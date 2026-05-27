@@ -101,6 +101,6 @@ Plans:
 - **Status**: In progress
 
 Plans:
-- [ ] 04-01-PLAN.md — AI metrics tracking, session cleanup cron endpoint, tests
-- [ ] 04-02-PLAN.md — PRIVACY.md, vercel.json, DEPLOY.md deployment runbook
+- [x] 04-01-PLAN.md — AI metrics tracking, session cleanup cron endpoint, tests
+- [x] 04-02-PLAN.md — PRIVACY.md, vercel.json, DEPLOY.md deployment runbook
 - [ ] 04-03-PLAN.md — End-to-end smoke test, final test suite and build verification

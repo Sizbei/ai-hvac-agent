@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: — MVP Launch
 status: unknown
-stopped_at: Completed 04-02-PLAN.md
-last_updated: "2026-05-27T09:22:56.075Z"
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-05-27T09:23:58.977Z"
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 18
-  completed_plans: 16
-  percent: 89
+  completed_plans: 17
+  percent: 94
 ---
 
 # State — v1.0 AI HVAC Customer Service Agent
@@ -64,6 +64,9 @@ Executing Phase 4
 - Used vi.hoisted() pattern for mock functions referenced inside vi.mock() factories
 - Proxy-based chainable mock for Drizzle ORM query builder chain in tests
 - Used AUTH_SECRET env var name (matching codebase) instead of JWT_SECRET from plan
+- Used performance.now() for sub-millisecond AI latency tracking in metrics module
+- Structured aiMetrics key in Pino logs for queryable AI call observability
+- CRON_SECRET Bearer auth pattern for all cron endpoints (Vercel Cron compatible)
 
 ## Blockers/Concerns
 
@@ -96,9 +99,10 @@ None
 | 03    | 05   | 2min     | 2     | 6     |
 | 03    | 06   | 5min     | 2     | 7     |
 | 04    | 02   | 2min     | 2     | 3     |
+| Phase 04 P01 | 3min | 2 tasks | 6 files |
 
 ## Last Session
 
 - **Timestamp:** 2026-05-27T09:07:31Z
-- **Stopped at:** Completed 04-02-PLAN.md
+- **Stopped at:** Completed 04-01-PLAN.md
 - **Resume:** None
