@@ -1,0 +1,77 @@
+# Roadmap — v1.0 AI HVAC Customer Service Agent
+
+## Milestone: v1.0 — MVP Launch
+
+### Phase 1: Schema + AI Core
+- **Goal**: Stand up the database, encryption layer, AI extraction pipeline, and core API routes
+- **Success Criteria**:
+  - Next.js 15 project initialized with all dependencies
+  - Drizzle ORM schema with 6 tables (organizations, users, customer_sessions, messages, service_requests, audit_log)
+  - PII column-level encryption via pgcrypto
+  - Multi-tenancy enforced via organization_id + withTenant helper
+  - Single-pass GPT-4o structured extraction with Zod schemas
+  - Prompt injection guardrails (input sanitization, system prompt hardening, output validation)
+  - Per-session AI token budget enforcement
+  - 4+2 conversation state machine (chatting/extracting/confirmed/submitted + escalated/abandoned)
+  - Chat API with SSE streaming via Vercel AI SDK
+  - Session management with cryptographic UUID tokens
+  - Structured logging with PII redaction via Pino
+  - Rate limiting on chat and session creation endpoints
+  - 50+ integration tests with 80%+ coverage on core modules
+  - Database seed with demo organization, admin user, and technicians
+- **Status**: Not started
+
+### Phase 2: Customer Chat UI
+- **Goal**: Build a premium, streaming chat interface for HVAC customers
+- **Depends on**: Phase 1
+- **Success Criteria**:
+  - shadcn/ui + Framer Motion design system configured
+  - Chat container with streaming responses via useChat hook
+  - Message bubbles with slide-in animations (user right-aligned, assistant left-aligned)
+  - Typing indicator with animated dots during AI streaming
+  - Chat header with status dot and "Talk to a Human" escalation button
+  - Extraction summary card showing extracted fields in real-time
+  - Confirmation flow (customer reviews and confirms extracted data)
+  - Escalation dialog for human handoff
+  - Message renderer with XSS prevention (no dangerouslySetInnerHTML)
+  - Minimal landing page with "Get Help Now" CTA
+  - Post-submission success page with reference number
+  - Error boundaries and loading skeletons on all pages
+  - Mobile-responsive design (most customers on phones)
+- **Status**: Not started
+
+### Phase 3: Admin Dashboard + Manual Dispatch
+- **Goal**: Authenticated admin dashboard for viewing requests and assigning technicians
+- **Depends on**: Phase 1
+- **Success Criteria**:
+  - NextAuth v5 with credentials provider and JWT rotation (15-min expiry)
+  - Admin middleware protecting /admin/* routes
+  - Admin API routes scoped by organization_id
+  - Request queue table with status filters and SSE live updates
+  - Request detail panel with conversation transcript and extracted data
+  - Manual technician assignment dialog
+  - Technician CRUD (list, create, edit, deactivate)
+  - Stats cards (Pending, Assigned, In Progress, Completed today)
+  - Audit logging on all state changes
+  - SSE hook for real-time dashboard updates (no Socket.IO)
+  - Responsive sidebar layout (collapsible on mobile)
+  - 20+ additional integration tests
+- **Status**: Not started
+
+### Phase 4: Polish + Deploy
+- **Goal**: Harden error handling, add observability, deploy to production, verify end-to-end
+- **Depends on**: Phase 2, Phase 3
+- **Success Criteria**:
+  - OpenAI data handling policy documented (DPA, training opt-out)
+  - AI metrics tracking (latency, tokens, error rate per call)
+  - Request ID middleware for distributed tracing
+  - Standardized API response envelope (no stack trace leaks)
+  - Session cleanup cron (expire sessions, 90-day data retention)
+  - Security headers (X-Content-Type-Options, X-Frame-Options, Referrer-Policy)
+  - Vercel deployment configuration
+  - Neon PostgreSQL production database provisioned
+  - Database migrations run against production
+  - Seed data for production org + admin
+  - Full end-to-end smoke test (chat -> confirm -> admin sees request -> assign tech)
+  - All 70+ tests passing
+- **Status**: Not started
