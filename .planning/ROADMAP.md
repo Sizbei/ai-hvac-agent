@@ -4,10 +4,11 @@
 
 ### Phase 1: Schema + AI Core
 - **Goal**: Stand up the database, encryption layer, AI extraction pipeline, and core API routes
+- **Plans:** 5 plans
 - **Success Criteria**:
   - Next.js 15 project initialized with all dependencies
   - Drizzle ORM schema with 6 tables (organizations, users, customer_sessions, messages, service_requests, audit_log)
-  - PII column-level encryption via pgcrypto
+  - PII column-level encryption via AES-256-GCM (app-level, Node crypto)
   - Multi-tenancy enforced via organization_id + withTenant helper
   - Single-pass GPT-4o structured extraction with Zod schemas
   - Prompt injection guardrails (input sanitization, system prompt hardening, output validation)
@@ -19,7 +20,14 @@
   - Rate limiting on chat and session creation endpoints
   - 50+ integration tests with 80%+ coverage on core modules
   - Database seed with demo organization, admin user, and technicians
-- **Status**: Not started
+- **Status**: Planning complete
+
+Plans:
+- [ ] 01-01-PLAN.md — Project setup, Drizzle schema, DB connection, encryption, logging
+- [ ] 01-02-PLAN.md — AI extraction engine, state machine, token budget, guardrails
+- [ ] 01-03-PLAN.md — Session management, chat API with SSE, rate limiting, response envelope
+- [ ] 01-04-PLAN.md — Database migrations and seed data
+- [ ] 01-05-PLAN.md — Unit tests for all core modules (50+ tests, 80%+ coverage)
 
 ### Phase 2: Customer Chat UI
 - **Goal**: Build a premium, streaming chat interface for HVAC customers
