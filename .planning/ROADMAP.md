@@ -75,7 +75,7 @@ Plans:
 
 Plans:
 - [x] 03-01-PLAN.md — Admin auth: JWT via jose, login/logout API, proxy.ts route protection
-- [ ] 03-02-PLAN.md — Admin API routes: requests, technicians, stats, assignment, audit logging
+- [x] 03-02-PLAN.md — Admin API routes: requests, technicians, stats, assignment, audit logging
 - [ ] 03-03-PLAN.md — Admin login page, sidebar layout, navigation shell
 - [ ] 03-04-PLAN.md — Request queue table, detail sheet, filters, polling, technician assignment
 - [ ] 03-05-PLAN.md — Technician CRUD page, stats cards
