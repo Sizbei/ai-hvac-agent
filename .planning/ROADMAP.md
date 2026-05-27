@@ -58,20 +58,28 @@ Plans:
 ### Phase 3: Admin Dashboard + Manual Dispatch
 - **Goal**: Authenticated admin dashboard for viewing requests and assigning technicians
 - **Depends on**: Phase 1
+- **Plans:** 6 plans
 - **Success Criteria**:
-  - NextAuth v5 with credentials provider and JWT rotation (15-min expiry)
-  - Admin middleware protecting /admin/* routes
+  - JWT auth with jose library and 24-hour expiry (Edge-compatible with Next.js 16 proxy.ts)
+  - Admin proxy.ts protecting /admin/* routes (Next.js 16 pattern, replacing deprecated middleware)
   - Admin API routes scoped by organization_id
-  - Request queue table with status filters and SSE live updates
+  - Request queue table with status filters and polling live updates (10s interval)
   - Request detail panel with conversation transcript and extracted data
   - Manual technician assignment dialog
   - Technician CRUD (list, create, edit, deactivate)
-  - Stats cards (Pending, Assigned, In Progress, Completed today)
+  - Stats cards (Pending, Assigned Today, In Progress, Completed Today)
   - Audit logging on all state changes
-  - SSE hook for real-time dashboard updates (no Socket.IO)
   - Responsive sidebar layout (collapsible on mobile)
   - 20+ additional integration tests
-- **Status**: Not started
+- **Status**: In progress
+
+Plans:
+- [ ] 03-01-PLAN.md — Admin auth: JWT via jose, login/logout API, proxy.ts route protection
+- [ ] 03-02-PLAN.md — Admin API routes: requests, technicians, stats, assignment, audit logging
+- [ ] 03-03-PLAN.md — Admin login page, sidebar layout, navigation shell
+- [ ] 03-04-PLAN.md — Request queue table, detail sheet, filters, polling, technician assignment
+- [ ] 03-05-PLAN.md — Technician CRUD page, stats cards
+- [ ] 03-06-PLAN.md — Integration tests (20+ tests for admin auth and API routes)
 
 ### Phase 4: Polish + Deploy
 - **Goal**: Harden error handling, add observability, deploy to production, verify end-to-end
