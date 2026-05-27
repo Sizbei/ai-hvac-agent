@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: — MVP Launch
 status: executing
-stopped_at: Completed 02-02-PLAN.md
-last_updated: "2026-05-27T07:14:24.901Z"
+stopped_at: Completed 02-04-PLAN.md
+last_updated: "2026-05-27T07:18:41.405Z"
 progress:
   total_phases: 4
   completed_phases: 1
   total_plans: 9
-  completed_plans: 7
-  percent: 78
+  completed_plans: 8
+  percent: 89
 ---
 
 # State — v1.0 AI HVAC Customer Service Agent
@@ -21,7 +21,7 @@ Phase 2: Customer Chat UI
 
 ## Current Plan
 
-Plan 2 of 4
+Plan 4 of 4
 
 ## Status
 
@@ -45,6 +45,9 @@ Executing Phase 2
 - Used shadcn Button render prop pattern for CTA link on landing page
 - Used readonly arrays/interfaces in chat component props for immutability
 - Chat input enforces 2000 char limit via onChange slice
+- Used Next.js 16 unstable_retry prop (not deprecated reset) for all error boundaries
+- Error fallback hides raw error.message, shows context-aware friendly messages only
+- Loading skeleton matches ChatContainer layout structure for visual consistency
 
 ## Blockers/Concerns
 
@@ -55,7 +58,7 @@ None
 | Phase | Status | Plans | Progress |
 |-------|--------|-------|----------|
 | 1     | ●      | 5/5   | 100%     |
-| 2     | ◐      | 2/4   | 50%      |
+| 2     | ◐      | 3/4   | 75%      |
 | 3     | ○      | 0/0   | 0%       |
 | 4     | ○      | 0/0   | 0%       |
 
@@ -69,9 +72,10 @@ None
 | 01    | 05   | 4min     | 2     | 8     |
 | 02    | 01   | 3min     | 2     | 17    |
 | 02    | 02   | 2min     | 2     | 10    |
+| 02    | 04   | 2min     | 2     | 6     |
 
 ## Last Session
 
-- **Timestamp:** 2026-05-27T07:13:35Z
-- **Stopped at:** Completed 02-02-PLAN.md
+- **Timestamp:** 2026-05-27T07:17:53Z
+- **Stopped at:** Completed 02-04-PLAN.md
 - **Resume:** None
