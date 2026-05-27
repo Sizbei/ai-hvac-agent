@@ -20,10 +20,10 @@
   - Rate limiting on chat and session creation endpoints
   - 50+ integration tests with 80%+ coverage on core modules
   - Database seed with demo organization, admin user, and technicians
-- **Status**: Planning complete
+- **Status**: In progress (1/5 plans complete)
 
 Plans:
-- [ ] 01-01-PLAN.md — Project setup, Drizzle schema, DB connection, encryption, logging
+- [x] 01-01-PLAN.md — Project setup, Drizzle schema, DB connection, encryption, logging
 - [ ] 01-02-PLAN.md — AI extraction engine, state machine, token budget, guardrails
 - [ ] 01-03-PLAN.md — Session management, chat API with SSE, rate limiting, response envelope
 - [ ] 01-04-PLAN.md — Database migrations and seed data
