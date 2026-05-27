@@ -3,29 +3,29 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: — MVP Launch
 status: executing
-stopped_at: Completed 02-03-PLAN.md
-last_updated: "2026-05-27T07:22:00Z"
+stopped_at: Completed 03-01-PLAN.md
+last_updated: "2026-05-27T08:52:48Z"
 progress:
   total_phases: 4
   completed_phases: 2
-  total_plans: 9
-  completed_plans: 9
-  percent: 100
+  total_plans: 15
+  completed_plans: 10
+  percent: 66
 ---
 
 # State — v1.0 AI HVAC Customer Service Agent
 
 ## Current Phase
 
-Phase 2: Customer Chat UI
+Phase 3: Admin Dashboard
 
 ## Current Plan
 
-Plan 4 of 4
+Plan 1 of 6
 
 ## Status
 
-Executing Phase 2
+Executing Phase 3
 
 ## Decisions
 
@@ -52,6 +52,9 @@ Executing Phase 2
 - Used Next.js 16 unstable_retry prop (not deprecated reset) for all error boundaries
 - Error fallback hides raw error.message, shows context-aware friendly messages only
 - Loading skeleton matches ChatContainer layout structure for visual consistency
+- Used jose directly for JWT instead of NextAuth v5 (Edge-compatible with Next.js 16 proxy.ts)
+- Migrated middleware.ts to proxy.ts per Next.js 16 deprecation
+- Generic "Invalid credentials" error for both wrong email and wrong password (prevent user enumeration)
 
 ## Blockers/Concerns
 
@@ -63,7 +66,7 @@ None
 |-------|--------|-------|----------|
 | 1     | ●      | 5/5   | 100%     |
 | 2     | ●      | 4/4   | 100%     |
-| 3     | ○      | 0/0   | 0%       |
+| 3     | ◐      | 1/6   | 17%      |
 | 4     | ○      | 0/0   | 0%       |
 
 ## Performance Metrics
@@ -78,9 +81,10 @@ None
 | 02    | 02   | 2min     | 2     | 10    |
 | 02    | 03   | 4min     | 2     | 7     |
 | 02    | 04   | 2min     | 2     | 6     |
+| 03    | 01   | 3min     | 3     | 9     |
 
 ## Last Session
 
-- **Timestamp:** 2026-05-27T07:22:00Z
-- **Stopped at:** Completed 02-03-PLAN.md
+- **Timestamp:** 2026-05-27T08:52:48Z
+- **Stopped at:** Completed 03-01-PLAN.md
 - **Resume:** None
