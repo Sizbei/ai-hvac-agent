@@ -47,12 +47,12 @@ Plans:
   - Post-submission success page with reference number
   - Error boundaries and loading skeletons on all pages
   - Mobile-responsive design (most customers on phones)
-- **Status**: In progress (3/4 plans complete)
+- **Status**: Complete
 
 Plans:
 - [x] 02-01-PLAN.md — shadcn/ui + motion + Inter font + design tokens + core components
 - [x] 02-02-PLAN.md — Chat UI shell components (message bubbles, header, input, typing indicator) + landing page
-- [ ] 02-03-PLAN.md — API integration (useChat hook, extraction card/pills, confirmation flow, escalation dialog, success page)
+- [x] 02-03-PLAN.md — API integration (useChat hook, extraction card/pills, confirmation flow, escalation dialog, success page)
 - [x] 02-04-PLAN.md — Error boundaries and loading skeletons for all routes
 
 ### Phase 3: Admin Dashboard + Manual Dispatch

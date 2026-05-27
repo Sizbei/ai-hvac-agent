@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: — MVP Launch
 status: executing
-stopped_at: Completed 02-04-PLAN.md
-last_updated: "2026-05-27T07:18:41.405Z"
+stopped_at: Completed 02-03-PLAN.md
+last_updated: "2026-05-27T07:22:00Z"
 progress:
   total_phases: 4
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 9
-  completed_plans: 8
-  percent: 89
+  completed_plans: 9
+  percent: 100
 ---
 
 # State — v1.0 AI HVAC Customer Service Agent
@@ -45,6 +45,10 @@ Executing Phase 2
 - Used shadcn Button render prop pattern for CTA link on landing page
 - Used readonly arrays/interfaces in chat component props for immutability
 - Chat input enforces 2000 char limit via onChange slice
+- Composed chat components directly in page.tsx rather than through ChatContainer for richer orchestration
+- Used TextStreamChatTransport with prepareSendMessagesRequest to match backend { message: string } body format
+- Session state polling triggered by chatStatus transitions (not interval-based)
+- Used base-ui render prop pattern for Button+Link on success page
 - Used Next.js 16 unstable_retry prop (not deprecated reset) for all error boundaries
 - Error fallback hides raw error.message, shows context-aware friendly messages only
 - Loading skeleton matches ChatContainer layout structure for visual consistency
@@ -58,7 +62,7 @@ None
 | Phase | Status | Plans | Progress |
 |-------|--------|-------|----------|
 | 1     | ●      | 5/5   | 100%     |
-| 2     | ◐      | 3/4   | 75%      |
+| 2     | ●      | 4/4   | 100%     |
 | 3     | ○      | 0/0   | 0%       |
 | 4     | ○      | 0/0   | 0%       |
 
@@ -72,10 +76,11 @@ None
 | 01    | 05   | 4min     | 2     | 8     |
 | 02    | 01   | 3min     | 2     | 17    |
 | 02    | 02   | 2min     | 2     | 10    |
+| 02    | 03   | 4min     | 2     | 7     |
 | 02    | 04   | 2min     | 2     | 6     |
 
 ## Last Session
 
-- **Timestamp:** 2026-05-27T07:17:53Z
-- **Stopped at:** Completed 02-04-PLAN.md
+- **Timestamp:** 2026-05-27T07:22:00Z
+- **Stopped at:** Completed 02-03-PLAN.md
 - **Resume:** None
