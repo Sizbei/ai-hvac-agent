@@ -47,10 +47,10 @@ Plans:
   - Post-submission success page with reference number
   - Error boundaries and loading skeletons on all pages
   - Mobile-responsive design (most customers on phones)
-- **Status**: Not started
+- **Status**: In progress (1/4 plans complete)
 
 Plans:
-- [ ] 02-01-PLAN.md — shadcn/ui + motion + Inter font + design tokens + core components
+- [x] 02-01-PLAN.md — shadcn/ui + motion + Inter font + design tokens + core components
 - [ ] 02-02-PLAN.md — Chat UI shell components (message bubbles, header, input, typing indicator) + landing page
 - [ ] 02-03-PLAN.md — API integration (useChat hook, extraction card/pills, confirmation flow, escalation dialog, success page)
 - [ ] 02-04-PLAN.md — Error boundaries and loading skeletons for all routes

@@ -2,30 +2,30 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: — MVP Launch
-status: unknown
-stopped_at: Completed 01-05-PLAN.md
-last_updated: "2026-05-27T06:28:34.498Z"
+status: executing
+stopped_at: Completed 02-01-PLAN.md
+last_updated: "2026-05-27T07:09:38.455Z"
 progress:
   total_phases: 4
   completed_phases: 1
-  total_plans: 5
-  completed_plans: 5
-  percent: 100
+  total_plans: 9
+  completed_plans: 6
+  percent: 67
 ---
 
 # State — v1.0 AI HVAC Customer Service Agent
 
 ## Current Phase
 
-Phase 1: Schema + AI Core
+Phase 2: Customer Chat UI
 
 ## Current Plan
 
-Plan 5 of 5
+Plan 1 of 4
 
 ## Status
 
-Phase 1 complete
+Executing Phase 2
 
 ## Decisions
 
@@ -39,6 +39,9 @@ Phase 1 complete
 - Removed request.ip usage since Next.js 15+ removed ip/geo from NextRequest
 - Used encrypt() directly per field instead of encryptFields() for clearer null handling on optional PII
 - Excluded non-pure-function modules from coverage thresholds to focus on testable core logic
+- Used shadcn v4 base-nova style (successor to new-york) with slate baseColor and oklch color space
+- Blue primary (#2563EB) and orange accent (#F97316) as HVAC brand theme via CSS custom properties
+- Added avatar, alert, separator components proactively for later chat UI plans
 
 ## Blockers/Concerns
 
@@ -49,7 +52,7 @@ None
 | Phase | Status | Plans | Progress |
 |-------|--------|-------|----------|
 | 1     | ●      | 5/5   | 100%     |
-| 2     | ○      | 0/0   | 0%       |
+| 2     | ◐      | 1/4   | 25%      |
 | 3     | ○      | 0/0   | 0%       |
 | 4     | ○      | 0/0   | 0%       |
 
@@ -61,9 +64,10 @@ None
 | 01    | 03   | 5min     | 3     | 8     |
 | 01    | 04   | 2min     | 2     | 7     |
 | 01    | 05   | 4min     | 2     | 8     |
+| 02    | 01   | 3min     | 2     | 17    |
 
 ## Last Session
 
-- **Timestamp:** 2026-05-27T06:20:08Z
-- **Stopped at:** Completed 01-05-PLAN.md
+- **Timestamp:** 2026-05-27T07:08:49Z
+- **Stopped at:** Completed 02-01-PLAN.md
 - **Resume:** None
