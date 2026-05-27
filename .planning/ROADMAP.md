@@ -20,13 +20,13 @@
   - Rate limiting on chat and session creation endpoints
   - 50+ integration tests with 80%+ coverage on core modules
   - Database seed with demo organization, admin user, and technicians
-- **Status**: In progress (1/5 plans complete)
+- **Status**: In progress (3/5 plans complete)
 
 Plans:
 - [x] 01-01-PLAN.md — Project setup, Drizzle schema, DB connection, encryption, logging
-- [ ] 01-02-PLAN.md — AI extraction engine, state machine, token budget, guardrails
+- [x] 01-02-PLAN.md — AI extraction engine, state machine, token budget, guardrails
 - [ ] 01-03-PLAN.md — Session management, chat API with SSE, rate limiting, response envelope
-- [ ] 01-04-PLAN.md — Database migrations and seed data
+- [x] 01-04-PLAN.md — Database migrations and seed data
 - [ ] 01-05-PLAN.md — Unit tests for all core modules (50+ tests, 80%+ coverage)
 
 ### Phase 2: Customer Chat UI
