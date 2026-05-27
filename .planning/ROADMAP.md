@@ -71,19 +71,20 @@ Plans:
   - Audit logging on all state changes
   - Responsive sidebar layout (collapsible on mobile)
   - 20+ additional integration tests
-- **Status**: In progress
+- **Status**: Complete
 
 Plans:
 - [x] 03-01-PLAN.md — Admin auth: JWT via jose, login/logout API, proxy.ts route protection
 - [x] 03-02-PLAN.md — Admin API routes: requests, technicians, stats, assignment, audit logging
 - [x] 03-03-PLAN.md — Admin login page, sidebar layout, navigation shell
-- [ ] 03-04-PLAN.md — Request queue table, detail sheet, filters, polling, technician assignment
-- [ ] 03-05-PLAN.md — Technician CRUD page, stats cards
-- [ ] 03-06-PLAN.md — Integration tests (20+ tests for admin auth and API routes)
+- [x] 03-04-PLAN.md — Request queue table, detail sheet, filters, polling, technician assignment
+- [x] 03-05-PLAN.md — Technician CRUD page, stats cards
+- [x] 03-06-PLAN.md — Integration tests (20+ tests for admin auth and API routes)
 
 ### Phase 4: Polish + Deploy
 - **Goal**: Harden error handling, add observability, deploy to production, verify end-to-end
 - **Depends on**: Phase 2, Phase 3
+- **Plans:** 3 plans
 - **Success Criteria**:
   - OpenAI data handling policy documented (DPA, training opt-out)
   - AI metrics tracking (latency, tokens, error rate per call)
@@ -96,5 +97,10 @@ Plans:
   - Database migrations run against production
   - Seed data for production org + admin
   - Full end-to-end smoke test (chat -> confirm -> admin sees request -> assign tech)
-  - All 70+ tests passing
-- **Status**: Not started
+  - All 195+ tests passing
+- **Status**: In progress
+
+Plans:
+- [ ] 04-01-PLAN.md — AI metrics tracking, session cleanup cron endpoint, tests
+- [ ] 04-02-PLAN.md — PRIVACY.md, vercel.json, DEPLOY.md deployment runbook
+- [ ] 04-03-PLAN.md — End-to-end smoke test, final test suite and build verification
