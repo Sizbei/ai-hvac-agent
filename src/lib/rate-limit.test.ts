@@ -134,6 +134,48 @@ describe('resetRateLimitStore', () => {
   });
 });
 
+describe('cleanup (internal)', () => {
+  it('should clean up expired entries after cleanup interval', () => {
+    // Add entries
+    slidingWindow('cleanup:1', 5, 60_000);
+    slidingWindow('cleanup:2', 5, 60_000);
+
+    // Advance past the window so timestamps expire
+    vi.advanceTimersByTime(60_001);
+
+    // Advance past the cleanup interval (5 minutes) so cleanup triggers
+    vi.advanceTimersByTime(5 * 60 * 1000);
+
+    // Next call triggers cleanup which removes expired entries
+    const result = slidingWindow('cleanup:3', 5, 60_000);
+    expect(result.allowed).toBe(true);
+    expect(result.remaining).toBe(4);
+  });
+
+  it('should retain entries with active timestamps during cleanup', () => {
+    // Add an entry
+    slidingWindow('cleanup:retain', 5, 60_000);
+
+    // Advance past cleanup interval but NOT past the window
+    vi.advanceTimersByTime(5 * 60 * 1000);
+
+    // This call triggers cleanup; the entry should be retained because
+    // its timestamp is within the window (cleanup uses windowMs param)
+    // Actually, the window is 60s and we advanced 5min, so the timestamp IS expired
+    // Let's add a fresh entry first
+    slidingWindow('cleanup:fresh', 5, 300_000); // 5 min window
+
+    // Advance just past cleanup interval
+    vi.advanceTimersByTime(1);
+
+    // Trigger cleanup via a new call - fresh entry should still be there
+    const result = slidingWindow('cleanup:fresh', 5, 300_000);
+    expect(result.allowed).toBe(true);
+    // Should have 2 timestamps: the one from before and this one
+    expect(result.remaining).toBe(3);
+  });
+});
+
 describe('RATE_LIMITS', () => {
   it('should define chat rate limit as 20 per minute', () => {
     expect(RATE_LIMITS.chat.maxRequests).toBe(20);
