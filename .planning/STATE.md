@@ -3,29 +3,29 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: — MVP Launch
 status: unknown
-stopped_at: Completed 03-06-PLAN.md
-last_updated: "2026-05-27T09:12:38.838Z"
+stopped_at: Completed 04-02-PLAN.md
+last_updated: "2026-05-27T09:22:56.075Z"
 progress:
   total_phases: 4
   completed_phases: 3
-  total_plans: 15
-  completed_plans: 15
-  percent: 100
+  total_plans: 18
+  completed_plans: 16
+  percent: 89
 ---
 
 # State — v1.0 AI HVAC Customer Service Agent
 
 ## Current Phase
 
-Phase 3: Admin Dashboard
+Phase 4: Polish & Deploy
 
 ## Current Plan
 
-Plan 6 of 6 (complete)
+Plan 2 of 3
 
 ## Status
 
-Executing Phase 3
+Executing Phase 4
 
 ## Decisions
 
@@ -63,6 +63,7 @@ Executing Phase 3
 - No polling for technician list (changes infrequently); stats poll every 30s
 - Used vi.hoisted() pattern for mock functions referenced inside vi.mock() factories
 - Proxy-based chainable mock for Drizzle ORM query builder chain in tests
+- Used AUTH_SECRET env var name (matching codebase) instead of JWT_SECRET from plan
 
 ## Blockers/Concerns
 
@@ -75,7 +76,7 @@ None
 | 1     | ●      | 5/5   | 100%     |
 | 2     | ●      | 4/4   | 100%     |
 | 3     | ●      | 6/6   | 100%     |
-| 4     | ○      | 0/0   | 0%       |
+| 4     | ◐      | 1/3   | 33%      |
 
 ## Performance Metrics
 
@@ -94,9 +95,10 @@ None
 | 03    | 03   | 4min     | 2     | 14    |
 | 03    | 05   | 2min     | 2     | 6     |
 | 03    | 06   | 5min     | 2     | 7     |
+| 04    | 02   | 2min     | 2     | 3     |
 
 ## Last Session
 
 - **Timestamp:** 2026-05-27T09:07:31Z
-- **Stopped at:** Completed 03-06-PLAN.md
+- **Stopped at:** Completed 04-02-PLAN.md
 - **Resume:** None
