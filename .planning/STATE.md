@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: — MVP Launch
 status: executing
-stopped_at: Completed 02-01-PLAN.md
-last_updated: "2026-05-27T07:09:38.455Z"
+stopped_at: Completed 02-02-PLAN.md
+last_updated: "2026-05-27T07:14:24.901Z"
 progress:
   total_phases: 4
   completed_phases: 1
   total_plans: 9
-  completed_plans: 6
-  percent: 67
+  completed_plans: 7
+  percent: 78
 ---
 
 # State — v1.0 AI HVAC Customer Service Agent
@@ -21,7 +21,7 @@ Phase 2: Customer Chat UI
 
 ## Current Plan
 
-Plan 1 of 4
+Plan 2 of 4
 
 ## Status
 
@@ -42,6 +42,9 @@ Executing Phase 2
 - Used shadcn v4 base-nova style (successor to new-york) with slate baseColor and oklch color space
 - Blue primary (#2563EB) and orange accent (#F97316) as HVAC brand theme via CSS custom properties
 - Added avatar, alert, separator components proactively for later chat UI plans
+- Used shadcn Button render prop pattern for CTA link on landing page
+- Used readonly arrays/interfaces in chat component props for immutability
+- Chat input enforces 2000 char limit via onChange slice
 
 ## Blockers/Concerns
 
@@ -52,7 +55,7 @@ None
 | Phase | Status | Plans | Progress |
 |-------|--------|-------|----------|
 | 1     | ●      | 5/5   | 100%     |
-| 2     | ◐      | 1/4   | 25%      |
+| 2     | ◐      | 2/4   | 50%      |
 | 3     | ○      | 0/0   | 0%       |
 | 4     | ○      | 0/0   | 0%       |
 
@@ -65,9 +68,10 @@ None
 | 01    | 04   | 2min     | 2     | 7     |
 | 01    | 05   | 4min     | 2     | 8     |
 | 02    | 01   | 3min     | 2     | 17    |
+| 02    | 02   | 2min     | 2     | 10    |
 
 ## Last Session
 
-- **Timestamp:** 2026-05-27T07:08:49Z
-- **Stopped at:** Completed 02-01-PLAN.md
+- **Timestamp:** 2026-05-27T07:13:35Z
+- **Stopped at:** Completed 02-02-PLAN.md
 - **Resume:** None
