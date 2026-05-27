@@ -3,6 +3,7 @@ import { openai } from '@ai-sdk/openai';
 import { extractionSchema, type ExtractionResult } from './extraction-schema';
 import { SYSTEM_PROMPT, EXTRACTION_INSTRUCTION } from './system-prompt';
 import { sanitizeInput, validateExtractionOutput, type GuardrailResult } from './guardrails';
+import { trackAICall } from './metrics';
 
 export interface Message {
   role: 'user' | 'assistant';
@@ -32,13 +33,20 @@ export async function extractServiceRequest(
     { role: 'user' as const, content: guardrailResult.sanitized },
   ];
 
-  // Step 3: Single-pass structured extraction with Zod per SC-05
-  const { object, usage } = await generateObject({
-    model: openai('gpt-4o'),
-    schema: extractionSchema,
-    system: `${SYSTEM_PROMPT}\n\n${EXTRACTION_INSTRUCTION}`,
-    messages,
-  });
+  // Step 3: Single-pass structured extraction with Zod per SC-05, wrapped with metrics
+  const { result: aiResult } = await trackAICall(
+    'extraction',
+    () =>
+      generateObject({
+        model: openai('gpt-4o'),
+        schema: extractionSchema,
+        system: `${SYSTEM_PROMPT}\n\n${EXTRACTION_INSTRUCTION}`,
+        messages,
+      }),
+    (r) => (r.usage?.inputTokens ?? 0) + (r.usage?.outputTokens ?? 0),
+  );
+
+  const { object, usage } = aiResult;
 
   // Step 4: Validate extraction output per SC-06
   const validOutput = validateExtractionOutput(object);
