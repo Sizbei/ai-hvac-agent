@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: — MVP Launch
-status: in-progress
+status: unknown
 stopped_at: Completed 01-04-PLAN.md
-last_updated: "2026-05-27T06:17:57.148Z"
+last_updated: "2026-05-27T06:21:14.588Z"
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 5
-  completed_plans: 3
-  percent: 60
+  completed_plans: 4
+  percent: 80
 ---
 
 # State — v1.0 AI HVAC Customer Service Agent
@@ -35,6 +35,9 @@ In progress
 - Used drizzle-kit generate for migration SQL to ensure exact schema match
 - Well-known UUID (00000000-...-000000000001) for demo org enables consistent API references
 - bcryptjs for password hashing (pure JS, cross-environment compatible)
+- Used toTextStreamResponse() instead of toDataStreamResponse() for AI SDK v6 compatibility
+- Removed request.ip usage since Next.js 15+ removed ip/geo from NextRequest
+- Used encrypt() directly per field instead of encryptFields() for clearer null handling on optional PII
 
 ## Blockers/Concerns
 
@@ -54,10 +57,11 @@ None
 | Phase | Plan | Duration | Tasks | Files |
 |-------|------|----------|-------|-------|
 | 01    | 01   | 6min     | 3     | 16    |
+| 01    | 03   | 5min     | 3     | 8     |
 | 01    | 04   | 2min     | 2     | 7     |
 
 ## Last Session
 
-- **Timestamp:** 2026-05-27T06:11:47Z
-- **Stopped at:** Completed 01-04-PLAN.md
-- **Resume:** 01-02-PLAN.md
+- **Timestamp:** 2026-05-27T06:20:08Z
+- **Stopped at:** Completed 01-03-PLAN.md
+- **Resume:** None
