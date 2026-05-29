@@ -10,9 +10,10 @@ const {
   mockLoggerInfo,
   mockLoggerError,
 } = vi.hoisted(() => ({
-  mockUpdate: vi.fn(),
-  mockSelect: vi.fn(),
-  mockDelete: vi.fn(),
+  // The DB mocks carry custom fields the chainable proxy reads to shape results.
+  mockUpdate: Object.assign(vi.fn(), { _rowCount: 0 }),
+  mockSelect: Object.assign(vi.fn(), { _resolvedValue: [] as unknown }),
+  mockDelete: Object.assign(vi.fn(), { _rowCount: 0 }),
   mockLoggerInfo: vi.fn(),
   mockLoggerError: vi.fn(),
 }));

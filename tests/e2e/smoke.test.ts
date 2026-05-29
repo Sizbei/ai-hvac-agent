@@ -74,7 +74,7 @@ vi.mock('@/lib/db', () => {
   // Create chainable thenable proxy. Every method call returns a new proxy.
   // The proxy is awaitable: `await db.select().from().where()` resolves via the mock fn.
   // This handles chains of any length: .where().orderBy(), .values().returning(), etc.
-  function createProxy(terminalFn: ReturnType<typeof vi.fn>): unknown {
+  function createProxy(terminalFn: () => unknown): unknown {
     const handler: ProxyHandler<object> = {
       get(_target, prop) {
         if (prop === 'then') {
@@ -172,10 +172,31 @@ vi.mock('@/lib/crypto', () => ({
 vi.mock('ai', () => ({
   streamText: (...args: unknown[]) => mockStreamText(...args),
   generateObject: vi.fn(),
+  generateText: vi.fn(),
 }));
 
 vi.mock('@ai-sdk/openai', () => ({
   openai: vi.fn().mockReturnValue('mock-model'),
+  createOpenAI: vi.fn().mockReturnValue(vi.fn().mockReturnValue('mock-model')),
+}));
+
+// Bypass the real provider so it never calls createOpenAI at import time.
+vi.mock('@/lib/ai/provider', () => ({
+  getModel: vi.fn().mockReturnValue('mock-model'),
+}));
+
+// This smoke test exercises the LLM streaming path; force the deterministic
+// router to defer so streamText is reached (router has its own unit tests).
+vi.mock('@/lib/ai/intent-router', () => ({
+  routeMessage: vi.fn().mockReturnValue({
+    action: 'FALLBACK_LLM',
+    intentId: null,
+    confidence: 0,
+    reply: null,
+    issueType: null,
+    urgency: null,
+    escalate: false,
+  }),
 }));
 
 vi.mock('@/lib/ai/system-prompt', () => ({
@@ -279,7 +300,7 @@ function createMockRequest(options: {
     init.body = JSON.stringify(options.body);
     init.headers['Content-Type'] = 'application/json';
   }
-  return new NextRequest(url, init);
+  return new NextRequest(url, init as ConstructorParameters<typeof NextRequest>[1]);
 }
 
 // ─── Shared state across ordered test cases ────────────────────────
