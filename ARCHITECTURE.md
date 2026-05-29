@@ -1,0 +1,108 @@
+# Architecture
+
+## 1. Overview
+
+An AI customer-service intake agent for HVAC companies. A customer describes a heating/cooling problem in a chat; the system answers common questions, collects the fields that matter (issue, urgency, address, contact), turns the conversation into a structured service request, and hands it to an admin dashboard for triage and dispatch.
+
+The core idea is **spend LLM tokens only when you have to**. A deterministic 65-intent router resolves the bulk of assistant turns — greetings, FAQs, safety escalations, and slot collection — with **zero LLM calls**. The language model (Qwen, via Alibaba DashScope's OpenAI-compatible endpoint) is the *fallback* for novel or ambiguous input, not the front door.
+
+## 2. System Diagram
+
+```
+  Customer (browser, /chat)
+        │  POST /api/chat  { message }
+        ▼
+┌───────────────────────────────────────────────────────────────┐
+│  Chat route handler (src/app/api/chat/route.ts)                 │
+│                                                                 │
+│  rate limit (per IP) → session + terminal-state check →         │
+│  token-budget check → sanitizeInput (guardrails) → persist msg  │
+│        │                                                        │
+│        ▼                                                        │
+│  ┌──────────────────────────┐                                  │
+│  │ Deterministic router     │   normalize → score → confidence │
+│  │ (intent-router.ts)       │   → verdict                      │
+│  └──────────┬───────────────┘                                  │
+│             │                                                   │
+│   ┌─────────┼───────────────┬──────────────┐                   │
+│   ▼         ▼               ▼              ▼                    │
+│ ANSWER   ESCALATE        SLOT_FILL    FALLBACK_LLM              │
+│ (canned) (lock session)  (regex slots) │                       │
+│   │         │               │          ▼                       │
+│   │         │               │   streamText(getModel) ──► token │
+│   │         │               │   onFinish: extractServiceReq    │
+│   │         │               │   (getExtractionModel, cheaper)  │
+│   └────┬────┴───────────────┴──────────┘                       │
+│        ▼  0 LLM tokens for the first three paths                │
+└────────┼────────────────────────────────────────────────────┘
+         ▼
+  Neon serverless Postgres (Drizzle ORM)
+  sessions · messages · service_requests · CRM · audit_log
+         ▲
+         │  tenant-scoped, PII decrypted on read
+  Admin dashboard (queue, conversations, AI insights, CRM)
+```
+
+## 3. Request Lifecycle (one chat turn through `route.ts`)
+
+1. **Rate limit** — per-IP sliding window keyed on `x-forwarded-for`; rejected with `429` if exceeded.
+2. **Session resolve** — load the session by httpOnly cookie token, scoped with `withTenant()`. Reject if missing.
+3. **Terminal-state guard** — refuse further messages on `submitted`/escalated/abandoned sessions.
+4. **Token-budget guard** — refuse if the session's `tokensUsed` has hit its `tokenBudget` (default 10,000).
+5. **Parse + sanitize** — validate the body, then `sanitizeInput()`: strip control chars, truncate to 2000 chars, and flag prompt-injection patterns (a flagged message is blocked with `400`).
+6. **Persist** the sanitized user message; increment turn count (escalation hint fires near `MAX_TURNS = 15`).
+7. **Deterministic routing** — call `routeMessage(message, knownSlots)` plus regex `extractSlots()`. If the verdict is *not* `FALLBACK_LLM` (or it's a mid-intake slot-provision turn), answer/escalate/slot-fill deterministically, write the assistant reply with `tokensUsed: 0`, update session state, and return a canned `text/plain` stream — **no model call**.
+8. **LLM fallback only if needed** — `streamText({ model: getModel(), maxOutputTokens: 350 })` over a sliding window of the last 10 messages, streamed to the client.
+9. **Background extraction** — in `onFinish`, record token usage, then run `extractServiceRequest()` to distill slots; it re-reads *current* metadata before merging so a fast follow-up turn can't be clobbered, and never overwrites a filled slot with null.
+
+## 4. The Cost-Saving Router (the centerpiece)
+
+`routeMessage()` is a pure function: no I/O, fully testable. Each turn flows through **normalize → score → threshold → verdict**.
+
+- **Normalize** — lowercase, strip punctuation (keeping `#`/`+`/digits), collapse whitespace, then apply aliases (`a/c` → `air conditioner`, `tstat` → `thermostat`, `co` → `carbon monoxide`).
+- **Score** — every entry in the 65-intent knowledge base is scored by keyword hits, with multi-word phrases weighted 3× single tokens. `negationGuards` zero out an entry (`"gas furnace"` must not trip the gas-leak intent); `requiredQualifiers` force a co-occurring danger word before an emergency can fire.
+- **Threshold / verdict** — confidence is `score / (score + runnerUp + 0.75)`. Three bands gate the action: `EMERGENCY_THRESHOLD = 0.25`, `LOW_HARM_THRESHOLD = 0.45` (FAQ-style ANSWER/REDIRECT), `ACT_THRESHOLD = 0.7` (everything higher-stakes). Compound messages (two distinct non-meta categories scoring meaningfully) and low-Latin-ratio input defer to the LLM. `COLLECT_INFO` is promoted to `SUBMIT` once all required slots are present.
+- **Emergency short-circuit** — gas/CO/fire/flood matches beat everything else (category priority 0), escalate at the low 0.25 band, and lock the session via `escalateSession()`. The qualifier gate keeps this conservative: a bare noun never escalates.
+
+**Why it matters.** The chat endpoint historically made **2 LLM calls per turn** (reply + extraction). On a matched deterministic turn that drops to **0** — roughly **55% of assistant turns**. The win is threefold: **cost** (no tokens), **latency** (a canned reply returns immediately, with no fake typing indicator), and **determinism for safety** (an emergency response is a fixed, audited string, never a model's improvisation). A single `ROUTER_ENABLED=false` kill-switch routes everything through the LLM if the layer ever misbehaves.
+
+## 5. Key Engineering Decisions
+
+| Decision | Why | Tradeoff |
+|---|---|---|
+| **Deterministic router in front of the LLM** | ~55% of turns answered at 0 tokens; instant latency; auditable safety responses | Keyword catalog must be hand-maintained; no semantic matching for unseen phrasings (those fall back to the LLM) |
+| **`generateText` + tolerant JSON parser, not `generateObject`** | DashScope does **not** honor `generateObject`'s strict `json_schema` mode — it returned prose/fenced text and threw `AI_JSONParseError` on every turn. Instructing the shape and parsing tolerantly (strip fences, coerce nullish, drop out-of-enum values, Zod-validate) works reliably | Loses the SDK's compile-time schema guarantee; parser must defensively handle chatty/malformed output |
+| **Separate extraction model (`AI_EXTRACTION_MODEL`)** | Extraction is mechanical JSON classification — it can run on a cheaper/faster tier than the conversational reply | Defaults to the chat model, so the saving is opt-in via env config |
+| **Neon serverless Postgres + Drizzle** | HTTP-driver Postgres suits Vercel's serverless/edge model (no pooled connection to manage); Drizzle gives typed schema + migrations | HTTP round-trips per query rather than a long-lived pooled connection |
+| **AES-256-GCM field encryption** | Customer name/phone/email/address are PII; GCM gives confidentiality **and** tamper detection (decrypt throws on a bad auth tag) | Encrypted columns aren't directly searchable; encryption key must be present to read |
+| **`withTenant()` query scoping** | Every query is filtered by `organization_id` through one helper, so multi-tenant isolation is enforced by construction, not by remembering | Relies on discipline — a raw query that bypasses the helper would bypass isolation |
+
+## 6. Data Model (11 tables, Drizzle)
+
+- **Auth / org** — `organizations`, `users` (admin + technician staff, role-gated, password-hashed).
+- **Chat** — `customer_sessions` (status state machine, token budget/usage, turn count, extracted-slot metadata) and `messages` (per-turn role/content, with `tokensUsed` recording 0 on deterministic turns).
+- **Service requests** — `service_requests`: the structured intake output, with **encrypted** name/phone/email/address columns, a unique reference number, urgency enum, and technician assignment.
+- **CRM** — `customers` (deduplicated profiles, encrypted PII), `customer_equipment` (installed units, warranty dates), `customer_notes`, `follow_ups` (maintenance/warranty reminders), `service_history` (work performed, parts, cost).
+- **Audit** — `audit_log`: append-only record of actions (escalations, request creation, feedback signals) with IP and entity references.
+
+Every table carries `organization_id` with supporting indexes; hot lookups (session token, request status, audit time) are indexed explicitly.
+
+## 7. Security & Reliability
+
+- **PII encryption at rest** — AES-256-GCM via immutable `encryptFields`/`decryptFields`; auth tag verification detects tampering.
+- **Prompt-injection guardrails** — input is matched against known injection patterns and blocked; control characters stripped; messages capped at 2000 chars.
+- **Admin auth** — JWT-signed sessions (`AUTH_SECRET`, min 32 chars).
+- **Multi-tenant isolation** — `withTenant()` scopes every query to one organization.
+- **Cost controls** — per-IP rate limiting, per-session token budget, `maxOutputTokens: 350`, and a 10-message sliding window to bound quadratic context growth.
+- **Safety** — emergency intents escalate deterministically and lock the session; escalation failures are logged so the audit trail is never silently lost.
+- **Auditability** — `audit_log` records escalations, submissions, and 👍/👎 deflection-quality feedback.
+- **Operational hygiene** — a daily Vercel cron (`vercel.json`, 03:00 UTC) cleans up abandoned sessions; secrets are validated at startup (encryption key length, missing `DATABASE_URL`).
+
+## 8. Scaling Notes / What I'd Do Next
+
+- **Distributed rate limiting** — the current sliding window is in-process; move to Redis (or Upstash) so limits hold across multiple serverless instances.
+- **Trusted-proxy IP handling** — `x-forwarded-for` is currently taken at face value; parse it against a trusted proxy chain to prevent spoofed rate-limit keys.
+- **Router eval harness** — add a labeled corpus and CI eval that scores precision/recall per intent and guards against regressions (especially false-negative emergencies) before merging knowledge-base changes.
+- **Response caching** — canned answers are already free, but FAQ responses and admin stat aggregations could be cached/edge-served to cut DB round-trips.
+- **Semantic fallback tier** — an embedding-based matcher between the keyword router and the full LLM could resolve paraphrased FAQs at lower cost than a chat completion.
+- **Searchable encrypted PII** — deterministic/blind-index encryption for fields that need lookup (e.g. returning-customer detection by phone) without giving up at-rest protection.
