@@ -33,6 +33,8 @@ import { logger } from "@/lib/logger";
 
 const DEMO_ORG_ID = "00000000-0000-0000-0000-000000000001";
 const MAX_TURNS = 15;
+// Sliding window of recent messages sent to the model (bounds context growth).
+const MAX_HISTORY = 10;
 // The deterministic router is on by default; set ROUTER_ENABLED=false to disable
 // it (kill-switch) and route every turn through the LLM.
 const ROUTER_ENABLED = process.env.ROUTER_ENABLED !== "false";
@@ -329,8 +331,13 @@ export async function POST(request: NextRequest) {
     const result = streamText({
       model: getModel(),
       system: SYSTEM_PROMPT + escalationHint,
+      // Cap output so replies stay short (the prompt asks for 2-3 sentences) and
+      // tail costs are bounded (Token-Savings #6).
+      maxOutputTokens: 350,
       messages: [
-        ...conversationHistory.map((m) => ({
+        // Sliding window: only send the most recent turns to bound the
+        // quadratic token growth of full-history re-sends (Token-Savings #4).
+        ...conversationHistory.slice(-MAX_HISTORY).map((m) => ({
           role: m.role as "user" | "assistant",
           content: m.content,
         })),

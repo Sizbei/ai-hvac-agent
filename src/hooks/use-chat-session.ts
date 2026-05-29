@@ -78,6 +78,7 @@ export function useChatSession(): UseChatSessionReturn {
 
   const {
     messages: uiMessages,
+    setMessages,
     sendMessage: aiSendMessage,
     status: chatStatus,
     error: chatError,
@@ -124,23 +125,66 @@ export function useChatSession(): UseChatSessionReturn {
 
   const isStreaming = chatStatus === 'streaming' || chatStatus === 'submitted';
 
-  // Create session on mount
+  // Resume an existing session (cookie persists across refresh) or create one.
   useEffect(() => {
     if (sessionCreatedRef.current) return;
     sessionCreatedRef.current = true;
+
+    const RESUMABLE: readonly SessionState[] = ['chatting', 'extracting', 'confirmed'];
 
     async function createSession(): Promise<void> {
       try {
         const res = await fetch('/api/session', { method: 'POST' });
         if (!res.ok) {
           const body = await res.json().catch(() => ({ error: { message: 'Failed to create session' } }));
-          setSessionError(
-            body?.error?.message ?? 'Failed to create session',
-          );
-          return;
+          setSessionError(body?.error?.message ?? 'Failed to create session');
         }
-        // Session cookie is set by the server response (httpOnly)
-        // Session is ready for chat
+        // Session cookie is set by the server response (httpOnly).
+      } catch {
+        setSessionError('Could not connect to server. Please try again.');
+      }
+    }
+
+    async function init(): Promise<void> {
+      try {
+        // Try to resume: the httpOnly session cookie survives a page refresh.
+        const res = await fetch('/api/session');
+        if (res.ok) {
+          const body = (await res.json()) as {
+            success: boolean;
+            data: SessionData & { metadata?: string };
+          };
+          const s = body?.data;
+          if (
+            body.success &&
+            s &&
+            RESUMABLE.includes(s.status) &&
+            s.messages.length > 0
+          ) {
+            // Rehydrate the chat transcript so a refresh doesn't lose progress.
+            setMessages(
+              s.messages.map((m, i) => ({
+                id: `resumed-${i}`,
+                role: m.role as 'user' | 'assistant',
+                parts: [{ type: 'text', text: m.content }],
+              })),
+            );
+            setSessionStatus(s.status);
+            if (typeof s.metadata === 'string') {
+              try {
+                const parsed = JSON.parse(s.metadata) as ExtractionResult;
+                if (parsed && typeof parsed === 'object' && 'issueType' in parsed) {
+                  setExtraction(parsed);
+                }
+              } catch {
+                // Not valid extraction JSON yet — ignore.
+              }
+            }
+            return;
+          }
+        }
+        // No resumable session — create a fresh one.
+        await createSession();
       } catch {
         setSessionError('Could not connect to server. Please try again.');
       } finally {
@@ -148,8 +192,8 @@ export function useChatSession(): UseChatSessionReturn {
       }
     }
 
-    createSession();
-  }, []);
+    init();
+  }, [setMessages]);
 
   // Poll session state after streaming finishes, with retries for background extraction
   useEffect(() => {

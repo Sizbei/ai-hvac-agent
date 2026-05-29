@@ -117,9 +117,10 @@ export async function extractServiceRequest(
   // Step 1: Sanitize input per SC-06
   const guardrailResult = sanitizeInput(latestUserMessage);
 
-  // Step 2: Build message history for extraction
+  // Step 2: Build message history for extraction (sliding window to bound tokens)
+  const MAX_HISTORY = 10;
   const messages = [
-    ...conversationHistory.map((m) => ({
+    ...conversationHistory.slice(-MAX_HISTORY).map((m) => ({
       role: m.role as 'user' | 'assistant',
       content: m.content,
     })),
