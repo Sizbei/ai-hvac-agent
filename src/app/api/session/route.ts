@@ -117,6 +117,9 @@ export async function GET(_request: NextRequest) {
       tokensUsed: session.tokensUsed,
       tokenBudget: session.tokenBudget,
       turnCount: session.turnCount,
+      // Raw JSON string of extracted slots; the client parses it to drive the
+      // confirmation card. Required for both the LLM and deterministic-router paths.
+      metadata: session.metadata,
       messages: sessionMessages.map((m) => ({
         role: m.role,
         content: m.content,
