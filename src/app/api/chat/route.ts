@@ -196,13 +196,27 @@ export async function POST(request: NextRequest) {
       const verdict = routeMessage(guardrailResult.sanitized, knownSlots);
       const extracted = extractSlots(guardrailResult.sanitized);
 
-      // A "slot provision" turn: we're mid-intake (issue already known) and the
-      // customer just supplied an address/phone/email. There's no intent for a
-      // bare address, so the router returns FALLBACK — but we can still fill the
-      // slot deterministically instead of paying for an LLM call.
+      // A "slot provision" turn: the customer supplied an address/phone/email.
+      // There's no intent for a bare address, so the router returns FALLBACK —
+      // but we can still fill the slot deterministically instead of paying for
+      // an LLM call (which, mid-intake, often re-asks for info already on
+      // screen). We treat it as slot provision when the issue is already known
+      // OR there's prior conversation (the customer is answering a question).
+      //
+      // Why not require knownSlots.issueType? Classification of novel issues
+      // (e.g. "heat pump short cycling") comes from the *async* background
+      // extraction, which can lag 10s+. Gating on it meant a fast follow-up
+      // address fell through to the LLM and got re-asked, and the intake
+      // stepper never lit up. extractSlots is conservative (number+street+
+      // suffix, 10-digit phone, real email), so false positives are unlikely;
+      // issueType/urgency it can't infer are still filled by the background
+      // extraction on the LLM turns.
+      const hasContactSlot = Boolean(
+        extracted.address || extracted.phone || extracted.email,
+      );
       const isSlotProvision =
-        Boolean(knownSlots.issueType) &&
-        Boolean(extracted.address || extracted.phone || extracted.email);
+        hasContactSlot &&
+        (Boolean(knownSlots.issueType) || conversationHistory.length > 0);
 
       if (verdict.action !== "FALLBACK_LLM" || isSlotProvision) {
         if (verdict.escalate) {

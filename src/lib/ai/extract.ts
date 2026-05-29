@@ -6,7 +6,6 @@ import {
   urgencyValues,
   type ExtractionResult,
 } from './extraction-schema';
-import { SYSTEM_PROMPT, EXTRACTION_INSTRUCTION } from './system-prompt';
 import { sanitizeInput, validateExtractionOutput, type GuardrailResult } from './guardrails';
 import { trackAICall } from './metrics';
 
@@ -33,6 +32,19 @@ const JSON_INSTRUCTION = `Respond with ONLY a single JSON object (no prose, no m
 issueType ∈ ${JSON.stringify(issueTypeValues)} or null.
 urgency ∈ ${JSON.stringify(urgencyValues)} or null.
 Use null for any field not yet mentioned. description is a brief 1-2 sentence summary.`;
+
+/**
+ * Extraction-only system prompt. Deliberately does NOT reuse the conversational
+ * SYSTEM_PROMPT: that persona ("be warm", "greet with Hi I'm your HVAC
+ * assistant", "ask one question at a time") makes the model reply with chat text
+ * instead of JSON on many turns, so the parser falls back to an empty result and
+ * the intake stepper never updates. This is a silent classifier — no persona.
+ */
+const EXTRACTION_SYSTEM = `You are a silent data-extraction function for an HVAC service-intake system. You NEVER greet, chat, apologize, or ask questions. Read the conversation and output ONLY a JSON object describing what the customer has told us.
+
+Map the problem to the closest allowed issueType; use "other" if it is clearly an HVAC issue but fits no category, and null only if no issue has been described. Infer urgency from context: emergency = no heat in freezing weather, gas smell, CO alarm, or flooding; high = AC out in extreme heat, heat out in the cold, or an active water leak; medium = reduced efficiency, noises, or thermostat problems; low = maintenance, filters, or general questions.
+
+${JSON_INSTRUCTION}`;
 
 const EMPTY_EXTRACTION: ExtractionResult = {
   issueType: null,
@@ -86,11 +98,23 @@ export function parseExtractionResponse(text: string): ExtractionResult {
   const urgency = nullify(raw.urgency);
   const email = nullify(raw.customerEmail);
 
+  const validIssueType =
+    issueType && (issueTypeValues as readonly string[]).includes(issueType)
+      ? issueType
+      : null;
+
+  const isHvacRelated =
+    typeof raw.isHvacRelated === 'boolean'
+      ? raw.isHvacRelated
+      : String(raw.isHvacRelated).toLowerCase() === 'true';
+
   const coerced = {
-    issueType:
-      issueType && (issueTypeValues as readonly string[]).includes(issueType)
-        ? issueType
-        : null,
+    // When the customer has clearly raised an HVAC problem but the model can't
+    // map it to a specific category (e.g. "heat pump short cycling"), fall back
+    // to the 'other' catch-all instead of null. A null issueType blocks the
+    // intake stepper from ever showing "Issue ✓" and prevents the request from
+    // ever being completable — even though we plainly understood it's an issue.
+    issueType: validIssueType ?? (isHvacRelated ? 'other' : null),
     urgency:
       urgency && (urgencyValues as readonly string[]).includes(urgency)
         ? urgency
@@ -100,10 +124,7 @@ export function parseExtractionResponse(text: string): ExtractionResult {
     customerPhone: nullify(raw.customerPhone),
     customerEmail: email && /.+@.+\..+/.test(email) ? email : null,
     description: typeof raw.description === 'string' ? raw.description : '',
-    isHvacRelated:
-      typeof raw.isHvacRelated === 'boolean'
-        ? raw.isHvacRelated
-        : String(raw.isHvacRelated).toLowerCase() === 'true',
+    isHvacRelated,
   };
 
   const result = extractionSchema.safeParse(coerced);
@@ -133,7 +154,7 @@ export async function extractServiceRequest(
     () =>
       generateText({
         model: getExtractionModel(),
-        system: `${SYSTEM_PROMPT}\n\n${EXTRACTION_INSTRUCTION}\n\n${JSON_INSTRUCTION}`,
+        system: EXTRACTION_SYSTEM,
         messages,
       }),
     (r) => (r.usage?.inputTokens ?? 0) + (r.usage?.outputTokens ?? 0),
