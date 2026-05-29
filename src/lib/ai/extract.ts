@@ -1,5 +1,5 @@
 import { generateText } from 'ai';
-import { getModel } from './provider';
+import { getExtractionModel } from './provider';
 import {
   extractionSchema,
   issueTypeValues,
@@ -132,7 +132,7 @@ export async function extractServiceRequest(
     'extraction',
     () =>
       generateText({
-        model: getModel(),
+        model: getExtractionModel(),
         system: `${SYSTEM_PROMPT}\n\n${EXTRACTION_INSTRUCTION}\n\n${JSON_INSTRUCTION}`,
         messages,
       }),

@@ -36,7 +36,9 @@ npm run dev           # start at http://localhost:3000
 | `DATABASE_URL` | Neon PostgreSQL pooled connection string |
 | `AI_BASE_URL` | DashScope OpenAI-compatible endpoint |
 | `AI_API_KEY` | Your DashScope API key |
-| `AI_MODEL` | Model name (default: `qwen-plus`) |
+| `AI_MODEL` | Chat model name (default: `qwen-plus`) |
+| `AI_EXTRACTION_MODEL` | *(optional)* cheaper model for structured extraction; defaults to `AI_MODEL` |
+| `ROUTER_ENABLED` | *(optional)* set `false` to disable the deterministic router (kill-switch); default on |
 | `ENCRYPTION_KEY` | 32-byte hex key for AES-256-GCM PII encryption |
 | `AUTH_SECRET` | JWT signing secret for admin auth (min 32 chars) |
 | `CRON_SECRET` | Secret for the session cleanup cron job |

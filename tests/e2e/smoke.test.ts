@@ -183,6 +183,7 @@ vi.mock('@ai-sdk/openai', () => ({
 // Bypass the real provider so it never calls createOpenAI at import time.
 vi.mock('@/lib/ai/provider', () => ({
   getModel: vi.fn().mockReturnValue('mock-model'),
+  getExtractionModel: vi.fn().mockReturnValue('mock-model'),
 }));
 
 // This smoke test exercises the LLM streaming path; force the deterministic
