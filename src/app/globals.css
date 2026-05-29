@@ -152,3 +152,100 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ----- Landing page motion + atmosphere ----- */
+@keyframes lp-rise {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes lp-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+@keyframes lp-drift {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(3%, -4%, 0) scale(1.08);
+  }
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+.lp-rise {
+  opacity: 0;
+  animation: lp-rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.lp-float {
+  animation: lp-float 6s ease-in-out infinite;
+}
+
+.lp-mesh::before,
+.lp-mesh::after {
+  content: "";
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(80px);
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* cool (blue) glow */
+.lp-mesh::before {
+  width: 42rem;
+  height: 42rem;
+  top: -14rem;
+  right: -8rem;
+  background: radial-gradient(
+    circle at center,
+    oklch(0.623 0.214 259.815 / 0.28),
+    transparent 70%
+  );
+  animation: lp-drift 18s ease-in-out infinite;
+}
+
+/* warm (orange) glow — the "heat" half of HVAC */
+.lp-mesh::after {
+  width: 36rem;
+  height: 36rem;
+  bottom: -16rem;
+  left: -10rem;
+  background: radial-gradient(
+    circle at center,
+    oklch(0.705 0.213 47.604 / 0.22),
+    transparent 70%
+  );
+  animation: lp-drift 22s ease-in-out infinite reverse;
+}
+
+.lp-grid {
+  background-image:
+    linear-gradient(
+      to right,
+      color-mix(in oklch, var(--foreground) 5%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in oklch, var(--foreground) 5%, transparent) 1px,
+      transparent 1px
+    );
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black, transparent 75%);
+}
