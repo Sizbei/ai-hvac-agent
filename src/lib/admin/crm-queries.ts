@@ -353,48 +353,66 @@ function normalizePhone(value: string | null): string | null {
 }
 
 /**
- * Finds an existing customer for the org by email (case-insensitive, trimmed),
- * falling back to phone (non-digits stripped), and returns its id. If no match
- * is found a new customer row is created and its id is returned.
+ * Finds an existing customer id for the org by email (case-insensitive, trimmed),
+ * falling back to phone (non-digits stripped). Returns null when nothing matches.
  *
  * Because the PII columns are encrypted with a random IV (non-deterministic),
  * matching cannot be done with a SQL equality filter — existing rows are
- * decrypted in application code and compared.
+ * decrypted in application code and compared. Email is matched across all rows
+ * first (the stronger identity key); phone is a secondary fallback.
+ */
+export async function findCustomerIdByContact(
+  organizationId: string,
+  input: { readonly email: string | null; readonly phone: string | null },
+): Promise<string | null> {
+  const targetEmail = normalizeEmail(input.email);
+  const targetPhone = normalizePhone(input.phone);
+
+  if (!targetEmail && !targetPhone) return null;
+
+  const existing = await db
+    .select({
+      id: customers.id,
+      emailEncrypted: customers.emailEncrypted,
+      phoneEncrypted: customers.phoneEncrypted,
+    })
+    .from(customers)
+    .where(withTenant(customers, organizationId));
+
+  if (targetEmail) {
+    for (const row of existing) {
+      const decryptedEmail = normalizeEmail(safeDecrypt(row.emailEncrypted));
+      if (decryptedEmail && decryptedEmail === targetEmail) {
+        return row.id;
+      }
+    }
+  }
+
+  if (targetPhone) {
+    for (const row of existing) {
+      const decryptedPhone = normalizePhone(safeDecrypt(row.phoneEncrypted));
+      if (decryptedPhone && decryptedPhone === targetPhone) {
+        return row.id;
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Finds an existing customer for the org (see {@link findCustomerIdByContact})
+ * or creates a new one, returning its id.
  */
 export async function findOrCreateCustomer(
   organizationId: string,
   input: FindOrCreateCustomerInput,
 ): Promise<string> {
-  const targetEmail = normalizeEmail(input.email);
-  const targetPhone = normalizePhone(input.phone);
-
-  if (targetEmail || targetPhone) {
-    const existing = await db
-      .select({
-        id: customers.id,
-        emailEncrypted: customers.emailEncrypted,
-        phoneEncrypted: customers.phoneEncrypted,
-      })
-      .from(customers)
-      .where(withTenant(customers, organizationId));
-
-    for (const row of existing) {
-      if (targetEmail) {
-        const decryptedEmail = normalizeEmail(safeDecrypt(row.emailEncrypted));
-        if (decryptedEmail && decryptedEmail === targetEmail) {
-          return row.id;
-        }
-        continue;
-      }
-
-      if (targetPhone) {
-        const decryptedPhone = normalizePhone(safeDecrypt(row.phoneEncrypted));
-        if (decryptedPhone && decryptedPhone === targetPhone) {
-          return row.id;
-        }
-      }
-    }
-  }
+  const existingId = await findCustomerIdByContact(organizationId, {
+    email: input.email,
+    phone: input.phone,
+  });
+  if (existingId) return existingId;
 
   const [created] = await db
     .insert(customers)

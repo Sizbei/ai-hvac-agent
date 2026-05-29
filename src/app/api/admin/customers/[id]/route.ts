@@ -130,6 +130,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
   }
 }
 
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function DELETE(_request: NextRequest, { params }: RouteParams) {
   try {
     const session = await getAdminSession();
@@ -138,6 +141,10 @@ export async function DELETE(_request: NextRequest, { params }: RouteParams) {
     }
 
     const { id } = await params;
+    if (!UUID_REGEX.test(id)) {
+      return errorResponse("Invalid customer ID format", "INVALID_ID", 400);
+    }
+
     const deleted = await deleteCustomer(session.organizationId, id);
 
     if (!deleted) {

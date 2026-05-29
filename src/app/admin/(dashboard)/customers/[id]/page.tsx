@@ -88,14 +88,16 @@ export default function CustomerDetailPage({
       }));
 
       if (res.ok && json.success) {
+        // Keep the button disabled — navigation unmounts this page, and
+        // re-enabling here would briefly allow a second (404-ing) delete.
         router.push('/admin/customers');
         return;
       }
 
       setDeleteError(json.error?.message ?? 'Failed to delete customer');
+      setIsDeleting(false);
     } catch {
       setDeleteError('Network error');
-    } finally {
       setIsDeleting(false);
     }
   }, [id, router]);

@@ -121,12 +121,12 @@ vi.mock('@/lib/db', () => {
   };
 });
 
-// The confirm route now links each service request to a CRM customer via
-// findOrCreateCustomer. Its internal find/create DB calls are covered by the
-// crm-queries layer; here we stub it so the confirm flow test stays focused on
-// the request-submission path.
+// The confirm route resolves a CRM customer via findCustomerIdByContact (a
+// read-only lookup) and upserts the customer inside its atomic batch. The
+// lookup is stubbed so the confirm flow test stays focused on the
+// request-submission path; the upsert itself flows through the mocked db.batch.
 vi.mock('@/lib/admin/crm-queries', () => ({
-  findOrCreateCustomer: vi.fn().mockResolvedValue('mock-customer-id'),
+  findCustomerIdByContact: vi.fn().mockResolvedValue('mock-customer-id'),
 }));
 
 vi.mock('@/lib/db/schema', () => ({
@@ -135,6 +135,7 @@ vi.mock('@/lib/db/schema', () => ({
   serviceRequests: { id: 'service_requests.id' },
   auditLog: {},
   users: { email: 'users.email' },
+  customers: { id: 'customers.id' },
 }));
 
 vi.mock('@/lib/db/tenant', () => ({
@@ -444,7 +445,9 @@ describe('E2E Smoke Test: Full Customer-to-Admin Flow', () => {
       },
     ]);
 
-    // Service request insert
+    // Batch insert order: [0] customer upsert (void), [1] service request
+    // insert (returning), [2] audit log insert (void, falls through to default).
+    mockDbInsert.mockResolvedValueOnce(undefined);
     mockDbInsert.mockResolvedValueOnce([
       {
         id: MOCK_REQUEST_ID,

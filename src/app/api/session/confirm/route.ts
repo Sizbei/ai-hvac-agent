@@ -2,7 +2,12 @@ import { NextRequest } from "next/server";
 import { eq } from "drizzle-orm";
 import { randomBytes, randomUUID } from "node:crypto";
 import { db } from "@/lib/db";
-import { customerSessions, serviceRequests, auditLog } from "@/lib/db/schema";
+import {
+  customerSessions,
+  serviceRequests,
+  auditLog,
+  customers,
+} from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { getSessionToken } from "@/lib/session";
@@ -10,7 +15,7 @@ import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { encrypt } from "@/lib/crypto";
 import { transition } from "@/lib/ai/state-machine";
 import { serviceRequestSchema } from "@/lib/ai/extraction-schema";
-import { findOrCreateCustomer } from "@/lib/admin/crm-queries";
+import { findCustomerIdByContact } from "@/lib/admin/crm-queries";
 import { logger } from "@/lib/logger";
 
 const DEMO_ORG_ID = "00000000-0000-0000-0000-000000000001";
@@ -83,15 +88,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Find or create the CRM customer record so the service request is linked
-    // to a customer. This must run before the atomic batch below because the
-    // returned customerId is needed when inserting the service request.
-    const customerId = await findOrCreateCustomer(DEMO_ORG_ID, {
-      name: parsed.data.customerName,
-      phone: parsed.data.customerPhone,
+    // Resolve the CRM customer for this request. The lookup is read-only; the
+    // customer row itself is upserted inside the atomic batch below so a failed
+    // submit can never leave an orphaned customer record behind.
+    const existingCustomerId = await findCustomerIdByContact(DEMO_ORG_ID, {
       email: parsed.data.customerEmail,
-      address: parsed.data.address,
+      phone: parsed.data.customerPhone,
     });
+    const customerId = existingCustomerId ?? randomUUID();
 
     // Encrypt PII fields individually before insert per D-05
     const referenceNumber = generateReferenceNumber();
@@ -101,11 +105,27 @@ export async function POST(request: NextRequest) {
 
     // The neon-http driver does not support interactive `db.transaction()`
     // (it throws "No transactions support in neon-http driver"), so the
-    // service-request insert, session-status update, and audit-log insert are
-    // issued via `db.batch`, which neon executes as a single atomic
-    // (non-interactive) transaction. This guarantees the service request is
-    // never persisted without its session/audit state.
-    const [insertedRequests] = await db.batch([
+    // customer upsert, service-request insert, session-status update, and
+    // audit-log insert are issued via `db.batch`, which neon executes as a
+    // single atomic (non-interactive) transaction. The customer upsert runs
+    // first so the service request's customerId FK resolves; when the customer
+    // already exists (existingCustomerId) onConflictDoNothing leaves it intact.
+    const [, insertedRequests] = await db.batch([
+      db
+        .insert(customers)
+        .values({
+          id: customerId,
+          organizationId: DEMO_ORG_ID,
+          nameEncrypted: encrypt(parsed.data.customerName ?? "Unknown"),
+          phoneEncrypted: parsed.data.customerPhone
+            ? encrypt(parsed.data.customerPhone)
+            : null,
+          emailEncrypted: parsed.data.customerEmail
+            ? encrypt(parsed.data.customerEmail)
+            : null,
+          addressEncrypted: encrypt(parsed.data.address),
+        })
+        .onConflictDoNothing(),
       db
         .insert(serviceRequests)
         .values({
