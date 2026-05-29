@@ -36,7 +36,12 @@ export function ChatHeader({ status, onEscalate }: ChatHeaderProps) {
           className={`inline-block size-2.5 rounded-full ${getStatusColor(status)}`}
           aria-label={`Status: ${status}`}
         />
-        <h1 className="text-base font-semibold">HVAC Assistant</h1>
+        <div className="leading-tight">
+          <h1 className="text-base font-semibold">HVAC Assistant</h1>
+          <p className="text-[11px] text-muted-foreground">
+            AI assistant · a technician follows up within 2 hrs
+          </p>
+        </div>
       </div>
       <Button
         variant="outline"

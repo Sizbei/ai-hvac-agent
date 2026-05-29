@@ -1,6 +1,6 @@
 'use client';
 
-import { motion } from 'motion/react';
+import { motion, useReducedMotion } from 'motion/react';
 import { ANIMATION } from '@/lib/design-tokens';
 import type { ChatMessage } from '@/lib/types/chat';
 
@@ -11,10 +11,11 @@ interface MessageBubbleProps {
 
 export function MessageBubble({ message, isLatest }: MessageBubbleProps) {
   const isUser = message.role === 'user';
+  const reduceMotion = useReducedMotion();
 
   return (
     <motion.div
-      initial={isLatest ? { opacity: 0, y: 10 } : false}
+      initial={isLatest && !reduceMotion ? { opacity: 0, y: 10 } : false}
       animate={{ opacity: 1, y: 0 }}
       transition={{
         duration: ANIMATION.messageSlideUp.duration,

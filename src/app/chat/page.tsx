@@ -8,6 +8,7 @@ import { ChatHeader } from '@/components/chat/chat-header';
 import { MessageList } from '@/components/chat/message-list';
 import { ChatInput } from '@/components/chat/chat-input';
 import { QuickReplies } from '@/components/chat/quick-replies';
+import { SuggestedReplies, type Suggestion } from '@/components/chat/suggested-replies';
 import { ExtractionPills } from '@/components/chat/extraction-pills';
 import { ExtractionCard } from '@/components/chat/extraction-card';
 import { EscalationDialog } from '@/components/chat/escalation-dialog';
@@ -19,8 +20,15 @@ const WELCOME_MESSAGE = {
   id: 'welcome',
   role: 'assistant' as const,
   content:
-    "Hi! I'm your HVAC assistant. Tell me what's going on with your heating or cooling system, or pick a common issue below to get started.",
+    "Hi! I'm an AI HVAC assistant — I can help describe your issue and get a technician dispatched. I might not get everything right, so you can tap “Talk to a Human” anytime. What's going on with your heating or cooling?",
 };
+
+// Contextual next-step chips shown after the conversation has started.
+const ISSUE_SUGGESTIONS: readonly Suggestion[] = [
+  { label: 'AC not cooling', message: 'My air conditioner is running but not cooling — it just blows warm air.' },
+  { label: 'No heat', message: "My furnace is running but the house isn't getting warm." },
+  { label: 'Thermostat issue', message: 'My thermostat display is blank / not responding.' },
+];
 
 export default function ChatPage() {
   const router = useRouter();
@@ -51,6 +59,8 @@ export default function ChatPage() {
   const displayMessages = hasUserMessages
     ? messages
     : [WELCOME_MESSAGE, ...messages];
+  const lastMessageIsAssistant =
+    displayMessages.at(-1)?.role === 'assistant';
 
   const handleEscalate = useCallback(async () => {
     setIsEscalating(true);
@@ -105,7 +115,11 @@ export default function ChatPage() {
         onEscalate={() => setShowEscalation(true)}
       />
 
-      <MessageList messages={displayMessages} isStreaming={isStreaming} />
+      <MessageList
+        messages={displayMessages}
+        isStreaming={isStreaming}
+        showFeedback
+      />
 
       {/* Extraction card appears inline when extraction is complete but not yet confirmed */}
       {status === 'extracting' && extraction && (
@@ -130,6 +144,20 @@ export default function ChatPage() {
 
       {/* Extraction progress pills */}
       <ExtractionPills fields={extractionFields} />
+
+      {/* Contextual suggested replies after the conversation has started */}
+      {hasUserMessages &&
+        !isStreaming &&
+        !isTerminal &&
+        status !== 'extracting' &&
+        lastMessageIsAssistant && (
+          <SuggestedReplies
+            suggestions={extraction?.issueType ? [] : ISSUE_SUGGESTIONS}
+            onSelect={sendMessage}
+            onEscalate={() => setShowEscalation(true)}
+            disabled={inputDisabled}
+          />
+        )}
 
       {/* Quick replies shown before user sends first message */}
       {!hasUserMessages && !isStreaming && !isTerminal && (

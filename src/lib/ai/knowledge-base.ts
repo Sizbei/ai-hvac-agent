@@ -1289,12 +1289,12 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ANSWER",
     cannedResponse:
-      "Hi! I'm your HVAC assistant. What heating, cooling, or air quality issue can I help you with today?",
+      "Hi! I'm an AI HVAC assistant — I can help describe your issue and get a technician dispatched. I might not get everything right, so you can tap “Talk to a Human” anytime. What heating, cooling, or air quality issue are you having?",
     infoNeeded: [],
     issueTypeMapping: null,
     urgencyHint: null,
     notes:
-      "Mirrors the system-prompt greeting. Only match standalone greetings (short message, no issue keywords) — 'hi my AC is broken' must route to the issue.",
+      "Mirrors the system-prompt greeting and discloses it's an AI with a human option (transparency / trust). Only match standalone greetings (short message, no issue keywords) — 'hi my AC is broken' must route to the issue.",
   },
   {
     id: "meta-thanks",
