@@ -1,4 +1,5 @@
 import { KNOWLEDGE_BASE } from "./knowledge-base";
+import { CONFIRM_REPLY } from "./constants";
 import type {
   KnowledgeBaseEntry,
   RouterAction,
@@ -172,6 +173,8 @@ function isGibberish(text: string): boolean {
   // an implausibly long consonant run (e.g. "asdfghjkl", "lkjsdf", "qwerty").
   return tokens.every((t) => {
     if (t.length < 4) return false;
+    // Pure-digit tokens (zip codes, phone fragments) are real input, not mash.
+    if (/^\d+$/.test(t)) return false;
     const vowels = (t.match(/[aeiou]/g) ?? []).length;
     const vowelRatio = vowels / t.length;
     const consonantRuns = t.match(/[^aeiou]+/g) ?? [];
@@ -190,7 +193,7 @@ function buildReply(
 ): string {
   if (action !== "SUBMIT") return entry.cannedResponse;
   // All required slots present → confirm rather than ask again.
-  return "Great — I have everything I need. Please review the summary and tap Confirm & Submit, and we'll get a technician scheduled.";
+  return CONFIRM_REPLY;
 }
 
 /** Required slots still missing once this entry's mappings are applied. */

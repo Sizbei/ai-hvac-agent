@@ -102,12 +102,14 @@ describe('sanitizeInput', () => {
     expect(result.sanitized).toBe('Line 1\nLine 2\tTabbed');
   });
 
-  it('should truncate messages over 2000 characters', () => {
+  it('should truncate messages over 2000 characters without flagging them as unsafe', () => {
     const longInput = 'a'.repeat(2500);
     const result = sanitizeInput(longInput);
     expect(result.sanitized.length).toBe(2000);
-    expect(result.safe).toBe(false);
-    expect(result.flagged).toContain('message_truncated_at_2000_chars');
+    // Truncation is not an injection flag — a long message is still processed.
+    expect(result.truncated).toBe(true);
+    expect(result.safe).toBe(true);
+    expect(result.flagged).not.toContain('message_truncated_at_2000_chars');
   });
 
   it('should not truncate messages at exactly 2000 characters', () => {

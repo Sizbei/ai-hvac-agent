@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { customerSessions, auditLog } from "@/lib/db/schema";
 import { transition, type SessionState } from "@/lib/ai/state-machine";
@@ -34,7 +34,12 @@ export async function escalateSession(params: {
   await db
     .update(customerSessions)
     .set({ status: "escalated", updatedAt: new Date() })
-    .where(eq(customerSessions.id, sessionId));
+    .where(
+      and(
+        eq(customerSessions.id, sessionId),
+        eq(customerSessions.organizationId, organizationId),
+      ),
+    );
 
   await db.insert(auditLog).values({
     organizationId,

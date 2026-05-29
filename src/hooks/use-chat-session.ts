@@ -130,7 +130,10 @@ export function useChatSession(): UseChatSessionReturn {
     if (sessionCreatedRef.current) return;
     sessionCreatedRef.current = true;
 
-    const RESUMABLE: readonly SessionState[] = ['chatting', 'extracting', 'confirmed'];
+    // 'confirmed' is intentionally excluded: the confirm endpoint transitions
+    // straight to 'submitted', so a 'confirmed' row only exists after a crash and
+    // has no resumable UI (the ExtractionCard only renders for 'extracting').
+    const RESUMABLE: readonly SessionState[] = ['chatting', 'extracting'];
 
     async function createSession(): Promise<void> {
       try {

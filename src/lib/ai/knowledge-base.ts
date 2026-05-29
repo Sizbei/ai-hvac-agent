@@ -1047,12 +1047,12 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ANSWER",
     cannedResponse:
-      "Yes — our technicians are licensed and our company is insured. Is there an HVAC issue I can help you with today?",
+      "Great question — our team can confirm the licensing and insurance details for your area when they follow up. Is there an HVAC issue I can help you with today?",
     infoNeeded: [],
     issueTypeMapping: null,
     urgencyHint: null,
     notes:
-      "Confirm with engineering that 'licensed and insured' is accurate for the org before shipping this canned claim.",
+      "Non-committal by design: per-org licensing/insurance data does not exist yet, so we must NOT assert 'licensed and insured' as fact (legal liability across tenants). Make this org-data-driven before claiming specifics.",
   },
   {
     id: "faq-install-vs-repair",

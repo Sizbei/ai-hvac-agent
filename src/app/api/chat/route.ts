@@ -21,6 +21,7 @@ import {
 import { checkTokenBudget, addTokenUsage } from "@/lib/ai/token-budget";
 import { isExtractionComplete } from "@/lib/ai/extraction-schema";
 import { routeMessage } from "@/lib/ai/intent-router";
+import { CONFIRM_REPLY } from "@/lib/ai/constants";
 import { extractSlots } from "@/lib/ai/slot-extract";
 import { escalateSession } from "@/lib/ai/escalate-service";
 import {
@@ -41,9 +42,6 @@ const ROUTER_ENABLED = process.env.ROUTER_ENABLED !== "false";
 
 const ESCALATION_NOTE =
   "\n\nIf you'd prefer to speak with a human, you can tap “Talk to a Human” anytime.";
-
-const CONFIRM_REPLY =
-  "Great — I have everything I need. Please review the summary and tap Confirm & Submit, and we'll get a technician scheduled.";
 
 /** Single-chunk text/plain response — byte-compatible with the SDK's text stream. */
 function cannedTextResponse(text: string): Response {
@@ -217,12 +215,19 @@ export async function POST(request: NextRequest) {
             content: replyText,
             tokensUsed: 0,
           });
-          await escalateSession({
+          const escResult = await escalateSession({
             organizationId: DEMO_ORG_ID,
             sessionId: session.id,
             currentStatus: session.status,
             ipAddress: ip,
           });
+          if (!escResult.ok) {
+            // Safety-critical: the audit trail must record the escalation.
+            logger.error(
+              { sessionId: session.id, reason: escResult.reason },
+              "Deterministic escalation failed to apply",
+            );
+          }
           await db
             .update(customerSessions)
             .set({ turnCount: newTurnCount, updatedAt: new Date() })
@@ -385,9 +390,16 @@ export async function POST(request: NextRequest) {
         // Run extraction in background — don't block the response
         extractServiceRequest(conversationHistory, guardrailResult.sanitized)
           .then(async (extraction) => {
+            // Re-read CURRENT metadata (not the request-time snapshot): a rapid
+            // follow-up turn may have written new slots while extraction ran.
+            // Merging against the snapshot would silently drop them.
+            const [fresh] = await db
+              .select({ metadata: customerSessions.metadata })
+              .from(customerSessions)
+              .where(eq(customerSessions.id, session.id));
             // Merge into any slots already known (deterministic or prior LLM
-            // turns); never overwrite a filled slot with null (review H2).
-            const merged = mergeSlots(parseKnownSlots(session.metadata), {
+            // turns); never overwrite a filled slot with null.
+            const merged = mergeSlots(parseKnownSlots(fresh?.metadata ?? null), {
               issueType: extraction.extraction.issueType ?? undefined,
               urgency: extraction.extraction.urgency ?? undefined,
               address: extraction.extraction.address ?? undefined,

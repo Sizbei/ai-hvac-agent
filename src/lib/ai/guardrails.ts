@@ -24,6 +24,8 @@ export interface GuardrailResult {
   safe: boolean;
   sanitized: string;
   flagged: string[];
+  /** True when the message exceeded the length cap and was silently truncated. */
+  truncated: boolean;
 }
 
 export function sanitizeInput(input: string): GuardrailResult {
@@ -40,16 +42,20 @@ export function sanitizeInput(input: string): GuardrailResult {
   // Strip control characters (keep newlines and tabs for formatting)
   sanitized = sanitized.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
 
-  // Limit length to prevent context stuffing (max 2000 chars per message)
+  // Limit length to prevent context stuffing (max 2000 chars per message).
+  // This is NOT a safety flag — a long message is truncated and still processed,
+  // so it must not land in `flagged` (which blocks the request as injection).
+  let truncated = false;
   if (sanitized.length > 2000) {
     sanitized = sanitized.slice(0, 2000);
-    flagged.push('message_truncated_at_2000_chars');
+    truncated = true;
   }
 
   return {
     safe: flagged.length === 0,
     sanitized,
     flagged,
+    truncated,
   };
 }
 

@@ -24,8 +24,10 @@ const feedbackSchema = z.object({
  */
 export async function POST(request: NextRequest) {
   const ip = request.headers.get("x-forwarded-for") ?? "unknown";
+  // Own bucket so feedback votes can't exhaust the escalation budget (a
+  // customer who taps 👍/👎 a few times must still be able to reach a human).
   const rateCheck = slidingWindow(
-    `session:action:${ip}`,
+    `session:feedback:${ip}`,
     RATE_LIMITS.sessionAction.maxRequests,
     RATE_LIMITS.sessionAction.windowMs,
   );
