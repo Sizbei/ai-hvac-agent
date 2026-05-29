@@ -80,6 +80,95 @@
   }
   .hamburger svg { width: 18px; height: 18px; }
 
+  /* ── Quality-of-life additions ───────────────────────────────────────── */
+
+  /* Dark theme: override the core variables. */
+  [data-theme="dark"] {
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4493f8;
+    --border: #2f3741;
+    --border-muted: #2a3038;
+    --code-bg: #161b22;
+    --canvas: #0d1117;
+    --canvas-subtle: #161b22;
+    --note: #4493f8;
+    --warn: #d29922;
+    --warn-bg: #2d2206;
+    --warn-border: #5c4708;
+    --green: #3fb950;
+  }
+  [data-theme="dark"] .hljs { background: var(--code-bg) !important; color: var(--fg); }
+  [data-theme="dark"] img.shot { filter: brightness(.92) contrast(1.02); }
+  html { color-scheme: light dark; }
+
+  /* Topbar controls (theme toggle) */
+  .topbar .spacer { flex: 1; }
+  .icon-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--canvas);
+    color: var(--fg); cursor: pointer; padding: 0;
+  }
+  .icon-btn:hover { background: var(--canvas-subtle); }
+  .icon-btn svg { width: 17px; height: 17px; }
+  .icon-btn .moon { display: none; }
+  [data-theme="dark"] .icon-btn .sun { display: none; }
+  [data-theme="dark"] .icon-btn .moon { display: inline; }
+
+  /* Reading-progress bar under the header */
+  #progress {
+    position: fixed; top: var(--header-h); left: 0; height: 3px; width: 0%;
+    background: linear-gradient(90deg, var(--accent), var(--green));
+    z-index: 60; transition: width .1s linear;
+  }
+
+  /* Sidebar search */
+  .sidebar .search { padding: 0 4px 10px; }
+  .sidebar .search input {
+    width: 100%; padding: 7px 10px; font-size: 13px;
+    border: 1px solid var(--border); border-radius: 8px;
+    background: var(--canvas-subtle); color: var(--fg);
+  }
+  .sidebar .search input::placeholder { color: var(--muted); }
+  .sidebar li.hidden { display: none; }
+  .sidebar .no-results { display: none; color: var(--muted); font-size: 13px; padding: 4px 6px; }
+  .sidebar .no-results.show { display: block; }
+
+  /* Copy buttons on code blocks */
+  .code-wrap { position: relative; }
+  .copy-btn {
+    position: absolute; top: 8px; right: 8px;
+    font-size: 12px; padding: 3px 8px; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--canvas);
+    color: var(--muted); cursor: pointer; opacity: 0; transition: opacity .12s;
+  }
+  .code-wrap:hover .copy-btn, .copy-btn:focus { opacity: 1; }
+  .copy-btn.copied { color: var(--green); border-color: var(--green); }
+
+  /* Back-to-top */
+  #toTop {
+    position: fixed; bottom: 24px; right: 24px; z-index: 60;
+    width: 40px; height: 40px; border-radius: 50%;
+    border: 1px solid var(--border); background: var(--canvas); color: var(--fg);
+    cursor: pointer; display: none; align-items: center; justify-content: center;
+    box-shadow: 0 2px 8px rgba(0,0,0,.15);
+  }
+  #toTop.show { display: inline-flex; }
+  #toTop svg { width: 18px; height: 18px; }
+
+  /* Footer */
+  main > footer.docs-footer {
+    margin-top: 48px; padding-top: 20px; border-top: 1px solid var(--border);
+    color: var(--muted); font-size: 13px;
+    display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    #progress { transition: none; }
+  }
+
   /* Layout */
   .layout { display: flex; align-items: flex-start; }
   nav.sidebar {
@@ -259,18 +348,38 @@
 </style>
 </head>
 <body>
+<script>
+  // Set the theme before paint to avoid a flash of the wrong color scheme.
+  (function () {
+    try {
+      var saved = localStorage.getItem('docs-theme');
+      var dark = saved ? saved === 'dark'
+        : window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      if (dark) document.documentElement.setAttribute('data-theme', 'dark');
+    } catch (e) {}
+  })();
+</script>
 
 <header class="topbar">
   <span class="brand"><span class="dot" aria-hidden="true"></span> AI HVAC Agent</span>
   <span class="tag">Docs</span>
+  <span class="spacer"></span>
+  <button class="icon-btn" id="themeToggle" aria-label="Toggle dark mode" title="Toggle dark mode (light/dark)">
+    <svg class="sun" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13Zm8-5a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8Zm10.657-5.657a.75.75 0 0 1 0 1.061l-1.06 1.06a.75.75 0 1 1-1.061-1.06l1.06-1.06a.75.75 0 0 1 1.061 0ZM4.464 11.536a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 0 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0Zm9.193 2.121a.75.75 0 0 1-1.06 0l-1.061-1.06a.75.75 0 0 1 1.06-1.061l1.061 1.06a.75.75 0 0 1 0 1.061ZM4.464 4.464a.75.75 0 0 1-1.06 0L2.343 3.404a.75.75 0 0 1 1.06-1.06l1.061 1.06a.75.75 0 0 1 0 1.06Z"/></svg>
+    <svg class="moon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M9.598 1.591a.75.75 0 0 1 .785-.175 7 7 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786Zm1.616 1.945a7 7 0 0 1-7.678 7.678 5.5 5.5 0 1 0 7.678-7.678Z"/></svg>
+  </button>
   <button class="hamburger" id="navToggle" aria-label="Toggle navigation" aria-expanded="false" aria-controls="sidebar">
     <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1 3.75A.75.75 0 0 1 1.75 3h12.5a.75.75 0 0 1 0 1.5H1.75A.75.75 0 0 1 1 3.75Zm0 4A.75.75 0 0 1 1.75 7h12.5a.75.75 0 0 1 0 1.5H1.75A.75.75 0 0 1 1 7.75ZM1.75 11h12.5a.75.75 0 0 1 0 1.5H1.75a.75.75 0 0 1 0-1.5Z"/></svg>
   </button>
 </header>
+<div id="progress" aria-hidden="true"></div>
 
 <div class="layout">
   <nav class="sidebar" id="sidebar" aria-label="Documentation sections">
     <h2>Documentation</h2>
+    <div class="search">
+      <input id="navSearch" type="search" placeholder="Filter sections…  ( / )" aria-label="Filter documentation sections" autocomplete="off" />
+    </div>
     <ul>
       <li><a href="#overview">Overview</a></li>
       <li><a href="#quick-start">Quick Start</a></li>
@@ -287,6 +396,7 @@
       <li><a href="#roadmap">Roadmap</a></li>
       <li><a href="#known-issue">Resolved Issues / Notes</a></li>
     </ul>
+    <p class="no-results" id="navNoResults">No matching sections.</p>
   </nav>
 
   <div id="backdrop" aria-hidden="true"></div>
@@ -677,8 +787,17 @@ npm run dev           # start at http://localhost:3000</code></pre>
       </div>
     </section>
 
+    <footer class="docs-footer">
+      <span>AI HVAC Agent — Next.js 16 · Qwen (DashScope) · Neon Postgres</span>
+      <span>Last updated: May 2026 · <a href="https://github.com/Sizbei/ai-hvac-agent">GitHub</a></span>
+    </footer>
+
   </main>
 </div>
+
+<button id="toTop" aria-label="Back to top" title="Back to top">
+  <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M3.22 10.53a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 1 1-1.06 1.06L8 6.81l-3.72 3.72a.75.75 0 0 1-1.06 0Z"/></svg>
+</button>
 
 <script>
   // Mobile nav toggle
@@ -730,6 +849,92 @@ npm run dev           # start at http://localhost:3000</code></pre>
     s.onload = function () { if (window.hljs) window.hljs.highlightAll(); };
     s.onerror = function () { /* styled <pre><code> remains readable */ };
     document.head.appendChild(s);
+  })();
+
+  // Dark / light theme toggle (persisted).
+  (function () {
+    var btn = document.getElementById('themeToggle');
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+      if (dark) document.documentElement.removeAttribute('data-theme');
+      else document.documentElement.setAttribute('data-theme', 'dark');
+      try { localStorage.setItem('docs-theme', dark ? 'light' : 'dark'); } catch (e) {}
+    });
+  })();
+
+  // Sidebar filter ("/" focuses it).
+  (function () {
+    var input = document.getElementById('navSearch');
+    var noRes = document.getElementById('navNoResults');
+    if (!input) return;
+    var items = Array.prototype.slice.call(document.querySelectorAll('nav.sidebar li'));
+    input.addEventListener('input', function () {
+      var q = input.value.trim().toLowerCase();
+      var shown = 0;
+      items.forEach(function (li) {
+        var match = !q || li.textContent.toLowerCase().indexOf(q) !== -1;
+        li.classList.toggle('hidden', !match);
+        if (match) shown++;
+      });
+      if (noRes) noRes.classList.toggle('show', shown === 0);
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === '/' && document.activeElement !== input &&
+          !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) {
+        e.preventDefault(); input.focus();
+      } else if (e.key === 'Escape' && document.activeElement === input) {
+        input.value = ''; input.dispatchEvent(new Event('input')); input.blur();
+      }
+    });
+  })();
+
+  // Copy buttons on code blocks.
+  (function () {
+    document.querySelectorAll('main pre').forEach(function (pre) {
+      var wrap = document.createElement('div');
+      wrap.className = 'code-wrap';
+      pre.parentNode.insertBefore(wrap, pre);
+      wrap.appendChild(pre);
+      var btn = document.createElement('button');
+      btn.className = 'copy-btn';
+      btn.type = 'button';
+      btn.textContent = 'Copy';
+      btn.addEventListener('click', function () {
+        var text = pre.innerText;
+        var done = function () {
+          btn.textContent = 'Copied'; btn.classList.add('copied');
+          setTimeout(function () { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1500);
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(done, function () {});
+        } else {
+          var ta = document.createElement('textarea');
+          ta.value = text; document.body.appendChild(ta); ta.select();
+          try { document.execCommand('copy'); done(); } catch (e) {}
+          document.body.removeChild(ta);
+        }
+      });
+      wrap.appendChild(btn);
+    });
+  })();
+
+  // Reading-progress bar + back-to-top.
+  (function () {
+    var bar = document.getElementById('progress');
+    var toTop = document.getElementById('toTop');
+    function onScroll() {
+      var h = document.documentElement;
+      var max = h.scrollHeight - h.clientHeight;
+      var pct = max > 0 ? (h.scrollTop / max) * 100 : 0;
+      if (bar) bar.style.width = pct + '%';
+      if (toTop) toTop.classList.toggle('show', h.scrollTop > 400);
+    }
+    document.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+    if (toTop) toTop.addEventListener('click', function () {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
   })();
 </script>
 </body>

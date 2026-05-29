@@ -1,5 +1,10 @@
 # AI HVAC Agent — User Guide & Product Overview
 
+> 💡 **Tip:** Prefer the interactive version? Run the app and open
+> [`/docs.html`](http://localhost:3000/docs.html) — it has a searchable sidebar
+> (press `/`), light/dark mode, copy-to-clipboard code blocks, a reading-progress
+> bar, and live screenshots.
+
 ## What This Is
 
 An AI-powered customer service agent for HVAC companies. Customers describe their heating/cooling problem in a chat, the AI extracts a structured service request (issue type, urgency, address, contact info), and admins manage the queue from a dashboard. Built with Next.js 16, Qwen (via DashScope), and Neon PostgreSQL.
