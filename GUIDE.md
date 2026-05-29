@@ -62,7 +62,8 @@ This is where the AI conversation happens:
 - The customer reviews and clicks "Confirm & Submit"
 - A **confirmation dialog** gives one final review before submitting
 
-![The customer chat showing a deterministic exchange and extraction progress pills](public/screenshots/chat.png)
+![The customer chat showing the Step X of 3 intake stepper, suggested-reply chips, a thumbs-up/thumbs-down feedback control, and the AI-assistant header subtitle](public/screenshots/chat.png)
+*The chat now shows a "Step X of 3" intake stepper with per-field check chips, contextual suggested-reply chips, a 👍/👎 "Was this helpful?" control under assistant answers, and an "AI assistant · a technician follows up within 2 hrs" header subtitle. See [Customer Chat Experience](#customer-chat-experience-stage-1) below.*
 
 **Guardrails built in:**
 - 2000-character message limit
@@ -79,6 +80,23 @@ Most customer turns never reach the language model. Before any message hits Qwen
 - **Novel or ambiguous input** (open-ended problem descriptions, compound messages, account lookups) falls back to the Qwen `streamText()` path.
 
 The chat endpoint used to make **2 LLM calls per turn** (one for the reply, one for extraction). On a matched deterministic turn that drops to **0** — a large cut in token cost across a typical conversation. The whole layer can be disabled with a single `ROUTER_ENABLED` flag, and the LLM fallback is always reachable. See [docs/COMMON-QUESTIONS-PLAN.md](docs/COMMON-QUESTIONS-PLAN.md) and [docs/TOKEN-SAVINGS.md](docs/TOKEN-SAVINGS.md).
+
+#### Customer Chat Experience (Stage 1)
+
+A trust- and transparency-focused pass over the chat, drawn from leading support bots (Intercom, Zendesk, Drift) and NN/G + accessibility guidance:
+
+- **AI disclosure + "Talk to a Human anytime"** in the greeting — the first bubble states it's an AI that can make mistakes and that a human is one tap away. Zero runtime cost.
+- **Intake progress stepper** — "Step X of 3" with a progress bar and per-field check chips, replacing the flat extraction pills, so the 3-field intake reads as a finish line.
+- **Contextual suggested-reply chips** after a bot turn — issue shortcuts plus a one-tap human handoff, so the customer rarely has to type.
+- **"Was this helpful? 👍/👎"** under assistant answers → `POST /api/session/feedback`, stored in `audit_log` as a deflection-quality signal (no new tables).
+- **Accessibility** — the message region is a `role="log"` with `aria-live="polite"`, animations are gated behind `prefers-reduced-motion`, and each new assistant message scrolls its *top* into view.
+- **Branded typing indicator** — "HVAC Assistant is typing…" appears only on the LLM-fallback path, so canned 0-token replies never fake latency.
+- **Clearer handoff copy** — a header subtitle ("AI assistant · a technician follows up within 2 hrs") plus an escalation dialog that states what happens next, with tap-to-call.
+
+#### Conversation Resume & Token Savings (Stage 2)
+
+- **Resume across refresh** — the httpOnly session cookie persists, so a refresh rehydrates the transcript and extracted slots from `GET /api/session` instead of starting over. Terminal/submitted sessions start fresh.
+- **Token-cost hardening** — chat output is capped at `maxOutputTokens: 350`, and only the last 10 messages are sent to the model on both the chat and extraction calls, keeping cost-per-turn flat in long conversations.
 
 **3. Escalation** — "Talk to a Human" button in the chat header
 
@@ -132,6 +150,17 @@ A searchable log of **every** saved customer chat — including sessions that ne
 ![The admin Conversations list — a searchable log of every saved chat](public/screenshots/admin-conversations.png)
 
 ![The Conversations detail sheet showing the transcript alongside extracted data](public/screenshots/admin-conversation-detail.png)
+
+**5. AI Insights** — `http://localhost:3000/admin/insights`
+
+A dashboard for how the AI is performing, computed entirely from existing tables (backed by `GET /api/admin/ai-insights`, no schema change):
+
+- **Deflection rate** (headline) — the share of assistant replies answered with **0 LLM tokens**.
+- **Funnel** — conversations → requests created (with conversion %), escalated, and abandoned.
+- **Deterministic-vs-LLM** reply counts and **total AI tokens used**.
+- **👍/👎 feedback** tallies from the new helpfulness control.
+
+![The admin AI Insights dashboard showing the headline deflection rate and metric cards](public/screenshots/admin-insights.png)
 
 ### Session States
 
@@ -210,7 +239,7 @@ See [DEPLOY.md](./DEPLOY.md) for the full runbook. The short version:
 
 ### What's Next — simple wins from chatbot research
 
-Research into leading support chatbots (Intercom, Zendesk, Drift, Tidio, plus NN/G and accessibility guidance) surfaced cheap, high-leverage UX patterns we haven't adopted yet. The top High-value / Small-effort wins: **AI disclosure in the greeting**, **👍/👎 on FAQ answers**, **contextual follow-up chips**, an **intake progress stepper**, and **`aria-live` + reduced-motion accessibility**. Full analysis and sources (including deliberately-skipped items) are in [docs/CHATBOT-BENCHMARKS.md](docs/CHATBOT-BENCHMARKS.md).
+Research into leading support chatbots (Intercom, Zendesk, Drift, Tidio, plus NN/G and accessibility guidance) surfaced cheap, high-leverage UX patterns. **The top High-value / Small-effort wins have now shipped** — ✅ **AI disclosure in the greeting**, ✅ **👍/👎 on answers**, ✅ **contextual suggested-reply chips**, ✅ an **intake progress stepper**, ✅ **`aria-live` + reduced-motion accessibility**, ✅ **scroll-to-top of new messages**, ✅ **conversation resume across refresh**, ✅ **header/escalation handoff copy**, and ✅ a **branded typing indicator** — see [Customer Chat Experience (Stage 1)](#customer-chat-experience-stage-1) and [AI Insights](#5-ai-insights--httplocalhost3000admininsights). Full analysis and sources (including deliberately-skipped items) are in [docs/CHATBOT-BENCHMARKS.md](docs/CHATBOT-BENCHMARKS.md).
 
 ### Desktop App (Tauri)
 
@@ -241,9 +270,9 @@ The current app treats each chat session independently. A CRM adds persistent cu
 ### UX Improvements
 
 **Chat:**
-- Quick-reply suggestion buttons (e.g., "AC not cooling", "Furnace won't start")
-- Progress stepper showing where the customer is in the flow
-- Branded typing indicator with company name
+- ✅ Quick-reply suggestion buttons (e.g., "AC not cooling", "Furnace won't start") — shipped as contextual suggested-reply chips
+- ✅ Progress stepper showing where the customer is in the flow — shipped as the "Step X of 3" intake stepper
+- ✅ Branded typing indicator with company name — shipped ("HVAC Assistant is typing…", LLM path only)
 
 **Dashboard:**
 - Kanban board view as an alternative to the table (drag requests between status columns)

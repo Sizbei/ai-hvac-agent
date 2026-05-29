@@ -276,6 +276,8 @@
       <li><a href="#quick-start">Quick Start</a></li>
       <li><a href="#workflow">Example Workflow</a></li>
       <li><a href="#deterministic">Deterministic Answers</a></li>
+      <li><a href="#experience">Customer Experience (Stage 1)</a></li>
+      <li><a href="#ops">Continuity, Cost &amp; Ops (Stage 2)</a></li>
       <li><a href="#admin">Admin Dashboard</a></li>
       <li><a href="#how-its-made">How It's Made</a></li>
       <li class="sub"><a href="#structure">Project structure</a></li>
@@ -387,8 +389,8 @@ npm run dev           # start at http://localhost:3000</code></pre>
       <p>Here is a concrete walkthrough. The customer reports a problem; the AI collects what it needs, confirms, and submits. After each step, the panel below shows what the system does behind the scenes.</p>
 
       <figure>
-        <img class="shot" src="/screenshots/chat.png" alt="The customer chat showing a deterministic exchange with extraction progress pills." />
-        <figcaption>The customer chat — extraction pills across the top track the required fields as they are collected.</figcaption>
+        <img class="shot" src="/screenshots/chat.png" alt="The customer chat showing the Step X of 3 intake stepper, suggested-reply chips, a thumbs-up/thumbs-down feedback control, and the AI-assistant header subtitle." />
+        <figcaption>The customer chat — a "Step X of 3" stepper with per-field check chips tracks the required fields, with suggested-reply chips, a 👍/👎 "Was this helpful?" control under the answer, and the "AI assistant · a technician follows up within 2 hrs" header subtitle. See <a href="#experience">Customer Experience (Stage 1)</a>.</figcaption>
       </figure>
 
       <div class="chat">
@@ -475,10 +477,69 @@ npm run dev           # start at http://localhost:3000</code></pre>
       </div>
     </section>
 
+    <!-- 3.6 CUSTOMER EXPERIENCE (STAGE 1) -->
+    <section id="experience">
+      <h2>Customer Experience (Stage 1) <a class="anchor" href="#experience" aria-label="Link to Customer Experience">#</a></h2>
+      <p>A pass over the chat focused on transparency, trust, and reduced friction — drawn from the patterns leading support bots use (Intercom, Zendesk, Drift, plus NN/G and accessibility guidance). Most of it costs nothing at runtime.</p>
+
+      <figure>
+        <img class="shot" src="/screenshots/chat.png" alt="The customer chat showing the Step X of 3 intake stepper with a progress bar and per-field check chips, suggested-reply chips, a thumbs-up/thumbs-down feedback control under an assistant answer, and the AI-assistant header subtitle." />
+        <figcaption>The customer chat — note the "Step X of 3" intake stepper with progress bar and per-field check chips (top), the contextual suggested-reply chips, the 👍/👎 "Was this helpful?" control under the assistant answer, and the "AI assistant · a technician follows up within 2 hrs" header subtitle.</figcaption>
+      </figure>
+
+      <h3>Transparency &amp; trust</h3>
+      <ul class="body">
+        <li><strong>AI disclosure in the greeting</strong> — the first bubble states plainly that it's an AI, that it can make mistakes, and that "Talk to a Human" is one tap away. Zero runtime cost — it's the deterministic greeting.</li>
+        <li><strong>Clearer handoff copy</strong> — the chat header carries a subtitle ("AI assistant · a technician follows up within 2 hrs"), and the escalation dialog now sets a concrete expectation plus a tap-to-call action instead of just showing a number.</li>
+      </ul>
+
+      <h3>Guided intake</h3>
+      <ul class="body">
+        <li><strong>Intake progress stepper</strong> — the flat extraction pills are replaced by an explicit "Step X of 3" stepper with a progress bar and per-field check chips, so the 3-field intake (issue, urgency, address) reads as a finish line.</li>
+        <li><strong>Contextual suggested-reply chips</strong> — after a bot turn the customer sees 2–3 tappable next steps (issue shortcuts plus one-tap human handoff) instead of having to type, keeping the conversation on rails.</li>
+      </ul>
+
+      <h3>Feedback &amp; accessibility</h3>
+      <ul class="body">
+        <li><strong>"Was this helpful? 👍/👎"</strong> under assistant answers — a tap posts to <code>POST /api/session/feedback</code> and is stored in <code>audit_log</code>, giving a deflection-quality signal with no new tables.</li>
+        <li><strong>Accessibility</strong> — the message region is a <code>role="log"</code> with <code>aria-live="polite"</code>, animations are gated behind <code>prefers-reduced-motion</code>, and each new assistant message scrolls its <em>top</em> into view (not the container bottom) so users read from the first line.</li>
+        <li><strong>Branded typing indicator</strong> — an "HVAC Assistant is typing…" label appears only on the LLM-fallback path, so canned 0-token replies never fake latency.</li>
+      </ul>
+    </section>
+
+    <!-- 3.7 CONTINUITY, COST & OPS (STAGE 2) -->
+    <section id="ops">
+      <h2>Continuity, Cost &amp; Ops (Stage 2) <a class="anchor" href="#ops" aria-label="Link to Continuity, Cost & Ops">#</a></h2>
+      <p>Stage 2 hardens the conversation against refreshes, caps the cost of every model call, and gives admins a window into how the AI is performing — all on the existing tables, with no schema change.</p>
+
+      <h3>Conversation resume across refresh</h3>
+      <p>The httpOnly session cookie persists across a page refresh, so the chat rehydrates its transcript and extracted slots from <code>GET /api/session</code> instead of starting over. A customer who accidentally reloads mid-intake keeps their progress — one of the top abandonment causes, removed. Terminal or already-submitted sessions deliberately start fresh.</p>
+
+      <h3>Token-cost hardening</h3>
+      <ul class="body">
+        <li><strong>Output cap</strong> — chat completions are capped at <code>maxOutputTokens: 350</code>, bounding the cost of any single reply.</li>
+        <li><strong>Sliding window</strong> — only the last 10 messages are sent to the model on both the chat and the extraction calls, so cost-per-turn stays flat even in long conversations.</li>
+      </ul>
+
+      <h3>AI Insights dashboard</h3>
+      <p>A new admin view at <code>/admin/insights</code> (backed by <code>GET /api/admin/ai-insights</code>) reports how the assistant is doing, computed entirely from existing tables:</p>
+      <ul class="body">
+        <li><strong>Deflection rate</strong> (headline) — the share of assistant replies answered with <strong>0 LLM tokens</strong>.</li>
+        <li><strong>Funnel</strong> — conversations → requests created (with conversion %), escalated, and abandoned.</li>
+        <li><strong>Deterministic-vs-LLM</strong> reply counts and <strong>total AI tokens used</strong>.</li>
+        <li><strong>👍/👎 feedback</strong> tallies from the new helpfulness control.</li>
+      </ul>
+
+      <figure>
+        <img class="shot" src="/screenshots/admin-insights.png" alt="The admin AI Insights dashboard showing the headline deflection rate and metric cards for the conversation funnel, deterministic-vs-LLM replies, total tokens, and thumbs-up/thumbs-down feedback." />
+        <figcaption>The AI Insights dashboard at <code>/admin/insights</code> — a headline deflection rate over metric cards for the funnel, deterministic-vs-LLM replies, total AI tokens, and 👍/👎 feedback.</figcaption>
+      </figure>
+    </section>
+
     <!-- 4. ADMIN DASHBOARD -->
     <section id="admin">
       <h2>Admin Dashboard <a class="anchor" href="#admin" aria-label="Link to Admin Dashboard">#</a></h2>
-      <p>Staff sign in at <code>/admin/login</code> and manage everything from the dashboard.</p>
+      <p>Staff sign in at <code>/admin/login</code> and manage everything from four views: <strong>Requests</strong>, <strong>Conversations</strong>, <strong>AI Insights</strong> (see <a href="#ops">Continuity, Cost &amp; Ops</a>), and <strong>Customers / Technicians</strong>.</p>
 
       <figure>
         <img class="shot" src="/screenshots/admin-login.png" alt="The admin login form." />
@@ -585,13 +646,23 @@ npm run dev           # start at http://localhost:3000</code></pre>
     <!-- 6. ROADMAP -->
     <section id="roadmap">
       <h2>Roadmap — simple improvements <a class="anchor" href="#roadmap" aria-label="Link to Roadmap">#</a></h2>
-      <p>Research into leading support chatbots (Intercom, Zendesk, Drift, Tidio, plus NN/G and accessibility guidance) surfaced a set of cheap, high-leverage UX patterns we haven't adopted yet. The top High-value / Small-effort wins:</p>
+      <p>Research into leading support chatbots (Intercom, Zendesk, Drift, Tidio, plus NN/G and accessibility guidance) surfaced a set of cheap, high-leverage UX patterns. The top High-value / Small-effort wins have now shipped.</p>
+
+      <h3>✅ Shipped this release</h3>
       <ul class="body">
-        <li><strong>AI disclosure in the greeting</strong> — state plainly in the first bubble that it's an AI, that it can make mistakes, and that a human is one tap away. Zero runtime cost (it's already the deterministic greeting).</li>
-        <li><strong>👍 / 👎 on FAQ answers</strong> — a "Did this answer your question?" check after each deterministic answer; a 👎 becomes a natural, low-pressure escalation trigger and a deflection-quality signal.</li>
-        <li><strong>Contextual follow-up chips</strong> — after a FAQ answer, show 2–3 next-step buttons ("Book a technician" / "Talk to a Human") instead of leaving the user to type, driven by the router verdict.</li>
-        <li><strong>Intake progress stepper</strong> — upgrade the extraction pills into an explicit "2 of 3 collected" stepper so the 3-field intake reads as a finish line.</li>
-        <li><strong>Accessibility: <code>aria-live</code> + reduced-motion</strong> — mark the streaming region <code>aria-live="polite"</code>, label each message by author, and pause the typing/pill animations under <code>prefers-reduced-motion</code>.</li>
+        <li><strong>AI disclosure + "Talk to a Human anytime"</strong> in the greeting — see <a href="#experience">Customer Experience (Stage 1)</a>.</li>
+        <li><strong>Intake progress stepper</strong> — "Step X of 3" with a progress bar and per-field check chips, replacing the flat extraction pills.</li>
+        <li><strong>Contextual suggested-reply chips</strong> after a bot turn (issue shortcuts + one-tap human handoff).</li>
+        <li><strong>👍 / 👎 "Was this helpful?"</strong> under assistant answers → <code>POST /api/session/feedback</code>, stored in <code>audit_log</code>.</li>
+        <li><strong>Accessibility</strong> — <code>role="log"</code> <code>aria-live="polite"</code> message region, reduced-motion gating, and scroll-to-top of new assistant messages.</li>
+        <li><strong>Conversation resume across refresh</strong> + token-cost hardening, and the <strong>AI Insights</strong> admin dashboard — see <a href="#ops">Continuity, Cost &amp; Ops (Stage 2)</a>.</li>
+        <li><strong>Clearer handoff copy</strong> (header subtitle, escalation expectation + tap-to-call) and a <strong>branded typing indicator</strong> on the LLM path.</li>
+      </ul>
+
+      <h3>Still on the roadmap</h3>
+      <ul class="body">
+        <li><strong>Kanban board view</strong> for the admin queue as an alternative to the table.</li>
+        <li><strong>Technician workload visualization</strong> and post-service customer-satisfaction tracking.</li>
       </ul>
       <p>Full analysis, sources, and the deliberately-skipped items are in <a href="https://github.com/Sizbei/ai-hvac-agent/blob/main/docs/CHATBOT-BENCHMARKS.md"><code>docs/CHATBOT-BENCHMARKS.md</code></a>.</p>
     </section>

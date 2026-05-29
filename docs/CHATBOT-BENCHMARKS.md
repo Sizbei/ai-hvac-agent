@@ -22,63 +22,65 @@ Sources: [Intercom Fin – Help](https://www.intercom.com/help/en/articles/71206
 
 ## Simple wins we should adopt (prioritized)
 
+> **Most of these are now implemented — see the Customer Experience / Ops sections of docs.html.**
+
 Each item is tagged **Value** (High/Med/Low) × **Effort** (S/M/L). Items marked ✅ ALREADY HAVE are listed only so we don't redo them.
 
-### 1. AI disclosure + "ask for a person anytime" in the first message — **High value / S effort**
+### 1. ✅ SHIPPED — AI disclosure + "ask for a person anytime" in the first message — **High value / S effort**
 - **Pattern (Intercom, NN/G, FTC/EU/CA compliance):** State plainly that it's an AI, that it can make mistakes, and that a human is one tap away — in the very first bubble.
 - **Why it helps:** Sets honest expectations, builds trust, and is increasingly a legal/compliance expectation. Costs nothing at runtime.
 - **HVAC mapping:** Reassures a stressed customer (no heat, gas smell) that escalation is always available, reinforcing our existing emergency/handoff design.
 - **Sketch:** Edit the first-greeting line in `src/lib/ai/system-prompt.ts` to: "Hi! I'm an AI HVAC assistant — I can help describe your issue and get a technician dispatched. I might not get everything right, so you can tap **Talk to a Human** anytime. What's going on?" Zero tokens — it's already the deterministic greeting.
 
-### 2. "Did this answer your question? 👍 / 👎" after FAQ answers — **High value / S–M effort**
+### 2. ✅ SHIPPED — "Did this answer your question? 👍 / 👎" after FAQ answers — **High value / S–M effort**
 - **Pattern (Zendesk):** Every answered FAQ ends with a yes/no helpfulness check; "no" surfaces alternatives or escalation.
 - **Why it helps:** Cheap signal for measuring deflection quality; a 👎 becomes a natural, low-pressure escalation trigger.
 - **HVAC mapping:** Applies only to the deterministic `ANSWER`/FAQ branch (not slot-collection or emergency). On 👎, offer "Describe your issue" or "Talk to a Human."
 - **Sketch:** When the chat route returns an `ANSWER` verdict, append a small feedback control (reuse the chip styling from `quick-replies.tsx`). Render it in `message-bubble.tsx`/`message-list.tsx`; persist the vote against the message + `intentId` already logged by the router metrics, so we can report FAQ helpfulness without new infra.
 
-### 3. Suggested follow-up replies after each answer — **High value / S effort**
+### 3. ✅ SHIPPED — Suggested follow-up replies after each answer — **High value / S effort**
 - **Pattern (Drift, NN/G "contextual suggested prompts"):** After a bot turn, show 2–3 clickable next steps instead of leaving the user to type.
 - **Why it helps:** Keeps users on rails, reduces typing on mobile, and steers toward completing the intake.
 - **HVAC mapping:** After a FAQ answer → "Book a technician" / "Talk to a Human." After the bot asks for the address → no suggestions (free text). We already have the chip component; this is mostly about *when* we show it.
 - **Sketch:** Drive contextual chips from the router verdict (`ANSWER` → next-step chips; `COLLECT_INFO` → keep free text). Reuse `quick-replies.tsx`'s button rendering with a smaller, context-specific list rather than the full category tree.
 
-### 4. Progress indicator for the multi-step intake — **High value / S effort**
+### 4. ✅ SHIPPED — Progress indicator for the multi-step intake — **High value / S effort**
 - **Pattern (NN/G progressive disclosure; common in multi-step intake bots):** Show how far along a multi-step flow the user is.
 - **Why it helps:** Reduces abandonment by signaling "almost done"; our intake is a known 3-field flow (issue, urgency, address).
 - **HVAC mapping:** We already render extraction *pills* — upgrade them into a clear "2 of 3 collected" stepper so progress reads as a finish line, not just chips.
 - **Sketch:** Add a compact "Step X of 3" / progress bar to `extraction-pills.tsx` derived from how many of the 3 required slots are filled (data already in `use-chat-session.ts`). No backend change.
 
-### 5. Streaming/answer accessibility: `aria-live` + reduced-motion — **High value / S–M effort**
+### 5. ✅ SHIPPED — Streaming/answer accessibility: `aria-live` + reduced-motion — **High value / S–M effort**
 - **Pattern (Orange, CANAXESS, BOIA):** `aria-live="polite"` + `aria-atomic="false"` on the streaming region; keyboard-focusable scrollable history; per-message labels with author; honor `prefers-reduced-motion`.
 - **Why it helps:** Screen-reader and keyboard users can actually use the bot; cheap insurance against accessibility complaints. The typing-dot and pill animations should pause under reduced-motion.
 - **HVAC mapping:** Customers in distress may be on phones, using voice control, or have impairments — broad reach matters.
 - **Sketch:** Add `aria-live="polite" aria-atomic="false"` to the streaming message container in `message-list.tsx`; ensure each `message-bubble.tsx` has an author label; gate the `motion` animations in `typing-indicator.tsx`/`extraction-pills.tsx` behind `prefers-reduced-motion`.
 
-### 6. Don't autoscroll past the top of a new bot message — **Med value / S effort**
+### 6. ✅ SHIPPED — Don't autoscroll past the top of a new bot message — **Med value / S effort**
 - **Pattern (NN/G guideline #7):** Keep the user's scroll at the *top* of a new long message so they read from the beginning.
 - **Why it helps:** With streaming, naive auto-scroll-to-bottom hides the start of longer answers.
 - **HVAC mapping:** Our FAQ/safety answers can be multi-line; users should see the first line of safety guidance.
 - **Sketch:** In `message-list.tsx`, on a new assistant message scroll its *top* into view rather than always jumping to the container bottom.
 
-### 7. Conversation persistence / resume across refresh — **Med value / S–M effort**
+### 7. ✅ SHIPPED — Conversation persistence / resume across refresh — **Med value / S–M effort**
 - **Pattern (GetStream, industry consensus):** Auto-save messages so a refresh, crash, or returning tab resumes the same conversation.
 - **Why it helps:** A customer who accidentally refreshes mid-intake shouldn't lose progress and start over (a top abandonment cause).
 - **HVAC mapping:** We already create a session server-side; the gap is *reattaching* the browser to it. Likely low effort since history + metadata already persist.
 - **Sketch:** Persist the session id in `localStorage`; on load, `use-chat-session.ts` rehydrates messages from the existing `GET /api/session` (which now returns `metadata` per the router plan). No new tables.
 
-### 8. Bot identity + handoff expectations in the header — **Med value / S effort**
+### 8. ✅ SHIPPED — Bot identity + handoff expectations in the header — **Med value / S effort**
 - **Pattern (NN/G "clarify capabilities"; Intercom handover):** The header should say what it is and set response-time expectations.
 - **Why it helps:** Reinforces transparency at a glance and frames the "Talk to a Human" button.
 - **HVAC mapping:** `chat-header.tsx` already shows "HVAC Assistant" + a status dot and the escalate button — just add a one-line subtitle like "AI assistant · a tech follows up within 2 hrs."
 - **Sketch:** Add a muted subtitle under the `<h1>` in `chat-header.tsx`. Static text, no logic.
 
-### 9. Set a realistic handoff expectation on escalation — **Med value / S effort**
+### 9. ✅ SHIPPED — Set a realistic handoff expectation on escalation — **Med value / S effort**
 - **Pattern (Intercom explicit handover; NN/G honesty):** Don't just dump a phone number — tell the user what happens next and when.
 - **Why it helps:** Avoids the "did anything happen?" anxiety after they click escalate; matches the trust-without-fake-promises principle.
 - **HVAC mapping:** Our `escalation-dialog.tsx` shows a number; add expectation copy consistent with our 2-hour promise on the success page.
 - **Sketch:** Add one line of copy to `escalation-dialog.tsx`: "We've flagged this for a human. Call now for emergencies, or a technician will reach out within 2 hours."
 
-### 10. Branded typing indicator with name — **Low value / S effort**
+### 10. ✅ SHIPPED — Branded typing indicator with name — **Low value / S effort**
 - **Pattern (NN/G typing indicators; Tidio branding):** Label the "thinking" state with the assistant's identity.
 - **Why it helps:** Minor warmth/trust nudge; reinforces it's the AI, not a person typing.
 - **HVAC mapping:** Note: deterministic answers are *instant* (0 tokens) — only show this on the LLM-fallback path so we don't fake latency on canned replies.
