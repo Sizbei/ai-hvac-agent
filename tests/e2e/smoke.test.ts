@@ -70,6 +70,14 @@ const {
 
 // ─── Module mocks ──────────────────────────────────────────────────
 
+// Keep the real NextRequest/NextResponse but stub `after()` to a no-op: the
+// chat route schedules background extraction via after(), which throws outside
+// Next's request scope when the handler is invoked directly in a unit test.
+vi.mock('next/server', async (importActual) => {
+  const actual = await importActual<typeof import('next/server')>();
+  return { ...actual, after: vi.fn() };
+});
+
 vi.mock('@/lib/db', () => {
   // Create chainable thenable proxy. Every method call returns a new proxy.
   // The proxy is awaitable: `await db.select().from().where()` resolves via the mock fn.

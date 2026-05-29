@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+import { NextRequest, after } from "next/server";
 import { streamText } from "ai";
 import { getModel } from "@/lib/ai/provider";
 import { eq } from "drizzle-orm";
@@ -400,77 +400,87 @@ export async function POST(request: NextRequest) {
           },
           "Chat message processed",
         );
-
-        // Run extraction in background — don't block the response
-        extractServiceRequest(conversationHistory, guardrailResult.sanitized)
-          .then(async (extraction) => {
-            // Re-read CURRENT metadata (not the request-time snapshot): a rapid
-            // follow-up turn may have written new slots while extraction ran.
-            // Merging against the snapshot would silently drop them.
-            const [fresh] = await db
-              .select({ metadata: customerSessions.metadata })
-              .from(customerSessions)
-              .where(eq(customerSessions.id, session.id));
-            // Merge into any slots already known (deterministic or prior LLM
-            // turns); never overwrite a filled slot with null.
-            const merged = mergeSlots(parseKnownSlots(fresh?.metadata ?? null), {
-              issueType: extraction.extraction.issueType ?? undefined,
-              urgency: extraction.extraction.urgency ?? undefined,
-              address: extraction.extraction.address ?? undefined,
-              name: extraction.extraction.customerName ?? undefined,
-              phone: extraction.extraction.customerPhone ?? undefined,
-              email: extraction.extraction.customerEmail ?? undefined,
-            });
-            const firstUserMessage =
-              conversationHistory.find((m) => m.role === "user")?.content ??
-              guardrailResult.sanitized;
-            const mergedExtraction = buildExtraction(
-              merged,
-              extraction.extraction.description || firstUserMessage.slice(0, 280),
-            );
-            const extractionComplete = isExtractionComplete(mergedExtraction);
-            const nextState = determineNextState(
-              session.status,
-              extractionComplete,
-              newTurnCount,
-              MAX_TURNS,
-            );
-
-            await db
-              .update(customerSessions)
-              .set({
-                status: nextState,
-                metadata: hasSlotData(merged)
-                  ? JSON.stringify(mergedExtraction)
-                  : session.metadata,
-                updatedAt: new Date(),
-              })
-              .where(eq(customerSessions.id, session.id));
-
-            logger.info(
-              { sessionId: session.id, extractionComplete },
-              "Background extraction complete",
-            );
-          })
-          .catch(async (extractionError: unknown) => {
-            logger.error(
-              { error: extractionError, sessionId: session.id },
-              "Background extraction failed",
-            );
-            // Ensure session state stays consistent even if extraction fails
-            const fallbackState = determineNextState(
-              session.status,
-              false,
-              newTurnCount,
-              MAX_TURNS,
-            );
-            await db
-              .update(customerSessions)
-              .set({ status: fallbackState, updatedAt: new Date() })
-              .where(eq(customerSessions.id, session.id))
-              .catch(() => {});
-          });
       },
+    });
+
+    // Run extraction after the response is sent. We use next/server's `after()`
+    // (not a detached promise) because on serverless the function is frozen once
+    // the streamed response closes — a bare `.then()` would be killed mid-flight,
+    // so issueType/urgency never persisted in production and the intake stepper
+    // stayed blank. `after()` registers the work with the platform's waitUntil so
+    // it runs to completion. Extraction needs only the conversation + the user
+    // message (not the assistant reply), so it can run independently of onFinish.
+    after(async () => {
+      try {
+        const extraction = await extractServiceRequest(
+          conversationHistory,
+          guardrailResult.sanitized,
+        );
+        // Re-read CURRENT metadata (not the request-time snapshot): a rapid
+        // follow-up turn may have written new slots while extraction ran.
+        // Merging against the snapshot would silently drop them.
+        const [fresh] = await db
+          .select({ metadata: customerSessions.metadata })
+          .from(customerSessions)
+          .where(eq(customerSessions.id, session.id));
+        // Merge into any slots already known (deterministic or prior LLM
+        // turns); never overwrite a filled slot with null.
+        const merged = mergeSlots(parseKnownSlots(fresh?.metadata ?? null), {
+          issueType: extraction.extraction.issueType ?? undefined,
+          urgency: extraction.extraction.urgency ?? undefined,
+          address: extraction.extraction.address ?? undefined,
+          name: extraction.extraction.customerName ?? undefined,
+          phone: extraction.extraction.customerPhone ?? undefined,
+          email: extraction.extraction.customerEmail ?? undefined,
+        });
+        const firstUserMessage =
+          conversationHistory.find((m) => m.role === "user")?.content ??
+          guardrailResult.sanitized;
+        const mergedExtraction = buildExtraction(
+          merged,
+          extraction.extraction.description || firstUserMessage.slice(0, 280),
+        );
+        const extractionComplete = isExtractionComplete(mergedExtraction);
+        const nextState = determineNextState(
+          session.status,
+          extractionComplete,
+          newTurnCount,
+          MAX_TURNS,
+        );
+
+        await db
+          .update(customerSessions)
+          .set({
+            status: nextState,
+            metadata: hasSlotData(merged)
+              ? JSON.stringify(mergedExtraction)
+              : session.metadata,
+            updatedAt: new Date(),
+          })
+          .where(eq(customerSessions.id, session.id));
+
+        logger.info(
+          { sessionId: session.id, extractionComplete },
+          "Background extraction complete",
+        );
+      } catch (extractionError: unknown) {
+        logger.error(
+          { error: extractionError, sessionId: session.id },
+          "Background extraction failed",
+        );
+        // Ensure session state stays consistent even if extraction fails
+        const fallbackState = determineNextState(
+          session.status,
+          false,
+          newTurnCount,
+          MAX_TURNS,
+        );
+        await db
+          .update(customerSessions)
+          .set({ status: fallbackState, updatedAt: new Date() })
+          .where(eq(customerSessions.id, session.id))
+          .catch(() => {});
+      }
     });
 
     return result.toTextStreamResponse();
