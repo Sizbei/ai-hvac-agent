@@ -48,6 +48,8 @@ Generate secrets with: `openssl rand -hex 32`
 
 The entry point. A single "Get Help Now" button sends customers into the AI chat. Designed mobile-first — centered layout, large tap target, 24/7 availability messaging.
 
+![The landing page with a single Get Help Now call-to-action](public/screenshots/landing.png)
+
 **2. AI Chat** — `http://localhost:3000/chat`
 
 This is where the AI conversation happens:
@@ -60,12 +62,23 @@ This is where the AI conversation happens:
 - The customer reviews and clicks "Confirm & Submit"
 - A **confirmation dialog** gives one final review before submitting
 
+![The customer chat showing a deterministic exchange and extraction progress pills](public/screenshots/chat.png)
+
 **Guardrails built in:**
 - 2000-character message limit
 - Input sanitization (prompt injection prevention)
 - Token budget per session (prevents runaway AI costs)
 - 15-turn escalation hint (suggests human handoff if conversation is long)
 - Rate limiting per IP
+
+#### Deterministic Answers & Token Savings
+
+Most customer turns never reach the language model. Before any message hits Qwen, a deterministic **intent router** matches it against a 65-intent knowledge base:
+
+- **Common questions, greetings, emergencies, and slot collection** are answered instantly with **0 LLM tokens** — canned FAQ answers, safety/escalation text, and regex extraction of phone/email/address.
+- **Novel or ambiguous input** (open-ended problem descriptions, compound messages, account lookups) falls back to the Qwen `streamText()` path.
+
+The chat endpoint used to make **2 LLM calls per turn** (one for the reply, one for extraction). On a matched deterministic turn that drops to **0** — a large cut in token cost across a typical conversation. The whole layer can be disabled with a single `ROUTER_ENABLED` flag, and the LLM fallback is always reachable. See [docs/COMMON-QUESTIONS-PLAN.md](docs/COMMON-QUESTIONS-PLAN.md) and [docs/TOKEN-SAVINGS.md](docs/TOKEN-SAVINGS.md).
 
 **3. Escalation** — "Talk to a Human" button in the chat header
 
@@ -103,12 +116,22 @@ The main admin screen. Shows:
   - Technician assignment dropdown
   - Full conversation transcript (user messages in blue, AI in gray)
 
+![The admin service-requests dashboard with stats cards and the request queue](public/screenshots/admin-requests.png)
+
 **3. Technician Management** — `http://localhost:3000/admin/technicians`
 
 - View all technicians in a table (name, email, status, join date)
 - **Add Technician**: Click "+ Add Technician", fill in name/email/password
 - **Edit Technician**: Click "Edit" to change name, email, or toggle active/inactive
 - Only active technicians appear in the assignment dropdown on service requests
+
+**4. Conversations** — `http://localhost:3000/admin/conversations`
+
+A searchable log of **every** saved customer chat — including sessions that never became a service request. Each entry opens a detail sheet with the full transcript and any extracted data. It reads directly from the `customer_sessions` and `messages` tables, so nothing a customer typed is ever lost, regardless of how the conversation ended.
+
+![The admin Conversations list — a searchable log of every saved chat](public/screenshots/admin-conversations.png)
+
+![The Conversations detail sheet showing the transcript alongside extracted data](public/screenshots/admin-conversation-detail.png)
 
 ### Session States
 
@@ -184,6 +207,10 @@ See [DEPLOY.md](./DEPLOY.md) for the full runbook. The short version:
 ---
 
 ## Roadmap
+
+### What's Next — simple wins from chatbot research
+
+Research into leading support chatbots (Intercom, Zendesk, Drift, Tidio, plus NN/G and accessibility guidance) surfaced cheap, high-leverage UX patterns we haven't adopted yet. The top High-value / Small-effort wins: **AI disclosure in the greeting**, **👍/👎 on FAQ answers**, **contextual follow-up chips**, an **intake progress stepper**, and **`aria-live` + reduced-motion accessibility**. Full analysis and sources (including deliberately-skipped items) are in [docs/CHATBOT-BENCHMARKS.md](docs/CHATBOT-BENCHMARKS.md).
 
 ### Desktop App (Tauri)
 

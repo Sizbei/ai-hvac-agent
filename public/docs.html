@@ -232,6 +232,11 @@
 
   hr { border: none; border-top: 1px solid var(--border-muted); margin: 36px 0; }
 
+  /* Doc screenshots */
+  .shot { width: 100%; border: 1px solid #d1d9e0; border-radius: 6px; margin: 12px 0; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+  figure { margin: 1.5rem 0; }
+  figcaption { color: #656d76; font-size: 13px; margin-top: 6px; }
+
   /* Responsive */
   #backdrop { display: none; }
   @media (max-width: 900px) {
@@ -270,13 +275,15 @@
       <li><a href="#overview">Overview</a></li>
       <li><a href="#quick-start">Quick Start</a></li>
       <li><a href="#workflow">Example Workflow</a></li>
+      <li><a href="#deterministic">Deterministic Answers</a></li>
       <li><a href="#admin">Admin Dashboard</a></li>
       <li><a href="#how-its-made">How It's Made</a></li>
       <li class="sub"><a href="#structure">Project structure</a></li>
       <li class="sub"><a href="#data-model">Data model</a></li>
       <li class="sub"><a href="#ai-layer">AI layer</a></li>
       <li class="sub"><a href="#security">Security &amp; tenancy</a></li>
-      <li><a href="#known-issue">Known Issue / Notes</a></li>
+      <li><a href="#roadmap">Roadmap</a></li>
+      <li><a href="#known-issue">Resolved Issues / Notes</a></li>
     </ul>
   </nav>
 
@@ -290,6 +297,11 @@
     <section id="overview">
       <h2>Overview <a class="anchor" href="#overview" aria-label="Link to Overview">#</a></h2>
       <p>Customers talk to the agent in plain language. The AI asks follow-up questions, collects the details that matter (issue type, urgency, address, contact info), and turns the conversation into a structured service request that staff triage and assign from an admin dashboard.</p>
+
+      <figure>
+        <img class="shot" src="/screenshots/landing.png" alt="The customer-facing landing page with a single Get Help Now call-to-action." />
+        <figcaption>The landing page — a single "Get Help Now" button sends customers straight into the AI chat.</figcaption>
+      </figure>
 
       <h3>Stack</h3>
       <div class="badges">
@@ -374,6 +386,11 @@ npm run dev           # start at http://localhost:3000</code></pre>
       <h2>Example Workflow <a class="anchor" href="#workflow" aria-label="Link to Example Workflow">#</a></h2>
       <p>Here is a concrete walkthrough. The customer reports a problem; the AI collects what it needs, confirms, and submits. After each step, the panel below shows what the system does behind the scenes.</p>
 
+      <figure>
+        <img class="shot" src="/screenshots/chat.png" alt="The customer chat showing a deterministic exchange with extraction progress pills." />
+        <figcaption>The customer chat — extraction pills across the top track the required fields as they are collected.</figcaption>
+      </figure>
+
       <div class="chat">
         <div class="turn cust"><div><div class="who">Customer</div><div class="bubble">My air conditioner is blowing warm air and making a loud rattling noise.</div></div></div>
         <div class="turn asst"><div><div class="who">Assistant</div><div class="bubble">I'm sorry to hear that — let's get this sorted. To gauge urgency: how hot is it where you are right now, is anyone vulnerable in the home (young children or elderly), and is the rattling constant or does it come and go?</div></div></div>
@@ -438,10 +455,35 @@ npm run dev           # start at http://localhost:3000</code></pre>
       </table>
     </section>
 
+    <!-- 3.5 DETERMINISTIC ANSWERS -->
+    <section id="deterministic">
+      <h2>Deterministic Answers (0-token routing) <a class="anchor" href="#deterministic" aria-label="Link to Deterministic Answers">#</a></h2>
+      <p>Most customer turns don't need a language model. Before any message reaches Qwen, it passes through a deterministic <strong>intent router</strong> — a pure function that matches the message against a 65-intent knowledge base and returns a verdict.</p>
+
+      <h3>What gets answered without an LLM</h3>
+      <ul class="body">
+        <li><strong>Common questions / FAQ</strong> (service area, pricing, hours) → an instant canned answer.</li>
+        <li><strong>Greetings &amp; meta</strong> ("hi", "are you a bot?") → handled inline, never shadowing a real issue in the same message.</li>
+        <li><strong>Emergencies</strong> (gas smell, carbon monoxide, smoke) → conservative safety/handoff text with a low confidence threshold, so the router fails toward escalation.</li>
+        <li><strong>Slot collection</strong> — the "what's your address?" style prompts plus regex extraction of phone, email, and address — all without a model call.</li>
+      </ul>
+      <p>Only genuinely novel or ambiguous input (open-ended problem descriptions, compound messages, account/status lookups, non-Latin text) falls through to the existing Qwen <code>streamText()</code> path. The router is a cost optimizer, not the brain — the LLM fallback is always reachable. A global <code>ROUTER_ENABLED</code> kill-switch disables the whole layer in one flag if a misroute is ever reported.</p>
+
+      <div class="callout">
+        <div class="label">Why this matters — before / after</div>
+        <p>The chat endpoint used to make <strong>2 LLM calls per turn</strong> (one <code>streamText</code> for the reply, one <code>generateObject</code> for extraction). On a matched deterministic turn that drops to <strong>0 LLM tokens</strong> — no reply call and no extraction call. With FAQ and slot-collection turns making up the bulk of a typical conversation, total token cost per conversation falls sharply. Every deterministic turn is logged with its intent id and confidence so the hit-rate is measured, not assumed.</p>
+      </div>
+    </section>
+
     <!-- 4. ADMIN DASHBOARD -->
     <section id="admin">
       <h2>Admin Dashboard <a class="anchor" href="#admin" aria-label="Link to Admin Dashboard">#</a></h2>
       <p>Staff sign in at <code>/admin/login</code> and manage everything from the dashboard.</p>
+
+      <figure>
+        <img class="shot" src="/screenshots/admin-login.png" alt="The admin login form." />
+        <figcaption>The admin login at <code>/admin/login</code>.</figcaption>
+      </figure>
 
       <h3>Service Requests</h3>
       <ul class="body">
@@ -450,6 +492,11 @@ npm run dev           # start at http://localhost:3000</code></pre>
         <li>Filter by status; open any row for a detail sheet with customer info, issue details, a technician-assignment dropdown, and the full conversation transcript.</li>
       </ul>
 
+      <figure>
+        <img class="shot" src="/screenshots/admin-requests.png" alt="The admin service-requests dashboard with stats cards and the request queue." />
+        <figcaption>The service-requests dashboard — auto-refreshing stats cards over the filterable request queue.</figcaption>
+      </figure>
+
       <h3>Customers (CRM)</h3>
       <p>Persistent customer profiles deduplicated from request data — contact info, property details, equipment registry, service-history timeline, notes, and follow-up reminders. Backed by the <code>customers</code>, <code>customer_equipment</code>, <code>customer_notes</code>, <code>follow_ups</code>, and <code>service_history</code> tables.</p>
 
@@ -457,10 +504,20 @@ npm run dev           # start at http://localhost:3000</code></pre>
       <p>Add, edit, and activate/deactivate technicians. Only active technicians appear in the assignment dropdown on service requests.</p>
 
       <h3>Conversations (new)</h3>
-      <p>A robust log of <em>every</em> saved customer chat — including sessions that never became a service request. It is searchable and shows the full transcript plus any extracted data.</p>
+      <p>A robust log of <em>every</em> saved customer chat — including sessions that never became a service request. It is searchable, and each entry opens a detail sheet with the full transcript plus any extracted data.</p>
+
+      <figure>
+        <img class="shot" src="/screenshots/admin-conversations.png" alt="The admin Conversations list — a searchable log of every saved customer chat." />
+        <figcaption>The Conversations list — a searchable log of every saved chat, including sessions that never became a request.</figcaption>
+      </figure>
+      <figure>
+        <img class="shot" src="/screenshots/admin-conversation-detail.png" alt="The Conversations detail sheet showing the full transcript alongside the extracted data." />
+        <figcaption>The Conversations detail sheet — full transcript on one side, extracted structured data on the other.</figcaption>
+      </figure>
+
       <div class="callout">
         <div class="label">Why this matters</div>
-        <p>The Conversations view reads directly from the <code>customer_sessions</code> + <code>messages</code> tables, so it stays complete even when a chat finishes without producing a <code>service_request</code> (see <a href="#known-issue">Known Issue</a>). Nothing a customer typed is lost.</p>
+        <p>The Conversations view reads directly from the <code>customer_sessions</code> + <code>messages</code> tables, so it stays complete even when a chat finishes without producing a <code>service_request</code>. Nothing a customer typed is lost — regardless of how the conversation ended.</p>
       </div>
     </section>
 
@@ -525,13 +582,27 @@ npm run dev           # start at http://localhost:3000</code></pre>
       </ul>
     </section>
 
-    <!-- 6. KNOWN ISSUE -->
+    <!-- 6. ROADMAP -->
+    <section id="roadmap">
+      <h2>Roadmap — simple improvements <a class="anchor" href="#roadmap" aria-label="Link to Roadmap">#</a></h2>
+      <p>Research into leading support chatbots (Intercom, Zendesk, Drift, Tidio, plus NN/G and accessibility guidance) surfaced a set of cheap, high-leverage UX patterns we haven't adopted yet. The top High-value / Small-effort wins:</p>
+      <ul class="body">
+        <li><strong>AI disclosure in the greeting</strong> — state plainly in the first bubble that it's an AI, that it can make mistakes, and that a human is one tap away. Zero runtime cost (it's already the deterministic greeting).</li>
+        <li><strong>👍 / 👎 on FAQ answers</strong> — a "Did this answer your question?" check after each deterministic answer; a 👎 becomes a natural, low-pressure escalation trigger and a deflection-quality signal.</li>
+        <li><strong>Contextual follow-up chips</strong> — after a FAQ answer, show 2–3 next-step buttons ("Book a technician" / "Talk to a Human") instead of leaving the user to type, driven by the router verdict.</li>
+        <li><strong>Intake progress stepper</strong> — upgrade the extraction pills into an explicit "2 of 3 collected" stepper so the 3-field intake reads as a finish line.</li>
+        <li><strong>Accessibility: <code>aria-live</code> + reduced-motion</strong> — mark the streaming region <code>aria-live="polite"</code>, label each message by author, and pause the typing/pill animations under <code>prefers-reduced-motion</code>.</li>
+      </ul>
+      <p>Full analysis, sources, and the deliberately-skipped items are in <a href="https://github.com/Sizbei/ai-hvac-agent/blob/main/docs/CHATBOT-BENCHMARKS.md"><code>docs/CHATBOT-BENCHMARKS.md</code></a>.</p>
+    </section>
+
+    <!-- 7. RESOLVED ISSUES / NOTES -->
     <section id="known-issue">
-      <h2>Known Issue / Notes <a class="anchor" href="#known-issue" aria-label="Link to Known Issue">#</a></h2>
-      <div class="callout warn">
-        <div class="label">Note — extraction against DashScope</div>
-        <p>Structured extraction via <code>generateObject()</code> currently returns a JSON parse error against the Qwen/DashScope endpoint. The AI SDK defaults to OpenAI's strict <code>json_schema</code> mode, which DashScope does not honor, so the structured object can fail to parse.</p>
-        <p>The practical effect: a session can complete the chat without a <code>service_request</code> being created. This is exactly why the <a href="#admin">Conversations</a> view reads the <code>customer_sessions</code> and <code>messages</code> tables directly — it stays robust and shows every conversation regardless of whether extraction succeeded.</p>
+      <h2>Resolved Issues / Notes <a class="anchor" href="#known-issue" aria-label="Link to Resolved Issues">#</a></h2>
+      <div class="callout">
+        <div class="label">Resolved — structured extraction against DashScope</div>
+        <p>Structured extraction previously returned a JSON parse error against the Qwen/DashScope endpoint: the AI SDK's <code>generateObject()</code> defaults to OpenAI's strict <code>json_schema</code> mode, which DashScope does not honor, so the structured object failed to parse and a chat could finish without a <code>service_request</code> being created.</p>
+        <p>This is now <strong>fixed</strong>. Extraction uses <code>generateText()</code> with tolerant JSON parsing, so structured extraction works reliably against Qwen/DashScope. As a defense-in-depth measure, the <a href="#admin">Conversations</a> view still reads <code>customer_sessions</code> and <code>messages</code> directly, so every conversation is preserved regardless of extraction outcome.</p>
       </div>
     </section>
 
