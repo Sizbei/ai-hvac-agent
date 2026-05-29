@@ -1,0 +1,17 @@
+# Desktop (Tauri) shell — not part of the web deployment. Rust build artifacts
+# in src-tauri/target are hundreds of MB and must never be uploaded.
+src-tauri
+
+# Local build output / deps (Vercel builds fresh in CI)
+.next
+node_modules
+
+# Docs, tests, and tooling that don't belong in the serverless bundle
+tests
+*.test.ts
+drizzle/meta
+test_qwen.py
+
+# Local env / secrets (never upload)
+.env
+.env.local

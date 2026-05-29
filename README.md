@@ -9,6 +9,14 @@ from an admin dashboard.
 Built with **Next.js 16**, **Qwen** (via Alibaba DashScope, OpenAI-compatible),
 **Drizzle ORM**, and **Neon PostgreSQL**.
 
+> **🔵 Live demo:** **https://ai-hvac-agent-lovat.vercel.app**
+> &nbsp;·&nbsp; [Customer chat](https://ai-hvac-agent-lovat.vercel.app/chat)
+> &nbsp;·&nbsp; [Admin dashboard](https://ai-hvac-agent-lovat.vercel.app/admin) (`admin@demo-hvac.com` / `admin123`)
+> &nbsp;·&nbsp; [Interactive docs](https://ai-hvac-agent-lovat.vercel.app/docs.html)
+>
+> New to the project? See **[DEMO.md](DEMO.md)** for a 5-minute guided walkthrough and
+> **[ARCHITECTURE.md](ARCHITECTURE.md)** for the system design.
+
 ![Customer chat](public/screenshots/chat.png)
 
 ## Highlights

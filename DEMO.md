@@ -4,6 +4,11 @@ A guided walkthrough for showing this project live. Follow the scenes in order; 
 one lists exactly what to type, what the audience will see, and a one-line engineering
 talking point.
 
+> **Live demo:** https://ai-hvac-agent-lovat.vercel.app
+> &nbsp;·&nbsp; chat → `/chat` &nbsp;·&nbsp; admin → `/admin` (`admin@demo-hvac.com` / `admin123`)
+> &nbsp;·&nbsp; docs → `/docs.html`
+> The admin dashboard is pre-seeded with realistic conversations, so it looks alive.
+
 ---
 
 ## TL;DR
@@ -34,8 +39,8 @@ Secrets: generate `ENCRYPTION_KEY` / `AUTH_SECRET` with `openssl rand -hex 32`.
 
 | What | Where |
 |---|---|
-| Customer chat | `http://localhost:3000/chat` (or `<DEPLOYED_URL>/chat`) |
-| Admin dashboard | `http://localhost:3000/admin` (or `<DEPLOYED_URL>/admin`) |
+| Customer chat | `http://localhost:3000/chat` (or `https://ai-hvac-agent-lovat.vercel.app/chat`) |
+| Admin dashboard | `http://localhost:3000/admin` (or `https://ai-hvac-agent-lovat.vercel.app/admin`) |
 | Interactive docs | `http://localhost:3000/docs.html` |
 | Admin login | `admin@demo-hvac.com` / `admin123` |
 
@@ -145,7 +150,7 @@ messages accepted).
 
 ### Scene 6 — Admin dashboard
 
-Open `<DEPLOYED_URL>/admin` and log in with `admin@demo-hvac.com` / `admin123`.
+Open `https://ai-hvac-agent-lovat.vercel.app/admin` and log in with `admin@demo-hvac.com` / `admin123`.
 
 1. **Service Requests queue** — the request from Scene 4 appears with its reference #,
    issue, color-coded urgency, and status. Open the detail sheet on the right and
