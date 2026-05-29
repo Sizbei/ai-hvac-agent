@@ -1,14 +1,82 @@
 # AI HVAC Agent
 
-AI-powered HVAC (Heating, Ventilation, and Air Conditioning) agent for intelligent climate control and energy optimization.
+An AI-powered customer-service intake agent for HVAC companies. Customers describe a
+heating or cooling problem in a chat; the agent answers common questions instantly,
+collects the details that matter (issue, urgency, address, contact), turns the
+conversation into a structured service request, and lets staff triage and dispatch
+from an admin dashboard.
 
-## Overview
+Built with **Next.js 16**, **Qwen** (via Alibaba DashScope, OpenAI-compatible),
+**Drizzle ORM**, and **Neon PostgreSQL**.
 
-This project implements an AI agent that monitors, controls, and optimizes HVAC systems for improved comfort and energy efficiency.
+![Customer chat](public/screenshots/chat.png)
 
-## Getting Started
+## Highlights
 
-*Coming soon.*
+- **Deterministic answers (0-token routing).** A 65-intent knowledge base + intent
+  router resolves common questions, greetings, emergencies, and slot collection
+  **without any LLM call** — the LLM (Qwen) is the fallback for novel input only.
+  ~55% of assistant turns cost zero tokens.
+- **Structured extraction.** The conversation is distilled into a validated service
+  request (issue type, urgency, address, contact) via `generateText` + tolerant
+  JSON parsing that works reliably against DashScope.
+- **Safety first.** Gas/CO/fire/flooding messages escalate immediately with a
+  conservative, qualifier-gated matcher; input is sanitized for prompt injection.
+- **Admin dashboard.** Service-request queue with technician assignment, a searchable
+  **Conversations** log of every saved chat, an **AI Insights** dashboard (deflection
+  rate, funnel, feedback), and a customer CRM.
+- **Customer UX.** AI disclosure, intake progress stepper, suggested replies, 👍/👎
+  feedback, conversation resume across refresh, accessibility (aria-live,
+  reduced-motion), and one-tap human handoff.
+- **Production-minded.** AES-256-GCM PII encryption, JWT admin auth, multi-tenant
+  query scoping, per-IP rate limiting, per-session token budget, and audit logging.
+
+## Quick Start
+
+Prerequisites: Node.js 20+, a Neon (or any) PostgreSQL database, and a DashScope
+API key (or any OpenAI-compatible endpoint, e.g. Ollama for local dev).
+
+```bash
+npm install
+cp .env.example .env.local   # then fill in the values
+npm run db:migrate           # create tables
+npm run db:seed              # seed demo org, admin, technicians
+npm run dev                  # http://localhost:3000
+```
+
+Demo admin login: `admin@demo-hvac.com` / `admin123`.
+
+See [`.env.example`](.env.example) / the [User Guide](GUIDE.md#environment-variables-envlocal)
+for the full list of environment variables (DB, AI provider, encryption, auth, etc.).
+
+## Documentation
+
+- **[GUIDE.md](GUIDE.md)** — product overview, customer + admin flows, env vars.
+- **`/docs.html`** — interactive docs (run the app, open http://localhost:3000/docs.html):
+  searchable sidebar, light/dark mode, copy buttons, example workflow, architecture.
+- **[docs/](docs/)** — `COMMON-QUESTIONS-PLAN.md`, `KNOWLEDGE-BASE-CATALOG.md`,
+  `TOKEN-SAVINGS.md`, `CHATBOT-BENCHMARKS.md`.
+
+## Scripts
+
+| Command | Purpose |
+|---|---|
+| `npm run dev` | Start the dev server |
+| `npm run build` | Production build |
+| `npm run lint` | ESLint |
+| `npx vitest run` | Run the test suite |
+| `npm run db:migrate` / `db:seed` / `db:studio` | Database migrate / seed / studio |
+
+## Project Structure
+
+```
+src/app/            App Router pages + API routes (chat, session, admin)
+src/components/      Chat UI + admin dashboard components
+src/lib/ai/         Intent router, knowledge base, extraction, guardrails
+src/lib/admin/      Tenant-scoped admin queries
+src/lib/db/         Drizzle schema, migrations, seed
+public/docs.html    Interactive documentation
+```
 
 ## License
 
