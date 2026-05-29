@@ -42,7 +42,7 @@ export default function AdminConversationsPage() {
     return () => clearTimeout(handler);
   }, [searchInput]);
 
-  const { conversations, total, isLoading, error } = useAdminConversations({
+  const { conversations, total, isLoading, error, refetch } = useAdminConversations({
     status: statusFilter === ALL_STATUSES ? undefined : statusFilter,
     search: debouncedSearch || undefined,
   });
@@ -92,6 +92,9 @@ export default function AdminConversationsPage() {
       <ConversationDetailSheet
         conversationId={selectedConversationId}
         onClose={() => setSelectedConversationId(null)}
+        onDeleted={() => {
+          void refetch();
+        }}
       />
     </div>
   );

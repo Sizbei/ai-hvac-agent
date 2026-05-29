@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { UserPlus, Search, Building2, Wrench, Calendar } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -8,24 +8,49 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { useAdminCustomers } from '@/hooks/use-admin-customers';
 import { CustomerFormDialog } from '@/components/admin/customer-form-dialog';
+
+const ALL_PROPERTY_TYPES = 'all';
 
 export default function CustomersPage() {
   const { customers, isLoading, refetch } = useAdminCustomers();
   const [search, setSearch] = useState('');
+  const [propertyTypeFilter, setPropertyTypeFilter] = useState<string>(ALL_PROPERTY_TYPES);
   const [showCreate, setShowCreate] = useState(false);
 
-  const filtered = customers.filter((c) => {
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (
-      c.name?.toLowerCase().includes(q) ||
-      c.email?.toLowerCase().includes(q) ||
-      c.phone?.includes(q) ||
-      c.address?.toLowerCase().includes(q)
-    );
-  });
+  const propertyTypeOptions = useMemo(() => {
+    const present = new Set<string>();
+    for (const c of customers) {
+      if (c.propertyType) present.add(c.propertyType);
+    }
+    return Array.from(present).sort((a, b) => a.localeCompare(b));
+  }, [customers]);
+
+  const filtered = useMemo(
+    () =>
+      customers.filter((c) => {
+        if (propertyTypeFilter !== ALL_PROPERTY_TYPES && c.propertyType !== propertyTypeFilter) {
+          return false;
+        }
+        if (!search) return true;
+        const q = search.toLowerCase();
+        return (
+          c.name?.toLowerCase().includes(q) ||
+          c.email?.toLowerCase().includes(q) ||
+          c.phone?.includes(q) ||
+          c.address?.toLowerCase().includes(q)
+        );
+      }),
+    [customers, search, propertyTypeFilter],
+  );
 
   return (
     <div className="space-y-6">
@@ -42,14 +67,32 @@ export default function CustomersPage() {
         </Button>
       </div>
 
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          placeholder="Search by name, email, phone, or address..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="pl-10"
-        />
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 sm:max-w-md">
+          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            placeholder="Search by name, email, phone, or address..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-10"
+          />
+        </div>
+        <Select
+          value={propertyTypeFilter}
+          onValueChange={(value) => setPropertyTypeFilter(value ?? ALL_PROPERTY_TYPES)}
+        >
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="Filter by property" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL_PROPERTY_TYPES}>All property types</SelectItem>
+            {propertyTypeOptions.map((type) => (
+              <SelectItem key={type} value={type}>
+                {type}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       {isLoading ? (
@@ -60,7 +103,9 @@ export default function CustomersPage() {
         </div>
       ) : filtered.length === 0 ? (
         <div className="py-12 text-center text-muted-foreground">
-          {search ? 'No customers match your search.' : 'No customers yet. Add your first customer to get started.'}
+          {search || propertyTypeFilter !== ALL_PROPERTY_TYPES
+            ? 'No customers match your filters.'
+            : 'No customers yet. Add your first customer to get started.'}
         </div>
       ) : (
         <div className="grid gap-3">

@@ -1,22 +1,27 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { Trash2 } from 'lucide-react';
 import {
   Sheet,
   SheetContent,
   SheetHeader,
   SheetTitle,
   SheetDescription,
+  SheetFooter,
 } from '@/components/ui/sheet';
+import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import { StatusBadge } from '@/components/admin/status-badge';
+import { ConfirmDialog } from '@/components/admin/confirm-dialog';
 import type { ConversationDetail } from '@/lib/admin/conversation-types';
 
 interface ConversationDetailSheetProps {
   readonly conversationId: string | null;
   readonly onClose: () => void;
+  readonly onDeleted?: () => void;
 }
 
 function InfoRow({ label, value }: { readonly label: string; readonly value: string | null }) {
@@ -118,10 +123,15 @@ function ExtractedData({ metadata }: { readonly metadata: Record<string, unknown
 export function ConversationDetailSheet({
   conversationId,
   onClose,
+  onDeleted,
 }: ConversationDetailSheetProps) {
   const [detail, setDetail] = useState<ConversationDetail | null>(null);
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
+
+  const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!conversationId) {
@@ -132,6 +142,8 @@ export function ConversationDetailSheet({
 
     setIsLoadingDetail(true);
     setDetailError(null);
+    setIsConfirmOpen(false);
+    setDeleteError(null);
 
     async function loadDetail(): Promise<void> {
       try {
@@ -159,6 +171,35 @@ export function ConversationDetailSheet({
 
     loadDetail();
   }, [conversationId]);
+
+  const handleDelete = useCallback(async (): Promise<void> => {
+    if (!conversationId) return;
+
+    setIsDeleting(true);
+    setDeleteError(null);
+
+    try {
+      const res = await fetch(`/api/admin/conversations/${conversationId}`, {
+        method: 'DELETE',
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({
+          error: { message: 'Failed to delete conversation' },
+        }));
+        setDeleteError(body?.error?.message ?? 'Failed to delete conversation');
+        return;
+      }
+
+      setIsConfirmOpen(false);
+      onDeleted?.();
+      onClose();
+    } catch {
+      setDeleteError('Could not connect to server.');
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [conversationId, onDeleted, onClose]);
 
   const isOpen = conversationId !== null;
 
@@ -235,9 +276,33 @@ export function ConversationDetailSheet({
                 </ScrollArea>
               </section>
             </div>
+
+            <SheetFooter>
+              <Button
+                variant="destructive"
+                onClick={() => {
+                  setDeleteError(null);
+                  setIsConfirmOpen(true);
+                }}
+              >
+                <Trash2 className="size-4" />
+                Delete conversation
+              </Button>
+            </SheetFooter>
           </>
         ) : null}
       </SheetContent>
+
+      <ConfirmDialog
+        open={isConfirmOpen}
+        onOpenChange={setIsConfirmOpen}
+        title="Delete conversation?"
+        description="This permanently deletes the conversation and its transcript. This action cannot be undone."
+        confirmLabel="Delete"
+        isConfirming={isDeleting}
+        error={deleteError}
+        onConfirm={handleDelete}
+      />
     </Sheet>
   );
 }

@@ -1,7 +1,8 @@
 'use client';
 
-import { use, useState } from 'react';
+import { use, useCallback, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   ArrowLeft,
   Building2,
@@ -14,15 +15,16 @@ import {
   Bell,
   Clock,
   CheckCircle,
+  Trash2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useCustomerDetail } from '@/hooks/use-admin-customers';
 import { EquipmentFormDialog } from '@/components/admin/equipment-form-dialog';
 import { NoteFormDialog } from '@/components/admin/note-form-dialog';
+import { ConfirmDialog } from '@/components/admin/confirm-dialog';
 
 const EQUIPMENT_LABELS: Record<string, string> = {
   ac: 'Air Conditioner',
@@ -64,9 +66,39 @@ export default function CustomerDetailPage({
   readonly params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
+  const router = useRouter();
   const { customer, isLoading, error, refetch } = useCustomerDetail(id);
   const [showEquipmentForm, setShowEquipmentForm] = useState(false);
   const [showNoteForm, setShowNoteForm] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const handleDelete = useCallback(async (): Promise<void> => {
+    setIsDeleting(true);
+    setDeleteError(null);
+
+    try {
+      const res = await fetch(`/api/admin/customers/${id}`, {
+        method: 'DELETE',
+      });
+
+      const json = await res.json().catch(() => ({
+        error: { message: 'Failed to delete customer' },
+      }));
+
+      if (res.ok && json.success) {
+        router.push('/admin/customers');
+        return;
+      }
+
+      setDeleteError(json.error?.message ?? 'Failed to delete customer');
+    } catch {
+      setDeleteError('Network error');
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [id, router]);
 
   if (isLoading) {
     return (
@@ -100,7 +132,7 @@ export default function CustomerDetailPage({
             <ArrowLeft className="size-4" />
           </Button>
         </Link>
-        <div>
+        <div className="flex-1">
           <h1 className="text-2xl font-bold tracking-tight">
             {customer.name ?? 'Unknown Customer'}
           </h1>
@@ -108,6 +140,16 @@ export default function CustomerDetailPage({
             Customer since {formatDate(customer.createdAt)}
           </p>
         </div>
+        <Button
+          variant="destructive"
+          onClick={() => {
+            setDeleteError(null);
+            setShowDeleteConfirm(true);
+          }}
+        >
+          <Trash2 className="size-4" />
+          Delete
+        </Button>
       </div>
 
       {/* Contact Info */}
@@ -356,6 +398,17 @@ export default function CustomerDetailPage({
           setShowNoteForm(false);
           refetch();
         }}
+      />
+
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        onOpenChange={setShowDeleteConfirm}
+        title="Delete customer?"
+        description="This permanently deletes the customer along with their equipment, service history, notes, and follow-ups. This action cannot be undone."
+        confirmLabel="Delete"
+        isConfirming={isDeleting}
+        error={deleteError}
+        onConfirm={handleDelete}
       />
     </div>
   );

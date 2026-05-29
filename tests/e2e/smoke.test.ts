@@ -113,9 +113,21 @@ vi.mock('@/lib/db', () => {
       select: () => createProxy(mockDbSelect),
       update: () => createProxy(mockDbUpdate),
       delete: () => createProxy(mockDbDelete),
+      // neon-http runs db.batch() as a single atomic transaction; each element
+      // is a thenable query proxy, so awaiting them all mirrors the real result
+      // array (one entry per statement, in order).
+      batch: (queries: readonly unknown[]) => Promise.all(queries),
     },
   };
 });
+
+// The confirm route now links each service request to a CRM customer via
+// findOrCreateCustomer. Its internal find/create DB calls are covered by the
+// crm-queries layer; here we stub it so the confirm flow test stays focused on
+// the request-submission path.
+vi.mock('@/lib/admin/crm-queries', () => ({
+  findOrCreateCustomer: vi.fn().mockResolvedValue('mock-customer-id'),
+}));
 
 vi.mock('@/lib/db/schema', () => ({
   customerSessions: { id: 'customer_sessions.id', token: 'token', status: 'status', organizationId: 'org_id', updatedAt: 'updated_at', createdAt: 'created_at' },

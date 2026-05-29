@@ -1,5 +1,8 @@
 import { getAdminSession } from "@/lib/auth/session";
-import { getConversationById } from "@/lib/admin/conversation-queries";
+import {
+  getConversationById,
+  deleteConversation,
+} from "@/lib/admin/conversation-queries";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { logger } from "@/lib/logger";
 
@@ -30,6 +33,34 @@ export async function GET(
     return successResponse(detail);
   } catch (error: unknown) {
     logger.error({ error }, "Failed to fetch conversation detail");
+    return errorResponse("Internal server error", "INTERNAL_ERROR", 500);
+  }
+}
+
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const session = await getAdminSession();
+    if (!session) {
+      return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
+    }
+
+    const { id } = await params;
+
+    if (!UUID_REGEX.test(id)) {
+      return errorResponse("Invalid conversation ID format", "INVALID_ID", 400);
+    }
+
+    const deleted = await deleteConversation(session.organizationId, id);
+    if (!deleted) {
+      return errorResponse("Conversation not found", "NOT_FOUND", 404);
+    }
+
+    return successResponse({ ok: true });
+  } catch (error: unknown) {
+    logger.error({ error }, "Failed to delete conversation");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);
   }
 }

@@ -17,6 +17,8 @@ import {
   customerSessions,
   messages,
   serviceRequests,
+  serviceHistory,
+  auditLog,
   sessionStatusEnum,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
@@ -343,4 +345,104 @@ export async function getConversationById(
     updatedAt: sessionRow.updatedAt.toISOString(),
     messages: conversationMessages,
   };
+}
+
+/**
+ * Permanently delete a conversation (a `customer_sessions` row) and every record
+ * that depends on it, all tenant-scoped to the given organization.
+ *
+ * Returns `false` when no matching session exists in the org (nothing deleted),
+ * and `true` once the session and its dependents are removed.
+ *
+ * Deletion runs as a single atomic `db.batch` (the neon-http driver has no
+ * interactive transactions) and follows FK dependency order, since none of the
+ * dependent tables declare ON DELETE CASCADE:
+ *   1. service_history (references service_requests.id)
+ *   2. service_requests (references customer_sessions.id, NOT NULL)
+ *   3. audit_log        (references customer_sessions.id, nullable)
+ *   4. messages         (references customer_sessions.id, NOT NULL)
+ *   5. customer_sessions (the conversation itself)
+ */
+export async function deleteConversation(
+  organizationId: string,
+  sessionId: string,
+): Promise<boolean> {
+  const [sessionRow] = await db
+    .select({ id: customerSessions.id })
+    .from(customerSessions)
+    .where(
+      withTenant(
+        customerSessions,
+        organizationId,
+        eq(customerSessions.id, sessionId),
+      ),
+    )
+    .limit(1);
+
+  if (!sessionRow) {
+    return false;
+  }
+
+  // The service_requests ids for this session, expressed as a subquery so the
+  // service_history delete stays a single statement (no pre-read, no empty-array
+  // edge case) and the whole cascade can run as one fixed-length atomic batch.
+  const sessionRequestIds = db
+    .select({ id: serviceRequests.id })
+    .from(serviceRequests)
+    .where(
+      withTenant(
+        serviceRequests,
+        organizationId,
+        eq(serviceRequests.sessionId, sessionId),
+      ),
+    );
+
+  // neon-http has no interactive transactions; db.batch runs these statements
+  // in order as a single atomic transaction. Order respects FK dependencies.
+  await db.batch([
+    // 1a. service_history references service_requests.id — delete first.
+    db
+      .delete(serviceHistory)
+      .where(
+        withTenant(
+          serviceHistory,
+          organizationId,
+          inArray(serviceHistory.serviceRequestId, sessionRequestIds),
+        ),
+      ),
+    // 1b. service_requests for this session.
+    db
+      .delete(serviceRequests)
+      .where(
+        withTenant(
+          serviceRequests,
+          organizationId,
+          eq(serviceRequests.sessionId, sessionId),
+        ),
+      ),
+    // 2. audit_log rows referencing this session (sessionId is nullable).
+    db
+      .delete(auditLog)
+      .where(
+        withTenant(auditLog, organizationId, eq(auditLog.sessionId, sessionId)),
+      ),
+    // 3. messages for this session.
+    db
+      .delete(messages)
+      .where(
+        withTenant(messages, organizationId, eq(messages.sessionId, sessionId)),
+      ),
+    // 4. The conversation (customer_sessions) row itself.
+    db
+      .delete(customerSessions)
+      .where(
+        withTenant(
+          customerSessions,
+          organizationId,
+          eq(customerSessions.id, sessionId),
+        ),
+      ),
+  ]);
+
+  return true;
 }

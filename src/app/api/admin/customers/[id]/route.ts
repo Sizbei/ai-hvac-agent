@@ -5,6 +5,7 @@ import {
   addEquipment,
   addNote,
   addFollowUp,
+  deleteCustomer,
 } from "@/lib/admin/crm-queries";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { logger } from "@/lib/logger";
@@ -125,6 +126,27 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
   } catch (error: unknown) {
     logger.error({ error }, "Failed to perform customer action");
+    return errorResponse("Internal server error", "INTERNAL_ERROR", 500);
+  }
+}
+
+export async function DELETE(_request: NextRequest, { params }: RouteParams) {
+  try {
+    const session = await getAdminSession();
+    if (!session) {
+      return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
+    }
+
+    const { id } = await params;
+    const deleted = await deleteCustomer(session.organizationId, id);
+
+    if (!deleted) {
+      return errorResponse("Customer not found", "NOT_FOUND", 404);
+    }
+
+    return successResponse({ ok: true });
+  } catch (error: unknown) {
+    logger.error({ error }, "Failed to delete customer");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);
   }
 }
