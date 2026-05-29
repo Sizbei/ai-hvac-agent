@@ -1,0 +1,594 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AI HVAC Agent — Documentation</title>
+<meta name="description" content="Documentation for the AI HVAC Agent: example end-to-end workflow and how the app is built." />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" />
+<style>
+  :root {
+    --fg: #1f2328;
+    --muted: #656d76;
+    --accent: #0969da;
+    --border: #d1d9e0;
+    --border-muted: #d8dee4;
+    --code-bg: #f6f8fa;
+    --canvas: #ffffff;
+    --canvas-subtle: #f6f8fa;
+    --note: #0969da;
+    --warn: #9a6700;
+    --warn-bg: #fff8c5;
+    --warn-border: #d4a72c;
+    --green: #1a7f37;
+    --header-h: 56px;
+    --sidebar-w: 280px;
+    --content-max: 800px;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--fg);
+    background: var(--canvas);
+    line-height: 1.6;
+    font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* Header */
+  header.topbar {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    height: var(--header-h);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 20px;
+    background: var(--canvas);
+    border-bottom: 1px solid var(--border);
+  }
+  .topbar .brand {
+    font-weight: 600;
+    font-size: 15px;
+    color: var(--fg);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .topbar .brand .dot {
+    width: 22px; height: 22px; border-radius: 6px;
+    background: linear-gradient(135deg, #0969da, #1a7f37);
+    display: inline-block;
+  }
+  .topbar .tag {
+    font-size: 12px; color: var(--muted);
+    border: 1px solid var(--border); border-radius: 999px;
+    padding: 2px 10px;
+  }
+  .hamburger {
+    display: none;
+    margin-left: auto;
+    background: none; border: 1px solid var(--border); border-radius: 6px;
+    width: 36px; height: 34px; cursor: pointer; color: var(--fg);
+    align-items: center; justify-content: center;
+  }
+  .hamburger svg { width: 18px; height: 18px; }
+
+  /* Layout */
+  .layout { display: flex; align-items: flex-start; }
+  nav.sidebar {
+    position: sticky;
+    top: var(--header-h);
+    width: var(--sidebar-w);
+    flex: 0 0 var(--sidebar-w);
+    height: calc(100vh - var(--header-h));
+    overflow-y: auto;
+    border-right: 1px solid var(--border);
+    padding: 24px 16px 48px;
+    background: var(--canvas);
+  }
+  nav.sidebar h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
+    color: var(--muted); margin: 0 0 8px 8px; font-weight: 600;
+  }
+  nav.sidebar ul { list-style: none; margin: 0 0 18px; padding: 0; }
+  nav.sidebar li a {
+    display: block; padding: 6px 10px; border-radius: 6px;
+    color: var(--fg); font-size: 14px; line-height: 1.4;
+  }
+  nav.sidebar li a:hover { background: var(--canvas-subtle); text-decoration: none; }
+  nav.sidebar li a.active {
+    background: #ddf4ff; color: #0550ae; font-weight: 600;
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
+  nav.sidebar li.sub a { padding-left: 22px; font-size: 13px; color: var(--muted); }
+
+  main {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 32px 40px 96px;
+    max-width: calc(var(--content-max) + 80px);
+  }
+
+  h1 { font-size: 30px; line-height: 1.25; margin: 0 0 8px; font-weight: 600; letter-spacing: -.01em; }
+  .lede { font-size: 17px; color: var(--muted); margin: 0 0 28px; }
+  section { scroll-margin-top: calc(var(--header-h) + 16px); padding-top: 8px; }
+  h2 { font-size: 23px; margin: 44px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--border-muted); font-weight: 600; }
+  h3 { font-size: 17px; margin: 26px 0 10px; font-weight: 600; }
+  h4 { font-size: 15px; margin: 20px 0 8px; font-weight: 600; color: #424a53; }
+  p { margin: 0 0 14px; }
+  ul.body, ol.body { margin: 0 0 16px; padding-left: 24px; }
+  ul.body li, ol.body li { margin: 4px 0; }
+
+  .anchor {
+    color: var(--muted); opacity: 0; margin-left: 8px; font-weight: 400;
+    text-decoration: none; font-size: .8em;
+  }
+  h2:hover .anchor, h3:hover .anchor { opacity: 1; }
+
+  /* Code */
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border-muted);
+    border-radius: 8px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    margin: 0 0 18px;
+    font-size: 13.5px;
+    line-height: 1.5;
+  }
+  pre code { font-family: var(--mono); background: none; padding: 0; color: #1f2328; }
+  code:not(pre code) {
+    font-family: var(--mono);
+    background: rgba(175,184,193,.2);
+    padding: .15em .4em; border-radius: 6px; font-size: 85%;
+  }
+  /* highlight.js may override; ensure base bg holds if CDN blocked */
+  pre code.hljs { background: transparent; padding: 0; }
+
+  /* Tables */
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 0 0 20px;
+    font-size: 14px;
+    display: block;
+    overflow-x: auto;
+  }
+  table th, table td {
+    border: 1px solid var(--border-muted);
+    padding: 7px 13px;
+    text-align: left;
+    vertical-align: top;
+  }
+  table th { background: var(--canvas-subtle); font-weight: 600; }
+  table tr:nth-child(2n) td { background: #fbfcfd; }
+
+  /* Callouts */
+  .callout {
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--note);
+    background: #ddf4ff44;
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin: 0 0 20px;
+    font-size: 14.5px;
+  }
+  .callout .label {
+    font-weight: 600; font-size: 12px; text-transform: uppercase;
+    letter-spacing: .04em; color: var(--note); margin-bottom: 4px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .callout.warn { border-left-color: var(--warn-border); background: var(--warn-bg); }
+  .callout.warn .label { color: var(--warn); }
+  .callout p:last-child { margin-bottom: 0; }
+
+  /* Stack badges */
+  .badges { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 22px; }
+  .badge {
+    font-size: 12.5px; color: #424a53;
+    background: var(--canvas-subtle); border: 1px solid var(--border-muted);
+    border-radius: 999px; padding: 4px 12px;
+  }
+
+  /* Diagram */
+  .diagram pre {
+    background: var(--canvas-subtle);
+    line-height: 1.4;
+    font-size: 12.5px;
+  }
+
+  /* Chat transcript */
+  .chat { margin: 0 0 8px; }
+  .turn { display: flex; margin: 0 0 12px; }
+  .turn.cust { justify-content: flex-end; }
+  .bubble {
+    max-width: 78%; padding: 10px 14px; border-radius: 14px;
+    font-size: 14.5px; line-height: 1.5;
+  }
+  .turn.asst .bubble { background: var(--canvas-subtle); border: 1px solid var(--border-muted); border-bottom-left-radius: 4px; }
+  .turn.cust .bubble { background: #0969da; color: #fff; border-bottom-right-radius: 4px; }
+  .turn .who { font-size: 11px; color: var(--muted); margin-bottom: 3px; font-weight: 600; }
+  .turn.cust .who { text-align: right; }
+  .behind {
+    border-left: 3px solid var(--border);
+    margin: 0 0 18px 8px; padding: 2px 0 2px 14px;
+    color: var(--muted); font-size: 13.5px;
+  }
+  .behind strong { color: var(--fg); }
+
+  .pill {
+    display: inline-block; font-size: 12px; font-weight: 600;
+    border-radius: 999px; padding: 2px 9px; margin: 0 4px 4px 0;
+  }
+  .pill.high { background: #ffebe9; color: #cf222e; border: 1px solid #ff818266; }
+  .pill.ok { background: #dafbe1; color: var(--green); border: 1px solid #4ac26b66; }
+
+  hr { border: none; border-top: 1px solid var(--border-muted); margin: 36px 0; }
+
+  /* Responsive */
+  #backdrop { display: none; }
+  @media (max-width: 900px) {
+    .hamburger { display: inline-flex; }
+    nav.sidebar {
+      position: fixed; top: var(--header-h); left: 0; bottom: 0;
+      height: auto; z-index: 60;
+      transform: translateX(-100%);
+      transition: transform .2s ease;
+      box-shadow: 2px 0 12px rgba(0,0,0,.08);
+    }
+    body.nav-open nav.sidebar { transform: translateX(0); }
+    body.nav-open #backdrop {
+      display: block; position: fixed; inset: var(--header-h) 0 0 0;
+      background: rgba(0,0,0,.25); z-index: 55;
+    }
+    main { padding: 24px 18px 80px; }
+    h1 { font-size: 25px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <span class="brand"><span class="dot" aria-hidden="true"></span> AI HVAC Agent</span>
+  <span class="tag">Docs</span>
+  <button class="hamburger" id="navToggle" aria-label="Toggle navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1 3.75A.75.75 0 0 1 1.75 3h12.5a.75.75 0 0 1 0 1.5H1.75A.75.75 0 0 1 1 3.75Zm0 4A.75.75 0 0 1 1.75 7h12.5a.75.75 0 0 1 0 1.5H1.75A.75.75 0 0 1 1 7.75ZM1.75 11h12.5a.75.75 0 0 1 0 1.5H1.75a.75.75 0 0 1 0-1.5Z"/></svg>
+  </button>
+</header>
+
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Documentation sections">
+    <h2>Documentation</h2>
+    <ul>
+      <li><a href="#overview">Overview</a></li>
+      <li><a href="#quick-start">Quick Start</a></li>
+      <li><a href="#workflow">Example Workflow</a></li>
+      <li><a href="#admin">Admin Dashboard</a></li>
+      <li><a href="#how-its-made">How It's Made</a></li>
+      <li class="sub"><a href="#structure">Project structure</a></li>
+      <li class="sub"><a href="#data-model">Data model</a></li>
+      <li class="sub"><a href="#ai-layer">AI layer</a></li>
+      <li class="sub"><a href="#security">Security &amp; tenancy</a></li>
+      <li><a href="#known-issue">Known Issue / Notes</a></li>
+    </ul>
+  </nav>
+
+  <div id="backdrop" aria-hidden="true"></div>
+
+  <main>
+    <h1>AI HVAC Agent</h1>
+    <p class="lede">An AI-powered customer-service agent for HVAC companies. Customers describe a heating or cooling problem in a chat, the AI extracts a structured service request, and admins manage the queue from a dashboard.</p>
+
+    <!-- 1. OVERVIEW -->
+    <section id="overview">
+      <h2>Overview <a class="anchor" href="#overview" aria-label="Link to Overview">#</a></h2>
+      <p>Customers talk to the agent in plain language. The AI asks follow-up questions, collects the details that matter (issue type, urgency, address, contact info), and turns the conversation into a structured service request that staff triage and assign from an admin dashboard.</p>
+
+      <h3>Stack</h3>
+      <div class="badges">
+        <span class="badge">Next.js 16 (App Router)</span>
+        <span class="badge">React 19</span>
+        <span class="badge">Vercel AI SDK</span>
+        <span class="badge">Qwen via DashScope</span>
+        <span class="badge">Drizzle ORM</span>
+        <span class="badge">Neon PostgreSQL</span>
+        <span class="badge">Zod</span>
+        <span class="badge">Tailwind CSS 4</span>
+        <span class="badge">jose (JWT)</span>
+        <span class="badge">AES-256-GCM</span>
+      </div>
+
+      <h3>Architecture at a glance</h3>
+      <div class="diagram">
+<pre><code>  Customer
+     │  natural-language chat
+     ▼
+ ┌─────────────────────┐   streamText()      ┌──────────────────┐
+ │  AI Chat (/chat)     │ ─────────────────▶  │  Qwen via        │
+ │  Vercel AI SDK       │ ◀─────────────────  │  DashScope       │
+ └─────────────────────┘   streamed tokens    └──────────────────┘
+     │  onFinish
+     ▼
+ ┌─────────────────────┐   generateObject()  ┌──────────────────┐
+ │  Structured          │ ─── Zod schema ───▶ │  ExtractionResult│
+ │  extraction          │                     │  (JSON)          │
+ └─────────────────────┘                      └──────────────────┘
+     │  customer confirms
+     ▼
+ ┌─────────────────────┐                      ┌──────────────────┐
+ │  service_request     │ ───────────────────▶│  Admin dashboard │
+ │  (PII encrypted)     │                      │  (queue / CRM)   │
+ └─────────────────────┘                      └──────────────────┘</code></pre>
+      </div>
+      <p>Chat responses stream token-by-token via the Vercel AI SDK's <code>streamText()</code>. After the stream completes, extraction runs in the <code>onFinish</code> callback using <code>generateObject()</code> against a Zod schema. Once the required fields are present and the customer confirms, a <code>service_request</code> is created and surfaces in the admin dashboard.</p>
+    </section>
+
+    <!-- 2. QUICK START -->
+    <section id="quick-start">
+      <h2>Quick Start <a class="anchor" href="#quick-start" aria-label="Link to Quick Start">#</a></h2>
+
+      <h3>Prerequisites</h3>
+      <ul class="body">
+        <li>Node.js 20+</li>
+        <li>A Neon PostgreSQL database (free tier works)</li>
+        <li>A DashScope API key from Alibaba Cloud (for Qwen)</li>
+      </ul>
+
+      <h3>Run locally</h3>
+<pre><code class="language-bash">cd ai-hvac-agent
+npm install
+npm run db:migrate    # create tables
+npm run db:seed       # seed demo data
+npm run dev           # start at http://localhost:3000</code></pre>
+
+      <h3>Environment variables (<code>.env.local</code>)</h3>
+      <p>Set these as variable names only — never commit real values. Generate secrets with <code>openssl rand -hex 32</code>.</p>
+      <table>
+        <thead><tr><th>Variable</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td><code>DATABASE_URL</code></td><td>Neon PostgreSQL pooled connection string</td></tr>
+          <tr><td><code>AI_BASE_URL</code></td><td>DashScope OpenAI-compatible endpoint</td></tr>
+          <tr><td><code>AI_API_KEY</code></td><td>Your DashScope API key</td></tr>
+          <tr><td><code>AI_MODEL</code></td><td>Model name (default: <code>qwen-plus</code>)</td></tr>
+          <tr><td><code>ENCRYPTION_KEY</code></td><td>32-byte hex key for AES-256-GCM PII encryption</td></tr>
+          <tr><td><code>AUTH_SECRET</code></td><td>JWT signing secret for admin auth (min 32 chars)</td></tr>
+          <tr><td><code>CRON_SECRET</code></td><td>Secret for the session-cleanup cron job</td></tr>
+        </tbody>
+      </table>
+
+      <div class="callout">
+        <div class="label">Demo login</div>
+        <p>The seed script creates a demo admin: <code>admin@demo-hvac.com</code> / <code>admin123</code>. Sign in at <code>/admin/login</code> and change the password after first login.</p>
+      </div>
+    </section>
+
+    <!-- 3. EXAMPLE WORKFLOW -->
+    <section id="workflow">
+      <h2>Example Workflow <a class="anchor" href="#workflow" aria-label="Link to Example Workflow">#</a></h2>
+      <p>Here is a concrete walkthrough. The customer reports a problem; the AI collects what it needs, confirms, and submits. After each step, the panel below shows what the system does behind the scenes.</p>
+
+      <div class="chat">
+        <div class="turn cust"><div><div class="who">Customer</div><div class="bubble">My air conditioner is blowing warm air and making a loud rattling noise.</div></div></div>
+        <div class="turn asst"><div><div class="who">Assistant</div><div class="bubble">I'm sorry to hear that — let's get this sorted. To gauge urgency: how hot is it where you are right now, is anyone vulnerable in the home (young children or elderly), and is the rattling constant or does it come and go?</div></div></div>
+      </div>
+      <div class="behind">
+        <strong>Behind the scenes:</strong> A <code>customer_session</code> already exists (created on page load, status <code>chatting</code>). The user message is sanitized by the guardrails, saved to the <code>messages</code> table, then streamed to Qwen via <code>streamText()</code>. The assistant reply streams back token-by-token.
+      </div>
+
+      <div class="chat">
+        <div class="turn cust"><div><div class="who">Customer</div><div class="bubble">It's very hot here, around 95 degrees, and my elderly mother lives with me. The rattling is constant. This is urgent.</div></div></div>
+        <div class="turn asst"><div><div class="who">Assistant</div><div class="bubble">Thanks — given the heat and a vulnerable household member, I'm flagging this as <strong>HIGH urgency</strong>. What is the service address so we can dispatch a technician?</div></div></div>
+      </div>
+      <div class="behind">
+        <strong>Behind the scenes:</strong> After the stream completes, the <code>onFinish</code> callback runs background extraction. The model now infers <span class="pill high">urgency: high</span> from the heat plus a vulnerable occupant. Issue type resolves toward <code>cooling_not_working</code>. The required fields (issue type, urgency, address) are not all present yet, so the session stays in the <code>extracting</code> phase.
+      </div>
+
+      <div class="chat">
+        <div class="turn cust"><div><div class="who">Customer</div><div class="bubble">My name is Jane Doe, phone is 555-123-9876, and the address is 742 Evergreen Terrace, Springfield, IL 62704.</div></div></div>
+        <div class="turn asst"><div><div class="who">Assistant</div><div class="bubble">Got it. Here's what I have:<br>• <strong>Issue:</strong> AC blowing warm air, constant rattling<br>• <strong>Urgency:</strong> High<br>• <strong>Address:</strong> 742 Evergreen Terrace, Springfield, IL 62704<br>Can you confirm your phone number is correct and let me know your preferred time?</div></div></div>
+      </div>
+      <div class="behind">
+        <strong>Behind the scenes:</strong> Extraction now has all three required fields, so <code>isExtractionComplete()</code> returns <code>true</code>. The extracted JSON is written to <code>customer_sessions.metadata</code> and the UI shows an extraction summary card with progress pills.
+      </div>
+
+      <div class="chat">
+        <div class="turn cust"><div><div class="who">Customer</div><div class="bubble">Yes, 555-123-9876 is correct. Tomorrow morning works best. Please go ahead and submit it.</div></div></div>
+        <div class="turn asst"><div><div class="who">Assistant</div><div class="bubble">Your request is submitted. A technician will reach out within 2 hours to confirm a tomorrow-morning visit. <span class="pill ok">Submitted</span></div></div></div>
+      </div>
+      <div class="behind">
+        <strong>Behind the scenes:</strong> The customer confirms in the review dialog. The session moves to <code>confirmed</code> then <code>submitted</code>, a <code>service_request</code> is created with a reference number, and the customer's name, phone, email, and address are encrypted at rest (AES-256-GCM) before storage.
+      </div>
+
+      <h3>The structured output the extractor aims to produce</h3>
+      <p>The extractor targets the Zod schema in <code>src/lib/ai/extraction-schema.ts</code>. For this conversation:</p>
+<pre><code class="language-json">{
+  "issueType": "cooling_not_working",
+  "urgency": "high",
+  "address": "742 Evergreen Terrace, Springfield, IL 62704",
+  "customerName": "Jane Doe",
+  "customerPhone": "555-123-9876",
+  "customerEmail": null,
+  "description": "AC blowing warm air with a constant loud rattling noise; home is ~95°F with an elderly resident.",
+  "isHvacRelated": true
+}</code></pre>
+      <p>Only three fields are required to complete extraction — <code>issueType</code>, <code>urgency</code>, and <code>address</code> (see <code>REQUIRED_EXTRACTION_FIELDS</code>). The rest (name, phone, email) are captured when offered. <code>customerEmail</code> is <code>null</code> here because the customer never gave one.</p>
+
+      <h3>Session state machine</h3>
+      <p>Each chat session moves through these states:</p>
+<pre><code>chatting → extracting → confirmed → submitted
+                ↘ escalated
+                ↘ abandoned (timeout)</code></pre>
+      <table>
+        <thead><tr><th>State</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>chatting</code></td><td>Active conversation in progress</td></tr>
+          <tr><td><code>extracting</code></td><td>AI is collecting the required structured fields</td></tr>
+          <tr><td><code>confirmed</code></td><td>Customer reviewed and confirmed the extraction</td></tr>
+          <tr><td><code>submitted</code></td><td>Service request created and visible to admins</td></tr>
+          <tr><td><code>escalated</code></td><td>Customer requested a human handoff</td></tr>
+          <tr><td><code>abandoned</code></td><td>Session expired; cleaned up by the daily cron</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- 4. ADMIN DASHBOARD -->
+    <section id="admin">
+      <h2>Admin Dashboard <a class="anchor" href="#admin" aria-label="Link to Admin Dashboard">#</a></h2>
+      <p>Staff sign in at <code>/admin/login</code> and manage everything from the dashboard.</p>
+
+      <h3>Service Requests</h3>
+      <ul class="body">
+        <li>Queue of incoming requests with reference #, customer, issue, urgency (color-coded), status, date, and assigned technician.</li>
+        <li>Stats cards (Pending, Assigned Today, In Progress, Completed Today) auto-refresh.</li>
+        <li>Filter by status; open any row for a detail sheet with customer info, issue details, a technician-assignment dropdown, and the full conversation transcript.</li>
+      </ul>
+
+      <h3>Customers (CRM)</h3>
+      <p>Persistent customer profiles deduplicated from request data — contact info, property details, equipment registry, service-history timeline, notes, and follow-up reminders. Backed by the <code>customers</code>, <code>customer_equipment</code>, <code>customer_notes</code>, <code>follow_ups</code>, and <code>service_history</code> tables.</p>
+
+      <h3>Technicians</h3>
+      <p>Add, edit, and activate/deactivate technicians. Only active technicians appear in the assignment dropdown on service requests.</p>
+
+      <h3>Conversations (new)</h3>
+      <p>A robust log of <em>every</em> saved customer chat — including sessions that never became a service request. It is searchable and shows the full transcript plus any extracted data.</p>
+      <div class="callout">
+        <div class="label">Why this matters</div>
+        <p>The Conversations view reads directly from the <code>customer_sessions</code> + <code>messages</code> tables, so it stays complete even when a chat finishes without producing a <code>service_request</code> (see <a href="#known-issue">Known Issue</a>). Nothing a customer typed is lost.</p>
+      </div>
+    </section>
+
+    <!-- 5. HOW IT'S MADE -->
+    <section id="how-its-made">
+      <h2>How It's Made <a class="anchor" href="#how-its-made" aria-label="Link to How It's Made">#</a></h2>
+
+      <h3 id="structure">Project structure</h3>
+<pre><code>src/
+├── app/                          # Next.js App Router
+│   ├── page.tsx                  # Landing page
+│   ├── chat/                     # AI chat + success page
+│   ├── admin/(dashboard)/        # requests, technicians, customers, conversations
+│   └── api/
+│       ├── chat/route.ts         # Streaming AI chat endpoint
+│       ├── session/              # create, confirm, escalate
+│       ├── auth/                 # login, logout
+│       ├── admin/                # stats, requests, technicians, customers CRUD
+│       └── cron/cleanup/route.ts # daily session cleanup
+├── components/                   # chat/, admin/, ui/ primitives
+├── hooks/                        # use-chat-session, use-admin-requests, ...
+└── lib/
+    ├── ai/                       # provider, extract, guardrails, metrics, state-machine
+    ├── db/                       # Drizzle schema, migrate, seed, tenant
+    └── admin/                    # CRM queries & types</code></pre>
+
+      <h3 id="data-model">Data model</h3>
+      <p>Defined with Drizzle in <code>src/lib/db/schema.ts</code>. Every table carries an <code>organization_id</code> for multi-tenancy.</p>
+      <table>
+        <thead><tr><th>Table</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td><code>organizations</code></td><td>Tenant root; every other row is scoped to one</td></tr>
+          <tr><td><code>users</code></td><td>Admin staff and technicians (role, password hash, active flag)</td></tr>
+          <tr><td><code>customer_sessions</code></td><td>One chat session: token, status, token budget/usage, turn count, extracted metadata</td></tr>
+          <tr><td><code>messages</code></td><td>Every chat message (user / assistant / system) with token usage</td></tr>
+          <tr><td><code>service_requests</code></td><td>Submitted request: issue type, urgency, encrypted PII, reference number, assignment</td></tr>
+          <tr><td><code>customers</code></td><td>CRM profile with encrypted contact info and property details</td></tr>
+          <tr><td><code>customer_equipment</code></td><td>Installed HVAC units (type, make, model, serial, warranty)</td></tr>
+          <tr><td><code>customer_notes</code></td><td>Free-form notes per customer (general, follow-up, complaint, compliment)</td></tr>
+          <tr><td><code>follow_ups</code></td><td>Scheduled reminders with due dates and status</td></tr>
+          <tr><td><code>service_history</code></td><td>Completed work, parts, cost, and tech notes linked to a request</td></tr>
+          <tr><td><code>audit_log</code></td><td>Action/entity audit trail with IP address</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="ai-layer">AI layer</h3>
+      <ul class="body">
+        <li><strong>Chat:</strong> <code>streamText()</code> (Vercel AI SDK) streams the assistant reply with the system prompt and full conversation history.</li>
+        <li><strong>Extraction:</strong> <code>generateObject()</code> with the Zod <code>extractionSchema</code> turns the conversation into typed JSON, run in the <code>onFinish</code> callback so it never blocks the streamed response.</li>
+        <li><strong>Provider:</strong> Qwen through DashScope's OpenAI-compatible endpoint, wired via <code>createOpenAI()</code> with <code>AI_BASE_URL</code>, <code>AI_API_KEY</code>, and <code>AI_MODEL</code>.</li>
+        <li><strong>State machine:</strong> <code>determineNextState()</code> advances the session based on extraction completeness and turn count; terminal states reject further messages.</li>
+      </ul>
+
+      <h3 id="security">Security &amp; multi-tenancy</h3>
+      <ul class="body">
+        <li><strong>PII encryption:</strong> Customer name, phone, email, and address are encrypted at rest with AES-256-GCM (the <code>*_encrypted</code> columns on <code>service_requests</code> and <code>customers</code>). The <code>ENCRYPTION_KEY</code> is required to decrypt.</li>
+        <li><strong>Multi-tenancy:</strong> A <code>withTenant()</code> helper scopes every query by <code>organization_id</code>, present on every table.</li>
+        <li><strong>Admin auth:</strong> JWT sessions signed with <code>AUTH_SECRET</code> via <code>jose</code>; passwords hashed with bcrypt.</li>
+        <li><strong>Input guardrails:</strong> <code>sanitizeInput()</code> strips/flags prompt-injection attempts before any message reaches the model; flagged messages are blocked.</li>
+        <li><strong>Rate limiting:</strong> A per-IP sliding window throttles the chat endpoint.</li>
+        <li><strong>Token budget:</strong> Each session has a token budget (default 10,000); requests are rejected once it is exhausted, preventing runaway AI cost.</li>
+      </ul>
+    </section>
+
+    <!-- 6. KNOWN ISSUE -->
+    <section id="known-issue">
+      <h2>Known Issue / Notes <a class="anchor" href="#known-issue" aria-label="Link to Known Issue">#</a></h2>
+      <div class="callout warn">
+        <div class="label">Note — extraction against DashScope</div>
+        <p>Structured extraction via <code>generateObject()</code> currently returns a JSON parse error against the Qwen/DashScope endpoint. The AI SDK defaults to OpenAI's strict <code>json_schema</code> mode, which DashScope does not honor, so the structured object can fail to parse.</p>
+        <p>The practical effect: a session can complete the chat without a <code>service_request</code> being created. This is exactly why the <a href="#admin">Conversations</a> view reads the <code>customer_sessions</code> and <code>messages</code> tables directly — it stays robust and shows every conversation regardless of whether extraction succeeded.</p>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+  // Mobile nav toggle
+  (function () {
+    var toggle = document.getElementById('navToggle');
+    var backdrop = document.getElementById('backdrop');
+    function close() { document.body.classList.remove('nav-open'); toggle.setAttribute('aria-expanded', 'false'); }
+    toggle.addEventListener('click', function () {
+      var open = document.body.classList.toggle('nav-open');
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+    backdrop.addEventListener('click', close);
+    document.querySelectorAll('nav.sidebar a').forEach(function (a) {
+      a.addEventListener('click', close);
+    });
+  })();
+
+  // Active-section highlighting on scroll
+  (function () {
+    var links = Array.prototype.slice.call(document.querySelectorAll('nav.sidebar a'));
+    var map = {};
+    links.forEach(function (a) {
+      var id = a.getAttribute('href').slice(1);
+      if (id) map[id] = a;
+    });
+    var targets = Object.keys(map).map(function (id) { return document.getElementById(id); }).filter(Boolean);
+    if (!('IntersectionObserver' in window) || !targets.length) return;
+    var visible = new Set();
+    var obs = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) visible.add(e.target.id); else visible.delete(e.target.id);
+      });
+      // pick the topmost visible target in document order
+      for (var i = 0; i < targets.length; i++) {
+        if (visible.has(targets[i].id)) {
+          links.forEach(function (l) { l.classList.remove('active'); });
+          if (map[targets[i].id]) map[targets[i].id].classList.add('active');
+          break;
+        }
+      }
+    }, { rootMargin: '-64px 0px -70% 0px', threshold: 0 });
+    targets.forEach(function (t) { obs.observe(t); });
+  })();
+
+  // Syntax highlighting (degrades gracefully if CDN blocked)
+  (function () {
+    var s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js';
+    s.onload = function () { if (window.hljs) window.hljs.highlightAll(); };
+    s.onerror = function () { /* styled <pre><code> remains readable */ };
+    document.head.appendChild(s);
+  })();
+</script>
+</body>
+</html>

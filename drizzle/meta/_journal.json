@@ -8,6 +8,20 @@
       "when": 1779862503476,
       "tag": "0000_demonic_caretaker",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1779905202657,
+      "tag": "0001_harsh_loners",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1780031882582,
+      "tag": "0002_awesome_piledriver",
+      "breakpoints": true
     }
   ]
 }

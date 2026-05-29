@@ -7,13 +7,20 @@ import { useChatSession } from '@/hooks/use-chat-session';
 import { ChatHeader } from '@/components/chat/chat-header';
 import { MessageList } from '@/components/chat/message-list';
 import { ChatInput } from '@/components/chat/chat-input';
+import { QuickReplies } from '@/components/chat/quick-replies';
 import { ExtractionPills } from '@/components/chat/extraction-pills';
 import { ExtractionCard } from '@/components/chat/extraction-card';
 import { EscalationDialog } from '@/components/chat/escalation-dialog';
 import { ConfirmationDialog } from '@/components/chat/confirmation-dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
+
+const WELCOME_MESSAGE = {
+  id: 'welcome',
+  role: 'assistant' as const,
+  content:
+    "Hi! I'm your HVAC assistant. Tell me what's going on with your heating or cooling system, or pick a common issue below to get started.",
+};
 
 export default function ChatPage() {
   const router = useRouter();
@@ -39,6 +46,11 @@ export default function ChatPage() {
   const isTerminal =
     status === 'escalated' || status === 'abandoned' || status === 'submitted';
   const inputDisabled = isStreaming || isTerminal || isLoading;
+
+  const hasUserMessages = messages.some((m) => m.role === 'user');
+  const displayMessages = hasUserMessages
+    ? messages
+    : [WELCOME_MESSAGE, ...messages];
 
   const handleEscalate = useCallback(async () => {
     setIsEscalating(true);
@@ -67,7 +79,6 @@ export default function ChatPage() {
     }
   }, [extraction, confirm, router]);
 
-  // Loading state while session is being created
   if (isLoading) {
     return (
       <div className="flex flex-col h-dvh md:mx-auto md:max-w-lg md:shadow-lg">
@@ -94,7 +105,7 @@ export default function ChatPage() {
         onEscalate={() => setShowEscalation(true)}
       />
 
-      <MessageList messages={messages} isStreaming={isStreaming} />
+      <MessageList messages={displayMessages} isStreaming={isStreaming} />
 
       {/* Extraction card appears inline when extraction is complete but not yet confirmed */}
       {status === 'extracting' && extraction && (
@@ -120,6 +131,13 @@ export default function ChatPage() {
       {/* Extraction progress pills */}
       <ExtractionPills fields={extractionFields} />
 
+      {/* Quick replies shown before user sends first message */}
+      {!hasUserMessages && !isStreaming && !isTerminal && (
+        <div className="border-t bg-muted/30 px-3 py-3">
+          <QuickReplies onSelect={sendMessage} disabled={inputDisabled} />
+        </div>
+      )}
+
       <ChatInput
         onSendMessage={sendMessage}
         disabled={inputDisabled}
@@ -128,11 +146,12 @@ export default function ChatPage() {
             ? 'Waiting for response...'
             : isTerminal
               ? 'Chat has ended'
-              : 'Describe your HVAC issue...'
+              : hasUserMessages
+                ? 'Type your reply...'
+                : 'Describe your HVAC issue...'
         }
       />
 
-      {/* Escalation dialog */}
       <EscalationDialog
         open={showEscalation}
         onOpenChange={setShowEscalation}
@@ -140,7 +159,6 @@ export default function ChatPage() {
         isLoading={isEscalating}
       />
 
-      {/* Confirmation dialog */}
       {extraction && (
         <ConfirmationDialog
           open={showConfirmation}

@@ -151,7 +151,7 @@ export function useChatSession(): UseChatSessionReturn {
     createSession();
   }, []);
 
-  // Poll session state after streaming finishes (status transitions from streaming/submitted to ready)
+  // Poll session state after streaming finishes, with retries for background extraction
   useEffect(() => {
     const wasActive =
       previousStatusRef.current === 'streaming' ||
@@ -162,10 +162,22 @@ export function useChatSession(): UseChatSessionReturn {
 
     if (!wasActive || !isNowReady) return;
 
+    let attempts = 0;
+    let failures = 0;
+    let timerId: ReturnType<typeof setTimeout> | null = null;
+
     async function pollSession(): Promise<void> {
       try {
         const res = await fetch('/api/session');
-        if (!res.ok) return;
+        if (!res.ok) {
+          failures += 1;
+          if (failures >= 3) {
+            setSessionError('Could not refresh session status. Your data may be stale.');
+          }
+          return;
+        }
+
+        failures = 0;
 
         const body = (await res.json()) as {
           success: boolean;
@@ -176,23 +188,36 @@ export function useChatSession(): UseChatSessionReturn {
         const session = body.data;
         setSessionStatus(session.status);
 
-        // Parse extraction from session metadata (stored as JSON string)
         if ('metadata' in session && typeof session.metadata === 'string') {
           try {
             const parsed = JSON.parse(session.metadata) as ExtractionResult;
             if (parsed && typeof parsed === 'object' && 'issueType' in parsed) {
               setExtraction(parsed);
+              return;
             }
           } catch {
-            // Metadata not valid extraction JSON yet -- that's fine
+            // Metadata not valid extraction JSON yet
           }
         }
+
+        // Retry polling for extraction results (background extraction may still be running)
+        attempts += 1;
+        if (attempts < 6) {
+          timerId = setTimeout(pollSession, 3000);
+        }
       } catch {
-        // Non-fatal: polling failure doesn't block chat
+        failures += 1;
+        if (failures >= 3) {
+          setSessionError('Could not refresh session status. Your data may be stale.');
+        }
       }
     }
 
     pollSession();
+
+    return () => {
+      if (timerId) clearTimeout(timerId);
+    };
   }, [chatStatus]);
 
   // Wrap sendMessage to accept plain text

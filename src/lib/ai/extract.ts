@@ -1,5 +1,5 @@
 import { generateObject } from 'ai';
-import { openai } from '@ai-sdk/openai';
+import { getModel } from './provider';
 import { extractionSchema, type ExtractionResult } from './extraction-schema';
 import { SYSTEM_PROMPT, EXTRACTION_INSTRUCTION } from './system-prompt';
 import { sanitizeInput, validateExtractionOutput, type GuardrailResult } from './guardrails';
@@ -38,7 +38,7 @@ export async function extractServiceRequest(
     'extraction',
     () =>
       generateObject({
-        model: openai('gpt-4o'),
+        model: getModel(),
         schema: extractionSchema,
         system: `${SYSTEM_PROMPT}\n\n${EXTRACTION_INSTRUCTION}`,
         messages,

@@ -5,7 +5,9 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   ClipboardList,
+  MessagesSquare,
   Users,
+  Building2,
   ChevronLeft,
   ChevronRight,
   LogOut,
@@ -30,6 +32,8 @@ interface NavItem {
 
 const NAV_ITEMS: readonly NavItem[] = [
   { label: 'Requests', href: '/admin/requests', icon: ClipboardList },
+  { label: 'Conversations', href: '/admin/conversations', icon: MessagesSquare },
+  { label: 'Customers', href: '/admin/customers', icon: Building2 },
   { label: 'Technicians', href: '/admin/technicians', icon: Users },
 ] as const;
 
