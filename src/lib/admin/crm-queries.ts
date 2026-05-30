@@ -8,6 +8,7 @@ import {
   serviceHistory,
   serviceRequests,
   users,
+  auditLog,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { encrypt, decrypt } from "@/lib/crypto";
@@ -28,6 +29,14 @@ function safeDecrypt(ciphertext: string | null): string | null {
     return null;
   }
 }
+
+// Upper bound on rows returned by the admin customer list. PII columns are
+// encrypted with a random IV, so search/filtering must happen client-side over
+// the loaded set — which means this query cannot stream or paginate server-side.
+// The cap keeps a pathological dataset from loading unbounded; the most recent
+// customers are returned first. At real scale, introduce a deterministic blind
+// index (HMAC of normalized email/phone) so lookups/search can be server-side.
+const CUSTOMER_LIST_LIMIT = 500;
 
 export async function getCustomers(
   organizationId: string,
@@ -58,7 +67,8 @@ export async function getCustomers(
     })
     .from(customers)
     .where(withTenant(customers, organizationId))
-    .orderBy(desc(customers.createdAt));
+    .orderBy(desc(customers.createdAt))
+    .limit(CUSTOMER_LIST_LIMIT);
 
   return rows.map((row) => ({
     id: row.id,
@@ -439,14 +449,16 @@ export async function findOrCreateCustomer(
  * their customer_id (so the request/conversation history survives), then
  * deletes the customer row — and returns true.
  *
- * The dependent writes are issued via `db.batch`, which the neon-http driver
- * executes as a single non-interactive (atomic) transaction. The neon-http
- * driver does not support Drizzle's interactive `db.transaction()` API
- * (it throws "No transactions support in neon-http driver").
+ * The dependent writes — and an audit-log entry recording who deleted what —
+ * are issued via `db.batch`, which the neon-http driver executes as a single
+ * non-interactive (atomic) transaction. The neon-http driver does not support
+ * Drizzle's interactive `db.transaction()` API (it throws "No transactions
+ * support in neon-http driver").
  */
 export async function deleteCustomer(
   organizationId: string,
   customerId: string,
+  actor?: { readonly userId?: string | null; readonly ipAddress?: string | null },
 ): Promise<boolean> {
   const [existing] = await db
     .select({ id: customers.id })
@@ -507,6 +519,14 @@ export async function deleteCustomer(
       .where(
         withTenant(customers, organizationId, eq(customers.id, customerId)),
       ),
+    db.insert(auditLog).values({
+      organizationId,
+      userId: actor?.userId ?? null,
+      action: "customer_deleted",
+      entity: "customers",
+      entityId: customerId,
+      ipAddress: actor?.ipAddress ?? null,
+    }),
   ]);
 
   return true;

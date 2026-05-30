@@ -362,10 +362,14 @@ export async function getConversationById(
  *   3. audit_log        (references customer_sessions.id, nullable)
  *   4. messages         (references customer_sessions.id, NOT NULL)
  *   5. customer_sessions (the conversation itself)
+ *
+ * Finally a `conversation_deleted` audit-log row is written (with a null
+ * sessionId, since the session no longer exists) recording who deleted it.
  */
 export async function deleteConversation(
   organizationId: string,
   sessionId: string,
+  actor?: { readonly userId?: string | null; readonly ipAddress?: string | null },
 ): Promise<boolean> {
   const [sessionRow] = await db
     .select({ id: customerSessions.id })
@@ -442,6 +446,17 @@ export async function deleteConversation(
           eq(customerSessions.id, sessionId),
         ),
       ),
+    // 5. Record the deletion. sessionId is null (the session is gone); the
+    // deleted session id is preserved in entityId, which has no FK.
+    db.insert(auditLog).values({
+      organizationId,
+      userId: actor?.userId ?? null,
+      sessionId: null,
+      action: "conversation_deleted",
+      entity: "customer_sessions",
+      entityId: sessionId,
+      ipAddress: actor?.ipAddress ?? null,
+    }),
   ]);
 
   return true;

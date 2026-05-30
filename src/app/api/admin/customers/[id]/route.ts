@@ -8,6 +8,7 @@ import {
   deleteCustomer,
 } from "@/lib/admin/crm-queries";
 import { successResponse, errorResponse } from "@/lib/api-response";
+import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
 
 interface RouteParams {
@@ -133,11 +134,21 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export async function DELETE(_request: NextRequest, { params }: RouteParams) {
+export async function DELETE(request: NextRequest, { params }: RouteParams) {
   try {
     const session = await getAdminSession();
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
+    }
+
+    const ipAddress = request.headers.get("x-forwarded-for") ?? "unknown";
+    const rateCheck = slidingWindow(
+      `admin:delete:${session.userId}`,
+      RATE_LIMITS.adminMutation.maxRequests,
+      RATE_LIMITS.adminMutation.windowMs,
+    );
+    if (!rateCheck.allowed) {
+      return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
     }
 
     const { id } = await params;
@@ -145,7 +156,10 @@ export async function DELETE(_request: NextRequest, { params }: RouteParams) {
       return errorResponse("Invalid customer ID format", "INVALID_ID", 400);
     }
 
-    const deleted = await deleteCustomer(session.organizationId, id);
+    const deleted = await deleteCustomer(session.organizationId, id, {
+      userId: session.userId,
+      ipAddress,
+    });
 
     if (!deleted) {
       return errorResponse("Customer not found", "NOT_FOUND", 404);

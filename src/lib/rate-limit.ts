@@ -71,6 +71,7 @@ export const RATE_LIMITS = {
   chat: { maxRequests: 20, windowMs: 60_000 }, // 20 messages per minute
   sessionCreate: { maxRequests: 5, windowMs: 60_000 }, // 5 sessions per minute
   sessionAction: { maxRequests: 10, windowMs: 60_000 }, // 10 actions per minute
+  adminMutation: { maxRequests: 30, windowMs: 60_000 }, // 30 admin writes/deletes per minute
 } as const;
 
 // Reset store (for testing)

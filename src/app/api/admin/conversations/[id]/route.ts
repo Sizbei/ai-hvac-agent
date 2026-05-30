@@ -1,9 +1,11 @@
+import { NextRequest } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
 import {
   getConversationById,
   deleteConversation,
 } from "@/lib/admin/conversation-queries";
 import { successResponse, errorResponse } from "@/lib/api-response";
+import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
 
 const UUID_REGEX =
@@ -38,7 +40,7 @@ export async function GET(
 }
 
 export async function DELETE(
-  _request: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
@@ -47,13 +49,26 @@ export async function DELETE(
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
 
+    const ipAddress = request.headers.get("x-forwarded-for") ?? "unknown";
+    const rateCheck = slidingWindow(
+      `admin:delete:${session.userId}`,
+      RATE_LIMITS.adminMutation.maxRequests,
+      RATE_LIMITS.adminMutation.windowMs,
+    );
+    if (!rateCheck.allowed) {
+      return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
+    }
+
     const { id } = await params;
 
     if (!UUID_REGEX.test(id)) {
       return errorResponse("Invalid conversation ID format", "INVALID_ID", 400);
     }
 
-    const deleted = await deleteConversation(session.organizationId, id);
+    const deleted = await deleteConversation(session.organizationId, id, {
+      userId: session.userId,
+      ipAddress,
+    });
     if (!deleted) {
       return errorResponse("Conversation not found", "NOT_FOUND", 404);
     }
