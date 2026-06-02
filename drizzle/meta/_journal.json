@@ -57,6 +57,13 @@
       "when": 1780433757193,
       "tag": "0007_polite_cloak",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1780433757194,
+      "tag": "0008_last_admin_guard",
+      "breakpoints": true
     }
   ]
 }
