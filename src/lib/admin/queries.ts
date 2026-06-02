@@ -4,7 +4,17 @@
  * Every query function takes organizationId as its first parameter
  * and uses withTenant to enforce multi-tenancy (key_links contract).
  */
-import { eq, and, count, desc, asc, gte, inArray } from "drizzle-orm";
+import {
+  eq,
+  and,
+  count,
+  desc,
+  asc,
+  gte,
+  inArray,
+  ilike,
+  type SQL,
+} from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   serviceRequests,
@@ -61,14 +71,29 @@ export async function getRequests(
   type RequestStatus = (typeof requestStatusEnum.enumValues)[number];
   const validStatuses: readonly string[] = requestStatusEnum.enumValues;
 
-  const baseConditions =
-    filters.status && validStatuses.includes(filters.status)
-      ? withTenant(
-          serviceRequests,
-          organizationId,
-          eq(serviceRequests.status, filters.status as RequestStatus),
-        )
-      : withTenant(serviceRequests, organizationId);
+  // Build the optional filters, then hand them to withTenant as variadic
+  // conditions (each is ANDed with the org scope).
+  const extraConditions: SQL[] = [];
+  if (filters.status && validStatuses.includes(filters.status)) {
+    extraConditions.push(
+      eq(serviceRequests.status, filters.status as RequestStatus),
+    );
+  }
+  const search = filters.search?.trim();
+  if (search) {
+    // Reference number is plaintext + indexed. Prefix match (ilike 'X%') so the
+    // requests_ref_idx can serve it; escape LIKE metacharacters in user input.
+    const escaped = search.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+    extraConditions.push(
+      ilike(serviceRequests.referenceNumber, `${escaped}%`),
+    );
+  }
+
+  const baseConditions = withTenant(
+    serviceRequests,
+    organizationId,
+    ...extraConditions,
+  );
 
   // Count total matching records
   const [countResult] = await db
@@ -224,10 +249,16 @@ export async function getRequestById(
   };
 }
 
-/** Request statuses from which a (re)assignment is allowed. Once work has
- * started (in_progress) or the request is closed (completed/cancelled),
- * assigning a technician would silently discard that state, so we refuse. */
+/** Request statuses from which an initial assignment is allowed. Assigning
+ * flips the status to "assigned", so from "in_progress" it would regress and
+ * discard progress — that case is handled by reassignTechnician instead, which
+ * preserves the status. Terminal states (completed/cancelled) are never
+ * assignable. */
 const ASSIGNABLE_STATUSES = ["pending", "assigned"] as const;
+
+/** Statuses from which a REASSIGNMENT (changing the assignee without resetting
+ * the lifecycle) is allowed: a request that already has work in flight. */
+const REASSIGNABLE_STATUSES = ["assigned", "in_progress"] as const;
 
 export type AssignTechnicianResult =
   | { readonly ok: true; readonly request: AdminRequest }
@@ -308,6 +339,109 @@ export async function assignTechnician(
     return {
       ok: false,
       reason: "request_not_assignable",
+      currentStatus: existing.status,
+    };
+  }
+
+  return {
+    ok: true,
+    request: {
+      id: updated.id,
+      status: updated.status,
+      issueType: updated.issueType,
+      urgency: updated.urgency,
+      description: updated.description,
+      referenceNumber: updated.referenceNumber,
+      customerName: safeDecrypt(updated.customerNameEncrypted),
+      assignedToName: tech.name,
+      createdAt: updated.createdAt.toISOString(),
+      updatedAt: updated.updatedAt.toISOString(),
+    },
+  };
+}
+
+export type ReassignTechnicianResult =
+  | { readonly ok: true; readonly request: AdminRequest }
+  | { readonly ok: false; readonly reason: "technician_not_found" }
+  | { readonly ok: false; readonly reason: "request_not_found" }
+  | {
+      readonly ok: false;
+      readonly reason: "request_not_reassignable";
+      readonly currentStatus: AdminRequest["status"];
+    };
+
+/**
+ * Move an in-flight request to a different technician WITHOUT resetting its
+ * lifecycle. Unlike assignTechnician (which flips status to "assigned"), this
+ * preserves the current status, so reassigning an "in_progress" job keeps it
+ * in progress. Allowed only from REASSIGNABLE_STATUSES (assigned/in_progress):
+ * a "pending" request has no assignee to swap (use assign), and terminal
+ * requests are locked. The status-guarded UPDATE also closes the lost-update
+ * race between two dispatchers.
+ */
+export async function reassignTechnician(
+  organizationId: string,
+  requestId: string,
+  technicianId: string,
+): Promise<ReassignTechnicianResult> {
+  // Same active-technician-in-this-org check as assignment.
+  const [tech] = await db
+    .select({ id: users.id, name: users.name })
+    .from(users)
+    .where(
+      withTenant(
+        users,
+        organizationId,
+        and(
+          eq(users.id, technicianId),
+          eq(users.role, "technician"),
+          eq(users.isActive, true),
+        )!,
+      ),
+    );
+
+  if (!tech) {
+    return { ok: false, reason: "technician_not_found" };
+  }
+
+  // Change the assignee only; status is deliberately left untouched. Guard on
+  // the reassignable states so a terminal/pending request matches zero rows.
+  const [updated] = await db
+    .update(serviceRequests)
+    .set({
+      assignedTo: technicianId,
+      updatedAt: new Date(),
+    })
+    .where(
+      withTenant(
+        serviceRequests,
+        organizationId,
+        and(
+          eq(serviceRequests.id, requestId),
+          inArray(serviceRequests.status, [...REASSIGNABLE_STATUSES]),
+        )!,
+      ),
+    )
+    .returning();
+
+  if (!updated) {
+    const [existing] = await db
+      .select({ status: serviceRequests.status })
+      .from(serviceRequests)
+      .where(
+        withTenant(
+          serviceRequests,
+          organizationId,
+          eq(serviceRequests.id, requestId),
+        ),
+      );
+
+    if (!existing) {
+      return { ok: false, reason: "request_not_found" };
+    }
+    return {
+      ok: false,
+      reason: "request_not_reassignable",
       currentStatus: existing.status,
     };
   }

@@ -89,6 +89,10 @@ export interface DashboardStats {
 
 export interface RequestFilters {
   readonly status?: string;
+  /** Case-insensitive reference-number search (prefix match). Customer names
+   * are AES-encrypted and therefore NOT SQL-searchable, so reference number is
+   * the searchable key callers quote on the phone. */
+  readonly search?: string;
   readonly page?: number;
   readonly limit?: number;
 }
