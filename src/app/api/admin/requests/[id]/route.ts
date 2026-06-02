@@ -3,6 +3,7 @@ import {
   getRequestById,
   updateRequestStatus,
   scheduleRequest,
+  addRequestNote,
 } from "@/lib/admin/queries";
 import { MANUAL_TARGET_STATUSES } from "@/lib/admin/request-status";
 import { logAudit } from "@/lib/admin/audit";
@@ -27,6 +28,11 @@ const patchSchema = z
     (v) => v.status !== undefined || v.scheduledDate !== undefined,
     { message: "Provide a status and/or scheduledDate" },
   );
+
+const MAX_NOTE_LENGTH = 5000;
+const noteSchema = z.object({
+  content: z.string().trim().min(1).max(MAX_NOTE_LENGTH),
+});
 
 export async function GET(
   _request: Request,
@@ -147,6 +153,68 @@ export async function PATCH(
     return successResponse(detail);
   } catch (error: unknown) {
     logger.error({ error }, "Failed to update request");
+    return errorResponse("Internal server error", "INTERNAL_ERROR", 500);
+  }
+}
+
+export async function POST(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const session = await getAdminSession();
+    if (!session) {
+      return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
+    }
+
+    const { id } = await params;
+    if (!UUID_REGEX.test(id)) {
+      return errorResponse("Invalid request ID format", "INVALID_ID", 400);
+    }
+
+    const rateCheck = slidingWindow(
+      `admin:request-note:${session.userId}`,
+      RATE_LIMITS.adminMutation.maxRequests,
+      RATE_LIMITS.adminMutation.windowMs,
+    );
+    if (!rateCheck.allowed) {
+      return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
+    }
+
+    const body: unknown = await request.json();
+    const parsed = noteSchema.safeParse(body);
+    if (!parsed.success) {
+      return errorResponse(
+        "Note content is required (1–5000 chars)",
+        "VALIDATION_ERROR",
+        400,
+      );
+    }
+
+    const result = await addRequestNote(
+      session.organizationId,
+      id,
+      session.userId,
+      parsed.data.content,
+    );
+    if (!result.ok) {
+      return errorResponse("Request not found", "NOT_FOUND", 404);
+    }
+
+    await logAudit({
+      organizationId: session.organizationId,
+      userId: session.userId,
+      action: "request_note_added",
+      entity: "service_request",
+      entityId: id,
+      // Note CONTENT is staff free-text — never log it in the audit details
+      // (the audit viewer renders details verbatim). Record only the note id.
+      details: JSON.stringify({ noteId: result.note.id }),
+    });
+
+    return successResponse(result.note, 201);
+  } catch (error: unknown) {
+    logger.error({ error }, "Failed to add request note");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);
   }
 }

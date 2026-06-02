@@ -28,11 +28,20 @@ export interface AdminRequestDetail extends AdminRequest {
   readonly completedAt: string | null;
   readonly assignedTo: string | null;
   readonly transcript: readonly TranscriptMessage[];
+  readonly notes: readonly RequestNote[];
 }
 
 export interface TranscriptMessage {
   readonly role: "user" | "assistant" | "system";
   readonly content: string;
+  readonly createdAt: string;
+}
+
+// Internal staff note on a request (never shown to the customer).
+export interface RequestNote {
+  readonly id: string;
+  readonly content: string;
+  readonly authorName: string | null;
   readonly createdAt: string;
 }
 

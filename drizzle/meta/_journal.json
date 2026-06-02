@@ -43,6 +43,13 @@
       "when": 1780395242430,
       "tag": "0005_heavy_lyja",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1780431102534,
+      "tag": "0006_spotty_thunderbolts",
+      "breakpoints": true
     }
   ]
 }
