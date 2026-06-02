@@ -1,7 +1,11 @@
 import { NextRequest } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { customerSessions, messages } from "@/lib/db/schema";
+import {
+  customerSessions,
+  messages,
+  organizationSettings,
+} from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import {
@@ -12,6 +16,7 @@ import {
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { resolveOrganizationForSession } from "@/lib/tenancy/organization";
 import { touchKeyLastUsed } from "@/lib/widget/key-queries";
+import { resolveTokenBudget, resolveMaxTurns } from "@/lib/ai/chat-limits";
 import { logger } from "@/lib/logger";
 
 export async function POST(request: NextRequest) {
@@ -51,6 +56,21 @@ export async function POST(request: NextRequest) {
 
     const { organizationId } = resolution;
 
+    // Resolve the org's configured conversation limits (or the system defaults)
+    // and stamp them onto the session so the chat hot path reads them off the
+    // loaded row. A missing/blank value falls back to the default via resolve*.
+    const [limitsRow] = await db
+      .select({
+        chatTokenBudget: organizationSettings.chatTokenBudget,
+        chatMaxTurns: organizationSettings.chatMaxTurns,
+      })
+      .from(organizationSettings)
+      .where(eq(organizationSettings.organizationId, organizationId))
+      .limit(1);
+
+    const tokenBudget = resolveTokenBudget(limitsRow?.chatTokenBudget);
+    const maxTurns = resolveMaxTurns(limitsRow?.chatMaxTurns);
+
     const token = generateSessionToken();
 
     const [session] = await db
@@ -60,8 +80,9 @@ export async function POST(request: NextRequest) {
         token,
         status: "chatting",
         tokensUsed: 0,
-        tokenBudget: 10_000,
+        tokenBudget,
         turnCount: 0,
+        maxTurns,
       })
       .returning();
 

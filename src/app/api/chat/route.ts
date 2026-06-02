@@ -20,6 +20,7 @@ import {
   isTerminalState,
 } from "@/lib/ai/state-machine";
 import { checkTokenBudget, addTokenUsage } from "@/lib/ai/token-budget";
+import { DEFAULT_MAX_TURNS } from "@/lib/ai/chat-limits";
 import { isExtractionComplete } from "@/lib/ai/extraction-schema";
 import { routeMessage } from "@/lib/ai/intent-router";
 import { EMPTY_ORG_CONFIG } from "@/lib/ai/router-config";
@@ -35,7 +36,6 @@ import {
 } from "@/lib/ai/chat-slots";
 import { logger } from "@/lib/logger";
 
-const MAX_TURNS = 15;
 // Sliding window of recent messages sent to the model (bounds context growth).
 const MAX_HISTORY = 10;
 // The deterministic router is on by default; set ROUTER_ENABLED=false to disable
@@ -119,6 +119,10 @@ export async function POST(request: NextRequest) {
       eq(customerSessions.id, session.id),
       eq(customerSessions.organizationId, organizationId),
     );
+
+    // The per-org turn limit was stamped onto the session at creation; fall back
+    // to the system default for legacy rows created before the column existed.
+    const maxTurns = session.maxTurns ?? DEFAULT_MAX_TURNS;
 
     // 2. Check terminal state
     if (isTerminalState(session.status)) {
@@ -205,7 +209,7 @@ export async function POST(request: NextRequest) {
     });
 
     const newTurnCount = session.turnCount + 1;
-    const nearTurnLimit = newTurnCount >= MAX_TURNS;
+    const nearTurnLimit = newTurnCount >= maxTurns;
 
     // 7. Deterministic intent routing — answer/act on common messages with NO
     // LLM call. Falls back to the LLM for anything novel/ambiguous. The org's
@@ -373,7 +377,7 @@ export async function POST(request: NextRequest) {
           session.status,
           extractionComplete,
           newTurnCount,
-          MAX_TURNS,
+          maxTurns,
         );
 
         await db
@@ -523,7 +527,7 @@ export async function POST(request: NextRequest) {
           currentStatus,
           extractionComplete,
           newTurnCount,
-          MAX_TURNS,
+          maxTurns,
         );
 
         await db
@@ -554,7 +558,7 @@ export async function POST(request: NextRequest) {
           session.status,
           false,
           newTurnCount,
-          MAX_TURNS,
+          maxTurns,
         );
         await db
           .update(customerSessions)

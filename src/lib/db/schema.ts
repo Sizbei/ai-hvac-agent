@@ -98,6 +98,10 @@ export const customerSessions = pgTable(
     tokensUsed: integer("tokens_used").notNull().default(0),
     tokenBudget: integer("token_budget").notNull().default(10000),
     turnCount: integer("turn_count").notNull().default(0),
+    // Max conversation turns before the bot wraps up. Stamped from the org's
+    // chatMaxTurns config at creation (or the system default). Per-session so
+    // the chat hot path reads it off the loaded row, not a config lookup.
+    maxTurns: integer("max_turns").notNull().default(15),
     metadata: text("metadata"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
@@ -466,6 +470,13 @@ export const organizationSettings = pgTable("organization_settings", {
     .$type<Record<string, unknown>>()
     .notNull()
     .default(sql`'{}'::jsonb`),
+
+  // ── Conversation limits (operational levers) ──
+  // Per-org overrides for the AI token budget and max conversation turns,
+  // stamped onto each new session at creation. NULL = use the system default
+  // (DEFAULT_TOKEN_BUDGET / DEFAULT_MAX_TURNS). Bounded at the API layer.
+  chatTokenBudget: integer("chat_token_budget"),
+  chatMaxTurns: integer("chat_max_turns"),
 
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()

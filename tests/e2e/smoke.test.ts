@@ -139,6 +139,11 @@ vi.mock('@/lib/db/schema', () => ({
   auditLog: {},
   users: { email: 'users.email' },
   customers: { id: 'customers.id' },
+  organizationSettings: {
+    organizationId: 'org_settings.org_id',
+    chatTokenBudget: 'org_settings.chat_token_budget',
+    chatMaxTurns: 'org_settings.chat_max_turns',
+  },
 }));
 
 vi.mock('@/lib/db/tenant', () => ({
@@ -262,6 +267,7 @@ vi.mock('@/lib/ai/state-machine', () => ({
 }));
 
 vi.mock('@/lib/ai/token-budget', () => ({
+  DEFAULT_TOKEN_BUDGET: 10_000,
   checkTokenBudget: vi.fn().mockReturnValue({ exhausted: false, remaining: 8000, warningThreshold: false }),
   addTokenUsage: vi.fn().mockReturnValue({ newTotal: 200, exceeded: false }),
 }));
@@ -369,6 +375,9 @@ beforeEach(() => {
 
 describe('E2E Smoke Test: Full Customer-to-Admin Flow', () => {
   it('POST /api/session creates a new customer session', async () => {
+    // The route reads the org's conversation-limit settings before inserting;
+    // an empty row → resolvers fall back to the system defaults.
+    mockDbSelect.mockResolvedValue([]);
     mockDbInsert.mockResolvedValue([
       {
         id: MOCK_SESSION_ID,
@@ -378,6 +387,7 @@ describe('E2E Smoke Test: Full Customer-to-Admin Flow', () => {
         tokensUsed: 0,
         tokenBudget: 10000,
         turnCount: 0,
+        maxTurns: 15,
         createdAt: new Date(),
         updatedAt: new Date(),
       },

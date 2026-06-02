@@ -16,6 +16,7 @@ import { drizzle } from "drizzle-orm/neon-http";
 import { eq, like, inArray } from "drizzle-orm";
 import * as schema from "./schema";
 import { encrypt } from "../crypto";
+import { DEFAULT_TOKEN_BUDGET, DEFAULT_MAX_TURNS } from "../ai/chat-limits";
 import * as dotenv from "dotenv";
 
 dotenv.config({ path: ".env.local" });
@@ -452,8 +453,9 @@ async function seedDemo(): Promise<void> {
         token: `${SESSION_TOKEN_PREFIX}${convo.key}`,
         status: convo.status,
         tokensUsed: totalTokens,
-        tokenBudget: 10000,
+        tokenBudget: DEFAULT_TOKEN_BUDGET,
         turnCount: convo.messages.filter((m) => m.role === "user").length,
+        maxTurns: DEFAULT_MAX_TURNS,
         metadata: convo.extraction
           ? JSON.stringify({
               ...convo.extraction,

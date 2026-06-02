@@ -99,6 +99,26 @@ describe('getOrgConfig', () => {
     expect(cfg.disabledIssueTypes).toEqual(['installation']);
     expect(cfg.businessInfo).toEqual({ phone: '555-1234' });
   });
+
+  it('surfaces the conversation-limit columns (null when unset)', async () => {
+    selectQueue.push([
+      {
+        companyName: null,
+        logoUrl: null,
+        primaryColor: null,
+        welcomeMessage: null,
+        launcherPosition: 'bottom-right',
+        disabledIssueTypes: [],
+        disabledServiceTags: [],
+        businessInfo: {},
+        chatTokenBudget: 25000,
+        chatMaxTurns: null,
+      },
+    ]);
+    const cfg = await getOrgConfig(ORG);
+    expect(cfg.chatTokenBudget).toBe(25000);
+    expect(cfg.chatMaxTurns).toBeNull();
+  });
 });
 
 describe('updateOrgConfig', () => {
@@ -124,6 +144,33 @@ describe('updateOrgConfig', () => {
     expect(conflict.set).toHaveProperty('primaryColor', '#000000');
     expect(conflict.set).not.toHaveProperty('companyName');
     expect(conflict.set).not.toHaveProperty('businessInfo');
+    expect(conflict.set).not.toHaveProperty('chatTokenBudget');
+  });
+
+  it('patches the conversation-limit columns, incl. null to reset', async () => {
+    selectQueue.push([
+      {
+        companyName: null,
+        logoUrl: null,
+        primaryColor: null,
+        welcomeMessage: null,
+        launcherPosition: 'bottom-right',
+        disabledIssueTypes: [],
+        disabledServiceTags: [],
+        businessInfo: {},
+        chatTokenBudget: null,
+        chatMaxTurns: null,
+      },
+    ]);
+
+    await updateOrgConfig(ORG, { chatTokenBudget: 30000, chatMaxTurns: null });
+
+    const conflict = lastConflict.value as { set: Record<string, unknown> };
+    // Both present in the patch — 30000, and null (explicit reset). The null
+    // must be IN the patch (key present), not dropped as "unprovided".
+    expect(conflict.set).toHaveProperty('chatTokenBudget', 30000);
+    expect(conflict.set).toHaveProperty('chatMaxTurns', null);
+    expect(conflict.set).not.toHaveProperty('primaryColor');
   });
 });
 
