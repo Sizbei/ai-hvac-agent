@@ -1,6 +1,13 @@
 'use client';
 
-import { AlertCircle, Palette, Wrench, Building2, MessageSquarePlus } from 'lucide-react';
+import {
+  AlertCircle,
+  Palette,
+  Wrench,
+  Building2,
+  MessageSquarePlus,
+  Code2,
+} from 'lucide-react';
 import { useOrgSettings } from '@/hooks/use-org-settings';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -9,6 +16,7 @@ import { BrandingPanel } from '@/components/admin/settings/branding-panel';
 import { ServicesPanel } from '@/components/admin/settings/services-panel';
 import { BusinessInfoPanel } from '@/components/admin/settings/business-info-panel';
 import { CustomFaqsPanel } from '@/components/admin/settings/custom-faqs-panel';
+import { EmbedPanel } from '@/components/admin/settings/embed-panel';
 
 export default function SettingsPage() {
   const settings = useOrgSettings();
@@ -54,6 +62,10 @@ export default function SettingsPage() {
               <MessageSquarePlus className="size-4" />
               Custom Q&amp;A
             </TabsTrigger>
+            <TabsTrigger value="embed">
+              <Code2 className="size-4" />
+              Embed &amp; Keys
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="branding" className="mt-6">
@@ -75,6 +87,9 @@ export default function SettingsPage() {
               onUpdate={settings.updateFaq}
               onDelete={settings.deleteFaq}
             />
+          </TabsContent>
+          <TabsContent value="embed" className="mt-6">
+            <EmbedPanel config={settings.config} onSave={settings.saveConfig} />
           </TabsContent>
         </Tabs>
       )}
