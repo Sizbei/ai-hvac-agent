@@ -25,9 +25,11 @@ describe("originMatchesEntry", () => {
     expect(originMatchesEntry("https://acme.com", "acme.com")).toBe(true);
   });
 
-  it("wildcard matches subdomains but NOT the apex", () => {
+  it("wildcard matches a SINGLE subdomain label, but NOT the apex or nested", () => {
     expect(originMatchesEntry("https://app.acme.com", "*.acme.com")).toBe(true);
-    expect(originMatchesEntry("https://a.b.acme.com", "*.acme.com")).toBe(true);
+    // Nested subdomains are NOT matched (single-label semantics).
+    expect(originMatchesEntry("https://a.b.acme.com", "*.acme.com")).toBe(false);
+    // Apex is not matched.
     expect(originMatchesEntry("https://acme.com", "*.acme.com")).toBe(false);
   });
 
@@ -41,6 +43,15 @@ describe("originMatchesEntry", () => {
   it("does not match a lookalike suffix without a dot boundary", () => {
     // "notacme.com" must not match "acme.com" bare host.
     expect(originMatchesEntry("https://notacme.com", "acme.com")).toBe(false);
+  });
+
+  it("strips userinfo so 'acme.com@evil.com' cannot impersonate acme.com", () => {
+    expect(originMatchesEntry("https://acme.com@evil.com", "acme.com")).toBe(
+      false,
+    );
+    expect(
+      originMatchesEntry("https://app.acme.com@evil.com", "*.acme.com"),
+    ).toBe(false);
   });
 
   it("returns false for empty inputs", () => {

@@ -73,7 +73,12 @@ describe("resolveOrganizationForSession", () => {
       publishableKey: "pk_live_abc",
       origin: "https://anything.com",
     });
-    expect(r).toEqual({ ok: true, organizationId: ORG_B, source: "widget_key" });
+    expect(r).toEqual({
+      ok: true,
+      organizationId: ORG_B,
+      source: "widget_key",
+      widgetKeyId: "k1",
+    });
   });
 
   it("rejects an unknown/revoked key", async () => {

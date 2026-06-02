@@ -33,6 +33,9 @@ export type OrganizationResolution =
       readonly organizationId: string;
       /** How the org was resolved — for logging/metrics. */
       readonly source: "demo_fallback" | "widget_key";
+      /** The widget key id that resolved this org (for last-used tracking);
+       * absent for the demo fallback. */
+      readonly widgetKeyId?: string;
     }
   | {
       readonly ok: false;
@@ -92,6 +95,7 @@ export async function resolveOrganizationForSession(
     ok: true,
     organizationId: validated.organizationId,
     source: "widget_key",
+    widgetKeyId: validated.id,
   };
 }
 
