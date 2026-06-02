@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { encrypt, decrypt, encryptFields, decryptFields } from '@/lib/crypto';
+import {
+  encrypt,
+  decrypt,
+  encryptFields,
+  decryptFields,
+  blindIndex,
+} from '@/lib/crypto';
 
 const TEST_KEY = 'a'.repeat(64); // 64 hex chars = 32 bytes
 const originalKey = process.env.ENCRYPTION_KEY;
@@ -67,6 +73,42 @@ describe('encrypt / decrypt', () => {
   it('should throw on completely invalid base64 ciphertext', () => {
     // Even though Buffer.from handles bad base64 gracefully, the length check or auth tag will fail
     expect(() => decrypt('not-valid-at-all')).toThrow();
+  });
+});
+
+describe('blindIndex', () => {
+  it('is deterministic — the same input always yields the same token', () => {
+    expect(blindIndex('alice@example.com')).toBe(blindIndex('alice@example.com'));
+  });
+
+  it('produces different tokens for different inputs', () => {
+    expect(blindIndex('alice@example.com')).not.toBe(
+      blindIndex('bob@example.com'),
+    );
+  });
+
+  it('returns a 64-char hex digest (HMAC-SHA256)', () => {
+    expect(blindIndex('5551234567')).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('is keyed — it is not a bare SHA-256 of the value', () => {
+    // A plain sha256("test") is a known constant; the keyed HMAC must differ.
+    const plainSha256 =
+      '9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08';
+    expect(blindIndex('test')).not.toBe(plainSha256);
+  });
+
+  it('throws on an empty value', () => {
+    expect(() => blindIndex('')).toThrow();
+    expect(() => blindIndex('   ')).toThrow();
+  });
+
+  it('changes when the encryption key changes (key-bound)', () => {
+    const withKeyA = blindIndex('alice@example.com');
+    process.env.ENCRYPTION_KEY = 'b'.repeat(64);
+    const withKeyB = blindIndex('alice@example.com');
+    process.env.ENCRYPTION_KEY = TEST_KEY;
+    expect(withKeyA).not.toBe(withKeyB);
   });
 });
 

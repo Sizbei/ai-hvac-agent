@@ -7,8 +7,10 @@ import {
   boolean,
   pgEnum,
   index,
+  uniqueIndex,
   varchar,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 // Enums
 export const sessionStatusEnum = pgEnum("session_status", [
@@ -175,6 +177,10 @@ export const serviceRequests = pgTable(
     index("requests_session_id_idx").on(table.sessionId),
     index("requests_status_idx").on(table.status),
     index("requests_ref_idx").on(table.referenceNumber),
+    // The CRM joins service requests by customerId (request counts, last
+    // service date, and cascade on customer delete) — index it to avoid a
+    // full scan as the table grows.
+    index("requests_customer_id_idx").on(table.customerId),
   ],
 );
 
@@ -214,6 +220,13 @@ export const customers = pgTable(
     phoneEncrypted: text("phone_encrypted"),
     emailEncrypted: text("email_encrypted"),
     addressEncrypted: text("address_encrypted"),
+    // Keyed blind indexes (HMAC) over the NORMALIZED email/phone. The encrypted
+    // columns above use a random IV per write and so can't be searched or
+    // deduped; these deterministic hashes can. They back the unique indexes
+    // below, which make customer dedupe atomic at the DB layer (concurrent
+    // submits for the same contact collide instead of both inserting).
+    emailHash: text("email_hash"),
+    phoneHash: text("phone_hash"),
     propertyType: text("property_type"),
     propertySqft: integer("property_sqft"),
     notes: text("notes"),
@@ -226,6 +239,15 @@ export const customers = pgTable(
   },
   (table) => [
     index("customers_org_id_idx").on(table.organizationId),
+    // Unique per org: one customer row per email / per phone within a tenant.
+    // Partial (WHERE ... IS NOT NULL) so the many rows lacking an email or
+    // phone don't all collide on NULL.
+    uniqueIndex("customers_org_email_hash_unique")
+      .on(table.organizationId, table.emailHash)
+      .where(sql`${table.emailHash} IS NOT NULL`),
+    uniqueIndex("customers_org_phone_hash_unique")
+      .on(table.organizationId, table.phoneHash)
+      .where(sql`${table.phoneHash} IS NOT NULL`),
   ],
 );
 
