@@ -4,8 +4,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // it so the module under test (which imports it as a build guard) can load.
 vi.mock("server-only", () => ({}));
 
-const { mockSelectRows } = vi.hoisted(() => ({
+const { mockSelectRows, mockValidateKey } = vi.hoisted(() => ({
   mockSelectRows: { value: [] as unknown[] },
+  mockValidateKey: vi.fn(),
 }));
 
 function chain(resolved: unknown): unknown {
@@ -24,8 +25,14 @@ function chain(resolved: unknown): unknown {
 vi.mock("@/lib/db", () => ({
   db: { select: () => chain(mockSelectRows.value) },
 }));
-vi.mock("@/lib/db/schema", () => ({ organizations: { id: "o.id" } }));
+vi.mock("@/lib/db/schema", () => ({
+  organizations: { id: "o.id" },
+  organizationSettings: { organizationId: "os.org", allowedOrigins: "os.ao" },
+}));
 vi.mock("drizzle-orm", () => ({ eq: (...a: unknown[]) => a }));
+vi.mock("@/lib/widget/key-queries", () => ({
+  validateKey: (k: string) => mockValidateKey(k),
+}));
 vi.mock("@/lib/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
@@ -36,26 +43,95 @@ import {
   DEMO_ORG_ID,
 } from "@/lib/tenancy/organization";
 
+const ORG_B = "11111111-1111-1111-1111-111111111111";
+
 beforeEach(() => {
   vi.clearAllMocks();
   mockSelectRows.value = [];
 });
 
 describe("resolveOrganizationForSession", () => {
-  it("falls back to the demo org when there is no tenant signal", async () => {
+  it("falls back to the demo org when there is no publishable key", async () => {
     const r = await resolveOrganizationForSession();
-    expect(r.organizationId).toBe(DEMO_ORG_ID);
-    expect(r.source).toBe("demo_fallback");
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.organizationId).toBe(DEMO_ORG_ID);
+      expect(r.source).toBe("demo_fallback");
+    }
   });
 
-  it("falls back to the demo org even when an origin is provided (widget path not wired yet)", async () => {
-    const r = await resolveOrganizationForSession({
-      origin: "https://contractor.example.com",
+  it("resolves the owning org for a valid publishable key (no allowlist)", async () => {
+    mockValidateKey.mockResolvedValue({
+      id: "k1",
+      organizationId: ORG_B,
+      keyType: "publishable",
+      scopes: ["sessions:create"],
     });
-    // Until the widget_keys/allowlist tables land, origin resolution is a
-    // no-op and we deliberately stay on the demo org. This test documents that
-    // contract so the widget phase intentionally changes it.
-    expect(r.organizationId).toBe(DEMO_ORG_ID);
+    mockSelectRows.value = [{ allowedOrigins: [] }]; // no allowlist configured
+
+    const r = await resolveOrganizationForSession({
+      publishableKey: "pk_live_abc",
+      origin: "https://anything.com",
+    });
+    expect(r).toEqual({
+      ok: true,
+      organizationId: ORG_B,
+      source: "widget_key",
+      widgetKeyId: "k1",
+    });
+  });
+
+  it("rejects an unknown/revoked key", async () => {
+    mockValidateKey.mockResolvedValue(null);
+    const r = await resolveOrganizationForSession({
+      publishableKey: "pk_live_bad",
+    });
+    expect(r).toEqual({ ok: false, reason: "invalid_key" });
+  });
+
+  it("rejects a SECRET key (secret keys can't open sessions)", async () => {
+    mockValidateKey.mockResolvedValue({
+      id: "k2",
+      organizationId: ORG_B,
+      keyType: "secret",
+      scopes: ["admin"],
+    });
+    const r = await resolveOrganizationForSession({
+      publishableKey: "sk_live_abc",
+    });
+    expect(r).toEqual({ ok: false, reason: "invalid_key" });
+  });
+
+  it("rejects when the origin is not on the org's allowlist", async () => {
+    mockValidateKey.mockResolvedValue({
+      id: "k1",
+      organizationId: ORG_B,
+      keyType: "publishable",
+      scopes: ["sessions:create"],
+    });
+    mockSelectRows.value = [{ allowedOrigins: ["https://acme.com"] }];
+
+    const r = await resolveOrganizationForSession({
+      publishableKey: "pk_live_abc",
+      origin: "https://evil.example.com",
+    });
+    expect(r).toEqual({ ok: false, reason: "origin_not_allowed" });
+  });
+
+  it("accepts when the origin matches the allowlist", async () => {
+    mockValidateKey.mockResolvedValue({
+      id: "k1",
+      organizationId: ORG_B,
+      keyType: "publishable",
+      scopes: ["sessions:create"],
+    });
+    mockSelectRows.value = [{ allowedOrigins: ["https://acme.com"] }];
+
+    const r = await resolveOrganizationForSession({
+      publishableKey: "pk_live_abc",
+      origin: "https://acme.com",
+    });
+    expect(r.ok).toBe(true);
   });
 });
 

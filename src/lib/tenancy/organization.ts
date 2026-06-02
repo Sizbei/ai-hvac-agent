@@ -2,7 +2,9 @@ import "server-only";
 
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { organizations } from "@/lib/db/schema";
+import { organizations, organizationSettings } from "@/lib/db/schema";
+import { validateKey } from "@/lib/widget/key-queries";
+import { isOriginAllowed } from "@/lib/widget/origin";
 import { logger } from "@/lib/logger";
 
 /**
@@ -25,12 +27,22 @@ import { logger } from "@/lib/logger";
  * src/lib/db/seed.ts. */
 export const DEMO_ORG_ID = "00000000-0000-0000-0000-000000000001";
 
-export interface OrganizationResolution {
-  readonly organizationId: string;
-  /** How the org was resolved — useful for logging/metrics and to distinguish
-   * the demo fallback from a real widget-key match once that exists. */
-  readonly source: "demo_fallback" | "widget_key" | "origin";
-}
+export type OrganizationResolution =
+  | {
+      readonly ok: true;
+      readonly organizationId: string;
+      /** How the org was resolved — for logging/metrics. */
+      readonly source: "demo_fallback" | "widget_key";
+      /** The widget key id that resolved this org (for last-used tracking);
+       * absent for the demo fallback. */
+      readonly widgetKeyId?: string;
+    }
+  | {
+      readonly ok: false;
+      /** invalid_key: key unknown/revoked/wrong type. origin_not_allowed: key
+       * valid but the request Origin isn't on the org's allowlist. */
+      readonly reason: "invalid_key" | "origin_not_allowed";
+    };
 
 export interface ResolveOrganizationInput {
   /** Publishable widget key from the embed snippet (e.g. "pk_live_..."). */
@@ -42,19 +54,49 @@ export interface ResolveOrganizationInput {
 /**
  * Resolve the organization for a NEW customer session.
  *
- * Resolution order (as capabilities land):
- *   1. publishableKey  -> the org that owns the widget key (widget embed)
- *   2. origin          -> the org whose allowlist contains this domain
- *   3. demo fallback    -> the seeded demo org (hosted /chat demo)
+ *   1. No publishable key  -> the seeded demo org (hosted /chat demo page).
+ *   2. Publishable key      -> the org that owns it. If that org has configured
+ *      an origin allowlist, the request Origin MUST match it (else reject); an
+ *      empty allowlist means "not locked down yet" and the key alone suffices.
  *
- * Steps 1–2 are not wired yet (no widget_keys table); this returns the demo
- * org. The signature is stable so the widget phase only fills in the lookups.
+ * A SECRET key is never accepted here — only publishable keys start sessions.
  */
 export async function resolveOrganizationForSession(
-  _input: ResolveOrganizationInput = {},
+  input: ResolveOrganizationInput = {},
 ): Promise<OrganizationResolution> {
-  // TODO(widget-phase): resolve by publishableKey, then by origin allowlist.
-  return { organizationId: DEMO_ORG_ID, source: "demo_fallback" };
+  const publishableKey = input.publishableKey?.trim();
+
+  // No key → the hosted demo page. Keep the existing single-tenant behavior.
+  if (!publishableKey) {
+    return { ok: true, organizationId: DEMO_ORG_ID, source: "demo_fallback" };
+  }
+
+  const validated = await validateKey(publishableKey);
+  // Must be a known, active PUBLISHABLE key (secret keys can't open sessions).
+  if (!validated || validated.keyType !== "publishable") {
+    return { ok: false, reason: "invalid_key" };
+  }
+
+  // Enforce the org's origin allowlist when one is configured.
+  const [settings] = await db
+    .select({ allowedOrigins: organizationSettings.allowedOrigins })
+    .from(organizationSettings)
+    .where(
+      eq(organizationSettings.organizationId, validated.organizationId),
+    )
+    .limit(1);
+
+  const allowed = settings?.allowedOrigins ?? [];
+  if (allowed.length > 0 && !isOriginAllowed(input.origin, allowed)) {
+    return { ok: false, reason: "origin_not_allowed" };
+  }
+
+  return {
+    ok: true,
+    organizationId: validated.organizationId,
+    source: "widget_key",
+    widgetKeyId: validated.id,
+  };
 }
 
 /** True if the organization exists. Cheap guard for resolution paths that

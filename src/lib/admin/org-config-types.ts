@@ -26,6 +26,11 @@ export type ServiceTag = (typeof SERVICE_TAGS)[number];
 
 const HEX_COLOR = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
 
+/** Allowlist entry: exact origin (https://acme.com), bare host (acme.com), or
+ * wildcard subdomain (*.acme.com). Permissive on scheme; no paths/spaces. */
+const ORIGIN_ENTRY =
+  /^(?:https?:\/\/)?(?:\*\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+(?::\d{1,5})?$/i;
+
 /** Business-info fields that personalize the canned FAQ answers. All optional;
  * absent fields fall back to the generic non-committal phrasing. */
 export const businessInfoSchema = z
@@ -58,6 +63,16 @@ export const orgConfigUpdateSchema = z
     disabledIssueTypes: z.array(z.enum(issueTypeValues)).optional(),
     disabledServiceTags: z.array(z.enum(SERVICE_TAGS)).optional(),
     businessInfo: businessInfoSchema.optional(),
+    allowedOrigins: z
+      .array(
+        z
+          .string()
+          .trim()
+          .toLowerCase()
+          .regex(ORIGIN_ENTRY, "Use a domain like acme.com or *.acme.com"),
+      )
+      .max(50)
+      .optional(),
   })
   .strict();
 
@@ -73,6 +88,7 @@ export interface OrgConfig {
   readonly disabledIssueTypes: readonly string[];
   readonly disabledServiceTags: readonly string[];
   readonly businessInfo: BusinessInfo;
+  readonly allowedOrigins: readonly string[];
 }
 
 export const DEFAULT_ORG_CONFIG: OrgConfig = {
@@ -84,6 +100,7 @@ export const DEFAULT_ORG_CONFIG: OrgConfig = {
   disabledIssueTypes: [],
   disabledServiceTags: [],
   businessInfo: {},
+  allowedOrigins: [],
 };
 
 // ── Custom FAQ ──

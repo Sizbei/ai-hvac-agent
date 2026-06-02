@@ -11,6 +11,7 @@ import {
 } from "@/lib/session";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { resolveOrganizationForSession } from "@/lib/tenancy/organization";
+import { touchKeyLastUsed } from "@/lib/widget/key-queries";
 import { logger } from "@/lib/logger";
 
 export async function POST(request: NextRequest) {
@@ -30,12 +31,25 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    // Resolve which organization this chat belongs to. The resolved org is
+    // Resolve which organization this chat belongs to. For an embedded widget,
+    // the publishable key arrives in the X-HVAC-Widget-Key header; the hosted
+    // demo page sends none and resolves to the demo org. The resolved org is
     // PERSISTED on the session; every later request reads it back from the
     // session row rather than re-resolving, so the chat can't be re-attributed.
-    const { organizationId } = await resolveOrganizationForSession({
+    const resolution = await resolveOrganizationForSession({
+      publishableKey: request.headers.get("x-hvac-widget-key"),
       origin: request.headers.get("origin"),
     });
+
+    if (!resolution.ok) {
+      const message =
+        resolution.reason === "origin_not_allowed"
+          ? "This domain is not allowed to use this widget."
+          : "Invalid widget key.";
+      return errorResponse(message, "WIDGET_NOT_AUTHORIZED", 403);
+    }
+
+    const { organizationId } = resolution;
 
     const token = generateSessionToken();
 
@@ -60,6 +74,12 @@ export async function POST(request: NextRequest) {
     }
 
     await setSessionCookie(token);
+
+    // Best-effort: record that the widget key was used (so admins can spot
+    // dormant keys). Never block or fail the session on this.
+    if (resolution.widgetKeyId) {
+      void touchKeyLastUsed(resolution.widgetKeyId).catch(() => {});
+    }
 
     logger.info({ sessionId: session.id }, "Customer session created");
 

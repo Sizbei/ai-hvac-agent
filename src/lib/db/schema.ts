@@ -409,6 +409,16 @@ export const organizationSettings = pgTable("organization_settings", {
   welcomeMessage: text("welcome_message"),
   launcherPosition: text("launcher_position"), // "bottom-right" | "bottom-left"
 
+  // ── Widget security ──
+  // Origins allowed to embed this org's widget (e.g. "https://acme.com",
+  // "*.acme.com"). The public widget/session endpoints reflect CORS and accept
+  // requests only from an origin matching this list. Empty = not yet locked
+  // down (resolution then relies on the publishable key alone).
+  allowedOrigins: jsonb("allowed_origins")
+    .$type<string[]>()
+    .notNull()
+    .default(sql`'[]'::jsonb`),
+
   // ── Services offered ──
   // issueType values the org does NOT handle (e.g. "installation"); the bot
   // declines/redirects instead of promising them. Stored as a JSON string array.
@@ -470,5 +480,40 @@ export const customFaqs = pgTable(
       table.organizationId,
       table.isActive,
     ),
+  ],
+);
+
+// 14. widget_keys — publishable/secret API keys for the embeddable widget.
+// Keys are stored HASHED (SHA-256); the plaintext is shown once at creation.
+// A publishable key resolves which org an embedded widget belongs to.
+export const widgetKeys = pgTable(
+  "widget_keys",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id),
+    // SHA-256 hex of the full key. Unique so a presented key maps to one row.
+    keyHash: text("key_hash").notNull().unique(),
+    // Cleartext leading chars for display, e.g. "pk_live_a1b2c3d4".
+    keyPrefix: text("key_prefix").notNull(),
+    keyType: text("key_type", { enum: ["publishable", "secret"] }).notNull(),
+    // Granted scopes (e.g. ["sessions:create","sessions:read"]).
+    scopes: jsonb("scopes")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    // Optional admin label so a key can be recognized ("Production site").
+    label: text("label"),
+    isActive: boolean("is_active").notNull().default(true),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("widget_keys_org_id_idx").on(table.organizationId),
+    index("widget_keys_hash_idx").on(table.keyHash),
   ],
 );
