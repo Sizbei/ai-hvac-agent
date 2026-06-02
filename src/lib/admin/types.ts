@@ -53,6 +53,33 @@ export interface TechnicianRecord {
   readonly createdAt: string;
 }
 
+/** A staff member (admin or technician) for the user-management surface.
+ * Unlike TechnicianRecord this carries the role so admins can manage both
+ * kinds of user from one screen. */
+export interface StaffRecord {
+  readonly id: string;
+  readonly name: string;
+  readonly email: string;
+  readonly role: "admin" | "technician";
+  readonly isActive: boolean;
+  readonly createdAt: string;
+}
+
+export interface CreateStaffInput {
+  readonly name: string;
+  readonly email: string;
+  readonly password: string;
+  readonly role: "admin" | "technician";
+}
+
+/** Patch for an existing staff member. Any subset may be present; an empty
+ * patch is a no-op. Password reset is a separate, explicit operation. */
+export interface UpdateStaffInput {
+  readonly name?: string;
+  readonly role?: "admin" | "technician";
+  readonly isActive?: boolean;
+}
+
 export interface DashboardStats {
   readonly pending: number;
   readonly assignedToday: number;

@@ -34,12 +34,23 @@ export async function verifyToken(
     const { payload } = await jwtVerify(token, encodedKey, {
       algorithms: [ALGORITHM],
     });
+    // Validate the claims at runtime rather than blindly casting — a token
+    // without role "admin" must never be accepted as an admin session.
+    if (
+      typeof payload.userId !== "string" ||
+      typeof payload.organizationId !== "string" ||
+      typeof payload.email !== "string" ||
+      typeof payload.name !== "string" ||
+      payload.role !== "admin"
+    ) {
+      return null;
+    }
     return {
-      userId: payload.userId as string,
-      organizationId: payload.organizationId as string,
-      email: payload.email as string,
-      name: payload.name as string,
-      role: payload.role as "admin",
+      userId: payload.userId,
+      organizationId: payload.organizationId,
+      email: payload.email,
+      name: payload.name,
+      role: "admin",
     };
   } catch {
     return null;

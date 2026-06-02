@@ -7,7 +7,7 @@ import {
   ClipboardList,
   MessagesSquare,
   BarChart3,
-  Users,
+  UsersRound,
   Building2,
   Settings,
   ScrollText,
@@ -38,7 +38,7 @@ const NAV_ITEMS: readonly NavItem[] = [
   { label: 'Conversations', href: '/admin/conversations', icon: MessagesSquare },
   { label: 'AI Insights', href: '/admin/insights', icon: BarChart3 },
   { label: 'Customers', href: '/admin/customers', icon: Building2 },
-  { label: 'Technicians', href: '/admin/technicians', icon: Users },
+  { label: 'Staff', href: '/admin/staff', icon: UsersRound },
   { label: 'Chatbot Settings', href: '/admin/settings', icon: Settings },
   { label: 'Audit Log', href: '/admin/audit-log', icon: ScrollText },
 ] as const;

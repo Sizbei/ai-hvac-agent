@@ -14,6 +14,7 @@ import {
   requestStatusEnum,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
+import { normalizeEmail } from "./staff-queries";
 import { decrypt } from "@/lib/crypto";
 import {
   canTransition,
@@ -544,7 +545,9 @@ export async function createTechnician(
     .values({
       organizationId,
       name: input.name,
-      email: input.email,
+      // Canonicalize email (trim + lowercase) so it matches the per-org
+      // uniqueness contract used by the staff surface (staff-queries).
+      email: normalizeEmail(input.email),
       passwordHash,
       role: "technician",
       isActive: true,
