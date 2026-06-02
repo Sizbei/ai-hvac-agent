@@ -899,18 +899,21 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     triggerKeywords: [
       "after hours",
       "weekend",
+      "weekends",
       "at night",
       "24/7",
       "overnight",
       "holiday",
     ],
     // "extra CHARGE / FEE for after hours" is a pricing question
-    // (logistics-after-hours-fee), not an availability question.
+    // (logistics-after-hours-fee), not an availability question. Multi-word so
+    // unrelated uses of "charge"/"fee" don't suppress availability questions.
     negationGuards: [
-      "charge",
-      "fee",
+      "charge for",
+      "fee for",
+      "extra charge",
+      "extra fee",
       "cost more",
-      "extra for",
       "surcharge",
       "overtime",
     ],
@@ -935,13 +938,14 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
       "time to arrive",
     ],
     // "how long does a furnace/system LAST" is a lifespan question
-    // (replacement-lifespan), not a wait-time question.
+    // (replacement-lifespan), not a wait-time question. Keep these multi-word —
+    // a bare "last" would wrongly suppress "the last tech took 4 hours".
     negationGuards: [
       "how long does",
       "how long should",
       "how long will my",
+      "how long do",
       "lifespan",
-      "last",
       "to install",
       "to replace",
     ],
@@ -1084,19 +1088,25 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     title: "Do you do installations vs repairs",
     triggerKeywords: [
       "installation",
+      "installations",
       "install",
+      "installs",
       "replace system",
       "new unit",
       "new system",
       "repair only",
     ],
-    // More specific install/replacement intents take precedence: cost/sizing
-    // (pricing-*, replacement-*), rebates (efficiency-*), and specific
-    // equipment (mini-split, boiler, IAQ products).
+    // More specific install/replacement intents take precedence: cost-to-replace
+    // (pricing-cost-to-replace), rebates (efficiency-*), sizing/lifespan
+    // (replacement-*), and specific equipment (mini-split, boiler, IAQ
+    // products). Cost guards stay MULTI-WORD so a generic "how much does an
+    // install cost" still reaches this install-capable entry rather than a
+    // routing black hole.
     negationGuards: [
-      "how much",
-      "cost",
-      "price",
+      "how much for a new",
+      "cost to replace",
+      "cost for a new",
+      "price for a new",
       "rebate",
       "rebates",
       "incentive",
@@ -1192,7 +1202,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     id: "faq-warranty",
     category: "faq",
     title: "Warranty / guarantee",
-    triggerKeywords: ["warranty", "guarantee", "guaranteed", "under warranty"],
+    triggerKeywords: ["warranty", "warranties", "guarantee", "guaranteed", "under warranty"],
     // Personalized coverage/registration questions route to the dedicated
     // warranty.* intents (which need a live lookup), and workmanship/"guarantee
     // your work" routes to trust-guarantee.
@@ -1205,6 +1215,9 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
       "warranty registration",
       "guarantee your work",
       "warranty on the labor",
+      "warranty on labor",
+      "labor warranty",
+      "parts and labor warranty",
       "warranty your repairs",
     ],
     action: "ANSWER",
@@ -1444,12 +1457,12 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ANSWER",
     cannedResponse:
-      "We may have seasonal promotions and discounts (for example for seniors, military, or first responders) — our team can tell you what's currently available. Would you like me to start a request so they can follow up?",
+      "We sometimes run seasonal promotions and may offer discounts for certain groups — our team can tell you what's currently available for your situation. Would you like me to start a request so they can follow up?",
     infoNeeded: [],
     issueTypeMapping: null,
     urgencyHint: null,
     notes:
-      "Promotions are time-sensitive and per-company; never name a specific percentage or promo. Keep conditional.",
+      "Promotions are time-sensitive and per-company; never name a specific percentage, promo, or guarantee a discount category exists (e.g. don't promise senior/military). Keep conditional.",
   },
   {
     id: "pricing-second-opinion",
@@ -1896,12 +1909,12 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     negationGuards: ["are you licensed and insured"],
     action: "ANSWER",
     cannedResponse:
-      "Our technicians are trained, licensed professionals, and we take who comes into your home seriously. Our team can share more about our hiring and vetting standards if you'd like — anything else I can help with?",
+      "We take who comes into your home seriously, and our team can share information about our technicians' training, licensing, and background-screening standards. Would you like me to have someone follow up?",
     infoNeeded: [],
     issueTypeMapping: null,
     urgencyHint: null,
     notes:
-      "Reassurance without over-promising specifics that vary by company (e.g. don't assert drug-testing as fact). faq-licensed-insured covers the company-level license/insurance question.",
+      "Must NOT assert 'licensed professionals' / drug-testing as fact — per-org data doesn't exist (legal liability across tenants), same convention as faq-licensed-insured. Offer to follow up instead. faq-licensed-insured covers the company-level license/insurance question.",
   },
 
   // ─── Category 18 — WARRANTY (detail intents beyond faq-warranty) ───────────

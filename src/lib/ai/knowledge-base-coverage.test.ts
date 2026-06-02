@@ -78,6 +78,52 @@ describe("expanded knowledge base — routing", () => {
   }
 });
 
+describe("existing intents still match after deconfliction guards", () => {
+  // The new negation guards on existing entries must NOT suppress the
+  // legitimate questions those entries still own. These are the regressions a
+  // bare ("last" / "charge" / "cost") guard would have caused.
+  const STILL_ANSWERS: ReadonlyArray<readonly [string, string]> = [
+    ["how long until a technician arrives?", "scheduling-how-long-until-tech"],
+    ["what's the wait time? the last tech took 4 hours", "scheduling-how-long-until-tech"],
+    ["do you do after hours visits?", "scheduling-after-hours"],
+    ["do you offer 24/7 service?", "scheduling-after-hours"],
+    ["what are your hours?", "faq-business-hours"],
+    ["what time do you open?", "faq-business-hours"],
+    ["do you offer warranties?", "faq-warranty"],
+    ["do you do installations?", "faq-install-vs-repair"],
+    // "how much does an install cost" reasonably lands on the generic pricing
+    // FAQ (a cost question); the install signal isn't lost to a black hole.
+    ["how much does an install cost?", "faq-pricing"],
+    ["what brands do you service?", "faq-brands-serviced"],
+  ];
+
+  for (const [message, intentId] of STILL_ANSWERS) {
+    it(`"${message}" still routes to ${intentId}`, () => {
+      const v = routeMessage(message);
+      expect(v.intentId).toBe(intentId);
+      expect(v.action).toBe("ANSWER");
+    });
+  }
+});
+
+describe("emergency routing is never suppressed by new intents", () => {
+  // The single most important safety property: hazards must always ESCALATE,
+  // even when they co-occur with a logistics/pricing question.
+  const EMERGENCIES: ReadonlyArray<string> = [
+    "i smell gas, can someone come today?",
+    "my carbon monoxide alarm is going off, what's the after hours fee?",
+    "the basement is flooding, do i need to be home?",
+    "there's a burning smell and sparks from the furnace",
+  ];
+  for (const message of EMERGENCIES) {
+    it(`"${message}" escalates`, () => {
+      const v = routeMessage(message);
+      expect(v.action).toBe("ESCALATE");
+      expect(v.escalate).toBe(true);
+    });
+  }
+});
+
 describe("knowledge base — integrity", () => {
   it("has no duplicate intent ids", () => {
     const ids = KNOWLEDGE_BASE.map((e) => e.id);
