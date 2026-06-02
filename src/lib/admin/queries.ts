@@ -9,6 +9,10 @@ import { db } from "@/lib/db";
 import { serviceRequests, users, messages, requestStatusEnum } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { decrypt } from "@/lib/crypto";
+import {
+  canTransition,
+  type RequestStatus,
+} from "./request-status";
 import type {
   AdminRequest,
   AdminRequestDetail,
@@ -287,6 +291,123 @@ export async function assignTechnician(
       createdAt: updated.createdAt.toISOString(),
       updatedAt: updated.updatedAt.toISOString(),
     },
+  };
+}
+
+export type UpdateRequestStatusResult =
+  | { readonly ok: true; readonly status: RequestStatus }
+  | { readonly ok: false; readonly reason: "request_not_found" }
+  | {
+      readonly ok: false;
+      readonly reason: "invalid_transition";
+      readonly currentStatus: RequestStatus;
+    };
+
+/**
+ * Manually transitions a request's status (e.g. assigned → in_progress →
+ * completed, or cancelled from any open state). Assignment is handled by
+ * {@link assignTechnician}; this drives the dispatcher's status controls.
+ *
+ * The transition is validated two ways: the in-memory state machine
+ * ({@link canTransition}) rejects illegal edges with a clear reason, and the
+ * UPDATE is guarded on the EXPECTED `from` status so two concurrent dispatchers
+ * can't both "succeed" (the second matches zero rows once the first has moved
+ * it on). Completing the request stamps `completedAt`; leaving completed (not
+ * legal here) would otherwise need to clear it.
+ */
+export async function updateRequestStatus(
+  organizationId: string,
+  requestId: string,
+  target: RequestStatus,
+): Promise<UpdateRequestStatusResult> {
+  const [existing] = await db
+    .select({ status: serviceRequests.status })
+    .from(serviceRequests)
+    .where(
+      withTenant(
+        serviceRequests,
+        organizationId,
+        eq(serviceRequests.id, requestId),
+      ),
+    );
+
+  if (!existing) {
+    return { ok: false, reason: "request_not_found" };
+  }
+
+  if (!canTransition(existing.status, target)) {
+    return {
+      ok: false,
+      reason: "invalid_transition",
+      currentStatus: existing.status,
+    };
+  }
+
+  const now = new Date();
+  const [updated] = await db
+    .update(serviceRequests)
+    .set({
+      status: target,
+      completedAt: target === "completed" ? now : null,
+      updatedAt: now,
+    })
+    .where(
+      withTenant(
+        serviceRequests,
+        organizationId,
+        and(
+          eq(serviceRequests.id, requestId),
+          eq(serviceRequests.status, existing.status),
+        )!,
+      ),
+    )
+    .returning({ status: serviceRequests.status });
+
+  if (!updated) {
+    // A concurrent transition moved the row between our read and write.
+    return {
+      ok: false,
+      reason: "invalid_transition",
+      currentStatus: existing.status,
+    };
+  }
+
+  return { ok: true, status: updated.status };
+}
+
+export type ScheduleRequestResult =
+  | { readonly ok: true; readonly scheduledDate: string | null }
+  | { readonly ok: false; readonly reason: "request_not_found" };
+
+/**
+ * Sets (or clears, with `null`) a request's scheduled service date. Org-scoped.
+ * Independent of status — a dispatcher can schedule a pending or assigned
+ * request before work starts.
+ */
+export async function scheduleRequest(
+  organizationId: string,
+  requestId: string,
+  scheduledDate: Date | null,
+): Promise<ScheduleRequestResult> {
+  const [updated] = await db
+    .update(serviceRequests)
+    .set({ scheduledDate, updatedAt: new Date() })
+    .where(
+      withTenant(
+        serviceRequests,
+        organizationId,
+        eq(serviceRequests.id, requestId),
+      ),
+    )
+    .returning({ scheduledDate: serviceRequests.scheduledDate });
+
+  if (!updated) {
+    return { ok: false, reason: "request_not_found" };
+  }
+
+  return {
+    ok: true,
+    scheduledDate: updated.scheduledDate?.toISOString() ?? null,
   };
 }
 

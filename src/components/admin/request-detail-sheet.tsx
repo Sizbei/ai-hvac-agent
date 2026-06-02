@@ -21,7 +21,29 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import { UrgencyBadge } from '@/components/admin/urgency-badge';
 import { StatusBadge } from '@/components/admin/status-badge';
+import {
+  allowedTransitions,
+  MANUAL_TARGET_STATUSES,
+  type RequestStatus,
+} from '@/lib/admin/request-status';
 import type { AdminRequestDetail, TechnicianRecord } from '@/lib/admin/types';
+
+// Only manual targets can ever be a transition button — narrowing the map to
+// those keys makes any drift from the state machine a compile error rather than
+// dead code.
+type ManualTargetStatus = (typeof MANUAL_TARGET_STATUSES)[number];
+
+const STATUS_ACTION_LABELS: Record<ManualTargetStatus, string> = {
+  in_progress: 'Start work',
+  completed: 'Mark complete',
+  cancelled: 'Cancel',
+};
+
+// HTML <input type="date"> wants YYYY-MM-DD; convert an ISO timestamp to that.
+function toDateInputValue(iso: string | null): string {
+  if (!iso) return '';
+  return iso.slice(0, 10);
+}
 
 interface RequestDetailSheetProps {
   readonly requestId: string | null;
@@ -97,6 +119,47 @@ export function RequestDetailSheet({
   const [isAssigning, setIsAssigning] = useState(false);
   const [assignError, setAssignError] = useState<string | null>(null);
 
+  const [scheduledInput, setScheduledInput] = useState<string>('');
+  const [isPatching, setIsPatching] = useState(false);
+  const [workflowError, setWorkflowError] = useState<string | null>(null);
+
+  // Shared PATCH for status transitions and scheduled-date changes. Returns the
+  // refreshed detail (server is the source of truth for derived fields like
+  // completedAt) and surfaces a friendly error otherwise.
+  const patchRequest = useCallback(
+    async (payload: {
+      status?: RequestStatus;
+      scheduledDate?: string | null;
+    }): Promise<void> => {
+      if (!requestId) return;
+      setIsPatching(true);
+      setWorkflowError(null);
+      try {
+        const res = await fetch(`/api/admin/requests/${requestId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const body = await res.json().catch(() => ({ success: false }));
+        if (res.ok && body.success) {
+          const next = body.data as AdminRequestDetail;
+          setDetail(next);
+          // Re-derive the date input from the server's truth so a Clear or Save
+          // reflects what actually persisted (no optimistic divergence on error).
+          setScheduledInput(toDateInputValue(next.scheduledDate));
+          onAssigned(); // refresh the underlying list (status/schedule changed)
+        } else {
+          setWorkflowError(body.error?.message ?? 'Update failed');
+        }
+      } catch {
+        setWorkflowError('Could not connect to server.');
+      } finally {
+        setIsPatching(false);
+      }
+    },
+    [requestId, onAssigned],
+  );
+
   // Fetch technician list (once)
   useEffect(() => {
     if (techniciansLoadedRef.current) return;
@@ -133,6 +196,8 @@ export function RequestDetailSheet({
     setDetailError(null);
     setSelectedTechId('');
     setAssignError(null);
+    setWorkflowError(null);
+    setScheduledInput('');
 
     async function loadDetail(): Promise<void> {
       try {
@@ -150,6 +215,7 @@ export function RequestDetailSheet({
         };
         if (body.success) {
           setDetail(body.data);
+          setScheduledInput(toDateInputValue(body.data.scheduledDate));
           // Pre-select current technician if already assigned
           if (body.data.assignedTo) {
             setSelectedTechId(body.data.assignedTo);
@@ -310,6 +376,86 @@ export function RequestDetailSheet({
                   </div>
                   {assignError && (
                     <p className="text-xs text-destructive">{assignError}</p>
+                  )}
+                </div>
+              </section>
+
+              {/* Status & scheduling */}
+              <section>
+                <h3 className="text-sm font-semibold mb-2">Status &amp; Scheduling</h3>
+                <div className="rounded-md border p-3 space-y-3">
+                  <div className="space-y-2">
+                    <span className="text-xs text-muted-foreground">
+                      Move this request to:
+                    </span>
+                    <div className="flex flex-wrap gap-2">
+                      {allowedTransitions(detail.status as RequestStatus)
+                        .length === 0 ? (
+                        <span className="text-sm text-muted-foreground italic">
+                          No further status changes available.
+                        </span>
+                      ) : (
+                        allowedTransitions(detail.status as RequestStatus).map(
+                          (next) => (
+                            <Button
+                              key={next}
+                              size="sm"
+                              variant={
+                                next === 'cancelled' ? 'outline' : 'default'
+                              }
+                              disabled={isPatching}
+                              onClick={() => patchRequest({ status: next })}
+                            >
+                              {STATUS_ACTION_LABELS[
+                                next as ManualTargetStatus
+                              ] ?? next}
+                            </Button>
+                          ),
+                        )
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <span className="text-xs text-muted-foreground">
+                      Scheduled service date:
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="date"
+                        value={scheduledInput}
+                        onChange={(e) => setScheduledInput(e.target.value)}
+                        className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      />
+                      <Button
+                        size="sm"
+                        disabled={isPatching || !scheduledInput}
+                        onClick={() =>
+                          patchRequest({
+                            // Anchor the chosen calendar day at UTC midnight.
+                            scheduledDate: new Date(
+                              `${scheduledInput}T00:00:00.000Z`,
+                            ).toISOString(),
+                          })
+                        }
+                      >
+                        Save
+                      </Button>
+                      {detail.scheduledDate && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={isPatching}
+                          onClick={() => patchRequest({ scheduledDate: null })}
+                        >
+                          Clear
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+
+                  {workflowError && (
+                    <p className="text-xs text-destructive">{workflowError}</p>
                   )}
                 </div>
               </section>

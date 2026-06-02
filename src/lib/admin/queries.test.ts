@@ -116,6 +116,8 @@ import {
   getRequests,
   getRequestById,
   assignTechnician,
+  updateRequestStatus,
+  scheduleRequest,
   getTechnicians,
   createTechnician,
   updateTechnician,
@@ -377,5 +379,69 @@ describe('getDashboardStats', () => {
     expect(typeof result.assignedToday).toBe('number');
     expect(typeof result.inProgress).toBe('number');
     expect(typeof result.completedToday).toBe('number');
+  });
+});
+
+describe('updateRequestStatus', () => {
+  it('returns request_not_found when the request is absent', async () => {
+    selectResolutions = [[]]; // existence check → no row
+    const result = await updateRequestStatus(ORG_ID, 'req-x', 'in_progress');
+    expect(result).toEqual({ ok: false, reason: 'request_not_found' });
+  });
+
+  it('rejects an illegal transition (pending → completed) without writing', async () => {
+    selectResolutions = [[{ status: 'pending' }]];
+    const result = await updateRequestStatus(ORG_ID, 'req-1', 'completed');
+    expect(result).toEqual({
+      ok: false,
+      reason: 'invalid_transition',
+      currentStatus: 'pending',
+    });
+  });
+
+  it('transitions assigned → in_progress when the guarded update matches', async () => {
+    selectResolutions = [[{ status: 'assigned' }]];
+    updateResolution = [{ status: 'in_progress' }];
+    const result = await updateRequestStatus(ORG_ID, 'req-1', 'in_progress');
+    expect(result).toEqual({ ok: true, status: 'in_progress' });
+  });
+
+  it('reports invalid_transition when a concurrent write moved the row (update matched zero)', async () => {
+    selectResolutions = [[{ status: 'assigned' }]]; // legal at read time
+    updateResolution = []; // but the guarded update matched nothing
+    const result = await updateRequestStatus(ORG_ID, 'req-1', 'in_progress');
+    expect(result).toEqual({
+      ok: false,
+      reason: 'invalid_transition',
+      currentStatus: 'assigned',
+    });
+  });
+
+  it('completes from in_progress', async () => {
+    selectResolutions = [[{ status: 'in_progress' }]];
+    updateResolution = [{ status: 'completed' }];
+    const result = await updateRequestStatus(ORG_ID, 'req-1', 'completed');
+    expect(result).toEqual({ ok: true, status: 'completed' });
+  });
+});
+
+describe('scheduleRequest', () => {
+  it('returns request_not_found when the update matches nothing', async () => {
+    updateResolution = [];
+    const result = await scheduleRequest(ORG_ID, 'req-x', new Date('2026-07-01T00:00:00Z'));
+    expect(result).toEqual({ ok: false, reason: 'request_not_found' });
+  });
+
+  it('sets a scheduled date and returns it as ISO', async () => {
+    const when = new Date('2026-07-01T00:00:00.000Z');
+    updateResolution = [{ scheduledDate: when }];
+    const result = await scheduleRequest(ORG_ID, 'req-1', when);
+    expect(result).toEqual({ ok: true, scheduledDate: '2026-07-01T00:00:00.000Z' });
+  });
+
+  it('clears a scheduled date (null) and returns null', async () => {
+    updateResolution = [{ scheduledDate: null }];
+    const result = await scheduleRequest(ORG_ID, 'req-1', null);
+    expect(result).toEqual({ ok: true, scheduledDate: null });
   });
 });
