@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { logger } from "@/lib/logger";
 
 /**
  * The embeddable widget loader. A contractor pastes:
@@ -154,15 +155,27 @@ export function GET(request: NextRequest) {
   // The loader bakes in the app origin (the iframe + config calls target it).
   // Derive it from a TRUSTED env var, not the request Host header — otherwise a
   // spoofed/forwarded Host could poison the cached loader to point the iframe at
-  // an attacker origin and phish PII. Fall back to the request origin only in
-  // development where the env var may be unset.
-  const configured = process.env.NEXT_PUBLIC_APP_URL?.trim();
-  const appOrigin =
-    configured && configured.length > 0
-      ? configured.replace(/\/+$/, "")
-      : process.env.NODE_ENV === "production"
-        ? request.nextUrl.origin // prod without the env var — last resort
-        : request.nextUrl.origin;
+  // an attacker origin and phish PII.
+  const configured = process.env.NEXT_PUBLIC_APP_URL?.trim().replace(/\/+$/, "");
+
+  if (!configured) {
+    // In production this MUST be set — falling back to the (spoofable) request
+    // Host would reintroduce the cache-poisoning vector, so fail loud instead.
+    if (process.env.NODE_ENV === "production") {
+      logger.error({}, "NEXT_PUBLIC_APP_URL is not set — refusing to serve the widget loader");
+      return new NextResponse(
+        "/* widget loader unavailable: server misconfigured (NEXT_PUBLIC_APP_URL) */",
+        { status: 503, headers: { "Content-Type": "application/javascript; charset=utf-8" } },
+      );
+    }
+    // Dev only: the request origin is fine (no caching/poisoning concern locally).
+    return new NextResponse(buildLoader(request.nextUrl.origin), {
+      status: 200,
+      headers: { "Content-Type": "application/javascript; charset=utf-8" },
+    });
+  }
+
+  const appOrigin = configured;
   return new NextResponse(buildLoader(appOrigin), {
     status: 200,
     headers: {

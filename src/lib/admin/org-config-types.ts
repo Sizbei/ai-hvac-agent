@@ -38,9 +38,14 @@ export type ServiceTag = (typeof SERVICE_TAGS)[number];
 const HEX_COLOR = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
 
 /** Allowlist entry: exact origin (https://acme.com), bare host (acme.com), or
- * wildcard subdomain (*.acme.com). Permissive on scheme; no paths/spaces. */
-const ORIGIN_ENTRY =
-  /^(?:https?:\/\/)?(?:\*\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+(?::\d{1,5})?$/i;
+ * wildcard subdomain (*.acme.com), with an optional valid port (1-65535).
+ * Permissive on scheme; no paths/spaces/control chars (so it's safe to emit in
+ * a CSP frame-ancestors header). */
+const PORT = "(?::(?:6553[0-5]|655[0-2]\\d|65[0-4]\\d{2}|6[0-4]\\d{3}|[1-5]\\d{4}|[1-9]\\d{0,3}))?";
+const ORIGIN_ENTRY = new RegExp(
+  `^(?:https?:\\/\\/)?(?:\\*\\.)?[a-z0-9-]+(?:\\.[a-z0-9-]+)+${PORT}$`,
+  "i",
+);
 
 /** Business-info fields that personalize the canned FAQ answers. All optional;
  * absent fields fall back to the generic non-committal phrasing. */
