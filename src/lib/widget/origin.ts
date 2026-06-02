@@ -65,6 +65,29 @@ export function originMatchesEntry(origin: string, entry: string): boolean {
   return false;
 }
 
+/**
+ * Convert allowlist entries into CSP `frame-ancestors` source expressions.
+ * "acme.com" -> "https://acme.com http://acme.com"; "*.acme.com" ->
+ * "https://*.acme.com http://*.acme.com"; an exact origin passes through.
+ * Returns the space-joined source list (without the "frame-ancestors" keyword).
+ */
+export function originsToFrameAncestors(
+  allowedOrigins: readonly string[],
+): string {
+  const sources: string[] = [];
+  for (const raw of allowedOrigins) {
+    const e = raw.trim().toLowerCase().replace(/\/+$/, "");
+    if (!e) continue;
+    if (/^https?:\/\//.test(e)) {
+      sources.push(e); // exact origin (scheme included)
+    } else {
+      // bare host or wildcard host → allow both schemes
+      sources.push(`https://${e}`, `http://${e}`);
+    }
+  }
+  return sources.join(" ");
+}
+
 /** Is `origin` allowed by ANY entry in the list? An EMPTY list means the org
  * hasn't configured an allowlist yet — callers decide whether that's open
  * (publishable-key-only) or closed. */

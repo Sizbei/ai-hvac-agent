@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { originMatchesEntry, isOriginAllowed } from "./origin";
+import {
+  originMatchesEntry,
+  isOriginAllowed,
+  originsToFrameAncestors,
+} from "./origin";
 
 describe("originMatchesEntry", () => {
   it("matches an exact origin", () => {
@@ -81,5 +85,31 @@ describe("isOriginAllowed", () => {
 
   it("is false for an empty allowlist (caller decides open vs closed)", () => {
     expect(isOriginAllowed("https://acme.com", [])).toBe(false);
+  });
+});
+
+describe("originsToFrameAncestors", () => {
+  it("expands a bare host to both schemes", () => {
+    expect(originsToFrameAncestors(["acme.com"])).toBe(
+      "https://acme.com http://acme.com",
+    );
+  });
+
+  it("expands a wildcard host to both schemes", () => {
+    expect(originsToFrameAncestors(["*.acme.com"])).toBe(
+      "https://*.acme.com http://*.acme.com",
+    );
+  });
+
+  it("passes an exact origin through unchanged", () => {
+    expect(originsToFrameAncestors(["https://acme.com"])).toBe(
+      "https://acme.com",
+    );
+  });
+
+  it("joins multiple entries with spaces", () => {
+    expect(
+      originsToFrameAncestors(["https://a.com", "b.com"]),
+    ).toBe("https://a.com https://b.com http://b.com");
   });
 });

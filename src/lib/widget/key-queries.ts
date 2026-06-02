@@ -1,6 +1,6 @@
 import { eq, and, desc } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { widgetKeys } from "@/lib/db/schema";
+import { widgetKeys, organizationSettings } from "@/lib/db/schema";
 import {
   generateWidgetKey,
   hashApiKey,
@@ -50,6 +50,28 @@ export async function validateKey(
     keyType: row.keyType as KeyType,
     scopes: row.scopes ?? [],
   };
+}
+
+/**
+ * Resolve the origin allowlist for a publishable key, for the proxy to scope
+ * the /embed `frame-ancestors` CSP. Returns the org's allowedOrigins, or null
+ * if the key is unknown/invalid/not publishable. neon-http is edge-safe, so
+ * this can run in the proxy. Empty array = the org hasn't locked down domains.
+ */
+export async function allowedOriginsForKey(
+  presentedKey: string,
+): Promise<readonly string[] | null> {
+  const validated = await validateKey(presentedKey);
+  if (!validated || validated.keyType !== "publishable") return null;
+
+  const [row] = await db
+    .select({ allowedOrigins: organizationSettings.allowedOrigins })
+    .from(organizationSettings)
+    .where(
+      eq(organizationSettings.organizationId, validated.organizationId),
+    )
+    .limit(1);
+  return row?.allowedOrigins ?? [];
 }
 
 /** Record that a key was used (best-effort, fire-and-forget by the caller). */

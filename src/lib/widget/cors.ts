@@ -15,7 +15,9 @@ import { isOriginAllowed } from "./origin";
 const BASE_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, X-HVAC-Widget-Key",
-  "Access-Control-Max-Age": "86400",
+  // No Access-Control-Max-Age: the per-org allowlist can change, and caching a
+  // permissive preflight could let a now-disallowed origin's request through.
+  // This endpoint is low-frequency, so re-preflighting is cheap.
   Vary: "Origin",
 };
 

@@ -151,9 +151,18 @@ function buildLoader(appOrigin: string): string {
 }
 
 export function GET(request: NextRequest) {
-  // Serve the loader from the request's own origin so the iframe/config calls
-  // are same-origin with this deployment.
-  const appOrigin = request.nextUrl.origin;
+  // The loader bakes in the app origin (the iframe + config calls target it).
+  // Derive it from a TRUSTED env var, not the request Host header — otherwise a
+  // spoofed/forwarded Host could poison the cached loader to point the iframe at
+  // an attacker origin and phish PII. Fall back to the request origin only in
+  // development where the env var may be unset.
+  const configured = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  const appOrigin =
+    configured && configured.length > 0
+      ? configured.replace(/\/+$/, "")
+      : process.env.NODE_ENV === "production"
+        ? request.nextUrl.origin // prod without the env var — last resort
+        : request.nextUrl.origin;
   return new NextResponse(buildLoader(appOrigin), {
     status: 200,
     headers: {

@@ -1,5 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { verifyToken } from "@/lib/auth/config";
+import { allowedOriginsForKey } from "@/lib/widget/key-queries";
+import { originsToFrameAncestors } from "@/lib/widget/origin";
 
 const ADMIN_SESSION_COOKIE = "hvac_admin_session";
 
@@ -15,16 +17,33 @@ export async function proxy(request: NextRequest) {
 
   // --- Embeddable chat panel ---
   // /embed is meant to be framed by contractors' sites, so it must NOT get the
-  // X-Frame-Options: DENY that every other route gets. The publishable widget
-  // key + per-org origin allowlist gate who can open a chat / reach org data,
-  // so framing the bare panel elsewhere exposes nothing without a valid key.
+  // blanket X-Frame-Options: DENY. But it collects PII, so we scope WHO can
+  // frame it: frame-ancestors is restricted to the org's configured allowlist
+  // (resolved from the ?key= publishable key). Only when the org has NOT
+  // configured any allowlist do we fall back to `*` (consistent with the rest
+  // of the system: empty allowlist = open). This blocks clickjacking by sites
+  // the org hasn't authorized, even using the org's public key.
   if (pathname === "/embed" || pathname.startsWith("/embed/")) {
     const response = NextResponse.next();
     const requestId =
       request.headers.get("x-request-id") ?? crypto.randomUUID();
     response.headers.set("X-Request-Id", requestId);
     response.headers.set("X-Content-Type-Options", "nosniff");
-    response.headers.set("Content-Security-Policy", "frame-ancestors *");
+
+    const key = request.nextUrl.searchParams.get("key");
+    let frameAncestors = "frame-ancestors 'self'";
+    if (key) {
+      const allowed = await allowedOriginsForKey(key).catch(() => null);
+      if (allowed === null) {
+        // Unknown/invalid key — don't allow framing anywhere meaningful.
+        frameAncestors = "frame-ancestors 'self'";
+      } else if (allowed.length === 0) {
+        frameAncestors = "frame-ancestors *"; // org hasn't locked down domains
+      } else {
+        frameAncestors = `frame-ancestors 'self' ${originsToFrameAncestors(allowed)}`;
+      }
+    }
+    response.headers.set("Content-Security-Policy", frameAncestors);
     return response;
   }
 

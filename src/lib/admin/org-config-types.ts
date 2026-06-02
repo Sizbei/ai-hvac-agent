@@ -7,6 +7,17 @@ import { issueTypeValues } from "@/lib/ai/extraction-schema";
  * business info, and custom FAQs (the last is its own table/endpoint).
  */
 
+/** An https:// URL — rejects javascript:/data:/http: so a stored value is safe
+ * to put in an href/src (the logo is rendered, the website may be linked). */
+const httpsUrl = (max: number) =>
+  z
+    .string()
+    .url()
+    .max(max)
+    .refine((u) => u.toLowerCase().startsWith("https://"), {
+      message: "Must be an https:// URL",
+    });
+
 export const LAUNCHER_POSITIONS = ["bottom-right", "bottom-left"] as const;
 export type LauncherPosition = (typeof LAUNCHER_POSITIONS)[number];
 
@@ -41,7 +52,7 @@ export const businessInfoSchema = z
     licensedInsured: z.string().max(300).optional(),
     financingAvailable: z.boolean().optional(),
     paymentMethods: z.string().max(300).optional(),
-    website: z.string().url().max(300).optional(),
+    website: httpsUrl(300).optional(),
   })
   .strict();
 
@@ -52,7 +63,7 @@ export type BusinessInfo = z.infer<typeof businessInfoSchema>;
 export const orgConfigUpdateSchema = z
   .object({
     companyName: z.string().min(1).max(120).nullable().optional(),
-    logoUrl: z.string().url().max(500).nullable().optional(),
+    logoUrl: httpsUrl(500).nullable().optional(),
     primaryColor: z
       .string()
       .regex(HEX_COLOR, "Must be a hex color like #2563eb")

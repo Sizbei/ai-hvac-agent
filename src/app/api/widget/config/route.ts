@@ -83,7 +83,10 @@ export async function GET(request: NextRequest) {
       status: 200,
       headers: {
         ...corsHeaders(origin, config.allowedOrigins),
-        "Cache-Control": "public, max-age=300",
+        // `private` so a shared CDN can't serve one org's branding (or one
+        // origin's reflected CORS header) to another. The widget loader caches
+        // client-side in localStorage anyway.
+        "Cache-Control": "private, max-age=300",
       },
     },
   );
