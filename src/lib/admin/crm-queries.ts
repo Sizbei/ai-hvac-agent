@@ -527,15 +527,25 @@ export async function upsertCustomerByContact(
   });
   if (existingId) return existingId;
 
-  const conflictTarget = emailHash
+  // Pick ONE arbiter index for ON CONFLICT — email when present (the stronger
+  // identity key), else phone. Postgres can only infer a PARTIAL unique index
+  // when the conflict spec repeats the index predicate, so targetWhere supplies
+  // the matching `... IS NOT NULL`. Without it Postgres raises "no unique or
+  // exclusion constraint matching the ON CONFLICT specification" at runtime.
+  const onEmail = Boolean(emailHash);
+  const conflictTarget = onEmail
     ? [customers.organizationId, customers.emailHash]
     : [customers.organizationId, customers.phoneHash];
+  const conflictPredicate = onEmail
+    ? sql`${customers.emailHash} IS NOT NULL`
+    : sql`${customers.phoneHash} IS NOT NULL`;
 
   const [row] = await db
     .insert(customers)
     .values(values)
     .onConflictDoUpdate({
       target: conflictTarget,
+      targetWhere: conflictPredicate,
       set: { updatedAt: new Date() },
     })
     .returning({ id: customers.id });
