@@ -59,7 +59,9 @@ export async function PATCH(
       action: "update_technician",
       entity: "user",
       entityId: id,
-      details: JSON.stringify(parsed.data),
+      // Log only WHICH fields changed — never the values. name/email are PII
+      // and the audit-log viewer surfaces `details` verbatim.
+      details: JSON.stringify({ fields: Object.keys(parsed.data) }),
     });
 
     return successResponse(technician);

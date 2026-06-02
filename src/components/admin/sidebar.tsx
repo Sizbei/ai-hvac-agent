@@ -10,6 +10,7 @@ import {
   Users,
   Building2,
   Settings,
+  ScrollText,
   ChevronLeft,
   ChevronRight,
   LogOut,
@@ -39,6 +40,7 @@ const NAV_ITEMS: readonly NavItem[] = [
   { label: 'Customers', href: '/admin/customers', icon: Building2 },
   { label: 'Technicians', href: '/admin/technicians', icon: Users },
   { label: 'Chatbot Settings', href: '/admin/settings', icon: Settings },
+  { label: 'Audit Log', href: '/admin/audit-log', icon: ScrollText },
 ] as const;
 
 interface SidebarProps {
