@@ -137,7 +137,15 @@ export function useChatSession(): UseChatSessionReturn {
 
     async function createSession(): Promise<void> {
       try {
-        const res = await fetch('/api/session', { method: 'POST' });
+        // When rendered inside the embed iframe the URL carries the org's
+        // publishable widget key (?key=pk_live_…). Forward it so the session is
+        // attributed to that org. The hosted /chat page has no key → demo org.
+        const headers: Record<string, string> = {};
+        if (typeof window !== 'undefined') {
+          const key = new URLSearchParams(window.location.search).get('key');
+          if (key) headers['X-HVAC-Widget-Key'] = key;
+        }
+        const res = await fetch('/api/session', { method: 'POST', headers });
         if (!res.ok) {
           const body = await res.json().catch(() => ({ error: { message: 'Failed to create session' } }));
           setSessionError(body?.error?.message ?? 'Failed to create session');

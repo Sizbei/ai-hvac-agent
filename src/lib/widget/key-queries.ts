@@ -1,6 +1,6 @@
 import { eq, and, desc } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { widgetKeys } from "@/lib/db/schema";
+import { widgetKeys, organizationSettings } from "@/lib/db/schema";
 import {
   generateWidgetKey,
   hashApiKey,
@@ -50,6 +50,44 @@ export async function validateKey(
     keyType: row.keyType as KeyType,
     scopes: row.scopes ?? [],
   };
+}
+
+/**
+ * Resolve the origin allowlist for a publishable key, for the proxy to scope
+ * the /embed `frame-ancestors` CSP. Returns the org's allowedOrigins, or null
+ * if the key is unknown/invalid/not publishable. neon-http is edge-safe, so
+ * this can run in the proxy. Empty array = the org hasn't locked down domains.
+ *
+ * Cached for a short TTL because the proxy calls this on EVERY /embed request
+ * (a public, unauthenticated path) — without the cache, a flood of /embed hits
+ * with a valid public key would drive two DB queries each. An allowlist edit
+ * propagates within the TTL.
+ */
+const ORIGINS_TTL_MS = 60_000;
+const originsCache = new Map<
+  string,
+  { value: readonly string[] | null; expires: number }
+>();
+
+export async function allowedOriginsForKey(
+  presentedKey: string,
+): Promise<readonly string[] | null> {
+  const cached = originsCache.get(presentedKey);
+  if (cached && cached.expires > Date.now()) return cached.value;
+
+  const validated = await validateKey(presentedKey);
+  let value: readonly string[] | null = null;
+  if (validated && validated.keyType === "publishable") {
+    const [row] = await db
+      .select({ allowedOrigins: organizationSettings.allowedOrigins })
+      .from(organizationSettings)
+      .where(eq(organizationSettings.organizationId, validated.organizationId))
+      .limit(1);
+    value = row?.allowedOrigins ?? [];
+  }
+
+  originsCache.set(presentedKey, { value, expires: Date.now() + ORIGINS_TTL_MS });
+  return value;
 }
 
 /** Record that a key was used (best-effort, fire-and-forget by the caller). */

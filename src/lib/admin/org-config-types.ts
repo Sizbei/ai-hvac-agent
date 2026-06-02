@@ -7,6 +7,17 @@ import { issueTypeValues } from "@/lib/ai/extraction-schema";
  * business info, and custom FAQs (the last is its own table/endpoint).
  */
 
+/** An https:// URL — rejects javascript:/data:/http: so a stored value is safe
+ * to put in an href/src (the logo is rendered, the website may be linked). */
+const httpsUrl = (max: number) =>
+  z
+    .string()
+    .url()
+    .max(max)
+    .refine((u) => u.toLowerCase().startsWith("https://"), {
+      message: "Must be an https:// URL",
+    });
+
 export const LAUNCHER_POSITIONS = ["bottom-right", "bottom-left"] as const;
 export type LauncherPosition = (typeof LAUNCHER_POSITIONS)[number];
 
@@ -27,9 +38,14 @@ export type ServiceTag = (typeof SERVICE_TAGS)[number];
 const HEX_COLOR = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
 
 /** Allowlist entry: exact origin (https://acme.com), bare host (acme.com), or
- * wildcard subdomain (*.acme.com). Permissive on scheme; no paths/spaces. */
-const ORIGIN_ENTRY =
-  /^(?:https?:\/\/)?(?:\*\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+(?::\d{1,5})?$/i;
+ * wildcard subdomain (*.acme.com), with an optional valid port (1-65535).
+ * Permissive on scheme; no paths/spaces/control chars (so it's safe to emit in
+ * a CSP frame-ancestors header). */
+const PORT = "(?::(?:6553[0-5]|655[0-2]\\d|65[0-4]\\d{2}|6[0-4]\\d{3}|[1-5]\\d{4}|[1-9]\\d{0,3}))?";
+const ORIGIN_ENTRY = new RegExp(
+  `^(?:https?:\\/\\/)?(?:\\*\\.)?[a-z0-9-]+(?:\\.[a-z0-9-]+)+${PORT}$`,
+  "i",
+);
 
 /** Business-info fields that personalize the canned FAQ answers. All optional;
  * absent fields fall back to the generic non-committal phrasing. */
@@ -41,7 +57,7 @@ export const businessInfoSchema = z
     licensedInsured: z.string().max(300).optional(),
     financingAvailable: z.boolean().optional(),
     paymentMethods: z.string().max(300).optional(),
-    website: z.string().url().max(300).optional(),
+    website: httpsUrl(300).optional(),
   })
   .strict();
 
@@ -52,7 +68,7 @@ export type BusinessInfo = z.infer<typeof businessInfoSchema>;
 export const orgConfigUpdateSchema = z
   .object({
     companyName: z.string().min(1).max(120).nullable().optional(),
-    logoUrl: z.string().url().max(500).nullable().optional(),
+    logoUrl: httpsUrl(500).nullable().optional(),
     primaryColor: z
       .string()
       .regex(HEX_COLOR, "Must be a hex color like #2563eb")

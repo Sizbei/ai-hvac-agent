@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Acme Heating &amp; Cooling — Widget Demo</title>
+    <style>
+      :root { font-family: system-ui, -apple-system, sans-serif; }
+      * { box-sizing: border-box; }
+      body { margin: 0; color: #1a2230; background: #f6f8fb; }
+      header { background: #0f172a; color: #fff; padding: 18px 24px; }
+      header strong { font-size: 18px; }
+      .hero {
+        max-width: 760px; margin: 48px auto; padding: 0 24px;
+      }
+      .hero h1 { font-size: 34px; line-height: 1.15; margin: 0 0 12px; }
+      .hero p { font-size: 17px; line-height: 1.6; color: #475569; }
+      .note {
+        margin-top: 28px; padding: 16px 18px; border-radius: 12px;
+        background: #fff; border: 1px solid #e2e8f0; font-size: 14px; color: #475569;
+      }
+      code { background: #eef2f7; padding: 1px 5px; border-radius: 4px; }
+    </style>
+  </head>
+  <body>
+    <header><strong>Acme Heating &amp; Cooling</strong> — sample customer site</header>
+    <main class="hero">
+      <h1>Fast, reliable heating &amp; cooling service.</h1>
+      <p>
+        This is a sample website that has embedded the HVAC chat widget. Look for
+        the chat bubble in the corner — click it to start a conversation, just
+        like a real customer would.
+      </p>
+      <div class="note">
+        To make this live, replace <code>data-hvac-key</code> below with a real
+        <strong>publishable</strong> key from your admin dashboard
+        (<code>Chatbot Settings → Embed &amp; Keys</code>), then host this page on
+        a domain you&apos;ve added to your <strong>Allowed domains</strong>.
+      </div>
+    </main>
+
+    <!-- The one-line embed. Replace the key with your publishable key. -->
+    <script
+      src="/widget.js"
+      data-hvac-key="pk_live_REPLACE_WITH_YOUR_PUBLISHABLE_KEY"
+      async
+    ></script>
+  </body>
+</html>

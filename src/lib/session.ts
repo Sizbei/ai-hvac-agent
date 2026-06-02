@@ -10,10 +10,18 @@ export function generateSessionToken(): string {
 
 export async function setSessionCookie(token: string): Promise<void> {
   const cookieStore = await cookies();
+  const isProd = process.env.NODE_ENV === "production";
   cookieStore.set(SESSION_COOKIE_NAME, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "strict",
+    // The customer chat runs inside a cross-site <iframe> on contractors'
+    // sites. A SameSite=Strict/Lax cookie is NOT sent on the cross-site fetch
+    // subrequests the iframe makes to /api/*, so the session would fail to
+    // authenticate after creation. SameSite=None (which REQUIRES Secure) lets
+    // the cookie travel in that embedded context. In dev (http) we fall back to
+    // Lax since None+insecure is rejected by browsers. The cookie is still
+    // httpOnly, so the host page can't read it.
+    secure: isProd,
+    sameSite: isProd ? "none" : "lax",
     maxAge: SESSION_COOKIE_MAX_AGE,
     path: "/",
   });
