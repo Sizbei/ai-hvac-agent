@@ -15,7 +15,11 @@ export async function createAdminSession(
   cookieStore.set(ADMIN_SESSION_COOKIE, token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
+    // "strict" so the admin session cookie is never sent on cross-site
+    // requests — this blocks CSRF against the state-changing /api/admin/*
+    // endpoints (assign, delete, create). The admin UI is same-origin, so
+    // strict has no UX cost here.
+    sameSite: "strict",
     maxAge: ADMIN_SESSION_MAX_AGE,
     path: "/",
   });

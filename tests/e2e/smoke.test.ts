@@ -588,16 +588,19 @@ describe('E2E Smoke Test: Full Customer-to-Admin Flow', () => {
   it('POST /api/admin/requests/[id]/assign assigns a technician', async () => {
     mockGetAdminSession.mockResolvedValue(mockAdminSession);
     mockAssignTechnician.mockResolvedValue({
-      id: MOCK_REQUEST_ID,
-      status: 'assigned',
-      issueType: 'cooling_not_working',
-      urgency: 'high',
-      description: 'AC not cooling',
-      referenceNumber: 'HVAC-TEST1234',
-      customerName: 'Test User',
-      assignedToName: 'Tech A',
-      createdAt: '2026-01-01T00:00:00Z',
-      updatedAt: '2026-01-01T00:00:00Z',
+      ok: true,
+      request: {
+        id: MOCK_REQUEST_ID,
+        status: 'assigned',
+        issueType: 'cooling_not_working',
+        urgency: 'high',
+        description: 'AC not cooling',
+        referenceNumber: 'HVAC-TEST1234',
+        customerName: 'Test User',
+        assignedToName: 'Tech A',
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+      },
     });
 
     const request = createMockRequest({

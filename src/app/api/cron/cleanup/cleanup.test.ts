@@ -127,6 +127,32 @@ describe("GET /api/cron/cleanup", () => {
     expect(body.error.code).toBe("UNAUTHORIZED");
   });
 
+  it("fails closed with 503 when CRON_SECRET is not configured", async () => {
+    delete process.env.CRON_SECRET;
+
+    const GET = await getHandler();
+    // Even an empty Bearer token must not slip through.
+    const request = createRequest({ authorization: "Bearer " });
+    const response = await GET(request);
+    const body = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe("NOT_CONFIGURED");
+  });
+
+  it("fails closed with 503 when CRON_SECRET is blank", async () => {
+    process.env.CRON_SECRET = "   ";
+
+    const GET = await getHandler();
+    const request = createRequest({ authorization: "Bearer    " });
+    const response = await GET(request);
+    const body = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(body.error.code).toBe("NOT_CONFIGURED");
+  });
+
   it("returns 401 when CRON_SECRET is wrong", async () => {
     const GET = await getHandler();
     const request = createRequest({

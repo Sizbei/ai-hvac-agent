@@ -12,11 +12,23 @@ interface CleanupSummary {
 }
 
 export async function GET(request: NextRequest) {
-  // Step 1: Auth check — validate Bearer token against CRON_SECRET
-  const authHeader = request.headers.get("authorization");
-  const expectedToken = `Bearer ${process.env.CRON_SECRET}`;
+  // Step 1: Auth check — validate Bearer token against CRON_SECRET.
+  // Fail CLOSED if the secret is missing/blank: otherwise the expected token
+  // collapses to "Bearer undefined" / "Bearer " and this destructive endpoint
+  // (it purges sessions and messages) could be triggered by an unauthenticated
+  // caller who guesses the misconfigured value.
+  const cronSecret = process.env.CRON_SECRET?.trim();
+  if (!cronSecret) {
+    logger.error({}, "CRON_SECRET is not configured; refusing cleanup");
+    return errorResponse(
+      "Cron endpoint not configured",
+      "NOT_CONFIGURED",
+      503,
+    );
+  }
 
-  if (!authHeader || authHeader !== expectedToken) {
+  const authHeader = request.headers.get("authorization");
+  if (!authHeader || authHeader !== `Bearer ${cronSecret}`) {
     return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
   }
 

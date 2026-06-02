@@ -4,7 +4,7 @@
  * Every query function takes organizationId as its first parameter
  * and uses withTenant to enforce multi-tenancy (key_links contract).
  */
-import { eq, and, sql, count, desc, asc, gte } from "drizzle-orm";
+import { eq, and, sql, count, desc, asc, gte, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { serviceRequests, users, messages, requestStatusEnum } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
@@ -185,12 +185,28 @@ export async function getRequestById(
   };
 }
 
+/** Request statuses from which a (re)assignment is allowed. Once work has
+ * started (in_progress) or the request is closed (completed/cancelled),
+ * assigning a technician would silently discard that state, so we refuse. */
+const ASSIGNABLE_STATUSES = ["pending", "assigned"] as const;
+
+export type AssignTechnicianResult =
+  | { readonly ok: true; readonly request: AdminRequest }
+  | { readonly ok: false; readonly reason: "technician_not_found" }
+  | { readonly ok: false; readonly reason: "request_not_found" }
+  | {
+      readonly ok: false;
+      readonly reason: "request_not_assignable";
+      readonly currentStatus: AdminRequest["status"];
+    };
+
 export async function assignTechnician(
   organizationId: string,
   requestId: string,
   technicianId: string,
-): Promise<AdminRequest | null> {
-  // Verify technician belongs to same org
+): Promise<AssignTechnicianResult> {
+  // Verify the assignee is an ACTIVE TECHNICIAN in this org — not an admin,
+  // not a deactivated/off-boarded account, and not a user from another tenant.
   const [tech] = await db
     .select({ id: users.id, name: users.name })
     .from(users)
@@ -198,15 +214,22 @@ export async function assignTechnician(
       withTenant(
         users,
         organizationId,
-        eq(users.id, technicianId),
+        and(
+          eq(users.id, technicianId),
+          eq(users.role, "technician"),
+          eq(users.isActive, true),
+        )!,
       ),
     );
 
   if (!tech) {
-    return null;
+    return { ok: false, reason: "technician_not_found" };
   }
 
   const now = new Date();
+  // Only flip to "assigned" from an assignable state. Guarding the status in
+  // the WHERE clause also closes the lost-update race between two dispatchers:
+  // the second UPDATE matches zero rows once the first has moved it on.
   const [updated] = await db
     .update(serviceRequests)
     .set({
@@ -218,26 +241,52 @@ export async function assignTechnician(
       withTenant(
         serviceRequests,
         organizationId,
-        eq(serviceRequests.id, requestId),
+        and(
+          eq(serviceRequests.id, requestId),
+          inArray(serviceRequests.status, [...ASSIGNABLE_STATUSES]),
+        )!,
       ),
     )
     .returning();
 
   if (!updated) {
-    return null;
+    // Either the request doesn't exist (in this org) or it's in a
+    // non-assignable state. Disambiguate so the caller can explain why.
+    const [existing] = await db
+      .select({ status: serviceRequests.status })
+      .from(serviceRequests)
+      .where(
+        withTenant(
+          serviceRequests,
+          organizationId,
+          eq(serviceRequests.id, requestId),
+        ),
+      );
+
+    if (!existing) {
+      return { ok: false, reason: "request_not_found" };
+    }
+    return {
+      ok: false,
+      reason: "request_not_assignable",
+      currentStatus: existing.status,
+    };
   }
 
   return {
-    id: updated.id,
-    status: updated.status,
-    issueType: updated.issueType,
-    urgency: updated.urgency,
-    description: updated.description,
-    referenceNumber: updated.referenceNumber,
-    customerName: safeDecrypt(updated.customerNameEncrypted),
-    assignedToName: tech.name,
-    createdAt: updated.createdAt.toISOString(),
-    updatedAt: updated.updatedAt.toISOString(),
+    ok: true,
+    request: {
+      id: updated.id,
+      status: updated.status,
+      issueType: updated.issueType,
+      urgency: updated.urgency,
+      description: updated.description,
+      referenceNumber: updated.referenceNumber,
+      customerName: safeDecrypt(updated.customerNameEncrypted),
+      assignedToName: tech.name,
+      createdAt: updated.createdAt.toISOString(),
+      updatedAt: updated.updatedAt.toISOString(),
+    },
   };
 }
 

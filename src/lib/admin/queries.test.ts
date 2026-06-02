@@ -64,6 +64,7 @@ vi.mock('drizzle-orm', () => ({
   desc: vi.fn((col: unknown) => col),
   asc: vi.fn((col: unknown) => col),
   gte: vi.fn((...args: unknown[]) => args),
+  inArray: vi.fn((...args: unknown[]) => args),
 }));
 
 // Mock schema tables — provide column-like objects
@@ -193,11 +194,64 @@ describe('getRequestById', () => {
 });
 
 describe('assignTechnician', () => {
-  it('should return null when technician not found in org', async () => {
-    selectResolutions = [[]]; // no tech found
+  it('should fail with technician_not_found when the assignee is not an active technician in the org', async () => {
+    selectResolutions = [[]]; // tech lookup (role+active+tenant) returns nothing
 
     const result = await assignTechnician(ORG_ID, 'req-1', 'tech-nonexistent');
-    expect(result).toBeNull();
+    expect(result).toEqual({ ok: false, reason: 'technician_not_found' });
+  });
+
+  it('should assign when the technician is valid and the request is pending', async () => {
+    const now = new Date();
+    selectResolutions = [
+      [{ id: 'tech-1', name: 'John Tech' }], // tech lookup succeeds
+    ];
+    updateResolution = [
+      {
+        id: 'req-1',
+        status: 'assigned',
+        issueType: 'no_cooling',
+        urgency: 'high',
+        description: 'AC out',
+        referenceNumber: 'HVAC-ABCD1234',
+        customerNameEncrypted: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ];
+
+    const result = await assignTechnician(ORG_ID, 'req-1', 'tech-1');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.request.status).toBe('assigned');
+      expect(result.request.assignedToName).toBe('John Tech');
+    }
+  });
+
+  it('should report request_not_assignable when the request exists but is not in an assignable state', async () => {
+    selectResolutions = [
+      [{ id: 'tech-1', name: 'John Tech' }], // tech lookup succeeds
+      [{ status: 'in_progress' }], // disambiguation lookup after empty update
+    ];
+    updateResolution = []; // status guard matched zero rows
+
+    const result = await assignTechnician(ORG_ID, 'req-1', 'tech-1');
+    expect(result).toEqual({
+      ok: false,
+      reason: 'request_not_assignable',
+      currentStatus: 'in_progress',
+    });
+  });
+
+  it('should report request_not_found when neither the update nor the lookup find the request', async () => {
+    selectResolutions = [
+      [{ id: 'tech-1', name: 'John Tech' }], // tech lookup succeeds
+      [], // disambiguation lookup finds nothing
+    ];
+    updateResolution = []; // update matched zero rows
+
+    const result = await assignTechnician(ORG_ID, 'req-1', 'req-nonexistent');
+    expect(result).toEqual({ ok: false, reason: 'request_not_found' });
   });
 });
 
