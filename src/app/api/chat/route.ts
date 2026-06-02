@@ -1,7 +1,7 @@
 import { NextRequest, after } from "next/server";
 import { streamText } from "ai";
 import { getModel } from "@/lib/ai/provider";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { customerSessions, messages } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
@@ -99,6 +99,12 @@ export async function POST(request: NextRequest) {
     // The org for every write in this turn comes from the session row, never a
     // hardcoded constant — a session created for tenant X always writes as X.
     const organizationId = session.organizationId;
+    // Scope every session-row read/write by BOTH id and org (defense in depth,
+    // matching escalate-service.ts) so a write can never touch another tenant.
+    const sessionScope = and(
+      eq(customerSessions.id, session.id),
+      eq(customerSessions.organizationId, organizationId),
+    );
 
     // 2. Check terminal state
     if (isTerminalState(session.status)) {
@@ -243,7 +249,7 @@ export async function POST(request: NextRequest) {
           await db
             .update(customerSessions)
             .set({ turnCount: newTurnCount, updatedAt: new Date() })
-            .where(eq(customerSessions.id, session.id));
+            .where(sessionScope);
 
           logger.info(
             {
@@ -313,7 +319,7 @@ export async function POST(request: NextRequest) {
             turnCount: newTurnCount,
             updatedAt: new Date(),
           })
-          .where(eq(customerSessions.id, session.id));
+          .where(sessionScope);
 
         logger.info(
           {
@@ -387,7 +393,7 @@ export async function POST(request: NextRequest) {
             turnCount: newTurnCount,
             updatedAt: new Date(),
           })
-          .where(eq(customerSessions.id, session.id));
+          .where(sessionScope);
 
         logger.info(
           {
@@ -420,7 +426,7 @@ export async function POST(request: NextRequest) {
         const [fresh] = await db
           .select({ metadata: customerSessions.metadata })
           .from(customerSessions)
-          .where(eq(customerSessions.id, session.id));
+          .where(sessionScope);
         // Merge into any slots already known (deterministic or prior LLM
         // turns); never overwrite a filled slot with null.
         const merged = mergeSlots(parseKnownSlots(fresh?.metadata ?? null), {
@@ -455,7 +461,7 @@ export async function POST(request: NextRequest) {
               : session.metadata,
             updatedAt: new Date(),
           })
-          .where(eq(customerSessions.id, session.id));
+          .where(sessionScope);
 
         logger.info(
           { sessionId: session.id, extractionComplete },
@@ -476,7 +482,7 @@ export async function POST(request: NextRequest) {
         await db
           .update(customerSessions)
           .set({ status: fallbackState, updatedAt: new Date() })
-          .where(eq(customerSessions.id, session.id))
+          .where(sessionScope)
           .catch(() => {});
       }
     });

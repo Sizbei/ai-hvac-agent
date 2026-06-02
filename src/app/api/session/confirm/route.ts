@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { randomBytes, randomUUID } from "node:crypto";
 import { db } from "@/lib/db";
 import {
@@ -134,7 +134,13 @@ export async function POST(request: NextRequest) {
       db
         .update(customerSessions)
         .set({ status: "submitted", updatedAt: new Date() })
-        .where(eq(customerSessions.id, session.id)),
+        // Scope by (id, org) — defense in depth, matching escalate-service.ts.
+        .where(
+          and(
+            eq(customerSessions.id, session.id),
+            eq(customerSessions.organizationId, organizationId),
+          ),
+        ),
       db.insert(auditLog).values({
         organizationId: organizationId,
         sessionId: session.id,

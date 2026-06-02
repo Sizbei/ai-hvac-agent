@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 
+// `server-only` throws at import in a non-server env; stub it so server modules
+// (e.g. the tenancy resolver pulled in by the session route) can load in tests.
+vi.mock('server-only', () => ({}));
+
 // ─── Hoisted mocks ─────────────────────────────────────────────────
 
 const {

@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+// `server-only` throws at import in a non-server env (before mocks apply); stub
+// it so the module under test (which imports it as a build guard) can load.
+vi.mock("server-only", () => ({}));
+
 const { mockSelectRows } = vi.hoisted(() => ({
   mockSelectRows: { value: [] as unknown[] },
 }));
