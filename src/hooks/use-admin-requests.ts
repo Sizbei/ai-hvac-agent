@@ -5,6 +5,8 @@ import type { AdminRequest } from '@/lib/admin/types';
 
 interface UseAdminRequestsOptions {
   readonly status?: string;
+  /** Reference-number search term (prefix match). */
+  readonly search?: string;
   readonly page?: number;
   readonly limit?: number;
 }
@@ -24,7 +26,7 @@ interface UseAdminRequestsResult {
 export function useAdminRequests(
   options: UseAdminRequestsOptions = {},
 ): UseAdminRequestsResult {
-  const { status, page = 1, limit = 20 } = options;
+  const { status, search, page = 1, limit = 20 } = options;
 
   const [requests, setRequests] = useState<readonly AdminRequest[]>([]);
   const [total, setTotal] = useState(0);
@@ -40,6 +42,7 @@ export function useAdminRequests(
     try {
       const params = new URLSearchParams();
       if (status) params.set('status', status);
+      if (search) params.set('search', search);
       params.set('page', String(page));
       params.set('limit', String(limit));
 
@@ -74,7 +77,7 @@ export function useAdminRequests(
     } finally {
       isFetchingRef.current = false;
     }
-  }, [status, page, limit]);
+  }, [status, search, page, limit]);
 
   // Fetch on mount and when options change
   useEffect(() => {

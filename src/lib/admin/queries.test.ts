@@ -65,6 +65,7 @@ vi.mock('drizzle-orm', () => ({
   asc: vi.fn((col: unknown) => col),
   gte: vi.fn((...args: unknown[]) => args),
   inArray: vi.fn((...args: unknown[]) => args),
+  ilike: vi.fn((...args: unknown[]) => args),
 }));
 
 // Mock schema tables — provide column-like objects
@@ -124,6 +125,7 @@ import {
   getRequests,
   getRequestById,
   assignTechnician,
+  reassignTechnician,
   updateRequestStatus,
   scheduleRequest,
   addRequestNote,
@@ -192,6 +194,28 @@ describe('getRequests', () => {
     expect(result.requests[0]).toHaveProperty('id', 'req-1');
     expect(result.requests[0]).toHaveProperty('customerName');
     expect(typeof result.requests[0].createdAt).toBe('string');
+  });
+
+  it('applies a reference-number prefix search, escaping LIKE metacharacters', async () => {
+    const { ilike } = await import('drizzle-orm');
+    selectResolutions = [[{ value: 0 }], []];
+
+    await getRequests(ORG_ID, { search: '  hvac_50%  ' });
+
+    // Trimmed; "_" and "%" escaped; appended with a trailing "%" for prefix.
+    expect(ilike).toHaveBeenCalledWith(
+      expect.anything(),
+      'hvac\\_50\\%%',
+    );
+  });
+
+  it('does not search when the term is blank after trimming', async () => {
+    const { ilike } = await import('drizzle-orm');
+    vi.mocked(ilike).mockClear();
+    selectResolutions = [[{ value: 0 }], []];
+
+    await getRequests(ORG_ID, { search: '   ' });
+    expect(ilike).not.toHaveBeenCalled();
   });
 });
 
@@ -262,6 +286,90 @@ describe('assignTechnician', () => {
     updateResolution = []; // update matched zero rows
 
     const result = await assignTechnician(ORG_ID, 'req-1', 'req-nonexistent');
+    expect(result).toEqual({ ok: false, reason: 'request_not_found' });
+  });
+});
+
+describe('reassignTechnician', () => {
+  it('fails with technician_not_found when the assignee is not an active technician', async () => {
+    selectResolutions = [[]]; // tech lookup returns nothing
+    const result = await reassignTechnician(ORG_ID, 'req-1', 'tech-x');
+    expect(result).toEqual({ ok: false, reason: 'technician_not_found' });
+  });
+
+  it('reassigns an in_progress request WITHOUT resetting its status', async () => {
+    const now = new Date();
+    selectResolutions = [[{ id: 'tech-2', name: 'Jane Tech' }]];
+    updateResolution = [
+      {
+        id: 'req-1',
+        status: 'in_progress', // preserved — NOT reset to "assigned"
+        issueType: 'no_cooling',
+        urgency: 'high',
+        description: 'AC out',
+        referenceNumber: 'HVAC-ABCD1234',
+        customerNameEncrypted: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ];
+
+    const result = await reassignTechnician(ORG_ID, 'req-1', 'tech-2');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.request.status).toBe('in_progress');
+      expect(result.request.assignedToName).toBe('Jane Tech');
+    }
+  });
+
+  it('reassigns an "assigned" request, preserving the assigned status', async () => {
+    const now = new Date();
+    selectResolutions = [[{ id: 'tech-3', name: 'Carlos Tech' }]];
+    updateResolution = [
+      {
+        id: 'req-2',
+        status: 'assigned', // stays assigned (assigned is also reassignable)
+        issueType: 'heating',
+        urgency: 'medium',
+        description: 'No heat',
+        referenceNumber: 'HVAC-WXYZ9876',
+        customerNameEncrypted: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ];
+
+    const result = await reassignTechnician(ORG_ID, 'req-2', 'tech-3');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.request.status).toBe('assigned');
+      expect(result.request.assignedToName).toBe('Carlos Tech');
+    }
+  });
+
+  it('reports request_not_reassignable for a pending (unassigned) request', async () => {
+    selectResolutions = [
+      [{ id: 'tech-2', name: 'Jane Tech' }], // tech ok
+      [{ status: 'pending' }], // disambiguation: pending is not reassignable
+    ];
+    updateResolution = []; // status guard matched zero rows
+
+    const result = await reassignTechnician(ORG_ID, 'req-1', 'tech-2');
+    expect(result).toEqual({
+      ok: false,
+      reason: 'request_not_reassignable',
+      currentStatus: 'pending',
+    });
+  });
+
+  it('reports request_not_found when the request does not exist in the org', async () => {
+    selectResolutions = [
+      [{ id: 'tech-2', name: 'Jane Tech' }],
+      [], // disambiguation finds nothing
+    ];
+    updateResolution = [];
+
+    const result = await reassignTechnician(ORG_ID, 'req-x', 'tech-2');
     expect(result).toEqual({ ok: false, reason: 'request_not_found' });
   });
 });

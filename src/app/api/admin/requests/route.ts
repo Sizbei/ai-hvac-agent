@@ -13,6 +13,7 @@ export async function GET(request: NextRequest) {
 
     const url = request.nextUrl;
     const status = url.searchParams.get("status") ?? undefined;
+    const searchParam = url.searchParams.get("search") ?? undefined;
     const pageParam = url.searchParams.get("page");
     const limitParam = url.searchParams.get("limit");
 
@@ -21,8 +22,13 @@ export async function GET(request: NextRequest) {
       ? Math.min(100, Math.max(1, parseInt(limitParam, 10) || 20))
       : 20;
 
+    // Cap the search term defensively; it can't usefully exceed a 20-char
+    // reference number anyway.
+    const search = searchParam ? searchParam.slice(0, 64) : undefined;
+
     const result = await getRequests(session.organizationId, {
       status,
+      search,
       page,
       limit,
     });

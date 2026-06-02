@@ -27,6 +27,7 @@ import {
   type RequestStatus,
 } from '@/lib/admin/request-status';
 import type {
+  AdminRequest,
   AdminRequestDetail,
   TechnicianRecord,
   RequestNote,
@@ -272,6 +273,12 @@ export function RequestDetailSheet({
     loadDetail();
   }, [requestId]);
 
+  // "assigned"/"in_progress" already have work in flight, so changing the
+  // technician is a REASSIGNMENT (PATCH) that preserves status; "pending" is an
+  // initial ASSIGNMENT (POST) that flips status to "assigned".
+  const isReassignMode =
+    detail?.status === 'assigned' || detail?.status === 'in_progress';
+
   const handleAssign = useCallback(async (): Promise<void> => {
     if (!requestId || !selectedTechId) return;
 
@@ -279,8 +286,9 @@ export function RequestDetailSheet({
     setAssignError(null);
 
     try {
+      const method = isReassignMode ? 'PATCH' : 'POST';
       const res = await fetch(`/api/admin/requests/${requestId}/assign`, {
-        method: 'POST',
+        method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ technicianId: selectedTechId }),
       });
@@ -293,10 +301,12 @@ export function RequestDetailSheet({
         return;
       }
 
-      // Update local detail to reflect assignment
+      // Update local detail to reflect the (re)assignment. The server response
+      // is the source of truth for status (preserved on reassign). Both POST
+      // and PATCH return the lighter AdminRequest (list-item) shape.
       const body = (await res.json()) as {
         success: boolean;
-        data: AdminRequestDetail;
+        data: AdminRequest;
       };
       if (body.success && detail) {
         const assignedTech = technicians.find((t) => t.id === selectedTechId);
@@ -314,7 +324,7 @@ export function RequestDetailSheet({
     } finally {
       setIsAssigning(false);
     }
-  }, [requestId, selectedTechId, detail, technicians, onAssigned]);
+  }, [requestId, selectedTechId, detail, technicians, onAssigned, isReassignMode]);
 
   const formatIssueType = (issueType: string): string =>
     issueType
@@ -381,7 +391,10 @@ export function RequestDetailSheet({
                 </div>
               </section>
 
-              {/* Assignment */}
+              {/* Assignment — hidden for terminal requests (completed/
+                  cancelled), where neither assign nor reassign is permitted. */}
+              {detail.status !== 'completed' &&
+                detail.status !== 'cancelled' && (
               <section>
                 <h3 className="text-sm font-semibold mb-2">Assignment</h3>
                 <div className="rounded-md border p-3 space-y-3">
@@ -410,9 +423,21 @@ export function RequestDetailSheet({
                     <Button
                       size="sm"
                       onClick={handleAssign}
-                      disabled={!selectedTechId || isAssigning}
+                      disabled={
+                        !selectedTechId ||
+                        isAssigning ||
+                        // In reassign mode, disable until a DIFFERENT tech is
+                        // picked — reassigning to the same person is a no-op.
+                        (isReassignMode && selectedTechId === detail.assignedTo)
+                      }
                     >
-                      {isAssigning ? 'Assigning...' : 'Assign'}
+                      {isAssigning
+                        ? isReassignMode
+                          ? 'Reassigning...'
+                          : 'Assigning...'
+                        : isReassignMode
+                          ? 'Reassign'
+                          : 'Assign'}
                     </Button>
                   </div>
                   {assignError && (
@@ -420,6 +445,7 @@ export function RequestDetailSheet({
                   )}
                 </div>
               </section>
+              )}
 
               {/* Status & scheduling */}
               <section>
