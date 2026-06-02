@@ -73,9 +73,18 @@ const CATEGORY_PRIORITY: Record<string, number> = {
   heating: 2,
   airquality: 2,
   thermostat: 2,
+  equipment: 2,
+  refrigerant: 2,
   maintenance: 3,
   scheduling: 3,
   faq: 3,
+  pricing: 3,
+  membership: 3,
+  efficiency: 3,
+  replacement: 3,
+  service_logistics: 3,
+  trust: 3,
+  warranty: 3,
   meta: 4,
 };
 
