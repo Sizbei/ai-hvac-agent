@@ -29,6 +29,13 @@
       "when": 1780389320558,
       "tag": "0003_legal_shen",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1780393495039,
+      "tag": "0004_broken_squadron_sinister",
+      "breakpoints": true
     }
   ]
 }

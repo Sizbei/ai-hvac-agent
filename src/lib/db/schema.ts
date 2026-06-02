@@ -9,6 +9,7 @@ import {
   index,
   uniqueIndex,
   varchar,
+  jsonb,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -388,5 +389,86 @@ export const auditLog = pgTable(
     index("audit_org_id_idx").on(table.organizationId),
     index("audit_action_idx").on(table.action),
     index("audit_created_idx").on(table.createdAt),
+  ],
+);
+
+// 12. organization_settings — per-org chatbot configuration (1:1 with org).
+// One row per organization. Drives the customer-facing widget's branding, which
+// services the bot will take, and the business-info answers used by canned FAQ
+// responses. JSON columns keep the shape flexible without a migration per field.
+export const organizationSettings = pgTable("organization_settings", {
+  organizationId: uuid("organization_id")
+    .primaryKey()
+    .references(() => organizations.id),
+
+  // ── Branding (widget look) ──
+  companyName: text("company_name"),
+  logoUrl: text("logo_url"),
+  // Hex color (e.g. "#2563eb"), validated at the API boundary.
+  primaryColor: varchar("primary_color", { length: 9 }),
+  welcomeMessage: text("welcome_message"),
+  launcherPosition: text("launcher_position"), // "bottom-right" | "bottom-left"
+
+  // ── Services offered ──
+  // issueType values the org does NOT handle (e.g. "installation"); the bot
+  // declines/redirects instead of promising them. Stored as a JSON string array.
+  disabledIssueTypes: jsonb("disabled_issue_types")
+    .$type<string[]>()
+    .notNull()
+    .default(sql`'[]'::jsonb`),
+  // Knowledge-base intent categories the org does NOT offer (e.g. "boiler",
+  // "commercial", "water_heater"); matching intents are suppressed/redirected.
+  disabledServiceTags: jsonb("disabled_service_tags")
+    .$type<string[]>()
+    .notNull()
+    .default(sql`'[]'::jsonb`),
+
+  // ── Business info (fills the per-tenant FAQ answers) ──
+  // Flexible bag: serviceArea, businessHours, phone, licensedInsured,
+  // financingAvailable, etc. Read by the router to personalize canned replies.
+  businessInfo: jsonb("business_info")
+    .$type<Record<string, unknown>>()
+    .notNull()
+    .default(sql`'{}'::jsonb`),
+
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+// 13. custom_faqs — admin-authored question→answer pairs (1:many per org).
+// Augments the built-in deterministic catalog with company-specific answers.
+export const customFaqs = pgTable(
+  "custom_faqs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id),
+    question: text("question").notNull(),
+    answer: text("answer").notNull(),
+    // Lowercased trigger phrases the matcher checks (comma/JSON array). Kept
+    // separate from `question` so admins can list multiple phrasings.
+    triggers: jsonb("triggers")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("custom_faqs_org_id_idx").on(table.organizationId),
+    index("custom_faqs_org_active_idx").on(
+      table.organizationId,
+      table.isActive,
+    ),
   ],
 );

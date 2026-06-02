@@ -224,6 +224,18 @@ vi.mock('@/lib/ai/intent-router', () => ({
   }),
 }));
 
+// The chat route loads the org's router config (disabled services, business
+// info, custom FAQs) before routing. Stub it so the smoke flow doesn't hit the
+// DB for config; the empty overlay leaves routing unchanged.
+vi.mock('@/lib/admin/org-config-queries', () => ({
+  getRouterConfig: vi.fn().mockResolvedValue({
+    disabledIssueTypes: [],
+    disabledServiceTags: [],
+    businessInfo: {},
+    customFaqs: [],
+  }),
+}));
+
 vi.mock('@/lib/ai/system-prompt', () => ({
   SYSTEM_PROMPT: 'You are an HVAC assistant.',
   EXTRACTION_INSTRUCTION: 'Extract service request details.',

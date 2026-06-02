@@ -1,5 +1,13 @@
 import { KNOWLEDGE_BASE } from "./knowledge-base";
 import { CONFIRM_REPLY } from "./constants";
+import {
+  EMPTY_ORG_CONFIG,
+  disabledIntentIds,
+  declineReply,
+  matchCustomFaq,
+  personalizeAnswer,
+  type RouterOrgConfig,
+} from "./router-config";
 import type {
   KnowledgeBaseEntry,
   RouterAction,
@@ -224,6 +232,7 @@ function missingRequiredSlots(
 export function routeMessage(
   rawMessage: string,
   known: KnownSlots = {},
+  config: RouterOrgConfig = EMPTY_ORG_CONFIG,
 ): RouterVerdict {
   const text = normalize(rawMessage);
 
@@ -242,6 +251,7 @@ export function routeMessage(
   })).filter((s) => s.score > 0);
 
   // 1) EMERGENCY short-circuit — safety beats everything (plan §4 / review H4).
+  // Runs BEFORE any org config so no per-org setting can suppress an escalation.
   const emergencies = scored
     .filter((s) => s.entry.category === "emergency")
     .sort((a, b) => b.score - a.score);
@@ -260,6 +270,23 @@ export function routeMessage(
       };
     }
   }
+
+  // 1b) Custom FAQ — admin-authored answers take precedence over the built-in
+  // catalog (but never over an emergency). Matched on the normalized text.
+  const customFaq = matchCustomFaq(text, config.customFaqs);
+  if (customFaq) {
+    return {
+      action: "ANSWER",
+      intentId: `custom-faq:${customFaq.id}`,
+      confidence: 1,
+      reply: customFaq.answer,
+      issueType: null,
+      urgency: null,
+      escalate: false,
+    };
+  }
+
+  const disabled = disabledIntentIds(config);
 
   if (scored.length === 0) {
     // Nothing matched. Detect pure noise; otherwise fall back.
@@ -311,6 +338,25 @@ export function routeMessage(
   const entry = top.entry;
   let action = entry.action;
 
+  // 4a) Services the org has turned off: if the winning intent is for a service
+  // this org doesn't offer, politely decline/redirect instead of answering
+  // "yes we do that" — OR letting it fall through to the LLM (which would also
+  // happily offer it). This runs BEFORE the FALLBACK_LLM gate so a disabled
+  // FALLBACK_LLM intent (e.g. boiler) still declines, but still respects the
+  // low-harm confidence floor so a weak spurious match doesn't wrongly decline.
+  // Emergencies already returned above, so this can never block a hazard.
+  if (disabled.has(entry.id) && confidence >= LOW_HARM_THRESHOLD) {
+    return {
+      action: "REDIRECT",
+      intentId: entry.id,
+      confidence,
+      reply: declineReply(),
+      issueType: null,
+      urgency: null,
+      escalate: false,
+    };
+  }
+
   if (action === "FALLBACK_LLM") return { ...FALLBACK, confidence };
 
   if (confidence < LOW_HARM_THRESHOLD) return { ...FALLBACK, confidence };
@@ -323,11 +369,19 @@ export function routeMessage(
     action = "SUBMIT";
   }
 
+  // Personalize the canned answer with the org's business info where we have a
+  // concrete field for this intent; otherwise the safe generic text stands.
+  const baseReply = buildReply(entry, action, known);
+  const reply =
+    action === "ANSWER"
+      ? personalizeAnswer(entry.id, baseReply, config.businessInfo)
+      : baseReply;
+
   return {
     action,
     intentId: entry.id,
     confidence,
-    reply: buildReply(entry, action, known),
+    reply,
     issueType: entry.issueTypeMapping,
     urgency: entry.urgencyHint,
     escalate: action === "ESCALATE",

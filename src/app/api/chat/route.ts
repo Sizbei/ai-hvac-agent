@@ -21,6 +21,7 @@ import {
 import { checkTokenBudget, addTokenUsage } from "@/lib/ai/token-budget";
 import { isExtractionComplete } from "@/lib/ai/extraction-schema";
 import { routeMessage } from "@/lib/ai/intent-router";
+import { getRouterConfig } from "@/lib/admin/org-config-queries";
 import { CONFIRM_REPLY } from "@/lib/ai/constants";
 import { extractSlots } from "@/lib/ai/slot-extract";
 import { escalateSession } from "@/lib/ai/escalate-service";
@@ -194,10 +195,17 @@ export async function POST(request: NextRequest) {
     const nearTurnLimit = newTurnCount >= MAX_TURNS;
 
     // 7. Deterministic intent routing — answer/act on common messages with NO
-    // LLM call. Falls back to the LLM for anything novel/ambiguous.
+    // LLM call. Falls back to the LLM for anything novel/ambiguous. The org's
+    // config (disabled services, business-info personalization, custom FAQs) is
+    // applied as an overlay — but it can never suppress an emergency.
     const knownSlots = parseKnownSlots(session.metadata);
     if (ROUTER_ENABLED) {
-      const verdict = routeMessage(guardrailResult.sanitized, knownSlots);
+      const routerConfig = await getRouterConfig(organizationId);
+      const verdict = routeMessage(
+        guardrailResult.sanitized,
+        knownSlots,
+        routerConfig,
+      );
       const extracted = extractSlots(guardrailResult.sanitized);
 
       // A "slot provision" turn: the customer supplied an address/phone/email.

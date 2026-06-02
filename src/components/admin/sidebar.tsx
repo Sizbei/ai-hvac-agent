@@ -9,6 +9,7 @@ import {
   BarChart3,
   Users,
   Building2,
+  Settings,
   ChevronLeft,
   ChevronRight,
   LogOut,
@@ -37,6 +38,7 @@ const NAV_ITEMS: readonly NavItem[] = [
   { label: 'AI Insights', href: '/admin/insights', icon: BarChart3 },
   { label: 'Customers', href: '/admin/customers', icon: Building2 },
   { label: 'Technicians', href: '/admin/technicians', icon: Users },
+  { label: 'Chatbot Settings', href: '/admin/settings', icon: Settings },
 ] as const;
 
 interface SidebarProps {

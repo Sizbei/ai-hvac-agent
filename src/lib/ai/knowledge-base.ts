@@ -1725,6 +1725,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     title: "Boiler / radiator / hydronic heat",
     triggerKeywords: [
       "boiler",
+      "boilers",
       "radiator",
       "radiators",
       "hydronic",
