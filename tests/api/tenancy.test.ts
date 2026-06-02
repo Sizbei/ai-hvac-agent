@@ -81,7 +81,13 @@ function req(body: unknown): NextRequest {
   return new NextRequest(new URL("http://localhost:3000/api/session/feedback"), {
     method: "POST",
     body: JSON.stringify(body),
-    headers: { "Content-Type": "application/json" },
+    // Same-origin Origin so the CSRF guard admits the request (the host here
+    // matches request.nextUrl.origin). Without it the guard 403s before the
+    // route logic these tests assert on.
+    headers: {
+      "Content-Type": "application/json",
+      Origin: "http://localhost:3000",
+    },
   });
 }
 

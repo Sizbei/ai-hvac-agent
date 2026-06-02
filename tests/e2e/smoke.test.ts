@@ -333,6 +333,12 @@ function createMockRequest(options: {
     method: options.method ?? 'GET',
     headers: { ...options.headers },
   };
+  // Default to a same-origin Origin header so the session-CSRF guard admits the
+  // request, mirroring a real browser fetch from the app's own pages. A test
+  // can still override `Origin` (e.g. to assert a cross-origin 403).
+  if (init.headers['Origin'] === undefined) {
+    init.headers['Origin'] = url.origin;
+  }
   if (options.body) {
     init.body = JSON.stringify(options.body);
     init.headers['Content-Type'] = 'application/json';
@@ -498,6 +504,38 @@ describe('E2E Smoke Test: Full Customer-to-Admin Flow', () => {
     expect(body.success).toBe(true);
     expect(body.data.referenceNumber).toBeDefined();
     expect(body.data.status).toBe('submitted');
+  });
+
+  it('POST /api/session/confirm rejects a cross-origin request with 403 (CSRF guard)', async () => {
+    mockGetSessionToken.mockResolvedValue('mock-session-token-123');
+    const request = createMockRequest({
+      method: 'POST',
+      url: 'http://localhost:3000/api/session/confirm',
+      headers: { Origin: 'https://evil.com' },
+      body: { issueType: 'cooling_not_working', urgency: 'high', description: 'x' },
+    });
+    const response = await confirmSession(request);
+    expect(response.status).toBe(403);
+    // The guard runs before the session is even loaded — no DB write happened.
+    expect((await response.json()).error.code).toBe('FORBIDDEN_ORIGIN');
+  });
+
+  it('POST /api/session/confirm rejects a non-JSON content-type with 415', async () => {
+    mockGetSessionToken.mockResolvedValue('mock-session-token-123');
+    // Same-origin but text/plain — the no-preflight form-POST vector.
+    const request = new NextRequest(
+      new URL('http://localhost:3000/api/session/confirm'),
+      {
+        method: 'POST',
+        headers: {
+          Origin: 'http://localhost:3000',
+          'Content-Type': 'text/plain',
+        },
+        body: '{"issueType":"cooling_not_working","urgency":"high","description":"x"}',
+      },
+    );
+    const response = await confirmSession(request);
+    expect(response.status).toBe(415);
   });
 
   it('POST /api/session/escalate escalates to human agent', async () => {

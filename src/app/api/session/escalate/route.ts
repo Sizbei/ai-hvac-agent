@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { customerSessions } from "@/lib/db/schema";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { getSessionToken } from "@/lib/session";
+import { isSameOriginRequest } from "@/lib/session-csrf";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { escalateSession } from "@/lib/ai/escalate-service";
 import { logger } from "@/lib/logger";
@@ -18,6 +19,13 @@ export async function POST(request: NextRequest) {
 
   if (!rateCheck.allowed) {
     return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
+  }
+
+  // CSRF: the session cookie is SameSite=None (needed for the cross-site
+  // iframe), so a forged cross-site POST would carry it. Only same-origin
+  // requests (the legitimate /embed or /chat caller) may act on the session.
+  if (!isSameOriginRequest(request)) {
+    return errorResponse("Cross-origin request rejected", "FORBIDDEN_ORIGIN", 403);
   }
 
   try {

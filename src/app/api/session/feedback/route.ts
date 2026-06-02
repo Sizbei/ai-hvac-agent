@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { customerSessions, auditLog } from "@/lib/db/schema";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { getSessionToken } from "@/lib/session";
+import { isSameOriginRequest, hasJsonContentType } from "@/lib/session-csrf";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
 
@@ -30,6 +31,15 @@ export async function POST(request: NextRequest) {
   );
   if (!rateCheck.allowed) {
     return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
+  }
+
+  // CSRF: session cookie is SameSite=None — only same-origin callers may act.
+  if (!isSameOriginRequest(request)) {
+    return errorResponse("Cross-origin request rejected", "FORBIDDEN_ORIGIN", 403);
+  }
+  // Defense-in-depth: block the no-preflight text/plain form-POST vector.
+  if (!hasJsonContentType(request)) {
+    return errorResponse("Expected application/json", "UNSUPPORTED_MEDIA_TYPE", 415);
   }
 
   try {
