@@ -7,6 +7,7 @@ import { customerSessions, messages } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { errorResponse } from "@/lib/api-response";
 import { getSessionToken } from "@/lib/session";
+import { isSameOriginRequest, hasJsonContentType } from "@/lib/session-csrf";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { SYSTEM_PROMPT } from "@/lib/ai/system-prompt";
 import { sanitizeInput } from "@/lib/ai/guardrails";
@@ -75,6 +76,17 @@ export async function POST(request: NextRequest) {
 
   if (!rateCheck.allowed) {
     return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
+  }
+
+  // CSRF: the session cookie is SameSite=None, so a forged cross-site POST
+  // would carry it. Only same-origin JSON requests (the legitimate chat client)
+  // may push messages into the session — this blocks the text/plain form-POST
+  // vector that could otherwise inject content / manipulate session metadata.
+  if (!isSameOriginRequest(request)) {
+    return errorResponse("Cross-origin request rejected", "FORBIDDEN_ORIGIN", 403);
+  }
+  if (!hasJsonContentType(request)) {
+    return errorResponse("Expected application/json", "UNSUPPORTED_MEDIA_TYPE", 415);
   }
 
   try {
