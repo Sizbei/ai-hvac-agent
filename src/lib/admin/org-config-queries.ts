@@ -45,6 +45,8 @@ export async function getOrgConfig(
     disabledServiceTags: row.disabledServiceTags ?? [],
     businessInfo: (row.businessInfo as BusinessInfo) ?? {},
     allowedOrigins: row.allowedOrigins ?? [],
+    chatTokenBudget: row.chatTokenBudget ?? null,
+    chatMaxTurns: row.chatMaxTurns ?? null,
   };
 }
 
@@ -76,6 +78,10 @@ export async function updateOrgConfig(
     patch.businessInfo = update.businessInfo;
   if (update.allowedOrigins !== undefined)
     patch.allowedOrigins = update.allowedOrigins;
+  if (update.chatTokenBudget !== undefined)
+    patch.chatTokenBudget = update.chatTokenBudget;
+  if (update.chatMaxTurns !== undefined)
+    patch.chatMaxTurns = update.chatMaxTurns;
 
   // Upsert keyed on the org (the PK). onConflictDoUpdate applies the same patch
   // to an existing row. The insert values fill required NOT-NULL JSON columns
@@ -93,6 +99,8 @@ export async function updateOrgConfig(
       disabledServiceTags: update.disabledServiceTags ?? [],
       businessInfo: update.businessInfo ?? {},
       allowedOrigins: update.allowedOrigins ?? [],
+      chatTokenBudget: update.chatTokenBudget ?? null,
+      chatMaxTurns: update.chatMaxTurns ?? null,
     })
     .onConflictDoUpdate({
       target: organizationSettings.organizationId,

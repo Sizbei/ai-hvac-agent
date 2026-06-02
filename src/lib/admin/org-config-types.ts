@@ -1,5 +1,11 @@
 import { z } from "zod";
 import { issueTypeValues } from "@/lib/ai/extraction-schema";
+import {
+  TOKEN_BUDGET_MIN,
+  TOKEN_BUDGET_MAX,
+  MAX_TURNS_MIN,
+  MAX_TURNS_MAX,
+} from "@/lib/ai/chat-limits";
 
 /**
  * Per-organization chatbot configuration — the shape the admin edits and the
@@ -89,6 +95,22 @@ export const orgConfigUpdateSchema = z
       )
       .max(50)
       .optional(),
+    // Conversation limits. `null` resets to the system default. Bounds mirror
+    // the resolve* guards so an out-of-range value is rejected at the boundary.
+    chatTokenBudget: z
+      .number()
+      .int()
+      .min(TOKEN_BUDGET_MIN)
+      .max(TOKEN_BUDGET_MAX)
+      .nullable()
+      .optional(),
+    chatMaxTurns: z
+      .number()
+      .int()
+      .min(MAX_TURNS_MIN)
+      .max(MAX_TURNS_MAX)
+      .nullable()
+      .optional(),
   })
   .strict();
 
@@ -105,6 +127,9 @@ export interface OrgConfig {
   readonly disabledServiceTags: readonly string[];
   readonly businessInfo: BusinessInfo;
   readonly allowedOrigins: readonly string[];
+  // null = use the system default (DEFAULT_TOKEN_BUDGET / DEFAULT_MAX_TURNS).
+  readonly chatTokenBudget: number | null;
+  readonly chatMaxTurns: number | null;
 }
 
 export const DEFAULT_ORG_CONFIG: OrgConfig = {
@@ -117,6 +142,8 @@ export const DEFAULT_ORG_CONFIG: OrgConfig = {
   disabledServiceTags: [],
   businessInfo: {},
   allowedOrigins: [],
+  chatTokenBudget: null,
+  chatMaxTurns: null,
 };
 
 // ── Custom FAQ ──

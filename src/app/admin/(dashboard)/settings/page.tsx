@@ -7,6 +7,7 @@ import {
   Building2,
   MessageSquarePlus,
   Code2,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { useOrgSettings } from '@/hooks/use-org-settings';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -17,6 +18,7 @@ import { ServicesPanel } from '@/components/admin/settings/services-panel';
 import { BusinessInfoPanel } from '@/components/admin/settings/business-info-panel';
 import { CustomFaqsPanel } from '@/components/admin/settings/custom-faqs-panel';
 import { EmbedPanel } from '@/components/admin/settings/embed-panel';
+import { ConversationLimitsPanel } from '@/components/admin/settings/conversation-limits-panel';
 
 export default function SettingsPage() {
   const settings = useOrgSettings();
@@ -66,6 +68,10 @@ export default function SettingsPage() {
               <Code2 className="size-4" />
               Embed &amp; Keys
             </TabsTrigger>
+            <TabsTrigger value="limits">
+              <SlidersHorizontal className="size-4" />
+              Limits
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="branding" className="mt-6">
@@ -90,6 +96,12 @@ export default function SettingsPage() {
           </TabsContent>
           <TabsContent value="embed" className="mt-6">
             <EmbedPanel config={settings.config} onSave={settings.saveConfig} />
+          </TabsContent>
+          <TabsContent value="limits" className="mt-6">
+            <ConversationLimitsPanel
+              config={settings.config}
+              onSave={settings.saveConfig}
+            />
           </TabsContent>
         </Tabs>
       )}
