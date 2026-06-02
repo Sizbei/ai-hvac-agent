@@ -121,12 +121,11 @@ vi.mock('@/lib/db', () => {
   };
 });
 
-// The confirm route resolves a CRM customer via findCustomerIdByContact (a
-// read-only lookup) and upserts the customer inside its atomic batch. The
-// lookup is stubbed so the confirm flow test stays focused on the
-// request-submission path; the upsert itself flows through the mocked db.batch.
+// The confirm route resolves (and atomically creates) the CRM customer via
+// upsertCustomerByContact before its batch. It's stubbed to return a fixed id
+// so the confirm flow test stays focused on the request-submission path.
 vi.mock('@/lib/admin/crm-queries', () => ({
-  findCustomerIdByContact: vi.fn().mockResolvedValue('mock-customer-id'),
+  upsertCustomerByContact: vi.fn().mockResolvedValue('mock-customer-id'),
 }));
 
 vi.mock('@/lib/db/schema', () => ({
@@ -445,9 +444,9 @@ describe('E2E Smoke Test: Full Customer-to-Admin Flow', () => {
       },
     ]);
 
-    // Batch insert order: [0] customer upsert (void), [1] service request
-    // insert (returning), [2] audit log insert (void, falls through to default).
-    mockDbInsert.mockResolvedValueOnce(undefined);
+    // The customer upsert now happens via the (mocked) upsertCustomerByContact
+    // BEFORE the batch, so the batch inserts are: [0] service request insert
+    // (returning), [1] audit log insert (void, falls through to default).
     mockDbInsert.mockResolvedValueOnce([
       {
         id: MOCK_REQUEST_ID,
@@ -588,16 +587,19 @@ describe('E2E Smoke Test: Full Customer-to-Admin Flow', () => {
   it('POST /api/admin/requests/[id]/assign assigns a technician', async () => {
     mockGetAdminSession.mockResolvedValue(mockAdminSession);
     mockAssignTechnician.mockResolvedValue({
-      id: MOCK_REQUEST_ID,
-      status: 'assigned',
-      issueType: 'cooling_not_working',
-      urgency: 'high',
-      description: 'AC not cooling',
-      referenceNumber: 'HVAC-TEST1234',
-      customerName: 'Test User',
-      assignedToName: 'Tech A',
-      createdAt: '2026-01-01T00:00:00Z',
-      updatedAt: '2026-01-01T00:00:00Z',
+      ok: true,
+      request: {
+        id: MOCK_REQUEST_ID,
+        status: 'assigned',
+        issueType: 'cooling_not_working',
+        urgency: 'high',
+        description: 'AC not cooling',
+        referenceNumber: 'HVAC-TEST1234',
+        customerName: 'Test User',
+        assignedToName: 'Tech A',
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+      },
     });
 
     const request = createMockRequest({

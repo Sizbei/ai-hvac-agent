@@ -13,6 +13,7 @@ export function useAdminCustomers() {
       const res = await fetch('/api/admin/customers');
       const json = await res.json();
       if (json.success) {
+        setError(null);
         setCustomers(json.data.customers);
       } else {
         setError(json.error?.message ?? 'Failed to load customers');
@@ -25,7 +26,7 @@ export function useAdminCustomers() {
   }, []);
 
   useEffect(() => {
-    fetch_();
+    void fetch_();
   }, [fetch_]);
 
   return { customers, isLoading, error, refetch: fetch_ } as const;

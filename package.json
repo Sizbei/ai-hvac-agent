@@ -9,6 +9,7 @@
     "lint": "eslint",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "npx tsx src/lib/db/migrate.ts",
+    "db:backfill:customer-hashes": "npx tsx src/lib/db/backfill-customer-hashes.ts",
     "db:seed": "npx tsx src/lib/db/seed.ts",
     "db:seed:demo": "npx tsx src/lib/db/seed-demo.ts",
     "db:push": "drizzle-kit push",

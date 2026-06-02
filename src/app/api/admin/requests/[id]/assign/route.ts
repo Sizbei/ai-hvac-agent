@@ -39,17 +39,29 @@ export async function POST(
 
     const { technicianId } = parsed.data;
 
-    const updatedRequest = await assignTechnician(
+    const result = await assignTechnician(
       session.organizationId,
       id,
       technicianId,
     );
-    if (!updatedRequest) {
-      return errorResponse(
-        "Request or technician not found",
-        "NOT_FOUND",
-        404,
-      );
+
+    if (!result.ok) {
+      switch (result.reason) {
+        case "technician_not_found":
+          return errorResponse(
+            "Technician not found, not active, or not a technician",
+            "TECHNICIAN_NOT_FOUND",
+            404,
+          );
+        case "request_not_found":
+          return errorResponse("Request not found", "NOT_FOUND", 404);
+        case "request_not_assignable":
+          return errorResponse(
+            `Request cannot be assigned while it is '${result.currentStatus}'`,
+            "REQUEST_NOT_ASSIGNABLE",
+            409,
+          );
+      }
     }
 
     await logAudit({
@@ -61,7 +73,7 @@ export async function POST(
       details: JSON.stringify({ technicianId }),
     });
 
-    return successResponse(updatedRequest);
+    return successResponse(result.request);
   } catch (error: unknown) {
     logger.error({ error }, "Failed to assign technician");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);

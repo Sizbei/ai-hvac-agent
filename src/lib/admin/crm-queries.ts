@@ -11,7 +11,7 @@ import {
   auditLog,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
-import { encrypt, decrypt } from "@/lib/crypto";
+import { encrypt, decrypt, blindIndex } from "@/lib/crypto";
 import type {
   CustomerRecord,
   CustomerDetail,
@@ -253,6 +253,13 @@ export async function createCustomer(
   organizationId: string,
   input: CreateCustomerInput,
 ): Promise<CustomerRecord> {
+  // Populate the blind-index hashes so admin-created customers participate in
+  // the same per-org uniqueness as chat-created ones (no split-brain dupes).
+  const { emailHash, phoneHash } = computeContactHashes({
+    email: input.email ?? null,
+    phone: input.phone ?? null,
+  });
+
   const [created] = await db
     .insert(customers)
     .values({
@@ -261,6 +268,8 @@ export async function createCustomer(
       phoneEncrypted: input.phone ? encrypt(input.phone) : null,
       emailEncrypted: input.email ? encrypt(input.email) : null,
       addressEncrypted: input.address ? encrypt(input.address) : null,
+      emailHash,
+      phoneHash,
       propertyType: input.propertyType ?? null,
       propertySqft: input.propertySqft ?? null,
       notes: input.notes ?? null,
@@ -350,26 +359,46 @@ export interface FindOrCreateCustomerInput {
   readonly address: string | null;
 }
 
-function normalizeEmail(value: string | null): string | null {
+export function normalizeEmail(value: string | null): string | null {
   if (!value) return null;
   const trimmed = value.trim().toLowerCase();
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function normalizePhone(value: string | null): string | null {
+export function normalizePhone(value: string | null): string | null {
   if (!value) return null;
   const digits = value.replace(/\D/g, "");
   return digits.length > 0 ? digits : null;
 }
 
 /**
+ * Computes the blind-index hashes to store alongside a customer's encrypted
+ * email/phone. Returns null for a field that is absent. Centralized so the
+ * write path (customer upsert) and the read path (lookup) always normalize and
+ * hash identically.
+ */
+export function computeContactHashes(input: {
+  readonly email: string | null;
+  readonly phone: string | null;
+}): { readonly emailHash: string | null; readonly phoneHash: string | null } {
+  const normalizedEmail = normalizeEmail(input.email);
+  const normalizedPhone = normalizePhone(input.phone);
+  return {
+    emailHash: normalizedEmail ? blindIndex(normalizedEmail) : null,
+    phoneHash: normalizedPhone ? blindIndex(normalizedPhone) : null,
+  };
+}
+
+/**
  * Finds an existing customer id for the org by email (case-insensitive, trimmed),
  * falling back to phone (non-digits stripped). Returns null when nothing matches.
  *
- * Because the PII columns are encrypted with a random IV (non-deterministic),
- * matching cannot be done with a SQL equality filter — existing rows are
- * decrypted in application code and compared. Email is matched across all rows
- * first (the stronger identity key); phone is a secondary fallback.
+ * Primary path: an indexed equality lookup on the deterministic blind-index
+ * (HMAC) columns — fast and used by the unique constraint to make dedupe
+ * atomic. Fallback path: for legacy rows written before the hash columns
+ * existed (emailHash/phoneHash still NULL), decrypt-and-compare in app code so
+ * those customers still dedupe correctly until backfilled. Email is the
+ * stronger identity key and is matched first; phone is the secondary fallback.
  */
 export async function findCustomerIdByContact(
   organizationId: string,
@@ -380,17 +409,57 @@ export async function findCustomerIdByContact(
 
   if (!targetEmail && !targetPhone) return null;
 
-  const existing = await db
+  // Fast path — indexed lookup on the blind-index columns.
+  if (targetEmail) {
+    const [byEmail] = await db
+      .select({ id: customers.id })
+      .from(customers)
+      .where(
+        withTenant(
+          customers,
+          organizationId,
+          eq(customers.emailHash, blindIndex(targetEmail)),
+        ),
+      )
+      .limit(1);
+    if (byEmail) return byEmail.id;
+  }
+
+  if (targetPhone) {
+    const [byPhone] = await db
+      .select({ id: customers.id })
+      .from(customers)
+      .where(
+        withTenant(
+          customers,
+          organizationId,
+          eq(customers.phoneHash, blindIndex(targetPhone)),
+        ),
+      )
+      .limit(1);
+    if (byPhone) return byPhone.id;
+  }
+
+  // Fallback — scan rows that have no blind index yet (pre-migration data).
+  const legacy = await db
     .select({
       id: customers.id,
       emailEncrypted: customers.emailEncrypted,
       phoneEncrypted: customers.phoneEncrypted,
+      emailHash: customers.emailHash,
+      phoneHash: customers.phoneHash,
     })
     .from(customers)
-    .where(withTenant(customers, organizationId));
+    .where(
+      withTenant(
+        customers,
+        organizationId,
+        sql`(${customers.emailHash} IS NULL AND ${customers.phoneHash} IS NULL)`,
+      ),
+    );
 
   if (targetEmail) {
-    for (const row of existing) {
+    for (const row of legacy) {
       const decryptedEmail = normalizeEmail(safeDecrypt(row.emailEncrypted));
       if (decryptedEmail && decryptedEmail === targetEmail) {
         return row.id;
@@ -399,7 +468,7 @@ export async function findCustomerIdByContact(
   }
 
   if (targetPhone) {
-    for (const row of existing) {
+    for (const row of legacy) {
       const decryptedPhone = normalizePhone(safeDecrypt(row.phoneEncrypted));
       if (decryptedPhone && decryptedPhone === targetPhone) {
         return row.id;
@@ -411,33 +480,97 @@ export async function findCustomerIdByContact(
 }
 
 /**
- * Finds an existing customer for the org (see {@link findCustomerIdByContact})
- * or creates a new one, returning its id.
+ * Atomically resolves the canonical customer id for a contact, creating the
+ * row if it doesn't exist. Safe under concurrency: when two callers race for
+ * the same email/phone, the unique blind-index constraint forces a conflict
+ * and `onConflictDoUpdate` returns the SAME existing id to both — so they can
+ * never create duplicate customer rows. (A plain find-then-insert has a
+ * TOCTOU window where both find nothing and both insert.)
+ *
+ * The conflict target is the email-hash index when an email is present,
+ * otherwise the phone-hash index. A no-op `updatedAt` touch is used as the
+ * conflict action purely so RETURNING yields the surviving row's id.
+ *
+ * Edge case: ON CONFLICT can arbiter only ONE index. If a row carries both an
+ * email and a phone and two submits race on the SAME phone but DIFFERENT email
+ * (so the email arbiter doesn't catch it), the phone unique index raises an
+ * uncaught unique violation, surfacing as a 500 the caller can retry. This is
+ * rare (findCustomerIdByContact, run just above, checks both keys first) and
+ * never corrupts data or creates a duplicate — it just fails that one request.
  */
-export async function findOrCreateCustomer(
+export async function upsertCustomerByContact(
   organizationId: string,
   input: FindOrCreateCustomerInput,
 ): Promise<string> {
+  const { emailHash, phoneHash } = computeContactHashes({
+    email: input.email,
+    phone: input.phone,
+  });
+
+  const values = {
+    organizationId,
+    nameEncrypted: encrypt(input.name ?? UNKNOWN_CUSTOMER_NAME),
+    phoneEncrypted: input.phone ? encrypt(input.phone) : null,
+    emailEncrypted: input.email ? encrypt(input.email) : null,
+    addressEncrypted: input.address ? encrypt(input.address) : null,
+    emailHash,
+    phoneHash,
+  };
+
+  // No contact key at all — nothing to dedupe on, just insert.
+  if (!emailHash && !phoneHash) {
+    const [created] = await db
+      .insert(customers)
+      .values(values)
+      .returning({ id: customers.id });
+    if (!created) throw new Error("Failed to create customer");
+    return created.id;
+  }
+
+  // If we already know the customer (incl. legacy non-hashed rows), reuse it.
   const existingId = await findCustomerIdByContact(organizationId, {
     email: input.email,
     phone: input.phone,
   });
   if (existingId) return existingId;
 
-  const [created] = await db
+  // Pick ONE arbiter index for ON CONFLICT — email when present (the stronger
+  // identity key), else phone. Postgres can only infer a PARTIAL unique index
+  // when the conflict spec repeats the index predicate, so targetWhere supplies
+  // the matching `... IS NOT NULL`. Without it Postgres raises "no unique or
+  // exclusion constraint matching the ON CONFLICT specification" at runtime.
+  const onEmail = Boolean(emailHash);
+  const conflictTarget = onEmail
+    ? [customers.organizationId, customers.emailHash]
+    : [customers.organizationId, customers.phoneHash];
+  const conflictPredicate = onEmail
+    ? sql`${customers.emailHash} IS NOT NULL`
+    : sql`${customers.phoneHash} IS NOT NULL`;
+
+  const [row] = await db
     .insert(customers)
-    .values({
-      organizationId,
-      nameEncrypted: encrypt(input.name ?? UNKNOWN_CUSTOMER_NAME),
-      phoneEncrypted: input.phone ? encrypt(input.phone) : null,
-      emailEncrypted: input.email ? encrypt(input.email) : null,
-      addressEncrypted: input.address ? encrypt(input.address) : null,
+    .values(values)
+    .onConflictDoUpdate({
+      target: conflictTarget,
+      targetWhere: conflictPredicate,
+      set: { updatedAt: new Date() },
     })
     .returning({ id: customers.id });
 
-  if (!created) throw new Error("Failed to create customer");
+  if (!row) throw new Error("Failed to upsert customer");
+  return row.id;
+}
 
-  return created.id;
+/**
+ * Finds an existing customer for the org (see {@link findCustomerIdByContact})
+ * or creates a new one, returning its id. Delegates to the atomic, race-safe
+ * {@link upsertCustomerByContact}.
+ */
+export async function findOrCreateCustomer(
+  organizationId: string,
+  input: FindOrCreateCustomerInput,
+): Promise<string> {
+  return upsertCustomerByContact(organizationId, input);
 }
 
 /**

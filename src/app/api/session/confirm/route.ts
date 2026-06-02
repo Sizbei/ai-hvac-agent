@@ -6,7 +6,6 @@ import {
   customerSessions,
   serviceRequests,
   auditLog,
-  customers,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { successResponse, errorResponse } from "@/lib/api-response";
@@ -15,7 +14,7 @@ import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { encrypt } from "@/lib/crypto";
 import { transition } from "@/lib/ai/state-machine";
 import { serviceRequestSchema } from "@/lib/ai/extraction-schema";
-import { findCustomerIdByContact } from "@/lib/admin/crm-queries";
+import { upsertCustomerByContact } from "@/lib/admin/crm-queries";
 import { logger } from "@/lib/logger";
 
 const DEMO_ORG_ID = "00000000-0000-0000-0000-000000000001";
@@ -88,14 +87,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Resolve the CRM customer for this request. The lookup is read-only; the
-    // customer row itself is upserted inside the atomic batch below so a failed
-    // submit can never leave an orphaned customer record behind.
-    const existingCustomerId = await findCustomerIdByContact(DEMO_ORG_ID, {
+    // Resolve (or atomically create) the canonical CRM customer for this
+    // contact BEFORE the batch. upsertCustomerByContact dedupes via a unique
+    // blind-index constraint, so two concurrent submits for the same
+    // email/phone converge on one customer id instead of creating duplicates.
+    // Doing it up front (not inside the batch) means the service request below
+    // always references a customer row that already exists — no dangling FK.
+    const customerId = await upsertCustomerByContact(DEMO_ORG_ID, {
+      name: parsed.data.customerName,
       email: parsed.data.customerEmail,
       phone: parsed.data.customerPhone,
+      address: parsed.data.address,
     });
-    const customerId = existingCustomerId ?? randomUUID();
 
     // Encrypt PII fields individually before insert per D-05
     const referenceNumber = generateReferenceNumber();
@@ -105,27 +108,10 @@ export async function POST(request: NextRequest) {
 
     // The neon-http driver does not support interactive `db.transaction()`
     // (it throws "No transactions support in neon-http driver"), so the
-    // customer upsert, service-request insert, session-status update, and
-    // audit-log insert are issued via `db.batch`, which neon executes as a
-    // single atomic (non-interactive) transaction. The customer upsert runs
-    // first so the service request's customerId FK resolves; when the customer
-    // already exists (existingCustomerId) onConflictDoNothing leaves it intact.
-    const [, insertedRequests] = await db.batch([
-      db
-        .insert(customers)
-        .values({
-          id: customerId,
-          organizationId: DEMO_ORG_ID,
-          nameEncrypted: encrypt(parsed.data.customerName ?? "Unknown"),
-          phoneEncrypted: parsed.data.customerPhone
-            ? encrypt(parsed.data.customerPhone)
-            : null,
-          emailEncrypted: parsed.data.customerEmail
-            ? encrypt(parsed.data.customerEmail)
-            : null,
-          addressEncrypted: encrypt(parsed.data.address),
-        })
-        .onConflictDoNothing(),
+    // service-request insert, session-status update, and audit-log insert are
+    // issued via `db.batch`, which neon executes as a single atomic
+    // (non-interactive) transaction.
+    const [insertedRequests] = await db.batch([
       db
         .insert(serviceRequests)
         .values({

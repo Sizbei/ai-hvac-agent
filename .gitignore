@@ -44,3 +44,4 @@ next-env.d.ts
 # tauri (rust build artifacts — never commit)
 src-tauri/target
 src-tauri/gen/schemas
+.claude/

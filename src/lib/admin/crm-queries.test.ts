@@ -34,6 +34,8 @@ vi.mock('@/lib/db', () => ({
 vi.mock('@/lib/crypto', () => ({
   encrypt: (v: string) => `enc:${v}`,
   decrypt: (v: string) => v.replace(/^enc:/, ''),
+  // Deterministic stand-in for the HMAC blind index: same input -> same token.
+  blindIndex: (v: string) => `bi:${v}`,
 }));
 
 vi.mock('@/lib/db/tenant', () => ({
@@ -60,6 +62,8 @@ vi.mock('@/lib/db/schema', () => ({
     emailEncrypted: 'customers.email',
     phoneEncrypted: 'customers.phone',
     addressEncrypted: 'customers.address',
+    emailHash: 'customers.emailHash',
+    phoneHash: 'customers.phoneHash',
     propertyType: 'customers.pt',
     propertySqft: 'customers.sqft',
     notes: 'customers.notes',
@@ -95,11 +99,9 @@ describe('findCustomerIdByContact', () => {
     expect(selectQueue.length).toBe(0);
   });
 
-  it('matches an existing customer by email (case-insensitive)', async () => {
-    selectQueue.push([
-      { id: 'c1', emailEncrypted: 'enc:alice@example.com', phoneEncrypted: null },
-      { id: 'c2', emailEncrypted: 'enc:bob@example.com', phoneEncrypted: null },
-    ]);
+  it('matches by the email blind index (fast path, indexed lookup)', async () => {
+    // Select #1 = email-hash lookup; returns the matching row directly.
+    selectQueue.push([{ id: 'c2' }]);
     const result = await findCustomerIdByContact(ORG, {
       email: 'BOB@Example.com',
       phone: null,
@@ -107,14 +109,9 @@ describe('findCustomerIdByContact', () => {
     expect(result).toBe('c2');
   });
 
-  it('falls back to phone when an email is supplied but does not match (regression: the old continue skipped this)', async () => {
-    selectQueue.push([
-      {
-        id: 'c1',
-        emailEncrypted: 'enc:alice@example.com',
-        phoneEncrypted: 'enc:(555) 010-0100',
-      },
-    ]);
+  it('falls back to the phone blind index when email does not match', async () => {
+    selectQueue.push([]); // #1 email-hash: no hit
+    selectQueue.push([{ id: 'c1' }]); // #2 phone-hash: hit
     const result = await findCustomerIdByContact(ORG, {
       email: 'someone-new@example.com',
       phone: '555-010-0100',
@@ -122,10 +119,31 @@ describe('findCustomerIdByContact', () => {
     expect(result).toBe('c1');
   });
 
-  it('returns null when nothing matches', async () => {
+  it('falls back to the legacy decrypt scan for rows with no blind index', async () => {
+    // Email only (no phone), so there are just two selects: the email-hash
+    // fast path, then the legacy scan.
+    selectQueue.push([]); // #1 email-hash: no hit
+    // #2 legacy scan (hashes NULL): decrypt-and-compare matches by email.
     selectQueue.push([
-      { id: 'c1', emailEncrypted: 'enc:alice@example.com', phoneEncrypted: null },
+      {
+        id: 'legacy-1',
+        emailEncrypted: 'enc:bob@example.com',
+        phoneEncrypted: null,
+        emailHash: null,
+        phoneHash: null,
+      },
     ]);
+    const result = await findCustomerIdByContact(ORG, {
+      email: 'BOB@Example.com',
+      phone: null,
+    });
+    expect(result).toBe('legacy-1');
+  });
+
+  it('returns null when nothing matches on any path', async () => {
+    selectQueue.push([]); // #1 email-hash
+    selectQueue.push([]); // #2 phone-hash
+    selectQueue.push([]); // #3 legacy scan
     const result = await findCustomerIdByContact(ORG, {
       email: 'nobody@example.com',
       phone: '999-999-9999',

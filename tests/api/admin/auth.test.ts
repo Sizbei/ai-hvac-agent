@@ -51,6 +51,7 @@ vi.mock('@/lib/logger', () => ({
 
 import { POST as loginHandler } from '@/app/api/auth/login/route';
 import { POST as logoutHandler } from '@/app/api/auth/logout/route';
+import { resetRateLimitStore } from '@/lib/rate-limit';
 
 function createMockRequest(options: {
   method?: string;
@@ -83,6 +84,9 @@ const mockAdminUser = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // The login route now enforces a real per-IP rate limit; clear the shared
+  // in-memory window so attempts don't accumulate across test cases.
+  resetRateLimitStore();
 });
 
 describe('POST /api/auth/login', () => {
@@ -110,8 +114,13 @@ describe('POST /api/auth/login', () => {
     expect(body.error.code).toBe('INVALID_CREDENTIALS');
   });
 
-  it('should return 403 for non-admin user', async () => {
+  // Non-admin and disabled accounts now return the SAME generic 401 as a
+  // wrong password / unknown email. Distinct 403 codes (FORBIDDEN /
+  // ACCOUNT_DISABLED) leaked whether an email mapped to a real account and
+  // what state it was in — useful intel for an attacker. We refuse to confirm.
+  it('should return a generic 401 for a non-admin user (no account-state leak)', async () => {
     mockDbSelect.mockResolvedValue([{ ...mockAdminUser, role: 'technician' }]);
+    mockBcryptCompare.mockResolvedValue(true);
 
     const request = createMockRequest({
       body: { email: 'tech@example.com', password: 'password123' },
@@ -119,13 +128,14 @@ describe('POST /api/auth/login', () => {
     const response = await loginHandler(request);
     const body = await response.json();
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(401);
     expect(body.success).toBe(false);
-    expect(body.error.code).toBe('FORBIDDEN');
+    expect(body.error.code).toBe('INVALID_CREDENTIALS');
   });
 
-  it('should return 403 for disabled admin account', async () => {
+  it('should return a generic 401 for a disabled admin account (no account-state leak)', async () => {
     mockDbSelect.mockResolvedValue([{ ...mockAdminUser, isActive: false }]);
+    mockBcryptCompare.mockResolvedValue(true);
 
     const request = createMockRequest({
       body: { email: 'admin@example.com', password: 'password123' },
@@ -133,9 +143,9 @@ describe('POST /api/auth/login', () => {
     const response = await loginHandler(request);
     const body = await response.json();
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(401);
     expect(body.success).toBe(false);
-    expect(body.error.code).toBe('ACCOUNT_DISABLED');
+    expect(body.error.code).toBe('INVALID_CREDENTIALS');
   });
 
   it('should return 401 for wrong password', async () => {

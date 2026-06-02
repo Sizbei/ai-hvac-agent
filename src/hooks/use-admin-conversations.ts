@@ -37,6 +37,7 @@ export function useAdminConversations(
   const fetchConversations = useCallback(async (): Promise<void> => {
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
+    setIsLoading(true);
 
     try {
       const params = new URLSearchParams();
@@ -75,13 +76,13 @@ export function useAdminConversations(
       setError('Could not connect to server. Please try again.');
     } finally {
       isFetchingRef.current = false;
+      setIsLoading(false);
     }
   }, [status, search, page, limit]);
 
   // Fetch on mount and when options change
   useEffect(() => {
-    setIsLoading(true);
-    fetchConversations().finally(() => setIsLoading(false));
+    void fetchConversations();
   }, [fetchConversations]);
 
   // Poll every 10 seconds

@@ -202,7 +202,7 @@ describe('POST /api/admin/requests/[id]/assign', () => {
       createdAt: '2026-01-01T00:00:00Z',
       updatedAt: '2026-01-01T00:00:00Z',
     };
-    mockAssignTechnician.mockResolvedValue(mockUpdated);
+    mockAssignTechnician.mockResolvedValue({ ok: true, request: mockUpdated });
 
     const request = createMockRequest({
       method: 'POST',
@@ -230,9 +230,33 @@ describe('POST /api/admin/requests/[id]/assign', () => {
     );
   });
 
-  it('should return 404 when request or technician not found', async () => {
+  it('should return 404 when the technician is not a valid active technician', async () => {
     mockGetAdminSession.mockResolvedValue(mockSession);
-    mockAssignTechnician.mockResolvedValue(null);
+    mockAssignTechnician.mockResolvedValue({
+      ok: false,
+      reason: 'technician_not_found',
+    });
+
+    const request = createMockRequest({
+      method: 'POST',
+      url: `http://localhost:3000/api/admin/requests/${requestId}/assign`,
+      body: { technicianId },
+    });
+    const response = await assignHandler(request, {
+      params: Promise.resolve({ id: requestId }),
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(body.error.code).toBe('TECHNICIAN_NOT_FOUND');
+  });
+
+  it('should return 404 when the request does not exist', async () => {
+    mockGetAdminSession.mockResolvedValue(mockSession);
+    mockAssignTechnician.mockResolvedValue({
+      ok: false,
+      reason: 'request_not_found',
+    });
 
     const request = createMockRequest({
       method: 'POST',
@@ -246,6 +270,30 @@ describe('POST /api/admin/requests/[id]/assign', () => {
 
     expect(response.status).toBe(404);
     expect(body.error.code).toBe('NOT_FOUND');
+  });
+
+  it('should return 409 when the request is not in an assignable state', async () => {
+    mockGetAdminSession.mockResolvedValue(mockSession);
+    mockAssignTechnician.mockResolvedValue({
+      ok: false,
+      reason: 'request_not_assignable',
+      currentStatus: 'in_progress',
+    });
+
+    const request = createMockRequest({
+      method: 'POST',
+      url: `http://localhost:3000/api/admin/requests/${requestId}/assign`,
+      body: { technicianId },
+    });
+    const response = await assignHandler(request, {
+      params: Promise.resolve({ id: requestId }),
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body.error.code).toBe('REQUEST_NOT_ASSIGNABLE');
+    // Audit must NOT be written for a rejected assignment.
+    expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
   it('should return 400 for invalid technicianId format', async () => {

@@ -2,11 +2,16 @@ import {
   randomBytes,
   createCipheriv,
   createDecipheriv,
+  createHmac,
 } from "node:crypto";
 
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 12;
 const AUTH_TAG_LENGTH = 16;
+
+// Domain-separation label so the blind-index HMAC key can never collide with
+// the AES encryption key, even though both are derived from ENCRYPTION_KEY.
+const BLIND_INDEX_DOMAIN = "hvac-blind-index-v1";
 
 function getEncryptionKey(): Buffer {
   const key = process.env.ENCRYPTION_KEY;
@@ -66,6 +71,35 @@ export function decrypt(ciphertext: string): string {
     decipher.final(),
   ]);
   return decrypted.toString("utf8");
+}
+
+/**
+ * Computes a deterministic, keyed blind index (HMAC-SHA256) of a value.
+ *
+ * AES-GCM ciphertext is non-deterministic (random IV per encryption), so two
+ * rows holding the same email/phone encrypt to different bytes — you can't
+ * dedupe or look them up without decrypting every row. A blind index gives a
+ * stable, keyed token for the SAME plaintext so we CAN enforce a UNIQUE
+ * constraint and do indexed equality lookups, without storing the value in a
+ * form that's reversible by a database reader (it's a keyed hash, not
+ * encryption). The HMAC key is derived from ENCRYPTION_KEY with a domain
+ * label so it never overlaps the AES key.
+ *
+ * Caller is responsible for normalizing the input first (lowercase email,
+ * digits-only phone) so equivalent values hash equally. Returns a 64-char hex
+ * digest, or null for empty/whitespace input.
+ */
+export function blindIndex(normalizedValue: string): string {
+  const trimmed = normalizedValue.trim();
+  if (trimmed.length === 0) {
+    throw new Error("blindIndex requires a non-empty value");
+  }
+  const key = getEncryptionKey();
+  return createHmac("sha256", key)
+    .update(BLIND_INDEX_DOMAIN)
+    .update("\0")
+    .update(trimmed)
+    .digest("hex");
 }
 
 /**
