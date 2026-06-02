@@ -31,15 +31,31 @@ export async function escalateSession(params: {
     return { ok: false, reason: result.reason };
   }
 
-  await db
+  // Guard the UPDATE by the EXPECTED current status too, so two concurrent
+  // escalations don't both "succeed": the first transitions the row, the second
+  // matches zero rows (status already moved) and we skip the duplicate audit
+  // entry. Closes the TOCTOU between the in-memory transition() check above and
+  // the write.
+  const [updated] = await db
     .update(customerSessions)
     .set({ status: "escalated", updatedAt: new Date() })
     .where(
       and(
         eq(customerSessions.id, sessionId),
         eq(customerSessions.organizationId, organizationId),
+        eq(customerSessions.status, currentStatus),
       ),
-    );
+    )
+    .returning({ id: customerSessions.id });
+
+  if (!updated) {
+    // Another request already moved the session on (or it's already escalated).
+    // An already-escalated session is a success (idempotent); anything else is
+    // a stale read — report it so the caller doesn't log a phantom escalation.
+    return currentStatus === "escalated"
+      ? { ok: true }
+      : { ok: false, reason: "already_transitioned" };
+  }
 
   await db.insert(auditLog).values({
     organizationId,

@@ -516,8 +516,9 @@ describe('E2E Smoke Test: Full Customer-to-Admin Flow', () => {
       },
     ]);
 
-    // Update and audit log
-    mockDbUpdate.mockResolvedValue(undefined);
+    // Update (now .returning() a row so the status-guarded escalate UPDATE
+    // reports it actually transitioned) and audit log.
+    mockDbUpdate.mockResolvedValue([{ id: MOCK_SESSION_ID }]);
     mockDbInsert.mockResolvedValue(undefined);
 
     // Override transition mock for escalation
