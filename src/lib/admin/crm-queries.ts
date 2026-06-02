@@ -490,6 +490,13 @@ export async function findCustomerIdByContact(
  * The conflict target is the email-hash index when an email is present,
  * otherwise the phone-hash index. A no-op `updatedAt` touch is used as the
  * conflict action purely so RETURNING yields the surviving row's id.
+ *
+ * Edge case: ON CONFLICT can arbiter only ONE index. If a row carries both an
+ * email and a phone and two submits race on the SAME phone but DIFFERENT email
+ * (so the email arbiter doesn't catch it), the phone unique index raises an
+ * uncaught unique violation, surfacing as a 500 the caller can retry. This is
+ * rare (findCustomerIdByContact, run just above, checks both keys first) and
+ * never corrupts data or creates a duplicate — it just fails that one request.
  */
 export async function upsertCustomerByContact(
   organizationId: string,
