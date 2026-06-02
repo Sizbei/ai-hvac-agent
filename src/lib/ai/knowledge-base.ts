@@ -904,6 +904,16 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
       "overnight",
       "holiday",
     ],
+    // "extra CHARGE / FEE for after hours" is a pricing question
+    // (logistics-after-hours-fee), not an availability question.
+    negationGuards: [
+      "charge",
+      "fee",
+      "cost more",
+      "extra for",
+      "surcharge",
+      "overtime",
+    ],
     action: "ANSWER",
     cannedResponse:
       "We offer support around the clock, and after-hours or weekend visits depend on availability — submit your request and our team will confirm the soonest time. If it's an emergency like a gas smell or no heat in freezing weather, please tell me right away.",
@@ -923,6 +933,17 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
       "eta",
       "how long until",
       "time to arrive",
+    ],
+    // "how long does a furnace/system LAST" is a lifespan question
+    // (replacement-lifespan), not a wait-time question.
+    negationGuards: [
+      "how long does",
+      "how long should",
+      "how long will my",
+      "lifespan",
+      "last",
+      "to install",
+      "to replace",
     ],
     action: "ANSWER",
     cannedResponse:
@@ -1005,6 +1026,9 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
       "what time",
       "closing time",
     ],
+    // "what time will the TECH arrive" is an arrival-window question, not a
+    // business-hours question.
+    negationGuards: ["tech arrive", "technician arrive", "the tech come"],
     action: "ANSWER",
     cannedResponse:
       "Our team is available to take requests around the clock, and a representative follows up to confirm scheduling. If you have an HVAC issue, I can start a request anytime.",
@@ -1066,6 +1090,30 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
       "new system",
       "repair only",
     ],
+    // More specific install/replacement intents take precedence: cost/sizing
+    // (pricing-*, replacement-*), rebates (efficiency-*), and specific
+    // equipment (mini-split, boiler, IAQ products).
+    negationGuards: [
+      "how much",
+      "cost",
+      "price",
+      "rebate",
+      "rebates",
+      "incentive",
+      "incentives",
+      "tax credit",
+      "mini split",
+      "minisplit",
+      "ductless",
+      "boiler",
+      "uv light",
+      "air purifier",
+      "humidifier",
+      "what size",
+      "how long does",
+      "repair or replace",
+      "second opinion",
+    ],
     action: "ANSWER",
     cannedResponse:
       "We handle both repairs and new installations. If you're considering an install or replacement, I can start a request and a technician will assess your needs. What's the service address?",
@@ -1087,8 +1135,10 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
       "goodman",
       "rheem",
       "mitsubishi",
-      "mini split",
     ],
+    // Mini-split / boiler / IAQ-product "do you service/install X" route to the
+    // dedicated equipment-* intents.
+    negationGuards: ["mini split", "minisplit", "ductless", "boiler", "uv light", "air purifier"],
     action: "ANSWER",
     cannedResponse:
       "Our technicians service all major HVAC brands and most makes and models. Do you have an issue with your system I can help start a request for?",
@@ -1143,6 +1193,20 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     category: "faq",
     title: "Warranty / guarantee",
     triggerKeywords: ["warranty", "guarantee", "guaranteed", "under warranty"],
+    // Personalized coverage/registration questions route to the dedicated
+    // warranty.* intents (which need a live lookup), and workmanship/"guarantee
+    // your work" routes to trust-guarantee.
+    negationGuards: [
+      "covered under warranty",
+      "is my warranty",
+      "is my system under warranty",
+      "still under warranty",
+      "register my warranty",
+      "warranty registration",
+      "guarantee your work",
+      "warranty on the labor",
+      "warranty your repairs",
+    ],
     action: "ANSWER",
     cannedResponse:
       "Our work is backed by a satisfaction guarantee, and a technician can confirm any manufacturer warranty on your specific equipment. Can I help start a service request?",
@@ -1271,6 +1335,660 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     urgencyHint: null,
     notes:
       "Maps to the existing escalation path (GUIDE.md 'Talk to a Human' → marks session escalated). Per system prompt, also trigger this on detected frustration or >15 turns. 'are you a bot?' is meta-are-you-bot, not necessarily a handoff request.",
+  },
+
+  // ─── Category 11 — PRICING / ESTIMATES ─────────────────────────────────────
+  // Cost intents customers type constantly. We never quote specific numbers
+  // (per-company, and a real price needs a diagnosis/assessment) — we set
+  // expectations and route to a request. ANSWER = low-harm informational.
+  {
+    id: "pricing-free-estimate",
+    category: "pricing",
+    title: "Free estimates / quotes",
+    triggerKeywords: [
+      "free estimate",
+      "free quote",
+      "free consultation",
+      "do you charge for a quote",
+      "charge to come out",
+      "cost to come give a price",
+    ],
+    negationGuards: ["diagnostic", "service call", "repair"],
+    action: "ANSWER",
+    cannedResponse:
+      "Estimates for a new system or replacement are typically free, while repair visits usually carry a diagnostic fee. I can have our team confirm the details for your situation — would you like me to start a request?",
+    infoNeeded: [],
+    issueTypeMapping: null,
+    urgencyHint: null,
+    notes:
+      "Industry split: replacement/install estimates free; repair visits carry a diagnostic fee (see pricing-diagnostic-fee). Don't promise it's free for a repair. Per-company policy — keep neutral.",
+  },
+  {
+    id: "pricing-diagnostic-fee",
+    category: "pricing",
+    title: "Service call / diagnostic fee",
+    triggerKeywords: [
+      "diagnostic fee",
+      "service call fee",
+      "service call charge",
+      "trip charge",
+      "trip fee",
+      "charge just to show up",
+      "cost to diagnose",
+      "how much to come out",
+    ],
+    action: "ANSWER",
+    cannedResponse:
+      "Repair visits usually include a diagnostic (service call) fee to cover the technician coming out and finding the problem. The exact amount and whether it's credited toward an approved repair varies — I can have our team confirm it for you. Want me to start a request?",
+    infoNeeded: [],
+    issueTypeMapping: null,
+    urgencyHint: null,
+    notes:
+      "Don't state a specific dollar amount (per-company). Mention the fee is often credited to an approved repair — see pricing-fee-waived.",
+  },
+  {
+    id: "pricing-fee-waived",
+    category: "pricing",
+    title: "Diagnostic fee waived/applied to repair",
+    triggerKeywords: [
+      "fee waived",
+      "fee applied",
+      "fee credited",
+      "applied to the repair",
+      "count toward the repair",
+      "still pay the fee if you fix it",
+      "waived with repair",
+    ],
+    action: "ANSWER",
+    cannedResponse:
+      "In many cases the diagnostic fee is credited toward the cost of an approved repair, so you're not paying twice. Our team can confirm how it works for your visit — would you like me to start a request?",
+    infoNeeded: [],
+    issueTypeMapping: null,
+    urgencyHint: null,
+    notes: "Common practice but per-company; keep it conditional ('in many cases').",
+  },
+  {
+    id: "pricing-cost-to-replace",
+    category: "pricing",
+    title: "Cost to replace a whole system",
+    triggerKeywords: [
+      "cost to replace",
+      "how much for a new system",
+      "price for a new furnace",
+      "price for a new ac",
+      "new unit cost",
+      "replace my whole system cost",
+      "ballpark for a new",
+    ],
+    action: "FALLBACK_LLM",
+    cannedResponse: "",
+    infoNeeded: [],
+    issueTypeMapping: null,
+    urgencyHint: null,
+    notes:
+      "FALLBACK_LLM: a real replacement number needs sizing/home assessment; the LLM can explain the ranges/factors and steer toward an estimate booking without committing to a price. Don't hardcode a number.",
+  },
+  {
+    id: "pricing-discounts",
+    category: "pricing",
+    title: "Discounts / specials / coupons",
+    triggerKeywords: [
+      "discount",
+      "coupon",
+      "current specials",
+      "any promotions",
+      "senior discount",
+      "military discount",
+      "veteran discount",
+      "first responder discount",
+    ],
+    action: "ANSWER",
+    cannedResponse:
+      "We may have seasonal promotions and discounts (for example for seniors, military, or first responders) — our team can tell you what's currently available. Would you like me to start a request so they can follow up?",
+    infoNeeded: [],
+    issueTypeMapping: null,
+    urgencyHint: null,
+    notes:
+      "Promotions are time-sensitive and per-company; never name a specific percentage or promo. Keep conditional.",
+  },
+  {
+    id: "pricing-second-opinion",
+    category: "pricing",
+    title: "Second opinion on another quote",
+    triggerKeywords: [
+      "second opinion",
+      "another company said",
+      "another contractor quoted",
+      "verify another quote",
+      "double check this quote",
+    ],
+    action: "ANSWER",
+    cannedResponse:
+      "We're happy to take a look and give you an honest second opinion on another company's diagnosis or quote. I can start a request so our team can follow up — would you like that?",
+    infoNeeded: [],
+    issueTypeMapping: null,
+    urgencyHint: null,
+    notes: "Many companies offer free second opinions on a written competitor diagnosis. Keep it welcoming, no price promise.",
+  },
+
+  // ─── Category 12 — MEMBERSHIP / MAINTENANCE PLANS ──────────────────────────
+  {
+    id: "membership-explainer",
+    category: "membership",
+    title: "Maintenance plan / membership — what is it",
+    triggerKeywords: [
+      "maintenance plan",
+      "service plan",
+      "membership",
+      "service agreement",
+      "comfort club",
+      "what do members get",
+      "whats included in the plan",
+    ],
+    negationGuards: ["cancel my membership", "am i a member"],
+    action: "ANSWER",
+    cannedResponse:
+      "A maintenance plan typically includes scheduled tune-ups, priority scheduling, and discounts on repairs to keep your system running efficiently and catch problems early. Our team can walk you through what's included and the cost — would you like me to start a request?",
+    infoNeeded: [],
+    issueTypeMapping: null,
+    urgencyHint: null,
+    notes:
+      "Per-company benefits/pricing — describe typical inclusions generically, don't quote a price. 'Am I a member?' is membership-account (FALLBACK_LLM).",
+  },
+  {
+    id: "membership-worth-it",
+    category: "membership",
+    title: "Is a maintenance plan worth it",
+    triggerKeywords: [
+      "is the plan worth it",
+      "worth getting the plan",
+      "benefit of the membership",
+      "will the plan save me money",
+      "why join the plan",
+    ],
+    action: "ANSWER",
+    cannedResponse:
+      "Regular maintenance helps your system run more efficiently, last longer, and avoid surprise breakdowns — and plan members often get repair discounts and priority service. Our team can go over the specifics so you can decide. Would you like me to start a request?",
+    infoNeeded: [],
+    issueTypeMapping: null,
+    urgencyHint: null,
+    notes: "Value framing only; no savings guarantee with a hard number.",
+  },
+  {
+    id: "membership-account",
+    category: "membership",
+    title: "Membership status / enrollment / next visit",
+    triggerKeywords: [
+      "am i a member",
+      "sign up for the plan",
+      "join the membership",
+      "enroll in the plan",
+      "my next tune up",
+      "when is my included service",
+    ],
+    action: "FALLBACK_LLM",
+    cannedResponse: "",
+    infoNeeded: [],
+    issueTypeMapping: null,
+    urgencyHint: null,
+    notes:
+      "FALLBACK_LLM: enrollment = lead capture; 'am I a member / next visit' needs a live account lookup. Deterministic layer can't resolve either.",
+  },
+
+  // ─── Category 13 — EFFICIENCY / REBATES / INCENTIVES ───────────────────────
+  // Time-sensitive content. NOTE: the federal Section 25C tax credit expired
+  // 12/31/2025 — do NOT claim an active federal tax credit. Steer to current
+  // utility/state rebates and a human for specifics.
+  {
+    id: "efficiency-rebates",
+    category: "efficiency",
+    title: "Rebates / incentives for a new system",
+    triggerKeywords: [
+      "rebate",
+      "rebates",
+      "incentive",
+      "incentives",
+      "utility rebate",
+      "energy rebate",
+      "heat pump rebate",
+    ],
+    action: "ANSWER",
+    cannedResponse:
+      "There are often utility or state rebates available for high-efficiency equipment like heat pumps, and the amounts change over time. Our team can point you to what currently applies in your area — would you like me to start a request so they can follow up?",
+    infoNeeded: [],
+    issueTypeMapping: null,
+    urgencyHint: null,
+    notes:
+      "Time-sensitive. Don't name specific dollar amounts or claim the expired federal 25C credit. Reviewed: 2026-06. Utility/state rebates and HEEHRA may apply; defer specifics to the team.",
+  },
+  {
+    id: "efficiency-tax-credit",
+    category: "efficiency",
+    title: "Tax credit for a new system",
+    triggerKeywords: [
+      "tax credit",
+      "tax write off",
+      "federal tax credit",
+      "write off a new furnace",
+      "write off a new ac",
+    ],
+    action: "ANSWER",
+    cannedResponse:
+      "Tax credits and incentives for HVAC equipment change year to year, so I'd point you to a tax professional for what currently applies. Our team can also tell you about any utility or manufacturer rebates available right now — want me to start a request?",
+    infoNeeded: [],
+    issueTypeMapping: null,
+    urgencyHint: null,
+    notes:
+      "The federal 25C credit expired 12/31/2025 — do NOT assert an active federal credit. Redirect to a tax professional + current rebates. Reviewed: 2026-06.",
+  },
+  {
+    id: "efficiency-savings",
+    category: "efficiency",
+    title: "Energy savings / SEER / efficiency questions",
+    triggerKeywords: [
+      "lower my energy bill",
+      "lower my electric bill",
+      "save on energy",
+      "more efficient system",
+      "what seer should i get",
+      "high efficiency unit",
+      "energy analysis",
+    ],
+    action: "FALLBACK_LLM",
+    cannedResponse: "",
+    infoNeeded: [],
+    issueTypeMapping: null,
+    urgencyHint: null,
+    notes:
+      "FALLBACK_LLM: SEER2/AFUE and efficiency-vs-cost tradeoffs are nuanced and home-specific; let the LLM explain and offer an assessment rather than a canned line.",
+  },
+
+  // ─── Category 14 — REPLACEMENT / SYSTEM AGE / SIZING ───────────────────────
+  {
+    id: "replacement-lifespan",
+    category: "replacement",
+    title: "System lifespan / how long does it last",
+    triggerKeywords: [
+      "how long does a furnace last",
+      "how long does an ac last",
+      "lifespan of",
+      "how long should my system last",
+      "how old is too old",
+      "average life of",
+    ],
+    action: "ANSWER",
+    cannedResponse:
+      "As a rough guide, furnaces often last about 15–20 years and air conditioners and heat pumps about 10–15 years, depending on use and maintenance. If yours is in that range and giving you trouble, our team can assess whether repair or replacement makes more sense. Want me to start a request?",
+    infoNeeded: [],
+    issueTypeMapping: null,
+    urgencyHint: null,
+    notes: "General lifespan ranges are stable, safe to state. Bridges to replacement-repair-or-replace.",
+  },
+  {
+    id: "replacement-repair-or-replace",
+    category: "replacement",
+    title: "Should I repair or replace",
+    triggerKeywords: [
+      "repair or replace",
+      "fix or replace",
+      "worth fixing",
+      "worth repairing",
+      "should i replace",
+      "time to replace",
+    ],
+    action: "FALLBACK_LLM",
+    cannedResponse: "",
+    infoNeeded: [],
+    issueTypeMapping: null,
+    urgencyHint: null,
+    notes:
+      "FALLBACK_LLM: the repair-vs-replace call depends on age, repair cost, frequency, and efficiency — too situational for a canned answer. LLM can explain factors (e.g. the 50%/$5k rules) and recommend an assessment.",
+  },
+  {
+    id: "replacement-sizing",
+    category: "replacement",
+    title: "What size system do I need",
+    triggerKeywords: [
+      "what size ac",
+      "what size furnace",
+      "how many tons",
+      "how many btus",
+      "size for my house",
+      "bigger unit cool better",
+    ],
+    action: "ANSWER",
+    cannedResponse:
+      "The right size isn't just about square footage — a proper sizing (a Manual J load calculation) accounts for your home's insulation, windows, and layout, so a bigger unit isn't automatically better. Our team can do that assessment for you. Would you like me to start a request?",
+    infoNeeded: [],
+    issueTypeMapping: null,
+    urgencyHint: null,
+    notes: "Correct the 'bigger is better' myth; point to Manual J + an assessment. No specific tonnage.",
+  },
+  {
+    id: "replacement-consultation",
+    category: "replacement",
+    title: "New install / replacement consultation",
+    triggerKeywords: [
+      "quote for a new system",
+      "new install quote",
+      "replacement consultation",
+      "come measure for a new",
+      "install a new system",
+      "looking to replace my",
+    ],
+    action: "FALLBACK_LLM",
+    cannedResponse: "",
+    infoNeeded: [],
+    issueTypeMapping: null,
+    urgencyHint: null,
+    notes:
+      "FALLBACK_LLM: a new-install/replacement consultation is a sales/estimate appointment distinct from a repair intake; let the LLM gather context and route appropriately rather than forcing the repair slot flow.",
+  },
+
+  // ─── Category 15 — EQUIPMENT TYPES / IAQ PRODUCTS ──────────────────────────
+  {
+    id: "equipment-minisplit",
+    category: "equipment",
+    title: "Ductless mini-split service/install",
+    triggerKeywords: [
+      "mini split",
+      "minisplit",
+      "ductless",
+      "ductless system",
+      "add ac without ducts",
+      "no ductwork",
+    ],
+    action: "ANSWER",
+    cannedResponse:
+      "Yes — ductless mini-splits are a great option for spaces without ductwork, additions, or zoning specific rooms, and our team can help with installation or service. Would you like me to start a request so they can follow up?",
+    infoNeeded: [],
+    issueTypeMapping: null,
+    urgencyHint: null,
+    notes: "Per-company capability assumed yes for a full-service HVAC shop. If it's a problem with an existing mini-split, the LLM/issue flow can take over.",
+  },
+  {
+    id: "equipment-boiler",
+    category: "equipment",
+    title: "Boiler / radiator / hydronic heat",
+    triggerKeywords: [
+      "boiler",
+      "radiator",
+      "radiators",
+      "hydronic",
+      "hot water heat",
+      "baseboard heat",
+      "steam heat",
+    ],
+    negationGuards: ["water heater", "no hot water from my tap"],
+    action: "FALLBACK_LLM",
+    cannedResponse: "",
+    infoNeeded: [],
+    issueTypeMapping: null,
+    urgencyHint: null,
+    notes:
+      "FALLBACK_LLM: not every HVAC shop services boilers/hydronic; let the LLM confirm scope and gather symptoms rather than asserting capability or forcing a forced-air assumption.",
+  },
+  {
+    id: "equipment-iaq-products",
+    category: "equipment",
+    title: "IAQ products — UV light, air purifier, humidifier",
+    triggerKeywords: [
+      "uv light",
+      "air purifier",
+      "air scrubber",
+      "whole home humidifier",
+      "whole house humidifier",
+      "dehumidifier",
+      "better filtration",
+      "media filter",
+      "air cleaner",
+    ],
+    action: "ANSWER",
+    cannedResponse:
+      "We can help improve your indoor air quality with add-ons like UV lights, whole-home air purifiers, humidifiers, and upgraded filtration. Our team can recommend what fits your system — would you like me to start a request so they can follow up?",
+    infoNeeded: [],
+    issueTypeMapping: null,
+    urgencyHint: null,
+    notes:
+      "Distinct from the air_quality category (which is SYMPTOMS like musty smell/dust). This is the buy/install-a-product intent.",
+  },
+
+  // ─── Category 16 — SERVICE LOGISTICS / VISIT EXPECTATIONS ──────────────────
+  {
+    id: "logistics-arrival-window",
+    category: "service_logistics",
+    title: "Arrival window / what time will the tech come",
+    triggerKeywords: [
+      "what time will the tech",
+      "arrival window",
+      "appointment window",
+      "exact time or a window",
+      "heads up before arrival",
+      "when will the technician arrive",
+    ],
+    action: "ANSWER",
+    cannedResponse:
+      "We typically give an arrival window rather than an exact minute, and you'll usually get a heads-up (a call or text) when the technician is on the way. For the specific timing of an existing appointment, our team can confirm — want me to help with that?",
+    infoNeeded: [],
+    issueTypeMapping: null,
+    urgencyHint: null,
+    notes: "General explainer is static; a specific ETA for a booked job needs dispatch (handle via team/LLM).",
+  },
+  {
+    id: "logistics-be-home",
+    category: "service_logistics",
+    title: "Do I need to be home",
+    triggerKeywords: [
+      "need to be home",
+      "have to be home",
+      "be there for the appointment",
+      "come if im at work",
+      "someone has to be there",
+    ],
+    action: "ANSWER",
+    cannedResponse:
+      "Usually an adult needs to be home to give the technician access and approve any work, but you can also leave a contact number if you'll be out. Our team can note any special access instructions for your visit. Anything you'd like me to pass along?",
+    infoNeeded: [],
+    issueTypeMapping: null,
+    urgencyHint: null,
+    notes: "Per-company but the 'adult to grant access' norm is safe.",
+  },
+  {
+    id: "logistics-prepare",
+    category: "service_logistics",
+    title: "How to prepare for the visit / pets",
+    triggerKeywords: [
+      "how should i prepare",
+      "prepare for the visit",
+      "what do you need from me",
+      "clear around the unit",
+      "i have a dog",
+      "put my pets away",
+      "have pets",
+    ],
+    action: "ANSWER",
+    cannedResponse:
+      "Just clear easy access to your indoor and outdoor units and jot down what you've noticed about the problem. If you have pets, securing them in a separate room during the visit is appreciated for everyone's safety. Anything else I can help with?",
+    infoNeeded: [],
+    issueTypeMapping: null,
+    urgencyHint: null,
+    notes: "Combines visit-prep and pets — both static, low-harm.",
+  },
+  {
+    id: "logistics-same-day-vs-emergency",
+    category: "service_logistics",
+    title: "Same-day vs emergency / can someone come today",
+    triggerKeywords: [
+      "can someone come today",
+      "same day",
+      "same day service",
+      "come out today",
+      "is this an emergency or can it wait",
+      "do you do same day",
+    ],
+    negationGuards: ["gas smell", "carbon monoxide", "flooding", "sparks", "burning smell"],
+    action: "FALLBACK_LLM",
+    cannedResponse: "",
+    infoNeeded: [],
+    issueTypeMapping: null,
+    urgencyHint: null,
+    notes:
+      "FALLBACK_LLM: same-day availability is live; and judging emergency-vs-can-wait depends on the symptom. Negation guards keep true hazards routing to the emergency entries instead.",
+  },
+  {
+    id: "logistics-after-hours-fee",
+    category: "service_logistics",
+    title: "After-hours / weekend / emergency fee",
+    triggerKeywords: [
+      "after hours fee",
+      "after hours charge",
+      "weekend charge",
+      "extra charge for after hours",
+      "emergency service fee",
+      "overtime charge",
+      "cost more at night",
+    ],
+    action: "ANSWER",
+    cannedResponse:
+      "After-hours, weekend, and emergency visits can carry an additional charge, and the amount varies. Our team can confirm the specifics for the time you need — would you like me to start a request?",
+    infoNeeded: [],
+    issueTypeMapping: null,
+    urgencyHint: null,
+    notes: "Per-company surcharge; don't state an amount. Keep conditional ('can carry').",
+  },
+
+  // ─── Category 17 — TRUST / GUARANTEES / CREDENTIALS ────────────────────────
+  {
+    id: "trust-guarantee",
+    category: "trust",
+    title: "Satisfaction / workmanship guarantee",
+    triggerKeywords: [
+      "guarantee your work",
+      "satisfaction guarantee",
+      "money back guarantee",
+      "warranty on the labor",
+      "warranty your repairs",
+      "if im not satisfied",
+      "if the problem comes back",
+    ],
+    action: "ANSWER",
+    cannedResponse:
+      "We stand behind our work and want you to be satisfied — our team can walk you through the specific labor and satisfaction guarantees that apply to your service. Would you like me to start a request so they can follow up?",
+    infoNeeded: [],
+    issueTypeMapping: null,
+    urgencyHint: null,
+    notes:
+      "Distinct from faq-warranty (manufacturer/equipment). This is workmanship/satisfaction. Per-company terms — keep general.",
+  },
+  {
+    id: "trust-technicians",
+    category: "trust",
+    title: "Are technicians vetted / background-checked",
+    triggerKeywords: [
+      "background checked",
+      "background check",
+      "are your techs vetted",
+      "drug tested",
+      "can i trust who you send",
+      "licensed technicians",
+      "insured technicians",
+    ],
+    negationGuards: ["are you licensed and insured"],
+    action: "ANSWER",
+    cannedResponse:
+      "Our technicians are trained, licensed professionals, and we take who comes into your home seriously. Our team can share more about our hiring and vetting standards if you'd like — anything else I can help with?",
+    infoNeeded: [],
+    issueTypeMapping: null,
+    urgencyHint: null,
+    notes:
+      "Reassurance without over-promising specifics that vary by company (e.g. don't assert drug-testing as fact). faq-licensed-insured covers the company-level license/insurance question.",
+  },
+
+  // ─── Category 18 — WARRANTY (detail intents beyond faq-warranty) ───────────
+  {
+    id: "warranty-coverage-check",
+    category: "warranty",
+    title: "Is my repair/system covered under warranty",
+    triggerKeywords: [
+      "covered under warranty",
+      "still under warranty",
+      "is my warranty",
+      "warranty cover this",
+      "warranty cover parts and labor",
+      "is my system under warranty",
+    ],
+    action: "FALLBACK_LLM",
+    cannedResponse: "",
+    infoNeeded: [],
+    issueTypeMapping: null,
+    urgencyHint: null,
+    notes:
+      "FALLBACK_LLM: whether a SPECIFIC system/repair is covered needs the equipment/install date and a live lookup. faq-warranty answers the general 'do you offer warranties' question; this is the personalized coverage check.",
+  },
+  {
+    id: "warranty-registration",
+    category: "warranty",
+    title: "Warranty registration",
+    triggerKeywords: [
+      "register my warranty",
+      "warranty registration",
+      "did you register my warranty",
+      "register the manufacturer warranty",
+      "do i need to register",
+    ],
+    action: "ANSWER",
+    cannedResponse:
+      "Manufacturer warranties usually need to be registered within a set window after installation to get full coverage. If we installed your system our team can confirm it was registered, or help you do it — would you like me to start a request?",
+    infoNeeded: [],
+    issueTypeMapping: null,
+    urgencyHint: null,
+    notes: "'Did you register MINE' is a live lookup, but the general guidance + offer-to-help is safe to canned-answer.",
+  },
+
+  // ─── Category 19 — REFRIGERANT (R-410A / R-22 phaseout) ────────────────────
+  {
+    id: "refrigerant-phaseout",
+    category: "refrigerant",
+    title: "Refrigerant phaseout (R-410A / R-22 / Freon)",
+    triggerKeywords: [
+      "r410a",
+      "r 410a",
+      "r22",
+      "r 22",
+      "freon being phased out",
+      "refrigerant phase out",
+      "refrigerant ban",
+      "refrigerant changing",
+    ],
+    action: "ANSWER",
+    cannedResponse:
+      "If your current system uses R-410A or older R-22, you can keep running and servicing it — the phaseout applies to the refrigerant used in brand-new equipment, not to existing systems. If you're ever replacing the system, newer low-impact refrigerants come standard. Anything else I can help with?",
+    infoNeeded: [],
+    issueTypeMapping: null,
+    urgencyHint: null,
+    notes:
+      "Date-stamped fact (reviewed 2026-06): new equipment must use low-GWP refrigerant (R-32/R-454B) since 1/1/2025; existing R-410A/R-22 systems are fine to service. Reassure, don't push replacement.",
+  },
+  {
+    id: "refrigerant-recharge",
+    category: "refrigerant",
+    title: "Recharge / add refrigerant (Freon) cost",
+    triggerKeywords: [
+      "recharge my ac",
+      "add freon",
+      "add refrigerant",
+      "low on refrigerant",
+      "low on freon",
+      "top off the freon",
+      "refrigerant so expensive",
+    ],
+    action: "FALLBACK_LLM",
+    cannedResponse: "",
+    infoNeeded: [],
+    issueTypeMapping: null,
+    urgencyHint: null,
+    notes:
+      "FALLBACK_LLM: a low charge almost always means a LEAK (recharging alone is a temporary fix needing diagnosis), and pricing is per-company/phaseout-driven. Let the LLM explain the leak point and steer to a diagnostic visit; don't quote a price.",
   },
 
   // ─── Category 10 — CONVERSATIONAL / META ───────────────────────────────────
