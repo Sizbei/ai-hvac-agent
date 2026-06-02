@@ -60,6 +60,37 @@ describe("router org-config overlay", () => {
       expect(v.reply).toContain("crate them");
     });
 
+    it("matches a trigger using the same normalization as the message (A/C → air conditioner)", () => {
+      const v = routeMessage(
+        "is my a/c covered",
+        {},
+        cfg({
+          customFaqs: [
+            {
+              id: "faq-ac",
+              answer: "AC coverage info.",
+              triggers: ["a/c"],
+            },
+          ],
+        }),
+      );
+      expect(v.intentId).toBe("custom-faq:faq-ac");
+    });
+
+    it("ignores a too-short trigger that would otherwise match almost anything", () => {
+      const v = routeMessage(
+        "what are your hours",
+        {},
+        cfg({
+          customFaqs: [
+            // "a" normalizes to length 1 < MIN_TRIGGER_LENGTH → never matches.
+            { id: "faq-a", answer: "should not win", triggers: ["a"] },
+          ],
+        }),
+      );
+      expect(v.intentId).toBe("faq-business-hours");
+    });
+
     it("ignores a custom FAQ whose trigger does not match", () => {
       const v = routeMessage(
         "what are your hours",

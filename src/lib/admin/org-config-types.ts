@@ -91,7 +91,9 @@ export const customFaqInputSchema = z
   .object({
     question: z.string().min(1).max(300),
     answer: z.string().min(1).max(2000),
-    triggers: z.array(z.string().min(1).max(120)).max(20).optional(),
+    // min 3 so a 1–2 char trigger (e.g. "a") can't match nearly every message
+    // and hijack routing. Mirrors MIN_TRIGGER_LENGTH in the router matcher.
+    triggers: z.array(z.string().min(3).max(120)).max(20).optional(),
     isActive: z.boolean().optional(),
   })
   .strict();

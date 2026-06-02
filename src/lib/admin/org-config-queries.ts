@@ -95,25 +95,46 @@ export async function updateOrgConfig(
       set: patch,
     });
 
+  invalidateRouterConfig(organizationId);
   return getOrgConfig(organizationId);
+}
+
+// Short-TTL in-memory cache for the router overlay. The chat route reads this
+// on EVERY turn; settings change rarely, so a brief cache avoids 2 DB reads per
+// message. Best-effort: a serverless cold start clears it, and a settings edit
+// is reflected within CONFIG_TTL_MS. Invalidated eagerly on writes below.
+const CONFIG_TTL_MS = 60_000;
+const routerConfigCache = new Map<
+  string,
+  { value: RouterOrgConfig; expires: number }
+>();
+
+/** Drop the cached overlay for an org after a settings/FAQ write so the next
+ * chat turn sees the change immediately rather than waiting out the TTL. */
+function invalidateRouterConfig(organizationId: string): void {
+  routerConfigCache.delete(organizationId);
 }
 
 /**
  * Build the overlay the deterministic router consumes for an org: disabled
  * services + business info + ACTIVE custom FAQs. One settings read + one FAQ
- * read. Falls back to EMPTY_ORG_CONFIG semantics (everything enabled, no
- * personalization) when nothing is configured, so the chat is unaffected for a
- * brand-new org.
+ * read (cached for CONFIG_TTL_MS). Falls back to EMPTY_ORG_CONFIG semantics
+ * (everything enabled, no personalization) when nothing is configured.
  */
 export async function getRouterConfig(
   organizationId: string,
 ): Promise<RouterOrgConfig> {
+  const cached = routerConfigCache.get(organizationId);
+  if (cached && cached.expires > Date.now()) {
+    return cached.value;
+  }
+
   const [config, faqs] = await Promise.all([
     getOrgConfig(organizationId),
     listCustomFaqs(organizationId),
   ]);
 
-  return {
+  const value: RouterOrgConfig = {
     ...EMPTY_ORG_CONFIG,
     disabledIssueTypes: config.disabledIssueTypes,
     disabledServiceTags: config.disabledServiceTags,
@@ -122,6 +143,12 @@ export async function getRouterConfig(
       .filter((f) => f.isActive)
       .map((f) => ({ id: f.id, answer: f.answer, triggers: f.triggers })),
   };
+
+  routerConfigCache.set(organizationId, {
+    value,
+    expires: Date.now() + CONFIG_TTL_MS,
+  });
+  return value;
 }
 
 // ── Custom FAQs ──
@@ -164,6 +191,7 @@ export async function createCustomFaq(
     })
     .returning();
   if (!row) throw new Error("Failed to create custom FAQ");
+  invalidateRouterConfig(organizationId);
   return toCustomFaq(row);
 }
 
@@ -188,6 +216,7 @@ export async function updateCustomFaq(
       ),
     )
     .returning();
+  if (row) invalidateRouterConfig(organizationId);
   return row ? toCustomFaq(row) : null;
 }
 
@@ -204,5 +233,6 @@ export async function deleteCustomFaq(
       ),
     )
     .returning({ id: customFaqs.id });
+  if (deleted.length > 0) invalidateRouterConfig(organizationId);
   return deleted.length > 0;
 }

@@ -21,6 +21,7 @@ import {
 import { checkTokenBudget, addTokenUsage } from "@/lib/ai/token-budget";
 import { isExtractionComplete } from "@/lib/ai/extraction-schema";
 import { routeMessage } from "@/lib/ai/intent-router";
+import { EMPTY_ORG_CONFIG } from "@/lib/ai/router-config";
 import { getRouterConfig } from "@/lib/admin/org-config-queries";
 import { CONFIRM_REPLY } from "@/lib/ai/constants";
 import { extractSlots } from "@/lib/ai/slot-extract";
@@ -200,7 +201,18 @@ export async function POST(request: NextRequest) {
     // applied as an overlay — but it can never suppress an emergency.
     const knownSlots = parseKnownSlots(session.metadata);
     if (ROUTER_ENABLED) {
-      const routerConfig = await getRouterConfig(organizationId);
+      // The org overlay is non-critical: if its read fails (DB blip, cold
+      // start), degrade to the empty overlay (everything enabled, no
+      // personalization) rather than failing the customer's whole turn.
+      const routerConfig = await getRouterConfig(organizationId).catch(
+        (configError: unknown) => {
+          logger.error(
+            { error: configError, sessionId: session.id },
+            "Failed to load router config — using empty overlay",
+          );
+          return EMPTY_ORG_CONFIG;
+        },
+      );
       const verdict = routeMessage(
         guardrailResult.sanitized,
         knownSlots,

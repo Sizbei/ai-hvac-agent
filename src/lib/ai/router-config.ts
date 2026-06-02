@@ -16,6 +16,8 @@ export interface CustomFaqRule {
   readonly triggers: readonly string[];
 }
 
+import { normalize } from "./text-normalize";
+
 export interface RouterOrgConfig {
   /** issueType values the org does NOT handle. */
   readonly disabledIssueTypes: readonly string[];
@@ -91,17 +93,22 @@ export function declineReply(): string {
   return "I'm sorry, but that's not a service we currently offer. Is there another heating or cooling issue I can help you with?";
 }
 
-/** Find the FIRST active custom FAQ whose trigger matches the normalized text.
- * Triggers are matched as case-insensitive substrings on the normalized message
- * (the caller passes already-normalized text). */
+/** Shortest trigger we'll match on, after normalization. Guards against an
+ * admin entering a 1–2 char trigger (e.g. "a") that would match nearly every
+ * message and hijack all routing. Kept in sync with the API's zod min. */
+export const MIN_TRIGGER_LENGTH = 3;
+
+/** Find the FIRST active custom FAQ whose trigger matches the message. The
+ * trigger is normalized the SAME way as the message (lowercase, punctuation →
+ * space, aliases) so admin phrasings like "A/C" match the normalized text. */
 export function matchCustomFaq(
   normalizedText: string,
   customFaqs: readonly CustomFaqRule[],
 ): CustomFaqRule | null {
   for (const faq of customFaqs) {
     for (const trigger of faq.triggers) {
-      const t = trigger.trim().toLowerCase();
-      if (t.length > 0 && normalizedText.includes(t)) {
+      const t = normalize(trigger);
+      if (t.length >= MIN_TRIGGER_LENGTH && normalizedText.includes(t)) {
         return faq;
       }
     }

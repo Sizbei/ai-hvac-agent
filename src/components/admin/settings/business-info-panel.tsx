@@ -81,6 +81,7 @@ export function BusinessInfoPanel({ config, onSave }: BusinessInfoPanelProps) {
           value={serviceArea}
           onChange={setServiceArea}
           placeholder="Greater Austin & surrounding counties"
+          maxLength={500}
         />
         <Field
           id="business-hours"
@@ -88,6 +89,7 @@ export function BusinessInfoPanel({ config, onSave }: BusinessInfoPanelProps) {
           value={businessHours}
           onChange={setBusinessHours}
           placeholder="Mon–Fri 8am–6pm, Sat 9am–2pm"
+          maxLength={300}
         />
         <Field
           id="phone"
@@ -95,6 +97,7 @@ export function BusinessInfoPanel({ config, onSave }: BusinessInfoPanelProps) {
           value={phone}
           onChange={setPhone}
           placeholder="(555) 123-4567"
+          maxLength={40}
         />
         <Field
           id="payment-methods"
@@ -102,6 +105,7 @@ export function BusinessInfoPanel({ config, onSave }: BusinessInfoPanelProps) {
           value={paymentMethods}
           onChange={setPaymentMethods}
           placeholder="all major cards, cash, and check"
+          maxLength={300}
         />
         <Field
           id="website"
@@ -109,6 +113,8 @@ export function BusinessInfoPanel({ config, onSave }: BusinessInfoPanelProps) {
           value={website}
           onChange={setWebsite}
           placeholder="https://yourcompany.com"
+          maxLength={300}
+          type="url"
         />
         <div className="space-y-2">
           <Label htmlFor="licensed">Licensing &amp; insurance statement</Label>
@@ -161,18 +167,29 @@ interface FieldProps {
   readonly value: string;
   readonly onChange: (v: string) => void;
   readonly placeholder?: string;
+  readonly maxLength: number;
+  readonly type?: string;
 }
 
-function Field({ id, label, value, onChange, placeholder }: FieldProps) {
+function Field({
+  id,
+  label,
+  value,
+  onChange,
+  placeholder,
+  maxLength,
+  type,
+}: FieldProps) {
   return (
     <div className="space-y-2">
       <Label htmlFor={id}>{label}</Label>
       <Input
         id={id}
+        type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        maxLength={500}
+        maxLength={maxLength}
       />
     </div>
   );
