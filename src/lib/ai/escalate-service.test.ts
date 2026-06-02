@@ -68,8 +68,12 @@ describe("escalateSession — concurrency guard", () => {
     expect(mockInsert).not.toHaveBeenCalled();
   });
 
-  it("treats an already-escalated session as idempotent success (no new audit)", async () => {
-    updateReturning.value = []; // no-op update (already escalated)
+  it("short-circuits an already-escalated session BEFORE any UPDATE (no dup audit)", async () => {
+    // A status-guarded UPDATE WHERE status='escalated' on an already-escalated
+    // row WOULD match and return it — so the idempotent path must short-circuit
+    // before the UPDATE. We prove that by returning a matched row from update()
+    // and asserting NO audit is written anyway.
+    updateReturning.value = [{ id: "sess-1" }];
     const r = await escalateSession({ ...BASE, currentStatus: "escalated" });
     expect(r.ok).toBe(true);
     expect(mockInsert).not.toHaveBeenCalled();

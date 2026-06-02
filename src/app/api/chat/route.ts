@@ -260,11 +260,19 @@ export async function POST(request: NextRequest) {
             ipAddress: ip,
           });
           if (!escResult.ok) {
-            // Safety-critical: the audit trail must record the escalation.
-            logger.error(
-              { sessionId: session.id, reason: escResult.reason },
-              "Deterministic escalation failed to apply",
-            );
+            // "already_transitioned" is a benign concurrency race (another turn
+            // escalated first) — warn, don't error. Anything else is a real
+            // failure to record a safety-critical escalation.
+            const logCtx = {
+              sessionId: session.id,
+              reason: escResult.reason,
+            };
+            const msg = "Deterministic escalation did not apply";
+            if (escResult.reason === "already_transitioned") {
+              logger.warn(logCtx, msg);
+            } else {
+              logger.error(logCtx, msg);
+            }
           }
           // Persist whatever we already know (the emergency's issueType/urgency
           // hint + any regex-extracted contact slots) into metadata. The

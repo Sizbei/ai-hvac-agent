@@ -26,6 +26,14 @@ export async function escalateSession(params: {
 }): Promise<EscalateResult> {
   const { organizationId, sessionId, currentStatus, ipAddress } = params;
 
+  // Already escalated → idempotent success with NO new write/audit. This MUST
+  // come before the status-guarded UPDATE below: an UPDATE WHERE status =
+  // 'escalated' would still match the live (already-escalated) row and write a
+  // duplicate audit entry.
+  if (currentStatus === "escalated") {
+    return { ok: true };
+  }
+
   const result = transition(currentStatus, "escalated");
   if (!result.success) {
     return { ok: false, reason: result.reason };
@@ -49,12 +57,10 @@ export async function escalateSession(params: {
     .returning({ id: customerSessions.id });
 
   if (!updated) {
-    // Another request already moved the session on (or it's already escalated).
-    // An already-escalated session is a success (idempotent); anything else is
-    // a stale read — report it so the caller doesn't log a phantom escalation.
-    return currentStatus === "escalated"
-      ? { ok: true }
-      : { ok: false, reason: "already_transitioned" };
+    // A concurrent request already moved the session on (status no longer
+    // matches). Benign race — the escalation already happened. Report it so the
+    // caller doesn't log a phantom failure.
+    return { ok: false, reason: "already_transitioned" };
   }
 
   await db.insert(auditLog).values({
