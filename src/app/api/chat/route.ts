@@ -32,7 +32,6 @@ import {
 } from "@/lib/ai/chat-slots";
 import { logger } from "@/lib/logger";
 
-const DEMO_ORG_ID = "00000000-0000-0000-0000-000000000001";
 const MAX_TURNS = 15;
 // Sliding window of recent messages sent to the model (bounds context growth).
 const MAX_HISTORY = 10;
@@ -90,17 +89,16 @@ export async function POST(request: NextRequest) {
     const [session] = await db
       .select()
       .from(customerSessions)
-      .where(
-        withTenant(
-          customerSessions,
-          DEMO_ORG_ID,
-          eq(customerSessions.token, token),
-        ),
-      );
+      .where(eq(customerSessions.token, token))
+      .limit(1);
 
     if (!session) {
       return errorResponse("Session not found", "SESSION_NOT_FOUND", 404);
     }
+
+    // The org for every write in this turn comes from the session row, never a
+    // hardcoded constant — a session created for tenant X always writes as X.
+    const organizationId = session.organizationId;
 
     // 2. Check terminal state
     if (isTerminalState(session.status)) {
@@ -167,7 +165,7 @@ export async function POST(request: NextRequest) {
       .where(
         withTenant(
           messages,
-          DEMO_ORG_ID,
+          organizationId,
           eq(messages.sessionId, session.id),
         ),
       )
@@ -180,7 +178,7 @@ export async function POST(request: NextRequest) {
 
     // 6. Save user message
     await db.insert(messages).values({
-      organizationId: DEMO_ORG_ID,
+      organizationId,
       sessionId: session.id,
       role: "user",
       content: guardrailResult.sanitized,
@@ -223,14 +221,14 @@ export async function POST(request: NextRequest) {
           const replyText =
             (verdict.reply ?? "") + (nearTurnLimit ? ESCALATION_NOTE : "");
           await db.insert(messages).values({
-            organizationId: DEMO_ORG_ID,
+            organizationId,
             sessionId: session.id,
             role: "assistant",
             content: replyText,
             tokensUsed: 0,
           });
           const escResult = await escalateSession({
-            organizationId: DEMO_ORG_ID,
+            organizationId,
             sessionId: session.id,
             currentStatus: session.status,
             ipAddress: ip,
@@ -293,7 +291,7 @@ export async function POST(request: NextRequest) {
         const replyText = baseReply + (nearTurnLimit ? ESCALATION_NOTE : "");
 
         await db.insert(messages).values({
-          organizationId: DEMO_ORG_ID,
+          organizationId,
           sessionId: session.id,
           role: "assistant",
           content: replyText,
@@ -368,7 +366,7 @@ export async function POST(request: NextRequest) {
 
         // Save assistant message
         await db.insert(messages).values({
-          organizationId: DEMO_ORG_ID,
+          organizationId,
           sessionId: session.id,
           role: "assistant",
           content: text,

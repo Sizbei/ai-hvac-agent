@@ -10,11 +10,8 @@ import {
   getSessionToken,
 } from "@/lib/session";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
+import { resolveOrganizationForSession } from "@/lib/tenancy/organization";
 import { logger } from "@/lib/logger";
-
-// Hard-coded demo org ID for Phase 1 (seeded in Plan 04)
-// Phase 3 will derive org from domain/subdomain
-const DEMO_ORG_ID = "00000000-0000-0000-0000-000000000001";
 
 export async function POST(request: NextRequest) {
   const ip = request.headers.get("x-forwarded-for") ?? "unknown";
@@ -33,12 +30,19 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    // Resolve which organization this chat belongs to. The resolved org is
+    // PERSISTED on the session; every later request reads it back from the
+    // session row rather than re-resolving, so the chat can't be re-attributed.
+    const { organizationId } = await resolveOrganizationForSession({
+      origin: request.headers.get("origin"),
+    });
+
     const token = generateSessionToken();
 
     const [session] = await db
       .insert(customerSessions)
       .values({
-        organizationId: DEMO_ORG_ID,
+        organizationId,
         token,
         status: "chatting",
         tokensUsed: 0,
@@ -83,29 +87,28 @@ export async function GET(_request: NextRequest) {
       return errorResponse("No session found", "NO_SESSION", 401);
     }
 
+    // The session token is a globally-unique, unguessable UUID delivered via an
+    // httpOnly cookie — it IS the session's auth, so look up by token alone.
+    // The org is then taken from the row (session.organizationId) and used to
+    // scope every related read.
     const [session] = await db
       .select()
       .from(customerSessions)
-      .where(
-        withTenant(
-          customerSessions,
-          DEMO_ORG_ID,
-          eq(customerSessions.token, token),
-        ),
-      );
+      .where(eq(customerSessions.token, token))
+      .limit(1);
 
     if (!session) {
       return errorResponse("Session not found", "SESSION_NOT_FOUND", 404);
     }
 
-    // Get message history for this session
+    // Get message history for this session, scoped to the session's own org.
     const sessionMessages = await db
       .select()
       .from(messages)
       .where(
         withTenant(
           messages,
-          DEMO_ORG_ID,
+          session.organizationId,
           eq(messages.sessionId, session.id),
         ),
       )

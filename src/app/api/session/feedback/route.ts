@@ -3,13 +3,10 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { customerSessions, auditLog } from "@/lib/db/schema";
-import { withTenant } from "@/lib/db/tenant";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { getSessionToken } from "@/lib/session";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
-
-const DEMO_ORG_ID = "00000000-0000-0000-0000-000000000001";
 
 const feedbackSchema = z.object({
   vote: z.enum(["up", "down"]),
@@ -44,13 +41,8 @@ export async function POST(request: NextRequest) {
     const [session] = await db
       .select()
       .from(customerSessions)
-      .where(
-        withTenant(
-          customerSessions,
-          DEMO_ORG_ID,
-          eq(customerSessions.token, token),
-        ),
-      );
+      .where(eq(customerSessions.token, token))
+      .limit(1);
     if (!session) {
       return errorResponse("Session not found", "SESSION_NOT_FOUND", 404);
     }
@@ -62,7 +54,7 @@ export async function POST(request: NextRequest) {
     }
 
     await db.insert(auditLog).values({
-      organizationId: DEMO_ORG_ID,
+      organizationId: session.organizationId,
       sessionId: session.id,
       action: "message_feedback",
       entity: "messages",

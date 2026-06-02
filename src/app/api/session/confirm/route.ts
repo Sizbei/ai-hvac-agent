@@ -7,7 +7,6 @@ import {
   serviceRequests,
   auditLog,
 } from "@/lib/db/schema";
-import { withTenant } from "@/lib/db/tenant";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { getSessionToken } from "@/lib/session";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
@@ -16,8 +15,6 @@ import { transition } from "@/lib/ai/state-machine";
 import { serviceRequestSchema } from "@/lib/ai/extraction-schema";
 import { upsertCustomerByContact } from "@/lib/admin/crm-queries";
 import { logger } from "@/lib/logger";
-
-const DEMO_ORG_ID = "00000000-0000-0000-0000-000000000001";
 
 function generateReferenceNumber(): string {
   // Format: HVAC-XXXXXXXX (8 random hex chars)
@@ -45,17 +42,15 @@ export async function POST(request: NextRequest) {
     const [session] = await db
       .select()
       .from(customerSessions)
-      .where(
-        withTenant(
-          customerSessions,
-          DEMO_ORG_ID,
-          eq(customerSessions.token, token),
-        ),
-      );
+      .where(eq(customerSessions.token, token))
+      .limit(1);
 
     if (!session) {
       return errorResponse("Session not found", "SESSION_NOT_FOUND", 404);
     }
+
+    // Everything written below is scoped to the session's own organization.
+    const organizationId = session.organizationId;
 
     // Parse and validate the service request data from request body
     const body: unknown = await request.json();
@@ -93,7 +88,7 @@ export async function POST(request: NextRequest) {
     // email/phone converge on one customer id instead of creating duplicates.
     // Doing it up front (not inside the batch) means the service request below
     // always references a customer row that already exists — no dangling FK.
-    const customerId = await upsertCustomerByContact(DEMO_ORG_ID, {
+    const customerId = await upsertCustomerByContact(organizationId, {
       name: parsed.data.customerName,
       email: parsed.data.customerEmail,
       phone: parsed.data.customerPhone,
@@ -116,7 +111,7 @@ export async function POST(request: NextRequest) {
         .insert(serviceRequests)
         .values({
           id: serviceRequestId,
-          organizationId: DEMO_ORG_ID,
+          organizationId: organizationId,
           sessionId: session.id,
           customerId,
           status: "pending",
@@ -141,7 +136,7 @@ export async function POST(request: NextRequest) {
         .set({ status: "submitted", updatedAt: new Date() })
         .where(eq(customerSessions.id, session.id)),
       db.insert(auditLog).values({
-        organizationId: DEMO_ORG_ID,
+        organizationId: organizationId,
         sessionId: session.id,
         action: "service_request_created",
         entity: "service_requests",
