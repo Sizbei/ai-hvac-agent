@@ -19,6 +19,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { OpsInsightsSection } from '@/components/admin/insights/ops-insights-section';
 
 interface InsightCard {
   readonly label: string;
@@ -225,6 +226,8 @@ export default function AiInsightsPage() {
           </div>
         </Card>
       </div>
+
+      <OpsInsightsSection />
     </div>
   );
 }
