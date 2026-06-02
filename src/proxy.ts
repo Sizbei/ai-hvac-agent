@@ -13,6 +13,21 @@ function addSecurityHeaders(response: NextResponse, requestId: string): void {
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  // --- Embeddable chat panel ---
+  // /embed is meant to be framed by contractors' sites, so it must NOT get the
+  // X-Frame-Options: DENY that every other route gets. The publishable widget
+  // key + per-org origin allowlist gate who can open a chat / reach org data,
+  // so framing the bare panel elsewhere exposes nothing without a valid key.
+  if (pathname === "/embed" || pathname.startsWith("/embed/")) {
+    const response = NextResponse.next();
+    const requestId =
+      request.headers.get("x-request-id") ?? crypto.randomUUID();
+    response.headers.set("X-Request-Id", requestId);
+    response.headers.set("X-Content-Type-Options", "nosniff");
+    response.headers.set("Content-Security-Policy", "frame-ancestors *");
+    return response;
+  }
+
   // --- Admin page route protection ---
   if (pathname.startsWith("/admin")) {
     // Redirect /admin exactly to /admin/requests
@@ -64,5 +79,5 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/api/:path*", "/admin/:path*"],
+  matcher: ["/api/:path*", "/admin/:path*", "/embed/:path*", "/embed"],
 };
