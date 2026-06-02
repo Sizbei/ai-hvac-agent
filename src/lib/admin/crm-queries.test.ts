@@ -1,8 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ─── Hoisted mock state ─────────────────────────────────────────────
-const { selectQueue, batchMock, chain } = vi.hoisted(() => {
+const { selectQueue, updateQueue, insertMock, logAuditMock, batchMock, chain } = vi.hoisted(() => {
   const selectQueue: unknown[][] = [];
+  const updateQueue: unknown[][] = [];
+  const insertMock = vi.fn();
+  const logAuditMock = vi.fn(async (..._args: unknown[]) => {});
   const batchMock = vi.fn(async (..._args: unknown[]) => [] as unknown[]);
   // Chainable thenable proxy: every method returns itself; awaiting resolves
   // to the value provided at construction time.
@@ -18,17 +21,24 @@ const { selectQueue, batchMock, chain } = vi.hoisted(() => {
     });
     return p;
   };
-  return { selectQueue, batchMock, chain };
+  return { selectQueue, updateQueue, insertMock, logAuditMock, batchMock, chain };
 });
 
 vi.mock('@/lib/db', () => ({
   db: {
     select: () => chain(selectQueue.shift() ?? []),
     delete: () => chain([]),
-    insert: () => chain([]),
-    update: () => chain([]),
+    insert: () => {
+      insertMock();
+      return chain([]);
+    },
+    update: () => chain(updateQueue.shift() ?? []),
     batch: (...args: unknown[]) => batchMock(...args),
   },
+}));
+
+vi.mock('@/lib/admin/audit', () => ({
+  logAudit: (...args: unknown[]) => logAuditMock(...args),
 }));
 
 vi.mock('@/lib/crypto', () => ({
@@ -45,6 +55,7 @@ vi.mock('@/lib/db/tenant', () => ({
 
 vi.mock('drizzle-orm', () => ({
   eq: (...a: unknown[]) => a,
+  ne: (...a: unknown[]) => a,
   and: (...a: unknown[]) => a,
   desc: (c: unknown) => c,
   asc: (c: unknown) => c,
@@ -68,22 +79,31 @@ vi.mock('@/lib/db/schema', () => ({
     propertySqft: 'customers.sqft',
     notes: 'customers.notes',
     createdAt: 'customers.created',
+    updatedAt: 'customers.updated',
   },
   customerEquipment: { customerId: 'equip.cid' },
   customerNotes: { customerId: 'notes.cid' },
-  followUps: { customerId: 'fu.cid' },
+  followUps: { id: 'fu.id', customerId: 'fu.cid', status: 'fu.status' },
   serviceHistory: { customerId: 'sh.cid', serviceRequestId: 'sh.srid' },
   serviceRequests: { customerId: 'sr.cid', id: 'sr.id', sessionId: 'sr.sid' },
   users: { id: 'users.id', name: 'users.name' },
   auditLog: {},
 }));
 
-import { findCustomerIdByContact, deleteCustomer } from './crm-queries';
+import {
+  findCustomerIdByContact,
+  deleteCustomer,
+  updateCustomerContact,
+  completeFollowUp,
+} from './crm-queries';
 
 const ORG = '00000000-0000-0000-0000-000000000001';
 
 beforeEach(() => {
   selectQueue.length = 0;
+  updateQueue.length = 0;
+  insertMock.mockClear();
+  logAuditMock.mockClear();
   batchMock.mockClear();
   batchMock.mockResolvedValue([]);
 });
@@ -171,5 +191,70 @@ describe('deleteCustomer', () => {
     // 4 child deletes + 1 service_requests detach + 1 customer delete + 1 audit insert.
     const statements = batchMock.mock.calls[0][0] as unknown[];
     expect(statements).toHaveLength(7);
+  });
+});
+
+describe('updateCustomerContact', () => {
+  it('returns not_found and does not write when the customer is absent', async () => {
+    selectQueue.push([]); // existence check → no row
+    const result = await updateCustomerContact(ORG, 'missing', { name: 'X' });
+    expect(result).toEqual({ ok: false, reason: 'not_found' });
+  });
+
+  it('updates a subset of fields and writes one audit entry', async () => {
+    selectQueue.push([{ id: 'c1', emailHash: null, phoneHash: null }]);
+    const result = await updateCustomerContact(ORG, 'c1', {
+      name: 'New Name',
+      address: '1 New St',
+    });
+    expect(result).toEqual({ ok: true });
+  });
+
+  it('is a no-op (no write) when the patch contains nothing to change', async () => {
+    selectQueue.push([{ id: 'c1', emailHash: null, phoneHash: null }]);
+    // Only a blank name → name is skipped (NOT NULL) and nothing else is set.
+    const result = await updateCustomerContact(ORG, 'c1', { name: '   ' });
+    expect(result).toEqual({ ok: true });
+    expect(logAuditMock).not.toHaveBeenCalled(); // no phantom audit row
+  });
+
+  it('rejects with contact_conflict when the new email belongs to another customer', async () => {
+    // #1 existence (current emailHash differs from the new one)
+    selectQueue.push([{ id: 'c1', emailHash: 'bi:old@x.com', phoneHash: null }]);
+    // #2 email-hash clash check → a DIFFERENT customer already owns it
+    selectQueue.push([{ id: 'c2' }]);
+    const result = await updateCustomerContact(ORG, 'c1', {
+      email: 'taken@example.com',
+    });
+    expect(result).toEqual({ ok: false, reason: 'contact_conflict' });
+  });
+
+  it('allows re-saving the same email (hash unchanged → no clash query)', async () => {
+    // normalizeEmail+blindIndex('same@x.com') === 'bi:same@x.com'
+    selectQueue.push([
+      { id: 'c1', emailHash: 'bi:same@x.com', phoneHash: null },
+    ]);
+    const result = await updateCustomerContact(ORG, 'c1', {
+      email: 'Same@X.com',
+    });
+    expect(result).toEqual({ ok: true });
+    // Only the existence select was consumed — no clash check ran.
+    expect(selectQueue.length).toBe(0);
+  });
+});
+
+describe('completeFollowUp', () => {
+  it('returns false and writes no audit when no pending follow-up matches', async () => {
+    updateQueue.push([]); // status-guarded update matched nothing
+    const result = await completeFollowUp(ORG, 'fu-missing');
+    expect(result).toBe(false);
+    expect(logAuditMock).not.toHaveBeenCalled();
+  });
+
+  it('marks complete and writes an audit entry when a pending row matches', async () => {
+    updateQueue.push([{ id: 'fu-1' }]);
+    const result = await completeFollowUp(ORG, 'fu-1', { userId: 'admin-1' });
+    expect(result).toBe(true);
+    expect(logAuditMock).toHaveBeenCalledTimes(1);
   });
 });

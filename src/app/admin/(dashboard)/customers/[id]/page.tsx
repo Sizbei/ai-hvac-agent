@@ -16,6 +16,7 @@ import {
   Clock,
   CheckCircle,
   Trash2,
+  Pencil,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -24,6 +25,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useCustomerDetail } from '@/hooks/use-admin-customers';
 import { EquipmentFormDialog } from '@/components/admin/equipment-form-dialog';
 import { NoteFormDialog } from '@/components/admin/note-form-dialog';
+import { FollowUpFormDialog } from '@/components/admin/follow-up-form-dialog';
+import { CustomerEditDialog } from '@/components/admin/customer-edit-dialog';
 import { ConfirmDialog } from '@/components/admin/confirm-dialog';
 
 const EQUIPMENT_LABELS: Record<string, string> = {
@@ -70,9 +73,37 @@ export default function CustomerDetailPage({
   const { customer, isLoading, error, refetch } = useCustomerDetail(id);
   const [showEquipmentForm, setShowEquipmentForm] = useState(false);
   const [showNoteForm, setShowNoteForm] = useState(false);
+  const [showFollowUpForm, setShowFollowUpForm] = useState(false);
+  const [showEditForm, setShowEditForm] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [completingId, setCompletingId] = useState<string | null>(null);
+
+  const handleCompleteFollowUp = useCallback(
+    async (followUpId: string): Promise<void> => {
+      setCompletingId(followUpId);
+      try {
+        const res = await fetch(`/api/admin/customers/${id}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'complete_follow_up',
+            followUpId,
+          }),
+        });
+        const json = await res.json().catch(() => ({ success: false }));
+        if (res.ok && json.success) {
+          refetch();
+        }
+      } catch {
+        // Surfaced by the unchanged status on refetch; no destructive failure.
+      } finally {
+        setCompletingId(null);
+      }
+    },
+    [id, refetch],
+  );
 
   const handleDelete = useCallback(async (): Promise<void> => {
     setIsDeleting(true);
@@ -142,6 +173,10 @@ export default function CustomerDetailPage({
             Customer since {formatDate(customer.createdAt)}
           </p>
         </div>
+        <Button variant="outline" onClick={() => setShowEditForm(true)}>
+          <Pencil className="size-4" />
+          Edit
+        </Button>
         <Button
           variant="destructive"
           onClick={() => {
@@ -348,10 +383,20 @@ export default function CustomerDetailPage({
       {/* Follow-ups */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Bell className="size-4" />
-            Follow-ups ({customer.followUps.length})
-          </CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Bell className="size-4" />
+              Follow-ups ({customer.followUps.length})
+            </CardTitle>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setShowFollowUpForm(true)}
+            >
+              <Plus className="mr-1 size-3" />
+              Add
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           {customer.followUps.length === 0 ? (
@@ -374,6 +419,16 @@ export default function CustomerDetailPage({
                       {f.assignedToName ? ` — ${f.assignedToName}` : ''}
                     </p>
                   </div>
+                  {f.status === 'pending' && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={completingId === f.id}
+                      onClick={() => handleCompleteFollowUp(f.id)}
+                    >
+                      {completingId === f.id ? 'Saving...' : 'Complete'}
+                    </Button>
+                  )}
                   <StatusBadge status={f.status} />
                 </div>
               ))}
@@ -398,6 +453,34 @@ export default function CustomerDetailPage({
         customerId={id}
         onSuccess={() => {
           setShowNoteForm(false);
+          refetch();
+        }}
+      />
+
+      <FollowUpFormDialog
+        open={showFollowUpForm}
+        onOpenChange={setShowFollowUpForm}
+        customerId={id}
+        onSuccess={() => {
+          setShowFollowUpForm(false);
+          refetch();
+        }}
+      />
+
+      <CustomerEditDialog
+        open={showEditForm}
+        onOpenChange={setShowEditForm}
+        customerId={id}
+        initial={{
+          name: customer.name,
+          phone: customer.phone,
+          email: customer.email,
+          address: customer.address,
+          propertyType: customer.propertyType,
+          propertySqft: customer.propertySqft,
+        }}
+        onSuccess={() => {
+          setShowEditForm(false);
           refetch();
         }}
       />

@@ -1,4 +1,4 @@
-import { eq, desc, count, sql } from "drizzle-orm";
+import { eq, ne, desc, count, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   customers,
@@ -11,6 +11,7 @@ import {
   auditLog,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
+import { logAudit } from "@/lib/admin/audit";
 import { encrypt, decrypt, blindIndex } from "@/lib/crypto";
 import type {
   CustomerRecord,
@@ -19,6 +20,8 @@ import type {
   CreateEquipmentInput,
   CreateNoteInput,
   CreateFollowUpInput,
+  UpdateCustomerInput,
+  UpdateCustomerResult,
 } from "./crm-types";
 
 function safeDecrypt(ciphertext: string | null): string | null {
@@ -661,6 +664,179 @@ export async function deleteCustomer(
       ipAddress: actor?.ipAddress ?? null,
     }),
   ]);
+
+  return true;
+}
+
+/**
+ * Updates a customer's contact/property fields within an org.
+ *
+ * PII columns are re-encrypted (random IV) and, when email/phone change, the
+ * deterministic blind-index hashes are recomputed so the row keeps deduping
+ * correctly. Before writing a new email/phone we check the corresponding
+ * blind-index does not already belong to a DIFFERENT customer in the org —
+ * returning `contact_conflict` instead of letting the partial unique index
+ * raise a raw 500. This is a check-then-write (not fully atomic), but the
+ * unique constraint is still the backstop: a losing concurrent write throws and
+ * surfaces as a retryable error rather than corrupting data.
+ *
+ * Only the fields present on `input` are touched; `undefined` leaves a column
+ * as-is, `null` clears it (except `name`, which is NOT NULL). The audit entry
+ * records WHICH fields changed, never their values.
+ */
+export async function updateCustomerContact(
+  organizationId: string,
+  customerId: string,
+  input: UpdateCustomerInput,
+  actor?: { readonly userId?: string | null; readonly ipAddress?: string | null },
+): Promise<UpdateCustomerResult> {
+  const [existing] = await db
+    .select({
+      id: customers.id,
+      emailHash: customers.emailHash,
+      phoneHash: customers.phoneHash,
+    })
+    .from(customers)
+    .where(withTenant(customers, organizationId, eq(customers.id, customerId)));
+
+  if (!existing) return { ok: false, reason: "not_found" };
+
+  const set: Record<string, unknown> = { updatedAt: new Date() };
+  const changedFields: string[] = [];
+
+  if (input.name !== undefined) {
+    const name = input.name.trim();
+    if (name.length === 0) {
+      // name is NOT NULL — refuse to blank it. Treat as a no-op for that field.
+    } else {
+      set.nameEncrypted = encrypt(name);
+      changedFields.push("name");
+    }
+  }
+
+  if (input.email !== undefined) {
+    const normalized = normalizeEmail(input.email);
+    const newHash = normalized ? blindIndex(normalized) : null;
+    if (newHash && newHash !== existing.emailHash) {
+      const [clash] = await db
+        .select({ id: customers.id })
+        .from(customers)
+        .where(
+          withTenant(
+            customers,
+            organizationId,
+            eq(customers.emailHash, newHash),
+            ne(customers.id, customerId),
+          ),
+        )
+        .limit(1);
+      if (clash) return { ok: false, reason: "contact_conflict" };
+    }
+    set.emailEncrypted = input.email ? encrypt(input.email) : null;
+    set.emailHash = newHash;
+    changedFields.push("email");
+  }
+
+  if (input.phone !== undefined) {
+    const normalized = normalizePhone(input.phone);
+    const newHash = normalized ? blindIndex(normalized) : null;
+    if (newHash && newHash !== existing.phoneHash) {
+      const [clash] = await db
+        .select({ id: customers.id })
+        .from(customers)
+        .where(
+          withTenant(
+            customers,
+            organizationId,
+            eq(customers.phoneHash, newHash),
+            ne(customers.id, customerId),
+          ),
+        )
+        .limit(1);
+      if (clash) return { ok: false, reason: "contact_conflict" };
+    }
+    set.phoneEncrypted = input.phone ? encrypt(input.phone) : null;
+    set.phoneHash = newHash;
+    changedFields.push("phone");
+  }
+
+  if (input.address !== undefined) {
+    set.addressEncrypted = input.address ? encrypt(input.address) : null;
+    changedFields.push("address");
+  }
+
+  if (input.propertyType !== undefined) {
+    set.propertyType = input.propertyType;
+    changedFields.push("propertyType");
+  }
+
+  if (input.propertySqft !== undefined) {
+    set.propertySqft = input.propertySqft;
+    changedFields.push("propertySqft");
+  }
+
+  if (input.notes !== undefined) {
+    set.notes = input.notes;
+    changedFields.push("notes");
+  }
+
+  // Nothing actually changed (e.g. a submit with no edits, or only a blank
+  // name) — skip the write and the audit row so we don't bump `updatedAt` or
+  // pollute the trail with a phantom "customer_updated" event.
+  if (changedFields.length === 0) {
+    return { ok: true };
+  }
+
+  await db
+    .update(customers)
+    .set(set)
+    .where(withTenant(customers, organizationId, eq(customers.id, customerId)));
+
+  await logAudit({
+    organizationId,
+    userId: actor?.userId ?? "system",
+    action: "customer_updated",
+    entity: "customers",
+    entityId: customerId,
+    details: JSON.stringify({ fields: changedFields }),
+    ipAddress: actor?.ipAddress ?? null,
+  });
+
+  return { ok: true };
+}
+
+/**
+ * Marks a pending follow-up complete for the org. Status-guarded on
+ * `pending` so a double-click (or a race) only transitions — and audits — once;
+ * a follow-up already completed/cancelled matches zero rows and returns false.
+ */
+export async function completeFollowUp(
+  organizationId: string,
+  followUpId: string,
+  actor?: { readonly userId?: string | null },
+): Promise<boolean> {
+  const [updated] = await db
+    .update(followUps)
+    .set({ status: "completed", completedAt: new Date() })
+    .where(
+      withTenant(
+        followUps,
+        organizationId,
+        eq(followUps.id, followUpId),
+        eq(followUps.status, "pending"),
+      ),
+    )
+    .returning({ id: followUps.id });
+
+  if (!updated) return false;
+
+  await logAudit({
+    organizationId,
+    userId: actor?.userId ?? "system",
+    action: "follow_up_completed",
+    entity: "follow_ups",
+    entityId: followUpId,
+  });
 
   return true;
 }

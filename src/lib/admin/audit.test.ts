@@ -44,6 +44,7 @@ describe('logAudit', () => {
       entity: 'service_request',
       entityId: 'req-789',
       details: '{"technicianId":"tech-001"}',
+      ipAddress: null,
     });
   });
 
@@ -63,6 +64,7 @@ describe('logAudit', () => {
       entity: 'user',
       entityId: null,
       details: null,
+      ipAddress: null,
     });
   });
 
@@ -80,6 +82,21 @@ describe('logAudit', () => {
         entityId: 'tech-002',
         details: null,
       }),
+    );
+  });
+
+  it('records ipAddress when provided', async () => {
+    await logAudit({
+      organizationId: 'org-123',
+      userId: 'user-456',
+      action: 'customer_updated',
+      entity: 'customers',
+      entityId: 'cust-1',
+      ipAddress: '203.0.113.7',
+    });
+
+    expect(mockValues).toHaveBeenCalledWith(
+      expect.objectContaining({ ipAddress: '203.0.113.7' }),
     );
   });
 });
