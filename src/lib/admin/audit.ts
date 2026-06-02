@@ -14,6 +14,7 @@ interface AuditParams {
   readonly entity: string;
   readonly entityId?: string;
   readonly details?: string;
+  readonly ipAddress?: string | null;
 }
 
 export async function logAudit(params: AuditParams): Promise<void> {
@@ -24,5 +25,6 @@ export async function logAudit(params: AuditParams): Promise<void> {
     entity: params.entity,
     entityId: params.entityId ?? null,
     details: params.details ?? null,
+    ipAddress: params.ipAddress ?? null,
   });
 }

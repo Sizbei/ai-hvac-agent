@@ -95,3 +95,23 @@ export interface CreateFollowUpInput {
   readonly dueDate: string;
   readonly assignedTo?: string;
 }
+
+/**
+ * Editable customer contact/property fields. Every field is optional so the
+ * caller can patch a subset; `null` explicitly clears a value (e.g. removing an
+ * email) while `undefined` leaves it untouched. `name` cannot be cleared — the
+ * underlying column is NOT NULL — so it is `string | undefined` only.
+ */
+export interface UpdateCustomerInput {
+  readonly name?: string;
+  readonly phone?: string | null;
+  readonly email?: string | null;
+  readonly address?: string | null;
+  readonly propertyType?: string | null;
+  readonly propertySqft?: number | null;
+  readonly notes?: string | null;
+}
+
+export type UpdateCustomerResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly reason: "not_found" | "contact_conflict" };
