@@ -185,6 +185,32 @@ export const serviceRequests = pgTable(
   ],
 );
 
+// 5b. request_notes — internal dispatcher notes on a service request.
+// Distinct from `messages` (the customer-facing chat transcript): these are
+// staff-only, never shown to the customer. Threaded/timestamped per author so
+// the request carries its own audit of internal commentary.
+export const requestNotes = pgTable(
+  "request_notes",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    requestId: uuid("request_id")
+      .notNull()
+      .references(() => serviceRequests.id),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id),
+    authorId: uuid("author_id").references(() => users.id),
+    content: text("content").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("request_notes_request_id_idx").on(table.requestId),
+    index("request_notes_org_id_idx").on(table.organizationId),
+  ],
+);
+
 // 6. customers (CRM)
 export const equipmentTypeEnum = pgEnum("equipment_type", [
   "ac",

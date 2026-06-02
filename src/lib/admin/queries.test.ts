@@ -106,6 +106,14 @@ vi.mock('@/lib/db/schema', () => ({
     sessionId: 'm.sessionId',
     organizationId: 'm.organizationId',
   },
+  requestNotes: {
+    id: 'rn.id',
+    requestId: 'rn.requestId',
+    organizationId: 'rn.organizationId',
+    authorId: 'rn.authorId',
+    content: 'rn.content',
+    createdAt: 'rn.createdAt',
+  },
   requestStatusEnum: {
     enumValues: ['pending', 'assigned', 'in_progress', 'completed', 'cancelled'],
   },
@@ -118,6 +126,7 @@ import {
   assignTechnician,
   updateRequestStatus,
   scheduleRequest,
+  addRequestNote,
   getTechnicians,
   createTechnician,
   updateTechnician,
@@ -443,5 +452,53 @@ describe('scheduleRequest', () => {
     updateResolution = [{ scheduledDate: null }];
     const result = await scheduleRequest(ORG_ID, 'req-1', null);
     expect(result).toEqual({ ok: true, scheduledDate: null });
+  });
+});
+
+describe('addRequestNote', () => {
+  it('returns request_not_found when the request is not in the org', async () => {
+    selectResolutions = [[]]; // existence check → no row
+    const result = await addRequestNote(ORG_ID, 'req-x', 'admin-1', 'hello');
+    expect(result).toEqual({ ok: false, reason: 'request_not_found' });
+  });
+
+  it('creates the note and returns it with the author name', async () => {
+    const when = new Date('2026-06-02T12:00:00.000Z');
+    selectResolutions = [
+      [{ id: 'req-1' }], // #1 existence check
+      [{ name: 'Dispatcher Dan' }], // #2 author lookup
+    ];
+    insertResolution = [{ id: 'note-1', createdAt: when }];
+
+    const result = await addRequestNote(
+      ORG_ID,
+      'req-1',
+      'admin-1',
+      'Customer prefers morning visits',
+    );
+    expect(result).toEqual({
+      ok: true,
+      note: {
+        id: 'note-1',
+        content: 'Customer prefers morning visits',
+        authorName: 'Dispatcher Dan',
+        createdAt: '2026-06-02T12:00:00.000Z',
+      },
+    });
+  });
+
+  it('returns a null authorName when the author lookup misses', async () => {
+    const when = new Date('2026-06-02T12:00:00.000Z');
+    selectResolutions = [
+      [{ id: 'req-1' }], // existence
+      [], // author lookup → none
+    ];
+    insertResolution = [{ id: 'note-2', createdAt: when }];
+
+    const result = await addRequestNote(ORG_ID, 'req-1', 'admin-x', 'note');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.note.authorName).toBeNull();
+    }
   });
 });

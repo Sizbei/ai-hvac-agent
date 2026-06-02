@@ -26,7 +26,11 @@ import {
   MANUAL_TARGET_STATUSES,
   type RequestStatus,
 } from '@/lib/admin/request-status';
-import type { AdminRequestDetail, TechnicianRecord } from '@/lib/admin/types';
+import type {
+  AdminRequestDetail,
+  TechnicianRecord,
+  RequestNote,
+} from '@/lib/admin/types';
 
 // Only manual targets can ever be a transition button — narrowing the map to
 // those keys makes any drift from the state machine a compile error rather than
@@ -123,6 +127,41 @@ export function RequestDetailSheet({
   const [isPatching, setIsPatching] = useState(false);
   const [workflowError, setWorkflowError] = useState<string | null>(null);
 
+  const [noteInput, setNoteInput] = useState<string>('');
+  const [isAddingNote, setIsAddingNote] = useState(false);
+  const [noteError, setNoteError] = useState<string | null>(null);
+
+  const handleAddNote = useCallback(async (): Promise<void> => {
+    if (!requestId) return;
+    const content = noteInput.trim();
+    if (!content) return;
+
+    setIsAddingNote(true);
+    setNoteError(null);
+    try {
+      const res = await fetch(`/api/admin/requests/${requestId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+      });
+      const body = await res.json().catch(() => ({ success: false }));
+      if (res.ok && body.success) {
+        setNoteInput('');
+        // Prepend the newly created note (server returns it with author name).
+        const created = body.data as RequestNote;
+        setDetail((prev) =>
+          prev ? { ...prev, notes: [created, ...prev.notes] } : prev,
+        );
+      } else {
+        setNoteError(body.error?.message ?? 'Failed to add note');
+      }
+    } catch {
+      setNoteError('Could not connect to server.');
+    } finally {
+      setIsAddingNote(false);
+    }
+  }, [requestId, noteInput]);
+
   // Shared PATCH for status transitions and scheduled-date changes. Returns the
   // refreshed detail (server is the source of truth for derived fields like
   // completedAt) and surfaces a friendly error otherwise.
@@ -198,6 +237,8 @@ export function RequestDetailSheet({
     setAssignError(null);
     setWorkflowError(null);
     setScheduledInput('');
+    setNoteInput('');
+    setNoteError(null);
 
     async function loadDetail(): Promise<void> {
       try {
@@ -456,6 +497,64 @@ export function RequestDetailSheet({
 
                   {workflowError && (
                     <p className="text-xs text-destructive">{workflowError}</p>
+                  )}
+                </div>
+              </section>
+
+              {/* Internal notes */}
+              <section>
+                <h3 className="text-sm font-semibold mb-2">
+                  Internal Notes ({detail.notes.length})
+                </h3>
+                <div className="space-y-3">
+                  <div className="space-y-2">
+                    <textarea
+                      value={noteInput}
+                      onChange={(e) => setNoteInput(e.target.value)}
+                      placeholder="Add an internal note (not visible to the customer)..."
+                      rows={2}
+                      maxLength={5000}
+                      className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    />
+                    <div className="flex items-center justify-between">
+                      {noteError ? (
+                        <p className="text-xs text-destructive">{noteError}</p>
+                      ) : (
+                        <span />
+                      )}
+                      <Button
+                        size="sm"
+                        disabled={isAddingNote || !noteInput.trim()}
+                        onClick={handleAddNote}
+                      >
+                        {isAddingNote ? 'Adding...' : 'Add Note'}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {detail.notes.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      No internal notes yet.
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      {detail.notes.map((note) => (
+                        <div key={note.id} className="rounded-md border p-3">
+                          <p className="whitespace-pre-wrap text-sm">
+                            {note.content}
+                          </p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {note.authorName ?? 'System'} ·{' '}
+                            {new Date(note.createdAt).toLocaleString('en-US', {
+                              month: 'short',
+                              day: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </div>
               </section>

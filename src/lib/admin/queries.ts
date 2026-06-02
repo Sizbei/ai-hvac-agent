@@ -4,9 +4,15 @@
  * Every query function takes organizationId as its first parameter
  * and uses withTenant to enforce multi-tenancy (key_links contract).
  */
-import { eq, and, sql, count, desc, asc, gte, inArray } from "drizzle-orm";
+import { eq, and, count, desc, asc, gte, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { serviceRequests, users, messages, requestStatusEnum } from "@/lib/db/schema";
+import {
+  serviceRequests,
+  requestNotes,
+  users,
+  messages,
+  requestStatusEnum,
+} from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { decrypt } from "@/lib/crypto";
 import {
@@ -22,6 +28,7 @@ import type {
   CreateTechnicianInput,
   UpdateTechnicianInput,
   TranscriptMessage,
+  RequestNote,
 } from "./types";
 import { hash } from "bcryptjs";
 
@@ -168,6 +175,32 @@ export async function getRequestById(
     createdAt: m.createdAt.toISOString(),
   }));
 
+  // Internal staff notes (newest first), with the author's display name.
+  const noteRows = await db
+    .select({
+      id: requestNotes.id,
+      content: requestNotes.content,
+      createdAt: requestNotes.createdAt,
+      authorName: users.name,
+    })
+    .from(requestNotes)
+    .leftJoin(users, eq(requestNotes.authorId, users.id))
+    .where(
+      withTenant(
+        requestNotes,
+        organizationId,
+        eq(requestNotes.requestId, requestId),
+      ),
+    )
+    .orderBy(desc(requestNotes.createdAt));
+
+  const notes: readonly RequestNote[] = noteRows.map((n) => ({
+    id: n.id,
+    content: n.content,
+    authorName: n.authorName,
+    createdAt: n.createdAt.toISOString(),
+  }));
+
   return {
     id: row.id,
     status: row.status,
@@ -186,6 +219,7 @@ export async function getRequestById(
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     transcript,
+    notes,
   };
 }
 
@@ -408,6 +442,64 @@ export async function scheduleRequest(
   return {
     ok: true,
     scheduledDate: updated.scheduledDate?.toISOString() ?? null,
+  };
+}
+
+export type AddRequestNoteResult =
+  | { readonly ok: true; readonly note: RequestNote }
+  | { readonly ok: false; readonly reason: "request_not_found" };
+
+/**
+ * Adds an internal staff note to a request. Verifies the request belongs to the
+ * org FIRST (so a guessed UUID from another tenant can't have a note attached),
+ * then inserts the note carrying the org id and author. Returns the created
+ * note (with the author's display name) for optimistic UI insertion.
+ */
+export async function addRequestNote(
+  organizationId: string,
+  requestId: string,
+  authorId: string,
+  content: string,
+): Promise<AddRequestNoteResult> {
+  const [request] = await db
+    .select({ id: serviceRequests.id })
+    .from(serviceRequests)
+    .where(
+      withTenant(
+        serviceRequests,
+        organizationId,
+        eq(serviceRequests.id, requestId),
+      ),
+    );
+
+  if (!request) {
+    return { ok: false, reason: "request_not_found" };
+  }
+
+  const [created] = await db
+    .insert(requestNotes)
+    .values({ requestId, organizationId, authorId, content })
+    .returning({ id: requestNotes.id, createdAt: requestNotes.createdAt });
+
+  if (!created) {
+    throw new Error("Failed to create request note");
+  }
+
+  // Resolve the author's display name for the returned note. The note's
+  // organizationId scopes it; the author is the acting admin.
+  const [author] = await db
+    .select({ name: users.name })
+    .from(users)
+    .where(withTenant(users, organizationId, eq(users.id, authorId)));
+
+  return {
+    ok: true,
+    note: {
+      id: created.id,
+      content,
+      authorName: author?.name ?? null,
+      createdAt: created.createdAt.toISOString(),
+    },
   };
 }
 
