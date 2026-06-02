@@ -211,6 +211,15 @@ describe('PATCH /api/admin/technicians/[id]', () => {
         entityId: techId,
       }),
     );
+    // The audit `details` must record only WHICH fields changed, never the
+    // values — name/email are PII surfaced verbatim by the audit-log viewer.
+    const auditCall = mockLogAudit.mock.calls[0][0] as { details?: string };
+    const detailsObj = JSON.parse(auditCall.details ?? '{}') as {
+      fields?: string[];
+    };
+    expect(detailsObj).toHaveProperty('fields');
+    expect(detailsObj.fields).toContain('name');
+    expect(JSON.stringify(detailsObj)).not.toContain('Updated Name');
   });
 
   it('should return 404 when technician not found', async () => {
