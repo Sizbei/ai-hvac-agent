@@ -260,15 +260,48 @@ export async function POST(request: NextRequest) {
             ipAddress: ip,
           });
           if (!escResult.ok) {
-            // Safety-critical: the audit trail must record the escalation.
-            logger.error(
-              { sessionId: session.id, reason: escResult.reason },
-              "Deterministic escalation failed to apply",
-            );
+            // "already_transitioned" is a benign concurrency race (another turn
+            // escalated first) — warn, don't error. Anything else is a real
+            // failure to record a safety-critical escalation.
+            const logCtx = {
+              sessionId: session.id,
+              reason: escResult.reason,
+            };
+            const msg = "Deterministic escalation did not apply";
+            if (escResult.reason === "already_transitioned") {
+              logger.warn(logCtx, msg);
+            } else {
+              logger.error(logCtx, msg);
+            }
           }
+          // Persist whatever we already know (the emergency's issueType/urgency
+          // hint + any regex-extracted contact slots) into metadata. The
+          // background LLM extraction never runs on this path (we return
+          // below), so without this the admin would see a BLANK emergency
+          // request — the worst case to have no details on.
+          const escMerged = mergeSlots(knownSlots, {
+            issueType: verdict.issueType ?? undefined,
+            urgency: verdict.urgency ?? undefined,
+            address: extracted.address ?? undefined,
+            phone: extracted.phone ?? undefined,
+            email: extracted.email ?? undefined,
+          });
+          const escMetadata = hasSlotData(escMerged)
+            ? JSON.stringify(
+                buildExtraction(
+                  escMerged,
+                  (conversationHistory.find((m) => m.role === "user")
+                    ?.content ?? guardrailResult.sanitized).slice(0, 280),
+                ),
+              )
+            : session.metadata;
           await db
             .update(customerSessions)
-            .set({ turnCount: newTurnCount, updatedAt: new Date() })
+            .set({
+              metadata: escMetadata,
+              turnCount: newTurnCount,
+              updatedAt: new Date(),
+            })
             .where(sessionScope);
 
           logger.info(
@@ -444,7 +477,10 @@ export async function POST(request: NextRequest) {
         // follow-up turn may have written new slots while extraction ran.
         // Merging against the snapshot would silently drop them.
         const [fresh] = await db
-          .select({ metadata: customerSessions.metadata })
+          .select({
+            metadata: customerSessions.metadata,
+            status: customerSessions.status,
+          })
           .from(customerSessions)
           .where(sessionScope);
         // Merge into any slots already known (deterministic or prior LLM
@@ -465,8 +501,14 @@ export async function POST(request: NextRequest) {
           extraction.extraction.description || firstUserMessage.slice(0, 280),
         );
         const extractionComplete = isExtractionComplete(mergedExtraction);
+        // Compute the next state from the session's CURRENT status (re-read
+        // above), not the request-time snapshot — a faster follow-up turn or an
+        // escalation may have advanced it. determineNextState won't move a
+        // terminal/escalated/submitted session, so a late extraction can't
+        // regress it. Fall back to the snapshot only if the re-read missed.
+        const currentStatus = fresh?.status ?? session.status;
         const nextState = determineNextState(
-          session.status,
+          currentStatus,
           extractionComplete,
           newTurnCount,
           MAX_TURNS,
@@ -476,9 +518,12 @@ export async function POST(request: NextRequest) {
           .update(customerSessions)
           .set({
             status: nextState,
+            // Always write the merged extraction (the merge never nulls a
+            // filled slot); only fall back to the FRESH metadata, not the stale
+            // request-time snapshot, when there's nothing to write.
             metadata: hasSlotData(merged)
               ? JSON.stringify(mergedExtraction)
-              : session.metadata,
+              : (fresh?.metadata ?? session.metadata),
             updatedAt: new Date(),
           })
           .where(sessionScope);

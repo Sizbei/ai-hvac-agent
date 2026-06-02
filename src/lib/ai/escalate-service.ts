@@ -26,20 +26,42 @@ export async function escalateSession(params: {
 }): Promise<EscalateResult> {
   const { organizationId, sessionId, currentStatus, ipAddress } = params;
 
+  // Already escalated → idempotent success with NO new write/audit. This MUST
+  // come before the status-guarded UPDATE below: an UPDATE WHERE status =
+  // 'escalated' would still match the live (already-escalated) row and write a
+  // duplicate audit entry.
+  if (currentStatus === "escalated") {
+    return { ok: true };
+  }
+
   const result = transition(currentStatus, "escalated");
   if (!result.success) {
     return { ok: false, reason: result.reason };
   }
 
-  await db
+  // Guard the UPDATE by the EXPECTED current status too, so two concurrent
+  // escalations don't both "succeed": the first transitions the row, the second
+  // matches zero rows (status already moved) and we skip the duplicate audit
+  // entry. Closes the TOCTOU between the in-memory transition() check above and
+  // the write.
+  const [updated] = await db
     .update(customerSessions)
     .set({ status: "escalated", updatedAt: new Date() })
     .where(
       and(
         eq(customerSessions.id, sessionId),
         eq(customerSessions.organizationId, organizationId),
+        eq(customerSessions.status, currentStatus),
       ),
-    );
+    )
+    .returning({ id: customerSessions.id });
+
+  if (!updated) {
+    // A concurrent request already moved the session on (status no longer
+    // matches). Benign race — the escalation already happened. Report it so the
+    // caller doesn't log a phantom failure.
+    return { ok: false, reason: "already_transitioned" };
+  }
 
   await db.insert(auditLog).values({
     organizationId,
