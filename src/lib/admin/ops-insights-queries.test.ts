@@ -43,14 +43,15 @@ vi.mock('@/lib/db/schema', () => ({
     organizationId: 'sr.org',
   },
   users: { id: 'u.id', name: 'u.name', organizationId: 'u.org' },
+  serviceHistory: { cost: 'sh.cost', organizationId: 'sh.org' },
 }));
 
 import { getOpsInsights } from './ops-insights-queries';
 
 const ORG = '00000000-0000-0000-0000-000000000001';
 
-// The query runs five selects via Promise.all, in this order:
-//   1 issue  2 urgency  3 status  4 last7  5 techLoad
+// The query runs seven selects via Promise.all, in this order:
+//   1 issue  2 urgency  3 status  4 last7  5 techLoad  6 hour  7 cost
 function seed(opts: {
   issue: { key: string; value: number | string }[];
   urgency: { key: string; value: number | string }[];
@@ -63,12 +64,16 @@ function seed(opts: {
     active: number | string;
     completed: number | string;
   }[];
+  hour?: { hour: number | string; value: number | string }[];
+  cost?: { count: number | string; total: number | string; average: number | string };
 }): void {
   selectQueue.push(opts.issue);
   selectQueue.push(opts.urgency);
   selectQueue.push(opts.status);
   selectQueue.push([{ value: opts.last7 }]);
   selectQueue.push(opts.tech);
+  selectQueue.push(opts.hour ?? []);
+  selectQueue.push([opts.cost ?? { count: 0, total: 0, average: 0 }]);
 }
 
 beforeEach(() => {
@@ -84,6 +89,65 @@ describe('getOpsInsights', () => {
     expect(r.completedRequests).toBe(0);
     expect(r.byIssueType).toEqual([]);
     expect(r.technicianLoad).toEqual([]);
+    // The hour histogram is always dense (24 entries), all zero here.
+    expect(r.requestsByHour).toHaveLength(24);
+    expect(r.requestsByHour.every((h) => h.count === 0)).toBe(true);
+    expect(r.requestsByHour[0]).toEqual({ hour: 0, count: 0 });
+    expect(r.costStats).toEqual({ count: 0, totalCents: 0, averageCents: 0 });
+  });
+
+  it('backfills missing hours to zero and coerces string hour keys', async () => {
+    seed({
+      issue: [],
+      urgency: [],
+      status: [],
+      last7: 0,
+      tech: [],
+      // neon-http returns the extracted hour + count as strings.
+      hour: [
+        { hour: '9', value: '5' },
+        { hour: '14', value: '3' },
+      ],
+    });
+    const r = await getOpsInsights(ORG);
+    expect(r.requestsByHour).toHaveLength(24);
+    expect(r.requestsByHour[9]).toEqual({ hour: 9, count: 5 });
+    expect(r.requestsByHour[14]).toEqual({ hour: 14, count: 3 });
+    expect(r.requestsByHour[0].count).toBe(0);
+    // Total across the histogram equals the sum of the seeded buckets.
+    const sum = r.requestsByHour.reduce((acc, h) => acc + h.count, 0);
+    expect(sum).toBe(8);
+  });
+
+  it('aggregates service costs and rounds the average to whole cents', async () => {
+    seed({
+      issue: [],
+      urgency: [],
+      status: [],
+      last7: 0,
+      tech: [],
+      // 3 jobs, total 30000c ($300), avg 10000.5c → rounds to 10001.
+      cost: { count: '3', total: '30000', average: '10000.5' },
+    });
+    const r = await getOpsInsights(ORG);
+    expect(r.costStats).toEqual({
+      count: 3,
+      totalCents: 30000,
+      averageCents: 10001,
+    });
+  });
+
+  it('reports a zero average when no costs are recorded even if sum coerces', async () => {
+    seed({
+      issue: [],
+      urgency: [],
+      status: [],
+      last7: 0,
+      tech: [],
+      cost: { count: '0', total: '0', average: '0' },
+    });
+    const r = await getOpsInsights(ORG);
+    expect(r.costStats.averageCents).toBe(0);
   });
 
   it('derives totals from the status breakdown and coerces string aggregates', async () => {
