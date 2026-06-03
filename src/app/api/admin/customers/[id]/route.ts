@@ -9,6 +9,12 @@ import {
   completeFollowUp,
   deleteCustomer,
 } from "@/lib/admin/crm-queries";
+import {
+  updateEquipment,
+  deleteEquipment,
+  isEquipmentType,
+} from "@/lib/admin/crm-equipment-queries";
+import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
@@ -81,6 +87,13 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
             400,
           );
         }
+        if (!isEquipmentType(equipmentType)) {
+          return errorResponse(
+            "Invalid equipment type",
+            "VALIDATION_ERROR",
+            400,
+          );
+        }
         await addEquipment(session.organizationId, id, {
           equipmentType,
           make: typeof body.make === "string" ? body.make : undefined,
@@ -104,6 +117,123 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           notes: typeof body.notes === "string" ? body.notes : undefined,
         });
         return successResponse({ ok: true }, 201);
+      }
+
+      case "update_equipment": {
+        const equipmentId =
+          typeof body.equipmentId === "string" ? body.equipmentId : "";
+        if (!UUID_REGEX.test(equipmentId)) {
+          return errorResponse(
+            "Valid equipment ID is required",
+            "VALIDATION_ERROR",
+            400,
+          );
+        }
+
+        // Present-key patch: a key on the body is written; for nullable text
+        // columns an empty string clears the field (→ null). equipmentType, if
+        // present, must be a non-empty string (the query validates the enum).
+        const patch: {
+          equipmentType?: string;
+          make?: string | null;
+          model?: string | null;
+          serialNumber?: string | null;
+          installDate?: string | null;
+          warrantyExpiration?: string | null;
+          locationInHome?: string | null;
+          notes?: string | null;
+        } = {};
+
+        const strOrNull = (v: unknown): string | null =>
+          typeof v === "string" && v.trim().length > 0 ? v.trim() : null;
+
+        if (typeof body.equipmentType === "string" && body.equipmentType) {
+          patch.equipmentType = body.equipmentType;
+        }
+        if ("make" in body) patch.make = strOrNull(body.make);
+        if ("model" in body) patch.model = strOrNull(body.model);
+        if ("serialNumber" in body) {
+          patch.serialNumber = strOrNull(body.serialNumber);
+        }
+        if ("installDate" in body) {
+          patch.installDate = strOrNull(body.installDate);
+        }
+        if ("warrantyExpiration" in body) {
+          patch.warrantyExpiration = strOrNull(body.warrantyExpiration);
+        }
+        if ("locationInHome" in body) {
+          patch.locationInHome = strOrNull(body.locationInHome);
+        }
+        if ("notes" in body) patch.notes = strOrNull(body.notes);
+
+        const result = await updateEquipment(
+          session.organizationId,
+          id,
+          equipmentId,
+          patch,
+        );
+        if (!result.ok) {
+          switch (result.reason) {
+            case "invalid_type":
+              return errorResponse(
+                "Invalid equipment type",
+                "VALIDATION_ERROR",
+                400,
+              );
+            case "no_changes":
+              return errorResponse(
+                "No valid changes provided",
+                "VALIDATION_ERROR",
+                400,
+              );
+            case "not_found":
+              return errorResponse("Equipment not found", "NOT_FOUND", 404);
+          }
+        }
+
+        await logAudit({
+          organizationId: session.organizationId,
+          userId: session.userId,
+          action: "update_equipment",
+          entity: "customer_equipment",
+          entityId: equipmentId,
+          // Field NAMES actually written (from the query, not the request) —
+          // make/model/serial are never logged as values.
+          details: JSON.stringify({ fields: result.updatedFields }),
+          ipAddress,
+        });
+        return successResponse({ ok: true });
+      }
+
+      case "delete_equipment": {
+        const equipmentId =
+          typeof body.equipmentId === "string" ? body.equipmentId : "";
+        if (!UUID_REGEX.test(equipmentId)) {
+          return errorResponse(
+            "Valid equipment ID is required",
+            "VALIDATION_ERROR",
+            400,
+          );
+        }
+
+        const deleted = await deleteEquipment(
+          session.organizationId,
+          id,
+          equipmentId,
+        );
+        if (!deleted) {
+          return errorResponse("Equipment not found", "NOT_FOUND", 404);
+        }
+
+        await logAudit({
+          organizationId: session.organizationId,
+          userId: session.userId,
+          action: "delete_equipment",
+          entity: "customer_equipment",
+          entityId: equipmentId,
+          ipAddress,
+        });
+        return successResponse({ ok: true });
       }
 
       case "add_note": {
