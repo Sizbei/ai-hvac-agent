@@ -26,6 +26,26 @@ export interface TechnicianLoad {
   readonly completed: number;
 }
 
+/** Number of requests created in a given hour-of-day bucket (0–23, UTC — the
+ * Neon session default). Surfaces peak demand windows; apply the org's local
+ * offset for local interpretation. */
+export interface HourlyCount {
+  /** Hour of day, 0–23 (UTC). */
+  readonly hour: number;
+  readonly count: number;
+}
+
+/** Aggregate cost stats over recorded service-history entries. Costs are stored
+ * as integer CENTS; the values here are also cents (the UI divides by 100). */
+export interface CostStats {
+  /** Number of service-history rows that carry a (non-null) cost. */
+  readonly count: number;
+  /** Sum of all recorded costs, in cents. */
+  readonly totalCents: number;
+  /** Mean cost across rows that carry a cost, in cents (0 when count is 0). */
+  readonly averageCents: number;
+}
+
 export interface OpsInsights {
   readonly totalRequests: number;
   /** Open = not completed and not cancelled. */
@@ -38,4 +58,8 @@ export interface OpsInsights {
   readonly byUrgency: readonly CategoryCount[];
   readonly byStatus: readonly CategoryCount[];
   readonly technicianLoad: readonly TechnicianLoad[];
+  /** Request volume by hour of day (always 24 entries, hour 0–23). */
+  readonly requestsByHour: readonly HourlyCount[];
+  /** Recorded service-cost aggregates (cents). */
+  readonly costStats: CostStats;
 }

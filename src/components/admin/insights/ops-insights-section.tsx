@@ -1,11 +1,20 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Wrench, Clock, CheckCircle2, XCircle, Users } from 'lucide-react';
+import {
+  Wrench,
+  Clock,
+  CheckCircle2,
+  XCircle,
+  Users,
+  DollarSign,
+  Sunrise,
+} from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import type { OpsInsights } from '@/lib/admin/ops-insights-types';
+import { formatCents, hourLabel } from '@/lib/admin/ops-insights-format';
 
 const ISSUE_LABELS: Record<string, string> = {
   heating_not_working: 'Heating',
@@ -104,6 +113,64 @@ function StatCard({
         </div>
       </div>
     </Card>
+  );
+}
+
+/** A 24-column bar chart of request volume by hour of day. Peak hour is
+ * highlighted; only every third hour is labelled to keep the axis readable. */
+function HourHistogram({
+  rows,
+}: {
+  readonly rows: readonly { readonly hour: number; readonly count: number }[];
+}) {
+  const total = rows.reduce((sum, r) => sum + r.count, 0);
+  if (total === 0) {
+    return <p className="text-sm text-muted-foreground">No data yet.</p>;
+  }
+  const max = Math.max(1, ...rows.map((r) => r.count));
+  // Strictly-greater picks the FIRST maximum on a tie (earliest hour in 0–23).
+  const peakHour = rows.reduce((a, b) => (b.count > a.count ? b : a)).hour;
+
+  return (
+    <div>
+      <div className="flex h-32 items-end gap-px">
+        {rows.map((r) => (
+          <div
+            key={r.hour}
+            className="group flex flex-1 flex-col items-center justify-end"
+            title={`${hourLabel(r.hour)} — ${r.count} request${r.count === 1 ? '' : 's'}`}
+          >
+            <div
+              className={`w-full rounded-t-sm ${
+                r.hour === peakHour ? 'bg-primary' : 'bg-primary/40'
+              }`}
+              // Zero-count hours render nothing; non-zero hours get a >=2% floor
+              // so a single request is still visible against a tall peak.
+              style={{
+                height:
+                  r.count === 0
+                    ? '0%'
+                    : `${Math.max(2, Math.round((r.count / max) * 100))}%`,
+              }}
+            />
+          </div>
+        ))}
+      </div>
+      <div className="mt-1 flex gap-px">
+        {rows.map((r) => (
+          <div
+            key={r.hour}
+            className="flex-1 text-center text-[10px] text-muted-foreground"
+          >
+            {r.hour % 3 === 0 ? hourLabel(r.hour) : ''}
+          </div>
+        ))}
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground">
+        Busiest hour:{' '}
+        <span className="font-medium text-foreground">{hourLabel(peakHour)}</span>
+      </p>
+    </div>
   );
 }
 
@@ -251,6 +318,54 @@ export function OpsInsightsSection() {
           </div>
         )}
       </Card>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card className="p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <Sunrise className="size-4 text-muted-foreground" />
+            <p className="text-sm font-medium">Requests by time of day</p>
+            <span className="ml-auto text-xs text-muted-foreground">UTC</span>
+          </div>
+          {isLoading ? (
+            <Skeleton className="h-32 w-full" />
+          ) : (
+            <HourHistogram rows={data?.requestsByHour ?? []} />
+          )}
+        </Card>
+
+        <Card className="p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <DollarSign className="size-4 text-muted-foreground" />
+            <p className="text-sm font-medium">Recorded service revenue</p>
+          </div>
+          {isLoading ? (
+            <Skeleton className="h-32 w-full" />
+          ) : !data || data.costStats.count === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No service costs recorded yet.
+            </p>
+          ) : (
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <p className="text-xs text-muted-foreground">Total</p>
+                <p className="text-xl font-bold">
+                  {formatCents(data.costStats.totalCents)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Avg / job</p>
+                <p className="text-xl font-bold">
+                  {formatCents(data.costStats.averageCents)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Jobs costed</p>
+                <p className="text-xl font-bold">{data.costStats.count}</p>
+              </div>
+            </div>
+          )}
+        </Card>
+      </div>
 
       <p className="text-xs text-muted-foreground">
         Status breakdown:{' '}
