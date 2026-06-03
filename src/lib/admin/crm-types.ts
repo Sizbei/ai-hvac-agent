@@ -85,6 +85,28 @@ export interface CreateEquipmentInput {
   readonly notes?: string;
 }
 
+/** Patch for an existing equipment row. Any subset of fields may be present.
+ * For nullable text/date columns, an explicit `null` clears the field while an
+ * absent key leaves it untouched; equipmentType (NOT NULL) can only be set to a
+ * new value, never cleared. */
+export interface UpdateEquipmentInput {
+  readonly equipmentType?: string;
+  readonly make?: string | null;
+  readonly model?: string | null;
+  readonly serialNumber?: string | null;
+  readonly installDate?: string | null;
+  readonly warrantyExpiration?: string | null;
+  readonly locationInHome?: string | null;
+  readonly notes?: string | null;
+}
+
+export type UpdateEquipmentResult =
+  | { readonly ok: true; readonly updatedFields: readonly string[] }
+  | {
+      readonly ok: false;
+      readonly reason: "not_found" | "no_changes" | "invalid_type";
+    };
+
 export interface CreateNoteInput {
   readonly content: string;
   readonly noteType?: string;

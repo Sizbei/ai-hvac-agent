@@ -28,6 +28,7 @@ import { NoteFormDialog } from '@/components/admin/note-form-dialog';
 import { FollowUpFormDialog } from '@/components/admin/follow-up-form-dialog';
 import { CustomerEditDialog } from '@/components/admin/customer-edit-dialog';
 import { ConfirmDialog } from '@/components/admin/confirm-dialog';
+import type { EquipmentRecord } from '@/lib/admin/crm-types';
 
 const EQUIPMENT_LABELS: Record<string, string> = {
   ac: 'Air Conditioner',
@@ -72,6 +73,14 @@ export default function CustomerDetailPage({
   const router = useRouter();
   const { customer, isLoading, error, refetch } = useCustomerDetail(id);
   const [showEquipmentForm, setShowEquipmentForm] = useState(false);
+  const [editingEquipment, setEditingEquipment] =
+    useState<EquipmentRecord | null>(null);
+  const [deletingEquipment, setDeletingEquipment] =
+    useState<EquipmentRecord | null>(null);
+  const [isDeletingEquipment, setIsDeletingEquipment] = useState(false);
+  const [equipmentDeleteError, setEquipmentDeleteError] = useState<string | null>(
+    null,
+  );
   const [showNoteForm, setShowNoteForm] = useState(false);
   const [showFollowUpForm, setShowFollowUpForm] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
@@ -132,6 +141,49 @@ export default function CustomerDetailPage({
       setIsDeleting(false);
     }
   }, [id, router]);
+
+  const handleDeleteEquipment = useCallback(async (): Promise<void> => {
+    if (!deletingEquipment) return;
+    setIsDeletingEquipment(true);
+    setEquipmentDeleteError(null);
+
+    try {
+      const res = await fetch(`/api/admin/customers/${id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'delete_equipment',
+          equipmentId: deletingEquipment.id,
+        }),
+      });
+      const json = await res.json().catch(() => ({
+        error: { message: 'Failed to delete equipment' },
+      }));
+
+      if (res.ok && json.success) {
+        setDeletingEquipment(null);
+        refetch();
+      } else {
+        setEquipmentDeleteError(
+          json.error?.message ?? 'Failed to delete equipment',
+        );
+      }
+    } catch {
+      setEquipmentDeleteError('Network error');
+    } finally {
+      setIsDeletingEquipment(false);
+    }
+  }, [id, deletingEquipment, refetch]);
+
+  function handleAddEquipment(): void {
+    setEditingEquipment(null);
+    setShowEquipmentForm(true);
+  }
+
+  function handleEditEquipment(equipment: EquipmentRecord): void {
+    setEditingEquipment(equipment);
+    setShowEquipmentForm(true);
+  }
 
   if (isLoading) {
     return (
@@ -235,11 +287,7 @@ export default function CustomerDetailPage({
               <Wrench className="size-4" />
               Equipment ({customer.equipment.length})
             </CardTitle>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setShowEquipmentForm(true)}
-            >
+            <Button size="sm" variant="outline" onClick={handleAddEquipment}>
               <Plus className="mr-1 size-3" />
               Add
             </Button>
@@ -257,25 +305,44 @@ export default function CustomerDetailPage({
                   key={eq.id}
                   className="rounded-lg border p-3"
                 >
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2">
                     <p className="font-medium text-sm">
                       {EQUIPMENT_LABELS[eq.equipmentType] ?? eq.equipmentType}
                     </p>
-                    {eq.warrantyExpiration && (
-                      <Badge
-                        variant={
-                          new Date(eq.warrantyExpiration) < new Date()
-                            ? 'destructive'
-                            : 'outline'
-                        }
-                        className="text-xs"
+                    <div className="flex items-center gap-1">
+                      {eq.warrantyExpiration && (
+                        <Badge
+                          variant={
+                            new Date(eq.warrantyExpiration) < new Date()
+                              ? 'destructive'
+                              : 'outline'
+                          }
+                          className="text-xs"
+                        >
+                          Warranty:{' '}
+                          {new Date(eq.warrantyExpiration) < new Date()
+                            ? 'Expired'
+                            : formatDate(eq.warrantyExpiration)}
+                        </Badge>
+                      )}
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        onClick={() => handleEditEquipment(eq)}
+                        aria-label="Edit equipment"
                       >
-                        Warranty:{' '}
-                        {new Date(eq.warrantyExpiration) < new Date()
-                          ? 'Expired'
-                          : formatDate(eq.warrantyExpiration)}
-                      </Badge>
-                    )}
+                        <Pencil className="size-3.5" />
+                      </Button>
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        onClick={() => setDeletingEquipment(eq)}
+                        aria-label="Delete equipment"
+                        className="text-muted-foreground hover:text-destructive"
+                      >
+                        <Trash2 className="size-3.5" />
+                      </Button>
+                    </div>
                   </div>
                   <p className="mt-1 text-xs text-muted-foreground">
                     {[eq.make, eq.model].filter(Boolean).join(' ') || 'No details'}
@@ -439,10 +506,15 @@ export default function CustomerDetailPage({
 
       <EquipmentFormDialog
         open={showEquipmentForm}
-        onOpenChange={setShowEquipmentForm}
+        onOpenChange={(open) => {
+          setShowEquipmentForm(open);
+          if (!open) setEditingEquipment(null);
+        }}
         customerId={id}
+        equipment={editingEquipment}
         onSuccess={() => {
           setShowEquipmentForm(false);
+          setEditingEquipment(null);
           refetch();
         }}
       />
@@ -491,9 +563,27 @@ export default function CustomerDetailPage({
         title="Delete customer?"
         description="This permanently deletes the customer along with their equipment, service history, notes, and follow-ups. This action cannot be undone."
         confirmLabel="Delete"
+        confirmingLabel="Deleting..."
         isConfirming={isDeleting}
         error={deleteError}
         onConfirm={handleDelete}
+      />
+
+      <ConfirmDialog
+        open={deletingEquipment !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeletingEquipment(null);
+            setEquipmentDeleteError(null);
+          }
+        }}
+        title="Delete equipment?"
+        description="This permanently removes this equipment record from the customer. This action cannot be undone."
+        confirmLabel="Delete"
+        confirmingLabel="Deleting..."
+        isConfirming={isDeletingEquipment}
+        error={equipmentDeleteError}
+        onConfirm={handleDeleteEquipment}
       />
     </div>
   );

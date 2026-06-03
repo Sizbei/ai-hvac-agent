@@ -16,6 +16,8 @@ interface ConfirmDialogProps {
   readonly title: string;
   readonly description: string;
   readonly confirmLabel?: string;
+  /** Label shown while the action runs. Defaults to "Working...". */
+  readonly confirmingLabel?: string;
   readonly cancelLabel?: string;
   readonly isConfirming?: boolean;
   readonly error?: string | null;
@@ -33,6 +35,7 @@ export function ConfirmDialog({
   title,
   description,
   confirmLabel = 'Confirm',
+  confirmingLabel = 'Working...',
   cancelLabel = 'Cancel',
   isConfirming = false,
   error = null,
@@ -63,7 +66,7 @@ export function ConfirmDialog({
             onClick={onConfirm}
             disabled={isConfirming}
           >
-            {isConfirming ? 'Deleting...' : confirmLabel}
+            {isConfirming ? confirmingLabel : confirmLabel}
           </Button>
         </DialogFooter>
       </DialogContent>

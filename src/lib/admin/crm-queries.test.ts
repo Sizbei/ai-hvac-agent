@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ─── Hoisted mock state ─────────────────────────────────────────────
-const { selectQueue, updateQueue, insertMock, logAuditMock, batchMock, chain } = vi.hoisted(() => {
+const { selectQueue, updateQueue, deleteQueue, insertMock, logAuditMock, batchMock, chain } = vi.hoisted(() => {
   const selectQueue: unknown[][] = [];
   const updateQueue: unknown[][] = [];
+  const deleteQueue: unknown[][] = [];
   const insertMock = vi.fn();
   const logAuditMock = vi.fn(async (..._args: unknown[]) => {});
   const batchMock = vi.fn(async (..._args: unknown[]) => [] as unknown[]);
@@ -21,13 +22,13 @@ const { selectQueue, updateQueue, insertMock, logAuditMock, batchMock, chain } =
     });
     return p;
   };
-  return { selectQueue, updateQueue, insertMock, logAuditMock, batchMock, chain };
+  return { selectQueue, updateQueue, deleteQueue, insertMock, logAuditMock, batchMock, chain };
 });
 
 vi.mock('@/lib/db', () => ({
   db: {
     select: () => chain(selectQueue.shift() ?? []),
-    delete: () => chain([]),
+    delete: () => chain(deleteQueue.shift() ?? []),
     insert: () => {
       insertMock();
       return chain([]);
@@ -81,7 +82,19 @@ vi.mock('@/lib/db/schema', () => ({
     createdAt: 'customers.created',
     updatedAt: 'customers.updated',
   },
-  customerEquipment: { customerId: 'equip.cid' },
+  customerEquipment: {
+    id: 'equip.id',
+    customerId: 'equip.cid',
+    organizationId: 'equip.org',
+    equipmentType: 'equip.type',
+    make: 'equip.make',
+    model: 'equip.model',
+    serialNumber: 'equip.serial',
+    installDate: 'equip.install',
+    warrantyExpiration: 'equip.warranty',
+    locationInHome: 'equip.location',
+    notes: 'equip.notes',
+  },
   customerNotes: { customerId: 'notes.cid' },
   followUps: { id: 'fu.id', customerId: 'fu.cid', status: 'fu.status' },
   serviceHistory: { customerId: 'sh.cid', serviceRequestId: 'sh.srid' },
@@ -96,12 +109,16 @@ import {
   updateCustomerContact,
   completeFollowUp,
 } from './crm-queries';
+import { updateEquipment, deleteEquipment } from './crm-equipment-queries';
 
 const ORG = '00000000-0000-0000-0000-000000000001';
+const CUST = '00000000-0000-0000-0000-0000000000c1';
+const EQUIP = '00000000-0000-0000-0000-0000000000e1';
 
 beforeEach(() => {
   selectQueue.length = 0;
   updateQueue.length = 0;
+  deleteQueue.length = 0;
   insertMock.mockClear();
   logAuditMock.mockClear();
   batchMock.mockClear();
@@ -256,5 +273,57 @@ describe('completeFollowUp', () => {
     const result = await completeFollowUp(ORG, 'fu-1', { userId: 'admin-1' });
     expect(result).toBe(true);
     expect(logAuditMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('updateEquipment', () => {
+  it('returns no_changes for an empty patch (no DB write)', async () => {
+    const result = await updateEquipment(ORG, CUST, EQUIP, {});
+    expect(result).toEqual({ ok: false, reason: 'no_changes' });
+  });
+
+  it('rejects an invalid equipmentType as invalid_type', async () => {
+    const result = await updateEquipment(ORG, CUST, EQUIP, {
+      equipmentType: 'spaceship',
+    });
+    expect(result).toEqual({ ok: false, reason: 'invalid_type' });
+  });
+
+  it('returns not_found when the org+customer-scoped row does not exist', async () => {
+    updateQueue.push([]); // scoped update matched nothing
+    const result = await updateEquipment(ORG, CUST, EQUIP, { make: 'Carrier' });
+    expect(result).toEqual({ ok: false, reason: 'not_found' });
+  });
+
+  it('updates when the scoped row exists; clears a nullable field via null', async () => {
+    updateQueue.push([{ id: EQUIP }]);
+    const result = await updateEquipment(ORG, CUST, EQUIP, {
+      make: 'Trane',
+      serialNumber: null, // explicit clear
+      equipmentType: 'furnace',
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // updatedFields reflects exactly the columns written.
+      expect([...result.updatedFields].sort()).toEqual([
+        'equipmentType',
+        'make',
+        'serialNumber',
+      ]);
+    }
+  });
+});
+
+describe('deleteEquipment', () => {
+  it('returns false when no matching row is deleted', async () => {
+    deleteQueue.push([]); // returning() yields nothing
+    const result = await deleteEquipment(ORG, CUST, EQUIP);
+    expect(result).toBe(false);
+  });
+
+  it('returns true when a scoped row is deleted', async () => {
+    deleteQueue.push([{ id: EQUIP }]);
+    const result = await deleteEquipment(ORG, CUST, EQUIP);
+    expect(result).toBe(true);
   });
 });
