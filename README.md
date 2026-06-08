@@ -2,9 +2,9 @@
 
 An AI-powered customer-service intake agent for HVAC companies. Customers describe a
 heating or cooling problem — in a web chat **or over the phone** — and the agent
-answers common questions instantly, collects the details that matter (issue, urgency,
-address, contact), turns the conversation into a structured service request, and lets
-staff triage and dispatch from an admin dashboard.
+answers common questions instantly, runs a comprehensive ServiceTitan-style intake
+(safety screen first, then the details that matter), turns the conversation into a
+structured service request, and lets staff triage and dispatch from an admin dashboard.
 
 Built with **Next.js 16**, **Qwen** (via Alibaba DashScope, OpenAI-compatible),
 **Drizzle ORM**, and **Neon PostgreSQL**.
@@ -25,9 +25,17 @@ Built with **Next.js 16**, **Qwen** (via Alibaba DashScope, OpenAI-compatible),
   router resolves common questions, greetings, emergencies, and slot collection
   **without any LLM call** — the LLM (Qwen) is the fallback for novel input only.
   ~55% of assistant turns cost zero tokens.
+- **Smart ServiceTitan-style intake.** A deterministic triage engine runs a
+  best-in-class HVAC intake: a **safety screen first** (gas/CO/burning/flooding
+  escalate), then qualifying questions (system fully down vs partly working, how
+  long), a small required gate (**issue, urgency, address, and contact phone**), and
+  skippable enrichment (system type, equipment age/brand, owner/renter, warranty,
+  access notes, preferred arrival window, lead source, …). Quick-reply chips keep the
+  common path 0-token; a `jobType` work classification is derived from the symptom.
+  See **[docs/INTAKE-FIELDS.md](docs/INTAKE-FIELDS.md)**.
 - **Structured extraction.** The conversation is distilled into a validated service
-  request (issue type, urgency, address, contact) via `generateText` + tolerant
-  JSON parsing that works reliably against DashScope.
+  request via `generateText` + tolerant JSON parsing that works reliably against
+  DashScope.
 - **Telephone agent (voice).** The same intake agent answers phone calls via Twilio,
   speaking with a natural **Amazon Polly neural voice**. It reuses the exact router /
   extraction / state-machine core as the web chat — a voice persona, not a second
@@ -70,10 +78,11 @@ at `/api/voice/incoming` to enable it (see [GUIDE.md](GUIDE.md#telephone-agent-v
 ## Documentation
 
 - **[GUIDE.md](GUIDE.md)** — product overview, customer + admin flows, env vars.
+- **[docs/INTAKE-FIELDS.md](docs/INTAKE-FIELDS.md)** — the full intake field model + triage playbook (ServiceTitan-based).
 - **`/docs.html`** — interactive docs (run the app, open http://localhost:3000/docs.html):
   searchable sidebar, light/dark mode, copy buttons, example workflow, architecture.
-- **[docs/](docs/)** — `COMMON-QUESTIONS-PLAN.md`, `KNOWLEDGE-BASE-CATALOG.md`,
-  `TOKEN-SAVINGS.md`, `CHATBOT-BENCHMARKS.md`.
+- **[docs/](docs/)** — `INTAKE-FIELDS.md`, `COMMON-QUESTIONS-PLAN.md`,
+  `KNOWLEDGE-BASE-CATALOG.md`, `TOKEN-SAVINGS.md`, `CHATBOT-BENCHMARKS.md`.
 
 ## Scripts
 

@@ -4,6 +4,9 @@
 > [`/docs.html`](http://localhost:3000/docs.html) — it has a searchable sidebar
 > (press `/`), light/dark mode, copy-to-clipboard code blocks, a reading-progress
 > bar, and live screenshots.
+>
+> For the full intake field model + triage playbook (with ServiceTitan citations),
+> see [docs/INTAKE-FIELDS.md](docs/INTAKE-FIELDS.md).
 
 ## What This Is
 
@@ -71,11 +74,19 @@ This is where the AI conversation happens:
 
 - A session is created automatically when the page loads
 - The customer describes their HVAC issue in natural language
-- The AI asks follow-up questions to collect: issue type, urgency, address, name, phone, email
-- **Extraction pills** appear at the top as each field is collected (Issue Type, Urgency, Address) — giving the customer visual progress feedback
-- Once all fields are collected, an **extraction card** appears showing the full summary
+- The AI runs a **smart, comprehensive ServiceTitan-style intake** driven by a deterministic triage engine. It asks one question at a time, with quick-reply chips, in this order:
+  1. **Safety screen first** — confirm there's no active gas smell, burning/electrical smell, carbon-monoxide alarm/symptoms, or water flooding. A hazard short-circuits to emergency escalation (which now also captures the address/phone so a dispatcher isn't left blind).
+  2. **Qualifying questions** — is the system completely down or partly working, and how long has it been happening (these set urgency far better than guessing).
+  3. **Required dispatch gate** — issue, urgency, service address, and a **contact phone**. Phone is now required; nothing submits without it.
+  4. **Skippable enrichment** — system type, equipment age band, brand, property type, owner/renter, warranty, access notes, vulnerable occupants, preferred arrival window, contact preference, lead source. Any of these can be skipped ("skip" / "I don't know" advances and is never re-asked).
+- A `jobType` (ServiceTitan work classification) is derived from the symptom issue type.
+- **Self-check de-escalation** — for "no power / nothing happens / thermostat blank", the agent first offers safe basic checks (thermostat batteries, the breaker, a clogged filter) to avoid a wasted truck roll — never anything involving opening the unit, wiring, gas, or refrigerant.
+- **Extraction pills / progress stepper** track the required fields as they're collected — giving the customer visual progress feedback
+- Once the required fields are collected and enrichment is answered-or-skipped, an **extraction card** appears showing the full summary
 - The customer reviews and clicks "Confirm & Submit"
 - A **confirmation dialog** gives one final review before submitting
+
+The full field model, enum values, and triage playbook (with ServiceTitan citations) live in [docs/INTAKE-FIELDS.md](docs/INTAKE-FIELDS.md).
 
 ![The customer chat showing the Step X of 3 intake stepper, suggested-reply chips, a thumbs-up/thumbs-down feedback control, and the AI-assistant header subtitle](public/screenshots/chat.png)
 *The chat now shows a "Step X of 3" intake stepper with per-field check chips, contextual suggested-reply chips, a 👍/👎 "Was this helpful?" control under assistant answers, and an "AI assistant · a technician follows up within 2 hrs" header subtitle. See [Customer Chat Experience](#customer-chat-experience-stage-1) below.*
@@ -179,6 +190,7 @@ The main admin screen. Shows:
 - **Request detail sheet** (click any row): Slides in from the right showing:
   - Customer information (name, phone, email, address)
   - Issue details (type, description)
+  - **Intake Details** — all the fields captured during the smart intake (system down status, problem duration, system type, equipment age/brand, property type, owner/renter, warranty, access notes, vulnerable occupants, preferred arrival window, contact preference, lead source, derived `jobType`), so dispatch sees everything the customer told us
   - Technician assignment dropdown
   - Full conversation transcript (user messages in blue, AI in gray)
 

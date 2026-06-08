@@ -408,7 +408,7 @@
     <!-- 1. OVERVIEW -->
     <section id="overview">
       <h2>Overview <a class="anchor" href="#overview" aria-label="Link to Overview">#</a></h2>
-      <p>Customers talk to the agent in plain language. The AI asks follow-up questions, collects the details that matter (issue type, urgency, address, contact info), and turns the conversation into a structured service request that staff triage and assign from an admin dashboard.</p>
+      <p>Customers talk to the agent in plain language. A deterministic <strong>triage engine</strong> runs a smart, comprehensive ServiceTitan-style intake — a <strong>safety screen first</strong> (gas/CO/burning/flooding escalate), then qualifying questions (system fully down vs partly working, how long), then a small required gate (issue, urgency, address, and a <strong>contact phone</strong>), then skippable enrichment (system type, equipment age/brand, property type, owner/renter, warranty, access notes, preferred arrival window, lead source, …). It asks one question at a time with <strong>quick-reply chips</strong>, so the common path costs 0 tokens, and turns the conversation into a structured service request that staff triage and assign from an admin dashboard. A <code>jobType</code> work classification is derived from the symptom.</p>
 
       <h3>Telephone agent (voice)</h3>
       <p>The same intake agent also answers <strong>phone calls</strong> via Twilio. It is a voice persona, not a second bot — it runs the <em>exact same</em> deterministic router → slot-extraction → state-machine core as the web chat. Speech is captured with Twilio's built-in recognition (<code>&lt;Gather input="speech"&gt;</code>) and replies are spoken back with an Amazon Polly <strong>neural</strong> voice (default <code>Polly.Joanna-Neural</code>, override via <code>TWILIO_VOICE</code>). The call hangs up on a terminal state (request submitted or escalated to a human), and gas/CO/fire/flood emergencies still escalate deterministically. The voice channel is optional — it turns on when <code>TWILIO_ACCOUNT_SID</code> and <code>TWILIO_AUTH_TOKEN</code> are set; without them the app is web-chat-only.</p>
@@ -683,7 +683,7 @@ npm run dev           # start at http://localhost:3000</code></pre>
       <ul class="body">
         <li>Queue of incoming requests with reference #, customer, issue, urgency (color-coded), status, date, and assigned technician.</li>
         <li>Stats cards (Pending, Assigned Today, In Progress, Completed Today) auto-refresh.</li>
-        <li>Filter by status; open any row for a detail sheet with customer info, issue details, a technician-assignment dropdown, and the full conversation transcript.</li>
+        <li>Filter by status; open any row for a detail sheet with customer info, issue details, an <strong>Intake Details</strong> section showing every field captured during the smart intake (system-down status, duration, system type, equipment age/brand, property type, owner/renter, warranty, access notes, vulnerable occupants, preferred window, contact preference, lead source, derived <code>jobType</code>), a technician-assignment dropdown, and the full conversation transcript.</li>
       </ul>
 
       <figure>
@@ -749,9 +749,9 @@ npm run dev           # start at http://localhost:3000</code></pre>
           <tr><td><code>users</code></td><td>Admin staff and technicians (role, password hash, active flag)</td></tr>
           <tr><td><code>customer_sessions</code></td><td>One chat session: token, status, token budget/usage, turn count, extracted metadata</td></tr>
           <tr><td><code>messages</code></td><td>Every chat message (user / assistant / system) with token usage</td></tr>
-          <tr><td><code>service_requests</code></td><td>Submitted request: issue type, urgency, encrypted PII, reference number, assignment</td></tr>
-          <tr><td><code>customers</code></td><td>CRM profile with encrypted contact info and property details</td></tr>
-          <tr><td><code>customer_equipment</code></td><td>Installed HVAC units (type, make, model, serial, warranty)</td></tr>
+          <tr><td><code>service_requests</code></td><td>Submitted request: issue type, urgency, encrypted PII, reference number, assignment, plus the comprehensive intake columns (system-down status, problem duration, system type, equipment age/brand, property type, owner-occupant, warranty, access notes, vulnerable occupants, preferred window, contact preference, lead source) and a derived <code>jobType</code></td></tr>
+          <tr><td><code>customers</code></td><td>CRM profile with encrypted contact info and property details, plus <code>customerType</code> / <code>membershipStatus</code> / <code>doNotService</code></td></tr>
+          <tr><td><code>customer_equipment</code></td><td>Installed HVAC units (type, make, model, serial, warranty, labor-warranty expiration)</td></tr>
           <tr><td><code>customer_notes</code></td><td>Free-form notes per customer (general, follow-up, complaint, compliment)</td></tr>
           <tr><td><code>follow_ups</code></td><td>Scheduled reminders with due dates and status</td></tr>
           <tr><td><code>service_history</code></td><td>Completed work, parts, cost, and tech notes linked to a request</td></tr>
@@ -759,8 +759,11 @@ npm run dev           # start at http://localhost:3000</code></pre>
         </tbody>
       </table>
 
+      <p>Following ServiceTitan's Customer/Location model as a <strong>soft split</strong>: the service address lives on the <code>service_requests</code> row (the location), while billing identity lives on the <code>customers</code> row — there is no separate locations table (deferred). The preferred window we capture is appointment <em>intent</em>, not a real calendar booking.</p>
+
       <h3 id="ai-layer">AI layer</h3>
       <ul class="body">
+        <li><strong>Triage engine:</strong> a deterministic state machine (<code>src/lib/ai/triage.ts</code>) drives the ServiceTitan-style intake — <strong>safety screen first</strong> (gas/CO/burning/flooding escalate), then qualifying questions, then the required gate (issue, urgency, address, <strong>contact phone</strong>), then skippable enrichment (system type, equipment age/brand, property type, owner/renter, warranty, access notes, vulnerable occupants, preferred window, contact preference, lead source). It emits one question at a time with quick-reply chips, so the common path is <strong>0-token</strong>; a <code>jobType</code> work classification is derived from the symptom. Shared by web chat and the phone agent. A "no power / thermostat blank" turn first offers safe self-checks (batteries, breaker, filter) to avoid a wasted truck roll.</li>
         <li><strong>Chat:</strong> <code>streamText()</code> (Vercel AI SDK) streams the assistant reply with the system prompt and full conversation history.</li>
         <li><strong>Extraction:</strong> <code>generateObject()</code> with the Zod <code>extractionSchema</code> turns the conversation into typed JSON, run in the <code>onFinish</code> callback so it never blocks the streamed response.</li>
         <li><strong>Provider:</strong> Qwen through DashScope's OpenAI-compatible endpoint, wired via <code>createOpenAI()</code> with <code>AI_BASE_URL</code>, <code>AI_API_KEY</code>, and <code>AI_MODEL</code>.</li>
