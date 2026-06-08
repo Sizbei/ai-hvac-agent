@@ -38,6 +38,10 @@ export interface KnownSlots {
   readonly name?: string | null;
   readonly phone?: string | null;
   readonly email?: string | null;
+  // ServiceTitan-style enrichment fields carried as a generic bag (see
+  // chat-slots.ts EXTRA_SLOT_KEYS). Optional; the router itself doesn't read
+  // them, but they ride along through merge/parse/build so they persist.
+  readonly extras?: Record<string, unknown>;
 }
 
 export interface RouterVerdict {

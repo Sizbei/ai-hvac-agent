@@ -31,7 +31,49 @@ describe("parseKnownSlots", () => {
       name: "Jane",
       phone: "555-1234",
       email: "j@x.com",
+      extras: {},
     });
+  });
+
+  it("carries the ServiceTitan-style extras through parse and round-trips", () => {
+    const meta = JSON.stringify({
+      issueType: "cooling_not_working",
+      urgency: "high",
+      address: "5 Oak St",
+      customerPhone: "555-1234",
+      description: "AC out",
+      isHvacRelated: true,
+      systemType: "heat_pump",
+      preferredWindow: "morning",
+      vulnerableOccupants: true,
+    });
+    const slots = parseKnownSlots(meta);
+    expect(slots.extras).toEqual({
+      systemType: "heat_pump",
+      preferredWindow: "morning",
+      vulnerableOccupants: true,
+    });
+  });
+
+  it("mergeSlots never clobbers a filled extra with an empty update", () => {
+    const known = parseKnownSlots(
+      JSON.stringify({ systemType: "furnace", description: "x", isHvacRelated: true }),
+    );
+    const merged = mergeSlots(known, { extras: { systemType: null, preferredWindow: "asap" } });
+    expect(merged.extras).toEqual({ systemType: "furnace", preferredWindow: "asap" });
+  });
+
+  it("buildExtraction spreads extras back into the metadata shape", () => {
+    const slots = mergeSlots(
+      {},
+      {
+        issueType: "cooling_not_working",
+        extras: { systemType: "central_ac", leadSource: "google" },
+      },
+    );
+    const e = buildExtraction(slots, "AC out");
+    expect(e.systemType).toBe("central_ac");
+    expect(e.leadSource).toBe("google");
   });
 });
 
