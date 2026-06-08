@@ -30,8 +30,12 @@ export function isArrivalWindow(value: string): value is ArrivalWindow {
 
 /**
  * Resolve a chosen date + window into concrete start/end timestamps on that
- * calendar day. The date's calendar day (local) is used; the time-of-day is
- * replaced by the window bounds.
+ * calendar day. The window bounds are applied in UTC so the result is
+ * deployment-timezone-independent: the UI sends the chosen day as UTC midnight
+ * (`<day>T00:00:00.000Z`), and we set the window hours with setUTCHours, so the
+ * window always lands on the day the dispatcher picked regardless of the
+ * server's TZ. (Using local setHours here would shift the window to the wrong
+ * calendar day on any server west of UTC.)
  */
 export function arrivalWindowForDate(
   date: Date,
@@ -39,9 +43,9 @@ export function arrivalWindowForDate(
 ): { readonly start: Date; readonly end: Date } {
   const [startHour, endHour] = WINDOW_HOURS[window];
   const start = new Date(date);
-  start.setHours(startHour, 0, 0, 0);
+  start.setUTCHours(startHour, 0, 0, 0);
   const end = new Date(date);
-  end.setHours(endHour, 0, 0, 0);
+  end.setUTCHours(endHour, 0, 0, 0);
   return { start, end };
 }
 
@@ -54,11 +58,18 @@ export function formatArrivalWindow(
   const start = new Date(startIso);
   const end = new Date(endIso);
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+  // The window is stored UTC-anchored (see arrivalWindowForDate), so render it
+  // in UTC for a stable label independent of the viewer's timezone.
   const day = start.toLocaleDateString(undefined, {
     month: "short",
     day: "numeric",
+    timeZone: "UTC",
   });
   const time = (d: Date) =>
-    d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    d.toLocaleTimeString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone: "UTC",
+    });
   return `${day}, ${time(start)} – ${time(end)}`;
 }

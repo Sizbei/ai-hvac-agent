@@ -33,8 +33,9 @@ const TRANSITIONS: Record<RequestStatus, readonly RequestStatus[]> = {
   // An assigned request can be scheduled, started, paused, or cancelled.
   assigned: ["scheduled", "in_progress", "on_hold", "cancelled"],
   in_progress: ["on_hold", "completed", "cancelled"],
-  // A paused job resumes (in_progress), can be re-scheduled, or cancelled.
-  on_hold: ["in_progress", "scheduled", "cancelled"],
+  // A paused job resumes (in_progress), can be re-scheduled, completed directly
+  // (a tech may finish while it's flagged on hold), or cancelled.
+  on_hold: ["in_progress", "scheduled", "completed", "cancelled"],
   completed: [],
   cancelled: [],
 };

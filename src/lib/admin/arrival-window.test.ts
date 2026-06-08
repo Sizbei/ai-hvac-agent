@@ -6,29 +6,31 @@ import {
   type ArrivalWindow,
 } from "./arrival-window";
 
-// A fixed local date to anchor the window math (no Date.now()).
-const DAY = new Date("2026-06-10T00:00:00");
+// A fixed UTC midnight date to anchor the window math (no Date.now()). The
+// window is computed in UTC (TZ-independent), so we assert UTC hours/day.
+const DAY = new Date("2026-06-10T00:00:00.000Z");
 
 describe("arrivalWindowForDate", () => {
-  it("morning = 8am–12pm on the given day", () => {
+  it("morning = 8am–12pm UTC on the given day", () => {
     const { start, end } = arrivalWindowForDate(DAY, "morning");
-    expect(start.getHours()).toBe(8);
-    expect(end.getHours()).toBe(12);
-    // same calendar day
-    expect(start.getDate()).toBe(end.getDate());
+    expect(start.getUTCHours()).toBe(8);
+    expect(end.getUTCHours()).toBe(12);
+    // same calendar day the dispatcher picked, regardless of server TZ
+    expect(start.getUTCDate()).toBe(10);
+    expect(end.getUTCDate()).toBe(10);
   });
 
-  it("afternoon = 12pm–4pm, evening = 4pm–8pm", () => {
-    expect(arrivalWindowForDate(DAY, "afternoon").start.getHours()).toBe(12);
-    expect(arrivalWindowForDate(DAY, "afternoon").end.getHours()).toBe(16);
-    expect(arrivalWindowForDate(DAY, "evening").start.getHours()).toBe(16);
-    expect(arrivalWindowForDate(DAY, "evening").end.getHours()).toBe(20);
+  it("afternoon = 12pm–4pm, evening = 4pm–8pm (UTC)", () => {
+    expect(arrivalWindowForDate(DAY, "afternoon").start.getUTCHours()).toBe(12);
+    expect(arrivalWindowForDate(DAY, "afternoon").end.getUTCHours()).toBe(16);
+    expect(arrivalWindowForDate(DAY, "evening").start.getUTCHours()).toBe(16);
+    expect(arrivalWindowForDate(DAY, "evening").end.getUTCHours()).toBe(20);
   });
 
-  it("anytime = a full business day 8am–8pm", () => {
+  it("anytime = a full business day 8am–8pm (UTC)", () => {
     const { start, end } = arrivalWindowForDate(DAY, "anytime");
-    expect(start.getHours()).toBe(8);
-    expect(end.getHours()).toBe(20);
+    expect(start.getUTCHours()).toBe(8);
+    expect(end.getUTCHours()).toBe(20);
   });
 
   it("start is always before end", () => {

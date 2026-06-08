@@ -407,11 +407,13 @@ export function RequestDetailSheet({
     loadDetail();
   }, [requestId]);
 
-  // "assigned"/"in_progress" already have work in flight, so changing the
-  // technician is a REASSIGNMENT (PATCH) that preserves status; "pending" is an
-  // initial ASSIGNMENT (POST) that flips status to "assigned".
-  const isReassignMode =
-    detail?.status === 'assigned' || detail?.status === 'in_progress';
+  // A request that ALREADY HAS A TECHNICIAN is changed via REASSIGNMENT (PATCH),
+  // which preserves the current status — so reassigning an on_hold or scheduled
+  // job keeps its stage/hold state. Only a request with no assignee yet uses the
+  // initial ASSIGNMENT (POST), which flips status to "assigned". (Keying off the
+  // assignee rather than a status allowlist avoids the bug where reassigning an
+  // on_hold/scheduled job via POST would silently reset it to "assigned".)
+  const isReassignMode = Boolean(detail?.assignedTo);
 
   const handleAssign = useCallback(async (): Promise<void> => {
     if (!requestId || !selectedTechId) return;
@@ -779,7 +781,12 @@ export function RequestDetailSheet({
                         {detail.followUpDate && (
                           <>
                             {' '}· follow up{' '}
-                            {new Date(detail.followUpDate).toLocaleDateString()}
+                            {/* The follow-up is a UTC-midnight calendar date;
+                                render it in UTC so it doesn't slip a day west of UTC. */}
+                            {new Date(detail.followUpDate).toLocaleDateString(
+                              undefined,
+                              { timeZone: 'UTC' },
+                            )}
                           </>
                         )}
                       </p>

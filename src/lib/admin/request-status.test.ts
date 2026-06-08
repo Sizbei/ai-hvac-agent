@@ -89,6 +89,10 @@ describe('request-status state machine', () => {
       expect(canTransition('on_hold', 'scheduled')).toBe(true);
     });
 
+    it('a held job can be completed directly (tech finished while on hold)', () => {
+      expect(canTransition('on_hold', 'completed')).toBe(true);
+    });
+
     it('neither new stage is terminal', () => {
       expect(isTerminal('scheduled')).toBe(false);
       expect(isTerminal('on_hold')).toBe(false);
