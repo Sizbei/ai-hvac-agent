@@ -78,7 +78,17 @@ export function RequestTable({ requests, isLoading, onRowClick }: RequestTablePr
                   <TableCell>{request.customerName ?? 'Unknown'}</TableCell>
                   <TableCell>{formatIssueType(request.issueType)}</TableCell>
                   <TableCell>
-                    <UrgencyBadge urgency={request.urgency} />
+                    <span className="inline-flex flex-wrap items-center gap-1">
+                      <UrgencyBadge urgency={request.urgency} />
+                      {request.isAfterHours && (
+                        <span
+                          title="Arrived after hours"
+                          className="inline-flex items-center rounded-full border border-amber-300 bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800"
+                        >
+                          After-hrs
+                        </span>
+                      )}
+                    </span>
                   </TableCell>
                   <TableCell>
                     <StatusBadge status={request.status} />

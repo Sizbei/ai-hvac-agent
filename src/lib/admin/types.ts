@@ -15,6 +15,7 @@ export interface AdminRequest {
   readonly referenceNumber: string;
   readonly customerName: string | null;
   readonly assignedToName: string | null;
+  readonly isAfterHours: boolean;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -29,6 +30,8 @@ export interface AdminRequestDetail extends AdminRequest {
   readonly arrivalWindowEnd: string | null;
   readonly holdReason: string | null;
   readonly followUpDate: string | null;
+  readonly isAfterHours: boolean;
+  readonly afterHoursSurcharge: number;
   readonly completedAt: string | null;
   readonly assignedTo: string | null;
   readonly transcript: readonly TranscriptMessage[];

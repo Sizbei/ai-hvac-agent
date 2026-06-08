@@ -6,6 +6,11 @@ import {
   MAX_TURNS_MIN,
   MAX_TURNS_MAX,
 } from "@/lib/ai/chat-limits";
+import {
+  afterHoursConfigSchema,
+  DEFAULT_AFTER_HOURS_CONFIG,
+  type AfterHoursConfig,
+} from "./after-hours";
 
 /**
  * Per-organization chatbot configuration — the shape the admin edits and the
@@ -111,6 +116,8 @@ export const orgConfigUpdateSchema = z
       .max(MAX_TURNS_MAX)
       .nullable()
       .optional(),
+    // After-hours pricing config. `null` resets to the system default.
+    afterHoursConfig: afterHoursConfigSchema.nullable().optional(),
   })
   .strict();
 
@@ -130,6 +137,8 @@ export interface OrgConfig {
   // null = use the system default (DEFAULT_TOKEN_BUDGET / DEFAULT_MAX_TURNS).
   readonly chatTokenBudget: number | null;
   readonly chatMaxTurns: number | null;
+  // Always resolved (defaults applied) so the admin form always has values.
+  readonly afterHoursConfig: AfterHoursConfig;
 }
 
 export const DEFAULT_ORG_CONFIG: OrgConfig = {
@@ -144,6 +153,7 @@ export const DEFAULT_ORG_CONFIG: OrgConfig = {
   allowedOrigins: [],
   chatTokenBudget: null,
   chatMaxTurns: null,
+  afterHoursConfig: DEFAULT_AFTER_HOURS_CONFIG,
 };
 
 // ── Custom FAQ ──

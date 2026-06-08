@@ -17,6 +17,7 @@ import {
   EMPTY_ORG_CONFIG,
   type RouterOrgConfig,
 } from "@/lib/ai/router-config";
+import { resolveAfterHoursConfig } from "./after-hours";
 
 /**
  * Read the resolved chatbot config for an org. Returns DEFAULT_ORG_CONFIG when
@@ -47,6 +48,7 @@ export async function getOrgConfig(
     allowedOrigins: row.allowedOrigins ?? [],
     chatTokenBudget: row.chatTokenBudget ?? null,
     chatMaxTurns: row.chatMaxTurns ?? null,
+    afterHoursConfig: resolveAfterHoursConfig(row.afterHoursConfig ?? null),
   };
 }
 
@@ -82,6 +84,8 @@ export async function updateOrgConfig(
     patch.chatTokenBudget = update.chatTokenBudget;
   if (update.chatMaxTurns !== undefined)
     patch.chatMaxTurns = update.chatMaxTurns;
+  if (update.afterHoursConfig !== undefined)
+    patch.afterHoursConfig = update.afterHoursConfig;
 
   // Upsert keyed on the org (the PK). onConflictDoUpdate applies the same patch
   // to an existing row. The insert values fill required NOT-NULL JSON columns
@@ -101,6 +105,7 @@ export async function updateOrgConfig(
       allowedOrigins: update.allowedOrigins ?? [],
       chatTokenBudget: update.chatTokenBudget ?? null,
       chatMaxTurns: update.chatMaxTurns ?? null,
+      afterHoursConfig: update.afterHoursConfig ?? null,
     })
     .onConflictDoUpdate({
       target: organizationSettings.organizationId,

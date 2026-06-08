@@ -491,9 +491,16 @@ export function RequestDetailSheet({
               <SheetTitle className="flex items-center gap-2">
                 <span className="font-mono text-sm">{detail.referenceNumber}</span>
               </SheetTitle>
-              <SheetDescription className="flex items-center gap-2">
+              <SheetDescription className="flex flex-wrap items-center gap-2">
                 <UrgencyBadge urgency={detail.urgency} />
                 <StatusBadge status={detail.status} />
+                {detail.isAfterHours && (
+                  <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
+                    After-hours
+                    {detail.afterHoursSurcharge > 0 &&
+                      ` +$${detail.afterHoursSurcharge}`}
+                  </span>
+                )}
               </SheetDescription>
             </SheetHeader>
 

@@ -8,6 +8,7 @@ import {
   MessageSquarePlus,
   Code2,
   SlidersHorizontal,
+  Clock,
 } from 'lucide-react';
 import { useOrgSettings } from '@/hooks/use-org-settings';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -19,6 +20,7 @@ import { BusinessInfoPanel } from '@/components/admin/settings/business-info-pan
 import { CustomFaqsPanel } from '@/components/admin/settings/custom-faqs-panel';
 import { EmbedPanel } from '@/components/admin/settings/embed-panel';
 import { ConversationLimitsPanel } from '@/components/admin/settings/conversation-limits-panel';
+import { AfterHoursPanel } from '@/components/admin/settings/after-hours-panel';
 
 export default function SettingsPage() {
   const settings = useOrgSettings();
@@ -72,6 +74,10 @@ export default function SettingsPage() {
               <SlidersHorizontal className="size-4" />
               Limits
             </TabsTrigger>
+            <TabsTrigger value="after-hours">
+              <Clock className="size-4" />
+              After-hours
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="branding" className="mt-6">
@@ -99,6 +105,12 @@ export default function SettingsPage() {
           </TabsContent>
           <TabsContent value="limits" className="mt-6">
             <ConversationLimitsPanel
+              config={settings.config}
+              onSave={settings.saveConfig}
+            />
+          </TabsContent>
+          <TabsContent value="after-hours" className="mt-6">
+            <AfterHoursPanel
               config={settings.config}
               onSave={settings.saveConfig}
             />
