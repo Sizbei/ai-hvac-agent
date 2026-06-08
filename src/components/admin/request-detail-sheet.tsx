@@ -24,7 +24,9 @@ import { StatusBadge } from '@/components/admin/status-badge';
 import {
   allowedTransitions,
   MANUAL_TARGET_STATUSES,
+  HOLD_REASONS,
   type RequestStatus,
+  type HoldReason,
 } from '@/lib/admin/request-status';
 import {
   ARRIVAL_WINDOWS,
@@ -63,6 +65,14 @@ const ARRIVAL_WINDOW_LABELS: Record<ArrivalWindow, string> = {
   afternoon: 'Afternoon (12–4pm)',
   evening: 'Evening (4–8pm)',
   anytime: 'Anytime (8am–8pm)',
+};
+
+const HOLD_REASON_LABELS: Record<HoldReason, string> = {
+  awaiting_parts: 'Awaiting parts',
+  awaiting_customer: 'Awaiting customer',
+  awaiting_access: 'Awaiting access',
+  weather: 'Weather',
+  other: 'Other',
 };
 
 // Per-field display maps for the intake enums. Keeping them explicit (rather
@@ -243,6 +253,9 @@ export function RequestDetailSheet({
   const [scheduledInput, setScheduledInput] = useState<string>('');
   const [arrivalWindowInput, setArrivalWindowInput] =
     useState<ArrivalWindow>('anytime');
+  const [holdReasonInput, setHoldReasonInput] =
+    useState<HoldReason>('awaiting_parts');
+  const [followUpInput, setFollowUpInput] = useState<string>('');
   const [isPatching, setIsPatching] = useState(false);
   const [workflowError, setWorkflowError] = useState<string | null>(null);
 
@@ -289,6 +302,8 @@ export function RequestDetailSheet({
       status?: RequestStatus;
       scheduledDate?: string | null;
       arrivalWindow?: ArrivalWindow | null;
+      holdReason?: HoldReason | null;
+      followUpDate?: string | null;
     }): Promise<void> => {
       if (!requestId) return;
       setIsPatching(true);
@@ -696,7 +711,21 @@ export function RequestDetailSheet({
                                 next === 'cancelled' ? 'outline' : 'default'
                               }
                               disabled={isPatching}
-                              onClick={() => patchRequest({ status: next })}
+                              onClick={() =>
+                                patchRequest(
+                                  next === 'on_hold'
+                                    ? {
+                                        status: next,
+                                        holdReason: holdReasonInput,
+                                        followUpDate: followUpInput
+                                          ? new Date(
+                                              `${followUpInput}T00:00:00.000Z`,
+                                            ).toISOString()
+                                          : null,
+                                      }
+                                    : { status: next },
+                                )
+                              }
                             >
                               {STATUS_ACTION_LABELS[
                                 next as ManualTargetStatus
@@ -706,6 +735,55 @@ export function RequestDetailSheet({
                         )
                       )}
                     </div>
+
+                    {/* Hold details — shown when "on_hold" is reachable, so the
+                        dispatcher can attach a reason + follow-up to the pause. */}
+                    {allowedTransitions(detail.status as RequestStatus).includes(
+                      'on_hold',
+                    ) && (
+                      <div className="flex flex-wrap items-center gap-2 pt-1">
+                        <span className="text-xs text-muted-foreground">
+                          If putting on hold:
+                        </span>
+                        <select
+                          value={holdReasonInput}
+                          onChange={(e) =>
+                            setHoldReasonInput(e.target.value as HoldReason)
+                          }
+                          className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          {HOLD_REASONS.map((r) => (
+                            <option key={r} value={r}>
+                              {HOLD_REASON_LABELS[r]}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          type="date"
+                          value={followUpInput}
+                          onChange={(e) => setFollowUpInput(e.target.value)}
+                          aria-label="Follow-up date"
+                          className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        />
+                      </div>
+                    )}
+
+                    {/* When already on hold, show what it's waiting on. */}
+                    {detail.status === 'on_hold' && detail.holdReason && (
+                      <p className="text-xs text-muted-foreground">
+                        On hold:{' '}
+                        <span className="font-medium text-foreground">
+                          {HOLD_REASON_LABELS[detail.holdReason as HoldReason] ??
+                            detail.holdReason}
+                        </span>
+                        {detail.followUpDate && (
+                          <>
+                            {' '}· follow up{' '}
+                            {new Date(detail.followUpDate).toLocaleDateString()}
+                          </>
+                        )}
+                      </p>
+                    )}
                   </div>
 
                   <div className="space-y-2">

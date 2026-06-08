@@ -155,6 +155,16 @@ export const contactPreferenceEnum = pgEnum("contact_preference", [
   "text",
 ]);
 
+// Why a request is on hold (ServiceTitan hold/cancel reason codes). Set when a
+// dispatcher pauses a job so the queue shows what it's waiting on.
+export const holdReasonEnum = pgEnum("hold_reason", [
+  "awaiting_parts",
+  "awaiting_customer",
+  "awaiting_access",
+  "weather",
+  "other",
+]);
+
 // 1. organizations
 export const organizations = pgTable("organizations", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -304,6 +314,9 @@ export const serviceRequests = pgTable(
     preferredWindow: preferredWindowEnum("preferred_window"),
     arrivalWindowStart: timestamp("arrival_window_start", { withTimezone: true }),
     arrivalWindowEnd: timestamp("arrival_window_end", { withTimezone: true }),
+    // Why a job is paused + when to revisit (set on an on_hold transition).
+    holdReason: holdReasonEnum("hold_reason"),
+    followUpDate: timestamp("follow_up_date", { withTimezone: true }),
     // Communication.
     contactPreference: contactPreferenceEnum("contact_preference"),
     smsConsent: boolean("sms_consent"),

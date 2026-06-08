@@ -22,6 +22,7 @@ import {
   users,
   messages,
   requestStatusEnum,
+  holdReasonEnum,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { normalizeEmail } from "./staff-queries";
@@ -30,6 +31,8 @@ import {
   canTransition,
   type RequestStatus,
 } from "./request-status";
+
+export type HoldReason = (typeof holdReasonEnum.enumValues)[number];
 import type {
   AdminRequest,
   AdminRequestDetail,
@@ -161,6 +164,8 @@ export async function getRequestById(
       scheduledDate: serviceRequests.scheduledDate,
       arrivalWindowStart: serviceRequests.arrivalWindowStart,
       arrivalWindowEnd: serviceRequests.arrivalWindowEnd,
+      holdReason: serviceRequests.holdReason,
+      followUpDate: serviceRequests.followUpDate,
       completedAt: serviceRequests.completedAt,
       createdAt: serviceRequests.createdAt,
       updatedAt: serviceRequests.updatedAt,
@@ -261,6 +266,8 @@ export async function getRequestById(
     scheduledDate: row.scheduledDate?.toISOString() ?? null,
     arrivalWindowStart: row.arrivalWindowStart?.toISOString() ?? null,
     arrivalWindowEnd: row.arrivalWindowEnd?.toISOString() ?? null,
+    holdReason: row.holdReason,
+    followUpDate: row.followUpDate?.toISOString() ?? null,
     completedAt: row.completedAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -527,6 +534,10 @@ export async function updateRequestStatus(
   organizationId: string,
   requestId: string,
   target: RequestStatus,
+  holdDetails?: {
+    readonly reason: HoldReason | null;
+    readonly followUpDate: Date | null;
+  },
 ): Promise<UpdateRequestStatusResult> {
   const [existing] = await db
     .select({ status: serviceRequests.status })
@@ -557,6 +568,12 @@ export async function updateRequestStatus(
     .set({
       status: target,
       completedAt: target === "completed" ? now : null,
+      // Hold metadata is set when pausing and CLEARED on any other transition
+      // (resuming, completing, cancelling) so a stale "waiting on parts" never
+      // lingers on a job that's moved on.
+      holdReason: target === "on_hold" ? (holdDetails?.reason ?? null) : null,
+      followUpDate:
+        target === "on_hold" ? (holdDetails?.followUpDate ?? null) : null,
       updatedAt: now,
     })
     .where(

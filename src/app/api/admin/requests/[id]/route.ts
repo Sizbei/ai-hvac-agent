@@ -5,7 +5,11 @@ import {
   scheduleRequest,
   addRequestNote,
 } from "@/lib/admin/queries";
-import { MANUAL_TARGET_STATUSES } from "@/lib/admin/request-status";
+import {
+  MANUAL_TARGET_STATUSES,
+  HOLD_REASONS,
+  type HoldReason,
+} from "@/lib/admin/request-status";
 import {
   ARRIVAL_WINDOWS,
   arrivalWindowForDate,
@@ -35,6 +39,12 @@ const patchSchema = z
       .enum([...ARRIVAL_WINDOWS] as [string, ...string[]])
       .nullable()
       .optional(),
+    // Hold metadata — only meaningful when status === "on_hold".
+    holdReason: z
+      .enum([...HOLD_REASONS] as [string, ...string[]])
+      .nullable()
+      .optional(),
+    followUpDate: z.string().datetime().nullable().optional(),
   })
   .refine(
     (v) =>
@@ -118,10 +128,22 @@ export async function PATCH(
     // silently persist a write while returning an error. The two writes are not
     // transactional (neon-http), so ordering is our only lever here.
     if (parsed.data.status !== undefined) {
+      // Hold metadata only applies to an on_hold transition; updateRequestStatus
+      // clears it on any other target.
+      const holdDetails =
+        parsed.data.status === "on_hold"
+          ? {
+              reason: (parsed.data.holdReason ?? null) as HoldReason | null,
+              followUpDate: parsed.data.followUpDate
+                ? new Date(parsed.data.followUpDate)
+                : null,
+            }
+          : undefined;
       const result = await updateRequestStatus(
         session.organizationId,
         id,
         parsed.data.status as (typeof MANUAL_TARGET_STATUSES)[number],
+        holdDetails,
       );
       if (!result.ok) {
         if (result.reason === "request_not_found") {

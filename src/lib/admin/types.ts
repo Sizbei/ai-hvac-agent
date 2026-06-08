@@ -27,6 +27,8 @@ export interface AdminRequestDetail extends AdminRequest {
   readonly scheduledDate: string | null;
   readonly arrivalWindowStart: string | null;
   readonly arrivalWindowEnd: string | null;
+  readonly holdReason: string | null;
+  readonly followUpDate: string | null;
   readonly completedAt: string | null;
   readonly assignedTo: string | null;
   readonly transcript: readonly TranscriptMessage[];

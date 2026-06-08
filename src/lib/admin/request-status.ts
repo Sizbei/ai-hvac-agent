@@ -15,9 +15,13 @@
  * UI in agreement on what's legal — and makes the lost-update race safe, since
  * the DB UPDATE is guarded on the expected `from` status.
  */
-import { requestStatusEnum } from "@/lib/db/schema";
+import { requestStatusEnum, holdReasonEnum } from "@/lib/db/schema";
 
 export type RequestStatus = (typeof requestStatusEnum.enumValues)[number];
+
+/** Why a request is on hold — set when a dispatcher pauses a job. */
+export const HOLD_REASONS = holdReasonEnum.enumValues;
+export type HoldReason = (typeof HOLD_REASONS)[number];
 
 /** Allowed manual transitions, keyed by the current status. Assignment is
  * handled separately (assignTechnician); it is not a manual target here. */

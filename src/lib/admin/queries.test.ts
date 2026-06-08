@@ -86,6 +86,8 @@ vi.mock('@/lib/db/schema', () => ({
     scheduledDate: 'sr.scheduledDate',
     arrivalWindowStart: 'sr.arrivalWindowStart',
     arrivalWindowEnd: 'sr.arrivalWindowEnd',
+    holdReason: 'sr.holdReason',
+    followUpDate: 'sr.followUpDate',
     completedAt: 'sr.completedAt',
     createdAt: 'sr.createdAt',
     updatedAt: 'sr.updatedAt',
@@ -118,7 +120,24 @@ vi.mock('@/lib/db/schema', () => ({
     createdAt: 'rn.createdAt',
   },
   requestStatusEnum: {
-    enumValues: ['pending', 'assigned', 'in_progress', 'completed', 'cancelled'],
+    enumValues: [
+      'pending',
+      'assigned',
+      'scheduled',
+      'in_progress',
+      'on_hold',
+      'completed',
+      'cancelled',
+    ],
+  },
+  holdReasonEnum: {
+    enumValues: [
+      'awaiting_parts',
+      'awaiting_customer',
+      'awaiting_access',
+      'weather',
+      'other',
+    ],
   },
 }));
 
@@ -541,6 +560,23 @@ describe('updateRequestStatus', () => {
     updateResolution = [{ status: 'completed' }];
     const result = await updateRequestStatus(ORG_ID, 'req-1', 'completed');
     expect(result).toEqual({ ok: true, status: 'completed' });
+  });
+
+  it('puts an in_progress job on hold with reason + follow-up', async () => {
+    selectResolutions = [[{ status: 'in_progress' }]];
+    updateResolution = [{ status: 'on_hold' }];
+    const result = await updateRequestStatus(ORG_ID, 'req-1', 'on_hold', {
+      reason: 'awaiting_parts',
+      followUpDate: new Date('2026-07-05T00:00:00Z'),
+    });
+    expect(result).toEqual({ ok: true, status: 'on_hold' });
+  });
+
+  it('resumes a held job (on_hold → in_progress)', async () => {
+    selectResolutions = [[{ status: 'on_hold' }]];
+    updateResolution = [{ status: 'in_progress' }];
+    const result = await updateRequestStatus(ORG_ID, 'req-1', 'in_progress');
+    expect(result).toEqual({ ok: true, status: 'in_progress' });
   });
 });
 

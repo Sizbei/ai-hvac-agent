@@ -15,6 +15,15 @@ vi.mock('@/lib/db/schema', () => ({
       'cancelled',
     ],
   },
+  holdReasonEnum: {
+    enumValues: [
+      'awaiting_parts',
+      'awaiting_customer',
+      'awaiting_access',
+      'weather',
+      'other',
+    ],
+  },
 }));
 
 import {
