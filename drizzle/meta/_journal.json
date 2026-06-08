@@ -64,6 +64,13 @@
       "when": 1780433757194,
       "tag": "0008_last_admin_guard",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1780433757195,
+      "tag": "0009_phone_channel_and_summary",
+      "breakpoints": true
     }
   ]
 }

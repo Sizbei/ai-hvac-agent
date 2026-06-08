@@ -10,6 +10,16 @@ import {
   MAX_TURNS_MAX,
 } from "./chat-limits";
 
+describe("raised conversation caps (long-conversation flow)", () => {
+  it("defaults to a higher max-turns ceiling now that compaction bounds cost", () => {
+    expect(DEFAULT_MAX_TURNS).toBe(40);
+  });
+
+  it("allows a larger per-org token budget upper bound", () => {
+    expect(TOKEN_BUDGET_MAX).toBe(500_000);
+  });
+});
+
 describe("resolveTokenBudget", () => {
   it("returns the default for null/undefined (unconfigured org)", () => {
     expect(resolveTokenBudget(null)).toBe(DEFAULT_TOKEN_BUDGET);

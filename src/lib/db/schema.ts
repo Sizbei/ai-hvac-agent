@@ -44,6 +44,12 @@ export const requestStatusEnum = pgEnum("request_status", [
   "cancelled",
 ]);
 
+// The medium a conversation came in over. "web" = the embeddable chat widget
+// (the default for every pre-existing session); "phone" = a voice call handled
+// by the telephone sub-agent (Twilio). Drives the admin channel badge/filter
+// and which system-prompt persona the agent uses.
+export const sessionChannelEnum = pgEnum("session_channel", ["web", "phone"]);
+
 // 1. organizations
 export const organizations = pgTable("organizations", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -102,7 +108,15 @@ export const customerSessions = pgTable(
     // chatMaxTurns config at creation (or the system default). Per-session so
     // the chat hot path reads it off the loaded row, not a config lookup.
     maxTurns: integer("max_turns").notNull().default(15),
+    // The medium this conversation arrived over (see sessionChannelEnum).
+    // Defaults to "web" so every existing row reads as a widget chat.
+    channel: sessionChannelEnum("channel").notNull().default("web"),
     metadata: text("metadata"),
+    // Rolling summary of turns that have aged out of the model's sliding
+    // window. Lets a long conversation stay coherent without re-sending the
+    // full transcript every turn. NULL until the conversation first exceeds the
+    // window. Written by the background compaction task.
+    runningSummary: text("running_summary"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -116,6 +130,8 @@ export const customerSessions = pgTable(
     index("sessions_token_idx").on(table.token),
     index("sessions_status_idx").on(table.status),
     index("sessions_org_created_idx").on(table.organizationId, table.createdAt),
+    // The admin Conversations view filters by channel within an org.
+    index("sessions_org_channel_idx").on(table.organizationId, table.channel),
   ],
 );
 

@@ -34,10 +34,9 @@ import {
   hasSlotData,
   buildExtraction,
 } from "@/lib/ai/chat-slots";
+import { buildModelMessages, MAX_HISTORY, type ChatTurn } from "@/lib/ai/compaction";
+import { compactSessionIfNeeded } from "@/lib/ai/compact-session";
 import { logger } from "@/lib/logger";
-
-// Sliding window of recent messages sent to the model (bounds context growth).
-const MAX_HISTORY = 10;
 // The deterministic router is on by default; set ROUTER_ENABLED=false to disable
 // it (kill-switch) and route every turn through the LLM.
 const ROUTER_ENABLED = process.env.ROUTER_ENABLED !== "false";
@@ -426,15 +425,16 @@ export async function POST(request: NextRequest) {
       // Cap output so replies stay short (the prompt asks for 2-3 sentences) and
       // tail costs are bounded (Token-Savings #6).
       maxOutputTokens: 350,
-      messages: [
-        // Sliding window: only send the most recent turns to bound the
-        // quadratic token growth of full-history re-sends (Token-Savings #4).
-        ...conversationHistory.slice(-MAX_HISTORY).map((m) => ({
-          role: m.role as "user" | "assistant",
-          content: m.content,
-        })),
-        { role: "user" as const, content: guardrailResult.sanitized },
-      ],
+      // Sliding window + rolling summary: the model sees a "summary of earlier
+      // conversation" (turns that aged out of the window) plus the most recent
+      // turns and the current message. This bounds the quadratic token growth
+      // of full-history re-sends (Token-Savings #4) while keeping long
+      // conversations coherent past MAX_HISTORY turns.
+      messages: buildModelMessages({
+        runningSummary: session.runningSummary,
+        recent: conversationHistory.slice(-MAX_HISTORY) as ChatTurn[],
+        current: guardrailResult.sanitized,
+      }).map((m) => ({ role: m.role, content: m.content })),
       onFinish: async ({ text, usage }) => {
         const tokensThisCall =
           (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0);
@@ -565,6 +565,37 @@ export async function POST(request: NextRequest) {
           .set({ status: fallbackState, updatedAt: new Date() })
           .where(sessionScope)
           .catch(() => {});
+      }
+    });
+
+    // Compaction runs in its own background task, independent of extraction so
+    // a failure in one never affects the other. The conversation as of this
+    // turn is the prior history + the user message we just saved (the assistant
+    // reply is the newest turn and stays inside the window, so it doesn't need
+    // to be included for the overflow calculation).
+    after(async () => {
+      try {
+        const turnsThisTurn: ChatTurn[] = [
+          ...conversationHistory,
+          { role: "user", content: guardrailResult.sanitized },
+        ];
+        const compacted = await compactSessionIfNeeded({
+          sessionId: session.id,
+          organizationId,
+          history: turnsThisTurn,
+        });
+        if (compacted) {
+          logger.info(
+            { sessionId: session.id },
+            "Conversation compacted into running summary",
+          );
+        }
+      } catch (compactionError: unknown) {
+        // Non-fatal: the conversation simply continues uncompacted.
+        logger.error(
+          { error: compactionError, sessionId: session.id },
+          "Conversation compaction failed",
+        );
       }
     });
 
