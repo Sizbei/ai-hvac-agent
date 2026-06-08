@@ -16,7 +16,7 @@ export const ARRIVAL_WINDOWS = [
 
 export type ArrivalWindow = (typeof ARRIVAL_WINDOWS)[number];
 
-// Window → [startHour, endHour) in local time, 24h.
+// Window → [startHour, endHour) applied in UTC (see arrivalWindowForDate), 24h.
 const WINDOW_HOURS: Record<ArrivalWindow, readonly [number, number]> = {
   morning: [8, 12],
   afternoon: [12, 16],
