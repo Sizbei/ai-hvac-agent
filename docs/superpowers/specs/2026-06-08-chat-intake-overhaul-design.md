@@ -12,14 +12,55 @@ in one visit — while keeping completion high and preserving the deterministic-
 first / cost-aware architecture. Grounded in competitor research
 (ServiceTitan/Housecall Pro/Jobber/Thumbtack + HVAC AI receptionists).
 
+## ServiceTitan model adopted (deep research)
+
+We mirror as much of ServiceTitan's data model as makes sense without a
+billing/routing/marketing backend. Key adopted concepts:
+
+- **Customer (payer) / Location (site) / Job (work) split — "soft split".** We do
+  NOT add a separate `locations` table yet (95%+ of chats are residential where
+  billing == service address). Instead: the customer row is the financially-
+  responsible identity; the **service address lives on the service_request** (=
+  the location). Documented upgrade path: promote to a real `locations` table if
+  commercial/property-management becomes a segment.
+- **Job type vs symptom.** Keep `issueType` as the customer-language symptom; add
+  a **`jobType`** enum that classifies the work using ST's HVAC taxonomy:
+  `service_call`, `no_heat`, `no_cool`, `maintenance`, `install`, `estimate`,
+  `warranty`, `diagnostic`, `inspection`.
+- **Customer class + flags.** `customers.type` (`residential`/`commercial`),
+  `customers.membershipStatus` (`none`/`active`/`suspended`/`expired`/`cancelled`),
+  `customers.doNotService` (bot refuses to book / warns).
+- **Arrival window, not exact time.** Requests get `arrivalWindowStart` /
+  `arrivalWindowEnd` (ST never books an exact time). The chat captures a
+  preferred window (Morning/Afternoon/Evening/ASAP) which maps to a window.
+- **SMS consent per booking** (`smsConsent` on the request) — consent is per-
+  interaction in ST, and arrival-window texts need a mobile.
+- **Lead source** (`leadSource` enum on the request): `google`, `facebook`,
+  `yelp`, `referral`, `repeat_customer`, `website`, `direct_mail`, `other` —
+  the one marketing field an owner actually reads; asked conversation-only.
+- **Tags** (small enum + join, seeded): `do_not_service`, `gate_code`, `dog`,
+  `member`, `follow_up`, `replacement_opp`, `high_value`. `gate_code`/`dog`/
+  `do_not_service` are the load-bearing ones (access + safety + refuse-to-book).
+- **Equipment**: split labor warranty from parts (`laborWarrantyExpiration`),
+  and link equipment to the request (request↔equipment).
+- **ST Step-3 qualifying questions** (duration / system age / # units / severity)
+  added to triage — ST's biggest accuracy lever, zero schema.
+
+Skipped (no backend): Business Unit, account balance/billing, DNI call tracking,
+custom fields, preferred technician, lifetime revenue.
+
+Sources: ServiceTitan CRM/Job/Equipment API docs, Web Scheduler + CSR call
+scripts, tagging guide, memberships FAQ, lead-attribution docs (see
+docs/INTAKE-FIELDS.md for the full citation list).
+
 ## Field model (tiered)
 
 **Required — blocks submission (5):**
 - Safety screen acknowledged/cleared (no active gas/CO/fire/flooding hazard, or
   escalated if present)
-- `issueType` (existing)
-- `urgency` (existing)
-- `address` (existing)
+- `issueType` (existing symptom) → also classified into `jobType` (ST taxonomy)
+- `urgency` (existing; ST priority maps low/medium/high/emergency)
+- `address` (existing — the ST "location")
 - `customerPhone` (NEW required — the dispatch primary key; today optional)
 
 **Best-effort — asked smartly, skippable ("I don't know"/"skip"):**
@@ -78,13 +119,20 @@ any point even if best-effort fields are blank.
 
 ## Persistence (schema + admin)
 
-New nullable columns on `service_requests` (migration 0010, hand-authored per
-the project's drizzle-kit-collision pattern):
-`system_type`, `equipment_age_band`, `equipment_brand`, `property_type`,
-`owner_occupant`, `under_warranty`, `access_notes`, `preferred_window`,
-`contact_preference`, `system_down_status`, `problem_duration`,
-`vulnerable_occupants`. (Equipment make/brand also mirrored into
-`customer_equipment` on submit when present.)
+New nullable columns (migration 0010, hand-authored per the project's
+drizzle-kit-collision pattern).
+
+On `service_requests`: `job_type` (enum), `system_type`, `equipment_age_band`,
+`equipment_brand`, `property_type`, `owner_occupant`, `under_warranty`,
+`access_notes`, `arrival_window_start`, `arrival_window_end`, `preferred_window`,
+`contact_preference`, `sms_consent`, `lead_source` (enum), `system_down_status`,
+`problem_duration`, `vulnerable_occupants`.
+
+On `customers`: `type` (residential/commercial), `membership_status` (enum),
+`do_not_service` (bool). On `customer_equipment`: `labor_warranty_expiration`.
+New enums: `job_type`, `customer_type`, `membership_status`, `lead_source`,
+`system_type`, `property_type`. (Equipment make/brand mirrored into
+`customer_equipment` on submit when present, linked to the request.)
 
 The admin **request detail** view renders these in a new "Intake details" /
 "Equipment & property" section. Conversation extraction metadata carries the
