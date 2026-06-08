@@ -233,6 +233,10 @@ export function ConversationDetailSheet({
               <section>
                 <h3 className="text-sm font-semibold mb-2">Overview</h3>
                 <div className="rounded-md border p-3 space-y-1">
+                  <InfoRow
+                    label="Channel"
+                    value={detail.channel === 'phone' ? 'Phone call' : 'Web chat'}
+                  />
                   <InfoRow label="Turns" value={String(detail.turnCount)} />
                   <InfoRow label="Messages" value={String(detail.messages.length)} />
                   <InfoRow
@@ -252,6 +256,18 @@ export function ConversationDetailSheet({
 
               {/* Extracted metadata */}
               {detail.metadata && <ExtractedData metadata={detail.metadata} />}
+
+              {/* Running summary (long conversations) */}
+              {detail.runningSummary && (
+                <section>
+                  <h3 className="text-sm font-semibold mb-2">Conversation Summary</h3>
+                  <div className="rounded-md border p-3">
+                    <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+                      {detail.runningSummary}
+                    </p>
+                  </div>
+                </section>
+              )}
 
               <Separator />
 

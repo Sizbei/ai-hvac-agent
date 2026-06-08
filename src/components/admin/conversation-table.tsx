@@ -9,8 +9,24 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Badge } from '@/components/ui/badge';
+import { Phone, MessageSquare } from 'lucide-react';
 import { StatusBadge } from '@/components/admin/status-badge';
-import type { ConversationSummary } from '@/lib/admin/conversation-types';
+import type {
+  ConversationSummary,
+  ConversationChannel,
+} from '@/lib/admin/conversation-types';
+
+function ChannelBadge({ channel }: { readonly channel: ConversationChannel }) {
+  const isPhone = channel === 'phone';
+  const Icon = isPhone ? Phone : MessageSquare;
+  return (
+    <Badge variant="outline" className="gap-1 font-normal">
+      <Icon className="size-3" />
+      {isPhone ? 'Phone' : 'Web'}
+    </Badge>
+  );
+}
 
 interface ConversationTableProps {
   readonly conversations: readonly ConversationSummary[];
@@ -23,7 +39,7 @@ function formatDateTime(dateString: string): string {
 }
 
 const SKELETON_ROWS = 5;
-const COLUMN_COUNT = 6;
+const COLUMN_COUNT = 7;
 
 export function ConversationTable({
   conversations,
@@ -35,6 +51,7 @@ export function ConversationTable({
       <TableHeader>
         <TableRow>
           <TableHead>Status</TableHead>
+          <TableHead>Channel</TableHead>
           <TableHead>Preview</TableHead>
           <TableHead>Messages</TableHead>
           <TableHead>Turns</TableHead>
@@ -69,6 +86,9 @@ export function ConversationTable({
                 >
                   <TableCell>
                     <StatusBadge status={conversation.status} />
+                  </TableCell>
+                  <TableCell>
+                    <ChannelBadge channel={conversation.channel} />
                   </TableCell>
                   <TableCell className="max-w-[280px] truncate text-muted-foreground">
                     {conversation.preview ?? '—'}

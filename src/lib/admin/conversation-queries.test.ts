@@ -50,8 +50,11 @@ vi.mock('@/lib/db/schema', () => ({
     id: 'sessions.id',
     organizationId: 'sessions.org',
     status: 'sessions.status',
+    channel: 'sessions.channel',
+    runningSummary: 'sessions.running_summary',
     createdAt: 'sessions.created',
   },
+  sessionChannelEnum: { enumValues: ['web', 'phone'] },
   messages: { sessionId: 'messages.sid', organizationId: 'messages.org' },
   serviceRequests: {
     id: 'sr.id',
@@ -63,7 +66,7 @@ vi.mock('@/lib/db/schema', () => ({
   auditLog: { sessionId: 'audit.sid', organizationId: 'audit.org' },
 }));
 
-import { deleteConversation } from './conversation-queries';
+import { deleteConversation, getConversationById } from './conversation-queries';
 
 const ORG = '00000000-0000-0000-0000-000000000001';
 
@@ -71,6 +74,38 @@ beforeEach(() => {
   selectQueue.length = 0;
   batchMock.mockClear();
   batchMock.mockResolvedValue([]);
+});
+
+describe('getConversationById', () => {
+  it('surfaces the channel and running summary in the detail', async () => {
+    selectQueue.push([
+      {
+        id: 's1',
+        status: 'chatting',
+        channel: 'phone',
+        turnCount: 3,
+        tokensUsed: 100,
+        tokenBudget: 10000,
+        metadata: null,
+        runningSummary: 'Caller reported no heat at 5 Oak St.',
+        createdAt: new Date('2026-06-08T00:00:00Z'),
+        updatedAt: new Date('2026-06-08T00:05:00Z'),
+      },
+    ]); // session row
+    selectQueue.push([]); // messages
+    selectQueue.push([]); // service request
+
+    const detail = await getConversationById(ORG, 's1');
+    expect(detail).not.toBeNull();
+    expect(detail?.channel).toBe('phone');
+    expect(detail?.runningSummary).toBe('Caller reported no heat at 5 Oak St.');
+  });
+
+  it('returns null when the session is not in the org', async () => {
+    selectQueue.push([]); // session row missing
+    const detail = await getConversationById(ORG, 'nope');
+    expect(detail).toBeNull();
+  });
 });
 
 describe('deleteConversation', () => {

@@ -18,7 +18,7 @@ export interface ParsedVoiceRequest {
 export async function parseAndVerifyTwilioRequest(
   request: Request,
 ): Promise<ParsedVoiceRequest> {
-  let params: Record<string, string> = {};
+  const params: Record<string, string> = {};
   try {
     const form = await request.formData();
     for (const [key, value] of form.entries()) {

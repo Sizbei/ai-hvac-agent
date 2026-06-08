@@ -5,6 +5,7 @@ import type { ConversationSummary } from '@/lib/admin/conversation-types';
 
 interface UseAdminConversationsOptions {
   readonly status?: string;
+  readonly channel?: string;
   readonly search?: string;
   readonly page?: number;
   readonly limit?: number;
@@ -25,7 +26,7 @@ interface UseAdminConversationsResult {
 export function useAdminConversations(
   options: UseAdminConversationsOptions = {},
 ): UseAdminConversationsResult {
-  const { status, search, page = 1, limit = 20 } = options;
+  const { status, channel, search, page = 1, limit = 20 } = options;
 
   const [conversations, setConversations] = useState<readonly ConversationSummary[]>([]);
   const [total, setTotal] = useState(0);
@@ -42,6 +43,7 @@ export function useAdminConversations(
     try {
       const params = new URLSearchParams();
       if (status) params.set('status', status);
+      if (channel) params.set('channel', channel);
       if (search) params.set('search', search);
       params.set('page', String(page));
       params.set('limit', String(limit));
@@ -78,7 +80,7 @@ export function useAdminConversations(
       isFetchingRef.current = false;
       setIsLoading(false);
     }
-  }, [status, search, page, limit]);
+  }, [status, channel, search, page, limit]);
 
   // Fetch on mount and when options change
   useEffect(() => {

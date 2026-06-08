@@ -20,6 +20,7 @@ import {
   serviceHistory,
   auditLog,
   sessionStatusEnum,
+  sessionChannelEnum,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import type {
@@ -38,6 +39,12 @@ type SessionStatus = (typeof sessionStatusEnum.enumValues)[number];
 
 function isValidStatus(value: string): value is SessionStatus {
   return (sessionStatusEnum.enumValues as readonly string[]).includes(value);
+}
+
+type SessionChannel = (typeof sessionChannelEnum.enumValues)[number];
+
+function isValidChannel(value: string): value is SessionChannel {
+  return (sessionChannelEnum.enumValues as readonly string[]).includes(value);
 }
 
 /**
@@ -112,6 +119,9 @@ export async function getConversations(
   if (filters.status && isValidStatus(filters.status)) {
     conditions.push(eq(customerSessions.status, filters.status));
   }
+  if (filters.channel && isValidChannel(filters.channel)) {
+    conditions.push(eq(customerSessions.channel, filters.channel));
+  }
 
   // Optional search: restrict to sessions whose id text-matches OR that have at
   // least one message whose content matches (case-insensitive substring).
@@ -150,6 +160,7 @@ export async function getConversations(
     .select({
       id: customerSessions.id,
       status: customerSessions.status,
+      channel: customerSessions.channel,
       turnCount: customerSessions.turnCount,
       tokensUsed: customerSessions.tokensUsed,
       createdAt: customerSessions.createdAt,
@@ -251,6 +262,7 @@ export async function getConversations(
       return {
         id: row.id,
         status: row.status,
+        channel: row.channel,
         turnCount: row.turnCount,
         messageCount: aggregate?.messageCount ?? 0,
         tokensUsed: row.tokensUsed,
@@ -275,10 +287,12 @@ export async function getConversationById(
     .select({
       id: customerSessions.id,
       status: customerSessions.status,
+      channel: customerSessions.channel,
       turnCount: customerSessions.turnCount,
       tokensUsed: customerSessions.tokensUsed,
       tokenBudget: customerSessions.tokenBudget,
       metadata: customerSessions.metadata,
+      runningSummary: customerSessions.runningSummary,
       createdAt: customerSessions.createdAt,
       updatedAt: customerSessions.updatedAt,
     })
@@ -335,10 +349,12 @@ export async function getConversationById(
   return {
     id: sessionRow.id,
     status: sessionRow.status,
+    channel: sessionRow.channel,
     turnCount: sessionRow.turnCount,
     tokensUsed: sessionRow.tokensUsed,
     tokenBudget: sessionRow.tokenBudget,
     metadata: parseMetadata(sessionRow.metadata),
+    runningSummary: sessionRow.runningSummary ?? null,
     referenceNumber,
     hasServiceRequest: referenceNumber !== null,
     createdAt: sessionRow.createdAt.toISOString(),

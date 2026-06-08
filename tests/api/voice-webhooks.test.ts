@@ -9,17 +9,6 @@ const { selectResult, insertSpy, voiceReplyMock } = vi.hoisted(() => ({
   voiceReplyMock: vi.fn(),
 }));
 
-function thenable(value: unknown): unknown {
-  const p: unknown = new Proxy(() => {}, {
-    get(_t, prop) {
-      if (prop === "then") return (r: (v: unknown) => void) => r(value);
-      return () => p;
-    },
-    apply: () => p,
-  });
-  return p;
-}
-
 // server-only throws at import in a non-server env; stub it before mocks apply.
 vi.mock("server-only", () => ({}));
 

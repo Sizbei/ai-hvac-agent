@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/select';
 
 const ALL_STATUSES = 'all';
+const ALL_CHANNELS = 'all';
 
 const STATUS_OPTIONS: readonly { readonly label: string; readonly value: string }[] = [
   { label: 'All', value: ALL_STATUSES },
@@ -27,10 +28,17 @@ const STATUS_OPTIONS: readonly { readonly label: string; readonly value: string 
   { label: 'Abandoned', value: 'abandoned' },
 ];
 
+const CHANNEL_OPTIONS: readonly { readonly label: string; readonly value: string }[] = [
+  { label: 'All channels', value: ALL_CHANNELS },
+  { label: 'Web', value: 'web' },
+  { label: 'Phone', value: 'phone' },
+];
+
 const SEARCH_DEBOUNCE_MS = 300;
 
 export default function AdminConversationsPage() {
   const [statusFilter, setStatusFilter] = useState<string>(ALL_STATUSES);
+  const [channelFilter, setChannelFilter] = useState<string>(ALL_CHANNELS);
   const [searchInput, setSearchInput] = useState<string>('');
   const [debouncedSearch, setDebouncedSearch] = useState<string>('');
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
@@ -44,6 +52,7 @@ export default function AdminConversationsPage() {
 
   const { conversations, total, isLoading, error, refetch } = useAdminConversations({
     status: statusFilter === ALL_STATUSES ? undefined : statusFilter,
+    channel: channelFilter === ALL_CHANNELS ? undefined : channelFilter,
     search: debouncedSearch || undefined,
   });
 
@@ -75,6 +84,18 @@ export default function AdminConversationsPage() {
           </SelectTrigger>
           <SelectContent>
             {STATUS_OPTIONS.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={channelFilter} onValueChange={(value) => setChannelFilter(value ?? ALL_CHANNELS)}>
+          <SelectTrigger className="w-[160px]">
+            <SelectValue placeholder="Filter by channel" />
+          </SelectTrigger>
+          <SelectContent>
+            {CHANNEL_OPTIONS.map((option) => (
               <SelectItem key={option.value} value={option.value}>
                 {option.label}
               </SelectItem>

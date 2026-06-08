@@ -8,9 +8,12 @@
  * All interfaces use readonly properties for immutability.
  */
 
+export type ConversationChannel = "web" | "phone";
+
 export interface ConversationSummary {
   readonly id: string; // session id
   readonly status: string; // session_status enum value
+  readonly channel: ConversationChannel; // medium: web widget vs phone call
   readonly turnCount: number;
   readonly messageCount: number;
   readonly tokensUsed: number;
@@ -32,9 +35,13 @@ export interface ConversationMessage {
 export interface ConversationDetail {
   readonly id: string;
   readonly status: string;
+  readonly channel: ConversationChannel;
   readonly turnCount: number;
   readonly tokensUsed: number;
   readonly tokenBudget: number;
+  // Rolling summary of turns that aged out of the model's window (long
+  // conversations). null when the conversation never grew past the window.
+  readonly runningSummary: string | null;
   // parsed from customerSessions.metadata JSON; null if absent/unparseable
   readonly metadata: Record<string, unknown> | null;
   readonly referenceNumber: string | null;
@@ -46,6 +53,7 @@ export interface ConversationDetail {
 
 export interface ConversationFilters {
   readonly status?: string; // optional session_status filter
+  readonly channel?: string; // optional session_channel filter ("web" | "phone")
   // optional: case-insensitive substring match against message content OR session id
   readonly search?: string;
   readonly page?: number;

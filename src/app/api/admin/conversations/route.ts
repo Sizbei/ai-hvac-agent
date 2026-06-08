@@ -13,6 +13,7 @@ export async function GET(request: NextRequest) {
 
     const url = request.nextUrl;
     const status = url.searchParams.get("status") ?? undefined;
+    const channel = url.searchParams.get("channel") ?? undefined;
     const search = url.searchParams.get("search") ?? undefined;
     const pageParam = url.searchParams.get("page");
     const limitParam = url.searchParams.get("limit");
@@ -24,6 +25,7 @@ export async function GET(request: NextRequest) {
 
     const result = await getConversations(session.organizationId, {
       status,
+      channel,
       search,
       page,
       limit,
