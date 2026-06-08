@@ -89,6 +89,9 @@ Set all environment variables in the Vercel Dashboard under **Settings > Environ
 | `ENCRYPTION_KEY` | 64-hex-char key for AES-256-GCM PII encryption | `openssl rand -hex 32` — **must match the key used to seed** |
 | `AUTH_SECRET` | Secret for admin JWT token signing (min 32 chars) | `openssl rand -hex 32` |
 | `CRON_SECRET` | Secret for cron endpoint authentication | `openssl rand -hex 32` |
+| `TWILIO_ACCOUNT_SID` | *(optional — phone agent)* Twilio Account SID | Twilio Console; omit to run web-chat-only |
+| `TWILIO_AUTH_TOKEN` | *(optional — phone agent)* validates inbound webhook signatures (fails closed without it) | Twilio Console |
+| `TWILIO_VOICE` | *(optional — phone agent)* Amazon Polly neural voice for spoken replies | defaults to `Polly.Joanna-Neural` |
 | `NODE_ENV` | Runtime environment | `production` (Vercel sets this automatically) |
 
 > The exact values for `AI_BASE_URL`, `AI_API_KEY`, and `AI_MODEL` are already in
@@ -121,6 +124,22 @@ The `vercel.json` file configures a daily cron job at 3:00 AM UTC that cleans up
 
 After deployment, verify the cron job appears in the Vercel dashboard under **Settings > Cron Jobs**.
 
+### Telephone Agent (optional)
+
+To let the agent answer phone calls, in addition to setting `TWILIO_ACCOUNT_SID`
+and `TWILIO_AUTH_TOKEN`:
+
+1. In the [Twilio Console](https://console.twilio.com), open your voice-capable
+   phone number.
+2. Under **Voice & Fax → A Call Comes In**, set the webhook to
+   `https://<your-app>.vercel.app/api/voice/incoming`, method **HTTP POST**.
+3. Save. Twilio will POST a signed request on each call; the app validates the
+   `X-Twilio-Signature` with `TWILIO_AUTH_TOKEN` and rejects anything unsigned.
+
+No `TWILIO_*` vars → the voice endpoints reject all traffic and the app runs as
+web-chat-only. Optionally set `TWILIO_VOICE` (e.g. `Polly.Matthew-Neural`) to
+change the spoken voice.
+
 ## 7. Post-Deploy Verification
 
 Run through this checklist after each production deployment:
@@ -146,6 +165,7 @@ Run through this checklist after each production deployment:
 - [ ] Cron job visible in Vercel dashboard under Settings > Cron Jobs
 - [ ] Database accessible in Neon dashboard with tables populated
 - [ ] Application logs visible in Vercel dashboard (Functions tab)
+- [ ] *(if phone agent enabled)* Call the Twilio number — the agent answers in a neural voice, gathers speech, and a `phone`-channel conversation appears in the admin **Conversations** list
 
 ## 8. Security Checklist
 
@@ -170,3 +190,5 @@ Complete before handling real customer data:
 | Chat AI not responding | Missing/incorrect `AI_API_KEY`, `AI_BASE_URL`, or `AI_MODEL` | Copy all three from `.env.local`; confirm the DashScope key is active. Note: the deterministic router still answers greetings/FAQs/emergencies even if the LLM is down |
 | Seeded customer names show as garbled/blank | `ENCRYPTION_KEY` differs from the seed-time key | Redeploy with the same `ENCRYPTION_KEY`, or re-run `db:seed:demo` with the deployment's key |
 | Build fails on Vercel | Node.js version mismatch | Ensure Vercel uses Node.js 20+ (Settings > General > Node.js Version) |
+| Twilio calls fail / "application error" | `TWILIO_AUTH_TOKEN` unset or webhook URL wrong | Set `TWILIO_AUTH_TOKEN`; point the number's Voice webhook at `/api/voice/incoming` (HTTP POST). Without the token the app rejects every webhook (fails closed) |
+| Phone voice sounds robotic | Using a legacy voice | Set `TWILIO_VOICE` to a Polly **neural** voice (e.g. `Polly.Joanna-Neural`); the default is already neural |

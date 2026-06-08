@@ -403,12 +403,15 @@
 
   <main>
     <h1>AI HVAC Agent</h1>
-    <p class="lede">An AI-powered customer-service agent for HVAC companies. Customers describe a heating or cooling problem in a chat, the AI extracts a structured service request, and admins manage the queue from a dashboard.</p>
+    <p class="lede">An AI-powered customer-service agent for HVAC companies. Customers describe a heating or cooling problem in a chat <em>or over the phone</em>, the AI extracts a structured service request, and admins manage the queue from a dashboard.</p>
 
     <!-- 1. OVERVIEW -->
     <section id="overview">
       <h2>Overview <a class="anchor" href="#overview" aria-label="Link to Overview">#</a></h2>
       <p>Customers talk to the agent in plain language. The AI asks follow-up questions, collects the details that matter (issue type, urgency, address, contact info), and turns the conversation into a structured service request that staff triage and assign from an admin dashboard.</p>
+
+      <h3>Telephone agent (voice)</h3>
+      <p>The same intake agent also answers <strong>phone calls</strong> via Twilio. It is a voice persona, not a second bot — it runs the <em>exact same</em> deterministic router → slot-extraction → state-machine core as the web chat. Speech is captured with Twilio's built-in recognition (<code>&lt;Gather input="speech"&gt;</code>) and replies are spoken back with an Amazon Polly <strong>neural</strong> voice (default <code>Polly.Joanna-Neural</code>, override via <code>TWILIO_VOICE</code>). The call hangs up on a terminal state (request submitted or escalated to a human), and gas/CO/fire/flood emergencies still escalate deterministically. The voice channel is optional — it turns on when <code>TWILIO_ACCOUNT_SID</code> and <code>TWILIO_AUTH_TOKEN</code> are set; without them the app is web-chat-only.</p>
 
       <figure>
         <img class="shot" src="/screenshots/landing.png" alt="The customer-facing landing page with a single Get Help Now call-to-action." />
@@ -421,6 +424,8 @@
         <span class="badge">React 19</span>
         <span class="badge">Vercel AI SDK</span>
         <span class="badge">Qwen via DashScope</span>
+        <span class="badge">Twilio (voice)</span>
+        <span class="badge">Amazon Polly (neural TTS)</span>
         <span class="badge">Drizzle ORM</span>
         <span class="badge">Neon PostgreSQL</span>
         <span class="badge">Zod</span>
@@ -431,27 +436,42 @@
 
       <h3>Architecture at a glance</h3>
       <div class="diagram">
-<pre><code>  Customer
-     │  natural-language chat
-     ▼
- ┌─────────────────────┐   streamText()      ┌──────────────────┐
- │  AI Chat (/chat)     │ ─────────────────▶  │  Qwen via        │
- │  Vercel AI SDK       │ ◀─────────────────  │  DashScope       │
- └─────────────────────┘   streamed tokens    └──────────────────┘
-     │  onFinish
-     ▼
- ┌─────────────────────┐   generateObject()  ┌──────────────────┐
- │  Structured          │ ─── Zod schema ───▶ │  ExtractionResult│
- │  extraction          │                     │  (JSON)          │
- └─────────────────────┘                      └──────────────────┘
-     │  customer confirms
-     ▼
- ┌─────────────────────┐                      ┌──────────────────┐
- │  service_request     │ ───────────────────▶│  Admin dashboard │
- │  (PII encrypted)     │                      │  (queue / CRM)   │
- └─────────────────────┘                      └──────────────────┘</code></pre>
+<pre><code>  Web customer              Phone caller
+     │  chat (web)             │  voice (Twilio)
+     ▼                         ▼
+ ┌──────────────┐        ┌──────────────────────┐
+ │  AI Chat      │        │  Voice webhooks       │
+ │  (/chat)      │        │  /api/voice/incoming  │
+ │  channel:web  │        │  /api/voice/gather    │
+ └──────────────┘        │  channel: phone       │
+     │                    └──────────────────────┘
+     │                         │  speech in / Polly out
+     └──────────┬──────────────┘
+                ▼
+ ┌───────────────────────────────────────────────┐
+ │  Shared core                                    │
+ │  deterministic router → slot extraction →       │
+ │  session state machine                          │
+ └───────────────────────────────────────────────┘
+     │  novel / ambiguous turns      ┌──────────────────┐
+     │  streamText() ──────────────▶ │  Qwen via        │
+     │  ◀──────────── streamed tokens│  DashScope       │
+     │                               └──────────────────┘
+     ▼  past 10-message window
+ ┌─────────────────────┐  after()    ┌──────────────────┐
+ │  Summary compaction  │ ──────────▶ │  running_summary │
+ │  (rolling context)   │             │  prepended       │
+ └─────────────────────┘             └──────────────────┘
+     │  onFinish                      ┌──────────────────┐
+     │  generateObject() ───────────▶ │  ExtractionResult│
+     │  (Zod schema)                  │  (JSON)          │
+     ▼  customer confirms             └──────────────────┘
+ ┌─────────────────────┐             ┌──────────────────┐
+ │  service_request     │ ──────────▶ │  Admin dashboard │
+ │  (PII encrypted)     │             │  (queue / CRM)   │
+ └─────────────────────┘             └──────────────────┘</code></pre>
       </div>
-      <p>Chat responses stream token-by-token via the Vercel AI SDK's <code>streamText()</code>. After the stream completes, extraction runs in the <code>onFinish</code> callback using <code>generateObject()</code> against a Zod schema. Once the required fields are present and the customer confirms, a <code>service_request</code> is created and surfaces in the admin dashboard.</p>
+      <p>Web chat and phone calls converge on one shared core — a deterministic router, slot extraction, and a session state machine — so both channels behave identically. Chat responses stream token-by-token via the Vercel AI SDK's <code>streamText()</code>; the phone agent captures speech with Twilio and speaks replies back with an Amazon Polly neural voice. Once a conversation grows past the 10-message sliding window, a background <code>after()</code> task folds older turns into a rolling <code>running_summary</code> that is prepended to the model context, keeping long calls and chats coherent at flat per-turn cost. After the stream completes, extraction runs in the <code>onFinish</code> callback using <code>generateObject()</code> against a Zod schema. Once the required fields are present and the customer confirms, a <code>service_request</code> is created and surfaces in the admin dashboard.</p>
     </section>
 
     <!-- 2. QUICK START -->
@@ -484,6 +504,9 @@ npm run dev           # start at http://localhost:3000</code></pre>
           <tr><td><code>ENCRYPTION_KEY</code></td><td>32-byte hex key for AES-256-GCM PII encryption</td></tr>
           <tr><td><code>AUTH_SECRET</code></td><td>JWT signing secret for admin auth (min 32 chars)</td></tr>
           <tr><td><code>CRON_SECRET</code></td><td>Secret for the session-cleanup cron job</td></tr>
+          <tr><td><code>TWILIO_ACCOUNT_SID</code></td><td>Twilio account SID — enables the phone/voice agent (optional)</td></tr>
+          <tr><td><code>TWILIO_AUTH_TOKEN</code></td><td>Twilio auth token — also the key for webhook signature validation (optional)</td></tr>
+          <tr><td><code>TWILIO_VOICE</code></td><td>Amazon Polly voice for spoken replies (default <code>Polly.Joanna-Neural</code>, optional)</td></tr>
         </tbody>
       </table>
 
@@ -675,7 +698,7 @@ npm run dev           # start at http://localhost:3000</code></pre>
       <p>Add, edit, and activate/deactivate technicians. Only active technicians appear in the assignment dropdown on service requests.</p>
 
       <h3>Conversations (new)</h3>
-      <p>A robust log of <em>every</em> saved customer chat — including sessions that never became a service request. It is searchable, and each entry opens a detail sheet with the full transcript plus any extracted data.</p>
+      <p>A robust log of <em>every</em> saved customer conversation — web chats <em>and</em> phone calls, including sessions that never became a service request. Each session carries a <code>channel</code> of <code>web</code> or <code>phone</code>: the list shows a <strong>Channel badge</strong> and can be <strong>filtered by channel</strong>. It is searchable, and each entry opens a detail sheet with the full transcript plus any extracted data. For long conversations, the detail sheet also shows the rolling <strong>Conversation Summary</strong> (the <code>running_summary</code> produced by summary compaction).</p>
 
       <figure>
         <img class="shot" src="/screenshots/admin-conversations.png" alt="The admin Conversations list — a searchable log of every saved customer chat." />
@@ -704,6 +727,7 @@ npm run dev           # start at http://localhost:3000</code></pre>
 │   ├── admin/(dashboard)/        # requests, technicians, customers, conversations
 │   └── api/
 │       ├── chat/route.ts         # Streaming AI chat endpoint
+│       ├── voice/                # Twilio webhooks: incoming, gather
 │       ├── session/              # create, confirm, escalate
 │       ├── auth/                 # login, logout
 │       ├── admin/                # stats, requests, technicians, customers CRUD
@@ -711,7 +735,8 @@ npm run dev           # start at http://localhost:3000</code></pre>
 ├── components/                   # chat/, admin/, ui/ primitives
 ├── hooks/                        # use-chat-session, use-admin-requests, ...
 └── lib/
-    ├── ai/                       # provider, extract, guardrails, metrics, state-machine
+    ├── ai/                       # provider, extract, guardrails, metrics, state-machine, compaction
+    ├── voice/                    # TwiML, signature validation, Polly voice config
     ├── db/                       # Drizzle schema, migrate, seed, tenant
     └── admin/                    # CRM queries & types</code></pre>
 
@@ -740,6 +765,8 @@ npm run dev           # start at http://localhost:3000</code></pre>
         <li><strong>Extraction:</strong> <code>generateObject()</code> with the Zod <code>extractionSchema</code> turns the conversation into typed JSON, run in the <code>onFinish</code> callback so it never blocks the streamed response.</li>
         <li><strong>Provider:</strong> Qwen through DashScope's OpenAI-compatible endpoint, wired via <code>createOpenAI()</code> with <code>AI_BASE_URL</code>, <code>AI_API_KEY</code>, and <code>AI_MODEL</code>.</li>
         <li><strong>State machine:</strong> <code>determineNextState()</code> advances the session based on extraction completeness and turn count; terminal states reject further messages.</li>
+        <li><strong>Summary compaction:</strong> once a conversation exceeds the 10-message sliding window, a background <code>after()</code> task folds the older turns into a rolling <code>running_summary</code> that is prepended to the model context, so long calls and chats stay coherent at flat per-turn cost. This is why the per-org turn ceiling can default to 40 (admin-tunable). See <code>src/lib/ai/compaction.ts</code> and <code>compact-session.ts</code>.</li>
+        <li><strong>Voice orchestration:</strong> the Twilio webhooks (<code>POST /api/voice/incoming</code> greets and creates a phone session; <code>POST /api/voice/gather</code> handles each spoken turn) feed the <em>same</em> router → extraction → state-machine core as the web chat, then render TwiML that speaks the reply back with an Amazon Polly neural voice. Webhooks are signature-validated (<code>X-Twilio-Signature</code>, HMAC-SHA1 keyed by <code>TWILIO_AUTH_TOKEN</code>) and fail closed; the call hangs up on a terminal state.</li>
       </ul>
 
       <h3 id="security">Security &amp; multi-tenancy</h3>

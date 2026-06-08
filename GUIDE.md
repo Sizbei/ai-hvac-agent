@@ -42,8 +42,16 @@ npm run dev           # start at http://localhost:3000
 | `ENCRYPTION_KEY` | 32-byte hex key for AES-256-GCM PII encryption |
 | `AUTH_SECRET` | JWT signing secret for admin auth (min 32 chars) |
 | `CRON_SECRET` | Secret for the session cleanup cron job |
+| `TWILIO_ACCOUNT_SID` | *(optional, phone agent)* Twilio Account SID — enables the telephone agent |
+| `TWILIO_AUTH_TOKEN` | *(optional, phone agent)* Twilio auth token; validates inbound webhook signatures (the voice endpoints reject every request without it — fails closed) |
+| `TWILIO_VOICE` | *(optional, phone agent)* Amazon Polly neural voice for spoken replies; defaults to `Polly.Joanna-Neural` |
 
 Generate secrets with: `openssl rand -hex 32`
+
+> **Phone agent (optional).** The `TWILIO_*` variables are only needed to take
+> phone calls. Leave them unset and the app runs exactly as before (web chat
+> only); the voice endpoints simply reject traffic. See
+> [Telephone Agent](#telephone-agent-voice) below.
 
 ---
 
@@ -104,6 +112,7 @@ A trust- and transparency-focused pass over the chat, drawn from leading support
 
 - **Resume across refresh** — the httpOnly session cookie persists, so a refresh rehydrates the transcript and extracted slots from `GET /api/session` instead of starting over. Terminal/submitted sessions start fresh.
 - **Token-cost hardening** — chat output is capped at `maxOutputTokens: 350`, and only the last 10 messages are sent to the model on both the chat and extraction calls, keeping cost-per-turn flat in long conversations.
+- **Long-conversation compaction** — when a conversation grows past the 10-message window, a background task folds the older turns into a rolling **summary** that's prepended to the model's context. Early facts (an address mentioned on turn 2) survive without re-sending the full transcript, so cost stays flat even on very long calls/chats. This is what lets the per-org turn ceiling default to 40 (configurable) without runaway cost.
 
 **3. Escalation** — "Talk to a Human" button in the chat header
 
@@ -112,6 +121,38 @@ If the customer prefers human help, they can escalate at any time. This shows a 
 **4. Success Page** — `http://localhost:3000/chat/success?ref=REF-XXXXX`
 
 After confirmation, the customer sees their reference number and a promise that a technician will reach out within 2 hours.
+
+### Telephone Agent (Voice)
+
+The same intake agent can also answer the **phone**. A Twilio voice number points
+its webhook at the app; the agent greets the caller, gathers their speech, and runs
+each turn through the **exact same** deterministic router → slot-extraction → state
+machine the web chat uses — it's a voice *persona* over the proven core, not a
+second brain.
+
+- **How a call flows** — Twilio calls `POST /api/voice/incoming` (creates a
+  `phone`-channel session and greets the caller), then `POST /api/voice/gather`
+  for each spoken turn. Speech is captured with Twilio's built-in recognition
+  (`<Gather input="speech">`) and the reply is spoken back. The call hangs up on a
+  terminal state (request submitted, or escalated to a human).
+- **Natural voice** — replies are spoken with an **Amazon Polly neural voice**
+  (`Polly.Joanna-Neural` by default, set `TWILIO_VOICE` to change it), not Twilio's
+  legacy robotic TTS.
+- **Voice-tuned persona** — the phone prompt drops anything screen-only ("tap a
+  button"), keeps replies to short spoken sentences, and repeats the address and
+  phone number back to the caller to confirm them.
+- **Same safety guarantees** — gas/CO/fire/flood still escalate deterministically;
+  the call is handed to a human and the automated leg ends.
+- **Security** — every webhook is verified against its `X-Twilio-Signature`
+  (HMAC-SHA1 over the URL + params, keyed by `TWILIO_AUTH_TOKEN`); a missing token
+  or bad signature is rejected (fails closed).
+
+Phone conversations appear in the admin **Conversations** view with a **Phone**
+channel badge, the full spoken transcript, and (for long calls) the rolling
+summary — exactly like web chats.
+
+To enable it: set `TWILIO_ACCOUNT_SID` + `TWILIO_AUTH_TOKEN`, and point your Twilio
+number's Voice webhook at `https://<your-deployment>/api/voice/incoming` (HTTP POST).
 
 ### Admin Flow (Protected)
 
@@ -152,7 +193,9 @@ The main admin screen. Shows:
 
 **4. Conversations** — `http://localhost:3000/admin/conversations`
 
-A searchable log of **every** saved customer chat — including sessions that never became a service request. Each entry opens a detail sheet with the full transcript and any extracted data. It reads directly from the `customer_sessions` and `messages` tables, so nothing a customer typed is ever lost, regardless of how the conversation ended.
+A searchable log of **every** saved customer conversation — including sessions that never became a service request. Each entry opens a detail sheet with the full transcript and any extracted data. It reads directly from the `customer_sessions` and `messages` tables, so nothing a customer said is ever lost, regardless of how the conversation ended.
+
+Each row shows a **Channel** badge — **Web** (the chat widget) or **Phone** (a call handled by the [telephone agent](#telephone-agent-voice)) — and the list can be filtered by channel as well as by status. For long conversations, the detail sheet also shows a **Conversation Summary**: a rolling natural-language recap of earlier turns that the agent keeps so a long call or chat stays coherent without re-sending the whole transcript every turn.
 
 ![The admin Conversations list — a searchable log of every saved chat](public/screenshots/admin-conversations.png)
 
@@ -183,8 +226,10 @@ chatting → extracting → confirmed → submitted
 - **extracting**: AI is collecting structured fields
 - **confirmed**: Customer reviewed and confirmed the extraction
 - **submitted**: Service request created and visible to admins
-- **escalated**: Customer requested human help
+- **escalated**: Customer requested human help (on a phone call, the automated leg ends and the caller is handed to a person)
 - **abandoned**: Session expired (cleaned up by daily cron)
+
+The state machine is shared across channels; a session's `channel` (`web` or `phone`) records how it arrived but does not change these transitions.
 
 ---
 

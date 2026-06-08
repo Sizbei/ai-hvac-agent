@@ -14,9 +14,10 @@ talking point.
 ## TL;DR
 
 This is an AI customer-service intake agent for HVAC companies. A customer describes a
-heating/cooling problem in a chat, the agent collects the details that matter (issue,
-urgency, address, contact), turns the conversation into a structured service request,
-and staff triage and dispatch it from an admin dashboard. **The headline is cost
+heating/cooling problem in a web chat or over the phone — the same AI agent handles both,
+with phone replies spoken in a natural Amazon Polly neural voice. The agent collects the
+details that matter (issue, urgency, address, contact), turns the conversation into a
+structured service request, and staff triage and dispatch it from an admin dashboard. **The headline is cost
 engineering:** a deterministic 65-intent router answers common questions, greetings,
 emergencies, and slot collection with **zero LLM tokens** (~55% of assistant turns) —
 the LLM (Qwen via Alibaba DashScope) is only the fallback for genuinely novel input.
@@ -239,3 +240,15 @@ one-off sessions into persistent customer relationships.
 Nothing is lost. The Conversations log reads directly from `customer_sessions` and
 `messages`, so abandoned, escalated, and incomplete chats are all searchable in the
 admin dashboard with full transcripts.
+
+**Q: Can customers call instead of chat?**
+Yes — a Twilio voice number routes calls to the same agent. It reuses the exact
+router/extraction/state-machine core as the web chat (a voice persona, not a second bot),
+speaks with an Amazon Polly neural voice, captures speech via Twilio's built-in
+recognition, validates every webhook's signature, and escalates emergencies the same way.
+Phone conversations show up in the admin Conversations view with a Phone channel badge.
+
+**Q: How do you keep long conversations coherent without runaway cost?**
+A background compaction step folds older turns into a rolling summary that's prepended to
+the model context, so only a summary plus the recent window is ever sent. This keeps cost
+flat and lets the per-org turn ceiling default to 40.

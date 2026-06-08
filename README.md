@@ -1,10 +1,10 @@
 # AI HVAC Agent
 
 An AI-powered customer-service intake agent for HVAC companies. Customers describe a
-heating or cooling problem in a chat; the agent answers common questions instantly,
-collects the details that matter (issue, urgency, address, contact), turns the
-conversation into a structured service request, and lets staff triage and dispatch
-from an admin dashboard.
+heating or cooling problem — in a web chat **or over the phone** — and the agent
+answers common questions instantly, collects the details that matter (issue, urgency,
+address, contact), turns the conversation into a structured service request, and lets
+staff triage and dispatch from an admin dashboard.
 
 Built with **Next.js 16**, **Qwen** (via Alibaba DashScope, OpenAI-compatible),
 **Drizzle ORM**, and **Neon PostgreSQL**.
@@ -28,10 +28,18 @@ Built with **Next.js 16**, **Qwen** (via Alibaba DashScope, OpenAI-compatible),
 - **Structured extraction.** The conversation is distilled into a validated service
   request (issue type, urgency, address, contact) via `generateText` + tolerant
   JSON parsing that works reliably against DashScope.
+- **Telephone agent (voice).** The same intake agent answers phone calls via Twilio,
+  speaking with a natural **Amazon Polly neural voice**. It reuses the exact router /
+  extraction / state-machine core as the web chat — a voice persona, not a second
+  bot — with signed webhooks and deterministic emergency escalation.
+- **Long conversations.** A background **summary-compaction** step folds older turns
+  into a rolling recap, so long calls and chats stay coherent and cheap; per-org turn
+  and token ceilings are admin-tunable.
 - **Safety first.** Gas/CO/fire/flooding messages escalate immediately with a
   conservative, qualifier-gated matcher; input is sanitized for prompt injection.
 - **Admin dashboard.** Service-request queue with technician assignment, a searchable
-  **Conversations** log of every saved chat, an **AI Insights** dashboard (deflection
+  **Conversations** log of every saved chat **and phone call** (filterable by channel,
+  with rolling summaries for long ones), an **AI Insights** dashboard (deflection
   rate, funnel, feedback), and a customer CRM.
 - **Customer UX.** AI disclosure, intake progress stepper, suggested replies, 👍/👎
   feedback, conversation resume across refresh, accessibility (aria-live,
@@ -56,6 +64,8 @@ Demo admin login: `admin@demo-hvac.com` / `admin123`.
 
 See [`.env.example`](.env.example) / the [User Guide](GUIDE.md#environment-variables-envlocal)
 for the full list of environment variables (DB, AI provider, encryption, auth, etc.).
+The phone agent is optional — set the `TWILIO_*` variables and point a Twilio number
+at `/api/voice/incoming` to enable it (see [GUIDE.md](GUIDE.md#telephone-agent-voice)).
 
 ## Documentation
 
@@ -78,9 +88,11 @@ for the full list of environment variables (DB, AI provider, encryption, auth, e
 ## Project Structure
 
 ```
-src/app/            App Router pages + API routes (chat, session, admin)
+src/app/            App Router pages + API routes (chat, voice, session, admin)
 src/components/      Chat UI + admin dashboard components
-src/lib/ai/         Intent router, knowledge base, extraction, guardrails
+src/lib/ai/         Intent router, knowledge base, extraction, guardrails,
+                     compaction, phone agent + voice-turn orchestration
+src/lib/voice/      Twilio signature validation, TwiML builders, voice config
 src/lib/admin/      Tenant-scoped admin queries
 src/lib/db/         Drizzle schema, migrations, seed
 public/docs.html    Interactive documentation

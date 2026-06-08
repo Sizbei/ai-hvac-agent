@@ -2,18 +2,22 @@
 
 ## 1. Overview
 
-An AI customer-service intake agent for HVAC companies. A customer describes a heating/cooling problem in a chat; the system answers common questions, collects the fields that matter (issue, urgency, address, contact), turns the conversation into a structured service request, and hands it to an admin dashboard for triage and dispatch.
+An AI customer-service intake agent for HVAC companies. A customer describes a heating/cooling problem — in a web chat or over the phone — and the system answers common questions, collects the fields that matter (issue, urgency, address, contact), turns the conversation into a structured service request, and hands it to an admin dashboard for triage and dispatch.
 
 The core idea is **spend LLM tokens only when you have to**. A deterministic 65-intent router resolves the bulk of assistant turns — greetings, FAQs, safety escalations, and slot collection — with **zero LLM calls**. The language model (Qwen, via Alibaba DashScope's OpenAI-compatible endpoint) is the *fallback* for novel or ambiguous input, not the front door.
+
+**Two channels, one brain.** The web chat (`/api/chat`) and the telephone agent (Twilio → `/api/voice/*`) run the *same* router → extraction → state-machine core; the phone path (`src/lib/ai/voice-turn.ts`) is a voice persona over it — spoken-friendly replies via an Amazon Polly neural voice, signed webhooks, and a non-streaming completion per turn — not a separate implementation. A session's `channel` column records which medium it arrived over.
 
 ## 2. System Diagram
 
 ```
-  Customer (browser, /chat)
-        │  POST /api/chat  { message }
-        ▼
+  Customer (browser /chat)          Caller (phone)
+        │  POST /api/chat            │  Twilio → POST /api/voice/{incoming,gather}
+        │  { message }               │  (signed; speech → text; reply spoken via Polly neural voice)
+        ▼                            ▼
 ┌───────────────────────────────────────────────────────────────┐
-│  Chat route handler (src/app/api/chat/route.ts)                 │
+│  Chat route (api/chat/route.ts) · Voice route (api/voice/*)     │
+│  both drive the SAME router → extraction → state-machine core   │
 │                                                                 │
 │  rate limit (per IP) → session + terminal-state check →         │
 │  token-budget check → sanitizeInput (guardrails) → persist msg  │
@@ -50,10 +54,11 @@ The core idea is **spend LLM tokens only when you have to**. A deterministic 65-
 3. **Terminal-state guard** — refuse further messages on `submitted`/escalated/abandoned sessions.
 4. **Token-budget guard** — refuse if the session's `tokensUsed` has hit its `tokenBudget` (default 10,000).
 5. **Parse + sanitize** — validate the body, then `sanitizeInput()`: strip control chars, truncate to 2000 chars, and flag prompt-injection patterns (a flagged message is blocked with `400`).
-6. **Persist** the sanitized user message; increment turn count (escalation hint fires near `MAX_TURNS = 15`).
+6. **Persist** the sanitized user message; increment turn count (escalation hint fires near the per-session turn limit — `DEFAULT_MAX_TURNS = 40`, admin-tunable per org).
 7. **Deterministic routing** — call `routeMessage(message, knownSlots)` plus regex `extractSlots()`. If the verdict is *not* `FALLBACK_LLM` (or it's a mid-intake slot-provision turn), answer/escalate/slot-fill deterministically, write the assistant reply with `tokensUsed: 0`, update session state, and return a canned `text/plain` stream — **no model call**.
-8. **LLM fallback only if needed** — `streamText({ model: getModel(), maxOutputTokens: 350 })` over a sliding window of the last 10 messages, streamed to the client.
+8. **LLM fallback only if needed** — `streamText({ model: getModel(), maxOutputTokens: 350 })` over a rolling **summary + the last 10 messages**, streamed to the client.
 9. **Background extraction** — in `onFinish`, record token usage, then run `extractServiceRequest()` to distill slots; it re-reads *current* metadata before merging so a fast follow-up turn can't be clobbered, and never overwrites a filled slot with null.
+10. **Background compaction** — a separate `after()` task folds turns that have aged out of the 10-message window into the session's `running_summary` (`src/lib/ai/compaction.ts` for the pure model helpers, `compact-session.ts` for the idempotent DB write). This keeps long conversations coherent without re-sending the full transcript, so the raised turn ceiling stays affordable. Failure is logged and swallowed — the conversation simply continues uncompacted.
 
 ## 4. The Cost-Saving Router (the centerpiece)
 
@@ -76,11 +81,14 @@ The core idea is **spend LLM tokens only when you have to**. A deterministic 65-
 | **Neon serverless Postgres + Drizzle** | HTTP-driver Postgres suits Vercel's serverless/edge model (no pooled connection to manage); Drizzle gives typed schema + migrations | HTTP round-trips per query rather than a long-lived pooled connection |
 | **AES-256-GCM field encryption** | Customer name/phone/email/address are PII; GCM gives confidentiality **and** tamper detection (decrypt throws on a bad auth tag) | Encrypted columns aren't directly searchable; encryption key must be present to read |
 | **`withTenant()` query scoping** | Every query is filtered by `organization_id` through one helper, so multi-tenant isolation is enforced by construction, not by remembering | Relies on discipline — a raw query that bypasses the helper would bypass isolation |
+| **Phone agent reuses the web core (voice persona, not a fork)** | The telephone agent runs the same router/extraction/state-machine; only the prompt persona and output shaping (spoken text, neural voice, TwiML) differ. One brain to maintain and test | A phone turn uses non-streaming `generateText` (a call needs a complete utterance), so the streaming optimization the web path enjoys doesn't apply on the LLM-fallback path |
+| **Summary compaction for long conversations** | Folding aged-out turns into a rolling summary keeps context coherent at flat per-turn cost, so the turn ceiling can rise (default 40) without unbounded token growth | Adds a background summarization call once a conversation crosses the window; the summary is model-generated and could lose nuance the raw transcript held |
+| **Twilio signature validation (fails closed)** | Webhooks are public endpoints; verifying `X-Twilio-Signature` (HMAC-SHA1, keyed by `TWILIO_AUTH_TOKEN`) proves authenticity. No token / bad signature ⇒ rejected | The voice endpoints do nothing useful until `TWILIO_AUTH_TOKEN` is set — intentional, but a silent "all rejected" if an operator forgets it |
 
 ## 6. Data Model (11 tables, Drizzle)
 
 - **Auth / org** — `organizations`, `users` (admin + technician staff, role-gated, password-hashed).
-- **Chat** — `customer_sessions` (status state machine, token budget/usage, turn count, extracted-slot metadata) and `messages` (per-turn role/content, with `tokensUsed` recording 0 on deterministic turns).
+- **Chat** — `customer_sessions` (status state machine, token budget/usage, turn count, extracted-slot metadata, a `channel` of `web`/`phone`, and a `running_summary` for compacted long conversations) and `messages` (per-turn role/content, with `tokensUsed` recording 0 on deterministic turns).
 - **Service requests** — `service_requests`: the structured intake output, with **encrypted** name/phone/email/address columns, a unique reference number, urgency enum, and technician assignment.
 - **CRM** — `customers` (deduplicated profiles, encrypted PII), `customer_equipment` (installed units, warranty dates), `customer_notes`, `follow_ups` (maintenance/warranty reminders), `service_history` (work performed, parts, cost).
 - **Audit** — `audit_log`: append-only record of actions (escalations, request creation, feedback signals) with IP and entity references.
@@ -93,7 +101,7 @@ Every table carries `organization_id` with supporting indexes; hot lookups (sess
 - **Prompt-injection guardrails** — input is matched against known injection patterns and blocked; control characters stripped; messages capped at 2000 chars.
 - **Admin auth** — JWT-signed sessions (`AUTH_SECRET`, min 32 chars).
 - **Multi-tenant isolation** — `withTenant()` scopes every query to one organization.
-- **Cost controls** — per-IP rate limiting, per-session token budget, `maxOutputTokens: 350`, and a 10-message sliding window to bound quadratic context growth.
+- **Cost controls** — per-IP rate limiting, per-session token budget, `maxOutputTokens: 350`, and a 10-message sliding window + rolling summary to bound quadratic context growth even on long conversations.
 - **Safety** — emergency intents escalate deterministically and lock the session; escalation failures are logged so the audit trail is never silently lost.
 - **Auditability** — `audit_log` records escalations, submissions, and 👍/👎 deflection-quality feedback.
 - **Operational hygiene** — a daily Vercel cron (`vercel.json`, 03:00 UTC) cleans up abandoned sessions; secrets are validated at startup (encryption key length, missing `DATABASE_URL`).
