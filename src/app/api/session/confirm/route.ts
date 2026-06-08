@@ -21,6 +21,8 @@ import {
 } from "@/lib/ai/extraction-schema";
 import { parseKnownSlots, stripSkipSentinels } from "@/lib/ai/chat-slots";
 import { upsertCustomerByContact } from "@/lib/admin/crm-queries";
+import { recordCustomerEquipment } from "@/lib/admin/crm-equipment-queries";
+import { buildEquipmentFromIntake } from "@/lib/admin/equipment-from-intake";
 import { logger } from "@/lib/logger";
 
 function generateReferenceNumber(): string {
@@ -246,6 +248,30 @@ export async function POST(request: NextRequest) {
         "SERVICE_REQUEST_CREATE_FAILED",
         500,
       );
+    }
+
+    // Record the customer's equipment from the intake (ServiceTitan asset
+    // history), best-effort: a failure here must not fail the submission, which
+    // already succeeded. De-duped — we don't add a second unit of the same type
+    // for a returning customer; if a brand/install date is now known we enrich
+    // the existing row instead.
+    const built = buildEquipmentFromIntake(
+      {
+        systemType: data.systemType,
+        equipmentBrand: data.equipmentBrand,
+        equipmentAgeBand: data.equipmentAgeBand,
+      },
+      new Date(),
+    );
+    if (built) {
+      try {
+        await recordCustomerEquipment(organizationId, customerId, built);
+      } catch (equipErr) {
+        logger.error(
+          { error: equipErr, sessionId: session.id, customerId },
+          "Failed to record customer equipment from intake (non-fatal)",
+        );
+      }
     }
 
     logger.info(

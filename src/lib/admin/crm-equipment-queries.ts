@@ -4,7 +4,7 @@
  * org and the parent customer so a mismatched (customerId, equipmentId) pair —
  * or a cross-tenant id — can never touch another customer's record.
  */
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { customerEquipment } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
@@ -34,6 +34,82 @@ function parseDateOrNull(value: string | null | undefined): Date | null {
   if (value == null) return null;
   const d = new Date(value);
   return Number.isNaN(d.getTime()) ? null : d;
+}
+
+export interface RecordEquipmentInput {
+  readonly equipmentType: EquipmentType;
+  readonly make: string | null;
+  readonly installDate: Date | null;
+}
+
+/**
+ * Record a customer's equipment captured from a service-intake conversation,
+ * de-duplicated by equipment TYPE: if the customer already has a unit of that
+ * type we enrich the existing row with any newly-learned make/install date
+ * (never overwriting a known value with null) rather than inserting a duplicate;
+ * otherwise we insert a new row. Org + customer scoped. Returns the row id and
+ * whether it was created or updated.
+ */
+export async function recordCustomerEquipment(
+  organizationId: string,
+  customerId: string,
+  input: RecordEquipmentInput,
+): Promise<{ readonly id: string; readonly created: boolean }> {
+  const [existing] = await db
+    .select({
+      id: customerEquipment.id,
+      make: customerEquipment.make,
+      installDate: customerEquipment.installDate,
+    })
+    .from(customerEquipment)
+    .where(
+      withTenant(
+        customerEquipment,
+        organizationId,
+        and(
+          eq(customerEquipment.customerId, customerId),
+          eq(customerEquipment.equipmentType, input.equipmentType),
+        )!,
+      ),
+    )
+    .limit(1);
+
+  if (existing) {
+    // Enrich only the gaps — never clobber an already-known make/install date.
+    const patch: { make?: string; installDate?: Date; updatedAt: Date } = {
+      updatedAt: new Date(),
+    };
+    if (!existing.make && input.make) patch.make = input.make;
+    if (!existing.installDate && input.installDate) {
+      patch.installDate = input.installDate;
+    }
+    if (patch.make !== undefined || patch.installDate !== undefined) {
+      await db
+        .update(customerEquipment)
+        .set(patch)
+        .where(
+          withTenant(
+            customerEquipment,
+            organizationId,
+            eq(customerEquipment.id, existing.id),
+          ),
+        );
+    }
+    return { id: existing.id, created: false };
+  }
+
+  const [inserted] = await db
+    .insert(customerEquipment)
+    .values({
+      organizationId,
+      customerId,
+      equipmentType: input.equipmentType,
+      make: input.make,
+      installDate: input.installDate,
+    })
+    .returning({ id: customerEquipment.id });
+
+  return { id: inserted!.id, created: true };
 }
 
 /**
