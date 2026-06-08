@@ -2005,6 +2005,97 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
       "FALLBACK_LLM: a low charge almost always means a LEAK (recharging alone is a temporary fix needing diagnosis), and pricing is per-company/phaseout-driven. Let the LLM explain the leak point and steer to a diagnostic visit; don't quote a price.",
   },
 
+  // ─── Category 20 — SELF-CHECK / DE-ESCALATION ──────────────────────────────
+  // Low-harm ANSWER intents that offer a SAFE basic check (thermostat batteries,
+  // breaker/fuse, furnace switch, filter) for "nothing happens" symptoms before
+  // we dispatch — often saving a wasted truck roll. Strictly limited to those
+  // checks: NEVER open the unit, touch wiring/refrigerant/gas, or relight
+  // anything. Every canned response ends with "if that doesn't help, we'll get a
+  // technician out." Category "selfcheck" is unlisted in CATEGORY_PRIORITY, so it
+  // takes the lowest priority — it can NEVER outrank an issue (cooling-wont-turn-on,
+  // thermostat-blank) or an emergency intent. Emergencies also short-circuit the
+  // router before this scores, so a no-heat-in-freezing case still escalates.
+  {
+    id: "selfcheck-no-power",
+    category: "selfcheck",
+    title: "Self-check: no power / nothing happens before dispatch",
+    // Triggers are deliberately the phrasings the issue intents do NOT already
+    // own AND that do not substring-overlap their triggers. The strong
+    // "no power"/"nothing happens"/"completely dead"/"ac wont turn on" phrases
+    // belong to cooling-wont-turn-on (and the heating intents) — repeating them
+    // (or a substring like "wont turn on" inside "ac wont turn on") would make
+    // BOTH score and trip the router's compound-message detector, sending a clean
+    // "my AC won't turn on, nothing happens" straight to FALLBACK_LLM and
+    // WEAKENING the dispatch path. So we fill only the gaps those entries miss
+    // (a bare "system dead" / "won't come on" with no AC/heat context); with
+    // AC/heat context the issue intent correctly wins and we stay silent.
+    triggerKeywords: [
+      "system dead",
+      "no response",
+      "wont power on",
+      "wont come on",
+      "wont power up",
+    ],
+    // Defensive: if a freezing / no-heat hazard is in the message, don't offer a
+    // self-check — let the emergency/issue intents own it. (Emergencies already
+    // short-circuit first; this is belt-and-suspenders.)
+    negationGuards: [
+      "freezing",
+      "no heat",
+      "gas smell",
+      "smell gas",
+      "burning smell",
+      "carbon monoxide",
+      "sparks",
+    ],
+    action: "ANSWER",
+    cannedResponse:
+      "Before we send anyone out, a couple of safe things are worth a quick look: try fresh batteries in the thermostat, check that the breaker (or fuse) for your HVAC hasn't tripped, and make sure the switch on the side of the furnace is on. If none of that brings it back to life, no worries — we'll get a technician out to you. Want me to start a request?",
+    infoNeeded: [],
+    issueTypeMapping: "other",
+    urgencyHint: "medium",
+    notes:
+      "Lowest-priority category by design — only fires when no issue/emergency intent matches more strongly (e.g. a bare 'nothing happens' with no AC/heat context). 'no power'/'nothing happens'/'completely dead' WITH ac/heat context route to cooling-wont-turn-on/heating intents (priority 2) instead, which is correct. Safe checks ONLY: batteries, breaker/fuse, furnace switch. Never open the unit or touch wiring/gas/refrigerant.",
+  },
+  {
+    id: "selfcheck-thermostat-blank",
+    // Same category as the authoritative thermostat-blank ON PURPOSE: the router's
+    // compound-message detector defers to the LLM only when 2+ DISTINCT non-meta
+    // categories score — sharing "thermostat" guarantees these two siblings never
+    // trip it (so "thermostat dead, screen is off" stays answerable instead of
+    // falling back). Ranking is then by score within the shared priority:
+    // thermostat-blank (COLLECT_INFO) owns the strong "blank screen"/"no display"
+    // phrasings and still wins those; this self-check only wins the gentler
+    // "is blank / is dead / screen is off" phrasings it would otherwise miss.
+    category: "thermostat",
+    title: "Self-check: blank/dead thermostat — try batteries first",
+    triggerKeywords: [
+      "thermostat dead",
+      "screen is off",
+      "thermostat is blank",
+      "thermostat is dead",
+      "screen went dark",
+    ],
+    // Keep the existing thermostat-blank (COLLECT_INFO, priority 2) authoritative;
+    // this is the lower-priority self-check sibling for the same symptom. Guard
+    // against any hazard context bleeding in.
+    negationGuards: [
+      "freezing",
+      "no heat",
+      "gas smell",
+      "burning smell",
+      "carbon monoxide",
+    ],
+    action: "ANSWER",
+    cannedResponse:
+      "A blank thermostat is very often just dead batteries — if yours takes them, popping in a fresh set is a safe first thing to try. It's also worth checking that the breaker for your HVAC hasn't tripped. If the screen stays dark after that, we'll get a technician out to take a look. Would you like me to start a request?",
+    infoNeeded: [],
+    issueTypeMapping: "thermostat_issue",
+    urgencyHint: "medium",
+    notes:
+      "Sibling of thermostat-blank (COLLECT_INFO). That entry stays authoritative (priority 2 beats this selfcheck default-priority entry whenever both match). This one catches the gentler 'maybe just batteries' framing / phrasings the issue entry's substring triggers miss (e.g. 'thermostat is blank'). Batteries + breaker check ONLY — no wiring/DIY walk-through.",
+  },
+
   // ─── Category 10 — CONVERSATIONAL / META ───────────────────────────────────
   {
     id: "meta-greeting",

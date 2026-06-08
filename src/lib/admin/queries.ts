@@ -163,6 +163,22 @@ export async function getRequestById(
       createdAt: serviceRequests.createdAt,
       updatedAt: serviceRequests.updatedAt,
       sessionId: serviceRequests.sessionId,
+      // ServiceTitan-style intake details.
+      jobType: serviceRequests.jobType,
+      systemType: serviceRequests.systemType,
+      equipmentBrand: serviceRequests.equipmentBrand,
+      equipmentAgeBand: serviceRequests.equipmentAgeBand,
+      propertyType: serviceRequests.propertyType,
+      ownerOccupant: serviceRequests.ownerOccupant,
+      underWarranty: serviceRequests.underWarranty,
+      accessNotes: serviceRequests.accessNotes,
+      systemDownStatus: serviceRequests.systemDownStatus,
+      problemDuration: serviceRequests.problemDuration,
+      vulnerableOccupants: serviceRequests.vulnerableOccupants,
+      preferredWindow: serviceRequests.preferredWindow,
+      contactPreference: serviceRequests.contactPreference,
+      smsConsent: serviceRequests.smsConsent,
+      leadSource: serviceRequests.leadSource,
     })
     .from(serviceRequests)
     .leftJoin(users, eq(serviceRequests.assignedTo, users.id))
@@ -246,6 +262,23 @@ export async function getRequestById(
     updatedAt: row.updatedAt.toISOString(),
     transcript,
     notes,
+    intake: {
+      jobType: row.jobType,
+      systemType: row.systemType,
+      equipmentBrand: row.equipmentBrand,
+      equipmentAgeBand: row.equipmentAgeBand,
+      propertyType: row.propertyType,
+      ownerOccupant: row.ownerOccupant,
+      underWarranty: row.underWarranty,
+      accessNotes: row.accessNotes,
+      systemDownStatus: row.systemDownStatus,
+      problemDuration: row.problemDuration,
+      vulnerableOccupants: row.vulnerableOccupants,
+      preferredWindow: row.preferredWindow,
+      contactPreference: row.contactPreference,
+      smsConsent: row.smsConsent,
+      leadSource: row.leadSource,
+    },
   };
 }
 

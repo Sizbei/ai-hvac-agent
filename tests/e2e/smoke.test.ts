@@ -275,6 +275,7 @@ vi.mock('@/lib/ai/token-budget', () => ({
 
 vi.mock('@/lib/ai/extraction-schema', () => ({
   isExtractionComplete: vi.fn().mockReturnValue(true),
+  jobTypeForIssue: vi.fn().mockReturnValue('no_cool'),
   serviceRequestSchema: {
     safeParse: vi.fn().mockReturnValue({
       success: true,

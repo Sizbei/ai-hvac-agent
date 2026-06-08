@@ -1,6 +1,6 @@
 # Knowledge Base Catalog (research output)
 
-> Source: domain-expert subagent. Encoded into `src/lib/ai/knowledge-base.ts`. 53 intents across 10 categories.
+> Source: domain-expert subagent. Encoded into `src/lib/ai/knowledge-base.ts`. The original research below covers the first 53 intents (Categories 1–10). The encoded catalog has since grown to **97 intents** — Categories 11–19 (pricing, membership, efficiency, replacement, equipment, service logistics, trust, warranty detail, refrigerant) live in code, and Category 20 (self-check / de-escalation) is documented at the end of this file. The authoritative source of truth is always `src/lib/ai/knowledge-base.ts`.
 
 ---
 
@@ -1313,6 +1313,48 @@ Lowest priority (don't shadow real issues). Mix of `ANSWER`, `REDIRECT`, `ESCALA
 
 ---
 
+## Category 20 — SELF-CHECK / DE-ESCALATION
+
+Low-harm `ANSWER` intents that offer a customer a **safe basic check** for "nothing happens / thermostat blank" symptoms *before* we dispatch — often saving a wasted truck roll. Strictly limited to: thermostat batteries, the breaker/fuse for the HVAC circuit, and the furnace power switch. They **never** suggest opening the unit or touching wiring, refrigerant, or gas, and every canned response ends with a "if that doesn't fix it, we'll get a technician out" hand-off.
+
+These are deliberately scoped so they **cannot weaken or shadow** the issue/emergency intents:
+- Emergency intents short-circuit the router first, so a no-heat-in-freezing case still escalates.
+- Trigger keywords avoid substring-overlapping the strong dispatch triggers (`no power`, `nothing happens`, `completely dead`, `ac wont turn on`, `blank screen`, `no display`) that `cooling-wont-turn-on` / `thermostat-blank` already own — co-firing across categories would trip the compound-message detector. They only catch the gap phrasings those entries miss.
+
+### `selfcheck-no-power`
+- **category:** selfcheck (unlisted in `CATEGORY_PRIORITY` → lowest priority; never outranks an issue/emergency intent)
+- **title:** Self-check: no power / nothing happens before dispatch
+- **examplePhrasings:**
+  - "the system is dead, no response"
+  - "it won't come on"
+  - "it won't power up"
+- **triggerKeywords:** `system dead`, `no response`, `wont power on`, `wont come on`, `wont power up` (the strong `no power`/`nothing happens`/`completely dead`/`ac wont turn on` phrases stay with `cooling-wont-turn-on` and the heating intents; with AC/heat context the issue intent correctly wins and this stays silent)
+- **negationGuards:** `freezing`, `no heat`, `gas smell`, `smell gas`, `burning smell`, `carbon monoxide`, `sparks` (belt-and-suspenders so a hazard context never gets a self-check instead of an escalation)
+- **action:** ANSWER
+- **cannedResponse:** suggests, in order, fresh thermostat batteries, checking the HVAC breaker/fuse, and the furnace power switch — then offers a technician if none of that helps.
+- **infoNeeded:** []
+- **issueTypeMapping:** other
+- **urgencyHint:** medium
+- **notes:** Safe checks ONLY: batteries, breaker/fuse, furnace switch. Never open the unit or touch wiring/gas/refrigerant.
+
+### `selfcheck-thermostat-blank`
+- **category:** thermostat (same as the authoritative `thermostat-blank` ON PURPOSE — sharing the category keeps the two siblings from tripping the compound-message detector; ranking is then by score within the shared priority)
+- **title:** Self-check: blank/dead thermostat — try batteries first
+- **examplePhrasings:**
+  - "thermostat is blank"
+  - "thermostat is dead"
+  - "the screen went dark on my thermostat"
+- **triggerKeywords:** `thermostat dead`, `screen is off`, `thermostat is blank`, `thermostat is dead`, `screen went dark` (`thermostat-blank` keeps the strong `thermostat blank`/`blank screen`/`no display`/`screen blank` phrasings and still wins those; this only catches the gentler "is blank / is dead" phrasings it misses)
+- **negationGuards:** `freezing`, `no heat`, `gas smell`, `burning smell`, `carbon monoxide`
+- **action:** ANSWER
+- **cannedResponse:** explains a blank thermostat is very often just dead batteries, suggests a fresh set plus a breaker check, and offers a technician if the screen stays dark.
+- **infoNeeded:** []
+- **issueTypeMapping:** thermostat_issue
+- **urgencyHint:** medium
+- **notes:** Batteries + breaker check ONLY — no wiring/DIY walk-through. `thermostat-blank` (COLLECT_INFO) remains authoritative for the canonical phrasings.
+
+---
+
 ## GENUINE AMBIGUITY CASES → prefer `FALLBACK_LLM`
 
 These are patterns where a wrong canned answer is high-harm or high-likelihood, so the router should defer to Qwen rather than guess:
@@ -1341,7 +1383,7 @@ These are patterns where a wrong canned answer is high-harm or high-likelihood, 
 
 ## Summary for the implementing engineer
 
-- **Total intents:** 53 across 10 categories (Emergency 6, Cooling 9, Heating 10, Air Quality 5, Thermostat 5, Maintenance 4, Scheduling 6, FAQ 11, Account 5, Meta 7).
+- **Total intents:** 97 across 20 categories. The original research above details Categories 1–10 (53 intents: Emergency 6, Cooling 9, Heating 10, Air Quality 5, Thermostat 5 + 1 self-check sibling, Maintenance 4, Scheduling 6, FAQ 11, Account 5, Meta 7). Categories 11–19 (pricing, membership, efficiency, replacement, equipment, service logistics, trust, warranty detail, refrigerant) were added later and live in code; Category 20 (self-check / de-escalation, 2 intents) is documented above. `src/lib/ai/knowledge-base.ts` is authoritative.
 - **All `issueTypeMapping` values are drawn strictly from the real enum:** `heating_not_working`, `cooling_not_working`, `thermostat_issue`, `air_quality`, `strange_noises`, `water_leak`, `maintenance`, `installation`, `other` (or `null`). No invented values.
 - **All `urgencyHint` values** are from `low | medium | high | emergency | null`, following the system-prompt urgency guidelines.
 - **Encode safety as the `ESCALATE` action**, not as an issueType — there is no emergency issueType.

@@ -50,6 +50,107 @@ function toDateInputValue(iso: string | null): string {
   return iso.slice(0, 10);
 }
 
+// Per-field display maps for the intake enums. Keeping them explicit (rather
+// than auto-title-casing) lets us spell out the cases that don't title-case
+// cleanly — "Central AC", "10–15 years", "ASAP", etc.
+const JOB_TYPE_LABELS: Record<string, string> = {
+  no_heat: 'No heat',
+  no_cool: 'No cooling',
+  service_call: 'Service call',
+  maintenance: 'Maintenance',
+  install: 'Installation',
+  estimate: 'Estimate',
+  warranty: 'Warranty',
+  diagnostic: 'Diagnostic',
+  inspection: 'Inspection',
+};
+
+const SYSTEM_TYPE_LABELS: Record<string, string> = {
+  central_ac: 'Central AC',
+  furnace: 'Furnace',
+  heat_pump: 'Heat pump',
+  mini_split: 'Mini-split',
+  boiler: 'Boiler',
+  packaged_unit: 'Packaged unit',
+  other: 'Other',
+};
+
+const EQUIPMENT_AGE_LABELS: Record<string, string> = {
+  under_5: 'Under 5 years',
+  '5_to_10': '5–10 years',
+  '10_to_15': '10–15 years',
+  over_15: 'Over 15 years',
+  unknown: 'Unknown',
+};
+
+const PROPERTY_TYPE_LABELS: Record<string, string> = {
+  residential: 'Residential',
+  commercial: 'Commercial',
+};
+
+const OWNER_OCCUPANT_LABELS: Record<string, string> = {
+  owner: 'Owner',
+  renter: 'Renter',
+  unknown: 'Unknown',
+};
+
+const WARRANTY_LABELS: Record<string, string> = {
+  yes: 'Yes',
+  no: 'No',
+  unknown: 'Unknown',
+};
+
+const SYSTEM_STATUS_LABELS: Record<string, string> = {
+  fully_down: 'Completely down',
+  partially_working: 'Partially working',
+  unknown: 'Unknown',
+};
+
+const PREFERRED_WINDOW_LABELS: Record<string, string> = {
+  morning: 'Morning',
+  afternoon: 'Afternoon',
+  evening: 'Evening',
+  asap: 'ASAP',
+};
+
+const CONTACT_PREFERENCE_LABELS: Record<string, string> = {
+  call: 'Call',
+  text: 'Text',
+};
+
+const LEAD_SOURCE_LABELS: Record<string, string> = {
+  google: 'Google',
+  facebook: 'Facebook',
+  yelp: 'Yelp',
+  referral: 'Referral',
+  repeat_customer: 'Repeat customer',
+  website: 'Website',
+  direct_mail: 'Direct mail',
+  other: 'Other',
+};
+
+// Map a raw enum value through a label map, falling back to a humanized form of
+// the raw value (snake_case → "Snake case") so unknown/new enum members still
+// render legibly rather than as raw tokens.
+function humanizeIntakeValue(
+  value: string | null,
+  labels: Record<string, string>,
+): string | null {
+  if (value === null) return null;
+  const mapped = labels[value];
+  if (mapped) return mapped;
+  const words = value.split('_');
+  return words
+    .map((w, i) => (i === 0 ? w.charAt(0).toUpperCase() + w.slice(1) : w))
+    .join(' ');
+}
+
+// Booleans render as Yes/No; null passes through to InfoRow's "Not provided".
+function boolLabel(value: boolean | null): string | null {
+  if (value === null) return null;
+  return value ? 'Yes' : 'No';
+}
+
 interface RequestDetailSheetProps {
   readonly requestId: string | null;
   readonly onClose: () => void;
@@ -390,6 +491,112 @@ export function RequestDetailSheet({
                   )}
                 </div>
               </section>
+
+              {/* Intake details — everything the chat/voice agent captured.
+                  Only shown when at least one field was filled in, so sparse
+                  conversations don't render a wall of "Not provided" rows. */}
+              {Object.values(detail.intake).some((v) => v !== null) && (
+              <section>
+                <h3 className="text-sm font-semibold mb-2">Intake Details</h3>
+                <div className="rounded-md border p-3 space-y-1">
+                  <InfoRow
+                    label="System"
+                    value={humanizeIntakeValue(
+                      detail.intake.systemType,
+                      SYSTEM_TYPE_LABELS,
+                    )}
+                  />
+                  <InfoRow
+                    label="Job type"
+                    value={humanizeIntakeValue(
+                      detail.intake.jobType,
+                      JOB_TYPE_LABELS,
+                    )}
+                  />
+                  <InfoRow
+                    label="Equipment age"
+                    value={humanizeIntakeValue(
+                      detail.intake.equipmentAgeBand,
+                      EQUIPMENT_AGE_LABELS,
+                    )}
+                  />
+                  <InfoRow label="Brand" value={detail.intake.equipmentBrand} />
+                  <InfoRow
+                    label="Property"
+                    value={humanizeIntakeValue(
+                      detail.intake.propertyType,
+                      PROPERTY_TYPE_LABELS,
+                    )}
+                  />
+                  <InfoRow
+                    label="Owner / Renter"
+                    value={humanizeIntakeValue(
+                      detail.intake.ownerOccupant,
+                      OWNER_OCCUPANT_LABELS,
+                    )}
+                  />
+                  <InfoRow
+                    label="Warranty"
+                    value={humanizeIntakeValue(
+                      detail.intake.underWarranty,
+                      WARRANTY_LABELS,
+                    )}
+                  />
+                  <InfoRow
+                    label="System status"
+                    value={humanizeIntakeValue(
+                      detail.intake.systemDownStatus,
+                      SYSTEM_STATUS_LABELS,
+                    )}
+                  />
+                  <InfoRow
+                    label="Duration"
+                    value={detail.intake.problemDuration}
+                  />
+                  <InfoRow
+                    label="Vulnerable occupants"
+                    value={boolLabel(detail.intake.vulnerableOccupants)}
+                  />
+                  <InfoRow
+                    label="Preferred window"
+                    value={humanizeIntakeValue(
+                      detail.intake.preferredWindow,
+                      PREFERRED_WINDOW_LABELS,
+                    )}
+                  />
+                  <InfoRow
+                    label="Contact preference"
+                    value={humanizeIntakeValue(
+                      detail.intake.contactPreference,
+                      CONTACT_PREFERENCE_LABELS,
+                    )}
+                  />
+                  <InfoRow
+                    label="SMS consent"
+                    value={boolLabel(detail.intake.smsConsent)}
+                  />
+                  <InfoRow
+                    label="Lead source"
+                    value={humanizeIntakeValue(
+                      detail.intake.leadSource,
+                      LEAD_SOURCE_LABELS,
+                    )}
+                  />
+                  {/* Access notes can be long — give it a stacked block rather
+                      than the inline two-column InfoRow layout. */}
+                  {detail.intake.accessNotes && (
+                    <div className="pt-2">
+                      <span className="text-sm text-muted-foreground">
+                        Access notes
+                      </span>
+                      <p className="mt-1 whitespace-pre-wrap text-sm font-medium">
+                        {detail.intake.accessNotes}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </section>
+              )}
 
               {/* Assignment — hidden for terminal requests (completed/
                   cancelled), where neither assign nor reassign is permitted. */}

@@ -13,7 +13,7 @@ import { isSameOriginRequest, hasJsonContentType } from "@/lib/session-csrf";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { encrypt } from "@/lib/crypto";
 import { transition } from "@/lib/ai/state-machine";
-import { serviceRequestSchema } from "@/lib/ai/extraction-schema";
+import { serviceRequestSchema, jobTypeForIssue } from "@/lib/ai/extraction-schema";
 import { upsertCustomerByContact } from "@/lib/admin/crm-queries";
 import { logger } from "@/lib/logger";
 
@@ -126,6 +126,8 @@ export async function POST(request: NextRequest) {
           customerId,
           status: "pending",
           issueType: parsed.data.issueType,
+          // ServiceTitan-style work classification derived from the symptom.
+          jobType: jobTypeForIssue(parsed.data.issueType),
           urgency: parsed.data.urgency,
           description: parsed.data.description,
           customerNameEncrypted: parsed.data.customerName
@@ -139,6 +141,21 @@ export async function POST(request: NextRequest) {
             : null,
           addressEncrypted: encrypt(parsed.data.address),
           referenceNumber,
+          // ── Comprehensive intake fields (PII-free; safe to store plainly) ──
+          systemType: parsed.data.systemType ?? null,
+          equipmentBrand: parsed.data.equipmentBrand ?? null,
+          equipmentAgeBand: parsed.data.equipmentAgeBand ?? null,
+          propertyType: parsed.data.propertyType ?? null,
+          ownerOccupant: parsed.data.ownerOccupant ?? null,
+          underWarranty: parsed.data.underWarranty ?? null,
+          accessNotes: parsed.data.accessNotes ?? null,
+          systemDownStatus: parsed.data.systemDownStatus ?? null,
+          problemDuration: parsed.data.problemDuration ?? null,
+          vulnerableOccupants: parsed.data.vulnerableOccupants ?? null,
+          preferredWindow: parsed.data.preferredWindow ?? null,
+          contactPreference: parsed.data.contactPreference ?? null,
+          smsConsent: parsed.data.smsConsent ?? null,
+          leadSource: parsed.data.leadSource ?? null,
         })
         .returning({ id: serviceRequests.id }),
       db

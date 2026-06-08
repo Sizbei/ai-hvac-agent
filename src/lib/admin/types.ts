@@ -29,6 +29,28 @@ export interface AdminRequestDetail extends AdminRequest {
   readonly assignedTo: string | null;
   readonly transcript: readonly TranscriptMessage[];
   readonly notes: readonly RequestNote[];
+  // ── ServiceTitan-style intake details (all nullable; PII-free) ──
+  readonly intake: RequestIntakeDetails;
+}
+
+// Comprehensive intake fields gathered by the chat/voice agent. Surfaced in the
+// admin request detail so dispatch sees everything the customer told us.
+export interface RequestIntakeDetails {
+  readonly jobType: string | null;
+  readonly systemType: string | null;
+  readonly equipmentBrand: string | null;
+  readonly equipmentAgeBand: string | null;
+  readonly propertyType: string | null;
+  readonly ownerOccupant: string | null;
+  readonly underWarranty: string | null;
+  readonly accessNotes: string | null;
+  readonly systemDownStatus: string | null;
+  readonly problemDuration: string | null;
+  readonly vulnerableOccupants: boolean | null;
+  readonly preferredWindow: string | null;
+  readonly contactPreference: string | null;
+  readonly smsConsent: boolean | null;
+  readonly leadSource: string | null;
 }
 
 export interface TranscriptMessage {
