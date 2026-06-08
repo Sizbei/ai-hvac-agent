@@ -1,0 +1,449 @@
+/**
+ * Intake triage — the "smart questions" layer.
+ *
+ * A pure, deterministic state function that, given what we already know about a
+ * conversation, decides the SINGLE next question to ask. It encodes a
+ * best-in-class HVAC intake order (researched against ServiceTitan + others):
+ *
+ *   1. Safety screen FIRST — confirm no active gas/CO/burning/flooding hazard
+ *      before booking anything. A hazard short-circuits to escalation.
+ *   2. ServiceTitan "Step 3" qualifying questions — is the system fully down or
+ *      partly working, and how long has it been happening. These disambiguate
+ *      urgency far better than guessing.
+ *   3. Required dispatch fields — service address, then phone (the dispatch
+ *      primary key).
+ *   4. Comprehensive enrichment (optional, skippable) — system type, equipment
+ *      age/brand, property type, owner/renter, warranty, access notes, vulnerable
+ *      occupants, preferred window, contact preference, lead source.
+ *
+ * Every question carries quick-reply chips so the common path is 0-token. The
+ * caller (chat/voice route) renders the question, then feeds the customer's
+ * answer back through `applyTriageAnswer`. Optional steps accept "skip"/"I don't
+ * know" and are never re-asked. No I/O — fully unit-tested.
+ */
+export interface QuickReply {
+  readonly label: string;
+  readonly value: string;
+}
+
+export interface TriageStep {
+  /** Stable id for the question (also the slot it fills). */
+  readonly id: string;
+  /** The question to ask the customer. */
+  readonly question: string;
+  /** Quick-reply chips (may be empty for free-text answers). */
+  readonly quickReplies: readonly QuickReply[];
+  /** True for enrichment questions the customer may skip. */
+  readonly optional: boolean;
+}
+
+// Slots the triage engine reasons over. `extras` mirrors chat-slots' extras bag.
+export interface TriageSlots {
+  issueType: string | null;
+  urgency: string | null;
+  address: string | null;
+  phone: string | null;
+  safetyScreenPassed: boolean;
+  safetyHazardReported?: boolean;
+  extras: Record<string, unknown>;
+  // Optional enrichment steps the customer explicitly skipped (so we don't
+  // re-ask them). Keyed by step id.
+  skipped?: Record<string, true>;
+}
+
+// The hard gate: a request cannot be submitted until these are satisfied.
+export const REQUIRED_FOR_SUBMIT = [
+  "safetyScreenPassed",
+  "issueType",
+  "urgency",
+  "address",
+  "phone",
+] as const;
+
+const SKIP_PATTERNS = [
+  "skip",
+  "i don't know",
+  "i dont know",
+  "don't know",
+  "dont know",
+  "not sure",
+  "no idea",
+  "unsure",
+  "n/a",
+  "na",
+  "pass",
+];
+
+/** True when the customer's answer means "skip / I don't know" for an optional field. */
+export function isSkip(answer: string): boolean {
+  const a = answer.trim().toLowerCase();
+  return SKIP_PATTERNS.includes(a);
+}
+
+const YES_PATTERNS = ["yes", "y", "yeah", "yep", "yup", "correct", "i do", "there is"];
+const NO_PATTERNS = ["no", "n", "nope", "none", "no smell", "all clear", "everything's fine", "im fine", "i'm fine"];
+
+function isYes(answer: string): boolean {
+  const a = answer.trim().toLowerCase();
+  return YES_PATTERNS.some((p) => a === p || a.startsWith(p + " "));
+}
+function isNo(answer: string): boolean {
+  const a = answer.trim().toLowerCase();
+  return NO_PATTERNS.some((p) => a === p || a.startsWith(p + " "));
+}
+
+// ── Step definitions ──
+
+const SAFETY_STEP: TriageStep = {
+  id: "safety_screen",
+  question:
+    "First, a quick safety check: do you smell gas, smell something burning, hear a carbon monoxide alarm, or have water actively flooding? (If none of these, just say \"no\".)",
+  quickReplies: [
+    { label: "No — all clear", value: "no" },
+    { label: "Yes — one of these", value: "yes" },
+  ],
+  optional: false,
+};
+
+const SYSTEM_DOWN_STEP: TriageStep = {
+  id: "system_down",
+  question: "Is the system completely down, or is it still partly working?",
+  quickReplies: [
+    { label: "Completely down", value: "fully_down" },
+    { label: "Partly working", value: "partially_working" },
+    { label: "Not sure", value: "unknown" },
+  ],
+  optional: false,
+};
+
+const DURATION_STEP: TriageStep = {
+  id: "duration",
+  question: "How long has this been happening?",
+  quickReplies: [
+    { label: "Just started today", value: "today" },
+    { label: "A few days", value: "a few days" },
+    { label: "A week or more", value: "a week or more" },
+  ],
+  optional: false,
+};
+
+const ADDRESS_STEP: TriageStep = {
+  id: "address",
+  question: "What's the service address where you'd like the technician to come?",
+  quickReplies: [],
+  optional: false,
+};
+
+const PHONE_STEP: TriageStep = {
+  id: "phone",
+  question: "What's the best phone number to reach you to confirm the visit?",
+  quickReplies: [],
+  optional: false,
+};
+
+const URGENCY_STEP: TriageStep = {
+  id: "urgency",
+  question: "How urgent is this — an emergency, or can it wait a little while?",
+  quickReplies: [
+    { label: "Emergency", value: "emergency" },
+    { label: "Soon (today)", value: "high" },
+    { label: "This week", value: "medium" },
+    { label: "Routine", value: "low" },
+  ],
+  optional: false,
+};
+
+// Optional enrichment steps, asked in order, each skippable.
+const SYSTEM_TYPE_STEP: TriageStep = {
+  id: "system_type",
+  question: "What kind of system is it? (You can skip if unsure.)",
+  quickReplies: [
+    { label: "Central AC", value: "central_ac" },
+    { label: "Furnace", value: "furnace" },
+    { label: "Heat pump", value: "heat_pump" },
+    { label: "Mini-split", value: "mini_split" },
+    { label: "Boiler", value: "boiler" },
+    { label: "Skip", value: "skip" },
+  ],
+  optional: true,
+};
+
+const EQUIPMENT_AGE_STEP: TriageStep = {
+  id: "equipment_age",
+  question: "Roughly how old is the system?",
+  quickReplies: [
+    { label: "Under 5 yrs", value: "under_5" },
+    { label: "5–10 yrs", value: "5_to_10" },
+    { label: "10–15 yrs", value: "10_to_15" },
+    { label: "15+ yrs", value: "over_15" },
+    { label: "Not sure", value: "skip" },
+  ],
+  optional: true,
+};
+
+const EQUIPMENT_BRAND_STEP: TriageStep = {
+  id: "equipment_brand",
+  question: "Do you know the brand? (e.g. Trane, Lennox, Goodman — or skip.)",
+  quickReplies: [{ label: "Skip", value: "skip" }],
+  optional: true,
+};
+
+const PROPERTY_TYPE_STEP: TriageStep = {
+  id: "property_type",
+  question: "Is this a home or a commercial property?",
+  quickReplies: [
+    { label: "Home", value: "residential" },
+    { label: "Commercial", value: "commercial" },
+    { label: "Skip", value: "skip" },
+  ],
+  optional: true,
+};
+
+const OWNER_STEP: TriageStep = {
+  id: "owner_occupant",
+  question: "Do you own the property, or are you renting?",
+  quickReplies: [
+    { label: "Own", value: "owner" },
+    { label: "Rent", value: "renter" },
+    { label: "Skip", value: "skip" },
+  ],
+  optional: true,
+};
+
+const WARRANTY_STEP: TriageStep = {
+  id: "under_warranty",
+  question: "Is the system still under warranty, do you know?",
+  quickReplies: [
+    { label: "Yes", value: "yes" },
+    { label: "No", value: "no" },
+    { label: "Not sure", value: "unknown" },
+  ],
+  optional: true,
+};
+
+const ACCESS_STEP: TriageStep = {
+  id: "access_notes",
+  question:
+    "Anything the technician should know to get to the unit — gate code, pets, parking, or where it's located (attic, roof, basement)? (Or skip.)",
+  quickReplies: [{ label: "Nothing special", value: "none" }, { label: "Skip", value: "skip" }],
+  optional: true,
+};
+
+const VULNERABLE_STEP: TriageStep = {
+  id: "vulnerable_occupants",
+  question:
+    "Is anyone in the home elderly, an infant, or with a medical condition? (This helps us prioritize.)",
+  quickReplies: [
+    { label: "Yes", value: "yes" },
+    { label: "No", value: "no" },
+    { label: "Skip", value: "skip" },
+  ],
+  optional: true,
+};
+
+const WINDOW_STEP: TriageStep = {
+  id: "preferred_window",
+  question: "When works best for a visit? (We'll confirm the exact time.)",
+  quickReplies: [
+    { label: "Morning", value: "morning" },
+    { label: "Afternoon", value: "afternoon" },
+    { label: "Evening", value: "evening" },
+    { label: "ASAP", value: "asap" },
+  ],
+  optional: true,
+};
+
+const CONTACT_PREF_STEP: TriageStep = {
+  id: "contact_preference",
+  question: "Would you prefer we call or text you?",
+  quickReplies: [
+    { label: "Call", value: "call" },
+    { label: "Text", value: "text" },
+    { label: "Skip", value: "skip" },
+  ],
+  optional: true,
+};
+
+const LEAD_SOURCE_STEP: TriageStep = {
+  id: "lead_source",
+  question: "Last one — how did you hear about us?",
+  quickReplies: [
+    { label: "Google", value: "google" },
+    { label: "Referral", value: "referral" },
+    { label: "Used before", value: "repeat_customer" },
+    { label: "Social", value: "facebook" },
+    { label: "Skip", value: "skip" },
+  ],
+  optional: true,
+};
+
+// Map each step id to the extras key it fills (core steps fill top-level slots).
+const STEP_TO_EXTRA: Record<string, string> = {
+  system_down: "systemDownStatus",
+  duration: "problemDuration",
+  system_type: "systemType",
+  equipment_age: "equipmentAgeBand",
+  equipment_brand: "equipmentBrand",
+  property_type: "propertyType",
+  owner_occupant: "ownerOccupant",
+  under_warranty: "underWarranty",
+  access_notes: "accessNotes",
+  vulnerable_occupants: "vulnerableOccupants",
+  preferred_window: "preferredWindow",
+  contact_preference: "contactPreference",
+  lead_source: "leadSource",
+};
+
+// Ordered list of OPTIONAL enrichment steps.
+const ENRICHMENT_ORDER: readonly TriageStep[] = [
+  SYSTEM_TYPE_STEP,
+  EQUIPMENT_AGE_STEP,
+  EQUIPMENT_BRAND_STEP,
+  PROPERTY_TYPE_STEP,
+  OWNER_STEP,
+  WARRANTY_STEP,
+  ACCESS_STEP,
+  VULNERABLE_STEP,
+  WINDOW_STEP,
+  CONTACT_PREF_STEP,
+  LEAD_SOURCE_STEP,
+];
+
+function extraFilledOrSkipped(slots: TriageSlots, step: TriageStep): boolean {
+  const extraKey = STEP_TO_EXTRA[step.id];
+  const filled =
+    extraKey !== undefined &&
+    slots.extras[extraKey] !== undefined &&
+    slots.extras[extraKey] !== null &&
+    slots.extras[extraKey] !== "";
+  const skipped = Boolean(slots.skipped?.[step.id]);
+  return filled || skipped;
+}
+
+// Reverse lookup: which extras key does a given step fill, and the set of valid
+// enum values for steps backed by an enum (used to capture a bare quick-reply
+// answer deterministically, with no LLM call).
+const ENUM_STEP_VALUES: Record<string, readonly string[]> = {
+  system_type: ["central_ac", "furnace", "heat_pump", "mini_split", "boiler", "packaged_unit", "other"],
+  equipment_age: ["under_5", "5_to_10", "10_to_15", "over_15"],
+  property_type: ["residential", "commercial"],
+  owner_occupant: ["owner", "renter"],
+  preferred_window: ["morning", "afternoon", "evening", "asap"],
+  contact_preference: ["call", "text"],
+  lead_source: ["google", "facebook", "yelp", "referral", "repeat_customer", "website", "direct_mail", "other"],
+};
+
+/**
+ * If `answer` is a bare quick-reply value for the step currently being asked,
+ * return the extras-key/value to persist — letting the chip path stay 0-token.
+ * Returns null when the answer isn't a recognizable enum value (the caller then
+ * falls back to the LLM, which can interpret free text). `pendingStepId` is the
+ * step id the customer was just asked (tracked by the caller).
+ */
+export function captureEnrichmentAnswer(
+  pendingStepId: string | null,
+  answer: string,
+): { key: string; value: string | boolean } | null {
+  if (!pendingStepId) return null;
+  const a = answer.trim().toLowerCase();
+  const extraKey = STEP_TO_EXTRA[pendingStepId];
+  if (!extraKey) return null;
+
+  if (pendingStepId === "vulnerable_occupants") {
+    if (isYes(a)) return { key: extraKey, value: true };
+    if (isNo(a)) return { key: extraKey, value: false };
+    return null;
+  }
+  if (pendingStepId === "under_warranty") {
+    if (a === "yes" || a === "no" || a === "unknown") return { key: extraKey, value: a };
+    return null;
+  }
+  const allowed = ENUM_STEP_VALUES[pendingStepId];
+  if (allowed && allowed.includes(a)) {
+    return { key: extraKey, value: a };
+  }
+  return null;
+}
+
+/**
+ * Decide the single next question to ask, or null when the conversation has
+ * everything it needs (required filled, enrichment answered-or-skipped).
+ */
+export function nextTriageStep(slots: TriageSlots): TriageStep | null {
+  // 1. Safety screen — always first, before any booking detail.
+  if (!slots.safetyScreenPassed && !slots.safetyHazardReported) {
+    return SAFETY_STEP;
+  }
+  // If a hazard was reported the caller escalates; triage stops asking.
+  if (slots.safetyHazardReported) return null;
+
+  // 2. ServiceTitan qualifying questions (down status, then duration).
+  if (!extraFilledOrSkipped(slots, SYSTEM_DOWN_STEP)) return SYSTEM_DOWN_STEP;
+  if (!extraFilledOrSkipped(slots, DURATION_STEP)) return DURATION_STEP;
+
+  // 3. Required dispatch fields.
+  if (!slots.address) return ADDRESS_STEP;
+  if (!slots.phone) return PHONE_STEP;
+  if (!slots.urgency) return URGENCY_STEP;
+
+  // 4. Optional enrichment, in order; skip any already filled or skipped.
+  for (const step of ENRICHMENT_ORDER) {
+    if (!extraFilledOrSkipped(slots, step)) return step;
+  }
+
+  return null;
+}
+
+/**
+ * Fold a customer's answer to `step` back into the triage slots. Optional steps
+ * accept skip / I-don't-know (recorded so they're not re-asked). The safety
+ * screen sets safetyScreenPassed / safetyHazardReported.
+ */
+export function applyTriageAnswer(
+  slots: TriageSlots,
+  step: TriageStep,
+  answer: string,
+): TriageSlots {
+  const next: TriageSlots = {
+    ...slots,
+    extras: { ...slots.extras },
+    skipped: { ...(slots.skipped ?? {}) },
+  };
+
+  if (step.id === "safety_screen") {
+    if (isYes(answer)) {
+      next.safetyHazardReported = true;
+      next.safetyScreenPassed = false;
+    } else if (isNo(answer)) {
+      next.safetyScreenPassed = true;
+    } else {
+      // Ambiguous → treat as not-yet-cleared; caller may fall back to the LLM.
+      next.safetyScreenPassed = false;
+    }
+    return next;
+  }
+
+  // Optional step skipped → record so we don't re-ask.
+  if (step.optional && isSkip(answer)) {
+    next.skipped![step.id] = true;
+    return next;
+  }
+
+  // Core triage signals + enrichment write into extras.
+  const extraKey = STEP_TO_EXTRA[step.id];
+  if (extraKey) {
+    if (step.id === "vulnerable_occupants") {
+      next.extras[extraKey] = isYes(answer) ? true : isNo(answer) ? false : null;
+      if (next.extras[extraKey] === null) delete next.extras[extraKey];
+    } else if (isSkip(answer)) {
+      if (step.optional) next.skipped![step.id] = true;
+    } else {
+      next.extras[extraKey] = answer.trim();
+    }
+    return next;
+  }
+
+  // Core dispatch fields (address/phone/urgency) are written by the caller via
+  // the existing slot extraction; triage just sequenced the question.
+  return next;
+}

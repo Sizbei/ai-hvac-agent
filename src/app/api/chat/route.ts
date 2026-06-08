@@ -22,7 +22,12 @@ import {
 import { checkTokenBudget, addTokenUsage } from "@/lib/ai/token-budget";
 import { DEFAULT_MAX_TURNS } from "@/lib/ai/chat-limits";
 import { isExtractionComplete } from "@/lib/ai/extraction-schema";
-import { routeMessage } from "@/lib/ai/intent-router";
+import { routeMessage, type KnownSlots } from "@/lib/ai/intent-router";
+import {
+  nextTriageStep,
+  captureEnrichmentAnswer,
+  type TriageSlots,
+} from "@/lib/ai/triage";
 import { EMPTY_ORG_CONFIG } from "@/lib/ai/router-config";
 import { getRouterConfig } from "@/lib/admin/org-config-queries";
 import { CONFIRM_REPLY } from "@/lib/ai/constants";
@@ -51,18 +56,35 @@ function cannedTextResponse(text: string): Response {
   });
 }
 
-/** Deterministic prompt for the next still-missing required slot. */
-function nextSlotPrompt(slots: {
-  readonly urgency?: unknown;
-  readonly address?: unknown;
-}): string {
-  if (!slots.address) {
-    return "Thanks! What's the service address where you'd like the technician to come?";
+/**
+ * Deterministic next-question prompt, driven by the triage engine. Maps the
+ * merged slots into the triage shape and asks for the single next question
+ * (safety screen → qualifying questions → required fields → enrichment). When
+ * the customer has answered/skipped everything, triage returns null and we fall
+ * back to a gentle "anything else?" prompt. Quick-reply chips are appended in
+ * parentheses so the deterministic (0-token) path still guides the customer.
+ */
+function nextSlotPrompt(merged: KnownSlots): string {
+  const triageSlots: TriageSlots = {
+    issueType: merged.issueType ?? null,
+    urgency: merged.urgency ?? null,
+    address: merged.address ?? null,
+    phone: merged.phone ?? null,
+    // The router only reaches this prompt once the message is non-hazardous, so
+    // treat the safety screen as cleared for the purpose of sequencing the
+    // remaining intake (a real hazard is handled by the ESCALATE branch).
+    safetyScreenPassed: true,
+    extras: { ...(merged.extras ?? {}) },
+  };
+  const step = nextTriageStep(triageSlots);
+  if (!step) {
+    return "Thanks — is there anything else that would help the technician?";
   }
-  if (!slots.urgency) {
-    return "Got it. How urgent is this — is it an emergency, or can it wait a little while?";
-  }
-  return "Thanks — could you share any other details that would help the technician?";
+  const chips =
+    step.quickReplies.length > 0
+      ? ` (${step.quickReplies.map((r) => r.label).join(" · ")})`
+      : "";
+  return step.question + chips;
 }
 
 export async function POST(request: NextRequest) {
@@ -332,6 +354,26 @@ export async function POST(request: NextRequest) {
           return cannedTextResponse(replyText);
         }
 
+        // If the customer's message is a bare quick-reply answer to the
+        // enrichment question we asked last turn, capture it deterministically
+        // (0-token) into the extras bag. The "pending step" is whatever triage
+        // would have asked given the slots BEFORE this turn.
+        const pendingStep = nextTriageStep({
+          issueType: knownSlots.issueType ?? null,
+          urgency: knownSlots.urgency ?? null,
+          address: knownSlots.address ?? null,
+          phone: knownSlots.phone ?? null,
+          safetyScreenPassed: true,
+          extras: { ...(knownSlots.extras ?? {}) },
+        });
+        const captured = captureEnrichmentAnswer(
+          pendingStep?.id ?? null,
+          guardrailResult.sanitized,
+        );
+        const capturedExtras = captured
+          ? { [captured.key]: captured.value }
+          : undefined;
+
         // Merge router + regex-extracted slots into the session metadata.
         const merged = mergeSlots(knownSlots, {
           issueType: verdict.issueType ?? undefined,
@@ -339,6 +381,7 @@ export async function POST(request: NextRequest) {
           address: extracted.address ?? undefined,
           phone: extracted.phone ?? undefined,
           email: extracted.email ?? undefined,
+          extras: capturedExtras,
         });
 
         let metadataStr = session.metadata;

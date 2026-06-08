@@ -12,6 +12,7 @@
  * It's pure (no I/O) so it unit-tests without a DB or telephony provider.
  */
 import { SYSTEM_PROMPT } from "./system-prompt";
+import { nextTriageStep, type TriageSlots } from "./triage";
 
 export type SessionChannel = "web" | "phone";
 
@@ -69,16 +70,63 @@ export function toSpokenReply(
   return spoken;
 }
 
-/** Deterministic spoken prompt for the next still-missing required slot. */
+// Spoken phrasing per triage step. A phone call shouldn't drag through all 11
+// enrichment questions, so voice asks the required sequence plus a few
+// high-value spoken extras (system type, preferred window); the rest are left
+// for the technician to confirm on arrival.
+const VOICE_STEP_PHRASING: Record<string, string> = {
+  safety_screen:
+    "First, a quick safety check — do you smell gas, smell anything burning, hear a carbon monoxide alarm, or have water flooding? If none of those, just say no.",
+  system_down: "Is the system completely down, or is it still partly working?",
+  duration: "And how long has this been going on?",
+  address:
+    "What's the service address where you'd like the technician to come? Take your time and I'll repeat it back.",
+  phone: "What's the best phone number to reach you to confirm the visit?",
+  urgency:
+    "How urgent is this — is it an emergency, or can it wait a little while?",
+  system_type:
+    "Do you know what kind of system it is — central air, a furnace, a heat pump, a mini-split, or a boiler? You can say you're not sure.",
+  preferred_window:
+    "When works best for a visit — morning, afternoon, or evening? We'll confirm the exact time.",
+};
+
+// Steps voice will actually ask (keeps a call from dragging). Everything else is
+// captured on the web channel or confirmed by the technician.
+const VOICE_ASKABLE = new Set(Object.keys(VOICE_STEP_PHRASING));
+
+/**
+ * Deterministic spoken prompt for the next still-needed slot, driven by the
+ * shared triage engine but rendered for voice and limited to the steps that
+ * make sense on a call.
+ */
 export function voiceNextSlotPrompt(slots: {
+  readonly issueType?: unknown;
   readonly urgency?: unknown;
   readonly address?: unknown;
+  readonly phone?: unknown;
+  readonly extras?: Record<string, unknown>;
 }): string {
-  if (!slots.address) {
-    return "Thanks. What's the service address where you'd like the technician to come? Take your time and I'll repeat it back.";
-  }
-  if (!slots.urgency) {
-    return "Got it. How urgent is this — is it an emergency, or can it wait a little while?";
+  let triageSlots: TriageSlots = {
+    issueType: (slots.issueType as string | null) ?? null,
+    urgency: (slots.urgency as string | null) ?? null,
+    address: (slots.address as string | null) ?? null,
+    phone: (slots.phone as string | null) ?? null,
+    safetyScreenPassed: true,
+    extras: { ...(slots.extras ?? {}) },
+  };
+
+  // Advance through any triage step voice won't ask (treat as skipped) so we
+  // land on the next voice-appropriate question (or run out → wrap up).
+  for (let i = 0; i < 20; i++) {
+    const step = nextTriageStep(triageSlots);
+    if (!step) break;
+    if (VOICE_ASKABLE.has(step.id)) {
+      return VOICE_STEP_PHRASING[step.id];
+    }
+    triageSlots = {
+      ...triageSlots,
+      skipped: { ...(triageSlots.skipped ?? {}), [step.id]: true },
+    };
   }
   return "Thanks. Is there anything else that would help the technician?";
 }

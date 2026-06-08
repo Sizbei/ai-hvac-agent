@@ -57,13 +57,33 @@ describe("toSpokenReply", () => {
   });
 });
 
-describe("voiceNextSlotPrompt", () => {
-  it("asks for the address first when missing", () => {
-    expect(voiceNextSlotPrompt({}).toLowerCase()).toContain("address");
+describe("voiceNextSlotPrompt (triage-driven)", () => {
+  // Note: the safety screen on voice is enforced by the router's emergency
+  // escalation (a hazard short-circuits the call), so voiceNextSlotPrompt — which
+  // runs AFTER the turn is processed — begins at the qualifying questions.
+  it("starts with a qualifying question (system down status)", () => {
+    expect(voiceNextSlotPrompt({}).toLowerCase()).toMatch(/completely down|partly working/);
   });
-  it("asks for urgency when address is known but urgency is not", () => {
+  it("asks how long it's been happening after the down-status is known", () => {
+    const next = voiceNextSlotPrompt({
+      extras: { systemDownStatus: "fully_down" },
+    }).toLowerCase();
+    expect(next).toContain("how long");
+  });
+  it("asks for the address once qualifying questions are answered", () => {
     expect(
-      voiceNextSlotPrompt({ address: "5 Oak St" }).toLowerCase(),
+      voiceNextSlotPrompt({
+        extras: { systemDownStatus: "fully_down", problemDuration: "today" },
+      }).toLowerCase(),
+    ).toContain("address");
+  });
+  it("asks for urgency once address and phone are known", () => {
+    expect(
+      voiceNextSlotPrompt({
+        address: "5 Oak St",
+        phone: "555-1234",
+        extras: { systemDownStatus: "fully_down", problemDuration: "today" },
+      }).toLowerCase(),
     ).toContain("urgent");
   });
 });
