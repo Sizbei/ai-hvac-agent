@@ -60,6 +60,10 @@ interface SeedConversation {
   readonly key: string;
   readonly daysAgo: number;
   readonly status: SessionStatus;
+  /** "web" (default) or "phone" — the medium the conversation arrived over. */
+  readonly channel?: "web" | "phone";
+  /** Optional rolling summary, shown in the admin detail for long conversations. */
+  readonly runningSummary?: string;
   readonly messages: readonly SeedMessage[];
   readonly extraction?: {
     readonly issueType: IssueType;
@@ -128,6 +132,72 @@ const CONVERSATIONS: readonly SeedConversation[] = [
       description: "AC stopped cooling during a heatwave; 86°F indoors with children at home.",
     },
     request: { status: "assigned", assignTo: "mike.johnson@demo-hvac.com" },
+    feedback: "up",
+  },
+  {
+    key: "phone-no-heat",
+    daysAgo: 0,
+    status: "submitted",
+    channel: "phone",
+    runningSummary:
+      "Caller Robert Alvarez phoned in: furnace producing no heat overnight with an infant in the home (high urgency). Confirmed service address 27 Larkspur Ln, Pflugerville, TX 78660 and callback number 512-555-0177; address was read back and confirmed.",
+    messages: [
+      {
+        role: "assistant",
+        content:
+          "Thanks for calling. I'm the HVAC assistant. What issue are you having today?",
+        tokens: 0,
+      },
+      {
+        role: "user",
+        content: "my furnace isn't putting out any heat and it got cold overnight",
+        tokens: 0,
+      },
+      {
+        role: "assistant",
+        content:
+          "I'm sorry to hear that, especially overnight. Let's get someone out to you. What's the service address?",
+        tokens: 138,
+      },
+      { role: "user", content: "twenty seven larkspur lane pflugerville texas", tokens: 0 },
+      {
+        role: "assistant",
+        content:
+          "Let me repeat that back to make sure I have it right: 27 Larkspur Lane, Pflugerville, Texas. Is that correct?",
+        tokens: 0,
+      },
+      { role: "user", content: "yes that's right", tokens: 0 },
+      {
+        role: "assistant",
+        content:
+          "Thank you. How urgent is this — is it an emergency, or can it wait a little while?",
+        tokens: 0,
+      },
+      { role: "user", content: "it's pretty urgent, we have a baby in the house", tokens: 0 },
+      {
+        role: "assistant",
+        content: "Understood. What's the best name and callback number for the technician?",
+        tokens: 0,
+      },
+      { role: "user", content: "Robert Alvarez, five one two, five five five, zero one seven seven", tokens: 0 },
+      {
+        role: "assistant",
+        content:
+          "Great — I have everything I need. I'll get this over to our team and a technician will be in touch to schedule. Is there anything else I can help you with?",
+        tokens: 0,
+      },
+    ],
+    extraction: {
+      issueType: "heating_not_working",
+      urgency: "high",
+      address: "27 Larkspur Ln, Pflugerville, TX 78660",
+      customerName: "Robert Alvarez",
+      customerPhone: "512-555-0177",
+      customerEmail: "robert.alvarez@gmail.com",
+      description:
+        "Phone call: furnace producing no heat overnight with an infant in the home.",
+    },
+    request: { status: "pending" },
     feedback: "up",
   },
   {
@@ -452,6 +522,8 @@ async function seedDemo(): Promise<void> {
         organizationId: DEMO_ORG_ID,
         token: `${SESSION_TOKEN_PREFIX}${convo.key}`,
         status: convo.status,
+        channel: convo.channel ?? "web",
+        runningSummary: convo.runningSummary ?? null,
         tokensUsed: totalTokens,
         tokenBudget: DEFAULT_TOKEN_BUDGET,
         turnCount: convo.messages.filter((m) => m.role === "user").length,
