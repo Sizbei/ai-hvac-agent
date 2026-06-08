@@ -9,6 +9,19 @@
 
 const XML_DECL = '<?xml version="1.0" encoding="UTF-8"?>';
 
+/**
+ * Default spoken voice — an Amazon Polly NEURAL voice (natural, far better than
+ * Twilio's legacy standard voices). Overridable per deployment via TWILIO_VOICE
+ * (any value Twilio's <Say voice=...> accepts, e.g. "Polly.Matthew-Neural").
+ */
+export const DEFAULT_VOICE = "Polly.Joanna-Neural";
+
+/** Resolve the configured TTS voice at call time (env override or default). */
+function resolveVoice(): string {
+  const v = process.env.TWILIO_VOICE?.trim();
+  return v && v.length > 0 ? v : DEFAULT_VOICE;
+}
+
 /** Escape the five XML special characters in spoken text. */
 export function escapeXml(text: string): string {
   return text
@@ -17,6 +30,11 @@ export function escapeXml(text: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&apos;");
+}
+
+/** A <Say> verb that speaks `text` with the configured neural voice. */
+function sayVerb(text: string): string {
+  return `<Say voice="${escapeXml(resolveVoice())}">${escapeXml(text)}</Say>`;
 }
 
 /**
@@ -30,13 +48,11 @@ export function gatherTwiML(params: {
   readonly reprompt?: string;
 }): string {
   const { say, action, reprompt } = params;
-  const repromptLine = reprompt
-    ? `\n  <Say>${escapeXml(reprompt)}</Say>`
-    : "";
+  const repromptLine = reprompt ? `\n  ${sayVerb(reprompt)}` : "";
   return `${XML_DECL}
 <Response>
   <Gather input="speech" action="${escapeXml(action)}" method="POST" speechTimeout="auto">
-    <Say>${escapeXml(say)}</Say>
+    ${sayVerb(say)}
   </Gather>${repromptLine}
 </Response>`;
 }
@@ -45,7 +61,7 @@ export function gatherTwiML(params: {
 export function sayThenHangupTwiML(say: string): string {
   return `${XML_DECL}
 <Response>
-  <Say>${escapeXml(say)}</Say>
+  ${sayVerb(say)}
   <Hangup/>
 </Response>`;
 }
