@@ -50,6 +50,106 @@ export const requestStatusEnum = pgEnum("request_status", [
 // and which system-prompt persona the agent uses.
 export const sessionChannelEnum = pgEnum("session_channel", ["web", "phone"]);
 
+// ── ServiceTitan-style intake enums (comprehensive intake overhaul) ──
+// Work classification, distinct from the customer-language `issueType` symptom.
+// Mirrors ServiceTitan's HVAC job-type taxonomy.
+export const jobTypeEnum = pgEnum("job_type", [
+  "service_call",
+  "no_heat",
+  "no_cool",
+  "maintenance",
+  "install",
+  "estimate",
+  "warranty",
+  "diagnostic",
+  "inspection",
+]);
+
+// Customer class — drives priority, pricing language, and assistant persona.
+export const customerTypeEnum = pgEnum("customer_type", [
+  "residential",
+  "commercial",
+]);
+
+// Membership / service-agreement status (ServiceTitan memberships model).
+export const membershipStatusEnum = pgEnum("membership_status", [
+  "none",
+  "active",
+  "suspended",
+  "expired",
+  "cancelled",
+]);
+
+// Marketing attribution — the one lead field an owner actually reads.
+export const leadSourceEnum = pgEnum("lead_source", [
+  "google",
+  "facebook",
+  "yelp",
+  "referral",
+  "repeat_customer",
+  "website",
+  "direct_mail",
+  "other",
+]);
+
+// The HVAC system the issue concerns — routing + parts prep.
+export const systemTypeEnum = pgEnum("system_type", [
+  "central_ac",
+  "furnace",
+  "heat_pump",
+  "mini_split",
+  "boiler",
+  "packaged_unit",
+  "other",
+]);
+
+// Property class for the service location.
+export const propertyTypeEnum = pgEnum("property_type", [
+  "residential",
+  "commercial",
+]);
+
+// Coarse equipment-age band — drives repair-vs-replace routing without
+// requiring an exact install date the customer rarely knows.
+export const equipmentAgeBandEnum = pgEnum("equipment_age_band", [
+  "under_5",
+  "5_to_10",
+  "10_to_15",
+  "over_15",
+  "unknown",
+]);
+
+// Whether the system is completely down or partly working — triage signal.
+export const systemDownStatusEnum = pgEnum("system_down_status", [
+  "fully_down",
+  "partially_working",
+  "unknown",
+]);
+
+// Owner-occupant vs renter — payment authority (renters may need landlord ok).
+export const ownerOccupantEnum = pgEnum("owner_occupant", [
+  "owner",
+  "renter",
+  "unknown",
+]);
+
+// Tri-state for yes/no fields the customer may not know.
+export const triStateEnum = pgEnum("tri_state", ["yes", "no", "unknown"]);
+
+// Preferred arrival window (we capture intent; dispatch confirms the exact time).
+export const preferredWindowEnum = pgEnum("preferred_window", [
+  "morning",
+  "afternoon",
+  "evening",
+  "asap",
+]);
+
+// Preferred contact channel for confirmation/follow-up.
+export const contactPreferenceEnum = pgEnum("contact_preference", [
+  "call",
+  "text",
+]);
+
 // 1. organizations
 export const organizations = pgTable("organizations", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -177,6 +277,33 @@ export const serviceRequests = pgTable(
     issueType: text("issue_type").notNull(),
     urgency: urgencyEnum("urgency").notNull(),
     description: text("description").notNull(),
+    // ── ServiceTitan-style intake fields (all nullable; intake fills when known) ──
+    // Work classification, distinct from the customer-language issueType symptom.
+    jobType: jobTypeEnum("job_type"),
+    // The HVAC system the issue concerns.
+    systemType: systemTypeEnum("system_type"),
+    equipmentBrand: text("equipment_brand"),
+    equipmentAgeBand: equipmentAgeBandEnum("equipment_age_band"),
+    propertyType: propertyTypeEnum("property_type"),
+    ownerOccupant: ownerOccupantEnum("owner_occupant"),
+    underWarranty: triStateEnum("under_warranty"),
+    // Free-text access notes — gate code, pets, parking, unit location.
+    accessNotes: text("access_notes"),
+    // Triage signals.
+    systemDownStatus: systemDownStatusEnum("system_down_status"),
+    problemDuration: text("problem_duration"),
+    vulnerableOccupants: boolean("vulnerable_occupants"),
+    // Scheduling: a preferred window (dispatch confirms the exact time). The
+    // resolved window start/end are set by dispatch; preferredWindow is the
+    // customer's stated preference captured at intake.
+    preferredWindow: preferredWindowEnum("preferred_window"),
+    arrivalWindowStart: timestamp("arrival_window_start", { withTimezone: true }),
+    arrivalWindowEnd: timestamp("arrival_window_end", { withTimezone: true }),
+    // Communication.
+    contactPreference: contactPreferenceEnum("contact_preference"),
+    smsConsent: boolean("sms_consent"),
+    // Marketing attribution.
+    leadSource: leadSourceEnum("lead_source"),
     customerNameEncrypted: text("customer_name_encrypted"),
     customerPhoneEncrypted: text("customer_phone_encrypted"),
     customerEmailEncrypted: text("customer_email_encrypted"),
@@ -277,6 +404,15 @@ export const customers = pgTable(
     propertyType: text("property_type"),
     propertySqft: integer("property_sqft"),
     notes: text("notes"),
+    // ── ServiceTitan-style customer fields ──
+    // Customer class (payer): residential vs commercial. Drives priority/persona.
+    customerType: customerTypeEnum("customer_type").notNull().default("residential"),
+    // Membership / service-agreement status; member-aware greeting + priority.
+    membershipStatus: membershipStatusEnum("membership_status")
+      .notNull()
+      .default("none"),
+    // When true the bot must refuse to book / warn (ServiceTitan "Do Not Service").
+    doNotService: boolean("do_not_service").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -315,6 +451,10 @@ export const customerEquipment = pgTable(
     serialNumber: text("serial_number"),
     installDate: timestamp("install_date", { withTimezone: true }),
     warrantyExpiration: timestamp("warranty_expiration", { withTimezone: true }),
+    // ServiceTitan splits parts warranty (warrantyExpiration) from labor warranty.
+    laborWarrantyExpiration: timestamp("labor_warranty_expiration", {
+      withTimezone: true,
+    }),
     locationInHome: text("location_in_home"),
     notes: text("notes"),
     createdAt: timestamp("created_at", { withTimezone: true })
