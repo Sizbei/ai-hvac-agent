@@ -10,8 +10,10 @@ interface RequestFiltersProps {
 const FILTER_OPTIONS: readonly { readonly label: string; readonly value: string }[] = [
   { label: 'All', value: '' },
   { label: 'Pending', value: 'pending' },
+  { label: 'Scheduled', value: 'scheduled' },
   { label: 'Assigned', value: 'assigned' },
   { label: 'In Progress', value: 'in_progress' },
+  { label: 'On Hold', value: 'on_hold' },
   { label: 'Completed', value: 'completed' },
   { label: 'Cancelled', value: 'cancelled' },
 ];

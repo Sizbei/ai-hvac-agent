@@ -285,13 +285,15 @@ export async function getRequestById(
 /** Request statuses from which an initial assignment is allowed. Assigning
  * flips the status to "assigned", so from "in_progress" it would regress and
  * discard progress — that case is handled by reassignTechnician instead, which
- * preserves the status. Terminal states (completed/cancelled) are never
+ * preserves the status. A "scheduled" request (booked, no tech yet) is the
+ * natural assign-from state. Terminal states (completed/cancelled) are never
  * assignable. */
-const ASSIGNABLE_STATUSES = ["pending", "assigned"] as const;
+const ASSIGNABLE_STATUSES = ["pending", "scheduled", "assigned"] as const;
 
 /** Statuses from which a REASSIGNMENT (changing the assignee without resetting
- * the lifecycle) is allowed: a request that already has work in flight. */
-const REASSIGNABLE_STATUSES = ["assigned", "in_progress"] as const;
+ * the lifecycle) is allowed: a request that already has work in flight or
+ * paused (on_hold) — reassign without discarding the lifecycle stage. */
+const REASSIGNABLE_STATUSES = ["assigned", "in_progress", "on_hold"] as const;
 
 export type AssignTechnicianResult =
   | { readonly ok: true; readonly request: AdminRequest }

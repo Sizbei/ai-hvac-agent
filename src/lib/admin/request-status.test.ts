@@ -5,7 +5,15 @@ import { describe, it, expect } from 'vitest';
 import { vi } from 'vitest';
 vi.mock('@/lib/db/schema', () => ({
   requestStatusEnum: {
-    enumValues: ['pending', 'assigned', 'in_progress', 'completed', 'cancelled'],
+    enumValues: [
+      'pending',
+      'assigned',
+      'scheduled',
+      'in_progress',
+      'on_hold',
+      'completed',
+      'cancelled',
+    ],
   },
 }));
 
@@ -52,5 +60,39 @@ describe('request-status state machine', () => {
     expect(MANUAL_TARGET_STATUSES).toContain('in_progress');
     expect(MANUAL_TARGET_STATUSES).toContain('completed');
     expect(MANUAL_TARGET_STATUSES).toContain('cancelled');
+  });
+
+  describe('new stages: scheduled + on_hold', () => {
+    it('can schedule a pending or assigned request', () => {
+      expect(canTransition('pending', 'scheduled')).toBe(true);
+      expect(canTransition('assigned', 'scheduled')).toBe(true);
+    });
+
+    it('a scheduled request can start, pause, or cancel', () => {
+      expect(canTransition('scheduled', 'in_progress')).toBe(true);
+      expect(canTransition('scheduled', 'on_hold')).toBe(true);
+      expect(canTransition('scheduled', 'cancelled')).toBe(true);
+    });
+
+    it('an active job can be put on hold and resumed', () => {
+      expect(canTransition('in_progress', 'on_hold')).toBe(true);
+      expect(canTransition('on_hold', 'in_progress')).toBe(true);
+      expect(canTransition('on_hold', 'scheduled')).toBe(true);
+    });
+
+    it('neither new stage is terminal', () => {
+      expect(isTerminal('scheduled')).toBe(false);
+      expect(isTerminal('on_hold')).toBe(false);
+    });
+
+    it('still cannot resume a completed/cancelled job into the new stages', () => {
+      expect(canTransition('completed', 'on_hold')).toBe(false);
+      expect(canTransition('cancelled', 'scheduled')).toBe(false);
+    });
+
+    it('exposes both new stages as manual targets', () => {
+      expect(MANUAL_TARGET_STATUSES).toContain('scheduled');
+      expect(MANUAL_TARGET_STATUSES).toContain('on_hold');
+    });
   });
 });
