@@ -111,7 +111,27 @@ export function hasSlotData(slots: KnownSlots): boolean {
   );
 }
 
-/** Build an ExtractionResult (the metadata shape the frontend + confirm endpoint expect). */
+// Sentinel a skipped optional step writes (see triage.SKIP_SENTINEL). It MUST
+// stay in the session metadata (so the step isn't re-asked on reload), and is
+// stripped only when the request is finally persisted (confirm route).
+export const SKIP_SENTINEL = "__skipped__";
+
+/** Drop skip-sentinel values from an extras bag (used at final persistence). */
+export function stripSkipSentinels(
+  extras: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(extras)) {
+    if (v !== SKIP_SENTINEL) out[k] = v;
+  }
+  return out;
+}
+
+/**
+ * Build an ExtractionResult (the metadata shape the frontend + confirm endpoint
+ * expect). Skip sentinels are preserved here because this result is written
+ * back to the session metadata, which triage re-reads to know what was skipped.
+ */
 export function buildExtraction(
   slots: KnownSlots,
   description: string,

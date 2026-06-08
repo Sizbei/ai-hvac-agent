@@ -30,6 +30,7 @@ import {
 import { isExtractionComplete } from "./extraction-schema";
 import { determineNextState, type SessionState } from "./state-machine";
 import { PHONE_SYSTEM_PROMPT, toSpokenReply, voiceNextSlotPrompt } from "./phone-agent";
+import { nextTriageStep, captureEnrichmentAnswer } from "./triage";
 import { buildModelMessages, MAX_HISTORY, type ChatTurn } from "./compaction";
 import { logger } from "@/lib/logger";
 
@@ -86,6 +87,20 @@ export async function voiceReply(params: {
   const verdict = routeMessage(userMessage, knownSlots, routerConfig);
   const extracted = extractSlots(userMessage);
 
+  // Capture a bare enrichment answer (the spoken-back chip value) into extras,
+  // mirroring the web chat — so phone enrichment answers actually persist
+  // instead of being spoken into the void.
+  const pendingStep = nextTriageStep({
+    issueType: knownSlots.issueType ?? null,
+    urgency: knownSlots.urgency ?? null,
+    address: knownSlots.address ?? null,
+    phone: knownSlots.phone ?? null,
+    safetyScreenPassed: true,
+    extras: { ...(knownSlots.extras ?? {}) },
+  });
+  const captured = captureEnrichmentAnswer(pendingStep?.id ?? null, userMessage);
+  const capturedExtras = captured ? { [captured.key]: captured.value } : undefined;
+
   const hasContactSlot = Boolean(
     extracted.address || extracted.phone || extracted.email,
   );
@@ -141,6 +156,7 @@ export async function voiceReply(params: {
       address: extracted.address ?? undefined,
       phone: extracted.phone ?? undefined,
       email: extracted.email ?? undefined,
+      extras: capturedExtras,
     });
 
     let metadataStr = session.metadata;

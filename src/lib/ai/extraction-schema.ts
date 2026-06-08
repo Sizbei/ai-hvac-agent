@@ -96,16 +96,19 @@ export function jobTypeForIssue(issueType: IssueType | null): JobType | null {
 
 // The new intake fields are all OPTIONAL — they enrich the request but never
 // block submission (the required gate is issue/urgency/address/phone).
+// Free-text fields are length-capped here (the schema boundary) so the public
+// confirm endpoint can't be made to persist unbounded strings — the chat
+// guardrail's 2000-char cap only protects the chat path, not a direct POST.
 const optionalIntakeFields = {
   systemType: z.enum(systemTypeValues).nullable().optional(),
-  equipmentBrand: z.string().nullable().optional(),
+  equipmentBrand: z.string().max(200).nullable().optional(),
   equipmentAgeBand: z.enum(equipmentAgeBandValues).nullable().optional(),
   propertyType: z.enum(propertyTypeValues).nullable().optional(),
   ownerOccupant: z.enum(ownerOccupantValues).nullable().optional(),
   underWarranty: z.enum(triStateValues).nullable().optional(),
-  accessNotes: z.string().nullable().optional(),
+  accessNotes: z.string().max(1000).nullable().optional(),
   systemDownStatus: z.enum(systemDownStatusValues).nullable().optional(),
-  problemDuration: z.string().nullable().optional(),
+  problemDuration: z.string().max(200).nullable().optional(),
   vulnerableOccupants: z.boolean().nullable().optional(),
   preferredWindow: z.enum(preferredWindowValues).nullable().optional(),
   contactPreference: z.enum(contactPreferenceValues).nullable().optional(),

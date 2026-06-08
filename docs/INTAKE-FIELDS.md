@@ -58,6 +58,15 @@ know" advances and is never re-asked).
 also gains `laborWarrantyExpiration` (ServiceTitan splits parts vs labor
 warranty).
 
+**Behavior wired today:**
+- `doNotService` — the confirm endpoint refuses to book a flagged customer and
+  routes them to call the office (`DO_NOT_SERVICE` response).
+- `vulnerableOccupants` — at confirmation, a vulnerable household with a
+  non-emergency issue is bumped one urgency tier (capped below "emergency").
+- `membershipStatus` — **stored, not yet acted on.** Member-aware greeting /
+  priority is a documented future step (the column + admin display exist; no
+  intake behavior reads it yet).
+
 ## Triage playbook (question order)
 
 The triage engine (`src/lib/ai/triage.ts`) emits ONE question at a time with

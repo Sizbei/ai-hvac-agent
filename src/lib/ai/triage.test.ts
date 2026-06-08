@@ -180,3 +180,71 @@ describe("REQUIRED_FOR_SUBMIT", () => {
     ]);
   });
 });
+
+describe("captureEnrichmentAnswer (review fixes)", () => {
+  it("captures a system_down chip value (qualifying question advances deterministically)", async () => {
+    const { captureEnrichmentAnswer } = await import("./triage");
+    expect(captureEnrichmentAnswer("system_down", "fully_down")).toEqual({
+      key: "systemDownStatus",
+      value: "fully_down",
+    });
+  });
+
+  it("captures free-text duration/brand/access answers (non-empty)", async () => {
+    const { captureEnrichmentAnswer } = await import("./triage");
+    expect(captureEnrichmentAnswer("duration", "since this morning")).toEqual({
+      key: "problemDuration",
+      value: "since this morning",
+    });
+    expect(captureEnrichmentAnswer("equipment_brand", "Trane")).toEqual({
+      key: "equipmentBrand",
+      value: "Trane",
+    });
+    expect(captureEnrichmentAnswer("access_notes", "gate code 4821")).toEqual({
+      key: "accessNotes",
+      value: "gate code 4821",
+    });
+  });
+
+  it("caps free-text at 1000 chars", async () => {
+    const { captureEnrichmentAnswer } = await import("./triage");
+    const long = "a".repeat(5000);
+    const r = captureEnrichmentAnswer("access_notes", long);
+    expect((r?.value as string).length).toBe(1000);
+  });
+
+  it("records a skip sentinel for an optional step (so it is not re-asked)", async () => {
+    const { captureEnrichmentAnswer, SKIP_SENTINEL } = await import("./triage");
+    expect(captureEnrichmentAnswer("system_type", "skip")).toEqual({
+      key: "systemType",
+      value: SKIP_SENTINEL,
+    });
+    expect(captureEnrichmentAnswer("equipment_brand", "i don't know")).toEqual({
+      key: "equipmentBrand",
+      value: SKIP_SENTINEL,
+    });
+  });
+
+  it("does NOT let a required step (system_down/duration) be skipped", async () => {
+    const { captureEnrichmentAnswer } = await import("./triage");
+    expect(captureEnrichmentAnswer("system_down", "skip")).toBeNull();
+  });
+
+  it("a skipped step is treated as resolved by nextTriageStep (sentinel in extras)", async () => {
+    const { nextTriageStep, SKIP_SENTINEL } = await import("./triage");
+    const step = nextTriageStep(
+      slots({
+        safetyScreenPassed: true,
+        urgency: "high",
+        address: "5 Oak St",
+        phone: "555-1234",
+        extras: {
+          systemDownStatus: "fully_down",
+          problemDuration: "today",
+          systemType: SKIP_SENTINEL, // skipped
+        },
+      }),
+    );
+    expect(step?.id).not.toBe("system_type");
+  });
+});

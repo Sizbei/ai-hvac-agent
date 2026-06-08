@@ -7,6 +7,16 @@
  *
  *   1. Safety screen FIRST — confirm no active gas/CO/burning/flooding hazard
  *      before booking anything. A hazard short-circuits to escalation.
+ *
+ * IMPORTANT (where safety is actually enforced in production): the chat and
+ * voice routes pass `safetyScreenPassed: true` into this engine, because the
+ * authoritative safety gate is the deterministic INTENT ROUTER's emergency
+ * detection (knowledge-base.ts emergency intents + escalateSession) — it fires
+ * on ANY turn a hazard is mentioned, not just when this screen is asked, and is
+ * what the system prompt reinforces. The `safety_screen` step here is therefore
+ * a self-contained backstop for callers that DON'T have the router in front of
+ * them (and keeps the engine correct in isolation/tests). If you wire a caller
+ * without the emergency router, pass the real screen state instead of `true`.
  *   2. ServiceTitan "Step 3" qualifying questions — is the system fully down or
  *      partly working, and how long has it been happening. These disambiguate
  *      urgency far better than guessing.
@@ -320,10 +330,18 @@ function extraFilledOrSkipped(slots: TriageSlots, step: TriageStep): boolean {
   return filled || skipped;
 }
 
-// Reverse lookup: which extras key does a given step fill, and the set of valid
-// enum values for steps backed by an enum (used to capture a bare quick-reply
-// answer deterministically, with no LLM call).
+// Sentinel stored in an extras slot when the customer skipped an optional step,
+// so it is treated as resolved (not re-asked) and survives a session reload via
+// the metadata round-trip. extraFilledOrSkipped + the schema's optional fields
+// tolerate it; it's never rendered (the admin UI maps unknown enum → label, and
+// free-text fields show it rarely — callers strip it before display if needed).
+export const SKIP_SENTINEL = "__skipped__";
+
+// Reverse lookup: the set of valid enum values for steps backed by an enum
+// (used to capture a bare quick-reply answer deterministically, with no LLM
+// call). Includes the qualifying-question steps so a tapped chip advances them.
 const ENUM_STEP_VALUES: Record<string, readonly string[]> = {
+  system_down: ["fully_down", "partially_working", "unknown"],
   system_type: ["central_ac", "furnace", "heat_pump", "mini_split", "boiler", "packaged_unit", "other"],
   equipment_age: ["under_5", "5_to_10", "10_to_15", "over_15"],
   property_type: ["residential", "commercial"],
@@ -333,21 +351,35 @@ const ENUM_STEP_VALUES: Record<string, readonly string[]> = {
   lead_source: ["google", "facebook", "yelp", "referral", "repeat_customer", "website", "direct_mail", "other"],
 };
 
+// Steps whose answer is free text (no enum) — any non-empty answer fills them.
+const FREE_TEXT_STEPS = new Set(["duration", "equipment_brand", "access_notes"]);
+
+const MAX_FREE_TEXT = 1000;
+
 /**
- * If `answer` is a bare quick-reply value for the step currently being asked,
- * return the extras-key/value to persist — letting the chip path stay 0-token.
- * Returns null when the answer isn't a recognizable enum value (the caller then
- * falls back to the LLM, which can interpret free text). `pendingStepId` is the
- * step id the customer was just asked (tracked by the caller).
+ * Map the customer's answer to the step we just asked into an extras
+ * {key,value} to persist — keeping the common path 0-token. Handles enum chips,
+ * free-text steps, the yes/no/unknown steps, and "skip / I don't know" on an
+ * optional step (recorded via a sentinel so it isn't re-asked). Returns null
+ * only when an answer to a REQUIRED step is unrecognized, so the caller can let
+ * the LLM interpret it. `pendingStepId` is the step the customer was just asked.
  */
 export function captureEnrichmentAnswer(
   pendingStepId: string | null,
   answer: string,
 ): { key: string; value: string | boolean } | null {
   if (!pendingStepId) return null;
-  const a = answer.trim().toLowerCase();
   const extraKey = STEP_TO_EXTRA[pendingStepId];
   if (!extraKey) return null;
+  const trimmed = answer.trim();
+  const a = trimmed.toLowerCase();
+
+  // Skip / don't-know on an optional step → record the sentinel so we don't
+  // re-ask it. (Required steps — system_down, duration — are not skippable.)
+  const optionalStep = pendingStepId !== "system_down" && pendingStepId !== "duration";
+  if (optionalStep && isSkip(a)) {
+    return { key: extraKey, value: SKIP_SENTINEL };
+  }
 
   if (pendingStepId === "vulnerable_occupants") {
     if (isYes(a)) return { key: extraKey, value: true };
@@ -358,6 +390,14 @@ export function captureEnrichmentAnswer(
     if (a === "yes" || a === "no" || a === "unknown") return { key: extraKey, value: a };
     return null;
   }
+
+  // Free-text steps: accept any non-empty answer (length-capped).
+  if (FREE_TEXT_STEPS.has(pendingStepId)) {
+    return trimmed.length > 0
+      ? { key: extraKey, value: trimmed.slice(0, MAX_FREE_TEXT) }
+      : null;
+  }
+
   const allowed = ENUM_STEP_VALUES[pendingStepId];
   if (allowed && allowed.includes(a)) {
     return { key: extraKey, value: a };

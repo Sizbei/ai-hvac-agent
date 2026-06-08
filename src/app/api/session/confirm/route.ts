@@ -6,6 +6,7 @@ import {
   customerSessions,
   serviceRequests,
   auditLog,
+  customers,
 } from "@/lib/db/schema";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { getSessionToken } from "@/lib/session";
@@ -13,7 +14,12 @@ import { isSameOriginRequest, hasJsonContentType } from "@/lib/session-csrf";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { encrypt } from "@/lib/crypto";
 import { transition } from "@/lib/ai/state-machine";
-import { serviceRequestSchema, jobTypeForIssue } from "@/lib/ai/extraction-schema";
+import {
+  serviceRequestSchema,
+  jobTypeForIssue,
+  type ServiceRequestData,
+} from "@/lib/ai/extraction-schema";
+import { parseKnownSlots, stripSkipSentinels } from "@/lib/ai/chat-slots";
 import { upsertCustomerByContact } from "@/lib/admin/crm-queries";
 import { logger } from "@/lib/logger";
 
@@ -73,6 +79,30 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Enrichment fields are gathered during the conversation and live in the
+    // session metadata. The browser confirm payload may only carry the core
+    // fields, so we read the enrichment SERVER-SIDE from the session's own
+    // metadata (the source of truth) — the client cannot drop it. Any field the
+    // client did send takes precedence (a last-second edit on the review card).
+    const sessionExtras = stripSkipSentinels(
+      parseKnownSlots(session.metadata).extras ?? {},
+    );
+    const merged = { ...sessionExtras, ...parsed.data } as ServiceRequestData;
+
+    // Vulnerable-occupant urgency bump: an elderly/infant/medically-fragile
+    // household with a non-emergency failure is bumped one tier (low→medium→
+    // high), capped below "emergency" (true emergencies come from the safety
+    // path, not this heuristic). Mirrors how a dispatcher would prioritize.
+    const URGENCY_BUMP: Record<string, "low" | "medium" | "high"> = {
+      low: "medium",
+      medium: "high",
+      high: "high",
+    };
+    const data: ServiceRequestData =
+      merged.vulnerableOccupants === true && merged.urgency !== "emergency"
+        ? { ...merged, urgency: URGENCY_BUMP[merged.urgency] }
+        : merged;
+
     // Transition: current state -> confirmed -> submitted
     const confirmResult = transition(session.status, "confirmed");
     if (!confirmResult.success) {
@@ -99,11 +129,36 @@ export async function POST(request: NextRequest) {
     // Doing it up front (not inside the batch) means the service request below
     // always references a customer row that already exists — no dangling FK.
     const customerId = await upsertCustomerByContact(organizationId, {
-      name: parsed.data.customerName,
-      email: parsed.data.customerEmail,
-      phone: parsed.data.customerPhone,
-      address: parsed.data.address,
+      name: data.customerName,
+      email: data.customerEmail,
+      phone: data.customerPhone,
+      address: data.address,
     });
+
+    // ServiceTitan "Do Not Service" guard: if this customer is flagged, refuse
+    // to create the request and route them to a human instead of silently
+    // booking. Tenant-scoped read by customer id.
+    const [flagRow] = await db
+      .select({ doNotService: customers.doNotService })
+      .from(customers)
+      .where(
+        and(
+          eq(customers.id, customerId),
+          eq(customers.organizationId, organizationId),
+        ),
+      )
+      .limit(1);
+    if (flagRow?.doNotService) {
+      logger.warn(
+        { sessionId: session.id, customerId },
+        "Confirm blocked: customer flagged do_not_service",
+      );
+      return errorResponse(
+        "We're unable to book this online. Please call our office so we can help you directly.",
+        "DO_NOT_SERVICE",
+        409,
+      );
+    }
 
     // Encrypt PII fields individually before insert per D-05
     const referenceNumber = generateReferenceNumber();
@@ -125,37 +180,42 @@ export async function POST(request: NextRequest) {
           sessionId: session.id,
           customerId,
           status: "pending",
-          issueType: parsed.data.issueType,
+          issueType: data.issueType,
           // ServiceTitan-style work classification derived from the symptom.
-          jobType: jobTypeForIssue(parsed.data.issueType),
-          urgency: parsed.data.urgency,
-          description: parsed.data.description,
-          customerNameEncrypted: parsed.data.customerName
-            ? encrypt(parsed.data.customerName)
+          jobType: jobTypeForIssue(data.issueType),
+          urgency: data.urgency,
+          description: data.description,
+          customerNameEncrypted: data.customerName
+            ? encrypt(data.customerName)
             : null,
-          customerPhoneEncrypted: parsed.data.customerPhone
-            ? encrypt(parsed.data.customerPhone)
+          customerPhoneEncrypted: data.customerPhone
+            ? encrypt(data.customerPhone)
             : null,
-          customerEmailEncrypted: parsed.data.customerEmail
-            ? encrypt(parsed.data.customerEmail)
+          customerEmailEncrypted: data.customerEmail
+            ? encrypt(data.customerEmail)
             : null,
-          addressEncrypted: encrypt(parsed.data.address),
+          addressEncrypted: encrypt(data.address),
           referenceNumber,
-          // ── Comprehensive intake fields (PII-free; safe to store plainly) ──
-          systemType: parsed.data.systemType ?? null,
-          equipmentBrand: parsed.data.equipmentBrand ?? null,
-          equipmentAgeBand: parsed.data.equipmentAgeBand ?? null,
-          propertyType: parsed.data.propertyType ?? null,
-          ownerOccupant: parsed.data.ownerOccupant ?? null,
-          underWarranty: parsed.data.underWarranty ?? null,
-          accessNotes: parsed.data.accessNotes ?? null,
-          systemDownStatus: parsed.data.systemDownStatus ?? null,
-          problemDuration: parsed.data.problemDuration ?? null,
-          vulnerableOccupants: parsed.data.vulnerableOccupants ?? null,
-          preferredWindow: parsed.data.preferredWindow ?? null,
-          contactPreference: parsed.data.contactPreference ?? null,
-          smsConsent: parsed.data.smsConsent ?? null,
-          leadSource: parsed.data.leadSource ?? null,
+          // ── Comprehensive intake fields ──
+          // Operational dispatch details, stored plainly (unlike the encrypted
+          // name/phone/email/address above). NOTE: accessNotes is customer-
+          // entered and may contain a gate code — operationally sensitive but
+          // not identifying PII; accepted as plaintext for now since dispatchers
+          // must read it. Length-capped at the schema boundary.
+          systemType: data.systemType ?? null,
+          equipmentBrand: data.equipmentBrand ?? null,
+          equipmentAgeBand: data.equipmentAgeBand ?? null,
+          propertyType: data.propertyType ?? null,
+          ownerOccupant: data.ownerOccupant ?? null,
+          underWarranty: data.underWarranty ?? null,
+          accessNotes: data.accessNotes ?? null,
+          systemDownStatus: data.systemDownStatus ?? null,
+          problemDuration: data.problemDuration ?? null,
+          vulnerableOccupants: data.vulnerableOccupants ?? null,
+          preferredWindow: data.preferredWindow ?? null,
+          contactPreference: data.contactPreference ?? null,
+          smsConsent: data.smsConsent ?? null,
+          leadSource: data.leadSource ?? null,
         })
         .returning({ id: serviceRequests.id }),
       db
