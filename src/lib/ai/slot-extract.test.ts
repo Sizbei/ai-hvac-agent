@@ -158,3 +158,27 @@ describe('extractSlots', () => {
     });
   });
 });
+
+describe('extractAddressLoose (used when the address question is pending)', () => {
+  it('still matches a full suffixed address', async () => {
+    const { extractAddressLoose } = await import('./slot-extract');
+    expect(extractAddressLoose('123 Main St, Austin TX 78704')).toContain('123 Main');
+  });
+
+  it('matches a suffix-less number + street name when the address was asked for', async () => {
+    const { extractAddressLoose } = await import('./slot-extract');
+    expect(extractAddressLoose('123 Main')).toBe('123 Main');
+    expect(extractAddressLoose('27 Larkspur, Pflugerville')).toContain('27 Larkspur');
+  });
+
+  it('does NOT treat a bare duration/quantity as an address', async () => {
+    const { extractAddressLoose } = await import('./slot-extract');
+    expect(extractAddressLoose('10 years')).toBeNull();
+    expect(extractAddressLoose('about 5')).toBeNull();
+  });
+
+  it('returns null for clearly non-address text', async () => {
+    const { extractAddressLoose } = await import('./slot-extract');
+    expect(extractAddressLoose('my ac is broken')).toBeNull();
+  });
+});

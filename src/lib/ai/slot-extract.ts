@@ -110,6 +110,46 @@ export function extractAddress(message: string): string | null {
   return cleaned.length > 0 ? cleaned : null;
 }
 
+// Words that look like "number + word" but are NOT addresses — durations,
+// quantities, ages. Used to reject false positives in the loose matcher.
+const NON_ADDRESS_WORDS = new Set([
+  'year', 'years', 'yr', 'yrs',
+  'day', 'days', 'week', 'weeks', 'month', 'months',
+  'hour', 'hours', 'minute', 'minutes', 'min', 'mins',
+  'degree', 'degrees', 'percent', 'dollar', 'dollars',
+  'unit', 'units', 'zone', 'zones', 'ton', 'tons',
+  'am', 'pm', 'oclock',
+]);
+
+// Loose address: a street number followed by at least one capitalized-ish word
+// that ISN'T a duration/quantity word. Anchored on a number to avoid matching
+// arbitrary phrases. Conservative enough to reject "10 years" / "about 5".
+const LOOSE_ADDRESS_PATTERN =
+  /\b\d{1,6}\s+([A-Za-z][A-Za-z0-9.'-]*(?:\s+[A-Za-z0-9.'-]+){0,4})/;
+
+/**
+ * Address extraction used when we have JUST asked the customer for their
+ * address (the conversational context says "this is the address"). Tries the
+ * strict suffix-anchored pattern first; if that misses, accepts a number +
+ * street-name even without a recognized suffix ("123 Main"), while rejecting
+ * number-led durations/quantities ("10 years", "5 units"). This fixes the
+ * re-ask bug where a suffix-less address fell through to the LLM and got
+ * re-asked.
+ */
+export function extractAddressLoose(message: string): string | null {
+  const strict = extractAddress(message);
+  if (strict) return strict;
+
+  const match = message.match(LOOSE_ADDRESS_PATTERN);
+  if (match === null) return null;
+
+  const firstWord = match[1].split(/\s+/)[0]?.toLowerCase().replace(/[.,]/g, '');
+  if (firstWord && NON_ADDRESS_WORDS.has(firstWord)) return null;
+
+  const cleaned = match[0].trim().replace(/[\s,.;]+$/, '');
+  return cleaned.length > 0 ? cleaned : null;
+}
+
 export function extractSlots(message: string): ExtractedSlots {
   return {
     address: extractAddress(message),

@@ -31,7 +31,7 @@ import {
 import { EMPTY_ORG_CONFIG } from "@/lib/ai/router-config";
 import { getRouterConfig } from "@/lib/admin/org-config-queries";
 import { CONFIRM_REPLY } from "@/lib/ai/constants";
-import { extractSlots } from "@/lib/ai/slot-extract";
+import { extractSlots, extractAddressLoose } from "@/lib/ai/slot-extract";
 import { escalateSession } from "@/lib/ai/escalate-service";
 import {
   parseKnownSlots,
@@ -237,6 +237,18 @@ export async function POST(request: NextRequest) {
     // config (disabled services, business-info personalization, custom FAQs) is
     // applied as an overlay — but it can never suppress an emergency.
     const knownSlots = parseKnownSlots(session.metadata);
+    // The triage question we asked LAST turn = what triage would ask given the
+    // slots as they stood BEFORE this message. Used to (a) loosely extract a
+    // suffix-less address when we just asked for it, and (b) capture a bare
+    // quick-reply enrichment answer deterministically.
+    const pendingStep = nextTriageStep({
+      issueType: knownSlots.issueType ?? null,
+      urgency: knownSlots.urgency ?? null,
+      address: knownSlots.address ?? null,
+      phone: knownSlots.phone ?? null,
+      safetyScreenPassed: true,
+      extras: { ...(knownSlots.extras ?? {}) },
+    });
     if (ROUTER_ENABLED) {
       // The org overlay is non-critical: if its read fails (DB blip, cold
       // start), degrade to the empty overlay (everything enabled, no
@@ -256,6 +268,13 @@ export async function POST(request: NextRequest) {
         routerConfig,
       );
       const extracted = extractSlots(guardrailResult.sanitized);
+      // When we JUST asked for the address, accept a suffix-less answer
+      // ("123 Main") that the strict extractor would miss — fixes the re-ask
+      // bug where such a reply fell through to the LLM and got re-asked.
+      const addressAnswer =
+        pendingStep?.id === "address" && !extracted.address
+          ? extractAddressLoose(guardrailResult.sanitized)
+          : extracted.address;
 
       // A "slot provision" turn: the customer supplied an address/phone/email.
       // There's no intent for a bare address, so the router returns FALLBACK —
@@ -273,7 +292,7 @@ export async function POST(request: NextRequest) {
       // issueType/urgency it can't infer are still filled by the background
       // extraction on the LLM turns.
       const hasContactSlot = Boolean(
-        extracted.address || extracted.phone || extracted.email,
+        addressAnswer || extracted.phone || extracted.email,
       );
       const isSlotProvision =
         hasContactSlot &&
@@ -281,8 +300,26 @@ export async function POST(request: NextRequest) {
 
       if (verdict.action !== "FALLBACK_LLM" || isSlotProvision) {
         if (verdict.escalate) {
+          // Bug fix: on an emergency escalation we MUST have a way to reach the
+          // customer and a place to send help. If the address or phone isn't
+          // already known and wasn't in this message, append an explicit ask so
+          // the reply itself captures it — rather than leaving the dispatcher
+          // with a blank-location emergency. (The session escalates either way;
+          // any reply the customer sends next is still recorded on the session.)
+          const escAddress = addressAnswer ?? knownSlots.address ?? null;
+          const escPhone = extracted.phone ?? knownSlots.phone ?? null;
+          const missingAsk =
+            !escAddress && !escPhone
+              ? " So we can get help to you fast, what's the address, and a phone number to reach you?"
+              : !escAddress
+                ? " So we can dispatch help, what's the service address?"
+                : !escPhone
+                  ? " What's the best phone number to reach you right now?"
+                  : "";
           const replyText =
-            (verdict.reply ?? "") + (nearTurnLimit ? ESCALATION_NOTE : "");
+            (verdict.reply ?? "") +
+            missingAsk +
+            (nearTurnLimit ? ESCALATION_NOTE : "");
           await db.insert(messages).values({
             organizationId,
             sessionId: session.id,
@@ -319,7 +356,7 @@ export async function POST(request: NextRequest) {
           const escMerged = mergeSlots(knownSlots, {
             issueType: verdict.issueType ?? undefined,
             urgency: verdict.urgency ?? undefined,
-            address: extracted.address ?? undefined,
+            address: addressAnswer ?? undefined,
             phone: extracted.phone ?? undefined,
             email: extracted.email ?? undefined,
           });
@@ -355,17 +392,8 @@ export async function POST(request: NextRequest) {
         }
 
         // If the customer's message is a bare quick-reply answer to the
-        // enrichment question we asked last turn, capture it deterministically
-        // (0-token) into the extras bag. The "pending step" is whatever triage
-        // would have asked given the slots BEFORE this turn.
-        const pendingStep = nextTriageStep({
-          issueType: knownSlots.issueType ?? null,
-          urgency: knownSlots.urgency ?? null,
-          address: knownSlots.address ?? null,
-          phone: knownSlots.phone ?? null,
-          safetyScreenPassed: true,
-          extras: { ...(knownSlots.extras ?? {}) },
-        });
+        // enrichment question we asked last turn (pendingStep, computed above),
+        // capture it deterministically (0-token) into the extras bag.
         const captured = captureEnrichmentAnswer(
           pendingStep?.id ?? null,
           guardrailResult.sanitized,
@@ -378,7 +406,7 @@ export async function POST(request: NextRequest) {
         const merged = mergeSlots(knownSlots, {
           issueType: verdict.issueType ?? undefined,
           urgency: verdict.urgency ?? undefined,
-          address: extracted.address ?? undefined,
+          address: addressAnswer ?? undefined,
           phone: extracted.phone ?? undefined,
           email: extracted.email ?? undefined,
           extras: capturedExtras,
