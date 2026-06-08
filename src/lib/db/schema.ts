@@ -322,6 +322,11 @@ export const serviceRequests = pgTable(
     smsConsent: boolean("sms_consent"),
     // Marketing attribution.
     leadSource: leadSourceEnum("lead_source"),
+    // After-hours: whether the request arrived outside business hours (per the
+    // org's configured window) + the resolved surcharge in whole dollars.
+    // Computed once at confirm time so dispatch/dashboard read it off the row.
+    isAfterHours: boolean("is_after_hours").notNull().default(false),
+    afterHoursSurcharge: integer("after_hours_surcharge").notNull().default(0),
     customerNameEncrypted: text("customer_name_encrypted"),
     customerPhoneEncrypted: text("customer_phone_encrypted"),
     customerEmailEncrypted: text("customer_email_encrypted"),
@@ -651,6 +656,12 @@ export const organizationSettings = pgTable("organization_settings", {
   // (DEFAULT_TOKEN_BUDGET / DEFAULT_MAX_TURNS). Bounded at the API layer.
   chatTokenBudget: integer("chat_token_budget"),
   chatMaxTurns: integer("chat_max_turns"),
+
+  // ── After-hours pricing (ServiceTitan-style emergency/after-hours surcharge) ──
+  // Per-org window + fees: { enabled, startHour, endHour, weekendsAreAfterHours,
+  // timezone, flatFee, emergencyMultiplier }. NULL = use the system default
+  // (DEFAULT_AFTER_HOURS_CONFIG). Validated by afterHoursConfigSchema.
+  afterHoursConfig: jsonb("after_hours_config").$type<Record<string, unknown>>(),
 
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()

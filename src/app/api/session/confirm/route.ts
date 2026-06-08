@@ -7,7 +7,13 @@ import {
   serviceRequests,
   auditLog,
   customers,
+  organizationSettings,
 } from "@/lib/db/schema";
+import {
+  resolveAfterHoursConfig,
+  isAfterHours,
+  computeSurcharge,
+} from "@/lib/admin/after-hours";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { getSessionToken } from "@/lib/session";
 import { isSameOriginRequest, hasJsonContentType } from "@/lib/session-csrf";
@@ -168,6 +174,25 @@ export async function POST(request: NextRequest) {
     // within the same atomic batch (no read-back needed).
     const serviceRequestId = randomUUID();
 
+    // After-hours: compute once at submit time from the org's configured window
+    // (its local clock), so dispatch + the dashboard read the flag + surcharge
+    // off the row. Best-effort config read — fall back to the default window.
+    const [settingsRow] = await db
+      .select({ afterHoursConfig: organizationSettings.afterHoursConfig })
+      .from(organizationSettings)
+      .where(eq(organizationSettings.organizationId, organizationId))
+      .limit(1);
+    const afterHoursConfig = resolveAfterHoursConfig(
+      settingsRow?.afterHoursConfig ?? null,
+    );
+    const submittedAt = new Date();
+    const afterHours = isAfterHours(submittedAt, afterHoursConfig);
+    const afterHoursSurcharge = computeSurcharge(
+      afterHours,
+      data.urgency,
+      afterHoursConfig,
+    );
+
     // The neon-http driver does not support interactive `db.transaction()`
     // (it throws "No transactions support in neon-http driver"), so the
     // service-request insert, session-status update, and audit-log insert are
@@ -218,6 +243,8 @@ export async function POST(request: NextRequest) {
           contactPreference: data.contactPreference ?? null,
           smsConsent: data.smsConsent ?? null,
           leadSource: data.leadSource ?? null,
+          isAfterHours: afterHours,
+          afterHoursSurcharge,
         })
         .returning({ id: serviceRequests.id }),
       db
