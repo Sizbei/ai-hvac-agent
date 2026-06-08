@@ -41,8 +41,10 @@ know" advances and is never re-asked).
 | `vulnerableOccupants` | boolean | Elderly/infant/medical → bumps urgency a tier |
 | `preferredWindow` | morning / afternoon / evening / asap | We capture intent; dispatch confirms the exact time |
 | `contactPreference` | call / text | Confirmation/follow-up channel |
-| `smsConsent` | boolean | Consent is per-booking; arrival-window texts need a mobile |
 | `leadSource` | google / facebook / yelp / referral / repeat_customer / website / direct_mail / other | Marketing attribution — the one lead field owners read |
+
+`smsConsent` (boolean) has a column + admin display but is **not yet asked** by
+the triage flow — see Deferred below.
 | `customerName`, `customerEmail` | free text | Optional contact detail |
 
 ### Derived
@@ -126,8 +128,10 @@ receptionists, plus authoritative gas/CO safety guidance:
 
 ## Deferred (documented, not built)
 
-Hard Customer↔Location table split (we use a "soft split": billing identity on
-the customer, service address on the request); real calendar/availability
-booking; phone-based existing-customer auto-lookup at intake; tags join table;
-DNI call-tracking / business units / billing. These need backends we don't have
+`smsConsent` capture (column exists; no triage step asks for it yet); hard
+Customer↔Location table split (we use a "soft split": billing identity on the
+customer, service address on the request); real calendar/availability booking;
+phone-based existing-customer auto-lookup at intake; membership-aware
+greeting/priority; tags join table; DNI call-tracking / business units /
+billing. These need backends we don't have
 yet; the schema is shaped to allow promoting them later.

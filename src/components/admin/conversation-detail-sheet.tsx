@@ -95,9 +95,15 @@ function formatMetadataValue(value: unknown): string {
   return String(value);
 }
 
+// Sentinel a skipped optional intake step writes (triage.SKIP_SENTINEL). It
+// lives in the in-flight session metadata so the step isn't re-asked, but must
+// never be shown to an admin as if it were a real value.
+const SKIP_SENTINEL = "__skipped__";
+
 function ExtractedData({ metadata }: { readonly metadata: Record<string, unknown> }) {
   const entries = Object.entries(metadata).filter(
-    ([, value]) => value !== null && value !== undefined,
+    ([, value]) =>
+      value !== null && value !== undefined && value !== SKIP_SENTINEL,
   );
 
   if (entries.length === 0) {

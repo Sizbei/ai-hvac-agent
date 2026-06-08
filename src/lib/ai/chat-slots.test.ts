@@ -149,3 +149,17 @@ describe("buildExtraction", () => {
     expect(e.isHvacRelated).toBe(true);
   });
 });
+
+describe("stripSkipSentinels", () => {
+  it("drops __skipped__ values, preserves real ones, and handles empty input", async () => {
+    const { stripSkipSentinels, SKIP_SENTINEL } = await import("./chat-slots");
+    expect(
+      stripSkipSentinels({
+        systemType: "heat_pump",
+        equipmentBrand: SKIP_SENTINEL,
+        preferredWindow: "morning",
+      }),
+    ).toEqual({ systemType: "heat_pump", preferredWindow: "morning" });
+    expect(stripSkipSentinels({})).toEqual({});
+  });
+});
