@@ -1,0 +1,136 @@
+import { NextRequest, after } from "next/server";
+import { db } from "@/lib/db";
+import { customerSessions, messages } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
+import { withTenant } from "@/lib/db/tenant";
+import { isTerminalState, type SessionState } from "@/lib/ai/state-machine";
+import { voiceReply } from "@/lib/ai/voice-turn";
+import { compactSessionIfNeeded } from "@/lib/ai/compact-session";
+import { type ChatTurn } from "@/lib/ai/compaction";
+import { sanitizeInput } from "@/lib/ai/guardrails";
+import { parseAndVerifyTwilioRequest } from "@/lib/voice/request";
+import {
+  gatherTwiML,
+  sayThenHangupTwiML,
+  hangupTwiML,
+  TWIML_HEADERS,
+} from "@/lib/voice/twiml";
+import { logger } from "@/lib/logger";
+
+/**
+ * Twilio speech-gather webhook. Verifies the signature, loads the phone session
+ * by CallSid, runs the recognized speech through the phone sub-agent, and
+ * returns TwiML that speaks the reply and gathers the next turn — or, on a
+ * terminal/confirmed state, speaks a closing line and hangs up.
+ */
+export async function POST(request: NextRequest) {
+  const ip = request.headers.get("x-forwarded-for") ?? "unknown";
+
+  const { params, valid } = await parseAndVerifyTwilioRequest(request);
+  if (!valid) {
+    logger.warn({ ip }, "Rejected Twilio gather webhook: invalid signature");
+    return new Response("Forbidden", { status: 403 });
+  }
+
+  const callSid = params.CallSid;
+  const speech = (params.SpeechResult ?? "").trim();
+
+  if (!callSid) {
+    return new Response(hangupTwiML(), { headers: TWIML_HEADERS });
+  }
+
+  try {
+    const [session] = await db
+      .select()
+      .from(customerSessions)
+      .where(eq(customerSessions.token, callSid))
+      .limit(1);
+
+    if (!session) {
+      return new Response(
+        sayThenHangupTwiML("Sorry, I lost track of this call. Please call back."),
+        { headers: TWIML_HEADERS },
+      );
+    }
+
+    // Already escalated/terminal — don't keep the automated leg running.
+    if (isTerminalState(session.status) || session.status === "submitted") {
+      return new Response(
+        sayThenHangupTwiML("Thanks for calling. Goodbye."),
+        { headers: TWIML_HEADERS },
+      );
+    }
+
+    // No recognized speech — re-prompt without consuming a turn.
+    if (speech.length === 0) {
+      return new Response(
+        gatherTwiML({
+          say: "I'm sorry, I didn't hear anything. Could you tell me what's going on?",
+          action: "/api/voice/gather",
+        }),
+        { headers: TWIML_HEADERS },
+      );
+    }
+
+    const sanitized = sanitizeInput(speech);
+    const organizationId = session.organizationId;
+
+    const history = await db
+      .select({ role: messages.role, content: messages.content })
+      .from(messages)
+      .where(
+        withTenant(messages, organizationId, eq(messages.sessionId, session.id)),
+      )
+      .orderBy(messages.createdAt);
+
+    const chatHistory: ChatTurn[] = history
+      .filter((m) => m.role === "user" || m.role === "assistant")
+      .map((m) => ({ role: m.role as ChatTurn["role"], content: m.content }));
+
+    const result = await voiceReply({
+      session: {
+        id: session.id,
+        organizationId,
+        status: session.status as SessionState,
+        turnCount: session.turnCount,
+        maxTurns: session.maxTurns,
+        metadata: session.metadata,
+        runningSummary: session.runningSummary,
+      },
+      history: chatHistory,
+      userMessage: sanitized.sanitized,
+      ipAddress: ip,
+    });
+
+    // Compaction runs in the background (same model as web), bounded so long
+    // calls stay coherent without re-sending the transcript each turn.
+    after(async () => {
+      try {
+        await compactSessionIfNeeded({
+          sessionId: session.id,
+          organizationId,
+          history: [...chatHistory, { role: "user", content: sanitized.sanitized }],
+        });
+      } catch (e) {
+        logger.error({ error: e, sessionId: session.id }, "Voice compaction failed");
+      }
+    });
+
+    if (result.endCall) {
+      return new Response(sayThenHangupTwiML(result.reply), {
+        headers: TWIML_HEADERS,
+      });
+    }
+
+    return new Response(
+      gatherTwiML({ say: result.reply, action: "/api/voice/gather" }),
+      { headers: TWIML_HEADERS },
+    );
+  } catch (error) {
+    logger.error({ error, callSid }, "Voice gather failed");
+    return new Response(
+      sayThenHangupTwiML("Sorry, something went wrong on our end. Please call back."),
+      { headers: TWIML_HEADERS },
+    );
+  }
+}
