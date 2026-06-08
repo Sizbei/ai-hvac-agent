@@ -6,6 +6,11 @@ import {
   addRequestNote,
 } from "@/lib/admin/queries";
 import { MANUAL_TARGET_STATUSES } from "@/lib/admin/request-status";
+import {
+  ARRIVAL_WINDOWS,
+  arrivalWindowForDate,
+  type ArrivalWindow,
+} from "@/lib/admin/arrival-window";
 import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
@@ -15,18 +20,28 @@ import { z } from "zod";
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// A PATCH can set a status transition, a scheduled date, or both. At least one
-// must be present. `scheduledDate` accepts an ISO datetime or null (to clear).
+// A PATCH can set a status transition, a scheduled date (+ optional arrival
+// window), or both. At least one must be present. `scheduledDate` accepts an ISO
+// datetime or null (to clear). `arrivalWindow` is one of the window names (or
+// null to clear); when set, the server resolves it to start/end timestamps on
+// the scheduled date.
 const patchSchema = z
   .object({
     status: z
       .enum([...MANUAL_TARGET_STATUSES] as [string, ...string[]])
       .optional(),
     scheduledDate: z.string().datetime().nullable().optional(),
+    arrivalWindow: z
+      .enum([...ARRIVAL_WINDOWS] as [string, ...string[]])
+      .nullable()
+      .optional(),
   })
   .refine(
-    (v) => v.status !== undefined || v.scheduledDate !== undefined,
-    { message: "Provide a status and/or scheduledDate" },
+    (v) =>
+      v.status !== undefined ||
+      v.scheduledDate !== undefined ||
+      v.arrivalWindow !== undefined,
+    { message: "Provide a status, scheduledDate, and/or arrivalWindow" },
   );
 
 const MAX_NOTE_LENGTH = 5000;
@@ -128,11 +143,33 @@ export async function PATCH(
       });
     }
 
-    if (parsed.data.scheduledDate !== undefined) {
+    if (
+      parsed.data.scheduledDate !== undefined ||
+      parsed.data.arrivalWindow !== undefined
+    ) {
       const when = parsed.data.scheduledDate
         ? new Date(parsed.data.scheduledDate)
         : null;
-      const result = await scheduleRequest(session.organizationId, id, when);
+      // Resolve the chosen window into start/end timestamps on the scheduled
+      // day. A window requires a date; clearing the date clears the window.
+      let arrivalWindow: { start: Date; end: Date } | null | undefined;
+      if (parsed.data.arrivalWindow === null || when === null) {
+        arrivalWindow = null;
+      } else if (parsed.data.arrivalWindow !== undefined && when) {
+        arrivalWindow = arrivalWindowForDate(
+          when,
+          parsed.data.arrivalWindow as ArrivalWindow,
+        );
+      } else {
+        arrivalWindow = undefined; // leave the window untouched
+      }
+
+      const result = await scheduleRequest(
+        session.organizationId,
+        id,
+        when,
+        arrivalWindow,
+      );
       if (!result.ok) {
         return errorResponse("Request not found", "NOT_FOUND", 404);
       }
@@ -142,7 +179,11 @@ export async function PATCH(
         action: "request_scheduled",
         entity: "service_request",
         entityId: id,
-        details: JSON.stringify({ scheduledDate: result.scheduledDate }),
+        details: JSON.stringify({
+          scheduledDate: result.scheduledDate,
+          arrivalWindowStart: result.arrivalWindowStart,
+          arrivalWindowEnd: result.arrivalWindowEnd,
+        }),
       });
     }
 

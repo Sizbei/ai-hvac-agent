@@ -26,6 +26,11 @@ import {
   MANUAL_TARGET_STATUSES,
   type RequestStatus,
 } from '@/lib/admin/request-status';
+import {
+  ARRIVAL_WINDOWS,
+  formatArrivalWindow,
+  type ArrivalWindow,
+} from '@/lib/admin/arrival-window';
 import type {
   AdminRequest,
   AdminRequestDetail,
@@ -51,6 +56,14 @@ function toDateInputValue(iso: string | null): string {
   if (!iso) return '';
   return iso.slice(0, 10);
 }
+
+// Spoken-friendly labels for the arrival-window selector.
+const ARRIVAL_WINDOW_LABELS: Record<ArrivalWindow, string> = {
+  morning: 'Morning (8am–12pm)',
+  afternoon: 'Afternoon (12–4pm)',
+  evening: 'Evening (4–8pm)',
+  anytime: 'Anytime (8am–8pm)',
+};
 
 // Per-field display maps for the intake enums. Keeping them explicit (rather
 // than auto-title-casing) lets us spell out the cases that don't title-case
@@ -228,6 +241,8 @@ export function RequestDetailSheet({
   const [assignError, setAssignError] = useState<string | null>(null);
 
   const [scheduledInput, setScheduledInput] = useState<string>('');
+  const [arrivalWindowInput, setArrivalWindowInput] =
+    useState<ArrivalWindow>('anytime');
   const [isPatching, setIsPatching] = useState(false);
   const [workflowError, setWorkflowError] = useState<string | null>(null);
 
@@ -273,6 +288,7 @@ export function RequestDetailSheet({
     async (payload: {
       status?: RequestStatus;
       scheduledDate?: string | null;
+      arrivalWindow?: ArrivalWindow | null;
     }): Promise<void> => {
       if (!requestId) return;
       setIsPatching(true);
@@ -694,15 +710,28 @@ export function RequestDetailSheet({
 
                   <div className="space-y-2">
                     <span className="text-xs text-muted-foreground">
-                      Scheduled service date:
+                      Scheduled service date &amp; arrival window:
                     </span>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <input
                         type="date"
                         value={scheduledInput}
                         onChange={(e) => setScheduledInput(e.target.value)}
                         className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       />
+                      <select
+                        value={arrivalWindowInput}
+                        onChange={(e) =>
+                          setArrivalWindowInput(e.target.value as ArrivalWindow)
+                        }
+                        className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        {ARRIVAL_WINDOWS.map((w) => (
+                          <option key={w} value={w}>
+                            {ARRIVAL_WINDOW_LABELS[w]}
+                          </option>
+                        ))}
+                      </select>
                       <Button
                         size="sm"
                         disabled={isPatching || !scheduledInput}
@@ -712,6 +741,7 @@ export function RequestDetailSheet({
                             scheduledDate: new Date(
                               `${scheduledInput}T00:00:00.000Z`,
                             ).toISOString(),
+                            arrivalWindow: arrivalWindowInput,
                           })
                         }
                       >
@@ -722,12 +752,31 @@ export function RequestDetailSheet({
                           size="sm"
                           variant="ghost"
                           disabled={isPatching}
-                          onClick={() => patchRequest({ scheduledDate: null })}
+                          onClick={() =>
+                            patchRequest({
+                              scheduledDate: null,
+                              arrivalWindow: null,
+                            })
+                          }
                         >
                           Clear
                         </Button>
                       )}
                     </div>
+                    {formatArrivalWindow(
+                      detail.arrivalWindowStart,
+                      detail.arrivalWindowEnd,
+                    ) && (
+                      <p className="text-xs text-muted-foreground">
+                        Arrival window:{" "}
+                        <span className="font-medium text-foreground">
+                          {formatArrivalWindow(
+                            detail.arrivalWindowStart,
+                            detail.arrivalWindowEnd,
+                          )}
+                        </span>
+                      </p>
+                    )}
                   </div>
 
                   {workflowError && (

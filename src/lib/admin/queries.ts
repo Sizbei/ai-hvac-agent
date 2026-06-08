@@ -159,6 +159,8 @@ export async function getRequestById(
       assignedTo: serviceRequests.assignedTo,
       assignedToName: users.name,
       scheduledDate: serviceRequests.scheduledDate,
+      arrivalWindowStart: serviceRequests.arrivalWindowStart,
+      arrivalWindowEnd: serviceRequests.arrivalWindowEnd,
       completedAt: serviceRequests.completedAt,
       createdAt: serviceRequests.createdAt,
       updatedAt: serviceRequests.updatedAt,
@@ -257,6 +259,8 @@ export async function getRequestById(
     assignedTo: row.assignedTo,
     assignedToName: row.assignedToName,
     scheduledDate: row.scheduledDate?.toISOString() ?? null,
+    arrivalWindowStart: row.arrivalWindowStart?.toISOString() ?? null,
+    arrivalWindowEnd: row.arrivalWindowEnd?.toISOString() ?? null,
     completedAt: row.completedAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -580,22 +584,40 @@ export async function updateRequestStatus(
 }
 
 export type ScheduleRequestResult =
-  | { readonly ok: true; readonly scheduledDate: string | null }
+  | {
+      readonly ok: true;
+      readonly scheduledDate: string | null;
+      readonly arrivalWindowStart: string | null;
+      readonly arrivalWindowEnd: string | null;
+    }
   | { readonly ok: false; readonly reason: "request_not_found" };
 
 /**
- * Sets (or clears, with `null`) a request's scheduled service date. Org-scoped.
- * Independent of status — a dispatcher can schedule a pending or assigned
- * request before work starts.
+ * Sets (or clears, with `null`) a request's scheduled service date and optional
+ * ARRIVAL WINDOW (start/end). Org-scoped. Independent of status — a dispatcher
+ * can schedule before work starts. Passing `arrivalWindow: null` clears the
+ * window; omitting it (undefined) leaves it untouched.
  */
 export async function scheduleRequest(
   organizationId: string,
   requestId: string,
   scheduledDate: Date | null,
+  arrivalWindow?: { readonly start: Date; readonly end: Date } | null,
 ): Promise<ScheduleRequestResult> {
+  const patch: {
+    scheduledDate: Date | null;
+    updatedAt: Date;
+    arrivalWindowStart?: Date | null;
+    arrivalWindowEnd?: Date | null;
+  } = { scheduledDate, updatedAt: new Date() };
+  if (arrivalWindow !== undefined) {
+    patch.arrivalWindowStart = arrivalWindow?.start ?? null;
+    patch.arrivalWindowEnd = arrivalWindow?.end ?? null;
+  }
+
   const [updated] = await db
     .update(serviceRequests)
-    .set({ scheduledDate, updatedAt: new Date() })
+    .set(patch)
     .where(
       withTenant(
         serviceRequests,
@@ -603,7 +625,11 @@ export async function scheduleRequest(
         eq(serviceRequests.id, requestId),
       ),
     )
-    .returning({ scheduledDate: serviceRequests.scheduledDate });
+    .returning({
+      scheduledDate: serviceRequests.scheduledDate,
+      arrivalWindowStart: serviceRequests.arrivalWindowStart,
+      arrivalWindowEnd: serviceRequests.arrivalWindowEnd,
+    });
 
   if (!updated) {
     return { ok: false, reason: "request_not_found" };
@@ -612,6 +638,8 @@ export async function scheduleRequest(
   return {
     ok: true,
     scheduledDate: updated.scheduledDate?.toISOString() ?? null,
+    arrivalWindowStart: updated.arrivalWindowStart?.toISOString() ?? null,
+    arrivalWindowEnd: updated.arrivalWindowEnd?.toISOString() ?? null,
   };
 }
 

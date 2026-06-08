@@ -84,6 +84,8 @@ vi.mock('@/lib/db/schema', () => ({
     assignedTo: 'sr.assignedTo',
     assignedToName: 'sr.assignedToName',
     scheduledDate: 'sr.scheduledDate',
+    arrivalWindowStart: 'sr.arrivalWindowStart',
+    arrivalWindowEnd: 'sr.arrivalWindowEnd',
     completedAt: 'sr.completedAt',
     createdAt: 'sr.createdAt',
     updatedAt: 'sr.updatedAt',
@@ -551,15 +553,45 @@ describe('scheduleRequest', () => {
 
   it('sets a scheduled date and returns it as ISO', async () => {
     const when = new Date('2026-07-01T00:00:00.000Z');
-    updateResolution = [{ scheduledDate: when }];
+    updateResolution = [
+      { scheduledDate: when, arrivalWindowStart: null, arrivalWindowEnd: null },
+    ];
     const result = await scheduleRequest(ORG_ID, 'req-1', when);
-    expect(result).toEqual({ ok: true, scheduledDate: '2026-07-01T00:00:00.000Z' });
+    expect(result).toEqual({
+      ok: true,
+      scheduledDate: '2026-07-01T00:00:00.000Z',
+      arrivalWindowStart: null,
+      arrivalWindowEnd: null,
+    });
   });
 
   it('clears a scheduled date (null) and returns null', async () => {
-    updateResolution = [{ scheduledDate: null }];
+    updateResolution = [
+      { scheduledDate: null, arrivalWindowStart: null, arrivalWindowEnd: null },
+    ];
     const result = await scheduleRequest(ORG_ID, 'req-1', null);
-    expect(result).toEqual({ ok: true, scheduledDate: null });
+    expect(result).toEqual({
+      ok: true,
+      scheduledDate: null,
+      arrivalWindowStart: null,
+      arrivalWindowEnd: null,
+    });
+  });
+
+  it('sets an arrival window (start/end) alongside the date', async () => {
+    const when = new Date('2026-07-01T00:00:00.000Z');
+    const start = new Date('2026-07-01T08:00:00.000Z');
+    const end = new Date('2026-07-01T12:00:00.000Z');
+    updateResolution = [
+      { scheduledDate: when, arrivalWindowStart: start, arrivalWindowEnd: end },
+    ];
+    const result = await scheduleRequest(ORG_ID, 'req-1', when, { start, end });
+    expect(result).toEqual({
+      ok: true,
+      scheduledDate: '2026-07-01T00:00:00.000Z',
+      arrivalWindowStart: '2026-07-01T08:00:00.000Z',
+      arrivalWindowEnd: '2026-07-01T12:00:00.000Z',
+    });
   });
 });
 
