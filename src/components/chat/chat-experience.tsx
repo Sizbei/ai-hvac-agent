@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, RotateCcw } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { useChatSession } from '@/hooks/use-chat-session';
 import { ChatHeader } from '@/components/chat/chat-header';
 import { MessageList } from '@/components/chat/message-list';
@@ -11,7 +12,11 @@ import {
   SuggestedReplies,
   type Suggestion,
 } from '@/components/chat/suggested-replies';
-import { chipsForExtraction } from '@/lib/ai/triage-from-extraction';
+import {
+  chipsForExtraction,
+  nextStepIdForExtraction,
+} from '@/lib/ai/triage-from-extraction';
+import { AddressAutocomplete } from '@/components/chat/address-autocomplete';
 import { ExtractionPills } from '@/components/chat/extraction-pills';
 import { ExtractionCard } from '@/components/chat/extraction-card';
 import { EscalationDialog } from '@/components/chat/escalation-dialog';
@@ -56,6 +61,7 @@ export function ChatExperience({
     sendMessage,
     escalate,
     confirm,
+    startNewConversation,
   } = useChatSession();
 
   const [showEscalation, setShowEscalation] = useState(false);
@@ -92,6 +98,31 @@ export function ChatExperience({
         message: c.value,
       }))
     : ISSUE_SUGGESTIONS;
+
+  // Show the address autocomplete only while the address (or city/ZIP follow-up)
+  // step is the pending question — derived from the SAME triage engine the
+  // server sequences with, so client and server always agree. Picking a result
+  // sends the full address as the customer's next message; the server captures
+  // it deterministically. If Photon is unreachable the widget falls back to a
+  // plain typed input, and the server's "what city and ZIP?" step handles partials.
+  const pendingStepId = nextStepIdForExtraction(extraction);
+  const showAddressAutocomplete =
+    pendingStepId === 'address' || pendingStepId === 'address_parts';
+
+  // Start a new conversation. Guard with a confirm only when there's real
+  // in-progress work to lose (the customer has sent messages and the session
+  // isn't already finished) — a fresh or terminal session restarts instantly.
+  const handleNewConversation = useCallback(() => {
+    const hasProgress = messages.some((m) => m.role === 'user') && !isTerminal;
+    if (
+      hasProgress &&
+      typeof window !== 'undefined' &&
+      !window.confirm('Start a new conversation? This clears the current chat.')
+    ) {
+      return;
+    }
+    void startNewConversation();
+  }, [messages, isTerminal, startNewConversation]);
 
   const handleEscalate = useCallback(async () => {
     setIsEscalating(true);
@@ -141,7 +172,11 @@ export function ChatExperience({
 
   return (
     <div className={containerClass}>
-      <ChatHeader status={status} onEscalate={() => setShowEscalation(true)} />
+      <ChatHeader
+        status={status}
+        onEscalate={() => setShowEscalation(true)}
+        onNewConversation={handleNewConversation}
+      />
 
       <MessageList
         messages={displayMessages}
@@ -186,6 +221,33 @@ export function ChatExperience({
       {!hasUserMessages && !isStreaming && !isTerminal && (
         <div className="border-t bg-muted/30 px-3 py-3">
           <QuickReplies onSelect={sendMessage} disabled={inputDisabled} />
+        </div>
+      )}
+
+      {showAddressAutocomplete &&
+        hasUserMessages &&
+        !isStreaming &&
+        !isTerminal &&
+        status !== 'extracting' && (
+          <AddressAutocomplete
+            onSelect={sendMessage}
+            disabled={inputDisabled}
+            placeholder="Start typing your service address…"
+          />
+        )}
+
+      {/* When the session has ended (submitted / escalated / abandoned) the
+          input is locked — offer a clear way to start over instead of a dead box. */}
+      {isTerminal && (
+        <div className="border-t bg-muted/30 px-3 py-3">
+          <Button
+            variant="outline"
+            className="w-full"
+            onClick={handleNewConversation}
+          >
+            <RotateCcw className="size-4" data-icon="inline-start" />
+            Start a new conversation
+          </Button>
         </div>
       )}
 

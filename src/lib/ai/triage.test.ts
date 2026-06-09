@@ -4,8 +4,13 @@ import {
   applyTriageAnswer,
   isSkip,
   REQUIRED_FOR_SUBMIT,
+  UNSKIPPABLE_CORE,
+  ENRICHMENT_NEVER_BLOCKS,
+  type TriageStep,
   type TriageSlots,
 } from "./triage";
+
+const COMPLETE_ADDRESS = "5 Oak St, Seattle, WA 98101";
 
 function slots(overrides: Partial<TriageSlots> = {}): TriageSlots {
   return {
@@ -47,11 +52,11 @@ describe("nextTriageStep — ordering", () => {
     expect(step?.id).toBe("address");
   });
 
-  it("asks for phone (required) after address", () => {
+  it("asks for phone (required) after a COMPLETE address", () => {
     const step = nextTriageStep(
       slots({
         safetyScreenPassed: true,
-        address: "5 Oak St",
+        address: "5 Oak St, Seattle, WA 98101",
         extras: { systemDownStatus: "fully_down", problemDuration: "today" },
       }),
     );
@@ -62,7 +67,7 @@ describe("nextTriageStep — ordering", () => {
     const step = nextTriageStep(
       slots({
         safetyScreenPassed: true,
-        address: "5 Oak St",
+        address: "5 Oak St, Seattle, WA 98101",
         phone: "555-1234",
         extras: { systemDownStatus: "fully_down", problemDuration: "today" },
       }),
@@ -78,7 +83,7 @@ describe("nextTriageStep — ordering", () => {
     const step = nextTriageStep(
       slots({
         safetyScreenPassed: true,
-        address: "5 Oak St",
+        address: "5 Oak St, Seattle, WA 98101",
         phone: "555-1234",
         name: "Jane Doe",
         extras: { systemDownStatus: "fully_down", problemDuration: "today" },
@@ -91,7 +96,7 @@ describe("nextTriageStep — ordering", () => {
     const step = nextTriageStep(
       slots({
         safetyScreenPassed: true,
-        address: "5 Oak St",
+        address: "5 Oak St, Seattle, WA 98101",
         phone: "555-1234",
         name: "Jane Doe",
         email: "jane@example.com",
@@ -105,7 +110,7 @@ describe("nextTriageStep — ordering", () => {
     const step = nextTriageStep(
       slots({
         safetyScreenPassed: true,
-        address: "5 Oak St",
+        address: "5 Oak St, Seattle, WA 98101",
         phone: "555-1234",
         name: "Jane Doe",
         extras: { systemDownStatus: "fully_down", problemDuration: "today" },
@@ -114,29 +119,29 @@ describe("nextTriageStep — ordering", () => {
     expect(step?.id).not.toBe("name");
   });
 
-  it("asks the comprehensive enrichment questions once required slots are filled", () => {
+  it("asks system_type (capped enrichment) once required slots are filled", () => {
     const step = nextTriageStep(
       slots({
         safetyScreenPassed: true,
         urgency: "high",
-        address: "5 Oak St",
+        address: "5 Oak St, Seattle, WA 98101",
         name: "Jane Doe",
         phone: "555-1234",
         email: "jane@example.com",
         extras: { systemDownStatus: "fully_down", problemDuration: "today" },
       }),
     );
-    // Should be one of the enrichment steps (systemType is the first).
+    // Enrichment is capped to system_type then preferred_window; system_type is first.
     expect(step?.id).toBe("system_type");
     expect(step!.optional).toBe(true);
   });
 
-  it("returns null (ready to confirm) when required + enrichment are all answered or skipped", () => {
+  it("returns null (ready to confirm) once core + the two capped enrichment steps are answered or skipped", () => {
     const step = nextTriageStep(
       slots({
         safetyScreenPassed: true,
         urgency: "high",
-        address: "5 Oak St",
+        address: "5 Oak St, Seattle, WA 98101",
         name: "Jane Doe",
         phone: "555-1234",
         email: "jane@example.com",
@@ -144,16 +149,7 @@ describe("nextTriageStep — ordering", () => {
           systemDownStatus: "fully_down",
           problemDuration: "today",
           systemType: "central_ac",
-          equipmentAgeBand: "10_to_15",
-          equipmentBrand: "Trane",
-          propertyType: "residential",
-          ownerOccupant: "owner",
-          underWarranty: "unknown",
-          accessNotes: "none",
-          vulnerableOccupants: false,
           preferredWindow: "morning",
-          contactPreference: "call",
-          leadSource: "google",
         },
       }),
     );
@@ -165,7 +161,7 @@ describe("nextTriageStep — ordering", () => {
     const step = nextTriageStep(
       slots({
         safetyScreenPassed: true,
-        address: "5 Oak St",
+        address: "5 Oak St, Seattle, WA 98101",
         extras: { systemDownStatus: "fully_down", problemDuration: "today" },
       }),
     );
@@ -190,7 +186,7 @@ describe("applyTriageAnswer — optional fields are skippable", () => {
     const before = slots({
       safetyScreenPassed: true,
       urgency: "high",
-      address: "5 Oak St",
+      address: "5 Oak St, Seattle, WA 98101",
       name: "Jane Doe",
       phone: "555-1234",
       email: "jane@example.com",
@@ -208,7 +204,7 @@ describe("applyTriageAnswer — optional fields are skippable", () => {
     const before = slots({
       safetyScreenPassed: true,
       urgency: "high",
-      address: "5 Oak St",
+      address: "5 Oak St, Seattle, WA 98101",
       name: "Jane Doe",
       phone: "555-1234",
       email: "jane@example.com",
@@ -363,8 +359,10 @@ describe("captureEnrichmentAnswer (review fixes)", () => {
       slots({
         safetyScreenPassed: true,
         urgency: "high",
-        address: "5 Oak St",
+        address: "5 Oak St, Seattle, WA 98101",
+        name: "Jane Doe",
         phone: "555-1234",
+        email: "jane@example.com",
         extras: {
           systemDownStatus: "fully_down",
           problemDuration: "today",
@@ -373,5 +371,164 @@ describe("captureEnrichmentAnswer (review fixes)", () => {
       }),
     );
     expect(step?.id).not.toBe("system_type");
+  });
+});
+
+describe("enrichment cap — only system_type then preferred_window", () => {
+  function coreFilled(extras: Record<string, unknown> = {}): TriageSlots {
+    return slots({
+      safetyScreenPassed: true,
+      urgency: "high",
+      address: COMPLETE_ADDRESS,
+      name: "Jane Doe",
+      phone: "555-1234",
+      email: "jane@example.com",
+      extras: { systemDownStatus: "fully_down", problemDuration: "today", ...extras },
+    });
+  }
+
+  it("asks system_type first, then preferred_window, then null — never the other 9", () => {
+    // 1) core filled → system_type
+    const s1 = coreFilled();
+    expect(nextTriageStep(s1)?.id).toBe("system_type");
+
+    // 2) system_type set → preferred_window (NOT equipment_age/brand/etc.)
+    const s2 = coreFilled({ systemType: "central_ac" });
+    expect(nextTriageStep(s2)?.id).toBe("preferred_window");
+
+    // 3) both capped steps set → null (route surfaces Complete & Submit)
+    const s3 = coreFilled({ systemType: "central_ac", preferredWindow: "morning" });
+    expect(nextTriageStep(s3)).toBeNull();
+  });
+
+  it("never asks any of the 9 never-block enrichment steps", () => {
+    const neverIds = new Set(ENRICHMENT_NEVER_BLOCKS.map((s) => s.id));
+    // Walk the whole flow from a freshly-cleared safety screen, answering each
+    // step, and assert we never land on a never-block step.
+    let s = coreFilled();
+    const seen: string[] = [];
+    for (let i = 0; i < 20; i++) {
+      const step = nextTriageStep(s);
+      if (!step) break;
+      seen.push(step.id);
+      expect(neverIds.has(step.id)).toBe(false);
+      // Answer the step to advance: chips use first quick-reply value; free-text
+      // gets a placeholder.
+      const answer = step.quickReplies[0]?.value ?? "morning";
+      s = applyTriageAnswer(s, step, answer);
+    }
+    // Only the two capped enrichment steps should appear after core.
+    expect(seen).toEqual(["system_type", "preferred_window"]);
+  });
+
+  it("still CAPTURES a volunteered never-block field (e.g. propertyType) without asking it", () => {
+    // Customer volunteered commercial property; engine doesn't ask, and a value
+    // already in extras is simply respected (no re-ask, no block).
+    const s = coreFilled({
+      systemType: "central_ac",
+      preferredWindow: "morning",
+      propertyType: "commercial",
+    });
+    expect(nextTriageStep(s)).toBeNull();
+    expect(s.extras.propertyType).toBe("commercial");
+  });
+});
+
+describe("partial address → single city/ZIP follow-up", () => {
+  function base(address: string | null): TriageSlots {
+    return slots({
+      safetyScreenPassed: true,
+      address,
+      extras: { systemDownStatus: "fully_down", problemDuration: "today" },
+    });
+  }
+
+  it("asks address_parts when the address is partial (no comma, not complete)", () => {
+    const step = nextTriageStep(base("120 Broadway"));
+    expect(step?.id).toBe("address_parts");
+    expect(step!.quickReplies.length).toBe(0); // free text
+    expect(step!.optional).toBe(false);
+    expect(step!.question.toLowerCase()).toMatch(/city|zip/);
+  });
+
+  it("does NOT ask address_parts when the address contains a comma", () => {
+    const step = nextTriageStep(base("120 Broadway, Seattle"));
+    expect(step?.id).not.toBe("address_parts");
+  });
+
+  it("does NOT ask address_parts when the address is already complete", () => {
+    const step = nextTriageStep(base("120 Broadway St Seattle WA 98122"));
+    expect(step?.id).not.toBe("address_parts");
+  });
+
+  it("applyTriageAnswer on address_parts appends city/ZIP to the street (adds comma)", () => {
+    const before = base("120 Broadway");
+    const step = nextTriageStep(before)!;
+    expect(step.id).toBe("address_parts");
+    const after = applyTriageAnswer(before, step, "Seattle, WA 98122");
+    expect(after.address).toBe("120 Broadway, Seattle, WA 98122");
+    // And the engine no longer re-asks address_parts (comma present).
+    expect(nextTriageStep(after)?.id).not.toBe("address_parts");
+  });
+
+  it("address_parts append does not mutate the input slots", () => {
+    const before = base("120 Broadway");
+    const step: TriageStep = nextTriageStep(before)!;
+    applyTriageAnswer(before, step, "Seattle, WA 98122");
+    expect(before.address).toBe("120 Broadway");
+  });
+});
+
+describe("core fields are unskippable", () => {
+  it("UNSKIPPABLE_CORE lists the five core slots", () => {
+    expect(UNSKIPPABLE_CORE).toEqual([
+      "issueType",
+      "address",
+      "name",
+      "email",
+      "phone",
+    ]);
+  });
+
+  it("skipping the address step does NOT advance (re-asks)", () => {
+    const before = slots({
+      safetyScreenPassed: true,
+      extras: { systemDownStatus: "fully_down", problemDuration: "today" },
+    });
+    const step = nextTriageStep(before)!;
+    expect(step.id).toBe("address");
+    // A skip writes nothing to the core address slot → still asks address.
+    const after = applyTriageAnswer(before, step, "skip");
+    expect(after.address).toBeNull();
+    expect(nextTriageStep(after)?.id).toBe("address");
+  });
+
+  it("skipping the name step does NOT advance (re-asks)", () => {
+    const before = slots({
+      safetyScreenPassed: true,
+      address: COMPLETE_ADDRESS,
+      phone: "555-1234",
+      extras: { systemDownStatus: "fully_down", problemDuration: "today" },
+    });
+    const step = nextTriageStep(before)!;
+    expect(step.id).toBe("name");
+    const after = applyTriageAnswer(before, step, "skip");
+    expect(after.name).toBeNull();
+    expect(nextTriageStep(after)?.id).toBe("name");
+  });
+
+  it("skipping the email step does NOT advance (re-asks)", () => {
+    const before = slots({
+      safetyScreenPassed: true,
+      address: COMPLETE_ADDRESS,
+      phone: "555-1234",
+      name: "Jane Doe",
+      extras: { systemDownStatus: "fully_down", problemDuration: "today" },
+    });
+    const step = nextTriageStep(before)!;
+    expect(step.id).toBe("email");
+    const after = applyTriageAnswer(before, step, "skip");
+    expect(after.email).toBeNull();
+    expect(nextTriageStep(after)?.id).toBe("email");
   });
 });

@@ -37,6 +37,9 @@ interface UseChatSessionReturn {
   readonly sendMessage: (text: string) => void;
   readonly escalate: () => Promise<void>;
   readonly confirm: (data: ExtractionResult) => Promise<{ referenceNumber: string }>;
+  /** Abandon the current session and start a fresh one (clears the transcript,
+   * extraction, and status; mints a new server session + cookie). */
+  readonly startNewConversation: () => Promise<void>;
 }
 
 const TERMINAL_STATES: readonly SessionState[] = ['escalated', 'abandoned', 'submitted'];
@@ -370,6 +373,36 @@ export function useChatSession(): UseChatSessionReturn {
     [],
   );
 
+  // Start a brand-new conversation: clear all client state, then mint a fresh
+  // server session (POST /api/session always issues a new token + cookie, so the
+  // old transcript is left behind and the next message starts clean). Used by
+  // the "New conversation" control — and as the recovery path after submit /
+  // escalation, where the input is otherwise locked.
+  const startNewConversation = useCallback(async (): Promise<void> => {
+    setSessionError(null);
+    setExtraction(null);
+    setMessages([]);
+    setSessionStatus('chatting');
+    try {
+      const headers: Record<string, string> = {};
+      if (typeof window !== 'undefined') {
+        const key = new URLSearchParams(window.location.search).get('key');
+        if (key) headers['X-HVAC-Widget-Key'] = key;
+      }
+      const res = await fetch('/api/session', { method: 'POST', headers });
+      if (!res.ok) {
+        const body = await res
+          .json()
+          .catch(() => ({ error: { message: 'Failed to start a new conversation' } }));
+        setSessionError(
+          body?.error?.message ?? 'Failed to start a new conversation',
+        );
+      }
+    } catch {
+      setSessionError('Could not connect to server. Please try again.');
+    }
+  }, [setMessages]);
+
   // Merge chat error with session error
   const error = sessionError ?? (chatError ? chatError.message : null);
 
@@ -384,5 +417,6 @@ export function useChatSession(): UseChatSessionReturn {
     sendMessage,
     escalate,
     confirm,
+    startNewConversation,
   };
 }
