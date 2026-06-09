@@ -18,6 +18,7 @@ import {
   Phone,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { BUSINESS_BASE_LOCATION } from '@/lib/config/business-location';
 
 const display = Bricolage_Grotesque({
   subsets: ['latin'],
@@ -32,7 +33,7 @@ const SPEARS = {
   phoneDisplay: '423-854-9505',
   phoneTel: '+14238549505',
   email: 'office@spearsservices.com',
-  address: '3501 W Market St, Suite 1, Johnson City, TN 37604',
+  address: BUSINESS_BASE_LOCATION.address,
 } as const;
 
 /** The live Twilio voice number for the AI agent demo. */
@@ -88,7 +89,7 @@ function delay(ms: number): React.CSSProperties {
 
 export default function Home() {
   return (
-    <div className={`${display.variable} relative min-h-dvh overflow-x-clip bg-background text-foreground`}>
+    <div className={`${display.variable} relative overflow-x-clip bg-background text-foreground`}>
       {/* Atmosphere */}
       <div className="lp-mesh pointer-events-none absolute inset-0 -z-10" aria-hidden />
       <div className="lp-grid pointer-events-none absolute inset-0 -z-10 h-[120vh]" aria-hidden />
@@ -362,6 +363,63 @@ export default function Home() {
           </div>
         </section>
       </main>
+
+      {/* Footer */}
+      <footer className="border-t border-border/60 bg-card/40">
+        <div className="mx-auto max-w-6xl px-5 py-10">
+          <div className="flex flex-col gap-8 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <span className="font-[family-name:var(--font-display)] text-lg font-bold uppercase tracking-tight">
+                Spears&nbsp;Services
+              </span>
+              <p className="mt-1 text-sm text-muted-foreground">AI intake demo</p>
+              <p className="mt-3 text-sm text-muted-foreground">
+                {BUSINESS_BASE_LOCATION.address}
+              </p>
+            </div>
+
+            <dl className="grid gap-3 text-sm sm:text-right">
+              <div className="flex flex-col gap-0.5 sm:items-end">
+                <dt className="text-xs uppercase tracking-widest text-muted-foreground">Phone</dt>
+                <dd>
+                  <a
+                    href={`tel:${SPEARS.phoneTel}`}
+                    className="font-semibold text-foreground underline-offset-4 transition-colors hover:text-primary hover:underline"
+                  >
+                    {SPEARS.phoneDisplay}
+                  </a>
+                </dd>
+              </div>
+              <div className="flex flex-col gap-0.5 sm:items-end">
+                <dt className="text-xs uppercase tracking-widest text-muted-foreground">Email</dt>
+                <dd>
+                  <a
+                    href={`mailto:${SPEARS.email}`}
+                    className="font-semibold text-foreground underline-offset-4 transition-colors hover:text-primary hover:underline"
+                  >
+                    {SPEARS.email}
+                  </a>
+                </dd>
+              </div>
+              <div className="flex flex-col gap-0.5 sm:items-end">
+                <dt className="text-xs uppercase tracking-widest text-muted-foreground">AI voice demo</dt>
+                <dd>
+                  <a
+                    href={`tel:${DEMO_PHONE.tel}`}
+                    className="font-semibold text-foreground underline-offset-4 transition-colors hover:text-primary hover:underline"
+                  >
+                    {DEMO_PHONE.display}
+                  </a>
+                </dd>
+              </div>
+            </dl>
+          </div>
+
+          <p className="mt-8 border-t border-border/60 pt-6 text-xs text-muted-foreground">
+            &copy; {new Date().getFullYear()} Spears Services. AI intake demo.
+          </p>
+        </div>
+      </footer>
     </div>
   );
 }

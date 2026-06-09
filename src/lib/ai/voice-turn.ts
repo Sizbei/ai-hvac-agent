@@ -17,7 +17,7 @@ import { db } from "@/lib/db";
 import { customerSessions, messages } from "@/lib/db/schema";
 import { getModel } from "./provider";
 import { routeMessage } from "./intent-router";
-import { extractSlots } from "./slot-extract";
+import { extractSlots, extractAddressAtAddressStep } from "./slot-extract";
 import { getRouterConfig } from "@/lib/admin/org-config-queries";
 import { EMPTY_ORG_CONFIG } from "./router-config";
 import { escalateSession } from "./escalate-service";
@@ -107,8 +107,20 @@ export async function voiceReply(params: {
   const captured = captureEnrichmentAnswer(pendingStep?.id ?? null, userMessage);
   const capturedExtras = captured ? { [captured.key]: captured.value } : undefined;
 
+  // At the address step the caller's whole reply IS the service address, but a
+  // spoken address (Twilio transcription) lacks the comma/ZIP structure the
+  // strict matcher anchors on — so it never fills and we re-ask forever. Use the
+  // permissive at-step matcher there (the same fix the web chat uses). Outside
+  // the address step we keep the strict matcher so a stray "123 Main" mid-issue
+  // isn't misread as the service address.
+  const atAddressStep =
+    pendingStep?.id === "address" || pendingStep?.id === "address_parts";
+  const resolvedAddress = atAddressStep
+    ? extractAddressAtAddressStep(userMessage) ?? extracted.address
+    : extracted.address;
+
   const hasContactSlot = Boolean(
-    extracted.address || extracted.phone || extracted.email,
+    resolvedAddress || extracted.phone || extracted.email,
   );
   const isSlotProvision =
     hasContactSlot && (Boolean(knownSlots.issueType) || history.length > 0);
@@ -136,7 +148,7 @@ export async function voiceReply(params: {
       const escMerged = mergeSlots(knownSlots, {
         issueType: verdict.issueType ?? undefined,
         urgency: verdict.urgency ?? undefined,
-        address: extracted.address ?? undefined,
+        address: resolvedAddress ?? undefined,
         phone: extracted.phone ?? undefined,
         email: extracted.email ?? undefined,
       });
@@ -159,7 +171,7 @@ export async function voiceReply(params: {
     const merged = mergeSlots(knownSlots, {
       issueType: verdict.issueType ?? undefined,
       urgency: verdict.urgency ?? undefined,
-      address: extracted.address ?? undefined,
+      address: resolvedAddress ?? undefined,
       phone: extracted.phone ?? undefined,
       email: extracted.email ?? undefined,
       extras: capturedExtras,
@@ -175,11 +187,20 @@ export async function voiceReply(params: {
       metadataStr = JSON.stringify(extraction);
     }
 
+    // Loop guard: when this turn merely filled a slot (an address/phone/email was
+    // just captured) and intake isn't complete yet, advance to the NEXT missing
+    // slot rather than re-speaking the router's canned line — re-speaking it is
+    // what made the call repeat the same question. A genuine deterministic ANSWER
+    // (e.g. business hours) is still spoken; completion still wins with the
+    // confirmation. `verdict.reply` is preferred only when it's NOT a bare slot
+    // provision.
     const baseReply = extractionComplete
       ? VOICE_CONFIRM_REPLY
-      : verdict.action !== "FALLBACK_LLM" && verdict.reply
-        ? verdict.reply
-        : voiceNextSlotPrompt(merged);
+      : isSlotProvision
+        ? voiceNextSlotPrompt(merged)
+        : verdict.action !== "FALLBACK_LLM" && verdict.reply
+          ? verdict.reply
+          : voiceNextSlotPrompt(merged);
     const reply = toSpokenReply(baseReply, { nearLimit });
 
     await db.insert(messages).values({

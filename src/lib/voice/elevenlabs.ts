@@ -9,13 +9,13 @@
  * fall back to the Polly neural <Say> voice (see twiml.ts), so telephony keeps
  * working with zero ElevenLabs configuration.
  *
- * Defaults to "Davis" (a warm, professional middle-aged American male voice)
- * and the low-latency eleven_turbo_v2_5 model, both overridable per deployment.
+ * Defaults to "Brian" (a natural, professional American male voice) and the
+ * low-latency eleven_turbo_v2_5 model, both overridable per deployment.
  * No SDK dependency — a single fetch keeps this trivially testable.
  */
 
-/** Davis — warm, professional middle-aged American male voice. */
-export const DEFAULT_ELEVENLABS_VOICE_ID = "Z2fsAwk7IblvPhYzfslC";
+/** Brian — natural, professional American male voice. */
+export const DEFAULT_ELEVENLABS_VOICE_ID = "nPczCjzI2devNBz1zQrb";
 
 /** Turbo v2.5 — ElevenLabs' low-latency model, best fit for live phone turns. */
 export const DEFAULT_ELEVENLABS_MODEL_ID = "eleven_turbo_v2_5";

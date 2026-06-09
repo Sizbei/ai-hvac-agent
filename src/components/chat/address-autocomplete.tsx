@@ -5,8 +5,10 @@ import { MapPin } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import {
   fetchAddressSuggestions,
+  haversineKm,
   type AddressSuggestion,
 } from '@/lib/address/photon';
+import { BUSINESS_BASE_LOCATION } from '@/lib/config/business-location';
 
 interface AddressAutocompleteProps {
   readonly onSelect: (fullAddress: string) => void;
@@ -17,6 +19,25 @@ interface AddressAutocompleteProps {
 const DEBOUNCE_MS = 250;
 const LISTBOX_ID = 'address-autocomplete-listbox';
 const optionId = (index: number) => `address-autocomplete-option-${index}`;
+const KM_TO_MILES = 0.621371;
+
+/**
+ * Display-only "~N mi" hint for a suggestion's distance from the business base.
+ * Returns null when the suggestion has no coordinates. This never affects the
+ * string passed to onSelect.
+ */
+function distanceHint(suggestion: AddressSuggestion): string | null {
+  if (typeof suggestion.lat !== 'number' || typeof suggestion.lon !== 'number') {
+    return null;
+  }
+  const km = haversineKm(
+    BUSINESS_BASE_LOCATION.latitude,
+    BUSINESS_BASE_LOCATION.longitude,
+    suggestion.lat,
+    suggestion.lon,
+  );
+  return `~${Math.round(km * KM_TO_MILES)} mi`;
+}
 
 /**
  * Keyless address autocomplete for the chat's service-address step.
@@ -61,7 +82,13 @@ export function AddressAutocomplete({
       const controller = new AbortController();
       abortRef.current = controller;
 
-      fetchAddressSuggestions(trimmed, { signal: controller.signal })
+      fetchAddressSuggestions(trimmed, {
+        signal: controller.signal,
+        near: {
+          lat: BUSINESS_BASE_LOCATION.latitude,
+          lon: BUSINESS_BASE_LOCATION.longitude,
+        },
+      })
         .then((results) => {
           if (controller.signal.aborted) return;
           setSuggestions(results);
@@ -149,28 +176,36 @@ export function AddressAutocomplete({
           aria-label="Address suggestions"
           className="absolute bottom-full left-3 right-3 z-10 mb-1 max-h-60 overflow-auto rounded-lg border border-border bg-background py-1 shadow-md"
         >
-          {suggestions.map((s, i) => (
-            <li
-              key={`${s.label}-${i}`}
-              id={optionId(i)}
-              role="option"
-              aria-selected={i === highlighted}
-              onMouseDown={(e) => {
-                // Prevent the input blur from closing the list before click.
-                e.preventDefault();
-                choose(s);
-              }}
-              onMouseEnter={() => setHighlighted(i)}
-              className={`flex cursor-pointer items-center gap-2 px-3 py-2 text-sm ${
-                i === highlighted
-                  ? 'bg-muted text-foreground'
-                  : 'text-foreground'
-              }`}
-            >
-              <MapPin className="size-3.5 shrink-0 text-muted-foreground" />
-              <span className="truncate">{s.label}</span>
-            </li>
-          ))}
+          {suggestions.map((s, i) => {
+            const hint = distanceHint(s);
+            return (
+              <li
+                key={`${s.label}-${i}`}
+                id={optionId(i)}
+                role="option"
+                aria-selected={i === highlighted}
+                onMouseDown={(e) => {
+                  // Prevent the input blur from closing the list before click.
+                  e.preventDefault();
+                  choose(s);
+                }}
+                onMouseEnter={() => setHighlighted(i)}
+                className={`flex cursor-pointer items-center gap-2 px-3 py-2 text-sm ${
+                  i === highlighted
+                    ? 'bg-muted text-foreground'
+                    : 'text-foreground'
+                }`}
+              >
+                <MapPin className="size-3.5 shrink-0 text-muted-foreground" />
+                <span className="truncate">{s.label}</span>
+                {hint !== null && (
+                  <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                    {hint}
+                  </span>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>

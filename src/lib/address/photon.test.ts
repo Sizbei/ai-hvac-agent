@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchAddressSuggestions } from "./photon";
+import { fetchAddressSuggestions, haversineKm } from "./photon";
 
 function jsonResponse(body: unknown, ok = true): Response {
   return {
@@ -47,6 +47,8 @@ describe("fetchAddressSuggestions", () => {
         city: "Johnson City",
         state: "Tennessee",
         postcode: "37601",
+        lat: null,
+        lon: null,
       },
     ]);
     expect(fetch).toHaveBeenCalledTimes(1);
@@ -195,5 +197,153 @@ describe("fetchAddressSuggestions", () => {
     await expect(fetchAddressSuggestions("  a  ")).resolves.toEqual([]);
     await expect(fetchAddressSuggestions("")).resolves.toEqual([]);
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("returns [] when fetch rejects even with `near` provided", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error("network down"),
+    );
+
+    await expect(
+      fetchAddressSuggestions("123 Main", {
+        near: { lat: JOHNSON_CITY.lat, lon: JOHNSON_CITY.lon },
+      }),
+    ).resolves.toEqual([]);
+  });
+});
+
+// Johnson City, TN — the Spears base used as the proximity origin in tests.
+const JOHNSON_CITY = { lat: 36.334, lon: -82.3819 };
+
+// A US feature near Johnson City (Jonesborough, TN, ~12km away).
+const NEAR_FEATURE = {
+  properties: {
+    housenumber: "1",
+    street: "Near St",
+    city: "Jonesborough",
+    state: "Tennessee",
+    postcode: "37659",
+    countrycode: "US",
+  },
+  geometry: { coordinates: [-82.4735, 36.2945] },
+};
+
+// A US feature far from Johnson City (Nashville, TN, ~400km away).
+const FAR_FEATURE = {
+  properties: {
+    housenumber: "2",
+    street: "Far St",
+    city: "Nashville",
+    state: "Tennessee",
+    postcode: "37203",
+    countrycode: "US",
+  },
+  geometry: { coordinates: [-86.7816, 36.1627] },
+};
+
+// A US feature with no geometry at all.
+const NO_GEOMETRY_FEATURE = {
+  properties: {
+    housenumber: "3",
+    street: "Nowhere Ave",
+    city: "Kingsport",
+    state: "Tennessee",
+    postcode: "37660",
+    countrycode: "US",
+  },
+};
+
+describe("fetchAddressSuggestions with `near` proximity bias", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("appends lat/lon/zoom to the Photon URL when `near` is set", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      jsonResponse({ features: [NEAR_FEATURE] }),
+    );
+
+    await fetchAddressSuggestions("near st", {
+      near: { lat: JOHNSON_CITY.lat, lon: JOHNSON_CITY.lon },
+    });
+
+    const calledUrl = (fetch as ReturnType<typeof vi.fn>).mock
+      .calls[0][0] as string;
+    expect(calledUrl).toContain(`lat=${JOHNSON_CITY.lat}`);
+    expect(calledUrl).toContain(`lon=${JOHNSON_CITY.lon}`);
+    expect(calledUrl).toContain("zoom=12");
+  });
+
+  it("captures geometry coordinates onto lat/lon (GeoJSON is [lon, lat])", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      jsonResponse({ features: [NEAR_FEATURE] }),
+    );
+
+    const result = await fetchAddressSuggestions("near st");
+
+    expect(result[0].lon).toBe(-82.4735);
+    expect(result[0].lat).toBe(36.2945);
+  });
+
+  it("sorts a closer suggestion ahead of a farther one when `near` is set", async () => {
+    // Far returned first to prove the sort actually reorders.
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      jsonResponse({ features: [FAR_FEATURE, NEAR_FEATURE] }),
+    );
+
+    const result = await fetchAddressSuggestions("street", {
+      near: { lat: JOHNSON_CITY.lat, lon: JOHNSON_CITY.lon },
+    });
+
+    expect(result.map((r) => r.city)).toEqual(["Jonesborough", "Nashville"]);
+  });
+
+  it("sorts suggestions missing geometry after ones that have it", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      jsonResponse({
+        features: [NO_GEOMETRY_FEATURE, FAR_FEATURE, NEAR_FEATURE],
+      }),
+    );
+
+    const result = await fetchAddressSuggestions("street", {
+      near: { lat: JOHNSON_CITY.lat, lon: JOHNSON_CITY.lon },
+    });
+
+    // Near, then Far (both have coords), then the no-geometry one last.
+    expect(result.map((r) => r.city)).toEqual([
+      "Jonesborough",
+      "Nashville",
+      "Kingsport",
+    ]);
+  });
+
+  it("does not drop out-of-radius results", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      jsonResponse({ features: [NEAR_FEATURE, FAR_FEATURE] }),
+    );
+
+    const result = await fetchAddressSuggestions("street", {
+      near: { lat: JOHNSON_CITY.lat, lon: JOHNSON_CITY.lon },
+    });
+
+    expect(result).toHaveLength(2);
+  });
+});
+
+describe("haversineKm", () => {
+  it("returns ~0 for identical points", () => {
+    expect(haversineKm(36.334, -82.3819, 36.334, -82.3819)).toBeCloseTo(0, 5);
+  });
+
+  it("returns a plausible distance for a known city pair", () => {
+    // Johnson City, TN -> Nashville, TN is roughly 400 km.
+    const km = haversineKm(36.334, -82.3819, 36.1627, -86.7816);
+    expect(km).toBeGreaterThan(380);
+    expect(km).toBeLessThan(420);
   });
 });
