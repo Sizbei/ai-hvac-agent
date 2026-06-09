@@ -133,6 +133,8 @@ function requestRow(
     issueType: "No cooling",
     urgency: "high",
     description: "Warm air",
+    jobType: "no_cool",
+    systemType: "central_ac",
     arrivalWindowStart: new Date("2026-07-01T12:00:00.000Z"),
     arrivalWindowEnd: new Date("2026-07-01T16:00:00.000Z"),
     addressEncrypted: null,
@@ -174,6 +176,12 @@ describe("pushJobToHcp — create path", () => {
     expect(arg.customerId).toBe("hcp-cust-1");
     expect(arg.requestId).toBe("req-1");
     expect(arg.scheduleStart).toBe("2026-07-01T12:00:00.000Z");
+    // Descriptive line items derived from the intake flow through (no prices).
+    expect(Array.isArray(arg.lineItems)).toBe(true);
+    expect(arg.lineItems.length).toBeGreaterThan(0);
+    for (const li of arg.lineItems) {
+      expect(li.unitPriceCents).toBeUndefined();
+    }
     expect(dbState.updateSet).toMatchObject({ hcpJobId: "hcp-job-1" });
   });
 
@@ -211,6 +219,11 @@ describe("pushJobToHcp — idempotent update path", () => {
     expect(updateJob.mock.calls[0][0]).toBe("hcp-job-1");
     const fields = updateJob.mock.calls[0][1];
     expect(fields.scheduleStart).toBe("2026-07-01T12:00:00.000Z");
+    // Line items flow through the idempotent update path too (no prices).
+    expect(Array.isArray(fields.lineItems)).toBe(true);
+    for (const li of fields.lineItems) {
+      expect(li.unitPriceCents).toBeUndefined();
+    }
     // No mapping write — the row already carries a job id.
     expect(dbState.updateSet).toBeUndefined();
   });

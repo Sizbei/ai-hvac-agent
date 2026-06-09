@@ -1,5 +1,6 @@
 import type { KnownSlots } from "./intent-router";
 import type { ExtractionResult } from "./extraction-schema";
+import { sanitizeContactFields } from "./sanitize-fields";
 
 /**
  * Helpers for moving extracted slots between the session's `metadata` column
@@ -136,7 +137,12 @@ export function buildExtraction(
   slots: KnownSlots,
   description: string,
 ): ExtractionResult {
-  return {
+  // Sanitize the contact fields at the single chokepoint every persisted /
+  // recapped extraction flows through: capitalize the name, format the phone,
+  // tidy the address, lower-case the email. Slot extraction and the LLM store
+  // raw values; this is where they become the clean record the customer sees in
+  // the confirmation recap and the dispatcher sees in the CRM.
+  return sanitizeContactFields({
     issueType: slots.issueType ?? null,
     urgency: slots.urgency ?? null,
     address: slots.address ?? null,
@@ -146,5 +152,5 @@ export function buildExtraction(
     description: description.length > 0 ? description : "HVAC issue reported via chat",
     isHvacRelated: true,
     ...(slots.extras ?? {}),
-  };
+  });
 }

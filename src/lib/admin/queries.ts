@@ -203,6 +203,8 @@ export async function getRequestById(
       holdReason: serviceRequests.holdReason,
       followUpDate: serviceRequests.followUpDate,
       isAfterHours: serviceRequests.isAfterHours,
+      // Invoice/payment status synced from HCP invoice.* webhooks.
+      invoiceStatus: serviceRequests.invoiceStatus,
       completedAt: serviceRequests.completedAt,
       createdAt: serviceRequests.createdAt,
       updatedAt: serviceRequests.updatedAt,
@@ -306,6 +308,7 @@ export async function getRequestById(
     holdReason: row.holdReason,
     followUpDate: row.followUpDate?.toISOString() ?? null,
     isAfterHours: row.isAfterHours,
+    invoiceStatus: row.invoiceStatus,
     completedAt: row.completedAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),

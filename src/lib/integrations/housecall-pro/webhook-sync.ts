@@ -36,7 +36,11 @@ import { withTenant } from "@/lib/db/tenant";
 import { updateRequestStatus } from "@/lib/admin/queries";
 import { addFollowUp } from "@/lib/admin/crm-queries";
 import { logger } from "@/lib/logger";
-import { eventTypeToStatus, type HcpWebhookEvent } from "./webhook-events";
+import {
+  eventTypeToInvoiceStatus,
+  eventTypeToStatus,
+  type HcpWebhookEvent,
+} from "./webhook-events";
 
 /** Days after a completed service to schedule the courtesy follow-up. */
 const FOLLOW_UP_DELAY_DAYS = 30;
@@ -169,6 +173,15 @@ export async function applyWebhookEvent(
   // returned below intentionally KEEP the ledger row — retrying them won't
   // change anything.
   try {
+    // 2a. Invoice events: mirror the invoice/payment status onto the matching
+    //     request (linked by hcpJobId). Independent of the job-status state
+    //     machine — an invoice event never drives a request-status transition.
+    //     Unknown/unlinkable invoice events are recorded + no-op'd.
+    const invoiceStatus = eventTypeToInvoiceStatus(event.eventType);
+    if (invoiceStatus) {
+      return await applyInvoiceEvent(organizationId, event, invoiceStatus);
+    }
+
     // 2. Map the event type to a request-status target. Unknown/non-lifecycle
     //    events are recorded (above) but drive no transition.
     const target = eventTypeToStatus(event.eventType);
@@ -261,6 +274,55 @@ export async function applyWebhookEvent(
     await releaseEvent(organizationId, event);
     throw error;
   }
+}
+
+/**
+ * Apply an HCP invoice event by mirroring its status onto the matching service
+ * request (found by hcpJobId, tenant-scoped) via a single conditional UPDATE.
+ * Degrade-safe: an unlinkable event (no request maps to the job, or it has no
+ * job id) updates zero rows and is recorded as a no-op. Idempotency is already
+ * handled by the caller's ledger claim, so a re-delivered event never reaches
+ * here; even if it did, setting the same status again would be a harmless write.
+ * Returns the terminal outcome; the ledger row is kept (retrying changes nothing).
+ */
+async function applyInvoiceEvent(
+  organizationId: string,
+  event: HcpWebhookEvent,
+  invoiceStatus: "sent" | "paid" | "void",
+): Promise<WebhookApplyResult> {
+  if (!event.hcpJobId) {
+    await auditOutcome(organizationId, event, "unknown_job", null);
+    return { outcome: "unknown_job" };
+  }
+
+  const updated = await db
+    .update(serviceRequests)
+    .set({ invoiceStatus })
+    .where(
+      withTenant(
+        serviceRequests,
+        organizationId,
+        eq(serviceRequests.hcpJobId, event.hcpJobId),
+      ),
+    )
+    .returning({ id: serviceRequests.id });
+
+  const row = updated[0];
+  if (!row) {
+    logger.warn(
+      { organizationId, hcpJobId: event.hcpJobId, eventType: event.eventType },
+      "HCP invoice webhook for unknown job id",
+    );
+    await auditOutcome(organizationId, event, "unknown_job", null);
+    return { outcome: "unknown_job" };
+  }
+
+  await auditOutcome(organizationId, event, "applied", row.id);
+  logger.info(
+    { organizationId, requestId: row.id, invoiceStatus },
+    "HCP invoice webhook applied invoice status",
+  );
+  return { outcome: "applied" };
 }
 
 /**

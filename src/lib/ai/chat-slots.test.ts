@@ -148,6 +148,22 @@ describe("buildExtraction", () => {
     expect(e.customerName).toBeNull();
     expect(e.isHvacRelated).toBe(true);
   });
+
+  it("sanitizes contact fields (name caps, phone format, address tidy, email lower)", () => {
+    const e = buildExtraction(
+      {
+        name: "brian hoang",
+        phone: "5551234567",
+        address: "12 oak st  ,knoxville tn 37920",
+        email: " B@X.COM ",
+      },
+      "AC out",
+    );
+    expect(e.customerName).toBe("Brian Hoang");
+    expect(e.customerPhone).toBe("(555) 123-4567");
+    expect(e.address).toBe("12 Oak St, Knoxville TN 37920");
+    expect(e.customerEmail).toBe("b@x.com");
+  });
 });
 
 describe("stripSkipSentinels", () => {

@@ -154,6 +154,54 @@ describe("RestHousecallProClient.createJob", () => {
     expect(sent.tags).toContain("request:req-42");
   });
 
+  it("serializes lineItems into HCP line_items (kind/quantity, NO price)", async () => {
+    const fetchMock = vi.fn<(url?: string, init?: RequestInit) => Promise<Response>>(async () =>
+      res({ id: "job-1", customer_id: "cust-1", work_status: "scheduled" }),
+    );
+    const client = new RestHousecallProClient(
+      CONFIG,
+      fetchMock as unknown as typeof fetch,
+    );
+    await client.createJob({
+      customerId: "cust-1",
+      description: "No cooling",
+      lineItems: [
+        { name: "No Cool — No cooling", kind: "service", quantity: 1 },
+        { name: "Site access", kind: "labor", quantity: 1, description: "Gate 1234" },
+      ],
+    });
+
+    const sent = JSON.parse(
+      (fetchMock.mock.calls[0][1] as RequestInit).body as string,
+    );
+    expect(sent.line_items).toHaveLength(2);
+    expect(sent.line_items[0]).toMatchObject({
+      name: "No Cool — No cooling",
+      kind: "service",
+      quantity: 1,
+    });
+    expect(sent.line_items[1].description).toBe("Gate 1234");
+    // No price is ever serialized for our descriptive items.
+    for (const li of sent.line_items) {
+      expect(li.unit_price).toBeUndefined();
+    }
+  });
+
+  it("omits line_items when no lineItems are provided", async () => {
+    const fetchMock = vi.fn<(url?: string, init?: RequestInit) => Promise<Response>>(async () =>
+      res({ id: "job-1", customer_id: "cust-1", work_status: "scheduled" }),
+    );
+    const client = new RestHousecallProClient(
+      CONFIG,
+      fetchMock as unknown as typeof fetch,
+    );
+    await client.createJob({ customerId: "cust-1", description: "No cooling" });
+    const sent = JSON.parse(
+      (fetchMock.mock.calls[0][1] as RequestInit).body as string,
+    );
+    expect(sent.line_items).toBeUndefined();
+  });
+
   it("omits schedule for an unscheduled job", async () => {
     const fetchMock = vi.fn<(url?: string, init?: RequestInit) => Promise<Response>>(async () =>
       res({ id: "job-2", customer_id: "cust-1", work_status: "unscheduled" }),
@@ -193,6 +241,41 @@ describe("RestHousecallProClient.updateJob", () => {
     expect(sent.description).toBe("Rescheduled — no cooling");
     expect(sent.schedule.start_time).toBe("2026-07-02T12:00:00.000Z");
     expect(sent.schedule.end_time).toBe("2026-07-02T16:00:00.000Z");
+  });
+
+  it("serializes lineItems into HCP line_items on update (NO price)", async () => {
+    const fetchMock = vi.fn<(url?: string, init?: RequestInit) => Promise<Response>>(async () =>
+      res({ id: "job-9", customer_id: "cust-1", work_status: "scheduled" }),
+    );
+    const client = new RestHousecallProClient(
+      CONFIG,
+      fetchMock as unknown as typeof fetch,
+    );
+    await client.updateJob("job-9", {
+      description: "Updated",
+      lineItems: [{ name: "Central Ac service", kind: "service", quantity: 1 }],
+    });
+    const sent = JSON.parse(
+      (fetchMock.mock.calls[0][1] as RequestInit).body as string,
+    );
+    expect(sent.line_items).toHaveLength(1);
+    expect(sent.line_items[0].name).toBe("Central Ac service");
+    expect(sent.line_items[0].unit_price).toBeUndefined();
+  });
+
+  it("omits line_items on an update that carries none", async () => {
+    const fetchMock = vi.fn<(url?: string, init?: RequestInit) => Promise<Response>>(async () =>
+      res({ id: "job-9", customer_id: "cust-1", work_status: "scheduled" }),
+    );
+    const client = new RestHousecallProClient(
+      CONFIG,
+      fetchMock as unknown as typeof fetch,
+    );
+    await client.updateJob("job-9", { description: "Updated notes" });
+    const sent = JSON.parse(
+      (fetchMock.mock.calls[0][1] as RequestInit).body as string,
+    );
+    expect(sent.line_items).toBeUndefined();
   });
 
   it("omits schedule on a description-only update (does not blank the window)", async () => {
@@ -277,6 +360,71 @@ describe("RestHousecallProClient.listAvailability", () => {
       startIso: "2026-07-01T12:00:00.000Z",
       endIso: "2026-07-01T16:00:00.000Z",
     });
+  });
+});
+
+describe("RestHousecallProClient.listTechnicians", () => {
+  it("GETs the employees endpoint with the Token auth header", async () => {
+    const fetchMock = vi.fn<(url?: string, init?: RequestInit) => Promise<Response>>(async () =>
+      res({ employees: [{ id: "emp-1", first_name: "Pat", active: true }] }),
+    );
+    const client = new RestHousecallProClient(
+      CONFIG,
+      fetchMock as unknown as typeof fetch,
+    );
+    const techs = await client.listTechnicians();
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.housecallpro.test/employees");
+    expect((init as RequestInit).method).toBe("GET");
+    const headers = (init as RequestInit).headers as Record<string, string>;
+    expect(headers.authorization).toBe("Token hcp-test-key");
+    expect(techs).toHaveLength(1);
+    expect(techs[0]).toEqual({ id: "emp-1", name: "Pat", isActive: true });
+  });
+
+  it("assembles name from first_name/last_name and reads is_active fallback", async () => {
+    const fetchMock = vi.fn<(url?: string, init?: RequestInit) => Promise<Response>>(async () =>
+      res({
+        employees: [
+          { id: "emp-2", first_name: "Sam", last_name: "Lee", is_active: false },
+        ],
+      }),
+    );
+    const client = new RestHousecallProClient(
+      CONFIG,
+      fetchMock as unknown as typeof fetch,
+    );
+    const techs = await client.listTechnicians();
+    expect(techs[0]).toEqual({ id: "emp-2", name: "Sam Lee", isActive: false });
+  });
+
+  it("tolerates missing fields and drops malformed rows (no throw)", async () => {
+    const fetchMock = vi.fn<(url?: string, init?: RequestInit) => Promise<Response>>(async () =>
+      res({
+        employees: [
+          { id: "emp-3" }, // no name, no active flag
+          { name: "no id" }, // dropped: missing id
+          null, // dropped: not an object
+        ],
+      }),
+    );
+    const client = new RestHousecallProClient(
+      CONFIG,
+      fetchMock as unknown as typeof fetch,
+    );
+    const techs = await client.listTechnicians();
+    expect(techs).toHaveLength(1);
+    expect(techs[0]).toEqual({ id: "emp-3", name: undefined, isActive: undefined });
+  });
+
+  it("returns an empty roster when the employees field is absent", async () => {
+    const fetchMock = vi.fn<(url?: string, init?: RequestInit) => Promise<Response>>(async () => res({}));
+    const client = new RestHousecallProClient(
+      CONFIG,
+      fetchMock as unknown as typeof fetch,
+    );
+    expect(await client.listTechnicians()).toEqual([]);
   });
 });
 

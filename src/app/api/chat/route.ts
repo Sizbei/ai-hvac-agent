@@ -55,6 +55,7 @@ import {
 } from "@/lib/ai/availability-prompt";
 import { CONFIRM_REPLY, HANDOFF_REPLY } from "@/lib/ai/constants";
 import { extractSlots, extractAddressLoose } from "@/lib/ai/slot-extract";
+import { detectCorrection, correctionFieldLabel } from "@/lib/ai/detect-correction";
 import { withLeadIn } from "@/lib/ai/lead-ins";
 import { escalateSession } from "@/lib/ai/escalate-service";
 import {
@@ -151,6 +152,29 @@ function readUrgencySignal(
     return "not_urgent";
   }
   return "unknown";
+}
+
+/**
+ * Map a customer's answer to the triage URGENCY step onto the canonical urgency
+ * enum (0-token). Accepts the chip values verbatim (emergency/high/medium/low)
+ * and the common natural phrasings the chips are labeled with ("emergency",
+ * "soon"/"today", "this week", "routine"/"whenever"). Returns null when the
+ * answer carries no clear urgency, so the caller can defer to the LLM rather
+ * than guess. Only called when the urgency step was the pending question.
+ */
+function parseUrgencyAnswer(message: string): "low" | "medium" | "high" | "emergency" | null {
+  const m = message.trim().toLowerCase();
+  if (m.length === 0) return null;
+  // Exact chip values.
+  if (m === "emergency" || m === "high" || m === "medium" || m === "low") {
+    return m;
+  }
+  // Natural phrasings.
+  if (/\b(emergency|right now|immediately|can'?t wait|asap)\b/.test(m)) return "emergency";
+  if (/\b(soon|today|tonight|urgent|as soon as)\b/.test(m)) return "high";
+  if (/\b(this week|few days|couple days|medium)\b/.test(m)) return "medium";
+  if (/\b(routine|whenever|no rush|not urgent|can wait|low|sometime)\b/.test(m)) return "low";
+  return null;
 }
 
 /**
@@ -713,14 +737,45 @@ export async function POST(request: NextRequest) {
       // suffix, 10-digit phone, real email), so false positives are unlikely;
       // issueType/urgency it can't infer are still filled by the background
       // extraction on the LLM turns.
+      // Deterministic name capture + correction (0-token). Detect it up front so
+      // a NAME-step answer or an explicit "change my …" turn is handled on the
+      // deterministic path (filling/overwriting the slot) instead of falling
+      // through to the slow LLM. detectCorrection returns the captured name when
+      // we just asked for it, or the corrected field+value for an explicit fix.
+      const correction = detectCorrection(
+        guardrailResult.sanitized,
+        pendingStep?.id ?? null,
+      );
+
       const hasContactSlot = Boolean(
         addressAnswer || extracted.phone || extracted.email,
       );
       const isSlotProvision =
-        hasContactSlot &&
+        (hasContactSlot || correction !== null) &&
         (Boolean(knownSlots.issueType) || conversationHistory.length > 0);
 
-      if (verdict.action !== "FALLBACK_LLM" || isSlotProvision) {
+      // A bare answer to the triage question we asked LAST turn is capturable on
+      // the deterministic path even without a contact slot. Without this, bare
+      // enum/free-text answers (system_down, duration, the enrichment steps, and
+      // a urgency chip) fall through to the LLM, never get captured, and the
+      // stepper re-asks the same question forever. captureEnrichmentAnswer
+      // returns non-null only for a RECOGNIZED answer to an extras-backed step
+      // (so an unrecognized reply to a required step still defers to the LLM);
+      // urgency is a top-level slot, captured when the customer's reply carries
+      // a clear urgency signal. The router's emergency short-circuit runs before
+      // this (verdict.escalate), so a hazard worded as an "answer" still escalates.
+      const pendingAnswerCaptured =
+        pendingStep !== null &&
+        (captureEnrichmentAnswer(pendingStep.id, guardrailResult.sanitized) !==
+          null ||
+          (pendingStep.id === "urgency" &&
+            parseUrgencyAnswer(guardrailResult.sanitized) !== null));
+
+      if (
+        verdict.action !== "FALLBACK_LLM" ||
+        isSlotProvision ||
+        pendingAnswerCaptured
+      ) {
         if (verdict.escalate) {
           // Bug fix: on an emergency escalation we MUST have a way to reach the
           // customer and a place to send help. If the address or phone isn't
@@ -824,17 +879,41 @@ export async function POST(request: NextRequest) {
           ? { [captured.key]: captured.value }
           : undefined;
 
+        // Urgency is a top-level slot (not an extras key), so when we just asked
+        // the urgency step capture the answer here — chip value or natural
+        // phrasing — so "this week" / "routine" advance the stepper without an
+        // LLM call. Only when the urgency step was pending, so we never reinterpret
+        // an unrelated message as urgency.
+        const capturedUrgency =
+          pendingStep?.id === "urgency"
+            ? parseUrgencyAnswer(guardrailResult.sanitized)
+            : undefined;
+
+        // The deterministic correction detected up front (NAME-step answer or an
+        // explicit "change my …"). A detected value is passed to mergeSlots as a
+        // NON-EMPTY update, which overwrites — the merge only refuses to clobber
+        // a filled slot with an EMPTY value, so an explicit correction wins.
+        const correctedName =
+          correction?.field === "name" ? correction.value : undefined;
+        const correctedPhone =
+          correction?.field === "phone" ? correction.value : undefined;
+        const correctedAddress =
+          correction?.field === "address" ? correction.value : undefined;
+        const correctedEmail =
+          correction?.field === "email" ? correction.value : undefined;
+
         // Merge router + regex-extracted slots into the session metadata. A
         // returning customer's stored name (seededName) fills the name slot so
         // intake skips the name question — mergeSlots never clobbers a name the
-        // customer already provided this conversation.
+        // customer already provided this conversation. A detected correction
+        // takes precedence over the seeded/extracted value for its field.
         const merged = mergeSlots(knownSlots, {
           issueType: verdict.issueType ?? undefined,
-          urgency: verdict.urgency ?? undefined,
-          address: addressAnswer ?? undefined,
-          phone: extracted.phone ?? undefined,
-          email: extracted.email ?? undefined,
-          name: seededName,
+          urgency: verdict.urgency ?? capturedUrgency ?? undefined,
+          address: correctedAddress ?? addressAnswer ?? undefined,
+          phone: correctedPhone ?? extracted.phone ?? undefined,
+          email: correctedEmail ?? extracted.email ?? undefined,
+          name: correctedName ?? seededName,
           extras: capturedExtras,
         });
 
@@ -913,14 +992,32 @@ export async function POST(request: NextRequest) {
         //    front — one voice only.
         //  - Intake INCOMPLETE + no after-hours move ("none"): use the warmth
         //    lead-in as before.
+        // When the customer EXPLICITLY corrected an already-known value (not a
+        // first-time name answer to the stepper), acknowledge it so the change
+        // is visibly registered rather than silently absorbed. Only for a true
+        // correction cue on a field we already had — a fresh NAME-step answer
+        // just proceeds normally.
+        const isExplicitCorrection =
+          correction !== null &&
+          !(correction.field === "name" && pendingStep?.id === "name");
+        const correctionAck = isExplicitCorrection
+          ? `Got it — I've updated your ${correctionFieldLabel(correction!.field)}. `
+          : "";
+
         let replyBody: string;
         if (extractionComplete) {
-          // nextQuestion is CONFIRM_REPLY here — stand-alone, no prefixes.
-          replyBody = nextQuestion;
+          // nextQuestion is CONFIRM_REPLY here — stand-alone, no prefixes EXCEPT
+          // a correction acknowledgement so the recap change isn't silent.
+          replyBody = correctionAck + nextQuestion;
         } else if (afterHoursDecision.kind !== "none") {
           // The after-hours copy carries the framing for this turn; append the
           // plain next question (no lead-in) so it reads as one person talking.
-          replyBody = `${afterHoursDecision.copy} ${nextQuestion}`;
+          // A correction ack leads so the customer sees the change registered.
+          replyBody = `${correctionAck}${afterHoursDecision.copy} ${nextQuestion}`;
+        } else if (isExplicitCorrection) {
+          // A correction owns the turn's framing — acknowledge, then ask the
+          // next question plainly (no issue lead-in, so it reads as one voice).
+          replyBody = correctionAck + nextQuestion;
         } else {
           // Conversational warmth (Stage 3b): prepend a brief, varied
           // acknowledgement of the stated issue before the next question —
