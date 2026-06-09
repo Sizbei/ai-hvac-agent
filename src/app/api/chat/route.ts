@@ -653,8 +653,8 @@ export async function POST(request: NextRequest) {
 
     // After-hours config: read the org's window the SAME way the confirm route
     // does (organizationSettings.afterHoursConfig → resolveAfterHoursConfig), so
-    // the customer-facing disclosure and the confirm-time surcharge agree on the
-    // window. Non-critical: ANY error degrades to a DISABLED config so we never
+    // the customer-facing disclosure and the confirm-time after-hours flag agree
+    // on the window. Non-critical: ANY error degrades to a DISABLED config so we never
     // wrongly threaten a charge (resolve returns the default window otherwise).
     const afterHoursConfig = await (async () => {
       try {
@@ -877,7 +877,7 @@ export async function POST(request: NextRequest) {
         // After-hours disclosure (deterministic path). When this intake is
         // happening outside the org's business hours we either ask whether it's
         // urgent, disclose the after-hours charge (urgent — NO dollar amount;
-        // the confirm route still computes the fee), or affirm a no-charge
+        // the charge depends on the work the team performs), or affirm a no-charge
         // business-hours / next-business-day visit. Emergencies never reach here
         // (they take the ESCALATE branch above), so we never delay a hazard to
         // talk about charges. "none" (business hours / disabled) is a no-op.
@@ -1005,9 +1005,9 @@ export async function POST(request: NextRequest) {
 
     // After-hours instruction block (LLM path). When the request is currently
     // outside the org's business hours, tell the model exactly how to handle
-    // the urgent/not-urgent branch and — critically — to disclose the surcharge
-    // WITHOUT quoting a dollar amount (the confirm route still computes the fee
-    // server-side). Empty string during business hours / when pricing is
+    // the urgent/not-urgent branch and — critically — to disclose the charge
+    // WITHOUT quoting a dollar amount (there is no fixed fee; the charge depends
+    // on the work performed). Empty string during business hours / when pricing is
     // disabled, so nothing about charges is ever said. We concat it as a
     // SEPARATE block rather than editing the brand persona. Emergencies are
     // never delayed for charge talk: the safety instruction in the brand prompt

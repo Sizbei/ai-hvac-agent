@@ -3,7 +3,6 @@ import {
   afterHoursConfigSchema,
   DEFAULT_AFTER_HOURS_CONFIG,
   isAfterHours,
-  computeSurcharge,
   resolveAfterHoursConfig,
   type AfterHoursConfig,
 } from "./after-hours";
@@ -16,8 +15,6 @@ const cfg: AfterHoursConfig = {
   endHour: 8, // 8am
   weekendsAreAfterHours: true,
   timezone: "America/Chicago",
-  flatFee: 150,
-  emergencyMultiplier: 1.5,
 };
 
 describe("isAfterHours", () => {
@@ -53,27 +50,6 @@ describe("isAfterHours", () => {
   });
 });
 
-describe("computeSurcharge", () => {
-  it("returns 0 when not after hours", () => {
-    expect(computeSurcharge(false, "high", cfg)).toBe(0);
-  });
-
-  it("applies the flat fee for an after-hours non-emergency", () => {
-    expect(computeSurcharge(true, "high", cfg)).toBe(150);
-  });
-
-  it("applies the emergency multiplier on the flat fee for an after-hours emergency", () => {
-    // 150 * 1.5 = 225
-    expect(computeSurcharge(true, "emergency", cfg)).toBe(225);
-  });
-
-  it("rounds to whole dollars", () => {
-    expect(
-      computeSurcharge(true, "emergency", { ...cfg, flatFee: 99, emergencyMultiplier: 1.5 }),
-    ).toBe(149); // 148.5 → 149
-  });
-});
-
 describe("afterHoursConfigSchema", () => {
   it("accepts a valid config", () => {
     expect(afterHoursConfigSchema.parse(cfg)).toEqual(cfg);
@@ -83,9 +59,10 @@ describe("afterHoursConfigSchema", () => {
     expect(afterHoursConfigSchema.safeParse({ ...cfg, startHour: 25 }).success).toBe(false);
   });
 
-  it("rejects a negative fee or a multiplier below 1", () => {
-    expect(afterHoursConfigSchema.safeParse({ ...cfg, flatFee: -1 }).success).toBe(false);
-    expect(afterHoursConfigSchema.safeParse({ ...cfg, emergencyMultiplier: 0.5 }).success).toBe(false);
+  it("rejects unknown keys like a stale flat fee (strict schema)", () => {
+    expect(
+      afterHoursConfigSchema.safeParse({ ...cfg, flatFee: 150 }).success,
+    ).toBe(false);
   });
 
   it("rejects an invalid timezone", () => {

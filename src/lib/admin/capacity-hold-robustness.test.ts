@@ -1,15 +1,17 @@
 /**
- * Stage 5 — calendar-robustness concurrency, fee-correctness, and edge-case
- * guarantees. These exercise the PURE pieces the confirm route composes
- * (pickBookableSlot / arrivalWindowForSlot) plus the after-hours engine, locking
- * in the behavior that makes the bot actually comply with the calendar:
+ * Stage 5 — calendar-robustness concurrency, after-hours-flag correctness, and
+ * edge-case guarantees. These exercise the PURE pieces the confirm route
+ * composes (pickBookableSlot / arrivalWindowForSlot) plus the after-hours
+ * detection engine, locking in the behavior that makes the bot actually comply
+ * with the calendar:
  *
  *   - capacity exhaustion: once a band's `available` reaches 0, no further hold
  *     can pick it (the semantic behind "two concurrent confirms can't both take
  *     the last slot" — the route re-reads availability right before the write).
- *   - fee correctness: the after-hours surcharge computed from the ARRIVAL-window
- *     instant (a business-hours visit) is 0 even when the confirm happens at
- *     11pm — the bug this whole stage fixes.
+ *   - after-hours-flag correctness: the flag derived from the ARRIVAL-window
+ *     instant (a business-hours visit) is FALSE even when the confirm happens at
+ *     11pm — so a business-hours booking never gets a surprise after-hours flag.
+ *     (There is no dollar surcharge — the charge depends on the work performed.)
  *   - DST + cross-band edge cases on the concrete arrival window.
  */
 import { describe, it, expect } from "vitest";
@@ -21,7 +23,6 @@ import {
 } from "./capacity-hold";
 import {
   isAfterHours,
-  computeSurcharge,
   DEFAULT_AFTER_HOURS_CONFIG,
 } from "./after-hours";
 import { toBusinessWallClock } from "./calendar-time";
@@ -85,24 +86,25 @@ describe("capacity exhaustion (concurrent-confirm semantics)", () => {
   });
 });
 
-describe("fee correctness: surcharge keyed to the arrival window, not the confirm clock", () => {
+describe("after-hours flag keyed to the arrival window, not the confirm clock", () => {
   const cfg = DEFAULT_AFTER_HOURS_CONFIG; // 6pm–8am after-hours, Eastern
 
-  it("a business-hours morning arrival incurs NO after-hours surcharge", () => {
+  it("a business-hours morning arrival is NOT flagged after-hours", () => {
     // Pick a weekday so weekend rules don't interfere (2026-06-10 is a Wed).
+    // The point — no surprise after-hours flag on a business-hours booking even
+    // when the customer confirms at 11pm — holds with no dollar number.
     const { startUtc } = arrivalWindowForSlot("2026-06-10", "morning");
     const wall = toBusinessWallClock(startUtc);
     expect(wall.hour).toBe(8); // 8am Eastern — inside business hours
     expect(isAfterHours(startUtc, cfg)).toBe(false);
-    expect(computeSurcharge(isAfterHours(startUtc, cfg), "high", cfg)).toBe(0);
   });
 
-  it("evening arrival (after 6pm Eastern) DOES incur the surcharge", () => {
+  it("the evening band starts at 4pm (business hours), so it is NOT flagged", () => {
     const { startUtc } = arrivalWindowForSlot("2026-06-10", "evening");
     const wall = toBusinessWallClock(startUtc);
     expect(wall.hour).toBe(16); // 4pm — still business hours, sanity
-    // The evening band starts at 4pm (business hours), so no surcharge — this
-    // documents that the band itself, not "evening==late", drives the fee.
+    // The evening band starts at 4pm (business hours) — this documents that the
+    // band's start, not "evening==late", drives the after-hours flag.
     expect(isAfterHours(startUtc, cfg)).toBe(false);
   });
 });

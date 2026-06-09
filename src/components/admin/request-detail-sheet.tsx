@@ -497,8 +497,6 @@ export function RequestDetailSheet({
                 {detail.isAfterHours && (
                   <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
                     After-hours
-                    {detail.afterHoursSurcharge > 0 &&
-                      ` +$${detail.afterHoursSurcharge}`}
                   </span>
                 )}
               </SheetDescription>

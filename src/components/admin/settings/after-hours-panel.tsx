@@ -32,10 +32,6 @@ export function AfterHoursPanel({ config, onSave }: AfterHoursPanelProps) {
   const [endHour, setEndHour] = useState(String(current.endHour));
   const [weekends, setWeekends] = useState(current.weekendsAreAfterHours);
   const [timezone, setTimezone] = useState(current.timezone);
-  const [flatFee, setFlatFee] = useState(String(current.flatFee));
-  const [emergencyMultiplier, setEmergencyMultiplier] = useState(
-    String(current.emergencyMultiplier),
-  );
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,8 +43,6 @@ export function AfterHoursPanel({ config, onSave }: AfterHoursPanelProps) {
       endHour: Number(endHour),
       weekendsAreAfterHours: weekends,
       timezone: timezone.trim(),
-      flatFee: Number(flatFee),
-      emergencyMultiplier: Number(emergencyMultiplier),
     };
 
     const parsed = afterHoursConfigSchema.safeParse(candidate);
@@ -74,17 +68,18 @@ export function AfterHoursPanel({ config, onSave }: AfterHoursPanelProps) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>After-hours pricing</CardTitle>
+        <CardTitle>After-hours window</CardTitle>
         <CardDescription>
-          Requests that arrive outside business hours are flagged and carry an
-          after-hours surcharge so dispatch and the customer record reflect the
-          higher rate. All times use the org timezone below.
+          Requests that arrive outside business hours are flagged so dispatch and
+          the customer record can react. After-hours visits may carry an
+          additional charge based on the work performed — no fixed fee is
+          configured here. All times use the org timezone below.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="flex items-center justify-between rounded-lg px-3 py-2 hover:bg-muted/50">
           <Label htmlFor="after-hours-enabled" className="cursor-pointer">
-            After-hours surcharge enabled
+            After-hours flagging enabled
           </Label>
           <Switch
             id="after-hours-enabled"
@@ -146,37 +141,6 @@ export function AfterHoursPanel({ config, onSave }: AfterHoursPanelProps) {
           </p>
         </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="after-hours-fee">Flat after-hours fee ($)</Label>
-          <Input
-            id="after-hours-fee"
-            inputMode="numeric"
-            value={flatFee}
-            onChange={(e) => setFlatFee(e.target.value)}
-            placeholder={`Default: ${DEFAULT_AFTER_HOURS_CONFIG.flatFee}`}
-          />
-          <p className="text-xs text-muted-foreground">
-            Whole dollars added to an after-hours request. Range 0–100,000.
-          </p>
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="after-hours-multiplier">Emergency multiplier</Label>
-          <Input
-            id="after-hours-multiplier"
-            type="number"
-            step="0.1"
-            inputMode="decimal"
-            value={emergencyMultiplier}
-            onChange={(e) => setEmergencyMultiplier(e.target.value)}
-            placeholder={`Default: ${DEFAULT_AFTER_HOURS_CONFIG.emergencyMultiplier}`}
-          />
-          <p className="text-xs text-muted-foreground">
-            Multiplies the flat fee for emergency-urgency after-hours calls.
-            Range 1–10.
-          </p>
-        </div>
-
         {error && <p className="text-sm text-destructive">{error}</p>}
       </CardContent>
       <CardFooter>
@@ -186,7 +150,7 @@ export function AfterHoursPanel({ config, onSave }: AfterHoursPanelProps) {
           ) : saved ? (
             <Check className="size-4" />
           ) : null}
-          {saved ? 'Saved' : 'Save after-hours'}
+          {saved ? 'Saved' : 'Save after-hours window'}
         </Button>
       </CardFooter>
     </Card>

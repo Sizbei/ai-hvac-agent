@@ -44,8 +44,8 @@ const CAPACITY_REF_PREFIX = "HVAC-CAP";
 // Seeded into organizationSettings (JSONB columns — no migration). businessInfo
 // keys mirror businessInfoSchema in org-config-types.ts so personalizeAnswer and
 // the LLM brand block read from one source. afterHoursConfig keys mirror
-// afterHoursConfigSchema (flatFee/emergencyMultiplier left at the defaults — the
-// bot never quotes them; they drive admin-side surcharge math only).
+// afterHoursConfigSchema (window only — no dollar fee; the bot discloses that a
+// charge may apply without quoting an amount, and the team confirms the work).
 const SPEARS_COMPANY_NAME = "Spears Services";
 const SPEARS_BUSINESS_INFO = {
   phone: "423-854-9505",
@@ -59,8 +59,6 @@ const SPEARS_AFTER_HOURS_CONFIG = {
   endHour: 8, // 8am — after-hours window wraps 5pm–8am
   weekendsAreAfterHours: true,
   timezone: "America/New_York", // Johnson City, TN is Eastern
-  flatFee: 150,
-  emergencyMultiplier: 1.5,
 } as const;
 
 type Urgency = "low" | "medium" | "high" | "emergency";

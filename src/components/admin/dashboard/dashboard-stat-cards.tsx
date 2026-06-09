@@ -8,7 +8,6 @@ import {
   CalendarClock,
   PauseCircle,
   Siren,
-  Moon,
 } from 'lucide-react';
 import type { DashboardStats } from '@/lib/admin/types';
 import { Card } from '@/components/ui/card';
@@ -73,14 +72,6 @@ const STAT_CARDS: readonly StatCardConfig[] = [
     icon: Siren,
     bgColor: 'bg-red-100 dark:bg-red-900/30',
     iconColor: 'text-red-600 dark:text-red-400',
-  },
-  {
-    key: 'surchargeToday',
-    label: 'After-hours $ Today',
-    icon: Moon,
-    bgColor: 'bg-amber-100 dark:bg-amber-900/30',
-    iconColor: 'text-amber-600 dark:text-amber-400',
-    isCurrency: true,
   },
 ] as const;
 

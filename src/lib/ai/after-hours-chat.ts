@@ -1,14 +1,15 @@
 /**
  * Customer-facing after-hours flow for the chat intake.
  *
- * The fee ENGINE (isAfterHours / computeSurcharge) lives in
- * `@/lib/admin/after-hours` and already flags `isAfterHours` + a surcharge on
- * the service request at confirm time. The GAP this helper closes is purely
- * conversational: when an intake happens outside the org's business hours, the
- * bot should (a) ask whether the situation is urgent, (b) if urgent, disclose
- * that an after-hours service charge applies — WITHOUT quoting a dollar amount
- * (the engine still computes the number at confirm), and (c) if NOT urgent,
- * offer a next-business-day visit at no after-hours charge.
+ * The detection ENGINE (isAfterHours) lives in `@/lib/admin/after-hours` and
+ * already flags `isAfterHours` on the service request at confirm time. There is
+ * NO dollar surcharge — the actual charge depends on the work the team
+ * performs. The GAP this helper closes is purely conversational: when an intake
+ * happens outside the org's business hours, the bot should (a) ask whether the
+ * situation is urgent, (b) if urgent, disclose that an after-hours service
+ * charge applies — WITHOUT quoting a dollar amount (the team confirms the
+ * details), and (c) if NOT urgent, offer a next-business-day visit at no
+ * after-hours charge.
  *
  * This module is PURE: it takes the current instant as a `clock` Date parameter
  * (never reads Date.now()) and the org's already-resolved AfterHoursConfig, so

@@ -96,7 +96,6 @@ vi.mock('@/lib/db/schema', () => ({
     holdReason: 'sr.holdReason',
     followUpDate: 'sr.followUpDate',
     isAfterHours: 'sr.isAfterHours',
-    afterHoursSurcharge: 'sr.afterHoursSurcharge',
     completedAt: 'sr.completedAt',
     createdAt: 'sr.createdAt',
     updatedAt: 'sr.updatedAt',
@@ -521,8 +520,8 @@ describe('updateTechnician', () => {
 
 describe('getDashboardStats', () => {
   it('should return the full KPI shape with numeric values', async () => {
-    // 9 select calls: pending, assignedToday, inProgress, completedToday,
-    // scheduled, onHold, emergencyOpen, afterHoursToday (count + surcharge sum).
+    // 8 select calls: pending, assignedToday, inProgress, completedToday,
+    // scheduled, onHold, emergencyOpen, afterHoursToday (count only).
     selectResolutions = [
       [{ value: 5 }], // pending
       [{ value: 3 }], // assignedToday
@@ -531,7 +530,7 @@ describe('getDashboardStats', () => {
       [{ value: 4 }], // scheduled
       [{ value: 2 }], // onHold
       [{ value: 1 }], // emergencyOpen
-      [{ value: 3, surcharge: 450 }], // afterHoursToday + surchargeToday
+      [{ value: 3 }], // afterHoursToday
     ];
 
     const result = await getDashboardStats(ORG_ID);
@@ -543,10 +542,9 @@ describe('getDashboardStats', () => {
     expect(result.onHold).toBe(2);
     expect(result.emergencyOpen).toBe(1);
     expect(result.afterHoursToday).toBe(3);
-    expect(result.surchargeToday).toBe(450);
   });
 
-  it('defaults surchargeToday to 0 when no after-hours rows exist', async () => {
+  it('defaults afterHoursToday to 0 when no after-hours rows exist', async () => {
     selectResolutions = [
       [{ value: 0 }],
       [{ value: 0 }],
@@ -555,12 +553,11 @@ describe('getDashboardStats', () => {
       [{ value: 0 }],
       [{ value: 0 }],
       [{ value: 0 }],
-      [{ value: 0, surcharge: 0 }],
+      [{ value: 0 }],
     ];
 
     const result = await getDashboardStats(ORG_ID);
     expect(result.afterHoursToday).toBe(0);
-    expect(result.surchargeToday).toBe(0);
   });
 });
 
@@ -590,7 +587,7 @@ describe('getDashboardOverview', () => {
       [{ value: 1 }],
       [{ value: 0 }],
       [{ value: 0 }],
-      [{ value: 1, surcharge: 150 }],
+      [{ value: 1 }],
       [scheduledRow], // todaySchedule
       [], // needsAttention
       [], // awaitingFollowUp
@@ -623,7 +620,7 @@ describe('getDashboardOverview', () => {
       [{ value: 0 }],
       [{ value: 0 }],
       [{ value: 0 }],
-      [{ value: 0, surcharge: 0 }],
+      [{ value: 0 }],
       [], // todaySchedule
       [], // needsAttention
       [], // awaitingFollowUp

@@ -31,7 +31,6 @@ export interface AdminRequestDetail extends AdminRequest {
   readonly holdReason: string | null;
   readonly followUpDate: string | null;
   readonly isAfterHours: boolean;
-  readonly afterHoursSurcharge: number;
   readonly completedAt: string | null;
   readonly assignedTo: string | null;
   readonly transcript: readonly TranscriptMessage[];
@@ -122,8 +121,6 @@ export interface DashboardStats {
   readonly emergencyOpen: number;
   /** Requests created today that were flagged after-hours. */
   readonly afterHoursToday: number;
-  /** Sum, in dollars, of after-hours surcharges applied to requests created today. */
-  readonly surchargeToday: number;
 }
 
 /** A single request as it appears in a dashboard list (today's schedule,

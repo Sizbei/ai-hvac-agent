@@ -12,7 +12,6 @@ import {
 import {
   resolveAfterHoursConfig,
   isAfterHours,
-  computeSurcharge,
 } from "@/lib/admin/after-hours";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { getSessionToken } from "@/lib/session";
@@ -232,8 +231,8 @@ export async function POST(request: NextRequest) {
     // within the same atomic batch (no read-back needed).
     const serviceRequestId = randomUUID();
 
-    // After-hours: compute once at submit time from the org's configured window
-    // (its local clock), so dispatch + the dashboard read the flag + surcharge
+    // After-hours: compute the flag once at submit time from the org's
+    // configured window (its local clock), so dispatch + the dashboard read it
     // off the row. Best-effort config read — fall back to the default window.
     const [settingsRow] = await db
       .select({ afterHoursConfig: organizationSettings.afterHoursConfig })
@@ -253,20 +252,16 @@ export async function POST(request: NextRequest) {
       data.preferredWindow,
     );
 
-    // Stage 4: the after-hours surcharge must reflect WHEN THE TECHNICIAN GOES
-    // OUT, not when the customer happens to confirm. When we hold a concrete
-    // arrival window, compute the fee from that instant — so a tomorrow-morning
-    // booking confirmed at 11pm is NOT charged an after-hours fee (aligning the
-    // stored fee with the bot's spoken "no after-hours charge for a business-
-    // hours visit"). Only when no slot is held (soft booking, time genuinely
-    // unknown) do we fall back to the confirm-time clock.
+    // Stage 4: the after-hours FLAG must reflect WHEN THE TECHNICIAN GOES OUT,
+    // not when the customer happens to confirm. When we hold a concrete arrival
+    // window, derive the flag from that instant — so a tomorrow-morning booking
+    // confirmed at 11pm is NOT flagged after-hours (aligning the stored flag
+    // with the bot's spoken "no after-hours charge for a business-hours
+    // visit"). Only when no slot is held (soft booking, time genuinely unknown)
+    // do we fall back to the confirm-time clock. No dollar surcharge is stored —
+    // the actual charge depends on the work the team performs.
     const feeInstant = heldSlot?.startUtc ?? new Date();
     const afterHours = isAfterHours(feeInstant, afterHoursConfig);
-    const afterHoursSurcharge = computeSurcharge(
-      afterHours,
-      data.urgency,
-      afterHoursConfig,
-    );
 
     // The neon-http driver does not support interactive `db.transaction()`
     // (it throws "No transactions support in neon-http driver"), so the
@@ -325,7 +320,6 @@ export async function POST(request: NextRequest) {
           smsConsent: data.smsConsent ?? null,
           leadSource: data.leadSource ?? null,
           isAfterHours: afterHours,
-          afterHoursSurcharge,
         })
         .returning({ id: serviceRequests.id }),
       db

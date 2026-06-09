@@ -203,7 +203,6 @@ export async function getRequestById(
       holdReason: serviceRequests.holdReason,
       followUpDate: serviceRequests.followUpDate,
       isAfterHours: serviceRequests.isAfterHours,
-      afterHoursSurcharge: serviceRequests.afterHoursSurcharge,
       completedAt: serviceRequests.completedAt,
       createdAt: serviceRequests.createdAt,
       updatedAt: serviceRequests.updatedAt,
@@ -307,7 +306,6 @@ export async function getRequestById(
     holdReason: row.holdReason,
     followUpDate: row.followUpDate?.toISOString() ?? null,
     isAfterHours: row.isAfterHours,
-    afterHoursSurcharge: row.afterHoursSurcharge,
     completedAt: row.completedAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -971,7 +969,6 @@ export async function getDashboardStats(
   const [afterHoursTodayResult] = await db
     .select({
       value: count(),
-      surcharge: sql<number>`coalesce(sum(${serviceRequests.afterHoursSurcharge}), 0)`,
     })
     .from(serviceRequests)
     .where(
@@ -992,10 +989,6 @@ export async function getDashboardStats(
     onHold: onHoldResult?.value ?? 0,
     emergencyOpen: emergencyOpenResult?.value ?? 0,
     afterHoursToday: afterHoursTodayResult?.value ?? 0,
-    // SUM over an integer column comes back from the Neon HTTP driver as a
-    // numeric STRING (e.g. "450"), so coerce explicitly — sql<number> is a
-    // compile-time cast only.
-    surchargeToday: parseFloat(String(afterHoursTodayResult?.surcharge ?? 0)),
   };
 }
 

@@ -1,8 +1,10 @@
 /**
- * After-hours detection + surcharge (ServiceTitan-style emergency/after-hours
- * pricing). A request that arrives outside business hours (after 6pm, before
- * 8am, or on a weekend by default) is flagged and carries an after-hours
- * surcharge so dispatch + the customer record reflect the higher rate.
+ * After-hours DETECTION (ServiceTitan-style emergency/after-hours flagging). A
+ * request that arrives outside business hours (after 6pm, before 8am, or on a
+ * weekend by default) is FLAGGED so dispatch + the bot's disclosure copy can
+ * react. We do NOT compute a dollar surcharge here: the business does not
+ * charge a fixed flat after-hours fee — the actual charge depends on the work
+ * performed and is settled by the team, not precomputed from config.
  *
  * All time math is done in the ORG's configured IANA timezone (a request's
  * "after hours" depends on the company's local clock, not the server's or the
@@ -29,10 +31,6 @@ export const afterHoursConfigSchema = z
     endHour: z.number().int().min(0).max(23),
     weekendsAreAfterHours: z.boolean(),
     timezone: z.string().refine(isValidTimezone, "Invalid IANA timezone"),
-    // Flat after-hours fee (whole dollars) and the multiplier applied to it for
-    // an emergency-urgency after-hours call.
-    flatFee: z.number().min(0).max(100000),
-    emergencyMultiplier: z.number().min(1).max(10),
   })
   .strict();
 
@@ -44,8 +42,6 @@ export const DEFAULT_AFTER_HOURS_CONFIG: AfterHoursConfig = {
   endHour: 8, // 8am
   weekendsAreAfterHours: true,
   timezone: "America/New_York",
-  flatFee: 150,
-  emergencyMultiplier: 1.5,
 };
 
 /** Resolve a stored (jsonb) value into a valid config, defaulting on absence/junk. */
@@ -92,20 +88,4 @@ export function isAfterHours(at: Date, config: AfterHoursConfig): boolean {
   }
   // Non-wrapping window (unusual, but supported): after-hours strictly inside.
   return hour >= config.startHour && hour < config.endHour;
-}
-
-/**
- * The surcharge (whole dollars) for a request: 0 when not after-hours, the flat
- * fee otherwise, multiplied by the emergency multiplier when urgency is
- * "emergency".
- */
-export function computeSurcharge(
-  afterHours: boolean,
-  urgency: string | null,
-  config: AfterHoursConfig,
-): number {
-  if (!afterHours) return 0;
-  const base = config.flatFee;
-  const amount = urgency === "emergency" ? base * config.emergencyMultiplier : base;
-  return Math.round(amount);
 }
