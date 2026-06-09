@@ -926,12 +926,12 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ANSWER",
     cannedResponse:
-      "Once your request is submitted, our team reviews it right away and reaches out to confirm the soonest available time — we aim to follow up within about 2 hours. If you describe your issue, I can get the request started.",
+      "Once your request is submitted, our team reviews it right away and reaches out to confirm the soonest available time. For an emergency, we're available any time, day or night. If you describe your issue, I can get the request started.",
     infoNeeded: [],
     issueTypeMapping: null,
     urgencyHint: null,
     notes:
-      "The 'within 2 hours follow-up' wording matches GUIDE.md's success-page promise. Time-pressure may signal an emergency — check emergency triggers first. Never promise an arrival time.",
+      "No fixed follow-up time is promised (the site states emergency service is 24/7, not a 2-hour callback). Time-pressure may signal an emergency — check emergency triggers first. Never promise an arrival time.",
   },
   {
     id: "scheduling-after-hours",
@@ -992,7 +992,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ANSWER",
     cannedResponse:
-      "After you submit a request, our team typically follows up within about 2 hours to confirm timing, and they'll give you an arrival window then. I can't promise an exact arrival time from here, but I can get your request started.",
+      "After you submit a request, our team follows up to confirm timing and give you an arrival window. I can't promise an exact arrival time from here, but I can get your request started — and for an emergency we're available any time, day or night.",
     infoNeeded: [],
     issueTypeMapping: null,
     urgencyHint: null,

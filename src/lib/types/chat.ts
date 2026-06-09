@@ -10,9 +10,18 @@ export interface ChatMessage {
 
 export type { SessionState, ExtractionResult };
 
-// Fields tracked for extraction progress pills
+// Fields tracked for extraction progress pills — the required intake set the
+// customer sees as a checklist (issue/urgency/address/name/phone/email).
 export interface ExtractionField {
-  readonly key: keyof Pick<ExtractionResult, 'issueType' | 'urgency' | 'address'>;
+  readonly key: keyof Pick<
+    ExtractionResult,
+    | 'issueType'
+    | 'urgency'
+    | 'address'
+    | 'customerName'
+    | 'customerPhone'
+    | 'customerEmail'
+  >;
   readonly label: string;
   readonly collected: boolean;
 }

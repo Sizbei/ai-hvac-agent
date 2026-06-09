@@ -22,13 +22,14 @@ const completeExtraction: ExtractionResult = {
 };
 
 describe('REQUIRED_EXTRACTION_FIELDS', () => {
-  it('should contain issueType, urgency, address, customerPhone, and customerName', () => {
+  it('should contain issueType, urgency, address, customerPhone, customerName, and customerEmail', () => {
     expect(REQUIRED_EXTRACTION_FIELDS).toEqual([
       'issueType',
       'urgency',
       'address',
       'customerPhone',
       'customerName',
+      'customerEmail',
     ]);
   });
 });
@@ -162,12 +163,24 @@ describe('isExtractionComplete', () => {
     expect(isExtractionComplete(extraction)).toBe(false);
   });
 
-  it('should return true when only email (truly optional) is null', () => {
+  it('should return false when email is null (email is now required)', () => {
     const extraction: ExtractionResult = {
       ...completeExtraction,
       customerEmail: null,
     };
-    expect(isExtractionComplete(extraction)).toBe(true);
+    expect(isExtractionComplete(extraction)).toBe(false);
+  });
+
+  it('should return false when email is present but malformed', () => {
+    const extraction: ExtractionResult = {
+      ...completeExtraction,
+      customerEmail: 'not-an-email',
+    };
+    expect(isExtractionComplete(extraction)).toBe(false);
+  });
+
+  it('should return true when all required fields incl. a valid email are set', () => {
+    expect(isExtractionComplete(completeExtraction)).toBe(true);
   });
 
   it('should return false when all required fields are null', () => {
@@ -294,6 +307,20 @@ describe('serviceRequestSchema (confirm payload)', () => {
     expect(r.success).toBe(false);
   });
 
+  it('requires a valid customerEmail (null/missing is rejected)', () => {
+    const base = {
+      issueType: 'cooling_not_working' as const,
+      urgency: 'high' as const,
+      address: '5 Oak St',
+      customerName: 'Jane',
+      customerPhone: '555-123-4567',
+      description: 'AC out',
+    };
+    expect(serviceRequestSchema.safeParse({ ...base, customerEmail: null }).success).toBe(false);
+    expect(serviceRequestSchema.safeParse({ ...base, customerEmail: 'nope' }).success).toBe(false);
+    expect(serviceRequestSchema.safeParse({ ...base, customerEmail: 'jane@example.com' }).success).toBe(true);
+  });
+
   it('accepts the new optional fields', () => {
     const parsed = serviceRequestSchema.parse({
       issueType: 'cooling_not_working',
@@ -301,7 +328,7 @@ describe('serviceRequestSchema (confirm payload)', () => {
       address: '5 Oak St',
       customerName: 'Jane',
       customerPhone: '555-123-4567',
-      customerEmail: null,
+      customerEmail: 'jane@example.com',
       description: 'AC out',
       systemType: 'central_ac',
       preferredWindow: 'afternoon',

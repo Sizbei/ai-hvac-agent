@@ -14,6 +14,7 @@ function slots(overrides: Partial<TriageSlots> = {}): TriageSlots {
     address: null,
     name: null,
     phone: null,
+    email: null,
     safetyScreenPassed: false,
     extras: {},
     ...overrides,
@@ -73,13 +74,27 @@ describe("nextTriageStep — ordering", () => {
     expect(step!.optional).toBe(false);
   });
 
-  it("asks urgency only after name is known", () => {
+  it("asks email after name, before urgency", () => {
     const step = nextTriageStep(
       slots({
         safetyScreenPassed: true,
         address: "5 Oak St",
         phone: "555-1234",
         name: "Jane Doe",
+        extras: { systemDownStatus: "fully_down", problemDuration: "today" },
+      }),
+    );
+    expect(step?.id).toBe("email");
+  });
+
+  it("asks urgency only after name and email are known", () => {
+    const step = nextTriageStep(
+      slots({
+        safetyScreenPassed: true,
+        address: "5 Oak St",
+        phone: "555-1234",
+        name: "Jane Doe",
+        email: "jane@example.com",
         extras: { systemDownStatus: "fully_down", problemDuration: "today" },
       }),
     );
@@ -107,6 +122,7 @@ describe("nextTriageStep — ordering", () => {
         address: "5 Oak St",
         name: "Jane Doe",
         phone: "555-1234",
+        email: "jane@example.com",
         extras: { systemDownStatus: "fully_down", problemDuration: "today" },
       }),
     );
@@ -123,6 +139,7 @@ describe("nextTriageStep — ordering", () => {
         address: "5 Oak St",
         name: "Jane Doe",
         phone: "555-1234",
+        email: "jane@example.com",
         extras: {
           systemDownStatus: "fully_down",
           problemDuration: "today",
@@ -176,6 +193,7 @@ describe("applyTriageAnswer — optional fields are skippable", () => {
       address: "5 Oak St",
       name: "Jane Doe",
       phone: "555-1234",
+      email: "jane@example.com",
       extras: { systemDownStatus: "fully_down", problemDuration: "today" },
     });
     const step = nextTriageStep(before)!;
@@ -193,6 +211,7 @@ describe("applyTriageAnswer — optional fields are skippable", () => {
       address: "5 Oak St",
       name: "Jane Doe",
       phone: "555-1234",
+      email: "jane@example.com",
       extras: { systemDownStatus: "fully_down", problemDuration: "today" },
     });
     const step = nextTriageStep(before)!; // system_type
@@ -217,7 +236,7 @@ describe("applyTriageAnswer — optional fields are skippable", () => {
 });
 
 describe("REQUIRED_FOR_SUBMIT", () => {
-  it("lists the hard gate (safety + issue + urgency + address + name + phone)", () => {
+  it("lists the hard gate (safety + issue + urgency + address + name + phone + email)", () => {
     expect(REQUIRED_FOR_SUBMIT).toEqual([
       "safetyScreenPassed",
       "issueType",
@@ -225,11 +244,13 @@ describe("REQUIRED_FOR_SUBMIT", () => {
       "address",
       "name",
       "phone",
+      "email",
     ]);
   });
 
-  it("includes name as a required field", () => {
+  it("includes name and email as required fields", () => {
     expect(REQUIRED_FOR_SUBMIT).toContain("name");
+    expect(REQUIRED_FOR_SUBMIT).toContain("email");
   });
 });
 

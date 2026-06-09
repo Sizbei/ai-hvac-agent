@@ -310,6 +310,7 @@ function nextSlotPrompt(
     address: merged.address ?? null,
     name: merged.name ?? null,
     phone: merged.phone ?? null,
+    email: merged.email ?? null,
     // The router only reaches this prompt once the message is non-hazardous, so
     // treat the safety screen as cleared for the purpose of sequencing the
     // remaining intake (a real hazard is handled by the ESCALATE branch).
@@ -345,6 +346,7 @@ function nextStepIdFor(merged: KnownSlots): string | null {
     address: merged.address ?? null,
     name: merged.name ?? null,
     phone: merged.phone ?? null,
+    email: merged.email ?? null,
     safetyScreenPassed: true,
     extras: { ...(merged.extras ?? {}) },
   });
@@ -587,6 +589,7 @@ export async function POST(request: NextRequest) {
       address: knownSlots.address ?? null,
       name: knownSlots.name ?? null,
       phone: knownSlots.phone ?? null,
+      email: knownSlots.email ?? null,
       safetyScreenPassed: true,
       extras: { ...(knownSlots.extras ?? {}) },
     });

@@ -79,8 +79,12 @@ function ttsPlayUrl(text: string, baseUrl: string, now: number): string {
  */
 function speak(text: string, voice: VoiceMode): string {
   if (voice.kind === "elevenlabs") {
+    // <Play> ONLY — emitting a <Say> after it made Twilio voice the line TWICE
+    // (the MP3 then Polly reading the same text). On a failed media fetch Twilio
+    // simply moves on to the next verb (the surrounding <Gather> re-prompts), so
+    // there's no dead-air risk that needs a second spoken copy.
     const url = ttsPlayUrl(text, voice.baseUrl, voice.now);
-    return `<Play>${escapeXml(url)}</Play>\n    ${pollySay(text)}`;
+    return `<Play>${escapeXml(url)}</Play>`;
   }
   return pollySay(text);
 }
@@ -100,10 +104,22 @@ export function gatherTwiML(params: {
   const repromptLine = reprompt ? `\n  ${speak(reprompt, voice)}` : "";
   return `${XML_DECL}
 <Response>
-  <Gather input="speech" action="${escapeXml(action)}" method="POST" speechTimeout="auto">
+  <Gather input="speech" action="${escapeXml(action)}" method="POST" speechTimeout="${resolveSpeechTimeout()}">
     ${speak(say, voice)}
   </Gather>${repromptLine}
 </Response>`;
+}
+
+/**
+ * How long Twilio waits after the caller stops speaking before submitting the
+ * <Gather>. "auto" detects a natural pause but often feels laggy; a short fixed
+ * timeout (default 2s) makes turns snappier. Override with TWILIO_SPEECH_TIMEOUT
+ * ("auto" or a number of seconds).
+ */
+function resolveSpeechTimeout(): string {
+  const v = process.env.TWILIO_SPEECH_TIMEOUT?.trim();
+  if (v && (v === "auto" || /^\d+$/.test(v))) return v;
+  return "2";
 }
 
 /** Speak a final message, then hang up. */
