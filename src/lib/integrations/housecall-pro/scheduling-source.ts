@@ -21,6 +21,14 @@
  * this source reports NO booked jobs — subtracting bookings again would
  * double-count and under-report open slots. The mapping owns the "what's open"
  * truth; jobs are intentionally empty here.
+ *
+ * TECHNICIAN ROSTER: getActiveTechnicianIds reports the REAL HCP technician
+ * roster (client.listTechnicians + technician-mapping) rather than synthetic ids
+ * inferred from availability windows. It is cached per org with the SAME TTL
+ * pattern as availability, and DEGRADES SAFELY: if the roster fetch fails or HCP
+ * returns no technicians, it falls back to the synthetic ids of the mapped
+ * availability surface (the prior behavior) so capacity never collapses to zero
+ * on a transient roster hiccup.
  */
 import type { SchedulingSource } from "@/lib/admin/scheduling-source";
 import type { AvailabilitySlot, ScheduledJob } from "@/lib/admin/types";
@@ -29,6 +37,7 @@ import {
   mapHcpAvailability,
   type MappedHcpAvailability,
 } from "./availability-mapping";
+import { mapHcpTechnicians } from "./technician-mapping";
 
 /** How far ahead we ask HCP for bookable windows. Matches the availability
  * route's MAX_DAYS so a single cached fetch covers any bounded request range. */
@@ -77,6 +86,44 @@ export class HcpAvailabilityCache {
 /** Process-wide default cache, shared across requests in a warm instance. */
 const defaultCache = new HcpAvailabilityCache();
 
+interface RosterCacheEntry {
+  readonly value: readonly string[];
+  readonly expiresAt: number;
+}
+
+/**
+ * A per-org TTL cache for the mapped HCP technician roster — same shape/policy as
+ * {@link HcpAvailabilityCache} but holds the opaque tech-id list. Separate cache
+ * so a roster fetch and an availability fetch expire independently (they are
+ * independent HCP calls). `now`/`ttlMs` are injectable for deterministic tests.
+ */
+export class HcpTechnicianCache {
+  private readonly store = new Map<string, RosterCacheEntry>();
+
+  constructor(
+    private readonly ttlMs: number = DEFAULT_HCP_AVAILABILITY_TTL_MS,
+    private readonly now: () => number = Date.now,
+  ) {}
+
+  get(key: string): readonly string[] | null {
+    const entry = this.store.get(key);
+    if (!entry || entry.expiresAt <= this.now()) {
+      if (entry) {
+        this.store.delete(key);
+      }
+      return null;
+    }
+    return entry.value;
+  }
+
+  set(key: string, value: readonly string[]): void {
+    this.store.set(key, { value, expiresAt: this.now() + this.ttlMs });
+  }
+}
+
+/** Process-wide default roster cache, shared across requests in a warm instance. */
+const defaultTechnicianCache = new HcpTechnicianCache();
+
 /**
  * HCP-backed scheduling source for one org. Bound to a resolved {@link
  * HousecallProClient} (the factory builds the client + checks connectedness; this
@@ -89,6 +136,7 @@ export class HcpSchedulingSource implements SchedulingSource {
     private readonly client: HousecallProClient,
     private readonly cache: HcpAvailabilityCache = defaultCache,
     private readonly now: () => number = Date.now,
+    private readonly technicianCache: HcpTechnicianCache = defaultTechnicianCache,
   ) {}
 
   /**
@@ -142,11 +190,37 @@ export class HcpSchedulingSource implements SchedulingSource {
   }
 
   /**
-   * The synthetic, opaque technician roster backing the mapped availability —
-   * the "bookable staff" the open-window aggregation counts when HCP is the
-   * source of truth. No HCP staff identity; ids are deterministic placeholders.
+   * The REAL HCP technician roster as opaque ids — the "bookable staff" the
+   * open-window aggregation counts when HCP is the source of truth. Fetched via
+   * client.listTechnicians + technician-mapping (active filter), cached per org
+   * with the same TTL as availability.
+   *
+   * DEGRADE SAFELY: a roster fetch failure, or an empty/all-inactive roster,
+   * falls back to the SYNTHETIC ids derived from the mapped availability surface
+   * (the prior behavior) — never zero — so a transient roster hiccup can't
+   * collapse capacity. No HCP staff name ever crosses this boundary (ids are
+   * opaque, prefixed employee ids).
    */
   async getActiveTechnicianIds(): Promise<readonly string[]> {
+    const cached = this.technicianCache.get(this.organizationId);
+    if (cached) {
+      return cached;
+    }
+    try {
+      const technicians = await this.client.listTechnicians();
+      const ids = mapHcpTechnicians(technicians);
+      if (ids.length > 0) {
+        this.technicianCache.set(this.organizationId, ids);
+        return ids;
+      }
+    } catch {
+      // Swallow: degrade to the synthetic roster below. The HCP key never
+      // reaches this layer, so there is nothing sensitive to log here; the
+      // factory's availability path still surfaces hard outages.
+    }
+    // Fallback: synthetic ids from the mapped availability windows (prior
+    // behavior). Not cached in the roster cache so a recovered HCP roster is
+    // picked up on the next call rather than being pinned to the fallback.
     const mapped = await this.loadMapped();
     return mapped.technicianIds;
   }

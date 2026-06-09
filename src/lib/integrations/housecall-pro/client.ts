@@ -24,6 +24,8 @@ import type {
   HousecallAvailabilitySlot,
   HousecallCustomer,
   HousecallJob,
+  HousecallLineItem,
+  HousecallTechnician,
   UpdateJobInput,
 } from "./types";
 
@@ -80,6 +82,14 @@ export interface HousecallProClient {
   ): Promise<readonly HousecallAvailabilitySlot[]>;
 
   /**
+   * List the org's technician (employee) roster. Used to derive the REAL set of
+   * active technicians the scheduling source reports (replacing synthetic ids
+   * inferred from availability windows). Tolerant of omitted fields; the active
+   * filter is applied by the mapping, not here.
+   */
+  listTechnicians(): Promise<readonly HousecallTechnician[]>;
+
+  /**
    * Lightweight authenticated probe used to VALIDATE an API key at connect time
    * and to cache non-secret account metadata. Throws on auth failure.
    */
@@ -130,6 +140,36 @@ function toCustomer(raw: unknown): HousecallCustomer {
   };
 }
 
+/**
+ * Serialize our descriptive line items into HCP's job `line_items` payload.
+ *
+ * ASSUMED HCP SHAPE: HCP's job endpoints accept a `line_items` array whose
+ * entries carry `name`, a `kind` ("service" | "material" | "labor"), a
+ * `quantity`, an optional `description`, and a `unit_price` in CENTS. We map our
+ * field names to those keys.
+ *
+ * PRICING (CRITICAL): our line items never carry a price — `unitPriceCents` is
+ * always undefined — so `unit_price` is OMITTED from every serialized row. This
+ * business prices on-site; we send descriptive rows only. Returns undefined when
+ * there are no items, so the key is omitted from the job body entirely.
+ */
+function toLineItemsPayload(
+  items: readonly HousecallLineItem[] | undefined,
+): Array<Record<string, unknown>> | undefined {
+  if (!items || items.length === 0) {
+    return undefined;
+  }
+  return items.map((item) => ({
+    name: item.name,
+    kind: item.kind ?? "service",
+    quantity: item.quantity ?? 1,
+    description: item.description,
+    // unit_price is sent ONLY when a price exists. Our mapping never sets one
+    // (descriptive items, priced on-site), so this stays omitted in practice.
+    unit_price: item.unitPriceCents,
+  }));
+}
+
 /** Narrow an untrusted HCP job payload to {@link HousecallJob}. */
 function toJob(raw: unknown): HousecallJob {
   if (typeof raw !== "object" || raw === null) {
@@ -153,6 +193,40 @@ function toJob(raw: unknown): HousecallJob {
     schedule_start: str(schedule.start_time),
     schedule_end: str(schedule.end_time),
   };
+}
+
+/**
+ * Narrow an untrusted HCP employee payload to {@link HousecallTechnician}, or
+ * null when it has no usable id. Tolerant of omitted fields: HCP omits blanks and
+ * may add fields, so a missing name/active flag must NOT crash the roster sync.
+ *
+ * Name is assembled from `name` (if HCP returns a single field) or first/last;
+ * the active flag is read from either `active` or `is_active` (HCP's employee
+ * payloads have varied), left undefined when neither is a boolean so the mapping
+ * can decide how to treat unknown-status staff.
+ */
+function toTechnician(raw: unknown): HousecallTechnician | null {
+  if (typeof raw !== "object" || raw === null) {
+    return null;
+  }
+  const obj = raw as Record<string, unknown>;
+  if (typeof obj.id !== "string" || obj.id.length === 0) {
+    return null;
+  }
+  const str = (v: unknown): string | undefined =>
+    typeof v === "string" && v.length > 0 ? v : undefined;
+  const assembled = [str(obj.first_name), str(obj.last_name)]
+    .filter((p): p is string => p !== undefined)
+    .join(" ");
+  // Prefer HCP's single `name` field; else first+last; else undefined (never "").
+  const name = str(obj.name) ?? (assembled.length > 0 ? assembled : undefined);
+  const isActive =
+    typeof obj.active === "boolean"
+      ? obj.active
+      : typeof obj.is_active === "boolean"
+        ? obj.is_active
+        : undefined;
+  return { id: obj.id, name, isActive };
 }
 
 /**
@@ -254,6 +328,8 @@ export class RestHousecallProClient implements HousecallProClient {
           : undefined,
       // Carry our request id so a webhook can map the HCP job back to us.
       tags: input.requestId ? [`request:${input.requestId}`] : undefined,
+      // Descriptive line items (no prices); omitted when none were derived.
+      line_items: toLineItemsPayload(input.lineItems),
     };
     const raw = await this.request("/jobs", {
       method: "POST",
@@ -275,6 +351,9 @@ export class RestHousecallProClient implements HousecallProClient {
         input.scheduleStart || input.scheduleEnd
           ? { start_time: input.scheduleStart, end_time: input.scheduleEnd }
           : undefined,
+      // Sent only when present so a description/schedule-only update never blanks
+      // the job's existing items. Descriptive (no prices).
+      line_items: toLineItemsPayload(input.lineItems),
     };
     const raw = await this.request(`/jobs/${encodeURIComponent(jobId)}`, {
       method: "PUT",
@@ -332,6 +411,23 @@ export class RestHousecallProClient implements HousecallProClient {
         return { startIso: obj.start_time, endIso: obj.end_time };
       })
       .filter((slot): slot is HousecallAvailabilitySlot => slot !== null);
+  }
+
+  async listTechnicians(): Promise<readonly HousecallTechnician[]> {
+    // HCP exposes the technician roster as the employees collection. Mirror
+    // listAvailability: GET, pull the typed list from the envelope, narrow +
+    // drop malformed rows (one bad employee must not blank the whole roster).
+    const raw = await this.request("/employees", { method: "GET" });
+    const list =
+      typeof raw === "object" && raw !== null
+        ? (raw as Record<string, unknown>).employees
+        : undefined;
+    if (!Array.isArray(list)) {
+      return [];
+    }
+    return list
+      .map(toTechnician)
+      .filter((t): t is HousecallTechnician => t !== null);
   }
 
   async getAccountInfo(): Promise<HousecallAccountInfo> {

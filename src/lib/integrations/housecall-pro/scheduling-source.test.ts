@@ -2,12 +2,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   HcpSchedulingSource,
   HcpAvailabilityCache,
+  HcpTechnicianCache,
   DEFAULT_HCP_AVAILABILITY_TTL_MS,
 } from "./scheduling-source";
 import { HCP_SYNTHETIC_TECH_PREFIX } from "./availability-mapping";
+import { HCP_TECH_ID_PREFIX, toHcpTechId } from "./technician-mapping";
 import { businessWallClockToUtc } from "@/lib/admin/calendar-time";
 import type { HousecallProClient } from "./client";
-import type { HousecallAvailabilitySlot } from "./types";
+import type { HousecallAvailabilitySlot, HousecallTechnician } from "./types";
 
 const ORG = "org-1";
 
@@ -23,16 +25,20 @@ function win(
   };
 }
 
-/** A client stub whose listAvailability is a spy; all other methods throw if
- * called (this source must only ever read availability). */
+/** A client stub whose listAvailability (and optionally listTechnicians) is a
+ * spy; all other methods throw if called (this source must only ever read
+ * availability + the technician roster). When `listTechnicians` is omitted it
+ * throws, exercising the degrade-to-synthetic-roster fallback. */
 function stubClient(
   listAvailability: HousecallProClient["listAvailability"],
+  listTechnicians?: HousecallProClient["listTechnicians"],
 ): HousecallProClient {
   const reject = () => {
     throw new Error("not expected in scheduling source");
   };
   return {
     listAvailability,
+    listTechnicians: listTechnicians ?? reject,
     createCustomer: reject,
     findCustomer: reject,
     createJob: reject,
@@ -155,5 +161,123 @@ describe("HcpSchedulingSource — caching", () => {
     await a.getAvailability();
     await b.getAvailability();
     expect(list).toHaveBeenCalledTimes(2);
+  });
+});
+
+/** Build a source wired to BOTH an availability spy and a technician spy, each
+ * with its own fresh, isolated cache pinned to a fixed clock. */
+function rosterSource(
+  list: HousecallProClient["listAvailability"],
+  techs: HousecallProClient["listTechnicians"],
+  org: string = ORG,
+  now: () => number = () => 1_000,
+): HcpSchedulingSource {
+  return new HcpSchedulingSource(
+    org,
+    stubClient(list, techs),
+    new HcpAvailabilityCache(30_000, now),
+    now,
+    new HcpTechnicianCache(30_000, now),
+  );
+}
+
+describe("HcpSchedulingSource — REAL technician roster", () => {
+  it("reports the real HCP roster (active, opaque ids) not synthetic ids", async () => {
+    const list = vi.fn().mockResolvedValue([win("2026-07-01", 8, 12)]);
+    const techs = vi.fn<() => Promise<readonly HousecallTechnician[]>>(
+      async () => [
+        { id: "emp-1", name: "Pat", isActive: true },
+        { id: "emp-2", name: "Sam", isActive: true },
+      ],
+    );
+    const source = rosterSource(list, techs);
+
+    const ids = await source.getActiveTechnicianIds();
+    expect(ids).toEqual([toHcpTechId("emp-1"), toHcpTechId("emp-2")]);
+    expect(ids.every((id) => id.startsWith(HCP_TECH_ID_PREFIX))).toBe(true);
+    // Availability is NOT fetched to build the roster on the happy path.
+    expect(list).not.toHaveBeenCalled();
+  });
+
+  it("filters inactive technicians out of the reported roster", async () => {
+    const list = vi.fn().mockResolvedValue([]);
+    const techs = vi.fn<() => Promise<readonly HousecallTechnician[]>>(
+      async () => [
+        { id: "emp-1", isActive: true },
+        { id: "emp-2", isActive: false },
+      ],
+    );
+    const source = rosterSource(list, techs);
+    expect(await source.getActiveTechnicianIds()).toEqual([toHcpTechId("emp-1")]);
+  });
+
+  it("caches the roster: one listTechnicians call across reads within the TTL", async () => {
+    const list = vi.fn().mockResolvedValue([]);
+    const techs = vi
+      .fn<() => Promise<readonly HousecallTechnician[]>>()
+      .mockResolvedValue([{ id: "emp-1", isActive: true }]);
+    const source = rosterSource(list, techs);
+
+    await source.getActiveTechnicianIds();
+    await source.getActiveTechnicianIds();
+    expect(techs).toHaveBeenCalledOnce();
+  });
+
+  it("re-fetches the roster after the TTL expires", async () => {
+    let now = 1_000;
+    const list = vi.fn().mockResolvedValue([]);
+    const techs = vi
+      .fn<() => Promise<readonly HousecallTechnician[]>>()
+      .mockResolvedValue([{ id: "emp-1", isActive: true }]);
+    const source = rosterSource(list, techs, ORG, () => now);
+
+    await source.getActiveTechnicianIds();
+    now += 31_000;
+    await source.getActiveTechnicianIds();
+    expect(techs).toHaveBeenCalledTimes(2);
+  });
+
+  it("DEGRADES on roster error: falls back to the synthetic availability roster", async () => {
+    // 2026-07-01 8–12 maps to one synthetic tech; the roster fetch fails, so the
+    // source must fall back to that synthetic id rather than throw or report [].
+    const list = vi.fn().mockResolvedValue([win("2026-07-01", 8, 12)]);
+    const techs = vi
+      .fn<() => Promise<readonly HousecallTechnician[]>>()
+      .mockRejectedValue(new Error("HCP 503"));
+    const source = rosterSource(list, techs);
+
+    const ids = await source.getActiveTechnicianIds();
+    expect(ids).toHaveLength(1);
+    expect(ids[0]!.startsWith(HCP_SYNTHETIC_TECH_PREFIX)).toBe(true);
+    expect(list).toHaveBeenCalled();
+  });
+
+  it("DEGRADES on empty roster: falls back to the synthetic availability roster", async () => {
+    const list = vi.fn().mockResolvedValue([win("2026-07-01", 8, 12)]);
+    const techs = vi
+      .fn<() => Promise<readonly HousecallTechnician[]>>()
+      .mockResolvedValue([]);
+    const source = rosterSource(list, techs);
+
+    const ids = await source.getActiveTechnicianIds();
+    expect(ids).toHaveLength(1);
+    expect(ids[0]!.startsWith(HCP_SYNTHETIC_TECH_PREFIX)).toBe(true);
+  });
+
+  it("does NOT pin the fallback: recovers to the real roster on the next call", async () => {
+    let now = 1_000;
+    const list = vi.fn().mockResolvedValue([win("2026-07-01", 8, 12)]);
+    const techs = vi
+      .fn<() => Promise<readonly HousecallTechnician[]>>()
+      .mockRejectedValueOnce(new Error("HCP 503"))
+      .mockResolvedValue([{ id: "emp-1", isActive: true }]);
+    const source = rosterSource(list, techs, ORG, () => now);
+
+    const first = await source.getActiveTechnicianIds();
+    expect(first[0]!.startsWith(HCP_SYNTHETIC_TECH_PREFIX)).toBe(true);
+
+    now += 1; // still within TTL, but the fallback was never cached
+    const second = await source.getActiveTechnicianIds();
+    expect(second).toEqual([toHcpTechId("emp-1")]);
   });
 });

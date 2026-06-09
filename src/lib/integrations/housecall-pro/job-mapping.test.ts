@@ -9,6 +9,8 @@ const BASE: RequestJobInput = {
   issueType: "No cooling",
   urgency: "high",
   description: "Upstairs unit blowing warm air",
+  jobType: "no_cool",
+  systemType: "central_ac",
   arrivalWindowStart: new Date("2026-07-01T12:00:00.000Z"),
   arrivalWindowEnd: new Date("2026-07-01T16:00:00.000Z"),
   addressText: "1 Main St, Boston MA",
@@ -52,5 +54,27 @@ describe("serviceRequestToJobFields", () => {
     });
     expect(description).not.toContain("Address:");
     expect(description).not.toContain("Access:");
+  });
+
+  it("includes descriptive line items derived from the intake (no prices)", () => {
+    const { lineItems } = serviceRequestToJobFields(BASE);
+    expect(lineItems).toBeDefined();
+    expect(lineItems?.length).toBeGreaterThan(0);
+    expect(lineItems?.some((i) => i.name === "No Cool — No cooling")).toBe(true);
+    expect(lineItems?.some((i) => i.name === "Central Ac service")).toBe(true);
+    for (const item of lineItems ?? []) {
+      expect(item.unitPriceCents).toBeUndefined();
+    }
+  });
+
+  it("omits lineItems when nothing could be derived", () => {
+    const { lineItems } = serviceRequestToJobFields({
+      ...BASE,
+      issueType: "   ",
+      jobType: null,
+      systemType: null,
+      accessNotes: null,
+    });
+    expect(lineItems).toBeUndefined();
   });
 });

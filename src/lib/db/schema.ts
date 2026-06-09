@@ -166,6 +166,17 @@ export const holdReasonEnum = pgEnum("hold_reason", [
   "other",
 ]);
 
+// Invoice / payment status synced from Housecall Pro invoice.* webhooks.
+// 'none' until HCP sends the first invoice event for the job's request; then
+// 'sent' (invoice.sent), 'paid' (invoice.paid), or 'void' (invoice.voided).
+// (Stage 4 of the HCP integration.)
+export const invoiceStatusEnum = pgEnum("invoice_status", [
+  "none",
+  "sent",
+  "paid",
+  "void",
+]);
+
 // 1. organizations
 export const organizations = pgTable("organizations", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -352,6 +363,11 @@ export const serviceRequests = pgTable(
     // for the audit trail. Plaintext (HCP's public resource id, not a secret).
     // (Stage 3 of the HCP integration.)
     hcpJobId: text("hcp_job_id"),
+    // Invoice / payment status mirrored from HCP invoice.* webhooks, linked to
+    // this request via hcpJobId. Defaults to 'none' (no invoice activity yet);
+    // an invoice.sent/paid/voided event updates it so admins can see whether a
+    // completed job has been invoiced/paid. (Stage 4 of the HCP integration.)
+    invoiceStatus: invoiceStatusEnum("invoice_status").notNull().default("none"),
     scheduledDate: timestamp("scheduled_date", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })

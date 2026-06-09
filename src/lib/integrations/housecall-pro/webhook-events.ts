@@ -29,6 +29,20 @@ export const HCP_JOB_EVENT_TYPES = [
 ] as const;
 
 /**
+ * The HCP invoice webhook event types we mirror onto a request's invoiceStatus.
+ * The invoice carries a `job_id` linking it back to the HCP job we mapped at
+ * push time (so we can find OUR service_request by hcpJobId). (Stage 4.)
+ */
+export const HCP_INVOICE_EVENT_TYPES = [
+  "invoice.sent",
+  "invoice.paid",
+  "invoice.voided",
+] as const;
+
+/** OUR invoice/payment status target for a service request (matches the DB enum). */
+export type InvoiceStatus = "sent" | "paid" | "void";
+
+/**
  * A narrowed HCP webhook event. `eventType` is kept as a free string (not a
  * union) so an unrecognized type never fails parsing — we still record it for
  * idempotency and audit, we just don't transition on it.
@@ -61,7 +75,17 @@ export function parseWebhookEvent(raw: unknown): HcpWebhookEvent | null {
     typeof obj.data === "object" && obj.data !== null
       ? (obj.data as Record<string, unknown>)
       : {};
-  const hcpJobId = typeof data.id === "string" ? data.id : null;
+  // The HCP job id this event references. For a job event the resource in `data`
+  // IS the job, so its `id` is the job id. For an invoice event the resource is
+  // the invoice (its `id` is the invoice id), which carries `job_id` linking it
+  // back to the job we mapped at push time — that's what we key on. Prefer an
+  // explicit `job_id` when present, else fall back to the resource `id`.
+  const hcpJobId =
+    typeof data.job_id === "string"
+      ? data.job_id
+      : typeof data.id === "string"
+        ? data.id
+        : null;
   return { eventId, eventType, hcpJobId };
 }
 
@@ -93,6 +117,35 @@ export function eventTypeToStatus(eventType: string): RequestStatus | null {
     case "job.canceled":
     case "job.deleted":
       return "cancelled";
+    default:
+      return null;
+  }
+}
+
+/**
+ * Map an HCP invoice event to OUR invoice/payment status, or null when the event
+ * carries no invoice-status meaning (or is unknown). Pure; the sync layer uses
+ * this to set the matching request's invoiceStatus:
+ *
+ *   - invoice.sent   → 'sent'
+ *   - invoice.paid   → 'paid'
+ *   - invoice.voided → 'void'
+ *
+ * Anything else maps to null and the handler records it + no-ops (degrade-safe).
+ * The existing job.* status mapping (eventTypeToStatus) is untouched — these two
+ * mappers are independent, so a job event never yields an invoice status and an
+ * invoice event never yields a request-status transition.
+ */
+export function eventTypeToInvoiceStatus(
+  eventType: string,
+): InvoiceStatus | null {
+  switch (eventType) {
+    case "invoice.sent":
+      return "sent";
+    case "invoice.paid":
+      return "paid";
+    case "invoice.voided":
+      return "void";
     default:
       return null;
   }

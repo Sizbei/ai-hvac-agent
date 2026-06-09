@@ -21,7 +21,11 @@ const dbState: {
   auditValues?: Record<string, unknown>;
   serviceHistoryValues?: Record<string, unknown>;
   ledgerDeletedEventId?: string;
-} = { ledgerInsertWins: true, requestRows: [] };
+  // Invoice update: which rows the conditional UPDATE ... RETURNING yields and
+  // the values it was called with.
+  updateReturnRows: Record<string, unknown>[];
+  updateValues?: Record<string, unknown>;
+} = { ledgerInsertWins: true, requestRows: [], updateReturnRows: [] };
 
 const ledgerDeleted = vi.fn();
 
@@ -61,7 +65,18 @@ vi.mock("@/lib/db", () => {
       return Object.assign(Promise.resolve(), { catch: () => Promise.resolve() });
     },
   });
-  return { db: { insert, select, delete: del } };
+  // update().set().where().returning() — the invoice-status conditional update.
+  const update = () => ({
+    set: (v: Record<string, unknown>) => {
+      dbState.updateValues = v;
+      return {
+        where: () => ({
+          returning: () => Promise.resolve(dbState.updateReturnRows),
+        }),
+      };
+    },
+  });
+  return { db: { insert, select, delete: del, update } };
 });
 
 // ── Mocked collaborators ──────────────────────────────────────────────────────
@@ -109,6 +124,8 @@ beforeEach(() => {
   dbState.ledgerValues = undefined;
   dbState.auditValues = undefined;
   dbState.serviceHistoryValues = undefined;
+  dbState.updateReturnRows = [{ id: "req_1" }];
+  dbState.updateValues = undefined;
   updateRequestStatus.mockReset();
   addFollowUp.mockReset();
   addFollowUp.mockResolvedValue(undefined);
@@ -256,5 +273,69 @@ describe("applyWebhookEvent — completion follow-up", () => {
       hcpJobId: "job_1",
     });
     expect(addFollowUp).not.toHaveBeenCalled();
+  });
+});
+
+describe("applyWebhookEvent — invoice status sync", () => {
+  const paidEvent: HcpWebhookEvent = {
+    eventId: "evt_inv_paid",
+    eventType: "invoice.paid",
+    hcpJobId: "job_1",
+  };
+
+  it("updates the matching request's invoiceStatus and audits (no state machine)", async () => {
+    dbState.updateReturnRows = [{ id: "req_1" }];
+
+    const result = await applyWebhookEvent(ORG, paidEvent);
+
+    expect(result.outcome).toBe("applied");
+    // Invoice events bypass the request-status state machine entirely.
+    expect(updateRequestStatus).not.toHaveBeenCalled();
+    // The conditional UPDATE set invoice_status to the mapped value.
+    expect(dbState.updateValues).toEqual({ invoiceStatus: "paid" });
+    // Audited with the request id + applied outcome (non-PII details).
+    expect(dbState.auditValues?.entityId).toBe("req_1");
+    const details = JSON.parse(String(dbState.auditValues?.details));
+    expect(details).toMatchObject({
+      eventId: "evt_inv_paid",
+      eventType: "invoice.paid",
+      hcpJobId: "job_1",
+      outcome: "applied",
+    });
+  });
+
+  it("is idempotent on redelivery via the ledger (no second update)", async () => {
+    dbState.updateReturnRows = [{ id: "req_1" }];
+
+    // First delivery: ledger insert wins → invoice update applied.
+    dbState.ledgerInsertWins = true;
+    const first = await applyWebhookEvent(ORG, paidEvent);
+    expect(first.outcome).toBe("applied");
+    expect(dbState.updateValues).toEqual({ invoiceStatus: "paid" });
+
+    // Redelivery: ledger insert conflicts → short-circuit before any update.
+    dbState.updateValues = undefined;
+    dbState.ledgerInsertWins = false;
+    const second = await applyWebhookEvent(ORG, paidEvent);
+    expect(second.outcome).toBe("duplicate");
+    expect(dbState.updateValues).toBeUndefined();
+  });
+
+  it("is a safe no-op when no request maps to the invoice's job", async () => {
+    dbState.updateReturnRows = []; // UPDATE matched zero rows.
+    const result = await applyWebhookEvent(ORG, paidEvent);
+    expect(result.outcome).toBe("unknown_job");
+    expect(dbState.auditValues?.entityId).toBe(null);
+  });
+
+  it("is a safe no-op when the invoice event carries no job id", async () => {
+    const result = await applyWebhookEvent(ORG, {
+      eventId: "evt_inv_nojob",
+      eventType: "invoice.sent",
+      hcpJobId: null,
+    });
+    expect(result.outcome).toBe("unknown_job");
+    // Never reached the UPDATE.
+    expect(dbState.updateValues).toBeUndefined();
   });
 });

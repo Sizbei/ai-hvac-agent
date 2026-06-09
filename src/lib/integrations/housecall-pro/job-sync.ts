@@ -69,6 +69,8 @@ async function loadJobSyncRow(
       issueType: serviceRequests.issueType,
       urgency: serviceRequests.urgency,
       description: serviceRequests.description,
+      jobType: serviceRequests.jobType,
+      systemType: serviceRequests.systemType,
       arrivalWindowStart: serviceRequests.arrivalWindowStart,
       arrivalWindowEnd: serviceRequests.arrivalWindowEnd,
       addressEncrypted: serviceRequests.addressEncrypted,
@@ -98,6 +100,8 @@ async function loadJobSyncRow(
       issueType: row.issueType,
       urgency: row.urgency,
       description: row.description,
+      jobType: row.jobType,
+      systemType: row.systemType,
       arrivalWindowStart: row.arrivalWindowStart,
       arrivalWindowEnd: row.arrivalWindowEnd,
       addressText: safeDecrypt(row.addressEncrypted),
@@ -144,6 +148,7 @@ export async function pushJobToHcp(
         description: fields.description,
         scheduleStart: fields.scheduleStart,
         scheduleEnd: fields.scheduleEnd,
+        lineItems: fields.lineItems,
       });
       logger.info(
         { organizationId, serviceRequestId, hcpJobId: initial.hcpJobId },
@@ -186,6 +191,7 @@ export async function pushJobToHcp(
       scheduleStart: fields.scheduleStart,
       scheduleEnd: fields.scheduleEnd,
       requestId: serviceRequestId,
+      lineItems: fields.lineItems,
     });
 
     // Persist the mapping, guarded on hcp_job_id IS NULL so a racing push that

@@ -31,6 +31,9 @@ export interface AdminRequestDetail extends AdminRequest {
   readonly holdReason: string | null;
   readonly followUpDate: string | null;
   readonly isAfterHours: boolean;
+  // Invoice/payment status synced from HCP invoice.* webhooks: 'none' | 'sent'
+  // | 'paid' | 'void'. 'none' means no invoice activity yet.
+  readonly invoiceStatus: string;
   readonly completedAt: string | null;
   readonly assignedTo: string | null;
   readonly transcript: readonly TranscriptMessage[];

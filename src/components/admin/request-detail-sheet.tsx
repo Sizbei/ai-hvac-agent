@@ -182,6 +182,34 @@ interface RequestDetailSheetProps {
   readonly onAssigned: () => void;
 }
 
+// Invoice/payment status synced from Housecall Pro invoice.* webhooks. Hidden
+// when there's no invoice activity yet ('none' / falsy). Color cues: paid green,
+// sent blue, void muted.
+function InvoiceStatusBadge({ status }: { readonly status: string }) {
+  if (!status || status === 'none') {
+    return null;
+  }
+  const styles: Record<string, string> = {
+    sent: 'border-blue-300 bg-blue-100 text-blue-800',
+    paid: 'border-green-300 bg-green-100 text-green-800',
+    void: 'border-gray-300 bg-gray-100 text-gray-600',
+  };
+  const labels: Record<string, string> = {
+    sent: 'Invoice sent',
+    paid: 'Invoice paid',
+    void: 'Invoice voided',
+  };
+  const className = styles[status] ?? 'border-gray-300 bg-gray-100 text-gray-600';
+  const label = labels[status] ?? `Invoice: ${status}`;
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${className}`}
+    >
+      {label}
+    </span>
+  );
+}
+
 function InfoRow({ label, value }: { readonly label: string; readonly value: string | null }) {
   return (
     <div className="flex justify-between py-1">
@@ -499,6 +527,7 @@ export function RequestDetailSheet({
                     After-hours
                   </span>
                 )}
+                <InvoiceStatusBadge status={detail.invoiceStatus} />
               </SheetDescription>
             </SheetHeader>
 

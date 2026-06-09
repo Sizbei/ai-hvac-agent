@@ -14,7 +14,13 @@
  * PII: the description carries the issue, reference, urgency, address and access
  * notes a tech needs on-site. Each labelled line is emitted only when its value
  * is present, and the caller decides what to pass through; nothing here logs.
+ *
+ * LINE ITEMS: alongside the description, the mapper also emits structured HCP
+ * line items (see line-items.ts). These are DESCRIPTIVE only — they carry NO
+ * prices (this business prices on-site). The description behavior is unchanged.
  */
+import { buildLineItemsFromRequest } from "./line-items";
+import type { HousecallLineItem } from "./types";
 
 /**
  * The slice of a service request the mapper needs. Decoupled from the DB row
@@ -32,6 +38,10 @@ export interface RequestJobInput {
   readonly arrivalWindowEnd: Date | null;
   readonly addressText: string | null;
   readonly accessNotes: string | null;
+  /** Work classification enum value (e.g. "no_cool"); feeds line items. */
+  readonly jobType?: string | null;
+  /** HVAC system enum value (e.g. "central_ac"); feeds line items. */
+  readonly systemType?: string | null;
 }
 
 /**
@@ -45,6 +55,11 @@ export interface MappedJobFields {
   readonly scheduleStart?: string;
   /** ISO-8601 UTC. */
   readonly scheduleEnd?: string;
+  /**
+   * Structured, DESCRIPTIVE line items derived from the intake (no prices).
+   * Present only when at least one item could be derived; omitted otherwise.
+   */
+  readonly lineItems?: readonly HousecallLineItem[];
 }
 
 /**
@@ -79,12 +94,22 @@ export function serviceRequestToJobFields(
   input: RequestJobInput,
 ): MappedJobFields {
   const description = buildDescription(input);
+  // Build descriptive line items alongside the description (no prices). Omit the
+  // field entirely when nothing could be derived, so the create body stays clean.
+  const derived = buildLineItemsFromRequest({
+    issueType: input.issueType,
+    jobType: input.jobType,
+    systemType: input.systemType,
+    accessNotes: input.accessNotes,
+  });
+  const lineItems = derived.length > 0 ? derived : undefined;
   if (input.arrivalWindowStart && input.arrivalWindowEnd) {
     return {
       description,
       scheduleStart: input.arrivalWindowStart.toISOString(),
       scheduleEnd: input.arrivalWindowEnd.toISOString(),
+      lineItems,
     };
   }
-  return { description };
+  return { description, lineItems };
 }

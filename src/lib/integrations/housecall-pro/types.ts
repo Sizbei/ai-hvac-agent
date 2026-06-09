@@ -73,6 +73,33 @@ export interface HousecallJob {
 }
 
 /**
+ * A single structured line item on an HCP job (a "service", "material", or
+ * "labor" row the tech sees alongside the free-text description).
+ *
+ * PRICING NOTE: this business charges based on actual work performed on-site —
+ * there is NO flat fee and NO intake-time pricing. Line items we emit are
+ * DESCRIPTIVE only; `unitPriceCents` is left undefined so the tech prices the
+ * job on-site. The field exists solely to mirror HCP's shape (it accepts a
+ * unit amount) and to keep this type honest about what HCP supports — our
+ * mapping never sets it. Callers that synthesize line items MUST leave it unset.
+ */
+export interface HousecallLineItem {
+  /** Human label for the row, e.g. "Diagnostic — No Cool". */
+  readonly name: string;
+  /** How HCP classifies the row. Defaults conceptually to a service. */
+  readonly kind?: "service" | "material" | "labor";
+  /** Quantity of the item; defaults to 1 when omitted. */
+  readonly quantity?: number;
+  /**
+   * Unit price in CENTS. INTENTIONALLY OPTIONAL AND LEFT UNSET by our mapping —
+   * see the pricing note above. Present only so the type matches HCP's surface.
+   */
+  readonly unitPriceCents?: number;
+  /** Optional longer note shown under the line. */
+  readonly description?: string;
+}
+
+/**
  * The fields we send to create an HCP job. Times are ISO-8601 UTC strings — the
  * app persists UTC everywhere and only renders Eastern, so the boundary stays
  * UTC. `requestId` is OUR service_request id, carried so a webhook can map the
@@ -87,6 +114,12 @@ export interface CreateJobInput {
   readonly scheduleEnd?: string;
   /** Our service_request id, stored on the job for back-mapping. */
   readonly requestId?: string;
+  /**
+   * Structured, DESCRIPTIVE line items derived from the intake (see
+   * {@link HousecallLineItem}). Emitted IN ADDITION TO `description`, never
+   * instead of it. Carries no prices. Omitted when nothing could be derived.
+   */
+  readonly lineItems?: readonly HousecallLineItem[];
 }
 
 /**
@@ -101,6 +134,12 @@ export interface UpdateJobInput {
   readonly scheduleStart?: string;
   /** ISO-8601 UTC. */
   readonly scheduleEnd?: string;
+  /**
+   * Structured, DESCRIPTIVE line items (see {@link HousecallLineItem}). Sent
+   * only when present so a description/schedule-only update never blanks the
+   * job's existing items. Carries no prices.
+   */
+  readonly lineItems?: readonly HousecallLineItem[];
 }
 
 /**
@@ -127,4 +166,22 @@ export interface HousecallAvailabilityRange {
 export interface HousecallAccountInfo {
   readonly companyName: string | null;
   readonly accountId: string | null;
+}
+
+/**
+ * A Housecall Pro technician (employee) resource — the subset we consume to build
+ * the active-tech roster the scheduling source reports. HCP models a tech as an
+ * "employee"; `id` is HCP's employee identifier. Only `id` is guaranteed; name is
+ * optional (and treated as PII — never crosses the public availability surface),
+ * and `isActive` mirrors HCP's active/deactivated flag so we can filter the
+ * roster down to staff who can still take jobs. Tolerant of omitted fields:
+ * HCP omits blanks and may add fields, and a missing field must never crash sync.
+ */
+export interface HousecallTechnician {
+  /** HCP employee id — the value we map to an opaque scheduling tech id. */
+  readonly id: string;
+  /** Display name, when HCP returns one. Optional + PII; not exposed publicly. */
+  readonly name?: string;
+  /** Whether the employee is active in HCP. Undefined when HCP omits it. */
+  readonly isActive?: boolean;
 }
