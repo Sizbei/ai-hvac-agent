@@ -150,6 +150,19 @@ vi.mock('@/lib/db/tenant', () => ({
   withTenant: vi.fn((_table: unknown, _orgId: string, ...conditions: unknown[]) => conditions[0] ?? true),
 }));
 
+// Stage 5: the chat route now imports the open-availability query layer to offer
+// real windows on the preferred-window step. Stub it so this smoke test (which
+// mocks the schema minimally) doesn't pull the scheduling-source → schema chain.
+// getOpenAvailability returns no windows → the chat route falls back to the
+// static window prompt, which is all this smoke flow exercises.
+vi.mock('@/lib/admin/availability-queries', () => ({
+  getOpenAvailability: vi.fn().mockResolvedValue({ days: [], windows: [] }),
+  businessDaysFrom: (start: string, count: number) =>
+    Array.from({ length: count }, (_v, i) => `${start}+${i}`),
+  businessTodayIso: () => '2026-07-01',
+  AVAILABILITY_TIME_ZONE: 'America/New_York',
+}));
+
 vi.mock('drizzle-orm', () => ({
   eq: vi.fn((...args: unknown[]) => args),
   and: vi.fn((...args: unknown[]) => args),

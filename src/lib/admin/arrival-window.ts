@@ -29,6 +29,19 @@ export function isArrivalWindow(value: string): value is ArrivalWindow {
 }
 
 /**
+ * The [startHour, endHour) bounds of a window, as plain wall-clock hours (24h).
+ * Exposed so the calendar layer can apply them in the BUSINESS timezone (Eastern)
+ * rather than the UTC interpretation arrivalWindowForDate uses — see
+ * calendar-time.ts arrivalWindowUtcForBusinessDate. Single source of truth for
+ * the window hours so the two interpretations never drift.
+ */
+export function arrivalWindowHours(
+  window: ArrivalWindow,
+): readonly [number, number] {
+  return WINDOW_HOURS[window];
+}
+
+/**
  * Resolve a chosen date + window into concrete start/end timestamps on that
  * calendar day. The window bounds are applied in UTC so the result is
  * deployment-timezone-independent: the UI sends the chosen day as UTC midnight

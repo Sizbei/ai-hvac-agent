@@ -120,6 +120,13 @@
       "when": 1780433757202,
       "tag": "0016_customer_archive",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1780433757203,
+      "tag": "0017_technician_availability",
+      "breakpoints": true
     }
   ]
 }

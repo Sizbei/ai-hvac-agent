@@ -19,12 +19,16 @@ function decide(
   customerSignal: Parameters<
     typeof decideAfterHoursDisclosure
   >[0]["customerSignal"] = "unknown",
+  bookingTarget: Parameters<
+    typeof decideAfterHoursDisclosure
+  >[0]["bookingTarget"] = "unknown",
 ): AfterHoursDecision {
   return decideAfterHoursDisclosure({
     clock,
     config: DEFAULT_AFTER_HOURS_CONFIG,
     urgency,
     customerSignal,
+    bookingTarget,
   });
 }
 
@@ -90,6 +94,55 @@ describe("decideAfterHoursDisclosure", () => {
       const d = decide(TUE_8PM_ET, null);
       expect(d.kind).toBe("ask_urgency");
       expect(d.copy.toLowerCase()).toContain("urgent");
+    });
+  });
+
+  describe("booking target gates the charge (Fix 2)", () => {
+    it("after-hours + business-hours booking → NO charge, even if urgency is high", () => {
+      // A customer chatting at 8pm who wants tomorrow morning is booking
+      // business hours. The charge is keyed to when the tech goes out, so a
+      // heuristic "high" urgency must NOT override an explicit next-day window.
+      const d = decide(TUE_8PM_ET, "high", "unknown", "business_hours");
+      expect(d.kind).toBe("offer_next_day");
+      expect(d.afterHours).toBe(true);
+      // Must affirm no charge and never quote a figure.
+      expect(d.copy.toLowerCase()).toContain("no after-hours charge");
+      expect(d.copy).not.toMatch(/\d/);
+      expect(d.copy).not.toMatch(/\$/);
+    });
+
+    it("after-hours + business-hours booking → NO charge even with an emergency classification", () => {
+      // Defensive: even an "emergency" label can't manufacture a charge once the
+      // customer has said they want a normal-hours slot.
+      const d = decide(TUE_8PM_ET, "emergency", "unknown", "business_hours");
+      expect(d.kind).toBe("offer_next_day");
+      expect(d.copy.toLowerCase()).toContain("no after-hours charge");
+    });
+
+    it("after-hours + 'now' booking target discloses the charge", () => {
+      // Customer explicitly wants someone tonight/ASAP → the service really is
+      // after hours → disclose (no dollar amount).
+      const d = decide(TUE_8PM_ET, null, "unknown", "now");
+      expect(d.kind).toBe("disclose_charge");
+      expect(d.copy).not.toMatch(/\d/);
+      expect(d.copy.toLowerCase()).toContain("after-hours");
+    });
+
+    it("business hours + business-hours booking is still 'none'", () => {
+      const d = decide(TUE_2PM_ET, "high", "unknown", "business_hours");
+      expect(d.kind).toBe("none");
+    });
+
+    it("omitting bookingTarget preserves legacy behavior (defaults to unknown)", () => {
+      // Back-compat: existing callers that don't pass bookingTarget still get
+      // the urgency-driven decision.
+      const d = decideAfterHoursDisclosure({
+        clock: TUE_8PM_ET,
+        config: DEFAULT_AFTER_HOURS_CONFIG,
+        urgency: "emergency",
+        customerSignal: "unknown",
+      });
+      expect(d.kind).toBe("disclose_charge");
     });
   });
 

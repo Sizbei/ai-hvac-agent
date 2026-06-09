@@ -14,6 +14,7 @@ import {
 } from "@/lib/admin/after-hours";
 import {
   decideAfterHoursDisclosure,
+  type BookingTarget,
   type CustomerUrgencySignal,
 } from "@/lib/ai/after-hours-chat";
 import { withTenant } from "@/lib/db/tenant";
@@ -30,6 +31,7 @@ import {
 import {
   determineNextState,
   isTerminalState,
+  type SessionState,
 } from "@/lib/ai/state-machine";
 import { checkTokenBudget, addTokenUsage } from "@/lib/ai/token-budget";
 import { DEFAULT_MAX_TURNS } from "@/lib/ai/chat-limits";
@@ -42,7 +44,16 @@ import {
 } from "@/lib/ai/triage";
 import { EMPTY_ORG_CONFIG } from "@/lib/ai/router-config";
 import { getRouterConfig } from "@/lib/admin/org-config-queries";
-import { CONFIRM_REPLY } from "@/lib/ai/constants";
+import {
+  getOpenAvailability,
+  businessDaysFrom,
+  businessTodayIso,
+} from "@/lib/admin/availability-queries";
+import {
+  buildWindowPrompt,
+  type WindowChip,
+} from "@/lib/ai/availability-prompt";
+import { CONFIRM_REPLY, HANDOFF_REPLY } from "@/lib/ai/constants";
 import { extractSlots, extractAddressLoose } from "@/lib/ai/slot-extract";
 import { withLeadIn } from "@/lib/ai/lead-ins";
 import { escalateSession } from "@/lib/ai/escalate-service";
@@ -142,6 +153,40 @@ function readUrgencySignal(
   return "unknown";
 }
 
+/**
+ * Infer WHEN the customer wants the service to happen — the signal that gates
+ * the after-hours charge (Fix 2). The charge is keyed to when the technician
+ * goes out, NOT when the customer is chatting, so a request explicitly for a
+ * business-hours window must never trigger a charge even if chatting at 11pm.
+ *
+ * Sources, in priority order:
+ *   1. The customer's stated preferred window (extras.preferredWindow):
+ *      morning/afternoon/evening → business_hours; asap → now.
+ *   2. The yes/no answer to our after-hours urgency ask: not_urgent →
+ *      business_hours; urgent → now.
+ * Otherwise "unknown" — fall back to urgency classification in the helper.
+ *
+ * Note we deliberately do NOT map a high/emergency urgency to "now" here; the
+ * helper already handles urgency directly, and a stated business-hours window
+ * should be able to override that heuristic.
+ */
+function inferBookingTarget(
+  preferredWindow: unknown,
+  customerSignal: CustomerUrgencySignal,
+): BookingTarget {
+  if (preferredWindow === "asap") return "now";
+  if (
+    preferredWindow === "morning" ||
+    preferredWindow === "afternoon" ||
+    preferredWindow === "evening"
+  ) {
+    return "business_hours";
+  }
+  if (customerSignal === "not_urgent") return "business_hours";
+  if (customerSignal === "urgent") return "now";
+  return "unknown";
+}
+
 /** True when the current instant falls in the org's after-hours window — used
  * to gate the LLM after-hours instruction block. Reuses the disclosure helper's
  * window logic (which honors `config.enabled`) so both paths agree. */
@@ -162,14 +207,77 @@ function cannedTextResponse(text: string): Response {
 }
 
 /**
+ * Graceful degradation: instead of surfacing a raw error to the customer (a red
+ * error box) when a turn can't be completed normally — token budget / turn limit
+ * reached, or the model call failed — record a warm handoff reply and escalate
+ * the session so a human picks it up. Returns the handoff copy as a normal text
+ * response so the client renders it as an assistant bubble, not an error.
+ *
+ * Best-effort: the message insert and escalation are wrapped so a DB blip still
+ * returns the handoff copy (the customer always sees a graceful message). Safe to
+ * call before any reply has streamed (all the early-gate failure paths qualify).
+ */
+async function gracefulHandoff(params: {
+  readonly organizationId: string;
+  readonly sessionId: string;
+  readonly currentStatus: SessionState;
+  readonly ipAddress: string;
+}): Promise<Response> {
+  const { organizationId, sessionId, currentStatus, ipAddress } = params;
+  try {
+    await db.insert(messages).values({
+      organizationId,
+      sessionId,
+      role: "assistant",
+      content: HANDOFF_REPLY,
+      tokensUsed: 0,
+    });
+  } catch (insertError: unknown) {
+    logger.error(
+      { error: insertError, sessionId },
+      "Graceful-handoff message insert failed — returning handoff copy anyway",
+    );
+  }
+  try {
+    const escResult = await escalateSession({
+      organizationId,
+      sessionId,
+      currentStatus,
+      ipAddress,
+    });
+    if (!escResult.ok && escResult.reason !== "already_transitioned") {
+      logger.error(
+        { sessionId, reason: escResult.reason },
+        "Graceful-handoff escalation did not apply",
+      );
+    }
+  } catch (escError: unknown) {
+    logger.error(
+      { error: escError, sessionId },
+      "Graceful-handoff escalation threw — returning handoff copy anyway",
+    );
+  }
+  return cannedTextResponse(HANDOFF_REPLY);
+}
+
+/**
  * Deterministic next-question prompt, driven by the triage engine. Maps the
  * merged slots into the triage shape and asks for the single next question
  * (safety screen → qualifying questions → required fields → enrichment). When
  * the customer has answered/skipped everything, triage returns null and we fall
  * back to a gentle "anything else?" prompt. Quick-reply chips are appended in
  * parentheses so the deterministic (0-token) path still guides the customer.
+ *
+ * Stage 5.2: when the next step is the preferred-window step, the caller may pass
+ * a `windowPrompt` built from REAL open availability (buildWindowPrompt) — we use
+ * its question + chips instead of the static "we'll confirm the time" copy so the
+ * customer is offered concrete bookable windows. The chip VALUES are unchanged
+ * (morning/afternoon/evening/asap), so capture stays deterministic.
  */
-function nextSlotPrompt(merged: KnownSlots): string {
+function nextSlotPrompt(
+  merged: KnownSlots,
+  windowPrompt?: { readonly question: string; readonly chips: readonly { readonly label: string }[] },
+): string {
   const triageSlots: TriageSlots = {
     issueType: merged.issueType ?? null,
     urgency: merged.urgency ?? null,
@@ -186,11 +294,62 @@ function nextSlotPrompt(merged: KnownSlots): string {
   if (!step) {
     return "Thanks — is there anything else that would help the technician?";
   }
+  // Offer real open windows when we've fetched them for THIS step (5.2).
+  if (step.id === "preferred_window" && windowPrompt) {
+    const chips =
+      windowPrompt.chips.length > 0
+        ? ` (${windowPrompt.chips.map((c) => c.label).join(" · ")})`
+        : "";
+    return windowPrompt.question + chips;
+  }
   const chips =
     step.quickReplies.length > 0
       ? ` (${step.quickReplies.map((r) => r.label).join(" · ")})`
       : "";
   return step.question + chips;
+}
+
+/** The triage step that would be asked next given the merged slots (same mapping
+ * nextSlotPrompt uses). Lets the route decide whether to fetch real availability
+ * BEFORE composing the reply, without duplicating the slot→triage mapping. */
+function nextStepIdFor(merged: KnownSlots): string | null {
+  const step = nextTriageStep({
+    issueType: merged.issueType ?? null,
+    urgency: merged.urgency ?? null,
+    address: merged.address ?? null,
+    name: merged.name ?? null,
+    phone: merged.phone ?? null,
+    safetyScreenPassed: true,
+    extras: { ...(merged.extras ?? {}) },
+  });
+  return step?.id ?? null;
+}
+
+/**
+ * Fetch REAL open windows for the next several business days and turn them into
+ * the preferred-window prompt (Stage 5.2). Reads through the scheduling-source
+ * seam (getOpenAvailability). Best-effort: ANY failure returns null so the caller
+ * falls back to the static window question — availability is an enhancement, never
+ * a gate on the intake. We offer next-business-day onward (skip today: a same-day
+ * booking is the after-hours/urgent path, not the standard "when works best").
+ */
+async function fetchWindowPrompt(
+  organizationId: string,
+): Promise<{ readonly question: string; readonly chips: readonly WindowChip[] } | null> {
+  try {
+    const today = businessTodayIso(new Date());
+    // Start at the day AFTER today: businessDaysFrom(today, 8) gives today..+7;
+    // we drop today so the offered openings are next-business-day onward.
+    const days = businessDaysFrom(today, 8).filter((d) => d !== today);
+    const availability = await getOpenAvailability(organizationId, days);
+    return buildWindowPrompt(availability);
+  } catch (availabilityError: unknown) {
+    logger.error(
+      { error: availabilityError, organizationId },
+      "Failed to fetch open availability for window prompt — using static prompt",
+    );
+    return null;
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -315,11 +474,19 @@ export async function POST(request: NextRequest) {
       session.tokenBudget,
     );
     if (budgetState.exhausted) {
-      return errorResponse(
-        "Token budget exhausted for this session. Please start a new session or speak with a human.",
-        "TOKEN_BUDGET_EXHAUSTED",
-        429,
+      // Don't surface a raw 429 — the customer just sees a red error box mid-chat
+      // ("it errors out when the conversation gets too long"). Degrade gracefully:
+      // connect them to a human and escalate the session instead.
+      logger.info(
+        { sessionId: session.id, tokensUsed: session.tokensUsed },
+        "Token budget exhausted — degrading to human handoff",
       );
+      return gracefulHandoff({
+        organizationId,
+        sessionId: session.id,
+        currentStatus: session.status,
+        ipAddress: ip,
+      });
     }
 
     // 4. Parse and sanitize message per SC-06
@@ -685,54 +852,90 @@ export async function POST(request: NextRequest) {
           metadataStr = JSON.stringify(extraction);
         }
 
+        // Stage 5.2: if the next thing to ask is the preferred-window step AND
+        // we're going to fall through to the deterministic next-slot prompt
+        // (not a canned intent reply / confirm), fetch REAL open windows so we
+        // offer concrete bookable bands instead of "we'll confirm the time".
+        // Only fetched on this narrow path so we never pay the read on turns
+        // that won't ask the window question. Best-effort (null → static copy).
+        const willAskWindow =
+          !extractionComplete &&
+          !(verdict.action !== "FALLBACK_LLM" && verdict.reply) &&
+          nextStepIdFor(merged) === "preferred_window";
+        const windowPrompt = willAskWindow
+          ? await fetchWindowPrompt(organizationId)
+          : null;
+
         // Reply: confirm when complete, else the intent's canned ask, else a
         // deterministic next-slot prompt (slot-provision turns).
         const nextQuestion = extractionComplete
           ? CONFIRM_REPLY
           : verdict.action !== "FALLBACK_LLM" && verdict.reply
             ? verdict.reply
-            : nextSlotPrompt(merged);
-
-        // Conversational warmth (Stage 3b): when we're still collecting info on a
-        // NON-emergency turn, prepend a brief, varied acknowledgement of the
-        // stated issue before the next question — template-based and 0-token, so
-        // the critical path stays LLM-free. We skip it once intake is complete
-        // (the confirm copy reads better on its own) and ALWAYS skip it for
-        // emergencies (withLeadIn returns "" for emergency urgency, so the exact
-        // safety copy is never softened). The merged urgency reflects this turn's
-        // router verdict + prior slots. newTurnCount rotates the variant.
-        const baseReply = extractionComplete
-          ? nextQuestion
-          : withLeadIn(
-              nextQuestion,
-              merged.issueType,
-              merged.urgency,
-              newTurnCount,
-            );
+            : nextSlotPrompt(merged, windowPrompt ?? undefined);
 
         // After-hours disclosure (deterministic path). When this intake is
         // happening outside the org's business hours we either ask whether it's
         // urgent, disclose the after-hours charge (urgent — NO dollar amount;
-        // the confirm route still computes the fee), or offer a no-charge
-        // next-business-day visit (not urgent). Emergencies never reach here
+        // the confirm route still computes the fee), or affirm a no-charge
+        // business-hours / next-business-day visit. Emergencies never reach here
         // (they take the ESCALATE branch above), so we never delay a hazard to
         // talk about charges. "none" (business hours / disabled) is a no-op.
+        //
+        // Fix 2: the charge is keyed to when the technician GOES OUT, not when
+        // the customer is chatting. We pass a bookingTarget derived from the
+        // customer's stated preferred window / urgency answer so a request for
+        // a business-hours slot (e.g. "tomorrow morning") never gets a charge,
+        // even when chatting at 11pm.
+        const bookingTarget = inferBookingTarget(
+          merged.extras?.preferredWindow,
+          urgencySignal,
+        );
         const afterHoursDecision = decideAfterHoursDisclosure({
           clock: new Date(),
           config: afterHoursConfig,
           urgency: merged.urgency ?? null,
           customerSignal: urgencySignal,
+          bookingTarget,
         });
-        // For the urgency-ask we PREFER the after-hours wording over a plain
-        // urgency question (it explains *why* we're asking); when not urgent we
-        // lead with the next-day offer; when urgent we prepend the disclosure
-        // and keep collecting. "none" leaves the reply untouched.
-        const afterHoursPrefix =
-          afterHoursDecision.kind === "none"
-            ? ""
-            : `${afterHoursDecision.copy} `;
-        const replyText =
-          afterHoursPrefix + baseReply + (nearTurnLimit ? ESCALATION_NOTE : "");
+
+        // Compose EXACTLY ONE coherent message for this turn (Fix 1). We never
+        // stack templates (after-hours line + lead-in + confirm) into one
+        // contradictory bubble. The rules:
+        //
+        //  - Intake COMPLETE: the reply is JUST the confirm copy. No after-hours
+        //    line, no warmth lead-in in front of it. (By the time intake
+        //    completes for a business-hours booking, Fix 2 means no charge is
+        //    disclosed anyway, so there is nothing to weave in.)
+        //  - Intake INCOMPLETE + there IS an after-hours move this turn (ask /
+        //    disclose / offer): that move OWNS the turn's framing. We use its
+        //    copy + the plain next question, with NO separate issue lead-in in
+        //    front — one voice only.
+        //  - Intake INCOMPLETE + no after-hours move ("none"): use the warmth
+        //    lead-in as before.
+        let replyBody: string;
+        if (extractionComplete) {
+          // nextQuestion is CONFIRM_REPLY here — stand-alone, no prefixes.
+          replyBody = nextQuestion;
+        } else if (afterHoursDecision.kind !== "none") {
+          // The after-hours copy carries the framing for this turn; append the
+          // plain next question (no lead-in) so it reads as one person talking.
+          replyBody = `${afterHoursDecision.copy} ${nextQuestion}`;
+        } else {
+          // Conversational warmth (Stage 3b): prepend a brief, varied
+          // acknowledgement of the stated issue before the next question —
+          // template-based and 0-token. withLeadIn returns "" for emergency
+          // urgency, so the exact safety copy is never softened. newTurnCount
+          // rotates the variant.
+          replyBody = withLeadIn(
+            nextQuestion,
+            merged.issueType,
+            merged.urgency,
+            newTurnCount,
+          );
+        }
+
+        const replyText = replyBody + (nearTurnLimit ? ESCALATION_NOTE : "");
 
         await db.insert(messages).values({
           organizationId,
@@ -1020,6 +1223,12 @@ export async function POST(request: NextRequest) {
     return result.toTextStreamResponse();
   } catch (error) {
     logger.error({ error }, "Chat endpoint error");
-    return errorResponse("Chat processing failed", "CHAT_FAILED", 500);
+    // Degrade gracefully rather than showing the customer a raw 500 error box.
+    // We can't reliably escalate here (the session may not have loaded, or the
+    // failure is in the stream itself), so we return the warm handoff copy as a
+    // normal assistant bubble. The budget/turn-limit paths above DO escalate; a
+    // genuine mid-stream model failure is rarer and the customer still gets a
+    // human-handoff message instead of an error.
+    return cannedTextResponse(HANDOFF_REPLY);
   }
 }

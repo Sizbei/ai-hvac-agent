@@ -6,13 +6,23 @@
  * acknowledgement of the customer's stated issue to prepend before the next
  * question — adding warmth WITHOUT an LLM call (it stays 0-token).
  *
+ * EMPATHY-ONCE: a real transcript showed the bot re-acknowledging the issue on
+ * EVERY collecting turn ("Got it...", "Understood...", "That sounds...") — a
+ * mechanical empathy decay that reads as "too AI". The fix: emit the lead-in
+ * exactly ONCE, on the first acknowledgement turn, then return "" so every
+ * later question is asked plainly. The `index` passed in is the route's
+ * `newTurnCount`, which starts at 1 on the first user turn, so the first turn to
+ * acknowledge is `index === 1`. Any other index (including the initial greeting
+ * turn before the first user reply, or later collecting turns) yields "".
+ *
  * Design constraints:
- *  - Pure, deterministic, no I/O — picks a lead-in from a fixed table using the
- *    known issueType and a rotating index so it isn't repetitive turn-to-turn.
+ *  - Pure, deterministic, no I/O — picks a single lead-in from a fixed table by
+ *    the known issueType. Variety across issues, not across turns of one chat.
  *  - EMERGENCIES are NEVER softened here: the caller must not invoke this for an
  *    emergency-urgency turn (the safety copy is exact and owned elsewhere).
  *  - Returns "" when there's nothing meaningful to acknowledge (no issue known),
- *    so the next question is sent unchanged rather than with a hollow filler.
+ *    or once the first acknowledgement turn has passed, so the next question is
+ *    sent unchanged rather than with a hollow or repeated filler.
  */
 import type { IssueType, Urgency } from "./router-types";
 
@@ -95,11 +105,21 @@ const GENERIC_LEAD_INS: readonly string[] = [
   "Understood — we'll help you sort this out.",
 ];
 
+/** The single turn on which we acknowledge the issue. `index` is the route's
+ * `newTurnCount` (1 on the first user turn), so the first acknowledgement turn
+ * is turn 1. Empathy is emitted there and ONLY there. */
+const ACK_TURN = 1;
+
 /**
  * Build a short empathetic lead-in for a NON-emergency deterministic intake
- * reply. Returns "" for emergencies (caller must keep exact safety copy), and
- * "" when there's no issue to acknowledge AND no signal worth a generic warmth
- * line. `index` rotates the variant so successive turns aren't identical.
+ * reply, emitted EXACTLY ONCE per conversation. Returns "":
+ *  - for emergencies (caller must keep exact safety copy),
+ *  - when there's no issue to acknowledge yet, and
+ *  - on every turn that isn't the first acknowledgement turn (index !== 1),
+ *    so later questions are asked plainly without a fresh "Got it / Understood".
+ *
+ * `index` is the route's `newTurnCount` (starts at 1 on the first user turn);
+ * we acknowledge only on `index === ACK_TURN`.
  */
 export function leadInForIssue(
   issueType: IssueType | null | undefined,
@@ -109,12 +129,13 @@ export function leadInForIssue(
   // Never soften emergency turns — that copy is owned by the safety path.
   if (urgency === "emergency") return "";
 
-  // Non-negative rotating index so the same issue varies turn-to-turn.
-  const i = Math.abs(Math.trunc(index));
+  // Empathy-once: acknowledge only on the first acknowledgement turn.
+  if (Math.trunc(index) !== ACK_TURN) return "";
 
   if (issueType) {
     const variants = ISSUE_LEAD_INS[issueType];
-    return variants[i % variants.length];
+    // First (most natural) variant — a single, calm acknowledgement.
+    return variants[0];
   }
 
   return "";

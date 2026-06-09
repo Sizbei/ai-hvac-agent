@@ -28,6 +28,24 @@ import type { Urgency } from "./router-types";
  */
 export type CustomerUrgencySignal = "unknown" | "urgent" | "not_urgent";
 
+/**
+ * When does the customer actually want the SERVICE to happen? The after-hours
+ * charge is about WHEN THE TECHNICIAN GOES OUT, not when the customer happens to
+ * be chatting. A customer messaging at 11pm who wants someone "tomorrow morning"
+ * is booking BUSINESS HOURS — no after-hours charge applies.
+ *
+ * - `"now"`: the customer wants service immediately / tonight / ASAP.
+ * - `"business_hours"`: the customer wants a next-business-day / morning /
+ *   afternoon / evening visit — i.e. during normal hours, so NO charge.
+ * - `"unknown"`: we don't yet know; fall back to urgency classification.
+ *
+ * NOTE: this is deliberately NOT a real appointment time — there is no calendar
+ * booking in scope yet. It's the best available proxy (the customer's stated
+ * preferred window / urgency intent), and it lets us avoid threatening a charge
+ * for a request that will plainly be serviced during business hours.
+ */
+export type BookingTarget = "unknown" | "now" | "business_hours";
+
 /** The conversational move to make this turn. */
 export type AfterHoursDecisionKind =
   // Not after-hours (or pricing disabled) — say nothing about charges.
@@ -57,6 +75,13 @@ export interface AfterHoursDecisionInput {
   readonly urgency: Urgency | null;
   /** What the customer answered to the urgency ask, if anything. */
   readonly customerSignal: CustomerUrgencySignal;
+  /**
+   * When the SERVICE is targeted to happen, inferred from the customer's stated
+   * preferred window / intent. Optional for backwards compatibility; defaults to
+   * `"unknown"`. When this is `"business_hours"` we NEVER disclose an
+   * after-hours charge — the visit is during normal hours, so no charge applies.
+   */
+  readonly bookingTarget?: BookingTarget;
 }
 
 // Copy is intentionally NUMBER-FREE: we never quote the fee (the engine still
@@ -70,6 +95,13 @@ const DISCLOSE_CHARGE_COPY =
 const OFFER_NEXT_DAY_COPY =
   "No problem — I can set you up for our next business day at no after-hours charge. Want me to do that?";
 
+// Used when the customer has stated a business-hours window (e.g. tomorrow
+// morning) WHILE we still need more intake info. We affirm the no-charge framing
+// up front so a surprise fee never appears later; the next intake question is
+// appended by the caller. Like the others, it is number-free.
+const BUSINESS_HOURS_BOOKING_COPY =
+  "Great — since that's during our normal business hours, there's no after-hours charge.";
+
 /** Urgency levels that count as "urgent enough" to skip the ask + disclose. */
 function isUrgentUrgency(urgency: Urgency | null): boolean {
   return urgency === "emergency" || urgency === "high";
@@ -79,24 +111,54 @@ function isUrgentUrgency(urgency: Urgency | null): boolean {
  * Decide the after-hours conversational move for the current turn.
  *
  * - Business hours (or pricing disabled): `"none"` — no charge talk at all.
- * - After-hours + clearly urgent (emergency/high urgency, OR the customer
- *   confirmed "yes"): `"disclose_charge"` (no dollar amount).
+ * - After-hours but the SERVICE is targeted for business hours (the customer
+ *   wants tomorrow morning / a normal-hours window): `"offer_next_day"` with a
+ *   NO-charge affirmation. The charge is keyed to when the technician goes out,
+ *   not when the customer is chatting, so a business-hours visit never incurs
+ *   one. This branch wins even over a high urgency classification, because an
+ *   explicit "tomorrow morning is fine" is a stronger signal than a heuristic.
+ * - After-hours + the service is wanted NOW / clearly urgent (emergency/high
+ *   urgency, the customer confirmed "yes", OR they asked for tonight/ASAP):
+ *   `"disclose_charge"` (no dollar amount).
  * - After-hours + clearly not urgent (customer said it can wait): `"offer_next_day"`.
  * - After-hours + urgency still unknown: `"ask_urgency"`.
+ *
+ * KEY GUARANTEE (Fix 2): we only ever disclose an after-hours charge when the
+ * request is genuinely for NOW. A next-business-day / morning booking is treated
+ * as a normal business-hours visit with no charge, so a customer chatting at
+ * 11pm for a tomorrow-morning appointment is never threatened with a fee.
  */
 export function decideAfterHoursDisclosure(
   input: AfterHoursDecisionInput,
 ): AfterHoursDecision {
   const { clock, config, urgency, customerSignal } = input;
+  const bookingTarget: BookingTarget = input.bookingTarget ?? "unknown";
 
   const afterHours = isAfterHours(clock, config);
   if (!afterHours) {
     return { kind: "none", afterHours: false, copy: "" };
   }
 
-  // Urgent: either we already classified it high/emergency, or the customer
-  // explicitly confirmed it's urgent in response to the ask.
-  if (isUrgentUrgency(urgency) || customerSignal === "urgent") {
+  // The booking is explicitly for business hours (e.g. "tomorrow morning"):
+  // no after-hours charge applies. This OVERRIDES the urgency heuristic — an
+  // explicit next-day window is the customer telling us it can wait. We affirm
+  // the no-charge framing so a surprise fee never surfaces later in the intake.
+  if (bookingTarget === "business_hours") {
+    return {
+      kind: "offer_next_day",
+      afterHours: true,
+      copy: BUSINESS_HOURS_BOOKING_COPY,
+    };
+  }
+
+  // Urgent: either we already classified it high/emergency, the customer
+  // explicitly confirmed it's urgent in response to the ask, OR they asked for
+  // service now/tonight/ASAP. The service really is happening after hours.
+  if (
+    isUrgentUrgency(urgency) ||
+    customerSignal === "urgent" ||
+    bookingTarget === "now"
+  ) {
     return {
       kind: "disclose_charge",
       afterHours: true,

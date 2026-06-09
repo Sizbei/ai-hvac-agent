@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard,
   CalendarRange,
+  CalendarClock,
   ClipboardList,
   MessagesSquare,
   BarChart3,
@@ -27,6 +28,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { useUnscheduledCount } from '@/hooks/use-unscheduled-count';
+import { unscheduledBadge } from '@/lib/admin/unscheduled-badge';
 import { cn } from '@/lib/utils';
 
 interface NavItem {
@@ -36,10 +39,13 @@ interface NavItem {
   /** Match the active state on the exact path only (for the index route, whose
    * href is a prefix of every other admin route). */
   readonly exact?: boolean;
+  /** When 'unscheduled', the item shows the unscheduled-jobs notification badge. */
+  readonly badge?: 'unscheduled';
 }
 
 const NAV_ITEMS: readonly NavItem[] = [
   { label: 'Dashboard', href: '/admin', icon: LayoutDashboard, exact: true },
+  { label: 'Calendar', href: '/admin/calendar', icon: CalendarClock, badge: 'unscheduled' },
   { label: 'Dispatch', href: '/admin/dispatch', icon: CalendarRange },
   { label: 'Requests', href: '/admin/requests', icon: ClipboardList },
   { label: 'Conversations', href: '/admin/conversations', icon: MessagesSquare },
@@ -66,6 +72,8 @@ export function Sidebar({
   const pathname = usePathname();
   const [isMobile, setIsMobile] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const { count: unscheduledCount } = useUnscheduledCount();
+  const badge = unscheduledBadge(unscheduledCount);
 
   useEffect(() => {
     const check = () => {
@@ -158,6 +166,14 @@ export function Sidebar({
                   >
                     <Icon className="size-5 shrink-0" />
                     <span>{item.label}</span>
+                    {item.badge === 'unscheduled' && badge.visible && (
+                      <span
+                        aria-label={badge.srLabel}
+                        className="ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500 px-1.5 text-[11px] font-semibold text-white"
+                      >
+                        {badge.label}
+                      </span>
+                    )}
                   </Link>
                 );
               })}
@@ -217,11 +233,12 @@ export function Sidebar({
                 : pathname.startsWith(item.href);
               const Icon = item.icon;
 
+              const showBadge = item.badge === 'unscheduled' && badge.visible;
               const linkContent = (
                 <Link
                   href={item.href}
                   className={cn(
-                    'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                    'relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
                     isActive
                       ? 'bg-primary/10 text-primary'
                       : 'text-muted-foreground hover:bg-muted hover:text-foreground',
@@ -230,6 +247,20 @@ export function Sidebar({
                 >
                   <Icon className="size-5 shrink-0" />
                   {!isCollapsed && <span>{item.label}</span>}
+                  {showBadge && !isCollapsed && (
+                    <span
+                      aria-label={badge.srLabel}
+                      className="ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500 px-1.5 text-[11px] font-semibold text-white"
+                    >
+                      {badge.label}
+                    </span>
+                  )}
+                  {showBadge && isCollapsed && (
+                    <span
+                      aria-label={badge.srLabel}
+                      className="absolute right-1 top-1 size-2 rounded-full bg-amber-500"
+                    />
+                  )}
                 </Link>
               );
 

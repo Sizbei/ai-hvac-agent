@@ -7,8 +7,8 @@ import {
 } from '@/lib/ai/token-budget';
 
 describe('DEFAULT_TOKEN_BUDGET', () => {
-  it('should be 10,000', () => {
-    expect(DEFAULT_TOKEN_BUDGET).toBe(10_000);
+  it('should be 40,000 (raised from 10k so a long intake degrades gracefully rather than erroring at the cap)', () => {
+    expect(DEFAULT_TOKEN_BUDGET).toBe(40_000);
   });
 });
 
@@ -16,31 +16,31 @@ describe('checkTokenBudget', () => {
   it('should return full budget when 0 tokens used', () => {
     const state = checkTokenBudget(0);
     expect(state.tokensUsed).toBe(0);
-    expect(state.tokenBudget).toBe(10_000);
-    expect(state.remaining).toBe(10_000);
+    expect(state.tokenBudget).toBe(DEFAULT_TOKEN_BUDGET);
+    expect(state.remaining).toBe(DEFAULT_TOKEN_BUDGET);
     expect(state.exhausted).toBe(false);
     expect(state.percentUsed).toBe(0);
   });
 
   it('should show exhausted when budget fully used', () => {
-    const state = checkTokenBudget(10_000);
+    const state = checkTokenBudget(DEFAULT_TOKEN_BUDGET);
     expect(state.remaining).toBe(0);
     expect(state.exhausted).toBe(true);
     expect(state.percentUsed).toBe(100);
   });
 
-  it('should show 50% used at 5000 tokens', () => {
-    const state = checkTokenBudget(5_000);
-    expect(state.remaining).toBe(5_000);
+  it('should show 50% used at half the budget', () => {
+    const state = checkTokenBudget(DEFAULT_TOKEN_BUDGET / 2);
+    expect(state.remaining).toBe(DEFAULT_TOKEN_BUDGET / 2);
     expect(state.exhausted).toBe(false);
     expect(state.percentUsed).toBe(50);
   });
 
   it('should clamp remaining to 0 when over budget', () => {
-    const state = checkTokenBudget(12_000);
+    const state = checkTokenBudget(DEFAULT_TOKEN_BUDGET + 2_000);
     expect(state.remaining).toBe(0);
     expect(state.exhausted).toBe(true);
-    expect(state.percentUsed).toBe(120);
+    expect(state.percentUsed).toBeGreaterThan(100);
   });
 
   it('should accept custom budget', () => {
@@ -51,7 +51,7 @@ describe('checkTokenBudget', () => {
   });
 
   it('should handle edge case of 1 token remaining', () => {
-    const state = checkTokenBudget(9_999);
+    const state = checkTokenBudget(DEFAULT_TOKEN_BUDGET - 1);
     expect(state.remaining).toBe(1);
     expect(state.exhausted).toBe(false);
   });
@@ -59,23 +59,23 @@ describe('checkTokenBudget', () => {
 
 describe('canAffordTokens', () => {
   it('should return true when cost fits within budget', () => {
-    expect(canAffordTokens(9_000, 500)).toBe(true);
+    expect(canAffordTokens(DEFAULT_TOKEN_BUDGET - 1_000, 500)).toBe(true);
   });
 
   it('should return false when cost exceeds remaining budget', () => {
-    expect(canAffordTokens(9_500, 600)).toBe(false);
+    expect(canAffordTokens(DEFAULT_TOKEN_BUDGET - 500, 600)).toBe(false);
   });
 
   it('should return false when already at budget limit', () => {
-    expect(canAffordTokens(10_000, 1)).toBe(false);
+    expect(canAffordTokens(DEFAULT_TOKEN_BUDGET, 1)).toBe(false);
   });
 
   it('should return true when cost exactly reaches budget', () => {
-    expect(canAffordTokens(9_500, 500)).toBe(true);
+    expect(canAffordTokens(DEFAULT_TOKEN_BUDGET - 500, 500)).toBe(true);
   });
 
   it('should return true for zero-cost operation', () => {
-    expect(canAffordTokens(10_000, 0)).toBe(true);
+    expect(canAffordTokens(DEFAULT_TOKEN_BUDGET, 0)).toBe(true);
   });
 
   it('should work with custom budget', () => {
@@ -89,19 +89,19 @@ describe('addTokenUsage', () => {
     const result = addTokenUsage(5_000, 200);
     expect(result.newTotal).toBe(5_200);
     expect(result.budgetState.exhausted).toBe(false);
-    expect(result.budgetState.remaining).toBe(4_800);
+    expect(result.budgetState.remaining).toBe(DEFAULT_TOKEN_BUDGET - 5_200);
   });
 
   it('should show exhausted when addition exceeds budget', () => {
-    const result = addTokenUsage(9_800, 300);
-    expect(result.newTotal).toBe(10_100);
+    const result = addTokenUsage(DEFAULT_TOKEN_BUDGET - 200, 300);
+    expect(result.newTotal).toBe(DEFAULT_TOKEN_BUDGET + 100);
     expect(result.budgetState.exhausted).toBe(true);
     expect(result.budgetState.remaining).toBe(0);
   });
 
   it('should show exhausted at exactly budget', () => {
-    const result = addTokenUsage(9_500, 500);
-    expect(result.newTotal).toBe(10_000);
+    const result = addTokenUsage(DEFAULT_TOKEN_BUDGET - 500, 500);
+    expect(result.newTotal).toBe(DEFAULT_TOKEN_BUDGET);
     expect(result.budgetState.exhausted).toBe(true);
     expect(result.budgetState.remaining).toBe(0);
   });

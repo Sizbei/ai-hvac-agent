@@ -53,7 +53,7 @@ export function MessageList({ messages, isStreaming, showFeedback }: MessageList
               ref={isAssistant && isLast ? lastAssistantRef : undefined}
             >
               <MessageBubble message={message} isLatest={isLast} />
-              {showFeedback && isAssistant && message.id !== 'welcome' && (
+              {showFeedback && isAssistant && isLast && message.id !== 'welcome' && (
                 <div className="flex justify-start">
                   <MessageFeedback messageIndex={index} />
                 </div>
