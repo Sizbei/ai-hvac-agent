@@ -66,6 +66,26 @@ describe("buildSystemPrompt — default (no brand)", () => {
     expect(prompt).toMatch(/^\/no_think/);
   });
 
+  it("enforces calm-dispatcher tone: empathy once, no script narration, plain prose, confirm once", () => {
+    const prompt = buildSystemPrompt();
+    // Empathy once, never repeated.
+    expect(prompt).toContain("ONCE");
+    expect(prompt).toContain("NEVER repeat empathy");
+    // No script narration of the upcoming steps.
+    expect(prompt).toContain("NEVER narrate your own steps");
+    // Plain prose: no markdown / bold / emoji / checkmarks instructed.
+    expect(prompt).toContain("NO markdown");
+    expect(prompt).toContain("NO emoji");
+    expect(prompt).toMatch(/NO bold|asterisks/);
+    // The prompt itself must not contain markdown bullets, bold, emoji, or checkmarks.
+    expect(prompt).not.toContain("✅");
+    expect(prompt).not.toMatch(/\*\*/);
+    expect(prompt).not.toMatch(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u);
+    // Confirm exactly once at the end, not a per-turn re-summary.
+    expect(prompt).toContain("Confirm EXACTLY ONCE");
+    expect(prompt).toContain("do NOT re-summarize");
+  });
+
   it("empty-string and whitespace-only brand fields fall back to generic", () => {
     const prompt = buildSystemPrompt({
       companyName: "   ",

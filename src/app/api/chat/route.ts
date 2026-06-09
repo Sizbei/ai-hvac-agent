@@ -14,6 +14,7 @@ import {
 } from "@/lib/admin/after-hours";
 import {
   decideAfterHoursDisclosure,
+  type BookingTarget,
   type CustomerUrgencySignal,
 } from "@/lib/ai/after-hours-chat";
 import { withTenant } from "@/lib/db/tenant";
@@ -139,6 +140,40 @@ function readUrgencySignal(
   ) {
     return "not_urgent";
   }
+  return "unknown";
+}
+
+/**
+ * Infer WHEN the customer wants the service to happen — the signal that gates
+ * the after-hours charge (Fix 2). The charge is keyed to when the technician
+ * goes out, NOT when the customer is chatting, so a request explicitly for a
+ * business-hours window must never trigger a charge even if chatting at 11pm.
+ *
+ * Sources, in priority order:
+ *   1. The customer's stated preferred window (extras.preferredWindow):
+ *      morning/afternoon/evening → business_hours; asap → now.
+ *   2. The yes/no answer to our after-hours urgency ask: not_urgent →
+ *      business_hours; urgent → now.
+ * Otherwise "unknown" — fall back to urgency classification in the helper.
+ *
+ * Note we deliberately do NOT map a high/emergency urgency to "now" here; the
+ * helper already handles urgency directly, and a stated business-hours window
+ * should be able to override that heuristic.
+ */
+function inferBookingTarget(
+  preferredWindow: unknown,
+  customerSignal: CustomerUrgencySignal,
+): BookingTarget {
+  if (preferredWindow === "asap") return "now";
+  if (
+    preferredWindow === "morning" ||
+    preferredWindow === "afternoon" ||
+    preferredWindow === "evening"
+  ) {
+    return "business_hours";
+  }
+  if (customerSignal === "not_urgent") return "business_hours";
+  if (customerSignal === "urgent") return "now";
   return "unknown";
 }
 
@@ -693,46 +728,68 @@ export async function POST(request: NextRequest) {
             ? verdict.reply
             : nextSlotPrompt(merged);
 
-        // Conversational warmth (Stage 3b): when we're still collecting info on a
-        // NON-emergency turn, prepend a brief, varied acknowledgement of the
-        // stated issue before the next question — template-based and 0-token, so
-        // the critical path stays LLM-free. We skip it once intake is complete
-        // (the confirm copy reads better on its own) and ALWAYS skip it for
-        // emergencies (withLeadIn returns "" for emergency urgency, so the exact
-        // safety copy is never softened). The merged urgency reflects this turn's
-        // router verdict + prior slots. newTurnCount rotates the variant.
-        const baseReply = extractionComplete
-          ? nextQuestion
-          : withLeadIn(
-              nextQuestion,
-              merged.issueType,
-              merged.urgency,
-              newTurnCount,
-            );
-
         // After-hours disclosure (deterministic path). When this intake is
         // happening outside the org's business hours we either ask whether it's
         // urgent, disclose the after-hours charge (urgent — NO dollar amount;
-        // the confirm route still computes the fee), or offer a no-charge
-        // next-business-day visit (not urgent). Emergencies never reach here
+        // the confirm route still computes the fee), or affirm a no-charge
+        // business-hours / next-business-day visit. Emergencies never reach here
         // (they take the ESCALATE branch above), so we never delay a hazard to
         // talk about charges. "none" (business hours / disabled) is a no-op.
+        //
+        // Fix 2: the charge is keyed to when the technician GOES OUT, not when
+        // the customer is chatting. We pass a bookingTarget derived from the
+        // customer's stated preferred window / urgency answer so a request for
+        // a business-hours slot (e.g. "tomorrow morning") never gets a charge,
+        // even when chatting at 11pm.
+        const bookingTarget = inferBookingTarget(
+          merged.extras?.preferredWindow,
+          urgencySignal,
+        );
         const afterHoursDecision = decideAfterHoursDisclosure({
           clock: new Date(),
           config: afterHoursConfig,
           urgency: merged.urgency ?? null,
           customerSignal: urgencySignal,
+          bookingTarget,
         });
-        // For the urgency-ask we PREFER the after-hours wording over a plain
-        // urgency question (it explains *why* we're asking); when not urgent we
-        // lead with the next-day offer; when urgent we prepend the disclosure
-        // and keep collecting. "none" leaves the reply untouched.
-        const afterHoursPrefix =
-          afterHoursDecision.kind === "none"
-            ? ""
-            : `${afterHoursDecision.copy} `;
-        const replyText =
-          afterHoursPrefix + baseReply + (nearTurnLimit ? ESCALATION_NOTE : "");
+
+        // Compose EXACTLY ONE coherent message for this turn (Fix 1). We never
+        // stack templates (after-hours line + lead-in + confirm) into one
+        // contradictory bubble. The rules:
+        //
+        //  - Intake COMPLETE: the reply is JUST the confirm copy. No after-hours
+        //    line, no warmth lead-in in front of it. (By the time intake
+        //    completes for a business-hours booking, Fix 2 means no charge is
+        //    disclosed anyway, so there is nothing to weave in.)
+        //  - Intake INCOMPLETE + there IS an after-hours move this turn (ask /
+        //    disclose / offer): that move OWNS the turn's framing. We use its
+        //    copy + the plain next question, with NO separate issue lead-in in
+        //    front — one voice only.
+        //  - Intake INCOMPLETE + no after-hours move ("none"): use the warmth
+        //    lead-in as before.
+        let replyBody: string;
+        if (extractionComplete) {
+          // nextQuestion is CONFIRM_REPLY here — stand-alone, no prefixes.
+          replyBody = nextQuestion;
+        } else if (afterHoursDecision.kind !== "none") {
+          // The after-hours copy carries the framing for this turn; append the
+          // plain next question (no lead-in) so it reads as one person talking.
+          replyBody = `${afterHoursDecision.copy} ${nextQuestion}`;
+        } else {
+          // Conversational warmth (Stage 3b): prepend a brief, varied
+          // acknowledgement of the stated issue before the next question —
+          // template-based and 0-token. withLeadIn returns "" for emergency
+          // urgency, so the exact safety copy is never softened. newTurnCount
+          // rotates the variant.
+          replyBody = withLeadIn(
+            nextQuestion,
+            merged.issueType,
+            merged.urgency,
+            newTurnCount,
+          );
+        }
+
+        const replyText = replyBody + (nearTurnLimit ? ESCALATION_NOTE : "");
 
         await db.insert(messages).values({
           organizationId,
