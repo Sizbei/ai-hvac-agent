@@ -2,6 +2,7 @@ import { NextRequest, after } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
 import { placeAndAssignRequest } from "@/lib/admin/scheduling-queries";
 import { syncRequestToCalendar } from "@/lib/integrations/google-calendar/sync";
+import { pushJobToHcp } from "@/lib/integrations/housecall-pro/job-sync";
 import {
   arrivalWindowUtcForBusinessDate,
   isRealIsoDate,
@@ -173,6 +174,11 @@ export async function POST(
     // the background — after() so the response isn't blocked and a Google
     // outage can't fail the reschedule. No-ops when the org isn't connected.
     after(() => syncRequestToCalendar(session.organizationId, id));
+
+    // Mirror the reschedule/reassign into Housecall Pro: pushJobToHcp UPDATEs the
+    // existing HCP job with the new window (idempotent — it created the job at
+    // confirm time). after() + degrade-safe; no-ops when the org isn't connected.
+    after(() => pushJobToHcp(session.organizationId, id));
 
     return successResponse(result);
   } catch (error: unknown) {

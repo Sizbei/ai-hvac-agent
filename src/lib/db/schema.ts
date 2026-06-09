@@ -344,6 +344,14 @@ export const serviceRequests = pgTable(
     referenceNumber: varchar("reference_number", { length: 20 })
       .notNull()
       .unique(),
+    // Housecall Pro job id this request maps to, once pushed. NULL until the org
+    // is HCP-connected and a successful create-job has mirrored the booking to
+    // HCP. Set once and treated idempotently: a re-push of an already-mapped
+    // request UPDATEs the existing HCP job (reschedule/reassign) instead of
+    // creating a duplicate; on cancel the HCP job is deleted but the id is left
+    // for the audit trail. Plaintext (HCP's public resource id, not a secret).
+    // (Stage 3 of the HCP integration.)
+    hcpJobId: text("hcp_job_id"),
     scheduledDate: timestamp("scheduled_date", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -446,6 +454,11 @@ export const customers = pgTable(
       .default("none"),
     // When true the bot must refuse to book / warn (ServiceTitan "Do Not Service").
     doNotService: boolean("do_not_service").notNull().default(false),
+    // Housecall Pro customer id this row maps to, once synced. NULL until the
+    // org is HCP-connected and a successful find-or-create has mirrored the
+    // customer to HCP. Set once and treated as idempotent: a re-sync of an
+    // already-mapped customer is a no-op. (Stage 2 of the HCP integration.)
+    hcpCustomerId: text("hcp_customer_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -811,6 +824,81 @@ export const googleCalendarConnections = pgTable(
     index("gcal_connections_org_id_idx").on(table.organizationId),
     // One Google Calendar connection per organization.
     uniqueIndex("gcal_connections_org_unique").on(table.organizationId),
+  ],
+);
+
+// 16. housecall_pro_connections — per-org Housecall Pro (HCP) API link.
+// One row per organization (unique). An HCP API key grants FULL account access,
+// so it is stored ENCRYPTED (AES-256-GCM via @/lib/crypto), NEVER plaintext,
+// NEVER logged. `accountInfo` caches non-secret metadata (company name, account
+// id) for the settings panel only. `connected` lets an org disconnect (clear
+// the key) without deleting the row's history.
+export const housecallProConnections = pgTable(
+  "housecall_pro_connections",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id),
+    // AES-256-GCM ciphertext of the HCP API key. Never null while connected;
+    // cleared (and connected=false) on disconnect.
+    apiKeyEncrypted: text("api_key_encrypted"),
+    // AES-256-GCM ciphertext of the per-org HCP WEBHOOK signing secret (the
+    // value HCP shows when a webhook is configured for this account). Used to
+    // verify inbound job-status webhooks (Stage 5). Optional: when null the
+    // env-level HOUSECALL_WEBHOOK_SECRET is used instead, and when neither is
+    // present the webhook endpoint rejects everything (fail closed). Never
+    // logged. (Stage 5 of the HCP integration.)
+    webhookSecretEncrypted: text("webhook_secret_encrypted"),
+    // Non-secret account metadata cache (company name, account id) — display only.
+    accountInfo: jsonb("account_info"),
+    connected: boolean("connected").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("hcp_connections_org_id_idx").on(table.organizationId),
+    // One Housecall Pro connection per organization.
+    uniqueIndex("hcp_connections_org_unique").on(table.organizationId),
+  ],
+);
+
+// 16b. hcp_webhook_events — IDEMPOTENCY ledger for inbound HCP webhooks.
+// HCP retries webhook delivery, so the same event id can arrive more than once.
+// We record each processed event id; the unique (org, event_id) index lets the
+// handler insert-on-conflict-do-nothing and treat a zero-row insert as "already
+// processed" — so a redelivery never applies a second status update. We persist
+// only NON-secret metadata (the HCP event id + event type + the job id it
+// referenced); never the raw payload or any secret. (Stage 5.)
+export const hcpWebhookEvents = pgTable(
+  "hcp_webhook_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id),
+    // HCP's event id (the `id` field on the webhook envelope). Deduped per org.
+    eventId: text("event_id").notNull(),
+    // HCP event type, e.g. "job.completed" — stored for the audit trail only.
+    eventType: text("event_type").notNull(),
+    // The HCP job id the event referenced (may be null for non-job events we
+    // still record as seen). Plaintext — HCP's public resource id, not a secret.
+    hcpJobId: text("hcp_job_id"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("hcp_webhook_events_org_id_idx").on(table.organizationId),
+    // One ledger row per (org, event id): the dedupe key the handler races on.
+    uniqueIndex("hcp_webhook_events_org_event_unique").on(
+      table.organizationId,
+      table.eventId,
+    ),
   ],
 );
 

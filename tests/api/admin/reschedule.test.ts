@@ -42,6 +42,14 @@ vi.mock('@/lib/integrations/google-calendar/sync', () => ({
   deleteRequestFromCalendar: vi.fn().mockResolvedValue(undefined),
 }));
 
+// Same for the Housecall Pro job sync the reschedule route schedules via after()
+// — its own unit-tested module; stub it so the inline after() callback doesn't
+// reach the DB/HCP here.
+vi.mock('@/lib/integrations/housecall-pro/job-sync', () => ({
+  pushJobToHcp: vi.fn().mockResolvedValue(undefined),
+  cancelHcpJob: vi.fn().mockResolvedValue(undefined),
+}));
+
 // calendar-time + arrival-window run REAL — they're pure timezone math, and we
 // want to assert the route persists the Eastern window the dispatcher dropped on.
 import { POST as rescheduleHandler } from '@/app/api/admin/requests/[id]/reschedule/route';
