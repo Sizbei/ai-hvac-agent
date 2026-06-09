@@ -37,7 +37,8 @@ Built with **Next.js 16**, **Qwen** (via Alibaba DashScope, OpenAI-compatible),
   request via `generateText` + tolerant JSON parsing that works reliably against
   DashScope.
 - **Telephone agent (voice).** The same intake agent answers phone calls via Twilio,
-  speaking with a natural **Amazon Polly neural voice**. It reuses the exact router /
+  speaking with a natural **Amazon Polly neural voice** — try the live demo by calling
+  **(231) 559-9669**. It reuses the exact router /
   extraction / state-machine core as the web chat — a voice persona, not a second
   bot — with signed webhooks and deterministic emergency escalation.
 - **Long conversations.** A background **summary-compaction** step folds older turns

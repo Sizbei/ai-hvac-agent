@@ -15,6 +15,7 @@ import {
   CheckCircle2,
   Code2,
   BookOpen,
+  Phone,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -29,6 +30,9 @@ const NAV = [
   { label: 'Admin', href: '/admin' },
   { label: 'Docs', href: '/docs.html' },
 ];
+
+/** The live Twilio voice number — callers reach the same intake agent by phone. */
+const DEMO_PHONE = { display: '(231) 559-9669', tel: '+12315599669' } as const;
 
 const STATS = [
   { value: '~55%', label: 'turns answered with zero LLM tokens' },
@@ -183,7 +187,18 @@ export default function Home() {
               </Button>
             </div>
 
-            <p className="lp-rise mt-4 text-sm text-muted-foreground" style={delay(300)}>
+            <p className="lp-rise mt-4 text-sm text-muted-foreground" style={delay(280)}>
+              Or call the agent — it answers in a natural voice:{' '}
+              <a
+                href={`tel:${DEMO_PHONE.tel}`}
+                className="inline-flex items-center gap-1.5 font-semibold text-foreground underline-offset-4 transition-colors hover:text-primary hover:underline"
+              >
+                <Phone className="size-3.5" />
+                {DEMO_PHONE.display}
+              </a>
+            </p>
+
+            <p className="lp-rise mt-3 text-sm text-muted-foreground" style={delay(300)}>
               Admin login{' '}
               <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground">
                 admin@demo-hvac.com
@@ -309,6 +324,15 @@ export default function Home() {
               >
                 Try the live demo
                 <ArrowRight className="size-4" data-icon="inline-end" />
+              </Button>
+              <Button
+                size="lg"
+                variant="outline"
+                className="h-11 px-5 text-base"
+                render={<a href={`tel:${DEMO_PHONE.tel}`} />}
+              >
+                <Phone className="size-4" data-icon="inline-start" />
+                Call {DEMO_PHONE.display}
               </Button>
               <Button
                 size="lg"
