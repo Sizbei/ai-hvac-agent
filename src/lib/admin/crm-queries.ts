@@ -13,6 +13,12 @@ import {
 import { withTenant } from "@/lib/db/tenant";
 import { logAudit } from "@/lib/admin/audit";
 import { encrypt, decrypt, blindIndex } from "@/lib/crypto";
+import {
+  sanitizeName,
+  sanitizePhone,
+  sanitizeAddress,
+  sanitizeEmail,
+} from "@/lib/ai/sanitize-fields";
 import type {
   CustomerRecord,
   CustomerDetail,
@@ -506,17 +512,24 @@ export async function upsertCustomerByContact(
   organizationId: string,
   input: FindOrCreateCustomerInput,
 ): Promise<string> {
+  // Dedupe hashes are computed from the RAW input — computeContactHashes
+  // normalizes internally (lower-cased email, digits-only phone), so formatting
+  // the phone for display below cannot change which customer this resolves to.
   const { emailHash, phoneHash } = computeContactHashes({
     email: input.email,
     phone: input.phone,
   });
 
+  // Sanitize the values we ENCRYPT for display/dispatch: capitalize the name,
+  // format the phone, tidy the address. The chat path already sanitizes via
+  // buildExtraction, but a direct POST to /api/session/confirm reaches here
+  // without that, so this is the authoritative persistence-boundary pass.
   const values = {
     organizationId,
-    nameEncrypted: encrypt(input.name ?? UNKNOWN_CUSTOMER_NAME),
-    phoneEncrypted: input.phone ? encrypt(input.phone) : null,
-    emailEncrypted: input.email ? encrypt(input.email) : null,
-    addressEncrypted: input.address ? encrypt(input.address) : null,
+    nameEncrypted: encrypt(input.name ? sanitizeName(input.name) : UNKNOWN_CUSTOMER_NAME),
+    phoneEncrypted: input.phone ? encrypt(sanitizePhone(input.phone)) : null,
+    emailEncrypted: input.email ? encrypt(sanitizeEmail(input.email)) : null,
+    addressEncrypted: input.address ? encrypt(sanitizeAddress(input.address)) : null,
     emailHash,
     phoneHash,
   };
