@@ -94,14 +94,14 @@ const DISCLOSE_CHARGE_COPY =
   "Since it's after our normal hours, there's an additional after-hours service charge, and our team will confirm the details. Let's get the rest of your information so we can get someone out to you.";
 
 const OFFER_NEXT_DAY_COPY =
-  "No problem — I can set you up for our next business day at no after-hours charge. Want me to do that?";
+  "No problem. I can set you up for our next business day at no after-hours charge. Want me to do that?";
 
 // Used when the customer has stated a business-hours window (e.g. tomorrow
 // morning) WHILE we still need more intake info. We affirm the no-charge framing
 // up front so a surprise fee never appears later; the next intake question is
 // appended by the caller. Like the others, it is number-free.
 const BUSINESS_HOURS_BOOKING_COPY =
-  "Great — since that's during our normal business hours, there's no after-hours charge.";
+  "Great. Since that's during our normal business hours, there's no after-hours charge.";
 
 /** Urgency levels that count as "urgent enough" to skip the ask + disclose. */
 function isUrgentUrgency(urgency: Urgency | null): boolean {

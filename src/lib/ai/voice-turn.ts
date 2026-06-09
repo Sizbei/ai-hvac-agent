@@ -36,7 +36,7 @@ import { logger } from "@/lib/logger";
 
 /** Spoken equivalent of CONFIRM_REPLY — no "tap a button" affordance. */
 export const VOICE_CONFIRM_REPLY =
-  "Great — I have everything I need. I'll get this over to our team and a technician will be in touch to schedule. Is there anything else I can help you with?";
+  "Great. I have everything I need. I'll get this over to our team and a technician will be in touch to schedule. Is there anything else I can help you with?";
 
 export interface VoiceSession {
   readonly id: string;

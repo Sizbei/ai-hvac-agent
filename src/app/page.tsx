@@ -3,18 +3,20 @@ import { Bricolage_Grotesque } from 'next/font/google';
 import {
   ArrowRight,
   Wind,
+  Snowflake,
   Flame,
-  Zap,
+  Wrench,
+  Refrigerator,
   ShieldAlert,
-  Lock,
-  GitBranch,
-  Gauge,
+  Clock,
+  Award,
+  BadgeCheck,
+  Users,
+  MapPin,
+  Mail,
+  CheckCircle2,
   MessagesSquare,
   LayoutDashboard,
-  BrainCircuit,
-  CheckCircle2,
-  Code2,
-  BookOpen,
   Phone,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -25,66 +27,63 @@ const display = Bricolage_Grotesque({
   variable: '--font-display',
 });
 
+/** Verified Spears Services contact facts (spearsservices.com). */
+const SPEARS = {
+  name: 'Spears Services',
+  positioning: 'Commercial Repair Experts in TN, VA, NC',
+  phoneDisplay: '423-854-9505',
+  phoneTel: '+14238549505',
+  email: 'office@spearsservices.com',
+  address: '3501 W Market St, Suite 1, Johnson City, TN 37604',
+} as const;
+
+/** The live Twilio voice number for the AI agent demo. */
+const DEMO_PHONE = { display: '(231) 559-9669', tel: '+12315599669' } as const;
+
 const NAV = [
   { label: 'Live demo', href: '/chat' },
   { label: 'Admin', href: '/admin' },
   { label: 'Docs', href: '/docs.html' },
 ];
 
-/** The live Twilio voice number — callers reach the same intake agent by phone. */
-const DEMO_PHONE = { display: '(231) 559-9669', tel: '+12315599669' } as const;
-
-const STATS = [
-  { value: '~55%', label: 'turns answered with zero LLM tokens' },
-  { value: '65', label: 'deterministic intents in the router' },
-  { value: '<150ms', label: 'typical canned-answer latency' },
-  { value: 'AES-256', label: 'GCM encryption on every PII field' },
-];
-
-const HIGHLIGHTS = [
+const SERVICES = [
   {
-    icon: Zap,
-    title: 'A 0-token intent router',
-    body: 'Greetings, FAQs, emergencies, and slot-collection resolve deterministically. The LLM is the fallback for novel input only — most turns cost nothing.',
+    icon: Wind,
+    title: 'HVAC Services',
+    body: 'Heating and cooling repair for commercial and residential systems, with most jobs finished in a single trip.',
   },
   {
-    icon: ShieldAlert,
-    title: 'Safety-first escalation',
-    body: 'Gas, CO, fire, and flooding messages short-circuit with qualifier-gated matching, return safety guidance, and lock the session instantly.',
+    icon: Refrigerator,
+    title: 'Refrigeration Services',
+    body: 'Walk-in coolers, reach-in freezers, display cases, beverage coolers, and ice makers kept running.',
   },
   {
-    icon: BrainCircuit,
-    title: 'Tolerant extraction',
-    body: 'Conversations distill into a validated service request via generateText + a forgiving JSON parser — because the model endpoint ignores strict schema mode.',
+    icon: Snowflake,
+    title: 'Ice Machine Repair & Service',
+    body: 'Commercial ice machine repair and preventive maintenance contracts so you never run dry.',
   },
   {
-    icon: Lock,
-    title: 'Security posture',
-    body: 'Field-level PII encryption, JWT admin auth, multi-tenant query scoping, per-IP rate limiting, per-session token budgets, and audit logging.',
+    icon: Flame,
+    title: 'Boiler Repair & Service',
+    body: 'Gas, electric, and oil boiler repair plus preventive maintenance plans for steady, safe heat.',
   },
   {
-    icon: GitBranch,
-    title: 'Multi-tenant by design',
-    body: 'Every query is scoped to an organization through a single helper, so one deployment cleanly serves many HVAC companies.',
-  },
-  {
-    icon: Gauge,
-    title: 'Built-in observability',
-    body: 'An AI Insights dashboard tracks deflection rate, the intake funnel, and 👍/👎 feedback — so you can see what the router is saving.',
+    icon: Wrench,
+    title: 'Commercial Appliance Repair',
+    body: 'Ranges, ovens, fryers, and the rest of your kitchen line serviced by full-time technicians.',
   },
 ];
 
-const STACK = [
-  'Next.js 16',
-  'TypeScript',
-  'Vercel AI SDK v6',
-  'Qwen · DashScope',
-  'Drizzle ORM',
-  'Neon Postgres',
-  'Tailwind v4',
+const WHY_CHOOSE = [
+  { icon: Clock, title: '24/7 Emergency Service', body: 'A real person answers when your equipment goes down, day or night.' },
+  { icon: Award, title: '50+ Years of Experience', body: 'Decades of commercial repair across the Tri-Cities region.' },
+  { icon: CheckCircle2, title: 'Most Jobs in One Trip', body: 'We come prepared to diagnose and fix on the first visit.' },
+  { icon: BadgeCheck, title: 'Licensed Professional Engineer', body: 'A licensed PE on staff and multiple service licenses.' },
+  { icon: Users, title: 'Full-Time Technicians', body: 'No rotating subcontractors. Our own trained crew.' },
+  { icon: ShieldAlert, title: 'Pricing Estimates', body: 'Clear estimates before the work, no surprises after.' },
 ];
 
-/** Animation delay helper — keeps staggered reveals declarative. */
+/** Animation delay helper, keeps staggered reveals declarative. */
 function delay(ms: number): React.CSSProperties {
   return { animationDelay: `${ms}ms` };
 }
@@ -96,15 +95,37 @@ export default function Home() {
       <div className="lp-mesh pointer-events-none absolute inset-0 -z-10" aria-hidden />
       <div className="lp-grid pointer-events-none absolute inset-0 -z-10 h-[120vh]" aria-hidden />
 
+      {/* Top utility bar: 24/7 + phone (Spears pattern) */}
+      <div className="hidden border-b border-border/60 bg-foreground text-background sm:block">
+        <div className="mx-auto flex h-9 max-w-6xl items-center justify-between px-5 text-xs">
+          <span className="flex items-center gap-1.5 font-medium">
+            <Clock className="size-3.5" />
+            24/7 Emergency Service
+          </span>
+          <a
+            href={`tel:${SPEARS.phoneTel}`}
+            className="flex items-center gap-1.5 font-semibold underline-offset-4 hover:underline"
+          >
+            <Phone className="size-3.5" />
+            {SPEARS.phoneDisplay}
+          </a>
+        </div>
+      </div>
+
       {/* Nav */}
       <header className="sticky top-0 z-40 border-b border-border/60 bg-background/70 backdrop-blur-xl">
         <nav className="mx-auto flex h-16 max-w-6xl items-center justify-between px-5">
           <Link href="/" className="flex items-center gap-2.5">
-            <span className="relative flex size-8 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-[var(--hvac-accent)] text-white shadow-sm">
-              <Wind className="size-4" strokeWidth={2.25} />
+            <span className="relative flex size-9 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-[var(--hvac-accent)] text-white shadow-sm">
+              <Wind className="size-5" strokeWidth={2.25} />
             </span>
-            <span className="font-[family-name:var(--font-display)] text-lg font-bold tracking-tight">
-              HVAC&nbsp;Agent
+            <span className="flex flex-col leading-none">
+              <span className="font-[family-name:var(--font-display)] text-lg font-bold uppercase tracking-tight">
+                Spears&nbsp;Services
+              </span>
+              <span className="text-[0.65rem] font-medium uppercase tracking-widest text-muted-foreground">
+                AI intake demo
+              </span>
             </span>
           </Link>
 
@@ -122,10 +143,10 @@ export default function Home() {
 
           <Button
             size="lg"
-            className="bg-foreground text-background hover:bg-foreground/85"
+            className="bg-primary text-primary-foreground hover:bg-primary/90"
             render={<Link href="/chat" />}
           >
-            Try it live
+            Get Service Now
             <ArrowRight className="size-4" data-icon="inline-end" />
           </Button>
         </nav>
@@ -141,19 +162,19 @@ export default function Home() {
               style={delay(0)}
             >
               <span className="relative flex size-1.5">
-                <span className="absolute inline-flex size-full animate-ping rounded-full bg-[var(--hvac-accent)] opacity-75" />
-                <span className="relative inline-flex size-1.5 rounded-full bg-[var(--hvac-accent)]" />
+                <span className="absolute inline-flex size-full animate-ping rounded-full bg-primary opacity-75" />
+                <span className="relative inline-flex size-1.5 rounded-full bg-primary" />
               </span>
-              AI intake agent · live demo
+              {SPEARS.positioning}
             </div>
 
             <h1
               className="lp-rise mt-5 font-[family-name:var(--font-display)] text-5xl font-extrabold leading-[1.02] tracking-tight md:text-6xl"
               style={delay(80)}
             >
-              The HVAC chatbot that{' '}
+              Commercial repair experts,{' '}
               <span className="bg-gradient-to-r from-primary via-primary to-[var(--hvac-accent)] bg-clip-text text-transparent">
-                spends tokens only when it has to
+                now answering around the clock
               </span>
             </h1>
 
@@ -161,10 +182,10 @@ export default function Home() {
               className="lp-rise mt-5 max-w-xl text-lg text-muted-foreground"
               style={delay(160)}
             >
-              Customers describe a heating or cooling problem in chat. A
-              deterministic router answers the common stuff for free, escalates
-              emergencies instantly, and turns the rest into a structured service
-              request your staff can dispatch.
+              Describe a heating, cooling, refrigeration, or appliance problem and
+              the Spears intake assistant captures the details, flags emergencies,
+              and gets a technician on the way. 24/7, with a real person never far
+              behind.
             </p>
 
             <div className="lp-rise mt-8 flex flex-wrap items-center gap-3" style={delay(240)}>
@@ -173,22 +194,22 @@ export default function Home() {
                 className="h-11 bg-primary px-5 text-base text-primary-foreground shadow-lg shadow-primary/20 hover:bg-primary/90"
                 render={<Link href="/chat" />}
               >
-                Start a conversation
+                Start a service request
                 <ArrowRight className="size-4" data-icon="inline-end" />
               </Button>
               <Button
                 size="lg"
                 variant="outline"
                 className="h-11 px-5 text-base"
-                render={<Link href="/admin" />}
+                render={<a href={`tel:${SPEARS.phoneTel}`} />}
               >
-                <LayoutDashboard className="size-4" data-icon="inline-start" />
-                Open the dashboard
+                <Phone className="size-4" data-icon="inline-start" />
+                Call {SPEARS.phoneDisplay}
               </Button>
             </div>
 
             <p className="lp-rise mt-4 text-sm text-muted-foreground" style={delay(280)}>
-              Or call the agent — it answers in a natural voice:{' '}
+              Prefer to talk to the assistant? It answers in a natural voice at{' '}
               <a
                 href={`tel:${DEMO_PHONE.tel}`}
                 className="inline-flex items-center gap-1.5 font-semibold text-foreground underline-offset-4 transition-colors hover:text-primary hover:underline"
@@ -199,7 +220,7 @@ export default function Home() {
             </p>
 
             <p className="lp-rise mt-3 text-sm text-muted-foreground" style={delay(300)}>
-              Admin login{' '}
+              Staff demo login{' '}
               <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground">
                 admin@demo-hvac.com
               </code>{' '}
@@ -216,24 +237,68 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Stat band */}
-        <section className="lp-rise grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-border/70 bg-border/70 lg:grid-cols-4" style={delay(420)}>
-          {STATS.map((s) => (
-            <div key={s.label} className="bg-card/80 p-6 backdrop-blur">
-              <div className="font-[family-name:var(--font-display)] text-3xl font-bold tracking-tight text-foreground">
-                {s.value}
-              </div>
-              <div className="mt-1 text-sm text-muted-foreground">{s.label}</div>
-            </div>
-          ))}
+        {/* Services */}
+        <section className="py-16 md:py-24">
+          <SectionHeading
+            eyebrow="What we service"
+            title="A full line of services for your operation"
+            subtitle="HVAC, refrigeration, ice machines, boilers, and commercial appliances, kept running across NE Tennessee, SW Virginia, and Western North Carolina."
+          />
+          <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {SERVICES.map((s) => (
+              <article
+                key={s.title}
+                className="group relative overflow-hidden rounded-xl border border-border/70 bg-card/60 p-6 backdrop-blur transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5"
+              >
+                <div className="flex size-11 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
+                  <s.icon className="size-5" strokeWidth={2} />
+                </div>
+                <h3 className="mt-4 font-[family-name:var(--font-display)] text-lg font-semibold tracking-tight">
+                  {s.title}
+                </h3>
+                <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                  {s.body}
+                </p>
+              </article>
+            ))}
+          </div>
         </section>
 
-        {/* Two surfaces */}
-        <section className="py-20 md:py-28">
+        {/* Why choose */}
+        <section className="pb-16 md:pb-24">
+          <SectionHeading
+            eyebrow="Why choose Spears Services?"
+            title="Experts with 50+ years of experience"
+            subtitle="Since 1993, businesses across the Tri-Cities have trusted Spears to keep their refrigeration, HVAC, and appliances running."
+          />
+          <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {WHY_CHOOSE.map((w) => (
+              <div
+                key={w.title}
+                className="flex gap-4 rounded-xl border border-border/70 bg-card/60 p-6 backdrop-blur"
+              >
+                <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-[var(--hvac-accent)]/10 text-[var(--hvac-accent)]">
+                  <w.icon className="size-5" strokeWidth={2} />
+                </div>
+                <div>
+                  <h3 className="font-[family-name:var(--font-display)] text-base font-semibold tracking-tight">
+                    {w.title}
+                  </h3>
+                  <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                    {w.body}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* Two surfaces (demo framing kept honest) */}
+        <section className="pb-16 md:pb-24">
           <SectionHeading
             eyebrow="One system, two surfaces"
             title="A customer chat and a staff cockpit"
-            subtitle="The same conversation flows from the customer-facing agent straight into a triage-ready admin dashboard."
+            subtitle="The same conversation flows from the customer-facing assistant straight into a triage-ready dispatch dashboard."
           />
           <div className="mt-12 grid gap-6 md:grid-cols-2">
             <SurfaceCard
@@ -243,64 +308,25 @@ export default function Home() {
               href="/chat"
               cta="Open the chat"
               points={[
-                'AI disclosure + one-tap human handoff',
-                'Intake progress stepper as details are captured',
-                'Suggested replies, 👍/👎 feedback, resume on refresh',
+                'AI disclosure plus one-tap human handoff',
+                'Intake progress as details are captured',
+                'Suggested replies and resume on refresh',
                 'Instant safety escalation for dangerous situations',
               ]}
             />
             <SurfaceCard
               icon={LayoutDashboard}
               tone="warm"
-              title="Admin dashboard"
+              title="Dispatch dashboard"
               href="/admin"
               cta="Open the dashboard"
               points={[
                 'Service-request queue with technician assignment',
                 'Searchable log of every saved conversation',
-                'AI Insights: deflection rate, funnel, feedback',
+                'Scheduling calendar with arrival windows',
                 'Customer CRM with equipment and service history',
               ]}
             />
-          </div>
-        </section>
-
-        {/* Engineering highlights */}
-        <section className="pb-20 md:pb-28">
-          <SectionHeading
-            eyebrow="Under the hood"
-            title="Engineering worth reading the code for"
-            subtitle="This is a portfolio project — the interesting parts are the decisions, not just the features."
-          />
-          <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {HIGHLIGHTS.map((h) => (
-              <article
-                key={h.title}
-                className="group relative overflow-hidden rounded-xl border border-border/70 bg-card/60 p-6 backdrop-blur transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5"
-              >
-                <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
-                  <h.icon className="size-5" strokeWidth={2} />
-                </div>
-                <h3 className="mt-4 font-[family-name:var(--font-display)] text-lg font-semibold tracking-tight">
-                  {h.title}
-                </h3>
-                <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                  {h.body}
-                </p>
-              </article>
-            ))}
-          </div>
-
-          {/* Tech stack */}
-          <div className="mt-12 flex flex-wrap items-center justify-center gap-2.5">
-            {STACK.map((t) => (
-              <span
-                key={t}
-                className="rounded-full border border-border/70 bg-card/60 px-3.5 py-1.5 text-sm font-medium text-muted-foreground backdrop-blur"
-              >
-                {t}
-              </span>
-            ))}
           </div>
         </section>
 
@@ -310,11 +336,11 @@ export default function Home() {
             <Flame className="lp-float absolute -right-6 -top-6 size-32 text-[var(--hvac-accent)]/10" aria-hidden />
             <Wind className="lp-float absolute -bottom-8 -left-6 size-32 text-primary/10" style={delay(800)} aria-hidden />
             <h2 className="relative font-[family-name:var(--font-display)] text-3xl font-bold tracking-tight md:text-4xl">
-              See it answer, escalate, and triage
+              Equipment down? Let&apos;s get you back up and running.
             </h2>
             <p className="relative mx-auto mt-3 max-w-xl text-muted-foreground">
-              Try the customer chat, then sign in to watch the request land in the
-              admin queue — or read how it&apos;s built.
+              Start a service request in chat, or call and a real person will pick
+              up. Most projects are completed in one trip.
             </p>
             <div className="relative mt-7 flex flex-wrap justify-center gap-3">
               <Button
@@ -322,26 +348,17 @@ export default function Home() {
                 className="h-11 bg-primary px-5 text-base text-primary-foreground shadow-lg shadow-primary/20 hover:bg-primary/90"
                 render={<Link href="/chat" />}
               >
-                Try the live demo
+                Get Service Now
                 <ArrowRight className="size-4" data-icon="inline-end" />
               </Button>
               <Button
                 size="lg"
                 variant="outline"
                 className="h-11 px-5 text-base"
-                render={<a href={`tel:${DEMO_PHONE.tel}`} />}
+                render={<a href={`tel:${SPEARS.phoneTel}`} />}
               >
                 <Phone className="size-4" data-icon="inline-start" />
-                Call {DEMO_PHONE.display}
-              </Button>
-              <Button
-                size="lg"
-                variant="outline"
-                className="h-11 px-5 text-base"
-                render={<Link href="/docs.html" />}
-              >
-                <BookOpen className="size-4" data-icon="inline-start" />
-                Read the docs
+                Call {SPEARS.phoneDisplay}
               </Button>
             </div>
           </div>
@@ -350,24 +367,76 @@ export default function Home() {
 
       {/* Footer */}
       <footer className="border-t border-border/60 bg-background/70 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-5 py-8 text-sm text-muted-foreground sm:flex-row">
-          <div className="flex items-center gap-2">
-            <span className="flex size-6 items-center justify-center rounded-md bg-gradient-to-br from-primary to-[var(--hvac-accent)] text-white">
-              <Wind className="size-3.5" />
-            </span>
-            <span>AI HVAC Agent — a full-stack portfolio project</span>
+        <div className="mx-auto grid max-w-6xl gap-8 px-5 py-12 sm:grid-cols-2 md:grid-cols-4">
+          <div className="sm:col-span-2 md:col-span-1">
+            <div className="flex items-center gap-2.5">
+              <span className="flex size-8 items-center justify-center rounded-md bg-gradient-to-br from-primary to-[var(--hvac-accent)] text-white">
+                <Wind className="size-4" />
+              </span>
+              <span className="font-[family-name:var(--font-display)] text-base font-bold uppercase tracking-tight">
+                Spears&nbsp;Services
+              </span>
+            </div>
+            <p className="mt-3 text-sm text-muted-foreground">
+              {SPEARS.positioning}. Serving the Tri-Cities since 1993.
+            </p>
           </div>
-          <div className="flex items-center gap-4">
-            <Link href="/docs.html" className="transition-colors hover:text-foreground">
-              Docs
-            </Link>
-            <Link
-              href="https://github.com/Sizbei/ai-hvac-agent"
-              className="flex items-center gap-1.5 transition-colors hover:text-foreground"
-            >
-              <Code2 className="size-4" />
-              Source
-            </Link>
+
+          <div>
+            <h4 className="text-sm font-semibold">Services</h4>
+            <ul className="mt-3 space-y-2 text-sm text-muted-foreground">
+              {SERVICES.map((s) => (
+                <li key={s.title}>{s.title}</li>
+              ))}
+            </ul>
+          </div>
+
+          <div>
+            <h4 className="text-sm font-semibold">Contact</h4>
+            <ul className="mt-3 space-y-2.5 text-sm text-muted-foreground">
+              <li>
+                <a
+                  href={`tel:${SPEARS.phoneTel}`}
+                  className="flex items-center gap-2 transition-colors hover:text-foreground"
+                >
+                  <Phone className="size-4 shrink-0" />
+                  {SPEARS.phoneDisplay}
+                </a>
+              </li>
+              <li>
+                <a
+                  href={`mailto:${SPEARS.email}`}
+                  className="flex items-center gap-2 transition-colors hover:text-foreground"
+                >
+                  <Mail className="size-4 shrink-0" />
+                  {SPEARS.email}
+                </a>
+              </li>
+              <li className="flex items-start gap-2">
+                <MapPin className="mt-0.5 size-4 shrink-0" />
+                {SPEARS.address}
+              </li>
+            </ul>
+          </div>
+
+          <div>
+            <h4 className="text-sm font-semibold">Demo</h4>
+            <ul className="mt-3 space-y-2 text-sm text-muted-foreground">
+              {NAV.map((item) => (
+                <li key={item.href}>
+                  <Link href={item.href} className="transition-colors hover:text-foreground">
+                    {item.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+
+        <div className="border-t border-border/60">
+          <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-2 px-5 py-6 text-xs text-muted-foreground sm:flex-row">
+            <span>AI intake demo for Spears Services. Hours marketed as 24/7 for emergencies.</span>
+            <span>Built as a full-stack portfolio project.</span>
           </div>
         </div>
       </footer>
@@ -386,7 +455,7 @@ interface SectionHeadingProps {
 function SectionHeading({ eyebrow, title, subtitle }: SectionHeadingProps) {
   return (
     <div className="mx-auto max-w-2xl text-center">
-      <span className="text-sm font-semibold uppercase tracking-widest text-[var(--hvac-accent)]">
+      <span className="text-sm font-semibold uppercase tracking-widest text-primary">
         {eyebrow}
       </span>
       <h2 className="mt-3 font-[family-name:var(--font-display)] text-3xl font-bold tracking-tight md:text-4xl">
@@ -445,7 +514,7 @@ function ChatPreview() {
           <span className="flex size-6 items-center justify-center rounded-md bg-gradient-to-br from-primary to-[var(--hvac-accent)] text-white">
             <Wind className="size-3.5" />
           </span>
-          <span className="text-sm font-medium">HVAC Assistant</span>
+          <span className="text-sm font-medium">Spears Assistant</span>
           <span className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground">
             <span className="size-1.5 rounded-full bg-emerald-500" />
             online
@@ -455,19 +524,19 @@ function ChatPreview() {
         {/* messages */}
         <div className="space-y-3 p-4">
           <Bubble from="bot">
-            Hi! I&apos;m an AI HVAC assistant. What heating, cooling, or air
-            quality issue are you having?
+            Thanks for contacting Spears Services. What heating, cooling, or
+            refrigeration issue can we help with?
           </Bubble>
-          <Bubble from="user">My AC isn&apos;t cooling and it&apos;s 85° inside.</Bubble>
+          <Bubble from="user">Our walk-in cooler stopped holding temp overnight.</Bubble>
           <Bubble from="bot">
-            That sounds uncomfortable — let&apos;s get a technician out. What&apos;s
+            That can put your product at risk, so let&apos;s move fast. What&apos;s
             the service address?
           </Bubble>
 
           {/* escalation chip */}
           <div className="flex items-center gap-2 rounded-lg border border-[var(--hvac-accent)]/30 bg-[var(--hvac-accent)]/10 px-3 py-2 text-xs font-medium text-[var(--hvac-accent)]">
             <ShieldAlert className="size-4 shrink-0" />
-            Say &ldquo;I smell gas&rdquo; → instant safety escalation
+            Say &ldquo;I smell gas&rdquo; for instant safety escalation
           </div>
         </div>
 
@@ -482,10 +551,10 @@ function ChatPreview() {
         </div>
       </div>
 
-      {/* floating token badge */}
+      {/* floating 24/7 badge */}
       <div className="absolute -right-4 -top-4 hidden rotate-3 items-center gap-1.5 rounded-xl border border-border/70 bg-card px-3 py-2 text-xs font-semibold shadow-lg sm:flex">
-        <Zap className="size-3.5 text-[var(--hvac-accent)]" />
-        0 tokens used
+        <Clock className="size-3.5 text-primary" />
+        24/7 emergency
       </div>
     </div>
   );

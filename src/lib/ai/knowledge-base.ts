@@ -44,7 +44,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     requiredQualifiers: ["smell", "leak", "odor", "rotten eggs"],
     action: "ESCALATE",
     cannedResponse:
-      "A gas smell can be dangerous — please leave your home right now, avoid using any switches, phones, or flames inside, and once you're safely outside call your gas utility's emergency line or 911. I'm flagging this as an emergency so our team can follow up right away.",
+      "A gas smell can be dangerous. Please leave your home right now, avoid using any switches, phones, or flames inside, and once you're safely outside call your gas utility's emergency line or 911. I'm flagging this as an emergency so our team can follow up right away.",
     infoNeeded: [],
     issueTypeMapping: "other",
     urgencyHint: "emergency",
@@ -78,7 +78,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ESCALATE",
     cannedResponse:
-      "A carbon monoxide alarm is a serious emergency — please get everyone (and pets) outside to fresh air immediately and call 911 once you're out. I'm marking this urgent so our team can follow up right away.",
+      "A carbon monoxide alarm is a serious emergency. Please get everyone (and pets) outside to fresh air immediately and call 911 once you're out. I'm marking this urgent so our team can follow up right away.",
     infoNeeded: [],
     issueTypeMapping: "other",
     urgencyHint: "emergency",
@@ -103,7 +103,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     requiredQualifiers: ["burning", "smoke", "smell", "sparks"],
     action: "ESCALATE",
     cannedResponse:
-      "A burning or electrical smell — or any smoke — is a fire risk. Please turn off the system at the thermostat or breaker if you can do so safely, leave the area, and call 911 if you see smoke or flames. I'm flagging this as an emergency for our team.",
+      "A burning or electrical smell, or any smoke, is a fire risk. Please turn off the system at the thermostat or breaker if you can do so safely, leave the area, and call 911 if you see smoke or flames. I'm flagging this as an emergency for our team.",
     infoNeeded: [],
     issueTypeMapping: "other",
     urgencyHint: "emergency",
@@ -133,7 +133,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ESCALATE",
     cannedResponse:
-      "That sounds like a serious leak. If you can safely reach it, shut off the water supply to the unit and turn off power to it at the breaker, then move valuables away from the water. I'm flagging this as urgent so our team can respond quickly — what's the service address?",
+      "That sounds like a serious leak. If you can safely reach it, shut off the water supply to the unit and turn off power to it at the breaker, then move valuables away from the water. I'm flagging this as urgent so our team can respond quickly. What's the service address?",
     infoNeeded: ["address"],
     issueTypeMapping: "water_leak",
     urgencyHint: "emergency",
@@ -179,12 +179,12 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ESCALATE",
     cannedResponse:
-      "No heat in freezing weather is an emergency, especially with vulnerable family members at home — please keep everyone warm with blankets and layers and use safe backup heat if you have it. I'm flagging this as urgent so our team can prioritize you. What's the service address?",
+      "No heat in freezing weather is an emergency, especially with vulnerable family members at home. Please keep everyone warm with blankets and layers and use safe backup heat if you have it. I'm flagging this as urgent so our team can prioritize you. What's the service address?",
     infoNeeded: ["address"],
     issueTypeMapping: "heating_not_working",
     urgencyHint: "emergency",
     notes:
-      "Per system prompt, 'no heat in freezing weather' is explicitly emergency. Without the freezing/vulnerable qualifier, route to heating-not-heating (high). 'no heat' alone in mild weather is heating-not-heating, not emergency. Never suggest unsafe space-heater/oven workarounds — only 'safe backup heat if you have it.'",
+      "Per system prompt, 'no heat in freezing weather' is explicitly emergency. Without the freezing/vulnerable qualifier, route to heating-not-heating (high). 'no heat' alone in mild weather is heating-not-heating, not emergency. Never suggest unsafe space-heater/oven workarounds; only 'safe backup heat if you have it.'",
   },
   {
     id: "emergency-no-cooling-extreme-heat-vulnerable",
@@ -217,7 +217,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ESCALATE",
     cannedResponse:
-      "No cooling in extreme heat can be a health risk for vulnerable people — please move to the coolest room, hydrate, and use fans or a cooling center if you can. I'm flagging this as urgent so our team can prioritize you. What's the service address?",
+      "No cooling in extreme heat can be a health risk for vulnerable people. Please move to the coolest room, hydrate, and use fans or a cooling center if you can. I'm flagging this as urgent so our team can prioritize you. What's the service address?",
     infoNeeded: ["address"],
     issueTypeMapping: "cooling_not_working",
     urgencyHint: "emergency",
@@ -256,7 +256,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "COLLECT_INFO",
     cannedResponse:
-      "I'm sorry your AC isn't keeping up — that's frustrating in this weather. I can get a technician out to look at it. What's the service address?",
+      "I'm sorry your AC isn't keeping up. That's frustrating in this weather. I can get a technician out to look at it. What's the service address?",
     infoNeeded: ["address"],
     issueTypeMapping: "cooling_not_working",
     urgencyHint: "high",
@@ -278,7 +278,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "COLLECT_INFO",
     cannedResponse:
-      "Sorry your AC won't start — let's get a technician out to diagnose it. What's the service address?",
+      "Sorry your AC won't start. Let's get a technician out to diagnose it. What's the service address?",
     infoNeeded: ["address"],
     issueTypeMapping: "cooling_not_working",
     urgencyHint: "high",
@@ -321,12 +321,12 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "COLLECT_INFO",
     cannedResponse:
-      "Ice on the unit usually means it needs attention before it's damaged — it's best to turn the cooling off and let it thaw while we get a technician out. What's the service address?",
+      "Ice on the unit usually means it needs attention before it's damaged. It's best to turn the cooling off and let it thaw while we get a technician out. What's the service address?",
     infoNeeded: ["address"],
     issueTypeMapping: "cooling_not_working",
     urgencyHint: "medium",
     notes:
-      "'Turn it off to let it thaw' is operational guidance, not a repair instruction — acceptable. Don't tell them to add refrigerant or open the unit. 'frozen pipes' in a heating context → emergency-no-heat-freezing.",
+      "'Turn it off to let it thaw' is operational guidance, not a repair instruction (acceptable). Don't tell them to add refrigerant or open the unit. 'frozen pipes' in a heating context → emergency-no-heat-freezing.",
   },
   {
     id: "cooling-short-cycling",
@@ -342,7 +342,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "COLLECT_INFO",
     cannedResponse:
-      "Short cycling like that can stress the system, so it's worth having checked. I can arrange a technician visit — what's the service address?",
+      "Short cycling like that can stress the system, so it's worth having checked. I can arrange a technician visit. What's the service address?",
     infoNeeded: ["address"],
     issueTypeMapping: "cooling_not_working",
     urgencyHint: "medium",
@@ -364,7 +364,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "COLLECT_INFO",
     cannedResponse:
-      "Unusual noises are worth checking before they turn into a bigger problem. I can get a technician out to take a look — what's the service address?",
+      "Unusual noises are worth checking before they turn into a bigger problem. I can get a technician out to take a look. What's the service address?",
     infoNeeded: ["address"],
     issueTypeMapping: "strange_noises",
     urgencyHint: "medium",
@@ -385,7 +385,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "COLLECT_INFO",
     cannedResponse:
-      "If the outdoor unit isn't running, the system can't cool properly and should be inspected. I can schedule a technician — what's the service address?",
+      "If the outdoor unit isn't running, the system can't cool properly and should be inspected. I can schedule a technician. What's the service address?",
     infoNeeded: ["address"],
     issueTypeMapping: "cooling_not_working",
     urgencyHint: "high",
@@ -399,12 +399,12 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     triggerKeywords: ["freon", "refrigerant", "recharge", "low on coolant"],
     action: "COLLECT_INFO",
     cannedResponse:
-      "Refrigerant levels need to be checked and handled by a licensed technician. I can set up a visit to diagnose it properly — what's the service address?",
+      "Refrigerant levels need to be checked and handled by a licensed technician. I can set up a visit to diagnose it properly. What's the service address?",
     infoNeeded: ["address"],
     issueTypeMapping: "cooling_not_working",
     urgencyHint: "medium",
     notes:
-      "Customer self-diagnosis may be wrong — frozen coil/airflow can mimic this. Never quote refrigerant pricing or confirm a recharge is needed (that's a tech diagnosis). Refrigerant handling is regulated — emphasize licensed tech.",
+      "Customer self-diagnosis may be wrong; frozen coil/airflow can mimic this. Never quote refrigerant pricing or confirm a recharge is needed (that's a tech diagnosis). Refrigerant handling is regulated, so emphasize licensed tech.",
   },
 
   // ─── Category 3 — HEATING ISSUES ───────────────────────────────────────────
@@ -435,7 +435,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "COLLECT_INFO",
     cannedResponse:
-      "Sorry you're not getting the heat you need — let's get a technician out to diagnose it. What's the service address?",
+      "Sorry you're not getting the heat you need. Let's get a technician out to diagnose it. What's the service address?",
     infoNeeded: ["address"],
     issueTypeMapping: "heating_not_working",
     urgencyHint: "high",
@@ -456,7 +456,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "COLLECT_INFO",
     cannedResponse:
-      "A furnace that won't ignite needs a technician's eye — I can get a visit scheduled. What's the service address?",
+      "A furnace that won't ignite needs a technician's eye. I can get a visit scheduled. What's the service address?",
     infoNeeded: ["address"],
     issueTypeMapping: "heating_not_working",
     urgencyHint: "high",
@@ -476,7 +476,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "COLLECT_INFO",
     cannedResponse:
-      "Relighting a pilot can involve gas, so it's safest to let a technician handle it — and if you ever smell gas, leave and call your gas company. I can schedule a visit; what's the service address?",
+      "Relighting a pilot can involve gas, so it's safest to let a technician handle it, and if you ever smell gas, leave and call your gas company. I can schedule a visit; what's the service address?",
     infoNeeded: ["address"],
     issueTypeMapping: "heating_not_working",
     urgencyHint: "high",
@@ -490,7 +490,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     triggerKeywords: ["blowing cold air", "blows cold", "cold air"],
     action: "COLLECT_INFO",
     cannedResponse:
-      "Cold air when you're calling for heat usually means something needs attention — I can get a technician out. What's the service address?",
+      "Cold air when you're calling for heat usually means something needs attention. I can get a technician out. What's the service address?",
     infoNeeded: ["address"],
     issueTypeMapping: "heating_not_working",
     urgencyHint: "high",
@@ -509,12 +509,12 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "COLLECT_INFO",
     cannedResponse:
-      "Short cycling can wear out the system, so it's good to have it checked. I can arrange a technician visit — what's the service address?",
+      "Short cycling can wear out the system, so it's good to have it checked. I can arrange a technician visit. What's the service address?",
     infoNeeded: ["address"],
     issueTypeMapping: "heating_not_working",
     urgencyHint: "medium",
     notes:
-      "Same phrasing as cooling-short-cycling — disambiguate on heat vs AC. If neither heat nor AC context is present → FALLBACK_LLM.",
+      "Same phrasing as cooling-short-cycling; disambiguate on heat vs AC. If neither heat nor AC context is present → FALLBACK_LLM.",
   },
   {
     id: "heating-strange-smell-startup",
@@ -533,12 +533,12 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     issueTypeMapping: "air_quality",
     urgencyHint: "low",
     notes:
-      "Deliberately FALLBACK_LLM. The line between 'harmless first-of-season dust burn-off' and 'dangerous burning smell' is too risky to canned-answer. HIGH overlap with emergency-electrical-burning-smell — 'burning plastic'/'smoke'/'persistent' must escalate, NOT match here. Let the LLM probe (persistent? plastic? smoke?) before deciding.",
+      "Deliberately FALLBACK_LLM. The line between 'harmless first-of-season dust burn-off' and 'dangerous burning smell' is too risky to canned-answer. HIGH overlap with emergency-electrical-burning-smell: 'burning plastic'/'smoke'/'persistent' must escalate, NOT match here. Let the LLM probe (persistent? plastic? smoke?) before deciding.",
   },
   {
     id: "heating-no-hot-water",
     category: "heating",
-    title: "Water heater — no hot water",
+    title: "Water heater: no hot water",
     triggerKeywords: [
       "no hot water",
       "water heater",
@@ -548,12 +548,12 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "COLLECT_INFO",
     cannedResponse:
-      "No hot water is a real hassle — I can get a technician out to look at your water heater. What's the service address?",
+      "No hot water is a real hassle. I can get a technician out to look at your water heater. What's the service address?",
     infoNeeded: ["address"],
     issueTypeMapping: "heating_not_working",
     urgencyHint: "high",
     notes:
-      "No dedicated water-heater enum; heating_not_working is the closest. 'water leak from water heater' → could be water_leak/emergency-flooding; 'pilot out on water heater' → heating-pilot-out. If the company doesn't service water heaters, candidate for FALLBACK_LLM or a business-scope answer — confirm scope with engineering.",
+      "No dedicated water-heater enum; heating_not_working is the closest. 'water leak from water heater' → could be water_leak/emergency-flooding; 'pilot out on water heater' → heating-pilot-out. If the company doesn't service water heaters, candidate for FALLBACK_LLM or a business-scope answer; confirm scope with engineering.",
   },
   {
     id: "heating-heat-pump-issue",
@@ -570,7 +570,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "COLLECT_INFO",
     cannedResponse:
-      "Heat pumps can act up in a few different ways — let's get a technician to diagnose it properly. What's the service address?",
+      "Heat pumps can act up in a few different ways. Let's get a technician to diagnose it properly. What's the service address?",
     infoNeeded: ["address"],
     issueTypeMapping: "heating_not_working",
     urgencyHint: "high",
@@ -591,7 +591,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "COLLECT_INFO",
     cannedResponse:
-      "Unusual furnace noises are worth checking before they get worse. I can get a technician out — what's the service address?",
+      "Unusual furnace noises are worth checking before they get worse. I can get a technician out. What's the service address?",
     infoNeeded: ["address"],
     issueTypeMapping: "strange_noises",
     urgencyHint: "medium",
@@ -613,12 +613,12 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "COLLECT_INFO",
     cannedResponse:
-      "A musty smell from the vents is something we can check out — it's often related to moisture or the ducts. I can schedule a technician; what's the service address?",
+      "A musty smell from the vents is something we can check out. It's often related to moisture or the ducts. I can schedule a technician; what's the service address?",
     infoNeeded: ["address"],
     issueTypeMapping: "air_quality",
     urgencyHint: "low",
     notes:
-      "Only match musty/moldy/mildew — burning/gas/electrical smells must route to emergency intents.",
+      "Only match musty/moldy/mildew; burning/gas/electrical smells must route to emergency intents.",
   },
   {
     id: "airquality-weak-airflow",
@@ -633,7 +633,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "COLLECT_INFO",
     cannedResponse:
-      "Weak airflow can have a few causes, sometimes as simple as a clogged filter. I can get a technician to take a look — what's the service address?",
+      "Weak airflow can have a few causes, sometimes as simple as a clogged filter. I can get a technician to take a look. What's the service address?",
     infoNeeded: ["address"],
     issueTypeMapping: "air_quality",
     urgencyHint: "medium",
@@ -652,7 +652,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "COLLECT_INFO",
     cannedResponse:
-      "Excess dust can sometimes point to filtration or duct issues — a technician can assess it. What's the service address?",
+      "Excess dust can sometimes point to filtration or duct issues, and a technician can assess it. What's the service address?",
     infoNeeded: ["address"],
     issueTypeMapping: "air_quality",
     urgencyHint: "low",
@@ -672,7 +672,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "COLLECT_INFO",
     cannedResponse:
-      "Indoor humidity issues are something we can help with — a technician can evaluate your system and options. What's the service address?",
+      "Indoor humidity issues are something we can help with. A technician can evaluate your system and options. What's the service address?",
     infoNeeded: ["address"],
     issueTypeMapping: "air_quality",
     urgencyHint: "low",
@@ -693,7 +693,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "COLLECT_INFO",
     cannedResponse:
-      "Uneven temperatures usually come down to airflow, ductwork, or balancing — a technician can pinpoint it. What's the service address?",
+      "Uneven temperatures usually come down to airflow, ductwork, or balancing, and a technician can pinpoint it. What's the service address?",
     infoNeeded: ["address"],
     issueTypeMapping: "air_quality",
     urgencyHint: "low",
@@ -716,12 +716,12 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "COLLECT_INFO",
     cannedResponse:
-      "A blank thermostat can stop the whole system from running — sometimes it's batteries, but it's worth a proper check. I can get a technician out; what's the service address?",
+      "A blank thermostat can stop the whole system from running. Sometimes it's batteries, but it's worth a proper check. I can get a technician out; what's the service address?",
     infoNeeded: ["address"],
     issueTypeMapping: "thermostat_issue",
     urgencyHint: "medium",
     notes:
-      "'Sometimes it's batteries' is a gentle hint, not a repair walk-through. A blank thermostat can cause cooling-wont-turn-on/no heat — prefer this intent when the screen is the stated symptom. If combined with no-heat-in-freezing, escalate.",
+      "'Sometimes it's batteries' is a gentle hint, not a repair walk-through. A blank thermostat can cause cooling-wont-turn-on/no heat, so prefer this intent when the screen is the stated symptom. If combined with no-heat-in-freezing, escalate.",
   },
   {
     id: "thermostat-unresponsive",
@@ -736,12 +736,12 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "COLLECT_INFO",
     cannedResponse:
-      "If the thermostat isn't responding, the system can't be controlled properly — let's have a technician check it. What's the service address?",
+      "If the thermostat isn't responding, the system can't be controlled properly. Let's have a technician check it. What's the service address?",
     infoNeeded: ["address"],
     issueTypeMapping: "thermostat_issue",
     urgencyHint: "medium",
     notes:
-      "'frozen' here means UI-frozen, not iced — disambiguate on thermostat keyword.",
+      "'frozen' here means UI-frozen, not iced; disambiguate on thermostat keyword.",
   },
   {
     id: "thermostat-wrong-reading",
@@ -757,7 +757,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "COLLECT_INFO",
     cannedResponse:
-      "A thermostat reading that's off can throw off your whole system — a technician can check the sensor and placement. What's the service address?",
+      "A thermostat reading that's off can throw off your whole system, and a technician can check the sensor and placement. What's the service address?",
     infoNeeded: ["address"],
     issueTypeMapping: "thermostat_issue",
     urgencyHint: "medium",
@@ -798,7 +798,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "COLLECT_INFO",
     cannedResponse:
-      "We can help with smart thermostat installation and setup — a technician will make sure it's wired and configured correctly for your system. What's the service address?",
+      "We can help with smart thermostat installation and setup. A technician will make sure it's wired and configured correctly for your system. What's the service address?",
     infoNeeded: ["address"],
     issueTypeMapping: "installation",
     urgencyHint: "low",
@@ -821,7 +821,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "COLLECT_INFO",
     cannedResponse:
-      "Happy to set up a tune-up to keep your system running smoothly. I just need a couple of details — what's the service address?",
+      "Happy to set up a tune-up to keep your system running smoothly. I just need a couple of details. What's the service address?",
     infoNeeded: ["address"],
     issueTypeMapping: "maintenance",
     urgencyHint: "low",
@@ -842,12 +842,12 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ANSWER",
     cannedResponse:
-      "Most home filters should be checked monthly and changed every 1-3 months. The right size is printed on the edge of your current filter (like 16x25x1) — if you'd like, I can schedule a technician to handle it during a visit.",
+      "Most home filters should be checked monthly and changed every 1-3 months. The right size is printed on the edge of your current filter (like 16x25x1). If you'd like, I can schedule a technician to handle it during a visit.",
     infoNeeded: [],
     issueTypeMapping: "maintenance",
     urgencyHint: "low",
     notes:
-      "Borderline DIY, but 'check the label for the size + change every 1-3 months' is general guidance, not a repair instruction — acceptable. 'weak airflow' can stem from filter → airquality-weak-airflow. If they then want a tech, transition to COLLECT_INFO (address).",
+      "Borderline DIY, but 'check the label for the size + change every 1-3 months' is general guidance, not a repair instruction (acceptable). 'weak airflow' can stem from filter → airquality-weak-airflow. If they then want a tech, transition to COLLECT_INFO (address).",
   },
   {
     id: "maintenance-duct-cleaning",
@@ -882,7 +882,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "COLLECT_INFO",
     cannedResponse:
-      "Seasonal prep is a great way to avoid surprises — I can schedule that for you. What's the service address?",
+      "Seasonal prep is a great way to avoid surprises, and I can schedule that for you. What's the service address?",
     infoNeeded: ["address"],
     issueTypeMapping: "maintenance",
     urgencyHint: "low",
@@ -910,7 +910,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     issueTypeMapping: null,
     urgencyHint: null,
     notes:
-      "This is the 'entry' scheduling intent. Once they describe the issue, hand off to the matching issue intent's slot collection. Very generic — if an issue is also described, classify the issue first. Don't promise a time.",
+      "This is the 'entry' scheduling intent. Once they describe the issue, hand off to the matching issue intent's slot collection. Very generic: if an issue is also described, classify the issue first. Don't promise a time.",
   },
   {
     id: "scheduling-earliest-availability",
@@ -931,7 +931,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     issueTypeMapping: null,
     urgencyHint: null,
     notes:
-      "No fixed follow-up time is promised (the site states emergency service is 24/7, not a 2-hour callback). Time-pressure may signal an emergency — check emergency triggers first. Never promise an arrival time.",
+      "No fixed follow-up time is promised (the site states emergency service is 24/7, not a 2-hour callback). Time-pressure may signal an emergency, so check emergency triggers first. Never promise an arrival time.",
   },
   {
     id: "scheduling-after-hours",
@@ -960,7 +960,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ANSWER",
     cannedResponse:
-      "We offer support around the clock, and after-hours or weekend visits depend on availability — submit your request and our team will confirm the soonest time. If it's an emergency like a gas smell or no heat in freezing weather, please tell me right away.",
+      "We offer support around the clock, and after-hours or weekend visits depend on availability. Submit your request and our team will confirm the soonest time. If it's an emergency like a gas smell or no heat in freezing weather, please tell me right away.",
     infoNeeded: [],
     issueTypeMapping: null,
     urgencyHint: null,
@@ -992,7 +992,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ANSWER",
     cannedResponse:
-      "After you submit a request, our team follows up to confirm timing and give you an arrival window. I can't promise an exact arrival time from here, but I can get your request started — and for an emergency we're available any time, day or night.",
+      "After you submit a request, our team follows up to confirm timing and give you an arrival window. I can't promise an exact arrival time from here, but I can get your request started, and for an emergency we're available any time, day or night.",
     infoNeeded: [],
     issueTypeMapping: null,
     urgencyHint: null,
@@ -1035,7 +1035,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     issueTypeMapping: null,
     urgencyHint: null,
     notes:
-      "OVERRIDE #1: FALLBACK_LLM (reference-lookup the deterministic layer can't do). Original canned text: 'No problem — I can help with that. What's your reference number (like REF-XXXXX) so I can pull up the right request?' If 'cancel' appears mid-intake (no booked job exists), treat as conversational reset, not a cancellation.",
+      "OVERRIDE #1: FALLBACK_LLM (reference-lookup the deterministic layer can't do). Original canned text: 'No problem, I can help with that. What's your reference number (like REF-XXXXX) so I can pull up the right request?' If 'cancel' appears mid-intake (no booked job exists), treat as conversational reset, not a cancellation.",
   },
 
   // ─── Category 8 — BUSINESS INFO / FAQ ──────────────────────────────────────
@@ -1053,7 +1053,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ANSWER",
     cannedResponse:
-      "We serve a wide local area. If you share your address or zip code, I can pass it along so our team can confirm coverage — and we can start a request if you have an HVAC issue.",
+      "We serve a wide local area. If you share your address or zip code, I can pass it along so our team can confirm coverage, and we can start a request if you have an HVAC issue.",
     infoNeeded: [],
     issueTypeMapping: null,
     urgencyHint: null,
@@ -1101,7 +1101,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     issueTypeMapping: null,
     urgencyHint: null,
     notes:
-      "Close to account-speak-to-human — that one is about escalation, this is just the number. Points to the existing 'Talk to a Human' escalation path (GUIDE.md) rather than hardcoding a number the catalog may not have.",
+      "Close to account-speak-to-human; that one is about escalation, this is just the number. Points to the existing 'Talk to a Human' escalation path (GUIDE.md) rather than hardcoding a number the catalog may not have.",
   },
   {
     id: "faq-licensed-insured",
@@ -1116,7 +1116,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ANSWER",
     cannedResponse:
-      "Great question — our team can confirm the licensing and insurance details for your area when they follow up. Is there an HVAC issue I can help you with today?",
+      "Great question. Our team can confirm the licensing and insurance details for your area when they follow up. Is there an HVAC issue I can help you with today?",
     infoNeeded: [],
     issueTypeMapping: null,
     urgencyHint: null,
@@ -1197,7 +1197,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     issueTypeMapping: null,
     urgencyHint: null,
     notes:
-      "A brand name alone may appear within an issue description — only treat as this FAQ if they ask whether you service it. 'All major brands' is a safe generic; confirm org reality.",
+      "A brand name alone may appear within an issue description; only treat as this FAQ if they ask whether you service it. 'All major brands' is a safe generic; confirm org reality.",
   },
   {
     id: "faq-payment-methods",
@@ -1213,7 +1213,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ANSWER",
     cannedResponse:
-      "Our team can walk you through accepted payment options when they confirm your service. For now, I can help you start a request — what HVAC issue are you having?",
+      "Our team can walk you through accepted payment options when they confirm your service. For now, I can help you start a request. What HVAC issue are you having?",
     infoNeeded: [],
     issueTypeMapping: null,
     urgencyHint: null,
@@ -1232,7 +1232,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ANSWER",
     cannedResponse:
-      "Financing options may be available, especially for new installations — our team can review the details with you. Would you like me to start a request so they can follow up?",
+      "Financing options may be available, especially for new installations, and our team can review the details with you. Would you like me to start a request so they can follow up?",
     infoNeeded: [],
     issueTypeMapping: null,
     urgencyHint: null,
@@ -1285,7 +1285,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ANSWER",
     cannedResponse:
-      "Pricing depends on what your system needs, so our technician provides a clear quote after assessing it in person — I'm not able to give prices from here. If you describe your issue, I can get a request started so they can follow up.",
+      "Pricing depends on what your system needs, so our technician provides a clear quote after assessing it in person. I'm not able to give prices from here. If you describe your issue, I can get a request started so they can follow up.",
     infoNeeded: [],
     issueTypeMapping: null,
     urgencyHint: null,
@@ -1328,7 +1328,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     issueTypeMapping: null,
     urgencyHint: null,
     notes:
-      "OVERRIDE #1: FALLBACK_LLM. Detect the reference pattern deterministically (regex ref-?\\s*[a-z0-9]{4,}), but acting on it (lookup, status, changes) needs backend data → defer to LLM/human flow. The router's job here is just to recognize it and route, not answer. A bare number could be a phone/zip — require the 'ref' token or 'REF-' prefix.",
+      "OVERRIDE #1: FALLBACK_LLM. Detect the reference pattern deterministically (regex ref-?\\s*[a-z0-9]{4,}), but acting on it (lookup, status, changes) needs backend data → defer to LLM/human flow. The router's job here is just to recognize it and route, not answer. A bare number could be a phone/zip, so require the 'ref' token or 'REF-' prefix.",
   },
   {
     id: "account-change-appointment",
@@ -1366,7 +1366,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     issueTypeMapping: null,
     urgencyHint: null,
     notes:
-      "During active intake this is normal slot-filling — the router should update the matching slot (name/phone/email/address) and continue, NOT treat it as a topic change. Validate email/phone format at the boundary.",
+      "During active intake this is normal slot-filling: the router should update the matching slot (name/phone/email/address) and continue, NOT treat it as a topic change. Validate email/phone format at the boundary.",
   },
   {
     id: "account-speak-to-human",
@@ -1383,7 +1383,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ESCALATE",
     cannedResponse:
-      "Of course — you can reach our team directly using the 'Talk to a Human' button in the chat header, which connects you with a real person. I'm flagging this so someone follows up with you.",
+      "Of course. You can reach our team directly using the 'Talk to a Human' button in the chat header, which connects you with a real person. I'm flagging this so someone follows up with you.",
     infoNeeded: [],
     issueTypeMapping: null,
     urgencyHint: null,
@@ -1410,12 +1410,12 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     negationGuards: ["diagnostic", "service call", "repair"],
     action: "ANSWER",
     cannedResponse:
-      "Estimates for a new system or replacement are typically free, while repair visits usually carry a diagnostic fee. I can have our team confirm the details for your situation — would you like me to start a request?",
+      "Estimates for a new system or replacement are typically free, while repair visits usually carry a diagnostic fee. I can have our team confirm the details for your situation. Would you like me to start a request?",
     infoNeeded: [],
     issueTypeMapping: null,
     urgencyHint: null,
     notes:
-      "Industry split: replacement/install estimates free; repair visits carry a diagnostic fee (see pricing-diagnostic-fee). Don't promise it's free for a repair. Per-company policy — keep neutral.",
+      "Industry split: replacement/install estimates free; repair visits carry a diagnostic fee (see pricing-diagnostic-fee). Don't promise it's free for a repair. Per-company policy, so keep neutral.",
   },
   {
     id: "pricing-diagnostic-fee",
@@ -1433,12 +1433,12 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ANSWER",
     cannedResponse:
-      "Repair visits usually include a diagnostic (service call) fee to cover the technician coming out and finding the problem. The exact amount and whether it's credited toward an approved repair varies — I can have our team confirm it for you. Want me to start a request?",
+      "Repair visits usually include a diagnostic (service call) fee to cover the technician coming out and finding the problem. The exact amount and whether it's credited toward an approved repair varies, so I can have our team confirm it for you. Want me to start a request?",
     infoNeeded: [],
     issueTypeMapping: null,
     urgencyHint: null,
     notes:
-      "Don't state a specific dollar amount (per-company). Mention the fee is often credited to an approved repair — see pricing-fee-waived.",
+      "Don't state a specific dollar amount (per-company). Mention the fee is often credited to an approved repair (see pricing-fee-waived).",
   },
   {
     id: "pricing-fee-waived",
@@ -1455,7 +1455,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ANSWER",
     cannedResponse:
-      "In many cases the diagnostic fee is credited toward the cost of an approved repair, so you're not paying twice. Our team can confirm how it works for your visit — would you like me to start a request?",
+      "In many cases the diagnostic fee is credited toward the cost of an approved repair, so you're not paying twice. Our team can confirm how it works for your visit. Would you like me to start a request?",
     infoNeeded: [],
     issueTypeMapping: null,
     urgencyHint: null,
@@ -1498,7 +1498,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ANSWER",
     cannedResponse:
-      "We sometimes run seasonal promotions and may offer discounts for certain groups — our team can tell you what's currently available for your situation. Would you like me to start a request so they can follow up?",
+      "We sometimes run seasonal promotions and may offer discounts for certain groups, and our team can tell you what's currently available for your situation. Would you like me to start a request so they can follow up?",
     infoNeeded: [],
     issueTypeMapping: null,
     urgencyHint: null,
@@ -1518,7 +1518,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ANSWER",
     cannedResponse:
-      "We're happy to take a look and give you an honest second opinion on another company's diagnosis or quote. I can start a request so our team can follow up — would you like that?",
+      "We're happy to take a look and give you an honest second opinion on another company's diagnosis or quote. I can start a request so our team can follow up. Would you like that?",
     infoNeeded: [],
     issueTypeMapping: null,
     urgencyHint: null,
@@ -1529,7 +1529,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
   {
     id: "membership-explainer",
     category: "membership",
-    title: "Maintenance plan / membership — what is it",
+    title: "Maintenance plan / membership: what is it",
     triggerKeywords: [
       "maintenance plan",
       "service plan",
@@ -1542,12 +1542,12 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     negationGuards: ["cancel my membership", "am i a member"],
     action: "ANSWER",
     cannedResponse:
-      "A maintenance plan typically includes scheduled tune-ups, priority scheduling, and discounts on repairs to keep your system running efficiently and catch problems early. Our team can walk you through what's included and the cost — would you like me to start a request?",
+      "A maintenance plan typically includes scheduled tune-ups, priority scheduling, and discounts on repairs to keep your system running efficiently and catch problems early. Our team can walk you through what's included and the cost. Would you like me to start a request?",
     infoNeeded: [],
     issueTypeMapping: null,
     urgencyHint: null,
     notes:
-      "Per-company benefits/pricing — describe typical inclusions generically, don't quote a price. 'Am I a member?' is membership-account (FALLBACK_LLM).",
+      "Per-company benefits/pricing: describe typical inclusions generically, don't quote a price. 'Am I a member?' is membership-account (FALLBACK_LLM).",
   },
   {
     id: "membership-worth-it",
@@ -1562,7 +1562,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ANSWER",
     cannedResponse:
-      "Regular maintenance helps your system run more efficiently, last longer, and avoid surprise breakdowns — and plan members often get repair discounts and priority service. Our team can go over the specifics so you can decide. Would you like me to start a request?",
+      "Regular maintenance helps your system run more efficiently, last longer, and avoid surprise breakdowns, and plan members often get repair discounts and priority service. Our team can go over the specifics so you can decide. Would you like me to start a request?",
     infoNeeded: [],
     issueTypeMapping: null,
     urgencyHint: null,
@@ -1608,7 +1608,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ANSWER",
     cannedResponse:
-      "There are often utility or state rebates available for high-efficiency equipment like heat pumps, and the amounts change over time. Our team can point you to what currently applies in your area — would you like me to start a request so they can follow up?",
+      "There are often utility or state rebates available for high-efficiency equipment like heat pumps, and the amounts change over time. Our team can point you to what currently applies in your area. Would you like me to start a request so they can follow up?",
     infoNeeded: [],
     issueTypeMapping: null,
     urgencyHint: null,
@@ -1628,12 +1628,12 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ANSWER",
     cannedResponse:
-      "Tax credits and incentives for HVAC equipment change year to year, so I'd point you to a tax professional for what currently applies. Our team can also tell you about any utility or manufacturer rebates available right now — want me to start a request?",
+      "Tax credits and incentives for HVAC equipment change year to year, so I'd point you to a tax professional for what currently applies. Our team can also tell you about any utility or manufacturer rebates available right now. Want me to start a request?",
     infoNeeded: [],
     issueTypeMapping: null,
     urgencyHint: null,
     notes:
-      "The federal 25C credit expired 12/31/2025 — do NOT assert an active federal credit. Redirect to a tax professional + current rebates. Reviewed: 2026-06.",
+      "The federal 25C credit expired 12/31/2025; do NOT assert an active federal credit. Redirect to a tax professional + current rebates. Reviewed: 2026-06.",
   },
   {
     id: "efficiency-savings",
@@ -1696,7 +1696,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     issueTypeMapping: null,
     urgencyHint: null,
     notes:
-      "FALLBACK_LLM: the repair-vs-replace call depends on age, repair cost, frequency, and efficiency — too situational for a canned answer. LLM can explain factors (e.g. the 50%/$5k rules) and recommend an assessment.",
+      "FALLBACK_LLM: the repair-vs-replace call depends on age, repair cost, frequency, and efficiency, which is too situational for a canned answer. LLM can explain factors (e.g. the 50%/$5k rules) and recommend an assessment.",
   },
   {
     id: "replacement-sizing",
@@ -1712,7 +1712,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ANSWER",
     cannedResponse:
-      "The right size isn't just about square footage — a proper sizing (a Manual J load calculation) accounts for your home's insulation, windows, and layout, so a bigger unit isn't automatically better. Our team can do that assessment for you. Would you like me to start a request?",
+      "The right size isn't just about square footage. A proper sizing (a Manual J load calculation) accounts for your home's insulation, windows, and layout, so a bigger unit isn't automatically better. Our team can do that assessment for you. Would you like me to start a request?",
     infoNeeded: [],
     issueTypeMapping: null,
     urgencyHint: null,
@@ -1754,7 +1754,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ANSWER",
     cannedResponse:
-      "Yes — ductless mini-splits are a great option for spaces without ductwork, additions, or zoning specific rooms, and our team can help with installation or service. Would you like me to start a request so they can follow up?",
+      "Yes, ductless mini-splits are a great option for spaces without ductwork, additions, or zoning specific rooms, and our team can help with installation or service. Would you like me to start a request so they can follow up?",
     infoNeeded: [],
     issueTypeMapping: null,
     urgencyHint: null,
@@ -1803,7 +1803,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
   {
     id: "equipment-iaq-products",
     category: "equipment",
-    title: "IAQ products — UV light, air purifier, humidifier",
+    title: "IAQ products: UV light, air purifier, humidifier",
     triggerKeywords: [
       "uv light",
       "air purifier",
@@ -1817,7 +1817,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ANSWER",
     cannedResponse:
-      "We can help improve your indoor air quality with add-ons like UV lights, whole-home air purifiers, humidifiers, and upgraded filtration. Our team can recommend what fits your system — would you like me to start a request so they can follow up?",
+      "We can help improve your indoor air quality with add-ons like UV lights, whole-home air purifiers, humidifiers, and upgraded filtration. Our team can recommend what fits your system. Would you like me to start a request so they can follow up?",
     infoNeeded: [],
     issueTypeMapping: null,
     urgencyHint: null,
@@ -1855,7 +1855,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "COLLECT_INFO",
     cannedResponse:
-      "A cooler or freezer that isn't holding temperature can put your product at risk fast — let's get a technician out to look at it. What's the service address?",
+      "A cooler or freezer that isn't holding temperature can put your product at risk fast. Let's get a technician out to look at it. What's the service address?",
     infoNeeded: ["address"],
     issueTypeMapping: "refrigeration",
     urgencyHint: "high",
@@ -1881,12 +1881,12 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "COLLECT_INFO",
     cannedResponse:
-      "We repair and service commercial ice machines — including Hoshizaki, Manitowoc, and Scotsman — and can set up preventative maintenance too. Let's get a technician out. What's the service address?",
+      "We repair and service commercial ice machines, including Hoshizaki, Manitowoc, and Scotsman, and can set up preventative maintenance too. Let's get a technician out. What's the service address?",
     infoNeeded: ["address"],
     issueTypeMapping: "ice_machine",
     urgencyHint: "high",
     notes:
-      "Commercial only. Brands named because Spears explicitly services Hoshizaki/Manitowoc/Scotsman/Koolaire. A residential fridge ice maker is NOT this — but 'ice machine'/'ice maker' phrasing is dominated by commercial units, and the refrigeration-not-cooling intent covers residential cooling failures.",
+      "Commercial only. Brands named because Spears explicitly services Hoshizaki/Manitowoc/Scotsman/Koolaire. A residential fridge ice maker is NOT this, but 'ice machine'/'ice maker' phrasing is dominated by commercial units, and the refrigeration-not-cooling intent covers residential cooling failures.",
   },
   {
     id: "boiler-issue",
@@ -1908,12 +1908,12 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     negationGuards: ["water heater", "no hot water from my tap"],
     action: "COLLECT_INFO",
     cannedResponse:
-      "We service gas, electric, and oil boilers — repairs and preventative maintenance. Let's get a technician out to look at it. What's the service address?",
+      "We service gas, electric, and oil boilers, both repairs and preventative maintenance. Let's get a technician out to look at it. What's the service address?",
     infoNeeded: ["address"],
     issueTypeMapping: "boiler",
     urgencyHint: "high",
     notes:
-      "Spears services boilers (residential + commercial), so a SPECIFIC boiler SYMPTOM is a repair intake — distinct from the generic equipment-boiler 'do you work on boilers?' capability question, which stays FALLBACK_LLM. negationGuards exclude domestic-hot-water/'water heater' which is a different appliance.",
+      "Spears services boilers (residential + commercial), so a SPECIFIC boiler SYMPTOM is a repair intake, distinct from the generic equipment-boiler 'do you work on boilers?' capability question, which stays FALLBACK_LLM. negationGuards exclude domestic-hot-water/'water heater' which is a different appliance.",
   },
   {
     id: "commercial-appliance-issue",
@@ -1936,7 +1936,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "COLLECT_INFO",
     cannedResponse:
-      "We repair commercial kitchen equipment — ranges, ovens, fryers, grills, and holding cabinets. Let's get a technician out to get you back up and running. What's the service address?",
+      "We repair commercial kitchen equipment: ranges, ovens, fryers, grills, and holding cabinets. Let's get a technician out to get you back up and running. What's the service address?",
     infoNeeded: ["address"],
     issueTypeMapping: "commercial_appliance",
     urgencyHint: "high",
@@ -1959,7 +1959,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ANSWER",
     cannedResponse:
-      "We typically give an arrival window rather than an exact minute, and you'll usually get a heads-up (a call or text) when the technician is on the way. For the specific timing of an existing appointment, our team can confirm — want me to help with that?",
+      "We typically give an arrival window rather than an exact minute, and you'll usually get a heads-up (a call or text) when the technician is on the way. For the specific timing of an existing appointment, our team can confirm. Want me to help with that?",
     infoNeeded: [],
     issueTypeMapping: null,
     urgencyHint: null,
@@ -2003,7 +2003,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     infoNeeded: [],
     issueTypeMapping: null,
     urgencyHint: null,
-    notes: "Combines visit-prep and pets — both static, low-harm.",
+    notes: "Combines visit-prep and pets; both static, low-harm.",
   },
   {
     id: "logistics-same-day-vs-emergency",
@@ -2041,7 +2041,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ANSWER",
     cannedResponse:
-      "After-hours, weekend, and emergency visits can carry an additional charge, and the amount varies. Our team can confirm the specifics for the time you need — would you like me to start a request?",
+      "After-hours, weekend, and emergency visits can carry an additional charge, and the amount varies. Our team can confirm the specifics for the time you need. Would you like me to start a request?",
     infoNeeded: [],
     issueTypeMapping: null,
     urgencyHint: null,
@@ -2064,12 +2064,12 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ANSWER",
     cannedResponse:
-      "We stand behind our work and want you to be satisfied — our team can walk you through the specific labor and satisfaction guarantees that apply to your service. Would you like me to start a request so they can follow up?",
+      "We stand behind our work and want you to be satisfied. Our team can walk you through the specific labor and satisfaction guarantees that apply to your service. Would you like me to start a request so they can follow up?",
     infoNeeded: [],
     issueTypeMapping: null,
     urgencyHint: null,
     notes:
-      "Distinct from faq-warranty (manufacturer/equipment). This is workmanship/satisfaction. Per-company terms — keep general.",
+      "Distinct from faq-warranty (manufacturer/equipment). This is workmanship/satisfaction. Per-company terms, so keep general.",
   },
   {
     id: "trust-technicians",
@@ -2092,7 +2092,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     issueTypeMapping: null,
     urgencyHint: null,
     notes:
-      "Must NOT assert 'licensed professionals' / drug-testing as fact — per-org data doesn't exist (legal liability across tenants), same convention as faq-licensed-insured. Offer to follow up instead. faq-licensed-insured covers the company-level license/insurance question.",
+      "Must NOT assert 'licensed professionals' / drug-testing as fact; per-org data doesn't exist (legal liability across tenants), same convention as faq-licensed-insured. Offer to follow up instead. faq-licensed-insured covers the company-level license/insurance question.",
   },
 
   // ─── Category 18 — WARRANTY (detail intents beyond faq-warranty) ───────────
@@ -2129,7 +2129,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ANSWER",
     cannedResponse:
-      "Manufacturer warranties usually need to be registered within a set window after installation to get full coverage. If we installed your system our team can confirm it was registered, or help you do it — would you like me to start a request?",
+      "Manufacturer warranties usually need to be registered within a set window after installation to get full coverage. If we installed your system our team can confirm it was registered, or help you do it. Would you like me to start a request?",
     infoNeeded: [],
     issueTypeMapping: null,
     urgencyHint: null,
@@ -2153,7 +2153,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ANSWER",
     cannedResponse:
-      "If your current system uses R-410A or older R-22, you can keep running and servicing it — the phaseout applies to the refrigerant used in brand-new equipment, not to existing systems. If you're ever replacing the system, newer low-impact refrigerants come standard. Anything else I can help with?",
+      "If your current system uses R-410A or older R-22, you can keep running and servicing it. The phaseout applies to the refrigerant used in brand-new equipment, not to existing systems. If you're ever replacing the system, newer low-impact refrigerants come standard. Anything else I can help with?",
     infoNeeded: [],
     issueTypeMapping: null,
     urgencyHint: null,
@@ -2227,12 +2227,12 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ANSWER",
     cannedResponse:
-      "Before we send anyone out, a couple of safe things are worth a quick look: try fresh batteries in the thermostat, check that the breaker (or fuse) for your HVAC hasn't tripped, and make sure the switch on the side of the furnace is on. If none of that brings it back to life, no worries — we'll get a technician out to you. Want me to start a request?",
+      "Before we send anyone out, a couple of safe things are worth a quick look: try fresh batteries in the thermostat, check that the breaker (or fuse) for your HVAC hasn't tripped, and make sure the switch on the side of the furnace is on. If none of that brings it back to life, no worries, we'll get a technician out to you. Want me to start a request?",
     infoNeeded: [],
     issueTypeMapping: "other",
     urgencyHint: "medium",
     notes:
-      "Lowest-priority category by design — only fires when no issue/emergency intent matches more strongly (e.g. a bare 'nothing happens' with no AC/heat context). 'no power'/'nothing happens'/'completely dead' WITH ac/heat context route to cooling-wont-turn-on/heating intents (priority 2) instead, which is correct. Safe checks ONLY: batteries, breaker/fuse, furnace switch. Never open the unit or touch wiring/gas/refrigerant.",
+      "Lowest-priority category by design; only fires when no issue/emergency intent matches more strongly (e.g. a bare 'nothing happens' with no AC/heat context). 'no power'/'nothing happens'/'completely dead' WITH ac/heat context route to cooling-wont-turn-on/heating intents (priority 2) instead, which is correct. Safe checks ONLY: batteries, breaker/fuse, furnace switch. Never open the unit or touch wiring/gas/refrigerant.",
   },
   {
     id: "selfcheck-thermostat-blank",
@@ -2245,7 +2245,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     // phrasings and still wins those; this self-check only wins the gentler
     // "is blank / is dead / screen is off" phrasings it would otherwise miss.
     category: "thermostat",
-    title: "Self-check: blank/dead thermostat — try batteries first",
+    title: "Self-check: blank/dead thermostat, try batteries first",
     triggerKeywords: [
       "thermostat dead",
       "screen is off",
@@ -2265,12 +2265,12 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ANSWER",
     cannedResponse:
-      "A blank thermostat is very often just dead batteries — if yours takes them, popping in a fresh set is a safe first thing to try. It's also worth checking that the breaker for your HVAC hasn't tripped. If the screen stays dark after that, we'll get a technician out to take a look. Would you like me to start a request?",
+      "A blank thermostat is very often just dead batteries. If yours takes them, popping in a fresh set is a safe first thing to try. It's also worth checking that the breaker for your HVAC hasn't tripped. If the screen stays dark after that, we'll get a technician out to take a look. Would you like me to start a request?",
     infoNeeded: [],
     issueTypeMapping: "thermostat_issue",
     urgencyHint: "medium",
     notes:
-      "Sibling of thermostat-blank (COLLECT_INFO). That entry stays authoritative (priority 2 beats this selfcheck default-priority entry whenever both match). This one catches the gentler 'maybe just batteries' framing / phrasings the issue entry's substring triggers miss (e.g. 'thermostat is blank'). Batteries + breaker check ONLY — no wiring/DIY walk-through.",
+      "Sibling of thermostat-blank (COLLECT_INFO). That entry stays authoritative (priority 2 beats this selfcheck default-priority entry whenever both match). This one catches the gentler 'maybe just batteries' framing / phrasings the issue entry's substring triggers miss (e.g. 'thermostat is blank'). Batteries + breaker check ONLY: no wiring/DIY walk-through.",
   },
 
   // ─── Category 10 — CONVERSATIONAL / META ───────────────────────────────────
@@ -2289,12 +2289,12 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ANSWER",
     cannedResponse:
-      "Hi! I'm an AI HVAC assistant — I can help describe your issue and get a technician dispatched. I might not get everything right, so you can tap “Talk to a Human” anytime. What heating, cooling, or air quality issue are you having?",
+      "Hi! I'm an AI HVAC assistant, here to help describe your issue and get a technician dispatched. I might not get everything right, so you can tap “Talk to a Human” anytime. What heating, cooling, or air quality issue are you having?",
     infoNeeded: [],
     issueTypeMapping: null,
     urgencyHint: null,
     notes:
-      "Mirrors the system-prompt greeting and discloses it's an AI with a human option (transparency / trust). Only match standalone greetings (short message, no issue keywords) — 'hi my AC is broken' must route to the issue.",
+      "Mirrors the system-prompt greeting and discloses it's an AI with a human option (transparency / trust). Only match standalone greetings (short message, no issue keywords); 'hi my AC is broken' must route to the issue.",
   },
   {
     id: "meta-thanks",
@@ -2349,7 +2349,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     issueTypeMapping: null,
     urgencyHint: null,
     notes:
-      "Be transparent (it's an AI). May precede a handoff request — if they then ask for a human, route to account-speak-to-human.",
+      "Be transparent (it's an AI). May precede a handoff request; if they then ask for a human, route to account-speak-to-human.",
   },
   {
     id: "meta-frustration",
@@ -2366,7 +2366,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "ESCALATE",
     cannedResponse:
-      "I'm really sorry for the frustration — that's the last thing I want for you. Let me connect you with a real person; you can tap 'Talk to a Human' in the chat header and our team will take care of you.",
+      "I'm really sorry for the frustration. That's the last thing I want for you. Let me connect you with a real person; you can tap 'Talk to a Human' in the chat header and our team will take care of you.",
     infoNeeded: [],
     issueTypeMapping: null,
     urgencyHint: null,
@@ -2405,12 +2405,12 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     action: "REDIRECT",
     cannedResponse:
-      "We handle HVAC, refrigeration, ice machines, boilers, and commercial appliance repair — that one's outside our wheelhouse, so you'd want a specialist for it. Is there a heating, cooling, refrigeration, or commercial equipment issue I can help you with?",
+      "We handle HVAC, refrigeration, ice machines, boilers, and commercial appliance repair, but that one's outside our wheelhouse, so you'd want a specialist for it. Is there a heating, cooling, refrigeration, or commercial equipment issue I can help you with?",
     infoNeeded: [],
     issueTypeMapping: null,
     urgencyHint: null,
     notes:
-      "Redirects ONLY genuinely out-of-scope work (plumbing-only, roofing, electrical-only, etc). Spears' in-scope lines — HVAC, refrigeration (coolers/freezers/display cases), ice machines, boilers, commercial appliances — are owned by their own COLLECT_INFO intents and MUST NOT appear here (removing 'refrigerator'/'fridge'/'appliance repair' fixed a defect where Spears' core business was being redirected away). Careful overlap guards: 'refrigerant'/'freon' = HVAC (cooling), NOT a fridge; 'water heater' = a separate appliance; 'electrical/burning smell' = HVAC emergency, not electrician work. When uncertain, FALLBACK_LLM. issueTypeMapping is null so a spurious redirect never stamps a bogus issue type.",
+      "Redirects ONLY genuinely out-of-scope work (plumbing-only, roofing, electrical-only, etc). Spears' in-scope lines (HVAC, refrigeration (coolers/freezers/display cases), ice machines, boilers, commercial appliances) are owned by their own COLLECT_INFO intents and MUST NOT appear here (removing 'refrigerator'/'fridge'/'appliance repair' fixed a defect where Spears' core business was being redirected away). Careful overlap guards: 'refrigerant'/'freon' = HVAC (cooling), NOT a fridge; 'water heater' = a separate appliance; 'electrical/burning smell' = HVAC emergency, not electrician work. When uncertain, FALLBACK_LLM. issueTypeMapping is null so a spurious redirect never stamps a bogus issue type.",
   },
 ];
 

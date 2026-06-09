@@ -52,15 +52,15 @@
 }
 
 :root {
-  /* HVAC Brand: Blue primary (#2563EB), slate backgrounds */
-  --background: oklch(0.985 0.002 247.858);
-  --foreground: oklch(0.129 0.042 264.695);
+  /* Spears Services brand: cyan primary (#0cb5ed), deep navy text (#0f2950) */
+  --background: oklch(0.985 0.003 220);
+  --foreground: oklch(0.27 0.06 258);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.129 0.042 264.695);
+  --card-foreground: oklch(0.27 0.06 258);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.129 0.042 264.695);
-  --primary: oklch(0.546 0.245 262.881);
-  --primary-foreground: oklch(0.985 0 0);
+  --popover-foreground: oklch(0.27 0.06 258);
+  --primary: oklch(0.72 0.13 220);
+  --primary-foreground: oklch(0.99 0 0);
   --secondary: oklch(0.968 0.007 247.896);
   --secondary-foreground: oklch(0.129 0.042 264.695);
   --muted: oklch(0.968 0.007 247.896);
@@ -70,37 +70,38 @@
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.918 0.016 264.054);
   --input: oklch(0.918 0.016 264.054);
-  --ring: oklch(0.546 0.245 262.881);
-  --chart-1: oklch(0.546 0.245 262.881);
-  --chart-2: oklch(0.705 0.213 47.604);
+  --ring: oklch(0.72 0.13 220);
+  --chart-1: oklch(0.72 0.13 220);
+  --chart-2: oklch(0.27 0.06 258);
   --chart-3: oklch(0.554 0.046 257.417);
   --chart-4: oklch(0.371 0.044 257.287);
   --chart-5: oklch(0.269 0.015 264.695);
   --radius: 0.625rem;
-  --sidebar: oklch(0.985 0.002 247.858);
-  --sidebar-foreground: oklch(0.129 0.042 264.695);
-  --sidebar-primary: oklch(0.546 0.245 262.881);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar: oklch(0.985 0.003 220);
+  --sidebar-foreground: oklch(0.27 0.06 258);
+  --sidebar-primary: oklch(0.72 0.13 220);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
   --sidebar-accent: oklch(0.968 0.007 247.896);
-  --sidebar-accent-foreground: oklch(0.129 0.042 264.695);
+  --sidebar-accent-foreground: oklch(0.27 0.06 258);
   --sidebar-border: oklch(0.918 0.016 264.054);
-  --sidebar-ring: oklch(0.546 0.245 262.881);
+  --sidebar-ring: oklch(0.72 0.13 220);
 
-  /* HVAC brand accent colors */
-  --hvac-accent: oklch(0.705 0.213 47.604);
-  --hvac-accent-light: oklch(0.98 0.016 73.684);
+  /* Spears brand accent: deep navy (#0f2950) replaces the old orange */
+  --hvac-accent: oklch(0.27 0.06 258);
+  --hvac-accent-light: oklch(0.96 0.01 220);
   --hvac-primary-light: oklch(0.932 0.032 254.607);
 }
 
 .dark {
-  --background: oklch(0.129 0.042 264.695);
+  /* Spears navy (#0f2950) base, brighter cyan primary for contrast */
+  --background: oklch(0.21 0.05 258);
   --foreground: oklch(0.968 0.007 247.896);
-  --card: oklch(0.208 0.042 265.755);
+  --card: oklch(0.27 0.06 258);
   --card-foreground: oklch(0.968 0.007 247.896);
-  --popover: oklch(0.208 0.042 265.755);
+  --popover: oklch(0.27 0.06 258);
   --popover-foreground: oklch(0.968 0.007 247.896);
-  --primary: oklch(0.623 0.214 259.815);
-  --primary-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.75 0.13 220);
+  --primary-foreground: oklch(0.16 0.04 258);
   --secondary: oklch(0.269 0.015 264.695);
   --secondary-foreground: oklch(0.968 0.007 247.896);
   --muted: oklch(0.269 0.015 264.695);
@@ -110,24 +111,24 @@
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.623 0.214 259.815);
-  --chart-1: oklch(0.623 0.214 259.815);
-  --chart-2: oklch(0.705 0.213 47.604);
+  --ring: oklch(0.75 0.13 220);
+  --chart-1: oklch(0.75 0.13 220);
+  --chart-2: oklch(0.62 0.1 222);
   --chart-3: oklch(0.554 0.046 257.417);
   --chart-4: oklch(0.371 0.044 257.287);
   --chart-5: oklch(0.269 0.015 264.695);
-  --sidebar: oklch(0.208 0.042 265.755);
+  --sidebar: oklch(0.27 0.06 258);
   --sidebar-foreground: oklch(0.968 0.007 247.896);
-  --sidebar-primary: oklch(0.623 0.214 259.815);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.75 0.13 220);
+  --sidebar-primary-foreground: oklch(0.16 0.04 258);
   --sidebar-accent: oklch(0.269 0.015 264.695);
   --sidebar-accent-foreground: oklch(0.968 0.007 247.896);
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.623 0.214 259.815);
+  --sidebar-ring: oklch(0.75 0.13 220);
 
-  /* HVAC brand accent colors (dark) */
-  --hvac-accent: oklch(0.705 0.213 47.604);
-  --hvac-accent-light: oklch(0.293 0.066 41.198);
+  /* Spears brand accent (dark): light cyan */
+  --hvac-accent: oklch(0.75 0.13 220);
+  --hvac-accent-light: oklch(0.3 0.06 240);
   --hvac-primary-light: oklch(0.279 0.077 261.935);
 }
 
@@ -206,7 +207,7 @@
   pointer-events: none;
 }
 
-/* cool (blue) glow */
+/* cyan glow (Spears primary) */
 .lp-mesh::before {
   width: 42rem;
   height: 42rem;
@@ -214,13 +215,13 @@
   right: -8rem;
   background: radial-gradient(
     circle at center,
-    oklch(0.623 0.214 259.815 / 0.28),
+    oklch(0.72 0.13 220 / 0.28),
     transparent 70%
   );
   animation: lp-drift 18s ease-in-out infinite;
 }
 
-/* warm (orange) glow — the "heat" half of HVAC */
+/* deep navy glow (Spears secondary) */
 .lp-mesh::after {
   width: 36rem;
   height: 36rem;
@@ -228,7 +229,7 @@
   left: -10rem;
   background: radial-gradient(
     circle at center,
-    oklch(0.705 0.213 47.604 / 0.22),
+    oklch(0.4 0.1 250 / 0.22),
     transparent 70%
   );
   animation: lp-drift 22s ease-in-out infinite reverse;
