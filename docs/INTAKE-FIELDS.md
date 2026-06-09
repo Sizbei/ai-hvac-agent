@@ -95,6 +95,34 @@ breaker, a clogged filter) to avoid a wasted truck roll — never anything that
 involves opening the unit, wiring, gas, or refrigerant. See the
 `selfcheck-*` intents in the knowledge base.
 
+## Address capture
+
+The service-address step is where intake most often stalled, so capture is
+deliberately permissive — by the time we ask "what's the service address?", the
+customer's reply **is** the address, whatever its shape.
+
+- **Address lookup (autocomplete).** The web chat renders a keyless address
+  lookup (`AddressAutocomplete`, backed by Photon) at the address step. When the
+  customer picks a result, the client sends it with an `addressSelected` flag and
+  the backend stores that selection **verbatim** — it does not re-validate it
+  against the US street-number regex. This is what lets non-US or house-number-less
+  addresses (e.g. `Route Nationale # 3, Commune Pignon, Nord`,
+  `Rockaway Freeway, New York, New York 11693`) go straight through instead of
+  being re-asked.
+- **Typed addresses.** A typed reply at the address step is captured by
+  `extractAddressAtAddressStep()` (`src/lib/ai/slot-extract.ts`): it accepts the
+  whole reply when it looks address-like (has a comma, a 5-digit ZIP, or 3+ words),
+  falls back to the loose number-led matcher for short streets like `123 Main`, and
+  rejects refusals/redirects (`skip`, `can someone call me instead`). It returns
+  the full string rather than a sub-match, so a full state name isn't truncated
+  (`…, Massachusetts 01104` stays intact).
+- **City/ZIP follow-up.** If only a street is given, the agent asks once for the
+  city and ZIP (`address_parts`) and appends it; a lookup pick or a re-typed full
+  street replaces the partial rather than doubling it.
+
+All of the above run on the deterministic (0-token) path — no LLM call to capture
+or re-ask an address.
+
 ## Channel behavior
 
 Both the web chat (`/api/chat`) and the phone agent (`/api/voice/*`) use the

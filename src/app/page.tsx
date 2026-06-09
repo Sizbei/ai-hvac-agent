@@ -12,8 +12,6 @@ import {
   Award,
   BadgeCheck,
   Users,
-  MapPin,
-  Mail,
   CheckCircle2,
   MessagesSquare,
   LayoutDashboard,
@@ -364,82 +362,6 @@ export default function Home() {
           </div>
         </section>
       </main>
-
-      {/* Footer */}
-      <footer className="border-t border-border/60 bg-background/70 backdrop-blur">
-        <div className="mx-auto grid max-w-6xl gap-8 px-5 py-12 sm:grid-cols-2 md:grid-cols-4">
-          <div className="sm:col-span-2 md:col-span-1">
-            <div className="flex items-center gap-2.5">
-              <span className="flex size-8 items-center justify-center rounded-md bg-gradient-to-br from-primary to-[var(--hvac-accent)] text-white">
-                <Wind className="size-4" />
-              </span>
-              <span className="font-[family-name:var(--font-display)] text-base font-bold uppercase tracking-tight">
-                Spears&nbsp;Services
-              </span>
-            </div>
-            <p className="mt-3 text-sm text-muted-foreground">
-              {SPEARS.positioning}. Serving the Tri-Cities since 1993.
-            </p>
-          </div>
-
-          <div>
-            <h4 className="text-sm font-semibold">Services</h4>
-            <ul className="mt-3 space-y-2 text-sm text-muted-foreground">
-              {SERVICES.map((s) => (
-                <li key={s.title}>{s.title}</li>
-              ))}
-            </ul>
-          </div>
-
-          <div>
-            <h4 className="text-sm font-semibold">Contact</h4>
-            <ul className="mt-3 space-y-2.5 text-sm text-muted-foreground">
-              <li>
-                <a
-                  href={`tel:${SPEARS.phoneTel}`}
-                  className="flex items-center gap-2 transition-colors hover:text-foreground"
-                >
-                  <Phone className="size-4 shrink-0" />
-                  {SPEARS.phoneDisplay}
-                </a>
-              </li>
-              <li>
-                <a
-                  href={`mailto:${SPEARS.email}`}
-                  className="flex items-center gap-2 transition-colors hover:text-foreground"
-                >
-                  <Mail className="size-4 shrink-0" />
-                  {SPEARS.email}
-                </a>
-              </li>
-              <li className="flex items-start gap-2">
-                <MapPin className="mt-0.5 size-4 shrink-0" />
-                {SPEARS.address}
-              </li>
-            </ul>
-          </div>
-
-          <div>
-            <h4 className="text-sm font-semibold">Demo</h4>
-            <ul className="mt-3 space-y-2 text-sm text-muted-foreground">
-              {NAV.map((item) => (
-                <li key={item.href}>
-                  <Link href={item.href} className="transition-colors hover:text-foreground">
-                    {item.label}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-
-        <div className="border-t border-border/60">
-          <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-2 px-5 py-6 text-xs text-muted-foreground sm:flex-row">
-            <span>AI intake demo for Spears Services. Hours marketed as 24/7 for emergencies.</span>
-            <span>Built as a full-stack portfolio project.</span>
-          </div>
-        </div>
-      </footer>
     </div>
   );
 }
