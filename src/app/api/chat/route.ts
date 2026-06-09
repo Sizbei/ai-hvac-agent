@@ -31,6 +31,7 @@ import {
 import {
   determineNextState,
   isTerminalState,
+  type SessionState,
 } from "@/lib/ai/state-machine";
 import { checkTokenBudget, addTokenUsage } from "@/lib/ai/token-budget";
 import { DEFAULT_MAX_TURNS } from "@/lib/ai/chat-limits";
@@ -43,7 +44,7 @@ import {
 } from "@/lib/ai/triage";
 import { EMPTY_ORG_CONFIG } from "@/lib/ai/router-config";
 import { getRouterConfig } from "@/lib/admin/org-config-queries";
-import { CONFIRM_REPLY } from "@/lib/ai/constants";
+import { CONFIRM_REPLY, HANDOFF_REPLY } from "@/lib/ai/constants";
 import { extractSlots, extractAddressLoose } from "@/lib/ai/slot-extract";
 import { withLeadIn } from "@/lib/ai/lead-ins";
 import { escalateSession } from "@/lib/ai/escalate-service";
@@ -194,6 +195,60 @@ function cannedTextResponse(text: string): Response {
   return new Response(text, {
     headers: { "content-type": "text/plain; charset=utf-8" },
   });
+}
+
+/**
+ * Graceful degradation: instead of surfacing a raw error to the customer (a red
+ * error box) when a turn can't be completed normally — token budget / turn limit
+ * reached, or the model call failed — record a warm handoff reply and escalate
+ * the session so a human picks it up. Returns the handoff copy as a normal text
+ * response so the client renders it as an assistant bubble, not an error.
+ *
+ * Best-effort: the message insert and escalation are wrapped so a DB blip still
+ * returns the handoff copy (the customer always sees a graceful message). Safe to
+ * call before any reply has streamed (all the early-gate failure paths qualify).
+ */
+async function gracefulHandoff(params: {
+  readonly organizationId: string;
+  readonly sessionId: string;
+  readonly currentStatus: SessionState;
+  readonly ipAddress: string;
+}): Promise<Response> {
+  const { organizationId, sessionId, currentStatus, ipAddress } = params;
+  try {
+    await db.insert(messages).values({
+      organizationId,
+      sessionId,
+      role: "assistant",
+      content: HANDOFF_REPLY,
+      tokensUsed: 0,
+    });
+  } catch (insertError: unknown) {
+    logger.error(
+      { error: insertError, sessionId },
+      "Graceful-handoff message insert failed — returning handoff copy anyway",
+    );
+  }
+  try {
+    const escResult = await escalateSession({
+      organizationId,
+      sessionId,
+      currentStatus,
+      ipAddress,
+    });
+    if (!escResult.ok && escResult.reason !== "already_transitioned") {
+      logger.error(
+        { sessionId, reason: escResult.reason },
+        "Graceful-handoff escalation did not apply",
+      );
+    }
+  } catch (escError: unknown) {
+    logger.error(
+      { error: escError, sessionId },
+      "Graceful-handoff escalation threw — returning handoff copy anyway",
+    );
+  }
+  return cannedTextResponse(HANDOFF_REPLY);
 }
 
 /**
@@ -350,11 +405,19 @@ export async function POST(request: NextRequest) {
       session.tokenBudget,
     );
     if (budgetState.exhausted) {
-      return errorResponse(
-        "Token budget exhausted for this session. Please start a new session or speak with a human.",
-        "TOKEN_BUDGET_EXHAUSTED",
-        429,
+      // Don't surface a raw 429 — the customer just sees a red error box mid-chat
+      // ("it errors out when the conversation gets too long"). Degrade gracefully:
+      // connect them to a human and escalate the session instead.
+      logger.info(
+        { sessionId: session.id, tokensUsed: session.tokensUsed },
+        "Token budget exhausted — degrading to human handoff",
       );
+      return gracefulHandoff({
+        organizationId,
+        sessionId: session.id,
+        currentStatus: session.status,
+        ipAddress: ip,
+      });
     }
 
     // 4. Parse and sanitize message per SC-06
@@ -1077,6 +1140,12 @@ export async function POST(request: NextRequest) {
     return result.toTextStreamResponse();
   } catch (error) {
     logger.error({ error }, "Chat endpoint error");
-    return errorResponse("Chat processing failed", "CHAT_FAILED", 500);
+    // Degrade gracefully rather than showing the customer a raw 500 error box.
+    // We can't reliably escalate here (the session may not have loaded, or the
+    // failure is in the stream itself), so we return the warm handoff copy as a
+    // normal assistant bubble. The budget/turn-limit paths above DO escalate; a
+    // genuine mid-stream model failure is rarer and the customer still gets a
+    // human-handoff message instead of an error.
+    return cannedTextResponse(HANDOFF_REPLY);
   }
 }

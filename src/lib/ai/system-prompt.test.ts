@@ -66,6 +66,59 @@ describe("buildSystemPrompt — default (no brand)", () => {
     expect(prompt).toMatch(/^\/no_think/);
   });
 
+  it("treats the safety screen as a hard gate that comes FIRST, before any field or booking", () => {
+    const prompt = buildSystemPrompt();
+    // A dedicated, high-priority safety section exists (not just a numbered list item).
+    expect(prompt).toContain("SAFETY GATE");
+    expect(prompt).toContain("HIGHEST PRIORITY");
+    // The gate must precede the required-fields gate in the prompt text.
+    expect(prompt.indexOf("SAFETY GATE")).toBeLessThan(
+      prompt.indexOf("REQUIRED before submitting"),
+    );
+    // Explicitly framed as first / before booking, and NOT a closing checkbox.
+    expect(prompt).toContain("before any intake field");
+    expect(prompt).toContain("NOT a closing checkbox");
+  });
+
+  it("short-circuits the whole flow on an active hazard with evacuate + connect-to-human guidance", () => {
+    const prompt = buildSystemPrompt();
+    // Enumerates the hazards.
+    expect(prompt).toMatch(/gas/i);
+    expect(prompt).toMatch(/burning or electrical smell/i);
+    expect(prompt).toMatch(/carbon-monoxide alarm|CO symptoms/i);
+    expect(prompt).toMatch(/active water flooding/i);
+    // Immediately stops everything else — no more intake, no booking, no scheduling/charges.
+    expect(prompt).toMatch(/IMMEDIATELY STOP|STOP all intake/);
+    expect(prompt).toContain("do NOT book");
+    expect(prompt).toMatch(/do NOT discuss scheduling or charges/);
+    // Evacuate guidance for gas/CO: leave, no switches/flames, call gas company or 911.
+    expect(prompt).toContain("leave the building");
+    expect(prompt).toMatch(/do NOT touch light switches/);
+    expect(prompt).toMatch(/gas company or 911/);
+    // Connect to a live person right away.
+    expect(prompt).toMatch(/connecting them to a live person/);
+  });
+
+  it("forbids re-asking the safety question — at most once, never as a wrap-up", () => {
+    const prompt = buildSystemPrompt();
+    expect(prompt).toContain("AT MOST ONCE");
+    expect(prompt).toMatch(/NEVER ask it again|never ask again/);
+    // Specifically forbidden as a closing/wrap-up question after booking.
+    expect(prompt).toMatch(/wrap-up/);
+    expect(prompt).toMatch(/after booking|after an appointment is booked/);
+    // The closing confirmation must not append the hazard question.
+    expect(prompt).toMatch(/NEVER append the safety hazard question/);
+  });
+
+  it("keeps the vulnerable-occupants question as enrichment, NOT a hazard gate", () => {
+    const prompt = buildSystemPrompt();
+    // It is explicitly called out as separate from / not a safety hazard.
+    expect(prompt).toMatch(/SEPARATE enrichment|prioritization detail/);
+    expect(prompt).toMatch(/NOT a safety hazard|It is NOT a safety hazard/);
+    // And must not be bundled into a closing safety checkbox.
+    expect(prompt).toMatch(/never (be )?bundled into|never as a closing safety checkbox/i);
+  });
+
   it("enforces calm-dispatcher tone: empathy once, no script narration, plain prose, confirm once", () => {
     const prompt = buildSystemPrompt();
     // Empathy once, never repeated.
