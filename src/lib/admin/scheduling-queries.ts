@@ -53,6 +53,58 @@ const ACTIVE_BOOKING_STATUSES = [
  * booked-as-a-status (scheduled) but missing a tech and/or an arrival window. */
 const UNSCHEDULED_STATUSES = ["pending", "scheduled"] as const;
 
+/** Minutes in a day. A slot's [start, end) span lives in [0, 1440] (1440 =
+ * end-of-day midnight), measured in business-tz wall clock. */
+const MINUTES_PER_DAY = 1440;
+const MIN_DAY_OF_WEEK = 0;
+const MAX_DAY_OF_WEEK = 6;
+
+/**
+ * A rejected availability slot — thrown by setTechnicianAvailability when an
+ * input slot is out of range (bad weekday or a non-positive / overflowing
+ * [start, end) span). A typed error so the route can map it to a 400 rather than
+ * letting impossible data reach the DB (where it would corrupt the open-window
+ * math and the out-of-hours shading).
+ */
+export class InvalidAvailabilitySlotError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidAvailabilitySlotError";
+  }
+}
+
+/**
+ * Validate one availability slot: an integer weekday in [0, 6] and an integer
+ * [startMinute, endMinute) span with 0 <= start < end <= 1440. Throws
+ * InvalidAvailabilitySlotError on the first violation. Pure — no I/O.
+ */
+function validateAvailabilitySlot(slot: AvailabilitySlotInput): void {
+  const { dayOfWeek, startMinute, endMinute } = slot;
+  if (
+    !Number.isInteger(dayOfWeek) ||
+    dayOfWeek < MIN_DAY_OF_WEEK ||
+    dayOfWeek > MAX_DAY_OF_WEEK
+  ) {
+    throw new InvalidAvailabilitySlotError(
+      `dayOfWeek must be an integer in [${MIN_DAY_OF_WEEK}, ${MAX_DAY_OF_WEEK}], got ${dayOfWeek}`,
+    );
+  }
+  if (!Number.isInteger(startMinute) || !Number.isInteger(endMinute)) {
+    throw new InvalidAvailabilitySlotError(
+      `startMinute and endMinute must be integers, got ${startMinute}/${endMinute}`,
+    );
+  }
+  if (
+    startMinute < 0 ||
+    startMinute >= endMinute ||
+    endMinute > MINUTES_PER_DAY
+  ) {
+    throw new InvalidAvailabilitySlotError(
+      `slot must satisfy 0 <= startMinute (${startMinute}) < endMinute (${endMinute}) <= ${MINUTES_PER_DAY}`,
+    );
+  }
+}
+
 /**
  * Recurring weekly availability rows for the org, or for one technician when
  * `technicianId` is given. Ordered by (technician, weekday, start) so the
@@ -106,6 +158,13 @@ export async function setTechnicianAvailability(
   technicianId: string,
   slots: readonly AvailabilitySlotInput[],
 ): Promise<void> {
+  // Validate EVERY slot up front (before any write) so one bad slot can't leave
+  // a partially-replaced availability set, and impossible data never reaches the
+  // DB. Throws InvalidAvailabilitySlotError, which the route maps to a 400.
+  for (const slot of slots) {
+    validateAvailabilitySlot(slot);
+  }
+
   const deleteStmt = db
     .delete(technicianAvailability)
     .where(
@@ -309,6 +368,13 @@ export type RescheduleRequestResult =
  * technician to clash with, so we skip the check.
  *
  * Tenant-scoped: read, write, and the conflict check are all org-scoped.
+ *
+ * @deprecated SUPERSEDED by {@link placeAndAssignRequest}, which is the LIVE
+ * path the reschedule route calls: it does HARD conflict/out-of-hours
+ * enforcement and can reassign + re-time in one guarded write, where this S3
+ * helper only does a SOFT (non-blocking) conflict surface. No HTTP route still
+ * invokes this; it is retained only for tests/back-compat.
+ * @internal
  */
 export async function rescheduleRequest(
   organizationId: string,

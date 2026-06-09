@@ -13,6 +13,7 @@ import {
   businessTodayIso,
   AVAILABILITY_TIME_ZONE,
 } from "@/lib/admin/availability-queries";
+import { isRealIsoDate } from "@/lib/admin/calendar-time";
 import { logger } from "@/lib/logger";
 
 /**
@@ -49,14 +50,16 @@ import { logger } from "@/lib/logger";
 const MAX_DAYS = 14;
 const DEFAULT_DAYS = 7;
 
-const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
-
 const querySchema = z
   .object({
     // Optional start day (business-tz YYYY-MM-DD); defaults to today (Eastern).
+    // isRealIsoDate enforces both the shape AND a round-trip, so an impossible
+    // date like 2026-02-31 (which `new Date` silently rolls forward) is rejected
+    // here rather than silently scheduling against the wrong day. Shared with the
+    // calendar + reschedule routes so the guard can't drift between surfaces.
     start: z
       .string()
-      .regex(ISO_DAY, "start must be YYYY-MM-DD")
+      .refine(isRealIsoDate, "start must be a real YYYY-MM-DD date")
       .optional(),
     // Optional day count [1, MAX_DAYS]; defaults to a week.
     days: z.coerce.number().int().min(1).max(MAX_DAYS).optional(),

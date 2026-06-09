@@ -17,6 +17,12 @@ import { eq, like, inArray } from "drizzle-orm";
 import * as schema from "./schema";
 import { encrypt } from "../crypto";
 import { DEFAULT_TOKEN_BUDGET, DEFAULT_MAX_TURNS } from "../ai/chat-limits";
+import { type ArrivalWindow } from "../admin/arrival-window";
+import {
+  arrivalWindowUtcForBusinessDate,
+  businessIsoDate,
+  businessWeekDates,
+} from "../admin/calendar-time";
 import * as dotenv from "dotenv";
 
 dotenv.config({ path: ".env.local" });
@@ -101,6 +107,17 @@ interface SeedConversation {
   readonly request?: {
     readonly status: RequestStatus;
     readonly assignTo?: string; // technician email
+    /**
+     * Places the request on the scheduling calendar for the CURRENT business
+     * week. `weekday` is 1=Mon … 5=Fri (matching the seeded Mon–Fri tech shifts);
+     * `window` is the arrival band. When present we set scheduledDate +
+     * arrivalWindowStart/End (UTC). Omit to leave the request in the unscheduled
+     * panel so the badge + queue still demonstrate.
+     */
+    readonly schedule?: {
+      readonly weekday: 1 | 2 | 3 | 4 | 5;
+      readonly window: ArrivalWindow;
+    };
   };
   readonly feedback?: "up" | "down";
 }
@@ -154,7 +171,11 @@ const CONVERSATIONS: readonly SeedConversation[] = [
       customerEmail: "jess.nguyen@gmail.com",
       description: "AC stopped cooling during a heatwave; 86°F indoors with children at home.",
     },
-    request: { status: "assigned", assignTo: "mike.johnson@demo-hvac.com" },
+    request: {
+      status: "assigned",
+      assignTo: "mike.johnson@demo-hvac.com",
+      schedule: { weekday: 1, window: "morning" },
+    },
     feedback: "up",
   },
   {
@@ -262,7 +283,11 @@ const CONVERSATIONS: readonly SeedConversation[] = [
       customerEmail: "tom.becker@outlook.com",
       description: "Furnace makes a loud banging noise on startup but still produces heat.",
     },
-    request: { status: "in_progress", assignTo: "sarah.chen@demo-hvac.com" },
+    request: {
+      status: "in_progress",
+      assignTo: "sarah.chen@demo-hvac.com",
+      schedule: { weekday: 2, window: "afternoon" },
+    },
     feedback: "up",
   },
   {
@@ -405,7 +430,11 @@ const CONVERSATIONS: readonly SeedConversation[] = [
       customerEmail: "sam.reed@gmail.com",
       description: "Water pooling around the indoor AC unit, likely a clogged condensate drain.",
     },
-    request: { status: "assigned", assignTo: "mike.johnson@demo-hvac.com" },
+    request: {
+      status: "assigned",
+      assignTo: "mike.johnson@demo-hvac.com",
+      schedule: { weekday: 3, window: "morning" },
+    },
     feedback: "down",
   },
   {
@@ -468,6 +497,271 @@ const CONVERSATIONS: readonly SeedConversation[] = [
     request: { status: "completed" },
     feedback: "up",
   },
+  // ── Calendar-fill conversations ──
+  // Short, already-extracted requests whose only job is to populate the
+  // scheduling calendar across the current week (Mon–Fri × the three techs), so
+  // the day AND week views show cards and the conflict/availability shading is
+  // exercised. They reuse the same converted-conversation pipeline (session +
+  // messages + encrypted service request) as the narrative conversations above.
+  {
+    key: "cal-tuneup-tue-am",
+    daysAgo: 1,
+    status: "submitted",
+    messages: [
+      { role: "user", content: "I'd like to book a furnace tune-up for this week", tokens: 0 },
+      {
+        role: "assistant",
+        content: "Happy to help. What's the service address and a good contact?",
+        tokens: 96,
+      },
+      {
+        role: "user",
+        content: "Grace Liu, 423-555-0231, 19 Sycamore St, Johnson City TN 37601, grace.liu@gmail.com",
+        tokens: 0,
+      },
+      {
+        role: "assistant",
+        content: "Great — I've created a maintenance request and we'll be in touch to confirm.",
+        tokens: 0,
+      },
+    ],
+    extraction: {
+      issueType: "maintenance",
+      urgency: "low",
+      address: "19 Sycamore St, Johnson City, TN 37601",
+      customerName: "Grace Liu",
+      customerPhone: "423-555-0231",
+      customerEmail: "grace.liu@gmail.com",
+      description: "Seasonal furnace tune-up requested for this week.",
+    },
+    request: {
+      status: "assigned",
+      assignTo: "mike.johnson@demo-hvac.com",
+      schedule: { weekday: 2, window: "morning" },
+    },
+  },
+  {
+    key: "cal-coil-wed-pm",
+    daysAgo: 1,
+    status: "submitted",
+    messages: [
+      { role: "user", content: "my AC isn't cooling well, I think the coil is dirty", tokens: 0 },
+      {
+        role: "assistant",
+        content: "We can take a look. What's the address and best contact name and number?",
+        tokens: 112,
+      },
+      {
+        role: "user",
+        content: "Hector Ramirez, 423-555-0245, 88 Watauga Ave, Johnson City TN 37601",
+        tokens: 0,
+      },
+      {
+        role: "assistant",
+        content: "Great — I've logged a service request and we'll schedule a visit.",
+        tokens: 0,
+      },
+    ],
+    extraction: {
+      issueType: "cooling_not_working",
+      urgency: "medium",
+      address: "88 Watauga Ave, Johnson City, TN 37601",
+      customerName: "Hector Ramirez",
+      customerPhone: "423-555-0245",
+      customerEmail: "hector.ramirez@gmail.com",
+      description: "AC cooling poorly; suspected dirty evaporator coil.",
+    },
+    request: {
+      status: "assigned",
+      assignTo: "sarah.chen@demo-hvac.com",
+      schedule: { weekday: 3, window: "afternoon" },
+    },
+  },
+  {
+    key: "cal-thermostat-thu-am",
+    daysAgo: 2,
+    status: "submitted",
+    messages: [
+      { role: "user", content: "thermostat screen is blank, want someone to check it", tokens: 0 },
+      {
+        role: "assistant",
+        content: "Sure — what's the service address and a good contact?",
+        tokens: 88,
+      },
+      {
+        role: "user",
+        content: "Nina Patel, 423-555-0260, 305 Cherokee Rd, Johnson City TN 37604",
+        tokens: 0,
+      },
+      {
+        role: "assistant",
+        content: "Great — I've created a request and we'll reach out to schedule.",
+        tokens: 0,
+      },
+    ],
+    extraction: {
+      issueType: "thermostat_issue",
+      urgency: "medium",
+      address: "305 Cherokee Rd, Johnson City, TN 37604",
+      customerName: "Nina Patel",
+      customerPhone: "423-555-0260",
+      customerEmail: "nina.patel@gmail.com",
+      description: "Thermostat display is blank; needs diagnosis.",
+    },
+    request: {
+      status: "assigned",
+      assignTo: "david.martinez@demo-hvac.com",
+      schedule: { weekday: 4, window: "morning" },
+    },
+  },
+  {
+    key: "cal-install-thu-pm",
+    daysAgo: 2,
+    status: "submitted",
+    messages: [
+      { role: "user", content: "I want an estimate to install a mini-split in my garage", tokens: 0 },
+      {
+        role: "assistant",
+        content: "Estimates are free. What's the address and best contact?",
+        tokens: 104,
+      },
+      {
+        role: "user",
+        content: "Owen Fischer, 423-555-0272, 12 Knob Creek Rd, Johnson City TN 37604",
+        tokens: 0,
+      },
+      {
+        role: "assistant",
+        content: "Great — I've created a request for a site visit and we'll be in touch.",
+        tokens: 0,
+      },
+    ],
+    extraction: {
+      issueType: "installation",
+      urgency: "low",
+      address: "12 Knob Creek Rd, Johnson City, TN 37604",
+      customerName: "Owen Fischer",
+      customerPhone: "423-555-0272",
+      customerEmail: "owen.fischer@gmail.com",
+      description: "Free estimate requested for a garage mini-split installation.",
+    },
+    request: {
+      status: "assigned",
+      assignTo: "mike.johnson@demo-hvac.com",
+      schedule: { weekday: 4, window: "afternoon" },
+    },
+  },
+  {
+    key: "cal-airquality-fri-am",
+    daysAgo: 3,
+    status: "submitted",
+    messages: [
+      { role: "user", content: "the air in the house feels really dusty, can someone check the filtration", tokens: 0 },
+      {
+        role: "assistant",
+        content: "We can assess your air quality. What's the address and a good contact?",
+        tokens: 118,
+      },
+      {
+        role: "user",
+        content: "Carla Mendez, 423-555-0288, 47 Buffalo St, Johnson City TN 37604",
+        tokens: 0,
+      },
+      {
+        role: "assistant",
+        content: "Great — I've logged a request and we'll schedule a visit.",
+        tokens: 0,
+      },
+    ],
+    extraction: {
+      issueType: "air_quality",
+      urgency: "low",
+      address: "47 Buffalo St, Johnson City, TN 37604",
+      customerName: "Carla Mendez",
+      customerPhone: "423-555-0288",
+      customerEmail: "carla.mendez@gmail.com",
+      description: "Persistent dust indoors; customer wants air filtration assessed.",
+    },
+    request: {
+      status: "assigned",
+      assignTo: "sarah.chen@demo-hvac.com",
+      schedule: { weekday: 5, window: "morning" },
+    },
+  },
+  {
+    key: "cal-noise-fri-pm",
+    daysAgo: 3,
+    status: "submitted",
+    messages: [
+      { role: "user", content: "outdoor unit is rattling loudly, want it looked at", tokens: 0 },
+      {
+        role: "assistant",
+        content: "We'll get someone out. What's the service address and best contact?",
+        tokens: 92,
+      },
+      {
+        role: "user",
+        content: "Derek Shaw, 423-555-0294, 920 Indian Ridge Rd, Johnson City TN 37604",
+        tokens: 0,
+      },
+      {
+        role: "assistant",
+        content: "Great — I've created a service request and we'll be in touch to schedule.",
+        tokens: 0,
+      },
+    ],
+    extraction: {
+      issueType: "strange_noises",
+      urgency: "medium",
+      address: "920 Indian Ridge Rd, Johnson City, TN 37604",
+      customerName: "Derek Shaw",
+      customerPhone: "423-555-0294",
+      customerEmail: "derek.shaw@gmail.com",
+      description: "Outdoor condenser unit rattling loudly; needs inspection.",
+    },
+    request: {
+      status: "assigned",
+      assignTo: "david.martinez@demo-hvac.com",
+      schedule: { weekday: 5, window: "afternoon" },
+    },
+  },
+  {
+    key: "cal-evening-mon",
+    daysAgo: 0,
+    status: "submitted",
+    messages: [
+      { role: "user", content: "can someone come after work hours to check my heat pump", tokens: 0 },
+      {
+        role: "assistant",
+        content: "We have early-evening slots. What's the address and a good contact?",
+        tokens: 101,
+      },
+      {
+        role: "user",
+        content: "Tara Wolfe, 423-555-0301, 6 Unaka Ave, Johnson City TN 37604",
+        tokens: 0,
+      },
+      {
+        role: "assistant",
+        content: "Great — I've created a request and we'll confirm the evening window.",
+        tokens: 0,
+      },
+    ],
+    extraction: {
+      issueType: "heating_not_working",
+      urgency: "medium",
+      address: "6 Unaka Ave, Johnson City, TN 37604",
+      customerName: "Tara Wolfe",
+      customerPhone: "423-555-0301",
+      customerEmail: "tara.wolfe@gmail.com",
+      description: "Heat pump short-cycling; customer requests an evening visit.",
+    },
+    request: {
+      status: "assigned",
+      assignTo: "sarah.chen@demo-hvac.com",
+      schedule: { weekday: 1, window: "evening" },
+    },
+  },
 ];
 
 function generateReferenceNumber(index: number): string {
@@ -501,10 +795,33 @@ async function clearPreviousDemoData(
       .where(inArray(schema.customerSessions.id, sessionIds));
   }
 
-  // Remove CRM customers created by this seeder (tagged in notes).
-  await db
-    .delete(schema.customers)
+  // Remove CRM customers created by this seeder (tagged in notes). Delete the
+  // child rows (equipment + notes) FIRST — they carry a FK to customers, so a
+  // bare customers delete fails the constraint on a re-run that left children
+  // behind. Resolve the demo customer ids, then cascade down manually.
+  const demoCustomers = await db
+    .select({ id: schema.customers.id })
+    .from(schema.customers)
     .where(eq(schema.customers.notes, "seeded:demo"));
+  const demoCustomerIds = demoCustomers.map((c) => c.id);
+  if (demoCustomerIds.length > 0) {
+    await db
+      .delete(schema.customerEquipment)
+      .where(inArray(schema.customerEquipment.customerId, demoCustomerIds));
+    await db
+      .delete(schema.customerNotes)
+      .where(inArray(schema.customerNotes.customerId, demoCustomerIds));
+    await db
+      .delete(schema.customers)
+      .where(inArray(schema.customers.id, demoCustomerIds));
+  }
+
+  // Remove the recurring technician availability for the demo org. These rows
+  // aren't session-linked, so they're cleared by org id; reseeded below. Keeps
+  // the seed re-runnable without piling up duplicate shifts.
+  await db
+    .delete(schema.technicianAvailability)
+    .where(eq(schema.technicianAvailability.organizationId, DEMO_ORG_ID));
 }
 
 async function seedDemo(): Promise<void> {
@@ -552,9 +869,47 @@ async function seedDemo(): Promise<void> {
     });
   console.log("  Seeded org config: Spears Services (brand + after-hours)");
 
+  // ── Technician recurring availability (Mon–Fri 8:00–17:00 Eastern) ──
+  // One row per technician per weekday. dayOfWeek is 0=Sun … 6=Sat; start/end are
+  // minutes-from-midnight in the BUSINESS timezone (see technicianAvailability
+  // schema). 8:00–17:00 → 480–1020. Cleared per-org in clearPreviousDemoData.
+  const WORK_START_MINUTE = 8 * 60; // 480
+  const WORK_END_MINUTE = 17 * 60; // 1020
+  const WEEKDAYS = [1, 2, 3, 4, 5] as const; // Mon–Fri
+  const TECH_EMAILS = [
+    "mike.johnson@demo-hvac.com",
+    "sarah.chen@demo-hvac.com",
+    "david.martinez@demo-hvac.com",
+  ] as const;
+
+  let availabilityRows = 0;
+  for (const email of TECH_EMAILS) {
+    const technicianId = techByEmail.get(email);
+    if (!technicianId) continue; // base seed not run for this tech — skip safely
+    for (const dayOfWeek of WEEKDAYS) {
+      await db.insert(schema.technicianAvailability).values({
+        organizationId: DEMO_ORG_ID,
+        technicianId,
+        dayOfWeek,
+        startMinute: WORK_START_MINUTE,
+        endMinute: WORK_END_MINUTE,
+      });
+      availabilityRows += 1;
+    }
+  }
+  console.log(
+    `  Seeded technician availability: ${availabilityRows} rows (Mon–Fri 8:00–17:00)`,
+  );
+
+  // ── Current business week (Eastern), Sunday-first ── so seeded jobs always
+  // land in the week the calendar is showing. It's a seed SCRIPT, so reading the
+  // runtime clock here is intentional and fine. weekDates[1..5] = Mon..Fri.
+  const weekDates = businessWeekDates(businessIsoDate(new Date()));
+
   const now = Date.now();
   const DAY_MS = 24 * 60 * 60 * 1000;
   let refIndex = 1;
+  let scheduledJobs = 0;
 
   for (const convo of CONVERSATIONS) {
     const createdAt = new Date(now - convo.daysAgo * DAY_MS);
@@ -609,6 +964,21 @@ async function seedDemo(): Promise<void> {
           ? new Date(msgTime + DAY_MS)
           : null;
 
+      // Place on the calendar when a schedule is given. We resolve the arrival
+      // window via arrivalWindowUtcForBusinessDate (the SAME helper the live
+      // reschedule/calendar path uses): it interprets the window hours as Eastern
+      // wall-clock and converts to UTC, so the card lands on the correct grid row.
+      // (arrival-window.ts's arrivalWindowForDate applies the hours in UTC, which
+      // would shift a "morning" job to ~4 AM Eastern in summer and fall off the
+      // 7 AM–8 PM grid — wrong for a calendar that renders in Eastern.) All three
+      // columns are persisted UTC.
+      const sched = convo.request.schedule;
+      const placement =
+        sched && !completedAt
+          ? arrivalWindowUtcForBusinessDate(weekDates[sched.weekday], sched.window)
+          : null;
+      if (placement) scheduledJobs += 1;
+
       await db.insert(schema.serviceRequests).values({
         organizationId: DEMO_ORG_ID,
         sessionId: session.id,
@@ -622,6 +992,9 @@ async function seedDemo(): Promise<void> {
         customerEmailEncrypted: encrypt(ex.customerEmail),
         addressEncrypted: encrypt(ex.address),
         referenceNumber: generateReferenceNumber(refIndex++),
+        scheduledDate: placement ? placement.start : null,
+        arrivalWindowStart: placement ? placement.start : null,
+        arrivalWindowEnd: placement ? placement.end : null,
         completedAt,
         createdAt,
         updatedAt: createdAt,
@@ -700,6 +1073,9 @@ async function seedDemo(): Promise<void> {
     console.log(`  Seeded CRM customer: ${c.name}`);
   }
 
+  console.log(
+    `  Scheduled ${scheduledJobs} jobs across the current week (Mon–Fri × techs)`,
+  );
   console.log("Demo seeding complete!");
 }
 

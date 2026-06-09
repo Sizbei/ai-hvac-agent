@@ -26,6 +26,25 @@ import {
 /** The single business timezone the calendar renders in. Eastern (handles DST). */
 export const BUSINESS_TIME_ZONE = "America/New_York";
 
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Is `value` a REAL calendar date in strict YYYY-MM-DD form?
+ *
+ * Two checks: the shape (`/^\d{4}-\d{2}-\d{2}$/`) AND a round-trip — parse the
+ * date as UTC midnight and confirm it re-serialises to the SAME string. The
+ * round-trip is what rejects a syntactically-valid-but-impossible date like
+ * 2026-02-31, which `new Date` silently rolls forward to 2026-03-03 (so the
+ * re-serialised ISO date no longer matches the input). Shared by every route
+ * that takes a business-day param (calendar, availability, reschedule) so the
+ * validation can never drift apart between surfaces.
+ */
+export function isRealIsoDate(value: string): boolean {
+  if (!ISO_DATE_PATTERN.test(value)) return false;
+  const d = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
+}
+
 /** Default business-hours grid: 7am–8pm Eastern, the rows the calendar draws. */
 export const CALENDAR_START_HOUR = 7;
 export const CALENDAR_END_HOUR = 20;

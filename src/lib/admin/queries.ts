@@ -10,6 +10,7 @@ import {
   count,
   desc,
   asc,
+  gt,
   gte,
   lt,
   inArray,
@@ -1248,7 +1249,14 @@ export async function getSchedulingCalendar(
   const [technicians, placedRows, unscheduledRows, availability] =
     await Promise.all([
     getTechnicians(organizationId),
-    // Placed jobs: an arrival window starting within the range, in an open state.
+    // Placed jobs: an arrival window OVERLAPPING the range, in an open state.
+    // Half-open overlap (window.start < rangeEnd AND window.end > rangeStart),
+    // consistent with checkScheduleConflict — NOT a point test on the start. A
+    // POINT test (start within [rangeStart, rangeEnd)) would DROP a job that
+    // starts before the range but whose window extends into it (e.g. an evening
+    // job spanning a day boundary, or a job opened just before a week view's
+    // first midnight). The end bound is STRICT (gt) so a job ending exactly at
+    // rangeStart belongs to the prior range, matching the booked-time feed.
     db
       .select(calendarSelect)
       .from(serviceRequests)
@@ -1258,8 +1266,9 @@ export async function getSchedulingCalendar(
           serviceRequests,
           organizationId,
           isNotNull(serviceRequests.arrivalWindowStart),
-          gte(serviceRequests.arrivalWindowStart, start),
+          isNotNull(serviceRequests.arrivalWindowEnd),
           lt(serviceRequests.arrivalWindowStart, end),
+          gt(serviceRequests.arrivalWindowEnd, start),
           inArray(serviceRequests.status, [...OPEN_STATUSES]),
         ),
       )

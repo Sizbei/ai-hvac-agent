@@ -1,7 +1,11 @@
-import { NextRequest } from "next/server";
+import { NextRequest, after } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
 import { placeAndAssignRequest } from "@/lib/admin/scheduling-queries";
-import { arrivalWindowUtcForBusinessDate } from "@/lib/admin/calendar-time";
+import { syncRequestToCalendar } from "@/lib/integrations/google-calendar/sync";
+import {
+  arrivalWindowUtcForBusinessDate,
+  isRealIsoDate,
+} from "@/lib/admin/calendar-time";
 import {
   ARRIVAL_WINDOWS,
   type ArrivalWindow,
@@ -41,12 +45,6 @@ const rescheduleSchema = z.object({
 function clientIp(request: NextRequest): string {
   const raw = request.headers.get("x-forwarded-for");
   return raw?.split(",")[0]?.trim().slice(0, 45) || "unknown";
-}
-
-/** Reject a syntactically-valid-but-impossible date (e.g. 2026-02-31). */
-function isRealIsoDate(value: string): boolean {
-  const d = new Date(`${value}T00:00:00.000Z`);
-  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
 }
 
 /**
@@ -170,6 +168,11 @@ export async function POST(
       }),
       ipAddress: clientIp(request),
     });
+
+    // Mirror the new arrival window into Google Calendar (idempotent upsert) in
+    // the background — after() so the response isn't blocked and a Google
+    // outage can't fail the reschedule. No-ops when the org isn't connected.
+    after(() => syncRequestToCalendar(session.organizationId, id));
 
     return successResponse(result);
   } catch (error: unknown) {

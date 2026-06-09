@@ -65,6 +65,7 @@ vi.mock('drizzle-orm', () => ({
   count: vi.fn(() => 'count'),
   desc: vi.fn((col: unknown) => col),
   asc: vi.fn((col: unknown) => col),
+  gt: vi.fn((...args: unknown[]) => args),
   gte: vi.fn((...args: unknown[]) => args),
   lt: vi.fn((...args: unknown[]) => args),
   inArray: vi.fn((...args: unknown[]) => args),
@@ -807,6 +808,46 @@ describe('getSchedulingCalendar', () => {
     await expect(
       getSchedulingCalendar(ORG_ID, 'not-a-date', END, [...DAYS]),
     ).rejects.toThrow('Invalid calendar range');
+  });
+
+  it('selects placed jobs by a half-open OVERLAP, not a point test on start', async () => {
+    // HIGH-2 regression: the placed-jobs filter must be a half-open OVERLAP
+    // (window.start < rangeEnd AND window.end > rangeStart), consistent with
+    // checkScheduleConflict — NOT a point test on the start (which dropped a job
+    // starting before the range whose window extended into it). We assert the
+    // operators were invoked on the right (column, bound) pairs.
+    selectResolutions = [
+      [{ id: TECH_A, name: 'Ann', email: 'a@x.io', isActive: true, createdAt: new Date() }],
+      [],
+      [],
+      [],
+    ];
+
+    const { gt, lt, gte } = await import('drizzle-orm');
+    vi.mocked(gt).mockClear();
+    vi.mocked(lt).mockClear();
+    vi.mocked(gte).mockClear();
+
+    await getSchedulingCalendar(ORG_ID, START, END, [...DAYS]);
+
+    const startInstant = new Date(START);
+    const endInstant = new Date(END);
+
+    // window.start < rangeEnd  → lt(arrivalWindowStart, end)
+    expect(vi.mocked(lt)).toHaveBeenCalledWith(
+      'sr.arrivalWindowStart',
+      endInstant,
+    );
+    // window.end > rangeStart  → gt(arrivalWindowEnd, start)
+    expect(vi.mocked(gt)).toHaveBeenCalledWith(
+      'sr.arrivalWindowEnd',
+      startInstant,
+    );
+    // The old POINT test (gte on the START column) must be gone.
+    expect(vi.mocked(gte)).not.toHaveBeenCalledWith(
+      'sr.arrivalWindowStart',
+      startInstant,
+    );
   });
 });
 

@@ -544,7 +544,12 @@ export function InteractiveSchedulingCalendar({
                 <DayView
                   lanes={board.lanes}
                   unassigned={board.unassigned}
-                  isoDay={board.days[0]}
+                  // board.days is always non-empty in practice (the route sends
+                  // [date] for a day view), but days[0] is typed string|undefined
+                  // under noUncheckedIndexedAccess; fall back to today's Eastern
+                  // date so a (transient) empty board never passes undefined into
+                  // a required string prop.
+                  isoDay={board.days[0] ?? businessIsoDate(new Date())}
                   onSelect={onSelect}
                   disabled={isRescheduling}
                   availabilityByTech={availabilityByTech}

@@ -1,3 +1,4 @@
+import { after } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
 import {
   getRequestById,
@@ -5,6 +6,10 @@ import {
   scheduleRequest,
   addRequestNote,
 } from "@/lib/admin/queries";
+import {
+  syncRequestToCalendar,
+  deleteRequestFromCalendar,
+} from "@/lib/integrations/google-calendar/sync";
 import {
   MANUAL_TARGET_STATUSES,
   HOLD_REASONS,
@@ -127,6 +132,13 @@ export async function PATCH(
     // rather than "schedule committed but status rejected" — the latter would
     // silently persist a write while returning an error. The two writes are not
     // transactional (neon-http), so ordering is our only lever here.
+    //
+    // Track what changed so a SINGLE Google Calendar sync fires after both
+    // writes: a cancellation DELETES the event; a (re)schedule UPSERTS it.
+    // Delete wins if both somehow apply in one PATCH.
+    let calendarCancelled = false;
+    let calendarScheduleChanged = false;
+
     if (parsed.data.status !== undefined) {
       // Hold metadata only applies to an on_hold transition; updateRequestStatus
       // clears it on any other target.
@@ -163,6 +175,9 @@ export async function PATCH(
         entityId: id,
         details: JSON.stringify({ status: result.status }),
       });
+      if (result.status === "cancelled") {
+        calendarCancelled = true;
+      }
     }
 
     if (
@@ -207,12 +222,24 @@ export async function PATCH(
           arrivalWindowEnd: result.arrivalWindowEnd,
         }),
       });
+      calendarScheduleChanged = true;
     }
 
     const detail = await getRequestById(session.organizationId, id);
     if (!detail) {
       return errorResponse("Request not found", "NOT_FOUND", 404);
     }
+
+    // One background Google Calendar reconciliation per PATCH (never blocks the
+    // response; no-ops when the org isn't connected). A cancel removes the
+    // event; otherwise a schedule change upserts it. syncRequestToCalendar
+    // itself no-ops when the request has no arrival window.
+    if (calendarCancelled) {
+      after(() => deleteRequestFromCalendar(session.organizationId, id));
+    } else if (calendarScheduleChanged) {
+      after(() => syncRequestToCalendar(session.organizationId, id));
+    }
+
     return successResponse(detail);
   } catch (error: unknown) {
     logger.error({ error }, "Failed to update request");

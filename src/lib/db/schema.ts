@@ -762,6 +762,55 @@ export const technicianAvailability = pgTable(
       table.technicianId,
       table.dayOfWeek,
     ),
+    // One row per (org, tech, weekday, shift START). setTechnicianAvailability
+    // does a delete-then-insert REPLACE inside a db.batch; this unique index is
+    // the DB-level guarantee that two slots can't collide on the same start (a
+    // split shift differs by start, so it's still allowed) — making the swap
+    // safe and rejecting an accidental duplicate insert.
+    uniqueIndex("tech_availability_org_tech_day_start_unique").on(
+      table.organizationId,
+      table.technicianId,
+      table.dayOfWeek,
+      table.startMinute,
+    ),
+  ],
+);
+
+// 15. google_calendar_connections — per-org Google Calendar OAuth link.
+// One row per organization (unique). The long-lived refresh token is stored
+// ENCRYPTED (AES-256-GCM via @/lib/crypto); the short-lived access token + its
+// expiry are a plaintext cache the client refreshes. `connected` lets an org
+// disconnect (revoke) without deleting the row's history. Tokens are NEVER
+// logged. `calendarId` is the target calendar ("primary" by default).
+export const googleCalendarConnections = pgTable(
+  "google_calendar_connections",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id),
+    // Target calendar — "primary" or a specific calendar id.
+    calendarId: text("calendar_id").notNull().default("primary"),
+    // AES-256-GCM ciphertext of the OAuth refresh token. Never null while
+    // connected; cleared (and connected=false) on disconnect.
+    refreshTokenEncrypted: text("refresh_token_encrypted"),
+    // Short-lived access-token cache (plaintext, low-value, expires fast).
+    accessToken: text("access_token"),
+    accessTokenExpiresAt: timestamp("access_token_expires_at", {
+      withTimezone: true,
+    }),
+    connected: boolean("connected").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("gcal_connections_org_id_idx").on(table.organizationId),
+    // One Google Calendar connection per organization.
+    uniqueIndex("gcal_connections_org_unique").on(table.organizationId),
   ],
 );
 

@@ -7,7 +7,9 @@ import { logger } from "@/lib/logger";
 import {
   businessWallClockToUtc,
   businessWeekDates,
+  isRealIsoDate,
 } from "@/lib/admin/calendar-time";
+import { businessTodayIso } from "@/lib/admin/availability-queries";
 
 /**
  * GET /api/admin/calendar?date=YYYY-MM-DD&view=day|week — the read-only
@@ -19,12 +21,6 @@ import {
  * timezone db rather than fixed-offset math. We pass the rendered business days
  * to the query so the grid and the data agree on the span.
  */
-function isIsoDate(value: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const d = new Date(`${value}T00:00:00.000Z`);
-  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
-}
-
 export async function GET(request: NextRequest) {
   try {
     const session = await getAdminSession();
@@ -46,10 +42,14 @@ export async function GET(request: NextRequest) {
     const view = viewParam === "week" ? "week" : "day";
 
     // Fall back to the business-tz "today" when the date is missing/invalid.
+    // businessTodayIso derives Eastern's calendar date from the current instant
+    // (not the UTC date), so between 8pm and midnight Eastern this still loads
+    // TODAY — matching the client's Eastern "today" — instead of tomorrow's UTC
+    // date.
     const date =
-      dateParam && isIsoDate(dateParam)
+      dateParam && isRealIsoDate(dateParam)
         ? dateParam
-        : new Date().toISOString().slice(0, 10);
+        : businessTodayIso(new Date());
 
     const days =
       view === "week" ? businessWeekDates(date) : [date];
