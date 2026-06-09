@@ -31,68 +31,68 @@ import type { IssueType, Urgency } from "./router-types";
 // Kept empathetic + competent, never apologetic or self-doubting.
 const ISSUE_LEAD_INS: Record<IssueType, readonly string[]> = {
   cooling_not_working: [
-    "That sounds uncomfortable — let's get your cooling sorted.",
+    "That sounds uncomfortable. Let's get your cooling sorted.",
     "No cool air is no fun, especially on a warm day. We'll get someone out to you.",
-    "Got it — a system that won't cool needs a look. Let's line that up.",
+    "Got it. A system that won't cool needs a look, so let's line that up.",
   ],
   heating_not_working: [
-    "A cold house is the last thing you need — let's get your heat back.",
+    "A cold house is the last thing you need, so let's get your heat back.",
     "Understood, losing heat is rough. We'll get a technician on it.",
-    "Got it — no heat is a priority for us. Let's get this moving.",
+    "Got it. No heat is a priority for us, so let's get this moving.",
   ],
   thermostat_issue: [
-    "Thermostat trouble can throw off the whole system — let's pin it down.",
-    "Got it — a thermostat acting up is worth a proper look. Let's set that up.",
+    "Thermostat trouble can throw off the whole system, so let's pin it down.",
+    "Got it. A thermostat acting up is worth a proper look, so let's set that up.",
     "Understood. We'll get the thermostat checked out.",
   ],
   air_quality: [
-    "Air quality matters for everyone at home — let's get this addressed.",
-    "Got it — we'll get someone out to look at your air quality.",
+    "Air quality matters for everyone at home, so let's get this addressed.",
+    "Got it. We'll get someone out to look at your air quality.",
     "Understood. Let's get to the bottom of the air quality issue.",
   ],
   strange_noises: [
-    "Odd noises are worth catching early — let's get it checked.",
-    "Got it — a noisy system shouldn't be ignored. Let's line up a visit.",
+    "Odd noises are worth catching early, so let's get it checked.",
+    "Got it. A noisy system shouldn't be ignored, so let's line up a visit.",
     "Understood. We'll have a technician track down that noise.",
   ],
   water_leak: [
-    "A leak is good to handle promptly — let's get a technician out.",
-    "Got it — we'll get that leak looked at before it spreads.",
+    "A leak is good to handle promptly, so let's get a technician out.",
+    "Got it. We'll get that leak looked at before it spreads.",
     "Understood. Let's get someone to your leak quickly.",
   ],
   maintenance: [
     "Happy to help you stay ahead of problems with a tune-up.",
-    "Got it — regular maintenance keeps things running smoothly. Let's set it up.",
-    "Great — let's get your maintenance visit scheduled.",
+    "Got it. Regular maintenance keeps things running smoothly, so let's set it up.",
+    "Great. Let's get your maintenance visit scheduled.",
   ],
   installation: [
-    "Exciting — let's get your new system planned out.",
-    "Got it — we'll help you get the right system in place.",
+    "Exciting. Let's get your new system planned out.",
+    "Got it. We'll help you get the right system in place.",
     "Happy to help with your installation. Let's get the details.",
   ],
   refrigeration: [
-    "A cooler that won't hold temperature puts your product at risk — let's get a tech out fast.",
-    "Got it — we'll get your refrigeration looked at before it costs you inventory.",
+    "A cooler that won't hold temperature puts your product at risk, so let's get a tech out fast.",
+    "Got it. We'll get your refrigeration looked at before it costs you inventory.",
     "Understood. Let's get someone to your cooler or freezer right away.",
   ],
   ice_machine: [
-    "An ice machine down can stall your whole operation — let's get it serviced.",
-    "Got it — we service the major ice machine brands. Let's line up a visit.",
+    "An ice machine down can stall your whole operation, so let's get it serviced.",
+    "Got it. We service the major ice machine brands, so let's line up a visit.",
     "Understood. We'll get a technician on your ice machine.",
   ],
   boiler: [
-    "A boiler issue is worth handling quickly — let's get a technician out.",
-    "Got it — we service gas, electric, and oil boilers. Let's set that up.",
+    "A boiler issue is worth handling quickly, so let's get a technician out.",
+    "Got it. We service gas, electric, and oil boilers, so let's set that up.",
     "Understood. Let's get your boiler looked at.",
   ],
   commercial_appliance: [
-    "Down kitchen equipment slows everything down — let's get you back up and running.",
-    "Got it — we'll get a technician out to your commercial appliance.",
+    "Down kitchen equipment slows everything down, so let's get you back up and running.",
+    "Got it. We'll get a technician out to your commercial appliance.",
     "Understood. Let's line up a repair on that equipment.",
   ],
   other: [
-    "Thanks for letting us know — let's get a technician on it.",
-    "Got it — we'll help you get this sorted.",
+    "Thanks for letting us know. Let's get a technician on it.",
+    "Got it. We'll help you get this sorted.",
     "Understood. Let's line up the right help.",
   ],
 };
@@ -100,9 +100,9 @@ const ISSUE_LEAD_INS: Record<IssueType, readonly string[]> = {
 // Generic acknowledgements when the issue type isn't known yet but the customer
 // has clearly raised something — keeps the tone warm without naming the issue.
 const GENERIC_LEAD_INS: readonly string[] = [
-  "Thanks for the details — let's get this moving.",
+  "Thanks for the details. Let's get this moving.",
   "Got it. Let's get you taken care of.",
-  "Understood — we'll help you sort this out.",
+  "Understood. We'll help you sort this out.",
 ];
 
 /** The single turn on which we acknowledge the issue. `index` is the route's

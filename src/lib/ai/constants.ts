@@ -2,7 +2,7 @@
 
 /** Sent when all required intake slots are collected and we want the customer to confirm. */
 export const CONFIRM_REPLY =
-  "Great — I have everything I need. Please review the summary and tap Confirm & Submit, and we'll get a technician scheduled.";
+  "Great. I have everything I need. Please review the summary and tap Confirm & Submit, and we'll get a technician scheduled.";
 
 /**
  * Warm graceful-degradation reply. Shown instead of a raw error when a chat turn
@@ -12,4 +12,4 @@ export const CONFIRM_REPLY =
  * session alongside this copy so a human picks it up.
  */
 export const HANDOFF_REPLY =
-  "I want to make sure you're taken care of — let me connect you with someone on our team who can help from here. Hang tight and we'll be right with you.";
+  "I want to make sure you're taken care of, so let me connect you with someone on our team who can help from here. Hang tight and we'll be right with you.";
