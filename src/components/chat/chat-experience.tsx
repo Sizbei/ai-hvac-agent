@@ -11,6 +11,7 @@ import {
   SuggestedReplies,
   type Suggestion,
 } from '@/components/chat/suggested-replies';
+import { chipsForExtraction } from '@/lib/ai/triage-from-extraction';
 import { ExtractionPills } from '@/components/chat/extraction-pills';
 import { ExtractionCard } from '@/components/chat/extraction-card';
 import { EscalationDialog } from '@/components/chat/escalation-dialog';
@@ -79,6 +80,18 @@ export function ChatExperience({
     ? messages
     : [WELCOME_MESSAGE, ...messages];
   const lastMessageIsAssistant = displayMessages.at(-1)?.role === 'assistant';
+
+  // Tappable mid-intake chips (#3): derive the next triage step's quick replies
+  // from the polled extraction and offer them as one-tap suggestions. The chip's
+  // captured value is sent as the message; the server captures it deterministically
+  // (0-token). Falls back to the issue picker when no issue is known yet, and to []
+  // for free-text steps (address/phone/name) where the customer should type.
+  const triageChips: readonly Suggestion[] = extraction?.issueType
+    ? chipsForExtraction(extraction).map((c) => ({
+        label: c.label,
+        message: c.value,
+      }))
+    : ISSUE_SUGGESTIONS;
 
   const handleEscalate = useCallback(async () => {
     setIsEscalating(true);
@@ -163,7 +176,7 @@ export function ChatExperience({
         status !== 'extracting' &&
         lastMessageIsAssistant && (
           <SuggestedReplies
-            suggestions={extraction?.issueType ? [] : ISSUE_SUGGESTIONS}
+            suggestions={triageChips}
             onSelect={sendMessage}
             onEscalate={() => setShowEscalation(true)}
             disabled={inputDisabled}
