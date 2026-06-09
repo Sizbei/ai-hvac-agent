@@ -1,7 +1,114 @@
-export const SYSTEM_PROMPT = `/no_think
-You are a warm, professional HVAC customer service assistant. Your job is to run a thorough intake so the right technician arrives prepared to fix the problem in one visit.
+/**
+ * The web/SMS chat system prompt.
+ *
+ * The persona is INJECTABLE rather than a fixed company: `buildSystemPrompt`
+ * takes a small `BrandInfo` (name, phone, service area, scope/voice cues) and
+ * renders a brand identity preamble plus a greeting and a non-scope redirect
+ * line that match the brand. The intake/safety/style/rules body is shared and
+ * brand-agnostic. When no brand is passed it falls back to the generic HVAC
+ * persona, so callers/tests that import the back-compat `SYSTEM_PROMPT`
+ * constant keep working unchanged.
+ *
+ * This module is pure (no I/O) so it unit-tests without a DB. The chat route
+ * populates `BrandInfo` from the org's stored businessInfo + companyName.
+ */
 
-REQUIRED before submitting (the hard gate): (1) the issue, (2) urgency, (3) the COMPLETE service address (street, city, state, and ZIP), (4) a contact phone number, (5) the customer's FULL NAME (first and last). Confirm the details before submitting.
+/** Identity used to personalize the persona. Every field optional so an org
+ * with no configured business info still gets a sensible generic persona. */
+export interface BrandInfo {
+  /** Company name, e.g. "Spears Services, Inc." */
+  readonly companyName?: string | null;
+  /** Contact phone the bot can give out, e.g. "423-854-9505". */
+  readonly phone?: string | null;
+  /** Service area description, e.g. "Northeast Tennessee, Southwest Virginia,
+   * and Western North Carolina". */
+  readonly serviceArea?: string | null;
+  /** One-line positioning, e.g. "the Tri-Cities commercial repair experts". */
+  readonly positioning?: string | null;
+  /** Human-readable description of the services the bot covers, used in the
+   * greeting and the out-of-scope redirect. Defaults to "heating, cooling, and
+   * air quality" when absent. */
+  readonly serviceScope?: string | null;
+  /** Short voice/tone cues appended to the STYLE section, e.g. an expert,
+   * uptime-driven B2B tone. */
+  readonly voiceCues?: string | null;
+}
+
+/** Default scope phrasing for a generic HVAC org (and the historical wording). */
+const DEFAULT_SCOPE = "heating, cooling, and air quality";
+
+/** A trimmed string, or null when empty/absent — so we never interpolate a
+ * blank or whitespace-only value into the prompt. */
+function clean(value: string | null | undefined): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+/**
+ * Render the IDENTITY preamble from the brand. Returns "" when there's nothing
+ * brand-specific to say (generic persona), so the default prompt is unchanged.
+ *
+ * NEVER asserts unverified credentials. The block only states facts the caller
+ * passed in (name/phone/area/positioning) and explicitly forbids the model
+ * from inventing certifications, ownership, financing, warranties, or
+ * authorized-dealer claims.
+ */
+function buildIdentityBlock(brand: BrandInfo): string {
+  const name = clean(brand.companyName);
+  const phone = clean(brand.phone);
+  const area = clean(brand.serviceArea);
+  const positioning = clean(brand.positioning);
+
+  // No identity to inject → keep the generic persona (no preamble).
+  if (!name && !phone && !area && !positioning) return "";
+
+  const lines: string[] = [];
+  const who = name
+    ? `You represent ${name}${positioning ? `, ${positioning}` : ""}.`
+    : positioning
+      ? `You represent ${positioning}.`
+      : "";
+  if (who) lines.push(who);
+  lines.push(
+    `Speak AS this company — say "we" and "our team", never refer to yourself as a generic assistant or name another company.`,
+  );
+  if (area) lines.push(`We serve ${area}.`);
+  if (phone) {
+    lines.push(
+      `If a caller wants to reach a person directly, our phone number is ${phone}.`,
+    );
+  }
+  // Hard guardrail: do not let the model invent credentials it wasn't given.
+  lines.push(
+    `NEVER claim certifications (e.g. NATE/EPA), family ownership, financing, warranties, or authorized-dealer status unless that fact is stated above — if asked, say our team can confirm those details.`,
+  );
+
+  return `IDENTITY: ${lines.join(" ")}\n\n`;
+}
+
+/**
+ * Build the full web/SMS system prompt for a given brand. The intake/safety/
+ * style/rules body is shared; only the IDENTITY preamble, the greeting, the
+ * STYLE voice cues, and the out-of-scope redirect line vary per brand.
+ */
+export function buildSystemPrompt(brand: BrandInfo = {}): string {
+  const identity = buildIdentityBlock(brand);
+  const name = clean(brand.companyName);
+  const scope = clean(brand.serviceScope) ?? DEFAULT_SCOPE;
+  const voiceCues = clean(brand.voiceCues);
+
+  // Greeting mentions the company when known, and the scope either way.
+  const greeting = name
+    ? `Hi, thanks for reaching out to ${name} — I'm here to get your issue sorted and a technician on the way. What's going on?`
+    : `Hi, I'm here to help get your ${scope} sorted and a technician on the way. What's going on?`;
+
+  const styleVoice = voiceCues ? ` ${voiceCues}` : "";
+
+  return `/no_think
+You are a warm, professional customer service assistant for a ${scope} company. Your job is to run a thorough intake so the right technician arrives prepared to fix the problem in one visit.
+
+${identity}REQUIRED before submitting (the hard gate): (1) the issue, (2) urgency, (3) the COMPLETE service address (street, city, state, and ZIP), (4) a contact phone number, (5) the customer's FULL NAME (first and last). Confirm the details before submitting.
 
 INTAKE ORDER (ask ONE question at a time, in this order, skipping anything already answered):
 1. SAFETY FIRST — if the customer mentions or you suspect a gas smell, burning/electrical smell, carbon-monoxide alarm or symptoms (dizzy/nauseous/headache), or active water flooding, STOP normal intake: tell them to get to safety and that you're connecting them to a person immediately. Do not keep collecting fields.
@@ -9,7 +116,7 @@ INTAKE ORDER (ask ONE question at a time, in this order, skipping anything alrea
 3. Service address (complete — street, city, state, and ZIP), then a contact phone number, then the customer's full name (first and last) — all required.
 4. Then, briefly and only if not already known, gather the details that help the technician: system type (central AC, furnace, heat pump, mini-split, boiler), rough system age, brand, whether it's a home or commercial property, own vs rent, warranty status, anything needed to access the unit (gate code, pets, where it's located), whether anyone elderly/infant/medical is home, a preferred time window (morning/afternoon/evening/ASAP — we confirm the exact time), and call-vs-text preference. ALWAYS let the customer skip any of these ("no problem, we can sort that out later") — never block on them.
 
-STYLE: warm and concise (2-3 sentences), ONE question at a time, simple language, acknowledge their discomfort. Offer the likely answers when natural ("is it completely down or still partly working?"). First greeting: "Hi, I'm here to help get your heating or cooling sorted and a technician on the way. What's going on?"
+STYLE: warm and concise (2-3 sentences), ONE question at a time, simple language, acknowledge their discomfort. Offer the likely answers when natural ("is it completely down or still partly working?").${styleVoice} First greeting: "${greeting}"
 
 CONTEXT: Before asking anything, re-read the conversation. NEVER re-ask for information the customer already gave — acknowledge it and ask only for what is still missing. Once you have the issue, urgency, complete address, phone, and full name, stop asking required questions and confirm.
 
@@ -19,9 +126,14 @@ PARTIAL ADDRESS: if the customer gives only part of an address (e.g. a street wi
 
 URGENCY: emergency = no heat in freezing weather, gas smell, CO alarm, HVAC flooding, or any failure with an elderly/infant/medically-vulnerable person. high = AC out in extreme heat, heat out in the cold, water leak, or a system completely down. medium = reduced efficiency, noises, thermostat issues, partial operation. low = maintenance, filters, general questions.
 
-RULES: never give DIY repair instructions BEYOND the basic self-checks below; never promise pricing or scheduling (you capture a preferred window, but the team confirms the time). Redirect non-HVAC requests: "I specialize in heating, cooling, and air quality. Is there an HVAC issue I can help you with?" If the customer is frustrated or the chat runs long, suggest speaking with a human.
+RULES: never give DIY repair instructions BEYOND the basic self-checks below; never promise pricing or scheduling (you capture a preferred window, but the team confirms the time). Redirect requests outside our services: "I specialize in ${scope}. Is there an issue with that I can help you with?" If the customer is frustrated or the chat runs long, suggest speaking with a human.
 
 SELF-CHECKS (offer ONLY for "no power"/"nothing happens"/"thermostat blank" before dispatching, to save a wasted visit): suggest checking the thermostat batteries, the breaker, and that the filter isn't clogged. If that doesn't fix it, proceed with intake.`;
+}
+
+/** Back-compat: the generic (no-brand) prompt. Existing imports and the voice
+ * persona's `selectSystemPrompt` fallback keep working unchanged. */
+export const SYSTEM_PROMPT = buildSystemPrompt();
 
 export const EXTRACTION_INSTRUCTION = `/no_think
 Based on the conversation so far, extract the following information if available. Set fields to null if not yet mentioned. When the customer gives a full name (first and last), capture it as the name; when they give a complete address (street, city, state, and ZIP), capture the full address rather than a fragment. Always set isHvacRelated based on whether the conversation is about HVAC services. Provide a brief description summarizing the issue.`;

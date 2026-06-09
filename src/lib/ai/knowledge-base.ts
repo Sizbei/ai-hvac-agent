@@ -155,7 +155,19 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
       "elderly",
       "baby",
     ],
-    negationGuards: ["em heat", "emergency heat", "aux heat"],
+    negationGuards: [
+      "em heat",
+      "emergency heat",
+      "aux heat",
+      // Refrigeration appliances use "freezer"/"freezing" in a non-weather
+      // sense ("freezer not freezing", "walk-in freezer"). Those are a
+      // refrigeration repair, NOT a no-heat-in-freezing-weather emergency.
+      "freezer",
+      "walk in freezer",
+      "walk-in freezer",
+      "reach in freezer",
+      "reach-in freezer",
+    ],
     requiredQualifiers: [
       "freezing",
       "below freezing",
@@ -227,6 +239,21 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
       "still hot",
       "lukewarm air",
     ],
+    negationGuards: [
+      // Commercial refrigeration ("walk-in cooler not cooling", "display case")
+      // is its own service line (refrigeration-not-cooling), not residential AC.
+      "walk in cooler",
+      "walk-in cooler",
+      "walk in freezer",
+      "walk-in freezer",
+      "reach in cooler",
+      "reach-in cooler",
+      "reach in freezer",
+      "reach-in freezer",
+      "display case",
+      "beverage cooler",
+      "freezer",
+    ],
     action: "COLLECT_INFO",
     cannedResponse:
       "I'm sorry your AC isn't keeping up — that's frustrating in this weather. I can get a technician out to look at it. What's the service address?",
@@ -234,7 +261,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     issueTypeMapping: "cooling_not_working",
     urgencyHint: "high",
     notes:
-      "If they mention extreme heat + vulnerable people → re-route to emergency-no-cooling-extreme-heat-vulnerable. 'blowing cold air' from a HEATING system is the opposite problem → heating-blowing-cold.",
+      "If they mention extreme heat + vulnerable people → re-route to emergency-no-cooling-extreme-heat-vulnerable. 'blowing cold air' from a HEATING system is the opposite problem → heating-blowing-cold. negationGuards keep commercial-refrigeration phrasing off this residential-AC intent (→ refrigeration-not-cooling).",
   },
   {
     id: "cooling-wont-turn-on",
@@ -392,6 +419,20 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
       "no real heat",
       "wont warm up",
     ],
+    negationGuards: [
+      // Commercial cooking equipment ("oven not heating", "fryer not heating")
+      // is the commercial-appliance service line, not a furnace heating call.
+      "oven",
+      "fryer",
+      "range",
+      "grill",
+      "griddle",
+      "holding cabinet",
+      "commercial appliance",
+      "restaurant equipment",
+      // A boiler heating complaint is owned by boiler-issue.
+      "boiler",
+    ],
     action: "COLLECT_INFO",
     cannedResponse:
       "Sorry you're not getting the heat you need — let's get a technician out to diagnose it. What's the service address?",
@@ -399,7 +440,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     issueTypeMapping: "heating_not_working",
     urgencyHint: "high",
     notes:
-      "Escalate if freezing weather / vulnerable occupants are mentioned. 'blowing cold air' → heating-blowing-cold; freezing-temp qualifier → emergency-no-heat-freezing.",
+      "Escalate if freezing weather / vulnerable occupants are mentioned. 'blowing cold air' → heating-blowing-cold; freezing-temp qualifier → emergency-no-heat-freezing. negationGuards keep commercial-appliance ('oven','fryer') and boiler phrasing off the furnace intent (→ commercial-appliance-issue / boiler-issue).",
   },
   {
     id: "heating-wont-ignite",
@@ -1733,14 +1774,31 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
       "baseboard heat",
       "steam heat",
     ],
-    negationGuards: ["water heater", "no hot water from my tap"],
+    negationGuards: [
+      "water heater",
+      "no hot water from my tap",
+      // A SPECIFIC boiler symptom is a repair intake (boiler-issue,
+      // COLLECT_INFO), not this generic "do you work on boilers?" capability
+      // question. Guarding these here keeps equipment-boiler from competing as
+      // a low-score runner-up and dragging boiler-issue's confidence below the
+      // ACT_THRESHOLD.
+      "boiler no heat",
+      "boiler not heating",
+      "boiler not working",
+      "boiler leaking",
+      "boiler leak",
+      "no heat from boiler",
+      "boiler wont fire",
+      "boiler not firing",
+      "boiler is leaking",
+    ],
     action: "FALLBACK_LLM",
     cannedResponse: "",
     infoNeeded: [],
     issueTypeMapping: null,
     urgencyHint: null,
     notes:
-      "FALLBACK_LLM: not every HVAC shop services boilers/hydronic; let the LLM confirm scope and gather symptoms rather than asserting capability or forcing a forced-air assumption.",
+      "FALLBACK_LLM for the generic capability question ('do you work on boilers?'). A specific boiler SYMPTOM is guarded off to boiler-issue (COLLECT_INFO). Spears DOES service boilers, but the generic question still benefits from LLM context-gathering rather than asserting a forced-air assumption.",
   },
   {
     id: "equipment-iaq-products",
@@ -1765,6 +1823,125 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     urgencyHint: null,
     notes:
       "Distinct from the air_quality category (which is SYMPTOMS like musty smell/dust). This is the buy/install-a-product intent.",
+  },
+
+  // ─── Category 15b — COMMERCIAL SERVICE LINES (refrigeration / ice / appliance) ──
+  // Spears Services is "THE Commercial Repair Experts" — beyond forced-air HVAC
+  // they service commercial refrigeration, ice machines, boilers, and commercial
+  // kitchen appliances. These intents route the natural phrasing for those
+  // symptoms to a repair intake (COLLECT_INFO) instead of the non-HVAC redirect.
+  // Brand-agnostic copy; brands are named only where natural (ice machines).
+  {
+    id: "refrigeration-not-cooling",
+    category: "refrigeration",
+    title: "Walk-in cooler / reach-in freezer / display case not cooling",
+    triggerKeywords: [
+      "walk in cooler",
+      "walk-in cooler",
+      "walk in freezer",
+      "walk-in freezer",
+      "reach in cooler",
+      "reach-in cooler",
+      "reach in freezer",
+      "reach-in freezer",
+      "display case",
+      "beverage cooler",
+      "cooler not cooling",
+      "freezer not freezing",
+      "cooler not cold",
+      "freezer not cold",
+      "walk in not cooling",
+      "refrigeration",
+    ],
+    action: "COLLECT_INFO",
+    cannedResponse:
+      "A cooler or freezer that isn't holding temperature can put your product at risk fast — let's get a technician out to look at it. What's the service address?",
+    infoNeeded: ["address"],
+    issueTypeMapping: "refrigeration",
+    urgencyHint: "high",
+    notes:
+      "Commercial + residential refrigeration. Distinct from a residential AC (cooling category). 'beverage cooler'/'display case'/'walk-in' are unambiguous commercial-refrigeration signals. If a temperature-loss emergency with perishable inventory is described, the LLM/urgency flow can raise urgency.",
+  },
+  {
+    id: "ice-machine-issue",
+    category: "refrigeration",
+    title: "Commercial ice machine not making ice / leaking",
+    triggerKeywords: [
+      "ice machine",
+      "ice maker",
+      "icemaker",
+      "not making ice",
+      "no ice",
+      "ice machine leaking",
+      "ice machine not working",
+      "hoshizaki",
+      "manitowoc",
+      "scotsman",
+      "koolaire",
+    ],
+    action: "COLLECT_INFO",
+    cannedResponse:
+      "We repair and service commercial ice machines — including Hoshizaki, Manitowoc, and Scotsman — and can set up preventative maintenance too. Let's get a technician out. What's the service address?",
+    infoNeeded: ["address"],
+    issueTypeMapping: "ice_machine",
+    urgencyHint: "high",
+    notes:
+      "Commercial only. Brands named because Spears explicitly services Hoshizaki/Manitowoc/Scotsman/Koolaire. A residential fridge ice maker is NOT this — but 'ice machine'/'ice maker' phrasing is dominated by commercial units, and the refrigeration-not-cooling intent covers residential cooling failures.",
+  },
+  {
+    id: "boiler-issue",
+    category: "heating",
+    title: "Boiler not heating / leaking (gas/electric/oil)",
+    triggerKeywords: [
+      "boiler no heat",
+      "boiler not heating",
+      "boiler not working",
+      "boiler leaking",
+      "boiler is leaking",
+      "boiler leak",
+      "no heat from boiler",
+      "boiler wont fire",
+      "boiler not firing",
+      "radiator not heating",
+      "no hot water heat",
+    ],
+    negationGuards: ["water heater", "no hot water from my tap"],
+    action: "COLLECT_INFO",
+    cannedResponse:
+      "We service gas, electric, and oil boilers — repairs and preventative maintenance. Let's get a technician out to look at it. What's the service address?",
+    infoNeeded: ["address"],
+    issueTypeMapping: "boiler",
+    urgencyHint: "high",
+    notes:
+      "Spears services boilers (residential + commercial), so a SPECIFIC boiler SYMPTOM is a repair intake — distinct from the generic equipment-boiler 'do you work on boilers?' capability question, which stays FALLBACK_LLM. negationGuards exclude domestic-hot-water/'water heater' which is a different appliance.",
+  },
+  {
+    id: "commercial-appliance-issue",
+    category: "equipment",
+    title: "Commercial kitchen appliance repair (oven / fryer / range / grill)",
+    triggerKeywords: [
+      "commercial oven",
+      "commercial range",
+      "commercial fryer",
+      "deep fryer",
+      "commercial grill",
+      "griddle",
+      "holding cabinet",
+      "oven wont heat",
+      "oven not heating",
+      "fryer not heating",
+      "range not working",
+      "commercial appliance",
+      "restaurant equipment",
+    ],
+    action: "COLLECT_INFO",
+    cannedResponse:
+      "We repair commercial kitchen equipment — ranges, ovens, fryers, grills, and holding cabinets. Let's get a technician out to get you back up and running. What's the service address?",
+    infoNeeded: ["address"],
+    issueTypeMapping: "commercial_appliance",
+    urgencyHint: "high",
+    notes:
+      "Commercial only. 'commercial'/'restaurant'/'deep fryer'/'holding cabinet' disambiguate from a residential range (which would be out of scope / non-HVAC). Brand-agnostic; Spears services True/Whirlpool/Frigidaire/etc but kitchen-line brands aren't asserted in copy.",
   },
 
   // ─── Category 16 — SERVICE LOGISTICS / VISIT EXPECTATIONS ──────────────────
@@ -2213,27 +2390,27 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
   {
     id: "meta-non-hvac-redirect",
     category: "meta",
-    title: "Non-HVAC request → polite redirect",
+    title: "Out-of-scope request → polite redirect",
     triggerKeywords: [
       "plumbing",
       "toilet",
+      "clogged drain",
       "roofing",
+      "roof",
       "electrician",
-      "refrigerator",
-      "fridge",
+      "electrical wiring",
       "garage door",
       "weather",
       "taxes",
-      "appliance repair",
     ],
     action: "REDIRECT",
     cannedResponse:
-      "I specialize in heating, cooling, and air quality, so that's outside what I can help with — you'd want a specialist for that. Is there an HVAC issue I can help you with?",
+      "We handle HVAC, refrigeration, ice machines, boilers, and commercial appliance repair — that one's outside our wheelhouse, so you'd want a specialist for it. Is there a heating, cooling, refrigeration, or commercial equipment issue I can help you with?",
     infoNeeded: [],
-    issueTypeMapping: "other",
+    issueTypeMapping: null,
     urgencyHint: null,
     notes:
-      "Follows the system-prompt redirect script almost verbatim. Careful negation/overlap guards: 'refrigerant'/'freon' = HVAC (cooling), NOT a fridge; 'water heater' = in scope (heating); 'electrical/burning smell' = HVAC emergency, not electrician work. Mismatching these is the biggest risk in this intent → when uncertain, FALLBACK_LLM.",
+      "Redirects ONLY genuinely out-of-scope work (plumbing-only, roofing, electrical-only, etc). Spears' in-scope lines — HVAC, refrigeration (coolers/freezers/display cases), ice machines, boilers, commercial appliances — are owned by their own COLLECT_INFO intents and MUST NOT appear here (removing 'refrigerator'/'fridge'/'appliance repair' fixed a defect where Spears' core business was being redirected away). Careful overlap guards: 'refrigerant'/'freon' = HVAC (cooling), NOT a fridge; 'water heater' = a separate appliance; 'electrical/burning smell' = HVAC emergency, not electrician work. When uncertain, FALLBACK_LLM. issueTypeMapping is null so a spurious redirect never stamps a bogus issue type.",
   },
 ];
 

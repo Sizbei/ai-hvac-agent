@@ -19,6 +19,8 @@ export interface CustomFaqRule {
 import { normalize } from "./text-normalize";
 
 export interface RouterOrgConfig {
+  /** Company name, used to brand the LLM-path system prompt. Null when unset. */
+  readonly companyName: string | null;
   /** issueType values the org does NOT handle. */
   readonly disabledIssueTypes: readonly string[];
   /** Service tags (e.g. "boiler") the org does NOT offer. */
@@ -30,6 +32,7 @@ export interface RouterOrgConfig {
 }
 
 export const EMPTY_ORG_CONFIG: RouterOrgConfig = {
+  companyName: null,
   disabledIssueTypes: [],
   disabledServiceTags: [],
   businessInfo: {},

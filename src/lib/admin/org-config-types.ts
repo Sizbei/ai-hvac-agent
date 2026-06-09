@@ -65,6 +65,9 @@ export const businessInfoSchema = z
     serviceArea: z.string().max(500).optional(),
     businessHours: z.string().max(300).optional(),
     phone: z.string().max(40).optional(),
+    // Contact email surfaced in canned replies / the LLM brand block. Validated
+    // as an email so a stored value is safe to show; optional like the rest.
+    email: z.string().email().max(254).optional(),
     licensedInsured: z.string().max(300).optional(),
     financingAvailable: z.boolean().optional(),
     paymentMethods: z.string().max(300).optional(),

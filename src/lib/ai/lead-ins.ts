@@ -60,6 +60,26 @@ const ISSUE_LEAD_INS: Record<IssueType, readonly string[]> = {
     "Got it — we'll help you get the right system in place.",
     "Happy to help with your installation. Let's get the details.",
   ],
+  refrigeration: [
+    "A cooler that won't hold temperature puts your product at risk — let's get a tech out fast.",
+    "Got it — we'll get your refrigeration looked at before it costs you inventory.",
+    "Understood. Let's get someone to your cooler or freezer right away.",
+  ],
+  ice_machine: [
+    "An ice machine down can stall your whole operation — let's get it serviced.",
+    "Got it — we service the major ice machine brands. Let's line up a visit.",
+    "Understood. We'll get a technician on your ice machine.",
+  ],
+  boiler: [
+    "A boiler issue is worth handling quickly — let's get a technician out.",
+    "Got it — we service gas, electric, and oil boilers. Let's set that up.",
+    "Understood. Let's get your boiler looked at.",
+  ],
+  commercial_appliance: [
+    "Down kitchen equipment slows everything down — let's get you back up and running.",
+    "Got it — we'll get a technician out to your commercial appliance.",
+    "Understood. Let's line up a repair on that equipment.",
+  ],
   other: [
     "Thanks for letting us know — let's get a technician on it.",
     "Got it — we'll help you get this sorted.",

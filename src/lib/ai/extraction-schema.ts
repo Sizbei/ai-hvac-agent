@@ -11,6 +11,16 @@ export const issueTypeValues = [
   'water_leak',
   'maintenance',
   'installation',
+  // Spears service lines beyond forced-air HVAC. These are stored in the
+  // `service_requests.issue_type` TEXT column (NOT a pg enum), so adding them
+  // needs no DB migration — only this const + the Zod `z.enum(issueTypeValues)`
+  // refs that derive from it. They all fall through `jobTypeForIssue`'s default
+  // to the `service_call` jobType (a tech diagnoses on site), so the
+  // `job_type` pg enum is untouched and likewise needs no migration.
+  'refrigeration',
+  'ice_machine',
+  'boiler',
+  'commercial_appliance',
   'other',
 ] as const;
 
@@ -88,7 +98,10 @@ export function jobTypeForIssue(issueType: IssueType | null): JobType | null {
     case 'installation':
       return 'install';
     // Symptoms that don't map to a dedicated ServiceTitan job type become a
-    // general service call (the tech diagnoses on site).
+    // general service call (the tech diagnoses on site). This includes the
+    // Spears non-HVAC service lines (refrigeration, ice_machine, boiler,
+    // commercial_appliance) — they intentionally reuse the existing
+    // `service_call` jobType so the `job_type` pg enum needs no migration.
     default:
       return 'service_call';
   }

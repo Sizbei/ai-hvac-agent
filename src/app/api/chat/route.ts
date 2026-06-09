@@ -3,13 +3,25 @@ import { streamText } from "ai";
 import { getModel } from "@/lib/ai/provider";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { customerSessions, messages } from "@/lib/db/schema";
+import {
+  customerSessions,
+  messages,
+  organizationSettings,
+} from "@/lib/db/schema";
+import {
+  resolveAfterHoursConfig,
+  type AfterHoursConfig,
+} from "@/lib/admin/after-hours";
+import {
+  decideAfterHoursDisclosure,
+  type CustomerUrgencySignal,
+} from "@/lib/ai/after-hours-chat";
 import { withTenant } from "@/lib/db/tenant";
 import { errorResponse } from "@/lib/api-response";
 import { getSessionToken } from "@/lib/session";
 import { isSameOriginRequest, hasJsonContentType } from "@/lib/session-csrf";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
-import { SYSTEM_PROMPT } from "@/lib/ai/system-prompt";
+import { buildSystemPrompt, type BrandInfo } from "@/lib/ai/system-prompt";
 import { sanitizeInput } from "@/lib/ai/guardrails";
 import {
   extractServiceRequest,
@@ -60,6 +72,87 @@ const ESCALATION_NOTE =
 // same refusal whether they reach the flag mid-chat or at confirm time.
 const DO_NOT_SERVICE_REPLY =
   "We're unable to book this online. Please call our office so we can help you directly.";
+
+// Behavioral instruction appended to the LLM system prompt (as a separate block,
+// NOT a rewrite of the brand persona) when the request is currently after-hours.
+// Tells the model the urgent/not-urgent branch + the strict NO-dollar-amount
+// disclosure rule. Emergencies still take the brand persona's safety path first.
+const AFTER_HOURS_LLM_INSTRUCTION = `
+
+AFTER-HOURS (it is currently outside our normal business hours): Before fully committing to dispatch, find out whether the situation is urgent — UNLESS it's already clearly an emergency or high-urgency (then skip the question and treat it as urgent). If it IS urgent (or the customer confirms yes): continue the intake AND let them know that, since it's after our normal hours, an additional after-hours service charge applies and our team will confirm the details. NEVER state a dollar amount or quote a price — just that a charge applies. If it is NOT urgent: offer to set them up for our next business day at no after-hours charge, and continue accordingly. SAFETY ALWAYS WINS: if there's any hazard (gas/CO/electrical/flooding), follow the safety instructions above and connect them to a person immediately — never delay a hazard to discuss charges.`;
+
+/** Read a non-empty trimmed string from the businessInfo bag, else undefined.
+ * businessInfo is a JSONB record, so values are typed `unknown` here. */
+function biString(
+  info: Readonly<Record<string, unknown>>,
+  key: string,
+): string | undefined {
+  const v = info[key];
+  return typeof v === "string" && v.trim().length > 0 ? v.trim() : undefined;
+}
+
+/**
+ * Map the org's stored companyName + businessInfo onto the persona's BrandInfo.
+ * Only fields that are actually set flow through; an org with no config yields
+ * an empty BrandInfo, so buildSystemPrompt falls back to the generic persona.
+ * `positioning`/`serviceScope`/`voiceCues` are read opportunistically so a
+ * future businessInfo extension brands the LLM with no further route changes.
+ */
+function buildBrandInfo(
+  companyName: string | null,
+  businessInfo: Readonly<Record<string, unknown>>,
+): BrandInfo {
+  return {
+    companyName: companyName ?? undefined,
+    phone: biString(businessInfo, "phone"),
+    serviceArea: biString(businessInfo, "serviceArea"),
+    positioning: biString(businessInfo, "positioning"),
+    serviceScope: biString(businessInfo, "serviceScope"),
+    voiceCues: biString(businessInfo, "voiceCues"),
+  };
+}
+
+/**
+ * Interpret a customer's reply to the after-hours "is this urgent?" ask as a
+ * yes/no signal. Only meaningful when we ASKED last turn (pendingStep is the
+ * urgency step); otherwise we return "unknown" and let urgency classification
+ * drive the decision. Conservative: only clear affirmatives/negatives flip it.
+ */
+function readUrgencySignal(
+  askedUrgencyLastTurn: boolean,
+  message: string,
+): CustomerUrgencySignal {
+  if (!askedUrgencyLastTurn) return "unknown";
+  const m = message.trim().toLowerCase();
+  if (
+    /\b(urgent|emergency|asap|right now|today|tonight|now|yes|yeah|yep|please do)\b/.test(
+      m,
+    ) ||
+    /can'?t wait/.test(m)
+  ) {
+    return "urgent";
+  }
+  if (
+    /\b(no|nope|not urgent|tomorrow|next day|morning|can wait|whenever|no rush)\b/.test(
+      m,
+    )
+  ) {
+    return "not_urgent";
+  }
+  return "unknown";
+}
+
+/** True when the current instant falls in the org's after-hours window — used
+ * to gate the LLM after-hours instruction block. Reuses the disclosure helper's
+ * window logic (which honors `config.enabled`) so both paths agree. */
+function isAfterHoursHintActive(config: AfterHoursConfig): boolean {
+  return decideAfterHoursDisclosure({
+    clock: new Date(),
+    config,
+    urgency: null,
+    customerSignal: "unknown",
+  }).afterHours;
+}
 
 /** Single-chunk text/plain response — byte-compatible with the SDK's text stream. */
 function cannedTextResponse(text: string): Response {
@@ -375,19 +468,55 @@ export async function POST(request: NextRequest) {
         ? customerContext.fullName
         : undefined;
 
+    // Org overlay (disabled services + businessInfo + companyName + custom
+    // FAQs). The deterministic router consumes it AND the LLM path reads its
+    // businessInfo/companyName to brand the system prompt — so it's hoisted to
+    // the turn scope. Non-critical: if its read fails (DB blip, cold start),
+    // degrade to the empty overlay (everything enabled, no personalization)
+    // rather than failing the customer's whole turn.
+    const routerConfig = await getRouterConfig(organizationId).catch(
+      (configError: unknown) => {
+        logger.error(
+          { error: configError, sessionId: session.id },
+          "Failed to load router config — using empty overlay",
+        );
+        return EMPTY_ORG_CONFIG;
+      },
+    );
+
+    // After-hours config: read the org's window the SAME way the confirm route
+    // does (organizationSettings.afterHoursConfig → resolveAfterHoursConfig), so
+    // the customer-facing disclosure and the confirm-time surcharge agree on the
+    // window. Non-critical: ANY error degrades to a DISABLED config so we never
+    // wrongly threaten a charge (resolve returns the default window otherwise).
+    const afterHoursConfig = await (async () => {
+      try {
+        const [row] = await db
+          .select({ afterHoursConfig: organizationSettings.afterHoursConfig })
+          .from(organizationSettings)
+          .where(eq(organizationSettings.organizationId, organizationId))
+          .limit(1);
+        return resolveAfterHoursConfig(row?.afterHoursConfig ?? null);
+      } catch (cfgError: unknown) {
+        logger.error(
+          { error: cfgError, sessionId: session.id },
+          "Failed to load after-hours config — disabling after-hours disclosure",
+        );
+        // Disabled → isAfterHours() returns false → decision is "none".
+        return resolveAfterHoursConfig({ enabled: false });
+      }
+    })();
+
+    // Did we ASK "is this urgent?" last turn? (pendingStep === urgency, which
+    // we only reach after-hours when urgency was still unknown.) If so, read the
+    // customer's yes/no answer as an urgency signal for this turn's decision.
+    const askedUrgencyLastTurn = pendingStep?.id === "urgency";
+    const urgencySignal: CustomerUrgencySignal = readUrgencySignal(
+      askedUrgencyLastTurn,
+      guardrailResult.sanitized,
+    );
+
     if (ROUTER_ENABLED) {
-      // The org overlay is non-critical: if its read fails (DB blip, cold
-      // start), degrade to the empty overlay (everything enabled, no
-      // personalization) rather than failing the customer's whole turn.
-      const routerConfig = await getRouterConfig(organizationId).catch(
-        (configError: unknown) => {
-          logger.error(
-            { error: configError, sessionId: session.id },
-            "Failed to load router config — using empty overlay",
-          );
-          return EMPTY_ORG_CONFIG;
-        },
-      );
       const verdict = routeMessage(
         guardrailResult.sanitized,
         knownSlots,
@@ -580,7 +709,30 @@ export async function POST(request: NextRequest) {
               merged.urgency,
               newTurnCount,
             );
-        const replyText = baseReply + (nearTurnLimit ? ESCALATION_NOTE : "");
+
+        // After-hours disclosure (deterministic path). When this intake is
+        // happening outside the org's business hours we either ask whether it's
+        // urgent, disclose the after-hours charge (urgent — NO dollar amount;
+        // the confirm route still computes the fee), or offer a no-charge
+        // next-business-day visit (not urgent). Emergencies never reach here
+        // (they take the ESCALATE branch above), so we never delay a hazard to
+        // talk about charges. "none" (business hours / disabled) is a no-op.
+        const afterHoursDecision = decideAfterHoursDisclosure({
+          clock: new Date(),
+          config: afterHoursConfig,
+          urgency: merged.urgency ?? null,
+          customerSignal: urgencySignal,
+        });
+        // For the urgency-ask we PREFER the after-hours wording over a plain
+        // urgency question (it explains *why* we're asking); when not urgent we
+        // lead with the next-day offer; when urgent we prepend the disclosure
+        // and keep collecting. "none" leaves the reply untouched.
+        const afterHoursPrefix =
+          afterHoursDecision.kind === "none"
+            ? ""
+            : `${afterHoursDecision.copy} `;
+        const replyText =
+          afterHoursPrefix + baseReply + (nearTurnLimit ? ESCALATION_NOTE : "");
 
         await db.insert(messages).values({
           organizationId,
@@ -641,10 +793,30 @@ export async function POST(request: NextRequest) {
     // info already on file. Empty string when not a returning customer.
     const customerContextHint = buildCustomerContextHint(customerContext);
 
+    // Brand the LLM persona from the org's stored config (companyName +
+    // businessInfo), populated above via the cached router overlay. Falls back
+    // to the generic HVAC persona when nothing is configured (empty BrandInfo).
+    const brandPrompt = buildSystemPrompt(
+      buildBrandInfo(routerConfig.companyName, routerConfig.businessInfo),
+    );
+
+    // After-hours instruction block (LLM path). When the request is currently
+    // outside the org's business hours, tell the model exactly how to handle
+    // the urgent/not-urgent branch and — critically — to disclose the surcharge
+    // WITHOUT quoting a dollar amount (the confirm route still computes the fee
+    // server-side). Empty string during business hours / when pricing is
+    // disabled, so nothing about charges is ever said. We concat it as a
+    // SEPARATE block rather than editing the brand persona. Emergencies are
+    // never delayed for charge talk: the safety instruction in the brand prompt
+    // takes precedence, and this block says so.
+    const afterHoursHint = isAfterHoursHintActive(afterHoursConfig)
+      ? AFTER_HOURS_LLM_INSTRUCTION
+      : "";
+
     // 8. Stream response via Vercel AI SDK per SC-09
     const result = streamText({
       model: getModel(),
-      system: SYSTEM_PROMPT + customerContextHint + escalationHint,
+      system: brandPrompt + customerContextHint + escalationHint + afterHoursHint,
       // Cap output so replies stay short (the prompt asks for 2-3 sentences) and
       // tail costs are bounded (Token-Savings #6).
       maxOutputTokens: 350,

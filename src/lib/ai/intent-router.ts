@@ -88,6 +88,10 @@ const CATEGORY_PRIORITY: Record<string, number> = {
   thermostat: 2,
   equipment: 2,
   refrigerant: 2,
+  // Spears commercial service lines: walk-in coolers, ice machines, etc. Same
+  // priority as the other equipment-symptom categories so a refrigeration
+  // symptom wins a tie against a priority-3 FAQ.
+  refrigeration: 2,
   maintenance: 3,
   scheduling: 3,
   faq: 3,
