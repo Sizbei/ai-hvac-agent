@@ -11,6 +11,10 @@ import {
   deleteRequestFromCalendar,
 } from "@/lib/integrations/google-calendar/sync";
 import {
+  pushJobToHcp,
+  cancelHcpJob,
+} from "@/lib/integrations/housecall-pro/job-sync";
+import {
   MANUAL_TARGET_STATUSES,
   HOLD_REASONS,
   type HoldReason,
@@ -238,6 +242,16 @@ export async function PATCH(
       after(() => deleteRequestFromCalendar(session.organizationId, id));
     } else if (calendarScheduleChanged) {
       after(() => syncRequestToCalendar(session.organizationId, id));
+    }
+
+    // Mirror the same change into Housecall Pro (never blocks; no-ops when the
+    // org isn't connected). A cancellation CANCELS the HCP job; a (re)schedule
+    // UPDATEs it (pushJobToHcp is idempotent — update when already mapped).
+    // Cancel wins if both somehow apply in one PATCH, matching the calendar.
+    if (calendarCancelled) {
+      after(() => cancelHcpJob(session.organizationId, id));
+    } else if (calendarScheduleChanged) {
+      after(() => pushJobToHcp(session.organizationId, id));
     }
 
     return successResponse(detail);

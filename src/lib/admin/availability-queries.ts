@@ -16,39 +16,47 @@
  * │ bookable staff live natively.                                               │
  * └────────────────────────────────────────────────────────────────────────────┘
  */
-import { eq } from "drizzle-orm";
-import { db } from "@/lib/db";
-import { users } from "@/lib/db/schema";
-import { withTenant } from "@/lib/db/tenant";
-import { getSchedulingSource } from "./scheduling-source";
+import { logger } from "@/lib/logger";
+import {
+  getSchedulingSource,
+  DbSchedulingSource,
+  type SchedulingSource,
+} from "./scheduling-source";
 import { computeOpenWindows } from "./availability";
 import {
   BUSINESS_TIME_ZONE,
   businessWallClockToUtc,
   toBusinessWallClock,
 } from "./calendar-time";
-import type { OpenAvailability } from "./types";
+import type {
+  AvailabilitySlot,
+  OpenAvailability,
+  ScheduledJob,
+} from "./types";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
-/** The active technician ids for an org — the bookable staff whose hours count
- * toward capacity. Tenant-scoped; ids only (no names) so nothing PII flows into
- * the open-window aggregation. */
-async function getActiveTechnicianIds(
-  organizationId: string,
-): Promise<readonly string[]> {
-  const rows = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(
-      withTenant(
-        users,
-        organizationId,
-        eq(users.role, "technician"),
-        eq(users.isActive, true),
-      ),
-    );
-  return rows.map((row) => row.id);
+/**
+ * Read the three facts the open-window math needs — bookable roster, recurring
+ * availability, booked jobs — from ONE scheduling source. Pulled out so it can
+ * run against the active source and, on failure, be retried against the DB
+ * source without duplicating the read shape.
+ */
+async function readSchedulingFacts(
+  source: SchedulingSource,
+  rangeStartIso: string,
+  rangeEndIso: string,
+): Promise<{
+  readonly activeTechIds: readonly string[];
+  readonly availability: readonly AvailabilitySlot[];
+  readonly jobs: readonly ScheduledJob[];
+}> {
+  const [activeTechIds, availability, jobs] = await Promise.all([
+    source.getActiveTechnicianIds(),
+    source.getAvailability(),
+    source.getJobs(rangeStartIso, rangeEndIso),
+  ]);
+  return { activeTechIds, availability, jobs };
 }
 
 /**
@@ -107,7 +115,7 @@ export async function getOpenAvailability(
     return { days: [], windows: [] };
   }
 
-  const source = getSchedulingSource(organizationId);
+  const source = await getSchedulingSource(organizationId);
   const firstDay = days[0]!;
   const lastDay = days[days.length - 1]!;
   // [first day's Eastern midnight, day-after-last's Eastern midnight) — a
@@ -115,13 +123,39 @@ export async function getOpenAvailability(
   const rangeStart = businessWallClockToUtc(firstDay, 0, 0);
   const lastMidnight = businessWallClockToUtc(lastDay, 0, 0);
   const rangeEnd = new Date(lastMidnight.getTime() + MS_PER_DAY);
+  const rangeStartIso = rangeStart.toISOString();
+  const rangeEndIso = rangeEnd.toISOString();
 
-  const [activeTechIds, availability, jobs] = await Promise.all([
-    getActiveTechnicianIds(organizationId),
-    source.getAvailability(),
-    source.getJobs(rangeStart.toISOString(), rangeEnd.toISOString()),
-  ]);
+  // Read through the active source (DB or HCP). DEGRADE SAFELY: if the active
+  // source errors (e.g. an HCP remote hiccup) AND it isn't already the DB source,
+  // retry once against the DB so a customer's slot-pick never fails on a remote
+  // outage. A second failure (DB itself) propagates — that's a real error.
+  let facts;
+  try {
+    facts = await readSchedulingFacts(source, rangeStartIso, rangeEndIso);
+  } catch (error: unknown) {
+    if (source instanceof DbSchedulingSource) {
+      throw error;
+    }
+    logger.warn(
+      {
+        organizationId,
+        error: error instanceof Error ? error.message : "unknown",
+      },
+      "Scheduling source failed; falling back to DB for availability",
+    );
+    facts = await readSchedulingFacts(
+      new DbSchedulingSource(organizationId),
+      rangeStartIso,
+      rangeEndIso,
+    );
+  }
 
-  const windows = computeOpenWindows(activeTechIds, availability, jobs, days);
+  const windows = computeOpenWindows(
+    facts.activeTechIds,
+    facts.availability,
+    facts.jobs,
+    days,
+  );
   return { days: [...days], windows };
 }

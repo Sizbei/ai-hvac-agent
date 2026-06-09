@@ -141,6 +141,34 @@
       "when": 1780433757205,
       "tag": "0019_google_calendar_connections",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1780433757206,
+      "tag": "0020_housecall_pro_connections",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1780433757207,
+      "tag": "0021_customer_hcp_mapping",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1780433757208,
+      "tag": "0022_service_request_hcp_job",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1780433757209,
+      "tag": "0023_hcp_webhook_events",
+      "breakpoints": true
     }
   ]
 }

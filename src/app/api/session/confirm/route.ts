@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+import { NextRequest, after } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { randomBytes, randomUUID } from "node:crypto";
 import { db } from "@/lib/db";
@@ -27,6 +27,7 @@ import {
 } from "@/lib/ai/extraction-schema";
 import { parseKnownSlots, stripSkipSentinels } from "@/lib/ai/chat-slots";
 import { upsertCustomerByContact } from "@/lib/admin/crm-queries";
+import { pushJobToHcp } from "@/lib/integrations/housecall-pro/job-sync";
 import { recordCustomerEquipment } from "@/lib/admin/crm-equipment-queries";
 import { buildEquipmentFromIntake } from "@/lib/admin/equipment-from-intake";
 import { logger } from "@/lib/logger";
@@ -276,6 +277,21 @@ export async function POST(request: NextRequest) {
         500,
       );
     }
+
+    // Push this confirmed booking into Housecall Pro as a JOB in the BACKGROUND
+    // — after() so the response isn't blocked, and degrade-safe so a not-
+    // connected org (or an HCP hiccup) never affects the booking we just
+    // persisted. pushJobToHcp ensures the customer is mirrored to HCP FIRST
+    // (Stage 2 — syncCustomerToHcp, sequentially within this one call), then
+    // creates the HCP job (or updates it if one already exists). We do NOT also
+    // fire syncCustomerToHcp separately here: two concurrent after() callbacks
+    // syncing the same brand-new customer would both see hcp_customer_id = null
+    // and both create a duplicate HCP customer (the isNull DB guard only
+    // protects the mapping write, not the upstream HCP create). Letting
+    // pushJobToHcp own the customer sync keeps it idempotent. (At confirm time
+    // the request has no arrival window yet, so the job is created unscheduled;
+    // dispatch's reschedule/assign updates it.)
+    after(() => pushJobToHcp(organizationId, serviceRequest.id));
 
     // Record the customer's equipment from the intake (ServiceTitan asset
     // history), best-effort: a failure here must not fail the submission, which

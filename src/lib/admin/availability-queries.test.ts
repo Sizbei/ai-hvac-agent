@@ -1,53 +1,50 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// ─── Hoisted mock state ─────────────────────────────────────────────
-// A chainable thenable proxy stands in for the drizzle query builder; the
-// active-technician select is the only DB read in this module (availability +
-// jobs come through the mocked scheduling source).
-const { selectQueue, chain } = vi.hoisted(() => {
-  const selectQueue: unknown[][] = [];
-  const chain = (resolved: unknown): unknown => {
-    const p: unknown = new Proxy(() => {}, {
-      get(_t, prop) {
-        if (prop === "then") {
-          return (resolve: (v: unknown) => void) => resolve(resolved);
-        }
-        return () => p;
-      },
-      apply: () => p,
-    });
-    return p;
+// Mock the scheduling source so the seam is exercised but no real DB is hit.
+// Every fact — roster, availability, jobs — comes through the source now, so
+// this module makes no direct DB read and needs no db mock. Hoisted together
+// (mocks + a stand-in DbSchedulingSource) so the vi.mock factory — which is
+// hoisted above module-level declarations — can reference them safely.
+const {
+  getActiveTechnicianIdsMock,
+  getAvailabilityMock,
+  getJobsMock,
+  dbActiveTechIdsMock,
+  dbAvailabilityMock,
+  dbJobsMock,
+  getSchedulingSourceMock,
+  FakeDbSchedulingSource,
+} = vi.hoisted(() => {
+  // Separate mock sets for the ACTIVE source (returned by the factory — could be
+  // HCP) and the DB FALLBACK source the module constructs directly. Keeping them
+  // distinct lets a test fail the active source and assert the DB fallback fed
+  // the open-window math.
+  const dbActiveTechIdsMock = vi.fn();
+  const dbAvailabilityMock = vi.fn();
+  const dbJobsMock = vi.fn();
+  // A stand-in DbSchedulingSource so `instanceof DbSchedulingSource` branching
+  // in the module under test resolves; its methods delegate to the DB mocks so a
+  // test can control what the fallback returns.
+  class FakeDbSchedulingSource {
+    getActiveTechnicianIds = dbActiveTechIdsMock;
+    getAvailability = dbAvailabilityMock;
+    getJobs = dbJobsMock;
+  }
+  return {
+    getActiveTechnicianIdsMock: vi.fn(),
+    getAvailabilityMock: vi.fn(),
+    getJobsMock: vi.fn(),
+    dbActiveTechIdsMock,
+    dbAvailabilityMock,
+    dbJobsMock,
+    getSchedulingSourceMock: vi.fn(),
+    FakeDbSchedulingSource,
   };
-  return { selectQueue, chain };
 });
 
-vi.mock("@/lib/db", () => ({
-  db: { select: () => chain(selectQueue.shift() ?? []) },
-}));
-
-vi.mock("@/lib/db/tenant", () => ({
-  withTenant: (_table: unknown, orgId: string, ...conditions: unknown[]) => ({
-    __tenant: orgId,
-    conditions,
-  }),
-}));
-
-vi.mock("drizzle-orm", () => ({
-  eq: (...a: unknown[]) => ["eq", ...a],
-}));
-
-vi.mock("@/lib/db/schema", () => ({
-  users: { id: "u.id", organizationId: "u.org", role: "u.role", isActive: "u.active" },
-}));
-
-// Mock the scheduling source so the seam is exercised but no real DB is hit.
-const getAvailabilityMock = vi.fn();
-const getJobsMock = vi.fn();
 vi.mock("./scheduling-source", () => ({
-  getSchedulingSource: (_orgId: string) => ({
-    getAvailability: getAvailabilityMock,
-    getJobs: getJobsMock,
-  }),
+  getSchedulingSource: getSchedulingSourceMock,
+  DbSchedulingSource: FakeDbSchedulingSource,
 }));
 
 import {
@@ -60,10 +57,24 @@ import type { AvailabilitySlot, ScheduledJob } from "./types";
 
 const ORG = "org-1";
 
+/** The ACTIVE (non-DB) source the factory returns by default — a plain object,
+ * so `instanceof DbSchedulingSource` is false and the HCP-error fallback path is
+ * reachable. */
+const activeSource = {
+  getActiveTechnicianIds: getActiveTechnicianIdsMock,
+  getAvailability: getAvailabilityMock,
+  getJobs: getJobsMock,
+};
+
 beforeEach(() => {
-  selectQueue.length = 0;
+  getActiveTechnicianIdsMock.mockReset();
   getAvailabilityMock.mockReset();
   getJobsMock.mockReset();
+  dbActiveTechIdsMock.mockReset();
+  dbAvailabilityMock.mockReset();
+  dbJobsMock.mockReset();
+  getSchedulingSourceMock.mockReset();
+  getSchedulingSourceMock.mockResolvedValue(activeSource);
 });
 
 describe("businessDaysFrom", () => {
@@ -125,13 +136,14 @@ describe("getOpenAvailability", () => {
     };
   }
 
-  it("reads techs from the DB and availability/jobs through the source seam", async () => {
-    selectQueue.push([{ id: "t1" }, { id: "t2" }]); // active technician ids
+  it("reads roster + availability + jobs through the source seam", async () => {
+    getActiveTechnicianIdsMock.mockResolvedValue(["t1", "t2"]);
     getAvailabilityMock.mockResolvedValue([avail("t1"), avail("t2")]);
     getJobsMock.mockResolvedValue([]);
 
     const result = await getOpenAvailability(ORG, ["2026-07-01"]);
 
+    expect(getActiveTechnicianIdsMock).toHaveBeenCalledOnce();
     expect(getAvailabilityMock).toHaveBeenCalledOnce();
     expect(getJobsMock).toHaveBeenCalledOnce();
     expect(result.days).toEqual(["2026-07-01"]);
@@ -141,7 +153,7 @@ describe("getOpenAvailability", () => {
   });
 
   it("subtracts a booked job surfaced by the source", async () => {
-    selectQueue.push([{ id: "t1" }, { id: "t2" }]);
+    getActiveTechnicianIdsMock.mockResolvedValue(["t1", "t2"]);
     getAvailabilityMock.mockResolvedValue([avail("t1"), avail("t2")]);
     const morningJob: ScheduledJob = {
       id: "j1",
@@ -159,7 +171,7 @@ describe("getOpenAvailability", () => {
   });
 
   it("passes a job range spanning all requested days to the source", async () => {
-    selectQueue.push([{ id: "t1" }]);
+    getActiveTechnicianIdsMock.mockResolvedValue(["t1"]);
     getAvailabilityMock.mockResolvedValue([avail("t1")]);
     getJobsMock.mockResolvedValue([]);
 
@@ -177,5 +189,36 @@ describe("getOpenAvailability", () => {
     const result = await getOpenAvailability(ORG, []);
     expect(result).toEqual({ days: [], windows: [] });
     expect(getAvailabilityMock).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the DB source when the active (HCP) source errors", async () => {
+    // Active source (e.g. HCP) blows up on a read…
+    getActiveTechnicianIdsMock.mockRejectedValue(new Error("HCP 503"));
+    getAvailabilityMock.mockResolvedValue([]);
+    getJobsMock.mockResolvedValue([]);
+    // …and the DB fallback answers with real data so the customer still gets slots.
+    dbActiveTechIdsMock.mockResolvedValue(["t1"]);
+    dbAvailabilityMock.mockResolvedValue([avail("t1")]);
+    dbJobsMock.mockResolvedValue([]);
+
+    const result = await getOpenAvailability(ORG, ["2026-07-01"]);
+
+    // DB fallback was used (one covered tech → 3 bands, available 1 each).
+    expect(dbActiveTechIdsMock).toHaveBeenCalledOnce();
+    expect(result.windows).toHaveLength(3);
+    expect(result.windows.every((w) => w.available === 1)).toBe(true);
+  });
+
+  it("propagates the error when the DB source itself fails (no infinite fallback)", async () => {
+    // The factory returns the DB source AND it fails → there's nothing to fall
+    // back to, so the error must surface rather than loop.
+    getSchedulingSourceMock.mockResolvedValue(new FakeDbSchedulingSource());
+    dbActiveTechIdsMock.mockRejectedValue(new Error("DB down"));
+    dbAvailabilityMock.mockResolvedValue([]);
+    dbJobsMock.mockResolvedValue([]);
+
+    await expect(getOpenAvailability(ORG, ["2026-07-01"])).rejects.toThrow(
+      "DB down",
+    );
   });
 });
