@@ -113,8 +113,8 @@ A trust- and transparency-focused pass over the chat, drawn from leading support
 
 - **AI disclosure + "Talk to a Human anytime"** in the greeting — the first bubble states it's an AI that can make mistakes and that a human is one tap away. Zero runtime cost.
 - **Intake progress stepper** — "Step X of 3" with a progress bar and per-field check chips, replacing the flat extraction pills, so the 3-field intake reads as a finish line.
-- **Contextual suggested-reply chips** after a bot turn — issue shortcuts plus a one-tap human handoff, so the customer rarely has to type.
-- **"Was this helpful? 👍/👎"** under assistant answers → `POST /api/session/feedback`, stored in `audit_log` as a deflection-quality signal (no new tables).
+- **Contextual suggested-reply chips** after a bot turn — issue shortcuts before the issue is known, then **tappable mid-intake chips** for the current triage step (time-window, system-down, urgency, …), plus a one-tap human handoff, so the customer rarely has to type. Tapping captures the value deterministically (0-token); free-text steps (address/phone/name) show no chips.
+- **"Was this helpful? 👍/👎"** — shown **once**, under the latest assistant message (not under every turn, which would interrupt the intake) → `POST /api/session/feedback`, stored in `audit_log` as a deflection-quality signal (no new tables).
 - **Accessibility** — the message region is a `role="log"` with `aria-live="polite"`, animations are gated behind `prefers-reduced-motion`, and each new assistant message scrolls its *top* into view.
 - **Branded typing indicator** — "HVAC Assistant is typing…" appears only on the LLM-fallback path, so canned 0-token replies never fake latency.
 - **Clearer handoff copy** — a header subtitle ("AI assistant · a technician follows up within 2 hrs") plus an escalation dialog that states what happens next, with tap-to-call.

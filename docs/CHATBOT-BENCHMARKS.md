@@ -99,6 +99,32 @@ Each item is tagged **Value** (High/Med/Low) × **Effort** (S/M/L). Items marked
 
 ---
 
+## Conversation-quality & reliability fixes (2026-06 transcript teardown)
+
+A real intake transcript surfaced a cluster of "too AI" / "errors out" problems that the
+simple-wins list above didn't cover — these are correctness and trust fixes, not UX polish.
+All shipped to `main`.
+
+| Problem (observed) | Root cause | Fix |
+|---|---|---|
+| **Contradictory stitched reply** ("Let's get the rest of your info… I have everything I need" in one bubble) | The deterministic reply path concatenated up to three independent templates (after-hours line + warmth lead-in + confirm) with no coordination | `chat/route.ts` now composes **exactly one** coherent message per turn: confirm stands alone; an after-hours move owns the turn's framing; the lead-in only fires when neither applies. |
+| **Surprise after-hours fee** introduced then retracted | The fee was computed from the *conversation* wall-clock, so an 11pm chat for a *tomorrow-morning* visit threatened a charge | `after-hours-chat.ts` gates the charge on a **booking target** (business_hours vs now) derived from the customer's stated window / urgency answer — a business-hours booking never triggers a charge, even when chatting after hours. The confirm route still computes the real surcharge server-side. |
+| **Empathy repeated every turn** ("that's frustrating", "I know how uncomfortable…") | `lead-ins.ts` emitted a warmth line on every collecting turn | Empathy now fires **once** (first acknowledgement turn), then `""`. |
+| **Walls of formatting / script narration / triple summaries** | The system prompt encouraged markdown, emoji, step-narration, and per-turn re-summarizing | `system-prompt.ts` rewritten to a calm-dispatcher voice: 1–2 short sentences, one question, no markdown/emoji/bullets, no "then I'll get your phone…" narration, confirm **once** at the end. |
+| **Safety question asked as a closing checkbox, after booking, twice** | The gas/CO screen was under-weighted in the prompt | `system-prompt.ts` now has an **absolute-highest-priority safety gate**: it comes first, short-circuits all intake on any hazard (evacuate + connect-to-human guidance), is asked at most once, and is explicitly forbidden as a wrap-up. The "vulnerable occupants" question is separated out as enrichment, not a hazard gate. |
+| **Chat "errors out when it gets long"** | NOT context overflow (history is already windowed to 10 turns + a rolling summary). The per-session **token budget (10k)** fired a hard 429 → red error box after ~5 LLM turns | Budget raised to **40k** (~20 LLM turns; most turns are 0-token via the router), and any budget/turn-limit/failure now **degrades to a warm human handoff** (escalates the session + a "let me connect you with someone" bubble) instead of an error. |
+
+### Updates to the simple-wins items above
+
+- **Item #2 ("Was this helpful?")** — corrected from *after every assistant message* to **once, under the latest assistant message only** (`message-list.tsx`). A per-turn micro-survey interrupts an unfinished intake; leaders ask at most once.
+- **Item #3 (suggested follow-up replies)** — now extended to **tappable mid-intake chips**: the client derives the next triage step from the polled extraction (`triage-from-extraction.ts`, pure) and renders its quick-replies as one-tap buttons (time-window, system-down, urgency, etc.). Tapping sends the enum value the server captures deterministically (0-token). Free-text steps (address/phone/name) correctly show no chips.
+
+### Still open
+
+- **Hard slot-hold booking.** The bot offers **real** open windows (`getOpenAvailability` reads working-hours + booked jobs through the HCP seam) and records the chosen band + writes the customer to CRM, but it does **not** yet reserve a specific technician slot or decrement capacity — two customers can pick the same band. This hardens into true slot-holds once the Housecall Pro MAX-plan API key unblocks the HCP source.
+
+---
+
 ## Deliberately skip / not worth it for an intake bot
 
 - **Source-article citations under each answer (Intercom Fin).** Great for a knowledge-base bot; our answers come from a small hand-curated deterministic catalog, not a doc corpus — citations add UI weight with little payoff.
