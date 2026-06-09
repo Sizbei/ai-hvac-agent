@@ -72,6 +72,10 @@ export const RATE_LIMITS = {
   sessionCreate: { maxRequests: 5, windowMs: 60_000 }, // 5 sessions per minute
   sessionAction: { maxRequests: 10, windowMs: 60_000 }, // 10 actions per minute
   adminMutation: { maxRequests: 30, windowMs: 60_000 }, // 30 admin writes/deletes per minute
+  // Polled admin read surfaces (dashboard overview, dispatch board) refresh on
+  // a 30s timer. 60/min/user comfortably covers a few open tabs while still
+  // capping a stuck/re-mounting client.
+  adminRead: { maxRequests: 60, windowMs: 60_000 },
 } as const;
 
 // Reset store (for testing)

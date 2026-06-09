@@ -45,6 +45,8 @@ import type {
   DashboardStats,
   DashboardRequest,
   DashboardOverview,
+  DispatchBoard,
+  DispatchColumn,
   RequestFilters,
   CreateTechnicianInput,
   UpdateTechnicianInput,
@@ -68,6 +70,26 @@ function startOfTodayUTC(): Date {
   return new Date(
     new Date().toISOString().split("T")[0] + "T00:00:00.000Z",
   );
+}
+
+/** UTC [start, end) day bounds for an ISO date string (YYYY-MM-DD). Returns
+ * null for anything that isn't a valid calendar date so callers fail closed
+ * rather than querying a garbage range. */
+function utcDayBounds(
+  isoDate: string,
+): { readonly start: Date; readonly end: Date; readonly date: string } | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) return null;
+  const start = new Date(`${isoDate}T00:00:00.000Z`);
+  if (Number.isNaN(start.getTime())) return null;
+  // Reject overflow dates (e.g. 2026-02-30 → March) by round-tripping.
+  if (start.toISOString().slice(0, 10) !== isoDate) return null;
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  return { start, end, date: isoDate };
+}
+
+/** The ISO date (YYYY-MM-DD) of the current UTC day. */
+function todayUTCDate(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
 export async function getRequests(
@@ -1104,5 +1126,80 @@ export async function getDashboardOverview(
     todaySchedule: scheduleRows.map(toDashboardRequest),
     needsAttention: attentionRows.map(toDashboardRequest),
     awaitingFollowUp: followUpRows.map(toDashboardRequest),
+  };
+}
+
+/**
+ * The dispatch board for a single UTC day: one column per ACTIVE technician
+ * holding the jobs assigned to them whose arrival window falls that day, plus
+ * an "unassigned" pile of scheduled jobs with no tech. Every technician gets a
+ * column even with zero jobs so the dispatcher sees who is free.
+ *
+ * `isoDate` defaults to the current UTC day; an invalid date falls back to
+ * today rather than querying a garbage range. Tenant-scoped; decrypted customer
+ * NAMES only.
+ */
+export async function getDispatchBoard(
+  organizationId: string,
+  isoDate?: string,
+): Promise<DispatchBoard> {
+  const bounds = (isoDate && utcDayBounds(isoDate)) || utcDayBounds(todayUTCDate())!;
+
+  // The board's job-card select mirrors dashboardRequestSelect but also carries
+  // the raw assignedTo id so we can bucket jobs into technician columns.
+  const dispatchSelect = {
+    ...dashboardRequestSelect,
+    assignedTo: serviceRequests.assignedTo,
+  } as const;
+
+  const [technicians, jobRows] = await Promise.all([
+    getTechnicians(organizationId),
+    db
+      .select(dispatchSelect)
+      .from(serviceRequests)
+      .leftJoin(users, eq(serviceRequests.assignedTo, users.id))
+      .where(
+        withTenant(
+          serviceRequests,
+          organizationId,
+          isNotNull(serviceRequests.arrivalWindowStart),
+          gte(serviceRequests.arrivalWindowStart, bounds.start),
+          lt(serviceRequests.arrivalWindowStart, bounds.end),
+          inArray(serviceRequests.status, [...OPEN_STATUSES]),
+        ),
+      )
+      .orderBy(asc(serviceRequests.arrivalWindowStart)),
+  ]);
+
+  // Seed a bucket for each ACTIVE technician first, so jobs assigned to them
+  // route into a real column. A job whose assignee is missing, deactivated, or
+  // otherwise not a visible active tech falls through to the unassigned pile
+  // rather than silently disappearing.
+  const activeTechs = technicians.filter((tech) => tech.isActive);
+  const byTech = new Map<string, DashboardRequest[]>(
+    activeTechs.map((tech) => [tech.id, [] as DashboardRequest[]]),
+  );
+  const unassigned: DashboardRequest[] = [];
+
+  for (const row of jobRows) {
+    const job = toDashboardRequest(row);
+    const bucket = row.assignedTo ? byTech.get(row.assignedTo) : undefined;
+    if (bucket) {
+      bucket.push(job); // rows are window-ordered, so each bucket stays sorted
+    } else {
+      unassigned.push(job);
+    }
+  }
+
+  const columns: readonly DispatchColumn[] = activeTechs.map((tech) => ({
+    technicianId: tech.id,
+    technicianName: tech.name,
+    jobs: byTech.get(tech.id) ?? [],
+  }));
+
+  return {
+    date: bounds.date,
+    columns,
+    unassigned,
   };
 }

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard,
+  CalendarRange,
   ClipboardList,
   MessagesSquare,
   BarChart3,
@@ -39,6 +40,7 @@ interface NavItem {
 
 const NAV_ITEMS: readonly NavItem[] = [
   { label: 'Dashboard', href: '/admin', icon: LayoutDashboard, exact: true },
+  { label: 'Dispatch', href: '/admin/dispatch', icon: CalendarRange },
   { label: 'Requests', href: '/admin/requests', icon: ClipboardList },
   { label: 'Conversations', href: '/admin/conversations', icon: MessagesSquare },
   { label: 'AI Insights', href: '/admin/insights', icon: BarChart3 },

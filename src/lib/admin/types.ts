@@ -161,6 +161,24 @@ export interface DashboardOverview {
   readonly awaitingFollowUp: readonly DashboardRequest[];
 }
 
+/** One technician's column on the dispatch board: the tech plus the jobs
+ * assigned to them for the selected day, ordered by arrival window. */
+export interface DispatchColumn {
+  readonly technicianId: string;
+  readonly technicianName: string;
+  readonly jobs: readonly DashboardRequest[];
+}
+
+/** The dispatch board for a single day: a column per active technician plus an
+ * unassigned pile, all tenant-scoped. Reuses DashboardRequest for job cards. */
+export interface DispatchBoard {
+  /** The day the board covers, as an ISO date (YYYY-MM-DD), UTC-anchored. */
+  readonly date: string;
+  readonly columns: readonly DispatchColumn[];
+  /** Scheduled jobs for the day with no technician yet — the "to place" pile. */
+  readonly unassigned: readonly DashboardRequest[];
+}
+
 export interface RequestFilters {
   readonly status?: string;
   /** Case-insensitive reference-number search (prefix match). Customer names

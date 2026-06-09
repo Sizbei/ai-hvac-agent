@@ -162,6 +162,7 @@ import {
   updateTechnician,
   getDashboardStats,
   getDashboardOverview,
+  getDispatchBoard,
 } from '@/lib/admin/queries';
 
 const ORG_ID = '00000000-0000-0000-0000-000000000001';
@@ -618,6 +619,89 @@ describe('getDashboardOverview', () => {
 
     await getDashboardOverview(ORG_ID);
     expect(isNull).toHaveBeenCalledWith('sr.assignedTo');
+  });
+});
+
+describe('getDispatchBoard', () => {
+  const TECH_A = '00000000-0000-0000-0000-0000000000a1';
+  const TECH_B = '00000000-0000-0000-0000-0000000000b2';
+
+  function jobRow(overrides: Record<string, unknown>) {
+    return {
+      id: 'job',
+      referenceNumber: 'HVAC-X',
+      customerNameEncrypted: 'enc',
+      issueType: 'no_cooling',
+      urgency: 'medium',
+      status: 'scheduled',
+      isAfterHours: false,
+      assignedToName: null,
+      arrivalWindowStart: new Date('2026-06-10T13:00:00.000Z'),
+      arrivalWindowEnd: new Date('2026-06-10T17:00:00.000Z'),
+      followUpDate: null,
+      holdReason: null,
+      createdAt: new Date('2026-06-09T10:00:00.000Z'),
+      assignedTo: null,
+      ...overrides,
+    };
+  }
+
+  it('buckets jobs into active-tech columns and an unassigned pile', async () => {
+    // select 0 = getTechnicians; select 1 = job rows.
+    selectResolutions = [
+      [
+        { id: TECH_A, name: 'Ann', email: 'a@x.io', isActive: true, createdAt: new Date() },
+        { id: TECH_B, name: 'Bob', email: 'b@x.io', isActive: false, createdAt: new Date() },
+      ],
+      [
+        jobRow({ id: 'j1', referenceNumber: 'HVAC-1', assignedTo: TECH_A }),
+        // Assigned to an INACTIVE tech → must fall to unassigned, not vanish.
+        jobRow({ id: 'j2', referenceNumber: 'HVAC-2', assignedTo: TECH_B }),
+        // No tech at all → unassigned.
+        jobRow({ id: 'j3', referenceNumber: 'HVAC-3', assignedTo: null }),
+      ],
+    ];
+
+    const board = await getDispatchBoard(ORG_ID, '2026-06-10');
+
+    expect(board.date).toBe('2026-06-10');
+    // Only the active tech gets a column.
+    expect(board.columns).toHaveLength(1);
+    expect(board.columns[0].technicianId).toBe(TECH_A);
+    expect(board.columns[0].jobs.map((j) => j.referenceNumber)).toEqual(['HVAC-1']);
+    // Inactive-tech job + truly-unassigned job both land in the pile.
+    expect(board.unassigned.map((j) => j.referenceNumber).sort()).toEqual([
+      'HVAC-2',
+      'HVAC-3',
+    ]);
+  });
+
+  it('gives every active tech a column even with zero jobs', async () => {
+    selectResolutions = [
+      [
+        { id: TECH_A, name: 'Ann', email: 'a@x.io', isActive: true, createdAt: new Date() },
+      ],
+      [],
+    ];
+
+    const board = await getDispatchBoard(ORG_ID, '2026-06-10');
+    expect(board.columns).toHaveLength(1);
+    expect(board.columns[0].jobs).toEqual([]);
+    expect(board.unassigned).toEqual([]);
+  });
+
+  it('falls back to today for an invalid date string', async () => {
+    selectResolutions = [[], []];
+    const board = await getDispatchBoard(ORG_ID, 'not-a-date');
+    // Today's UTC date — matches the YYYY-MM-DD shape, not the bad input.
+    expect(board.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(board.date).not.toBe('not-a-date');
+  });
+
+  it('rejects overflow calendar dates and falls back to today', async () => {
+    selectResolutions = [[], []];
+    const board = await getDispatchBoard(ORG_ID, '2026-02-30');
+    expect(board.date).not.toBe('2026-02-30');
   });
 });
 
