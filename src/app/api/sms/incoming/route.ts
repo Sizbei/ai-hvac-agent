@@ -25,8 +25,6 @@ const GREETING =
 const BUSY_REPLY =
   "We're handling a lot of messages right now. Please text again in a moment.";
 
-const CLOSED_REPLY = "Thanks for reaching out. Goodbye.";
-
 const ERROR_REPLY =
   "Sorry, something went wrong on our end. Please text us again in a moment.";
 

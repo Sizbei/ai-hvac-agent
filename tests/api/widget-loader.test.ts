@@ -7,7 +7,6 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 const ORIG_APP_URL = process.env.NEXT_PUBLIC_APP_URL;
-const ORIG_NODE_ENV = process.env.NODE_ENV;
 afterEach(() => {
   if (ORIG_APP_URL === undefined) delete process.env.NEXT_PUBLIC_APP_URL;
   else process.env.NEXT_PUBLIC_APP_URL = ORIG_APP_URL;

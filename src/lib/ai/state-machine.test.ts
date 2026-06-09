@@ -7,7 +7,6 @@ import {
   transition,
   isTerminalState,
   determineNextState,
-  type SessionState,
 } from '@/lib/ai/state-machine';
 
 describe('constants', () => {

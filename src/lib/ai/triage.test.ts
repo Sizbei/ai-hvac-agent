@@ -6,6 +6,7 @@ import {
   REQUIRED_FOR_SUBMIT,
   UNSKIPPABLE_CORE,
   ENRICHMENT_NEVER_BLOCKS,
+  MAX_ADDRESS_REPROMPTS,
   type TriageStep,
   type TriageSlots,
 } from "./triage";
@@ -489,9 +490,12 @@ describe("partial address → single city/ZIP follow-up", () => {
     expect(step!.question.toLowerCase()).toMatch(/city|zip/);
   });
 
-  it("does NOT ask address_parts when the address contains a comma", () => {
-    const step = nextTriageStep(base("120 Broadway, Seattle"));
-    expect(step?.id).not.toBe("address_parts");
+  it("re-prompts a comma-bearing address that still lacks a US ZIP (e.g. Canadian)", () => {
+    // Previously a comma alone counted as "complete enough" and suppressed the
+    // follow-up — so a Canadian / ZIP-less address slipped through. Now we
+    // require a real US ZIP (or a verified lookup pick), so this re-prompts.
+    const step = nextTriageStep(base("123 Main St, Toronto, ON M5V 2T6"));
+    expect(step?.id).toBe("address_parts");
   });
 
   it("does NOT ask address_parts when the address is already complete", () => {
@@ -514,6 +518,74 @@ describe("partial address → single city/ZIP follow-up", () => {
     const step: TriageStep = nextTriageStep(before)!;
     applyTriageAnswer(before, step, "Seattle, WA 98122");
     expect(before.address).toBe("120 Broadway");
+  });
+});
+
+describe("address must be a complete US address OR a verified lookup pick", () => {
+  function base(address: string | null, extras: Record<string, unknown> = {}): TriageSlots {
+    return slots({
+      safetyScreenPassed: true,
+      address,
+      extras: { systemDownStatus: "fully_down", problemDuration: "today", ...extras },
+    });
+  }
+
+  it("re-prompts an address with no street number", () => {
+    expect(nextTriageStep(base("Main Street, Springfield, IL 62704"))?.id).toBe(
+      "address_parts",
+    );
+  });
+
+  it("re-prompts a US address that's missing its ZIP", () => {
+    expect(nextTriageStep(base("120 Broadway, New York, NY"))?.id).toBe(
+      "address_parts",
+    );
+  });
+
+  it("accepts a complete US address without re-prompting", () => {
+    expect(nextTriageStep(base("120 Broadway, New York, NY 10001"))?.id).not.toBe(
+      "address_parts",
+    );
+  });
+
+  it("accepts a verified (lookup-selected) address even if it isn't US-formatted", () => {
+    // addressVerified = the customer picked a geocoded suggestion → "found".
+    const step = nextTriageStep(
+      base("123 Main St, Toronto, ON M5V 2T6", { addressVerified: "yes" }),
+    );
+    expect(step?.id).not.toBe("address_parts");
+  });
+
+  it("stops re-prompting after MAX_ADDRESS_REPROMPTS to avoid an endless loop", () => {
+    const stillBad = "123 Main St, Toronto, ON M5V 2T6";
+    // Below the cap → still re-prompting.
+    expect(
+      nextTriageStep(base(stillBad, { addressAttempts: MAX_ADDRESS_REPROMPTS - 1 }))
+        ?.id,
+    ).toBe("address_parts");
+    // At the cap → give up on the address and move on to the next field.
+    expect(
+      nextTriageStep(base(stillBad, { addressAttempts: MAX_ADDRESS_REPROMPTS }))?.id,
+    ).not.toBe("address_parts");
+  });
+
+  it("applyTriageAnswer increments the attempt counter each re-prompt", () => {
+    const before = base("123 Main St, Toronto, ON M5V 2T6");
+    const step = nextTriageStep(before)!;
+    expect(step.id).toBe("address_parts");
+    const after = applyTriageAnswer(before, step, "still not a us address");
+    expect(Number(after.extras.addressAttempts)).toBe(1);
+  });
+
+  it("a re-typed full US street at the re-prompt replaces (not appends) the bad address", () => {
+    const before = base("not a real address");
+    const after = applyTriageAnswer(
+      before,
+      { id: "address_parts", question: "", quickReplies: [], optional: false },
+      "120 Broadway, New York, NY 10001",
+    );
+    expect(after.address).toBe("120 Broadway, New York, NY 10001");
+    expect(nextTriageStep(after)?.id).not.toBe("address_parts");
   });
 });
 

@@ -183,15 +183,22 @@ const ADDRESS_STEP: TriageStep = {
   optional: false,
 };
 
-// Asked ONCE when an address is present but not yet complete (no comma and fails
-// the strict check) — captures the missing city/ZIP. The route appends the answer
-// as ", <answer>", which adds a comma, so this step never re-fires afterward.
+// Asked when the address we have isn't a dispatchable US address (missing street
+// number, missing/!US 5-digit ZIP, etc.) and wasn't verified via the lookup.
+// Asks for the FULL address (not just city/ZIP) so a missing house number can be
+// supplied too. Re-fired up to MAX_ADDRESS_REPROMPTS times (see nextTriageStep).
 const ADDRESS_PARTS_STEP: TriageStep = {
   id: "address_parts",
-  question: "Thanks. What city and ZIP code is that in?",
+  question:
+    "I want to make sure a technician can find you. What's the full US service address — street number, street, city, state, and 5-digit ZIP code?",
   quickReplies: [],
   optional: false,
 };
+
+// How many times we'll re-prompt for a complete/valid US address before we stop
+// asking (so a customer who can't supply one — e.g. outside our service area —
+// isn't trapped in an endless loop). Two gives an honest second chance.
+export const MAX_ADDRESS_REPROMPTS = 2;
 
 const PHONE_STEP: TriageStep = {
   id: "phone",
@@ -586,11 +593,19 @@ export function nextTriageStep(slots: TriageSlots): TriageStep | null {
 
   // 3. Required dispatch fields.
   if (!slots.address) return ADDRESS_STEP;
-  // Address present but not complete (no comma AND fails the strict check): ask
-  // ONE city/ZIP follow-up. We infer "already asked parts" from the address
-  // shape — once it contains a comma (the route appends ", <answer>") or looks
-  // complete, we don't re-ask. No new persisted flag needed.
-  if (!addressLooksComplete(slots.address) && !slots.address.includes(",")) {
+  // The address must be DISPATCHABLE before we move on: either it's a complete
+  // US address (street number + city/state + 5-digit ZIP, per addressLooksComplete)
+  // OR it was verified via the address lookup (the customer picked a geocoded
+  // suggestion — `addressVerified`). Anything else — a ZIP-less / non-US address,
+  // or one with no street number — is re-prompted, up to MAX_ADDRESS_REPROMPTS so
+  // a customer who genuinely can't supply a US address isn't looped forever.
+  const addressVerified = slots.extras?.addressVerified === "yes";
+  const addressAttempts = Number(slots.extras?.addressAttempts ?? 0);
+  if (
+    !addressVerified &&
+    !addressLooksComplete(slots.address) &&
+    addressAttempts < MAX_ADDRESS_REPROMPTS
+  ) {
     return ADDRESS_PARTS_STEP;
   }
   if (!slots.phone) return PHONE_STEP;
@@ -625,14 +640,21 @@ export function applyTriageAnswer(
     skipped: { ...(slots.skipped ?? {}) },
   };
 
-  // Address city/ZIP follow-up: append the answer to the existing street so the
-  // address becomes "<street>, <city ZIP>". The added comma makes the address
-  // satisfy the "already asked parts" check, so it is never re-asked.
+  // Address re-prompt: count the attempt (so nextTriageStep stops after
+  // MAX_ADDRESS_REPROMPTS) and fold in the answer. If the customer re-typed a
+  // full street (leading house number) use it as the new base; otherwise append
+  // the answer as the missing "<city ZIP>" tail of the street we already have.
   if (step.id === "address_parts") {
+    next.extras.addressAttempts =
+      Number(next.extras.addressAttempts ?? 0) + 1;
     const street = (next.address ?? "").trim();
     const part = answer.trim();
-    if (street && part) {
-      next.address = `${street}, ${part}`.slice(0, MAX_FREE_TEXT);
+    if (part) {
+      next.address = (
+        /^\s*\d/.test(part) || street.length === 0
+          ? part
+          : `${street}, ${part}`
+      ).slice(0, MAX_FREE_TEXT);
     }
     return next;
   }

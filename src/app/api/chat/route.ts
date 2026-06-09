@@ -987,9 +987,32 @@ export async function POST(request: NextRequest) {
         const businessNameDetected =
           nameThisTurn !== null && isBusinessName(nameThisTurn) &&
           knownSlots.extras?.propertyType !== "commercial";
-        const capturedExtras = businessNameDetected
-          ? { ...(capturedExtrasBase ?? {}), propertyType: "commercial" }
-          : capturedExtrasBase;
+        // Address-validation control flags (persisted in extras, stripped from
+        // the final CRM record by the extraction schema):
+        //  - addressVerified: the customer picked a geocoded suggestion, so the
+        //    address is "found" and trusted even if it isn't a US-ZIP format.
+        //  - addressAttempts: bump the re-prompt counter whenever we just asked
+        //    the address re-prompt step, so triage stops after the cap instead of
+        //    looping on a customer who can't supply a complete US address.
+        const addressControl: Record<string, unknown> = {};
+        if (addressSelected) {
+          addressControl.addressVerified = "yes";
+        }
+        if (pendingStep?.id === "address_parts") {
+          addressControl.addressAttempts =
+            Number(knownSlots.extras?.addressAttempts ?? 0) + 1;
+        }
+
+        const capturedExtras =
+          businessNameDetected ||
+          capturedExtrasBase ||
+          Object.keys(addressControl).length > 0
+            ? {
+                ...(capturedExtrasBase ?? {}),
+                ...(businessNameDetected ? { propertyType: "commercial" } : {}),
+                ...addressControl,
+              }
+            : undefined;
 
         // City/ZIP follow-up (address_parts): the customer's reply is normally
         // the missing tail of an address we already have, so we append it to the

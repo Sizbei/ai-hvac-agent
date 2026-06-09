@@ -195,7 +195,7 @@ function isGibberish(text: string): boolean {
 function buildReply(
   entry: KnowledgeBaseEntry,
   action: RouterAction,
-  known: KnownSlots,
+  _known: KnownSlots,
 ): string {
   if (action !== "SUBMIT") return entry.cannedResponse;
   // All required slots present → confirm rather than ask again.

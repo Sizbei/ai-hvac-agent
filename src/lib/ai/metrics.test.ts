@@ -13,7 +13,7 @@ vi.mock("@/lib/logger", () => ({
   },
 }));
 
-import { trackAICall, type AICallMetrics } from "./metrics";
+import { trackAICall } from "./metrics";
 
 beforeEach(() => {
   vi.clearAllMocks();

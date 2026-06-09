@@ -38,14 +38,29 @@ export type ExtraSlots = Partial<
   Pick<ExtractionResult, (typeof EXTRA_SLOT_KEYS)[number]>
 >;
 
+// Internal control flags that ride along in the extras bag but are NOT part of
+// the persisted ExtractionResult — the extraction schema strips unknown keys at
+// the confirm endpoint, so these never reach the CRM. They exist only to
+// sequence the conversation across turns:
+//   - addressVerified: "yes" once the customer picked a geocoded suggestion, so
+//     a "found" address is trusted even when it isn't a US-ZIP format.
+//   - addressAttempts: how many times we've re-prompted for a complete US
+//     address, so triage stops after MAX_ADDRESS_REPROMPTS instead of looping.
+// They merge/parse with the same never-clobber rule as the real slots.
+export const CONTROL_SLOT_KEYS = [
+  "addressVerified",
+  "addressAttempts",
+] as const;
+
 function isFilled(value: unknown): boolean {
   return value !== null && value !== undefined && value !== "";
 }
 
-/** Pull the extra (non-core) slots out of a parsed metadata object. */
+/** Pull the extra (non-core) slots — plus the internal control flags — out of a
+ * parsed metadata object. */
 function pickExtras(source: Partial<ExtractionResult>): ExtraSlots {
   const out: Record<string, unknown> = {};
-  for (const key of EXTRA_SLOT_KEYS) {
+  for (const key of [...EXTRA_SLOT_KEYS, ...CONTROL_SLOT_KEYS]) {
     const v = (source as Record<string, unknown>)[key];
     if (isFilled(v)) out[key] = v;
   }
@@ -83,7 +98,7 @@ export function mergeSlots(
   // rule, so a late turn that fills systemType doesn't wipe an earlier brand.
   const mergedExtras: Record<string, unknown> = { ...(known.extras ?? {}) };
   const updateExtras = updates.extras ?? {};
-  for (const key of EXTRA_SLOT_KEYS) {
+  for (const key of [...EXTRA_SLOT_KEYS, ...CONTROL_SLOT_KEYS]) {
     const next = (updateExtras as Record<string, unknown>)[key];
     if (isFilled(next)) mergedExtras[key] = next;
   }

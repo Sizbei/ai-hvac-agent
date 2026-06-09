@@ -4,7 +4,6 @@ import { User, Inbox } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { UrgencyBadge } from '@/components/admin/urgency-badge';
 import { StatusBadge } from '@/components/admin/status-badge';
-import { formatArrivalWindow } from '@/lib/admin/arrival-window';
 import type { DashboardRequest } from '@/lib/admin/types';
 
 interface DispatchColumnProps {

@@ -37,7 +37,6 @@ import {
   customerSessions,
   messages,
   serviceRequests,
-  serviceHistory,
   auditLog,
 } from "./schema";
 import { sanitizeContactFields } from "../ai/sanitize-fields";

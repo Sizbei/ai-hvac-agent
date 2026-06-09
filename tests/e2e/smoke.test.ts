@@ -39,7 +39,7 @@ const {
         }
         return new Proxy(() => {}, handler) as unknown;
       },
-      apply(_target, _thisArg, args) {
+      apply(_target, _thisArg, _args) {
         return new Proxy(() => {}, handler) as unknown;
       },
     };

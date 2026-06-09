@@ -24,6 +24,22 @@ const eslintConfig = defineConfig([
     // setState patterns still surface without blocking on known-safe fetches.
     rules: {
       "react-hooks/set-state-in-effect": "warn",
+      // Allow deliberately-unused identifiers when prefixed with `_`. This is the
+      // idiomatic signal for a binding that must exist for a signature/position
+      // (unused route `_request`, proxy-trap `_args`, placeholder params) but is
+      // intentionally not read. Genuinely-dead code is still flagged.
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        {
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          caughtErrorsIgnorePattern: "^_",
+          destructuredArrayIgnorePattern: "^_",
+          // A var destructured purely to omit it via a rest sibling
+          // (`const { drop, ...rest } = obj`) is intentional, not dead.
+          ignoreRestSiblings: true,
+        },
+      ],
     },
   },
 ]);

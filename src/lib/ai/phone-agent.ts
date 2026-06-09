@@ -86,7 +86,8 @@ const VOICE_STEP_PHRASING: Record<string, string> = {
   duration: "And how long has this been going on?",
   address:
     "What's the service address where you'd like the technician to come? Take your time and I'll repeat it back.",
-  address_parts: "Thanks. What city and ZIP code is that in?",
+  address_parts:
+    "Let's make sure a technician can find you. What's the full address — street number, street, city, state, and 5-digit ZIP code?",
   phone: "What's the best phone number for our team to reach you?",
   urgency:
     "How urgent is this? Is it an emergency, or can it wait a little while?",
