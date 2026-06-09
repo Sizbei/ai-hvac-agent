@@ -1,7 +1,8 @@
 'use client';
 
-import { Menu, Thermometer } from 'lucide-react';
+import { Menu } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { BrandMark } from '@/components/admin/brand-mark';
 
 interface AdminHeaderProps {
   readonly onMenuClick: () => void;
@@ -9,14 +10,11 @@ interface AdminHeaderProps {
 
 export function AdminHeader({ onMenuClick }: AdminHeaderProps) {
   return (
-    <header className="flex h-14 items-center gap-3 border-b bg-card px-4 md:hidden">
+    <header className="flex h-16 items-center gap-3 border-b bg-card/80 px-4 backdrop-blur-sm md:hidden">
       <Button variant="ghost" size="icon" onClick={onMenuClick}>
         <Menu className="size-5" />
       </Button>
-      <div className="flex items-center gap-2">
-        <Thermometer className="size-5 text-primary" />
-        <span className="text-base font-semibold">HVAC Dashboard</span>
-      </div>
+      <BrandMark />
     </header>
   );
 }

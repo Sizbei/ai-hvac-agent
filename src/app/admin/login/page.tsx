@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Thermometer, Loader2, AlertCircle } from 'lucide-react';
+import { Wind, Loader2, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -48,15 +48,24 @@ export default function AdminLoginPage() {
   }
 
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-gradient-to-br from-slate-50 to-blue-50 px-4">
-      <Card className="w-full max-w-sm">
+    <div className="relative flex min-h-dvh items-center justify-center overflow-hidden bg-gradient-to-br from-[oklch(0.22_0.05_258)] to-[oklch(0.16_0.05_260)] px-4">
+      {/* Cyan brand glow */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -top-32 right-[-10%] size-[34rem] rounded-full bg-[radial-gradient(circle_at_center,oklch(0.72_0.13_220/0.3),transparent_70%)] blur-3xl"
+      />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute bottom-[-12rem] left-[-8%] size-[28rem] rounded-full bg-[radial-gradient(circle_at_center,oklch(0.4_0.1_250/0.25),transparent_70%)] blur-3xl"
+      />
+      <Card className="relative z-10 w-full max-w-sm shadow-2xl">
         <CardHeader className="text-center">
-          <div className="mx-auto mb-2 flex size-12 items-center justify-center rounded-xl bg-primary/10">
-            <Thermometer className="size-6 text-primary" />
+          <div className="mx-auto mb-3 flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-[oklch(0.62_0.13_222)] text-primary-foreground shadow-lg">
+            <Wind className="size-7" />
           </div>
-          <CardTitle className="text-xl">HVAC Dashboard</CardTitle>
+          <CardTitle className="font-heading text-xl">Spears Services</CardTitle>
           <CardDescription>
-            Sign in to manage service requests
+            Sign in to the service console
           </CardDescription>
         </CardHeader>
         <CardContent>

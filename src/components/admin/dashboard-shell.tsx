@@ -26,7 +26,7 @@ export function DashboardShell({
   }, []);
 
   return (
-    <div className="flex h-dvh bg-slate-50">
+    <div className="flex h-dvh bg-[oklch(0.97_0.006_240)] dark:bg-background">
       <Sidebar
         adminName={adminName}
         adminEmail={adminEmail}

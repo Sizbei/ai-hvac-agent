@@ -85,12 +85,14 @@ export function DashboardListCard({
 }: DashboardListCardProps) {
   return (
     <Card className="flex flex-col p-4">
-      <div className="mb-3 flex items-center gap-2">
-        <Icon className={`h-4 w-4 ${iconColor}`} />
-        <h2 className="text-sm font-semibold">{title}</h2>
+      <div className="mb-3 flex items-center gap-2.5">
+        <span className="flex size-7 items-center justify-center rounded-lg bg-muted">
+          <Icon className={`h-4 w-4 ${iconColor}`} />
+        </span>
+        <h2 className="font-heading text-sm font-semibold">{title}</h2>
         {!isLoading && (
           <span
-            className="ml-auto text-xs text-muted-foreground"
+            className="ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-muted px-1.5 text-xs font-medium tabular-nums text-muted-foreground"
             title={
               requests.length >= DASHBOARD_LIST_LIMIT
                 ? `Showing the first ${DASHBOARD_LIST_LIMIT}`

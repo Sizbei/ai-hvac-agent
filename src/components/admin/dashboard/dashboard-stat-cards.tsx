@@ -86,26 +86,29 @@ function formatValue(value: number, isCurrency?: boolean): string {
 
 export function DashboardStatCards({ stats, isLoading }: DashboardStatCardsProps) {
   return (
-    <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+    <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
       {STAT_CARDS.map((config) => {
         const Icon = config.icon;
         return (
-          <Card key={config.key} className="p-4">
-            <div className="flex items-center gap-3">
-              <div className={`rounded-lg p-2 ${config.bgColor}`}>
-                <Icon className={`h-5 w-5 ${config.iconColor}`} />
-              </div>
+          <Card
+            key={config.key}
+            className="p-4 transition-shadow duration-200 hover:shadow-md hover:ring-1 hover:ring-primary/30"
+          >
+            <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="truncate text-sm text-muted-foreground">
+                <p className="truncate text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   {config.label}
                 </p>
                 {isLoading || !stats ? (
-                  <Skeleton className="mt-1 h-7 w-10" />
+                  <Skeleton className="mt-2 h-9 w-12" />
                 ) : (
-                  <p className="text-2xl font-bold">
+                  <p className="mt-1 font-heading text-3xl font-bold tracking-tight tabular-nums">
                     {formatValue(stats[config.key], config.isCurrency)}
                   </p>
                 )}
+              </div>
+              <div className={`shrink-0 rounded-xl p-2.5 ${config.bgColor}`}>
+                <Icon className={`h-5 w-5 ${config.iconColor}`} />
               </div>
             </div>
           </Card>

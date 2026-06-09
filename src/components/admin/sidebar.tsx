@@ -17,17 +17,16 @@ import {
   ChevronLeft,
   ChevronRight,
   LogOut,
-  Thermometer,
   X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Separator } from '@/components/ui/separator';
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { BrandMark } from '@/components/admin/brand-mark';
 import { useUnscheduledCount } from '@/hooks/use-unscheduled-count';
 import { unscheduledBadge } from '@/lib/admin/unscheduled-badge';
 import { cn } from '@/lib/utils';
@@ -43,17 +42,37 @@ interface NavItem {
   readonly badge?: 'unscheduled';
 }
 
-const NAV_ITEMS: readonly NavItem[] = [
-  { label: 'Dashboard', href: '/admin', icon: LayoutDashboard, exact: true },
-  { label: 'Calendar', href: '/admin/calendar', icon: CalendarClock, badge: 'unscheduled' },
-  { label: 'Dispatch', href: '/admin/dispatch', icon: CalendarRange },
-  { label: 'Requests', href: '/admin/requests', icon: ClipboardList },
-  { label: 'Conversations', href: '/admin/conversations', icon: MessagesSquare },
-  { label: 'AI Insights', href: '/admin/insights', icon: BarChart3 },
-  { label: 'Customers', href: '/admin/customers', icon: Building2 },
-  { label: 'Staff', href: '/admin/staff', icon: UsersRound },
-  { label: 'Chatbot Settings', href: '/admin/settings', icon: Settings },
-  { label: 'Audit Log', href: '/admin/audit-log', icon: ScrollText },
+interface NavGroup {
+  readonly heading: string;
+  readonly items: readonly NavItem[];
+}
+
+const NAV_GROUPS: readonly NavGroup[] = [
+  {
+    heading: 'Operations',
+    items: [
+      { label: 'Dashboard', href: '/admin', icon: LayoutDashboard, exact: true },
+      { label: 'Calendar', href: '/admin/calendar', icon: CalendarClock, badge: 'unscheduled' },
+      { label: 'Dispatch', href: '/admin/dispatch', icon: CalendarRange },
+      { label: 'Requests', href: '/admin/requests', icon: ClipboardList },
+    ],
+  },
+  {
+    heading: 'Customers',
+    items: [
+      { label: 'Conversations', href: '/admin/conversations', icon: MessagesSquare },
+      { label: 'AI Insights', href: '/admin/insights', icon: BarChart3 },
+      { label: 'Customers', href: '/admin/customers', icon: Building2 },
+    ],
+  },
+  {
+    heading: 'Workspace',
+    items: [
+      { label: 'Staff', href: '/admin/staff', icon: UsersRound },
+      { label: 'Chatbot Settings', href: '/admin/settings', icon: Settings },
+      { label: 'Audit Log', href: '/admin/audit-log', icon: ScrollText },
+    ],
+  },
 ] as const;
 
 interface SidebarProps {
@@ -61,6 +80,14 @@ interface SidebarProps {
   readonly adminEmail: string;
   readonly isMobileOpen: boolean;
   readonly onMobileClose: () => void;
+}
+
+/** Two-character initials for the user avatar (e.g. "Raymond Chen" -> "RC"). */
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
 export function Sidebar({
@@ -79,9 +106,8 @@ export function Sidebar({
     const check = () => {
       const mobile = window.innerWidth < 768;
       setIsMobile(mobile);
-      if (mobile) {
-        setIsCollapsed(true);
-      }
+      // Collapse on mobile; expand the desktop rail again when widening back.
+      setIsCollapsed(mobile);
     };
     check();
     window.addEventListener('resize', check);
@@ -102,14 +128,70 @@ export function Sidebar({
     setIsCollapsed((prev) => !prev);
   }, []);
 
+  const isItemActive = useCallback(
+    (item: NavItem) =>
+      item.exact ? pathname === item.href : pathname.startsWith(item.href),
+    [pathname],
+  );
+
+  const renderNavLink = useCallback(
+    (item: NavItem, collapsed: boolean) => {
+      const isActive = isItemActive(item);
+      const Icon = item.icon;
+      const showBadge = item.badge === 'unscheduled' && badge.visible;
+      return (
+        <Link
+          href={item.href}
+          className={cn(
+            'group/nav relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+            isActive
+              ? 'bg-white/10 text-white'
+              : 'text-white/65 hover:bg-white/[0.06] hover:text-white',
+            collapsed && 'justify-center px-2',
+          )}
+        >
+          {/* Active accent bar */}
+          {isActive && (
+            <span className="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-primary" />
+          )}
+          <Icon
+            className={cn(
+              'size-5 shrink-0 transition-colors',
+              isActive ? 'text-primary' : 'text-white/70 group-hover/nav:text-white',
+            )}
+          />
+          {!collapsed && <span className="truncate">{item.label}</span>}
+          {showBadge && !collapsed && (
+            <span
+              aria-label={badge.srLabel}
+              className="ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500 px-1.5 text-[11px] font-semibold text-white"
+            >
+              {badge.label}
+            </span>
+          )}
+          {showBadge && collapsed && (
+            <span
+              aria-label={badge.srLabel}
+              className="absolute right-1 top-1 size-2 rounded-full bg-amber-500 ring-2 ring-[oklch(0.21_0.05_258)]"
+            />
+          )}
+        </Link>
+      );
+    },
+    [badge, isItemActive],
+  );
+
+  // Shared navy surface for both mobile and desktop sidebars.
+  const surfaceClass =
+    'bg-gradient-to-b from-[oklch(0.24_0.055_258)] to-[oklch(0.18_0.05_260)] text-white';
+
   // Mobile: overlay sidebar
   if (isMobile) {
     return (
       <>
-        {/* Backdrop */}
         {isMobileOpen && (
           <div
-            className="fixed inset-0 z-40 bg-black/50"
+            className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
             onClick={onMobileClose}
             onKeyDown={(e) => {
               if (e.key === 'Escape') {
@@ -122,78 +204,55 @@ export function Sidebar({
           />
         )}
 
-        {/* Slide-out sidebar */}
         <aside
           className={cn(
-            'fixed inset-y-0 left-0 z-50 w-64 border-r bg-card transition-transform duration-200',
-            isMobileOpen ? 'translate-x-0' : '-translate-x-full'
+            'fixed inset-y-0 left-0 z-50 w-64 transition-transform duration-200',
+            surfaceClass,
+            isMobileOpen ? 'translate-x-0' : '-translate-x-full',
           )}
         >
           <div className="flex h-full flex-col">
-            {/* Header */}
-            <div className="flex h-14 items-center gap-2 px-4">
-              <Thermometer className="size-6 shrink-0 text-primary" />
-              <span className="text-lg font-semibold text-primary">HVAC</span>
+            <div className="flex h-16 items-center px-4">
+              <BrandMark onDark />
               <Button
                 variant="ghost"
                 size="icon-sm"
-                className="ml-auto"
+                className="ml-auto text-white/70 hover:bg-white/10 hover:text-white"
                 onClick={onMobileClose}
+                aria-label="Close navigation"
               >
                 <X className="size-4" />
               </Button>
             </div>
 
-            <Separator />
-
-            {/* Nav */}
-            <nav className="flex-1 space-y-1 px-2 py-2">
-              {NAV_ITEMS.map((item) => {
-                const isActive = item.exact
-                  ? pathname === item.href
-                  : pathname.startsWith(item.href);
-                const Icon = item.icon;
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={cn(
-                      'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-                      isActive
-                        ? 'bg-primary/10 text-primary'
-                        : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                    )}
-                  >
-                    <Icon className="size-5 shrink-0" />
-                    <span>{item.label}</span>
-                    {item.badge === 'unscheduled' && badge.visible && (
-                      <span
-                        aria-label={badge.srLabel}
-                        className="ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500 px-1.5 text-[11px] font-semibold text-white"
-                      >
-                        {badge.label}
-                      </span>
-                    )}
-                  </Link>
-                );
-              })}
+            <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-3">
+              {NAV_GROUPS.map((group) => (
+                <div key={group.heading} className="space-y-1">
+                  <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">
+                    {group.heading}
+                  </p>
+                  {group.items.map((item) => (
+                    <div key={item.href}>{renderNavLink(item, false)}</div>
+                  ))}
+                </div>
+              ))}
             </nav>
 
-            <Separator />
-
-            {/* User info + logout */}
-            <div className="space-y-2 px-2 py-2">
-              <div className="rounded-lg bg-muted/50 px-3 py-2">
-                <p className="truncate text-sm font-medium">{adminName}</p>
-                <p className="truncate text-xs text-muted-foreground">
-                  {adminEmail}
-                </p>
+            <div className="border-t border-white/10 px-3 py-3">
+              <div className="flex items-center gap-3 rounded-lg bg-white/[0.06] px-3 py-2">
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/20 text-xs font-semibold text-primary">
+                  {initialsOf(adminName)}
+                </span>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-white">{adminName}</p>
+                  <p className="truncate text-xs text-white/50">{adminEmail}</p>
+                </div>
               </div>
               <Button
                 variant="ghost"
                 size="default"
                 onClick={handleLogout}
-                className="w-full justify-start text-muted-foreground hover:text-destructive"
+                className="mt-1 w-full justify-start text-white/65 hover:bg-white/10 hover:text-white"
               >
                 <LogOut className="size-4" />
                 <span>Sign Out</span>
@@ -209,89 +268,79 @@ export function Sidebar({
   return (
     <aside
       className={cn(
-        'shrink-0 border-r bg-card transition-all duration-200',
-        isCollapsed ? 'w-16' : 'w-64'
+        'shrink-0 transition-all duration-200',
+        surfaceClass,
+        isCollapsed ? 'w-16' : 'w-64',
       )}
     >
       <div className="flex h-full flex-col">
         {/* Logo */}
-        <div className="flex h-14 items-center gap-2 px-4">
-          <Thermometer className="size-6 shrink-0 text-primary" />
-          {!isCollapsed && (
-            <span className="text-lg font-semibold text-primary">HVAC</span>
+        <div
+          className={cn(
+            'flex h-16 items-center px-4',
+            isCollapsed && 'justify-center px-0',
           )}
+        >
+          <BrandMark onDark compact={isCollapsed} />
         </div>
 
-        <Separator />
-
         {/* Nav */}
-        <nav className="flex-1 space-y-1 px-2 py-2">
+        <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-3">
           <TooltipProvider>
-            {NAV_ITEMS.map((item) => {
-              const isActive = item.exact
-                ? pathname === item.href
-                : pathname.startsWith(item.href);
-              const Icon = item.icon;
-
-              const showBadge = item.badge === 'unscheduled' && badge.visible;
-              const linkContent = (
-                <Link
-                  href={item.href}
-                  className={cn(
-                    'relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-                    isActive
-                      ? 'bg-primary/10 text-primary'
-                      : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-                    isCollapsed && 'justify-center px-2'
-                  )}
-                >
-                  <Icon className="size-5 shrink-0" />
-                  {!isCollapsed && <span>{item.label}</span>}
-                  {showBadge && !isCollapsed && (
-                    <span
-                      aria-label={badge.srLabel}
-                      className="ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500 px-1.5 text-[11px] font-semibold text-white"
-                    >
-                      {badge.label}
-                    </span>
-                  )}
-                  {showBadge && isCollapsed && (
-                    <span
-                      aria-label={badge.srLabel}
-                      className="absolute right-1 top-1 size-2 rounded-full bg-amber-500"
-                    />
-                  )}
-                </Link>
-              );
-
-              if (isCollapsed) {
-                return (
-                  <Tooltip key={item.href}>
-                    <TooltipTrigger render={<div />}>
-                      {linkContent}
-                    </TooltipTrigger>
-                    <TooltipContent side="right">
-                      {item.label}
-                    </TooltipContent>
-                  </Tooltip>
-                );
-              }
-
-              return <div key={item.href}>{linkContent}</div>;
-            })}
+            {NAV_GROUPS.map((group, groupIndex) => (
+              <div key={group.heading} className="space-y-1">
+                {!isCollapsed && (
+                  <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">
+                    {group.heading}
+                  </p>
+                )}
+                {/* Collapsed: a short rule separates groups (not above the first). */}
+                {isCollapsed && groupIndex > 0 && (
+                  <div className="mx-auto mb-1 h-px w-6 bg-white/10" aria-hidden="true" />
+                )}
+                {group.items.map((item) => {
+                  if (isCollapsed) {
+                    return (
+                      <Tooltip key={item.href}>
+                        <TooltipTrigger render={<div />}>
+                          {renderNavLink(item, true)}
+                        </TooltipTrigger>
+                        <TooltipContent side="right">{item.label}</TooltipContent>
+                      </Tooltip>
+                    );
+                  }
+                  return <div key={item.href}>{renderNavLink(item, false)}</div>;
+                })}
+              </div>
+            ))}
           </TooltipProvider>
         </nav>
 
-        <Separator />
-
         {/* Bottom section */}
-        <div className="space-y-2 px-2 py-2">
+        <div className="border-t border-white/10 px-3 py-3">
+          {/* User info */}
+          {!isCollapsed && (
+            <div className="mb-1 flex items-center gap-3 rounded-lg bg-white/[0.06] px-3 py-2">
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/20 text-xs font-semibold text-primary">
+                {initialsOf(adminName)}
+              </span>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-white">{adminName}</p>
+                <p className="truncate text-xs text-white/50">{adminEmail}</p>
+              </div>
+            </div>
+          )}
+
           {/* Collapse toggle */}
           <Button
             variant="ghost"
             size={isCollapsed ? 'icon' : 'default'}
             onClick={toggleCollapse}
-            className={cn('w-full', !isCollapsed && 'justify-start')}
+            aria-label={isCollapsed ? 'Expand sidebar' : undefined}
+            className={cn(
+              'w-full text-white/65 hover:bg-white/10 hover:text-white',
+              !isCollapsed && 'justify-start',
+            )}
           >
             {isCollapsed ? (
               <ChevronRight className="size-4" />
@@ -303,16 +352,6 @@ export function Sidebar({
             )}
           </Button>
 
-          {/* User info */}
-          {!isCollapsed && (
-            <div className="rounded-lg bg-muted/50 px-3 py-2">
-              <p className="truncate text-sm font-medium">{adminName}</p>
-              <p className="truncate text-xs text-muted-foreground">
-                {adminEmail}
-              </p>
-            </div>
-          )}
-
           {/* Logout */}
           <TooltipProvider>
             {isCollapsed ? (
@@ -322,7 +361,7 @@ export function Sidebar({
                     variant="ghost"
                     size="icon"
                     onClick={handleLogout}
-                    className="w-full text-muted-foreground hover:text-destructive"
+                    className="w-full text-white/65 hover:bg-white/10 hover:text-red-300"
                   >
                     <LogOut className="size-4" />
                   </Button>
@@ -334,7 +373,7 @@ export function Sidebar({
                 variant="ghost"
                 size="default"
                 onClick={handleLogout}
-                className="w-full justify-start text-muted-foreground hover:text-destructive"
+                className="w-full justify-start text-white/65 hover:bg-white/10 hover:text-red-300"
               >
                 <LogOut className="size-4" />
                 <span>Sign Out</span>
