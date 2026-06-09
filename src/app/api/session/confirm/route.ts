@@ -18,7 +18,11 @@ import { getSessionToken } from "@/lib/session";
 import { isSameOriginRequest, hasJsonContentType } from "@/lib/session-csrf";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { encrypt } from "@/lib/crypto";
-import { transition } from "@/lib/ai/state-machine";
+import {
+  transition,
+  isTerminalState,
+  type SessionState,
+} from "@/lib/ai/state-machine";
 import {
   serviceRequestSchema,
   jobTypeForIssue,
@@ -168,11 +172,40 @@ export async function POST(request: NextRequest) {
         ? { ...merged, urgency: URGENCY_BUMP[merged.urgency] }
         : merged;
 
-    // Transition: current state -> confirmed -> submitted
-    const confirmResult = transition(session.status, "confirmed");
-    if (!confirmResult.success) {
+    // Transition to 'confirmed'. The payload already passed
+    // serviceRequestSchema (issue/urgency/address/phone/email/description all
+    // present and valid), so this IS a complete, submittable request — the only
+    // thing that should ever block it is a genuinely terminal session
+    // (already submitted, escalated to a human, or abandoned).
+    //
+    // Robustness fix: 'confirmed' is only reachable from 'extracting', but a
+    // session can legitimately be sitting in 'chatting' when the customer taps
+    // Confirm & Submit — e.g. an LLM-driven turn declared the intake complete in
+    // prose while the server-side completeness flag lagged, so the status never
+    // advanced to 'extracting'. Rather than reject a complete request (the
+    // customer sees "didn't work"), we PROMOTE chatting -> extracting first, then
+    // confirm. Terminal states still hard-block.
+    if (isTerminalState(session.status) || session.status === "submitted") {
       return errorResponse(
-        `Cannot confirm from state '${session.status}'`,
+        `This request can no longer be submitted (session is '${session.status}'). Please start a new request or call our office.`,
+        "INVALID_STATE_TRANSITION",
+        409,
+      );
+    }
+
+    // Promote chatting -> extracting so the confirmed transition is valid. (A
+    // session already in 'extracting' or 'confirmed' skips this no-op.)
+    const startState: SessionState =
+      session.status === "chatting" ? "extracting" : session.status;
+
+    const confirmResult = transition(startState, "confirmed");
+    if (!confirmResult.success) {
+      logger.error(
+        { sessionId: session.id, status: session.status, startState },
+        "Confirm transition unexpectedly failed for a complete request",
+      );
+      return errorResponse(
+        "We couldn't submit your request just now. Please try again, or call our office and we'll take it directly.",
         "INVALID_STATE_TRANSITION",
         409,
       );
@@ -181,7 +214,7 @@ export async function POST(request: NextRequest) {
     const submitResult = transition("confirmed", "submitted");
     if (!submitResult.success) {
       return errorResponse(
-        "Cannot submit after confirm",
+        "We couldn't submit your request just now. Please try again, or call our office and we'll take it directly.",
         "INVALID_STATE_TRANSITION",
         409,
       );

@@ -1,12 +1,15 @@
 'use client';
 
-import { PhoneForwarded } from 'lucide-react';
+import { PhoneForwarded, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { SessionState } from '@/lib/types/chat';
 
 interface ChatHeaderProps {
   readonly status: SessionState;
   readonly onEscalate: () => void;
+  /** Start a fresh conversation (clears the transcript + session). Optional so
+   * legacy consumers without a session hook can omit the control. */
+  readonly onNewConversation?: () => void;
 }
 
 function getStatusColor(status: SessionState): string {
@@ -28,7 +31,11 @@ function isEscalationDisabled(status: SessionState): boolean {
   return status === 'escalated' || status === 'abandoned' || status === 'submitted';
 }
 
-export function ChatHeader({ status, onEscalate }: ChatHeaderProps) {
+export function ChatHeader({
+  status,
+  onEscalate,
+  onNewConversation,
+}: ChatHeaderProps) {
   return (
     <header className="sticky top-0 z-10 flex items-center justify-between border-b bg-background/80 backdrop-blur px-4 py-3">
       <div className="flex items-center gap-2">
@@ -43,15 +50,28 @@ export function ChatHeader({ status, onEscalate }: ChatHeaderProps) {
           </p>
         </div>
       </div>
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={onEscalate}
-        disabled={isEscalationDisabled(status)}
-      >
-        <PhoneForwarded className="size-3.5" data-icon="inline-start" />
-        Talk to a Human
-      </Button>
+      <div className="flex items-center gap-2">
+        {onNewConversation && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onNewConversation}
+            title="Start a new conversation"
+          >
+            <RotateCcw className="size-3.5" data-icon="inline-start" />
+            New
+          </Button>
+        )}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onEscalate}
+          disabled={isEscalationDisabled(status)}
+        >
+          <PhoneForwarded className="size-3.5" data-icon="inline-start" />
+          Talk to a Human
+        </Button>
+      </div>
     </header>
   );
 }

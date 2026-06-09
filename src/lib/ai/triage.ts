@@ -80,6 +80,35 @@ export const REQUIRED_FOR_SUBMIT = [
   "email",
 ] as const;
 
+// Core fields a "skip" must NEVER satisfy — the engine re-asks until they carry a
+// real value. The slot gates in nextTriageStep already key on the slot value, so
+// a "skip" answer (which writes nothing to these top-level slots) naturally
+// re-asks. Exported for the route, which uses it to refuse a skip on core fields.
+export const UNSKIPPABLE_CORE = [
+  "issueType",
+  "address",
+  "name",
+  "email",
+  "phone",
+] as const;
+
+/**
+ * Local mirror of extraction-schema.isAddressComplete: a COMPLETE service
+ * address has >=4 whitespace tokens, the first token starts with a digit
+ * (street number), and it contains a 5-digit ZIP. Duplicated here (not imported)
+ * so the pure triage engine has no dependency on the extraction schema.
+ */
+function addressLooksComplete(address: string | null | undefined): boolean {
+  if (!address) return false;
+  const trimmed = address.trim();
+  if (trimmed.length === 0) return false;
+  const tokens = trimmed.split(/\s+/);
+  if (tokens.length < 4) return false;
+  if (!/^\d/.test(tokens[0])) return false;
+  if (!/\b\d{5}\b/.test(trimmed)) return false;
+  return true;
+}
+
 const SKIP_PATTERNS = [
   "skip",
   "i don't know",
@@ -154,9 +183,19 @@ const ADDRESS_STEP: TriageStep = {
   optional: false,
 };
 
+// Asked ONCE when an address is present but not yet complete (no comma and fails
+// the strict check) — captures the missing city/ZIP. The route appends the answer
+// as ", <answer>", which adds a comma, so this step never re-fires afterward.
+const ADDRESS_PARTS_STEP: TriageStep = {
+  id: "address_parts",
+  question: "Thanks. What city and ZIP code is that in?",
+  quickReplies: [],
+  optional: false,
+};
+
 const PHONE_STEP: TriageStep = {
   id: "phone",
-  question: "What's the best phone number for our team to reach you?",
+  question: "What's the best phone number to reach you to confirm the visit?",
   quickReplies: [],
   optional: false,
 };
@@ -277,7 +316,7 @@ const VULNERABLE_STEP: TriageStep = {
 
 const WINDOW_STEP: TriageStep = {
   id: "preferred_window",
-  question: "Any preference on time of day? Our team coordinates the actual time with you.",
+  question: "When works best for a visit? (We'll confirm the exact time.)",
   quickReplies: [
     { label: "Morning", value: "morning" },
     { label: "Afternoon", value: "afternoon" },
@@ -328,9 +367,17 @@ const STEP_TO_EXTRA: Record<string, string> = {
   lead_source: "leadSource",
 };
 
-// Ordered list of OPTIONAL enrichment steps.
-const ENRICHMENT_ORDER: readonly TriageStep[] = [
-  SYSTEM_TYPE_STEP,
+// Ordered list of OPTIONAL enrichment steps the engine WILL ask after core info
+// is captured. Deliberately capped to just two so intake ends quickly: ask
+// system type, then a preferred window, then return null so the route surfaces
+// "Complete & Submit". Keeping this short is the fix for the never-ending intake.
+const ENRICHMENT_ORDER: readonly TriageStep[] = [SYSTEM_TYPE_STEP, WINDOW_STEP];
+
+// Enrichment steps the engine NEVER proactively asks (documentation only —
+// nextTriageStep does NOT iterate this list). If the customer VOLUNTEERS one of
+// these (e.g. mentions a business name → propertyType=commercial), the caller's
+// extraction still captures it into extras; it just isn't a question we block on.
+export const ENRICHMENT_NEVER_BLOCKS: readonly TriageStep[] = [
   EQUIPMENT_AGE_STEP,
   EQUIPMENT_BRAND_STEP,
   PROPERTY_TYPE_STEP,
@@ -338,7 +385,6 @@ const ENRICHMENT_ORDER: readonly TriageStep[] = [
   WARRANTY_STEP,
   ACCESS_STEP,
   VULNERABLE_STEP,
-  WINDOW_STEP,
   CONTACT_PREF_STEP,
   LEAD_SOURCE_STEP,
 ];
@@ -511,6 +557,13 @@ export function nextTriageStep(slots: TriageSlots): TriageStep | null {
 
   // 3. Required dispatch fields.
   if (!slots.address) return ADDRESS_STEP;
+  // Address present but not complete (no comma AND fails the strict check): ask
+  // ONE city/ZIP follow-up. We infer "already asked parts" from the address
+  // shape — once it contains a comma (the route appends ", <answer>") or looks
+  // complete, we don't re-ask. No new persisted flag needed.
+  if (!addressLooksComplete(slots.address) && !slots.address.includes(",")) {
+    return ADDRESS_PARTS_STEP;
+  }
   if (!slots.phone) return PHONE_STEP;
   if (!slots.name) return NAME_STEP;
   if (!slots.email) return EMAIL_STEP;
@@ -539,6 +592,18 @@ export function applyTriageAnswer(
     extras: { ...slots.extras },
     skipped: { ...(slots.skipped ?? {}) },
   };
+
+  // Address city/ZIP follow-up: append the answer to the existing street so the
+  // address becomes "<street>, <city ZIP>". The added comma makes the address
+  // satisfy the "already asked parts" check, so it is never re-asked.
+  if (step.id === "address_parts") {
+    const street = (next.address ?? "").trim();
+    const part = answer.trim();
+    if (street && part) {
+      next.address = `${street}, ${part}`.slice(0, MAX_FREE_TEXT);
+    }
+    return next;
+  }
 
   if (step.id === "safety_screen") {
     if (isYes(answer)) {

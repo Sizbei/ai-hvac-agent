@@ -98,3 +98,16 @@ export function chipsForExtraction(
   if (!step) return [];
   return step.quickReplies;
 }
+
+/**
+ * The id of the triage step currently being asked (or null when intake is
+ * complete / there's no extraction yet). Lets the client render step-specific UI
+ * — e.g. the address autocomplete only when the address (or city/ZIP follow-up)
+ * step is pending — using the SAME engine the server sequences with.
+ */
+export function nextStepIdForExtraction(
+  extraction: ExtractionResult | null,
+): string | null {
+  if (!extraction) return null;
+  return nextTriageStep(extractionToTriageSlots(extraction))?.id ?? null;
+}

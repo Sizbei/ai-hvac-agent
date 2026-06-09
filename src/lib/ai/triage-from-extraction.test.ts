@@ -96,6 +96,37 @@ describe("chipsForExtraction", () => {
     expect(values).not.toContain(""); // never an empty/free-text chip
   });
 
+  it("returns [] (intake done → Complete & Submit) once core + system_type + window are filled", () => {
+    const chips = chipsForExtraction(
+      emptyExtraction({
+        issueType: "heating_not_working",
+        urgency: "high",
+        address: "120 Broadway, Seattle, WA 98122",
+        customerName: "Raymond Chen",
+        customerPhone: "6478960801",
+        customerEmail: "ray@example.com",
+        systemDownStatus: "fully_down",
+        problemDuration: "a few days",
+        systemType: "central_ac",
+        preferredWindow: "morning",
+      }),
+    );
+    expect(chips).toEqual([]);
+  });
+
+  it("returns [] (no chips) for the address_parts free-text follow-up", () => {
+    // Partial address (no comma, not complete) → ADDRESS_PARTS_STEP, free text.
+    const chips = chipsForExtraction(
+      emptyExtraction({
+        issueType: "heating_not_working",
+        address: "120 Broadway",
+        systemDownStatus: "fully_down",
+        problemDuration: "a few days",
+      }),
+    );
+    expect(chips).toEqual([]);
+  });
+
   it("returns [] (no chips) for a free-text step like address", () => {
     // issue + qualifiers known, but address missing → ADDRESS_STEP (free text).
     const chips = chipsForExtraction(

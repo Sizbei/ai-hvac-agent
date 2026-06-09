@@ -83,11 +83,24 @@ describe("voiceNextSlotPrompt (triage-driven)", () => {
       }).toLowerCase(),
     ).toContain("address");
   });
-  it("asks for urgency once address and phone are known", () => {
+  it("asks the city/ZIP follow-up when only a partial street address is known", () => {
+    // A bare street (no city/ZIP, no comma) now routes through the address_parts
+    // follow-up step before the flow moves on.
     expect(
       voiceNextSlotPrompt({
         address: "5 Oak St",
+        extras: { systemDownStatus: "fully_down", problemDuration: "today" },
+      }).toLowerCase(),
+    ).toContain("city");
+  });
+  it("asks for urgency once a complete address, phone, name and email are known", () => {
+    expect(
+      voiceNextSlotPrompt({
+        address: "5 Oak St, Seattle, WA 98101",
         phone: "555-1234",
+        name: "Jane Doe",
+        // voice skips name/email core steps via the sentinel, so urgency is next
+        // once the address is complete.
         extras: { systemDownStatus: "fully_down", problemDuration: "today" },
       }).toLowerCase(),
     ).toContain("urgent");

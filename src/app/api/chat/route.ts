@@ -55,6 +55,7 @@ import {
 } from "@/lib/ai/availability-prompt";
 import { CONFIRM_REPLY, HANDOFF_REPLY } from "@/lib/ai/constants";
 import { extractSlots, extractAddressLoose } from "@/lib/ai/slot-extract";
+import { extractAllContactFields } from "@/lib/ai/extract-all-contact";
 import { detectCorrection, correctionFieldLabel } from "@/lib/ai/detect-correction";
 import { isBusinessName } from "@/lib/ai/detect-business-name";
 import { withLeadIn } from "@/lib/ai/lead-ins";
@@ -718,12 +719,25 @@ export async function POST(request: NextRequest) {
         knownSlots,
         routerConfig,
       );
-      const extracted = extractSlots(guardrailResult.sanitized);
-      // When we JUST asked for the address, accept a suffix-less answer
-      // ("123 Main") that the strict extractor would miss — fixes the re-ask
-      // bug where such a reply fell through to the LLM and got re-asked.
+      // Multi-field capture: pull EVERY recognizable contact field from this one
+      // message (name + phone + email + address), not just the slot the current
+      // step expects. Fixes the bug where "ray chen, 4169029212" (name + phone)
+      // captured only the phone and the name got re-asked. The residual-name
+      // heuristic only fires when a co-field (phone/email/address) is present, so
+      // it never guesses a name from prose.
+      const allContact = extractAllContactFields(guardrailResult.sanitized);
+      const extracted = {
+        address: allContact.address,
+        phone: allContact.phone,
+        email: allContact.email,
+      };
+      // When we JUST asked for the address (or the city/ZIP follow-up), accept a
+      // suffix-less answer ("123 Main", "Johnson City 37604") the strict
+      // extractor would miss — fixes the re-ask bug where such a reply fell
+      // through to the LLM and got re-asked.
       const addressAnswer =
-        pendingStep?.id === "address" && !extracted.address
+        (pendingStep?.id === "address" || pendingStep?.id === "address_parts") &&
+        !extracted.address
           ? extractAddressLoose(guardrailResult.sanitized)
           : extracted.address;
 
@@ -753,11 +767,25 @@ export async function POST(request: NextRequest) {
       );
 
       const hasContactSlot = Boolean(
-        addressAnswer || extracted.phone || extracted.email,
+        addressAnswer || extracted.phone || extracted.email || allContact.name,
       );
       const isSlotProvision =
         (hasContactSlot || correction !== null) &&
         (Boolean(knownSlots.issueType) || conversationHistory.length > 0);
+
+      // Two-brain fix: when a CORE free-text step is the pending question
+      // (name / email / phone / address / city-ZIP follow-up), the customer's
+      // reply IS the answer to that step. We MUST stay deterministic and advance,
+      // never letting the turn fall through to the LLM, which (seeing a bare
+      // "Raymond chen" or "Johnson City 37604") improvises and RE-ASKS a question
+      // we already asked. Root cause of the duplicate-question bug in the
+      // transcript (address asked 3x, "home or commercial?" asked twice).
+      const pendingCoreFreeText =
+        pendingStep?.id === "name" ||
+        pendingStep?.id === "email" ||
+        pendingStep?.id === "phone" ||
+        pendingStep?.id === "address" ||
+        pendingStep?.id === "address_parts";
 
       // A bare answer to the triage question we asked LAST turn is capturable on
       // the deterministic path even without a contact slot. Without this, bare
@@ -779,7 +807,8 @@ export async function POST(request: NextRequest) {
       if (
         verdict.action !== "FALLBACK_LLM" ||
         isSlotProvision ||
-        pendingAnswerCaptured
+        pendingAnswerCaptured ||
+        pendingCoreFreeText
       ) {
         if (verdict.escalate) {
           // Bug fix: on an emergency escalation we MUST have a way to reach the
@@ -913,13 +942,39 @@ export async function POST(request: NextRequest) {
         // (so the "home or commercial?" step is skipped) and flag it so the bot
         // confirms it's for a commercial unit. Only fires on the name being
         // provided THIS turn — we don't re-flag an already-stored name.
-        const nameThisTurn = correctedName ?? seededName ?? null;
+        // Residual name from a multi-field dump ("ray chen, 4169029212"): fill
+        // the name slot when the message carried one and we don't already have a
+        // corrected/seeded name. extractAllContactFields only returns a residual
+        // name when a co-field (phone/email/address) is present, so this never
+        // guesses a name from prose.
+        const residualName = allContact.name ?? undefined;
+
+        const nameThisTurn =
+          correctedName ?? residualName ?? seededName ?? null;
         const businessNameDetected =
           nameThisTurn !== null && isBusinessName(nameThisTurn) &&
           knownSlots.extras?.propertyType !== "commercial";
         const capturedExtras = businessNameDetected
           ? { ...(capturedExtrasBase ?? {}), propertyType: "commercial" }
           : capturedExtrasBase;
+
+        // City/ZIP follow-up (address_parts): the customer's reply is normally
+        // the missing tail of an address we already have, so we append it to the
+        // known street → the engine sees a comma-bearing ("parts handled")
+        // address and stops looping. BUT if the customer RE-TYPED a full street
+        // address at this step (the loose extractor found a number+street), use
+        // that as the base instead of doubling it onto the partial — avoids the
+        // "120 Broadway, 120 Broadway, Seattle…" double-address. Falls back to
+        // addressAnswer/extracted for all other steps.
+        const partsAnswerRaw = guardrailResult.sanitized.trim();
+        const retypedFullStreet = /^\s*\d/.test(partsAnswerRaw); // "120 Broadway, …"
+        const combinedAddress =
+          pendingStep?.id === "address_parts" && knownSlots.address
+            ? (retypedFullStreet
+                ? partsAnswerRaw // they re-typed a full street → use it as the base
+                : `${knownSlots.address.trim()}, ${partsAnswerRaw}` // append city/ZIP
+              ).slice(0, 500)
+            : undefined;
 
         // Merge router + regex-extracted slots into the session metadata. A
         // returning customer's stored name (seededName) fills the name slot so
@@ -929,10 +984,11 @@ export async function POST(request: NextRequest) {
         const merged = mergeSlots(knownSlots, {
           issueType: verdict.issueType ?? undefined,
           urgency: verdict.urgency ?? capturedUrgency ?? undefined,
-          address: correctedAddress ?? addressAnswer ?? undefined,
+          address:
+            correctedAddress ?? combinedAddress ?? addressAnswer ?? undefined,
           phone: correctedPhone ?? extracted.phone ?? undefined,
           email: correctedEmail ?? extracted.email ?? undefined,
-          name: correctedName ?? seededName,
+          name: correctedName ?? residualName ?? seededName,
           extras: capturedExtras,
         });
 
