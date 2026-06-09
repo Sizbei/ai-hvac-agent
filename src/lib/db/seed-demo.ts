@@ -60,8 +60,8 @@ interface SeedConversation {
   readonly key: string;
   readonly daysAgo: number;
   readonly status: SessionStatus;
-  /** "web" (default) or "phone" — the medium the conversation arrived over. */
-  readonly channel?: "web" | "phone";
+  /** "web" (default), "phone", or "sms" — the medium the conversation arrived over. */
+  readonly channel?: "web" | "phone" | "sms";
   /** Optional rolling summary, shown in the admin detail for long conversations. */
   readonly runningSummary?: string;
   readonly messages: readonly SeedMessage[];

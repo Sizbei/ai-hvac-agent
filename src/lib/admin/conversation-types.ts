@@ -8,7 +8,7 @@
  * All interfaces use readonly properties for immutability.
  */
 
-export type ConversationChannel = "web" | "phone";
+export type ConversationChannel = "web" | "phone" | "sms";
 
 export interface ConversationSummary {
   readonly id: string; // session id

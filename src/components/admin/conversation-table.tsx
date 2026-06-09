@@ -10,20 +10,28 @@ import {
 } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
-import { Phone, MessageSquare } from 'lucide-react';
+import { Phone, MessageSquare, MessageSquareText } from 'lucide-react';
 import { StatusBadge } from '@/components/admin/status-badge';
 import type {
   ConversationSummary,
   ConversationChannel,
 } from '@/lib/admin/conversation-types';
 
+const CHANNEL_BADGES: Record<
+  ConversationChannel,
+  { readonly Icon: typeof Phone; readonly label: string }
+> = {
+  phone: { Icon: Phone, label: 'Phone' },
+  sms: { Icon: MessageSquareText, label: 'SMS' },
+  web: { Icon: MessageSquare, label: 'Web' },
+};
+
 function ChannelBadge({ channel }: { readonly channel: ConversationChannel }) {
-  const isPhone = channel === 'phone';
-  const Icon = isPhone ? Phone : MessageSquare;
+  const { Icon, label } = CHANNEL_BADGES[channel] ?? CHANNEL_BADGES.web;
   return (
     <Badge variant="outline" className="gap-1 font-normal">
       <Icon className="size-3" />
-      {isPhone ? 'Phone' : 'Web'}
+      {label}
     </Badge>
   );
 }

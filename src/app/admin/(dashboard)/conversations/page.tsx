@@ -32,6 +32,7 @@ const CHANNEL_OPTIONS: readonly { readonly label: string; readonly value: string
   { label: 'All channels', value: ALL_CHANNELS },
   { label: 'Web', value: 'web' },
   { label: 'Phone', value: 'phone' },
+  { label: 'SMS', value: 'sms' },
 ];
 
 const SEARCH_DEBOUNCE_MS = 300;
