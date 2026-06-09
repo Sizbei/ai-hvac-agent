@@ -3,11 +3,12 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
+  Thermometer,
   Snowflake,
+  IceCream,
   Flame,
-  Wind,
+  CookingPot,
   AlertTriangle,
-  Wrench,
   ChevronDown,
 } from 'lucide-react';
 
@@ -23,37 +24,62 @@ interface QuickReply {
   readonly message: string;
 }
 
+// Spears Services' five service lines (spearsservices.com) — commercial-first.
+// Each reply's `message` is phrased to route to the matching intake intent in
+// knowledge-base.ts. Keep these aligned with the site's Services menu.
 const GROUPS: readonly QuickReplyGroup[] = [
   {
-    label: 'Cooling',
-    icon: Snowflake,
+    label: 'HVAC',
+    icon: Thermometer,
     color: 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100',
     replies: [
-      { text: 'AC not cooling', message: 'My air conditioner is running but not cooling the house. It just blows warm air.' },
-      { text: 'AC leaking water', message: 'My AC unit is leaking water inside the house.' },
-      { text: 'AC making noise', message: 'My air conditioner is making a loud grinding/buzzing noise.' },
-      { text: 'AC won\'t turn on', message: 'My AC unit won\'t turn on at all. Nothing happens when I set the thermostat to cool.' },
+      { text: 'Not cooling', message: 'Our HVAC system is running but not cooling — it\'s just blowing warm air.' },
+      { text: 'Not heating', message: 'Our HVAC system is running but not putting out any heat.' },
+      { text: 'Won\'t turn on', message: 'Our HVAC unit won\'t turn on at all — nothing happens at the thermostat.' },
+      { text: 'Making noise / leaking', message: 'Our HVAC unit is making a loud noise / leaking water.' },
     ],
   },
   {
-    label: 'Heating',
+    label: 'Refrigeration',
+    icon: Snowflake,
+    color: 'bg-cyan-50 text-cyan-700 border-cyan-200 hover:bg-cyan-100',
+    replies: [
+      { text: 'Walk-in cooler not cooling', message: 'Our walk-in cooler is not holding temperature / not cooling.' },
+      { text: 'Reach-in freezer not freezing', message: 'Our reach-in freezer is not freezing / not staying cold.' },
+      { text: 'Display case warm', message: 'Our display case isn\'t cold — the product is getting warm.' },
+      { text: 'Beverage cooler down', message: 'Our beverage cooler stopped cooling.' },
+    ],
+  },
+  {
+    label: 'Ice Machine',
+    icon: IceCream,
+    color: 'bg-sky-50 text-sky-700 border-sky-200 hover:bg-sky-100',
+    replies: [
+      { text: 'Not making ice', message: 'Our commercial ice machine has stopped making ice.' },
+      { text: 'Low ice production', message: 'Our ice machine is barely producing any ice.' },
+      { text: 'Leaking water', message: 'Our ice machine is leaking water.' },
+      { text: 'PM / service contract', message: 'I\'d like to set up preventive maintenance for our commercial ice machine.' },
+    ],
+  },
+  {
+    label: 'Boiler',
     icon: Flame,
     color: 'bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100',
     replies: [
-      { text: 'Furnace not heating', message: 'My furnace is running but the house isn\'t getting warm.' },
-      { text: 'No hot water', message: 'My water heater stopped producing hot water.' },
-      { text: 'Furnace won\'t start', message: 'My furnace won\'t ignite or start up when I turn the thermostat to heat.' },
-      { text: 'Pilot light out', message: 'The pilot light on my furnace/water heater went out and I can\'t relight it.' },
+      { text: 'No heat from boiler', message: 'Our boiler is not producing heat.' },
+      { text: 'Boiler won\'t fire', message: 'Our boiler won\'t fire up / won\'t start.' },
+      { text: 'Boiler leaking', message: 'Our boiler is leaking.' },
+      { text: 'Boiler PM plan', message: 'I\'d like to set up a preventive maintenance plan for our boiler.' },
     ],
   },
   {
-    label: 'Air Quality',
-    icon: Wind,
-    color: 'bg-teal-50 text-teal-700 border-teal-200 hover:bg-teal-100',
+    label: 'Commercial Appliance',
+    icon: CookingPot,
+    color: 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100',
     replies: [
-      { text: 'Bad smell from vents', message: 'There\'s a musty/burning smell coming from my air vents.' },
-      { text: 'Weak airflow', message: 'The airflow from my vents is very weak, barely any air is coming out.' },
-      { text: 'Too much dust', message: 'There\'s excessive dust in my house even after cleaning. I think it\'s coming from the HVAC.' },
+      { text: 'Oven / range down', message: 'Our commercial oven / range has stopped working.' },
+      { text: 'Fryer not heating', message: 'Our commercial fryer is not heating up.' },
+      { text: 'Other kitchen equipment', message: 'A piece of our commercial kitchen equipment has stopped working.' },
     ],
   },
   {
@@ -61,19 +87,9 @@ const GROUPS: readonly QuickReplyGroup[] = [
     icon: AlertTriangle,
     color: 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100',
     replies: [
-      { text: 'Gas smell', message: 'I smell gas near my furnace or in my home. This is urgent.' },
-      { text: 'Carbon monoxide alarm', message: 'My carbon monoxide detector is going off and I think it might be related to my furnace.' },
-      { text: 'Complete system failure', message: 'My entire HVAC system stopped working and it\'s extremely hot/cold outside. I need emergency help.' },
-    ],
-  },
-  {
-    label: 'Maintenance',
-    icon: Wrench,
-    color: 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100',
-    replies: [
-      { text: 'Annual tune-up', message: 'I\'d like to schedule an annual HVAC tune-up and maintenance check.' },
-      { text: 'Filter replacement', message: 'I need help with replacing my HVAC air filter. I\'m not sure what size I need.' },
-      { text: 'Thermostat issues', message: 'My thermostat display is blank / not responding / showing wrong temperature.' },
+      { text: 'Gas smell', message: 'I smell gas near our equipment. This is urgent.' },
+      { text: 'Carbon monoxide alarm', message: 'Our carbon monoxide detector is going off.' },
+      { text: 'Equipment down — losing product', message: 'Our refrigeration is down and we\'re about to lose product. We need emergency help.' },
     ],
   },
 ];
@@ -89,7 +105,7 @@ export function QuickReplies({ onSelect, disabled }: QuickRepliesProps) {
   return (
     <div className="space-y-2">
       <p className="text-xs font-medium text-muted-foreground px-1">
-        Common issues — tap to describe yours:
+        What can we help with? Tap a service:
       </p>
 
       {/* Category chips */}

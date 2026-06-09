@@ -185,3 +185,19 @@ export interface HousecallTechnician {
   /** Whether the employee is active in HCP. Undefined when HCP omits it. */
   readonly isActive?: boolean;
 }
+
+/**
+ * A PII-free summary of a customer's PAST service with us, derived from their HCP
+ * job history. Used to enrich the bot's returning-customer context and the admin
+ * customer view ("last serviced in March"). Deliberately omits the customer name,
+ * address, and any contact detail — it carries only a count and the most-recent
+ * job's date + free-text description (the work performed, not who it was for).
+ */
+export interface HousecallCustomerServiceHistory {
+  /** Total past jobs HCP has on file for this customer (0 when none / degraded). */
+  readonly jobCount: number;
+  /** ISO-8601 UTC start of the most-recent job, or null when none/unscheduled. */
+  readonly lastServiceDate: string | null;
+  /** Free-text description of the most-recent job, or null when absent. */
+  readonly lastServiceDescription: string | null;
+}
