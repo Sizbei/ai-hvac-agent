@@ -19,6 +19,8 @@ export interface AddressSuggestion {
   readonly city: string | null;
   readonly state: string | null;
   readonly postcode: string | null;
+  readonly lat: number | null;
+  readonly lon: number | null;
 }
 
 interface PhotonProperties {
@@ -33,8 +35,13 @@ interface PhotonProperties {
   readonly countrycode?: string;
 }
 
+interface PhotonGeometry {
+  readonly coordinates?: readonly [number, number];
+}
+
 interface PhotonFeature {
   readonly properties?: PhotonProperties;
+  readonly geometry?: PhotonGeometry;
 }
 
 interface PhotonResponse {
@@ -43,6 +50,7 @@ interface PhotonResponse {
 
 interface FetchOptions {
   readonly signal?: AbortSignal;
+  readonly near?: { readonly lat: number; readonly lon: number };
 }
 
 /**
@@ -61,7 +69,11 @@ export async function fetchAddressSuggestions(
     return [];
   }
 
-  const url = `${PHOTON_ENDPOINT}?q=${encodeURIComponent(trimmed)}&limit=${RESULT_LIMIT}&lang=en`;
+  let url = `${PHOTON_ENDPOINT}?q=${encodeURIComponent(trimmed)}&limit=${RESULT_LIMIT}&lang=en`;
+  if (opts?.near) {
+    // Photon biases results toward a focus point via lat/lon + zoom.
+    url += `&lat=${opts.near.lat}&lon=${opts.near.lon}&zoom=12`;
+  }
 
   // Use a caller-provided signal when present; otherwise enforce our own timeout.
   const controller = opts?.signal ? null : new AbortController();
@@ -86,7 +98,9 @@ export async function fetchAddressSuggestions(
       .map(toMappedSuggestion)
       .filter((s): s is MappedSuggestion => s !== null);
 
-    return preferUsResults(mapped);
+    const chosen = preferUsResults(mapped);
+
+    return opts?.near ? sortByDistance(chosen, opts.near) : chosen;
   } catch {
     // Swallow everything (network, abort, JSON parse) — graceful degradation.
     return [];
@@ -125,8 +139,13 @@ function toMappedSuggestion(feature: PhotonFeature): MappedSuggestion | null {
     return null;
   }
 
+  // Photon GeoJSON geometry is [lon, lat]; read both, defaulting to null.
+  const coords = feature.geometry?.coordinates;
+  const lon = typeof coords?.[0] === "number" ? coords[0] : null;
+  const lat = typeof coords?.[1] === "number" ? coords[1] : null;
+
   return {
-    suggestion: { label, street, city, state, postcode },
+    suggestion: { label, street, city, state, postcode, lat, lon },
     isUs: props.countrycode === "US",
   };
 }
@@ -177,4 +196,61 @@ function preferUsResults(mapped: readonly MappedSuggestion[]): AddressSuggestion
   return usSuggestions.length > 0
     ? usSuggestions
     : mapped.map((m) => m.suggestion);
+}
+
+const EARTH_RADIUS_KM = 6371;
+
+function toRadians(degrees: number): number {
+  return (degrees * Math.PI) / 180;
+}
+
+/**
+ * Great-circle distance in kilometers between two lat/lon points.
+ * Pure: depends only on its arguments.
+ */
+export function haversineKm(
+  aLat: number,
+  aLon: number,
+  bLat: number,
+  bLon: number,
+): number {
+  const dLat = toRadians(bLat - aLat);
+  const dLon = toRadians(bLon - aLon);
+  const lat1 = toRadians(aLat);
+  const lat2 = toRadians(bLat);
+
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+
+  return 2 * EARTH_RADIUS_KM * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+/**
+ * Stable-sort suggestions by haversine distance from `near` ascending.
+ * Suggestions with null coordinates sort last while preserving their
+ * relative order. Never drops any suggestion.
+ */
+function sortByDistance(
+  suggestions: readonly AddressSuggestion[],
+  near: { readonly lat: number; readonly lon: number },
+): AddressSuggestion[] {
+  const indexed = suggestions.map((suggestion, index) => {
+    const hasCoords =
+      typeof suggestion.lat === "number" && typeof suggestion.lon === "number";
+    const distance = hasCoords
+      ? haversineKm(near.lat, near.lon, suggestion.lat!, suggestion.lon!)
+      : Number.POSITIVE_INFINITY;
+    return { suggestion, index, distance };
+  });
+
+  indexed.sort((a, b) => {
+    if (a.distance !== b.distance) {
+      return a.distance - b.distance;
+    }
+    // Tie (including both null/Infinity): preserve original order.
+    return a.index - b.index;
+  });
+
+  return indexed.map((item) => item.suggestion);
 }
