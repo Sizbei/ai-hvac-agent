@@ -38,7 +38,7 @@ function SuccessContent() {
         </Card>
 
         <p className="text-sm text-muted-foreground">
-          Our team will reach out to confirm the soonest available time. For an
+          Our team will follow up with you to coordinate the details. For an
           emergency, call us any time, day or night, at{' '}
           <span className="font-medium text-foreground">423-854-9505</span>.
         </p>

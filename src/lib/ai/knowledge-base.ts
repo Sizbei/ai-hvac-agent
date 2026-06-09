@@ -266,7 +266,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
   {
     id: "cooling-wont-turn-on",
     category: "cooling",
-    title: "AC won't turn on at all",
+    title: "AC won't turn on / is down",
     triggerKeywords: [
       "ac wont turn on",
       "wont start",
@@ -275,6 +275,38 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
       "nothing happens",
       "wont kick on",
       "no power",
+      // "down" is a very common way to say the system isn't running. These are
+      // SUBSTRING-matched (multi-word), so they catch "my office AC is completely
+      // down", "the AC is down", "cooling is down". Each fragment is specific
+      // enough that unrelated "down" (calm down, slow down) can't match.
+      "ac is down",
+      "ac down",
+      "completely down",
+      "cooling is down",
+    ],
+    negationGuards: [
+      // The generic "completely down" trigger must not steal a HEATING or
+      // refrigeration "down" complaint — those have their own intents. Scoped to
+      // explicit heating/refrigeration phrasing (not a bare "heat", which appears
+      // in legit cooling phrasings like "no AC in this heat" or "heat pump").
+      "heat is down",
+      "heating is down",
+      "no heat",
+      "not heating",
+      "furnace",
+      "boiler",
+      // Refrigeration units — use the specific multi-word forms (a bare "walk in"
+      // would wrongly fire on "can someone walk in and check my AC").
+      "walk in cooler",
+      "walk-in cooler",
+      "walk in freezer",
+      "walk-in freezer",
+      "reach in cooler",
+      "reach-in cooler",
+      "reach in freezer",
+      "reach-in freezer",
+      "freezer",
+      "display case",
     ],
     action: "COLLECT_INFO",
     cannedResponse:
@@ -283,7 +315,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     issueTypeMapping: "cooling_not_working",
     urgencyHint: "high",
     notes:
-      "Overlaps with thermostat-dead; if the customer attributes it to a blank/dead thermostat, route to thermostat-blank instead.",
+      "Overlaps with thermostat-dead; if the customer attributes it to a blank/dead thermostat, route to thermostat-blank instead. negationGuards keep heating/refrigeration 'down' phrasing off this residential-AC intent.",
   },
   {
     id: "cooling-water-leak",
@@ -418,6 +450,18 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
       "not heating",
       "no real heat",
       "wont warm up",
+      // "down" phrasing, anchored to heat/furnace. Avoid bare "heat down" —
+      // it collides with "turn the heat down" (a working system). A bare
+      // "system is down" stays on the cooling intent.
+      "heat is down",
+      "heating is down",
+      "furnace is down",
+      "furnace down",
+      // "no heat" is the most common bare phrasing for a non-working furnace; in
+      // mild weather (no freezing/vulnerable qualifier) it belongs here, not the
+      // emergency intent (which requires that qualifier).
+      "no heat",
+      "no heating",
     ],
     negationGuards: [
       // Commercial cooking equipment ("oven not heating", "fryer not heating")

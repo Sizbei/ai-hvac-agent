@@ -16,6 +16,11 @@ describe("nameFromDirectAnswer (answer to the NAME step)", () => {
     expect(nameFromDirectAnswer("my name is Jane Doe")).toBe("Jane Doe");
     expect(nameFromDirectAnswer("I'm Sam Smith")).toBe("Sam Smith");
   });
+  it("captures accented and international names (Unicode letters)", () => {
+    expect(nameFromDirectAnswer("José García")).toBe("José García");
+    expect(nameFromDirectAnswer("Müller Schmidt")).toBe("Müller Schmidt");
+    expect(nameFromDirectAnswer("Renée O'Brien")).toBe("Renée O'Brien");
+  });
   it("rejects an answer containing digits (likely a phone/address)", () => {
     expect(nameFromDirectAnswer("865-555-1212")).toBeNull();
     expect(nameFromDirectAnswer("123 Main St")).toBeNull();
@@ -36,6 +41,9 @@ describe("extractNameFromCue (explicit name correction)", () => {
       "Robert Lee",
     );
     expect(extractNameFromCue("call me Mike")).toBe("Mike");
+  });
+  it("pulls an accented name after a cue", () => {
+    expect(extractNameFromCue("my name is José García")).toBe("José García");
   });
   it("stops at trailing filler", () => {
     expect(extractNameFromCue("my name is Brian thanks")).toBe("Brian");

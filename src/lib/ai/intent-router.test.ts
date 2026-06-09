@@ -100,6 +100,44 @@ describe("issue intents → COLLECT_INFO", () => {
     expect(v.action).toBe("COLLECT_INFO");
     expect(v.issueType).toBe("heating_not_working");
   });
+
+  // "down" is a common way customers describe a non-working system. The router
+  // must classify it (not punt to the LLM, which left issueType null in live
+  // testing). Heating/refrigeration "down" must NOT mis-route to cooling.
+  it('classifies "AC is completely down" as cooling', () => {
+    const v = routeMessage("my office AC is completely down");
+    expect(v.action).toBe("COLLECT_INFO");
+    expect(v.issueType).toBe("cooling_not_working");
+  });
+
+  it('classifies "ac is down" / "cooling is down" as cooling', () => {
+    expect(routeMessage("ac is down").issueType).toBe("cooling_not_working");
+    expect(routeMessage("the cooling is down").issueType).toBe(
+      "cooling_not_working",
+    );
+  });
+
+  it('classifies "the heat is down" / "furnace is down" as heating', () => {
+    expect(routeMessage("the heat is down").issueType).toBe(
+      "heating_not_working",
+    );
+    expect(routeMessage("my furnace is down").issueType).toBe(
+      "heating_not_working",
+    );
+  });
+
+  it('classifies a bare "no heat" as heating (not emergency without a qualifier)', () => {
+    const v = routeMessage("no heat in the building");
+    expect(v.issueType).toBe("heating_not_working");
+    expect(v.escalate).toBe(false);
+  });
+
+  it('does NOT mis-route a heating "down" complaint to cooling', () => {
+    // "furnace ... down" → the cooling intent guards off "furnace"; it must not
+    // claim this via its generic "completely down" trigger.
+    const v = routeMessage("the furnace is down");
+    expect(v.issueType).not.toBe("cooling_not_working");
+  });
 });
 
 describe("COLLECT_INFO → SUBMIT promotion when required slots known", () => {

@@ -27,16 +27,20 @@ import {
   hasSlotData,
   buildExtraction,
 } from "./chat-slots";
-import { isExtractionComplete } from "./extraction-schema";
+import { isVoiceExtractionComplete } from "./extraction-schema";
 import { determineNextState, type SessionState } from "./state-machine";
 import { PHONE_SYSTEM_PROMPT, toSpokenReply, voiceNextSlotPrompt } from "./phone-agent";
 import { nextTriageStep, captureEnrichmentAnswer } from "./triage";
 import { buildModelMessages, MAX_HISTORY, type ChatTurn } from "./compaction";
 import { logger } from "@/lib/logger";
 
-/** Spoken equivalent of CONFIRM_REPLY — no "tap a button" affordance. */
+/**
+ * Spoken equivalent of CONFIRM_REPLY — no "tap a button" affordance. Does NOT
+ * quote a time or arrival window (the team coordinates timing with the customer
+ * later); it only confirms the request was captured and handed off.
+ */
 export const VOICE_CONFIRM_REPLY =
-  "Great. I have everything I need. I'll get this over to our team and a technician will be in touch to schedule. Is there anything else I can help you with?";
+  "Great. I have everything I need. I'll get this over to our team and they'll follow up with you. Is there anything else I can help you with?";
 
 export interface VoiceSession {
   readonly id: string;
@@ -167,7 +171,7 @@ export async function voiceReply(params: {
       const firstUser =
         history.find((m) => m.role === "user")?.content ?? userMessage;
       const extraction = buildExtraction(merged, firstUser.slice(0, 280));
-      extractionComplete = isExtractionComplete(extraction);
+      extractionComplete = isVoiceExtractionComplete(extraction);
       metadataStr = JSON.stringify(extraction);
     }
 

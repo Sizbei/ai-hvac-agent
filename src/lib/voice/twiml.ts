@@ -112,14 +112,17 @@ export function gatherTwiML(params: {
 
 /**
  * How long Twilio waits after the caller stops speaking before submitting the
- * <Gather>. "auto" detects a natural pause but often feels laggy; a short fixed
- * timeout (default 2s) makes turns snappier. Override with TWILIO_SPEECH_TIMEOUT
- * ("auto" or a number of seconds).
+ * <Gather>. Twilio only accepts whole seconds or "auto" (fractional values like
+ * 1.5 are rejected). Human conversational turn-taking pauses are ~200ms and feel
+ * "done" by ~1s, so 1s is the most natural-feeling fixed value; "auto" detects a
+ * natural pause but errs toward waiting longer (laggy). Default 1s; override with
+ * TWILIO_SPEECH_TIMEOUT ("auto" or a whole number of seconds) — bump to 2 if real
+ * calls show slow talkers getting clipped mid-answer.
  */
 function resolveSpeechTimeout(): string {
   const v = process.env.TWILIO_SPEECH_TIMEOUT?.trim();
   if (v && (v === "auto" || /^\d+$/.test(v))) return v;
-  return "2";
+  return "1";
 }
 
 /** Speak a final message, then hang up. */

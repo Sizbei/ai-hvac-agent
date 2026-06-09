@@ -1,21 +1,17 @@
 /**
- * Calendar-compliance integration test — "the bot respects the calendar."
+ * Calendar-compliance integration test — "the bot never over-promises timing."
  *
- * This is the contract test that proves the customer-facing window offer
- * (buildWindowPrompt) only ever surfaces arrival bands that ACTUALLY have open
- * capacity according to the pure capacity calc (computeOpenWindows). It wires the
- * two real, pure layers together exactly as the live availability path does
- * (computeOpenWindows → OpenAvailability → buildWindowPrompt) — NO mocks of the
- * pure layer, NO live DB — so a regression that lets the bot offer a fully-booked
- * band (or a fully-booked day) fails here.
+ * Policy: the customer-facing window offer (buildWindowPrompt) must NOT surface
+ * concrete dates, openings, or any committed time/window. The bot asks a soft
+ * time-of-day PREFERENCE only; the team coordinates the actual time later. This
+ * test wires the real pure capacity layer (computeOpenWindows) into the prompt
+ * builder exactly as the live path does, and proves that NO MATTER what the
+ * calendar looks like — wide open, partially booked, or fully booked — the
+ * customer prompt is identical and leaks nothing about capacity or dates.
  *
- * Scenarios:
- *   1. Morning fully booked, afternoon/evening open → chips drop morning, keep
- *      afternoon/evening (+ the always-present ASAP).
- *   2. A whole day fully booked → that day is skipped, the next open day offered.
- *   3. Nothing open in range → generic fallback (all four chips incl. morning).
- *   4. Offered chip VALUES are always a subset of {morning,afternoon,evening,asap}
- *      and NEVER a band whose computed `available` is 0.
+ * (computeOpenWindows itself is still exercised for admin scheduling; its
+ * capacity math is covered by availability.test.ts. Here we only assert the
+ * customer prompt is calendar-INDEPENDENT.)
  */
 import { describe, it, expect } from "vitest";
 import { computeOpenWindows } from "./availability";
@@ -31,7 +27,7 @@ import type {
 const WED = "2026-07-01";
 const THU = "2026-07-02";
 
-const ALLOWED_VALUES = new Set(["morning", "afternoon", "evening", "asap"]);
+const EXPECTED_CHIPS = ["morning", "afternoon", "evening", "asap"];
 
 /** Full-day (8am–8pm Eastern) availability slot for a tech on a weekday so every
  * band has capacity unless a booking subtracts it. */
@@ -80,73 +76,44 @@ function offerFor(
   return buildWindowPrompt(open);
 }
 
-describe("calendar compliance — bot offers only bands with real capacity", () => {
-  it("1. morning fully booked → offers afternoon/evening (+ASAP), NOT morning", () => {
+/** Assert a prompt is the calendar-independent soft-preference prompt: no date,
+ * no openings, no time commitment, and exactly the four preference chips. */
+function expectSoftPreference(result: ReturnType<typeof buildWindowPrompt>) {
+  expect(result.question).toMatch(/preference on time of day/i);
+  expect(result.question).toMatch(/team coordinates the actual time/i);
+  expect(result.question).not.toMatch(/Jul \d/);
+  expect(result.question).not.toMatch(/next opening/i);
+  expect(result.question).not.toMatch(/confirm the exact time/i);
+  expect(result.chips.map((c) => c.value)).toEqual(EXPECTED_CHIPS);
+}
+
+describe("calendar compliance — bot never quotes a time/window to the customer", () => {
+  it("wide-open calendar → soft preference only, no date or openings", () => {
     const techs = ["t1", "t2"];
-    const availability = [fullDaySlot("t1", 3), fullDaySlot("t2", 3)]; // Wed
-    // BOTH techs booked the morning band → morning available 0; pm/evening open.
+    const availability = [fullDaySlot("t1", 3), fullDaySlot("t2", 3)];
+    expectSoftPreference(offerFor(techs, availability, [], [WED]));
+  });
+
+  it("partially booked calendar → SAME soft preference, leaks no capacity", () => {
+    const techs = ["t1", "t2"];
+    const availability = [fullDaySlot("t1", 3), fullDaySlot("t2", 3)];
+    // Both techs booked the morning band — capacity differs, prompt must not.
     const jobs = [bookedJob("t1", WED, 8, 12), bookedJob("t2", WED, 8, 12)];
-
-    const { chips } = offerFor(techs, availability, jobs, [WED]);
-    const values = chips.map((c) => c.value);
-
-    expect(values).not.toContain("morning");
-    expect(values).toContain("afternoon");
-    expect(values).toContain("evening");
-    expect(values).toContain("asap"); // always present for urgent callers
+    expectSoftPreference(offerFor(techs, availability, jobs, [WED]));
   });
 
-  it("2. whole day fully booked → that day skipped, next open day offered", () => {
+  it("fully booked calendar → SAME soft preference (never reveals 'fully booked')", () => {
     const techs = ["t1"];
-    // Tech works Wed (3) AND Thu (4) full days.
-    const availability = [fullDaySlot("t1", 3), fullDaySlot("t1", 4)];
-    // The single tech is booked ALL of Wed (8–20 = every band) → Wed has no
-    // open window; Thu is untouched.
-    const jobs = [bookedJob("t1", WED, 8, 20)];
-
-    const { chips, question } = offerFor(techs, availability, jobs, [WED, THU]);
-    const values = chips.map((c) => c.value);
-
-    // Wed is fully booked, so the offered day must be Thu — the prompt names it.
-    expect(question).toContain("Jul 2");
-    // Thu is wide open, so all three bands are bookable there.
-    expect(values).toEqual(
-      expect.arrayContaining(["morning", "afternoon", "evening", "asap"]),
-    );
+    const availability = [fullDaySlot("t1", 3)];
+    const jobs = [bookedJob("t1", WED, 8, 20)]; // all of Wed booked
+    expectSoftPreference(offerFor(techs, availability, jobs, [WED]));
   });
 
-  it("3. nothing open in range → generic fallback (all four chips incl. morning)", () => {
-    const techs = ["t1"];
-    const availability = [fullDaySlot("t1", 3)]; // Wed only
-    // Tech booked the entire Wed (8–20) → no open windows anywhere in range.
-    const jobs = [bookedJob("t1", WED, 8, 20)];
-
-    const { chips, question } = offerFor(techs, availability, jobs, [WED]);
-    const values = chips.map((c) => c.value);
-
-    // Generic fallback copy + the full four-chip set (morning included again).
-    expect(question).toBe(
-      "When works best for a visit? (We'll confirm the exact time.)",
-    );
-    expect(values).toEqual(["morning", "afternoon", "evening", "asap"]);
+  it("no availability configured → SAME soft preference", () => {
+    expectSoftPreference(offerFor(["t1"], [], [], [WED]));
   });
 
-  it("3b. no availability configured at all → generic fallback", () => {
-    // No slots ⇒ computeOpenWindows returns [] ⇒ no bookable day ⇒ fallback.
-    const { chips } = offerFor(["t1"], [], [], [WED]);
-    expect(chips.map((c) => c.value)).toEqual([
-      "morning",
-      "afternoon",
-      "evening",
-      "asap",
-    ]);
-  });
-
-  it("4. offered values are always a subset of the enum and never a 0-available band", () => {
-    // A mixed scenario across two days with partial bookings, so the offer has to
-    // actually filter: Wed morning full (both booked), Wed afternoon half-open;
-    // evening open. Whatever day/bands buildWindowPrompt picks, assert the
-    // invariant against the SAME capacity data the offer was derived from.
+  it("multi-day mixed bookings → prompt is identical regardless", () => {
     const techs = ["t1", "t2"];
     const availability = [
       fullDaySlot("t1", 3),
@@ -156,38 +123,9 @@ describe("calendar compliance — bot offers only bands with real capacity", () 
     ];
     const jobs = [
       bookedJob("t1", WED, 8, 12),
-      bookedJob("t2", WED, 8, 12), // Wed morning fully booked
-      bookedJob("t1", WED, 12, 16), // Wed afternoon: t1 booked, t2 free
+      bookedJob("t2", WED, 8, 12),
+      bookedJob("t1", WED, 12, 16),
     ];
-    const days = [WED, THU];
-
-    const windows = computeOpenWindows(techs, availability, jobs, days);
-    const open: OpenAvailability = { days: [...days], windows };
-    const { chips } = buildWindowPrompt(open);
-
-    // Build a lookup of available counts for the chosen day so we can assert no
-    // offered band had available === 0. The offer surfaces the FIRST day with any
-    // open band; derive which day that is the same way buildWindowPrompt does.
-    const offeredDay = days.find((d) =>
-      windows.some((w) => w.day === d && w.available > 0),
-    );
-    expect(offeredDay).toBeDefined();
-    const availByBand = new Map(
-      windows
-        .filter((w) => w.day === offeredDay)
-        .map((w) => [w.window, w.available] as const),
-    );
-
-    for (const chip of chips) {
-      // Invariant A: only ever the known enum values.
-      expect(ALLOWED_VALUES.has(chip.value)).toBe(true);
-      // Invariant B: ASAP is always allowed; any real band offered must have
-      // available > 0 on the offered day (never a fully-booked band).
-      if (chip.value !== "asap") {
-        expect(availByBand.get(chip.value) ?? 0).toBeGreaterThan(0);
-      }
-    }
-    // And specifically: Wed morning (fully booked) must NOT be offered.
-    expect(chips.map((c) => c.value)).not.toContain("morning");
+    expectSoftPreference(offerFor(techs, availability, jobs, [WED, THU]));
   });
 });

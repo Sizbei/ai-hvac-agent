@@ -1,8 +1,11 @@
 /** Shared chat copy used by both the intent router and the chat route. */
 
-/** Sent when all required intake slots are collected and we want the customer to confirm. */
+/**
+ * Sent when all required intake slots are collected and we want the customer to
+ * confirm. Does not promise a time/schedule — the team coordinates timing later.
+ */
 export const CONFIRM_REPLY =
-  "Great. I have everything I need. Please review the summary and tap Confirm & Submit, and we'll get a technician scheduled.";
+  "Great. I have everything I need. Please review the summary and tap Confirm & Submit to send it to our team.";
 
 /**
  * Warm graceful-degradation reply. Shown instead of a raw error when a chat turn
