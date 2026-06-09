@@ -13,7 +13,7 @@
  */
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
-import { eq, like, inArray } from "drizzle-orm";
+import { eq, like, inArray, or } from "drizzle-orm";
 import * as schema from "./schema";
 import { encrypt } from "../crypto";
 import { DEFAULT_TOKEN_BUDGET, DEFAULT_MAX_TURNS } from "../ai/chat-limits";
@@ -21,7 +21,9 @@ import { type ArrivalWindow } from "../admin/arrival-window";
 import {
   arrivalWindowUtcForBusinessDate,
   businessIsoDate,
+  businessWallClockToUtc,
   businessWeekDates,
+  toBusinessWallClock,
 } from "../admin/calendar-time";
 import * as dotenv from "dotenv";
 
@@ -29,6 +31,14 @@ dotenv.config({ path: ".env.local" });
 
 const DEMO_ORG_ID = "00000000-0000-0000-0000-000000000001";
 const SESSION_TOKEN_PREFIX = "demo-seed-";
+// Separate token prefix for the capacity-consuming booked jobs (Stage 1 calendar
+// robustness). These are intentionally NOT narrative conversations — they exist
+// only to occupy band capacity so the bot's window-offer logic has something to
+// route around. Kept on their own prefix so they clear/reseed independently.
+const CAPACITY_SESSION_TOKEN_PREFIX = "demo-cap-";
+// Demo-tagged reference-number prefix for the capacity booked jobs, so they're
+// findable + removable on re-run (mirrors the HVAC-DEMO prefix scheme).
+const CAPACITY_REF_PREFIX = "HVAC-CAP";
 
 // ── Spears Services, Inc. brand/config (verified facts) ──
 // Seeded into organizationSettings (JSONB columns — no migration). businessInfo
@@ -769,14 +779,48 @@ function generateReferenceNumber(index: number): string {
   return `HVAC-DEMO${String(index).padStart(4, "0")}`;
 }
 
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * The next business-tz weekday (Mon–Fri) STRICTLY after `fromIsoDay`, as a
+ * YYYY-MM-DD business date. Steps a day at a time off the day's Eastern noon
+ * instant (DST-safe, same convention as businessDaysFrom) and skips Sat/Sun.
+ * Used to anchor the capacity-consuming booked jobs on a real working day so the
+ * seeded shifts (Mon–Fri) always cover the band we're filling.
+ */
+function nextBusinessDayAfter(fromIsoDay: string): string {
+  let cursor = businessWallClockToUtc(fromIsoDay, 12, 0);
+  for (let guard = 0; guard < 14; guard += 1) {
+    cursor = new Date(cursor.getTime() + MS_PER_DAY);
+    const wall = toBusinessWallClock(cursor);
+    const weekday = new Date(
+      Date.UTC(wall.year, wall.month - 1, wall.day),
+    ).getUTCDay();
+    if (weekday >= 1 && weekday <= 5) {
+      const mm = String(wall.month).padStart(2, "0");
+      const dd = String(wall.day).padStart(2, "0");
+      return `${wall.year}-${mm}-${dd}`;
+    }
+  }
+  // Unreachable in practice (a 14-day window always contains a weekday).
+  throw new Error("nextBusinessDayAfter: no weekday found within 14 days");
+}
+
 async function clearPreviousDemoData(
   db: ReturnType<typeof drizzle>,
 ): Promise<void> {
   // Find demo sessions by token prefix, then cascade-delete their children.
+  // Matches BOTH the narrative-conversation sessions and the capacity booked-job
+  // sessions so a re-run clears every seeder-owned session (and its requests).
   const sessions = await db
     .select({ id: schema.customerSessions.id })
     .from(schema.customerSessions)
-    .where(like(schema.customerSessions.token, `${SESSION_TOKEN_PREFIX}%`));
+    .where(
+      or(
+        like(schema.customerSessions.token, `${SESSION_TOKEN_PREFIX}%`),
+        like(schema.customerSessions.token, `${CAPACITY_SESSION_TOKEN_PREFIX}%`),
+      ),
+    );
 
   const sessionIds = sessions.map((s) => s.id);
 
@@ -899,6 +943,71 @@ async function seedDemo(): Promise<void> {
   }
   console.log(
     `  Seeded technician availability: ${availabilityRows} rows (Mon–Fri 8:00–17:00)`,
+  );
+
+  // ── Capacity-consuming booked jobs (Stage 1 calendar robustness) ──
+  // These are dummy BOOKED jobs (status "scheduled" — an ACTIVE_BOOKING_STATUS)
+  // with concrete arrival windows that OCCUPY band capacity, so the bot's
+  // window-offer logic (computeOpenWindows → buildWindowPrompt) has something to
+  // route around. The scenario, on the NEXT business day after today:
+  //   • MORNING  fully booked — one job per active tech (8–12) → available 0.
+  //   • AFTERNOON / EVENING left open — no capacity jobs → still bookable.
+  //   • A LATER business day (the next business day after that) left fully open.
+  // Arrival windows are built with businessWallClockToUtc so the band hours are
+  // Eastern wall-clock (matching arrival-window.ts: morning [8,12), afternoon
+  // [12,16), evening [16,20)) — we do NOT hand-roll timezone math. Each job gets
+  // its own minimal session (capacity token prefix) so it's a valid FK target and
+  // is cleared on re-run alongside the narrative sessions.
+  const todayIso = businessIsoDate(new Date());
+  const fullyBookedDay = nextBusinessDayAfter(todayIso); // morning full here
+  const openLaterDay = nextBusinessDayAfter(fullyBookedDay); // left fully open
+  const activeTechIds = TECH_EMAILS
+    .map((email) => techByEmail.get(email))
+    .filter((id): id is string => Boolean(id));
+
+  let capacitySessionIndex = 0;
+  let capacityRefIndex = 1;
+  let capacityJobs = 0;
+  for (const technicianId of activeTechIds) {
+    // One MORNING (8–12 Eastern) job per active tech on the fully-booked day.
+    const morningStart = businessWallClockToUtc(fullyBookedDay, 8, 0);
+    const morningEnd = businessWallClockToUtc(fullyBookedDay, 12, 0);
+
+    const [capSession] = await db
+      .insert(schema.customerSessions)
+      .values({
+        organizationId: DEMO_ORG_ID,
+        token: `${CAPACITY_SESSION_TOKEN_PREFIX}${capacitySessionIndex++}`,
+        status: "submitted",
+        channel: "web",
+        tokensUsed: 0,
+        tokenBudget: DEFAULT_TOKEN_BUDGET,
+        turnCount: 0,
+        maxTurns: DEFAULT_MAX_TURNS,
+      })
+      .returning({ id: schema.customerSessions.id });
+
+    await db.insert(schema.serviceRequests).values({
+      organizationId: DEMO_ORG_ID,
+      sessionId: capSession.id,
+      assignedTo: technicianId,
+      // "scheduled" is an ACTIVE_BOOKING_STATUS → genuinely consumes capacity.
+      status: "scheduled",
+      issueType: "maintenance",
+      urgency: "low",
+      description:
+        "Seeded capacity hold — books a morning slot so the next business day's morning band reads as full.",
+      customerNameEncrypted: encrypt("Capacity Hold"),
+      referenceNumber: `${CAPACITY_REF_PREFIX}${String(capacityRefIndex++).padStart(4, "0")}`,
+      scheduledDate: morningStart,
+      arrivalWindowStart: morningStart,
+      arrivalWindowEnd: morningEnd,
+    });
+    capacityJobs += 1;
+  }
+  console.log(
+    `  Seeded ${capacityJobs} capacity booked jobs: morning FULL on ${fullyBookedDay} ` +
+      `(afternoon/evening open), ${openLaterDay} left fully open`,
   );
 
   // ── Current business week (Eastern), Sunday-first ── so seeded jobs always

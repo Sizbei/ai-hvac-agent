@@ -27,6 +27,15 @@ import {
 } from "@/lib/ai/extraction-schema";
 import { parseKnownSlots, stripSkipSentinels } from "@/lib/ai/chat-slots";
 import { upsertCustomerByContact } from "@/lib/admin/crm-queries";
+import {
+  getOpenAvailability,
+  businessDaysFrom,
+  businessTodayIso,
+} from "@/lib/admin/availability-queries";
+import {
+  pickBookableSlot,
+  arrivalWindowForSlot,
+} from "@/lib/admin/capacity-hold";
 import { pushJobToHcp } from "@/lib/integrations/housecall-pro/job-sync";
 import { recordCustomerEquipment } from "@/lib/admin/crm-equipment-queries";
 import { buildEquipmentFromIntake } from "@/lib/admin/equipment-from-intake";
@@ -35,6 +44,54 @@ import { logger } from "@/lib/logger";
 function generateReferenceNumber(): string {
   // Format: HVAC-XXXXXXXX (8 random hex chars)
   return `HVAC-${randomBytes(4).toString("hex").toUpperCase()}`;
+}
+
+/**
+ * Confirm-time capacity hold (calendar-robustness stages 2 + 3).
+ *
+ * At chat time the bot offered windows from REAL availability, but the customer
+ * may have sat on the confirm screen while other bookings filled the band. This
+ * RE-VERIFIES against current availability right before the write and, when the
+ * preferred band still has an opening, turns the soft `preferredWindow` label
+ * into a CONCRETE arrival window — so the booking actually consumes capacity that
+ * the NEXT customer's `getOpenAvailability` will see (the previous behavior left
+ * arrivalWindow NULL, so nothing was ever consumed and two customers could claim
+ * the same band indefinitely).
+ *
+ * This SHRINKS the race to the few ms between this re-read and the insert (we
+ * cannot SELECT ... FOR UPDATE on neon-http). It NEVER blocks the lead: any
+ * failure, or a fully-booked preferred band, returns null and the caller falls
+ * back to the soft booking (preferredWindow label only, dispatcher assigns).
+ *
+ * Returns the concrete arrival window + the resolved {day, window}, or null.
+ */
+async function holdConcreteSlot(
+  organizationId: string,
+  preferredWindow: string | null | undefined,
+): Promise<{
+  readonly startUtc: Date;
+  readonly endUtc: Date;
+  readonly day: string;
+  readonly window: string;
+} | null> {
+  if (!preferredWindow) return null;
+  try {
+    // Next-business-day onward (skip today — a same-day booking is the
+    // after-hours/urgent path, mirroring the chat route's fetchWindowPrompt).
+    const today = businessTodayIso(new Date());
+    const days = businessDaysFrom(today, 8).filter((d) => d !== today);
+    const availability = await getOpenAvailability(organizationId, days);
+    const slot = pickBookableSlot(availability, preferredWindow);
+    if (!slot) return null; // preferred band full across the range → soft booking
+    const { startUtc, endUtc } = arrivalWindowForSlot(slot.day, slot.window);
+    return { startUtc, endUtc, day: slot.day, window: slot.window };
+  } catch (holdError: unknown) {
+    logger.error(
+      { error: holdError, organizationId },
+      "Confirm-time capacity hold failed — falling back to soft booking",
+    );
+    return null;
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -186,8 +243,25 @@ export async function POST(request: NextRequest) {
     const afterHoursConfig = resolveAfterHoursConfig(
       settingsRow?.afterHoursConfig ?? null,
     );
-    const submittedAt = new Date();
-    const afterHours = isAfterHours(submittedAt, afterHoursConfig);
+
+    // Stages 2+3: re-verify the customer's preferred window against CURRENT
+    // availability and, if it's still open, reserve a concrete arrival window so
+    // the booking actually consumes calendar capacity. Best-effort: null → soft
+    // booking (preferredWindow label only), never blocks the lead.
+    const heldSlot = await holdConcreteSlot(
+      organizationId,
+      data.preferredWindow,
+    );
+
+    // Stage 4: the after-hours surcharge must reflect WHEN THE TECHNICIAN GOES
+    // OUT, not when the customer happens to confirm. When we hold a concrete
+    // arrival window, compute the fee from that instant — so a tomorrow-morning
+    // booking confirmed at 11pm is NOT charged an after-hours fee (aligning the
+    // stored fee with the bot's spoken "no after-hours charge for a business-
+    // hours visit"). Only when no slot is held (soft booking, time genuinely
+    // unknown) do we fall back to the confirm-time clock.
+    const feeInstant = heldSlot?.startUtc ?? new Date();
+    const afterHours = isAfterHours(feeInstant, afterHoursConfig);
     const afterHoursSurcharge = computeSurcharge(
       afterHours,
       data.urgency,
@@ -241,6 +315,12 @@ export async function POST(request: NextRequest) {
           problemDuration: data.problemDuration ?? null,
           vulnerableOccupants: data.vulnerableOccupants ?? null,
           preferredWindow: data.preferredWindow ?? null,
+          // Concrete arrival window when a confirm-time capacity hold succeeded
+          // (stages 2+3): turns the soft preference into a real booked band that
+          // consumes capacity for the next customer. NULL → soft booking, a
+          // dispatcher assigns the window later.
+          arrivalWindowStart: heldSlot?.startUtc ?? null,
+          arrivalWindowEnd: heldSlot?.endUtc ?? null,
           contactPreference: data.contactPreference ?? null,
           smsConsent: data.smsConsent ?? null,
           leadSource: data.leadSource ?? null,

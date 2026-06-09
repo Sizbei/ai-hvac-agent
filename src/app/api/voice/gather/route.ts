@@ -8,7 +8,7 @@ import { voiceReply } from "@/lib/ai/voice-turn";
 import { compactSessionIfNeeded } from "@/lib/ai/compact-session";
 import { type ChatTurn } from "@/lib/ai/compaction";
 import { sanitizeInput } from "@/lib/ai/guardrails";
-import { parseAndVerifyTwilioRequest } from "@/lib/voice/request";
+import { parseAndVerifyTwilioRequest, resolveVoiceMode } from "@/lib/voice/request";
 import {
   gatherTwiML,
   sayThenHangupTwiML,
@@ -25,6 +25,7 @@ import { logger } from "@/lib/logger";
  */
 export async function POST(request: NextRequest) {
   const ip = request.headers.get("x-forwarded-for") ?? "unknown";
+  const voice = resolveVoiceMode(request, Date.now());
 
   const { params, valid } = await parseAndVerifyTwilioRequest(request);
   if (!valid) {
@@ -48,7 +49,10 @@ export async function POST(request: NextRequest) {
 
     if (!session) {
       return new Response(
-        sayThenHangupTwiML("Sorry, I lost track of this call. Please call back."),
+        sayThenHangupTwiML(
+          "Sorry, I lost track of this call. Please call back.",
+          voice,
+        ),
         { headers: TWIML_HEADERS },
       );
     }
@@ -56,7 +60,7 @@ export async function POST(request: NextRequest) {
     // Already escalated/terminal — don't keep the automated leg running.
     if (isTerminalState(session.status) || session.status === "submitted") {
       return new Response(
-        sayThenHangupTwiML("Thanks for calling. Goodbye."),
+        sayThenHangupTwiML("Thanks for calling. Goodbye.", voice),
         { headers: TWIML_HEADERS },
       );
     }
@@ -67,6 +71,7 @@ export async function POST(request: NextRequest) {
         gatherTwiML({
           say: "I'm sorry, I didn't hear anything. Could you tell me what's going on?",
           action: "/api/voice/gather",
+          voice,
         }),
         { headers: TWIML_HEADERS },
       );
@@ -117,19 +122,22 @@ export async function POST(request: NextRequest) {
     });
 
     if (result.endCall) {
-      return new Response(sayThenHangupTwiML(result.reply), {
+      return new Response(sayThenHangupTwiML(result.reply, voice), {
         headers: TWIML_HEADERS,
       });
     }
 
     return new Response(
-      gatherTwiML({ say: result.reply, action: "/api/voice/gather" }),
+      gatherTwiML({ say: result.reply, action: "/api/voice/gather", voice }),
       { headers: TWIML_HEADERS },
     );
   } catch (error) {
     logger.error({ error, callSid }, "Voice gather failed");
     return new Response(
-      sayThenHangupTwiML("Sorry, something went wrong on our end. Please call back."),
+      sayThenHangupTwiML(
+        "Sorry, something went wrong on our end. Please call back.",
+        voice,
+      ),
       { headers: TWIML_HEADERS },
     );
   }

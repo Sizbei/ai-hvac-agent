@@ -5,11 +5,12 @@ import { eq } from "drizzle-orm";
 import { DEMO_ORG_ID } from "@/lib/tenancy/organization";
 import { resolveTokenBudget, resolveMaxTurns } from "@/lib/ai/chat-limits";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
-import { parseAndVerifyTwilioRequest } from "@/lib/voice/request";
+import { parseAndVerifyTwilioRequest, resolveVoiceMode } from "@/lib/voice/request";
 import {
   gatherTwiML,
   sayThenHangupTwiML,
   hangupTwiML,
+  POLLY_VOICE,
   TWIML_HEADERS,
 } from "@/lib/voice/twiml";
 import { logger } from "@/lib/logger";
@@ -32,13 +33,17 @@ export async function POST(request: NextRequest) {
   );
   if (!rate.allowed) {
     // Twilio retries; a spoken apology is better than a bare 429 the caller
-    // hears as dead air.
+    // hears as dead air. (Polly here — no verified session yet, keep it cheap.)
     return new Response(
-      sayThenHangupTwiML("We're experiencing high call volume. Please try again shortly."),
+      sayThenHangupTwiML(
+        "We're experiencing high call volume. Please try again shortly.",
+        POLLY_VOICE,
+      ),
       { headers: TWIML_HEADERS },
     );
   }
 
+  const voice = resolveVoiceMode(request, Date.now());
   const { params, valid } = await parseAndVerifyTwilioRequest(request);
   if (!valid) {
     logger.warn({ ip }, "Rejected Twilio incoming webhook: invalid signature");
@@ -86,13 +91,17 @@ export async function POST(request: NextRequest) {
         say: GREETING,
         action: "/api/voice/gather",
         reprompt: "Sorry, I did not catch that. Please tell me what is going on with your heating or cooling.",
+        voice,
       }),
       { headers: TWIML_HEADERS },
     );
   } catch (error) {
     logger.error({ error, callSid }, "Voice incoming failed");
     return new Response(
-      sayThenHangupTwiML("Sorry, something went wrong. Please call back in a moment."),
+      sayThenHangupTwiML(
+        "Sorry, something went wrong. Please call back in a moment.",
+        voice,
+      ),
       { headers: TWIML_HEADERS },
     );
   }
