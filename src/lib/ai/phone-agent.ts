@@ -123,6 +123,7 @@ export function voiceNextSlotPrompt(slots: {
     address: (slots.address as string | null) ?? null,
     name: (slots.name as string | null) ?? null,
     phone: (slots.phone as string | null) ?? null,
+    email: null,
     safetyScreenPassed: true,
     extras: { ...(slots.extras ?? {}) },
   };
@@ -140,13 +141,18 @@ export function voiceNextSlotPrompt(slots: {
     if (VOICE_ASKABLE.has(step.id)) {
       return VOICE_STEP_PHRASING[step.id];
     }
+    // CORE steps are gated on the slot VALUE (not `skipped`), so advance them by
+    // setting the slot to a local sentinel. name + email are collected on web /
+    // confirmed by the tech, not asked over the phone.
     triageSlots =
       step.id === "name"
         ? { ...triageSlots, name: VOICE_SKIPPED_CORE }
-        : {
-            ...triageSlots,
-            skipped: { ...(triageSlots.skipped ?? {}), [step.id]: true },
-          };
+        : step.id === "email"
+          ? { ...triageSlots, email: VOICE_SKIPPED_CORE }
+          : {
+              ...triageSlots,
+              skipped: { ...(triageSlots.skipped ?? {}), [step.id]: true },
+            };
   }
   return "Thanks. Is there anything else that would help the technician?";
 }

@@ -31,13 +31,19 @@ export function requestOrigin(request: Request): string {
 }
 
 /**
- * Choose how to voice replies for this request. ElevenLabs <Play> when the API
- * key is configured (anchored on the request origin and `now` for token
- * signing), otherwise the Polly <Say> default.
+ * Choose how to voice replies for this request.
+ *
+ * DEFAULT = Polly <Say> (Amazon neural, female "Ruth") — single voice, no
+ * synthesis round-trip, so the lowest latency. ElevenLabs <Play> is opt-in via
+ * VOICE_PROVIDER=elevenlabs (and a key configured); it adds a per-turn synthesis
+ * round-trip, so it's off unless explicitly chosen.
  */
 export function resolveVoiceMode(request: Request, now: number): VoiceMode {
-  if (!isElevenLabsEnabled()) return POLLY_VOICE;
-  return { kind: "elevenlabs", baseUrl: requestOrigin(request), now };
+  const provider = process.env.VOICE_PROVIDER?.trim().toLowerCase();
+  if (provider === "elevenlabs" && isElevenLabsEnabled()) {
+    return { kind: "elevenlabs", baseUrl: requestOrigin(request), now };
+  }
+  return POLLY_VOICE;
 }
 
 /**

@@ -30,14 +30,15 @@ export function EscalationDialog({
         <DialogHeader>
           <DialogTitle>Talk to a Human</DialogTitle>
           <DialogDescription>
-            We&apos;ll flag this conversation for a human. For an emergency, call
-            us now — otherwise a technician will reach out within 2 hours.
+            We&apos;ll flag this conversation for a human, who will reach out to
+            confirm the details. For an emergency, call us any time, day or
+            night.
           </DialogDescription>
         </DialogHeader>
         <div className="flex items-center gap-2 rounded-lg bg-muted p-3">
           <Phone className="size-4 text-muted-foreground" />
-          <a href="tel:+15551234567" className="text-sm font-medium hover:underline">
-            (555) 123-4567
+          <a href="tel:+14238549505" className="text-sm font-medium hover:underline">
+            423-854-9505
           </a>
         </div>
         <DialogFooter>

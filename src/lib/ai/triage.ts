@@ -57,6 +57,10 @@ export interface TriageSlots {
   // NAME_STEP question. Not an extras key.
   name: string | null;
   phone: string | null;
+  // The customer's email. A CORE required field (booking confirmation channel),
+  // written by the caller's slot extraction; gated here only to sequence the
+  // EMAIL_STEP question. Not an extras key.
+  email: string | null;
   safetyScreenPassed: boolean;
   safetyHazardReported?: boolean;
   extras: Record<string, unknown>;
@@ -73,6 +77,7 @@ export const REQUIRED_FOR_SUBMIT = [
   "address",
   "name",
   "phone",
+  "email",
 ] as const;
 
 const SKIP_PATTERNS = [
@@ -159,6 +164,13 @@ const PHONE_STEP: TriageStep = {
 const NAME_STEP: TriageStep = {
   id: "name",
   question: "And what's your full name — first and last?",
+  quickReplies: [],
+  optional: false,
+};
+
+const EMAIL_STEP: TriageStep = {
+  id: "email",
+  question: "What's the best email address for your booking confirmation?",
   quickReplies: [],
   optional: false,
 };
@@ -501,6 +513,7 @@ export function nextTriageStep(slots: TriageSlots): TriageStep | null {
   if (!slots.address) return ADDRESS_STEP;
   if (!slots.phone) return PHONE_STEP;
   if (!slots.name) return NAME_STEP;
+  if (!slots.email) return EMAIL_STEP;
   if (!slots.urgency) return URGENCY_STEP;
 
   // 4. Optional enrichment, in order; skip any already filled or skipped.

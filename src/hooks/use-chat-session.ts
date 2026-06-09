@@ -6,6 +6,11 @@ import { TextStreamChatTransport } from 'ai';
 import type { UIMessage } from 'ai';
 import type { SessionState } from '@/lib/ai/state-machine';
 import type { ExtractionResult } from '@/lib/ai/extraction-schema';
+import {
+  isAddressComplete,
+  isNameComplete,
+  isEmailComplete,
+} from '@/lib/ai/extraction-schema';
 import type { ChatMessage, ExtractionField } from '@/lib/types/chat';
 
 interface SessionData {
@@ -116,8 +121,24 @@ export function useChatSession(): UseChatSessionReturn {
       {
         key: 'address' as const,
         label: 'Address',
+        collected: isAddressComplete(extraction?.address ?? null),
+      },
+      {
+        key: 'customerName' as const,
+        label: 'Name',
+        collected: isNameComplete(extraction?.customerName ?? null),
+      },
+      {
+        key: 'customerPhone' as const,
+        label: 'Phone',
         collected:
-          extraction?.address != null && extraction.address.length > 0,
+          extraction?.customerPhone != null &&
+          extraction.customerPhone.length > 0,
+      },
+      {
+        key: 'customerEmail' as const,
+        label: 'Email',
+        collected: isEmailComplete(extraction?.customerEmail ?? null),
       },
     ],
     [extraction],

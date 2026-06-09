@@ -38,8 +38,9 @@ function SuccessContent() {
         </Card>
 
         <p className="text-sm text-muted-foreground">
-          A technician will reach out to you{' '}
-          <span className="font-medium text-foreground">within 2 hours</span>.
+          Our team will reach out to confirm the soonest available time. For an
+          emergency, call us any time, day or night, at{' '}
+          <span className="font-medium text-foreground">423-854-9505</span>.
         </p>
 
         <div className="flex flex-col items-center gap-3">

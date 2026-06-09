@@ -25,7 +25,7 @@ describe("ElevenLabs <Play> mode", () => {
     delete process.env.ENCRYPTION_KEY;
   });
 
-  it("emits a <Play> of the absolute TTS URL plus a <Say> fallback", () => {
+  it("emits a <Play> of the absolute TTS URL and NO duplicate <Say>", () => {
     const xml = gatherTwiML({
       say: "Hello there.",
       action: "/api/voice/gather",
@@ -38,13 +38,12 @@ describe("ElevenLabs <Play> mode", () => {
     expect(xml).toContain("text=Hello+there.");
     expect(xml).toContain("exp=");
     expect(xml).toContain("sig=");
-    // Fallback <Say> remains so a synthesis failure isn't dead air.
-    expect(xml).toContain(`<Say voice="${DEFAULT_VOICE}">Hello there.</Say>`);
-    // <Play> comes before the fallback <Say>.
-    expect(xml.indexOf("<Play>")).toBeLessThan(xml.indexOf("<Say"));
+    // CRITICAL: no <Say> alongside the <Play> — emitting both made Twilio voice
+    // the line twice (MP3 + Polly). ElevenLabs mode is <Play> only.
+    expect(xml).not.toContain("<Say");
   });
 
-  it("plays both the prompt and the reprompt in ElevenLabs mode", () => {
+  it("plays the prompt and the reprompt (both <Play>, no <Say>)", () => {
     const xml = gatherTwiML({
       say: "Go ahead.",
       action: "/x",
@@ -52,12 +51,13 @@ describe("ElevenLabs <Play> mode", () => {
       voice: ELEVEN_VOICE,
     });
     expect((xml.match(/<Play>/g) ?? []).length).toBe(2);
+    expect(xml).not.toContain("<Say");
   });
 
-  it("plays the final line then hangs up", () => {
+  it("plays the final line then hangs up (no duplicate <Say>)", () => {
     const xml = sayThenHangupTwiML("Goodbye now.", ELEVEN_VOICE);
     expect(xml).toContain("<Play>");
-    expect(xml).toContain("Goodbye now.</Say>");
+    expect(xml).not.toContain("<Say");
     expect(xml).toContain("<Hangup/>");
   });
 
@@ -112,6 +112,22 @@ describe("gatherTwiML", () => {
     expect(xml).toContain('method="POST"');
     expect(xml).toContain("What issue are you having?</Say>");
     expect(xml.trim().endsWith("</Response>")).toBe(true);
+  });
+
+  it("defaults to a short 2s speechTimeout (snappier than auto), env-overridable", () => {
+    delete process.env.TWILIO_SPEECH_TIMEOUT;
+    expect(gatherTwiML({ say: "Hi.", action: "/x" })).toContain(
+      'speechTimeout="2"',
+    );
+    process.env.TWILIO_SPEECH_TIMEOUT = "auto";
+    expect(gatherTwiML({ say: "Hi.", action: "/x" })).toContain(
+      'speechTimeout="auto"',
+    );
+    process.env.TWILIO_SPEECH_TIMEOUT = "3";
+    expect(gatherTwiML({ say: "Hi.", action: "/x" })).toContain(
+      'speechTimeout="3"',
+    );
+    delete process.env.TWILIO_SPEECH_TIMEOUT;
   });
 
   it("XML-escapes the spoken text to keep the document well-formed", () => {

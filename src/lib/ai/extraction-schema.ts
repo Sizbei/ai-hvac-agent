@@ -155,15 +155,17 @@ export const extractionSchema = z.object({
 
 export type ExtractionResult = z.infer<typeof extractionSchema>;
 
-// The fields that gate submission. Phone is now required (the dispatch primary
+// The fields that gate submission. Phone is required (the dispatch primary
 // key — a dispatcher cannot act on a request with no way to reach the customer).
-// Name is required too: dispatch needs a person to ask for at the door.
+// Name is required too: dispatch needs a person to ask for at the door. Email is
+// required as well: it's the channel for the booking confirmation / receipt.
 export const REQUIRED_EXTRACTION_FIELDS = [
   'issueType',
   'urgency',
   'address',
   'customerPhone',
   'customerName',
+  'customerEmail',
 ] as const;
 
 // Sentinel a skipped optional step writes (see triage.SKIP_SENTINEL). A name
@@ -210,6 +212,23 @@ export function isNameComplete(name: string | null): boolean {
   return tokens.length >= 2;
 }
 
+// Conservative email shape check: a single token with one @, a non-empty local
+// part, and a dotted domain. Matches the slot extractor's EMAIL_PATTERN and the
+// Zod .email() the schema enforces, so a value that passes here will persist.
+const EMAIL_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+
+/**
+ * True when `email` is a usable email address. Required for submission — it's
+ * how the customer gets their booking confirmation. Rejects null, the skip
+ * sentinel, and anything that isn't a well-formed address.
+ */
+export function isEmailComplete(email: string | null): boolean {
+  if (email === null) return false;
+  const trimmed = email.trim();
+  if (trimmed.length === 0 || trimmed === SKIP_SENTINEL) return false;
+  return EMAIL_RE.test(trimmed);
+}
+
 export function isExtractionComplete(extraction: ExtractionResult): boolean {
   return (
     extraction.issueType !== null &&
@@ -217,19 +236,22 @@ export function isExtractionComplete(extraction: ExtractionResult): boolean {
     isAddressComplete(extraction.address) &&
     isNameComplete(extraction.customerName) &&
     extraction.customerPhone !== null &&
-    extraction.customerPhone.length > 0
+    extraction.customerPhone.length > 0 &&
+    isEmailComplete(extraction.customerEmail)
   );
 }
 
-// Validated service request data (after customer confirms). Phone is required;
-// the new intake fields are optional enrichment.
+// Validated service request data (after customer confirms). Phone AND email are
+// required (email is the booking-confirmation channel); the new intake fields
+// are optional enrichment. customerName stays nullable in the schema but the
+// chat gate (isExtractionComplete) requires a real first+last before confirm.
 export const serviceRequestSchema = z.object({
   issueType: z.enum(issueTypeValues),
   urgency: z.enum(urgencyValues),
   address: z.string().min(1),
   customerName: z.string().nullable(),
   customerPhone: z.string().min(1),
-  customerEmail: z.string().email().nullable(),
+  customerEmail: z.string().email(),
   description: z.string().min(1),
   ...optionalIntakeFields,
 });
