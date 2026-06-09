@@ -10,6 +10,10 @@ export interface ApiError {
   error: {
     message: string;
     code: string;
+    /** Optional structured payload for errors the client must act on (e.g. a
+     * 409 SCHEDULE_CONFLICT carries the conflicting jobs so the UI can offer an
+     * override). PII-free by contract — callers pass ids/flags only. */
+    details?: unknown;
   };
 }
 
@@ -26,9 +30,16 @@ export function errorResponse(
   message: string,
   code: string,
   status: number = 400,
+  details?: unknown,
 ): NextResponse<ApiError> {
   return NextResponse.json(
-    { success: false as const, error: { message, code } },
+    {
+      success: false as const,
+      error:
+        details === undefined
+          ? { message, code }
+          : { message, code, details },
+    },
     { status },
   );
 }

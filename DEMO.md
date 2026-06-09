@@ -7,6 +7,7 @@ talking point.
 > **Live demo:** https://ai-hvac-agent-lovat.vercel.app
 > &nbsp;·&nbsp; chat → `/chat` &nbsp;·&nbsp; admin → `/admin` (`admin@demo-hvac.com` / `admin123`)
 > &nbsp;·&nbsp; docs → `/docs.html`
+> &nbsp;·&nbsp; **call the voice agent → (231) 559-9669**
 > The admin dashboard is pre-seeded with realistic conversations, so it looks alive.
 
 ---
@@ -242,7 +243,8 @@ Nothing is lost. The Conversations log reads directly from `customer_sessions` a
 admin dashboard with full transcripts.
 
 **Q: Can customers call instead of chat?**
-Yes — a Twilio voice number routes calls to the same agent. It reuses the exact
+Yes — **call the live demo at (231) 559-9669** and the agent answers in a natural
+neural voice. A Twilio voice number routes calls to the same agent. It reuses the exact
 router/extraction/state-machine core as the web chat (a voice persona, not a second bot),
 speaks with an Amazon Polly neural voice, captures speech via Twilio's built-in
 recognition, validates every webhook's signature, and escalates emergencies the same way.

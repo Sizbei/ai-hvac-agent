@@ -44,6 +44,15 @@ import {
 } from "@/lib/ai/triage";
 import { EMPTY_ORG_CONFIG } from "@/lib/ai/router-config";
 import { getRouterConfig } from "@/lib/admin/org-config-queries";
+import {
+  getOpenAvailability,
+  businessDaysFrom,
+  businessTodayIso,
+} from "@/lib/admin/availability-queries";
+import {
+  buildWindowPrompt,
+  type WindowChip,
+} from "@/lib/ai/availability-prompt";
 import { CONFIRM_REPLY, HANDOFF_REPLY } from "@/lib/ai/constants";
 import { extractSlots, extractAddressLoose } from "@/lib/ai/slot-extract";
 import { withLeadIn } from "@/lib/ai/lead-ins";
@@ -258,8 +267,17 @@ async function gracefulHandoff(params: {
  * the customer has answered/skipped everything, triage returns null and we fall
  * back to a gentle "anything else?" prompt. Quick-reply chips are appended in
  * parentheses so the deterministic (0-token) path still guides the customer.
+ *
+ * Stage 5.2: when the next step is the preferred-window step, the caller may pass
+ * a `windowPrompt` built from REAL open availability (buildWindowPrompt) — we use
+ * its question + chips instead of the static "we'll confirm the time" copy so the
+ * customer is offered concrete bookable windows. The chip VALUES are unchanged
+ * (morning/afternoon/evening/asap), so capture stays deterministic.
  */
-function nextSlotPrompt(merged: KnownSlots): string {
+function nextSlotPrompt(
+  merged: KnownSlots,
+  windowPrompt?: { readonly question: string; readonly chips: readonly { readonly label: string }[] },
+): string {
   const triageSlots: TriageSlots = {
     issueType: merged.issueType ?? null,
     urgency: merged.urgency ?? null,
@@ -276,11 +294,62 @@ function nextSlotPrompt(merged: KnownSlots): string {
   if (!step) {
     return "Thanks — is there anything else that would help the technician?";
   }
+  // Offer real open windows when we've fetched them for THIS step (5.2).
+  if (step.id === "preferred_window" && windowPrompt) {
+    const chips =
+      windowPrompt.chips.length > 0
+        ? ` (${windowPrompt.chips.map((c) => c.label).join(" · ")})`
+        : "";
+    return windowPrompt.question + chips;
+  }
   const chips =
     step.quickReplies.length > 0
       ? ` (${step.quickReplies.map((r) => r.label).join(" · ")})`
       : "";
   return step.question + chips;
+}
+
+/** The triage step that would be asked next given the merged slots (same mapping
+ * nextSlotPrompt uses). Lets the route decide whether to fetch real availability
+ * BEFORE composing the reply, without duplicating the slot→triage mapping. */
+function nextStepIdFor(merged: KnownSlots): string | null {
+  const step = nextTriageStep({
+    issueType: merged.issueType ?? null,
+    urgency: merged.urgency ?? null,
+    address: merged.address ?? null,
+    name: merged.name ?? null,
+    phone: merged.phone ?? null,
+    safetyScreenPassed: true,
+    extras: { ...(merged.extras ?? {}) },
+  });
+  return step?.id ?? null;
+}
+
+/**
+ * Fetch REAL open windows for the next several business days and turn them into
+ * the preferred-window prompt (Stage 5.2). Reads through the scheduling-source
+ * seam (getOpenAvailability). Best-effort: ANY failure returns null so the caller
+ * falls back to the static window question — availability is an enhancement, never
+ * a gate on the intake. We offer next-business-day onward (skip today: a same-day
+ * booking is the after-hours/urgent path, not the standard "when works best").
+ */
+async function fetchWindowPrompt(
+  organizationId: string,
+): Promise<{ readonly question: string; readonly chips: readonly WindowChip[] } | null> {
+  try {
+    const today = businessTodayIso(new Date());
+    // Start at the day AFTER today: businessDaysFrom(today, 8) gives today..+7;
+    // we drop today so the offered openings are next-business-day onward.
+    const days = businessDaysFrom(today, 8).filter((d) => d !== today);
+    const availability = await getOpenAvailability(organizationId, days);
+    return buildWindowPrompt(availability);
+  } catch (availabilityError: unknown) {
+    logger.error(
+      { error: availabilityError, organizationId },
+      "Failed to fetch open availability for window prompt — using static prompt",
+    );
+    return null;
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -783,13 +852,27 @@ export async function POST(request: NextRequest) {
           metadataStr = JSON.stringify(extraction);
         }
 
+        // Stage 5.2: if the next thing to ask is the preferred-window step AND
+        // we're going to fall through to the deterministic next-slot prompt
+        // (not a canned intent reply / confirm), fetch REAL open windows so we
+        // offer concrete bookable bands instead of "we'll confirm the time".
+        // Only fetched on this narrow path so we never pay the read on turns
+        // that won't ask the window question. Best-effort (null → static copy).
+        const willAskWindow =
+          !extractionComplete &&
+          !(verdict.action !== "FALLBACK_LLM" && verdict.reply) &&
+          nextStepIdFor(merged) === "preferred_window";
+        const windowPrompt = willAskWindow
+          ? await fetchWindowPrompt(organizationId)
+          : null;
+
         // Reply: confirm when complete, else the intent's canned ask, else a
         // deterministic next-slot prompt (slot-provision turns).
         const nextQuestion = extractionComplete
           ? CONFIRM_REPLY
           : verdict.action !== "FALLBACK_LLM" && verdict.reply
             ? verdict.reply
-            : nextSlotPrompt(merged);
+            : nextSlotPrompt(merged, windowPrompt ?? undefined);
 
         // After-hours disclosure (deterministic path). When this intake is
         // happening outside the org's business hours we either ask whether it's

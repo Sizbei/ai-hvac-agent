@@ -719,6 +719,52 @@ export const customFaqs = pgTable(
   ],
 );
 
+// 15. technician_availability — recurring weekly working hours per technician.
+// One row per technician per weekday SHIFT. `dayOfWeek` is 0=Sunday … 6=Saturday;
+// `startMinute`/`endMinute` are minutes-from-midnight in the BUSINESS timezone
+// (America/New_York), describing a recurring [start, end) wall-clock span — NOT
+// UTC, because these are a weekly pattern ("Mon 8am–5pm") that the calendar
+// layer resolves against a concrete date (handling DST) when it needs UTC.
+// Multiple rows per tech/day are allowed, so a split shift is simply two rows.
+//
+// This is the NATIVE availability source today; an HCP-backed source can drop in
+// later behind the scheduling-source seam (see lib/admin/scheduling-source.ts).
+export const technicianAvailability = pgTable(
+  "technician_availability",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id),
+    technicianId: uuid("technician_id")
+      .notNull()
+      .references(() => users.id),
+    // 0=Sunday … 6=Saturday (JS Date.getDay() convention).
+    dayOfWeek: integer("day_of_week").notNull(),
+    // Minutes from midnight in the business timezone; [startMinute, endMinute).
+    startMinute: integer("start_minute").notNull(),
+    endMinute: integer("end_minute").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("tech_availability_org_id_idx").on(table.organizationId),
+    index("tech_availability_org_tech_idx").on(
+      table.organizationId,
+      table.technicianId,
+    ),
+    index("tech_availability_org_tech_day_idx").on(
+      table.organizationId,
+      table.technicianId,
+      table.dayOfWeek,
+    ),
+  ],
+);
+
 // 14. widget_keys — publishable/secret API keys for the embeddable widget.
 // Keys are stored HASHED (SHA-256); the plaintext is shown once at creation.
 // A publishable key resolves which org an embedded widget belongs to.

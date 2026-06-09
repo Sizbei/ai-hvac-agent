@@ -16,6 +16,7 @@ import {
   ilike,
   isNull,
   isNotNull,
+  or,
   sql,
   type SQL,
 } from "drizzle-orm";
@@ -38,6 +39,7 @@ import {
 
 export type HoldReason = (typeof holdReasonEnum.enumValues)[number];
 import { DASHBOARD_LIST_LIMIT } from "./types";
+import { getTechnicianAvailability } from "./scheduling-queries";
 import type {
   AdminRequest,
   AdminRequestDetail,
@@ -47,6 +49,8 @@ import type {
   DashboardOverview,
   DispatchBoard,
   DispatchColumn,
+  SchedulingCalendar,
+  CalendarTechnicianLane,
   RequestFilters,
   CreateTechnicianInput,
   UpdateTechnicianInput,
@@ -1202,4 +1206,138 @@ export async function getDispatchBoard(
     columns,
     unassigned,
   };
+}
+
+// ─── Scheduling calendar (Stage 2) ───────────────────────────────────────────
+
+/**
+ * The scheduling calendar for an arbitrary UTC instant range [startIso, endIso):
+ * placed jobs (those with an arrival window) bucketed into a lane per active
+ * technician, plus a placed-but-unassigned lane, plus the "to place" unscheduled
+ * queue. Reuses dashboardRequestSelect so calendar cards carry the same rich
+ * fields (decrypted name, urgency, status) as the dispatch board.
+ *
+ * The range is a half-open instant window the API computes from the chosen
+ * business-day(s) (start = business-tz midnight of the first day, end = midnight
+ * after the last). Jobs are matched by arrivalWindowStart falling in the range —
+ * the same anchor the dispatch board uses. `days` is supplied by the caller (the
+ * business-tz ISO dates being rendered) so the calendar grid and the data agree
+ * on which days the view spans, independent of the server's timezone.
+ *
+ * The window/unscheduled feeds could later come from an HCP-backed source; this
+ * function reads our own tables for now (the scheduling-source seam covers the
+ * leaner ScheduledJob feed used by conflict detection). Tenant-scoped throughout.
+ */
+export async function getSchedulingCalendar(
+  organizationId: string,
+  startIso: string,
+  endIso: string,
+  days: readonly string[],
+): Promise<SchedulingCalendar> {
+  const start = new Date(startIso);
+  const end = new Date(endIso);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    throw new Error("Invalid calendar range");
+  }
+
+  const calendarSelect = {
+    ...dashboardRequestSelect,
+    assignedTo: serviceRequests.assignedTo,
+  } as const;
+
+  const [technicians, placedRows, unscheduledRows, availability] =
+    await Promise.all([
+    getTechnicians(organizationId),
+    // Placed jobs: an arrival window starting within the range, in an open state.
+    db
+      .select(calendarSelect)
+      .from(serviceRequests)
+      .leftJoin(users, eq(serviceRequests.assignedTo, users.id))
+      .where(
+        withTenant(
+          serviceRequests,
+          organizationId,
+          isNotNull(serviceRequests.arrivalWindowStart),
+          gte(serviceRequests.arrivalWindowStart, start),
+          lt(serviceRequests.arrivalWindowStart, end),
+          inArray(serviceRequests.status, [...OPEN_STATUSES]),
+        ),
+      )
+      .orderBy(asc(serviceRequests.arrivalWindowStart)),
+    // Unscheduled: open intake not yet fully placed — no tech OR no window.
+    db
+      .select(dashboardRequestSelect)
+      .from(serviceRequests)
+      .leftJoin(users, eq(serviceRequests.assignedTo, users.id))
+      .where(
+        withTenant(
+          serviceRequests,
+          organizationId,
+          inArray(serviceRequests.status, [...UNASSIGNED_OPEN_STATUSES]),
+          or(
+            isNull(serviceRequests.assignedTo),
+            isNull(serviceRequests.arrivalWindowStart),
+          )!,
+        ),
+      )
+      .orderBy(asc(serviceRequests.createdAt))
+      .limit(DASHBOARD_LIST_LIMIT),
+    // Recurring working hours for every tech — drives S4 out-of-hours shading.
+    getTechnicianAvailability(organizationId),
+  ]);
+
+  const activeTechs = technicians.filter((tech) => tech.isActive);
+  const byTech = new Map<string, DashboardRequest[]>(
+    activeTechs.map((tech) => [tech.id, [] as DashboardRequest[]]),
+  );
+  const unassigned: DashboardRequest[] = [];
+
+  for (const row of placedRows) {
+    const job = toDashboardRequest(row);
+    const bucket = row.assignedTo ? byTech.get(row.assignedTo) : undefined;
+    if (bucket) {
+      bucket.push(job); // rows are window-ordered, so each lane stays sorted
+    } else {
+      unassigned.push(job);
+    }
+  }
+
+  const lanes: readonly CalendarTechnicianLane[] = activeTechs.map((tech) => ({
+    technicianId: tech.id,
+    technicianName: tech.name,
+    jobs: byTech.get(tech.id) ?? [],
+  }));
+
+  return {
+    days: [...days],
+    lanes,
+    unassigned,
+    unscheduled: unscheduledRows.map(toDashboardRequest),
+    availability: [...availability],
+  };
+}
+
+/**
+ * Count of open requests still needing to be PLACED on the calendar (no tech
+ * and/or no arrival window) — the number the admin-nav unscheduled badge shows.
+ * A cheap COUNT(*) so it can be fetched on every admin page load. Tenant-scoped.
+ */
+export async function countUnscheduledRequests(
+  organizationId: string,
+): Promise<number> {
+  const [result] = await db
+    .select({ value: count() })
+    .from(serviceRequests)
+    .where(
+      withTenant(
+        serviceRequests,
+        organizationId,
+        inArray(serviceRequests.status, [...UNASSIGNED_OPEN_STATUSES]),
+        or(
+          isNull(serviceRequests.assignedTo),
+          isNull(serviceRequests.arrivalWindowStart),
+        )!,
+      ),
+    );
+  return result?.value ?? 0;
 }

@@ -71,6 +71,7 @@ vi.mock('drizzle-orm', () => ({
   ilike: vi.fn((...args: unknown[]) => args),
   isNull: vi.fn((...args: unknown[]) => args),
   isNotNull: vi.fn((...args: unknown[]) => args),
+  or: vi.fn((...args: unknown[]) => args),
 }));
 
 // Mock schema tables — provide column-like objects
@@ -126,6 +127,14 @@ vi.mock('@/lib/db/schema', () => ({
     content: 'rn.content',
     createdAt: 'rn.createdAt',
   },
+  technicianAvailability: {
+    id: 'ta.id',
+    organizationId: 'ta.org',
+    technicianId: 'ta.tech',
+    dayOfWeek: 'ta.dow',
+    startMinute: 'ta.start',
+    endMinute: 'ta.end',
+  },
   requestStatusEnum: {
     enumValues: [
       'pending',
@@ -163,6 +172,8 @@ import {
   getDashboardStats,
   getDashboardOverview,
   getDispatchBoard,
+  getSchedulingCalendar,
+  countUnscheduledRequests,
 } from '@/lib/admin/queries';
 
 const ORG_ID = '00000000-0000-0000-0000-000000000001';
@@ -702,6 +713,114 @@ describe('getDispatchBoard', () => {
     selectResolutions = [[], []];
     const board = await getDispatchBoard(ORG_ID, '2026-02-30');
     expect(board.date).not.toBe('2026-02-30');
+  });
+});
+
+describe('getSchedulingCalendar', () => {
+  const TECH_A = '00000000-0000-0000-0000-0000000000a1';
+  const TECH_B = '00000000-0000-0000-0000-0000000000b2';
+  const START = '2026-06-07T04:00:00.000Z';
+  const END = '2026-06-14T04:00:00.000Z';
+  const DAYS = ['2026-06-07', '2026-06-08'] as const;
+
+  function placedRow(overrides: Record<string, unknown>) {
+    return {
+      id: 'job',
+      referenceNumber: 'HVAC-X',
+      customerNameEncrypted: 'enc',
+      issueType: 'no_cooling',
+      urgency: 'medium',
+      status: 'scheduled',
+      isAfterHours: false,
+      assignedToName: null,
+      arrivalWindowStart: new Date('2026-06-08T13:00:00.000Z'),
+      arrivalWindowEnd: new Date('2026-06-08T17:00:00.000Z'),
+      followUpDate: null,
+      holdReason: null,
+      createdAt: new Date('2026-06-07T10:00:00.000Z'),
+      assignedTo: null,
+      ...overrides,
+    };
+  }
+
+  it('buckets placed jobs into tech lanes + unassigned and returns the days', async () => {
+    // select 0 = getTechnicians; 1 = placed jobs; 2 = unscheduled list.
+    selectResolutions = [
+      [
+        { id: TECH_A, name: 'Ann', email: 'a@x.io', isActive: true, createdAt: new Date() },
+        { id: TECH_B, name: 'Bob', email: 'b@x.io', isActive: false, createdAt: new Date() },
+      ],
+      [
+        placedRow({ id: 'j1', referenceNumber: 'HVAC-1', assignedTo: TECH_A }),
+        // Inactive-tech job falls to the unassigned lane, not its own column.
+        placedRow({ id: 'j2', referenceNumber: 'HVAC-2', assignedTo: TECH_B }),
+        placedRow({ id: 'j3', referenceNumber: 'HVAC-3', assignedTo: null }),
+      ],
+      [
+        placedRow({
+          id: 'u1',
+          referenceNumber: 'HVAC-9',
+          assignedTo: null,
+          arrivalWindowStart: null,
+          arrivalWindowEnd: null,
+          status: 'pending',
+        }),
+      ],
+    ];
+
+    const calendar = await getSchedulingCalendar(ORG_ID, START, END, [...DAYS]);
+
+    expect(calendar.days).toEqual([...DAYS]);
+    // Only the active tech gets a lane.
+    expect(calendar.lanes).toHaveLength(1);
+    expect(calendar.lanes[0].technicianId).toBe(TECH_A);
+    expect(calendar.lanes[0].jobs.map((j) => j.referenceNumber)).toEqual(['HVAC-1']);
+    expect(calendar.unassigned.map((j) => j.referenceNumber).sort()).toEqual([
+      'HVAC-2',
+      'HVAC-3',
+    ]);
+    expect(calendar.unscheduled.map((j) => j.referenceNumber)).toEqual(['HVAC-9']);
+    // S4: availability now travels with the calendar (drives out-of-hours
+    // shading + the conflict warning). None configured in this fixture → empty.
+    expect(calendar.availability).toEqual([]);
+  });
+
+  it('carries technician availability for out-of-hours shading (S4)', async () => {
+    // select 0 = techs; 1 = placed; 2 = unscheduled; 3 = availability.
+    selectResolutions = [
+      [{ id: TECH_A, name: 'Ann', email: 'a@x.io', isActive: true, createdAt: new Date() }],
+      [],
+      [],
+      [
+        { id: 'av1', technicianId: TECH_A, dayOfWeek: 1, startMinute: 480, endMinute: 1020 },
+      ],
+    ];
+
+    const calendar = await getSchedulingCalendar(ORG_ID, START, END, [...DAYS]);
+    expect(calendar.availability).toEqual([
+      { id: 'av1', technicianId: TECH_A, dayOfWeek: 1, startMinute: 480, endMinute: 1020 },
+    ]);
+  });
+
+  it('throws on an invalid range rather than querying garbage', async () => {
+    selectResolutions = [[], [], []];
+    await expect(
+      getSchedulingCalendar(ORG_ID, 'not-a-date', END, [...DAYS]),
+    ).rejects.toThrow('Invalid calendar range');
+  });
+});
+
+describe('countUnscheduledRequests', () => {
+  it('returns the count value from the aggregate query', async () => {
+    selectResolutions = [[{ value: 7 }]];
+    const result = await countUnscheduledRequests(ORG_ID);
+    expect(result).toBe(7);
+  });
+
+  it('defaults to 0 when the aggregate returns no row', async () => {
+    selectResolutions = [[]];
+    const result = await countUnscheduledRequests(ORG_ID);
+    expect(result).toBe(0);
   });
 });
 
