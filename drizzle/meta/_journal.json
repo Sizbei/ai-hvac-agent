@@ -113,6 +113,13 @@
       "when": 1780433757201,
       "tag": "0015_session_customer_fk",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1780433757202,
+      "tag": "0016_customer_archive",
+      "breakpoints": true
     }
   ]
 }

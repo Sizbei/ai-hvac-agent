@@ -64,6 +64,7 @@ vi.mock('drizzle-orm', () => ({
   max: (c: unknown) => c,
   sql: vi.fn(),
   inArray: (...a: unknown[]) => a,
+  isNull: (c: unknown) => c,
 }));
 
 vi.mock('@/lib/db/schema', () => ({
@@ -81,6 +82,7 @@ vi.mock('@/lib/db/schema', () => ({
     notes: 'customers.notes',
     createdAt: 'customers.created',
     updatedAt: 'customers.updated',
+    archivedAt: 'customers.archived',
   },
   customerEquipment: {
     id: 'equip.id',
@@ -106,6 +108,7 @@ vi.mock('@/lib/db/schema', () => ({
 import {
   findCustomerIdByContact,
   deleteCustomer,
+  archiveCustomer,
   updateCustomerContact,
   completeFollowUp,
 } from './crm-queries';
@@ -208,6 +211,35 @@ describe('deleteCustomer', () => {
     // 4 child deletes + 1 service_requests detach + 1 customer delete + 1 audit insert.
     const statements = batchMock.mock.calls[0][0] as unknown[];
     expect(statements).toHaveLength(7);
+  });
+});
+
+describe('archiveCustomer', () => {
+  it('returns false and does not write when the customer is not in the org', async () => {
+    selectQueue.push([]); // existence check → no row
+    const result = await archiveCustomer(ORG, 'missing-id');
+    expect(result).toBe(false);
+    expect(batchMock).not.toHaveBeenCalled();
+  });
+
+  it('sets archived_at and writes an audit row in one batch (no child deletes)', async () => {
+    selectQueue.push([{ id: 'c1', archivedAt: null }]); // existence check → found, active
+    const result = await archiveCustomer(ORG, 'c1', {
+      userId: 'admin-1',
+      ipAddress: '1.2.3.4',
+    });
+    expect(result).toBe(true);
+    expect(batchMock).toHaveBeenCalledTimes(1);
+    // 1 customer update (archived_at) + 1 audit insert — children untouched.
+    const statements = batchMock.mock.calls[0][0] as unknown[];
+    expect(statements).toHaveLength(2);
+  });
+
+  it('is a no-op (returns true, no write) when already archived', async () => {
+    selectQueue.push([{ id: 'c1', archivedAt: new Date() }]); // already archived
+    const result = await archiveCustomer(ORG, 'c1', { userId: 'admin-1' });
+    expect(result).toBe(true);
+    expect(batchMock).not.toHaveBeenCalled();
   });
 });
 

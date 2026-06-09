@@ -17,6 +17,7 @@ import {
   CheckCircle,
   Trash2,
   Pencil,
+  Archive,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -87,6 +88,9 @@ export default function CustomerDetailPage({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
+  const [isArchiving, setIsArchiving] = useState(false);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
   const [completingId, setCompletingId] = useState<string | null>(null);
 
   const handleCompleteFollowUp = useCallback(
@@ -139,6 +143,36 @@ export default function CustomerDetailPage({
     } catch {
       setDeleteError('Network error');
       setIsDeleting(false);
+    }
+  }, [id, router]);
+
+  const handleArchive = useCallback(async (): Promise<void> => {
+    setIsArchiving(true);
+    setArchiveError(null);
+
+    try {
+      const res = await fetch(`/api/admin/customers/${id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'archive' }),
+      });
+
+      const json = await res.json().catch(() => ({
+        error: { message: 'Failed to archive customer' },
+      }));
+
+      if (res.ok && json.success) {
+        // Archived customers drop out of the list — leave disabled and navigate
+        // (unmounts this page) so a second archive can't fire.
+        router.push('/admin/customers');
+        return;
+      }
+
+      setArchiveError(json.error?.message ?? 'Failed to archive customer');
+      setIsArchiving(false);
+    } catch {
+      setArchiveError('Network error');
+      setIsArchiving(false);
     }
   }, [id, router]);
 
@@ -228,6 +262,16 @@ export default function CustomerDetailPage({
         <Button variant="outline" onClick={() => setShowEditForm(true)}>
           <Pencil className="size-4" />
           Edit
+        </Button>
+        <Button
+          variant="outline"
+          onClick={() => {
+            setArchiveError(null);
+            setShowArchiveConfirm(true);
+          }}
+        >
+          <Archive className="size-4" />
+          Archive
         </Button>
         <Button
           variant="destructive"
@@ -555,6 +599,18 @@ export default function CustomerDetailPage({
           setShowEditForm(false);
           refetch();
         }}
+      />
+
+      <ConfirmDialog
+        open={showArchiveConfirm}
+        onOpenChange={setShowArchiveConfirm}
+        title="Archive customer?"
+        description="This hides the customer from your active list but keeps all their records. If they contact you again, they're automatically reactivated."
+        confirmLabel="Archive"
+        confirmingLabel="Archiving..."
+        isConfirming={isArchiving}
+        error={archiveError}
+        onConfirm={handleArchive}
       />
 
       <ConfirmDialog

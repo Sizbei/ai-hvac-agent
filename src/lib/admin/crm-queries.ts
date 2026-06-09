@@ -1,4 +1,4 @@
-import { eq, ne, desc, count, sql } from "drizzle-orm";
+import { eq, ne, desc, count, sql, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   customers,
@@ -69,7 +69,8 @@ export async function getCustomers(
       )`,
     })
     .from(customers)
-    .where(withTenant(customers, organizationId))
+    // Exclude archived (soft-deleted) customers from the default list.
+    .where(withTenant(customers, organizationId, isNull(customers.archivedAt)))
     .orderBy(desc(customers.createdAt))
     .limit(CUSTOMER_LIST_LIMIT);
 
@@ -535,7 +536,22 @@ export async function upsertCustomerByContact(
     email: input.email,
     phone: input.phone,
   });
-  if (existingId) return existingId;
+  if (existingId) {
+    // A returning customer who was archived is reactivated by their new
+    // booking — clearing archived_at brings them back into the active list.
+    await db
+      .update(customers)
+      .set({ archivedAt: null, updatedAt: new Date() })
+      .where(
+        withTenant(
+          customers,
+          organizationId,
+          eq(customers.id, existingId),
+          sql`${customers.archivedAt} IS NOT NULL`,
+        ),
+      );
+    return existingId;
+  }
 
   // Pick ONE arbiter index for ON CONFLICT — email when present (the stronger
   // identity key), else phone. Postgres can only infer a PARTIAL unique index
@@ -556,7 +572,8 @@ export async function upsertCustomerByContact(
     .onConflictDoUpdate({
       target: conflictTarget,
       targetWhere: conflictPredicate,
-      set: { updatedAt: new Date() },
+      // Reactivate an archived match on conflict (a returning customer rebooking).
+      set: { updatedAt: new Date(), archivedAt: null },
     })
     .returning({ id: customers.id });
 
@@ -659,6 +676,46 @@ export async function deleteCustomer(
       organizationId,
       userId: actor?.userId ?? null,
       action: "customer_deleted",
+      entity: "customers",
+      entityId: customerId,
+      ipAddress: actor?.ipAddress ?? null,
+    }),
+  ]);
+
+  return true;
+}
+
+/**
+ * Archives (soft-deletes) a customer: sets archived_at so the row drops out of
+ * the default list but is fully retained and reversible. Unlike deleteCustomer,
+ * no related rows are touched. Idempotent on an already-archived row (still
+ * returns true). Returns false only when the customer doesn't exist in the org.
+ */
+export async function archiveCustomer(
+  organizationId: string,
+  customerId: string,
+  actor?: { readonly userId?: string | null; readonly ipAddress?: string | null },
+): Promise<boolean> {
+  const [existing] = await db
+    .select({ id: customers.id, archivedAt: customers.archivedAt })
+    .from(customers)
+    .where(withTenant(customers, organizationId, eq(customers.id, customerId)));
+
+  if (!existing) return false;
+  // Already archived — no-op (don't re-stamp or write a duplicate audit row).
+  if (existing.archivedAt !== null) return true;
+
+  await db.batch([
+    db
+      .update(customers)
+      .set({ archivedAt: sql`now()`, updatedAt: sql`now()` })
+      .where(
+        withTenant(customers, organizationId, eq(customers.id, customerId)),
+      ),
+    db.insert(auditLog).values({
+      organizationId,
+      userId: actor?.userId ?? null,
+      action: "customer_archived",
       entity: "customers",
       entityId: customerId,
       ipAddress: actor?.ipAddress ?? null,

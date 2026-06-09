@@ -8,6 +8,7 @@ import {
   updateCustomerContact,
   completeFollowUp,
   deleteCustomer,
+  archiveCustomer,
 } from "@/lib/admin/crm-queries";
 import {
   updateEquipment,
@@ -348,6 +349,17 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
             "CONTACT_CONFLICT",
             409,
           );
+        }
+        return successResponse({ ok: true });
+      }
+
+      case "archive": {
+        const archived = await archiveCustomer(session.organizationId, id, {
+          userId: session.userId,
+          ipAddress,
+        });
+        if (!archived) {
+          return errorResponse("Customer not found", "NOT_FOUND", 404);
         }
         return successResponse({ ok: true });
       }

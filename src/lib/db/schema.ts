@@ -452,6 +452,10 @@ export const customers = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
+    // Soft-delete: when set, the customer is archived — hidden from the default
+    // admin list but fully retained (reversible), as opposed to the permanent
+    // DELETE. NULL = active.
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
   },
   (table) => [
     index("customers_org_id_idx").on(table.organizationId),
