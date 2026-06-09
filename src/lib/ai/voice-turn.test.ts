@@ -7,6 +7,7 @@ const {
   escalateMock,
   routeMock,
   extractSlotsMock,
+  extractAddressAtAddressStepMock,
   getRouterConfigMock,
 } = vi.hoisted(() => ({
   generateTextMock: vi.fn(),
@@ -15,6 +16,7 @@ const {
   escalateMock: vi.fn(),
   routeMock: vi.fn(),
   extractSlotsMock: vi.fn(),
+  extractAddressAtAddressStepMock: vi.fn(),
   getRouterConfigMock: vi.fn(),
 }));
 
@@ -44,7 +46,10 @@ vi.mock("@/lib/db/schema", () => ({ customerSessions: {}, messages: {} }));
 
 vi.mock("./escalate-service", () => ({ escalateSession: escalateMock }));
 vi.mock("./intent-router", () => ({ routeMessage: routeMock }));
-vi.mock("./slot-extract", () => ({ extractSlots: extractSlotsMock }));
+vi.mock("./slot-extract", () => ({
+  extractSlots: extractSlotsMock,
+  extractAddressAtAddressStep: extractAddressAtAddressStepMock,
+}));
 vi.mock("@/lib/admin/org-config-queries", () => ({
   getRouterConfig: getRouterConfigMock,
 }));
@@ -72,9 +77,11 @@ describe("voiceReply", () => {
     escalateMock.mockReset();
     routeMock.mockReset();
     extractSlotsMock.mockReset();
+    extractAddressAtAddressStepMock.mockReset();
     getRouterConfigMock.mockReset();
     getRouterConfigMock.mockResolvedValue({});
     extractSlotsMock.mockReturnValue(noSlots());
+    extractAddressAtAddressStepMock.mockReturnValue(null);
   });
 
   it("returns a spoken canned reply on a deterministic ANSWER (no LLM, no markdown)", async () => {
@@ -174,6 +181,75 @@ describe("voiceReply", () => {
     expect(generateTextMock).not.toHaveBeenCalled();
     expect(result.reply).toContain("everything I need");
     expect(result.reply.toLowerCase()).not.toContain("tap");
+  });
+
+  it("fills the address slot from a spoken-form address at the address step and does NOT re-ask the address", async () => {
+    // REGRESSION (the looping bug): voice captured slots via extractSlots, whose
+    // address matcher is the STRICT suffix/ZIP-anchored extractor. A spoken
+    // address Twilio transcribes ("123 Main Street Johnson City Tennessee" — no
+    // comma, no ZIP) never matched, the address slot never filled, and
+    // voiceNextSlotPrompt re-asked the address forever. Voice now uses the
+    // permissive at-step matcher when triage is at the address step.
+    const spoken = "123 Main Street Johnson City Tennessee";
+    // Strict extractor still misses the spoken form…
+    extractSlotsMock.mockReturnValue({ address: null, phone: null, email: null });
+    // …but the permissive at-step matcher captures it.
+    extractAddressAtAddressStepMock.mockReturnValue(spoken);
+
+    // A canned ANSWER verdict — the kind that used to get re-spoken and stall the
+    // call. With a slot just provided, voice should advance instead.
+    routeMock.mockReturnValue({
+      action: "ANSWER",
+      intentId: "smalltalk",
+      confidence: 0.5,
+      reply: "Thanks for that.",
+      issueType: null,
+      urgency: null,
+      escalate: false,
+    });
+
+    const session = {
+      ...baseSession,
+      // Safety implicitly passed; issue + urgency known; qualifying questions
+      // answered; address still null → triage's pending step is `address`, so
+      // this turn's spoken reply is captured via extractAddressAtAddressStep.
+      // After capture the merged address is filled, so voiceNextSlotPrompt
+      // advances past address — proving the loop is broken (no re-ask).
+      metadata: JSON.stringify({
+        issueType: "cooling_not_working",
+        urgency: "high",
+        address: null,
+        customerName: null,
+        customerPhone: null,
+        customerEmail: null,
+        description: "ac out",
+        isHvacRelated: true,
+        systemDownStatus: "fully_down",
+        problemDuration: "today",
+        addressVerified: "yes",
+      }),
+    };
+
+    const result = await voiceReply({
+      session,
+      history: [{ role: "user", content: "my ac is out" }],
+      userMessage: spoken,
+      ipAddress: "1.2.3.4",
+    });
+
+    expect(generateTextMock).not.toHaveBeenCalled();
+    // The address slot was captured and persisted (loop broken).
+    const persisted = updateSetMock.mock.calls
+      .map((c) => c[0] as { metadata?: string })
+      .find((s) => typeof s.metadata === "string");
+    expect(persisted?.metadata).toContain("123 Main Street");
+    // And the reply is NOT the bare service-address question again — the call
+    // advances to the next missing slot (the phone number).
+    expect(result.reply).not.toContain(
+      "What's the service address where you'd like the technician",
+    );
+    expect(result.reply.toLowerCase()).toContain("phone");
+    expect(result.endCall).toBe(false);
   });
 
   it("falls back to a non-streaming LLM call when the router defers", async () => {

@@ -33,14 +33,18 @@ export function requestOrigin(request: Request): string {
 /**
  * Choose how to voice replies for this request.
  *
- * DEFAULT = Polly <Say> (Amazon neural, female "Ruth") — single voice, no
- * synthesis round-trip, so the lowest latency. ElevenLabs <Play> is opt-in via
- * VOICE_PROVIDER=elevenlabs (and a key configured); it adds a per-turn synthesis
- * round-trip, so it's off unless explicitly chosen.
+ * DEFAULT = ElevenLabs <Play> whenever a key is configured (isElevenLabsEnabled)
+ * — the warmer "Brian" voice is used automatically, no VOICE_PROVIDER flag
+ * required. Escape hatch: set VOICE_PROVIDER=polly to force the Polly <Say>
+ * voice even when a key is present (single voice, no synthesis round-trip, lowest
+ * latency). With no key configured we always fall back to Polly.
  */
 export function resolveVoiceMode(request: Request, now: number): VoiceMode {
   const provider = process.env.VOICE_PROVIDER?.trim().toLowerCase();
-  if (provider === "elevenlabs" && isElevenLabsEnabled()) {
+  if (provider === "polly") {
+    return POLLY_VOICE;
+  }
+  if (isElevenLabsEnabled()) {
     return { kind: "elevenlabs", baseUrl: requestOrigin(request), now };
   }
   return POLLY_VOICE;

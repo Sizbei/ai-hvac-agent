@@ -15,6 +15,10 @@ afterEach(() => {
 });
 
 describe("config gating", () => {
+  it("defaults to the ElevenLabs Brian voice id", () => {
+    expect(DEFAULT_ELEVENLABS_VOICE_ID).toBe("nPczCjzI2devNBz1zQrb");
+  });
+
   it("is disabled and returns null config when no key is set", () => {
     expect(isElevenLabsEnabled()).toBe(false);
     expect(getElevenLabsConfig()).toBeNull();
