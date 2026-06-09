@@ -114,10 +114,10 @@ describe("gatherTwiML", () => {
     expect(xml.trim().endsWith("</Response>")).toBe(true);
   });
 
-  it("defaults to a short 2s speechTimeout (snappier than auto), env-overridable", () => {
+  it("defaults to a natural 1s speechTimeout (snappier than auto), env-overridable", () => {
     delete process.env.TWILIO_SPEECH_TIMEOUT;
     expect(gatherTwiML({ say: "Hi.", action: "/x" })).toContain(
-      'speechTimeout="2"',
+      'speechTimeout="1"',
     );
     process.env.TWILIO_SPEECH_TIMEOUT = "auto";
     expect(gatherTwiML({ say: "Hi.", action: "/x" })).toContain(

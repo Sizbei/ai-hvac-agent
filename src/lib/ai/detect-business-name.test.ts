@@ -35,6 +35,22 @@ describe("isBusinessName", () => {
     expect(isBusinessName("O'Brien")).toBe(false); // single surname, not possessive-s
   });
 
+  it("does NOT flag a two-token person whose surname is an ambiguous word", () => {
+    // "co", "group", "holdings", "industries", "services" are also surname-ish /
+    // common words — a plain <First> <Last> must not trip the business heuristic.
+    expect(isBusinessName("Mary Co")).toBe(false);
+    expect(isBusinessName("Jane Holdings")).toBe(false);
+    expect(isBusinessName("Will Group")).toBe(false);
+    expect(isBusinessName("Brian Industries")).toBe(false);
+    expect(isBusinessName("Sara Services")).toBe(false);
+  });
+
+  it("flags an ambiguous suffix only as the trailing token of a longer name", () => {
+    expect(isBusinessName("Acme Refrigeration Co")).toBe(true);
+    expect(isBusinessName("Smith Family Holdings")).toBe(true);
+    expect(isBusinessName("Tri Cities Industries")).toBe(true);
+  });
+
   it("handles null / empty safely", () => {
     expect(isBusinessName(null)).toBe(false);
     expect(isBusinessName(undefined)).toBe(false);

@@ -39,7 +39,7 @@ export function ChatHeader({ status, onEscalate }: ChatHeaderProps) {
         <div className="leading-tight">
           <h1 className="text-base font-semibold">HVAC Assistant</h1>
           <p className="text-[11px] text-muted-foreground">
-            AI assistant · our team follows up to confirm your visit
+            AI assistant · our team follows up on every request
           </p>
         </div>
       </div>

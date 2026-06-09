@@ -229,15 +229,47 @@ export function isEmailComplete(email: string | null): boolean {
   return EMAIL_RE.test(trimmed);
 }
 
+/**
+ * True when `phone` is a usable callback number. The dispatcher's primary key to
+ * reach the customer, so it must be more than non-empty: a NANP number has 10
+ * digits (or 11 with a leading country code 1). Rejects null, the skip sentinel,
+ * and junk like "abc" or "5" that a non-empty check would wave through.
+ */
+export function isPhoneComplete(phone: string | null): boolean {
+  if (phone === null) return false;
+  const trimmed = phone.trim();
+  if (trimmed.length === 0 || trimmed === SKIP_SENTINEL) return false;
+  const digits = trimmed.replace(/\D/g, '');
+  return digits.length === 10 || (digits.length === 11 && digits.startsWith('1'));
+}
+
 export function isExtractionComplete(extraction: ExtractionResult): boolean {
   return (
     extraction.issueType !== null &&
     extraction.urgency !== null &&
     isAddressComplete(extraction.address) &&
     isNameComplete(extraction.customerName) &&
-    extraction.customerPhone !== null &&
-    extraction.customerPhone.length > 0 &&
+    isPhoneComplete(extraction.customerPhone) &&
     isEmailComplete(extraction.customerEmail)
+  );
+}
+
+/**
+ * Completeness gate for the PHONE intake, which collects a narrower set than web
+ * chat. Over the phone we cannot reliably capture a typed email (and the name is
+ * confirmed by the technician at the door, not spelled out on a call), so voice
+ * gates only on the dispatch essentials it can actually hear: issue, urgency, a
+ * drivable address, and a callback phone. The completed voice session leaves its
+ * extraction in metadata for a human to action — it does NOT auto-insert a
+ * service_request (that's the web confirm path), so omitting email/name here
+ * never persists an invalid record; it only lets the call wrap up.
+ */
+export function isVoiceExtractionComplete(extraction: ExtractionResult): boolean {
+  return (
+    extraction.issueType !== null &&
+    extraction.urgency !== null &&
+    isAddressComplete(extraction.address) &&
+    isPhoneComplete(extraction.customerPhone)
   );
 }
 
@@ -250,7 +282,12 @@ export const serviceRequestSchema = z.object({
   urgency: z.enum(urgencyValues),
   address: z.string().min(1),
   customerName: z.string().nullable(),
-  customerPhone: z.string().min(1),
+  // Validate phone SHAPE at the write boundary too (not just .min(1)) so a direct
+  // POST to /api/session/confirm can't persist a junk/short number that bypassed
+  // the chat gate. Matches isPhoneComplete (10 or 11-digit NANP).
+  customerPhone: z
+    .string()
+    .refine(isPhoneComplete, "Phone must be a 10 or 11-digit US number"),
   customerEmail: z.string().email(),
   description: z.string().min(1),
   ...optionalIntakeFields,

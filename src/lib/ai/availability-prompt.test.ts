@@ -2,86 +2,52 @@ import { describe, it, expect } from "vitest";
 import { buildWindowPrompt } from "./availability-prompt";
 import type { OpenAvailability } from "@/lib/admin/types";
 
+// The bot no longer offers concrete dated slots — it asks a soft time-of-day
+// PREFERENCE only and never quotes/commits to a specific time or window (the
+// team coordinates the actual time with the customer later). buildWindowPrompt
+// still accepts an OpenAvailability to keep the call site stable, but ignores
+// the specifics: the same prompt comes out regardless of what's "open".
+
+const WITH_OPENINGS: OpenAvailability = {
+  days: ["2026-07-01", "2026-07-02"],
+  windows: [
+    { day: "2026-07-01", window: "morning", capacity: 2, available: 1 },
+    { day: "2026-07-01", window: "afternoon", capacity: 2, available: 0 },
+    { day: "2026-07-01", window: "evening", capacity: 2, available: 2 },
+  ],
+};
+
 describe("buildWindowPrompt", () => {
-  it("offers concrete open bands on the next bookable day, with an ASAP chip", () => {
-    const availability: OpenAvailability = {
-      days: ["2026-07-01", "2026-07-02"],
-      windows: [
-        { day: "2026-07-01", window: "morning", capacity: 2, available: 1 },
-        { day: "2026-07-01", window: "afternoon", capacity: 2, available: 0 },
-        { day: "2026-07-01", window: "evening", capacity: 2, available: 2 },
-      ],
-    };
-    const { question, chips } = buildWindowPrompt(availability);
-    // Names the day (Jul 1) and drops the "we'll confirm the exact time" hedge.
-    expect(question).toContain("Jul 1");
-    expect(question).not.toContain("confirm the exact time");
-    // Only bands with available > 0 (morning, evening) + ASAP.
-    expect(chips.map((c) => c.value)).toEqual(["morning", "evening", "asap"]);
+  it("asks a soft time-of-day preference, never naming a concrete date", () => {
+    const { question } = buildWindowPrompt(WITH_OPENINGS);
+    expect(question).toMatch(/preference on time of day/i);
+    // No concrete date and no time/window commitment language.
+    expect(question).not.toMatch(/Jul \d/);
+    expect(question).not.toMatch(/next opening/i);
+    expect(question).not.toMatch(/confirm the exact time/i);
   });
 
-  it("orders bands morning → afternoon → evening regardless of input order", () => {
-    const availability: OpenAvailability = {
-      days: ["2026-07-01"],
-      windows: [
-        { day: "2026-07-01", window: "evening", capacity: 1, available: 1 },
-        { day: "2026-07-01", window: "morning", capacity: 1, available: 1 },
-        { day: "2026-07-01", window: "afternoon", capacity: 1, available: 1 },
-      ],
-    };
-    const { chips } = buildWindowPrompt(availability);
-    expect(chips.map((c) => c.value)).toEqual([
+  it("makes clear the team coordinates the actual time", () => {
+    const { question } = buildWindowPrompt(WITH_OPENINGS);
+    expect(question).toMatch(/team coordinates the actual time/i);
+  });
+
+  it("offers the four preference chips regardless of availability", () => {
+    const open = buildWindowPrompt(WITH_OPENINGS);
+    const empty = buildWindowPrompt({ days: [], windows: [] });
+    expect(open.chips.map((c) => c.value)).toEqual([
       "morning",
       "afternoon",
       "evening",
       "asap",
     ]);
-  });
-
-  it("skips fully-booked days and uses the first day with an opening", () => {
-    const availability: OpenAvailability = {
-      days: ["2026-07-01", "2026-07-02"],
-      windows: [
-        { day: "2026-07-01", window: "morning", capacity: 1, available: 0 },
-        { day: "2026-07-02", window: "afternoon", capacity: 1, available: 1 },
-      ],
-    };
-    const { question, chips } = buildWindowPrompt(availability);
-    expect(question).toContain("Jul 2");
-    expect(chips.map((c) => c.value)).toEqual(["afternoon", "asap"]);
-  });
-
-  it("falls back to the generic question when nothing is open", () => {
-    const availability: OpenAvailability = {
-      days: ["2026-07-01"],
-      windows: [
-        { day: "2026-07-01", window: "morning", capacity: 1, available: 0 },
-      ],
-    };
-    const { question, chips } = buildWindowPrompt(availability);
-    expect(question).toContain("We'll confirm the exact time");
-    expect(chips.map((c) => c.value)).toEqual([
-      "morning",
-      "afternoon",
-      "evening",
-      "asap",
-    ]);
-  });
-
-  it("falls back when availability is empty", () => {
-    const { question, chips } = buildWindowPrompt({ days: [], windows: [] });
-    expect(question).toContain("When works best");
-    expect(chips).toHaveLength(4);
+    // Same prompt whether or not anything is "open" — availability is ignored.
+    expect(empty.question).toBe(open.question);
+    expect(empty.chips).toEqual(open.chips);
   });
 
   it("keeps chip values as the existing enum so capture stays deterministic", () => {
-    const availability: OpenAvailability = {
-      days: ["2026-07-01"],
-      windows: [
-        { day: "2026-07-01", window: "morning", capacity: 1, available: 1 },
-      ],
-    };
-    const { chips } = buildWindowPrompt(availability);
+    const { chips } = buildWindowPrompt(WITH_OPENINGS);
     const allowed = new Set(["morning", "afternoon", "evening", "asap"]);
     expect(chips.every((c) => allowed.has(c.value))).toBe(true);
   });

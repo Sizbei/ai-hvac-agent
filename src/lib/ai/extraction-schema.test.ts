@@ -3,8 +3,10 @@ import {
   extractionSchema,
   serviceRequestSchema,
   isExtractionComplete,
+  isVoiceExtractionComplete,
   isAddressComplete,
   isNameComplete,
+  isPhoneComplete,
   jobTypeForIssue,
   REQUIRED_EXTRACTION_FIELDS,
   type ExtractionResult,
@@ -15,7 +17,7 @@ const completeExtraction: ExtractionResult = {
   urgency: 'high',
   address: '123 Main St, Springfield, IL 62704',
   customerName: 'John Doe',
-  customerPhone: '555-0100',
+  customerPhone: '(555) 010-0100',
   customerEmail: 'john@example.com',
   description: 'Furnace stopped working last night',
   isHvacRelated: true,
@@ -153,6 +155,15 @@ describe('isExtractionComplete', () => {
     expect(isExtractionComplete(extraction)).toBe(false);
   });
 
+  it('should return false when customerPhone is junk (not a real number)', () => {
+    expect(
+      isExtractionComplete({ ...completeExtraction, customerPhone: 'abc' }),
+    ).toBe(false);
+    expect(
+      isExtractionComplete({ ...completeExtraction, customerPhone: '5' }),
+    ).toBe(false);
+  });
+
   it('should return false when customerName is null (now required)', () => {
     const extraction: ExtractionResult = { ...completeExtraction, customerName: null };
     expect(isExtractionComplete(extraction)).toBe(false);
@@ -192,6 +203,53 @@ describe('isExtractionComplete', () => {
       customerName: null,
     };
     expect(isExtractionComplete(extraction)).toBe(false);
+  });
+});
+
+describe('isPhoneComplete', () => {
+  it('accepts a 10-digit NANP number in any format', () => {
+    expect(isPhoneComplete('(865) 555-1212')).toBe(true);
+    expect(isPhoneComplete('8655551212')).toBe(true);
+    expect(isPhoneComplete('865.555.1212')).toBe(true);
+  });
+
+  it('accepts an 11-digit number with a leading country code 1', () => {
+    expect(isPhoneComplete('1-865-555-1212')).toBe(true);
+  });
+
+  it('rejects null, empty, the skip sentinel, and junk', () => {
+    expect(isPhoneComplete(null)).toBe(false);
+    expect(isPhoneComplete('')).toBe(false);
+    expect(isPhoneComplete('__skipped__')).toBe(false);
+    expect(isPhoneComplete('abc')).toBe(false);
+    expect(isPhoneComplete('5')).toBe(false);
+    expect(isPhoneComplete('555-0100')).toBe(false); // only 7 digits
+  });
+});
+
+describe('isVoiceExtractionComplete', () => {
+  it('completes on the dispatch essentials voice can hear (no email/name needed)', () => {
+    const voiceExtraction: ExtractionResult = {
+      ...completeExtraction,
+      customerName: null, // voice confirms name at the door
+      customerEmail: null, // voice cannot collect a typed email
+    };
+    expect(isVoiceExtractionComplete(voiceExtraction)).toBe(true);
+  });
+
+  it('still requires issue, urgency, a drivable address, and a real phone', () => {
+    expect(
+      isVoiceExtractionComplete({ ...completeExtraction, issueType: null }),
+    ).toBe(false);
+    expect(
+      isVoiceExtractionComplete({ ...completeExtraction, urgency: null }),
+    ).toBe(false);
+    expect(
+      isVoiceExtractionComplete({ ...completeExtraction, address: '123 Main St' }),
+    ).toBe(false);
+    expect(
+      isVoiceExtractionComplete({ ...completeExtraction, customerPhone: 'abc' }),
+    ).toBe(false);
   });
 });
 
@@ -305,6 +363,23 @@ describe('serviceRequestSchema (confirm payload)', () => {
       description: 'AC out',
     });
     expect(r.success).toBe(false);
+  });
+
+  it('rejects a junk/short phone at the write boundary (not just .min(1))', () => {
+    const base = {
+      issueType: 'cooling_not_working' as const,
+      urgency: 'high' as const,
+      address: '5 Oak St',
+      customerName: 'Jane',
+      customerEmail: 'jane@example.com',
+      description: 'AC out',
+    };
+    // A direct POST can't bypass the phone-shape gate the chat UI enforces.
+    expect(serviceRequestSchema.safeParse({ ...base, customerPhone: 'abc' }).success).toBe(false);
+    expect(serviceRequestSchema.safeParse({ ...base, customerPhone: '5' }).success).toBe(false);
+    expect(serviceRequestSchema.safeParse({ ...base, customerPhone: '555-0100' }).success).toBe(false);
+    // A real 10-digit number passes.
+    expect(serviceRequestSchema.safeParse({ ...base, customerPhone: '(423) 555-7788' }).success).toBe(true);
   });
 
   it('requires a valid customerEmail (null/missing is rejected)', () => {

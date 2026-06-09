@@ -107,8 +107,10 @@ export function extractNameFromCue(message: string): string | null {
   // Match a cue, then capture the following words (letters, spaces, hyphens,
   // apostrophes, periods). Case-insensitive; we re-case downstream via
   // sanitizeName, so we accept any input casing here.
+  // The name capture uses \p{L} (Unicode letters) so accented/international
+  // names are caught; the cue anchors stay ASCII. `u` flag enables \p{L}.
   const cuePattern =
-    /(?:my name(?:'s| is)?|name(?:'s| is)?(?:\s+(?:to|now))?|call me|i am|i'm|im)\s+(?:is\s+|to\s+|now\s+)?([a-z][a-z.'-]*(?:\s+[a-z][a-z.'-]*){0,3})/i;
+    /(?:my name(?:'s| is)?|name(?:'s| is)?(?:\s+(?:to|now))?|call me|i am|i'm|im)\s+(?:is\s+|to\s+|now\s+)?(\p{L}[\p{L}.'’-]*(?:\s+\p{L}[\p{L}.'’-]*){0,3})/iu;
   const match = message.match(cuePattern);
   if (!match) return null;
 
@@ -155,8 +157,10 @@ export function nameFromDirectAnswer(message: string): string | null {
 
   const words = m.split(/\s+/).filter((w) => w.length > 0);
   if (words.length === 0 || words.length > MAX_NAME_WORDS) return null;
-  // Each token must be mostly alphabetic (allow hyphen/apostrophe/period).
-  if (!words.every((w) => /^[a-z][a-z.'-]*$/i.test(w))) return null;
+  // Each token must be mostly alphabetic. \p{L} (Unicode letters) so accented and
+  // international names (José, Müller, 李) are captured, not just ASCII; still
+  // allow hyphen/apostrophe (incl. the curly ’)/period inside a token.
+  if (!words.every((w) => /^\p{L}[\p{L}.'’-]*$/u.test(w))) return null;
 
   m = words.join(" ");
   return m;

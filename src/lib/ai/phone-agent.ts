@@ -86,13 +86,13 @@ const VOICE_STEP_PHRASING: Record<string, string> = {
   duration: "And how long has this been going on?",
   address:
     "What's the service address where you'd like the technician to come? Take your time and I'll repeat it back.",
-  phone: "What's the best phone number to reach you to confirm the visit?",
+  phone: "What's the best phone number for our team to reach you?",
   urgency:
     "How urgent is this? Is it an emergency, or can it wait a little while?",
   system_type:
     "Do you know what kind of system it is? Central air, a furnace, a heat pump, a mini-split, or a boiler? You can say you're not sure.",
   preferred_window:
-    "When works best for a visit? Morning, afternoon, or evening? We'll confirm the exact time.",
+    "Any preference on time of day? Morning, afternoon, or evening? Our team coordinates the actual time with you.",
 };
 
 // Steps voice will actually ask (keeps a call from dragging). Everything else is

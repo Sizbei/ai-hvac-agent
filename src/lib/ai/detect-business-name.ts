@@ -12,21 +12,30 @@
  * flagged; only signals that strongly indicate a business are.
  */
 
-// Legal-entity / business suffixes (word-boundary matched, case-insensitive).
-const ENTITY_SUFFIXES = [
+// STRONG legal-entity suffixes — unambiguous, never a real surname. Flagged
+// wherever they appear as a standalone token ("Acme LLC", "Inc" anywhere).
+const STRONG_ENTITY_SUFFIXES = [
   "llc",
   "l.l.c",
   "inc",
   "incorporated",
   "corp",
   "corporation",
-  "co",
-  "company",
   "ltd",
   "limited",
   "lp",
   "llp",
   "pllc",
+];
+
+// WEAK / ambiguous suffixes — also common as ordinary words or surname
+// fragments ("Mary Co", "Jane Holdings", "John Lee Group"). Only a business
+// signal when they appear as the TRAILING token of a multi-token name
+// ("Acme Industries", "Smith Holdings Co"), NOT mid-name or as a 2-token
+// "<First> <Last>". This stops false-positives on real people.
+const WEAK_ENTITY_SUFFIXES = [
+  "co",
+  "company",
   "group",
   "holdings",
   "enterprises",
@@ -139,8 +148,16 @@ export function isBusinessName(name: string | null | undefined): boolean {
   const ts = tokens(name);
   if (ts.length === 0) return false;
 
-  // Legal-entity suffix as a standalone token ("… LLC", "… Inc").
-  if (ts.some((t) => ENTITY_SUFFIXES.includes(t))) return true;
+  // Strong legal-entity suffix as a standalone token, anywhere ("… LLC", "… Inc").
+  if (ts.some((t) => STRONG_ENTITY_SUFFIXES.includes(t))) return true;
+
+  // Weak/ambiguous suffix ("Co", "Group", "Holdings", "Industries", "Services"):
+  // only a business signal as the TRAILING token of a 3+-token name, so a real
+  // two-token person like "Mary Co" or "John Group" is NOT flagged, but
+  // "Acme Refrigeration Co" / "Smith Family Holdings" is.
+  if (ts.length >= 3 && WEAK_ENTITY_SUFFIXES.includes(ts[ts.length - 1])) {
+    return true;
+  }
 
   // Industry/venue word as a standalone token ("… Diner", "… Hotel").
   if (ts.some((t) => BUSINESS_WORDS.includes(t))) return true;

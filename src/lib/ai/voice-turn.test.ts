@@ -128,6 +128,54 @@ describe("voiceReply", () => {
     expect(result.endCall).toBe(true);
   });
 
+  it("completes a voice intake without email/name (voice gate excludes them)", async () => {
+    // REGRESSION: making email REQUIRED for web broke voice — isExtractionComplete
+    // required an email voice never collects, so a call could never wrap up. Voice
+    // uses isVoiceExtractionComplete (issue+urgency+address+phone), so a phone
+    // intake with those four reaches VOICE_CONFIRM_REPLY even with no email/name.
+    routeMock.mockReturnValue({
+      action: "FALLBACK_LLM", // not an ANSWER — drive completion off slots, not a canned reply
+      intentId: null,
+      confidence: 0,
+      reply: null,
+      issueType: "cooling_not_working",
+      urgency: "high",
+      escalate: false,
+    });
+    // The caller's final turn supplies the phone; address already known.
+    extractSlotsMock.mockReturnValue({
+      address: "3501 W Market St, Johnson City, TN 37604",
+      phone: "(423) 854-9505",
+      email: null,
+    });
+
+    const session = {
+      ...baseSession,
+      // issue + urgency already captured; address present; phone arrives this turn.
+      metadata: JSON.stringify({
+        issueType: "cooling_not_working",
+        urgency: "high",
+        address: "3501 W Market St, Johnson City, TN 37604",
+        customerName: null,
+        customerPhone: null,
+        customerEmail: null,
+        description: "ac out",
+        isHvacRelated: true,
+      }),
+    };
+
+    const result = await voiceReply({
+      session,
+      history: [{ role: "user", content: "my ac is out" }],
+      userMessage: "my number is 423-854-9505",
+      ipAddress: "1.2.3.4",
+    });
+
+    expect(generateTextMock).not.toHaveBeenCalled();
+    expect(result.reply).toContain("everything I need");
+    expect(result.reply.toLowerCase()).not.toContain("tap");
+  });
+
   it("falls back to a non-streaming LLM call when the router defers", async () => {
     routeMock.mockReturnValue({
       action: "FALLBACK_LLM",

@@ -156,7 +156,7 @@ const ADDRESS_STEP: TriageStep = {
 
 const PHONE_STEP: TriageStep = {
   id: "phone",
-  question: "What's the best phone number to reach you to confirm the visit?",
+  question: "What's the best phone number for our team to reach you?",
   quickReplies: [],
   optional: false,
 };
@@ -277,7 +277,7 @@ const VULNERABLE_STEP: TriageStep = {
 
 const WINDOW_STEP: TriageStep = {
   id: "preferred_window",
-  question: "When works best for a visit? (We'll confirm the exact time.)",
+  question: "Any preference on time of day? Our team coordinates the actual time with you.",
   quickReplies: [
     { label: "Morning", value: "morning" },
     { label: "Afternoon", value: "afternoon" },
