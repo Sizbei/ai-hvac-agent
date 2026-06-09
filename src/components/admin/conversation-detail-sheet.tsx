@@ -241,7 +241,13 @@ export function ConversationDetailSheet({
                 <div className="rounded-md border p-3 space-y-1">
                   <InfoRow
                     label="Channel"
-                    value={detail.channel === 'phone' ? 'Phone call' : 'Web chat'}
+                    value={
+                      detail.channel === 'phone'
+                        ? 'Phone call'
+                        : detail.channel === 'sms'
+                          ? 'Text message'
+                          : 'Web chat'
+                    }
                   />
                   <InfoRow label="Turns" value={String(detail.turnCount)} />
                   <InfoRow label="Messages" value={String(detail.messages.length)} />

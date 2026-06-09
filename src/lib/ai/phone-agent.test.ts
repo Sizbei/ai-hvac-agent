@@ -15,6 +15,12 @@ describe("selectSystemPrompt", () => {
   it("returns the web persona for the web channel (and default)", () => {
     expect(selectSystemPrompt("web")).toBe(SYSTEM_PROMPT);
   });
+
+  it("uses the web (text) persona for SMS, not the spoken phone one", () => {
+    // SMS is written text the customer can read, so the voice-only persona
+    // ("read details back", "can't see a screen") doesn't apply.
+    expect(selectSystemPrompt("sms")).toBe(SYSTEM_PROMPT);
+  });
 });
 
 describe("PHONE_SYSTEM_PROMPT", () => {

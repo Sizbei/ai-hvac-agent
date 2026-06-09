@@ -54,7 +54,7 @@ vi.mock('@/lib/db/schema', () => ({
     runningSummary: 'sessions.running_summary',
     createdAt: 'sessions.created',
   },
-  sessionChannelEnum: { enumValues: ['web', 'phone'] },
+  sessionChannelEnum: { enumValues: ['web', 'phone', 'sms'] },
   messages: { sessionId: 'messages.sid', organizationId: 'messages.org' },
   serviceRequests: {
     id: 'sr.id',

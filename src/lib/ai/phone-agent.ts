@@ -14,7 +14,7 @@
 import { SYSTEM_PROMPT } from "./system-prompt";
 import { nextTriageStep, type TriageSlots } from "./triage";
 
-export type SessionChannel = "web" | "phone";
+export type SessionChannel = "web" | "phone" | "sms";
 
 export const PHONE_SYSTEM_PROMPT = `/no_think
 You are a warm, professional HVAC customer service assistant speaking with a caller on the PHONE. Help the caller describe their heating/cooling/air-quality issue so a technician can be dispatched.
@@ -31,7 +31,12 @@ URGENCY: emergency = no heat in freezing weather, gas smell, CO alarm, HVAC floo
 
 RULES: never give DIY repair instructions; never promise pricing or scheduling. Redirect non-HVAC requests by saying you only handle heating, cooling, and air quality. If the caller is frustrated or the call runs long, offer to transfer them to a person — tell them they can stay on the line to be connected.`;
 
-/** Pick the persona for the conversation's channel. Web is the default. */
+/**
+ * Pick the persona for the conversation's channel. The phone persona is tuned
+ * for a spoken call (short sentences, read details back, "can't see a screen").
+ * SMS is written text the customer can read, so it uses the default web persona
+ * rather than the voice one. Web is the default.
+ */
 export function selectSystemPrompt(channel: SessionChannel): string {
   return channel === "phone" ? PHONE_SYSTEM_PROMPT : SYSTEM_PROMPT;
 }

@@ -50,10 +50,11 @@ export const requestStatusEnum = pgEnum("request_status", [
 ]);
 
 // The medium a conversation came in over. "web" = the embeddable chat widget
-// (the default for every pre-existing session); "phone" = a voice call handled
-// by the telephone sub-agent (Twilio). Drives the admin channel badge/filter
-// and which system-prompt persona the agent uses.
-export const sessionChannelEnum = pgEnum("session_channel", ["web", "phone"]);
+// (the default for every pre-existing session); "phone" = a voice call and
+// "sms" = an inbound text message, both handled by the telephone sub-agent
+// (Twilio). Drives the admin channel badge/filter and which system-prompt
+// persona the agent uses.
+export const sessionChannelEnum = pgEnum("session_channel", ["web", "phone", "sms"]);
 
 // ── ServiceTitan-style intake enums (comprehensive intake overhaul) ──
 // Work classification, distinct from the customer-language `issueType` symptom.

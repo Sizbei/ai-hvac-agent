@@ -99,6 +99,13 @@
       "when": 1780433757199,
       "tag": "0013_after_hours",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1780433757200,
+      "tag": "0014_sms_channel",
+      "breakpoints": true
     }
   ]
 }
