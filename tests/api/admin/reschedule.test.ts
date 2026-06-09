@@ -27,6 +27,21 @@ vi.mock('@/lib/logger', () => ({
   logger: { info: vi.fn(), error: vi.fn() },
 }));
 
+// after() runs outside a request scope in tests — invoke the callback inline so
+// the route's background Google Calendar sync is exercised. Mirrors the
+// next/server mock in the sms/voice webhook tests.
+vi.mock('next/server', async (orig) => {
+  const actual = await orig<typeof import('next/server')>();
+  return { ...actual, after: (fn: () => void) => fn() };
+});
+
+// The calendar sync is its own unit-tested module; stub it here so this stays a
+// focused route test (no DB / network).
+vi.mock('@/lib/integrations/google-calendar/sync', () => ({
+  syncRequestToCalendar: vi.fn().mockResolvedValue(undefined),
+  deleteRequestFromCalendar: vi.fn().mockResolvedValue(undefined),
+}));
+
 // calendar-time + arrival-window run REAL — they're pure timezone math, and we
 // want to assert the route persists the Eastern window the dispatcher dropped on.
 import { POST as rescheduleHandler } from '@/app/api/admin/requests/[id]/reschedule/route';

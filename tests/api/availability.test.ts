@@ -147,6 +147,15 @@ describe("GET /api/availability — validation", () => {
     expect(body.error.code).toBe("VALIDATION_FAILED");
   });
 
+  it("400s a syntactically-valid-but-impossible start date (e.g. Feb 31)", async () => {
+    // MED-1: the round-trip guard rejects 2026-02-31 (which new Date would
+    // silently roll forward to Mar 3) instead of scheduling against the wrong day.
+    const res = await GET(req({ url: "http://localhost:3000/api/availability?start=2026-02-31" }));
+    const body = await res.json();
+    expect(res.status).toBe(400);
+    expect(body.error.code).toBe("VALIDATION_FAILED");
+  });
+
   it("400s a day count over the max", async () => {
     const res = await GET(req({ url: "http://localhost:3000/api/availability?days=99" }));
     const body = await res.json();

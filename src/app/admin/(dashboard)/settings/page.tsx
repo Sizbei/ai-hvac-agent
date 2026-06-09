@@ -9,6 +9,7 @@ import {
   Code2,
   SlidersHorizontal,
   Clock,
+  Calendar,
 } from 'lucide-react';
 import { useOrgSettings } from '@/hooks/use-org-settings';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -21,6 +22,7 @@ import { CustomFaqsPanel } from '@/components/admin/settings/custom-faqs-panel';
 import { EmbedPanel } from '@/components/admin/settings/embed-panel';
 import { ConversationLimitsPanel } from '@/components/admin/settings/conversation-limits-panel';
 import { AfterHoursPanel } from '@/components/admin/settings/after-hours-panel';
+import { GoogleCalendarPanel } from '@/components/admin/settings/google-calendar-panel';
 
 export default function SettingsPage() {
   const settings = useOrgSettings();
@@ -78,6 +80,10 @@ export default function SettingsPage() {
               <Clock className="size-4" />
               After-hours
             </TabsTrigger>
+            <TabsTrigger value="calendar">
+              <Calendar className="size-4" />
+              Calendar
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="branding" className="mt-6">
@@ -114,6 +120,9 @@ export default function SettingsPage() {
               config={settings.config}
               onSave={settings.saveConfig}
             />
+          </TabsContent>
+          <TabsContent value="calendar" className="mt-6">
+            <GoogleCalendarPanel />
           </TabsContent>
         </Tabs>
       )}

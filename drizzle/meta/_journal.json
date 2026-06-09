@@ -127,6 +127,20 @@
       "when": 1780433757203,
       "tag": "0017_technician_availability",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1780433757204,
+      "tag": "0018_tech_availability_unique_slot",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1780433757205,
+      "tag": "0019_google_calendar_connections",
+      "breakpoints": true
     }
   ]
 }

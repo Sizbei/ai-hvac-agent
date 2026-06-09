@@ -12,6 +12,7 @@ import {
   arrivalWindowUtcForBusinessDate,
   windowBandPlacement,
   windowRowOfInstant,
+  isRealIsoDate,
   CALENDAR_START_HOUR,
   CALENDAR_END_HOUR,
 } from "./calendar-time";
@@ -214,5 +215,28 @@ describe("windowRowOfInstant", () => {
 
   it("returns null for an instant outside the discrete bands (e.g. 6 AM)", () => {
     expect(windowRowOfInstant(new Date("2026-07-01T10:00:00.000Z"))).toBeNull();
+  });
+});
+
+describe("isRealIsoDate", () => {
+  it("accepts a real YYYY-MM-DD date", () => {
+    expect(isRealIsoDate("2026-06-09")).toBe(true);
+    expect(isRealIsoDate("2024-02-29")).toBe(true); // leap day
+  });
+
+  it("rejects a syntactically-valid-but-impossible date (round-trip guard)", () => {
+    // new Date silently rolls Feb 31 → Mar 3, so the re-serialised date differs.
+    expect(isRealIsoDate("2026-02-31")).toBe(false);
+    expect(isRealIsoDate("2026-13-01")).toBe(false); // month 13
+    expect(isRealIsoDate("2025-02-29")).toBe(false); // not a leap year
+    expect(isRealIsoDate("2026-04-31")).toBe(false); // April has 30 days
+  });
+
+  it("rejects anything not in strict YYYY-MM-DD shape", () => {
+    expect(isRealIsoDate("2026-6-9")).toBe(false);
+    expect(isRealIsoDate("06/09/2026")).toBe(false);
+    expect(isRealIsoDate("2026-06-09T00:00:00Z")).toBe(false);
+    expect(isRealIsoDate("not-a-date")).toBe(false);
+    expect(isRealIsoDate("")).toBe(false);
   });
 });

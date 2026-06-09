@@ -124,6 +124,7 @@ vi.mock("@/lib/db/schema", () => ({
 import {
   getTechnicianAvailability,
   setTechnicianAvailability,
+  InvalidAvailabilitySlotError,
   checkScheduleConflict,
   getScheduledJobsForRange,
   listUnscheduledRequests,
@@ -201,6 +202,56 @@ describe("setTechnicianAvailability", () => {
     const statements = batchMock.mock.calls[0][0] as unknown[];
     expect(statements).toHaveLength(2); // delete + insert
     expect(insertMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts a back-to-back split shift (8–12 then 12–17)", async () => {
+    deleteQueue.push([]);
+    await expect(
+      setTechnicianAvailability(ORG, TECH, [
+        { dayOfWeek: 1, startMinute: 480, endMinute: 720 },
+        { dayOfWeek: 1, startMinute: 720, endMinute: 1020 },
+      ]),
+    ).resolves.toBeUndefined();
+    expect(batchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts an end-of-day slot ending exactly at 1440", async () => {
+    deleteQueue.push([]);
+    await expect(
+      setTechnicianAvailability(ORG, TECH, [
+        { dayOfWeek: 6, startMinute: 0, endMinute: 1440 },
+      ]),
+    ).resolves.toBeUndefined();
+    expect(batchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["dayOfWeek below 0", { dayOfWeek: -1, startMinute: 480, endMinute: 720 }],
+    ["dayOfWeek above 6", { dayOfWeek: 7, startMinute: 480, endMinute: 720 }],
+    ["non-integer dayOfWeek", { dayOfWeek: 1.5, startMinute: 480, endMinute: 720 }],
+    ["negative startMinute", { dayOfWeek: 1, startMinute: -1, endMinute: 720 }],
+    ["start == end", { dayOfWeek: 1, startMinute: 600, endMinute: 600 }],
+    ["start > end", { dayOfWeek: 1, startMinute: 720, endMinute: 480 }],
+    ["endMinute above 1440", { dayOfWeek: 1, startMinute: 1200, endMinute: 1441 }],
+    ["non-integer startMinute", { dayOfWeek: 1, startMinute: 1.5, endMinute: 720 }],
+  ])("rejects an out-of-range slot (%s) without touching the DB", async (_label, slot) => {
+    await expect(
+      setTechnicianAvailability(ORG, TECH, [slot]),
+    ).rejects.toBeInstanceOf(InvalidAvailabilitySlotError);
+    // Validation runs BEFORE any write — nothing is deleted or inserted.
+    expect(batchMock).not.toHaveBeenCalled();
+    expect(insertMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects the whole set when ANY slot is invalid (no partial write)", async () => {
+    await expect(
+      setTechnicianAvailability(ORG, TECH, [
+        { dayOfWeek: 1, startMinute: 480, endMinute: 720 }, // valid
+        { dayOfWeek: 1, startMinute: 720, endMinute: 480 }, // invalid
+      ]),
+    ).rejects.toBeInstanceOf(InvalidAvailabilitySlotError);
+    expect(batchMock).not.toHaveBeenCalled();
+    expect(insertMock).not.toHaveBeenCalled();
   });
 });
 
