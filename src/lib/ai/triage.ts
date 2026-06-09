@@ -373,6 +373,35 @@ const STEP_TO_EXTRA: Record<string, string> = {
 // "Complete & Submit". Keeping this short is the fix for the never-ending intake.
 const ENRICHMENT_ORDER: readonly TriageStep[] = [SYSTEM_TYPE_STEP, WINDOW_STEP];
 
+// Service lines whose equipment is NOT described by the forced-air HVAC
+// system-type taxonomy (central_ac / furnace / heat pump / mini-split / boiler).
+// Asking "What kind of system is it?" for a walk-in cooler, ice machine, or
+// commercial oven/range is nonsensical and produces a misleading answer — e.g. a
+// downed commercial range getting stored as systemType "furnace". For these the
+// system_type enrichment step is skipped entirely.
+const SYSTEM_TYPE_NOT_APPLICABLE: ReadonlySet<string> = new Set([
+  "refrigeration",
+  "ice_machine",
+  "commercial_appliance",
+]);
+
+/**
+ * Whether an enrichment step is relevant to the given issue type. Only the
+ * system_type step is conditional today: it's suppressed for the non-HVAC-system
+ * service lines (see SYSTEM_TYPE_NOT_APPLICABLE). Every other step always
+ * applies. A null issue type (not yet classified) leaves the step applicable so
+ * we never prematurely suppress it.
+ */
+function enrichmentStepApplies(
+  stepId: string,
+  issueType: string | null,
+): boolean {
+  if (stepId === SYSTEM_TYPE_STEP.id && issueType !== null) {
+    return !SYSTEM_TYPE_NOT_APPLICABLE.has(issueType);
+  }
+  return true;
+}
+
 // Enrichment steps the engine NEVER proactively asks (documentation only —
 // nextTriageStep does NOT iterate this list). If the customer VOLUNTEERS one of
 // these (e.g. mentions a business name → propertyType=commercial), the caller's
@@ -569,8 +598,11 @@ export function nextTriageStep(slots: TriageSlots): TriageStep | null {
   if (!slots.email) return EMAIL_STEP;
   if (!slots.urgency) return URGENCY_STEP;
 
-  // 4. Optional enrichment, in order; skip any already filled or skipped.
+  // 4. Optional enrichment, in order; skip any already filled or skipped, and
+  // any step that doesn't apply to this issue type (e.g. system_type for a
+  // commercial appliance / refrigeration / ice machine).
   for (const step of ENRICHMENT_ORDER) {
+    if (!enrichmentStepApplies(step.id, slots.issueType)) continue;
     if (!extraFilledOrSkipped(slots, step)) return step;
   }
 

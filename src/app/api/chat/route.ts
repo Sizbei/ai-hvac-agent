@@ -761,8 +761,17 @@ export async function POST(request: NextRequest) {
       const addressAnswer = atAddressStep
         ? addressSelected
           ? guardrailResult.sanitized.trim().slice(0, 500)
-          : extracted.address ??
-            extractAddressAtAddressStep(guardrailResult.sanitized)
+          : // The step extractor (purpose-built for "the whole reply IS the
+            // address") must win over the loose multi-field extractor here.
+            // extracted.address comes from extractAddressLoose, which truncates
+            // at the first comma — so a non-US / suffix-less address like
+            // "21 Avoca Crescent, Ballarat, Victoria 3350" was being stored as
+            // just "21 Avoca Crescent", dropping city/state/postcode and
+            // triggering a spurious city/ZIP re-ask loop. Prefer the verbatim
+            // step capture; fall back to the loose street only when the step
+            // extractor declines (e.g. a refusal/redirect reply).
+            extractAddressAtAddressStep(guardrailResult.sanitized) ??
+            extracted.address
         : extracted.address;
 
       // A "slot provision" turn: the customer supplied an address/phone/email.

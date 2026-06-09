@@ -4,6 +4,7 @@ import {
   extractPhone,
   extractEmail,
   extractAddress,
+  extractAddressLoose,
   extractAddressAtAddressStep,
 } from './slot-extract';
 
@@ -140,6 +141,22 @@ describe('extractAddressAtAddressStep', () => {
     expect(
       extractAddressAtAddressStep('Route Nationale # 3, Commune Pignon, Nord'),
     ).toBe('Route Nationale # 3, Commune Pignon, Nord');
+  });
+
+  it('keeps a suffix-less Australian address whole (re-ask loop bug)', () => {
+    // "Crescent" is not a recognized street suffix and "3350" is a 4-digit
+    // postcode, so the strict + loose extractors truncate at the first comma
+    // ("21 Avoca Crescent"). The step extractor must return the WHOLE reply so
+    // the chat route stores city/state/postcode and never fires a spurious
+    // city/ZIP follow-up. Regression for the transcript re-ask loop.
+    expect(
+      extractAddressAtAddressStep('21 Avoca Crescent, Ballarat, Victoria 3350'),
+    ).toBe('21 Avoca Crescent, Ballarat, Victoria 3350');
+    // Document why ordering matters in the route: the loose extractor truncates
+    // the same input, so it must NOT be preferred at the address step.
+    expect(
+      extractAddressLoose('21 Avoca Crescent, Ballarat, Victoria 3350'),
+    ).toBe('21 Avoca Crescent');
   });
 
   it('captures a suffix-less number-led address', () => {

@@ -432,6 +432,44 @@ describe("enrichment cap — only system_type then preferred_window", () => {
     expect(nextTriageStep(s)).toBeNull();
     expect(s.extras.propertyType).toBe("commercial");
   });
+
+  it("SKIPS system_type for non-HVAC-system service lines (commercial appliance)", () => {
+    // A downed commercial oven/range is a valid Spears service line, but the
+    // forced-air "Central AC / Furnace / Heat pump…" taxonomy doesn't describe
+    // it — asking would store a misleading systemType like "furnace". The engine
+    // must jump straight to preferred_window and never ask system_type.
+    const s1 = coreFilled();
+    s1.issueType = "commercial_appliance";
+    expect(nextTriageStep(s1)?.id).toBe("preferred_window");
+
+    // The whole flow from core onward yields ONLY preferred_window.
+    let s = coreFilled();
+    s.issueType = "commercial_appliance";
+    const seen: string[] = [];
+    for (let i = 0; i < 20; i++) {
+      const step = nextTriageStep(s);
+      if (!step) break;
+      seen.push(step.id);
+      s = applyTriageAnswer(s, step, step.quickReplies[0]?.value ?? "morning");
+    }
+    expect(seen).toEqual(["preferred_window"]);
+  });
+
+  it("STILL asks system_type for refrigeration's relative — a true HVAC issue", () => {
+    // Sanity guard: the suppression is scoped to the three non-HVAC service
+    // lines, so a normal cooling issue still gets the system_type question.
+    const s = coreFilled();
+    s.issueType = "cooling_not_working";
+    expect(nextTriageStep(s)?.id).toBe("system_type");
+  });
+
+  it("SKIPS system_type for refrigeration and ice_machine too", () => {
+    for (const issueType of ["refrigeration", "ice_machine"]) {
+      const s = coreFilled();
+      s.issueType = issueType;
+      expect(nextTriageStep(s)?.id).toBe("preferred_window");
+    }
+  });
 });
 
 describe("partial address → single city/ZIP follow-up", () => {
