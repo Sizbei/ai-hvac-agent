@@ -11,10 +11,12 @@ const XML_DECL = '<?xml version="1.0" encoding="UTF-8"?>';
 
 /**
  * Default spoken voice — an Amazon Polly NEURAL voice (natural, far better than
- * Twilio's legacy standard voices). Overridable per deployment via TWILIO_VOICE
- * (any value Twilio's <Say voice=...> accepts, e.g. "Polly.Matthew-Neural").
+ * Twilio's legacy standard voices). Ruth is the warmest, most natural US English
+ * neural voice — a friendlier default than Joanna for a customer-service line.
+ * Overridable per deployment via TWILIO_VOICE (any value Twilio's <Say voice=...>
+ * accepts, e.g. "Polly.Matthew-Neural" or "Polly.Ruth-Generative").
  */
-export const DEFAULT_VOICE = "Polly.Joanna-Neural";
+export const DEFAULT_VOICE = "Polly.Ruth-Neural";
 
 /** Resolve the configured TTS voice at call time (env override or default). */
 function resolveVoice(): string {

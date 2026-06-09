@@ -10,6 +10,28 @@ function getDatabaseUrl(): string {
   return url;
 }
 
-const sql = neon(getDatabaseUrl());
-export const db = drizzle(sql, { schema });
-export type Database = typeof db;
+type DrizzleDb = ReturnType<typeof drizzle<typeof schema>>;
+
+// Connect lazily on first use. `next build` evaluates route modules to collect
+// page data, which imports this module; connecting eagerly here would read
+// DATABASE_URL at build time and throw when it isn't present in the build
+// environment (it's a runtime-only secret). The Proxy defers neon()/drizzle()
+// until the first query, so importing `db` never touches DATABASE_URL — only an
+// actual request does.
+let cached: DrizzleDb | undefined;
+
+function getDb(): DrizzleDb {
+  if (!cached) {
+    const sql = neon(getDatabaseUrl());
+    cached = drizzle(sql, { schema });
+  }
+  return cached;
+}
+
+export const db = new Proxy({} as DrizzleDb, {
+  get(_target, prop, receiver) {
+    return Reflect.get(getDb(), prop, receiver);
+  },
+}) as DrizzleDb;
+
+export type Database = DrizzleDb;

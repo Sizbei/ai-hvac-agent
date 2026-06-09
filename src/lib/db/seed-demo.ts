@@ -24,6 +24,29 @@ dotenv.config({ path: ".env.local" });
 const DEMO_ORG_ID = "00000000-0000-0000-0000-000000000001";
 const SESSION_TOKEN_PREFIX = "demo-seed-";
 
+// ── Spears Services, Inc. brand/config (verified facts) ──
+// Seeded into organizationSettings (JSONB columns — no migration). businessInfo
+// keys mirror businessInfoSchema in org-config-types.ts so personalizeAnswer and
+// the LLM brand block read from one source. afterHoursConfig keys mirror
+// afterHoursConfigSchema (flatFee/emergencyMultiplier left at the defaults — the
+// bot never quotes them; they drive admin-side surcharge math only).
+const SPEARS_COMPANY_NAME = "Spears Services";
+const SPEARS_BUSINESS_INFO = {
+  phone: "423-854-9505",
+  email: "office@spearsservices.com",
+  serviceArea:
+    "Northeast Tennessee, Southwest Virginia & Western North Carolina (Tri-Cities)",
+} as const;
+const SPEARS_AFTER_HOURS_CONFIG = {
+  enabled: true,
+  startHour: 17, // 5pm
+  endHour: 8, // 8am — after-hours window wraps 5pm–8am
+  weekendsAreAfterHours: true,
+  timezone: "America/New_York", // Johnson City, TN is Eastern
+  flatFee: 150,
+  emergencyMultiplier: 1.5,
+} as const;
+
 type Urgency = "low" | "medium" | "high" | "emergency";
 type IssueType =
   | "heating_not_working"
@@ -506,6 +529,28 @@ async function seedDemo(): Promise<void> {
   const adminId = techByEmail.get("admin@demo-hvac.com") ?? null;
 
   await clearPreviousDemoData(db);
+
+  // Org config (Spears brand + after-hours). JSONB columns — no migration.
+  // Idempotent upsert keyed on the org PK; only the brand-relevant columns are
+  // set, everything else keeps its existing/default value.
+  await db
+    .insert(schema.organizationSettings)
+    .values({
+      organizationId: DEMO_ORG_ID,
+      companyName: SPEARS_COMPANY_NAME,
+      businessInfo: SPEARS_BUSINESS_INFO,
+      afterHoursConfig: SPEARS_AFTER_HOURS_CONFIG,
+    })
+    .onConflictDoUpdate({
+      target: schema.organizationSettings.organizationId,
+      set: {
+        companyName: SPEARS_COMPANY_NAME,
+        businessInfo: SPEARS_BUSINESS_INFO,
+        afterHoursConfig: SPEARS_AFTER_HOURS_CONFIG,
+        updatedAt: new Date(),
+      },
+    });
+  console.log("  Seeded org config: Spears Services (brand + after-hours)");
 
   const now = Date.now();
   const DAY_MS = 24 * 60 * 60 * 1000;

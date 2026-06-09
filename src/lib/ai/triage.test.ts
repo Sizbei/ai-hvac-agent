@@ -12,6 +12,7 @@ function slots(overrides: Partial<TriageSlots> = {}): TriageSlots {
     issueType: "cooling_not_working",
     urgency: null,
     address: null,
+    name: null,
     phone: null,
     safetyScreenPassed: false,
     extras: {},
@@ -56,12 +57,55 @@ describe("nextTriageStep — ordering", () => {
     expect(step?.id).toBe("phone");
   });
 
+  it("asks for the customer's full name after phone, before urgency", () => {
+    const step = nextTriageStep(
+      slots({
+        safetyScreenPassed: true,
+        address: "5 Oak St",
+        phone: "555-1234",
+        extras: { systemDownStatus: "fully_down", problemDuration: "today" },
+      }),
+    );
+    expect(step?.id).toBe("name");
+    // Asks for first + last, with no quick replies (free-text), and is required.
+    expect(step!.question.toLowerCase()).toMatch(/full name|first and last/);
+    expect(step!.quickReplies.length).toBe(0);
+    expect(step!.optional).toBe(false);
+  });
+
+  it("asks urgency only after name is known", () => {
+    const step = nextTriageStep(
+      slots({
+        safetyScreenPassed: true,
+        address: "5 Oak St",
+        phone: "555-1234",
+        name: "Jane Doe",
+        extras: { systemDownStatus: "fully_down", problemDuration: "today" },
+      }),
+    );
+    expect(step?.id).toBe("urgency");
+  });
+
+  it("does not re-ask name once it is filled", () => {
+    const step = nextTriageStep(
+      slots({
+        safetyScreenPassed: true,
+        address: "5 Oak St",
+        phone: "555-1234",
+        name: "Jane Doe",
+        extras: { systemDownStatus: "fully_down", problemDuration: "today" },
+      }),
+    );
+    expect(step?.id).not.toBe("name");
+  });
+
   it("asks the comprehensive enrichment questions once required slots are filled", () => {
     const step = nextTriageStep(
       slots({
         safetyScreenPassed: true,
         urgency: "high",
         address: "5 Oak St",
+        name: "Jane Doe",
         phone: "555-1234",
         extras: { systemDownStatus: "fully_down", problemDuration: "today" },
       }),
@@ -77,6 +121,7 @@ describe("nextTriageStep — ordering", () => {
         safetyScreenPassed: true,
         urgency: "high",
         address: "5 Oak St",
+        name: "Jane Doe",
         phone: "555-1234",
         extras: {
           systemDownStatus: "fully_down",
@@ -129,6 +174,7 @@ describe("applyTriageAnswer — optional fields are skippable", () => {
       safetyScreenPassed: true,
       urgency: "high",
       address: "5 Oak St",
+      name: "Jane Doe",
       phone: "555-1234",
       extras: { systemDownStatus: "fully_down", problemDuration: "today" },
     });
@@ -145,6 +191,7 @@ describe("applyTriageAnswer — optional fields are skippable", () => {
       safetyScreenPassed: true,
       urgency: "high",
       address: "5 Oak St",
+      name: "Jane Doe",
       phone: "555-1234",
       extras: { systemDownStatus: "fully_down", problemDuration: "today" },
     });
@@ -170,14 +217,19 @@ describe("applyTriageAnswer — optional fields are skippable", () => {
 });
 
 describe("REQUIRED_FOR_SUBMIT", () => {
-  it("lists the hard gate (safety + issue + urgency + address + phone)", () => {
+  it("lists the hard gate (safety + issue + urgency + address + name + phone)", () => {
     expect(REQUIRED_FOR_SUBMIT).toEqual([
       "safetyScreenPassed",
       "issueType",
       "urgency",
       "address",
+      "name",
       "phone",
     ]);
+  });
+
+  it("includes name as a required field", () => {
+    expect(REQUIRED_FOR_SUBMIT).toContain("name");
   });
 });
 
@@ -228,6 +280,60 @@ describe("captureEnrichmentAnswer (review fixes)", () => {
   it("does NOT let a required step (system_down/duration) be skipped", async () => {
     const { captureEnrichmentAnswer } = await import("./triage");
     expect(captureEnrichmentAnswer("system_down", "skip")).toBeNull();
+  });
+
+  it("fuzzily maps natural system_down phrasing onto the enum value", async () => {
+    const { captureEnrichmentAnswer } = await import("./triage");
+    expect(captureEnrichmentAnswer("system_down", "my system is dead")).toEqual({
+      key: "systemDownStatus",
+      value: "fully_down",
+    });
+    expect(captureEnrichmentAnswer("system_down", "it still kind of runs")).toEqual({
+      key: "systemDownStatus",
+      value: "partially_working",
+    });
+    // A few more natural phrasings on both sides of the enum.
+    for (const dead of [
+      "it's completely dead",
+      "won't turn on at all",
+      "there's no power to it",
+      "totally dead",
+    ]) {
+      expect(captureEnrichmentAnswer("system_down", dead)?.value).toBe("fully_down");
+    }
+    for (const partial of [
+      "it's sort of working",
+      "blows but warm",
+      "the fan is weak",
+      "it still runs but barely",
+    ]) {
+      expect(captureEnrichmentAnswer("system_down", partial)?.value).toBe(
+        "partially_working",
+      );
+    }
+  });
+
+  it("does not let fuzzy mapping override an exact enum value", async () => {
+    const { captureEnrichmentAnswer } = await import("./triage");
+    // Exact chip values still capture exactly (and aren't reinterpreted).
+    expect(captureEnrichmentAnswer("system_down", "fully_down")).toEqual({
+      key: "systemDownStatus",
+      value: "fully_down",
+    });
+    expect(captureEnrichmentAnswer("system_down", "partially_working")).toEqual({
+      key: "systemDownStatus",
+      value: "partially_working",
+    });
+    expect(captureEnrichmentAnswer("system_down", "unknown")).toEqual({
+      key: "systemDownStatus",
+      value: "unknown",
+    });
+  });
+
+  it("returns null for a system_down answer with no enum or synonym match", async () => {
+    const { captureEnrichmentAnswer } = await import("./triage");
+    // Unrecognized → null so the caller can fall back to the LLM.
+    expect(captureEnrichmentAnswer("system_down", "the weather is nice")).toBeNull();
   });
 
   it("a skipped step is treated as resolved by nextTriageStep (sentinel in extras)", async () => {

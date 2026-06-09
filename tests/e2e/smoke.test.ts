@@ -245,6 +245,9 @@ vi.mock('@/lib/admin/org-config-queries', () => ({
 vi.mock('@/lib/ai/system-prompt', () => ({
   SYSTEM_PROMPT: 'You are an HVAC assistant.',
   EXTRACTION_INSTRUCTION: 'Extract service request details.',
+  // The chat route now brands the LLM persona via buildSystemPrompt(brandInfo);
+  // stub it to a fixed persona so the smoke flow doesn't depend on branding.
+  buildSystemPrompt: vi.fn(() => 'You are an HVAC assistant.'),
 }));
 
 vi.mock('@/lib/ai/guardrails', () => ({
@@ -426,6 +429,8 @@ describe('E2E Smoke Test: Full Customer-to-Admin Flow', () => {
         },
       ])
       // Message history (empty)
+      .mockResolvedValueOnce([])
+      // After-hours config lookup (no settings row → resolves to default/disabled)
       .mockResolvedValueOnce([]);
 
     // Mock streamText to return an object with toTextStreamResponse

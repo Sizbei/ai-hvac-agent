@@ -68,7 +68,8 @@ describe("compactSessionIfNeeded", () => {
     selectResult.value = [{ runningSummary: "prior" }];
     summarizeMock.mockResolvedValue("new summary");
 
-    const history = makeHistory(COMPACTION_THRESHOLD + 2);
+    // +1 is the first message past the threshold, which fires under the throttle.
+    const history = makeHistory(COMPACTION_THRESHOLD + 1);
     const did = await compactSessionIfNeeded({
       sessionId: "s1",
       organizationId: "o1",
@@ -93,10 +94,26 @@ describe("compactSessionIfNeeded", () => {
     const did = await compactSessionIfNeeded({
       sessionId: "s1",
       organizationId: "o1",
+      history: makeHistory(COMPACTION_THRESHOLD + 1),
+    });
+
+    expect(did).toBe(false);
+    expect(updateSet).not.toHaveBeenCalled();
+  });
+
+  it("skips compaction on the throttled in-between turns past the threshold", async () => {
+    selectResult.value = [{ runningSummary: "prior" }];
+    summarizeMock.mockResolvedValue("new summary");
+
+    // +2 is past the threshold but lands between firings under the throttle.
+    const did = await compactSessionIfNeeded({
+      sessionId: "s1",
+      organizationId: "o1",
       history: makeHistory(COMPACTION_THRESHOLD + 2),
     });
 
     expect(did).toBe(false);
+    expect(summarizeMock).not.toHaveBeenCalled();
     expect(updateSet).not.toHaveBeenCalled();
   });
 });

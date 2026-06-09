@@ -16,6 +16,7 @@ import {
   buildModelMessages,
   summarizeOlderTurns,
   COMPACTION_THRESHOLD,
+  COMPACTION_INTERVAL,
   MAX_HISTORY,
   shouldCompact,
   selectTurnsToCompact,
@@ -75,8 +76,36 @@ describe("shouldCompact", () => {
     expect(shouldCompact(COMPACTION_THRESHOLD)).toBe(false);
     expect(shouldCompact(COMPACTION_THRESHOLD - 1)).toBe(false);
   });
-  it("is true above the threshold", () => {
+  it("fires on the first message past the threshold", () => {
     expect(shouldCompact(COMPACTION_THRESHOLD + 1)).toBe(true);
+  });
+
+  it("throttles to every COMPACTION_INTERVAL messages past the threshold", () => {
+    // First firing is at +1, then every Nth message after that. The in-between
+    // turns are skipped (folded in on the next firing).
+    expect(shouldCompact(COMPACTION_THRESHOLD + 1)).toBe(true);
+    for (let i = 2; i <= COMPACTION_INTERVAL; i++) {
+      expect(shouldCompact(COMPACTION_THRESHOLD + i)).toBe(false);
+    }
+    // +1 + INTERVAL is the next firing.
+    expect(shouldCompact(COMPACTION_THRESHOLD + 1 + COMPACTION_INTERVAL)).toBe(
+      true,
+    );
+    for (let i = 1; i < COMPACTION_INTERVAL; i++) {
+      expect(
+        shouldCompact(COMPACTION_THRESHOLD + 1 + COMPACTION_INTERVAL + i),
+      ).toBe(false);
+    }
+    expect(
+      shouldCompact(COMPACTION_THRESHOLD + 1 + 2 * COMPACTION_INTERVAL),
+    ).toBe(true);
+  });
+
+  it("keeps the firing cadence within the recent window so no turn is lost", () => {
+    // Between two firings the conversation grows by at most COMPACTION_INTERVAL,
+    // which must not exceed MAX_HISTORY or an aged-out turn could scroll off the
+    // verbatim window before being summarized.
+    expect(COMPACTION_INTERVAL).toBeLessThanOrEqual(MAX_HISTORY);
   });
 });
 

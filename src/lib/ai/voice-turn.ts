@@ -94,6 +94,7 @@ export async function voiceReply(params: {
     issueType: knownSlots.issueType ?? null,
     urgency: knownSlots.urgency ?? null,
     address: knownSlots.address ?? null,
+    name: knownSlots.name ?? null,
     phone: knownSlots.phone ?? null,
     safetyScreenPassed: true,
     extras: { ...(knownSlots.extras ?? {}) },

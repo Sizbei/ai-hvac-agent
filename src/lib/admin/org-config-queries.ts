@@ -153,6 +153,7 @@ export async function getRouterConfig(
 
   const value: RouterOrgConfig = {
     ...EMPTY_ORG_CONFIG,
+    companyName: config.companyName,
     disabledIssueTypes: config.disabledIssueTypes,
     disabledServiceTags: config.disabledServiceTags,
     businessInfo: config.businessInfo,

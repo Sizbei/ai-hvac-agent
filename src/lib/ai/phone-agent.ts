@@ -19,13 +19,13 @@ export type SessionChannel = "web" | "phone" | "sms";
 export const PHONE_SYSTEM_PROMPT = `/no_think
 You are a warm, professional HVAC customer service assistant speaking with a caller on the PHONE. Help the caller describe their heating/cooling/air-quality issue so a technician can be dispatched.
 
-GOALS: collect (1) the issue, (2) urgency, (3) the service address — all three are required. Optionally collect name, phone, email. Confirm the details out loud before submitting.
+GOALS: collect (1) the issue, (2) urgency, (3) the complete service address (street, city, state, and ZIP), (4) the caller's full name (first and last), and (5) a contact phone number — all five are required. You may also collect an email. Confirm the details out loud before submitting.
 
 STYLE: this is a spoken phone conversation. Speak in short, natural sentences (one or two), one question at a time, plain words, no markdown, no lists, no emoji. Never refer to anything on a screen. First greeting: "Thanks for calling. I'm the HVAC assistant. What issue are you having today?"
 
 CONFIRMING DETAILS: because the caller can't see the screen, REPEAT important details back to them — read the service address and any phone number or email back so they can correct you. For example: "Let me repeat that address back to you to make sure I have it right."
 
-CONTEXT: re-read the conversation before asking anything. NEVER ask for information the caller already gave (issue, urgency, address, name, phone, email) — acknowledge it and ask only for what's still missing. Once you have the issue, urgency, and address, stop asking and confirm the details out loud.
+CONTEXT: re-read the conversation before asking anything. NEVER ask for information the caller already gave (issue, urgency, address, name, phone, email) — acknowledge it and ask only for what's still missing. If the caller gives only part of an address, acknowledge what you have and ask specifically for the missing parts, such as the city, state, or ZIP — never treat a partial address as complete. Once you have the issue, urgency, complete address, full name, and phone, stop asking and confirm the details out loud.
 
 URGENCY: emergency = no heat in freezing weather, gas smell, CO alarm, HVAC flooding. high = AC out in extreme heat, heat out in the cold, water leak. medium = reduced efficiency, noises, thermostat issues. low = maintenance, filters, general questions.
 
@@ -99,6 +99,11 @@ const VOICE_STEP_PHRASING: Record<string, string> = {
 // captured on the web channel or confirmed by the technician.
 const VOICE_ASKABLE = new Set(Object.keys(VOICE_STEP_PHRASING));
 
+// In-loop sentinel used to advance past a CORE triage step (gated on a slot
+// value, not on `skipped`) that voice won't ask — e.g. NAME_STEP. Local to the
+// sequencing loop in voiceNextSlotPrompt; never persisted to real slots.
+const VOICE_SKIPPED_CORE = "__voice_skipped__";
+
 /**
  * Deterministic spoken prompt for the next still-needed slot, driven by the
  * shared triage engine but rendered for voice and limited to the steps that
@@ -108,6 +113,7 @@ export function voiceNextSlotPrompt(slots: {
   readonly issueType?: unknown;
   readonly urgency?: unknown;
   readonly address?: unknown;
+  readonly name?: unknown;
   readonly phone?: unknown;
   readonly extras?: Record<string, unknown>;
 }): string {
@@ -115,6 +121,7 @@ export function voiceNextSlotPrompt(slots: {
     issueType: (slots.issueType as string | null) ?? null,
     urgency: (slots.urgency as string | null) ?? null,
     address: (slots.address as string | null) ?? null,
+    name: (slots.name as string | null) ?? null,
     phone: (slots.phone as string | null) ?? null,
     safetyScreenPassed: true,
     extras: { ...(slots.extras ?? {}) },
@@ -122,16 +129,24 @@ export function voiceNextSlotPrompt(slots: {
 
   // Advance through any triage step voice won't ask (treat as skipped) so we
   // land on the next voice-appropriate question (or run out → wrap up).
+  // Optional/enrichment steps are gated on extraFilledOrSkipped, so marking
+  // `skipped` advances them. Core fields (name, etc.) are gated on the slot
+  // value itself, so we mark a sentinel on the field to advance past a core
+  // step voice doesn't ask (e.g. NAME_STEP — name is collected on web / by the
+  // technician, not over the phone).
   for (let i = 0; i < 20; i++) {
     const step = nextTriageStep(triageSlots);
     if (!step) break;
     if (VOICE_ASKABLE.has(step.id)) {
       return VOICE_STEP_PHRASING[step.id];
     }
-    triageSlots = {
-      ...triageSlots,
-      skipped: { ...(triageSlots.skipped ?? {}), [step.id]: true },
-    };
+    triageSlots =
+      step.id === "name"
+        ? { ...triageSlots, name: VOICE_SKIPPED_CORE }
+        : {
+            ...triageSlots,
+            skipped: { ...(triageSlots.skipped ?? {}), [step.id]: true },
+          };
   }
   return "Thanks. Is there anything else that would help the technician?";
 }
