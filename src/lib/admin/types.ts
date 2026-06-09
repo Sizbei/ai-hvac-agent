@@ -114,6 +114,51 @@ export interface DashboardStats {
   readonly assignedToday: number;
   readonly inProgress: number;
   readonly completedToday: number;
+  /** Booked with an arrival window, not yet started (request_status "scheduled"). */
+  readonly scheduled: number;
+  /** Paused awaiting parts/callback/access (request_status "on_hold"). */
+  readonly onHold: number;
+  /** Open (non-terminal) requests flagged urgency = "emergency". */
+  readonly emergencyOpen: number;
+  /** Requests created today that were flagged after-hours. */
+  readonly afterHoursToday: number;
+  /** Sum, in dollars, of after-hours surcharges applied to requests created today. */
+  readonly surchargeToday: number;
+}
+
+/** A single request as it appears in a dashboard list (today's schedule,
+ * attention queues). Lightweight: no transcript/notes, decrypted name only. */
+export interface DashboardRequest {
+  readonly id: string;
+  readonly referenceNumber: string;
+  readonly customerName: string | null;
+  readonly issueType: string;
+  readonly urgency: string;
+  readonly status: string;
+  readonly isAfterHours: boolean;
+  readonly assignedToName: string | null;
+  readonly arrivalWindowStart: string | null;
+  readonly arrivalWindowEnd: string | null;
+  readonly followUpDate: string | null;
+  readonly holdReason: string | null;
+  readonly createdAt: string;
+}
+
+/** Max rows any single dashboard list returns. A list at this length is shown
+ * with a "50+" affordance in the UI so operators know it may be truncated.
+ * Lives here (not in queries.ts) so client components can import it without
+ * pulling server-only DB code into the bundle. */
+export const DASHBOARD_LIST_LIMIT = 50;
+
+/** Everything the /admin overview dashboard renders, in one tenant-scoped payload. */
+export interface DashboardOverview {
+  readonly stats: DashboardStats;
+  /** Requests with an arrival window that starts today, soonest first. */
+  readonly todaySchedule: readonly DashboardRequest[];
+  /** Open emergency/high-urgency requests not yet assigned, most urgent first. */
+  readonly needsAttention: readonly DashboardRequest[];
+  /** On-hold requests awaiting a follow-up, earliest follow-up first. */
+  readonly awaitingFollowUp: readonly DashboardRequest[];
 }
 
 export interface RequestFilters {

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
+  LayoutDashboard,
   ClipboardList,
   MessagesSquare,
   BarChart3,
@@ -31,9 +32,13 @@ interface NavItem {
   readonly label: string;
   readonly href: string;
   readonly icon: typeof ClipboardList;
+  /** Match the active state on the exact path only (for the index route, whose
+   * href is a prefix of every other admin route). */
+  readonly exact?: boolean;
 }
 
 const NAV_ITEMS: readonly NavItem[] = [
+  { label: 'Dashboard', href: '/admin', icon: LayoutDashboard, exact: true },
   { label: 'Requests', href: '/admin/requests', icon: ClipboardList },
   { label: 'Conversations', href: '/admin/conversations', icon: MessagesSquare },
   { label: 'AI Insights', href: '/admin/insights', icon: BarChart3 },
@@ -134,7 +139,9 @@ export function Sidebar({
             {/* Nav */}
             <nav className="flex-1 space-y-1 px-2 py-2">
               {NAV_ITEMS.map((item) => {
-                const isActive = pathname.startsWith(item.href);
+                const isActive = item.exact
+                  ? pathname === item.href
+                  : pathname.startsWith(item.href);
                 const Icon = item.icon;
                 return (
                   <Link
@@ -203,7 +210,9 @@ export function Sidebar({
         <nav className="flex-1 space-y-1 px-2 py-2">
           <TooltipProvider>
             {NAV_ITEMS.map((item) => {
-              const isActive = pathname.startsWith(item.href);
+              const isActive = item.exact
+                ? pathname === item.href
+                : pathname.startsWith(item.href);
               const Icon = item.icon;
 
               const linkContent = (

@@ -59,13 +59,18 @@ vi.mock('@/lib/db', () => ({
 vi.mock('drizzle-orm', () => ({
   eq: vi.fn((...args: unknown[]) => args),
   and: vi.fn((...args: unknown[]) => args),
-  sql: vi.fn(),
+  // sql is used both as a tagged-template (sql`...`) and as sql<T>`...`; a plain
+  // mock fn satisfies both call shapes.
+  sql: vi.fn((...args: unknown[]) => args),
   count: vi.fn(() => 'count'),
   desc: vi.fn((col: unknown) => col),
   asc: vi.fn((col: unknown) => col),
   gte: vi.fn((...args: unknown[]) => args),
+  lt: vi.fn((...args: unknown[]) => args),
   inArray: vi.fn((...args: unknown[]) => args),
   ilike: vi.fn((...args: unknown[]) => args),
+  isNull: vi.fn((...args: unknown[]) => args),
+  isNotNull: vi.fn((...args: unknown[]) => args),
 }));
 
 // Mock schema tables — provide column-like objects
@@ -88,6 +93,8 @@ vi.mock('@/lib/db/schema', () => ({
     arrivalWindowEnd: 'sr.arrivalWindowEnd',
     holdReason: 'sr.holdReason',
     followUpDate: 'sr.followUpDate',
+    isAfterHours: 'sr.isAfterHours',
+    afterHoursSurcharge: 'sr.afterHoursSurcharge',
     completedAt: 'sr.completedAt',
     createdAt: 'sr.createdAt',
     updatedAt: 'sr.updatedAt',
@@ -154,6 +161,7 @@ import {
   createTechnician,
   updateTechnician,
   getDashboardStats,
+  getDashboardOverview,
 } from '@/lib/admin/queries';
 
 const ORG_ID = '00000000-0000-0000-0000-000000000001';
@@ -499,24 +507,117 @@ describe('updateTechnician', () => {
 });
 
 describe('getDashboardStats', () => {
-  it('should return { pending, assignedToday, inProgress, completedToday } shape', async () => {
-    // getDashboardStats makes 4 select calls (pending, assignedToday, inProgress, completedToday)
+  it('should return the full KPI shape with numeric values', async () => {
+    // 9 select calls: pending, assignedToday, inProgress, completedToday,
+    // scheduled, onHold, emergencyOpen, afterHoursToday (count + surcharge sum).
     selectResolutions = [
-      [{ value: 5 }],
-      [{ value: 3 }],
-      [{ value: 2 }],
-      [{ value: 1 }],
+      [{ value: 5 }], // pending
+      [{ value: 3 }], // assignedToday
+      [{ value: 2 }], // inProgress
+      [{ value: 1 }], // completedToday
+      [{ value: 4 }], // scheduled
+      [{ value: 2 }], // onHold
+      [{ value: 1 }], // emergencyOpen
+      [{ value: 3, surcharge: 450 }], // afterHoursToday + surchargeToday
     ];
 
     const result = await getDashboardStats(ORG_ID);
-    expect(result).toHaveProperty('pending');
-    expect(result).toHaveProperty('assignedToday');
-    expect(result).toHaveProperty('inProgress');
-    expect(result).toHaveProperty('completedToday');
-    expect(typeof result.pending).toBe('number');
-    expect(typeof result.assignedToday).toBe('number');
-    expect(typeof result.inProgress).toBe('number');
-    expect(typeof result.completedToday).toBe('number');
+    expect(result.pending).toBe(5);
+    expect(result.assignedToday).toBe(3);
+    expect(result.inProgress).toBe(2);
+    expect(result.completedToday).toBe(1);
+    expect(result.scheduled).toBe(4);
+    expect(result.onHold).toBe(2);
+    expect(result.emergencyOpen).toBe(1);
+    expect(result.afterHoursToday).toBe(3);
+    expect(result.surchargeToday).toBe(450);
+  });
+
+  it('defaults surchargeToday to 0 when no after-hours rows exist', async () => {
+    selectResolutions = [
+      [{ value: 0 }],
+      [{ value: 0 }],
+      [{ value: 0 }],
+      [{ value: 0 }],
+      [{ value: 0 }],
+      [{ value: 0 }],
+      [{ value: 0 }],
+      [{ value: 0, surcharge: 0 }],
+    ];
+
+    const result = await getDashboardStats(ORG_ID);
+    expect(result.afterHoursToday).toBe(0);
+    expect(result.surchargeToday).toBe(0);
+  });
+});
+
+describe('getDashboardOverview', () => {
+  it('returns stats plus three mapped request lists', async () => {
+    // First 8 selects feed getDashboardStats; then 3 list selects.
+    const scheduledRow = {
+      id: 'req-1',
+      referenceNumber: 'HVAC-001',
+      customerNameEncrypted: 'enc-name',
+      issueType: 'no_cooling',
+      urgency: 'high',
+      status: 'scheduled',
+      isAfterHours: true,
+      assignedToName: 'Tech A',
+      arrivalWindowStart: new Date('2026-06-08T13:00:00.000Z'),
+      arrivalWindowEnd: new Date('2026-06-08T17:00:00.000Z'),
+      followUpDate: null,
+      holdReason: null,
+      createdAt: new Date('2026-06-07T10:00:00.000Z'),
+    };
+    selectResolutions = [
+      [{ value: 1 }],
+      [{ value: 0 }],
+      [{ value: 0 }],
+      [{ value: 0 }],
+      [{ value: 1 }],
+      [{ value: 0 }],
+      [{ value: 0 }],
+      [{ value: 1, surcharge: 150 }],
+      [scheduledRow], // todaySchedule
+      [], // needsAttention
+      [], // awaitingFollowUp
+    ];
+
+    const result = await getDashboardOverview(ORG_ID);
+    expect(result.stats.pending).toBe(1);
+    expect(result.todaySchedule).toHaveLength(1);
+    expect(result.todaySchedule[0].referenceNumber).toBe('HVAC-001');
+    // Customer name is decrypted (the crypto mock prefixes 'decrypted_').
+    expect(result.todaySchedule[0].customerName).toBe('decrypted_enc-name');
+    expect(result.todaySchedule[0].arrivalWindowStart).toBe(
+      '2026-06-08T13:00:00.000Z',
+    );
+    expect(result.needsAttention).toEqual([]);
+    expect(result.awaitingFollowUp).toEqual([]);
+  });
+
+  it('scopes the needs-attention queue to UNASSIGNED requests', async () => {
+    // The "needs attention" queue must filter on assignedTo IS NULL — an
+    // assigned-but-urgent request should never surface here. We assert the
+    // query was built with isNull(assignedTo) rather than relying on the mock
+    // to execute SQL filtering.
+    const { isNull } = await import('drizzle-orm');
+    selectResolutions = [
+      [{ value: 0 }],
+      [{ value: 0 }],
+      [{ value: 0 }],
+      [{ value: 0 }],
+      [{ value: 0 }],
+      [{ value: 0 }],
+      [{ value: 0 }],
+      [{ value: 0, surcharge: 0 }],
+      [], // todaySchedule
+      [], // needsAttention
+      [], // awaitingFollowUp
+    ];
+
+    await getDashboardOverview(ORG_ID);
+    expect(isNull).toHaveBeenCalledWith('sr.assignedTo');
   });
 });
 

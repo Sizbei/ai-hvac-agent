@@ -11,8 +11,12 @@ import {
   desc,
   asc,
   gte,
+  lt,
   inArray,
   ilike,
+  isNull,
+  isNotNull,
+  sql,
   type SQL,
 } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -33,11 +37,14 @@ import {
 } from "./request-status";
 
 export type HoldReason = (typeof holdReasonEnum.enumValues)[number];
+import { DASHBOARD_LIST_LIMIT } from "./types";
 import type {
   AdminRequest,
   AdminRequestDetail,
   TechnicianRecord,
   DashboardStats,
+  DashboardRequest,
+  DashboardOverview,
   RequestFilters,
   CreateTechnicianInput,
   UpdateTechnicianInput,
@@ -306,6 +313,20 @@ export async function getRequestById(
  * natural assign-from state. Terminal states (completed/cancelled) are never
  * assignable. */
 const ASSIGNABLE_STATUSES = ["pending", "scheduled", "assigned"] as const;
+
+/** Non-terminal statuses — a request still needs work. Excludes completed and
+ * cancelled. Used by dashboard KPIs (e.g. open emergencies). */
+const OPEN_STATUSES = [
+  "pending",
+  "assigned",
+  "scheduled",
+  "in_progress",
+  "on_hold",
+] as const;
+
+/** Statuses a dashboard "needs attention" queue draws from: open and not yet
+ * assigned to a tech. */
+const UNASSIGNED_OPEN_STATUSES = ["pending", "scheduled"] as const;
 
 /** Statuses from which a REASSIGNMENT (changing the assignee without resetting
  * the lifecycle) is allowed: a request that already has work in flight or
@@ -884,10 +905,204 @@ export async function getDashboardStats(
       ),
     );
 
+  const [scheduledResult] = await db
+    .select({ value: count() })
+    .from(serviceRequests)
+    .where(
+      withTenant(
+        serviceRequests,
+        organizationId,
+        eq(serviceRequests.status, "scheduled"),
+      ),
+    );
+
+  const [onHoldResult] = await db
+    .select({ value: count() })
+    .from(serviceRequests)
+    .where(
+      withTenant(
+        serviceRequests,
+        organizationId,
+        eq(serviceRequests.status, "on_hold"),
+      ),
+    );
+
+  // Open = any non-terminal status. We flag emergencies still in flight so
+  // dispatch sees them even after assignment.
+  const [emergencyOpenResult] = await db
+    .select({ value: count() })
+    .from(serviceRequests)
+    .where(
+      withTenant(
+        serviceRequests,
+        organizationId,
+        eq(serviceRequests.urgency, "emergency"),
+        inArray(serviceRequests.status, [...OPEN_STATUSES]),
+      ),
+    );
+
+  const [afterHoursTodayResult] = await db
+    .select({
+      value: count(),
+      surcharge: sql<number>`coalesce(sum(${serviceRequests.afterHoursSurcharge}), 0)`,
+    })
+    .from(serviceRequests)
+    .where(
+      withTenant(
+        serviceRequests,
+        organizationId,
+        eq(serviceRequests.isAfterHours, true),
+        gte(serviceRequests.createdAt, todayStart),
+      ),
+    );
+
   return {
     pending: pendingResult?.value ?? 0,
     assignedToday: assignedTodayResult?.value ?? 0,
     inProgress: inProgressResult?.value ?? 0,
     completedToday: completedTodayResult?.value ?? 0,
+    scheduled: scheduledResult?.value ?? 0,
+    onHold: onHoldResult?.value ?? 0,
+    emergencyOpen: emergencyOpenResult?.value ?? 0,
+    afterHoursToday: afterHoursTodayResult?.value ?? 0,
+    // SUM over an integer column comes back from the Neon HTTP driver as a
+    // numeric STRING (e.g. "450"), so coerce explicitly — sql<number> is a
+    // compile-time cast only.
+    surchargeToday: parseFloat(String(afterHoursTodayResult?.surcharge ?? 0)),
+  };
+}
+
+// The column set every dashboard list query selects, so they all map through
+// the same toDashboardRequest() helper below. Kept narrow on purpose: no
+// transcript, no decrypted phone/email/address — names only.
+const dashboardRequestSelect = {
+  id: serviceRequests.id,
+  referenceNumber: serviceRequests.referenceNumber,
+  customerNameEncrypted: serviceRequests.customerNameEncrypted,
+  issueType: serviceRequests.issueType,
+  urgency: serviceRequests.urgency,
+  status: serviceRequests.status,
+  isAfterHours: serviceRequests.isAfterHours,
+  assignedToName: users.name,
+  arrivalWindowStart: serviceRequests.arrivalWindowStart,
+  arrivalWindowEnd: serviceRequests.arrivalWindowEnd,
+  followUpDate: serviceRequests.followUpDate,
+  holdReason: serviceRequests.holdReason,
+  createdAt: serviceRequests.createdAt,
+} as const;
+
+type DashboardRequestRow = {
+  readonly id: string;
+  readonly referenceNumber: string;
+  readonly customerNameEncrypted: string | null;
+  readonly issueType: string;
+  readonly urgency: string;
+  readonly status: string;
+  readonly isAfterHours: boolean;
+  readonly assignedToName: string | null;
+  readonly arrivalWindowStart: Date | null;
+  readonly arrivalWindowEnd: Date | null;
+  readonly followUpDate: Date | null;
+  readonly holdReason: string | null;
+  readonly createdAt: Date;
+};
+
+function toDashboardRequest(row: DashboardRequestRow): DashboardRequest {
+  return {
+    id: row.id,
+    referenceNumber: row.referenceNumber,
+    customerName: safeDecrypt(row.customerNameEncrypted),
+    issueType: row.issueType,
+    urgency: row.urgency,
+    status: row.status,
+    isAfterHours: row.isAfterHours,
+    assignedToName: row.assignedToName,
+    arrivalWindowStart: row.arrivalWindowStart?.toISOString() ?? null,
+    arrivalWindowEnd: row.arrivalWindowEnd?.toISOString() ?? null,
+    followUpDate: row.followUpDate?.toISOString() ?? null,
+    holdReason: row.holdReason,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+/**
+ * One tenant-scoped payload for the /admin overview dashboard: the expanded
+ * KPI counts, today's scheduled arrival windows, the unassigned urgent/emergency
+ * queue, and on-hold requests awaiting a follow-up. All lists are capped and
+ * carry decrypted customer NAMES only (no other PII).
+ */
+export async function getDashboardOverview(
+  organizationId: string,
+): Promise<DashboardOverview> {
+  const stats = await getDashboardStats(organizationId);
+
+  const todayStart = startOfTodayUTC();
+  const tomorrowStart = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
+
+  // Today's schedule: any open request whose arrival window starts today.
+  const scheduleRows = await db
+    .select(dashboardRequestSelect)
+    .from(serviceRequests)
+    .leftJoin(users, eq(serviceRequests.assignedTo, users.id))
+    .where(
+      withTenant(
+        serviceRequests,
+        organizationId,
+        isNotNull(serviceRequests.arrivalWindowStart),
+        gte(serviceRequests.arrivalWindowStart, todayStart),
+        lt(serviceRequests.arrivalWindowStart, tomorrowStart),
+        inArray(serviceRequests.status, [...OPEN_STATUSES]),
+      ),
+    )
+    .orderBy(asc(serviceRequests.arrivalWindowStart))
+    .limit(DASHBOARD_LIST_LIMIT);
+
+  // Needs attention: open, unassigned, urgent or emergency — most urgent first.
+  const attentionRows = await db
+    .select(dashboardRequestSelect)
+    .from(serviceRequests)
+    .leftJoin(users, eq(serviceRequests.assignedTo, users.id))
+    .where(
+      withTenant(
+        serviceRequests,
+        organizationId,
+        // "Needs attention" = nobody is on it yet. A pending/scheduled request
+        // can still carry an assignee (reassign keeps assignedTo), so filter on
+        // assignedTo IS NULL, not status alone — otherwise assigned-but-urgent
+        // jobs leak into the queue.
+        isNull(serviceRequests.assignedTo),
+        inArray(serviceRequests.status, [...UNASSIGNED_OPEN_STATUSES]),
+        inArray(serviceRequests.urgency, ["emergency", "high"]),
+      ),
+    )
+    // Order by urgency rank (emergency before high), then oldest-first so the
+    // longest-waiting request floats to the top.
+    .orderBy(
+      sql`case ${serviceRequests.urgency} when 'emergency' then 0 else 1 end`,
+      asc(serviceRequests.createdAt),
+    )
+    .limit(DASHBOARD_LIST_LIMIT);
+
+  // On hold and waiting on a follow-up — earliest follow-up first.
+  const followUpRows = await db
+    .select(dashboardRequestSelect)
+    .from(serviceRequests)
+    .leftJoin(users, eq(serviceRequests.assignedTo, users.id))
+    .where(
+      withTenant(
+        serviceRequests,
+        organizationId,
+        eq(serviceRequests.status, "on_hold"),
+        isNotNull(serviceRequests.followUpDate),
+      ),
+    )
+    .orderBy(asc(serviceRequests.followUpDate))
+    .limit(DASHBOARD_LIST_LIMIT);
+
+  return {
+    stats,
+    todaySchedule: scheduleRows.map(toDashboardRequest),
+    needsAttention: attentionRows.map(toDashboardRequest),
+    awaitingFollowUp: followUpRows.map(toDashboardRequest),
   };
 }
