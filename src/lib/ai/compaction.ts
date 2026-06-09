@@ -34,9 +34,27 @@ export const MAX_HISTORY = 10;
 // MAX_HISTORY so we don't summarize on every single turn near the boundary.
 export const COMPACTION_THRESHOLD = MAX_HISTORY + 4;
 
-/** True once the stored message count warrants folding older turns into the summary. */
+// Throttle: past the threshold, only summarize every Nth message rather than on
+// every single turn. The summarizer is an LLM call in a background after() task;
+// re-folding the (slowly growing) overflow on every turn is wasteful and adds
+// latency/cost without improving coherence. Because the prior summary is always
+// carried forward and the recent window (MAX_HISTORY) is still sent verbatim,
+// skipping the in-between turns is safe — they're folded in on the next firing.
+// Must stay <= MAX_HISTORY so no aged-out turn can scroll fully off the recent
+// window before the next compaction captures it.
+export const COMPACTION_INTERVAL = 3;
+
+/**
+ * True once the stored message count warrants folding older turns into the
+ * summary. Fires on the first message past the threshold, then only every
+ * COMPACTION_INTERVAL messages after that — so a long intake summarizes
+ * periodically instead of on every turn.
+ */
 export function shouldCompact(messageCount: number): boolean {
-  return messageCount > COMPACTION_THRESHOLD;
+  if (messageCount <= COMPACTION_THRESHOLD) return false;
+  const overflow = messageCount - COMPACTION_THRESHOLD;
+  // overflow === 1 (first turn past threshold) fires; thereafter every Nth turn.
+  return (overflow - 1) % COMPACTION_INTERVAL === 0;
 }
 
 /**

@@ -52,6 +52,10 @@ export interface TriageSlots {
   issueType: string | null;
   urgency: string | null;
   address: string | null;
+  // The customer's full name (first + last). A CORE field like address/phone:
+  // written by the caller's slot extraction, gated here only to sequence the
+  // NAME_STEP question. Not an extras key.
+  name: string | null;
   phone: string | null;
   safetyScreenPassed: boolean;
   safetyHazardReported?: boolean;
@@ -67,6 +71,7 @@ export const REQUIRED_FOR_SUBMIT = [
   "issueType",
   "urgency",
   "address",
+  "name",
   "phone",
 ] as const;
 
@@ -147,6 +152,13 @@ const ADDRESS_STEP: TriageStep = {
 const PHONE_STEP: TriageStep = {
   id: "phone",
   question: "What's the best phone number to reach you to confirm the visit?",
+  quickReplies: [],
+  optional: false,
+};
+
+const NAME_STEP: TriageStep = {
+  id: "name",
+  question: "And what's your full name — first and last?",
   quickReplies: [],
   optional: false,
 };
@@ -351,6 +363,59 @@ const ENUM_STEP_VALUES: Record<string, readonly string[]> = {
   lead_source: ["google", "facebook", "yelp", "referral", "repeat_customer", "website", "direct_mail", "other"],
 };
 
+// Fuzzy synonym map for enum steps: natural phrasings → the canonical enum
+// value. Keyed by step id, then by target enum value, listing the lowercase
+// substrings/phrases that map to it. Applied ONLY when the raw answer isn't
+// already a valid enum value (so exact chips and skips are untouched). Kept
+// conservative — substring containment, longest matching phrase wins so a more
+// specific phrase ("completely dead") beats a looser one ("dead"). Other enum
+// steps can register their own synonyms here later.
+const ENUM_SYNONYMS: Record<string, Record<string, readonly string[]>> = {
+  system_down: {
+    fully_down: [
+      "completely dead",
+      "totally dead",
+      "not working at all",
+      "won't turn on",
+      "wont turn on",
+      "nothing happens",
+      "no power",
+      "dead",
+      "down",
+    ],
+    partially_working: [
+      "kind of working",
+      "still kind of runs",
+      "blows but warm",
+      "sort of",
+      "still runs",
+      "partly",
+      "weak",
+      "barely",
+    ],
+  },
+};
+
+/**
+ * Map a natural-language answer to an enum value via the step's synonym map.
+ * Matches by substring containment, preferring the LONGEST phrase so a specific
+ * phrase wins over a looser one. Returns null when no synonym matches (caller
+ * then falls back to the LLM for required steps / sentinel for optional).
+ */
+function fuzzyEnumMatch(stepId: string, answer: string): string | null {
+  const synonyms = ENUM_SYNONYMS[stepId];
+  if (!synonyms) return null;
+  let best: { value: string; length: number } | null = null;
+  for (const [value, phrases] of Object.entries(synonyms)) {
+    for (const phrase of phrases) {
+      if (answer.includes(phrase) && (best === null || phrase.length > best.length)) {
+        best = { value, length: phrase.length };
+      }
+    }
+  }
+  return best?.value ?? null;
+}
+
 // Steps whose answer is free text (no enum) — any non-empty answer fills them.
 const FREE_TEXT_STEPS = new Set(["duration", "equipment_brand", "access_notes"]);
 
@@ -402,6 +467,17 @@ export function captureEnrichmentAnswer(
   if (allowed && allowed.includes(a)) {
     return { key: extraKey, value: a };
   }
+
+  // Fuzzy fallback: only AFTER the exact-enum check has failed, try to map a
+  // natural phrasing onto a canonical enum value (e.g. "my system is dead" →
+  // fully_down). Conservative substring match; never overrides an exact value.
+  if (allowed) {
+    const fuzzy = fuzzyEnumMatch(pendingStepId, a);
+    if (fuzzy && allowed.includes(fuzzy)) {
+      return { key: extraKey, value: fuzzy };
+    }
+  }
+
   return null;
 }
 
@@ -424,6 +500,7 @@ export function nextTriageStep(slots: TriageSlots): TriageStep | null {
   // 3. Required dispatch fields.
   if (!slots.address) return ADDRESS_STEP;
   if (!slots.phone) return PHONE_STEP;
+  if (!slots.name) return NAME_STEP;
   if (!slots.urgency) return URGENCY_STEP;
 
   // 4. Optional enrichment, in order; skip any already filled or skipped.
@@ -483,7 +560,7 @@ export function applyTriageAnswer(
     return next;
   }
 
-  // Core dispatch fields (address/phone/urgency) are written by the caller via
-  // the existing slot extraction; triage just sequenced the question.
+  // Core dispatch fields (address/phone/name/urgency) are written by the caller
+  // via the existing slot extraction; triage just sequenced the question.
   return next;
 }

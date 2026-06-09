@@ -44,6 +44,8 @@ const EXTRACTION_SYSTEM = `You are a silent data-extraction function for an HVAC
 
 Map the problem to the closest allowed issueType; use "other" if it is clearly an HVAC issue but fits no category, and null only if no issue has been described. Infer urgency from context: emergency = no heat in freezing weather, gas smell, CO alarm, or flooding; high = AC out in extreme heat, heat out in the cold, or an active water leak; medium = reduced efficiency, noises, or thermostat problems; low = maintenance, filters, or general questions.
 
+When the customer gives a full name (first and last), capture both as customerName. When they give a complete address (street, city, state, and ZIP), capture the full address rather than only a fragment.
+
 ${JSON_INSTRUCTION}`;
 
 const EMPTY_EXTRACTION: ExtractionResult = {

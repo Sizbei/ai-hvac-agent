@@ -233,6 +233,12 @@ export const customerSessions = pgTable(
     // full transcript every turn. NULL until the conversation first exceeds the
     // window. Written by the background compaction task.
     runningSummary: text("running_summary"),
+    // The repeat customer this session resolved to, once a contact slot (email
+    // or phone) matches an existing customer via blind-index lookup. NULL for
+    // anonymous sessions and for sessions that never link to a known customer.
+    // Forward reference to `customers` (declared later in this file) — same
+    // thunk-FK pattern as serviceRequests.customerId.
+    customerId: uuid("customer_id").references(() => customers.id),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -248,6 +254,9 @@ export const customerSessions = pgTable(
     index("sessions_org_created_idx").on(table.organizationId, table.createdAt),
     // The admin Conversations view filters by channel within an org.
     index("sessions_org_channel_idx").on(table.organizationId, table.channel),
+    // Look up a customer's prior sessions, and back the load-time
+    // do-not-service / returning-customer checks off the resolved link.
+    index("sessions_customer_id_idx").on(table.customerId),
   ],
 );
 

@@ -32,6 +32,7 @@ import { EMPTY_ORG_CONFIG } from "@/lib/ai/router-config";
 import { getRouterConfig } from "@/lib/admin/org-config-queries";
 import { CONFIRM_REPLY } from "@/lib/ai/constants";
 import { extractSlots, extractAddressLoose } from "@/lib/ai/slot-extract";
+import { withLeadIn } from "@/lib/ai/lead-ins";
 import { escalateSession } from "@/lib/ai/escalate-service";
 import {
   parseKnownSlots,
@@ -41,6 +42,12 @@ import {
 } from "@/lib/ai/chat-slots";
 import { buildModelMessages, MAX_HISTORY, type ChatTurn } from "@/lib/ai/compaction";
 import { compactSessionIfNeeded } from "@/lib/ai/compact-session";
+import {
+  lookupCustomerContext,
+  buildCustomerContextHint,
+  type CustomerContext,
+} from "@/lib/ai/customer-context";
+import { customers } from "@/lib/db/schema";
 import { logger } from "@/lib/logger";
 // The deterministic router is on by default; set ROUTER_ENABLED=false to disable
 // it (kill-switch) and route every turn through the LLM.
@@ -48,6 +55,11 @@ const ROUTER_ENABLED = process.env.ROUTER_ENABLED !== "false";
 
 const ESCALATION_NOTE =
   "\n\nIf you'd prefer to speak with a human, you can tap “Talk to a Human” anytime.";
+
+// Mirrors the confirm-route copy (DO_NOT_SERVICE) so a flagged customer gets the
+// same refusal whether they reach the flag mid-chat or at confirm time.
+const DO_NOT_SERVICE_REPLY =
+  "We're unable to book this online. Please call our office so we can help you directly.";
 
 /** Single-chunk text/plain response — byte-compatible with the SDK's text stream. */
 function cannedTextResponse(text: string): Response {
@@ -69,6 +81,7 @@ function nextSlotPrompt(merged: KnownSlots): string {
     issueType: merged.issueType ?? null,
     urgency: merged.urgency ?? null,
     address: merged.address ?? null,
+    name: merged.name ?? null,
     phone: merged.phone ?? null,
     // The router only reaches this prompt once the message is non-hazardous, so
     // treat the safety screen as cleared for the purpose of sequencing the
@@ -162,6 +175,47 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Do-Not-Service early gate: if a PRIOR turn already resolved this session to
+    // a flagged customer (the FK persisted below), refuse before any router/LLM
+    // work — the async extraction path can't alter an already-streamed reply, so
+    // a customer first flagged mid-turn is enforced here on the NEXT turn. The
+    // read is non-critical: a DB blip degrades to "no early gate" (the confirm
+    // route is still the hard backstop), never a failed turn.
+    if (session.customerId) {
+      try {
+        const [flagRow] = await db
+          .select({ doNotService: customers.doNotService })
+          .from(customers)
+          .where(
+            withTenant(
+              customers,
+              organizationId,
+              eq(customers.id, session.customerId),
+            ),
+          )
+          .limit(1);
+        if (flagRow?.doNotService) {
+          await db.insert(messages).values({
+            organizationId,
+            sessionId: session.id,
+            role: "assistant",
+            content: DO_NOT_SERVICE_REPLY,
+            tokensUsed: 0,
+          });
+          logger.warn(
+            { sessionId: session.id, customerId: session.customerId },
+            "Chat blocked at load: customer flagged do_not_service",
+          );
+          return cannedTextResponse(DO_NOT_SERVICE_REPLY);
+        }
+      } catch (gateError: unknown) {
+        logger.error(
+          { error: gateError, sessionId: session.id },
+          "Do-not-service load gate failed — continuing (confirm route still guards)",
+        );
+      }
+    }
+
     // 3. Check token budget per D-07
     const budgetState = checkTokenBudget(
       session.tokensUsed,
@@ -245,10 +299,82 @@ export async function POST(request: NextRequest) {
       issueType: knownSlots.issueType ?? null,
       urgency: knownSlots.urgency ?? null,
       address: knownSlots.address ?? null,
+      name: knownSlots.name ?? null,
       phone: knownSlots.phone ?? null,
       safetyScreenPassed: true,
       extras: { ...(knownSlots.extras ?? {}) },
     });
+
+    // Repeat-customer awareness: as soon as an email or phone is known (from a
+    // prior turn's metadata OR a contact slot in THIS message), resolve any
+    // existing customer — WITHOUT creating one — so we can (a) personalize the
+    // reply, (b) enforce do-not-service early, and (c) skip re-asking the name.
+    // A single indexed blind-index lookup; wrapped so a CRM blip degrades to
+    // "no context" and never blocks the streamed reply. Only when the session
+    // isn't already linked (the load gate above handles linked sessions).
+    const turnSlots = extractSlots(guardrailResult.sanitized);
+    const resolvedEmail = knownSlots.email ?? turnSlots.email ?? null;
+    const resolvedPhone = knownSlots.phone ?? turnSlots.phone ?? null;
+    let customerContext: CustomerContext | null = null;
+    if (!session.customerId && (resolvedEmail || resolvedPhone)) {
+      customerContext = await lookupCustomerContext(organizationId, {
+        email: resolvedEmail,
+        phone: resolvedPhone,
+      }).catch((lookupError: unknown) => {
+        logger.error(
+          { error: lookupError, sessionId: session.id },
+          "Customer-context lookup failed — continuing without context",
+        );
+        return null;
+      });
+
+      if (customerContext) {
+        // Persist the canonical link onto the session FK so the next turn's load
+        // gate can enforce do-not-service before any work. Non-critical write.
+        await db
+          .update(customerSessions)
+          .set({ customerId: customerContext.customerId, updatedAt: new Date() })
+          .where(sessionScope)
+          .catch((linkError: unknown) => {
+            logger.error(
+              { error: linkError, sessionId: session.id },
+              "Failed to link session to customer — continuing",
+            );
+          });
+
+        // Do-not-service: refuse immediately rather than continuing intake.
+        if (customerContext.doNotService) {
+          await db.insert(messages).values({
+            organizationId,
+            sessionId: session.id,
+            role: "assistant",
+            content: DO_NOT_SERVICE_REPLY,
+            tokensUsed: 0,
+          });
+          await db
+            .update(customerSessions)
+            .set({ turnCount: newTurnCount, updatedAt: new Date() })
+            .where(sessionScope);
+          logger.warn(
+            {
+              sessionId: session.id,
+              customerId: customerContext.customerId,
+            },
+            "Chat blocked mid-turn: customer flagged do_not_service",
+          );
+          return cannedTextResponse(DO_NOT_SERVICE_REPLY);
+        }
+      }
+    }
+
+    // If we already know a returning customer's full name (PII, server-side
+    // only), pre-seed the name slot so triage/the next-slot prompt never re-ask
+    // for it. Only when we don't already have a name from this conversation.
+    const seededName =
+      !knownSlots.name && customerContext?.fullName
+        ? customerContext.fullName
+        : undefined;
+
     if (ROUTER_ENABLED) {
       // The org overlay is non-critical: if its read fails (DB blip, cold
       // start), degrade to the empty overlay (everything enabled, no
@@ -402,13 +528,17 @@ export async function POST(request: NextRequest) {
           ? { [captured.key]: captured.value }
           : undefined;
 
-        // Merge router + regex-extracted slots into the session metadata.
+        // Merge router + regex-extracted slots into the session metadata. A
+        // returning customer's stored name (seededName) fills the name slot so
+        // intake skips the name question — mergeSlots never clobbers a name the
+        // customer already provided this conversation.
         const merged = mergeSlots(knownSlots, {
           issueType: verdict.issueType ?? undefined,
           urgency: verdict.urgency ?? undefined,
           address: addressAnswer ?? undefined,
           phone: extracted.phone ?? undefined,
           email: extracted.email ?? undefined,
+          name: seededName,
           extras: capturedExtras,
         });
 
@@ -428,11 +558,28 @@ export async function POST(request: NextRequest) {
 
         // Reply: confirm when complete, else the intent's canned ask, else a
         // deterministic next-slot prompt (slot-provision turns).
-        const baseReply = extractionComplete
+        const nextQuestion = extractionComplete
           ? CONFIRM_REPLY
           : verdict.action !== "FALLBACK_LLM" && verdict.reply
             ? verdict.reply
             : nextSlotPrompt(merged);
+
+        // Conversational warmth (Stage 3b): when we're still collecting info on a
+        // NON-emergency turn, prepend a brief, varied acknowledgement of the
+        // stated issue before the next question — template-based and 0-token, so
+        // the critical path stays LLM-free. We skip it once intake is complete
+        // (the confirm copy reads better on its own) and ALWAYS skip it for
+        // emergencies (withLeadIn returns "" for emergency urgency, so the exact
+        // safety copy is never softened). The merged urgency reflects this turn's
+        // router verdict + prior slots. newTurnCount rotates the variant.
+        const baseReply = extractionComplete
+          ? nextQuestion
+          : withLeadIn(
+              nextQuestion,
+              merged.issueType,
+              merged.urgency,
+              newTurnCount,
+            );
         const replyText = baseReply + (nearTurnLimit ? ESCALATION_NOTE : "");
 
         await db.insert(messages).values({
@@ -489,10 +636,15 @@ export async function POST(request: NextRequest) {
       ? "\n\n[Note: This conversation has been going for a while. If you would prefer to speak with a human agent, you can request an escalation at any time.]"
       : "";
 
+    // Returning-customer note (non-PII: first name + counts/membership) so the
+    // model greets them by name, acknowledges prior service, and skips re-asking
+    // info already on file. Empty string when not a returning customer.
+    const customerContextHint = buildCustomerContextHint(customerContext);
+
     // 8. Stream response via Vercel AI SDK per SC-09
     const result = streamText({
       model: getModel(),
-      system: SYSTEM_PROMPT + escalationHint,
+      system: SYSTEM_PROMPT + customerContextHint + escalationHint,
       // Cap output so replies stay short (the prompt asks for 2-3 sentences) and
       // tail costs are bounded (Token-Savings #6).
       maxOutputTokens: 350,
@@ -614,6 +766,29 @@ export async function POST(request: NextRequest) {
             updatedAt: new Date(),
           })
           .where(sessionScope);
+
+        // Repeat-customer link from the ASYNC path: the background extraction
+        // may surface an email/phone the synchronous slot extractor missed (e.g.
+        // a name+email written out in prose). If we resolve a customer and the
+        // session isn't linked yet, persist the FK so the NEXT turn's load gate
+        // can greet them / enforce do-not-service. We can't alter the reply that
+        // already streamed this turn, so enforcement is deferred to that gate.
+        if (!session.customerId && (merged.email || merged.phone)) {
+          const asyncContext = await lookupCustomerContext(organizationId, {
+            email: merged.email,
+            phone: merged.phone,
+          }).catch(() => null);
+          if (asyncContext) {
+            await db
+              .update(customerSessions)
+              .set({
+                customerId: asyncContext.customerId,
+                updatedAt: new Date(),
+              })
+              .where(sessionScope)
+              .catch(() => {});
+          }
+        }
 
         logger.info(
           { sessionId: session.id, extractionComplete },

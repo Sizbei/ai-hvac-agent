@@ -217,6 +217,13 @@ export function useChatSession(): UseChatSessionReturn {
 
     if (!wasActive || !isNowReady) return;
 
+    // Async extraction runs in a background after() task, so the result usually
+    // lands within a second or two of the stream finishing. Poll fast first,
+    // then back off exponentially — this cuts perceived latency in the common
+    // case while staying bounded if extraction never completes. Each entry is
+    // the delay (ms) BEFORE that attempt; total budget ~14s across 6 attempts.
+    const POLL_BACKOFF_MS: readonly number[] = [800, 1500, 2500, 4000, 5000];
+
     let attempts = 0;
     let failures = 0;
     let timerId: ReturnType<typeof setTimeout> | null = null;
@@ -255,10 +262,13 @@ export function useChatSession(): UseChatSessionReturn {
           }
         }
 
-        // Retry polling for extraction results (background extraction may still be running)
+        // Retry polling for extraction results (background extraction may still
+        // be running). Schedule the next check with exponential backoff and stop
+        // once the backoff schedule is exhausted (bounded retries).
+        const nextDelay = POLL_BACKOFF_MS[attempts];
         attempts += 1;
-        if (attempts < 6) {
-          timerId = setTimeout(pollSession, 3000);
+        if (nextDelay !== undefined) {
+          timerId = setTimeout(pollSession, nextDelay);
         }
       } catch {
         failures += 1;
@@ -268,7 +278,9 @@ export function useChatSession(): UseChatSessionReturn {
       }
     }
 
-    pollSession();
+    // Kick off the first check quickly — extraction often finishes almost
+    // immediately after the stream ends — then fall into the backoff schedule.
+    timerId = setTimeout(pollSession, 300);
 
     return () => {
       if (timerId) clearTimeout(timerId);

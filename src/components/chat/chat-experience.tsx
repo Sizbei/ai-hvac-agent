@@ -23,7 +23,7 @@ const WELCOME_MESSAGE = {
   id: 'welcome',
   role: 'assistant' as const,
   content:
-    "Hi! I'm an AI HVAC assistant — I can help describe your issue and get a technician dispatched. I might not get everything right, so you can tap “Talk to a Human” anytime. What's going on with your heating or cooling?",
+    "Hi, I'm here to help get your heating or cooling sorted and a technician on the way. Tell me what's going on, and I'll take care of the rest. (You can tap “Talk to a Human” anytime.)",
 };
 
 const ISSUE_SUGGESTIONS: readonly Suggestion[] = [

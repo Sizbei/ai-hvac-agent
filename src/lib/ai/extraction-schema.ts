@@ -120,8 +120,19 @@ const optionalIntakeFields = {
 export const extractionSchema = z.object({
   issueType: z.enum(issueTypeValues).nullable().describe('Type of HVAC issue the customer is experiencing'),
   urgency: z.enum(urgencyValues).nullable().describe('How urgent the issue is based on customer description'),
-  address: z.string().nullable().describe('Service address provided by the customer'),
-  customerName: z.string().nullable().describe('Customer name if provided'),
+  address: z
+    .string()
+    .nullable()
+    .describe(
+      'Full service address provided by the customer — street number + street name, city, state, and 5-digit ZIP',
+    ),
+  // Kept as z.string().nullable() (not gated in the schema): completeness is
+  // enforced via isNameComplete(), so the async extractor can still report a
+  // partial name (e.g. just a first name) without a Zod throw.
+  customerName: z
+    .string()
+    .nullable()
+    .describe('Customer full name (first and last) if provided'),
   customerPhone: z.string().nullable().describe('Customer phone number if provided'),
   customerEmail: z.string().email().nullable().describe('Customer email if provided'),
   description: z.string().describe('Summary of the issue in 1-2 sentences'),
@@ -133,19 +144,65 @@ export type ExtractionResult = z.infer<typeof extractionSchema>;
 
 // The fields that gate submission. Phone is now required (the dispatch primary
 // key — a dispatcher cannot act on a request with no way to reach the customer).
+// Name is required too: dispatch needs a person to ask for at the door.
 export const REQUIRED_EXTRACTION_FIELDS = [
   'issueType',
   'urgency',
   'address',
   'customerPhone',
+  'customerName',
 ] as const;
+
+// Sentinel a skipped optional step writes (see triage.SKIP_SENTINEL). A name
+// that is purely this sentinel is not a real name and must not pass the gate.
+const SKIP_SENTINEL = '__skipped__';
+
+/**
+ * True when `address` is a COMPLETE service address — one a tech can actually
+ * drive to. A complete address needs a street number + street name + city +
+ * state + ZIP. Heuristic (lenient but rejects partials like "5 Oak", "Oak St",
+ * "downtown"): trimmed, at least 4 whitespace-separated tokens, the first token
+ * starts with a digit (street number), AND it contains a 5-digit ZIP.
+ */
+export function isAddressComplete(address: string | null): boolean {
+  if (address === null) return false;
+  const trimmed = address.trim();
+  if (trimmed.length === 0) return false;
+
+  const tokens = trimmed.split(/\s+/);
+  if (tokens.length < 4) return false;
+
+  // First token must start with a digit (the street number).
+  if (!/^\d/.test(tokens[0])) return false;
+
+  // Must contain a 5-digit ZIP somewhere (word-boundary so we don't match a
+  // longer run of digits like a phone number).
+  if (!/\b\d{5}\b/.test(trimmed)) return false;
+
+  return true;
+}
+
+/**
+ * True when `name` is a COMPLETE customer name — at least a first and last
+ * name. Heuristic: trimmed, at least 2 whitespace-separated tokens each with
+ * >= 1 character, and not purely the skip sentinel.
+ */
+export function isNameComplete(name: string | null): boolean {
+  if (name === null) return false;
+  const trimmed = name.trim();
+  if (trimmed.length === 0) return false;
+  if (trimmed === SKIP_SENTINEL) return false;
+
+  const tokens = trimmed.split(/\s+/).filter((t) => t.length > 0);
+  return tokens.length >= 2;
+}
 
 export function isExtractionComplete(extraction: ExtractionResult): boolean {
   return (
     extraction.issueType !== null &&
     extraction.urgency !== null &&
-    extraction.address !== null &&
-    extraction.address.length > 0 &&
+    isAddressComplete(extraction.address) &&
+    isNameComplete(extraction.customerName) &&
     extraction.customerPhone !== null &&
     extraction.customerPhone.length > 0
   );

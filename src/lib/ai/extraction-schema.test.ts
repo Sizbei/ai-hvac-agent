@@ -3,6 +3,8 @@ import {
   extractionSchema,
   serviceRequestSchema,
   isExtractionComplete,
+  isAddressComplete,
+  isNameComplete,
   jobTypeForIssue,
   REQUIRED_EXTRACTION_FIELDS,
   type ExtractionResult,
@@ -11,7 +13,7 @@ import {
 const completeExtraction: ExtractionResult = {
   issueType: 'heating_not_working',
   urgency: 'high',
-  address: '123 Main St',
+  address: '123 Main St, Springfield, IL 62704',
   customerName: 'John Doe',
   customerPhone: '555-0100',
   customerEmail: 'john@example.com',
@@ -20,18 +22,103 @@ const completeExtraction: ExtractionResult = {
 };
 
 describe('REQUIRED_EXTRACTION_FIELDS', () => {
-  it('should contain issueType, urgency, address, and customerPhone', () => {
+  it('should contain issueType, urgency, address, customerPhone, and customerName', () => {
     expect(REQUIRED_EXTRACTION_FIELDS).toEqual([
       'issueType',
       'urgency',
       'address',
       'customerPhone',
+      'customerName',
     ]);
   });
 });
 
+describe('isAddressComplete', () => {
+  it('accepts a full street + city + state + ZIP address', () => {
+    expect(isAddressComplete('123 Main St, Springfield, IL 62704')).toBe(true);
+  });
+
+  it('accepts a full address without commas', () => {
+    expect(isAddressComplete('123 Main Street Springfield IL 62704')).toBe(true);
+  });
+
+  it('accepts a unit/apartment in the address', () => {
+    expect(isAddressComplete('456 Oak Ave Apt 3 Chicago IL 60614')).toBe(true);
+  });
+
+  it('rejects null', () => {
+    expect(isAddressComplete(null)).toBe(false);
+  });
+
+  it('rejects empty / whitespace-only strings', () => {
+    expect(isAddressComplete('')).toBe(false);
+    expect(isAddressComplete('    ')).toBe(false);
+  });
+
+  it('rejects a partial address with too few tokens', () => {
+    expect(isAddressComplete('5 Oak')).toBe(false);
+  });
+
+  it('rejects a street with no street number', () => {
+    expect(isAddressComplete('Oak St')).toBe(false);
+    expect(isAddressComplete('Main Street Springfield IL 62704')).toBe(false);
+  });
+
+  it('rejects a vague non-address', () => {
+    expect(isAddressComplete('downtown')).toBe(false);
+    expect(isAddressComplete('near the mall on the east side')).toBe(false);
+  });
+
+  it('rejects an otherwise-complete-looking address with no 5-digit ZIP', () => {
+    expect(isAddressComplete('123 Main St Springfield Illinois')).toBe(false);
+  });
+
+  it('does not accept a non-ZIP digit run as a ZIP (needs exactly 5)', () => {
+    expect(isAddressComplete('123 Main St Springfield IL 6270')).toBe(false);
+  });
+
+  it('tolerates leading/trailing whitespace', () => {
+    expect(isAddressComplete('  123 Main St Springfield IL 62704  ')).toBe(true);
+  });
+});
+
+describe('isNameComplete', () => {
+  it('accepts a first + last name', () => {
+    expect(isNameComplete('John Doe')).toBe(true);
+  });
+
+  it('accepts a three-part name', () => {
+    expect(isNameComplete('Mary Jane Watson')).toBe(true);
+  });
+
+  it('rejects null', () => {
+    expect(isNameComplete(null)).toBe(false);
+  });
+
+  it('rejects empty / whitespace-only strings', () => {
+    expect(isNameComplete('')).toBe(false);
+    expect(isNameComplete('   ')).toBe(false);
+  });
+
+  it('rejects a single (first-only) name', () => {
+    expect(isNameComplete('Jane')).toBe(false);
+  });
+
+  it('rejects the skip sentinel', () => {
+    expect(isNameComplete('__skipped__')).toBe(false);
+  });
+
+  it('tolerates extra interior whitespace', () => {
+    expect(isNameComplete('John    Doe')).toBe(true);
+  });
+
+  it('tolerates leading/trailing whitespace', () => {
+    expect(isNameComplete('  John Doe  ')).toBe(true);
+  });
+});
+
 describe('isExtractionComplete', () => {
-  it('should return true when issueType, urgency, and address are all present', () => {
+  it('should return true when all required fields are present and complete', () => {
     expect(isExtractionComplete(completeExtraction)).toBe(true);
   });
 
@@ -55,26 +142,41 @@ describe('isExtractionComplete', () => {
     expect(isExtractionComplete(extraction)).toBe(false);
   });
 
+  it('should return false when address is a partial (street only, no ZIP)', () => {
+    const extraction: ExtractionResult = { ...completeExtraction, address: '123 Main St' };
+    expect(isExtractionComplete(extraction)).toBe(false);
+  });
+
   it('should return false when customerPhone is missing (now required)', () => {
     const extraction: ExtractionResult = { ...completeExtraction, customerPhone: null };
     expect(isExtractionComplete(extraction)).toBe(false);
   });
 
-  it('should return true when only name and email (truly optional) are null', () => {
+  it('should return false when customerName is null (now required)', () => {
+    const extraction: ExtractionResult = { ...completeExtraction, customerName: null };
+    expect(isExtractionComplete(extraction)).toBe(false);
+  });
+
+  it('should return false when customerName is only a first name', () => {
+    const extraction: ExtractionResult = { ...completeExtraction, customerName: 'John' };
+    expect(isExtractionComplete(extraction)).toBe(false);
+  });
+
+  it('should return true when only email (truly optional) is null', () => {
     const extraction: ExtractionResult = {
       ...completeExtraction,
-      customerName: null,
       customerEmail: null,
     };
     expect(isExtractionComplete(extraction)).toBe(true);
   });
 
-  it('should return false when all three required fields are null', () => {
+  it('should return false when all required fields are null', () => {
     const extraction: ExtractionResult = {
       ...completeExtraction,
       issueType: null,
       urgency: null,
       address: null,
+      customerName: null,
     };
     expect(isExtractionComplete(extraction)).toBe(false);
   });
@@ -85,7 +187,7 @@ describe('extractionSchema', () => {
     const result = extractionSchema.parse(completeExtraction);
     expect(result.issueType).toBe('heating_not_working');
     expect(result.urgency).toBe('high');
-    expect(result.address).toBe('123 Main St');
+    expect(result.address).toBe('123 Main St, Springfield, IL 62704');
   });
 
   it('should accept data with null optional fields', () => {
