@@ -84,6 +84,7 @@ describe("chipsForExtraction", () => {
         address: "120 Broadway, Seattle, WA 98122",
         customerName: "Raymond Chen",
         customerPhone: "6478960801",
+        customerEmail: "ray@example.com",
         systemDownStatus: "fully_down",
         problemDuration: "a few days",
       }),

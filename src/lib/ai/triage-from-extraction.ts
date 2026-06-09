@@ -70,6 +70,7 @@ export function extractionToTriageSlots(
     address: extraction.address ?? null,
     name: extraction.customerName ?? null,
     phone: extraction.customerPhone ?? null,
+    email: extraction.customerEmail ?? null,
     // A real hazard escalates server-side before this client view renders, so we
     // sequence the remaining intake as if the safety screen is cleared (same
     // convention the chat route's nextSlotPrompt uses).
