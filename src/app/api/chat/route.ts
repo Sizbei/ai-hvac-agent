@@ -54,7 +54,10 @@ import {
   type WindowChip,
 } from "@/lib/ai/availability-prompt";
 import { CONFIRM_REPLY, HANDOFF_REPLY } from "@/lib/ai/constants";
-import { extractSlots, extractAddressLoose } from "@/lib/ai/slot-extract";
+import {
+  extractSlots,
+  extractAddressAtAddressStep,
+} from "@/lib/ai/slot-extract";
 import { extractAllContactFields } from "@/lib/ai/extract-all-contact";
 import { detectCorrection, correctionFieldLabel } from "@/lib/ai/detect-correction";
 import { isBusinessName } from "@/lib/ai/detect-business-name";
@@ -532,6 +535,16 @@ export async function POST(request: NextRequest) {
       return errorResponse("Message is required", "INVALID_MESSAGE", 400);
     }
 
+    // Set by the client when the customer picked a result from the address
+    // lookup (vs. typing free text). A structured selection is a complete,
+    // valid address, so we trust it verbatim at the address step rather than
+    // re-running the US-centric regex (which rejects e.g. non-US addresses or
+    // ones without a leading house number, causing the address re-ask bug).
+    const addressSelected =
+      typeof body === "object" &&
+      body !== null &&
+      (body as Record<string, unknown>).addressSelected === true;
+
     const guardrailResult = sanitizeInput(userMessage);
 
     if (guardrailResult.flagged.length > 0) {
@@ -731,15 +744,26 @@ export async function POST(request: NextRequest) {
         phone: allContact.phone,
         email: allContact.email,
       };
-      // When we JUST asked for the address (or the city/ZIP follow-up), accept a
-      // suffix-less answer ("123 Main", "Johnson City 37604") the strict
-      // extractor would miss — fixes the re-ask bug where such a reply fell
-      // through to the LLM and got re-asked.
-      const addressAnswer =
-        (pendingStep?.id === "address" || pendingStep?.id === "address_parts") &&
-        !extracted.address
-          ? extractAddressLoose(guardrailResult.sanitized)
-          : extracted.address;
+      // When we JUST asked for the address (or the city/ZIP follow-up), capture
+      // the customer's reply as the address even when the strict extractor would
+      // miss it. Two cases:
+      //  1. The customer PICKED a result from the address lookup
+      //     (addressSelected) — a complete, validated address — so we trust the
+      //     whole message verbatim, even a non-US / house-number-less address
+      //     ("Route Nationale # 3, Commune Pignon, Nord").
+      //  2. The customer TYPED a reply — use the lenient step extractor, which
+      //     accepts suffix-less / number-less addresses that still look like an
+      //     address (comma, ZIP, or 3+ words) and rejects refusals.
+      // This fixes the re-ask bug where such replies fell through every
+      // extractor and the bot asked for the address again.
+      const atAddressStep =
+        pendingStep?.id === "address" || pendingStep?.id === "address_parts";
+      const addressAnswer = atAddressStep
+        ? addressSelected
+          ? guardrailResult.sanitized.trim().slice(0, 500)
+          : extracted.address ??
+            extractAddressAtAddressStep(guardrailResult.sanitized)
+        : extracted.address;
 
       // A "slot provision" turn: the customer supplied an address/phone/email.
       // There's no intent for a bare address, so the router returns FALLBACK —
@@ -967,7 +991,10 @@ export async function POST(request: NextRequest) {
         // "120 Broadway, 120 Broadway, Seattle…" double-address. Falls back to
         // addressAnswer/extracted for all other steps.
         const partsAnswerRaw = guardrailResult.sanitized.trim();
-        const retypedFullStreet = /^\s*\d/.test(partsAnswerRaw); // "120 Broadway, …"
+        // A leading digit ("120 Broadway, …") OR a lookup selection (a complete,
+        // standalone address) means the customer gave a full address here — use
+        // it as the base rather than appending to the stored partial.
+        const retypedFullStreet = addressSelected || /^\s*\d/.test(partsAnswerRaw);
         const combinedAddress =
           pendingStep?.id === "address_parts" && knownSlots.address
             ? (retypedFullStreet

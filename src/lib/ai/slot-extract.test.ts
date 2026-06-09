@@ -4,6 +4,7 @@ import {
   extractPhone,
   extractEmail,
   extractAddress,
+  extractAddressAtAddressStep,
 } from './slot-extract';
 
 describe('extractPhone', () => {
@@ -119,6 +120,49 @@ describe('extractAddress', () => {
 
   it('returns null for empty string', () => {
     expect(extractAddress('')).toBeNull();
+  });
+});
+
+describe('extractAddressAtAddressStep', () => {
+  it('captures a standard US address (delegates to loose)', () => {
+    expect(
+      extractAddressAtAddressStep('87 Harvard Street, Springfield, Massachusetts 01104'),
+    ).toBe('87 Harvard Street, Springfield, Massachusetts 01104');
+  });
+
+  it('captures an address with no leading house number (the re-ask bug)', () => {
+    expect(
+      extractAddressAtAddressStep('Rockaway Freeway, New York, New York 11693'),
+    ).toBe('Rockaway Freeway, New York, New York 11693');
+  });
+
+  it('captures a non-US address with a number mid-string', () => {
+    expect(
+      extractAddressAtAddressStep('Route Nationale # 3, Commune Pignon, Nord'),
+    ).toBe('Route Nationale # 3, Commune Pignon, Nord');
+  });
+
+  it('captures a suffix-less number-led address', () => {
+    expect(extractAddressAtAddressStep('123 Main')).toBe('123 Main');
+  });
+
+  it('trims trailing punctuation', () => {
+    expect(
+      extractAddressAtAddressStep('Rockaway Freeway, New York 11693.'),
+    ).toBe('Rockaway Freeway, New York 11693');
+  });
+
+  it('rejects an empty reply', () => {
+    expect(extractAddressAtAddressStep('   ')).toBeNull();
+  });
+
+  it('rejects a refusal / redirect reply', () => {
+    expect(extractAddressAtAddressStep('skip')).toBeNull();
+    expect(extractAddressAtAddressStep('can someone call me instead')).toBeNull();
+  });
+
+  it('rejects a one-word non-address reply', () => {
+    expect(extractAddressAtAddressStep('hello')).toBeNull();
   });
 });
 

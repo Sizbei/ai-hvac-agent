@@ -26,6 +26,12 @@ interface SessionData {
   }[];
 }
 
+/** Per-message send options. `addressSelected` marks a message that came from
+ * the address lookup so the backend trusts it verbatim as the service address. */
+interface SendMessageOptions {
+  readonly addressSelected?: boolean;
+}
+
 interface UseChatSessionReturn {
   readonly messages: readonly ChatMessage[];
   readonly status: SessionState;
@@ -34,7 +40,7 @@ interface UseChatSessionReturn {
   readonly extractionFields: readonly ExtractionField[];
   readonly error: string | null;
   readonly isLoading: boolean;
-  readonly sendMessage: (text: string) => void;
+  readonly sendMessage: (text: string, options?: SendMessageOptions) => void;
   readonly escalate: () => Promise<void>;
   readonly confirm: (data: ExtractionResult) => Promise<{ referenceNumber: string }>;
   /** Abandon the current session and start a fresh one (clears the transcript,
@@ -65,7 +71,7 @@ export function useChatSession(): UseChatSessionReturn {
     () =>
       new TextStreamChatTransport({
         api: '/api/chat',
-        prepareSendMessagesRequest: ({ messages: msgs, ...rest }) => {
+        prepareSendMessagesRequest: ({ messages: msgs, body: callBody, ...rest }) => {
           // Extract the last user message content from UIMessage parts
           const lastUserMsg = msgs.filter((m) => m.role === 'user').at(-1);
           const content =
@@ -75,9 +81,12 @@ export function useChatSession(): UseChatSessionReturn {
               )
               .map((p) => p.text)
               .join('') ?? '';
+          // Forward any per-call body fields (e.g. addressSelected, set when the
+          // customer picks a result from the address lookup) alongside the
+          // message so the backend can trust a structured selection verbatim.
           return {
             ...rest,
-            body: { message: content },
+            body: { message: content, ...(callBody ?? {}) },
           };
         },
       }),
@@ -313,12 +322,17 @@ export function useChatSession(): UseChatSessionReturn {
 
   // Wrap sendMessage to accept plain text
   const sendMessage = useCallback(
-    (text: string): void => {
+    (text: string, options?: SendMessageOptions): void => {
       if (isTerminalOrSubmitted(sessionStatus) || isStreaming || isLoading) {
         return;
       }
       setSessionError(null);
-      aiSendMessage({ text });
+      aiSendMessage(
+        { text },
+        options?.addressSelected
+          ? { body: { addressSelected: true } }
+          : undefined,
+      );
     },
     [sessionStatus, isStreaming, isLoading, aiSendMessage],
   );

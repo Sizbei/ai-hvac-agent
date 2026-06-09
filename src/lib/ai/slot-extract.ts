@@ -150,6 +150,82 @@ export function extractAddressLoose(message: string): string | null {
   return cleaned.length > 0 ? cleaned : null;
 }
 
+// Short answers that are NOT an address when they are the WHOLE reply (or its
+// start): "skip" / "human" / "not sure". Matched by equality or prefix so a
+// real address ("Stop Street") isn't caught by a bare-word coincidence.
+const NON_ADDRESS_EXACT = [
+  'skip',
+  'human',
+  'agent',
+  "don't know",
+  'dont know',
+  'not sure',
+  'no idea',
+  'cancel',
+  'nevermind',
+  'never mind',
+  'stop',
+  'pass',
+  'n/a',
+];
+
+// Redirect phrases that mark the reply as a request to be contacted rather than
+// a service address, even when buried in a sentence ("can someone call me
+// instead?"). Matched by substring containment.
+const NON_ADDRESS_CONTAINS = [
+  'call me',
+  'text me',
+  'someone call',
+  'talk to a human',
+  'speak to a human',
+  'speak to someone',
+  'call instead',
+];
+
+/**
+ * Address capture for the moment we have JUST asked for the service address
+ * (the conversational context guarantees the reply IS the address). This is the
+ * most permissive matcher and exists to fix the re-ask bug where a perfectly
+ * valid address that doesn't start with a US house number — e.g. an
+ * autocomplete pick like "Route Nationale # 3, Commune Pignon, Nord" or
+ * "Rockaway Freeway, New York, New York 11693" — fell through every stricter
+ * extractor and the bot re-asked for the address.
+ *
+ * Order matters. At this step the WHOLE reply is the address, so when the
+ * cleaned message already looks like an address (has a comma, a 5-digit ZIP, or
+ * 3+ words) we return it verbatim — we deliberately do NOT route it through the
+ * suffix-anchored extractor, which is built to pull an address out of a longer
+ * sentence and would truncate a full state name (e.g. "…, Massachusetts 01104"
+ * → "…, Ma"). Only for a short reply with no address signal (e.g. "123 Main")
+ * do we fall back to the loose extractor. Refusals/redirects ("skip", "call me
+ * instead") and empty replies return null so the caller can defer.
+ */
+export function extractAddressAtAddressStep(message: string): string | null {
+  const cleaned = message.trim().replace(/[\s,.;]+$/, '');
+  if (cleaned.length === 0) return null;
+
+  const lower = cleaned.toLowerCase();
+  // Reject refusals/redirects so we don't store "skip" or "can someone call me
+  // instead?" as the service address.
+  if (NON_ADDRESS_EXACT.some((p) => lower === p || lower.startsWith(p + ' '))) {
+    return null;
+  }
+  if (NON_ADDRESS_CONTAINS.some((p) => lower.includes(p))) {
+    return null;
+  }
+
+  const hasComma = cleaned.includes(',');
+  const hasZip = /\b\d{5}(?:-\d{4})?\b/.test(cleaned);
+  const wordCount = cleaned.split(/\s+/).length;
+  if (hasComma || hasZip || wordCount >= 3) {
+    return cleaned;
+  }
+
+  // Short reply, no address signal — try the loose extractor for a number-led
+  // street like "123 Main" (rejects "10 years" etc.). Otherwise defer.
+  return extractAddressLoose(cleaned);
+}
+
 export function extractSlots(message: string): ExtractedSlots {
   return {
     address: extractAddress(message),

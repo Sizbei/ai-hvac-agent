@@ -230,7 +230,7 @@ export function ChatExperience({
         !isTerminal &&
         status !== 'extracting' && (
           <AddressAutocomplete
-            onSelect={sendMessage}
+            onSelect={(addr) => sendMessage(addr, { addressSelected: true })}
             disabled={inputDisabled}
             placeholder="Start typing your service address…"
           />
