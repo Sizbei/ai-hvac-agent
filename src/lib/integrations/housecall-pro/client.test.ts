@@ -480,3 +480,109 @@ describe("RestHousecallProClient — error handling + retry", () => {
 // level — avoiding per-test vi.mock hoisting hazards. `getHousecallClient` is
 // imported here only to keep the public surface referenced.
 void getHousecallClient;
+
+// ── Appended: listCustomerJobs (Stage 3 customer history) ──
+describe("RestHousecallProClient.listCustomerJobs", () => {
+  it("filters by customer_id and parses the jobs list", async () => {
+    const fetchMock = vi.fn<(url?: string, init?: RequestInit) => Promise<Response>>(async () =>
+      res({
+        jobs: [
+          {
+            id: "job-1",
+            customer_id: "cust-7",
+            work_status: "completed",
+            description: "Replaced capacitor",
+            schedule: { start_time: "2026-03-15T14:00:00.000Z" },
+          },
+          {
+            id: "job-2",
+            customer_id: "cust-7",
+            work_status: "scheduled",
+            description: "Annual tune-up",
+            schedule: { start_time: "2026-06-01T13:00:00.000Z" },
+          },
+        ],
+      }),
+    );
+    const client = new RestHousecallProClient(
+      CONFIG,
+      fetchMock as unknown as typeof fetch,
+    );
+    const jobs = await client.listCustomerJobs("cust-7");
+
+    expect(jobs).toHaveLength(2);
+    expect(jobs[0]?.id).toBe("job-1");
+    expect(jobs[0]?.schedule_start).toBe("2026-03-15T14:00:00.000Z");
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url as string).toContain("/jobs?");
+    expect(url as string).toContain("customer_id=cust-7");
+    expect((init as RequestInit).method).toBe("GET");
+  });
+
+  it("drops malformed jobs instead of throwing", async () => {
+    const fetchMock = vi.fn<(url?: string, init?: RequestInit) => Promise<Response>>(async () =>
+      res({
+        jobs: [
+          { id: "job-1", customer_id: "cust-7", work_status: "completed" },
+          { id: "no-customer-id" }, // malformed → dropped
+          "not-an-object", // malformed → dropped
+        ],
+      }),
+    );
+    const client = new RestHousecallProClient(
+      CONFIG,
+      fetchMock as unknown as typeof fetch,
+    );
+    const jobs = await client.listCustomerJobs("cust-7");
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]?.id).toBe("job-1");
+  });
+
+  it("returns [] when HCP returns no jobs array", async () => {
+    const fetchMock = vi.fn<(url?: string, init?: RequestInit) => Promise<Response>>(async () => res({}));
+    const client = new RestHousecallProClient(
+      CONFIG,
+      fetchMock as unknown as typeof fetch,
+    );
+    expect(await client.listCustomerJobs("cust-7")).toEqual([]);
+  });
+});
+
+
+// ── Appended: addJobNote (Stage 5 note sync) ──
+describe("RestHousecallProClient.addJobNote", () => {
+  it("POSTs the note to the job's notes sub-collection and resolves void", async () => {
+    const fetchMock = vi.fn<(url?: string, init?: RequestInit) => Promise<Response>>(async () =>
+      res({ id: "note-1", content: "Gate code 1234" }, true, 201),
+    );
+    const client = new RestHousecallProClient(
+      CONFIG,
+      fetchMock as unknown as typeof fetch,
+    );
+    await expect(
+      client.addJobNote("job-9", "Gate code 1234"),
+    ).resolves.toBeUndefined();
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.housecallpro.test/jobs/job-9/notes");
+    expect((init as RequestInit).method).toBe("POST");
+    const sent = JSON.parse((init as RequestInit).body as string);
+    expect(sent.content).toBe("Gate code 1234");
+    // The note is sent in the body, never in the URL.
+    expect(url as string).not.toContain("Gate");
+  });
+
+  it("encodes the job id and resolves void on a 204 (no body)", async () => {
+    const fetchMock = vi.fn<(url?: string, init?: RequestInit) => Promise<Response>>(async () =>
+      res(null, true, 204),
+    );
+    const client = new RestHousecallProClient(
+      CONFIG,
+      fetchMock as unknown as typeof fetch,
+    );
+    await expect(client.addJobNote("job/9", "hi")).resolves.toBeUndefined();
+    const [url] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.housecallpro.test/jobs/job%2F9/notes");
+  });
+});
+

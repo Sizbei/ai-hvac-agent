@@ -4,6 +4,7 @@ import { customers } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { decrypt } from "@/lib/crypto";
 import { findCustomerIdByContact } from "@/lib/admin/crm-queries";
+import { getCustomerServiceHistory } from "@/lib/integrations/housecall-pro/customer-history";
 
 /**
  * Light, NON-PII-leaking context about a customer the chat agent has just
@@ -35,6 +36,19 @@ export interface CustomerContext {
    * which surfaces only the first name + non-identifying facts).
    */
   readonly fullName: string | null;
+  /**
+   * The customer's Housecall Pro id, if we've mirrored them there. Used ONLY
+   * server-side as the seam into HCP service history (see
+   * {@link enrichWithServiceHistory}); never placed in the prompt hint.
+   */
+  readonly hcpCustomerId: string | null;
+  /**
+   * Optional one-line, PII-free prior-service note derived from HCP job history
+   * (e.g. "Most recent service: March 2026 — replaced capacitor."). Absent until
+   * a best-effort {@link enrichWithServiceHistory} pass fills it; surfaced in the
+   * hint when present. Best-effort: stays null when HCP is absent or errors.
+   */
+  readonly priorServiceNote?: string | null;
 }
 
 /**
@@ -95,6 +109,7 @@ export async function lookupCustomerContext(
       customerType: customers.customerType,
       membershipStatus: customers.membershipStatus,
       doNotService: customers.doNotService,
+      hcpCustomerId: customers.hcpCustomerId,
       priorRequestCount: sql<number>`(
         SELECT count(*)::int FROM service_requests
         WHERE service_requests.customer_id = ${customers.id}
@@ -124,7 +139,73 @@ export async function lookupCustomerContext(
     doNotService: row.doNotService,
     firstName: firstNameFrom(decryptedName),
     fullName,
+    hcpCustomerId: row.hcpCustomerId,
   };
+}
+
+/** Format an ISO date as "Month YYYY" (e.g. "March 2026"), or null if unparsable. */
+function monthYear(iso: string | null): string | null {
+  if (!iso) return null;
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return null;
+  return new Date(ms).toLocaleString("en-US", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+/**
+ * BEST-EFFORT enrichment: when the resolved customer is mapped into Housecall Pro
+ * (has an hcpCustomerId) AND the org is HCP-connected, pull their past-job history
+ * and attach a one-line, PII-free prior-service note to the context. Returns a NEW
+ * context (immutable) — the caller swaps it in before building the hint.
+ *
+ * DEGRADE-SAFE and non-blocking by design:
+ *  - null context → returned unchanged.
+ *  - no hcpCustomerId (never mirrored) → returned unchanged, no HCP call.
+ *  - HCP not connected / errors → {@link getCustomerServiceHistory} yields the
+ *    empty summary, so the context is returned unchanged (no note added).
+ *  - no past jobs → no note added.
+ *
+ * The existing context behavior is therefore identical when HCP is absent. Keep
+ * this off the critical reply path or `await` it only where a small extra round
+ * trip is acceptable; it never throws.
+ */
+export async function enrichWithServiceHistory(
+  organizationId: string,
+  context: CustomerContext | null,
+  fetchImpl: typeof fetch = fetch,
+): Promise<CustomerContext | null> {
+  if (!context || !context.hcpCustomerId) {
+    return context;
+  }
+
+  const history = await getCustomerServiceHistory(
+    organizationId,
+    context.hcpCustomerId,
+    fetchImpl,
+  );
+  if (history.jobCount === 0) {
+    return context; // no past jobs (or degraded) — leave context untouched
+  }
+
+  const when = monthYear(history.lastServiceDate);
+  const what = history.lastServiceDescription?.trim();
+  // Build the note from whatever we have; bail (no change) if neither is usable.
+  let note: string | null = null;
+  if (when && what) {
+    note = `Most recent service: ${when} — ${what}.`;
+  } else if (when) {
+    note = `Most recent service: ${when}.`;
+  } else if (what) {
+    note = `Most recent service: ${what}.`;
+  }
+  if (!note) {
+    return context;
+  }
+
+  return { ...context, priorServiceNote: note };
 }
 
 /**
@@ -153,6 +234,10 @@ export function buildCustomerContextHint(
   }
   if (context.customerType === "commercial") {
     parts.push("This is a commercial account.");
+  }
+  // Best-effort prior-service note from HCP history (PII-free: date + work only).
+  if (context.priorServiceNote) {
+    parts.push(context.priorServiceNote);
   }
 
   const facts = parts.join(" ");

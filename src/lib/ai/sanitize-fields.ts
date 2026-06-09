@@ -46,23 +46,34 @@ export function sanitizeName(raw: string): string {
 function capitalizeSegment(segment: string): string {
   if (segment.length === 0) return segment;
 
-  // Apostrophe parts: O'Brien, D'Angelo — capitalize each side.
+  // Apostrophe parts. A possessive "'s" (apostrophe + lone s) stays lowercase
+  // ("McDonald's", not "McDonald'S"); other apostrophe parts capitalize each
+  // side ("O'Brien", "D'Angelo"). The part BEFORE the apostrophe still gets the
+  // full Mc/Mac + capitalize rules.
   if (segment.includes("'")) {
-    return segment
-      .split("'")
-      .map((p) => simpleCapitalize(p))
+    const parts = segment.split("'");
+    return parts
+      .map((p, i) => {
+        // A trailing possessive "s" (last part, single 's') → lowercase.
+        if (i === parts.length - 1 && p.toLowerCase() === "s") return "s";
+        return capitalizeCore(p);
+      })
       .join("'");
   }
 
+  return capitalizeCore(segment);
+}
+
+/** Capitalize a name core, applying the Mc/Mac prefix rule. */
+function capitalizeCore(segment: string): string {
   const lower = segment.toLowerCase();
-  // Mc/Mac prefixes: capitalize the prefix AND the following letter.
+  if (lower.length === 0) return lower;
   if (lower.startsWith("mc") && lower.length > 2) {
     return "Mc" + simpleCapitalize(lower.slice(2));
   }
   if (lower.startsWith("mac") && lower.length > 3) {
     return "Mac" + simpleCapitalize(lower.slice(3));
   }
-
   return simpleCapitalize(lower);
 }
 

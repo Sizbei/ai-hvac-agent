@@ -114,6 +114,30 @@ describe("Spears commercial service lines route to a repair intake", () => {
   }
 });
 
+describe("quick-reply chip messages route to a repair intake (not redirect)", () => {
+  // The exact `message` strings behind the home-screen service chips
+  // (components/chat/quick-replies.tsx). Each must enter intake, never redirect.
+  // Keep in sync with the GROUPS there.
+  const CHIP_MESSAGES: readonly string[] = [
+    "Our HVAC system is running but not cooling — it's just blowing warm air.",
+    "Our HVAC system is running but not putting out any heat.",
+    "Our walk-in cooler is not holding temperature / not cooling.",
+    "Our reach-in freezer is not freezing / not staying cold.",
+    "Our commercial ice machine has stopped making ice.",
+    "Our boiler is not producing heat.",
+    "Our boiler won't fire up / won't start.",
+    "Our commercial oven / range has stopped working.",
+    "Our commercial fryer is not heating up.",
+  ];
+  for (const message of CHIP_MESSAGES) {
+    it(`chip "${message.slice(0, 32)}…" enters intake, not redirect`, () => {
+      const v = routeMessage(message);
+      expect(v.action).not.toBe("REDIRECT");
+      expect(v.intentId).not.toBe("meta-non-hvac-redirect");
+    });
+  }
+});
+
 describe("existing residential HVAC intents still own their phrasing", () => {
   // The new commercial negationGuards must NOT steal the plain residential
   // HVAC requests they share keywords with.

@@ -56,6 +56,7 @@ import {
 import { CONFIRM_REPLY, HANDOFF_REPLY } from "@/lib/ai/constants";
 import { extractSlots, extractAddressLoose } from "@/lib/ai/slot-extract";
 import { detectCorrection, correctionFieldLabel } from "@/lib/ai/detect-correction";
+import { isBusinessName } from "@/lib/ai/detect-business-name";
 import { withLeadIn } from "@/lib/ai/lead-ins";
 import { escalateSession } from "@/lib/ai/escalate-service";
 import {
@@ -69,6 +70,7 @@ import { compactSessionIfNeeded } from "@/lib/ai/compact-session";
 import {
   lookupCustomerContext,
   buildCustomerContextHint,
+  enrichWithServiceHistory,
   type CustomerContext,
 } from "@/lib/ai/customer-context";
 import { customers } from "@/lib/db/schema";
@@ -875,7 +877,7 @@ export async function POST(request: NextRequest) {
           pendingStep?.id ?? null,
           guardrailResult.sanitized,
         );
-        const capturedExtras = captured
+        const capturedExtrasBase = captured
           ? { [captured.key]: captured.value }
           : undefined;
 
@@ -901,6 +903,20 @@ export async function POST(request: NextRequest) {
           correction?.field === "address" ? correction.value : undefined;
         const correctedEmail =
           correction?.field === "email" ? correction.value : undefined;
+
+        // If the name we're capturing/correcting this turn is a BUSINESS
+        // ("McDonald's", "Joe's Diner", "Acme Refrigeration LLC") rather than a
+        // person, treat the job as commercial: pre-set propertyType=commercial
+        // (so the "home or commercial?" step is skipped) and flag it so the bot
+        // confirms it's for a commercial unit. Only fires on the name being
+        // provided THIS turn — we don't re-flag an already-stored name.
+        const nameThisTurn = correctedName ?? seededName ?? null;
+        const businessNameDetected =
+          nameThisTurn !== null && isBusinessName(nameThisTurn) &&
+          knownSlots.extras?.propertyType !== "commercial";
+        const capturedExtras = businessNameDetected
+          ? { ...(capturedExtrasBase ?? {}), propertyType: "commercial" }
+          : capturedExtrasBase;
 
         // Merge router + regex-extracted slots into the session metadata. A
         // returning customer's stored name (seededName) fills the name slot so
@@ -945,12 +961,23 @@ export async function POST(request: NextRequest) {
           ? await fetchWindowPrompt(organizationId)
           : null;
 
-        // Reply: confirm when complete, else the intent's canned ask, else a
-        // deterministic next-slot prompt (slot-provision turns).
+        // Reply: confirm when complete, else the next question.
+        //
+        // Residual #1 fix: for a COLLECT_INFO intake intent we DON'T use the
+        // intent's canned ask (which hard-codes "what's the service address?",
+        // jumping past the triage sequence). We let the deterministic stepper
+        // drive — it asks the qualifying questions (system down? how long?)
+        // before address, in the researched order. The canned reply is still
+        // used for ANSWER / REDIRECT verdicts (an FAQ answer or out-of-scope
+        // redirect IS the message; there's no slot to step through).
+        const useCannedReply =
+          verdict.action !== "FALLBACK_LLM" &&
+          verdict.action !== "COLLECT_INFO" &&
+          Boolean(verdict.reply);
         const nextQuestion = extractionComplete
           ? CONFIRM_REPLY
-          : verdict.action !== "FALLBACK_LLM" && verdict.reply
-            ? verdict.reply
+          : useCannedReply
+            ? verdict.reply!
             : nextSlotPrompt(merged, windowPrompt ?? undefined);
 
         // After-hours disclosure (deterministic path). When this intake is
@@ -1004,20 +1031,32 @@ export async function POST(request: NextRequest) {
           ? `Got it — I've updated your ${correctionFieldLabel(correction!.field)}. `
           : "";
 
+        // When the name they gave is a business, confirm we're treating it as a
+        // commercial unit (Spears is commercial-first). Leads the turn so it's
+        // clear before the next question. Shown once (businessNameDetected only
+        // fires the turn the business name is provided).
+        const businessAck = businessNameDetected
+          ? `Thanks — I'll log this as a commercial account for ${nameThisTurn}, so we'll send a commercial technician. `
+          : "";
+
+        // Combined lead-in for this turn: business clarification then correction
+        // ack (at most one of these is usually set).
+        const ack = businessAck + correctionAck;
+
         let replyBody: string;
         if (extractionComplete) {
           // nextQuestion is CONFIRM_REPLY here — stand-alone, no prefixes EXCEPT
-          // a correction acknowledgement so the recap change isn't silent.
-          replyBody = correctionAck + nextQuestion;
+          // an ack so a business/correction change isn't silent.
+          replyBody = ack + nextQuestion;
         } else if (afterHoursDecision.kind !== "none") {
           // The after-hours copy carries the framing for this turn; append the
           // plain next question (no lead-in) so it reads as one person talking.
-          // A correction ack leads so the customer sees the change registered.
-          replyBody = `${correctionAck}${afterHoursDecision.copy} ${nextQuestion}`;
-        } else if (isExplicitCorrection) {
-          // A correction owns the turn's framing — acknowledge, then ask the
-          // next question plainly (no issue lead-in, so it reads as one voice).
-          replyBody = correctionAck + nextQuestion;
+          // An ack leads so the customer sees the change registered.
+          replyBody = `${ack}${afterHoursDecision.copy} ${nextQuestion}`;
+        } else if (isExplicitCorrection || businessNameDetected) {
+          // A correction / business clarification owns the turn's framing —
+          // acknowledge, then ask the next question plainly (one voice).
+          replyBody = ack + nextQuestion;
         } else {
           // Conversational warmth (Stage 3b): prepend a brief, varied
           // acknowledgement of the stated issue before the next question —
@@ -1087,6 +1126,16 @@ export async function POST(request: NextRequest) {
     const escalationHint = nearTurnLimit
       ? "\n\n[Note: This conversation has been going for a while. If you would prefer to speak with a human agent, you can request an escalation at any time.]"
       : "";
+
+    // Best-effort HCP service-history enrichment (HCP Stage 3): when the resolved
+    // customer is linked to HCP, attach a one-line PII-free prior-service note
+    // ("last serviced in March") to the context. Behind the seam + degrade-safe:
+    // when HCP isn't connected or errors, the context is returned unchanged, so
+    // the hint is byte-identical to before. Never blocks/throws on the reply path.
+    customerContext = await enrichWithServiceHistory(
+      organizationId,
+      customerContext,
+    ).catch(() => customerContext);
 
     // Returning-customer note (non-PII: first name + counts/membership) so the
     // model greets them by name, acknowledges prior service, and skips re-asking
@@ -1196,9 +1245,22 @@ export async function POST(request: NextRequest) {
           .where(sessionScope);
         // Merge into any slots already known (deterministic or prior LLM
         // turns); never overwrite a filled slot with null.
-        const merged = mergeSlots(parseKnownSlots(fresh?.metadata ?? null), {
-          issueType: extraction.extraction.issueType ?? undefined,
-          urgency: extraction.extraction.urgency ?? undefined,
+        //
+        // Residual #2 fix: the DETERMINISTIC router is authoritative for the
+        // issue classification of an in-scope request ("blowing warm air" →
+        // cooling_not_working). The background LLM extractor is weaker at it and
+        // sometimes returns "other", which would clobber the router's correct
+        // value (mergeSlots overwrites with any non-empty update). So only let
+        // the extractor FILL issueType/urgency when they aren't already set —
+        // pass undefined when the fresh metadata already has them.
+        const freshSlots = parseKnownSlots(fresh?.metadata ?? null);
+        const merged = mergeSlots(freshSlots, {
+          issueType: freshSlots.issueType
+            ? undefined
+            : extraction.extraction.issueType ?? undefined,
+          urgency: freshSlots.urgency
+            ? undefined
+            : extraction.extraction.urgency ?? undefined,
           address: extraction.extraction.address ?? undefined,
           name: extraction.extraction.customerName ?? undefined,
           phone: extraction.extraction.customerPhone ?? undefined,

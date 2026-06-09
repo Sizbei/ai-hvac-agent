@@ -18,6 +18,11 @@ describe("sanitizeName", () => {
     expect(sanitizeName("o'brien")).toBe("O'Brien");
     expect(sanitizeName("d'angelo")).toBe("D'Angelo");
   });
+  it("keeps a possessive 's lowercase (McDonald's, not McDonald'S)", () => {
+    expect(sanitizeName("mcdonald's")).toBe("McDonald's");
+    expect(sanitizeName("joe's")).toBe("Joe's");
+    expect(sanitizeName("o'brien's")).toBe("O'Brien's");
+  });
   it("handles hyphenated names", () => {
     expect(sanitizeName("anne-marie watson")).toBe("Anne-Marie Watson");
   });

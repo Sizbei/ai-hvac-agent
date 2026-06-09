@@ -73,6 +73,21 @@ export interface HousecallProClient {
    */
   cancelJob(jobId: string): Promise<void>;
 
+  /**
+   * Append a note to an existing HCP job so the field tech sees it (a dispatcher
+   * note / appointment update). HCP returns the created note (or 204); we ignore
+   * the body — the caller only needs "it happened". Mirrors {@link cancelJob}'s
+   * void-return style. Appending is additive, so a repeat is harmless.
+   */
+  addJobNote(jobId: string, note: string): Promise<void>;
+
+  /**
+   * List the jobs HCP has on file for one customer (their service history),
+   * newest-ish first as HCP returns them. READ-ONLY. Used to surface prior
+   * service ("last serviced in March") to the bot and admin views.
+   */
+  listCustomerJobs(hcpCustomerId: string): Promise<readonly HousecallJob[]>;
+
   /** Fetch a job by HCP id (e.g. to reconcile a webhook). */
   getJob(jobId: string): Promise<HousecallJob>;
 
@@ -369,6 +384,53 @@ export class RestHousecallProClient implements HousecallProClient {
     await this.request(`/jobs/${encodeURIComponent(jobId)}/cancel`, {
       method: "PUT",
     });
+  }
+
+  async addJobNote(jobId: string, note: string): Promise<void> {
+    // ASSUMED HCP SHAPE: a job's notes live under a `/jobs/{id}/notes`
+    // sub-collection; a POST with a JSON body `{ content }` appends one. We
+    // follow HCP's convention (`content`, as the request-note POST route already
+    // uses). Like cancelJob, the endpoint returns the created note (or 204); we
+    // ignore the body since the caller only needs "it happened".
+    await this.request(`/jobs/${encodeURIComponent(jobId)}/notes`, {
+      method: "POST",
+      body: JSON.stringify({ content: note }),
+    });
+  }
+
+  async listCustomerJobs(
+    hcpCustomerId: string,
+  ): Promise<readonly HousecallJob[]> {
+    // ENDPOINT ASSUMPTION: HCP exposes a customer's jobs via the jobs list
+    // endpoint filtered by `customer_id` (mirrors findCustomer's `q=` query +
+    // paged `{ jobs: [...] }` envelope). If the account instead nests jobs under
+    // `/customers/{id}/jobs`, only this path + the envelope key change; the
+    // parse/narrow below is unaffected.
+    const params = new URLSearchParams({
+      customer_id: hcpCustomerId,
+      page_size: "100",
+    });
+    const raw = await this.request(`/jobs?${params.toString()}`, {
+      method: "GET",
+    });
+    const list =
+      typeof raw === "object" && raw !== null
+        ? (raw as Record<string, unknown>).jobs
+        : undefined;
+    if (!Array.isArray(list)) {
+      return [];
+    }
+    // Drop any malformed job rather than throwing, so a single bad row never
+    // blows up the whole history read.
+    return list
+      .map((j): HousecallJob | null => {
+        try {
+          return toJob(j);
+        } catch {
+          return null;
+        }
+      })
+      .filter((j): j is HousecallJob => j !== null);
   }
 
   async getJob(jobId: string): Promise<HousecallJob> {

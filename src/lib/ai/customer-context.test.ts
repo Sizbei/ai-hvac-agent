@@ -1,13 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { findIdMock, selectResult, decryptMock } = vi.hoisted(() => ({
-  findIdMock: vi.fn(),
-  selectResult: { value: [] as unknown[] },
-  decryptMock: vi.fn(),
-}));
+const { findIdMock, selectResult, decryptMock, historyMock } = vi.hoisted(
+  () => ({
+    findIdMock: vi.fn(),
+    selectResult: { value: [] as unknown[] },
+    decryptMock: vi.fn(),
+    historyMock: vi.fn(),
+  }),
+);
 
 vi.mock("@/lib/admin/crm-queries", () => ({
   findCustomerIdByContact: findIdMock,
+}));
+
+vi.mock("@/lib/integrations/housecall-pro/customer-history", () => ({
+  getCustomerServiceHistory: historyMock,
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -27,6 +34,7 @@ vi.mock("@/lib/db/schema", () => ({
     customerType: "customers.customer_type",
     membershipStatus: "customers.membership_status",
     doNotService: "customers.do_not_service",
+    hcpCustomerId: "customers.hcp_customer_id",
   },
 }));
 
@@ -46,6 +54,8 @@ vi.mock("@/lib/crypto", () => ({
 import {
   lookupCustomerContext,
   buildCustomerContextHint,
+  enrichWithServiceHistory,
+  type CustomerContext,
 } from "./customer-context";
 
 const ORG = "org-1";
@@ -54,6 +64,12 @@ beforeEach(() => {
   vi.clearAllMocks();
   selectResult.value = [];
   decryptMock.mockImplementation((v: string) => v); // identity unless overridden
+  // Default: HCP not connected / no history. Tests override per-case.
+  historyMock.mockResolvedValue({
+    jobCount: 0,
+    lastServiceDate: null,
+    lastServiceDescription: null,
+  });
 });
 
 describe("lookupCustomerContext", () => {
@@ -83,6 +99,7 @@ describe("lookupCustomerContext", () => {
         customerType: "residential",
         membershipStatus: "active",
         doNotService: false,
+        hcpCustomerId: "hcp-1",
         priorRequestCount: 3,
       },
     ];
@@ -100,6 +117,7 @@ describe("lookupCustomerContext", () => {
       doNotService: false,
       firstName: "Jane",
       fullName: "Jane Doe",
+      hcpCustomerId: "hcp-1",
     });
   });
 
@@ -186,6 +204,7 @@ describe("buildCustomerContextHint", () => {
       doNotService: false,
       firstName: "Sam",
       fullName: "Sam Jones",
+      hcpCustomerId: null,
     });
     expect(hint).toContain("RETURNING CUSTOMER");
     expect(hint).toContain("Sam");
@@ -204,6 +223,7 @@ describe("buildCustomerContextHint", () => {
       doNotService: false,
       firstName: "Sam",
       fullName: "Sam Jones",
+      hcpCustomerId: null,
     });
     expect(hint).toContain("Sam");
     expect(hint).not.toContain("Jones");
@@ -220,7 +240,87 @@ describe("buildCustomerContextHint", () => {
       doNotService: false,
       firstName: null,
       fullName: null,
+      hcpCustomerId: null,
     });
     expect(hint).toContain("commercial account");
+  });
+
+  it("surfaces a prior-service note when present", () => {
+    const hint = buildCustomerContextHint({
+      customerId: "c1",
+      isReturning: true,
+      priorRequestCount: 1,
+      membershipStatus: "none",
+      customerType: "residential",
+      doNotService: false,
+      firstName: "Sam",
+      fullName: "Sam Jones",
+      hcpCustomerId: "hcp-1",
+      priorServiceNote: "Most recent service: March 2026 — replaced capacitor.",
+    });
+    expect(hint).toContain("Most recent service: March 2026");
+    expect(hint).toContain("replaced capacitor");
+  });
+});
+
+describe("enrichWithServiceHistory", () => {
+  const baseContext: CustomerContext = {
+    customerId: "cust-1",
+    isReturning: true,
+    priorRequestCount: 2,
+    membershipStatus: "active",
+    customerType: "residential",
+    doNotService: false,
+    firstName: "Jane",
+    fullName: "Jane Doe",
+    hcpCustomerId: "hcp-1",
+  };
+
+  it("returns null context unchanged (no HCP call)", async () => {
+    const result = await enrichWithServiceHistory(ORG, null);
+    expect(result).toBeNull();
+    expect(historyMock).not.toHaveBeenCalled();
+  });
+
+  it("returns context unchanged when there is no hcpCustomerId (no HCP call)", async () => {
+    const ctx = { ...baseContext, hcpCustomerId: null };
+    const result = await enrichWithServiceHistory(ORG, ctx);
+    expect(result).toEqual(ctx);
+    expect(result?.priorServiceNote).toBeUndefined();
+    expect(historyMock).not.toHaveBeenCalled();
+  });
+
+  it("attaches a prior-service note (date + description) when history exists", async () => {
+    historyMock.mockResolvedValue({
+      jobCount: 4,
+      lastServiceDate: "2026-03-15T14:00:00.000Z",
+      lastServiceDescription: "Replaced capacitor",
+    });
+    const result = await enrichWithServiceHistory(ORG, baseContext);
+    expect(historyMock).toHaveBeenCalledWith(ORG, "hcp-1", expect.anything());
+    expect(result?.priorServiceNote).toBe(
+      "Most recent service: March 2026 — Replaced capacitor.",
+    );
+  });
+
+  it("attaches a date-only note when description is absent", async () => {
+    historyMock.mockResolvedValue({
+      jobCount: 1,
+      lastServiceDate: "2026-03-15T14:00:00.000Z",
+      lastServiceDescription: null,
+    });
+    const result = await enrichWithServiceHistory(ORG, baseContext);
+    expect(result?.priorServiceNote).toBe("Most recent service: March 2026.");
+  });
+
+  it("leaves context unchanged when HCP has no past jobs (degraded/empty)", async () => {
+    historyMock.mockResolvedValue({
+      jobCount: 0,
+      lastServiceDate: null,
+      lastServiceDescription: null,
+    });
+    const result = await enrichWithServiceHistory(ORG, baseContext);
+    expect(result).toEqual(baseContext);
+    expect(result?.priorServiceNote).toBeUndefined();
   });
 });
