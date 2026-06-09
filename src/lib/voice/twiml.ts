@@ -5,24 +5,46 @@
  * are small pure string builders (no SDK dependency) so they unit-test in
  * isolation. All caller-derived text is XML-escaped to keep the document
  * well-formed regardless of what the agent or summary contains.
+ *
+ * Two ways to voice text:
+ *  - Polly <Say>: Twilio's own neural TTS. Near-instant, the default.
+ *  - ElevenLabs <Play>: when ELEVENLABS_API_KEY is set, the route synthesizes
+ *    the reply to MP3 via /api/voice/tts and Twilio plays it. Warmer/custom
+ *    voice at the cost of a synthesis round-trip per turn.
+ * The mode is chosen by the route and passed in as `voice` so these builders
+ * stay pure and env-free. ElevenLabs mode still emits a Polly <Say> fallback
+ * (after the <Play>) so a synthesis failure degrades to a spoken line rather
+ * than silence.
  */
+import { createTtsToken } from "./tts-token";
 
 const XML_DECL = '<?xml version="1.0" encoding="UTF-8"?>';
 
 /**
- * Default spoken voice — an Amazon Polly NEURAL voice (natural, far better than
- * Twilio's legacy standard voices). Ruth is the warmest, most natural US English
- * neural voice — a friendlier default than Joanna for a customer-service line.
- * Overridable per deployment via TWILIO_VOICE (any value Twilio's <Say voice=...>
- * accepts, e.g. "Polly.Matthew-Neural" or "Polly.Ruth-Generative").
+ * Default spoken voice when ElevenLabs is not configured — an Amazon Polly
+ * NEURAL voice (natural, far better than Twilio's legacy standard voices). Ruth
+ * is the warmest, most natural US English neural voice. Overridable per
+ * deployment via TWILIO_VOICE (any value Twilio's <Say voice=...> accepts).
  */
 export const DEFAULT_VOICE = "Polly.Ruth-Neural";
 
-/** Resolve the configured TTS voice at call time (env override or default). */
-function resolveVoice(): string {
+/** Resolve the configured Polly TTS voice (env override or default). */
+function resolvePollyVoice(): string {
   const v = process.env.TWILIO_VOICE?.trim();
   return v && v.length > 0 ? v : DEFAULT_VOICE;
 }
+
+/**
+ * How to voice spoken text. `polly` uses <Say>; `elevenlabs` plays a synthesized
+ * MP3 from /api/voice/tts at `baseUrl` (the absolute origin Twilio reached us
+ * on), passing the signed token via the URL. `now` stamps the token expiry.
+ */
+export type VoiceMode =
+  | { readonly kind: "polly" }
+  | { readonly kind: "elevenlabs"; readonly baseUrl: string; readonly now: number };
+
+/** Polly is the safe default whenever ElevenLabs isn't explicitly selected. */
+export const POLLY_VOICE: VoiceMode = { kind: "polly" };
 
 /** Escape the five XML special characters in spoken text. */
 export function escapeXml(text: string): string {
@@ -34,9 +56,33 @@ export function escapeXml(text: string): string {
     .replace(/'/g, "&apos;");
 }
 
-/** A <Say> verb that speaks `text` with the configured neural voice. */
-function sayVerb(text: string): string {
-  return `<Say voice="${escapeXml(resolveVoice())}">${escapeXml(text)}</Say>`;
+/** A <Say> verb that speaks `text` with the configured Polly neural voice. */
+function pollySay(text: string): string {
+  return `<Say voice="${escapeXml(resolvePollyVoice())}">${escapeXml(text)}</Say>`;
+}
+
+/** Build the absolute /api/voice/tts URL that synthesizes `text` via ElevenLabs. */
+function ttsPlayUrl(text: string, baseUrl: string, now: number): string {
+  const token = createTtsToken(text, now);
+  const u = new URL("/api/voice/tts", baseUrl);
+  u.searchParams.set("text", token.text);
+  u.searchParams.set("exp", String(token.expiresAt));
+  u.searchParams.set("sig", token.sig);
+  return u.toString();
+}
+
+/**
+ * Render a spoken line for the given voice mode. In ElevenLabs mode this is a
+ * <Play> of the synthesized MP3 followed by a <Say> fallback, so a TTS failure
+ * (the route 500s and Twilio can't play it) still leaves the caller a spoken
+ * line rather than dead air.
+ */
+function speak(text: string, voice: VoiceMode): string {
+  if (voice.kind === "elevenlabs") {
+    const url = ttsPlayUrl(text, voice.baseUrl, voice.now);
+    return `<Play>${escapeXml(url)}</Play>\n    ${pollySay(text)}`;
+  }
+  return pollySay(text);
 }
 
 /**
@@ -48,22 +94,26 @@ export function gatherTwiML(params: {
   readonly say: string;
   readonly action: string;
   readonly reprompt?: string;
+  readonly voice?: VoiceMode;
 }): string {
-  const { say, action, reprompt } = params;
-  const repromptLine = reprompt ? `\n  ${sayVerb(reprompt)}` : "";
+  const { say, action, reprompt, voice = POLLY_VOICE } = params;
+  const repromptLine = reprompt ? `\n  ${speak(reprompt, voice)}` : "";
   return `${XML_DECL}
 <Response>
   <Gather input="speech" action="${escapeXml(action)}" method="POST" speechTimeout="auto">
-    ${sayVerb(say)}
+    ${speak(say, voice)}
   </Gather>${repromptLine}
 </Response>`;
 }
 
 /** Speak a final message, then hang up. */
-export function sayThenHangupTwiML(say: string): string {
+export function sayThenHangupTwiML(
+  say: string,
+  voice: VoiceMode = POLLY_VOICE,
+): string {
   return `${XML_DECL}
 <Response>
-  ${sayVerb(say)}
+  ${speak(say, voice)}
   <Hangup/>
 </Response>`;
 }
