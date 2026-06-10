@@ -25,13 +25,6 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { cn } from '@/lib/utils';
 
-const WELCOME_MESSAGE = {
-  id: 'welcome',
-  role: 'assistant' as const,
-  content:
-    "Hi, I'm here to help get your heating or cooling sorted and a technician on the way. Tell me what's going on, and I'll take care of the rest. (You can tap “Talk to a Human” anytime.)",
-};
-
 const ISSUE_SUGGESTIONS: readonly Suggestion[] = [
   { label: 'AC not cooling', message: 'My air conditioner is running but not cooling — it just blows warm air.' },
   { label: 'No heat', message: "My furnace is running but the house isn't getting warm." },
@@ -82,10 +75,10 @@ export function ChatExperience({
   const inputDisabled = isStreaming || isTerminal || isLoading;
 
   const hasUserMessages = messages.some((m) => m.role === 'user');
-  const displayMessages = hasUserMessages
-    ? messages
-    : [WELCOME_MESSAGE, ...messages];
-  const lastMessageIsAssistant = displayMessages.at(-1)?.role === 'assistant';
+  // The greeting is a real persisted message (seeded by useChatSession from
+  // POST /api/session), so the transcript renders as-is — no display-only
+  // welcome that would vanish on the customer's first reply.
+  const lastMessageIsAssistant = messages.at(-1)?.role === 'assistant';
 
   // Tappable mid-intake chips (#3): derive the next triage step's quick replies
   // from the polled extraction and offer them as one-tap suggestions. The chip's
@@ -179,7 +172,7 @@ export function ChatExperience({
       />
 
       <MessageList
-        messages={displayMessages}
+        messages={messages}
         isStreaming={isStreaming}
         showFeedback
       />

@@ -17,6 +17,11 @@ import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { resolveOrganizationForSession } from "@/lib/tenancy/organization";
 import { touchKeyLastUsed } from "@/lib/widget/key-queries";
 import { resolveTokenBudget, resolveMaxTurns } from "@/lib/ai/chat-limits";
+import {
+  buildWelcomeMessage,
+  brandInfoFromConfig,
+} from "@/lib/ai/system-prompt";
+import { getRouterConfig } from "@/lib/admin/org-config-queries";
 import { logger } from "@/lib/logger";
 
 export async function POST(request: NextRequest) {
@@ -96,6 +101,34 @@ export async function POST(request: NextRequest) {
 
     await setSessionCookie(token);
 
+    // Persist the org-branded greeting as the FIRST assistant message (parity
+    // with the voice channel, which persists its spoken greeting at call
+    // start). This makes the welcome a real transcript message: the UI renders
+    // it from session data instead of a client-side phantom that vanished once
+    // the customer replied, a refresh rehydrates it, and the LLM sees an
+    // assistant reply already exists so it never greets a second time.
+    // Best-effort — a failure here must not fail session creation.
+    let greeting: string | null = null;
+    try {
+      const config = await getRouterConfig(organizationId);
+      greeting = buildWelcomeMessage(
+        brandInfoFromConfig(config.companyName, config.businessInfo),
+      );
+      await db.insert(messages).values({
+        organizationId,
+        sessionId: session.id,
+        role: "assistant",
+        content: greeting,
+        tokensUsed: 0,
+      });
+    } catch (greetError: unknown) {
+      logger.error(
+        { error: greetError, sessionId: session.id },
+        "Failed to persist session greeting (non-fatal)",
+      );
+      greeting = null;
+    }
+
     // Best-effort: record that the widget key was used (so admins can spot
     // dormant keys). Never block or fail the session on this.
     if (resolution.widgetKeyId) {
@@ -108,6 +141,10 @@ export async function POST(request: NextRequest) {
       {
         sessionId: session.id,
         status: session.status,
+        // The persisted welcome copy, so the client can seed its transcript
+        // without a second round-trip. Null if persistence failed (the client
+        // falls back to its generic copy).
+        greeting,
       },
       201,
     );

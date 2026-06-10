@@ -22,7 +22,7 @@ import { errorResponse } from "@/lib/api-response";
 import { getSessionToken } from "@/lib/session";
 import { isSameOriginRequest, hasJsonContentType } from "@/lib/session-csrf";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
-import { buildSystemPrompt, type BrandInfo } from "@/lib/ai/system-prompt";
+import { buildSystemPrompt, brandInfoFromConfig } from "@/lib/ai/system-prompt";
 import { sanitizeInput } from "@/lib/ai/guardrails";
 import {
   extractServiceRequest,
@@ -101,37 +101,6 @@ const DO_NOT_SERVICE_REPLY =
 const AFTER_HOURS_LLM_INSTRUCTION = `
 
 AFTER-HOURS (it is currently outside our normal business hours): Before fully committing to dispatch, find out whether the situation is urgent — UNLESS it's already clearly an emergency or high-urgency (then skip the question and treat it as urgent). If it IS urgent (or the customer confirms yes): continue the intake AND let them know that, since it's after our normal hours, an additional after-hours service charge applies and our team will confirm the details. NEVER state a dollar amount or quote a price — just that a charge applies. If it is NOT urgent: offer to set them up for our next business day at no after-hours charge, and continue accordingly. SAFETY ALWAYS WINS: if there's any hazard (gas/CO/electrical/flooding), follow the safety instructions above and connect them to a person immediately — never delay a hazard to discuss charges.`;
-
-/** Read a non-empty trimmed string from the businessInfo bag, else undefined.
- * businessInfo is a JSONB record, so values are typed `unknown` here. */
-function biString(
-  info: Readonly<Record<string, unknown>>,
-  key: string,
-): string | undefined {
-  const v = info[key];
-  return typeof v === "string" && v.trim().length > 0 ? v.trim() : undefined;
-}
-
-/**
- * Map the org's stored companyName + businessInfo onto the persona's BrandInfo.
- * Only fields that are actually set flow through; an org with no config yields
- * an empty BrandInfo, so buildSystemPrompt falls back to the generic persona.
- * `positioning`/`serviceScope`/`voiceCues` are read opportunistically so a
- * future businessInfo extension brands the LLM with no further route changes.
- */
-function buildBrandInfo(
-  companyName: string | null,
-  businessInfo: Readonly<Record<string, unknown>>,
-): BrandInfo {
-  return {
-    companyName: companyName ?? undefined,
-    phone: biString(businessInfo, "phone"),
-    serviceArea: biString(businessInfo, "serviceArea"),
-    positioning: biString(businessInfo, "positioning"),
-    serviceScope: biString(businessInfo, "serviceScope"),
-    voiceCues: biString(businessInfo, "voiceCues"),
-  };
-}
 
 /**
  * Interpret a customer's reply to the after-hours "is this urgent?" ask as a
@@ -1372,7 +1341,7 @@ export async function POST(request: NextRequest) {
     // businessInfo), populated above via the cached router overlay. Falls back
     // to the generic HVAC persona when nothing is configured (empty BrandInfo).
     const brandPrompt = buildSystemPrompt(
-      buildBrandInfo(routerConfig.companyName, routerConfig.businessInfo),
+      brandInfoFromConfig(routerConfig.companyName, routerConfig.businessInfo),
     );
 
     // After-hours instruction block (LLM path). When the request is currently

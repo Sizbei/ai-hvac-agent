@@ -50,6 +50,22 @@ interface UseChatSessionReturn {
 
 const TERMINAL_STATES: readonly SessionState[] = ['escalated', 'abandoned', 'submitted'];
 
+// Shown only if the server failed to persist/return a greeting — normally the
+// org-branded copy comes back from POST /api/session (where it's also stored
+// as the session's first assistant message).
+const FALLBACK_GREETING =
+  "Hi, I'm here to help get your heating or cooling sorted and a technician on the way. Tell me what's going on, and I'll take care of the rest.";
+
+/** The greeting as a UIMessage, seeding a fresh transcript so the welcome is a
+ * real first message that persists once the customer replies. */
+function greetingUiMessage(text: string): UIMessage {
+  return {
+    id: 'greeting',
+    role: 'assistant',
+    parts: [{ type: 'text', text }],
+  };
+}
+
 function isTerminalOrSubmitted(status: SessionState): boolean {
   return TERMINAL_STATES.includes(status);
 }
@@ -182,8 +198,19 @@ export function useChatSession(): UseChatSessionReturn {
         if (!res.ok) {
           const body = await res.json().catch(() => ({ error: { message: 'Failed to create session' } }));
           setSessionError(body?.error?.message ?? 'Failed to create session');
+          return;
         }
-        // Session cookie is set by the server response (httpOnly).
+        // Session cookie is set by the server response (httpOnly). Seed the
+        // transcript with the greeting the server just persisted as the
+        // session's first assistant message, so the welcome the customer sees
+        // IS the conversation's first turn (not a display-only bubble that
+        // vanishes when they reply).
+        const body = (await res.json().catch(() => null)) as {
+          data?: { greeting?: string | null };
+        } | null;
+        setMessages([
+          greetingUiMessage(body?.data?.greeting ?? FALLBACK_GREETING),
+        ]);
       } catch {
         setSessionError('Could not connect to server. Please try again.');
       }
@@ -411,7 +438,16 @@ export function useChatSession(): UseChatSessionReturn {
         setSessionError(
           body?.error?.message ?? 'Failed to start a new conversation',
         );
+        return;
       }
+      // Seed the new transcript with the greeting the server persisted as the
+      // fresh session's first assistant message (same as initial creation).
+      const body = (await res.json().catch(() => null)) as {
+        data?: { greeting?: string | null };
+      } | null;
+      setMessages([
+        greetingUiMessage(body?.data?.greeting ?? FALLBACK_GREETING),
+      ]);
     } catch {
       setSessionError('Could not connect to server. Please try again.');
     }

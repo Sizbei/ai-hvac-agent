@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   buildSystemPrompt,
+  buildChatGreeting,
+  buildWelcomeMessage,
+  brandInfoFromConfig,
   SYSTEM_PROMPT,
   EXTRACTION_INSTRUCTION,
   type BrandInfo,
@@ -216,6 +219,54 @@ describe("buildSystemPrompt — partial brand", () => {
     expect(prompt).toContain(
       "Hi, I'm here to help get your heating, cooling, and air quality sorted",
     );
+  });
+});
+
+describe("buildChatGreeting / buildWelcomeMessage", () => {
+  it("brands the greeting with the company name when known", () => {
+    expect(buildChatGreeting({ companyName: "Acme Heating" })).toBe(
+      "Hi, thanks for reaching out to Acme Heating. I'm here to get your issue sorted and a technician on the way.",
+    );
+  });
+
+  it("falls back to the scope when no company name is set", () => {
+    expect(buildChatGreeting({})).toBe(
+      "Hi, I'm here to help get your heating, cooling, and air quality sorted and a technician on the way.",
+    );
+  });
+
+  it("the system prompt's first-greeting instruction uses the SAME copy, so the persisted welcome suppresses a second greeting", () => {
+    const brand: BrandInfo = { companyName: "Acme Heating" };
+    expect(buildSystemPrompt(brand)).toContain(buildChatGreeting(brand));
+  });
+
+  it("the welcome message is the greeting plus the open-ended ask", () => {
+    const brand: BrandInfo = { companyName: "Acme Heating" };
+    expect(buildWelcomeMessage(brand)).toBe(
+      `${buildChatGreeting(brand)} Tell me what's going on, and I'll take care of the rest.`,
+    );
+  });
+});
+
+describe("brandInfoFromConfig", () => {
+  it("maps set fields and drops blank/non-string values", () => {
+    const info = brandInfoFromConfig("Acme Heating", {
+      phone: " 555-123-4567 ",
+      serviceArea: "",
+      positioning: 42,
+      serviceScope: "heating and cooling",
+    });
+    expect(info.companyName).toBe("Acme Heating");
+    expect(info.phone).toBe("555-123-4567");
+    expect(info.serviceArea).toBeUndefined();
+    expect(info.positioning).toBeUndefined();
+    expect(info.serviceScope).toBe("heating and cooling");
+  });
+
+  it("yields an empty BrandInfo for an unconfigured org (generic persona)", () => {
+    const info = brandInfoFromConfig(null, {});
+    expect(info.companyName).toBeUndefined();
+    expect(buildSystemPrompt(info)).toBe(SYSTEM_PROMPT);
   });
 });
 

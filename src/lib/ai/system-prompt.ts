@@ -88,20 +88,72 @@ function buildIdentityBlock(brand: BrandInfo): string {
 }
 
 /**
+ * The brand-aware chat greeting: mentions the company when known, and the
+ * scope either way. Single source of truth shared by the system prompt's
+ * "first greeting" instruction AND the persisted welcome message the session
+ * route writes at creation — so the copy can never drift between the two.
+ */
+export function buildChatGreeting(brand: BrandInfo = {}): string {
+  const name = clean(brand.companyName);
+  const scope = clean(brand.serviceScope) ?? DEFAULT_SCOPE;
+  return name
+    ? `Hi, thanks for reaching out to ${name}. I'm here to get your issue sorted and a technician on the way.`
+    : `Hi, I'm here to help get your ${scope} sorted and a technician on the way.`;
+}
+
+/**
+ * The welcome message persisted as the FIRST assistant message when a web chat
+ * session is created (mirroring how the voice channel persists its spoken
+ * greeting). Persisting it means: the UI renders it as a real transcript
+ * message (it never vanishes once the customer replies), a refresh rehydrates
+ * it, and the LLM sees an assistant reply already exists so it never greets a
+ * second time.
+ */
+export function buildWelcomeMessage(brand: BrandInfo = {}): string {
+  return `${buildChatGreeting(brand)} Tell me what's going on, and I'll take care of the rest.`;
+}
+
+/** Read a non-empty string off a stored businessInfo bag, or undefined. */
+function biString(
+  info: Readonly<Record<string, unknown>>,
+  key: string,
+): string | undefined {
+  const v = info[key];
+  return typeof v === "string" && v.trim().length > 0 ? v.trim() : undefined;
+}
+
+/**
+ * Map an org's stored companyName + businessInfo onto the persona's BrandInfo.
+ * Only fields that are actually set flow through; an org with no config yields
+ * an empty BrandInfo, so buildSystemPrompt falls back to the generic persona.
+ * `positioning`/`serviceScope`/`voiceCues` are read opportunistically so a
+ * future businessInfo extension brands the LLM with no further route changes.
+ */
+export function brandInfoFromConfig(
+  companyName: string | null,
+  businessInfo: Readonly<Record<string, unknown>>,
+): BrandInfo {
+  return {
+    companyName: companyName ?? undefined,
+    phone: biString(businessInfo, "phone"),
+    serviceArea: biString(businessInfo, "serviceArea"),
+    positioning: biString(businessInfo, "positioning"),
+    serviceScope: biString(businessInfo, "serviceScope"),
+    voiceCues: biString(businessInfo, "voiceCues"),
+  };
+}
+
+/**
  * Build the full web/SMS system prompt for a given brand. The intake/safety/
  * style/rules body is shared; only the IDENTITY preamble, the greeting, the
  * STYLE voice cues, and the out-of-scope redirect line vary per brand.
  */
 export function buildSystemPrompt(brand: BrandInfo = {}): string {
   const identity = buildIdentityBlock(brand);
-  const name = clean(brand.companyName);
   const scope = clean(brand.serviceScope) ?? DEFAULT_SCOPE;
   const voiceCues = clean(brand.voiceCues);
 
-  // Greeting mentions the company when known, and the scope either way.
-  const greeting = name
-    ? `Hi, thanks for reaching out to ${name}. I'm here to get your issue sorted and a technician on the way.`
-    : `Hi, I'm here to help get your ${scope} sorted and a technician on the way.`;
+  const greeting = buildChatGreeting(brand);
 
   const styleVoice = voiceCues ? ` ${voiceCues}` : "";
 

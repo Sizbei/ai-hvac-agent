@@ -261,6 +261,9 @@ vi.mock('@/lib/ai/system-prompt', () => ({
   // The chat route now brands the LLM persona via buildSystemPrompt(brandInfo);
   // stub it to a fixed persona so the smoke flow doesn't depend on branding.
   buildSystemPrompt: vi.fn(() => 'You are an HVAC assistant.'),
+  brandInfoFromConfig: vi.fn(() => ({})),
+  // Session creation persists this as the first assistant message.
+  buildWelcomeMessage: vi.fn(() => 'Hi, how can we help?'),
 }));
 
 vi.mock('@/lib/ai/guardrails', () => ({
