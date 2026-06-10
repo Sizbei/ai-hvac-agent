@@ -294,6 +294,9 @@ function WeekView({
   const todayIso = businessIsoDate(new Date());
   return (
     <div className="flex gap-2">
+      {/* pt-7 (28px) offsets the hour axis down past the clickable day-header
+          row so the axis lines up with hour 0 of the lanes. Matches the header
+          height: py-1 (8) + text-xs line-height (16) + mb-1 (4) = 28px. */}
       <div className="pt-7">
         <TimeAxis />
       </div>
@@ -311,6 +314,7 @@ function WeekView({
                 type="button"
                 onClick={() => onPickDay?.(isoDay)}
                 title="Open this day"
+                aria-label={`Open ${isoDay} in day view`}
                 className={`mb-1 rounded-md py-1 text-center text-xs font-semibold transition-colors hover:bg-muted ${
                   isToday
                     ? 'bg-primary/10 text-primary'

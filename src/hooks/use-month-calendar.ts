@@ -32,6 +32,8 @@ export function useMonthCalendar(
   const isMountedRef = useRef(true);
 
   const fetchMonth = useCallback(async (): Promise<void> => {
+    // `!enabled` MUST be checked before isFetchingRef is touched, so a disabled
+    // hook never leaves the in-flight latch stuck.
     if (!enabled) return;
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
@@ -68,11 +70,14 @@ export function useMonthCalendar(
     } finally {
       isFetchingRef.current = false;
     }
-  }, [date]);
+  }, [date, enabled]);
 
   useEffect(() => {
-    isMountedRef.current = true;
     if (!enabled) return;
+    // Set the mounted latch only on the active (enabled) path, AFTER the guard,
+    // so a fetch started before `enabled` flipped to false can't setState on the
+    // now-disabled hook when it resolves.
+    isMountedRef.current = true;
     setIsLoading(true);
     // Clear the previous month so the grid shows its skeleton instead of stale
     // cells while the new month loads.

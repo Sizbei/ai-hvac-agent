@@ -35,6 +35,8 @@ export function useSchedulingCalendar(
   const isMountedRef = useRef(true);
 
   const fetchCalendar = useCallback(async (): Promise<void> => {
+    // `!enabled` MUST be checked before isFetchingRef is touched, so a disabled
+    // hook never leaves the in-flight latch stuck.
     if (!enabled) return;
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
@@ -71,11 +73,14 @@ export function useSchedulingCalendar(
     } finally {
       isFetchingRef.current = false;
     }
-  }, [date, view]);
+  }, [date, view, enabled]);
 
   useEffect(() => {
-    isMountedRef.current = true;
     if (!enabled) return;
+    // Set the mounted latch only on the active (enabled) path, AFTER the guard,
+    // so a fetch started before `enabled` flipped to false can't setState on the
+    // now-disabled hook when it resolves.
+    isMountedRef.current = true;
     setIsLoading(true);
     // Clear the previous range so the page shows its skeleton (guarded on
     // isLoading && !calendar) instead of stale lanes while the new range loads.
