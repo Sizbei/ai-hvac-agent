@@ -15,6 +15,11 @@ const eslintConfig = defineConfig([
     // Nested build artifacts (git worktrees under .claude carry their own .next/).
     "**/.next/**",
     ".claude/**",
+    // Generated, non-source artifacts: test-coverage output and the Rust/Tauri
+    // target dir. Linting these is noise (a stale eslint-disable in the coverage
+    // bundle, an emitted global-api script) and never actionable.
+    "coverage/**",
+    "src-tauri/target/**",
   ]),
   {
     // The fetch-on-mount data hooks call an async fetcher from useEffect. The
