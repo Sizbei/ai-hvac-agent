@@ -2,6 +2,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // --- Mock setup ---
 
+// queries.ts imports staff-queries, which (via the consolidated authz policy)
+// transitively imports "server-only". No-op it so this test can load the module.
+vi.mock('server-only', () => ({}));
+
 // Mock bcryptjs so we can verify hashing behavior
 const mockHash = vi.fn().mockResolvedValue('$2a$12$hashed');
 vi.mock('bcryptjs', () => ({

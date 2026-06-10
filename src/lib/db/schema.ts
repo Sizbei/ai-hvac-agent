@@ -221,11 +221,69 @@ export const users = pgTable(
   (table) => [
     index("users_org_id_idx").on(table.organizationId),
     index("users_email_idx").on(table.email),
+    // Email is unique PER ORGANIZATION. This is the authoritative guard behind
+    // createStaff's read-then-insert pre-check (which races under concurrency)
+    // and it makes the email→row mapping unambiguous within an org, which the
+    // password-login and Google-OIDC lookups rely on. NOT globally unique: the
+    // same email may legitimately exist in two different tenants.
+    uniqueIndex("users_org_email_unique").on(
+      table.organizationId,
+      table.email,
+    ),
     // One Google account ↔ one user. Partial (WHERE google_id IS NOT NULL) so
     // the many password-only rows (NULL google_id) never collide.
     uniqueIndex("users_google_id_unique")
       .on(table.googleId)
       .where(sql`${table.googleId} IS NOT NULL`),
+  ],
+);
+
+// 2b. staff_invites — tokenized invitations to join an organization as staff.
+// An admin creates an invite for an email + role; the recipient opens a
+// one-time link, sets a name + password, and a user row is created. The token
+// is stored HASHED (SHA-256) at rest — the plaintext is embedded in the link
+// ONCE at creation and is unrecoverable afterward (mirrors widget_keys). An
+// invite can never grant `super_admin` (only admin/technician). Single-use
+// (accepted_at), expiring (72h), and revocable (revoked_at).
+export const staffInvites = pgTable(
+  "staff_invites",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id),
+    // Normalized (trim + lowercase) at creation so it matches how users.email
+    // is stored and how the accept flow's collision check resolves.
+    email: text("email").notNull(),
+    // Only admin/technician — super_admin is NEVER invitable. The accept flow
+    // takes the new user's role from THIS column, never from request input.
+    role: text("role", { enum: ["admin", "technician"] }).notNull(),
+    // SHA-256 hex of the full invite token. Unique so a presented token maps to
+    // exactly one row. The plaintext token is shown once and never stored.
+    tokenHash: text("token_hash").notNull().unique(),
+    invitedByUserId: uuid("invited_by_user_id")
+      .notNull()
+      .references(() => users.id),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    // Set when the invite is consumed → single-use. NULL while pending.
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    // Set when an admin revokes the invite. NULL while live.
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("staff_invites_org_id_idx").on(table.organizationId),
+    index("staff_invites_token_hash_idx").on(table.tokenHash),
+    // At most ONE live (un-accepted, un-revoked) invite per org+email, so an
+    // admin can't pile up duplicate pending invites and a double-accept can't
+    // create two users. Expiry is time-based and intentionally NOT in this
+    // partial predicate — an expired-but-not-revoked invite is treated as
+    // re-invitable by the query layer (it filters expiry at read time).
+    uniqueIndex("staff_invites_live_unique")
+      .on(table.organizationId, table.email)
+      .where(sql`${table.acceptedAt} IS NULL AND ${table.revokedAt} IS NULL`),
   ],
 );
 

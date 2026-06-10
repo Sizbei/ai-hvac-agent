@@ -60,12 +60,36 @@ export async function proxy(request: NextRequest) {
       return NextResponse.redirect(new URL("/admin/requests", request.url));
     }
 
-    // Allow /admin/login without authentication
-    if (pathname === "/admin/login") {
+    // Allow /admin/login and the public invite-accept page without auth. The
+    // invite page is pre-authentication by design: a new teammate opens a
+    // tokenized link to set their password before any account/session exists.
+    // It is fully token-gated server-side (resolveInviteByToken); the token is
+    // the bearer of authority, not a session.
+    if (pathname === "/admin/login" || pathname.startsWith("/admin/invite/")) {
       const response = NextResponse.next();
       const requestId =
         request.headers.get("x-request-id") ?? crypto.randomUUID();
       addSecurityHeaders(response, requestId);
+      // The public invite-accept page takes a password from an UNauthenticated
+      // user, so give it a defense-in-depth CSP. 'unsafe-inline' is required for
+      // Next's hydration/styles; we still pin script/connect to 'self' so no
+      // third-party origin can run script or exfiltrate the form. (Scoped to the
+      // invite page only — the authenticated dashboard isn't constrained here.)
+      if (pathname.startsWith("/admin/invite/")) {
+        response.headers.set(
+          "Content-Security-Policy",
+          [
+            "default-src 'self'",
+            "script-src 'self' 'unsafe-inline'",
+            "style-src 'self' 'unsafe-inline'",
+            "img-src 'self' data:",
+            "connect-src 'self'",
+            "form-action 'self'",
+            "frame-ancestors 'none'",
+            "base-uri 'self'",
+          ].join("; "),
+        );
+      }
       return response;
     }
 

@@ -4,6 +4,7 @@ import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
+import { normalizeEmail } from "@/lib/admin/staff-queries";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { createAdminSession } from "@/lib/auth/session";
 import type { AdminRole } from "@/lib/auth/types";
@@ -46,12 +47,19 @@ export async function POST(request: NextRequest) {
       return errorResponse("Invalid request body", "VALIDATION_ERROR", 400);
     }
 
-    const { email, password } = parsed.data;
+    // Canonicalize the email the same way createStaff does before persisting
+    // (trim + lowercase). User rows are stored normalized, and Postgres text
+    // equality is case-sensitive, so a mixed-case login would otherwise miss a
+    // real row and fall through to the dummy-hash path — failing a legitimate
+    // login AND leaking (via timing) that the exact-case email didn't exist.
+    const { password } = parsed.data;
+    const email = normalizeEmail(parsed.data.email);
 
     const [user] = await db
       .select()
       .from(users)
-      .where(eq(users.email, email));
+      .where(eq(users.email, email))
+      .limit(1);
 
     // Only an active admin-tier user (super_admin or admin) WITH a password is a
     // valid password login. A Google-only user has passwordHash === null and can

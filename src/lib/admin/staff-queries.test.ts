@@ -1,5 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+// authz.ts imports "server-only"; make it a no-op in tests. The real policy is
+// re-implemented inline below so these stay pure unit tests of staff-queries.
+vi.mock('server-only', () => ({}));
+vi.mock('@/lib/auth/authz', () => ({
+  canManageRole: (actor: string, target: string) =>
+    actor === 'super_admin' ? true : target === 'technician',
+  canAssignRole: (actor: string, desired: string) =>
+    actor === 'super_admin' ? true : desired === 'technician',
+}));
+
 // bcrypt hash is mocked so tests don't pay the real cost and we can assert the
 // plaintext is hashed, never persisted raw.
 const mockHash = vi.fn().mockResolvedValue('$2a$12$hashed');

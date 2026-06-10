@@ -57,21 +57,24 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    // Self-mutation guard: an admin may rename themselves, but must NOT demote
-    // or deactivate their own account through this surface. This is a stricter,
-    // per-actor check that fires even when other admins exist — it prevents an
-    // admin from accidentally locking THEMSELVES out mid-session. (The
-    // org-wide last-admin invariant in updateStaff is the backstop for the
-    // case where they target a different admin who happens to be the last one.)
+    // Self-mutation guard: an admin may rename themselves, but must NOT change
+    // their OWN role or deactivate their own account through this surface. This
+    // is a stricter, per-actor check that fires even when other admins exist —
+    // it prevents an admin from locking THEMSELVES out mid-session. Critically,
+    // ANY self role change is rejected (not just demotion to technician): a
+    // super_admin downgrading itself to admin is irreversible if it is the
+    // org's last super_admin, since only a super_admin can promote anyone back
+    // into the admin tier and the last-admin trigger counts admin-tier as a
+    // whole, not super_admins specifically. So: no self role change at all.
+    // (The org-wide last-admin invariant in updateStaff is the backstop for the
+    // case where they target a DIFFERENT admin who happens to be the last one.)
     if (id === session.userId) {
-      const demotesSelf =
-        parsed.data.role !== undefined &&
-        parsed.data.role !== "super_admin" &&
-        parsed.data.role !== "admin";
+      const changesOwnRole =
+        parsed.data.role !== undefined && parsed.data.role !== session.role;
       const deactivatesSelf = parsed.data.isActive === false;
-      if (demotesSelf || deactivatesSelf) {
+      if (changesOwnRole || deactivatesSelf) {
         return errorResponse(
-          "You cannot demote or deactivate your own account",
+          "You cannot change your own role or deactivate your own account",
           "SELF_MUTATION_FORBIDDEN",
           409,
         );
