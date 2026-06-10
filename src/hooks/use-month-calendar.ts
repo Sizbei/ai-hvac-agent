@@ -19,7 +19,12 @@ const POLL_INTERVAL_MS = 30_000;
  * lanes). Refetches when `date` changes; polls every 30s; skips in-flight
  * requests and ignores responses after unmount.
  */
-export function useMonthCalendar(date: string): UseMonthCalendarResult {
+export function useMonthCalendar(
+  date: string,
+  /** When false, the hook does not fetch or poll (used when month view is not
+   * the active view, so it doesn't fire requests in the background). */
+  enabled = true,
+): UseMonthCalendarResult {
   const [month, setMonth] = useState<MonthCalendar | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -27,6 +32,7 @@ export function useMonthCalendar(date: string): UseMonthCalendarResult {
   const isMountedRef = useRef(true);
 
   const fetchMonth = useCallback(async (): Promise<void> => {
+    if (!enabled) return;
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
 
@@ -66,6 +72,7 @@ export function useMonthCalendar(date: string): UseMonthCalendarResult {
 
   useEffect(() => {
     isMountedRef.current = true;
+    if (!enabled) return;
     setIsLoading(true);
     // Clear the previous month so the grid shows its skeleton instead of stale
     // cells while the new month loads.
@@ -82,7 +89,7 @@ export function useMonthCalendar(date: string): UseMonthCalendarResult {
       isMountedRef.current = false;
       clearInterval(intervalId);
     };
-  }, [fetchMonth]);
+  }, [fetchMonth, enabled]);
 
   return { month, isLoading, error, refetch: fetchMonth };
 }

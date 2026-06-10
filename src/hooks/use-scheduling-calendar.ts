@@ -24,6 +24,9 @@ const POLL_INTERVAL_MS = 30_000;
 export function useSchedulingCalendar(
   date: string,
   view: CalendarView,
+  /** When false, the hook does not fetch or poll (used when another view —
+   * e.g. month — is active, so the inactive view doesn't fire requests). */
+  enabled = true,
 ): UseSchedulingCalendarResult {
   const [calendar, setCalendar] = useState<SchedulingCalendar | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -32,6 +35,7 @@ export function useSchedulingCalendar(
   const isMountedRef = useRef(true);
 
   const fetchCalendar = useCallback(async (): Promise<void> => {
+    if (!enabled) return;
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
 
@@ -71,6 +75,7 @@ export function useSchedulingCalendar(
 
   useEffect(() => {
     isMountedRef.current = true;
+    if (!enabled) return;
     setIsLoading(true);
     // Clear the previous range so the page shows its skeleton (guarded on
     // isLoading && !calendar) instead of stale lanes while the new range loads.
@@ -87,7 +92,7 @@ export function useSchedulingCalendar(
       isMountedRef.current = false;
       clearInterval(intervalId);
     };
-  }, [fetchCalendar]);
+  }, [fetchCalendar, enabled]);
 
   return { calendar, isLoading, error, refetch: fetchCalendar };
 }
