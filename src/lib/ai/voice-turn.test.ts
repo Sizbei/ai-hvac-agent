@@ -6,8 +6,10 @@ const {
   updateSetMock,
   escalateMock,
   routeMock,
-  extractSlotsMock,
+  extractAllContactMock,
   extractAddressAtAddressStepMock,
+  extractSpokenPhoneMock,
+  detectCorrectionMock,
   getRouterConfigMock,
 } = vi.hoisted(() => ({
   generateTextMock: vi.fn(),
@@ -15,8 +17,10 @@ const {
   updateSetMock: vi.fn(),
   escalateMock: vi.fn(),
   routeMock: vi.fn(),
-  extractSlotsMock: vi.fn(),
+  extractAllContactMock: vi.fn(),
   extractAddressAtAddressStepMock: vi.fn(),
+  extractSpokenPhoneMock: vi.fn(),
+  detectCorrectionMock: vi.fn(),
   getRouterConfigMock: vi.fn(),
 }));
 
@@ -46,10 +50,26 @@ vi.mock("@/lib/db/schema", () => ({ customerSessions: {}, messages: {} }));
 
 vi.mock("./escalate-service", () => ({ escalateSession: escalateMock }));
 vi.mock("./intent-router", () => ({ routeMessage: routeMock }));
-vi.mock("./slot-extract", () => ({
-  extractSlots: extractSlotsMock,
-  extractAddressAtAddressStep: extractAddressAtAddressStepMock,
+vi.mock("./slot-extract", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./slot-extract")>();
+  return {
+    ...actual,
+    extractAddressAtAddressStep: extractAddressAtAddressStepMock,
+  };
+});
+vi.mock("./extract-all-contact", () => ({
+  extractAllContactFields: extractAllContactMock,
 }));
+vi.mock("./extract-spoken-phone", () => ({
+  extractSpokenPhone: extractSpokenPhoneMock,
+}));
+vi.mock("./detect-correction", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./detect-correction")>();
+  return {
+    ...actual,
+    detectCorrection: detectCorrectionMock,
+  };
+});
 vi.mock("@/lib/admin/org-config-queries", () => ({
   getRouterConfig: getRouterConfigMock,
 }));
@@ -66,7 +86,7 @@ const baseSession = {
 };
 
 function noSlots() {
-  return { address: null, phone: null, email: null };
+  return { name: null, address: null, phone: null, email: null };
 }
 
 describe("voiceReply", () => {
@@ -76,12 +96,16 @@ describe("voiceReply", () => {
     updateSetMock.mockReset();
     escalateMock.mockReset();
     routeMock.mockReset();
-    extractSlotsMock.mockReset();
+    extractAllContactMock.mockReset();
     extractAddressAtAddressStepMock.mockReset();
+    extractSpokenPhoneMock.mockReset();
+    detectCorrectionMock.mockReset();
     getRouterConfigMock.mockReset();
     getRouterConfigMock.mockResolvedValue({});
-    extractSlotsMock.mockReturnValue(noSlots());
+    extractAllContactMock.mockReturnValue(noSlots());
     extractAddressAtAddressStepMock.mockReturnValue(null);
+    extractSpokenPhoneMock.mockReturnValue(null);
+    detectCorrectionMock.mockReturnValue(null);
   });
 
   it("returns a spoken canned reply on a deterministic ANSWER (no LLM, no markdown)", async () => {
@@ -150,7 +174,8 @@ describe("voiceReply", () => {
       escalate: false,
     });
     // The caller's final turn supplies the phone; address already known.
-    extractSlotsMock.mockReturnValue({
+    extractAllContactMock.mockReturnValue({
+      name: null,
       address: "3501 W Market St, Johnson City, TN 37604",
       phone: "(423) 854-9505",
       email: null,
@@ -191,8 +216,13 @@ describe("voiceReply", () => {
     // voiceNextSlotPrompt re-asked the address forever. Voice now uses the
     // permissive at-step matcher when triage is at the address step.
     const spoken = "123 Main Street Johnson City Tennessee";
-    // Strict extractor still misses the spoken form…
-    extractSlotsMock.mockReturnValue({ address: null, phone: null, email: null });
+    // Strict multi-field extractor still misses the spoken form…
+    extractAllContactMock.mockReturnValue({
+      name: null,
+      address: null,
+      phone: null,
+      email: null,
+    });
     // …but the permissive at-step matcher captures it.
     extractAddressAtAddressStepMock.mockReturnValue(spoken);
 
@@ -280,6 +310,276 @@ describe("voiceReply", () => {
     expect(call.system.toLowerCase()).toContain("phone");
     expect(result.reply).toContain("noise");
     expect(result.endCall).toBe(false);
+  });
+
+  it("captures a residual name spoken alongside a phone in one utterance", async () => {
+    routeMock.mockReturnValue({
+      action: "FALLBACK_LLM",
+      intentId: null,
+      confidence: 0,
+      reply: null,
+      issueType: "cooling_not_working",
+      urgency: "high",
+      escalate: false,
+    });
+    // "Ray Chen, 865-555-1212" → name + phone in one turn (web-chat parity).
+    extractAllContactMock.mockReturnValue({
+      name: "Ray Chen",
+      address: null,
+      phone: "865-555-1212",
+      email: null,
+    });
+
+    const session = {
+      ...baseSession,
+      metadata: JSON.stringify({
+        issueType: "cooling_not_working",
+        urgency: "high",
+        address: "3501 W Market St, Johnson City, TN 37604 12345",
+        customerName: null,
+        customerPhone: null,
+        customerEmail: null,
+        description: "ac out",
+        isHvacRelated: true,
+      }),
+    };
+
+    await voiceReply({
+      session,
+      history: [{ role: "user", content: "my ac is out" }],
+      userMessage: "Ray Chen, 865-555-1212",
+      ipAddress: "1.2.3.4",
+    });
+
+    const persisted = updateSetMock.mock.calls
+      .map((c) => c[0] as { metadata?: string })
+      .find((s) => typeof s.metadata === "string");
+    // Both the name and the phone landed in the persisted extraction (phone is
+    // stored normalized, so assert on digits).
+    expect(persisted?.metadata).toContain("Ray Chen");
+    expect((persisted?.metadata ?? "").replace(/\D/g, "")).toContain(
+      "8655551212",
+    );
+  });
+
+  it("captures a digit-by-digit spoken phone at the phone step", async () => {
+    routeMock.mockReturnValue({
+      action: "FALLBACK_LLM",
+      intentId: null,
+      confidence: 0,
+      reply: null,
+      issueType: "cooling_not_working",
+      urgency: "high",
+      escalate: false,
+    });
+    // The grouped regex misses the spelled-out form…
+    extractAllContactMock.mockReturnValue({
+      name: null,
+      address: null,
+      phone: null,
+      email: null,
+    });
+    // …but the spoken-phone fallback (gated to the phone step) captures it.
+    extractSpokenPhoneMock.mockReturnValue("865-555-1212");
+
+    const session = {
+      ...baseSession,
+      // issue + urgency + a complete address known → triage's pending step is phone.
+      metadata: JSON.stringify({
+        issueType: "cooling_not_working",
+        urgency: "high",
+        address: "3501 W Market St, Johnson City, TN 37604 12345",
+        customerName: null,
+        customerPhone: null,
+        customerEmail: null,
+        description: "ac out",
+        isHvacRelated: true,
+        systemDownStatus: "fully_down",
+        problemDuration: "today",
+      }),
+    };
+
+    await voiceReply({
+      session,
+      history: [{ role: "user", content: "my ac is out" }],
+      userMessage: "eight six five, five five five, one two one two",
+      ipAddress: "1.2.3.4",
+    });
+
+    expect(extractSpokenPhoneMock).toHaveBeenCalled();
+    const persisted = updateSetMock.mock.calls
+      .map((c) => c[0] as { metadata?: string })
+      .find((s) => typeof s.metadata === "string");
+    // Stored normalized — assert on digits.
+    expect((persisted?.metadata ?? "").replace(/\D/g, "")).toContain(
+      "8655551212",
+    );
+  });
+
+  it("applies and acknowledges a mid-call correction", async () => {
+    routeMock.mockReturnValue({
+      action: "FALLBACK_LLM",
+      intentId: null,
+      confidence: 0,
+      reply: null,
+      issueType: "cooling_not_working",
+      urgency: "high",
+      escalate: false,
+    });
+    extractAllContactMock.mockReturnValue({
+      name: null,
+      address: null,
+      phone: null,
+      email: null,
+    });
+    // The caller corrects their already-stored address. Phone is still missing,
+    // so intake isn't complete and the ack (not the confirm) should be spoken.
+    detectCorrectionMock.mockReturnValue({
+      field: "address",
+      value: "999 New Street, Johnson City, TN 37601 99999",
+    });
+
+    const session = {
+      ...baseSession,
+      metadata: JSON.stringify({
+        issueType: "cooling_not_working",
+        urgency: "high",
+        address: "3501 W Market St, Johnson City, TN 37604 12345",
+        customerName: null,
+        customerPhone: null,
+        customerEmail: null,
+        description: "ac out",
+        isHvacRelated: true,
+      }),
+    };
+
+    const result = await voiceReply({
+      session,
+      history: [{ role: "user", content: "my ac is out" }],
+      userMessage: "actually the address is 999 New Street, Johnson City TN 37601",
+      ipAddress: "1.2.3.4",
+    });
+
+    const persisted = updateSetMock.mock.calls
+      .map((c) => c[0] as { metadata?: string })
+      .find((s) => typeof s.metadata === "string");
+    // The corrected address replaced the old one.
+    expect(persisted?.metadata).toContain("999 New Street");
+    expect(persisted?.metadata).not.toContain("3501 W Market St");
+    // And the caller heard an acknowledgement of the change.
+    expect(result.reply.toLowerCase()).toContain("updated your address");
+  });
+
+  it("does not store an enrichment answer as the caller's name (pendingStep=name misalignment)", async () => {
+    // REGRESSION: raw nextTriageStep reports `name` as pending whenever the name
+    // slot is empty, but voice SKIPS the name step. detectCorrection treats a
+    // pending `name` step as a direct name answer, so a caller answering the
+    // system-type question with "boiler" would have "boiler" stored as their
+    // name. Voice must never pass name/email as the pending step to
+    // detectCorrection — guard asserted directly on the call argument.
+    routeMock.mockReturnValue({
+      action: "FALLBACK_LLM",
+      intentId: null,
+      confidence: 0,
+      reply: null,
+      issueType: "cooling_not_working",
+      urgency: "high",
+      escalate: false,
+    });
+    extractAllContactMock.mockReturnValue({
+      name: null,
+      address: null,
+      phone: null,
+      email: null,
+    });
+    detectCorrectionMock.mockReturnValue(null);
+    // With name pending (voice skips it) and nothing captured, the turn defers
+    // to the LLM — mock it so the call completes and we can inspect the args.
+    generateTextMock.mockResolvedValue({
+      text: "Got it. Anything else?",
+      usage: { inputTokens: 5, outputTokens: 3 },
+    });
+
+    const session = {
+      ...baseSession,
+      // address + phone filled, name empty → raw nextTriageStep returns `name`.
+      metadata: JSON.stringify({
+        issueType: "cooling_not_working",
+        urgency: "high",
+        address: "3501 W Market St, Johnson City, TN 37604 12345",
+        customerName: null,
+        customerPhone: "865-555-1212",
+        customerEmail: null,
+        description: "ac out",
+        isHvacRelated: true,
+        systemDownStatus: "fully_down",
+        problemDuration: "today",
+      }),
+    };
+
+    await voiceReply({
+      session,
+      history: [{ role: "user", content: "my ac is out" }],
+      userMessage: "boiler",
+      ipAddress: "1.2.3.4",
+    });
+
+    // detectCorrection must NOT have been invoked with the `name` (or `email`)
+    // step id — that is what triggers its name-direct-answer branch.
+    for (const call of detectCorrectionMock.mock.calls) {
+      expect(call[1]).not.toBe("name");
+      expect(call[1]).not.toBe("email");
+    }
+  });
+
+  it("latches an unrecognized optional-enrichment answer as skipped (no re-ask)", async () => {
+    routeMock.mockReturnValue({
+      action: "FALLBACK_LLM",
+      intentId: null,
+      confidence: 0,
+      reply: null,
+      issueType: "cooling_not_working",
+      urgency: "high",
+      escalate: false,
+    });
+    extractAllContactMock.mockReturnValue({
+      name: null,
+      address: null,
+      phone: null,
+      email: null,
+    });
+
+    const session = {
+      ...baseSession,
+      // Every required core/contact slot filled so triage's pending step is the
+      // optional system_type enrichment (which voice asks).
+      metadata: JSON.stringify({
+        issueType: "cooling_not_working",
+        urgency: "high",
+        address: "3501 W Market St, Johnson City, TN 37604 12345",
+        customerName: "Ray Chen",
+        customerPhone: "865-555-1212",
+        customerEmail: "ray@example.com",
+        description: "ac out",
+        isHvacRelated: true,
+        systemDownStatus: "fully_down",
+        problemDuration: "today",
+      }),
+    };
+
+    await voiceReply({
+      session,
+      history: [{ role: "user", content: "my ac is out" }],
+      // An answer captureEnrichmentAnswer won't recognize as a system type.
+      userMessage: "I really have no clue what it is honestly",
+      ipAddress: "1.2.3.4",
+    });
+
+    const persisted = updateSetMock.mock.calls
+      .map((c) => c[0] as { metadata?: string })
+      .find((s) => typeof s.metadata === "string");
+    // systemType latched to the skip sentinel so the step won't be re-asked.
+    expect(persisted?.metadata).toContain("__skipped__");
   });
 });
 
