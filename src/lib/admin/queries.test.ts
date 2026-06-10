@@ -177,6 +177,7 @@ import {
   getDashboardOverview,
   getDispatchBoard,
   getSchedulingCalendar,
+  getMonthCalendar,
   countUnscheduledRequests,
 } from '@/lib/admin/queries';
 
@@ -849,6 +850,82 @@ describe('getSchedulingCalendar', () => {
       'sr.arrivalWindowStart',
       startInstant,
     );
+  });
+});
+
+describe('getMonthCalendar', () => {
+  // A small 2-week grid (Sun Jun 7 → Sat Jun 20). Jun is the focused month.
+  const GRID = [
+    '2026-06-07', '2026-06-08', '2026-06-09', '2026-06-10',
+    '2026-06-11', '2026-06-12', '2026-06-13', '2026-05-31',
+  ] as const;
+  const START = '2026-06-07T04:00:00.000Z';
+  const END = '2026-06-14T04:00:00.000Z';
+
+  function placedRow(overrides: Record<string, unknown>) {
+    return {
+      id: 'job',
+      referenceNumber: 'HVAC-X',
+      customerNameEncrypted: 'enc',
+      issueType: 'no_cooling',
+      urgency: 'medium',
+      status: 'scheduled',
+      isAfterHours: false,
+      assignedToName: null,
+      arrivalWindowStart: new Date('2026-06-08T13:00:00.000Z'),
+      arrivalWindowEnd: new Date('2026-06-08T17:00:00.000Z'),
+      followUpDate: null,
+      holdReason: null,
+      createdAt: new Date('2026-06-07T10:00:00.000Z'),
+      assignedTo: null,
+      ...overrides,
+    };
+  }
+
+  it('buckets jobs by their business-day window start and flags in-month days', async () => {
+    selectResolutions = [
+      [
+        // Jun 8 13:00Z = 09:00 ET → bucketed on 2026-06-08.
+        placedRow({ id: 'j1', referenceNumber: 'HVAC-1' }),
+        // Jun 10 18:00Z = 14:00 ET → bucketed on 2026-06-10.
+        placedRow({
+          id: 'j2',
+          referenceNumber: 'HVAC-2',
+          arrivalWindowStart: new Date('2026-06-10T18:00:00.000Z'),
+          arrivalWindowEnd: new Date('2026-06-10T22:00:00.000Z'),
+        }),
+      ],
+    ];
+
+    const month = await getMonthCalendar(ORG_ID, START, END, [...GRID], '2026-06');
+
+    expect(month.month).toBe('2026-06');
+    expect(month.days).toHaveLength(GRID.length);
+
+    const jun8 = month.days.find((d) => d.day === '2026-06-08');
+    const jun10 = month.days.find((d) => d.day === '2026-06-10');
+    const may31 = month.days.find((d) => d.day === '2026-05-31');
+
+    expect(jun8?.jobs.map((j) => j.referenceNumber)).toEqual(['HVAC-1']);
+    expect(jun10?.jobs.map((j) => j.referenceNumber)).toEqual(['HVAC-2']);
+    // May 31 is a leading day from the prior month → inMonth false, no jobs.
+    expect(may31?.inMonth).toBe(false);
+    expect(may31?.jobs).toEqual([]);
+    // Jun 8 is in the focused month.
+    expect(jun8?.inMonth).toBe(true);
+  });
+
+  it('returns empty job arrays for days with no jobs', async () => {
+    selectResolutions = [[]];
+    const month = await getMonthCalendar(ORG_ID, START, END, [...GRID], '2026-06');
+    expect(month.days.every((d) => d.jobs.length === 0)).toBe(true);
+  });
+
+  it('throws on an invalid range', async () => {
+    selectResolutions = [[]];
+    await expect(
+      getMonthCalendar(ORG_ID, 'not-a-date', END, [...GRID], '2026-06'),
+    ).rejects.toThrow();
   });
 });
 
