@@ -8,6 +8,7 @@ import { describe, it, expect } from "vitest";
 import { nextTriageStep, MAX_EMAIL_REPROMPTS } from "./triage";
 import {
   isExtractionComplete,
+  isAddressComplete,
   serviceRequestSchema,
 } from "./extraction-schema";
 import { SKIP_SENTINEL } from "./chat-slots";
@@ -113,5 +114,59 @@ describe("spoken word-digit phone numbers", () => {
 
   it("rejects non-phone utterances", () => {
     expect(extractSpokenPhone("tomorrow morning works")).toBe(null);
+  });
+});
+
+describe("rural named-route addresses", () => {
+  it("accepts County Road / Highway style addresses with a ZIP", () => {
+    expect(isAddressComplete("County Road 120, Mississippi 38683")).toBe(true);
+    expect(isAddressComplete("Highway 64 East, Lebanon, TN 37087")).toBe(true);
+    expect(isAddressComplete("State Route 34, Jonesborough, TN 37659")).toBe(
+      true,
+    );
+  });
+
+  it("still rejects named routes without a ZIP and non-addresses", () => {
+    expect(isAddressComplete("County Road 120, Mississippi")).toBe(false);
+    expect(isAddressComplete("the house on the county road")).toBe(false);
+    expect(isAddressComplete("Maple Street, Johnson City, TN 37601")).toBe(
+      false,
+    );
+  });
+
+  it("still accepts conventional house-number addresses", () => {
+    expect(isAddressComplete("212 E Unaka Ave, Johnson City, TN 37601")).toBe(
+      true,
+    );
+  });
+});
+
+describe("addressVerified completeness override", () => {
+  const base = {
+    issueType: "cooling_not_working",
+    urgency: "high",
+    customerName: "Raymond Chen",
+    customerPhone: "423-555-0147",
+    customerEmail: "ray@example.com",
+    description: "AC out",
+  };
+
+  it("a geocoded lookup selection completes even when the heuristic rejects it", () => {
+    expect(
+      isExtractionComplete({
+        ...base,
+        address: "Walnut, Mississippi",
+        addressVerified: "yes",
+      } as never),
+    ).toBe(true);
+  });
+
+  it("an unverified heuristic-failing address stays incomplete", () => {
+    expect(
+      isExtractionComplete({
+        ...base,
+        address: "Walnut, Mississippi",
+      } as never),
+    ).toBe(false);
   });
 });

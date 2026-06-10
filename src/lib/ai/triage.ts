@@ -99,13 +99,19 @@ export const UNSKIPPABLE_CORE = [
  * (street number), and it contains a 5-digit ZIP. Duplicated here (not imported)
  * so the pure triage engine has no dependency on the extraction schema.
  */
+// Rural/named-route street lines ("County Road 120", "Highway 64", "FM 1325")
+// — the road's number follows its name, so the leading-digit check must not
+// reject them. Mirrors extraction-schema.NAMED_ROUTE.
+const NAMED_ROUTE_TRIAGE =
+  /\b(?:county\s+(?:road|rd)|state\s+(?:route|highway|hwy|road|rd)|(?:us\s+)?highway|hwy|route|rte|farm\s+to\s+market|fm|cr|sr|rr)\s*#?\s*\d+\b/i;
+
 function addressLooksComplete(address: string | null | undefined): boolean {
   if (!address) return false;
   const trimmed = address.trim();
   if (trimmed.length === 0) return false;
   const tokens = trimmed.split(/\s+/);
   if (tokens.length < 4) return false;
-  if (!/^\d/.test(tokens[0])) return false;
+  if (!/^\d/.test(tokens[0]) && !NAMED_ROUTE_TRIAGE.test(trimmed)) return false;
   if (!/\b\d{5}\b/.test(trimmed)) return false;
   return true;
 }

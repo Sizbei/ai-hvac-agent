@@ -179,6 +179,10 @@ const SKIP_SENTINEL = '__skipped__';
  * "downtown"): trimmed, at least 4 whitespace-separated tokens, the first token
  * starts with a digit (street number), AND it contains a 5-digit ZIP.
  */
+// Rural/named-route street lines: the road's number follows its name.
+const NAMED_ROUTE =
+  /\b(?:county\s+(?:road|rd)|state\s+(?:route|highway|hwy|road|rd)|(?:us\s+)?highway|hwy|route|rte|farm\s+to\s+market|fm|cr|sr|rr)\s*#?\s*\d+\b/i;
+
 export function isAddressComplete(address: string | null): boolean {
   if (address === null) return false;
   const trimmed = address.trim();
@@ -187,8 +191,10 @@ export function isAddressComplete(address: string | null): boolean {
   const tokens = trimmed.split(/\s+/);
   if (tokens.length < 4) return false;
 
-  // First token must start with a digit (the street number).
-  if (!/^\d/.test(tokens[0])) return false;
+  // First token must start with a digit (the street number) — OR the line is a
+  // named rural route ("County Road 120", "Highway 64", "FM 1325"), which is a
+  // real dispatchable street line that carries its number after the road name.
+  if (!/^\d/.test(tokens[0]) && !NAMED_ROUTE.test(trimmed)) return false;
 
   // Must contain a 5-digit ZIP somewhere (word-boundary so we don't match a
   // longer run of digits like a phone number).
@@ -247,7 +253,12 @@ export function isExtractionComplete(extraction: ExtractionResult): boolean {
   return (
     extraction.issueType !== null &&
     extraction.urgency !== null &&
-    isAddressComplete(extraction.address) &&
+    // addressVerified rides in from the chat route when the customer picked a
+    // geocoded autocomplete suggestion — trusted complete even when the format
+    // heuristic (house number / named route + ZIP) doesn't match.
+    (isAddressComplete(extraction.address) ||
+      (extraction.address !== null &&
+        (extraction as Record<string, unknown>).addressVerified === "yes")) &&
     isNameComplete(extraction.customerName) &&
     isPhoneComplete(extraction.customerPhone) &&
     // A skipped email (the customer declined, or we hit MAX_EMAIL_REPROMPTS)

@@ -219,7 +219,11 @@ export async function voiceReply(params: {
     pendingStep?.id === "address_parts" &&
     knownSlots.address &&
     resolvedAddress &&
-    !/^\s*\d/.test(userMessage.trim())
+    !/^\s*\d/.test(userMessage.trim()) &&
+    // A reply that parsed as a phone/email answers a different field — don't
+    // glue it onto the address.
+    !allContact.phone &&
+    !allContact.email
       ? `${knownSlots.address.trim()}, ${userMessage.trim()}`.slice(0, 500)
       : null;
 

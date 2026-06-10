@@ -1054,8 +1054,15 @@ export async function POST(request: NextRequest) {
         // standalone address) means the customer gave a full address here — use
         // it as the base rather than appending to the stored partial.
         const retypedFullStreet = addressSelected || /^\s*\d/.test(partsAnswerRaw);
+        // A reply that parsed as a phone or email is the answer to a DIFFERENT
+        // field (customers often answer out of order) — never fold it into the
+        // address as a city/ZIP tail or treat it as a re-typed street.
+        const partsAnswerIsOtherField =
+          extracted.phone !== null || extracted.email !== null;
         const combinedAddress =
-          pendingStep?.id === "address_parts" && knownSlots.address
+          pendingStep?.id === "address_parts" &&
+          knownSlots.address &&
+          !partsAnswerIsOtherField
             ? (retypedFullStreet
                 ? partsAnswerRaw // they re-typed a full street → use it as the base
                 : `${knownSlots.address.trim()}, ${partsAnswerRaw}` // append city/ZIP
