@@ -17,6 +17,7 @@ vi.mock('drizzle-orm', () => ({
   eq: (...a: unknown[]) => ['eq', ...a],
   and: (...a: unknown[]) => ['and', ...a],
   ne: (...a: unknown[]) => ['ne', ...a],
+  inArray: (...a: unknown[]) => ['inArray', ...a],
   count: () => 'count',
   asc: (c: unknown) => c,
 }));

@@ -28,7 +28,7 @@ const createStaffSchema = z.object({
   name: z.string().min(1).max(200),
   email: z.string().email().max(320),
   password: z.string().min(8).max(200),
-  role: z.enum(["admin", "technician"]),
+  role: z.enum(["super_admin", "admin", "technician"]),
 });
 
 export async function POST(request: NextRequest) {
@@ -57,8 +57,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const result = await createStaff(session.organizationId, parsed.data);
+    const result = await createStaff(
+      session.organizationId,
+      parsed.data,
+      session.role,
+    );
     if (!result.ok) {
+      if (result.reason === "forbidden") {
+        return errorResponse(
+          "Only a super admin can create admin accounts",
+          "FORBIDDEN",
+          403,
+        );
+      }
       return errorResponse(
         "A user with this email already exists in your organization",
         "EMAIL_CONFLICT",

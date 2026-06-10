@@ -200,8 +200,14 @@ export const users = pgTable(
       .references(() => organizations.id),
     email: text("email").notNull(),
     name: text("name").notNull(),
-    passwordHash: text("password_hash").notNull(),
-    role: text("role", { enum: ["admin", "technician"] })
+    // Nullable: a Google-only (OIDC) user has no password. A NULL hash means
+    // password login is IMPOSSIBLE for this user — the login route must treat it
+    // as ineligible and never pass NULL to bcrypt.compare as the stored hash.
+    passwordHash: text("password_hash"),
+    // Set when an admin links "Sign in with Google". Unique so one Google
+    // account maps to at most one user row.
+    googleId: text("google_id"),
+    role: text("role", { enum: ["super_admin", "admin", "technician"] })
       .notNull()
       .default("technician"),
     isActive: boolean("is_active").notNull().default(true),
@@ -215,6 +221,11 @@ export const users = pgTable(
   (table) => [
     index("users_org_id_idx").on(table.organizationId),
     index("users_email_idx").on(table.email),
+    // One Google account ↔ one user. Partial (WHERE google_id IS NOT NULL) so
+    // the many password-only rows (NULL google_id) never collide.
+    uniqueIndex("users_google_id_unique")
+      .on(table.googleId)
+      .where(sql`${table.googleId} IS NOT NULL`),
   ],
 );
 

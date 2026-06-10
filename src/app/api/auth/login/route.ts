@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { createAdminSession } from "@/lib/auth/session";
+import type { AdminRole } from "@/lib/auth/types";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
 
@@ -52,12 +53,21 @@ export async function POST(request: NextRequest) {
       .from(users)
       .where(eq(users.email, email));
 
-    // Only an active admin is a valid login. For any other case (no user,
-    // wrong role, disabled), still run bcrypt.compare against a dummy hash and
-    // return the SAME generic 401 so neither timing nor the error message
-    // reveals whether the email exists or what's wrong with it.
+    // Only an active admin-tier user (super_admin or admin) WITH a password is a
+    // valid password login. A Google-only user has passwordHash === null and can
+    // never log in this way — we treat it as ineligible and (critically) never
+    // pass null to bcrypt.compare as the stored hash. For every ineligible case
+    // (no user, wrong role, disabled, password-less), still run bcrypt.compare
+    // against a dummy hash and return the SAME generic 401 so neither timing nor
+    // the error message reveals whether the email exists or what's wrong.
+    const adminRole: AdminRole | null =
+      user && (user.role === "super_admin" || user.role === "admin")
+        ? user.role
+        : null;
     const eligibleUser =
-      user && user.role === "admin" && user.isActive ? user : null;
+      user && adminRole && user.isActive && user.passwordHash !== null
+        ? { ...user, role: adminRole, passwordHash: user.passwordHash }
+        : null;
     const passwordValid = await bcrypt.compare(
       password,
       eligibleUser ? eligibleUser.passwordHash : DUMMY_HASH,
@@ -76,7 +86,7 @@ export async function POST(request: NextRequest) {
       organizationId: eligibleUser.organizationId,
       email: eligibleUser.email,
       name: eligibleUser.name,
-      role: "admin",
+      role: eligibleUser.role,
     });
 
     logger.info({ userId: eligibleUser.id }, "Admin login successful");

@@ -27,16 +27,27 @@
  * the trigger's exception back to the same `last_admin` sentinel so the race
  * loser gets the same 409 rather than a 500.
  */
-import { eq, ne, count, asc } from "drizzle-orm";
+import { eq, ne, count, asc, inArray } from "drizzle-orm";
 import { hash } from "bcryptjs";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
-import type {
-  StaffRecord,
-  CreateStaffInput,
-  UpdateStaffInput,
+import {
+  ADMIN_TIER_ROLES,
+  type StaffRecord,
+  type StaffRole,
+  type CreateStaffInput,
+  type UpdateStaffInput,
 } from "./types";
+
+/** Admin-tier roles (super_admin + admin) as a mutable array for inArray(). */
+const ADMIN_TIER = [...ADMIN_TIER_ROLES] as StaffRole[];
+
+/** An admin-tier role holds an admin session and counts toward the org's
+ * "keep one active admin" lockout guard. */
+function isAdminTier(role: StaffRole): boolean {
+  return role === "super_admin" || role === "admin";
+}
 
 export const BCRYPT_COST = 12;
 
@@ -57,7 +68,7 @@ function toStaffRecord(row: {
   id: string;
   name: string;
   email: string;
-  role: "admin" | "technician";
+  role: StaffRole;
   isActive: boolean;
   createdAt: Date;
 }): StaffRecord {
@@ -99,14 +110,16 @@ export async function listStaff(
   return rows.map(toStaffRecord);
 }
 
-/** Count active admins in the org, optionally excluding one user id (used to
- * check "would this leave zero active admins"). */
+/** Count active admin-tier users (super_admin OR admin) in the org, optionally
+ * excluding one user id (used to check "would this leave zero active admins").
+ * A super_admin counts as an admin for the lockout guard — an org whose only
+ * privileged user is a super_admin must not be demotable into lockout. */
 async function countActiveAdmins(
   organizationId: string,
   excludeUserId?: string,
 ): Promise<number> {
   const conditions = [
-    eq(users.role, "admin"),
+    inArray(users.role, ADMIN_TIER),
     eq(users.isActive, true),
   ];
   if (excludeUserId) {
@@ -124,12 +137,23 @@ async function countActiveAdmins(
 
 export type CreateStaffResult =
   | { ok: true; staff: StaffRecord }
-  | { ok: false; reason: "email_conflict" };
+  | { ok: false; reason: "email_conflict" | "forbidden" };
 
 export async function createStaff(
   organizationId: string,
   input: CreateStaffInput,
+  /** Role of the admin creating the user. Only a super_admin may create an
+   * admin-tier user; a normal admin may only create technicians. Defaults to
+   * "super_admin" for internal/seed callers — route handlers MUST pass the
+   * real session role. */
+  actorRole: StaffRole = "super_admin",
 ): Promise<CreateStaffResult> {
+  // Privilege-escalation guard: a non-super_admin cannot create an admin-tier
+  // account.
+  if (actorRole !== "super_admin" && isAdminTier(input.role)) {
+    return { ok: false, reason: "forbidden" };
+  }
+
   const email = normalizeEmail(input.email);
 
   // Per-org email uniqueness: reject before hashing/inserting.
@@ -166,12 +190,21 @@ export async function createStaff(
 
 export type UpdateStaffResult =
   | { ok: true; staff: StaffRecord }
-  | { ok: false; reason: "not_found" | "last_admin" | "no_changes" };
+  | {
+      ok: false;
+      reason: "not_found" | "last_admin" | "no_changes" | "forbidden";
+    };
 
 export async function updateStaff(
   organizationId: string,
   userId: string,
   input: UpdateStaffInput,
+  /** Role of the admin performing the update. Only a super_admin may manage an
+   * admin-tier target or assign an admin-tier role; a normal admin is confined
+   * to technicians. Defaults to "super_admin" only for internal/seed callers
+   * that have already authorized themselves — route handlers MUST pass the real
+   * session role. */
+  actorRole: StaffRole = "super_admin",
 ): Promise<UpdateStaffResult> {
   const hasChange =
     input.name !== undefined ||
@@ -193,12 +226,25 @@ export async function updateStaff(
     return { ok: false, reason: "not_found" };
   }
 
+  // Authorization: only a super_admin may manage an admin-tier user (admin or
+  // super_admin) OR promote anyone INTO an admin-tier role. A normal admin can
+  // only touch technicians. This is the privilege-escalation guard — it stops an
+  // admin from editing/demoting another admin or minting a new admin.
+  if (actorRole !== "super_admin") {
+    const targetIsAdminTier = isAdminTier(current.role);
+    const assignsAdminTier =
+      input.role !== undefined && isAdminTier(input.role);
+    if (targetIsAdminTier || assignsAdminTier) {
+      return { ok: false, reason: "forbidden" };
+    }
+  }
+
   // Does this patch remove admin access from a currently-active admin? That's
   // either an explicit demotion (role → technician) or a deactivation.
   const losesAdminAccess =
-    current.role === "admin" &&
+    isAdminTier(current.role) &&
     current.isActive &&
-    ((input.role !== undefined && input.role !== "admin") ||
+    ((input.role !== undefined && !isAdminTier(input.role)) ||
       input.isActive === false);
 
   if (losesAdminAccess) {
