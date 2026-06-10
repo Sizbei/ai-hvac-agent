@@ -15,6 +15,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { acceptInvite } from "@/lib/admin/invites";
 import { createAdminSession } from "@/lib/auth/session";
+import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
@@ -26,9 +27,17 @@ const acceptSchema = z.object({
   password: z.string().min(8).max(200),
 });
 
+/** Best-effort client IP. x-forwarded-for is client-controllable, so we take
+ * only the LEFTMOST address (the real client at the edge; appended hops can't
+ * shift the rate-limit bucket) and cap the length (45 = longest IPv6). */
+function clientIp(request: NextRequest): string {
+  const raw = request.headers.get("x-forwarded-for");
+  return raw?.split(",")[0]?.trim().slice(0, 45) || "unknown";
+}
+
 export async function POST(request: NextRequest) {
   try {
-    const ip = request.headers.get("x-forwarded-for") ?? "unknown";
+    const ip = clientIp(request);
     const rateCheck = slidingWindow(
       `auth:invite-accept:${ip}`,
       RATE_LIMITS.sessionCreate.maxRequests,
@@ -67,6 +76,19 @@ export async function POST(request: NextRequest) {
     }
 
     const { accepted } = result;
+
+    // Audit the account creation — a security-relevant event — in the invite's
+    // org. The new user is both the entity and (self-)actor; details carry the
+    // role enum only (never the email, name, password, or token).
+    await logAudit({
+      organizationId: accepted.organizationId,
+      userId: accepted.userId,
+      action: "accept_invite",
+      entity: "user",
+      entityId: accepted.userId,
+      details: JSON.stringify({ role: accepted.role }),
+      ipAddress: ip,
+    });
 
     // Admin-role invite → mint the session cookie and send them to the
     // dashboard. Technician invite → account created, but no admin session.

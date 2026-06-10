@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { it, expect, vi, beforeEach } from "vitest";
 
 const acceptInvite = vi.fn();
 vi.mock("@/lib/admin/invites", () => ({
@@ -8,6 +8,11 @@ vi.mock("@/lib/admin/invites", () => ({
 const createAdminSession = vi.fn().mockResolvedValue(undefined);
 vi.mock("@/lib/auth/session", () => ({
   createAdminSession: (...a: unknown[]) => createAdminSession(...a),
+}));
+
+const logAudit = vi.fn().mockResolvedValue(undefined);
+vi.mock("@/lib/admin/audit", () => ({
+  logAudit: (...a: unknown[]) => logAudit(...a),
 }));
 
 vi.mock("@/lib/rate-limit", () => ({
@@ -34,6 +39,7 @@ function req(body: unknown) {
 beforeEach(() => {
   acceptInvite.mockReset();
   createAdminSession.mockClear();
+  logAudit.mockClear();
 });
 
 it("rejects a malformed token shape generically (no enumeration)", async () => {
@@ -95,6 +101,11 @@ it("mints an admin session and redirects to /admin for an admin invite", async (
   expect(createAdminSession).toHaveBeenCalledOnce();
   const json = await res.json();
   expect(json.data.redirectTo).toBe("/admin");
+  // Audits the account creation with role enum only — no email/name/token.
+  const auditArg = logAudit.mock.calls[0][0];
+  expect(auditArg.action).toBe("accept_invite");
+  expect(auditArg.entity).toBe("user");
+  expect(auditArg.details).toBe(JSON.stringify({ role: "admin" }));
 });
 
 it("does NOT mint a session for a technician invite; routes to login", async () => {
@@ -124,5 +135,7 @@ it("collapses every accept failure to one generic 400 (no enumeration)", async (
     const json = await res.json();
     expect(json.error.code).toBe("INVALID_INVITE");
     expect(createAdminSession).not.toHaveBeenCalled();
+    // No account was created → nothing to audit.
+    expect(logAudit).not.toHaveBeenCalled();
   }
 });

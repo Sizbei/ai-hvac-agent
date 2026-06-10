@@ -304,10 +304,14 @@ export type AcceptInviteResult =
  * from request input), mark the invite accepted (single-use), and return the
  * new user (plus an admin session payload when the role is admin-tier).
  *
- * Concurrency: neon-http has no transactions. We guard against double-accept by
- * marking the invite accepted with a conditional UPDATE (… WHERE accepted_at IS
- * NULL) and only proceeding if that UPDATE claimed the row. The user is then
- * created; the per-org unique email index is the backstop against two rows.
+ * Concurrency: neon-http has no transactions. We CREATE THE USER FIRST, then
+ * claim the invite (conditional UPDATE … WHERE accepted_at IS NULL). Ordering
+ * this way means there is no rollback to lose: the per-org unique email index
+ * (users_org_email_unique) is the hard backstop, so two concurrent accepts of
+ * the same invite can't both create a user — the loser gets email_conflict and
+ * never claims. A crash between create and claim leaves a live invite + a real
+ * user; re-accepting then hits email_conflict (a clean terminal state) rather
+ * than silently burning the invite with no account behind it.
  */
 export async function acceptInvite(
   token: string,
@@ -319,24 +323,11 @@ export async function acceptInvite(
   }
   const { invite } = resolved;
 
-  // Claim the invite first: flip accepted_at only if still NULL. If we don't
-  // claim it (someone else just did), abort — prevents a double-accept from
-  // creating two users from one invite.
-  const [claimed] = await db
-    .update(staffInvites)
-    .set({ acceptedAt: new Date() })
-    .where(
-      and(eq(staffInvites.id, invite.id), isNull(staffInvites.acceptedAt)),
-    )
-    .returning({ id: staffInvites.id });
-
-  if (!claimed) {
-    return { ok: false, reason: "invalid" };
-  }
-
-  // Create the user in the invite's OWN org, with the invite's role. Internal
-  // call: actorRole defaults to super_admin (the inviting admin's authority was
-  // already checked at create time; the role is fixed by the trusted invite).
+  // Create the user in the invite's OWN org, with the invite's role, BEFORE
+  // claiming the invite. Internal call: actorRole defaults to super_admin (the
+  // inviting admin's authority was checked at create time; the role is fixed by
+  // the trusted invite row, never by request input). The unique email index
+  // makes this the race arbiter — a duplicate create returns email_conflict.
   const created = await createStaff(invite.organizationId, {
     name: input.name,
     email: invite.email,
@@ -345,15 +336,21 @@ export async function acceptInvite(
   });
 
   if (!created.ok) {
-    // The only non-ok reason for an internal createStaff call is email_conflict
-    // (a user with this email was created in the org between invite creation and
-    // acceptance). Roll the claim back so the invite isn't silently burned.
-    await db
-      .update(staffInvites)
-      .set({ acceptedAt: null })
-      .where(eq(staffInvites.id, invite.id));
+    // email_conflict: a user with this email already exists in the org (created
+    // concurrently or after the invite). The invite is left UN-claimed; there is
+    // nothing to roll back. This is terminal for the invite (the email is taken).
     return { ok: false, reason: "email_conflict" };
   }
+
+  // User exists now — claim the invite so it can't be reused. Conditional on
+  // accepted_at IS NULL purely for hygiene; the unique index already prevented a
+  // second user, so even an unguarded write here would be safe.
+  await db
+    .update(staffInvites)
+    .set({ acceptedAt: new Date() })
+    .where(
+      and(eq(staffInvites.id, invite.id), isNull(staffInvites.acceptedAt)),
+    );
 
   // Only an admin-role invite yields an admin session. A technician invite
   // creates the user but mints no admin cookie (technician is not a session

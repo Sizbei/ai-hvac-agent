@@ -178,6 +178,31 @@ Public (no session):
   super_admin self-demotion blocked; authz.ts wired (existing staff tests still
   green).
 
+## Post-review hardening (security-reviewer pass, 0 CRITICAL)
+
+A second security review of the implemented invite flow returned 0 CRITICAL /
+3 HIGH / 2 MEDIUM. Dispositions:
+
+- **H1 — invite burned if a crash hits between claim and rollback.** FIXED by
+  reordering `acceptInvite`: create the user FIRST, then claim the invite. The
+  per-org unique email index is the race arbiter, so there is no rollback to
+  lose; a crash leaves a live invite + real user, and re-accept cleanly returns
+  email_conflict instead of a silently-burned invite.
+- **H2 — IP rate-limit key spoofable via X-Forwarded-For.** FIXED: the accept
+  route now derives the IP with the codebase's `clientIp` pattern (leftmost XFF
+  address, length-capped) instead of the raw header.
+- **H3 — no audit entry for invite acceptance.** FIXED: the accept route now
+  calls `logAudit({ action: "accept_invite", entity: "user", details: {role} })`
+  on success — role enum only, never the email/name/password/token.
+- **M1 — accept page reveals the invited email to a token holder.** ACCEPTED by
+  design: the recipient must see which account they're activating, and the
+  256-bit token is itself the secret. The page still collapses all failure
+  reasons to one generic card (no enumeration without a valid token).
+- **M2 — no CSP on the public accept page.** FIXED: a scoped Content-Security-
+  Policy (script/connect/form-action pinned to 'self', frame-ancestors none) is
+  set for `/admin/invite/*` only, since it takes a password from an
+  unauthenticated user. The authenticated dashboard is unaffected.
+
 ## Migration / deploy note
 
 Migrations are NOT run on Vercel deploy — run `npm run db:migrate` after merge.

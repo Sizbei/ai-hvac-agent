@@ -334,7 +334,6 @@ describe('acceptInvite', () => {
 
   it('creates the user with the role FROM THE INVITE, not request input', async () => {
     selectQueue.push([liveRow('technician')]); // resolve
-    updateQueue.push([{ id: 'inv1' }]); // claim succeeds
     mockCreateStaff.mockResolvedValue({
       ok: true,
       staff: {
@@ -346,6 +345,7 @@ describe('acceptInvite', () => {
         createdAt: '2026-06-10T00:00:00.000Z',
       },
     });
+    updateQueue.push([{ id: 'inv1' }]); // claim (after create)
 
     const res = await acceptInvite('t', { name: 'N', password: 'password1' });
     expect(res.ok).toBe(true);
@@ -365,7 +365,6 @@ describe('acceptInvite', () => {
 
   it('mints an admin session for an admin-role invite', async () => {
     selectQueue.push([liveRow('admin')]);
-    updateQueue.push([{ id: 'inv1' }]);
     mockCreateStaff.mockResolvedValue({
       ok: true,
       staff: {
@@ -377,6 +376,7 @@ describe('acceptInvite', () => {
         createdAt: '2026-06-10T00:00:00.000Z',
       },
     });
+    updateQueue.push([{ id: 'inv1' }]); // claim
     const res = await acceptInvite('t', { name: 'A', password: 'password1' });
     expect(res.ok).toBe(true);
     if (res.ok) {
@@ -388,20 +388,14 @@ describe('acceptInvite', () => {
     }
   });
 
-  it('aborts if the claim UPDATE does not catch the row (double-accept race)', async () => {
+  it('reports email_conflict WITHOUT claiming the invite when the user already exists', async () => {
+    // create-first ordering: a colliding create means the email is taken, so the
+    // invite is left un-claimed (nothing to roll back) and the user is NOT made.
     selectQueue.push([liveRow('technician')]);
-    updateQueue.push([]); // claim returns nothing → someone else won
-    const res = await acceptInvite('t', { name: 'N', password: 'password1' });
-    expect(res).toEqual({ ok: false, reason: 'invalid' });
-    expect(mockCreateStaff).not.toHaveBeenCalled();
-  });
-
-  it('rolls the claim back and reports email_conflict if user creation collides', async () => {
-    selectQueue.push([liveRow('technician')]);
-    updateQueue.push([{ id: 'inv1' }]); // claim
     mockCreateStaff.mockResolvedValue({ ok: false, reason: 'email_conflict' });
-    updateQueue.push([{ id: 'inv1' }]); // rollback update
     const res = await acceptInvite('t', { name: 'N', password: 'password1' });
     expect(res).toEqual({ ok: false, reason: 'email_conflict' });
+    // No claim UPDATE was needed (create failed before the claim step).
+    expect(updateQueue.length).toBe(0);
   });
 });
