@@ -32,6 +32,8 @@ import { hash } from "bcryptjs";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
+import { canManageRole, canAssignRole } from "@/lib/auth/authz";
+import type { AdminRole } from "@/lib/auth/types";
 import {
   ADMIN_TIER_ROLES,
   type StaffRecord,
@@ -49,6 +51,16 @@ function isAdminTier(role: StaffRole): boolean {
   return role === "super_admin" || role === "admin";
 }
 
+/** Project a (possibly wider) StaffRole onto the AdminRole used by the authz
+ * policy helpers. Only `super_admin` is privileged; every other tier (admin or
+ * the never-a-session technician) is treated as a normal `admin` for the
+ * policy, which confines it to managing technicians. This keeps the single
+ * source of truth in authz.ts while accepting the wider StaffRole at the call
+ * sites here. */
+function toActorRole(role: StaffRole): AdminRole {
+  return role === "super_admin" ? "super_admin" : "admin";
+}
+
 export const BCRYPT_COST = 12;
 
 /** True when an error is the last-active-admin trigger violation (migration
@@ -62,6 +74,19 @@ function isLastAdminViolation(error: unknown): boolean {
         ? error
         : "";
   return message.includes("last_active_admin");
+}
+
+/** True when an error is the per-org unique-email violation (index
+ * users_org_email_unique, migration 0029). We match on the index name in the
+ * message so it survives neon-http error wrapping (Postgres SQLSTATE 23505). */
+function isUniqueEmailViolation(error: unknown): boolean {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : "";
+  return message.includes("users_org_email_unique");
 }
 
 function toStaffRecord(row: {
@@ -148,9 +173,9 @@ export async function createStaff(
    * real session role. */
   actorRole: StaffRole = "super_admin",
 ): Promise<CreateStaffResult> {
-  // Privilege-escalation guard: a non-super_admin cannot create an admin-tier
-  // account.
-  if (actorRole !== "super_admin" && isAdminTier(input.role)) {
+  // Privilege-escalation guard (policy in authz.ts): only a super_admin may
+  // assign an admin-tier role; a normal admin may only ever mint a technician.
+  if (!canAssignRole(toActorRole(actorRole), input.role)) {
     return { ok: false, reason: "forbidden" };
   }
 
@@ -169,17 +194,29 @@ export async function createStaff(
 
   const passwordHash = await hash(input.password, BCRYPT_COST);
 
-  const [created] = await db
-    .insert(users)
-    .values({
-      organizationId,
-      name: input.name,
-      email,
-      passwordHash,
-      role: input.role,
-      isActive: true,
-    })
-    .returning(STAFF_COLUMNS);
+  let created;
+  try {
+    [created] = await db
+      .insert(users)
+      .values({
+        organizationId,
+        name: input.name,
+        email,
+        passwordHash,
+        role: input.role,
+        isActive: true,
+      })
+      .returning(STAFF_COLUMNS);
+  } catch (error: unknown) {
+    // The per-org unique email index (migration 0029) is the authoritative
+    // guard behind the read-then-insert pre-check above, which races under
+    // concurrency. If two creates for the same org+email interleave, the loser
+    // hits the unique violation here — map it to the same friendly sentinel.
+    if (isUniqueEmailViolation(error)) {
+      return { ok: false, reason: "email_conflict" };
+    }
+    throw error;
+  }
 
   if (!created) {
     throw new Error("Failed to create staff member");
@@ -226,17 +263,17 @@ export async function updateStaff(
     return { ok: false, reason: "not_found" };
   }
 
-  // Authorization: only a super_admin may manage an admin-tier user (admin or
-  // super_admin) OR promote anyone INTO an admin-tier role. A normal admin can
-  // only touch technicians. This is the privilege-escalation guard — it stops an
-  // admin from editing/demoting another admin or minting a new admin.
-  if (actorRole !== "super_admin") {
-    const targetIsAdminTier = isAdminTier(current.role);
-    const assignsAdminTier =
-      input.role !== undefined && isAdminTier(input.role);
-    if (targetIsAdminTier || assignsAdminTier) {
-      return { ok: false, reason: "forbidden" };
-    }
+  // Authorization (policy in authz.ts): only a super_admin may manage an
+  // admin-tier user (admin or super_admin) OR promote anyone INTO an admin-tier
+  // role. A normal admin can only touch technicians. This is the
+  // privilege-escalation guard — it stops an admin from editing/demoting another
+  // admin or minting a new admin.
+  const actor = toActorRole(actorRole);
+  const cannotManageTarget = !canManageRole(actor, current.role);
+  const cannotAssignRole =
+    input.role !== undefined && !canAssignRole(actor, input.role);
+  if (cannotManageTarget || cannotAssignRole) {
+    return { ok: false, reason: "forbidden" };
   }
 
   // Does this patch remove admin access from a currently-active admin? That's
@@ -316,7 +353,10 @@ export async function resetStaffPassword(
     return { ok: false, reason: "not_found" };
   }
 
-  if (actorRole !== "super_admin" && isAdminTier(current.role)) {
+  // Policy in authz.ts: managing an admin-tier target's credentials requires
+  // super_admin. Without this a normal admin could plant a password on a
+  // Google-only super_admin and then log in as them.
+  if (!canManageRole(toActorRole(actorRole), current.role)) {
     return { ok: false, reason: "forbidden" };
   }
 
