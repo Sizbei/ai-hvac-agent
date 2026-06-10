@@ -3,6 +3,7 @@
 import { UrgencyBadge } from '@/components/admin/urgency-badge';
 import { StatusBadge } from '@/components/admin/status-badge';
 import { formatBusinessTime } from '@/lib/admin/calendar-time';
+import { urgencyAccent } from '@/lib/admin/urgency-accent';
 import type { DashboardRequest } from '@/lib/admin/types';
 
 interface CalendarJobCardProps {
@@ -33,11 +34,15 @@ export function CalendarJobCard({ job, onSelect, compact }: CalendarJobCardProps
     ? formatBusinessTime(start)
     : '—';
 
+  const accent = urgencyAccent(job.urgency);
+
   return (
     <button
       type="button"
       onClick={() => onSelect(job.id)}
-      className="flex h-full w-full flex-col overflow-hidden rounded-md border border-sky-200 bg-sky-50 px-2 py-1 text-left text-xs leading-tight transition-colors hover:bg-sky-100 dark:border-sky-900 dark:bg-sky-950 dark:hover:bg-sky-900"
+      // Sky body + an urgency-colored left rail (border-l-4) so a glance reads
+      // priority by color — consistent with the urgency badges.
+      className={`flex h-full w-full flex-col overflow-hidden rounded-md border border-l-4 border-sky-200 ${accent.bar} bg-sky-50 px-2 py-1 text-left text-xs leading-tight transition-colors hover:bg-sky-100 dark:border-sky-900 dark:bg-sky-950 dark:hover:bg-sky-900`}
     >
       <div className="flex items-center justify-between gap-1">
         <span className="font-medium tabular-nums">{time}</span>

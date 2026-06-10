@@ -27,6 +27,7 @@ import {
   placeJobInGrid,
   windowBandPlacement,
   businessIsoDate,
+  businessMinutesOfDay,
   toBusinessWallClock,
 } from '@/lib/admin/calendar-time';
 import {
@@ -60,6 +61,8 @@ interface InteractiveSchedulingCalendarProps {
   readonly onStatus: (message: string, tone: 'warning' | 'error') => void;
   /** Whether the initial board is still loading (drives the skeletons). */
   readonly isLoading: boolean;
+  /** Jump to a specific business day in Day view (week day-header click). */
+  readonly onPickDay?: (isoDay: string) => void;
 }
 
 /** Same grid geometry as the read-only S2 view. */
@@ -263,26 +266,38 @@ function DayView({
   );
 }
 
-/** Week view: one column per business day. Dropping in week view keeps the job
- * in its current lane (scope) — the column only changes the DAY/window. We use the
- * unassigned scope per day for placed-but-unassigned and per-tech for the rest by
- * routing the drop to the job's existing scope (resolved in the drop handler). */
+/**
+ * Wide week view: a full-width time grid (Google/HCP style). A single left hour
+ * axis, then 7 EQUAL-width day columns (flex-1, no horizontal scroll) Sun→Sat.
+ * Each column is a continuous day lane showing every job that day; the current
+ * day is highlighted and a "now" line is drawn when today is in range. Clicking a
+ * day header jumps into Day view for that date.
+ *
+ * Drag-to-reschedule is preserved: each column's bands are registered under the
+ * unassigned scope, so a drop moves the job's DAY/window only — technician
+ * assignment is unchanged server-side (rescheduleRequest never touches
+ * assignedTo), matching the prior week behavior.
+ */
 function WeekView({
   days,
   allJobs,
   onSelect,
+  onPickDay,
   disabled,
 }: {
   readonly days: readonly string[];
   readonly allJobs: readonly DashboardRequest[];
   readonly onSelect: (id: string) => void;
+  readonly onPickDay?: (isoDay: string) => void;
   readonly disabled?: boolean;
 }) {
   const todayIso = businessIsoDate(new Date());
   return (
-    <div className="flex gap-2 overflow-x-auto pb-2">
-      <TimeAxis />
-      <div className="flex min-w-0 flex-1 gap-2">
+    <div className="flex gap-2">
+      <div className="pt-7">
+        <TimeAxis />
+      </div>
+      <div className="grid min-w-0 flex-1 grid-cols-7 gap-1.5">
         {days.map((isoDay) => {
           const noonUtc = new Date(`${isoDay}T12:00:00.000Z`);
           const wall = toBusinessWallClock(noonUtc);
@@ -291,31 +306,62 @@ function WeekView({
           ).toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' });
           const isToday = isoDay === todayIso;
           return (
-            <div key={isoDay} className="flex min-w-32 flex-1 flex-col">
-              <div
-                className={`mb-1 text-center text-xs font-semibold ${
-                  isToday ? 'text-primary' : 'text-foreground'
+            <div key={isoDay} className="flex min-w-0 flex-col">
+              <button
+                type="button"
+                onClick={() => onPickDay?.(isoDay)}
+                title="Open this day"
+                className={`mb-1 rounded-md py-1 text-center text-xs font-semibold transition-colors hover:bg-muted ${
+                  isToday
+                    ? 'bg-primary/10 text-primary'
+                    : 'text-foreground'
                 }`}
               >
                 {weekday}{' '}
-                <span className="font-normal text-muted-foreground">
+                <span
+                  className={
+                    isToday ? 'font-bold' : 'font-normal text-muted-foreground'
+                  }
+                >
                   {wall.month}/{wall.day}
                 </span>
+              </button>
+              <div className="relative">
+                {isToday && <NowLine />}
+                <DayLane
+                  scope={UNASSIGNED_SCOPE}
+                  jobs={allJobs}
+                  isoDay={isoDay}
+                  onSelect={onSelect}
+                  compact
+                  disabled={disabled}
+                />
               </div>
-              {/* Week-view drops scope to the day's unassigned lane band: the
-                  reschedule moves day+window; technician assignment is unchanged
-                  server-side (rescheduleRequest never touches assignedTo). */}
-              <DayLane
-                scope={UNASSIGNED_SCOPE}
-                jobs={allJobs}
-                isoDay={isoDay}
-                onSelect={onSelect}
-                compact
-                disabled={disabled}
-              />
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+/** A thin horizontal "current time" indicator, positioned within the day grid by
+ * the business-tz minute-of-day. Hidden when the current time is outside the
+ * rendered window (before CALENDAR_START_HOUR or after CALENDAR_END_HOUR). */
+function NowLine() {
+  const minutes = businessMinutesOfDay(new Date());
+  const startMin = CALENDAR_START_HOUR * 60;
+  const endMin = CALENDAR_END_HOUR * 60;
+  if (minutes < startMin || minutes > endMin) return null;
+  const topPx = ((minutes - startMin) / (endMin - startMin)) * GRID_PX;
+  return (
+    <div
+      className="pointer-events-none absolute inset-x-0 z-20"
+      style={{ top: topPx }}
+      aria-hidden
+    >
+      <div className="relative h-px bg-red-500">
+        <div className="absolute -left-1 -top-1 size-2 rounded-full bg-red-500" />
       </div>
     </div>
   );
@@ -336,6 +382,7 @@ export function InteractiveSchedulingCalendar({
   onRefetch,
   onStatus,
   isLoading,
+  onPickDay,
 }: InteractiveSchedulingCalendarProps) {
   // Optimistic copy of the board. Local drops mutate this copy; it is RESET to
   // the authoritative payload whenever a new `calendar` prop arrives (poll /
@@ -538,6 +585,7 @@ export function InteractiveSchedulingCalendar({
                   days={board.days}
                   allJobs={allJobs}
                   onSelect={onSelect}
+                  onPickDay={onPickDay}
                   disabled={isRescheduling}
                 />
               ) : (
