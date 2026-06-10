@@ -89,10 +89,11 @@ function delay(ms: number): React.CSSProperties {
 
 export default function Home() {
   return (
-    <div className={`${display.variable} relative overflow-x-clip bg-background text-foreground`}>
-      {/* Atmosphere */}
-      <div className="lp-mesh pointer-events-none absolute inset-0 -z-10" aria-hidden />
-      <div className="lp-grid pointer-events-none absolute inset-0 -z-10 h-[120vh]" aria-hidden />
+    <div className={`${display.variable} relative flex min-h-full flex-1 flex-col overflow-x-clip bg-background text-foreground`}>
+      {/* Atmosphere — pinned to the top of the page so the blurred glows and grid
+          never paint into the empty space below the footer. */}
+      <div className="lp-mesh pointer-events-none absolute inset-x-0 top-0 -z-10 h-[120vh] overflow-hidden" aria-hidden />
+      <div className="lp-grid pointer-events-none absolute inset-x-0 top-0 -z-10 h-[120vh]" aria-hidden />
 
       {/* Top utility bar: 24/7 + phone (Spears pattern) */}
       <div className="hidden border-b border-border/60 bg-foreground text-background sm:block">
