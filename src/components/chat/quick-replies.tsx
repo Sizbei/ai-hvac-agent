@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 import {
   Thermometer,
   Snowflake,
@@ -101,6 +101,7 @@ interface QuickRepliesProps {
 
 export function QuickReplies({ onSelect, disabled }: QuickRepliesProps) {
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
+  const reduceMotion = useReducedMotion();
 
   return (
     <div className="space-y-2">
@@ -123,7 +124,7 @@ export function QuickReplies({ onSelect, disabled }: QuickRepliesProps) {
               }
               aria-expanded={isExpanded}
               aria-controls={`replies-${group.label}`}
-              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:pointer-events-none ${
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-[background-color,border-color,color,scale] duration-150 ease-out active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:pointer-events-none ${
                 isExpanded
                   ? group.color + ' ring-1 ring-current/20'
                   : group.color
@@ -132,7 +133,7 @@ export function QuickReplies({ onSelect, disabled }: QuickRepliesProps) {
               <Icon className="size-3.5" />
               {group.label}
               <ChevronDown
-                className={`size-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                className={`size-3 transition-transform duration-200 ease-out ${isExpanded ? 'rotate-180' : ''}`}
               />
             </button>
           );
@@ -147,7 +148,7 @@ export function QuickReplies({ onSelect, disabled }: QuickRepliesProps) {
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.15 }}
+            transition={{ duration: reduceMotion ? 0 : 0.18, ease: 'easeOut' }}
             className="overflow-hidden"
           >
             <div
@@ -157,19 +158,26 @@ export function QuickReplies({ onSelect, disabled }: QuickRepliesProps) {
               className="flex flex-wrap gap-1.5 pt-1"
             >
               {GROUPS.find((g) => g.label === expandedGroup)?.replies.map(
-                (reply) => (
-                  <button
+                (reply, i) => (
+                  <motion.button
                     key={reply.text}
                     type="button"
                     disabled={disabled}
+                    initial={reduceMotion ? false : { opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{
+                      duration: 0.15,
+                      ease: 'easeOut',
+                      delay: reduceMotion ? 0 : i * 0.03,
+                    }}
                     onClick={() => {
                       onSelect(reply.message);
                       setExpandedGroup(null);
                     }}
-                    className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:pointer-events-none"
+                    className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs text-foreground transition-[background-color,border-color,color,scale] duration-150 ease-out hover:bg-muted active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:pointer-events-none"
                   >
                     {reply.text}
-                  </button>
+                  </motion.button>
                 ),
               )}
             </div>

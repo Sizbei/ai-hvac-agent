@@ -84,11 +84,16 @@ function buildLoader(appOrigin: string): string {
     style.textContent = [
       ":host{all:initial}",
       ".w-wrap{position:fixed;bottom:20px;" + side + ":20px;z-index:2147483000;font-family:system-ui,-apple-system,sans-serif}",
-      ".w-btn{width:60px;height:60px;border-radius:50%;border:none;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.2);display:flex;align-items:center;justify-content:center;transition:transform .15s ease;color:#fff}",
-      ".w-btn:hover{transform:scale(1.06)}",
+      ".w-btn{width:60px;height:60px;border-radius:50%;border:none;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.2);display:flex;align-items:center;justify-content:center;transition:transform .15s cubic-bezier(.23,1,.32,1);color:#fff}",
+      "@media (hover:hover) and (pointer:fine){.w-btn:hover{transform:scale(1.06)}}",
+      ".w-btn:active{transform:scale(.94)}",
       ".w-btn svg{width:28px;height:28px}",
-      ".w-panel{position:fixed;bottom:92px;" + side + ":20px;width:380px;max-width:calc(100vw - 40px);height:600px;max-height:calc(100vh - 120px);border-radius:16px;overflow:hidden;box-shadow:0 12px 48px rgba(0,0,0,.24);background:#fff;border:1px solid rgba(0,0,0,.08);opacity:0;transform:translateY(12px);pointer-events:none;transition:opacity .18s ease,transform .18s ease}",
-      ".w-panel.open{opacity:1;transform:translateY(0);pointer-events:auto}",
+      // Panel scales in from the launcher's corner (origin-aware, like a
+      // popover from its trigger), enters slower than it exits (220ms in /
+      // 140ms out) with a strong ease-out so it never feels sluggish.
+      ".w-panel{position:fixed;bottom:92px;" + side + ":20px;width:380px;max-width:calc(100vw - 40px);height:600px;max-height:calc(100vh - 120px);border-radius:16px;overflow:hidden;box-shadow:0 12px 48px rgba(0,0,0,.24);background:#fff;border:1px solid rgba(0,0,0,.08);opacity:0;transform:translateY(10px) scale(.97);transform-origin:bottom " + side + ";pointer-events:none;transition:opacity .14s cubic-bezier(.23,1,.32,1),transform .14s cubic-bezier(.23,1,.32,1)}",
+      ".w-panel.open{opacity:1;transform:none;pointer-events:auto;transition-duration:.22s}",
+      "@media (prefers-reduced-motion:reduce){.w-btn,.w-panel{transition-property:opacity}.w-panel{transform:none}}",
       ".w-panel iframe{width:100%;height:100%;border:0;display:block}",
       "@media (max-width:480px){.w-panel{width:100vw;max-width:100vw;height:100vh;max-height:100vh;bottom:0;" + side + ":0;border-radius:0}}"
     ].join("");

@@ -37,7 +37,7 @@ export function SuggestedReplies({
           type="button"
           disabled={disabled}
           onClick={() => onSelect(s.message)}
-          className="rounded-full border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:pointer-events-none"
+          className="rounded-full border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-[background-color,border-color,color,scale] duration-150 ease-out active:scale-[0.97] hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:pointer-events-none"
         >
           {s.label}
         </button>
@@ -46,7 +46,7 @@ export function SuggestedReplies({
         type="button"
         disabled={disabled}
         onClick={onEscalate}
-        className="inline-flex items-center gap-1 rounded-full border border-orange-200 bg-orange-50 px-3 py-1.5 text-xs font-medium text-orange-700 transition-colors hover:bg-orange-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:pointer-events-none"
+        className="inline-flex items-center gap-1 rounded-full border border-orange-200 bg-orange-50 px-3 py-1.5 text-xs font-medium text-orange-700 transition-[background-color,border-color,color,scale] duration-150 ease-out active:scale-[0.97] hover:bg-orange-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:pointer-events-none"
       >
         <PhoneForwarded className="size-3" />
         Talk to a human

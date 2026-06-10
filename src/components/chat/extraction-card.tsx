@@ -12,6 +12,7 @@ import {
   CardFooter,
 } from '@/components/ui/card';
 import { ANIMATION } from '@/lib/design-tokens';
+import { SKIP_SENTINEL } from '@/lib/ai/chat-slots';
 import type { ExtractionResult } from '@/lib/ai/extraction-schema';
 
 interface ExtractionCardProps {
@@ -98,7 +99,13 @@ export function ExtractionCard({ extraction, onConfirm }: ExtractionCardProps) {
             <FieldRow label="Phone">{extraction.customerPhone}</FieldRow>
           )}
           {extraction.customerEmail && (
-            <FieldRow label="Email">{extraction.customerEmail}</FieldRow>
+            <FieldRow label="Email">
+              {extraction.customerEmail === SKIP_SENTINEL ? (
+                <span className="text-muted-foreground">Not provided</span>
+              ) : (
+                extraction.customerEmail
+              )}
+            </FieldRow>
           )}
           {extraction.description && (
             <FieldRow label="Description">{extraction.description}</FieldRow>

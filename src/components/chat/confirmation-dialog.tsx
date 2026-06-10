@@ -11,6 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { SKIP_SENTINEL } from '@/lib/ai/chat-slots';
 import type { ExtractionResult } from '@/lib/ai/extraction-schema';
 
 interface ConfirmationDialogProps {
@@ -99,7 +100,13 @@ export function ConfirmationDialog({
             <DetailRow label="Phone">{extraction.customerPhone}</DetailRow>
           )}
           {extraction.customerEmail && (
-            <DetailRow label="Email">{extraction.customerEmail}</DetailRow>
+            <DetailRow label="Email">
+              {extraction.customerEmail === SKIP_SENTINEL ? (
+                <span className="text-muted-foreground">Not provided</span>
+              ) : (
+                extraction.customerEmail
+              )}
+            </DetailRow>
           )}
           {extraction.description && (
             <DetailRow label="Description">
