@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 
+// The login route now imports normalizeEmail from staff-queries, which (via the
+// consolidated authz policy) transitively imports "server-only". No-op it here
+// so this client-context test can load the route module.
+vi.mock('server-only', () => ({}));
+
 // --- Hoisted mocks ---
 
 const { mockDbSelect, mockCreateAdminSession, mockDeleteAdminSession, mockBcryptCompare } =
@@ -17,7 +22,11 @@ vi.mock('@/lib/db', () => ({
   db: {
     select: () => ({
       from: () => ({
-        where: mockDbSelect,
+        // The login query is now .where(...).limit(1); mockDbSelect supplies the
+        // rows and .limit() just returns them so existing cases are unchanged.
+        where: (...args: unknown[]) => ({
+          limit: () => mockDbSelect(...args),
+        }),
       }),
     }),
   },
@@ -187,6 +196,28 @@ describe('POST /api/auth/login', () => {
       name: 'Admin User',
       role: 'admin',
     });
+  });
+
+  it('lowercases a mixed-case email before the DB lookup', async () => {
+    // User rows are stored lowercased (normalizeEmail on create), and Postgres
+    // text equality is case-sensitive, so the route must lowercase the input
+    // before building the lookup condition — otherwise a real user typing
+    // mixed-case would miss their own row. (zod .email() already rejects
+    // surrounding whitespace, so only case needs normalizing at this layer.)
+    mockDbSelect.mockResolvedValue([mockAdminUser]);
+    mockBcryptCompare.mockResolvedValue(true);
+
+    const request = createMockRequest({
+      body: { email: 'Admin@Example.COM', password: 'correctpassword' },
+    });
+    const response = await loginHandler(request);
+
+    expect(response.status).toBe(200);
+    // eq() mock returns its args as a tuple [col, value]; the value must be the
+    // normalized (lowercased) email, proving normalization happened pre-lookup.
+    const whereArgs = mockDbSelect.mock.calls[0][0] as unknown[];
+    expect(JSON.stringify(whereArgs)).toContain('admin@example.com');
+    expect(JSON.stringify(whereArgs)).not.toContain('Admin@Example.COM');
   });
 });
 
