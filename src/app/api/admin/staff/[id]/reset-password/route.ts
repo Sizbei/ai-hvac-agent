@@ -53,8 +53,16 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       session.organizationId,
       id,
       parsed.data.password,
+      session.role,
     );
     if (!result.ok) {
+      if (result.reason === "forbidden") {
+        return errorResponse(
+          "Only a super admin can reset an admin's password",
+          "FORBIDDEN",
+          403,
+        );
+      }
       return errorResponse("User not found", "NOT_FOUND", 404);
     }
 

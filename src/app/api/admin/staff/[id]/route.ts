@@ -51,7 +51,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     const parsed = updateStaffSchema.safeParse(body);
     if (!parsed.success) {
       return errorResponse(
-        "Invalid request body: name, role ('admin'|'technician'), or isActive expected",
+        "Invalid request body: name, a valid role, or isActive expected",
         "VALIDATION_ERROR",
         400,
       );

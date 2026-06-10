@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
     const parsed = createStaffSchema.safeParse(body);
     if (!parsed.success) {
       return errorResponse(
-        "Invalid request body: name, valid email, password (min 8 chars), and role ('admin'|'technician') required",
+        "Invalid request body: name, valid email, password (min 8 chars), and a valid role required",
         "VALIDATION_ERROR",
         400,
       );

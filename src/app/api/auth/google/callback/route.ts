@@ -15,6 +15,7 @@
  * configured.
  */
 import { NextResponse, type NextRequest } from "next/server";
+import { timingSafeEqual } from "node:crypto";
 import { errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
@@ -29,6 +30,13 @@ import {
   GOOGLE_OIDC_NONCE_COOKIE,
 } from "@/lib/auth/google-oidc-state";
 import { resolveGoogleLogin } from "@/lib/auth/google-login";
+
+/** Constant-time string compare for the CSRF state (avoids a timing oracle). */
+function safeEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, "utf8");
+  const bufB = Buffer.from(b, "utf8");
+  return bufA.length === bufB.length && timingSafeEqual(bufA, bufB);
+}
 
 /** Redirect to the login page with a generic error code, clearing flow cookies. */
 function denyRedirect(request: NextRequest, code: string): NextResponse {
@@ -70,7 +78,7 @@ export async function GET(request: NextRequest): Promise<Response> {
     // CSRF: the returned state must match the cookie we set in /start.
     const cookieState = request.cookies.get(GOOGLE_OIDC_STATE_COOKIE)?.value;
     const nonce = request.cookies.get(GOOGLE_OIDC_NONCE_COOKIE)?.value;
-    if (!cookieState || !nonce || cookieState !== returnedState) {
+    if (!cookieState || !nonce || !safeEqual(cookieState, returnedState)) {
       return denyRedirect(request, "google_failed");
     }
 

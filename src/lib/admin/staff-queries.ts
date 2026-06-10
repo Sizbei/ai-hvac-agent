@@ -286,15 +286,40 @@ export async function updateStaff(
 
 export type ResetPasswordResult =
   | { ok: true }
-  | { ok: false; reason: "not_found" };
+  | { ok: false; reason: "not_found" | "forbidden" };
 
 /** Reset a staff member's password to a new value. The plaintext password is
- * NEVER logged or returned — only the hash is persisted. */
+ * NEVER logged or returned — only the hash is persisted.
+ *
+ * SECURITY: only a super_admin may reset an admin-tier user's password. Without
+ * this guard a normal admin could plant a password on a Google-only super_admin
+ * (passwordHash NULL → set) and then authenticate as that super_admin via the
+ * password-login route — a privilege-escalation path. We therefore load the
+ * target's role first and refuse the reset unless the actor is a super_admin or
+ * the target is a technician. */
 export async function resetStaffPassword(
   organizationId: string,
   userId: string,
   newPassword: string,
+  /** Role of the admin performing the reset. Defaults to "super_admin" for
+   * internal callers; route handlers MUST pass the real session role. */
+  actorRole: StaffRole = "super_admin",
 ): Promise<ResetPasswordResult> {
+  // Load the target's role (org-scoped) so we can authorize against it.
+  const [current] = await db
+    .select({ id: users.id, role: users.role })
+    .from(users)
+    .where(withTenant(users, organizationId, eq(users.id, userId)))
+    .limit(1);
+
+  if (!current) {
+    return { ok: false, reason: "not_found" };
+  }
+
+  if (actorRole !== "super_admin" && isAdminTier(current.role)) {
+    return { ok: false, reason: "forbidden" };
+  }
+
   const passwordHash = await hash(newPassword, BCRYPT_COST);
 
   const [updated] = await db
