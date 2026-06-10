@@ -13,6 +13,7 @@
     "db:cleanup:conversations": "npx tsx src/lib/db/cleanup-conversations.ts",
     "db:seed": "npx tsx src/lib/db/seed.ts",
     "db:seed:demo": "npx tsx src/lib/db/seed-demo.ts",
+    "db:seed:super-admin": "npx tsx src/lib/db/seed-super-admin.ts",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "tauri:dev": "tauri dev",

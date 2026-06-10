@@ -34,14 +34,15 @@ export async function verifyToken(
     const { payload } = await jwtVerify(token, encodedKey, {
       algorithms: [ALGORITHM],
     });
-    // Validate the claims at runtime rather than blindly casting — a token
-    // without role "admin" must never be accepted as an admin session.
+    // Validate the claims at runtime rather than blindly casting — a token whose
+    // role isn't an admin tier ("super_admin" or "admin") must never be accepted
+    // as an admin session. A "technician" (or any other value) is rejected.
     if (
       typeof payload.userId !== "string" ||
       typeof payload.organizationId !== "string" ||
       typeof payload.email !== "string" ||
       typeof payload.name !== "string" ||
-      payload.role !== "admin"
+      (payload.role !== "super_admin" && payload.role !== "admin")
     ) {
       return null;
     }
@@ -50,7 +51,7 @@ export async function verifyToken(
       organizationId: payload.organizationId,
       email: payload.email,
       name: payload.name,
-      role: "admin",
+      role: payload.role,
     };
   } catch {
     return null;

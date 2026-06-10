@@ -1,3 +1,7 @@
+// ⚠️ DEV-ONLY SEED. This creates accounts with trivially-guessable demo
+// passwords ("admin123" / "tech123"). NEVER run this against a production
+// DATABASE_URL — it would create weak-credential admin accounts. For prod, use
+// db:seed:super-admin (Google-only) and create staff through the admin UI.
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import * as schema from "./schema";

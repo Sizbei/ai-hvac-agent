@@ -127,7 +127,10 @@ export async function getConversations(
   // least one message whose content matches (case-insensitive substring).
   const search = filters.search?.trim();
   if (search) {
-    const pattern = `%${search}%`;
+    // Escape LIKE metacharacters (% _ \) so a search of "%" or "_" matches them
+    // literally instead of becoming a wildcard that full-scans messages.content.
+    const escaped = search.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+    const pattern = `%${escaped}%`;
     conditions.push(
       sql`(
         ${customerSessions.id}::text ILIKE ${pattern}

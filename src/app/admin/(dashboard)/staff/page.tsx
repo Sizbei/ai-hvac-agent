@@ -12,6 +12,11 @@ import type { StaffRecord } from '@/lib/admin/types';
 
 export default function StaffPage() {
   const { staff, currentUserId, isLoading, error, refetch } = useAdminStaff();
+  // The current user appears in their own staff list; derive whether they're a
+  // super_admin so the UI only offers admin-tier role options to those allowed
+  // to assign them. The server is the authoritative guard regardless.
+  const canManageAdmins =
+    staff.find((m) => m.id === currentUserId)?.role === 'super_admin';
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<StaffRecord | null>(null);
   const [resetTarget, setResetTarget] = useState<StaffRecord | null>(null);
@@ -72,6 +77,7 @@ export default function StaffPage() {
         onSuccess={handleSuccess}
         staff={editing}
         isSelf={editing !== null && editing.id === currentUserId}
+        canManageAdmins={canManageAdmins}
       />
 
       <StaffResetPasswordDialog

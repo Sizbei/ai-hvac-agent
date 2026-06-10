@@ -85,13 +85,22 @@ export interface TechnicianRecord {
 }
 
 /** A staff member (admin or technician) for the user-management surface.
+/** Every role a user row can hold. `super_admin` and `admin` are the two
+ * admin-tier roles (both hold an admin session); `technician` is field staff. */
+export type StaffRole = "super_admin" | "admin" | "technician";
+
+/** Roles that count toward the "org must keep one active admin" lockout guard
+ * and that require super_admin to manage. */
+export const ADMIN_TIER_ROLES: readonly StaffRole[] = ["super_admin", "admin"];
+
+/**
  * Unlike TechnicianRecord this carries the role so admins can manage both
  * kinds of user from one screen. */
 export interface StaffRecord {
   readonly id: string;
   readonly name: string;
   readonly email: string;
-  readonly role: "admin" | "technician";
+  readonly role: StaffRole;
   readonly isActive: boolean;
   readonly createdAt: string;
 }
@@ -100,14 +109,14 @@ export interface CreateStaffInput {
   readonly name: string;
   readonly email: string;
   readonly password: string;
-  readonly role: "admin" | "technician";
+  readonly role: StaffRole;
 }
 
 /** Patch for an existing staff member. Any subset may be present; an empty
  * patch is a no-op. Password reset is a separate, explicit operation. */
 export interface UpdateStaffInput {
   readonly name?: string;
-  readonly role?: "admin" | "technician";
+  readonly role?: StaffRole;
   readonly isActive?: boolean;
 }
 

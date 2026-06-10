@@ -4,6 +4,7 @@ import { getOrgConfig, updateOrgConfig } from "@/lib/admin/org-config-queries";
 import { orgConfigUpdateSchema } from "@/lib/admin/org-config-types";
 import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
+import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
 
 export async function GET() {
@@ -12,6 +13,16 @@ export async function GET() {
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+
+    const rateCheck = slidingWindow(
+      `admin:settings-get:${session.userId}`,
+      RATE_LIMITS.adminRead.maxRequests,
+      RATE_LIMITS.adminRead.windowMs,
+    );
+    if (!rateCheck.allowed) {
+      return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
+    }
+
     const config = await getOrgConfig(session.organizationId);
     return successResponse({ config });
   } catch (error: unknown) {
@@ -25,6 +36,15 @@ export async function PATCH(request: NextRequest) {
     const session = await getAdminSession();
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
+    }
+
+    const rateCheck = slidingWindow(
+      `admin:settings-update:${session.userId}`,
+      RATE_LIMITS.adminMutation.maxRequests,
+      RATE_LIMITS.adminMutation.windowMs,
+    );
+    if (!rateCheck.allowed) {
+      return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
     }
 
     const body: unknown = await request.json();

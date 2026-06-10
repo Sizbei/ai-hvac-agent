@@ -2,6 +2,7 @@ import { getAdminSession } from "@/lib/auth/session";
 import { getTechnicians, createTechnician } from "@/lib/admin/queries";
 import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
+import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
 import { z } from "zod";
 
@@ -10,6 +11,15 @@ export async function GET() {
     const session = await getAdminSession();
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
+    }
+
+    const rateCheck = slidingWindow(
+      `admin:technicians-list:${session.userId}`,
+      RATE_LIMITS.adminRead.maxRequests,
+      RATE_LIMITS.adminRead.windowMs,
+    );
+    if (!rateCheck.allowed) {
+      return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
     }
 
     const technicians = await getTechnicians(session.organizationId);
@@ -31,6 +41,15 @@ export async function POST(request: Request) {
     const session = await getAdminSession();
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
+    }
+
+    const rateCheck = slidingWindow(
+      `admin:technicians-create:${session.userId}`,
+      RATE_LIMITS.adminMutation.maxRequests,
+      RATE_LIMITS.adminMutation.windowMs,
+    );
+    if (!rateCheck.allowed) {
+      return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
     }
 
     const body: unknown = await request.json();

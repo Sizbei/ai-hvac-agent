@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import type { StaffRecord } from '@/lib/admin/types';
+import type { StaffRecord, StaffRole } from '@/lib/admin/types';
 import {
   Dialog,
   DialogContent,
@@ -30,15 +30,18 @@ interface StaffFormDialogProps {
   /** True when editing your own account — disables role/active controls so you
    * can't lock yourself out. The server enforces this too. */
   readonly isSelf: boolean;
+  /** True when the current user is a super_admin. Gates the admin-tier role
+   * options (Super Admin / Admin) in the dropdown — a normal admin may only
+   * create/assign Technician. The server is the authoritative guard; this just
+   * hides options the actor can't use. */
+  readonly canManageAdmins?: boolean;
 }
-
-type Role = 'admin' | 'technician';
 
 interface FormState {
   readonly name: string;
   readonly email: string;
   readonly password: string;
-  readonly role: Role;
+  readonly role: StaffRole;
   readonly isActive: boolean;
 }
 
@@ -67,6 +70,7 @@ export function StaffFormDialog({
   onSuccess,
   staff,
   isSelf,
+  canManageAdmins = false,
 }: StaffFormDialogProps) {
   const isEditMode = staff !== null;
   const [form, setForm] = useState<FormState>(INITIAL_FORM_STATE);
@@ -230,7 +234,7 @@ export function StaffFormDialog({
             <Select
               value={form.role}
               onValueChange={(v) =>
-                updateField('role', (v ?? 'technician') as Role)
+                updateField('role', (v ?? 'technician') as StaffRole)
               }
               disabled={isSelf}
             >
@@ -238,7 +242,12 @@ export function StaffFormDialog({
                 <SelectValue placeholder="Select a role" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="admin">Admin</SelectItem>
+                {canManageAdmins && (
+                  <SelectItem value="super_admin">Super Admin</SelectItem>
+                )}
+                {canManageAdmins && (
+                  <SelectItem value="admin">Admin</SelectItem>
+                )}
                 <SelectItem value="technician">Technician</SelectItem>
               </SelectContent>
             </Select>

@@ -17,7 +17,7 @@ const UUID_REGEX =
 const updateStaffSchema = z
   .object({
     name: z.string().min(1).max(200).optional(),
-    role: z.enum(["admin", "technician"]).optional(),
+    role: z.enum(["super_admin", "admin", "technician"]).optional(),
     isActive: z.boolean().optional(),
   })
   .refine(
@@ -51,7 +51,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     const parsed = updateStaffSchema.safeParse(body);
     if (!parsed.success) {
       return errorResponse(
-        "Invalid request body: name, role ('admin'|'technician'), or isActive expected",
+        "Invalid request body: name, a valid role, or isActive expected",
         "VALIDATION_ERROR",
         400,
       );
@@ -64,7 +64,10 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     // org-wide last-admin invariant in updateStaff is the backstop for the
     // case where they target a different admin who happens to be the last one.)
     if (id === session.userId) {
-      const demotesSelf = parsed.data.role !== undefined && parsed.data.role !== "admin";
+      const demotesSelf =
+        parsed.data.role !== undefined &&
+        parsed.data.role !== "super_admin" &&
+        parsed.data.role !== "admin";
       const deactivatesSelf = parsed.data.isActive === false;
       if (demotesSelf || deactivatesSelf) {
         return errorResponse(
@@ -75,11 +78,22 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       }
     }
 
-    const result = await updateStaff(session.organizationId, id, parsed.data);
+    const result = await updateStaff(
+      session.organizationId,
+      id,
+      parsed.data,
+      session.role,
+    );
     if (!result.ok) {
       switch (result.reason) {
         case "not_found":
           return errorResponse("User not found", "NOT_FOUND", 404);
+        case "forbidden":
+          return errorResponse(
+            "Only a super admin can manage admin accounts",
+            "FORBIDDEN",
+            403,
+          );
         case "last_admin":
           return errorResponse(
             "Cannot remove admin access from the organization's last active admin",

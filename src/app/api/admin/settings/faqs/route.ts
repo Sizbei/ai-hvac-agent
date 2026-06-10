@@ -7,6 +7,7 @@ import {
 import { customFaqInputSchema } from "@/lib/admin/org-config-types";
 import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
+import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
 
 /** Upper bound on custom FAQs per org — keeps the deterministic matcher's
@@ -19,6 +20,16 @@ export async function GET() {
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+
+    const rateCheck = slidingWindow(
+      `admin:faqs-list:${session.userId}`,
+      RATE_LIMITS.adminRead.maxRequests,
+      RATE_LIMITS.adminRead.windowMs,
+    );
+    if (!rateCheck.allowed) {
+      return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
+    }
+
     const faqs = await listCustomFaqs(session.organizationId);
     return successResponse({ faqs });
   } catch (error: unknown) {
@@ -32,6 +43,15 @@ export async function POST(request: NextRequest) {
     const session = await getAdminSession();
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
+    }
+
+    const rateCheck = slidingWindow(
+      `admin:faqs-create:${session.userId}`,
+      RATE_LIMITS.adminMutation.maxRequests,
+      RATE_LIMITS.adminMutation.windowMs,
+    );
+    if (!rateCheck.allowed) {
+      return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
     }
 
     const body: unknown = await request.json();

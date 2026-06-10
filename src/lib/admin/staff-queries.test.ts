@@ -17,6 +17,7 @@ vi.mock('drizzle-orm', () => ({
   eq: (...a: unknown[]) => ['eq', ...a],
   and: (...a: unknown[]) => ['and', ...a],
   ne: (...a: unknown[]) => ['ne', ...a],
+  inArray: (...a: unknown[]) => ['inArray', ...a],
   count: () => 'count',
   asc: (c: unknown) => c,
 }));
@@ -251,6 +252,7 @@ describe('updateStaff', () => {
 
 describe('resetStaffPassword', () => {
   it('hashes the new password and never returns it', async () => {
+    selectQueue.push([{ id: USER, role: 'technician' }]); // target lookup
     updateQueue.push([{ id: USER }]);
     const r = await resetStaffPassword(ORG, USER, 'brandnewpass');
     expect(mockHash).toHaveBeenCalledWith('brandnewpass', BCRYPT_COST);
@@ -258,8 +260,35 @@ describe('resetStaffPassword', () => {
   });
 
   it('returns not_found when the user is absent', async () => {
-    updateQueue.push([]);
+    selectQueue.push([]); // no target row
     const r = await resetStaffPassword(ORG, USER, 'brandnewpass');
     expect(r).toEqual({ ok: false, reason: 'not_found' });
+  });
+
+  it('forbids a normal admin from resetting an admin-tier password (priv-esc guard)', async () => {
+    selectQueue.push([{ id: USER, role: 'super_admin' }]); // target is super_admin
+    const r = await resetStaffPassword(ORG, USER, 'planted-pass', 'admin');
+    expect(r).toEqual({ ok: false, reason: 'forbidden' });
+    expect(mockHash).not.toHaveBeenCalledWith('planted-pass', BCRYPT_COST);
+  });
+
+  it('forbids a normal admin from resetting another admin password', async () => {
+    selectQueue.push([{ id: USER, role: 'admin' }]);
+    const r = await resetStaffPassword(ORG, USER, 'x', 'admin');
+    expect(r).toEqual({ ok: false, reason: 'forbidden' });
+  });
+
+  it('allows a super_admin to reset an admin-tier password', async () => {
+    selectQueue.push([{ id: USER, role: 'admin' }]);
+    updateQueue.push([{ id: USER }]);
+    const r = await resetStaffPassword(ORG, USER, 'newpass', 'super_admin');
+    expect(r).toEqual({ ok: true });
+  });
+
+  it('allows a normal admin to reset a technician password', async () => {
+    selectQueue.push([{ id: USER, role: 'technician' }]);
+    updateQueue.push([{ id: USER }]);
+    const r = await resetStaffPassword(ORG, USER, 'newpass', 'admin');
+    expect(r).toEqual({ ok: true });
   });
 });
