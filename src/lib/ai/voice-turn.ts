@@ -17,7 +17,16 @@ import { db } from "@/lib/db";
 import { customerSessions, messages } from "@/lib/db/schema";
 import { getModel } from "./provider";
 import { routeMessage } from "./intent-router";
-import { extractSlots, extractAddressAtAddressStep } from "./slot-extract";
+import { extractAddressAtAddressStep } from "./slot-extract";
+import { extractAllContactFields } from "./extract-all-contact";
+import { extractSpokenPhone } from "./extract-spoken-phone";
+import {
+  detectCorrection,
+  correctionFieldLabel,
+  type DetectedCorrection,
+} from "./detect-correction";
+import { isBusinessName } from "./detect-business-name";
+import { withLeadIn } from "./lead-ins";
 import { getRouterConfig } from "@/lib/admin/org-config-queries";
 import { EMPTY_ORG_CONFIG } from "./router-config";
 import { escalateSession } from "./escalate-service";
@@ -26,13 +35,61 @@ import {
   mergeSlots,
   hasSlotData,
   buildExtraction,
+  SKIP_SENTINEL,
 } from "./chat-slots";
-import { isVoiceExtractionComplete } from "./extraction-schema";
+import { isVoiceExtractionComplete, type IssueType } from "./extraction-schema";
 import { determineNextState, type SessionState } from "./state-machine";
 import { PHONE_SYSTEM_PROMPT, toSpokenReply, voiceNextSlotPrompt } from "./phone-agent";
 import { nextTriageStep, captureEnrichmentAnswer } from "./triage";
 import { buildModelMessages, MAX_HISTORY, type ChatTurn } from "./compaction";
+import type { Urgency } from "./router-types";
 import { logger } from "@/lib/logger";
+
+/**
+ * The optional enrichment steps voice actually asks (see VOICE_STEP_PHRASING),
+ * mapped to their extras key. On a call, an unrecognized reply to one of these
+ * must latch as skipped (write the SKIP_SENTINEL into the extra) so the stepper
+ * advances instead of re-asking — a phone call gets one shot per optional
+ * question. The required steps (system_down, duration) are intentionally absent:
+ * they are not skippable. Kept local so triage's internal map stays private.
+ */
+const VOICE_OPTIONAL_STEP_EXTRA: Record<string, string> = {
+  system_type: "systemType",
+  preferred_window: "preferredWindow",
+};
+
+/**
+ * Prepend a single brief spoken acknowledgement to the next question, matching
+ * the web chat's warmth without stacking. Priority (one ack only): an explicit
+ * correction the caller just made, then a commercial-account note when the
+ * captured name is a business, then the issue/urgency lead-in (which the shared
+ * helper already limits to a single early turn). On an emergency or when nothing
+ * applies, the question is returned unchanged — voice stays terse under
+ * pressure.
+ */
+function acknowledge(
+  nextQuestion: string,
+  ctx: {
+    readonly correction: DetectedCorrection | null;
+    readonly name: string | null;
+    readonly issueType: IssueType | null;
+    readonly urgency: Urgency | null;
+    readonly turn: number;
+  },
+): string {
+  if (ctx.urgency === "emergency") return nextQuestion;
+
+  if (ctx.correction) {
+    const label = correctionFieldLabel(ctx.correction.field);
+    return `Got it, I've updated your ${label}. ${nextQuestion}`;
+  }
+
+  if (ctx.name && isBusinessName(ctx.name)) {
+    return `Thanks, I'll note this as a commercial account for ${ctx.name}. ${nextQuestion}`;
+  }
+
+  return withLeadIn(nextQuestion, ctx.issueType, ctx.urgency, ctx.turn);
+}
 
 /**
  * Spoken equivalent of CONFIRM_REPLY — no "tap a button" affordance. Does NOT
@@ -89,11 +146,16 @@ export async function voiceReply(params: {
     () => EMPTY_ORG_CONFIG,
   );
   const verdict = routeMessage(userMessage, knownSlots, routerConfig);
-  const extracted = extractSlots(userMessage);
+  // Multi-field capture, matching the web chat: one utterance can carry the
+  // address, phone, email, AND a residual name ("Ray Chen, 865-555-1212"). The
+  // narrower extractSlots used before never captured a spoken name, so triage
+  // couldn't latch completion and the call stalled at confirm.
+  const allContact = extractAllContactFields(userMessage, {
+    allowResidualName: true,
+  });
 
-  // Capture a bare enrichment answer (the spoken-back chip value) into extras,
-  // mirroring the web chat — so phone enrichment answers actually persist
-  // instead of being spoken into the void.
+  // The step we asked LAST turn — used to scope the at-step address/phone
+  // fallbacks and the optional-enrichment skip latch.
   const pendingStep = nextTriageStep({
     issueType: knownSlots.issueType ?? null,
     urgency: knownSlots.urgency ?? null,
@@ -104,8 +166,6 @@ export async function voiceReply(params: {
     safetyScreenPassed: true,
     extras: { ...(knownSlots.extras ?? {}) },
   });
-  const captured = captureEnrichmentAnswer(pendingStep?.id ?? null, userMessage);
-  const capturedExtras = captured ? { [captured.key]: captured.value } : undefined;
 
   // At the address step the caller's whole reply IS the service address, but a
   // spoken address (Twilio transcription) lacks the comma/ZIP structure the
@@ -116,17 +176,99 @@ export async function voiceReply(params: {
   const atAddressStep =
     pendingStep?.id === "address" || pendingStep?.id === "address_parts";
   const resolvedAddress = atAddressStep
-    ? extractAddressAtAddressStep(userMessage) ?? extracted.address
-    : extracted.address;
+    ? extractAddressAtAddressStep(userMessage) ?? allContact.address
+    : allContact.address;
+
+  // At the phone step, a caller often reads the number digit-by-digit, which
+  // Twilio may transcribe as a loose run of single digits the grouped regex
+  // misses. Fall back to the spoken-phone digit extractor there only, so a
+  // missed number doesn't loop. Elsewhere the strict regex result stands.
+  const resolvedPhone =
+    pendingStep?.id === "phone"
+      ? allContact.phone ?? extractSpokenPhone(userMessage)
+      : allContact.phone;
+
+  // A mid-call correction to an already-filled field ("actually my number is
+  // 865-555-1212"). Generic logic, ported from the web chat — there's no reason
+  // to ignore corrections on a phone call. Skipped at the address step, where
+  // the whole reply is already treated as the (new) address above.
+  //
+  // IMPORTANT: voiceNextSlotPrompt SKIPS the name and email steps, but the raw
+  // nextTriageStep still reports `name`/`email` as pending whenever those slots
+  // are empty. detectCorrection treats `pendingStepId === "name"` as a DIRECT
+  // name answer (the whole utterance is the name) — but on a call we never
+  // actually asked for the name, so the caller's reply is really answering the
+  // enrichment question voice DID ask (e.g. "boiler" for system type). Passing
+  // "name" here would silently store "boiler" as the caller's name. Voice only
+  // ever asks the voice-askable steps, so we never pass name/email as the
+  // pending step; corrections still fire via their explicit cue ("actually…").
+  const correctionStepId =
+    pendingStep && pendingStep.id !== "name" && pendingStep.id !== "email"
+      ? pendingStep.id
+      : null;
+  const correction = atAddressStep
+    ? null
+    : detectCorrection(userMessage, correctionStepId);
+
+  // Capture a bare enrichment answer (the spoken-back chip value) into extras,
+  // mirroring the web chat — so phone enrichment answers actually persist
+  // instead of being spoken into the void.
+  const captured = captureEnrichmentAnswer(pendingStep?.id ?? null, userMessage);
+  // Skip latch: when the pending step is an OPTIONAL enrichment step voice asked
+  // (system_type / preferred_window) and the reply wasn't recognized as a value,
+  // mark it skipped so the stepper advances. A phone call gets one shot per
+  // optional question — otherwise an unrecognized answer re-asks it forever.
+  const optionalExtraKey = pendingStep
+    ? VOICE_OPTIONAL_STEP_EXTRA[pendingStep.id]
+    : undefined;
+  const shouldSkipOptional =
+    !captured && optionalExtraKey !== undefined;
+  const capturedExtras = captured
+    ? { [captured.key]: captured.value }
+    : shouldSkipOptional
+      ? { [optionalExtraKey as string]: SKIP_SENTINEL }
+      : undefined;
 
   const hasContactSlot = Boolean(
-    resolvedAddress || extracted.phone || extracted.email,
+    resolvedAddress || resolvedPhone || allContact.email || correction,
   );
   const isSlotProvision =
     hasContactSlot && (Boolean(knownSlots.issueType) || history.length > 0);
 
+  // A bare answer to the enrichment question we asked LAST turn (captured value
+  // or a skip-latched optional step) must stay on the deterministic path — same
+  // as the web chat. Otherwise it falls to the LLM and the captured/skipped
+  // value is never persisted, so the stepper re-asks the same question forever.
+  const pendingAnswerCaptured = capturedExtras !== undefined;
+
+  // The contact-field updates to merge this turn: the extracted values, with a
+  // detected correction overriding the matching field (a correction is the
+  // caller explicitly fixing a value, so it must win). Used identically by both
+  // the escalation merge and the deterministic merge so the two paths can't
+  // drift. mergeSlots only overwrites with filled values, so `undefined` here
+  // never clobbers a previously-captured slot.
+  const slotUpdates: {
+    address?: string;
+    phone?: string;
+    email?: string;
+    name?: string;
+  } = {
+    address:
+      (correction?.field === "address" ? correction.value : resolvedAddress) ??
+      undefined,
+    phone:
+      (correction?.field === "phone" ? correction.value : resolvedPhone) ??
+      undefined,
+    email:
+      (correction?.field === "email" ? correction.value : allContact.email) ??
+      undefined,
+    name:
+      (correction?.field === "name" ? correction.value : allContact.name) ??
+      undefined,
+  };
+
   // ── Emergency / escalation ──
-  if (verdict.action !== "FALLBACK_LLM" || isSlotProvision) {
+  if (verdict.action !== "FALLBACK_LLM" || isSlotProvision || pendingAnswerCaptured) {
     if (verdict.escalate) {
       const reply = toSpokenReply(verdict.reply ?? "", { nearLimit });
       await db.insert(messages).values({
@@ -148,9 +290,7 @@ export async function voiceReply(params: {
       const escMerged = mergeSlots(knownSlots, {
         issueType: verdict.issueType ?? undefined,
         urgency: verdict.urgency ?? undefined,
-        address: resolvedAddress ?? undefined,
-        phone: extracted.phone ?? undefined,
-        email: extracted.email ?? undefined,
+        ...slotUpdates,
       });
       await db
         .update(customerSessions)
@@ -171,9 +311,7 @@ export async function voiceReply(params: {
     const merged = mergeSlots(knownSlots, {
       issueType: verdict.issueType ?? undefined,
       urgency: verdict.urgency ?? undefined,
-      address: resolvedAddress ?? undefined,
-      phone: extracted.phone ?? undefined,
-      email: extracted.email ?? undefined,
+      ...slotUpdates,
       extras: capturedExtras,
     });
 
@@ -194,13 +332,23 @@ export async function voiceReply(params: {
     // (e.g. business hours) is still spoken; completion still wins with the
     // confirmation. `verdict.reply` is preferred only when it's NOT a bare slot
     // provision.
+    const nextQuestion = voiceNextSlotPrompt(merged);
+    const isAdvancing =
+      !extractionComplete &&
+      (isSlotProvision ||
+        verdict.action === "FALLBACK_LLM" ||
+        !verdict.reply);
     const baseReply = extractionComplete
       ? VOICE_CONFIRM_REPLY
-      : isSlotProvision
-        ? voiceNextSlotPrompt(merged)
-        : verdict.action !== "FALLBACK_LLM" && verdict.reply
-          ? verdict.reply
-          : voiceNextSlotPrompt(merged);
+      : isAdvancing
+        ? acknowledge(nextQuestion, {
+            correction,
+            name: slotUpdates.name ?? null,
+            issueType: merged.issueType as IssueType | null,
+            urgency: merged.urgency as Urgency | null,
+            turn: newTurnCount,
+          })
+        : verdict.reply ?? nextQuestion;
     const reply = toSpokenReply(baseReply, { nearLimit });
 
     await db.insert(messages).values({
