@@ -40,6 +40,8 @@ import { routeMessage, type KnownSlots } from "@/lib/ai/intent-router";
 import {
   nextTriageStep,
   captureEnrichmentAnswer,
+  isSkip,
+  MAX_EMAIL_REPROMPTS,
   type TriageSlots,
 } from "@/lib/ai/triage";
 import { EMPTY_ORG_CONFIG } from "@/lib/ai/router-config";
@@ -68,6 +70,7 @@ import {
   mergeSlots,
   hasSlotData,
   buildExtraction,
+  SKIP_SENTINEL,
 } from "@/lib/ai/chat-slots";
 import { buildModelMessages, MAX_HISTORY, type ChatTurn } from "@/lib/ai/compaction";
 import { compactSessionIfNeeded } from "@/lib/ai/compact-session";
@@ -720,7 +723,19 @@ export async function POST(request: NextRequest) {
     // Did we ASK "is this urgent?" last turn? (pendingStep === urgency, which
     // we only reach after-hours when urgency was still unknown.) If so, read the
     // customer's yes/no answer as an urgency signal for this turn's decision.
-    const askedUrgencyLastTurn = pendingStep?.id === "urgency";
+    // We "asked about urgency last turn" when the triage urgency step was
+    // pending OR the after-hours ask_urgency move was the LAST disclosure shown
+    // (it owns its turn, so the next customer message answers it). Keyed to the
+    // LAST shown move only — a "yes" answering offer_next_day's "Want me to do
+    // that?" must never be read as "urgent".
+    const afterHoursShownPrior = String(
+      knownSlots.extras?.afterHoursShown ?? "",
+    );
+    const askedUrgencyLastTurn =
+      pendingStep?.id === "urgency" ||
+      (afterHoursShownPrior.split(",").filter(Boolean).pop() ===
+        "ask_urgency" &&
+        !knownSlots.urgency);
     const urgencySignal: CustomerUrgencySignal = readUrgencySignal(
       askedUrgencyLastTurn,
       guardrailResult.sanitized,
@@ -831,11 +846,16 @@ export async function POST(request: NextRequest) {
       // a clear urgency signal. The router's emergency short-circuit runs before
       // this (verdict.escalate), so a hazard worded as an "answer" still escalates.
       const pendingAnswerCaptured =
-        pendingStep !== null &&
-        (captureEnrichmentAnswer(pendingStep.id, guardrailResult.sanitized) !==
-          null ||
-          (pendingStep.id === "urgency" &&
-            parseUrgencyAnswer(guardrailResult.sanitized) !== null));
+        (pendingStep !== null &&
+          (captureEnrichmentAnswer(pendingStep.id, guardrailResult.sanitized) !==
+            null ||
+            (pendingStep.id === "urgency" &&
+              parseUrgencyAnswer(guardrailResult.sanitized) !== null))) ||
+        // A clear answer to the after-hours "is this urgent?" ask is a captured
+        // answer too: it must persist deterministically (the LLM path stores no
+        // slots, so the signal would evaporate and a later turn could disclose
+        // a charge the customer already declined).
+        (askedUrgencyLastTurn && urgencySignal !== "unknown");
 
       if (
         verdict.action !== "FALLBACK_LLM" ||
@@ -1002,6 +1022,13 @@ export async function POST(request: NextRequest) {
           addressControl.addressAttempts =
             Number(knownSlots.extras?.addressAttempts ?? 0) + 1;
         }
+        // Email re-ask counter, mirroring addressAttempts: bump whenever the
+        // email step was the pending question so triage stops re-asking at
+        // MAX_EMAIL_REPROMPTS instead of looping the identical question.
+        if (pendingStep?.id === "email") {
+          addressControl.emailAttempts =
+            Number(knownSlots.extras?.emailAttempts ?? 0) + 1;
+        }
 
         const capturedExtras =
           businessNameDetected ||
@@ -1040,16 +1067,49 @@ export async function POST(request: NextRequest) {
         // intake skips the name question — mergeSlots never clobbers a name the
         // customer already provided this conversation. A detected correction
         // takes precedence over the seeded/extracted value for its field.
-        const merged = mergeSlots(knownSlots, {
+        // An explicit decline at the email step ("skip", "I don't have an
+        // email") latches the skip sentinel so the intake proceeds without one
+        // instead of re-asking.
+        const emailDeclined =
+          pendingStep?.id === "email" &&
+          (isSkip(guardrailResult.sanitized) ||
+            /\bno email\b|\b(?:don'?t|do not) have (?:an |one|email)/i.test(
+              guardrailResult.sanitized,
+            ));
+
+        // The customer's answer to the after-hours "is this urgent?" ask also
+        // fills the urgency slot, so the urgency triage step never re-asks it.
+        const signalUrgency =
+          askedUrgencyLastTurn && urgencySignal === "urgent"
+            ? ("high" as const)
+            : askedUrgencyLastTurn && urgencySignal === "not_urgent"
+              ? ("medium" as const)
+              : undefined;
+
+        const mergedBase = mergeSlots(knownSlots, {
           issueType: verdict.issueType ?? undefined,
-          urgency: verdict.urgency ?? capturedUrgency ?? undefined,
+          urgency: verdict.urgency ?? capturedUrgency ?? signalUrgency ?? undefined,
           address:
             correctedAddress ?? combinedAddress ?? addressAnswer ?? undefined,
           phone: correctedPhone ?? extracted.phone ?? undefined,
-          email: correctedEmail ?? extracted.email ?? undefined,
+          email:
+            correctedEmail ??
+            extracted.email ??
+            (emailDeclined ? SKIP_SENTINEL : undefined),
           name: correctedName ?? residualName ?? seededName,
           extras: capturedExtras,
         });
+        // Email cap: we've asked MAX_EMAIL_REPROMPTS times and still have no
+        // email — latch the skip sentinel so completeness/confirm can proceed.
+        const emailAttemptsNow = Number(
+          addressControl.emailAttempts ??
+            knownSlots.extras?.emailAttempts ??
+            0,
+        );
+        const merged =
+          !mergedBase.email && emailAttemptsNow >= MAX_EMAIL_REPROMPTS
+            ? mergeSlots(mergedBase, { email: SKIP_SENTINEL })
+            : mergedBase;
 
         let metadataStr = session.metadata;
         let extractionComplete = false;
@@ -1088,9 +1148,14 @@ export async function POST(request: NextRequest) {
         // before address, in the researched order. The canned reply is still
         // used for ANSWER / REDIRECT verdicts (an FAQ answer or out-of-scope
         // redirect IS the message; there's no slot to step through).
+        // SUBMIT is also excluded: the router's required-slot view (issue/
+        // urgency/address) is narrower than the real intake, so its canned
+        // confirm copy fires before name/phone/email exist. extractionComplete
+        // (computed above from the FULL slot set) owns the confirm decision.
         const useCannedReply =
           verdict.action !== "FALLBACK_LLM" &&
           verdict.action !== "COLLECT_INFO" &&
+          verdict.action !== "SUBMIT" &&
           Boolean(verdict.reply);
         const nextQuestion = extractionComplete
           ? CONFIRM_REPLY
@@ -1122,6 +1187,38 @@ export async function POST(request: NextRequest) {
           customerSignal: urgencySignal,
           bookingTarget,
         });
+
+        // Each after-hours move is surfaced AT MOST ONCE per session (the
+        // re-prepended preamble was the #1 "bot repeats itself" report), and
+        // only on intake turns — never glued onto a canned FAQ answer (a
+        // "what are your hours?" reply must not open with "is this urgent?")
+        // or onto the confirm copy.
+        const shownKinds = afterHoursShownPrior.split(",").filter(Boolean);
+        const afterHoursMove =
+          afterHoursDecision.kind !== "none" &&
+          !extractionComplete &&
+          !useCannedReply &&
+          !shownKinds.includes(afterHoursDecision.kind)
+            ? afterHoursDecision
+            : null;
+        if (afterHoursMove) {
+          // Persist the shown flag so every later turn suppresses this move.
+          metadataStr = JSON.stringify(
+            buildExtraction(
+              mergeSlots(merged, {
+                extras: {
+                  afterHoursShown: [...shownKinds, afterHoursMove.kind].join(
+                    ",",
+                  ),
+                },
+              }),
+              (
+                conversationHistory.find((m) => m.role === "user")?.content ??
+                guardrailResult.sanitized
+              ).slice(0, 280),
+            ),
+          );
+        }
 
         // Compose EXACTLY ONE coherent message for this turn (Fix 1). We never
         // stack templates (after-hours line + lead-in + confirm) into one
@@ -1166,11 +1263,15 @@ export async function POST(request: NextRequest) {
           // nextQuestion is CONFIRM_REPLY here — stand-alone, no prefixes EXCEPT
           // an ack so a business/correction change isn't silent.
           replyBody = ack + nextQuestion;
-        } else if (afterHoursDecision.kind !== "none") {
-          // The after-hours copy carries the framing for this turn; append the
-          // plain next question (no lead-in) so it reads as one person talking.
-          // An ack leads so the customer sees the change registered.
-          replyBody = `${ack}${afterHoursDecision.copy} ${nextQuestion}`;
+        } else if (afterHoursMove) {
+          // The after-hours copy carries the framing for this turn. A copy that
+          // ends in a question (the urgency ask, the next-day offer) OWNS the
+          // turn — appending the slot question too made two-question bubbles.
+          // Statement copies (charge disclosure, no-charge affirmation) lead
+          // into the plain next question so it reads as one person talking.
+          replyBody = afterHoursMove.copy.trim().endsWith("?")
+            ? `${ack}${afterHoursMove.copy}`
+            : `${ack}${afterHoursMove.copy} ${nextQuestion}`;
         } else if (isExplicitCorrection || businessNameDetected) {
           // A correction / business clarification owns the turn's framing —
           // acknowledge, then ask the next question plainly (one voice).
@@ -1276,14 +1377,48 @@ export async function POST(request: NextRequest) {
     // SEPARATE block rather than editing the brand persona. Emergencies are
     // never delayed for charge talk: the safety instruction in the brand prompt
     // takes precedence, and this block says so.
-    const afterHoursHint = isAfterHoursHintActive(afterHoursConfig)
-      ? AFTER_HOURS_LLM_INSTRUCTION
-      : "";
+    // Suppress the LLM's after-hours coaching once a disclosure has already
+    // been made on a deterministic turn — re-explaining the charge every LLM
+    // turn is the same repetition bug in another coat.
+    const afterHoursAlreadyShown =
+      String(knownSlots.extras?.afterHoursShown ?? "").length > 0;
+    const afterHoursHint =
+      isAfterHoursHintActive(afterHoursConfig) && !afterHoursAlreadyShown
+        ? AFTER_HOURS_LLM_INSTRUCTION
+        : afterHoursAlreadyShown
+          ? "\nAFTER-HOURS: the after-hours situation has ALREADY been explained to this customer. Do NOT bring up after-hours charges or hours again unless the customer asks."
+          : "";
+
+    // Tell the model which intake slots this session has ALREADY captured.
+    // Deterministic turns persist slots to metadata, but the model never saw
+    // them — so on fallback turns it would re-ask for a phone/address already
+    // on file (the post-confirm "I still need your address" bug).
+    const sessionFacts = [
+      knownSlots.issueType ? `issue: ${knownSlots.issueType}` : null,
+      knownSlots.urgency ? `urgency: ${knownSlots.urgency}` : null,
+      knownSlots.address ? `service address: ${knownSlots.address}` : null,
+      knownSlots.phone ? `phone: ${knownSlots.phone}` : null,
+      knownSlots.name ? `name: ${knownSlots.name}` : null,
+      knownSlots.email && knownSlots.email !== SKIP_SENTINEL
+        ? `email: ${knownSlots.email}`
+        : knownSlots.email === SKIP_SENTINEL
+          ? `email: (customer declined to share one)`
+          : null,
+    ].filter(Boolean);
+    const sessionSlotsHint =
+      sessionFacts.length > 0
+        ? `\n\nALREADY CAPTURED THIS CONVERSATION (saved — never re-ask or claim you still need these): ${sessionFacts.join("; ")}.`
+        : "";
 
     // 8. Stream response via Vercel AI SDK per SC-09
     const result = streamText({
       model: getModel(),
-      system: brandPrompt + customerContextHint + escalationHint + afterHoursHint,
+      system:
+        brandPrompt +
+        customerContextHint +
+        sessionSlotsHint +
+        escalationHint +
+        afterHoursHint,
       // Cap output so replies stay short (the prompt asks for 2-3 sentences) and
       // tail costs are bounded (Token-Savings #6).
       maxOutputTokens: 350,

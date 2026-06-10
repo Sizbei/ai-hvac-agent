@@ -57,10 +57,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Already escalated/terminal — don't keep the automated leg running.
+    // Already escalated/terminal — don't keep the automated leg running. A
+    // SUBMITTED session gets a closing line that confirms the request is in
+    // (the caller may have said "yes, one more thing" — the team handles it).
     if (isTerminalState(session.status) || session.status === "submitted") {
       return new Response(
-        sayThenHangupTwiML("Thanks for calling. Goodbye.", voice),
+        sayThenHangupTwiML(
+          session.status === "submitted"
+            ? "Your request is in with our team and they'll follow up with you shortly. Thanks for calling. Goodbye."
+            : "Thanks for calling. Goodbye.",
+          voice,
+        ),
         { headers: TWIML_HEADERS },
       );
     }

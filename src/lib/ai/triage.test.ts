@@ -590,12 +590,11 @@ describe("address must be a complete US address OR a verified lookup pick", () =
 });
 
 describe("core fields are unskippable", () => {
-  it("UNSKIPPABLE_CORE lists the five core slots", () => {
+  it("UNSKIPPABLE_CORE lists the four hard-required core slots (email is skippable after MAX_EMAIL_REPROMPTS)", () => {
     expect(UNSKIPPABLE_CORE).toEqual([
       "issueType",
       "address",
       "name",
-      "email",
       "phone",
     ]);
   });

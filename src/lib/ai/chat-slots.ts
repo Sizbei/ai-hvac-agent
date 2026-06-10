@@ -46,10 +46,18 @@ export type ExtraSlots = Partial<
 //     a "found" address is trusted even when it isn't a US-ZIP format.
 //   - addressAttempts: how many times we've re-prompted for a complete US
 //     address, so triage stops after MAX_ADDRESS_REPROMPTS instead of looping.
+//   - emailAttempts: how many times we've asked for the email, so triage stops
+//     after MAX_EMAIL_REPROMPTS and the intake proceeds without one instead of
+//     re-asking the identical question forever.
+//   - afterHoursShown: comma-joined after-hours moves already surfaced this
+//     session (e.g. "ask_urgency,disclose_charge"), so each disclosure is said
+//     AT MOST ONCE instead of being prepended to every intake turn.
 // They merge/parse with the same never-clobber rule as the real slots.
 export const CONTROL_SLOT_KEYS = [
   "addressVerified",
   "addressAttempts",
+  "emailAttempts",
+  "afterHoursShown",
 ] as const;
 
 function isFilled(value: unknown): boolean {

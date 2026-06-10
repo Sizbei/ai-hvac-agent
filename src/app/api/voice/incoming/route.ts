@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
-import { customerSessions, organizationSettings } from "@/lib/db/schema";
+import { customerSessions, messages, organizationSettings } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { DEMO_ORG_ID } from "@/lib/tenancy/organization";
 import { resolveTokenBudget, resolveMaxTurns } from "@/lib/ai/chat-limits";
@@ -83,6 +83,37 @@ export async function POST(request: NextRequest) {
         maxTurns: resolveMaxTurns(limitsRow?.chatMaxTurns),
       })
       .onConflictDoNothing({ target: customerSessions.token });
+
+    // Persist the greeting as the call's first assistant message. The LLM
+    // fallback builds its context from message history — without this row it
+    // believes no greeting happened and re-greets on its first turn. Guarded on
+    // "no messages yet" so a Twilio retry of this webhook can't double-insert.
+    const [sessionRow] = await db
+      .select({ id: customerSessions.id })
+      .from(customerSessions)
+      .where(eq(customerSessions.token, callSid))
+      .limit(1);
+    const [existingMessage] = sessionRow
+      ? await db
+          .select({ id: messages.id })
+          .from(messages)
+          .where(eq(messages.sessionId, sessionRow.id))
+          .limit(1)
+      : [];
+    if (sessionRow && !existingMessage) {
+      await db
+        .insert(messages)
+        .values({
+          organizationId,
+          sessionId: sessionRow.id,
+          role: "assistant",
+          content: GREETING,
+          tokensUsed: 0,
+        })
+        .catch((e: unknown) =>
+          logger.warn({ error: e, callSid }, "Greeting persist failed"),
+        );
+    }
 
     logger.info({ callSid }, "Phone session started");
 

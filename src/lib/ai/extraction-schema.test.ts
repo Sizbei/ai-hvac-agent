@@ -382,7 +382,7 @@ describe('serviceRequestSchema (confirm payload)', () => {
     expect(serviceRequestSchema.safeParse({ ...base, customerPhone: '(423) 555-7788' }).success).toBe(true);
   });
 
-  it('requires a valid customerEmail (null/missing is rejected)', () => {
+  it('customerEmail is nullable (skippable) but a PRESENT value must be a real email', () => {
     const base = {
       issueType: 'cooling_not_working' as const,
       urgency: 'high' as const,
@@ -391,7 +391,9 @@ describe('serviceRequestSchema (confirm payload)', () => {
       customerPhone: '555-123-4567',
       description: 'AC out',
     };
-    expect(serviceRequestSchema.safeParse({ ...base, customerEmail: null }).success).toBe(false);
+    // A customer may skip the email (MAX_EMAIL_REPROMPTS / explicit skip) —
+    // the request is still dispatchable via phone.
+    expect(serviceRequestSchema.safeParse({ ...base, customerEmail: null }).success).toBe(true);
     expect(serviceRequestSchema.safeParse({ ...base, customerEmail: 'nope' }).success).toBe(false);
     expect(serviceRequestSchema.safeParse({ ...base, customerEmail: 'jane@example.com' }).success).toBe(true);
   });

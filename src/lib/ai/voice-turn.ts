@@ -35,9 +35,16 @@ import {
   mergeSlots,
   hasSlotData,
   buildExtraction,
+  stripSkipSentinels,
   SKIP_SENTINEL,
 } from "./chat-slots";
-import { isVoiceExtractionComplete, type IssueType } from "./extraction-schema";
+import {
+  isVoiceExtractionComplete,
+  isAddressComplete,
+  serviceRequestSchema,
+  type IssueType,
+} from "./extraction-schema";
+import { submitSessionServiceRequest } from "@/lib/requests/submit-session-request";
 import { determineNextState, type SessionState } from "./state-machine";
 import { PHONE_SYSTEM_PROMPT, toSpokenReply, voiceNextSlotPrompt } from "./phone-agent";
 import { nextTriageStep, captureEnrichmentAnswer } from "./triage";
@@ -98,6 +105,18 @@ function acknowledge(
  */
 export const VOICE_CONFIRM_REPLY =
   "Great. I have everything I need. I'll get this over to our team and they'll follow up with you. Is there anything else I can help you with?";
+
+/**
+ * Spoken on the turn the completed intake is AUTO-SUBMITTED (voice has no
+ * Confirm & Submit button — the moment intake completes, the request is
+ * created, so this promise is true even if the caller hangs up right after).
+ */
+export const VOICE_SUBMITTED_REPLY =
+  "Great — I have everything I need. I've sent your request over to our team and they'll follow up with you shortly. Is there anything else I can help you with?";
+
+/** Spoken when the do-not-service guard blocks an automated booking. */
+const VOICE_OFFICE_REPLY =
+  "I'm not able to book this automatically. Please give our office a call and we'll help you directly. Thanks for calling.";
 
 export interface VoiceSession {
   readonly id: string;
@@ -175,9 +194,34 @@ export async function voiceReply(params: {
   // isn't misread as the service address.
   const atAddressStep =
     pendingStep?.id === "address" || pendingStep?.id === "address_parts";
+  // The LLM (not the stepper) may have been the one to ask for the address —
+  // on those turns pendingStep points elsewhere and the strict extractor
+  // truncates a spoken "212 East Unaka Avenue, Johnson City, Tennessee 37601"
+  // at the first comma, storing an address that can never validate (the root
+  // of the voice address re-ask loop). So whenever the address slot is still
+  // missing and the utterance parses as a COMPLETE address, trust the at-step
+  // extractor's verbatim capture.
+  const spokenFullAddress =
+    !atAddressStep && !knownSlots.address
+      ? extractAddressAtAddressStep(userMessage)
+      : null;
   const resolvedAddress = atAddressStep
     ? extractAddressAtAddressStep(userMessage) ?? allContact.address
-    : allContact.address;
+    : spokenFullAddress && isAddressComplete(spokenFullAddress)
+      ? spokenFullAddress
+      : allContact.address;
+
+  // City/ZIP follow-up (address_parts): the reply is normally the missing TAIL
+  // of an address we already hold — append it (web parity) so the engine sees a
+  // complete address instead of looping. A reply that starts with a street
+  // number is a re-given full address and replaces the base.
+  const partsTail =
+    pendingStep?.id === "address_parts" &&
+    knownSlots.address &&
+    resolvedAddress &&
+    !/^\s*\d/.test(userMessage.trim())
+      ? `${knownSlots.address.trim()}, ${userMessage.trim()}`.slice(0, 500)
+      : null;
 
   // At the phone step, a caller often reads the number digit-by-digit, which
   // Twilio may transcribe as a loose run of single digits the grouped regex
@@ -223,10 +267,22 @@ export async function voiceReply(params: {
     : undefined;
   const shouldSkipOptional =
     !captured && optionalExtraKey !== undefined;
-  const capturedExtras = captured
+  // Address re-prompt counter (web parity): without it MAX_ADDRESS_REPROMPTS
+  // never engages on a call and the city/ZIP follow-up can re-ask forever.
+  const addressControl: Record<string, unknown> =
+    pendingStep?.id === "address_parts"
+      ? {
+          addressAttempts: Number(knownSlots.extras?.addressAttempts ?? 0) + 1,
+        }
+      : {};
+  const capturedExtrasBase = captured
     ? { [captured.key]: captured.value }
     : shouldSkipOptional
       ? { [optionalExtraKey as string]: SKIP_SENTINEL }
+      : undefined;
+  const capturedExtras =
+    capturedExtrasBase || Object.keys(addressControl).length > 0
+      ? { ...(capturedExtrasBase ?? {}), ...addressControl }
       : undefined;
 
   const hasContactSlot = Boolean(
@@ -254,8 +310,9 @@ export async function voiceReply(params: {
     name?: string;
   } = {
     address:
-      (correction?.field === "address" ? correction.value : resolvedAddress) ??
-      undefined,
+      (correction?.field === "address"
+        ? correction.value
+        : partsTail ?? resolvedAddress) ?? undefined,
     phone:
       (correction?.field === "phone" ? correction.value : resolvedPhone) ??
       undefined,
@@ -317,12 +374,99 @@ export async function voiceReply(params: {
 
     let metadataStr = session.metadata;
     let extractionComplete = false;
+    let extraction: ReturnType<typeof buildExtraction> | null = null;
     if (hasSlotData(merged)) {
       const firstUser =
         history.find((m) => m.role === "user")?.content ?? userMessage;
-      const extraction = buildExtraction(merged, firstUser.slice(0, 280));
+      extraction = buildExtraction(merged, firstUser.slice(0, 280));
       extractionComplete = isVoiceExtractionComplete(extraction);
       metadataStr = JSON.stringify(extraction);
+    }
+
+    // ── Auto-submit (voice has no Confirm & Submit button) ──
+    // The moment the spoken intake completes, create the service request
+    // through the same shared write path as the web confirm. Submitting BEFORE
+    // we speak means "I've sent your request to our team" is true even if the
+    // caller hangs up immediately after. On any failure we fall through to the
+    // old confirm copy — the conversation (with full metadata) still exists
+    // for the team. Re-entry is impossible: the batch flips the session to
+    // "submitted", which the gather route terminates before reaching us.
+    if (extractionComplete && extraction) {
+      const requestPayload = {
+        issueType: merged.issueType,
+        urgency: merged.urgency,
+        address: merged.address,
+        customerName: merged.name ?? null,
+        customerPhone: merged.phone ?? null,
+        customerEmail:
+          !merged.email || merged.email === SKIP_SENTINEL ? null : merged.email,
+        description: extraction.description,
+        // Enrichment extras ride at the top level of the request payload, with
+        // skip sentinels stripped (the schema drops unknown control keys).
+        ...stripSkipSentinels(merged.extras ?? {}),
+      };
+      const parsedRequest = serviceRequestSchema.safeParse(requestPayload);
+      if (parsedRequest.success) {
+        try {
+          const submitted = await submitSessionServiceRequest({
+            organizationId,
+            sessionId: session.id,
+            data: parsedRequest.data,
+            ipAddress,
+          });
+          if (submitted.ok) {
+            const reply = toSpokenReply(VOICE_SUBMITTED_REPLY, { nearLimit });
+            await db.insert(messages).values({
+              organizationId,
+              sessionId: session.id,
+              role: "assistant",
+              content: reply,
+              tokensUsed: 0,
+            });
+            // Status is already "submitted" via the submission batch — only
+            // metadata/turn bookkeeping remains for this turn.
+            await db
+              .update(customerSessions)
+              .set({
+                metadata: metadataStr,
+                turnCount: newTurnCount,
+                updatedAt: new Date(),
+              })
+              .where(sessionScope);
+            return { reply, endCall: false, nextState: "submitted" };
+          }
+          if (submitted.reason === "do_not_service") {
+            const reply = toSpokenReply(VOICE_OFFICE_REPLY, {});
+            await db.insert(messages).values({
+              organizationId,
+              sessionId: session.id,
+              role: "assistant",
+              content: reply,
+              tokensUsed: 0,
+            });
+            await db
+              .update(customerSessions)
+              .set({
+                metadata: metadataStr,
+                turnCount: newTurnCount,
+                updatedAt: new Date(),
+              })
+              .where(sessionScope);
+            return { reply, endCall: true, nextState: session.status };
+          }
+          // insert_failed → fall through to the confirm copy below.
+        } catch (submitError: unknown) {
+          logger.error(
+            { error: submitError, sessionId: session.id },
+            "Voice auto-submit failed — falling back to confirm copy",
+          );
+        }
+      } else {
+        logger.warn(
+          { sessionId: session.id, issues: parsedRequest.error.issues },
+          "Voice extraction complete but request payload failed validation",
+        );
+      }
     }
 
     // Loop guard: when this turn merely filled a slot (an address/phone/email was
@@ -333,10 +477,15 @@ export async function voiceReply(params: {
     // confirmation. `verdict.reply` is preferred only when it's NOT a bare slot
     // provision.
     const nextQuestion = voiceNextSlotPrompt(merged);
+    // SUBMIT is included: the router's required-slot view (issue/urgency/
+    // address) is narrower than the voice gate (phone), so its canned confirm
+    // copy — which says "tap Confirm & Submit", a screen affordance — must
+    // never be spoken. The voice completeness gate owns confirmation.
     const isAdvancing =
       !extractionComplete &&
       (isSlotProvision ||
         verdict.action === "FALLBACK_LLM" ||
+        verdict.action === "SUBMIT" ||
         !verdict.reply);
     const baseReply = extractionComplete
       ? VOICE_CONFIRM_REPLY
@@ -386,9 +535,24 @@ export async function voiceReply(params: {
     current: userMessage,
   }).map((m) => ({ role: m.role, content: m.content }));
 
+  // Tell the model what intake state already exists. LLM turns persist no
+  // extraction, so without this the model has no idea which slots are filled
+  // and freelances repeat asks and endless re-confirmation loops.
+  const knownFacts = [
+    knownSlots.issueType ? `issue: ${knownSlots.issueType}` : null,
+    knownSlots.urgency ? `urgency: ${knownSlots.urgency}` : null,
+    knownSlots.address ? `service address: ${knownSlots.address}` : null,
+    knownSlots.phone ? `callback phone: ${knownSlots.phone}` : null,
+    knownSlots.name ? `name: ${knownSlots.name}` : null,
+  ].filter(Boolean);
+  const slotContextHint =
+    knownFacts.length > 0
+      ? `\n\nALREADY CAPTURED AND SAVED (never re-ask or re-confirm these): ${knownFacts.join("; ")}.`
+      : "";
+
   const { text, usage } = await generateText({
     model: getModel(),
-    system: PHONE_SYSTEM_PROMPT,
+    system: PHONE_SYSTEM_PROMPT + slotContextHint,
     messages: modelMessages,
   });
 

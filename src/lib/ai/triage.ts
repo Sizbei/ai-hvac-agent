@@ -88,9 +88,10 @@ export const UNSKIPPABLE_CORE = [
   "issueType",
   "address",
   "name",
-  "email",
   "phone",
 ] as const;
+// NOTE: email is intentionally NOT in this list — after MAX_EMAIL_REPROMPTS
+// (or an explicit "skip") the intake proceeds without one.
 
 /**
  * Local mirror of extraction-schema.isAddressComplete: a COMPLETE service
@@ -220,6 +221,23 @@ const EMAIL_STEP: TriageStep = {
   quickReplies: [],
   optional: false,
 };
+
+// Re-ask copy for the email step: surfaces the skip affordance so a customer
+// who can't or won't share an email isn't trapped (see MAX_EMAIL_REPROMPTS).
+const EMAIL_RETRY_STEP: TriageStep = {
+  id: "email",
+  question:
+    "What's the best email address for your booking confirmation? If you'd rather not share one, just say \"skip\".",
+  quickReplies: [],
+  optional: false,
+};
+
+// How many times we'll ask for an email before proceeding without one. Email is
+// the booking-confirmation channel, so we want it — but a customer who keeps
+// answering with something else (or doesn't have one) must never be trapped in
+// an endless identical re-ask. After the cap the caller writes the skip
+// sentinel into the email slot and the intake moves on.
+export const MAX_EMAIL_REPROMPTS = 2;
 
 const URGENCY_STEP: TriageStep = {
   id: "urgency",
@@ -610,7 +628,16 @@ export function nextTriageStep(slots: TriageSlots): TriageStep | null {
   }
   if (!slots.phone) return PHONE_STEP;
   if (!slots.name) return NAME_STEP;
-  if (!slots.email) return EMAIL_STEP;
+  // Email: ask up to MAX_EMAIL_REPROMPTS times (the retry copy offers "skip"),
+  // then stop — the caller writes the skip sentinel so completeness/confirm can
+  // proceed without one. A skipped email (sentinel value) is non-empty, so this
+  // gate naturally stops firing once the skip is recorded.
+  if (!slots.email) {
+    const emailAttempts = Number(slots.extras?.emailAttempts ?? 0);
+    if (emailAttempts < MAX_EMAIL_REPROMPTS) {
+      return emailAttempts > 0 ? EMAIL_RETRY_STEP : EMAIL_STEP;
+    }
+  }
   if (!slots.urgency) return URGENCY_STEP;
 
   // 4. Optional enrichment, in order; skip any already filled or skipped, and

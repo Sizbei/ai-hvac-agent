@@ -11,6 +11,7 @@ const {
   extractSpokenPhoneMock,
   detectCorrectionMock,
   getRouterConfigMock,
+  submitSessionMock,
 } = vi.hoisted(() => ({
   generateTextMock: vi.fn(),
   insertMock: vi.fn(),
@@ -22,6 +23,7 @@ const {
   extractSpokenPhoneMock: vi.fn(),
   detectCorrectionMock: vi.fn(),
   getRouterConfigMock: vi.fn(),
+  submitSessionMock: vi.fn(),
 }));
 
 vi.mock("ai", () => ({ generateText: generateTextMock }));
@@ -70,6 +72,11 @@ vi.mock("./detect-correction", async (importOriginal) => {
     detectCorrection: detectCorrectionMock,
   };
 });
+// The shared submission module pulls in the full admin/db dependency chain —
+// mock it at the boundary (auto-submit success by default; per-test overrides).
+vi.mock("@/lib/requests/submit-session-request", () => ({
+  submitSessionServiceRequest: submitSessionMock,
+}));
 vi.mock("@/lib/admin/org-config-queries", () => ({
   getRouterConfig: getRouterConfigMock,
 }));
@@ -102,6 +109,12 @@ describe("voiceReply", () => {
     detectCorrectionMock.mockReset();
     getRouterConfigMock.mockReset();
     getRouterConfigMock.mockResolvedValue({});
+    submitSessionMock.mockReset();
+    submitSessionMock.mockResolvedValue({
+      ok: true,
+      referenceNumber: "HVAC-TEST",
+      serviceRequestId: "sr-test",
+    });
     extractAllContactMock.mockReturnValue(noSlots());
     extractAddressAtAddressStepMock.mockReturnValue(null);
     extractSpokenPhoneMock.mockReturnValue(null);

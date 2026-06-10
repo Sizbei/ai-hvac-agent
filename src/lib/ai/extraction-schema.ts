@@ -250,7 +250,10 @@ export function isExtractionComplete(extraction: ExtractionResult): boolean {
     isAddressComplete(extraction.address) &&
     isNameComplete(extraction.customerName) &&
     isPhoneComplete(extraction.customerPhone) &&
-    isEmailComplete(extraction.customerEmail)
+    // A skipped email (the customer declined, or we hit MAX_EMAIL_REPROMPTS)
+    // counts as resolved: the intake proceeds and the request stores no email.
+    (isEmailComplete(extraction.customerEmail) ||
+      extraction.customerEmail === SKIP_SENTINEL)
   );
 }
 
@@ -288,7 +291,10 @@ export const serviceRequestSchema = z.object({
   customerPhone: z
     .string()
     .refine(isPhoneComplete, "Phone must be a 10 or 11-digit US number"),
-  customerEmail: z.string().email(),
+  // Nullable: a customer may skip the email (see MAX_EMAIL_REPROMPTS) — the
+  // request is still dispatchable via phone. A PRESENT value must be a real
+  // email so junk can't be persisted through a direct POST.
+  customerEmail: z.string().email().nullable(),
   description: z.string().min(1),
   ...optionalIntakeFields,
 });

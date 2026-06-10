@@ -1,0 +1,285 @@
+/**
+ * Channel-agnostic service-request submission.
+ *
+ * The single write path that turns a completed intake session into a real
+ * `service_requests` row (+ session status, audit log, HCP push, equipment
+ * record). Extracted from the web confirm route so the PHONE channel can
+ * auto-submit a completed call — before this, a finished voice intake promised
+ * "I'll get this over to our team" while nothing was ever created.
+ *
+ * Callers own channel-specific concerns (CSRF/rate limiting/state-transition
+ * guards for web; Twilio signature for voice) and pass a fully VALIDATED
+ * ServiceRequestData. This module owns the canonical effects:
+ *   1. CRM customer upsert (blind-index deduped)
+ *   2. "Do Not Service" guard
+ *   3. confirm-time capacity hold (soft-booking fallback)
+ *   4. after-hours flag derivation (keyed to when the technician goes out)
+ *   5. atomic batch: request insert + session→submitted + audit log
+ *   6. background: Housecall Pro job push + customer-equipment record
+ */
+import { after } from "next/server";
+import { and, eq } from "drizzle-orm";
+import { randomBytes, randomUUID } from "node:crypto";
+import { db } from "@/lib/db";
+import {
+  customerSessions,
+  serviceRequests,
+  auditLog,
+  customers,
+  organizationSettings,
+} from "@/lib/db/schema";
+import {
+  resolveAfterHoursConfig,
+  isAfterHours,
+} from "@/lib/admin/after-hours";
+import { encrypt } from "@/lib/crypto";
+import {
+  jobTypeForIssue,
+  type ServiceRequestData,
+} from "@/lib/ai/extraction-schema";
+import { upsertCustomerByContact } from "@/lib/admin/crm-queries";
+import {
+  getOpenAvailability,
+  businessDaysFrom,
+  businessTodayIso,
+} from "@/lib/admin/availability-queries";
+import {
+  pickBookableSlot,
+  arrivalWindowForSlot,
+} from "@/lib/admin/capacity-hold";
+import { pushJobToHcp } from "@/lib/integrations/housecall-pro/job-sync";
+import { recordCustomerEquipment } from "@/lib/admin/crm-equipment-queries";
+import { buildEquipmentFromIntake } from "@/lib/admin/equipment-from-intake";
+import { logger } from "@/lib/logger";
+
+export function generateReferenceNumber(): string {
+  // Format: HVAC-XXXXXXXX (8 random hex chars)
+  return `HVAC-${randomBytes(4).toString("hex").toUpperCase()}`;
+}
+
+/**
+ * Confirm-time capacity hold (calendar-robustness stages 2 + 3).
+ *
+ * Re-verifies the customer's preferred window against CURRENT availability
+ * right before the write and, when the band still has an opening, turns the
+ * soft `preferredWindow` label into a CONCRETE arrival window that consumes
+ * calendar capacity. NEVER blocks the lead: any failure or a full band returns
+ * null and the caller falls back to the soft booking.
+ */
+async function holdConcreteSlot(
+  organizationId: string,
+  preferredWindow: string | null | undefined,
+): Promise<{
+  readonly startUtc: Date;
+  readonly endUtc: Date;
+  readonly day: string;
+  readonly window: string;
+} | null> {
+  if (!preferredWindow) return null;
+  try {
+    // Next-business-day onward (skip today — a same-day booking is the
+    // after-hours/urgent path, mirroring the chat route's fetchWindowPrompt).
+    const today = businessTodayIso(new Date());
+    const days = businessDaysFrom(today, 8).filter((d) => d !== today);
+    const availability = await getOpenAvailability(organizationId, days);
+    const slot = pickBookableSlot(availability, preferredWindow);
+    if (!slot) return null; // preferred band full across the range → soft booking
+    const { startUtc, endUtc } = arrivalWindowForSlot(slot.day, slot.window);
+    return { startUtc, endUtc, day: slot.day, window: slot.window };
+  } catch (holdError: unknown) {
+    logger.error(
+      { error: holdError, organizationId },
+      "Confirm-time capacity hold failed — falling back to soft booking",
+    );
+    return null;
+  }
+}
+
+export type SubmitSessionResult =
+  | {
+      readonly ok: true;
+      readonly referenceNumber: string;
+      readonly serviceRequestId: string;
+    }
+  | { readonly ok: false; readonly reason: "do_not_service" | "insert_failed" };
+
+export async function submitSessionServiceRequest(params: {
+  readonly organizationId: string;
+  readonly sessionId: string;
+  readonly data: ServiceRequestData;
+  readonly ipAddress: string;
+}): Promise<SubmitSessionResult> {
+  const { organizationId, sessionId, data, ipAddress } = params;
+
+  // Resolve (or atomically create) the canonical CRM customer for this
+  // contact BEFORE the batch. upsertCustomerByContact dedupes via a unique
+  // blind-index constraint, so two concurrent submits for the same
+  // email/phone converge on one customer id instead of creating duplicates.
+  const customerId = await upsertCustomerByContact(organizationId, {
+    name: data.customerName,
+    email: data.customerEmail,
+    phone: data.customerPhone,
+    address: data.address,
+  });
+
+  // ServiceTitan "Do Not Service" guard: if this customer is flagged, refuse
+  // to create the request — the caller routes the customer to a human.
+  const [flagRow] = await db
+    .select({ doNotService: customers.doNotService })
+    .from(customers)
+    .where(
+      and(
+        eq(customers.id, customerId),
+        eq(customers.organizationId, organizationId),
+      ),
+    )
+    .limit(1);
+  if (flagRow?.doNotService) {
+    logger.warn(
+      { sessionId, customerId },
+      "Submission blocked: customer flagged do_not_service",
+    );
+    return { ok: false, reason: "do_not_service" };
+  }
+
+  const referenceNumber = generateReferenceNumber();
+  // Pre-generate the service request id so the audit log can reference it
+  // within the same atomic batch (no read-back needed).
+  const serviceRequestId = randomUUID();
+
+  // After-hours: compute the flag once at submit time from the org's
+  // configured window (its local clock), so dispatch + the dashboard read it
+  // off the row. Best-effort config read — fall back to the default window.
+  const [settingsRow] = await db
+    .select({ afterHoursConfig: organizationSettings.afterHoursConfig })
+    .from(organizationSettings)
+    .where(eq(organizationSettings.organizationId, organizationId))
+    .limit(1);
+  const afterHoursConfig = resolveAfterHoursConfig(
+    settingsRow?.afterHoursConfig ?? null,
+  );
+
+  const heldSlot = await holdConcreteSlot(organizationId, data.preferredWindow);
+
+  // The after-hours FLAG must reflect WHEN THE TECHNICIAN GOES OUT, not when
+  // the customer happens to confirm. When we hold a concrete arrival window,
+  // derive the flag from that instant; otherwise fall back to the submit-time
+  // clock. No dollar surcharge is stored — the actual charge depends on the
+  // work the team performs.
+  const feeInstant = heldSlot?.startUtc ?? new Date();
+  const afterHours = isAfterHours(feeInstant, afterHoursConfig);
+
+  // The neon-http driver does not support interactive `db.transaction()`, so
+  // the service-request insert, session-status update, and audit-log insert
+  // are issued via `db.batch`, which neon executes as a single atomic
+  // (non-interactive) transaction.
+  const [insertedRequests] = await db.batch([
+    db
+      .insert(serviceRequests)
+      .values({
+        id: serviceRequestId,
+        organizationId,
+        sessionId,
+        customerId,
+        status: "pending",
+        issueType: data.issueType,
+        // ServiceTitan-style work classification derived from the symptom.
+        jobType: jobTypeForIssue(data.issueType),
+        urgency: data.urgency,
+        description: data.description,
+        customerNameEncrypted: data.customerName
+          ? encrypt(data.customerName)
+          : null,
+        customerPhoneEncrypted: data.customerPhone
+          ? encrypt(data.customerPhone)
+          : null,
+        customerEmailEncrypted: data.customerEmail
+          ? encrypt(data.customerEmail)
+          : null,
+        addressEncrypted: encrypt(data.address),
+        referenceNumber,
+        // ── Comprehensive intake fields ──
+        // Operational dispatch details, stored plainly (unlike the encrypted
+        // name/phone/email/address above). NOTE: accessNotes is customer-
+        // entered and may contain a gate code — operationally sensitive but
+        // not identifying PII; accepted as plaintext for now since dispatchers
+        // must read it. Length-capped at the schema boundary.
+        systemType: data.systemType ?? null,
+        equipmentBrand: data.equipmentBrand ?? null,
+        equipmentAgeBand: data.equipmentAgeBand ?? null,
+        propertyType: data.propertyType ?? null,
+        ownerOccupant: data.ownerOccupant ?? null,
+        underWarranty: data.underWarranty ?? null,
+        accessNotes: data.accessNotes ?? null,
+        systemDownStatus: data.systemDownStatus ?? null,
+        problemDuration: data.problemDuration ?? null,
+        vulnerableOccupants: data.vulnerableOccupants ?? null,
+        preferredWindow: data.preferredWindow ?? null,
+        // Concrete arrival window when a confirm-time capacity hold succeeded:
+        // turns the soft preference into a real booked band that consumes
+        // capacity. NULL → soft booking, a dispatcher assigns the window later.
+        arrivalWindowStart: heldSlot?.startUtc ?? null,
+        arrivalWindowEnd: heldSlot?.endUtc ?? null,
+        contactPreference: data.contactPreference ?? null,
+        smsConsent: data.smsConsent ?? null,
+        leadSource: data.leadSource ?? null,
+        isAfterHours: afterHours,
+      })
+      .returning({ id: serviceRequests.id }),
+    db
+      .update(customerSessions)
+      .set({ status: "submitted", updatedAt: new Date() })
+      // Scope by (id, org) — defense in depth, matching escalate-service.ts.
+      .where(
+        and(
+          eq(customerSessions.id, sessionId),
+          eq(customerSessions.organizationId, organizationId),
+        ),
+      ),
+    db.insert(auditLog).values({
+      organizationId,
+      sessionId,
+      action: "service_request_created",
+      entity: "service_requests",
+      entityId: serviceRequestId,
+      ipAddress,
+    }),
+  ]);
+
+  const serviceRequest = insertedRequests[0];
+  if (!serviceRequest) {
+    return { ok: false, reason: "insert_failed" };
+  }
+
+  // Push this confirmed booking into Housecall Pro as a JOB in the BACKGROUND
+  // — after() so the response isn't blocked, and degrade-safe so a not-
+  // connected org (or an HCP hiccup) never affects the booking we just
+  // persisted. pushJobToHcp owns the customer sync (mirrors the customer to
+  // HCP first, then creates/updates the job) which keeps it idempotent.
+  after(() => pushJobToHcp(organizationId, serviceRequest.id));
+
+  // Record the customer's equipment from the intake (ServiceTitan asset
+  // history), best-effort: a failure here must not fail the submission.
+  const built = buildEquipmentFromIntake(
+    {
+      systemType: data.systemType,
+      equipmentBrand: data.equipmentBrand,
+      equipmentAgeBand: data.equipmentAgeBand,
+    },
+    new Date(),
+  );
+  if (built) {
+    try {
+      await recordCustomerEquipment(organizationId, customerId, built);
+    } catch (equipErr) {
+      logger.error(
+        { error: equipErr, sessionId, customerId },
+        "Failed to record customer equipment from intake (non-fatal)",
+      );
+    }
+  }
+
+  logger.info({ sessionId, referenceNumber }, "Service request submitted");
+
+  return { ok: true, referenceNumber, serviceRequestId: serviceRequest.id };
+}
