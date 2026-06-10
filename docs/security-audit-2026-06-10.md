@@ -43,4 +43,32 @@ handling are all clean. Findings are MEDIUM and below, mostly hardening.
 
 ## Inline fixes applied in this PR
 
-See commits on `feat/google-login-super-admin`. Items #2, #3, #4, #7, #8, #9, #10, #14 addressed. #1, #5, #11, #12, #13 documented for follow-up (infra/dependency/multi-tenant-readiness — out of scope for a single PR).
+See commits on `feat/google-login-super-admin`:
+
+- **#2 FIXED** — rate limiting added to all admin mutation endpoints.
+- **#3 FIXED** — rate limiting added to all admin read endpoints (every admin
+  route now has `slidingWindow`; 23 handler methods across 15 files).
+- **#4 FIXED** — `next.config.ts` now sets baseline headers (nosniff,
+  Referrer-Policy, HSTS) for every route, covering `/`, `/chat`, `/widget.js`.
+- **#7 FIXED** — `super_admin` role tier added with a real login path.
+- **#9 FIXED** — HSTS added to the middleware `addSecurityHeaders` and the
+  config fallback.
+- **#10 FIXED** — conversation search now escapes LIKE metacharacters.
+- **#14 FIXED** — `seed.ts` carries a prominent "DEV-ONLY, never run against
+  prod" warning.
+
+Documented / not changed (with rationale):
+
+- **#1** (in-memory rate limiter per-instance) — needs a shared store (Vercel
+  KV); infra change, follow-up.
+- **#5** (JWT not invalidated on deactivation, 24h window) — accepted trade-off
+  for short-lived JWT; would need a DB re-check per request.
+- **#6** (`secure` cookie conditional on NODE_ENV) — accepted (Vercel previews
+  are HTTPS).
+- **#8** (unauthenticated logout) — left as-is: deleting a `SameSite=strict`
+  cookie is already CSRF-safe and clearing a non-existent cookie is a harmless
+  no-op; a session check would add complexity with no real security gain.
+- **#11** (brand fields in system prompt) — trust-boundary; harden before
+  multi-tenant self-serve.
+- **#12/#13** (postcss/esbuild moderate advisories) — dependency upgrades,
+  no prod-exploitable path.

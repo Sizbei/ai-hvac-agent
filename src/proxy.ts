@@ -10,6 +10,12 @@ function addSecurityHeaders(response: NextResponse, requestId: string): void {
   response.headers.set("X-Content-Type-Options", "nosniff");
   response.headers.set("X-Frame-Options", "DENY");
   response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  // HSTS: pin HTTPS for 2 years (incl. subdomains). Only meaningful over HTTPS
+  // (Vercel serves all traffic over HTTPS); harmless on local http.
+  response.headers.set(
+    "Strict-Transport-Security",
+    "max-age=63072000; includeSubDomains",
+  );
 }
 
 export async function proxy(request: NextRequest) {

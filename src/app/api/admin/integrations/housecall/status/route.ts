@@ -9,6 +9,7 @@
  */
 import { getAdminSession } from "@/lib/auth/session";
 import { successResponse, errorResponse } from "@/lib/api-response";
+import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
 import { getHousecallConnectionStatus } from "@/lib/integrations/housecall-pro/connection-queries";
 
@@ -17,6 +18,15 @@ export async function GET(): Promise<Response> {
     const session = await getAdminSession();
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
+    }
+
+    const rateCheck = slidingWindow(
+      `admin:housecall-status:${session.userId}`,
+      RATE_LIMITS.adminRead.maxRequests,
+      RATE_LIMITS.adminRead.windowMs,
+    );
+    if (!rateCheck.allowed) {
+      return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
     }
 
     const status = await getHousecallConnectionStatus(session.organizationId);
