@@ -6,10 +6,13 @@ import {
   useSchedulingCalendar,
   type CalendarView,
 } from '@/hooks/use-scheduling-calendar';
+import { useMonthCalendar } from '@/hooks/use-month-calendar';
 import { InteractiveSchedulingCalendar } from '@/components/admin/calendar/interactive-scheduling-calendar';
+import { MonthGrid } from '@/components/admin/calendar/month-grid';
 import { RequestDetailSheet } from '@/components/admin/request-detail-sheet';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { URGENCY_LEGEND, urgencyAccent } from '@/lib/admin/urgency-accent';
 
 /** A transient banner the calendar surfaces after a reschedule (soft conflict
  * warning or a failure that triggered a rollback). */
@@ -40,6 +43,32 @@ function shiftDate(isoDate: string, days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
+/** Shift a business-tz ISO date by whole months, clamping the day to the target
+ * month's length (e.g. Jan 31 → Feb 28). Whole-month UTC date math, then clamp. */
+function shiftMonth(isoDate: string, months: number): string {
+  const date = new Date(`${isoDate}T00:00:00.000Z`);
+  const targetMonthFirst = new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + months, 1),
+  );
+  const daysInTarget = new Date(
+    Date.UTC(
+      targetMonthFirst.getUTCFullYear(),
+      targetMonthFirst.getUTCMonth() + 1,
+      0,
+    ),
+  ).getUTCDate();
+  const day = Math.min(date.getUTCDate(), daysInTarget);
+  return new Date(
+    Date.UTC(
+      targetMonthFirst.getUTCFullYear(),
+      targetMonthFirst.getUTCMonth(),
+      day,
+    ),
+  )
+    .toISOString()
+    .slice(0, 10);
+}
+
 function formatRangeLabel(isoDate: string, view: CalendarView): string {
   const date = new Date(`${isoDate}T00:00:00.000Z`);
   if (Number.isNaN(date.getTime())) return isoDate;
@@ -48,6 +77,13 @@ function formatRangeLabel(isoDate: string, view: CalendarView): string {
       weekday: 'short',
       month: 'short',
       day: 'numeric',
+      year: 'numeric',
+      timeZone: 'UTC',
+    });
+  }
+  if (view === 'month') {
+    return date.toLocaleDateString('en-US', {
+      month: 'long',
       year: 'numeric',
       timeZone: 'UTC',
     });
@@ -61,16 +97,63 @@ function formatRangeLabel(isoDate: string, view: CalendarView): string {
   })}`;
 }
 
+/** A compact urgency color key shown beneath the calendar. */
+function UrgencyLegend() {
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+      <span className="font-medium">Urgency:</span>
+      {URGENCY_LEGEND.map(({ urgency, label }) => (
+        <span key={urgency} className="flex items-center gap-1.5">
+          <span
+            className={`size-2.5 rounded-full ${urgencyAccent(urgency).dot}`}
+          />
+          {label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export default function CalendarPage() {
   const [date, setDate] = useState<string>(todayBusiness);
   const [view, setView] = useState<CalendarView>('day');
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [status, setStatus] = useState<CalendarStatus | null>(null);
 
-  const { calendar, isLoading, error, refetch } = useSchedulingCalendar(date, view);
+  // Day/week share one hook; month uses a separate (lightweight) payload. Each
+  // is enabled only for its active view so the inactive one doesn't poll.
+  const isMonth = view === 'month';
+  const { calendar, isLoading, error, refetch } = useSchedulingCalendar(
+    date,
+    view,
+    !isMonth,
+  );
+  const {
+    month,
+    isLoading: monthLoading,
+    error: monthError,
+    refetch: refetchMonth,
+  } = useMonthCalendar(date, isMonth);
 
-  const step = view === 'week' ? 7 : 1;
   const isToday = date === todayBusiness();
+
+  /** Step the date by the active view's unit. */
+  function stepDate(direction: -1 | 1): void {
+    setDate((d) =>
+      isMonth
+        ? shiftMonth(d, direction)
+        : shiftDate(d, direction * (view === 'week' ? 7 : 1)),
+    );
+  }
+
+  /** Jump to a specific business day in Day view (week header / month cell). */
+  function pickDay(isoDay: string): void {
+    setDate(isoDay);
+    setView('day');
+  }
+
+  const activeError = isMonth ? monthError : error;
+  const stepLabel = isMonth ? 'month' : view === 'week' ? 'week' : 'day';
 
   return (
     <div className="space-y-6 p-6">
@@ -99,14 +182,21 @@ export default function CalendarPage() {
             >
               Week
             </Button>
+            <Button
+              variant={view === 'month' ? 'secondary' : 'ghost'}
+              size="sm"
+              onClick={() => setView('month')}
+            >
+              Month
+            </Button>
           </div>
 
           {/* Date stepper */}
           <Button
             variant="outline"
             size="icon-sm"
-            onClick={() => setDate((d) => shiftDate(d, -step))}
-            aria-label={view === 'week' ? 'Previous week' : 'Previous day'}
+            onClick={() => stepDate(-1)}
+            aria-label={`Previous ${stepLabel}`}
           >
             <ChevronLeft className="size-4" />
           </Button>
@@ -116,8 +206,8 @@ export default function CalendarPage() {
           <Button
             variant="outline"
             size="icon-sm"
-            onClick={() => setDate((d) => shiftDate(d, step))}
-            aria-label={view === 'week' ? 'Next week' : 'Next day'}
+            onClick={() => stepDate(1)}
+            aria-label={`Next ${stepLabel}`}
           >
             <ChevronRight className="size-4" />
           </Button>
@@ -132,10 +222,10 @@ export default function CalendarPage() {
         </div>
       </div>
 
-      {error && (
+      {activeError && (
         <Alert variant="destructive">
           <AlertCircle className="size-4" />
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{activeError}</AlertDescription>
         </Alert>
       )}
 
@@ -146,19 +236,31 @@ export default function CalendarPage() {
         </Alert>
       )}
 
-      <InteractiveSchedulingCalendar
-        calendar={calendar}
-        view={view}
-        onSelect={setSelectedRequestId}
-        onRefetch={refetch}
-        onStatus={(message, tone) => setStatus({ message, tone })}
-        isLoading={isLoading}
-      />
+      {isMonth ? (
+        <MonthGrid
+          month={month}
+          isLoading={monthLoading}
+          onSelect={setSelectedRequestId}
+          onPickDay={pickDay}
+        />
+      ) : (
+        <InteractiveSchedulingCalendar
+          calendar={calendar}
+          view={view}
+          onSelect={setSelectedRequestId}
+          onRefetch={refetch}
+          onStatus={(message, tone) => setStatus({ message, tone })}
+          isLoading={isLoading}
+          onPickDay={pickDay}
+        />
+      )}
+
+      <UrgencyLegend />
 
       <RequestDetailSheet
         requestId={selectedRequestId}
         onClose={() => setSelectedRequestId(null)}
-        onAssigned={refetch}
+        onAssigned={isMonth ? refetchMonth : refetch}
       />
     </div>
   );

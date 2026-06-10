@@ -9,6 +9,8 @@ import {
   hourRowLabels,
   formatBusinessTime,
   businessWeekDates,
+  businessMonthDates,
+  businessMonthOf,
   arrivalWindowUtcForBusinessDate,
   windowBandPlacement,
   windowRowOfInstant,
@@ -162,6 +164,57 @@ describe("businessWeekDates", () => {
     expect(week[0]).toBe("2026-06-07");
     expect(week[6]).toBe("2026-06-13");
     expect(week).toContain("2026-06-10");
+  });
+});
+
+describe("businessMonthDates", () => {
+  it("fills the grid with whole Sunday-anchored weeks covering the month", () => {
+    // June 2026: Jun 1 is a Monday. Grid leads with Sun May 31, ends Sat Jul 4.
+    const grid = businessMonthDates("2026-06-10");
+    expect(grid.length % 7).toBe(0);
+    expect(grid[0]).toBe("2026-05-31"); // Sunday before Jun 1
+    expect(grid[grid.length - 1]).toBe("2026-07-04"); // Saturday after Jun 30
+    expect(grid).toContain("2026-06-01");
+    expect(grid).toContain("2026-06-30");
+    // Every entry is unique and consecutive.
+    expect(new Set(grid).size).toBe(grid.length);
+  });
+
+  it("works regardless of which day of the month the input is", () => {
+    const fromFirst = businessMonthDates("2026-06-01");
+    const fromLast = businessMonthDates("2026-06-30");
+    expect(fromFirst).toEqual(fromLast);
+  });
+
+  it("starts every grid on a Sunday and ends on a Saturday", () => {
+    const grid = businessMonthDates("2026-02-15"); // February (28 days, 2026)
+    const first = new Date(`${grid[0]}T12:00:00.000Z`).getUTCDay();
+    const last = new Date(
+      `${grid[grid.length - 1]}T12:00:00.000Z`,
+    ).getUTCDay();
+    expect(first).toBe(0); // Sunday
+    expect(last).toBe(6); // Saturday
+  });
+
+  it("spans a month with a DST transition (March 2026) without gaps", () => {
+    // US DST begins Sun Mar 8, 2026. Whole-day stepping must not drop/dup a day.
+    const grid = businessMonthDates("2026-03-15");
+    expect(grid.length % 7).toBe(0);
+    expect(grid).toContain("2026-03-08");
+    // Consecutive: each date is exactly one day after the previous.
+    for (let i = 1; i < grid.length; i += 1) {
+      const prev = new Date(`${grid[i - 1]}T00:00:00.000Z`).getTime();
+      const cur = new Date(`${grid[i]}T00:00:00.000Z`).getTime();
+      expect(cur - prev).toBe(24 * 60 * 60 * 1000);
+    }
+  });
+});
+
+describe("businessMonthOf", () => {
+  it("returns the YYYY-MM month of a business date", () => {
+    expect(businessMonthOf("2026-06-10")).toBe("2026-06");
+    expect(businessMonthOf("2026-01-01")).toBe("2026-01");
+    expect(businessMonthOf("2026-12-31")).toBe("2026-12");
   });
 });
 

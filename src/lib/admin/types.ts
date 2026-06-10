@@ -267,6 +267,32 @@ export interface SchedulingCalendar {
   readonly availability: readonly AvailabilitySlot[];
 }
 
+// ─── Month calendar (read-only overview) ────────────────────────────────────
+
+/**
+ * One day cell in the month-view grid. `day` is a business-tz ISO date
+ * (YYYY-MM-DD); `inMonth` is false for the leading/trailing days borrowed from
+ * the adjacent months to fill whole weeks (rendered dimmed). `jobs` are the
+ * placed jobs whose arrival window falls on this business day, window-ordered —
+ * the same rich DashboardRequest cards the other calendar views use.
+ */
+export interface MonthCalendarDay {
+  readonly day: string;
+  readonly inMonth: boolean;
+  readonly jobs: readonly DashboardRequest[];
+}
+
+/**
+ * The month-view payload: the focused month (YYYY-MM) plus the full grid of day
+ * cells (length 35 or 42, Sunday-first). Lightweight by design — no per-tech
+ * lanes or availability; month view is a read-only overview, not a scheduling
+ * surface.
+ */
+export interface MonthCalendar {
+  readonly month: string;
+  readonly days: readonly MonthCalendarDay[];
+}
+
 // ─── Scheduling (Stage 5: customer-facing open windows) ─────────────────────
 
 /**

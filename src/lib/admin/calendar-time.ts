@@ -337,3 +337,46 @@ export function businessWeekDates(isoDate: string): readonly string[] {
   }
   return dates;
 }
+
+const MS_PER_DAY = 24 * MINUTES_PER_HOUR * MS_PER_MINUTE;
+
+/** The "YYYY-MM" business-tz month containing `isoDate`. */
+export function businessMonthOf(isoDate: string): string {
+  const noonUtc = businessWallClockToUtc(isoDate, 12, 0);
+  const wall = toBusinessWallClock(noonUtc);
+  return `${wall.year}-${String(wall.month).padStart(2, "0")}`;
+}
+
+/**
+ * The business-day ISO dates filling a month-view grid for the month containing
+ * `isoDate`: every day of that month plus the LEADING days (from the prior
+ * month) needed to start the grid on a Sunday and the TRAILING days (from the
+ * next month) needed to complete the final week. Always a whole number of weeks
+ * (length 35 or 42), Sunday-first — so a 6×7 / 5×7 grid renders without gaps.
+ *
+ * Anchored in the business timezone (each day resolved from a business-tz midday
+ * instant) so the grid's month boundaries match what the calendar renders and
+ * DST transitions are handled by the tz db, not fixed-offset math. The grid is
+ * built by whole-UTC-day stepping from the first grid day, which is timezone-
+ * independent for whole calendar days.
+ */
+export function businessMonthDates(isoDate: string): readonly string[] {
+  // First of the business-tz month containing isoDate (midday-anchored).
+  const noonUtc = businessWallClockToUtc(isoDate, 12, 0);
+  const wall = toBusinessWallClock(noonUtc);
+  const firstOfMonthMs = Date.UTC(wall.year, wall.month - 1, 1);
+  // Last day of the month: day 0 of the NEXT month.
+  const lastOfMonthMs = Date.UTC(wall.year, wall.month, 0);
+
+  const leadWeekday = new Date(firstOfMonthMs).getUTCDay(); // 0=Sun
+  const gridStartMs = firstOfMonthMs - leadWeekday * MS_PER_DAY;
+
+  const trailWeekday = new Date(lastOfMonthMs).getUTCDay(); // 0=Sun
+  const gridEndMs = lastOfMonthMs + (6 - trailWeekday) * MS_PER_DAY;
+
+  const dates: string[] = [];
+  for (let ms = gridStartMs; ms <= gridEndMs; ms += MS_PER_DAY) {
+    dates.push(new Date(ms).toISOString().slice(0, 10));
+  }
+  return dates;
+}

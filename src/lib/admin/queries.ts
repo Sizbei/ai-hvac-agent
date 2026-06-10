@@ -41,6 +41,7 @@ import {
 export type HoldReason = (typeof holdReasonEnum.enumValues)[number];
 import { DASHBOARD_LIST_LIMIT } from "./types";
 import { getTechnicianAvailability } from "./scheduling-queries";
+import { businessIsoDate } from "./calendar-time";
 import type {
   AdminRequest,
   AdminRequestDetail,
@@ -52,6 +53,8 @@ import type {
   DispatchColumn,
   SchedulingCalendar,
   CalendarTechnicianLane,
+  MonthCalendar,
+  MonthCalendarDay,
   RequestFilters,
   CreateTechnicianInput,
   UpdateTechnicianInput,
@@ -1320,6 +1323,79 @@ export async function getSchedulingCalendar(
     unscheduled: unscheduledRows.map(toDashboardRequest),
     availability: [...availability],
   };
+}
+
+/**
+ * The MONTH-view payload: every placed job in [startIso, endIso) bucketed by the
+ * business day its arrival window starts on, projected onto the supplied grid of
+ * business-tz dates (`gridDays`, length 35 or 42 from businessMonthDates).
+ *
+ * Lightweight on purpose — month view is a read-only overview, so unlike
+ * getSchedulingCalendar this fetches NO per-technician lanes, NO availability,
+ * and NO unscheduled queue. It reuses the SAME overlap predicate and
+ * DashboardRequest projection as the day/week board so chips carry the same rich
+ * fields (urgency, status, customer, window). Jobs are bucketed by the business
+ * day of their window START — a job is shown on the day it begins. Tenant-scoped.
+ */
+export async function getMonthCalendar(
+  organizationId: string,
+  startIso: string,
+  endIso: string,
+  gridDays: readonly string[],
+  month: string,
+): Promise<MonthCalendar> {
+  const start = new Date(startIso);
+  const end = new Date(endIso);
+  if (
+    Number.isNaN(start.getTime()) ||
+    Number.isNaN(end.getTime()) ||
+    start >= end
+  ) {
+    throw new Error("Invalid month calendar range");
+  }
+
+  // Same half-open window-overlap predicate as the day/week board.
+  const placedRows = await db
+    .select(dashboardRequestSelect)
+    .from(serviceRequests)
+    .leftJoin(users, eq(serviceRequests.assignedTo, users.id))
+    .where(
+      withTenant(
+        serviceRequests,
+        organizationId,
+        isNotNull(serviceRequests.arrivalWindowStart),
+        isNotNull(serviceRequests.arrivalWindowEnd),
+        // Date objects (not ISO strings): the arrival-window columns are
+        // timestamptz, matching how the day/week board passes its bounds.
+        lt(serviceRequests.arrivalWindowStart, end),
+        gt(serviceRequests.arrivalWindowEnd, start),
+        inArray(serviceRequests.status, [...OPEN_STATUSES]),
+      ),
+    )
+    .orderBy(asc(serviceRequests.arrivalWindowStart));
+
+  // Bucket window-ordered rows by the business day their window starts on. A row
+  // whose start day isn't in the grid (shouldn't happen — the range is built
+  // from the grid) is simply dropped from the view.
+  const jobsByDay = new Map<string, DashboardRequest[]>(
+    gridDays.map((day) => [day, [] as DashboardRequest[]]),
+  );
+  for (const row of placedRows) {
+    if (!row.arrivalWindowStart) continue;
+    const startDate = new Date(row.arrivalWindowStart);
+    if (Number.isNaN(startDate.getTime())) continue;
+    const bucket = jobsByDay.get(businessIsoDate(startDate));
+    if (bucket) bucket.push(toDashboardRequest(row)); // already window-ordered
+  }
+
+  const monthPrefix = `${month}-`;
+  const days: readonly MonthCalendarDay[] = gridDays.map((day) => ({
+    day,
+    inMonth: day.startsWith(monthPrefix),
+    jobs: jobsByDay.get(day) ?? [],
+  }));
+
+  return { month, days };
 }
 
 /**
