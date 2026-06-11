@@ -1169,3 +1169,202 @@ export const customFieldValues = pgTable(
     ),
   ],
 );
+
+// ── Ghost CSR: Communication Automation Foundation ──
+
+// Communication channel types
+export const communicationChannelEnum = pgEnum("communication_channel", [
+  "sms",
+  "email",
+  "voice",
+]);
+
+// Message/trigger types (events that can initiate a communication)
+export const communicationTriggerTypeEnum = pgEnum("communication_trigger_type", [
+  "appointment_scheduled",
+  "appointment_reminder_24h",
+  "appointment_reminder_2h",
+  "appointment_rescheduled",
+  "appointment_cancelled",
+  "technician_enroute",
+  "technician_arrived",
+  "job_completed",
+  "review_request",
+  "follow_up",
+  "escalation",
+]);
+
+// Job execution status
+export const communicationJobStatusEnum = pgEnum("communication_job_status", [
+  "pending",
+  "processing",
+  "sent",
+  "failed",
+  "cancelled",
+]);
+
+// Template types (determines rendering engine)
+export const communicationTemplateTypeEnum = pgEnum("communication_template_type", [
+  "sms",
+  "email_html",
+  "email_text",
+]);
+
+// 20. communication_templates — reusable message templates for automated customer communications
+// Per-organization templates for each communication trigger type
+export const communicationTemplates = pgTable(
+  "communication_templates",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    key: varchar("key", { length: 100 }).notNull(),
+    name: varchar("name", { length: 255 }).notNull(),
+    description: text("description"),
+    triggerType: communicationTriggerTypeEnum("trigger_type").notNull(),
+    templateType: communicationTemplateTypeEnum("template_type").notNull(),
+    // For email templates only
+    subjectTemplate: text("subject_template"),
+    // The message body (Handlebars for SMS, React Email for HTML)
+    bodyTemplate: text("body_template").notNull(),
+    // Available variables for template rendering
+    variables: jsonb("variables")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    isActive: boolean("is_active").notNull().default(true),
+    // Lower = higher priority (0-100, default 50)
+    priority: integer("priority").notNull().default(50),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("communication_templates_org_id_idx").on(table.organizationId),
+    index("communication_templates_org_trigger_active_idx").on(
+      table.organizationId,
+      table.triggerType,
+      table.isActive,
+    ),
+    uniqueIndex("communication_templates_org_key_unique").on(
+      table.organizationId,
+      table.key,
+    ),
+  ],
+);
+
+// 21. communication_jobs — queue of pending/completed communication jobs
+// Each job represents a single communication to be sent or already sent
+export const communicationJobs = pgTable(
+  "communication_jobs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    templateId: uuid("template_id")
+      .notNull()
+      .references(() => communicationTemplates.id, { onDelete: "cascade" }),
+    triggerType: communicationTriggerTypeEnum("trigger_type").notNull(),
+    channel: communicationChannelEnum("channel").notNull(),
+    status: communicationJobStatusEnum("status").notNull().default("pending"),
+    // Lower = higher priority (0-100, default 50)
+    priority: integer("priority").notNull().default(50),
+
+    // Recipient information
+    recipientPhone: varchar("recipient_phone", { length: 20 }),
+    recipientEmail: text("recipient_email"),
+
+    // Context data for template rendering
+    templateVariables: jsonb("template_variables")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+
+    // Execution tracking
+    scheduledFor: timestamp("scheduled_for", { withTimezone: true }).notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    attempts: integer("attempts").notNull().default(0),
+    maxAttempts: integer("max_attempts").notNull().default(3),
+    errorMessage: text("error_message"),
+
+    // External IDs (provider message IDs)
+    externalId: varchar("external_id", { length: 255 }),
+
+    // Related entities (optional, for tracking/queries)
+    customerId: uuid("customer_id"),
+    serviceRequestId: uuid("service_request_id"),
+
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("communication_jobs_org_id_idx").on(table.organizationId),
+    // Index for job processor: pending/failed jobs ordered by scheduled time
+    index("communication_jobs_status_scheduled_idx").on(
+      table.status,
+      table.scheduledFor,
+    ).where(sql`${table.status} IN ('pending', 'failed')`),
+    // Indexes for related entity lookups
+    index("communication_jobs_service_request_idx").on(table.serviceRequestId),
+    index("communication_jobs_customer_idx").on(table.customerId),
+    // Index for webhook correlation (Twilio message SID, etc.)
+    index("communication_jobs_external_id_idx").on(table.externalId),
+  ],
+);
+
+// 22. communication_preferences — per-customer communication preferences
+// One row per customer per organization (customers can exist across multiple orgs)
+export const communicationPreferences = pgTable(
+  "communication_preferences",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    customerId: uuid("customer_id").notNull(),
+
+    // Channel preferences
+    smsEnabled: boolean("sms_enabled").notNull().default(true),
+    emailEnabled: boolean("email_enabled").notNull().default(true),
+    voiceEnabled: boolean("voice_enabled").notNull().default(false),
+
+    // Specific communication type preferences
+    appointmentReminders: boolean("appointment_reminders").notNull().default(true),
+    automatedConfirmations: boolean("automated_confirmations")
+      .notNull()
+      .default(true),
+    reviewRequests: boolean("review_requests").notNull().default(true),
+    marketingMessages: boolean("marketing_messages").notNull().default(false),
+
+    // Timezone for scheduling (defaults to Eastern time)
+    timezone: varchar("timezone", { length: 50 }).default("America/New_York"),
+
+    // Global opt-out flag
+    doNotContact: boolean("do_not_contact").notNull().default(false),
+
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("communication_prefs_org_id_idx").on(table.organizationId),
+    // One preference record per customer per organization
+    uniqueIndex("communication_prefs_org_customer_unique").on(
+      table.organizationId,
+      table.customerId,
+    ),
+  ],
+);

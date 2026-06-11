@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Housecall Pro Integration - Interactive Demo</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .demo-container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            max-width: 1200px;
+            width: 100%;
+            overflow: hidden;
+            animation: slideIn 0.5s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 16px;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 30px;
+            border-bottom: 2px solid #e5e7eb;
+            padding-bottom: 10px;
+        }
+
+        .tab {
+            padding: 12px 24px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            color: #6b7280;
+            border-radius: 8px;
+            transition: all 0.2s;
+        }
+
+        .tab:hover {
+            background: #f3f4f6;
+        }
+
+        .tab.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .workflow-diagram {
+            background: #f9fafb;
+            border-radius: 12px;
+            padding: 30px;
+            margin: 20px 0;
+        }
+
+        .workflow-step {
+            display: flex;
+            align-items: center;
+            margin: 20px 0;
+            opacity: 0;
+            transform: translateX(-20px);
+            animation: slideInStep 0.5s ease-out forwards;
+        }
+
+        @keyframes slideInStep {
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .workflow-step:nth-child(1) { animation-delay: 0.1s; }
+        .workflow-step:nth-child(2) { animation-delay: 0.2s; }
+        .workflow-step:nth-child(3) { animation-delay: 0.3s; }
+        .workflow-step:nth-child(4) { animation-delay: 0.4s; }
+        .workflow-step:nth-child(5) { animation-delay: 0.5s; }
+
+        .step-icon {
+            width: 50px;
+            height: 50px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            margin-right: 20px;
+            flex-shrink: 0;
+        }
+
+        .step-content {
+            flex: 1;
+        }
+
+        .step-title {
+            font-weight: 600;
+            color: #111827;
+            margin-bottom: 5px;
+        }
+
+        .step-description {
+            color: #6b7280;
+            font-size: 14px;
+        }
+
+        .arrow {
+            margin: 10px 0 10px 70px;
+            color: #9ca3af;
+        }
+
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+
+        .feature-card {
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 20px;
+            transition: all 0.3s;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+        }
+
+        .feature-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            margin-bottom: 15px;
+        }
+
+        .feature-title {
+            font-weight: 600;
+            color: #111827;
+            margin-bottom: 8px;
+        }
+
+        .feature-description {
+            color: #6b7280;
+            font-size: 14px;
+        }
+
+        .demo-button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin: 10px 10px 10px 0;
+        }
+
+        .demo-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px -5px rgba(102, 126, 234, 0.4);
+        }
+
+        .demo-button.secondary {
+            background: white;
+            color: #667eea;
+            border: 2px solid #667eea;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+            margin-left: 10px;
+        }
+
+        .status-badge.connected {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .status-badge.pending {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .interactive-demo {
+            background: #f9fafb;
+            border-radius: 12px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+
+        .demo-chat {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            margin: 20px 0;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .chat-message {
+            margin: 15px 0;
+            opacity: 0;
+            animation: messageIn 0.3s ease-out forwards;
+        }
+
+        @keyframes messageIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .chat-message.user {
+            text-align: right;
+        }
+
+        .chat-bubble {
+            display: inline-block;
+            padding: 12px 18px;
+            border-radius: 18px;
+            max-width: 80%;
+        }
+
+        .chat-message.user .chat-bubble {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .chat-message.bot .chat-bubble {
+            background: #f3f4f6;
+            color: #111827;
+        }
+
+        .progress-bar {
+            height: 8px;
+            background: #e5e7eb;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 20px 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            width: 0%;
+            transition: width 0.5s ease-out;
+        }
+
+        .checklist {
+            list-style: none;
+            margin: 20px 0;
+        }
+
+        .checklist-item {
+            display: flex;
+            align-items: center;
+            padding: 12px;
+            border-radius: 8px;
+            margin: 8px 0;
+            transition: all 0.2s;
+        }
+
+        .checklist-item:hover {
+            background: #f3f4f6;
+        }
+
+        .checklist-item input[type="checkbox"] {
+            margin-right: 12px;
+            width: 20px;
+            height: 20px;
+        }
+
+        .requirements-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+
+        .requirement-card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            border-left: 4px solid #667eea;
+        }
+
+        .requirement-title {
+            font-weight: 600;
+            color: #111827;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+        }
+
+        .requirement-icon {
+            margin-right: 10px;
+        }
+
+        .requirement-description {
+            color: #6b7280;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .code-block {
+            background: #1f2937;
+            color: #f9fafb;
+            padding: 20px;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 14px;
+            overflow-x: auto;
+            margin: 15px 0;
+        }
+
+        .tooltip {
+            position: relative;
+            display: inline-block;
+        }
+
+        .tooltip .tooltip-text {
+            visibility: hidden;
+            background: #1f2937;
+            color: white;
+            text-align: center;
+            border-radius: 6px;
+            padding: 8px 12px;
+            position: absolute;
+            z-index: 1;
+            bottom: 125%;
+            left: 50%;
+            transform: translateX(-50%);
+            opacity: 0;
+            transition: opacity 0.3s;
+            font-size: 12px;
+            white-space: nowrap;
+        }
+
+        .tooltip:hover .tooltip-text {
+            visibility: visible;
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+    <div class="demo-container">
+        <div class="header">
+            <h1>🔧 Housecall Pro Integration</h1>
+            <p>Interactive demo of the seamless HVAC workflow automation</p>
+        </div>
+
+        <div class="content">
+            <div class="tabs">
+                <button class="tab active" data-tab="overview">Overview</button>
+                <button class="tab" data-tab="workflow">Workflow</button>
+                <button class="tab" data-tab="demo">Live Demo</button>
+                <button class="tab" data-tab="features">Features</button>
+                <button class="tab" data-tab="setup">Setup</button>
+            </div>
+
+            <!-- Overview Tab -->
+            <div class="tab-content active" id="overview">
+                <h2 style="margin-bottom: 20px;">What This Integration Does</h2>
+
+                <div class="feature-grid">
+                    <div class="feature-card">
+                        <div class="feature-icon" style="background: #dbeafe;">👤</div>
+                        <div class="feature-title">Customer Sync</div>
+                        <div class="feature-description">Automatically sync customers between Housecall Pro and your AI chatbot. No duplicate entries.</div>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon" style="background: #fce7f3;">📅</div>
+                        <div class="feature-title">Job Push</div>
+                        <div class="feature-description">Confirmed service requests instantly create jobs in Housecall Pro with full details.</div>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon" style="background: #dcfce7;">⏰</div>
+                        <div class="feature-title">Real-time Availability</div>
+                        <div class="feature-description">Bot offers actual time slots from your Housecall Pro schedule, not guesses.</div>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon" style="background: #fef3c7;">🔔</div>
+                        <div class="feature-title">Status Webhooks</div>
+                        <div class="feature-description">Real-time updates when jobs are completed, rescheduled, or canceled in HCP.</div>
+                    </div>
+                </div>
+
+                <div class="interactive-demo">
+                    <h3 style="margin-bottom: 15px;">Current Status</h3>
+                    <div style="display: flex; align-items: center; margin-bottom: 20px;">
+                        <span style="font-size: 18px; margin-right: 10px;">Integration:</span>
+                        <span class="status-badge connected">✓ Fully Built</span>
+                        <span class="status-badge pending">⏳ Awaiting API Key</span>
+                    </div>
+                    <p style="color: #6b7280;">The complete integration is already implemented in your codebase. It just needs your Housecall Pro API key to go live.</p>
+                </div>
+            </div>
+
+            <!-- Workflow Tab -->
+            <div class="tab-content" id="workflow">
+                <h2 style="margin-bottom: 20px;">How It Works</h2>
+
+                <div class="workflow-diagram">
+                    <div class="workflow-step">
+                        <div class="step-icon" style="background: #dbeafe;">💬</div>
+                        <div class="step-content">
+                            <div class="step-title">Customer Contacts via Chat</div>
+                            <div class="step-description">Customer uses the AI chatbot to request service, providing name, phone, address, and problem description.</div>
+                        </div>
+                    </div>
+
+                    <div class="arrow">↓</div>
+
+                    <div class="workflow-step">
+                        <div class="step-icon" style="background: #fce7f3;">🔍</div>
+                        <div class="step-content">
+                            <div class="step-title">Customer Lookup</div>
+                            <div class="step-description">Bot checks Housecall Pro for existing customer by email/phone. Found? Links to existing. New? Creates automatically.</div>
+                        </div>
+                    </div>
+
+                    <div class="arrow">↓</div>
+
+                    <div class="workflow-step">
+                        <div class="step-icon" style="background: #dcfce7;">📅</div>
+                        <div class="step-content">
+                            <div class="step-title">Availability Check</div>
+                            <div class="step-description">Bot queries real-time availability from Housecall Pro and offers actual open slots to the customer.</div>
+                        </div>
+                    </div>
+
+                    <div class="arrow">↓</div>
+
+                    <div class="workflow-step">
+                        <div class="step-icon" style="background: #fef9c3;">✅</div>
+                        <div class="step-content">
+                            <div class="step-title">Confirmation Creates Job</div>
+                            <div class="step-description">Once customer confirms, a job is instantly created in Housecall Pro with all details synced to your dispatch board.</div>
+                        </div>
+                    </div>
+
+                    <div class="arrow">↓</div>
+
+                    <div class="workflow-step">
+                        <div class="step-icon" style="background: #e0e7ff;">🔔</div>
+                        <div class="step-content">
+                            <div class="step-title">Status Sync</div>
+                            <div class="step-description">Technician completes job in HCP → Webhook updates your system → Bot can follow up with customer automatically.</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Live Demo Tab -->
+            <div class="tab-content" id="demo">
+                <h2 style="margin-bottom: 20px;">Interactive Demo</h2>
+                <p style="color: #6b7280; margin-bottom: 20px;">Click the button below to see a simulated customer conversation and job creation flow.</p>
+
+                <button class="demo-button" onclick="runDemo()">▶ Start Demo</button>
+                <button class="demo-button secondary" onclick="resetDemo()">↺ Reset</button>
+
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progress"></div>
+                </div>
+
+                <div class="demo-chat" id="chat">
+                    <div style="text-align: center; color: #9ca3af; padding: 20px;">
+                        Click "Start Demo" to see the integration in action
+                    </div>
+                </div>
+            </div>
+
+            <!-- Features Tab -->
+            <div class="tab-content" id="features">
+                <h2 style="margin-bottom: 20px;">Complete Feature List</h2>
+
+                <div class="requirements-grid">
+                    <div class="requirement-card">
+                        <div class="requirement-title">
+                            <span class="requirement-icon">✓</span>
+                            Customer Sync
+                        </div>
+                        <div class="requirement-description">
+                            <strong>Two-way synchronization:</strong>
+                            <ul style="margin: 10px 0 10px 20px;">
+                                <li>Find existing customers by email or phone</li>
+                                <li>Create new customers automatically</li>
+                                <li>Link chat conversations to HCP customer records</li>
+                                <li>Pull customer service history for context</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="requirement-card">
+                        <div class="requirement-title">
+                            <span class="requirement-icon">✓</span>
+                            Job Management
+                        </div>
+                        <div class="requirement-description">
+                            <strong>Full job lifecycle:</strong>
+                            <ul style="margin: 10px 0 10px 20px;">
+                                <li>Create jobs from confirmed chat requests</li>
+                                <li>Update existing jobs (reschedule, modify)</li>
+                                <li>Cancel jobs when requests are withdrawn</li>
+                                <li>Add dispatcher notes for technicians</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="requirement-card">
+                        <div class="requirement-title">
+                            <span class="requirement-icon">✓</span>
+                            Availability Source
+                        </div>
+                        <div class="requirement-description">
+                            <strong>Real-time scheduling:</strong>
+                            <ul style="margin: 10px 0 10px 20px;">
+                                <li>Query actual open slots from HCP</li>
+                                <li>Offer customers real availability windows</li>
+                                <li>Sync technician roster for accurate assignments</li>
+                                <li>Handle timezone conversions correctly</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="requirement-card">
+                        <div class="requirement-title">
+                            <span class="requirement-icon">✓</span>
+                            Webhook Integration
+                        </div>
+                        <div class="requirement-description">
+                            <strong>Status updates in real-time:</strong>
+                            <ul style="margin: 10px 0 10px 20px;">
+                                <li>Receive job status changes from HCP</li>
+                                <li>Sync completion, cancellation, rescheduling</li>
+                                <li>Trigger automated follow-up messages</li>
+                                <li>Secure signature verification</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="requirement-card">
+                        <div class="requirement-title">
+                            <span class="requirement-icon">✓</span>
+                            Admin Controls
+                        </div>
+                        <div class="requirement-description">
+                            <strong>Full management interface:</strong>
+                            <ul style="margin: 10px 0 10px 20px;">
+                                <li>Connect/disconnect HCP from admin panel</li>
+                                <li>API key stored encrypted at rest</li>
+                                <li>Connection status monitoring</li>
+                                <li>Per-organization configuration</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="requirement-card">
+                        <div class="requirement-title">
+                            <span class="requirement-icon">✓</span>
+                            Testing & Quality
+                        </div>
+                        <div class="requirement-description">
+                            <strong>Battle-tested code:</strong>
+                            <ul style="margin: 10px 0 10px 20px;">
+                                <li>Comprehensive test suite included</li>
+                                <li>Mock HCP client for testing</li>
+                                <li>Error handling with retry logic</li>
+                                <li>Graceful degradation when disconnected</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Setup Tab -->
+            <div class="tab-content" id="setup">
+                <h2 style="margin-bottom: 20px;">Setup Requirements</h2>
+
+                <div class="requirements-grid">
+                    <div class="requirement-card" style="border-left-color: #dc2626;">
+                        <div class="requirement-title">
+                            <span class="requirement-icon">⚠️</span>
+                            MAX Plan Required
+                        </div>
+                        <div class="requirement-description">
+                            <strong>Housecall Pro MAX plan is required</strong> for API access. The public REST API is not available on lower tiers. Verify your account plan before proceeding.
+                        </div>
+                    </div>
+
+                    <div class="requirement-card" style="border-left-color: #2563eb;">
+                        <div class="requirement-title">
+                            <span class="requirement-icon">🔑</span>
+                            API Key Generation
+                        </div>
+                        <div class="requirement-description">
+                            <strong>Generate API key in HCP:</strong>
+                            <ol style="margin: 10px 0 10px 20px;">
+                                <li>Log into Housecall Pro</li>
+                                <li>Go to Settings > API Access</li>
+                                <li>Create a new API key</li>
+                                <li>Copy the key (you'll only see it once!)</li>
+                            </ol>
+                        </div>
+                    </div>
+
+                    <div class="requirement-card" style="border-left-color: #16a34a;">
+                        <div class="requirement-title">
+                            <span class="requirement-icon">🔗</span>
+                            Connect Integration
+                        </div>
+                        <div class="requirement-description">
+                            <strong>Connect via Admin Panel:</strong>
+                            <ol style="margin: 10px 0 10px 20px;">
+                                <li>Navigate to Admin > Chatbot Settings</li>
+                                <li>Find "Housecall Pro" section</li>
+                                <li>Paste your API key</li>
+                                <li>Click "Connect Housecall Pro"</li>
+                            </ol>
+                        </div>
+                    </div>
+
+                    <div class="requirement-card" style="border-left-color: #9333ea;">
+                        <div class="requirement-title">
+                            <span class="requirement-icon">🌐</span>
+                            Register Webhook
+                        </div>
+                        <div class="requirement-description">
+                            <strong>Set up webhook for status updates:</strong>
+                            <div class="code-block">
+https://ai-hvac-agent-lovat.vercel.app/api/webhooks/housecall
+                            </div>
+                            <p style="margin-top: 10px;">Register this URL in your Housecall Pro webhook settings to receive real-time job status updates.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="interactive-demo" style="margin-top: 30px;">
+                    <h3 style="margin-bottom: 15px;">Environment Variables (Optional)</h3>
+                    <p style="color: #6b7280; margin-bottom: 15px;">You can also set the API key via environment variable for the default organization:</p>
+                    <div class="code-block">
+HOUSECALL_API_KEY=your_api_key_here
+                    </div>
+                    <p style="color: #6b7280; margin-top: 15px; font-size: 14px;">
+                        <strong>Note:</strong> The admin panel method is preferred as it's organization-specific and doesn't require redeployment.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Tab switching
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                // Remove active from all tabs
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+
+                // Add active to clicked tab
+                tab.classList.add('active');
+                document.getElementById(tab.dataset.tab).classList.add('active');
+            });
+        });
+
+        // Demo functionality
+        let demoRunning = false;
+        let messageCount = 0;
+
+        const demoMessages = [
+            { role: 'user', text: 'My AC isn\'t cooling and it\'s 85 degrees inside!', delay: 0 },
+            { role: 'bot', text: 'I understand that's urgent! Let me help you schedule emergency service. Can you provide your name and phone number?', delay: 1000 },
+            { role: 'user', text: 'Sarah Johnson, 423-555-1234', delay: 2500 },
+            { role: 'bot', text: 'Thanks Sarah! What's your address?', delay: 3500 },
+            { role: 'user', text: '123 Oak Street, Johnson City TN 37601', delay: 5000 },
+            { role: 'bot', text: '🔍 Checking Housecall Pro for existing customer...', delay: 6500, progress: 20 },
+            { role: 'bot', text: '📅 Checking real-time availability...', delay: 7500, progress: 40 },
+            { role: 'bot', text: 'Found your address! I have a technician available today between 2-4 PM or tomorrow 9-11 AM. Which works better?', delay: 9000, progress: 60 },
+            { role: 'user', text: 'Today 2-4 PM would be great!', delay: 11000 },
+            { role: 'bot', text: '✅ Perfect! Confirming your appointment...', delay: 13000, progress: 80 },
+            { role: 'bot', text: '✨ Created job #HC-45239 in Housecall Pro! A technician will arrive between 2-4 PM today. You\'ll receive a call when they\'re on the way.', delay: 14500, progress: 100 },
+        ];
+
+        function addMessage(role, text) {
+            const chat = document.getElementById('chat');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `chat-message ${role}`;
+            messageDiv.innerHTML = `<div class="chat-bubble">${text}</div>`;
+            chat.appendChild(messageDiv);
+            chat.scrollTop = chat.scrollHeight;
+        }
+
+        function updateProgress(percent) {
+            document.getElementById('progress').style.width = `${percent}%`;
+        }
+
+        function runDemo() {
+            if (demoRunning) return;
+            demoRunning = true;
+            messageCount = 0;
+
+            // Clear chat except first message if present
+            const chat = document.getElementById('chat');
+            chat.innerHTML = '';
+
+            let cumulativeDelay = 0;
+
+            demoMessages.forEach((msg, index) => {
+                cumulativeDelay += msg.delay || 0;
+
+                setTimeout(() => {
+                    addMessage(msg.role, msg.text);
+                    if (msg.progress !== undefined) {
+                        updateProgress(msg.progress);
+                    }
+                    messageCount++;
+
+                    if (messageCount === demoMessages.length) {
+                        demoRunning = false;
+                    }
+                }, cumulativeDelay);
+            });
+        }
+
+        function resetDemo() {
+            const chat = document.getElementById('chat');
+            chat.innerHTML = `
+                <div style="text-align: center; color: #9ca3af; padding: 20px;">
+                    Click "Start Demo" to see the integration in action
+                </div>
+            `;
+            updateProgress(0);
+            demoRunning = false;
+            messageCount = 0;
+        }
+
+        // Animate workflow steps on scroll
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.style.animationPlayState = 'running';
+                }
+            });
+        }, { threshold: 0.5 });
+
+        document.querySelectorAll('.workflow-step').forEach(step => {
+            step.style.animationPlayState = 'paused';
+            observer.observe(step);
+        });
+    </script>
+</body>
+</html>
