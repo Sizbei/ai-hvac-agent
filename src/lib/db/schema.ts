@@ -1053,3 +1053,119 @@ export const attachments = pgTable(
     index("attachments_message_id_idx").on(table.messageId),
   ],
 );
+
+// ── Custom Fields CRM System ──
+
+// Entity types that can have custom fields
+export const customFieldEntityTypeEnum = pgEnum("custom_field_entity_type", [
+  "customer",
+  "service_request",
+  "both",
+]);
+
+// Field data types for custom fields
+export const customFieldTypeEnum = pgEnum("custom_field_type", [
+  "text",
+  "textarea",
+  "select",
+  "multiselect",
+  "number",
+  "currency",
+  "date",
+  "checkbox",
+]);
+
+// 18. custom_field_definitions — organization-defined field schemas
+// One organization can define any number of custom fields to store beyond
+// the built-in HVAC-specific fields. Each definition includes the field type,
+// validation rules, and whether it applies to customers, service requests, or both.
+export const customFieldDefinitions = pgTable(
+  "custom_field_definitions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    // Machine-readable identifier (snake_case, matches regex ^[a-z][a-z0-9_]*$)
+    key: varchar("key", { length: 100 }).notNull(),
+    // Human-readable display name
+    label: varchar("label", { length: 255 }).notNull(),
+    description: text("description"),
+    // Which entity type this field applies to
+    entityType: customFieldEntityTypeEnum("entity_type").notNull(),
+    // Data type of the field
+    fieldType: customFieldTypeEnum("field_type").notNull(),
+    // Allowed values for select/multiselect types
+    options: jsonb("options")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    required: boolean("required").notNull().default(false),
+    placeholder: text("placeholder"),
+    defaultValue: jsonb("default_value"),
+    // Validation rules (min/max/length/pattern) encoded as JSON
+    validation: jsonb("validation").$type<Record<string, unknown>>(),
+    displayOrder: integer("display_order").notNull().default(0),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("custom_field_defs_org_id_idx").on(table.organizationId),
+    // Active fields per org + entity type — the primary lookup for form rendering
+    index("custom_field_defs_org_entity_active_idx").on(
+      table.organizationId,
+      table.entityType,
+      table.isActive,
+    ),
+    // Unique key per org (only among active fields; archived fields can collide)
+    uniqueIndex("custom_field_defs_org_key_unique")
+      .on(table.organizationId, table.key)
+      .where(sql`${table.isActive} = true`),
+  ],
+);
+
+// 19. custom_field_values — actual field values per entity
+// Stores the value of each custom field for each customer/service request.
+// One row per (field_definition, entity_type, entity_id).
+export const customFieldValues = pgTable(
+  "custom_field_values",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    fieldDefinitionId: uuid("field_definition_id")
+      .notNull()
+      .references(() => customFieldDefinitions.id, { onDelete: "cascade" }),
+    entityType: customFieldEntityTypeEnum("entity_type").notNull(),
+    entityId: uuid("entity_id").notNull(),
+    // The actual value, typed according to the field definition
+    value: jsonb("value").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("custom_field_values_org_id_idx").on(table.organizationId),
+    index("custom_field_values_field_def_idx").on(table.fieldDefinitionId),
+    // Lookup all values for a specific entity (customer or service request)
+    index("custom_field_values_entity_idx").on(
+      table.entityType,
+      table.entityId,
+    ),
+    // One value per field per entity — prevents duplicates
+    uniqueIndex("custom_field_values_field_entity_unique").on(
+      table.fieldDefinitionId,
+      table.entityType,
+      table.entityId,
+    ),
+  ],
+);

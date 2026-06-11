@@ -10,70 +10,75 @@ Deployment documentation for the AI HVAC Agent platform.
 4. [Vercel Deployment](#vercel-deployment)
 5. [Self-Hosted Deployment](#self-hosted-deployment)
 6. [Post-Deployment](#post-deployment)
-7. [Monitoring](#monitoring)
+7. [Security Considerations](#security-considerations)
+8. [Monitoring](#monitoring)
 
 ---
 
 ## Environment Variables
 
-### Required
+### Required (Application will fail to start without these)
 
 ```bash
-# Database
-DATABASE_URL=postgresql://user:password@host/database
-# Or for Neon Serverless:
+# Database (Neon Serverless or self-hosted Postgres)
 DATABASE_URL=postgresql://user:password@ep-xxx.us-east-2.aws.neon.tech/neondb
 
-# AI Provider
-OPENAI_API_KEY=sk-proj-xxxxx
-OPENAI_BASE_URL=https://api.openai.com/v1  # Optional, defaults to OpenAI
-AI_MODEL=gpt-4o-mini
-AI_FALLBACK_MODELS=gpt-4o-mini,gpt-4-turbo
+# AI Provider (Anthropic Claude)
+ANTHROPIC_API_KEY=sk-ant-xxxxx
 
-# Auth (JWT)
-JWT_SECRET=your-secret-key-min-32-chars
-
-# Storage (Cloudflare R2)
-R2_ACCOUNT_ID=your-account-id
-R2_ACCESS_KEY_ID=your-access-key
-R2_SECRET_ACCESS_KEY=your-secret-key
-R2_BUCKET_NAME=hvac-uploads
-R2_ENDPOINT=https://xxx.r2.cloudflarestorage.com  # Optional
-R2_PUBLIC_URL=https://pub-xxx.r2.dev
-```
-
-### Optional
-
-```bash
-# Multi-Model Configuration
-AI_EXTRACTION_MODEL=gpt-4o-mini
-AI_EXTRACTION_FALLBACKS=gpt-4o-mini,llama3
-AI_REASONING_MODEL=o1-preview
-AI_REASONING_FALLBACKS=o1-preview,gpt-4o
-
-# Ollama (Local Models)
-AI_BASE_URL=http://localhost:11434/v1
-AI_API_KEY=ollama
-
-# Google OAuth (Admin Auth)
+# Admin Authentication (Google OAuth)
 GOOGLE_CLIENT_ID=xxx.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=GOCSPX-xxx
-GOOGLE_REDIRECT_URL=https://your-domain.com/api/auth/callback
+GOOGLE_REDIRECT_URI=https://your-domain.com/api/auth/callback
 
-# Business Branding
+# Session Security
+SESSION_SECRET=your-secret-key-min-32-chars-random
+
+# Application URL (for CSRF validation)
+NEXT_PUBLIC_APP_URL=https://your-domain.com
+```
+
+### Required for File Upload Feature
+
+```bash
+# Cloudflare R2 Storage
+R2_ACCOUNT_ID=your-cloudflare-account-id
+R2_ACCESS_KEY_ID=your-r2-access-key-id
+R2_SECRET_ACCESS_KEY=your-r2-secret-access-key
+R2_BUCKET_NAME=hvac-uploads
+R2_PUBLIC_URL=https://pub-xxx.r2.dev  # Public URL for attachment links
+R2_ENDPOINT=https://xxx.r2.cloudflarestorage.com  # Optional, auto-constructed from ACCOUNT_ID
+```
+
+### Optional (Phone Voice Feature)
+
+```bash
+# ElevenLabs TTS (phone voice)
+ELEVENLABS_API_KEY=sk_xxx
+ELEVENLABS_VOICE_ID=xxx  # Default: "Brian" (21m00Tcm4TlvDq8ikWAM)
+
+# Twilio (phone calls)
+TWILIO_ACCOUNT_SID=ACxxx
+TWILIO_API_KEY=SKxxx
+TWILIO_AUTH_TOKEN=xxx
+TWILIO_PHONE_NUMBER=+15551234567
+```
+
+### Optional (Feature Flags & Routing)
+
+```bash
+# Deterministic Router (enabled by default)
+ROUTER_ENABLED=true  # Set to "false" to disable and route everything through LLM
+```
+
+### Business Branding (Optional, set in admin UI instead)
+
+```bash
+# These can also be configured per-organization in the admin dashboard
 BUSINESS_NAME=Spears Services
 BUSINESS_PHONE=+15551234567
-BUSINESS_SERVICE_AREA=Johnson City, TN and 50km surrounding
-BUSINESS_HOURS=Mon-Fri 7AM-5PM
-
-# Feature Flags
-ENABLE_ELEVENLABS_VOICE=false
-ELEVENLABS_API_KEY=xxx
-ELEVENLABS_VOICE_ID=xxx
-
-# Observability
-VERCEL_OTEL_EXPORTER_URL=https://otlp.vercel-management.com
-OTEL_SERVICE_NAME=ai-hvac-agent
+BUSINESS_BASE_LOCATION=Johnson City, TN
+BUSINESS_SERVICE_AREA_RADIUS=50  # km
 ```
 
 ---
@@ -120,7 +125,7 @@ OTEL_SERVICE_NAME=ai-hvac-agent
 
 ## Storage Setup
 
-### Cloudflare R2 (Recommended)
+### Cloudflare R2 (Recommended for file uploads)
 
 1. **Create R2 bucket:**
    ```bash
@@ -143,18 +148,7 @@ OTEL_SERVICE_NAME=ai-hvac-agent
    R2_PUBLIC_URL=https://pub-xxx.r2.dev
    ```
 
-### Alternative: Vercel Blob
-
-```typescript
-// Update src/app/api/upload/route.ts
-import { put } from '@vercel/blob';
-
-export async function POST(request: Request) {
-  const file = await request.formData();
-  const blob = await put(filename, file, { access: 'public' });
-  return Response.json({ url: blob.url });
-}
-```
+**IMPORTANT:** The `R2_PUBLIC_URL` must be set or attachment URLs will be `undefined`. The application validates this at startup.
 
 ---
 
@@ -177,9 +171,12 @@ vercel link
 
 ```bash
 # Via CLI
-vercel env add DATABASE_URL
-vercel env add OPENAI_API_KEY
-vercel env add R2_ACCESS_KEY_ID
+vercel env add DATABASE_URL production
+vercel env add ANTHROPIC_API_KEY production
+vercel env add GOOGLE_CLIENT_ID production
+vercel env add GOOGLE_CLIENT_SECRET production
+vercel env add SESSION_SECRET production
+vercel env add NEXT_PUBLIC_APP_URL production
 # ... etc
 
 # Or via dashboard
@@ -198,11 +195,17 @@ vercel
 
 ### 5. Post-Deploy Migration
 
+**IMPORTANT:** Vercel builds do NOT run migrations. You must run migrations manually after deploying:
+
 ```bash
-# Important: Vercel build doesn't run migrations
-# Run manually after first deploy:
-DATABASE_URL=$(vercel env get DATABASE_URL production) npm run db:migrate
+# Get the production DATABASE_URL from Vercel
+vercel env pull .env.production
+
+# Run migrations
+npm run db:migrate
 ```
+
+See memory `migrations-not-run-on-deploy` for details.
 
 ---
 
@@ -255,7 +258,7 @@ CMD ["node", "server.js"]
 docker build -t ai-hvac-agent .
 docker run -p 3000:3000 \
   -e DATABASE_URL="..." \
-  -e OPENAI_API_KEY="..." \
+  -e ANTHROPIC_API_KEY="..." \
   ai-hvac-agent
 ```
 
@@ -268,24 +271,8 @@ npm run build
 # Start
 NODE_ENV=production \
 DATABASE_URL="..." \
-OPENAI_API_KEY="..." \
+ANTHROPIC_API_KEY="..." \
 npm start
-```
-
-### PM2 Process Manager
-
-```bash
-# Install PM2
-npm i -g pm2
-
-# Start
-pm2 start npm --name "ai-hvac-agent" -- start
-
-# Monitor
-pm2 monit
-
-# Logs
-pm2 logs ai-hvac-agent
 ```
 
 ---
@@ -326,11 +313,56 @@ curl -X POST https://your-domain.com/api/upload \
   -F "file=@test.jpg"
 ```
 
-### 5. Verify Health
+---
 
-```bash
-curl https://your-domain.com/api/health
+## Security Considerations
+
+### Widget Host Header Validation
+
+**CRITICAL:** If you self-host behind a reverse proxy, ensure the proxy validates the `Host` header. The widget loader derives `appOrigin` from `request.nextUrl.origin`, which relies on the `Host` header being trustworthy.
+
+For Vercel deployments, this is handled automatically. For self-hosted deployments behind nginx, Caddy, or similar proxies, ensure:
+
+```nginx
+# nginx example
+server {
+    server_name your-domain.com;
+    # Only accept this hostname
+    if ($host != "your-domain.com") { return 444; }
+}
 ```
+
+### CSRF Protection
+
+The application uses same-origin CSRF protection via `isSameOriginRequest()`. This requires:
+
+1. `NEXT_PUBLIC_APP_URL` to be set correctly
+2. Requests include a valid `Origin` header (browser requests do this automatically)
+3. For API clients (mobile apps, etc.), send an appropriate `Origin` header
+
+### Rate Limiting
+
+Current implementation uses in-memory storage. For production Vercel serverless deployments:
+
+- Rate limits reset on each serverless function cold start
+- A determined attacker could bypass limits by sending requests from different edge workers
+- Consider upgrading to Redis-backed rate limiting for production
+
+See docs/DEPLOYMENT.md > Scaling Considerations for Redis implementation example.
+
+### File Upload Security
+
+The upload endpoint includes multiple security layers:
+
+1. **Magic byte validation** - File content is verified against declared MIME type
+2. **Size validation** - Server-side 5MB limit enforced (not just client-side)
+3. **MIME type normalization** - Only `image/jpeg` and `image/png` allowed
+4. **Filename sanitization** - Dangerous characters removed
+5. **Secure storage keys** - UUID-based keys prevent path traversal
+
+### Environment Variable Validation
+
+The application validates all required environment variables at startup (via `src/instrumentation.ts`). Missing required variables will cause the application to fail fast with a clear error message.
 
 ---
 
@@ -338,16 +370,14 @@ curl https://your-domain.com/api/health
 
 ### OpenTelemetry (Built-in)
 
-The app includes OpenTelemetry instrumentation:
+The app includes OpenTelemetry instrumentation via `src/instrumentation.ts`:
 
 ```typescript
-// src/instrumentation.ts
 export function register() {
-  if (process.env.VERCEL) {
-    // Vercel OTeL integration
-    const { VercelOpenTelemetry } = require('@vercel/otel');
-    VercelOpenTelemetry();
-  }
+  validateEnvVars();  // Fail fast on missing config
+  registerOTel({
+    serviceName: 'ai-hvac-agent',
+  });
 }
 ```
 
@@ -377,6 +407,7 @@ Recommended alerting:
 - P95 latency > 3s
 - Token budget exhausted
 - Database connection failures
+- Missing required environment variables
 
 ---
 
@@ -389,7 +420,7 @@ Recommended alerting:
 
 ### Rate Limiting
 
-Current implementation uses in-memory storage. For production:
+Current implementation uses in-memory storage. For production, upgrade to Redis:
 
 ```typescript
 // Upgrade to Redis-backed rate limiting
@@ -430,20 +461,34 @@ Before production deployment:
 
 - [ ] All secrets in environment variables (not in code)
 - [ ] HTTPS enforced (redirect HTTP to HTTPS)
-- [ ] Security headers configured
+- [ ] Security headers configured (X-Frame-Options, X-XSS-Protection, Permissions-Policy)
 - [ ] Rate limiting enabled
 - [ ] Database connection string uses SSL
-- [ ] CSRF protection enabled
+- [ ] CSRF protection enabled (same-origin validation)
 - [ ] Input validation on all endpoints
-- [ ] File upload magic byte validation
-- [ ] JWT secrets are 32+ characters
+- [ ] File upload magic byte validation enabled
+- [ ] Session secrets are 32+ characters
 - [ ] CORS configured correctly
 - [ ] API keys rotated regularly
-- [ ] Dependency vulnerabilities addressed
+- [ ] Dependency vulnerabilities addressed (`npm audit`)
+- [ ] Host header validated (self-hosted deployments only)
 
 ---
 
 ## Troubleshooting
+
+### Application fails to start on missing env vars
+
+The application now validates required environment variables at startup. If you see:
+
+```
+Missing required environment variables:
+  - DATABASE_URL
+  - ANTHROPIC_API_KEY
+  ...
+```
+
+Set the missing variables in your deployment environment or `.env.local` for local development.
 
 ### Database Connection Errors
 
@@ -466,13 +511,9 @@ aws s3 ls \
   s3://$R2_BUCKET_NAME
 ```
 
-### AI Provider Errors
+### Attachment URLs are undefined
 
-```bash
-# Test OpenAI connection
-curl https://api.openai.com/v1/models \
-  -H "Authorization: Bearer $OPENAI_API_KEY"
-```
+If attachment URLs show as `undefined`, check that `R2_PUBLIC_URL` is set. The application validates this at startup.
 
 ### Build Failures
 
@@ -485,40 +526,10 @@ npm run build
 
 ---
 
-## Cost Estimation
-
-### Vercel (Hobby -> Pro)
-
-| Feature | Hobby | Pro |
-|---------|-------|-----|
-| Price | Free | $20/mo |
-| Bandwidth | 100GB | 1TB |
-| Build Minutes | 6000 | 10000 |
-| Serverless Function Execution | 100h | 1000h |
-
-### Neon Serverless
-
-- **Free Tier:** 3.x hours compute, 500MB storage
-- **Pro:** $19/mo for 193 hours compute
-
-### Cloudflare R2
-
-- **Free Tier:** 10GB storage, 10M read operations
-- **Paid:** $0.015/GB/month storage
-
-### OpenAI API
-
-- **GPT-4o-mini:** $0.150/1M input tokens, $0.600/1M output tokens
-- **GPT-4o:** $2.50/1M input tokens, $10.00/1M output tokens
-
-Estimated cost per 1,000 chats: $2-5 (depending on length)
-
----
-
 ## References
 
 - [Vercel Deployment Docs](https://vercel.com/docs)
 - [Neon Serverless](https://neon.tech/docs)
 - [Cloudflare R2](https://developers.cloudflare.com/r2/)
-- [OpenAI API](https://platform.openai.com/docs)
+- [Anthropic API](https://docs.anthropic.com/)
 - [Next.js Deployment](https://nextjs.org/docs/deployment)
