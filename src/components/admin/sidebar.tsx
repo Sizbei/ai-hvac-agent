@@ -51,7 +51,7 @@ const NAV_GROUPS: readonly NavGroup[] = [
   {
     heading: 'Operations',
     items: [
-      { label: 'Dashboard', href: '/admin', icon: LayoutDashboard, exact: true },
+      { label: 'Dashboard', href: '/admin/', icon: LayoutDashboard, exact: true },
       { label: 'Calendar', href: '/admin/calendar', icon: CalendarClock, badge: 'unscheduled' },
       { label: 'Dispatch', href: '/admin/dispatch', icon: CalendarRange },
       { label: 'Requests', href: '/admin/requests', icon: ClipboardList },
