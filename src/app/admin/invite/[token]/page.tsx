@@ -1,5 +1,6 @@
 import Link from 'next/link';
-import { Wind } from 'lucide-react';
+import { Suspense } from 'react';
+import { Loader2, Wind } from 'lucide-react';
 import {
   Card,
   CardContent,
@@ -25,7 +26,15 @@ interface PageProps {
  * The token never leaves the server except as the value already in the URL the
  * recipient was given; we pass it to the client form only to submit on accept.
  */
-export default async function InviteAcceptPage({ params }: PageProps) {
+export default function InviteAcceptPage({ params }: PageProps) {
+  return (
+    <Suspense fallback={<InviteAcceptLoading />}>
+      <InviteAcceptContent params={params} />
+    </Suspense>
+  );
+}
+
+async function InviteAcceptContent({ params }: PageProps) {
   const { token } = await params;
   const resolved = await resolveInviteByToken(token);
 
@@ -65,5 +74,17 @@ export default async function InviteAcceptPage({ params }: PageProps) {
       email={resolved.invite.email}
       role={resolved.invite.role}
     />
+  );
+}
+
+function InviteAcceptLoading() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background p-4">
+      <Card className="w-full max-w-sm">
+        <CardHeader className="space-y-1 text-center">
+          <Loader2 className="h-6 w-6 animate-spin mx-auto" />
+        </CardHeader>
+      </Card>
+    </div>
   );
 }

@@ -12,6 +12,7 @@ interface MessageBubbleProps {
 export function MessageBubble({ message, isLatest }: MessageBubbleProps) {
   const isUser = message.role === 'user';
   const reduceMotion = useReducedMotion();
+  const hasAttachments = message.attachments && message.attachments.length > 0;
 
   return (
     <motion.div
@@ -24,15 +25,41 @@ export function MessageBubble({ message, isLatest }: MessageBubbleProps) {
       className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}
     >
       <div
-        className={`max-w-[80%] px-4 py-2.5 shadow-sm ${
+        className={`max-w-[80%] shadow-sm ${
           isUser
             ? 'bg-primary text-primary-foreground rounded-2xl rounded-br-md'
             : 'bg-card border border-border rounded-2xl rounded-bl-md'
         }`}
       >
-        <p className="text-sm whitespace-pre-wrap break-words">
-          {message.content}
-        </p>
+        {/* Image Attachments */}
+        {hasAttachments && (
+          <div className="p-2 pt-3">
+            <div className="flex flex-col gap-2">
+              {message.attachments!.map((attachment) => (
+                <div
+                  key={attachment.id}
+                  className="rounded-lg overflow-hidden border border-border/20"
+                >
+                  <img
+                    src={attachment.url}
+                    alt={attachment.filename}
+                    className="w-full h-auto max-h-64 object-cover"
+                    loading="lazy"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Message Text */}
+        {message.content && (
+          <div className={`px-4 py-2.5 ${hasAttachments ? 'pt-2' : ''}`}>
+            <p className="text-sm whitespace-pre-wrap break-words">
+              {message.content}
+            </p>
+          </div>
+        )}
       </div>
     </motion.div>
   );

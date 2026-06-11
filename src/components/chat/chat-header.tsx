@@ -1,12 +1,13 @@
 'use client';
 
-import { PhoneForwarded, RotateCcw } from 'lucide-react';
+import { PhoneForwarded, RotateCcw, History } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { SessionState } from '@/lib/types/chat';
 
 interface ChatHeaderProps {
   readonly status: SessionState;
   readonly onEscalate: () => void;
+  readonly onShowHistory?: () => void;
   /** Start a fresh conversation (clears the transcript + session). Optional so
    * legacy consumers without a session hook can omit the control. */
   readonly onNewConversation?: () => void;
@@ -35,6 +36,7 @@ export function ChatHeader({
   status,
   onEscalate,
   onNewConversation,
+  onShowHistory,
 }: ChatHeaderProps) {
   return (
     <header className="sticky top-0 z-10 flex items-center justify-between border-b bg-background/80 backdrop-blur px-4 py-3">
@@ -51,6 +53,16 @@ export function ChatHeader({
         </div>
       </div>
       <div className="flex items-center gap-2">
+        {onShowHistory && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onShowHistory}
+            title="View conversation history"
+          >
+            <History className="size-3.5" data-icon="inline-start" />
+          </Button>
+        )}
         {onNewConversation && (
           <Button
             variant="ghost"

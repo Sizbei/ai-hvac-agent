@@ -4,6 +4,9 @@ interface RateLimitEntry {
 
 const store = new Map<string, RateLimitEntry>();
 
+// Memory ceiling to prevent unbounded growth under heavy load
+const MAX_STORE_ENTRIES = 10000;
+
 // Cleanup old entries every 5 minutes to prevent memory leak
 const CLEANUP_INTERVAL = 5 * 60 * 1000;
 let lastCleanup = Date.now();
@@ -12,6 +15,15 @@ function cleanup(windowMs: number): void {
   const now = Date.now();
   if (now - lastCleanup < CLEANUP_INTERVAL) return;
   lastCleanup = now;
+
+  // Enforce memory ceiling - evict oldest entries if we exceed limit
+  if (store.size > MAX_STORE_ENTRIES) {
+    const entries = Array.from(store.entries());
+    // Sort by oldest timestamp (first timestamp in each entry)
+    entries.sort((a, b) => a[1].timestamps[0] - b[1].timestamps[0]);
+    const toDelete = entries.slice(0, store.size - MAX_STORE_ENTRIES);
+    toDelete.forEach(([key]) => store.delete(key));
+  }
 
   const cutoff = now - windowMs;
   for (const [key, entry] of store.entries()) {

@@ -5,6 +5,7 @@ import {
   customerSessions,
   messages,
   organizationSettings,
+  attachments,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { successResponse, errorResponse } from "@/lib/api-response";
@@ -192,6 +193,19 @@ export async function GET(_request: NextRequest) {
       )
       .orderBy(messages.createdAt);
 
+    // Get attachments for this session, scoped to the session's own org.
+    const sessionAttachments = await db
+      .select()
+      .from(attachments)
+      .where(
+        withTenant(
+          attachments,
+          session.organizationId,
+          eq(attachments.sessionId, session.id),
+        ),
+      )
+      .orderBy(attachments.createdAt);
+
     return successResponse({
       sessionId: session.id,
       status: session.status,
@@ -205,6 +219,15 @@ export async function GET(_request: NextRequest) {
         role: m.role,
         content: m.content,
         createdAt: m.createdAt,
+      })),
+      // Attachments for this session, grouped by message ID
+      attachments: sessionAttachments.map((a) => ({
+        id: a.id,
+        messageId: a.messageId,
+        filename: a.filename,
+        mimeType: a.mimeType,
+        size: a.size,
+        url: `${process.env.R2_PUBLIC_URL}/${a.storageKey}`,
       })),
     });
   } catch (error) {

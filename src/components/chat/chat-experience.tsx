@@ -24,6 +24,7 @@ import { ConfirmationDialog } from '@/components/chat/confirmation-dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { cn } from '@/lib/utils';
+import { HistorySidebar } from '@/components/chat/history-sidebar';
 
 const ISSUE_SUGGESTIONS: readonly Suggestion[] = [
   { label: 'AC not cooling', message: 'My air conditioner is running but not cooling — it just blows warm air.' },
@@ -62,6 +63,8 @@ export function ChatExperience({
   const [isEscalating, setIsEscalating] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const [viewingPastSessionId, setViewingPastSessionId] = useState<string | null>(null);
 
   const containerClass = cn(
     'flex flex-col',
@@ -164,11 +167,23 @@ export function ChatExperience({
   }
 
   return (
-    <div className={containerClass}>
+    <>
+      <HistorySidebar
+        open={showHistory}
+        onOpenChange={setShowHistory}
+        onSelectSession={(sessionId) => {
+          setViewingPastSessionId(sessionId);
+          setShowHistory(false);
+        }}
+        customerId={null} // customerId is populated after extraction confirmation
+      />
+
+      <div className={containerClass}>
       <ChatHeader
         status={status}
         onEscalate={() => setShowEscalation(true)}
         onNewConversation={handleNewConversation}
+        onShowHistory={() => setShowHistory(true)}
       />
 
       <MessageList
@@ -223,7 +238,7 @@ export function ChatExperience({
         !isTerminal &&
         status !== 'extracting' && (
           <AddressAutocomplete
-            onSelect={(addr) => sendMessage(addr, { addressSelected: true })}
+            onSelect={(addr) => sendMessage(addr)}
             disabled={inputDisabled}
             placeholder="Start typing your service address…"
           />
@@ -275,5 +290,6 @@ export function ChatExperience({
         />
       )}
     </div>
+    </>
   );
 }

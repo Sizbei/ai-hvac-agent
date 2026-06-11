@@ -1,5 +1,8 @@
 import Link from 'next/link';
 import { Bricolage_Grotesque } from 'next/font/google';
+
+export const dynamic = 'force-dynamic';
+
 import {
   ArrowRight,
   Wind,
@@ -417,7 +420,7 @@ export default function Home() {
           </div>
 
           <p className="mt-8 border-t border-border/60 pt-6 text-xs text-muted-foreground">
-            &copy; {new Date().getFullYear()} Spears Services. AI intake demo.
+            &copy; 2026 Spears Services. AI intake demo.
           </p>
         </div>
       </footer>

@@ -112,9 +112,17 @@ function buildLoader(appOrigin: string): string {
     btn.style.background = c.primaryColor;
     btn.setAttribute("aria-label", "Open chat");
     btn.setAttribute("aria-expanded", "false");
+
+    // Safe SVG insertion using template to avoid innerHTML with user content
+    function setSvg(svgString) {
+      var template = document.createElement("template");
+      template.innerHTML = svgString;
+      btn.appendChild(template.content.firstChild.cloneNode(true));
+    }
+
     var ICON_CHAT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
     var ICON_CLOSE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';
-    btn.innerHTML = ICON_CHAT;
+    setSvg(ICON_CHAT);
 
     var iframe = null;
     var open = false;
@@ -132,7 +140,12 @@ function buildLoader(appOrigin: string): string {
       open = next;
       if (open) ensureIframe();
       panel.classList.toggle("open", open);
-      btn.innerHTML = open ? ICON_CLOSE : ICON_CHAT;
+
+      // Safe SVG update - clear and re-append
+      while (btn.firstChild && btn.firstChild.nodeType === 1 /* ELEMENT */) {
+        btn.removeChild(btn.firstChild);
+      }
+      setSvg(open ? ICON_CLOSE : ICON_CHAT);
       btn.setAttribute("aria-expanded", open ? "true" : "false");
       btn.setAttribute("aria-label", open ? "Close chat" : "Open chat");
     }

@@ -1022,3 +1022,34 @@ export const widgetKeys = pgTable(
     index("widget_keys_hash_idx").on(table.keyHash),
   ],
 );
+
+// 17. attachments — file attachments (photos, documents) uploaded by customers.
+// Display-only: customers upload once, attachments are shown in the chat transcript
+// and admin view. No versioning or editing. Multi-tenant scoped by organizationId
+// and linked to a session/message. The actual file is stored in R2/S3; this table
+// stores only metadata.
+export const attachments = pgTable(
+  "attachments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id),
+    sessionId: uuid("session_id")
+      .notNull()
+      .references(() => customerSessions.id),
+    messageId: uuid("message_id").references(() => messages.id),
+    filename: text("filename").notNull(),
+    mimeType: text("mime_type").notNull(),
+    size: integer("size").notNull(), // File size in bytes
+    storageKey: text("storage_key").notNull(), // R2/S3 path key
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("attachments_org_id_idx").on(table.organizationId),
+    index("attachments_session_id_idx").on(table.sessionId),
+    index("attachments_message_id_idx").on(table.messageId),
+  ],
+);

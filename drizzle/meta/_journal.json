@@ -211,6 +211,13 @@
       "when": 1781127647008,
       "tag": "0029_faulty_thaddeus_ross",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1781161640252,
+      "tag": "0030_high_argent",
+      "breakpoints": true
     }
   ]
 }

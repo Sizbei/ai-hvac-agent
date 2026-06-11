@@ -6,6 +6,15 @@ export interface ChatMessage {
   readonly role: 'user' | 'assistant';
   readonly content: string;
   readonly createdAt?: Date;
+  readonly attachments?: readonly MessageAttachment[];
+}
+
+export interface MessageAttachment {
+  readonly id: string;
+  readonly filename: string;
+  readonly mimeType: string;
+  readonly size: number;
+  readonly url: string;
 }
 
 export type { SessionState, ExtractionResult };
@@ -35,8 +44,14 @@ export interface ChatContainerProps {
   readonly status: SessionState;
   readonly isStreaming: boolean;
   readonly extraction: ExtractionResult | null;
-  readonly onSendMessage: (message: string) => void;
+  readonly onSendMessage: (message: string, attachments?: readonly PendingAttachment[]) => void;
   readonly onEscalate: () => void;
   readonly onConfirm: () => void;
   readonly inputDisabled?: boolean;
+}
+
+export interface PendingAttachment {
+  readonly file: File;
+  readonly preview: string;
+  readonly id: string;
 }

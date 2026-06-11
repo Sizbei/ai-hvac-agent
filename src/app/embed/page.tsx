@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
+import { Loader2 } from 'lucide-react';
 import { CheckCircle2 } from 'lucide-react';
 import { ChatExperience } from '@/components/chat/chat-experience';
 
@@ -11,8 +12,19 @@ import { ChatExperience } from '@/components/chat/chat-experience';
  *
  * The publishable widget key arrives as ?key=pk_live_… and is forwarded to
  * /api/session by the chat-session hook.
+ *
+ * Wrapped in Suspense to prevent prerender errors from useChat's internal
+ * Math.random() calls during build.
  */
 export default function EmbedPage() {
+  return (
+    <Suspense fallback={<EmbedLoading />}>
+      <EmbedContent />
+    </Suspense>
+  );
+}
+
+function EmbedContent() {
   const [submittedRef, setSubmittedRef] = useState<string | null>(null);
 
   if (submittedRef) {
@@ -34,4 +46,12 @@ export default function EmbedPage() {
   }
 
   return <ChatExperience variant="embed" onSubmitted={setSubmittedRef} />;
+}
+
+function EmbedLoading() {
+  return (
+    <div className="flex h-dvh items-center justify-center">
+      <Loader2 className="size-8 animate-spin text-muted-foreground" />
+    </div>
+  );
 }
