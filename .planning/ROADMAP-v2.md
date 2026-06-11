@@ -13,8 +13,8 @@
   - [ ] Add `skills` and `location` columns to technicians table.
   - [ ] Create an AI background worker that listens for new requests and assigns the best technician.
 
-## Phase 7: Deep Customization (CRM)
+## Phase 7: Deep Customization (CRM) ✅ DONE
 - **Goal**: Flexible CRM that Housecall Pro lacks.
 - **Tasks**:
-  - [ ] Add `custom_fields` JSONB column to `organizations` and `customers`.
-  - [ ] Dynamic forms based on organization configuration.
+  - [x] Add `custom_fields` JSONB column to `organizations` and `customers`.
+  - [x] Dynamic forms based on organization configuration.

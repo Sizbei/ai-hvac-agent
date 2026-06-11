@@ -12,7 +12,7 @@ import { customFieldTypeEnum, customFieldEntityTypeEnum } from "@/lib/db/schema"
 export type CustomFieldType = "text" | "textarea" | "select" | "multiselect" | "number" | "currency" | "date" | "checkbox";
 export type CustomFieldEntityType = "customer" | "service_request" | "both";
 
-export interface ValidationRules {
+export interface ValidationRules extends Record<string, unknown> {
   // For text/textarea
   minLength?: number;
   maxLength?: number;
@@ -64,6 +64,7 @@ export interface CreateFieldDefinitionInput {
 }
 
 export interface UpdateFieldDefinitionInput {
+  key?: string;
   label?: string;
   description?: string;
   entityType?: CustomFieldEntityType;
