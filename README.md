@@ -51,10 +51,11 @@ Built with **Next.js 16**, **Qwen** (via Alibaba DashScope, OpenAI-compatible),
   with rolling summaries for long ones), an **AI Insights** dashboard (deflection
   rate, funnel, feedback), and a customer CRM.
 - **Customer UX.** AI disclosure, intake progress stepper, suggested replies, 👍/👎
-  feedback, conversation resume across refresh, accessibility (aria-live,
-  reduced-motion), and one-tap human handoff.
+  feedback, conversation resume across refresh, collapsible history sidebar,
+  accessibility (aria-live, reduced-motion), and one-tap human handoff.
 - **Production-minded.** AES-256-GCM PII encryption, JWT admin auth, multi-tenant
-  query scoping, per-IP rate limiting, per-session token budget, and audit logging.
+  query scoping, per-IP rate limiting, per-session token budget, audit logging,
+  file upload with magic-byte validation, and secure cookie enforcement.
 
 ## Quick Start
 
@@ -80,10 +81,13 @@ at `/api/voice/incoming` to enable it (see [GUIDE.md](GUIDE.md#telephone-agent-v
 
 - **[GUIDE.md](GUIDE.md)** — product overview, customer + admin flows, env vars.
 - **[docs/INTAKE-FIELDS.md](docs/INTAKE-FIELDS.md)** — the full intake field model + triage playbook (ServiceTitan-based).
+- **[docs/API.md](docs/API.md)** — complete REST API reference (chat, admin, file upload, widget).
+- **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** — Vercel and self-hosted deployment guide.
+- **[docs/MIGRATION_GUIDE.md](docs/MIGRATION_GUIDE.md)** — feature comparison with Vercel chatbot.
+- **[docs/HVAC_IMPROVEMENTS.md](docs/HVAC_IMPROVEMENTS.md)** — HVAC-specific features and recommendations.
+- **[docs/SECURITY_AUDIT.md](docs/SECURITY_AUDIT.md)** — security audit findings and mitigations.
 - **`/docs.html`** — interactive docs (run the app, open http://localhost:3000/docs.html):
   searchable sidebar, light/dark mode, copy buttons, example workflow, architecture.
-- **[docs/](docs/)** — `INTAKE-FIELDS.md`, `COMMON-QUESTIONS-PLAN.md`,
-  `KNOWLEDGE-BASE-CATALOG.md`, `TOKEN-SAVINGS.md`, `CHATBOT-BENCHMARKS.md`.
 
 ## Scripts
 
@@ -92,19 +96,25 @@ at `/api/voice/incoming` to enable it (see [GUIDE.md](GUIDE.md#telephone-agent-v
 | `npm run dev` | Start the dev server |
 | `npm run build` | Production build |
 | `npm run lint` | ESLint |
-| `npx vitest run` | Run the test suite |
+| `npm run test:e2e` | Run E2E tests (Playwright) |
 | `npm run db:migrate` / `db:seed` / `db:studio` | Database migrate / seed / studio |
 
 ## Project Structure
 
 ```
 src/app/            App Router pages + API routes (chat, voice, session, admin)
-src/components/      Chat UI + admin dashboard components
+src/components/      Chat UI + admin dashboard components (history sidebar, file upload)
 src/lib/ai/         Intent router, knowledge base, extraction, guardrails,
-                     compaction, phone agent + voice-turn orchestration
+                     compaction, phone agent + voice-turn orchestration,
+                     multi-model provider (OpenAI, Ollama, fallbacks)
 src/lib/voice/      Twilio signature validation, TwiML builders, voice config
 src/lib/admin/      Tenant-scoped admin queries
 src/lib/db/         Drizzle schema, migrations, seed
+src/lib/streaming/  Streaming utilities and patterns (SSE, transport, hooks)
+src/lib/storage/    Cloudflare R2/S3 storage client for file uploads
+src/lib/rate-limit/ In-memory rate limiting with memory ceiling protection
+e2e/                Playwright E2E test suites (chat, admin, security, embed)
+.github/            CI/CD pipeline (type-check, lint, test, security audit)
 public/docs.html    Interactive documentation
 ```
 
