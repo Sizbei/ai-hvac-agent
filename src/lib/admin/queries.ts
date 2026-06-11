@@ -890,111 +890,39 @@ export async function getDashboardStats(
 ): Promise<DashboardStats> {
   const todayStart = startOfTodayUTC();
 
-  const [pendingResult] = await db
-    .select({ value: count() })
-    .from(serviceRequests)
-    .where(
-      withTenant(
-        serviceRequests,
-        organizationId,
-        eq(serviceRequests.status, "pending"),
-      ),
-    );
-
-  const [assignedTodayResult] = await db
-    .select({ value: count() })
-    .from(serviceRequests)
-    .where(
-      withTenant(
-        serviceRequests,
-        organizationId,
-        eq(serviceRequests.status, "assigned"),
-        gte(serviceRequests.updatedAt, todayStart),
-      ),
-    );
-
-  const [inProgressResult] = await db
-    .select({ value: count() })
-    .from(serviceRequests)
-    .where(
-      withTenant(
-        serviceRequests,
-        organizationId,
-        eq(serviceRequests.status, "in_progress"),
-      ),
-    );
-
-  const [completedTodayResult] = await db
-    .select({ value: count() })
-    .from(serviceRequests)
-    .where(
-      withTenant(
-        serviceRequests,
-        organizationId,
-        eq(serviceRequests.status, "completed"),
-        gte(serviceRequests.completedAt, todayStart),
-      ),
-    );
-
-  const [scheduledResult] = await db
-    .select({ value: count() })
-    .from(serviceRequests)
-    .where(
-      withTenant(
-        serviceRequests,
-        organizationId,
-        eq(serviceRequests.status, "scheduled"),
-      ),
-    );
-
-  const [onHoldResult] = await db
-    .select({ value: count() })
-    .from(serviceRequests)
-    .where(
-      withTenant(
-        serviceRequests,
-        organizationId,
-        eq(serviceRequests.status, "on_hold"),
-      ),
-    );
-
-  // Open = any non-terminal status. We flag emergencies still in flight so
-  // dispatch sees them even after assignment.
-  const [emergencyOpenResult] = await db
-    .select({ value: count() })
-    .from(serviceRequests)
-    .where(
-      withTenant(
-        serviceRequests,
-        organizationId,
-        eq(serviceRequests.urgency, "emergency"),
-        inArray(serviceRequests.status, [...OPEN_STATUSES]),
-      ),
-    );
-
-  const [afterHoursTodayResult] = await db
+  // Use a single aggregate query with CASE statements for all counts.
+  // This is much faster than 7 separate count queries (1 DB round-trip vs 7).
+  const [result] = await db
     .select({
-      value: count(),
+      pending: count(sql`CASE WHEN ${serviceRequests.status} = 'pending' THEN 1 END`),
+      assignedToday: count(
+        sql`CASE WHEN ${serviceRequests.status} = 'assigned' AND ${serviceRequests.updatedAt} >= ${todayStart} THEN 1 END`,
+      ),
+      inProgress: count(sql`CASE WHEN ${serviceRequests.status} = 'in_progress' THEN 1 END`),
+      completedToday: count(
+        sql`CASE WHEN ${serviceRequests.status} = 'completed' AND ${serviceRequests.completedAt} >= ${todayStart} THEN 1 END`,
+      ),
+      scheduled: count(sql`CASE WHEN ${serviceRequests.status} = 'scheduled' THEN 1 END`),
+      onHold: count(sql`CASE WHEN ${serviceRequests.status} = 'on_hold' THEN 1 END`),
+      emergencyOpen: count(
+        sql`CASE WHEN ${serviceRequests.urgency} = 'emergency' AND ${serviceRequests.status} IN ${sql`[${OPEN_STATUSES.join(',')}]`} THEN 1 END`,
+      ),
+      afterHoursToday: count(
+        sql`CASE WHEN ${serviceRequests.isAfterHours} = true AND ${serviceRequests.createdAt} >= ${todayStart} THEN 1 END`,
+      ),
     })
     .from(serviceRequests)
-    .where(
-      withTenant(
-        serviceRequests,
-        organizationId,
-        eq(serviceRequests.isAfterHours, true),
-        gte(serviceRequests.createdAt, todayStart),
-      ),
-    );
+    .where(withTenant(serviceRequests, organizationId));
 
   return {
-    pending: pendingResult?.value ?? 0,
-    assignedToday: assignedTodayResult?.value ?? 0,
-    inProgress: inProgressResult?.value ?? 0,
-    completedToday: completedTodayResult?.value ?? 0,
-    scheduled: scheduledResult?.value ?? 0,
-    onHold: onHoldResult?.value ?? 0,
-    emergencyOpen: emergencyOpenResult?.value ?? 0,
-    afterHoursToday: afterHoursTodayResult?.value ?? 0,
+    pending: result?.pending ?? 0,
+    assignedToday: result?.assignedToday ?? 0,
+    inProgress: result?.inProgress ?? 0,
+    completedToday: result?.completedToday ?? 0,
+    scheduled: result?.scheduled ?? 0,
+    onHold: result?.onHold ?? 0,
+    emergencyOpen: result?.emergencyOpen ?? 0,
+    afterHoursToday: result?.afterHoursToday ?? 0,
   };
 }
 
@@ -1060,70 +988,74 @@ function toDashboardRequest(row: DashboardRequestRow): DashboardRequest {
 export async function getDashboardOverview(
   organizationId: string,
 ): Promise<DashboardOverview> {
-  const stats = await getDashboardStats(organizationId);
-
   const todayStart = startOfTodayUTC();
   const tomorrowStart = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
 
-  // Today's schedule: any open request whose arrival window starts today.
-  const scheduleRows = await db
-    .select(dashboardRequestSelect)
-    .from(serviceRequests)
-    .leftJoin(users, eq(serviceRequests.assignedTo, users.id))
-    .where(
-      withTenant(
-        serviceRequests,
-        organizationId,
-        isNotNull(serviceRequests.arrivalWindowStart),
-        gte(serviceRequests.arrivalWindowStart, todayStart),
-        lt(serviceRequests.arrivalWindowStart, tomorrowStart),
-        inArray(serviceRequests.status, [...OPEN_STATUSES]),
-      ),
-    )
-    .orderBy(asc(serviceRequests.arrivalWindowStart))
-    .limit(DASHBOARD_LIST_LIMIT);
+  // Run all queries in parallel to reduce latency (1 DB round-trip vs 4 sequential).
+  // Neon's pgwire protocol supports multiple concurrent queries per connection.
+  const [stats, scheduleRows, attentionRows, followUpRows] = await Promise.all([
+    getDashboardStats(organizationId),
 
-  // Needs attention: open, unassigned, urgent or emergency — most urgent first.
-  const attentionRows = await db
-    .select(dashboardRequestSelect)
-    .from(serviceRequests)
-    .leftJoin(users, eq(serviceRequests.assignedTo, users.id))
-    .where(
-      withTenant(
-        serviceRequests,
-        organizationId,
-        // "Needs attention" = nobody is on it yet. A pending/scheduled request
-        // can still carry an assignee (reassign keeps assignedTo), so filter on
-        // assignedTo IS NULL, not status alone — otherwise assigned-but-urgent
-        // jobs leak into the queue.
-        isNull(serviceRequests.assignedTo),
-        inArray(serviceRequests.status, [...UNASSIGNED_OPEN_STATUSES]),
-        inArray(serviceRequests.urgency, ["emergency", "high"]),
-      ),
-    )
-    // Order by urgency rank (emergency before high), then oldest-first so the
-    // longest-waiting request floats to the top.
-    .orderBy(
-      sql`case ${serviceRequests.urgency} when 'emergency' then 0 else 1 end`,
-      asc(serviceRequests.createdAt),
-    )
-    .limit(DASHBOARD_LIST_LIMIT);
+    // Today's schedule: any open request whose arrival window starts today.
+    db
+      .select(dashboardRequestSelect)
+      .from(serviceRequests)
+      .leftJoin(users, eq(serviceRequests.assignedTo, users.id))
+      .where(
+        withTenant(
+          serviceRequests,
+          organizationId,
+          isNotNull(serviceRequests.arrivalWindowStart),
+          gte(serviceRequests.arrivalWindowStart, todayStart),
+          lt(serviceRequests.arrivalWindowStart, tomorrowStart),
+          inArray(serviceRequests.status, [...OPEN_STATUSES]),
+        ),
+      )
+      .orderBy(asc(serviceRequests.arrivalWindowStart))
+      .limit(DASHBOARD_LIST_LIMIT),
 
-  // On hold and waiting on a follow-up — earliest follow-up first.
-  const followUpRows = await db
-    .select(dashboardRequestSelect)
-    .from(serviceRequests)
-    .leftJoin(users, eq(serviceRequests.assignedTo, users.id))
-    .where(
-      withTenant(
-        serviceRequests,
-        organizationId,
-        eq(serviceRequests.status, "on_hold"),
-        isNotNull(serviceRequests.followUpDate),
-      ),
-    )
-    .orderBy(asc(serviceRequests.followUpDate))
-    .limit(DASHBOARD_LIST_LIMIT);
+    // Needs attention: open, unassigned, urgent or emergency — most urgent first.
+    db
+      .select(dashboardRequestSelect)
+      .from(serviceRequests)
+      .leftJoin(users, eq(serviceRequests.assignedTo, users.id))
+      .where(
+        withTenant(
+          serviceRequests,
+          organizationId,
+          // "Needs attention" = nobody is on it yet. A pending/scheduled request
+          // can still carry an assignee (reassign keeps assignedTo), so filter on
+          // assignedTo IS NULL, not status alone — otherwise assigned-but-urgent
+          // jobs leak into the queue.
+          isNull(serviceRequests.assignedTo),
+          inArray(serviceRequests.status, [...UNASSIGNED_OPEN_STATUSES]),
+          inArray(serviceRequests.urgency, ["emergency", "high"]),
+        ),
+      )
+      // Order by urgency rank (emergency before high), then oldest-first so the
+      // longest-waiting request floats to the top.
+      .orderBy(
+        sql`case ${serviceRequests.urgency} when 'emergency' then 0 else 1 end`,
+        asc(serviceRequests.createdAt),
+      )
+      .limit(DASHBOARD_LIST_LIMIT),
+
+    // On hold and waiting on a follow-up — earliest follow-up first.
+    db
+      .select(dashboardRequestSelect)
+      .from(serviceRequests)
+      .leftJoin(users, eq(serviceRequests.assignedTo, users.id))
+      .where(
+        withTenant(
+          serviceRequests,
+          organizationId,
+          eq(serviceRequests.status, "on_hold"),
+          isNotNull(serviceRequests.followUpDate),
+        ),
+      )
+      .orderBy(asc(serviceRequests.followUpDate))
+      .limit(DASHBOARD_LIST_LIMIT),
+  ]);
 
   return {
     stats,
