@@ -11,7 +11,7 @@ import {
   isNameComplete,
   isEmailComplete,
 } from '@/lib/ai/extraction-schema';
-import type { ChatMessage, ExtractionField, PendingAttachment } from '@/lib/types/chat';
+import type { ChatMessage, ExtractionField, PendingAttachment, UploadedAttachment } from '@/lib/types/chat';
 
 interface SessionData {
   readonly sessionId: string;
@@ -40,7 +40,7 @@ interface UseChatSessionReturn {
   readonly extractionFields: readonly ExtractionField[];
   readonly error: string | null;
   readonly isLoading: boolean;
-  readonly sendMessage: (text: string, attachments?: readonly PendingAttachment[]) => void;
+  readonly sendMessage: (text: string, attachments?: readonly UploadedAttachment[]) => void;
   readonly escalate: () => Promise<void>;
   readonly confirm: (data: ExtractionResult) => Promise<{ referenceNumber: string }>;
   /** Abandon the current session and start a fresh one (clears the transcript,
@@ -349,22 +349,21 @@ export function useChatSession(): UseChatSessionReturn {
 
   // Wrap sendMessage to accept plain text and optional attachments
   const sendMessage = useCallback(
-    (text: string, attachments?: readonly PendingAttachment[]): void => {
+    (text: string, attachments?: readonly UploadedAttachment[]): void => {
       if (isTerminalOrSubmitted(sessionStatus) || isStreaming || isLoading) {
         return;
       }
       setSessionError(null);
 
-      // Handle attachments by adding them as part of the message
-      // For now, we'll include attachment info in the message body
-      let messageText = text;
-      if (attachments && attachments.length > 0) {
-        const attachmentInfo = attachments.map((a) => `[Image: ${a.file.name}]`).join(' ');
-        messageText = text ? `${text}\n\n${attachmentInfo}` : attachmentInfo;
-      }
+      // Pass attachment IDs in the request body so the server can link them to the message
+      const attachmentIds = attachments?.map((a) => a.id) ?? [];
 
       aiSendMessage(
-        { text: messageText },
+        {
+          text,
+          // Pass attachment IDs in the body so the backend can link them
+          ...(attachmentIds.length > 0 && { attachments: attachmentIds }),
+        },
       );
     },
     [sessionStatus, isStreaming, isLoading, aiSendMessage],

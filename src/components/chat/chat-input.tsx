@@ -4,10 +4,10 @@ import { useState, useRef, useEffect, type FormEvent } from 'react';
 import { SendHorizontal, Paperclip, X, Image as ImageIcon } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import type { PendingAttachment } from '@/lib/types/chat';
+import type { PendingAttachment, UploadedAttachment } from '@/lib/types/chat';
 
 interface ChatInputProps {
-  readonly onSendMessage: (message: string, attachments?: readonly PendingAttachment[]) => void;
+  readonly onSendMessage: (message: string, attachments?: readonly UploadedAttachment[]) => void;
   readonly disabled?: boolean;
   readonly placeholder?: string;
 }
@@ -101,7 +101,8 @@ export function ChatInput({
     setIsUploading(true);
 
     try {
-      // Upload attachments if present
+      // Upload attachments if present and capture their IDs
+      let uploadedAttachments: UploadedAttachment[] = [];
       if (attachments.length > 0) {
         const uploadPromises = attachments.map(async (attachment) => {
           const formData = new FormData();
@@ -117,13 +118,14 @@ export function ChatInput({
             throw new Error(error.error || 'Failed to upload file');
           }
 
-          return await response.json();
+          const result = await response.json();
+          return result.data as UploadedAttachment;
         });
 
-        await Promise.all(uploadPromises);
+        uploadedAttachments = await Promise.all(uploadPromises);
       }
 
-      onSendMessage(trimmed, attachments);
+      onSendMessage(trimmed, uploadedAttachments);
 
       setValue('');
       setAttachments([]);

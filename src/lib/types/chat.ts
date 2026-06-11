@@ -44,7 +44,7 @@ export interface ChatContainerProps {
   readonly status: SessionState;
   readonly isStreaming: boolean;
   readonly extraction: ExtractionResult | null;
-  readonly onSendMessage: (message: string, attachments?: readonly PendingAttachment[]) => void;
+  readonly onSendMessage: (message: string, attachments?: readonly UploadedAttachment[]) => void;
   readonly onEscalate: () => void;
   readonly onConfirm: () => void;
   readonly inputDisabled?: boolean;
@@ -54,4 +54,13 @@ export interface PendingAttachment {
   readonly file: File;
   readonly preview: string;
   readonly id: string;
+}
+
+export interface UploadedAttachment {
+  readonly id: string;
+  readonly storageKey: string;
+  readonly url: string;
+  readonly filename: string;
+  readonly mimeType: string;
+  readonly size: number;
 }

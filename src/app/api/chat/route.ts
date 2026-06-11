@@ -7,6 +7,7 @@ import {
   customerSessions,
   messages,
   organizationSettings,
+  attachments,
 } from "@/lib/db/schema";
 import {
   resolveAfterHoursConfig,
@@ -507,6 +508,16 @@ export async function POST(request: NextRequest) {
       return errorResponse("Message is required", "INVALID_MESSAGE", 400);
     }
 
+    // Extract attachment IDs from the request body
+    const attachmentIds =
+      typeof body === "object" &&
+      body !== null &&
+      "attachments" in body &&
+      Array.isArray((body as Record<string, unknown>).attachments)
+        ? ((body as Record<string, unknown>).attachments as string[])
+            .filter((id): id is string => typeof id === "string")
+        : [];
+
     // Set by the client when the customer picked a result from the address
     // lookup (vs. typing free text). A structured selection is a complete,
     // valid address, so we trust it verbatim at the address step rather than
@@ -550,12 +561,49 @@ export async function POST(request: NextRequest) {
     }));
 
     // 6. Save user message
-    await db.insert(messages).values({
-      organizationId,
-      sessionId: session.id,
-      role: "user",
-      content: guardrailResult.sanitized,
-    });
+    const [userMessageRow] = await db
+      .insert(messages)
+      .values({
+        organizationId,
+        sessionId: session.id,
+        role: "user",
+        content: guardrailResult.sanitized,
+      })
+      .returning();
+
+    // Link uploaded attachments to this message
+    if (attachmentIds.length > 0 && userMessageRow) {
+      await db
+        .update(attachments)
+        .set({ messageId: userMessageRow.id })
+        .where(
+          and(
+            eq(attachments.sessionId, session.id),
+            // Only link attachments that belong to this session and are in the provided list
+            // Using a raw OR clause for the array of IDs
+          ),
+        );
+      // Update each attachment individually to link to the message
+      for (const attachmentId of attachmentIds) {
+        await db
+          .update(attachments)
+          .set({ messageId: userMessageRow.id })
+          .where(
+            and(
+              eq(attachments.id, attachmentId),
+              eq(attachments.sessionId, session.id),
+              eq(attachments.organizationId, organizationId),
+            ),
+          );
+      }
+      logger.info(
+        {
+          messageId: userMessageRow.id,
+          attachmentCount: attachmentIds.length,
+        },
+        "Attachments linked to user message",
+      );
+    }
 
     const newTurnCount = session.turnCount + 1;
     const nearTurnLimit = newTurnCount >= maxTurns;
