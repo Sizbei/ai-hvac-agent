@@ -5,6 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { NextRequest } from "next/server";
 import { POST } from "@/app/api/admin/integrations/fieldpulse/webhook/route";
 
 // Mock dependencies
@@ -31,7 +32,7 @@ describe("Fieldpulse Phase 5: Webhook Security", () => {
         organizationId: "different-org-456", // Attacker tries to spoof org
       };
 
-      const request = new Request("http://localhost:3000/api/admin/integrations/fieldpulse/webhook", {
+      const request = new NextRequest("http://localhost:3000/api/admin/integrations/fieldpulse/webhook", {
         method: "POST",
         body: JSON.stringify(maliciousPayload),
       });
@@ -80,7 +81,7 @@ describe("Fieldpulse Phase 5: Webhook Security", () => {
         jobId: "nonexistent-job",
       };
 
-      const request = new Request("http://localhost:3000/api/admin/integrations/fieldpulse/webhook", {
+      const request = new NextRequest("http://localhost:3000/api/admin/integrations/fieldpulse/webhook", {
         method: "POST",
         body: JSON.stringify(payload),
       });
@@ -117,7 +118,7 @@ describe("Fieldpulse Phase 5: Webhook Security", () => {
         jobId: mockJobId,
       };
 
-      const request = new Request("http://localhost:3000/api/admin/integrations/fieldpulse/webhook", {
+      const request = new NextRequest("http://localhost:3000/api/admin/integrations/fieldpulse/webhook", {
         method: "POST",
         body: JSON.stringify(payload),
       });
@@ -147,7 +148,7 @@ describe("Fieldpulse Phase 5: Webhook Security", () => {
         jobId: mockJobId,
       };
 
-      const request = new Request("http://localhost:3000/api/admin/integrations/fieldpulse/webhook", {
+      const request = new NextRequest("http://localhost:3000/api/admin/integrations/fieldpulse/webhook", {
         method: "POST",
         body: JSON.stringify(payload),
       });
@@ -206,7 +207,7 @@ describe("Fieldpulse Phase 5: Webhook Security", () => {
         jobId: mockJobId,
       };
 
-      const request = new Request("http://localhost:3000/api/admin/integrations/fieldpulse/webhook", {
+      const request = new NextRequest("http://localhost:3000/api/admin/integrations/fieldpulse/webhook", {
         method: "POST",
         body: JSON.stringify(payload),
       });
@@ -244,7 +245,7 @@ describe("Fieldpulse Phase 5: Webhook Security", () => {
 
       // Get the audit insert call
       const auditInsertCalls = db.insert.mock.calls.filter(
-        (call) => call[0]?.into === "audit_log"
+        (call: any) => call[0]?.into === "audit_log"
       );
 
       expect(auditInsertCalls.length).toBeGreaterThan(0);
@@ -269,7 +270,7 @@ describe("Fieldpulse Phase 5: Webhook Security", () => {
         jobId: mockJobId,
       };
 
-      const request = new Request("http://localhost:3000/api/admin/integrations/fieldpulse/webhook", {
+      const request = new NextRequest("http://localhost:3000/api/admin/integrations/fieldpulse/webhook", {
         method: "POST",
         body: JSON.stringify(payload),
       });
@@ -314,7 +315,7 @@ describe("Fieldpulse Phase 5: Webhook Security", () => {
         jobId: mockJobId,
       };
 
-      const request = new Request("http://localhost:3000/api/admin/integrations/fieldpulse/webhook", {
+      const request = new NextRequest("http://localhost:3000/api/admin/integrations/fieldpulse/webhook", {
         method: "POST",
         body: JSON.stringify(payload),
       });
@@ -347,7 +348,7 @@ describe("Fieldpulse Phase 5: Webhook Security", () => {
 
   describe("Generic error messages (no information leakage)", () => {
     it("should return generic error for invalid JSON", async () => {
-      const request = new Request("http://localhost:3000/api/admin/integrations/fieldpulse/webhook", {
+      const request = new NextRequest("http://localhost:3000/api/admin/integrations/fieldpulse/webhook", {
         method: "POST",
         body: "invalid json{{{",
       });
@@ -368,7 +369,7 @@ describe("Fieldpulse Phase 5: Webhook Security", () => {
         jobId: mockJobId,
       };
 
-      const request = new Request("http://localhost:3000/api/admin/integrations/fieldpulse/webhook", {
+      const request = new NextRequest("http://localhost:3000/api/admin/integrations/fieldpulse/webhook", {
         method: "POST",
         body: JSON.stringify(payload),
       });

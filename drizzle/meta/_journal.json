@@ -239,6 +239,20 @@
       "when": 1781518267000,
       "tag": "0033_fieldpulse",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1781518268000,
+      "tag": "0034_webhook_cleanup_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1781518269000,
+      "tag": "0035_fp_availability_sync",
+      "breakpoints": true
     }
   ]
 }

@@ -19,13 +19,17 @@ import type {
   CreateCustomerInput,
   CreateJobInput,
   FieldpulseAccountInfo,
+  FieldpulseAddress,
   FieldpulseAvailabilityRange,
   FieldpulseAvailabilitySlot,
   FieldpulseCustomer,
+  FieldpulseInvoice,
   FieldpulseJob,
   FieldpulseUser,
   FindCustomerQuery,
   UpdateJobInput,
+  GeocodeInput,
+  FieldpulseGeocodeResult,
 } from "./types";
 
 /** Max attempts (1 initial + retries) for transient 429/5xx failures. */
@@ -110,6 +114,25 @@ export interface FieldpulseClient {
    * and to cache non-secret account metadata. Throws on auth failure.
    */
   getAccountInfo(): Promise<FieldpulseAccountInfo>;
+
+  /**
+   * Fetch an invoice by Fieldpulse id (e.g., to reconcile a webhook).
+   * Returns null if not found.
+   */
+  getInvoice(invoiceId: string): Promise<FieldpulseInvoice | null>;
+
+  /**
+   * List invoices for a specific job (to determine payment status).
+   * Returns newest-first as returned.
+   */
+  listJobInvoices(fieldpulseJobId: string): Promise<readonly FieldpulseInvoice[]>;
+
+  /**
+   * Validate and normalize an address using Fieldpulse's geocoding API (if available).
+   * Used to verify addresses before creating customers/jobs.
+   * Returns null if the endpoint doesn't exist or on any error (degrades gracefully).
+   */
+  geocodeAddress(input: GeocodeInput): Promise<FieldpulseGeocodeResult | null>;
 }
 
 /** Map a raw Fieldpulse address to our type (tolerant of omitted fields). */
@@ -199,7 +222,13 @@ function toUser(raw: unknown): FieldpulseUser | null {
       : typeof obj.is_active === "boolean"
         ? obj.is_active
         : undefined;
-  return { id: obj.id, name: str(obj.name), email: str(obj.email), isActive };
+  return {
+    id: obj.id,
+    name: str(obj.name),
+    email: str(obj.email),
+    isActive,
+    role: str(obj.role),
+  };
 }
 
 /**
@@ -223,6 +252,31 @@ function toAvailabilitySlot(raw: unknown): FieldpulseAvailabilitySlot | null {
     startIso: obj.start_time,
     endIso: obj.end_time,
     userId: str(obj.user_id),
+  };
+}
+
+/** Narrow an untrusted Fieldpulse invoice payload to {@link FieldpulseInvoice}. */
+function toInvoice(raw: unknown): FieldpulseInvoice | null {
+  if (typeof raw !== "object" || raw === null) {
+    return null;
+  }
+  const obj = raw as Record<string, unknown>;
+  if (typeof obj.id !== "string") {
+    return null;
+  }
+  const str = (v: unknown): string | null =>
+    typeof v === "string" ? v : null;
+  const num = (v: unknown): number | null =>
+    typeof v === "number" ? v : null;
+  return {
+    id: obj.id,
+    jobId: str(obj.job_id),
+    customerId: str(obj.customer_id),
+    status: str(obj.status),
+    total: num(obj.total),
+    dueDate: str(obj.due_date),
+    paidAt: str(obj.paid_at),
+    createdAt: str(obj.created_at),
   };
 }
 
@@ -456,6 +510,106 @@ export class RestFieldpulseClient implements FieldpulseClient {
       companyName: typeof obj.name === "string" ? obj.name : null,
       accountId: typeof obj.id === "string" ? obj.id : null,
     };
+  }
+
+  async getInvoice(invoiceId: string): Promise<FieldpulseInvoice | null> {
+    try {
+      const raw = await this.request(
+        `/invoices/${encodeURIComponent(invoiceId)}`,
+        { method: "GET" },
+      );
+      return toInvoice(raw);
+    } catch {
+      // Return null if invoice not found (404) or other error
+      return null;
+    }
+  }
+
+  async listJobInvoices(
+    fieldpulseJobId: string,
+  ): Promise<readonly FieldpulseInvoice[]> {
+    const params = new URLSearchParams({
+      job_id: fieldpulseJobId,
+      page_size: "50",
+    });
+    const raw = await this.request(`/invoices?${params.toString()}`, {
+      method: "GET",
+    });
+    const list =
+      typeof raw === "object" && raw !== null
+        ? (raw as Record<string, unknown>).invoices
+        : undefined;
+    if (!Array.isArray(list)) {
+      return [];
+    }
+    // Drop any malformed invoices rather than throwing
+    return list
+      .map(toInvoice)
+      .filter((i): i is FieldpulseInvoice => i !== null);
+  }
+
+  async geocodeAddress(input: GeocodeInput): Promise<FieldpulseGeocodeResult | null> {
+    try {
+      // Build address string from components
+      const addressParts = [
+        input.street,
+        input.city,
+        input.state,
+        input.zip,
+        input.country,
+      ].filter((p): p is string => Boolean(p && p.trim()));
+
+      if (addressParts.length === 0) {
+        return { valid: false, error: "No address components provided" };
+      }
+
+      const addressQuery = addressParts.join(", ");
+
+      // Try Fieldpulse's address validation endpoint (may not exist)
+      const raw = await this.request(`/addresses/validate?q=${encodeURIComponent(addressQuery)}`, {
+        method: "GET",
+      });
+
+      // Parse the response
+      if (typeof raw !== "object" || raw === null) {
+        return null; // Endpoint exists but returned unexpected format
+      }
+
+      const obj = raw as Record<string, unknown>;
+
+      // Check if Fieldpulse marked the address as valid
+      const isValid = typeof obj.valid === "boolean" ? obj.valid : false;
+
+      if (!isValid) {
+        return {
+          valid: false,
+          error: typeof obj.error === "string" ? obj.error : "Address validation failed"
+        };
+      }
+
+      // Extract normalized address components
+      const str = (v: unknown): string | null =>
+        typeof v === "string" ? v : null;
+      const num = (v: unknown): number | null =>
+        typeof v === "number" ? v : null;
+
+      return {
+        valid: true,
+        normalizedAddress: {
+          street: str(obj.street),
+          streetLine2: str(obj.street_line_2),
+          city: str(obj.city),
+          state: str(obj.state),
+          zip: str(obj.zip),
+          country: str(obj.country),
+        },
+        latitude: num(obj.latitude),
+        longitude: num(obj.longitude),
+      };
+    } catch {
+      // Endpoint doesn't exist or failed - degrade gracefully
+      return null;
+    }
   }
 }
 

@@ -6,6 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { NextRequest } from "next/server";
 import { POST } from "@/app/api/admin/integrations/fieldpulse/connect/route";
 import { POST as DisconnectPOST } from "@/app/api/admin/integrations/fieldpulse/disconnect/route";
 import { GET } from "@/app/api/admin/integrations/fieldpulse/status/route";
@@ -55,7 +56,7 @@ describe("Fieldpulse Phase 1: Connection Flow", () => {
 
   describe("POST /api/admin/integrations/fieldpulse/connect", () => {
     it("should reject request without API key", async () => {
-      const request = new Request("http://localhost:3000/api/admin/integrations/fieldpulse/connect", {
+      const request = new NextRequest("http://localhost:3000/api/admin/integrations/fieldpulse/connect", {
         method: "POST",
         body: JSON.stringify({}),
       });
@@ -78,7 +79,7 @@ describe("Fieldpulse Phase 1: Connection Flow", () => {
     it("should validate API key with live probe before storing", async () => {
       // This test would mock the Fieldpulse client to return success
       // and verify the key is stored encrypted
-      const request = new Request("http://localhost:3000/api/admin/integrations/fieldpulse/connect", {
+      const request = new NextRequest("http://localhost:3000/api/admin/integrations/fieldpulse/connect", {
         method: "POST",
         body: JSON.stringify({ apiKey: mockApiKey }),
       });
@@ -98,7 +99,7 @@ describe("Fieldpulse Phase 1: Connection Flow", () => {
 
     it("should return 409 if already connected", async () => {
       // Test duplicate connection rejection
-      const request = new Request("http://localhost:3000/api/admin/integrations/fieldpulse/connect", {
+      const request = new NextRequest("http://localhost:3000/api/admin/integrations/fieldpulse/connect", {
         method: "POST",
         body: JSON.stringify({ apiKey: mockApiKey }),
       });
@@ -117,7 +118,7 @@ describe("Fieldpulse Phase 1: Connection Flow", () => {
 
   describe("POST /api/admin/integrations/fieldpulse/disconnect", () => {
     it("should clear credentials and set connected=false", async () => {
-      const request = new Request("http://localhost:3000/api/admin/integrations/fieldpulse/disconnect", {
+      const request = new NextRequest("http://localhost:3000/api/admin/integrations/fieldpulse/disconnect", {
         method: "POST",
       });
 
@@ -132,7 +133,7 @@ describe("Fieldpulse Phase 1: Connection Flow", () => {
     });
 
     it("should degrade gracefully if no connection exists", async () => {
-      const request = new Request("http://localhost:3000/api/admin/integrations/fieldpulse/disconnect", {
+      const request = new NextRequest("http://localhost:3000/api/admin/integrations/fieldpulse/disconnect", {
         method: "POST",
       });
 

@@ -1,17 +1,27 @@
 /**
  * POST /api/admin/integrations/fieldpulse/webhook
  *
- * Inbound Fieldpulse webhook endpoint for job status updates.
+ * Inbound Fieldpulse webhook endpoint for job status and invoice updates.
  *
- * Fieldpulse sends webhooks for job status changes (e.g., "completed", "cancelled").
+ * Fieldpulse sends webhooks for:
+ * - Job status changes (e.g., "completed", "cancelled")
+ * - Invoice events (e.g., "invoice.sent", "invoice.paid", "invoice.voided")
+ *
  * This endpoint verifies the webhook signature (if configured), records the event
- * for idempotency, and updates the corresponding service request status.
+ * for idempotency, and updates the corresponding service request status or invoice
+ * status.
  *
  * SECURITY FIXES (Phase 5):
  * - Organization ID is derived from fieldpulseJobId lookup, not trusted from payload
  * - Audit logging for all status changes
  * - Status-only update guard (no-op if status already matches)
  * - Proper error handling without information leakage
+ *
+ * INVOICE SYNC (Stage 7):
+ * - Invoice events update the invoiceStatus field on service requests
+ * - invoice.sent → "sent"
+ * - invoice.paid → "paid"
+ * - invoice.voided → "void"
  *
  * Rate-limited per org to prevent abuse. Returns 200 OK for duplicate events
  * (already processed) and 204 No Content for successful processing.
@@ -28,6 +38,12 @@ import { eq, and } from "drizzle-orm";
 import { logger } from "@/lib/logger";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { errorResponse } from "@/lib/api-response";
+import { syncInvoiceStatus } from "@/lib/integrations/fieldpulse/invoice-sync";
+import {
+  verifySignature,
+  getVerificationReason,
+  type SignatureVerificationResult,
+} from "@/lib/integrations/fieldpulse/webhook-signature";
 
 /**
  * Expected Fieldpulse webhook envelope (based on typical FSM patterns).
@@ -35,29 +51,30 @@ import { errorResponse } from "@/lib/api-response";
  */
 const webhookSchema = z.object({
   id: z.string(), // Event id for idempotency
-  eventType: z.string(), // e.g., "job.status_updated", "job.completed"
-  jobId: z.string(), // The Fieldpulse job id (REQUIRED for status sync)
+  eventType: z.string(), // e.g., "job.status_updated", "invoice.sent"
+  jobId: z.string().optional(), // The Fieldpulse job id (for job/invoice events)
+  invoiceId: z.string().optional(), // The invoice id (for invoice events)
   // NOTE: Fieldpulse may send additional fields (timestamp, payload, etc.)
   // that we can ignore for now. We DO NOT trust organizationId from the payload.
 });
 
 /**
- * Verify webhook signature (if Fieldpulse supports it).
+ * Verify webhook signature using HMAC-SHA256.
  *
- * TODO: Implement when Fieldpulse webhook signing is documented.
- * For now, we rely on:
- * - The unguessable webhook URL (UUID-based secret path)
- * - Rate limiting
- * - Idempotency via eventId
- * - Org derived from fieldpulseJobId lookup
+ * SECURITY BEHAVIOR:
+ * - If FIELDPULSE_WEBHOOK_SECRET is configured: signature is REQUIRED
+ * - If FIELDPULSE_WEBHOOK_SECRET is NOT configured: signature is OPTIONAL (dev mode)
+ *
+ * Expected signature format: x-fieldpulse-signature: sha256=<hex_signature>
+ *
+ * Returns a SignatureVerificationResult with valid flag and optional reason.
  */
 function verifyWebhookSignature(
-  _body: string,
-  _signature: string | null,
-  _secret: string | null,
-): boolean {
-  // Placeholder - returns true until Fieldpulse documents their signature format
-  return true;
+  body: string,
+  signature: string | null,
+  secret: string | null,
+): SignatureVerificationResult {
+  return verifySignature(body, signature, secret);
 }
 
 /**
@@ -126,29 +143,45 @@ export async function POST(request: NextRequest): Promise<Response> {
       return errorResponse("Invalid request", "INVALID_REQUEST", 400);
     }
 
-    const { id: eventId, eventType, jobId } = parsed.data;
+    const { id: eventId, eventType, jobId, invoiceId } = parsed.data;
+
+    // Determine event type: job status or invoice
+    const isInvoiceEvent = eventType.startsWith("invoice.");
 
     // SECURITY: Do NOT trust organizationId from webhook payload.
     // We'll derive it from the fieldpulseJobId lookup below.
-    // For rate limiting, use a fallback key until we have the org.
     let organizationId: string | null = null;
-    let tempRateLimitKey = `fieldpulse-webhook:unknown:${jobId}`;
 
-    // First, look up the service request to get the orgId (and current status)
-    const [requestRow] = await db
-      .select({
-        id: serviceRequests.id,
-        organizationId: serviceRequests.organizationId,
-        status: serviceRequests.status,
-        fieldpulseJobId: serviceRequests.fieldpulseJobId,
-      })
-      .from(serviceRequests)
-      .where(eq(serviceRequests.fieldpulseJobId, jobId));
+    // For invoice events, we may need to look up via invoiceId if jobId is missing
+    // For job events, we require jobId
+    if (!jobId && !isInvoiceEvent) {
+      logger.warn({ eventId, eventType }, "Fieldpulse webhook: missing jobId");
+      return errorResponse("Invalid request", "INVALID_REQUEST", 400);
+    }
+
+    // First, look up the service request to get the orgId
+    const requestRow = jobId
+      ? (
+          await db
+            .select({
+              id: serviceRequests.id,
+              organizationId: serviceRequests.organizationId,
+              status: serviceRequests.status,
+              invoiceStatus: serviceRequests.invoiceStatus,
+              fieldpulseJobId: serviceRequests.fieldpulseJobId,
+            })
+            .from(serviceRequests)
+            .where(eq(serviceRequests.fieldpulseJobId, jobId))
+        )[0]
+      : null;
 
     if (!requestRow) {
       // No matching request - either not synced or invalid jobId
       // Return 200 so Fieldpulse doesn't retry (idempotent)
-      logger.info({ eventId, jobId }, "Fieldpulse webhook: no matching request");
+      logger.info(
+        { eventId, eventType, jobId },
+        "Fieldpulse webhook: no matching request",
+      );
       return new Response(null, { status: 200 });
     }
 
@@ -167,12 +200,22 @@ export async function POST(request: NextRequest): Promise<Response> {
     // Verify signature if secret is configured
     const signature = request.headers.get("x-fieldpulse-signature");
     const secret = process.env.FIELDPULSE_WEBHOOK_SECRET ?? null;
-    if (!verifyWebhookSignature(rawBody, signature, secret)) {
+    const signatureResult = verifyWebhookSignature(rawBody, signature, secret);
+
+    if (!signatureResult.valid) {
       logger.warn(
-        { organizationId, eventId },
+        { organizationId, eventId, reason: signatureResult.reason },
         "Fieldpulse webhook signature verification failed",
       );
       return errorResponse("Invalid signature", "INVALID_SIGNATURE", 401);
+    }
+
+    // Log if signature verification is skipped (no secret configured)
+    if (signatureResult.reason === "no_secret_configured") {
+      logger.info(
+        { eventId, eventType },
+        "Fieldpulse webhook: signature verification skipped (no secret configured)",
+      );
     }
 
     // Idempotency check: record this event
@@ -182,7 +225,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         organizationId,
         eventId,
         eventType,
-        fieldpulseJobId: jobId,
+        fieldpulseJobId: jobId ?? null,
       })
       .onConflictDoNothing()
       .returning({ id: fieldpulseWebhookEvents.id });
@@ -196,7 +239,42 @@ export async function POST(request: NextRequest): Promise<Response> {
       return new Response(null, { status: 200 });
     }
 
-    // Derive the new status from the event type
+    // Handle invoice events
+    if (isInvoiceEvent) {
+      // SECURITY: Invoice events MUST include jobId to link to our service request
+      if (!jobId) {
+        logger.warn(
+          { eventId, eventType, invoiceId },
+          "Invoice event missing jobId - cannot sync without job reference",
+        );
+        return errorResponse("Invalid request", "INVALID_REQUEST", 400);
+      }
+
+      // Extract invoice status from event type
+      let invoiceStatus: string | null = null;
+      if (eventType === "invoice.sent") {
+        invoiceStatus = "sent";
+      } else if (eventType === "invoice.paid") {
+        invoiceStatus = "paid";
+      } else if (eventType === "invoice.voided") {
+        invoiceStatus = "void";
+      }
+
+      if (invoiceStatus) {
+        await syncInvoiceStatus(jobId, invoiceStatus, organizationId);
+        logger.info(
+          { eventId, eventType, jobId, invoiceStatus },
+          "Fieldpulse invoice webhook processed",
+        );
+        return new Response(null, { status: 204 });
+      }
+
+      // Unknown invoice event type - log but return 200 (don't retry)
+      logger.warn({ eventType }, "Unknown invoice event type");
+      return new Response(null, { status: 200 });
+    }
+
+    // Handle job status events
     const newStatus = mapFieldpulseStatusToRequestStatus(eventType);
 
     // SECURITY: Only update if status is different (no-op guard)
@@ -228,7 +306,6 @@ export async function POST(request: NextRequest): Promise<Response> {
     // Audit log for the status change (FORENSIC TRAIL)
     await db.insert(auditLog).values({
       organizationId,
-      serviceRequestId: requestRow.id,
       action: "status_updated",
       entity: "service_requests",
       entityId: requestRow.id,

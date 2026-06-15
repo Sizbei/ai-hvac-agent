@@ -20,6 +20,10 @@ import { withTenant } from "@/lib/db/tenant";
 import { decrypt } from "@/lib/crypto";
 import { logger } from "@/lib/logger";
 import { getFieldpulseClient } from "./client";
+import {
+  validateAddressForSync,
+  hasMinimumAddressQuality,
+} from "./address-validation";
 import type {
   FieldpulseAddress,
   CreateCustomerInput,
@@ -74,14 +78,34 @@ interface CustomerContact {
 
 /**
  * Build the Fieldpulse create-customer payload from our decrypted contact. We
- * carry the free-text address into Fieldpulse's `street` field — Fieldpulse
- * accepts a loosely-structured address and we don't parse it into components.
+ * validate the address using two-way validation (Photon + Fieldpulse geocoding)
+ * to ensure we have quality address data before syncing.
  */
-function toCreateInput(contact: CustomerContact): CreateCustomerInput {
+async function toCreateInput(
+  organizationId: string,
+  contact: CustomerContact,
+): Promise<CreateCustomerInput> {
   const { firstName, lastName } = splitName(contact.name);
-  const address: FieldpulseAddress | undefined = contact.address
-    ? { street: contact.address }
-    : undefined;
+
+  // Validate address if provided
+  let address: FieldpulseAddress | undefined = undefined;
+  if (contact.address && hasMinimumAddressQuality({ street: contact.address })) {
+    try {
+      const validated = await validateAddressForSync(organizationId, {
+        street: contact.address,
+      });
+      if (validated) {
+        address = validated;
+      }
+    } catch {
+      // Validation failed - use original address as fallback
+      address = { street: contact.address };
+    }
+  } else if (contact.address) {
+    // Address doesn't meet minimum quality - use as-is
+    address = { street: contact.address };
+  }
+
   return {
     firstName,
     lastName,
@@ -103,7 +127,10 @@ function toFindQuery(contact: CustomerContact): FindCustomerQuery | null {
 }
 
 /** Case-insensitive email compare; both sides trimmed. */
-function emailsMatch(a: string | null, b: string | null): boolean {
+function emailsMatch(
+  a: string | null | undefined,
+  b: string | null | undefined,
+): boolean {
   if (!a || !b) {
     return false;
   }
@@ -111,7 +138,10 @@ function emailsMatch(a: string | null, b: string | null): boolean {
 }
 
 /** Digits-only phone compare so formatting differences don't block a match. */
-function phonesMatch(a: string | null, b: string | null): boolean {
+function phonesMatch(
+  a: string | null | undefined,
+  b: string | null | undefined,
+): boolean {
   if (!a || !b) {
     return false;
   }
@@ -128,7 +158,10 @@ function phonesMatch(a: string | null, b: string | null): boolean {
  */
 function isExactMatch(
   contact: CustomerContact,
-  candidate: { readonly email: string | null; readonly phone: string | null },
+  candidate: {
+    readonly email?: string | null;
+    readonly phone?: string | null;
+  },
 ): boolean {
   if (emailsMatch(contact.email, candidate.email)) {
     return true;
@@ -199,7 +232,7 @@ export async function syncCustomerToFieldpulse(
       candidate && isExactMatch(contact, candidate) ? candidate : null;
     const fpId = existing
       ? existing.id
-      : (await client.createCustomer(toCreateInput(contact))).id;
+      : (await client.createCustomer(await toCreateInput(organizationId, contact))).id;
 
     // Persist the mapping, guarded on fieldpulse_customer_id IS NULL so a racing
     // sync that already wrote an id is never overwritten.

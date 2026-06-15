@@ -1,0 +1,163 @@
+/**
+ * INVOICE SYNC: track Fieldpulse invoice status on our service requests.
+ *
+ * Mirrors housecall-pro invoice pattern: Fieldpulse sends invoice webhooks
+ * (invoice.sent, invoice.paid, invoice.voided) and we update the request's
+ * invoiceStatus column so admins can see billing state without leaving our
+ * system.
+ *
+ * DEGRADE-SAFE: webhook failures are logged and never block the invoice in
+ * Fieldpulse. Idempotent via fieldpulseWebhookEvents table.
+ */
+import { eq, and } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { serviceRequests } from "@/lib/db/schema";
+import { fieldpulseWebhookEvents } from "@/lib/db/schema";
+import { logger } from "@/lib/logger";
+import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
+import { errorResponse } from "@/lib/api-response";
+import type { NextRequest } from "next/server";
+
+/**
+ * Expected invoice webhook envelope from Fieldpulse.
+ */
+const invoiceWebhookSchema = {
+  id: "string", // Event id for idempotency
+  eventType: "string", // invoice.sent, invoice.paid, invoice.voided
+  jobId: "string", // The Fieldpulse job id
+  // May include invoice number, amount, etc.
+};
+
+/**
+ * Map Fieldpulse invoice event types to our invoice status enum.
+ */
+function mapInvoiceEventToStatus(
+  eventType: string,
+): "none" | "sent" | "paid" | "void" {
+  const normalized = eventType.toLowerCase();
+  switch (normalized) {
+    case "invoice.sent":
+    case "invoice_created":
+    case "invoice_sent":
+      return "sent";
+    case "invoice.paid":
+    case "invoice_paid":
+    case "payment_received":
+      return "paid";
+    case "invoice.voided":
+    case "invoice_void":
+    case "invoice_cancelled":
+      return "void";
+    default:
+      logger.warn({ eventType }, "Unknown Fieldpulse invoice event type");
+      return "none";
+  }
+}
+
+/**
+ * POST /api/admin/integrations/fieldpulse/invoice-webhook
+ *
+ * Separate endpoint for invoice webhooks (different from job status webhooks).
+ * Uses the same idempotency pattern and org derivation via jobId lookup.
+ */
+export async function POST(request: NextRequest): Promise<Response> {
+  try {
+    const rawBody = await request.text();
+    let body: unknown;
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      return errorResponse("Invalid request", "INVALID_REQUEST", 400);
+    }
+
+    // Basic validation (in production, use zod schema)
+    if (
+      typeof body !== "object" ||
+      body === null ||
+      !("id" in body) ||
+      !("eventType" in body) ||
+      !("jobId" in body)
+    ) {
+      return errorResponse("Invalid request", "INVALID_REQUEST", 400);
+    }
+
+    const { id: eventId, eventType, jobId } = body as {
+      id: string;
+      eventType: string;
+      jobId: string;
+    };
+
+    // Look up the service request to get orgId
+    const [requestRow] = await db
+      .select({
+        id: serviceRequests.id,
+        organizationId: serviceRequests.organizationId,
+        invoiceStatus: serviceRequests.invoiceStatus,
+      })
+      .from(serviceRequests)
+      .where(eq(serviceRequests.fieldpulseJobId, jobId));
+
+    if (!requestRow) {
+      logger.info({ eventId, jobId }, "Fieldpulse invoice webhook: no matching request");
+      return new Response(null, { status: 200 }); // Don't retry
+    }
+
+    const organizationId = requestRow.organizationId;
+
+    // Rate limit per org
+    const rateCheck = slidingWindow(
+      `fieldpulse-invoice:${organizationId}`,
+      RATE_LIMITS.webhook.maxRequests,
+      RATE_LIMITS.webhook.windowMs,
+    );
+    if (!rateCheck.allowed) {
+      return errorResponse("Too many requests", "RATE_LIMITED", 429);
+    }
+
+    // Idempotency check
+    const inserted = await db
+      .insert(fieldpulseWebhookEvents)
+      .values({
+        organizationId,
+        eventId,
+        eventType,
+        fieldpulseJobId: jobId,
+      })
+      .onConflictDoNothing()
+      .returning({ id: fieldpulseWebhookEvents.id });
+
+    if (inserted.length === 0) {
+      logger.info({ eventId }, "Fieldpulse invoice webhook: already processed");
+      return new Response(null, { status: 200 });
+    }
+
+    // Map event to invoice status
+    const newStatus = mapInvoiceEventToStatus(eventType);
+
+    // Only update if status is changing
+    if (requestRow.invoiceStatus !== newStatus) {
+      await db
+        .update(serviceRequests)
+        .set({
+          invoiceStatus: newStatus,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(serviceRequests.id, requestRow.id),
+            eq(serviceRequests.invoiceStatus, requestRow.invoiceStatus),
+          ),
+        );
+
+      logger.info(
+        { eventId, eventType, jobId, newStatus },
+        "Fieldpulse invoice webhook: updated invoice status",
+      );
+    }
+
+    return new Response(null, { status: 204 });
+  } catch (error: unknown) {
+    logger.error({ error }, "Failed to process Fieldpulse invoice webhook");
+    return errorResponse("Internal server error", "INTERNAL_ERROR", 500);
+  }
+}

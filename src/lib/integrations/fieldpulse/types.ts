@@ -44,6 +44,7 @@ export interface FieldpulseUser {
   readonly name?: string | null;
   readonly email?: string | null;
   readonly isActive?: boolean | null;
+  readonly role?: string | null; // e.g. "technician" — used to filter the roster
 }
 
 /** A Fieldpulse team (for grouping technicians). */
@@ -103,4 +104,46 @@ export interface FieldpulseAvailabilitySlot {
   readonly startIso: string;
   readonly endIso: string;
   readonly userId?: string; // The technician/user this slot belongs to
+}
+
+/** A Fieldpulse invoice (their "Invoice" resource). */
+export interface FieldpulseInvoice {
+  readonly id: string;
+  readonly jobId?: string | null; // The associated job id
+  readonly customerId?: string | null;
+  readonly status?: string | null; // "sent", "paid", "void", etc.
+  readonly total?: number | null; // Invoice amount in cents
+  readonly dueDate?: string | null; // ISO date
+  readonly paidAt?: string | null; // ISO datetime when paid
+  readonly createdAt?: string | null; // ISO datetime
+}
+
+/** Invoice status values from Fieldpulse (adjusted per actual docs). */
+export type FieldpulseInvoiceStatus = "draft" | "sent" | "viewed" | "paid" | "void" | "overdue";
+
+/** Invoice webhook event type. */
+export interface FieldpulseInvoiceEvent {
+  readonly id: string; // Event id for idempotency
+  readonly eventType: "invoice.sent" | "invoice.paid" | "invoice.voided" | "invoice.updated";
+  readonly invoiceId: string;
+  readonly jobId?: string | null; // May be present to link to a job
+  readonly invoice?: FieldpulseInvoice | null; // Full invoice payload if provided
+}
+
+/** Geocoding result from Fieldpulse (if they provide address validation). */
+export interface FieldpulseGeocodeResult {
+  readonly valid: boolean;
+  readonly normalizedAddress?: FieldpulseAddress | null;
+  readonly latitude?: number | null;
+  readonly longitude?: number | null;
+  readonly error?: string | null;
+}
+
+/** Input to validate an address against Fieldpulse. */
+export interface GeocodeInput {
+  readonly street?: string | null;
+  readonly city?: string | null;
+  readonly state?: string | null;
+  readonly zip?: string | null;
+  readonly country?: string | null;
 }

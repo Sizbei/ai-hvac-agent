@@ -34,7 +34,7 @@ function isFieldpulseTechnician(user: FieldpulseUser): boolean {
  * Normalize email to lowercase for case-insensitive matching.
  * Fieldpulse may return "John@Doe.com" while we store "john@doe.com".
  */
-function normalizeEmail(email: string | null): string | null {
+function normalizeEmail(email: string | null | undefined): string | null {
   return email ? email.trim().toLowerCase() : null;
 }
 

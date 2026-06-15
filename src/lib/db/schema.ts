@@ -177,6 +177,15 @@ export const invoiceStatusEnum = pgEnum("invoice_status", [
   "void",
 ]);
 
+// Availability sync status from Fieldpulse FSM.
+// Tracks the state of the background job that syncs technician availability.
+export const availabilitySyncStatusEnum = pgEnum("availability_sync_status", [
+  "pending",
+  "in_progress",
+  "completed",
+  "failed",
+]);
+
 // 1. organizations
 export const organizations = pgTable("organizations", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -993,6 +1002,19 @@ export const fieldpulseConnections = pgTable(
     // Non-secret account metadata cache (company name, account id) — display only.
     accountInfo: jsonb("account_info"),
     connected: boolean("connected").notNull().default(false),
+    // Stage 9: Availability sync tracking. Timestamp of last successful sync
+    // (null = never synced). Used for monitoring and troubleshooting.
+    lastAvailabilitySyncAt: timestamp("last_availability_sync_at", {
+      withTimezone: true,
+    }),
+    // Stage 9: Current availability sync status. Used for admin UI display
+    // and to prevent concurrent syncs.
+    availabilitySyncStatus: availabilitySyncStatusEnum(
+      "availability_sync_status",
+    ).notNull().default("pending"),
+    // Stage 9: Error message from last failed sync. Null when last sync succeeded
+    // or never ran. Used for troubleshooting in the admin UI.
+    lastSyncError: text("last_sync_error"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -1004,6 +1026,10 @@ export const fieldpulseConnections = pgTable(
     index("fieldpulse_connections_org_id_idx").on(table.organizationId),
     // One Fieldpulse connection per organization.
     uniqueIndex("fieldpulse_connections_org_unique").on(table.organizationId),
+    // Stage 9: Index for filtering active connections by sync status (admin UI).
+    index("fieldpulse_connections_sync_status_idx").on(
+      table.availabilitySyncStatus,
+    ).where(sql`${table.connected} = true`),
   ],
 );
 
