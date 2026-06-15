@@ -24,6 +24,7 @@ import { ConversationLimitsPanel } from '@/components/admin/settings/conversatio
 import { AfterHoursPanel } from '@/components/admin/settings/after-hours-panel';
 import { GoogleCalendarPanel } from '@/components/admin/settings/google-calendar-panel';
 import { HousecallProPanel } from '@/components/admin/settings/housecall-pro-panel';
+import { FieldpulsePanel } from '@/components/admin/settings/fieldpulse-panel';
 
 export default function SettingsPage() {
   const settings = useOrgSettings();
@@ -125,6 +126,7 @@ export default function SettingsPage() {
           <TabsContent value="integrations" className="mt-6 space-y-6">
             <GoogleCalendarPanel />
             <HousecallProPanel />
+            <FieldpulsePanel />
           </TabsContent>
         </Tabs>
       )}

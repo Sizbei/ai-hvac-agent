@@ -432,6 +432,12 @@ export const serviceRequests = pgTable(
     // for the audit trail. Plaintext (HCP's public resource id, not a secret).
     // (Stage 3 of the HCP integration.)
     hcpJobId: text("hcp_job_id"),
+    // Fieldpulse job id this request maps to, once pushed. NULL until the org is
+    // Fieldpulse-connected and a successful create-job has mirrored the booking to
+    // Fieldpulse. Set once and treated idempotently: a re-push of an already-mapped
+    // request UPDATEs the existing Fieldpulse job (reschedule/reassign) instead of
+    // creating a duplicate. Plaintext (Fieldpulse's public resource id, not a secret).
+    fieldpulseJobId: text("fieldpulse_job_id"),
     // Invoice / payment status mirrored from HCP invoice.* webhooks, linked to
     // this request via hcpJobId. Defaults to 'none' (no invoice activity yet);
     // an invoice.sent/paid/voided event updates it so admins can see whether a
@@ -544,6 +550,11 @@ export const customers = pgTable(
     // customer to HCP. Set once and treated as idempotent: a re-sync of an
     // already-mapped customer is a no-op. (Stage 2 of the HCP integration.)
     hcpCustomerId: text("hcp_customer_id"),
+    // Fieldpulse customer id this row maps to, once synced. NULL until the org is
+    // Fieldpulse-connected and a successful find-or-create has mirrored the
+    // customer to Fieldpulse. Set once and treated as idempotent: a re-sync of an
+    // already-mapped customer is a no-op.
+    fieldpulseCustomerId: text("fieldpulse_customer_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -960,6 +971,77 @@ export const housecallProConnections = pgTable(
 // processed" — so a redelivery never applies a second status update. We persist
 // only NON-secret metadata (the HCP event id + event type + the job id it
 // referenced); never the raw payload or any secret. (Stage 5.)
+// 16c. fieldpulse_connections — Per-org Fieldpulse API credentials.
+// Mirrors housecall_pro_connections: stores the encrypted API key, webhook secret,
+// and non-secret account metadata. One connection per organization.
+export const fieldpulseConnections = pgTable(
+  "fieldpulse_connections",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id),
+    // AES-256-GCM ciphertext of the Fieldpulse API key. Never null while connected;
+    // cleared (and connected=false) on disconnect.
+    apiKeyEncrypted: text("api_key_encrypted"),
+    // AES-256-GCM ciphertext of the per-org Fieldpulse WEBHOOK signing secret (if
+    // Fieldpulse supports webhook signing). Used to verify inbound job-status
+    // webhooks. Optional: when null the env-level FIELDPULSE_WEBHOOK_SECRET is
+    // used instead, and when neither is present the webhook endpoint rejects
+    // everything (fail closed). Never logged.
+    webhookSecretEncrypted: text("webhook_secret_encrypted"),
+    // Non-secret account metadata cache (company name, account id) — display only.
+    accountInfo: jsonb("account_info"),
+    connected: boolean("connected").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("fieldpulse_connections_org_id_idx").on(table.organizationId),
+    // One Fieldpulse connection per organization.
+    uniqueIndex("fieldpulse_connections_org_unique").on(table.organizationId),
+  ],
+);
+
+// 16d. fieldpulse_webhook_events — IDEMPOTENCY ledger for inbound Fieldpulse webhooks.
+// Fieldpulse retries webhook delivery, so the same event id can arrive more than once.
+// We record each processed event id; the unique (org, event_id) index lets the
+// handler insert-on-conflict-do-nothing and treat a zero-row insert as "already
+// processed" — so a redelivery never applies a second status update. We persist
+// only NON-secret metadata (the Fieldpulse event id + event type + the job id it
+// referenced); never the raw payload or any secret.
+export const fieldpulseWebhookEvents = pgTable(
+  "fieldpulse_webhook_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id),
+    // Fieldpulse's event id (the `id` field on the webhook envelope). Deduped per org.
+    eventId: text("event_id").notNull(),
+    // Fieldpulse event type, e.g. "job.status_updated" — stored for the audit trail only.
+    eventType: text("event_type").notNull(),
+    // The Fieldpulse job id the event referenced (may be null for non-job events we
+    // still record as seen). Plaintext — Fieldpulse's public resource id, not a secret.
+    fieldpulseJobId: text("fieldpulse_job_id"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("fieldpulse_webhook_events_org_id_idx").on(table.organizationId),
+    // One event per org per Fieldpulse event id — idempotent.
+    uniqueIndex("fieldpulse_webhook_events_org_event_unique").on(
+      table.organizationId,
+      table.eventId,
+    ),
+  ],
+);
+
 export const hcpWebhookEvents = pgTable(
   "hcp_webhook_events",
   {
