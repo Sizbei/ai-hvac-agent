@@ -88,6 +88,9 @@ export const RATE_LIMITS = {
   // a 30s timer. 60/min/user comfortably covers a few open tabs while still
   // capping a stuck/re-mounting client.
   adminRead: { maxRequests: 60, windowMs: 60_000 },
+  // Webhook endpoints (Fieldpulse, Housecall Pro, etc.) — higher limit since
+  // they're server-to-server and events can burst.
+  webhook: { maxRequests: 200, windowMs: 60_000 },
 } as const;
 
 // Reset store (for testing)

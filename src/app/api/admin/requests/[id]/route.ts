@@ -19,6 +19,7 @@ import {
   cancelFieldpulseJob,
 } from "@/lib/integrations/fieldpulse/job-sync";
 import { syncJobNoteToHcp } from "@/lib/integrations/housecall-pro/note-sync";
+import { syncNoteToFieldpulse } from "@/lib/integrations/fieldpulse/note-sync";
 import {
   MANUAL_TARGET_STATUSES,
   HOLD_REASONS,
@@ -324,13 +325,16 @@ export async function POST(
       details: JSON.stringify({ noteId: result.note.id }),
     });
 
-    // Mirror the dispatcher note onto the request's HCP job so the field tech
-    // sees it. Background-only (after()) so a slow/down HCP can never block or
-    // fail adding a note; degrade-safe + no-ops when the org isn't connected or
-    // the request isn't in HCP yet. We push the validated note CONTENT (not the
-    // note id) — it's the text the tech needs.
+    // Mirror the dispatcher note onto the request's FSM jobs (HCP + Fieldpulse)
+    // so the field tech sees it. Background-only (after()) so a slow/down FSM
+    // can never block or fail adding a note; degrade-safe + no-ops when the org
+    // isn't connected or the request isn't in the FSM yet. We push the validated
+    // note CONTENT (not the note id) — it's the text the tech needs.
     after(() =>
       syncJobNoteToHcp(session.organizationId, id, parsed.data.content),
+    );
+    after(() =>
+      syncNoteToFieldpulse(session.organizationId, id, parsed.data.content),
     );
 
     return successResponse(result.note, 201);
