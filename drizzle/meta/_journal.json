@@ -218,6 +218,27 @@
       "when": 1781161640252,
       "tag": "0030_high_argent",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1781496092000,
+      "tag": "0031_sensible_amos",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1781496093000,
+      "tag": "0032_ghost_csr",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1781518267000,
+      "tag": "0033_fieldpulse",
+      "breakpoints": true
     }
   ]
 }

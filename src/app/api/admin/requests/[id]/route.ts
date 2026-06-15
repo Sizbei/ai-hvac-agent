@@ -14,6 +14,10 @@ import {
   pushJobToHcp,
   cancelHcpJob,
 } from "@/lib/integrations/housecall-pro/job-sync";
+import {
+  pushJobToFieldpulse,
+  cancelFieldpulseJob,
+} from "@/lib/integrations/fieldpulse/job-sync";
 import { syncJobNoteToHcp } from "@/lib/integrations/housecall-pro/note-sync";
 import {
   MANUAL_TARGET_STATUSES,
@@ -245,14 +249,17 @@ export async function PATCH(
       after(() => syncRequestToCalendar(session.organizationId, id));
     }
 
-    // Mirror the same change into Housecall Pro (never blocks; no-ops when the
-    // org isn't connected). A cancellation CANCELS the HCP job; a (re)schedule
-    // UPDATEs it (pushJobToHcp is idempotent — update when already mapped).
-    // Cancel wins if both somehow apply in one PATCH, matching the calendar.
+    // Mirror the same change into FSM integrations (HCP + Fieldpulse) — never
+    // blocks; no-ops when the org isn't connected. A cancellation CANCELS the
+    // FSM job; a (re)schedule UPDATEs it (each push*Job function is idempotent
+    // — update when already mapped). Cancel wins if both somehow apply in one
+    // PATCH, matching the calendar.
     if (calendarCancelled) {
       after(() => cancelHcpJob(session.organizationId, id));
+      after(() => cancelFieldpulseJob(session.organizationId, id));
     } else if (calendarScheduleChanged) {
       after(() => pushJobToHcp(session.organizationId, id));
+      after(() => pushJobToFieldpulse(session.organizationId, id));
     }
 
     return successResponse(detail);

@@ -48,6 +48,7 @@ import {
   arrivalWindowForSlot,
 } from "@/lib/admin/capacity-hold";
 import { pushJobToHcp } from "@/lib/integrations/housecall-pro/job-sync";
+import { pushJobToFieldpulse } from "@/lib/integrations/fieldpulse/job-sync";
 import { recordCustomerEquipment } from "@/lib/admin/crm-equipment-queries";
 import { buildEquipmentFromIntake } from "@/lib/admin/equipment-from-intake";
 import { logger } from "@/lib/logger";
@@ -251,12 +252,14 @@ export async function submitSessionServiceRequest(params: {
     return { ok: false, reason: "insert_failed" };
   }
 
-  // Push this confirmed booking into Housecall Pro as a JOB in the BACKGROUND
-  // — after() so the response isn't blocked, and degrade-safe so a not-
-  // connected org (or an HCP hiccup) never affects the booking we just
-  // persisted. pushJobToHcp owns the customer sync (mirrors the customer to
-  // HCP first, then creates/updates the job) which keeps it idempotent.
+  // Push this confirmed booking into FSM integrations (HCP + Fieldpulse) as
+  // JOBS in the BACKGROUND — after() so the response isn't blocked, and
+  // degrade-safe so a not-connected org (or an integration hiccup) never
+  // affects the booking we just persisted. Each pushJob* function owns the
+  // customer sync (mirrors the customer to the FSM first, then creates/updates
+  // the job) which keeps it idempotent.
   after(() => pushJobToHcp(organizationId, serviceRequest.id));
+  after(() => pushJobToFieldpulse(organizationId, serviceRequest.id));
 
   // Record the customer's equipment from the intake (ServiceTitan asset
   // history), best-effort: a failure here must not fail the submission.
