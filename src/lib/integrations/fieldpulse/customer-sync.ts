@@ -17,7 +17,7 @@ import { eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { customers } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
-import { decrypt } from "@/lib/encryption";
+import { decrypt } from "@/lib/crypto";
 import { logger } from "@/lib/logger";
 import { getFieldpulseClient } from "./client";
 import type {

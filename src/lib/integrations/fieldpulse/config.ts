@@ -10,7 +10,7 @@
 import { db } from "@/lib/db";
 import { fieldpulseConnections } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
-import { decrypt } from "@/lib/encryption";
+import { decrypt } from "@/lib/crypto";
 
 /** Base URL for the Fieldpulse REST API (AWS API Gateway stage). */
 export const FIELDPULSE_BASE_URL = "https://ywe3crmpll.execute-api.us-east-2.amazonaws.com/stage";

@@ -9,7 +9,7 @@
 import { db } from "@/lib/db";
 import { fieldpulseConnections } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
-import { encrypt } from "@/lib/encryption";
+import { encrypt } from "@/lib/crypto";
 import type { FieldpulseAccountInfo } from "./types";
 
 /** Connection status for the admin UI — NEVER includes the API key. */
