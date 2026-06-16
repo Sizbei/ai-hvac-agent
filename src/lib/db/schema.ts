@@ -1670,3 +1670,308 @@ export const customerLocations = pgTable(
       .where(sql`${table.addressHash} IS NOT NULL`),
   ],
 );
+
+// ════════ Stage 8: Pricebook + tax (sales-money spine root) ════════
+export const pricebookItemTypeEnum = pgEnum("pricebook_item_type", [
+  "service",
+  "material",
+  "equipment",
+]);
+
+// 26. pricebook_categories — self-referential category tree.
+export const pricebookCategories = pgTable(
+  "pricebook_categories",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    parentId: uuid("parent_id"), // self-link (app-enforced)
+    name: text("name").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index("pricebook_categories_org_idx").on(table.organizationId)],
+);
+
+// 27. pricebook_items — priced catalog (money in integer cents).
+export const pricebookItems = pgTable(
+  "pricebook_items",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    categoryId: uuid("category_id"),
+    type: pricebookItemTypeEnum("type").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    sku: text("sku"),
+    costCents: integer("cost_cents").notNull().default(0),
+    markupPct: integer("markup_pct").notNull().default(0),
+    priceCents: integer("price_cents").notNull().default(0),
+    memberPriceCents: integer("member_price_cents"),
+    hours: integer("hours"), // labor hours (estimating)
+    warranty: text("warranty"),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("pricebook_items_org_idx").on(table.organizationId),
+    index("pricebook_items_category_idx").on(table.categoryId),
+    uniqueIndex("pricebook_items_org_sku_unique")
+      .on(table.organizationId, table.sku)
+      .where(sql`${table.sku} IS NOT NULL`),
+  ],
+);
+
+// 28. pricebook_item_materials — materials that compose a service item.
+export const pricebookItemMaterials = pgTable(
+  "pricebook_item_materials",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    itemId: uuid("item_id")
+      .notNull()
+      .references(() => pricebookItems.id, { onDelete: "cascade" }),
+    materialItemId: uuid("material_item_id")
+      .notNull()
+      .references(() => pricebookItems.id, { onDelete: "cascade" }),
+    quantity: integer("quantity").notNull().default(1),
+  },
+  (table) => [index("pricebook_item_materials_item_idx").on(table.itemId)],
+);
+
+// 29. tax_rates — jurisdictional tax (rate in basis points; 825 = 8.25%).
+export const taxRates = pgTable(
+  "tax_rates",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    jurisdiction: text("jurisdiction"),
+    rateBps: integer("rate_bps").notNull(), // basis points
+    isDefault: boolean("is_default").notNull().default(false),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index("tax_rates_org_idx").on(table.organizationId)],
+);
+
+// ════════ Stage 9: Estimates, invoicing, payments, financing ════════
+export const estimateStatusEnum = pgEnum("estimate_status", [
+  "open",
+  "sold",
+  "dismissed",
+  "expired",
+]);
+export const invoiceStateEnum = pgEnum("invoice_state", [
+  "draft",
+  "open",
+  "paid",
+  "void",
+  "refunded",
+]);
+export const paymentStatusEnum = pgEnum("payment_status", [
+  "pending",
+  "succeeded",
+  "failed",
+  "refunded",
+]);
+export const financingStatusEnum = pgEnum("financing_status", [
+  "pending",
+  "approved",
+  "declined",
+  "expired",
+]);
+
+// 30. estimates — a good-better-best proposal for a service request.
+export const estimates = pgTable(
+  "estimates",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    serviceRequestId: uuid("service_request_id"),
+    customerId: uuid("customer_id"),
+    status: estimateStatusEnum("status").notNull().default("open"),
+    totalCents: integer("total_cents").notNull().default(0),
+    // Tokenized public approval (hashed token, like staff invites/widget keys).
+    approvalTokenHash: text("approval_token_hash"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    // e-signature capture on approval.
+    signedAt: timestamp("signed_at", { withTimezone: true }),
+    signatureName: text("signature_name"),
+    signatureIp: text("signature_ip"),
+    soldOptionId: uuid("sold_option_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("estimates_org_idx").on(table.organizationId),
+    index("estimates_request_idx").on(table.serviceRequestId),
+    uniqueIndex("estimates_approval_token_unique")
+      .on(table.approvalTokenHash)
+      .where(sql`${table.approvalTokenHash} IS NOT NULL`),
+  ],
+);
+
+// 31. estimate_options — the good/better/best tiers.
+export const estimateOptions = pgTable(
+  "estimate_options",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    estimateId: uuid("estimate_id")
+      .notNull()
+      .references(() => estimates.id, { onDelete: "cascade" }),
+    name: text("name").notNull(), // "Good" | "Better" | "Best"
+    sortOrder: integer("sort_order").notNull().default(0),
+    subtotalCents: integer("subtotal_cents").notNull().default(0),
+    taxCents: integer("tax_cents").notNull().default(0),
+    totalCents: integer("total_cents").notNull().default(0),
+  },
+  (table) => [index("estimate_options_estimate_idx").on(table.estimateId)],
+);
+
+// 32. estimate_line_items — SNAPSHOT of a pricebook item at quote time.
+export const estimateLineItems = pgTable(
+  "estimate_line_items",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    optionId: uuid("option_id")
+      .notNull()
+      .references(() => estimateOptions.id, { onDelete: "cascade" }),
+    // Reference the source item but SNAPSHOT name/price so later catalog edits
+    // never mutate a sent quote.
+    pricebookItemId: uuid("pricebook_item_id"),
+    name: text("name").notNull(),
+    quantity: integer("quantity").notNull().default(1),
+    unitPriceCents: integer("unit_price_cents").notNull().default(0),
+    lineTotalCents: integer("line_total_cents").notNull().default(0),
+  },
+  (table) => [index("estimate_line_items_option_idx").on(table.optionId)],
+);
+
+// 33. invoices — native invoicing (path B; for non-FSM orgs).
+export const invoices = pgTable(
+  "invoices",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    serviceRequestId: uuid("service_request_id"),
+    customerId: uuid("customer_id"),
+    estimateId: uuid("estimate_id"),
+    state: invoiceStateEnum("state").notNull().default("draft"),
+    subtotalCents: integer("subtotal_cents").notNull().default(0),
+    taxCents: integer("tax_cents").notNull().default(0),
+    totalCents: integer("total_cents").notNull().default(0),
+    amountPaidCents: integer("amount_paid_cents").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("invoices_org_idx").on(table.organizationId),
+    index("invoices_request_idx").on(table.serviceRequestId),
+  ],
+);
+
+// 34. invoice_line_items — snapshot from the sold estimate option.
+export const invoiceLineItems = pgTable(
+  "invoice_line_items",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    invoiceId: uuid("invoice_id")
+      .notNull()
+      .references(() => invoices.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    quantity: integer("quantity").notNull().default(1),
+    unitPriceCents: integer("unit_price_cents").notNull().default(0),
+    lineTotalCents: integer("line_total_cents").notNull().default(0),
+  },
+  (table) => [index("invoice_line_items_invoice_idx").on(table.invoiceId)],
+);
+
+// 35. payments — a charge against an invoice (provider-agnostic seam).
+export const payments = pgTable(
+  "payments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    invoiceId: uuid("invoice_id")
+      .notNull()
+      .references(() => invoices.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(), // "mock" | "stripe"
+    providerPaymentId: text("provider_payment_id"),
+    amountCents: integer("amount_cents").notNull(),
+    status: paymentStatusEnum("status").notNull().default("pending"),
+    isDeposit: boolean("is_deposit").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("payments_invoice_idx").on(table.invoiceId),
+    uniqueIndex("payments_provider_id_unique")
+      .on(table.provider, table.providerPaymentId)
+      .where(sql`${table.providerPaymentId} IS NOT NULL`),
+  ],
+);
+
+// 36. refunds — a refund/credit against a payment.
+export const refunds = pgTable(
+  "refunds",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    paymentId: uuid("payment_id")
+      .notNull()
+      .references(() => payments.id, { onDelete: "cascade" }),
+    amountCents: integer("amount_cents").notNull(),
+    reason: text("reason"),
+    providerRefundId: text("provider_refund_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index("refunds_payment_idx").on(table.paymentId)],
+);
+
+// 37. financing_applications — thin hand-off to a consumer lender.
+export const financingApplications = pgTable(
+  "financing_applications",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    customerId: uuid("customer_id"),
+    estimateId: uuid("estimate_id"),
+    provider: text("provider").notNull(), // "mock" | "wisetack" | "greensky"
+    providerAppId: text("provider_app_id"),
+    status: financingStatusEnum("status").notNull().default("pending"),
+    requestedAmountCents: integer("requested_amount_cents").notNull(),
+    approvedAmountCents: integer("approved_amount_cents"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index("financing_applications_org_idx").on(table.organizationId)],
+);
