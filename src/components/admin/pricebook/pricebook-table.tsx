@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatCentsExact } from '@/lib/admin/money-format';
+import { computeMargin } from '@/lib/admin/margin';
 import type { PricebookItem } from '@/hooks/use-pricebook';
 
 interface PricebookTableProps {
@@ -39,6 +40,7 @@ function SkeletonRows() {
           <TableCell><Skeleton className="h-4 w-24" /></TableCell>
           <TableCell><Skeleton className="h-4 w-20" /></TableCell>
           <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+          <TableCell><Skeleton className="h-4 w-12" /></TableCell>
           <TableCell><Skeleton className="h-7 w-32" /></TableCell>
         </TableRow>
       ))}
@@ -69,6 +71,7 @@ export function PricebookTable({
           <TableHead>SKU</TableHead>
           <TableHead className="text-right">Price</TableHead>
           <TableHead className="text-right">Member</TableHead>
+          <TableHead className="text-right">Margin</TableHead>
           <TableHead className="text-right">Actions</TableHead>
         </TableRow>
       </TableHeader>
@@ -98,6 +101,14 @@ export function PricebookTable({
               <TableCell className="text-right tabular-nums text-muted-foreground">
                 {item.memberPriceCents != null
                   ? formatCentsExact(item.memberPriceCents)
+                  : '—'}
+              </TableCell>
+              <TableCell className="text-right tabular-nums text-muted-foreground">
+                {item.priceCents > 0
+                  ? `${(
+                      computeMargin(item.priceCents, item.costCents).marginPct *
+                      100
+                    ).toFixed(1)}%`
                   : '—'}
               </TableCell>
               <TableCell>

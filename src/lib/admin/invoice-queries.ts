@@ -508,6 +508,8 @@ export interface InvoiceLineItemView {
   readonly name: string;
   readonly quantity: number;
   readonly unitPriceCents: number;
+  /** Snapshotted cost (ADMIN-ONLY — invoices are not customer-facing here). */
+  readonly costCents: number;
   readonly lineTotalCents: number;
 }
 
@@ -575,6 +577,7 @@ export async function getInvoiceDetailById(
       name: invoiceLineItems.name,
       quantity: invoiceLineItems.quantity,
       unitPriceCents: invoiceLineItems.unitPriceCents,
+      costCents: invoiceLineItems.costCents,
       lineTotalCents: invoiceLineItems.lineTotalCents,
     })
     .from(invoiceLineItems)

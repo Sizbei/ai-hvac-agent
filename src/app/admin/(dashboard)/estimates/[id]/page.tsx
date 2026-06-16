@@ -10,12 +10,14 @@ import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EstimateStatusBadge } from '@/components/admin/estimates/estimate-status-badge';
 import { formatCentsExact } from '@/lib/admin/money-format';
+import { rollUpMargin } from '@/lib/admin/margin';
 
 interface LineItem {
   readonly id: string;
   readonly name: string;
   readonly quantity: number;
   readonly unitPriceCents: number;
+  readonly costCents: number;
   readonly lineTotalCents: number;
 }
 interface Option {
@@ -195,6 +197,7 @@ export default function EstimateDetailPage({
       {/* Options */}
       {estimate.options.map((opt) => {
         const isSold = estimate.soldOptionId === opt.id;
+        const margin = rollUpMargin(opt.lineItems);
         return (
           <Card key={opt.id} className={isSold ? 'border-green-400' : undefined}>
             <CardHeader>
@@ -230,6 +233,32 @@ export default function EstimateDetailPage({
                 <div className="flex justify-between text-muted-foreground">
                   <span>Tax</span>
                   <span>{formatCentsExact(opt.taxCents)}</span>
+                </div>
+              </div>
+
+              {/* Internal margin readout (admin-only; subordinate styling). */}
+              <div className="mt-3 rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+                <div className="mb-1 font-medium uppercase tracking-wide text-[10px]">
+                  Margin (internal)
+                </div>
+                <div className="flex justify-between">
+                  <span>Revenue</span>
+                  <span className="tabular-nums">
+                    {formatCentsExact(margin.revenueCents)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Cost</span>
+                  <span className="tabular-nums">
+                    {formatCentsExact(margin.costCents)}
+                  </span>
+                </div>
+                <div className="flex justify-between font-medium text-foreground">
+                  <span>Margin</span>
+                  <span className="tabular-nums">
+                    {formatCentsExact(margin.marginCents)} (
+                    {(margin.marginPct * 100).toFixed(1)}%)
+                  </span>
                 </div>
               </div>
             </CardContent>
