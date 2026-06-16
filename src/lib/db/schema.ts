@@ -728,6 +728,11 @@ export const serviceHistory = pgTable(
   ],
 );
 
+// Who/what performed an audited action. "ai" marks autonomous agent actions
+// (booking, recovery sends) so an AI-initiated mutation is distinguishable from a
+// human dispatcher or a system/cron job — the audit trail for "autonomous AI".
+export const actorTypeEnum = pgEnum("actor_type", ["human", "ai", "system"]);
+
 // 11. audit_log
 export const auditLog = pgTable(
   "audit_log",
@@ -738,6 +743,8 @@ export const auditLog = pgTable(
       .references(() => organizations.id),
     userId: uuid("user_id").references(() => users.id),
     sessionId: uuid("session_id").references(() => customerSessions.id),
+    // human (a logged-in user) | ai (autonomous agent) | system (cron/webhook).
+    actorType: actorTypeEnum("actor_type").notNull().default("human"),
     action: text("action").notNull(),
     entity: text("entity").notNull(),
     entityId: uuid("entity_id"),
@@ -1503,5 +1510,66 @@ export const communicationPreferences = pgTable(
       table.organizationId,
       table.customerId,
     ),
+  ],
+);
+
+// 23. outbound_message_ledger — dedupe ledger for CRON-DRIVEN outbound comms.
+// Distinct from the INBOUND webhook ledgers (fieldpulse/hcp_webhook_events): this
+// stops a re-run of an outbound cron (warranty-expiry, booking-recovery, renewal
+// nudge) from double-sending. The caller claims a (customer, trigger, period)
+// slot before sending; the unique index makes the claim atomic. No PII stored.
+export const outboundMessageLedger = pgTable(
+  "outbound_message_ledger",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    customerId: uuid("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "cascade" }),
+    triggerType: communicationTriggerTypeEnum("trigger_type").notNull(),
+    // Caller-defined bucket the send is deduped within, e.g. "2026-06-15" (daily)
+    // or "warranty:<equipmentId>" (once per unit). One send per bucket.
+    periodKey: text("period_key").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("outbound_ledger_unique").on(
+      table.organizationId,
+      table.customerId,
+      table.triggerType,
+      table.periodKey,
+    ),
+  ],
+);
+
+// 24. request_status_events — append-only log of every service-request status
+// transition. Source data for on-time KPIs, payroll/labor hours (Stage 10), and
+// tech-on-the-way automation. actorType records whether a human, the AI agent,
+// or a system/webhook drove the change. No PII (ids + enums only).
+export const requestStatusEvents = pgTable(
+  "request_status_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    serviceRequestId: uuid("service_request_id")
+      .notNull()
+      .references(() => serviceRequests.id, { onDelete: "cascade" }),
+    // null fromStatus = the request's initial status at creation.
+    fromStatus: requestStatusEnum("from_status"),
+    toStatus: requestStatusEnum("to_status").notNull(),
+    actorType: actorTypeEnum("actor_type").notNull().default("system"),
+    // The user id for human actors; null for ai/system.
+    actorId: uuid("actor_id"),
+    at: timestamp("at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("request_status_events_request_idx").on(table.serviceRequestId),
+    index("request_status_events_org_idx").on(table.organizationId),
   ],
 );

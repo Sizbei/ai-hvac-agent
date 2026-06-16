@@ -260,6 +260,13 @@
       "when": 1781518270000,
       "tag": "0036_audit_hardening",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1781518271000,
+      "tag": "0037_compliance_eventing",
+      "breakpoints": true
     }
   ]
 }

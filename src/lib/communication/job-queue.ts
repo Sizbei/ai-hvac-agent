@@ -12,6 +12,7 @@ import { db } from "@/lib/db";
 import { communicationJobs, communicationTemplates, communicationChannelEnum, communicationJobStatusEnum } from "@/lib/db/schema";
 import { eq, and, lt, lte, asc } from "drizzle-orm";
 import { encrypt, decrypt } from "@/lib/crypto";
+import { checkSendAllowed } from "./consent";
 import { sendSms } from "./twilio-adapter";
 import { resend } from "./resend-adapter";
 import { renderSmsTemplate } from "./sms-templates";
@@ -97,6 +98,28 @@ export async function processPendingJobs(limit = 10): Promise<{
   // Process each job
   for (const job of pendingJobs) {
     try {
+      // CONSENT GATE (TCPA/CAN-SPAM): the send chokepoint. A do-not-contact
+      // customer, a disabled channel/type, or quiet hours suppresses the send —
+      // the job is cancelled, never delivered. Checked at SEND time (not just
+      // enqueue) so a consent change after enqueue is honored.
+      const decision = await checkSendAllowed({
+        organizationId: job.organizationId,
+        customerId: job.customerId,
+        channel: job.channel,
+        triggerType: job.triggerType,
+      });
+      if (!decision.allowed) {
+        await db
+          .update(communicationJobs)
+          .set({
+            status: "cancelled",
+            completedAt: new Date(),
+            errorMessage: `suppressed:${decision.reason}`,
+          })
+          .where(eq(communicationJobs.id, job.id));
+        continue;
+      }
+
       // Mark as processing
       await db
         .update(communicationJobs)

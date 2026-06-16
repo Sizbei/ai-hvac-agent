@@ -81,6 +81,7 @@ vi.mock('drizzle-orm', () => ({
 
 // Mock schema tables — provide column-like objects
 vi.mock('@/lib/db/schema', () => ({
+  requestStatusEvents: { id: 'rse.id' },
   serviceRequests: {
     id: 'sr.id',
     status: 'sr.status',

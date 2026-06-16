@@ -37,6 +37,7 @@ import {
   canTransition,
   type RequestStatus,
 } from "./request-status";
+import { recordStatusEvent, type ActorType } from "./status-events";
 
 export type HoldReason = (typeof holdReasonEnum.enumValues)[number];
 import { DASHBOARD_LIST_LIMIT } from "./types";
@@ -447,6 +448,17 @@ export async function assignTechnician(
     };
   }
 
+  // Record the → assigned transition (fromStatus omitted: the guarded UPDATE
+  // doesn't read the prior status on the hot path; toStatus + actor are the
+  // salient facts for KPIs).
+  await recordStatusEvent({
+    organizationId,
+    serviceRequestId: requestId,
+    fromStatus: null,
+    toStatus: "assigned",
+    actorType: "human",
+  });
+
   return {
     ok: true,
     request: {
@@ -598,6 +610,11 @@ export async function updateRequestStatus(
     readonly reason: HoldReason | null;
     readonly followUpDate: Date | null;
   },
+  // Who drove the transition — recorded on the status event. Defaults to a human
+  // dispatcher (this function backs the admin status endpoint).
+  actor: { readonly actorType: ActorType; readonly actorId?: string | null } = {
+    actorType: "human",
+  },
 ): Promise<UpdateRequestStatusResult> {
   const [existing] = await db
     .select({ status: serviceRequests.status })
@@ -656,6 +673,17 @@ export async function updateRequestStatus(
       currentStatus: existing.status,
     };
   }
+
+  // Record the transition for KPIs / payroll / automation (best-effort: the
+  // status write above already committed).
+  await recordStatusEvent({
+    organizationId,
+    serviceRequestId: requestId,
+    fromStatus: existing.status,
+    toStatus: updated.status,
+    actorType: actor.actorType,
+    actorId: actor.actorId ?? null,
+  });
 
   return { ok: true, status: updated.status };
 }

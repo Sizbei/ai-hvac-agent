@@ -40,6 +40,7 @@ describe('logAudit', () => {
     expect(mockValues).toHaveBeenCalledWith({
       organizationId: 'org-123',
       userId: 'user-456',
+      actorType: 'human',
       action: 'assign_technician',
       entity: 'service_request',
       entityId: 'req-789',
@@ -60,6 +61,7 @@ describe('logAudit', () => {
     expect(mockValues).toHaveBeenCalledWith({
       organizationId: 'org-123',
       userId: 'user-456',
+      actorType: 'human',
       action: 'create_technician',
       entity: 'user',
       entityId: null,

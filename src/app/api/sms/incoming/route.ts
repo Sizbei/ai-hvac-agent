@@ -17,7 +17,18 @@ import { sanitizeInput } from "@/lib/ai/guardrails";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { parseAndVerifyTwilioRequest } from "@/lib/voice/request";
 import { messagingTwiML, MESSAGING_HEADERS } from "@/lib/sms/twiml";
+import {
+  classifySmsKeyword,
+  setDoNotContactByPhone,
+} from "@/lib/communication/consent";
 import { logger } from "@/lib/logger";
+
+// CTIA-compliant replies for the carrier opt-out keywords.
+const STOP_REPLY =
+  "You're unsubscribed and won't receive more messages. Reply START to resubscribe.";
+const START_REPLY = "You're resubscribed and will receive messages again.";
+const HELP_REPLY =
+  "HVAC assistant. Reply with your service question, or STOP to unsubscribe. Msg & data rates may apply.";
 
 const GREETING =
   "Thanks for texting. I'm the HVAC assistant. What issue are you having today?";
@@ -70,6 +81,25 @@ export async function POST(request: NextRequest) {
 
   try {
     const organizationId = DEMO_ORG_ID;
+
+    // COMPLIANCE: handle STOP/HELP/START BEFORE the AI brain ever runs — an
+    // inbound "STOP" must suppress the contact and get a standard opt-out reply,
+    // never a conversational answer from the bot.
+    const keyword = classifySmsKeyword(body);
+    if (keyword === "stop") {
+      await setDoNotContactByPhone(organizationId, from, true);
+      logger.info({ from }, "SMS opt-out (STOP)");
+      return new Response(messagingTwiML(STOP_REPLY), { headers: MESSAGING_HEADERS });
+    }
+    if (keyword === "start") {
+      await setDoNotContactByPhone(organizationId, from, false);
+      logger.info({ from }, "SMS opt-in (START)");
+      return new Response(messagingTwiML(START_REPLY), { headers: MESSAGING_HEADERS });
+    }
+    if (keyword === "help") {
+      return new Response(messagingTwiML(HELP_REPLY), { headers: MESSAGING_HEADERS });
+    }
+
     // Key the session on the sender's number so subsequent texts in the same
     // conversation resolve the same session — the SMS analogue of CallSid.
     const sessionToken = `sms:${from}`;

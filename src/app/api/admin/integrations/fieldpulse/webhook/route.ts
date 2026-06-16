@@ -40,6 +40,7 @@ import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { errorResponse } from "@/lib/api-response";
 import { syncInvoiceStatus } from "@/lib/integrations/fieldpulse/invoice-sync";
 import { getFieldpulseWebhookSecret } from "@/lib/integrations/fieldpulse/config";
+import { recordStatusEvent } from "@/lib/admin/status-events";
 import {
   verifySignature,
   isReplayTimestamp,
@@ -350,9 +351,10 @@ export async function POST(request: NextRequest): Promise<Response> {
         ),
       );
 
-    // Audit log for the status change (FORENSIC TRAIL)
+    // Audit log for the status change (FORENSIC TRAIL) — actorType=system.
     await db.insert(auditLog).values({
       organizationId,
+      actorType: "system",
       action: "status_updated",
       entity: "service_requests",
       entityId: requestRow.id,
@@ -363,6 +365,15 @@ export async function POST(request: NextRequest): Promise<Response> {
         eventType,
       }),
       ipAddress: null, // Webhook - no client IP
+    });
+
+    // Append to the status-event log (system actor; FSM-driven transition).
+    await recordStatusEvent({
+      organizationId,
+      serviceRequestId: requestRow.id,
+      fromStatus: requestRow.status,
+      toStatus: newStatus,
+      actorType: "system",
     });
 
     logger.info(

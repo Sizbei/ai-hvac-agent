@@ -15,12 +15,15 @@ interface AuditParams {
   readonly entityId?: string;
   readonly details?: string;
   readonly ipAddress?: string | null;
+  /** human (a logged-in user, default) | ai (autonomous agent) | system. */
+  readonly actorType?: "human" | "ai" | "system";
 }
 
 export async function logAudit(params: AuditParams): Promise<void> {
   await db.insert(auditLog).values({
     organizationId: params.organizationId,
     userId: params.userId,
+    actorType: params.actorType ?? "human",
     action: params.action,
     entity: params.entity,
     entityId: params.entityId ?? null,
