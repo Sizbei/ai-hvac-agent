@@ -2046,6 +2046,17 @@ export const membershipBillingPeriodEnum = pgEnum("membership_billing_period", [
   "annual",
 ]);
 
+// Lifecycle of a single scheduled maintenance visit entitled by a membership
+// (ServiceTitan service-agreement parity). "scheduled" = planned but not yet
+// materialized into a job; "generated" = a service_request was created for it;
+// "completed" = the visit was performed; "skipped" = intentionally not done.
+export const membershipVisitStatusEnum = pgEnum("membership_visit_status", [
+  "scheduled",
+  "generated",
+  "completed",
+  "skipped",
+]);
+
 export const membershipPlans = pgTable(
   "membership_plans",
   {
@@ -2060,6 +2071,13 @@ export const membershipPlans = pgTable(
     billingPeriod: membershipBillingPeriodEnum("billing_period")
       .notNull()
       .default("monthly"),
+    // Maintenance entitlement: how many maintenance visits a member is owed per
+    // year (ServiceTitan service-agreement parity). 0 = billing-only plan (no
+    // auto-generated visits). Drives the generate-membership-visits cron.
+    visitsPerYear: integer("visits_per_year").notNull().default(0),
+    // Free-form member benefits (e.g. discount %, priority dispatch, waived
+    // diagnostic) for display/quote logic. Nullable until a plan defines any.
+    benefits: jsonb("benefits"),
     // Soft-deactivate (a plan may have historical enrollments): never hard delete.
     active: boolean("active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -2115,5 +2133,49 @@ export const customerMemberships = pgTable(
     uniqueIndex("customer_memberships_org_customer_active_unique")
       .on(table.organizationId, table.customerId)
       .where(sql`${table.status} = 'active'`),
+  ],
+);
+
+// A single maintenance visit entitled by a membership (ServiceTitan service-
+// agreement parity). The generate-membership-visits cron materializes these for
+// members whose plan.visitsPerYear>0 as their due date approaches. periodKey is
+// the idempotency bucket (e.g. "2026-H1" for the first of two annual visits):
+// the (customerMembershipId, periodKey) UNIQUE index makes generation safe to
+// re-run on a daily cron — a retried run for the same period can't duplicate.
+export const membershipVisits = pgTable(
+  "membership_visits",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    customerMembershipId: uuid("customer_membership_id")
+      .notNull()
+      .references(() => customerMemberships.id, { onDelete: "cascade" }),
+    // When the visit is due. The generated job's scheduledDate is set to this.
+    dueDate: timestamp("due_date", { withTimezone: true }).notNull(),
+    // Idempotency bucket within a membership's cycle (e.g. "2026-H1").
+    periodKey: text("period_key").notNull(),
+    status: membershipVisitStatusEnum("status").notNull().default("scheduled"),
+    // The service_request created when this visit was generated. NULL until then.
+    generatedServiceRequestId: uuid("generated_service_request_id").references(
+      () => serviceRequests.id,
+    ),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("membership_visits_org_idx").on(table.organizationId),
+    index("membership_visits_membership_idx").on(table.customerMembershipId),
+    // The idempotency guard: at most one visit row per (membership, period).
+    // A concurrent/retried cron run collides here instead of double-generating.
+    uniqueIndex("membership_visits_membership_period_unique").on(
+      table.customerMembershipId,
+      table.periodKey,
+    ),
   ],
 );

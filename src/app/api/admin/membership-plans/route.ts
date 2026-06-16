@@ -15,6 +15,7 @@ const planSchema = z.object({
   description: z.string().trim().max(2000).nullable().optional(),
   priceCents: z.number().int().min(0),
   billingPeriod: z.enum(["monthly", "annual"]),
+  visitsPerYear: z.number().int().min(0).max(12).optional(),
 });
 
 export async function GET(request: NextRequest) {

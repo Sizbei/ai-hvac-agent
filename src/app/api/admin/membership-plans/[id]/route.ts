@@ -16,6 +16,7 @@ const updateSchema = z.object({
   description: z.string().trim().max(2000).nullable().optional(),
   priceCents: z.number().int().min(0).optional(),
   billingPeriod: z.enum(["monthly", "annual"]).optional(),
+  visitsPerYear: z.number().int().min(0).max(12).optional(),
 });
 
 export async function PATCH(
