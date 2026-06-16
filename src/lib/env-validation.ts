@@ -58,33 +58,39 @@ const REQUIRED_ENV_VARS: readonly EnvVarSpec[] = [
     required: false,
     description: 'R2 endpoint (optional, defaults to account-based URL)',
   },
-  // AI Provider
+  // AI Provider — AI_API_KEY is the real var (provider.ts), and it has an
+  // "ollama" fallback, so it's optional rather than required. (The old
+  // ANTHROPIC_API_KEY entry was a phantom — read nowhere — and made every clean
+  // deploy crash at cold start.)
   {
-    name: 'ANTHROPIC_API_KEY',
-    required: true,
-    description: 'Anthropic API key for Claude models',
+    name: 'AI_API_KEY',
+    required: false,
+    description: 'API key for the OpenAI-compatible model provider (falls back to ollama)',
   },
-  // Auth
+  // Google integrations — OAuth login AND Google Calendar are degrade-safe
+  // OPTIONAL features (the code returns null / shows "not configured" when
+  // unset, and admin password login still works), so these must NOT be required
+  // or a deploy that does not use Google crashes at cold start.
   {
     name: 'GOOGLE_CLIENT_ID',
-    required: true,
-    description: 'Google OAuth client ID for admin authentication',
+    required: false,
+    description: 'Google OAuth client ID (optional — Google login / Calendar)',
   },
   {
     name: 'GOOGLE_CLIENT_SECRET',
-    required: true,
-    description: 'Google OAuth client secret',
+    required: false,
+    description: 'Google OAuth client secret (optional)',
   },
   {
     name: 'GOOGLE_REDIRECT_URI',
-    required: true,
-    description: 'Google OAuth redirect URI',
+    required: false,
+    description: 'Google Calendar OAuth redirect URI (optional)',
   },
-  // Session
+  // Optional webhook signing secret for Resend delivery callbacks.
   {
-    name: 'SESSION_SECRET',
-    required: true,
-    description: 'Secret for session token encryption',
+    name: 'RESEND_WEBHOOK_SECRET',
+    required: false,
+    description: 'HMAC secret for verifying Resend webhook signatures',
   },
   // Core secrets — fail fast at cold start rather than 500 at first use.
   {
