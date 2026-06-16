@@ -18,10 +18,12 @@ describe("MockPaymentProvider", () => {
     expect(r.status).toBe("failed");
   });
 
-  it("refunds the requested amount", async () => {
-    const r = await p.refund({ providerPaymentId: "mock_pay_k1", amountCents: 2000 });
-    expect(r.amountCents).toBe(2000);
-    expect(r.providerRefundId).toContain("mock_ref_");
+  it("refunds the requested amount with a stable, idempotency-keyed id", async () => {
+    const a = await p.refund({ providerPaymentId: "mock_pay_k1", amountCents: 2000, idempotencyKey: "r1" });
+    const b = await p.refund({ providerPaymentId: "mock_pay_k1", amountCents: 2000, idempotencyKey: "r1" });
+    expect(a.amountCents).toBe(2000);
+    expect(a.providerRefundId).toBe("mock_ref_r1");
+    expect(b.providerRefundId).toBe(a.providerRefundId); // retry-stable
   });
 
   it("getPaymentProvider returns the mock when no Stripe key", () => {

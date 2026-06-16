@@ -119,4 +119,59 @@ describe("refundPayment", () => {
     const r = await refundPayment("org-1", "pay-1", { amountCents: 5000 }, provider);
     expect(r).toEqual({ ok: false, reason: "exceeds_payment" });
   });
+
+  // Captures the set() payloads passed to db.update so we can assert the invoice
+  // state the refund writes.
+  function captureUpdateStates(): Record<string, unknown>[] {
+    const states: Record<string, unknown>[] = [];
+    vi.mocked(db.update).mockImplementation(
+      () =>
+        ({
+          set: (v: Record<string, unknown>) => {
+            states.push(v);
+            return { where: vi.fn().mockResolvedValue(undefined) };
+          },
+        }) as never,
+    );
+    return states;
+  }
+
+  it("keeps a fully-paid invoice 'paid' (NOT chargeable) after a PARTIAL refund — guards over-collection", async () => {
+    mockSelectSeq([
+      [{ id: "pay-1", invoiceId: "inv-1", amountCents: 10000, status: "succeeded", providerPaymentId: "mock_pay_x" }],
+      [], // no prior refunds
+      [{ amountPaidCents: 10000, totalCents: 10000 }], // invoice was FULLY paid
+    ]);
+    const states = captureUpdateStates();
+    const r = await refundPayment("org-1", "pay-1", { amountCents: 4000 }, provider);
+    expect(r.ok).toBe(true);
+    const invoiceSet = states.find((s) => "state" in s);
+    expect(invoiceSet?.state).toBe("paid"); // pre-fix this regressed to "open"
+  });
+
+  it("reopens a partially-paid invoice ('open') after a partial refund — a real balance remains", async () => {
+    mockSelectSeq([
+      [{ id: "pay-1", invoiceId: "inv-1", amountCents: 5000, status: "succeeded", providerPaymentId: "mock_pay_x" }],
+      [],
+      [{ amountPaidCents: 5000, totalCents: 10000 }], // only partially paid
+    ]);
+    const states = captureUpdateStates();
+    await refundPayment("org-1", "pay-1", { amountCents: 2000 }, provider);
+    expect(states.find((s) => "state" in s)?.state).toBe("open");
+  });
+
+  it("passes a stable idempotency key to the provider (retry-safe, no double refund)", async () => {
+    const refundSpy = vi.fn().mockResolvedValue({ providerRefundId: "r", amountCents: 1000 });
+    const spyProvider = { name: "mock", createCharge: vi.fn(), refund: refundSpy };
+    mockSelectSeq([
+      [{ id: "pay-1", invoiceId: "inv-1", amountCents: 10000, status: "succeeded", providerPaymentId: "mock_pay_x" }],
+      [{ amountCents: 2000 }], // 2000 already refunded
+      [{ amountPaidCents: 10000, totalCents: 10000 }],
+    ]);
+    captureUpdateStates();
+    await refundPayment("org-1", "pay-1", { amountCents: 1000 }, spyProvider as never);
+    expect(refundSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ idempotencyKey: "pay-1:2000:1000" }),
+    );
+  });
 });

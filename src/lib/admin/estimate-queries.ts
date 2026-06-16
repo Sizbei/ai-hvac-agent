@@ -166,12 +166,15 @@ export async function approveEstimate(params: {
     return { ok: false, reason: "expired" };
   }
 
-  // The chosen option must belong to this estimate.
+  // The chosen option must belong to this estimate AND this estimate's org
+  // (defense-in-depth: a tampered optionId from another tenant cannot pass).
   const [opt] = await db
     .select({ id: estimateOptions.id })
     .from(estimateOptions)
     .where(
-      and(
+      withTenant(
+        estimateOptions,
+        est.organizationId,
         eq(estimateOptions.estimateId, est.id),
         eq(estimateOptions.id, params.optionId),
       ),

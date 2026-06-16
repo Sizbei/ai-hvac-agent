@@ -225,30 +225,41 @@ export async function refundPayment(
     return { ok: false, reason: "not_refundable" };
   }
   // Guard against over-refunding: sum prior refunds, cap at the remaining balance.
+  // Tenant-scoped so a payment's refunds can't be summed across orgs.
   const prior = await db
     .select({ amountCents: refunds.amountCents })
     .from(refunds)
-    .where(eq(refunds.paymentId, paymentId));
+    .where(withTenant(refunds, organizationId, eq(refunds.paymentId, paymentId)));
   const alreadyRefunded = prior.reduce((s, r) => s + r.amountCents, 0);
   if (params.amountCents <= 0 || params.amountCents > pay.amountCents - alreadyRefunded) {
     return { ok: false, reason: "exceeds_payment" };
   }
   const fullyRefunded = alreadyRefunded + params.amountCents >= pay.amountCents;
 
+  // Read the invoice (tenant-scoped) BEFORE the provider call: we need to know
+  // whether it was fully paid, because a partial refund of a fully-paid invoice
+  // must NOT reopen it for charging (that would allow over-collection).
+  const [inv] = await db
+    .select({ amountPaidCents: invoices.amountPaidCents, totalCents: invoices.totalCents })
+    .from(invoices)
+    .where(withTenant(invoices, organizationId, eq(invoices.id, pay.invoiceId)))
+    .limit(1);
+  const wasFullyPaid = (inv?.amountPaidCents ?? 0) >= (inv?.totalCents ?? 0);
+  const newPaid = Math.max(0, (inv?.amountPaidCents ?? 0) - params.amountCents);
+
+  // Stable idempotency key from invariants (payment + cumulative prior refunds +
+  // this amount): a RETRY of the same logical refund yields the same key, so the
+  // provider dedupes it — preventing a double money-out if the batch below fails
+  // after the provider already succeeded.
+  const idempotencyKey = `${paymentId}:${alreadyRefunded}:${params.amountCents}`;
   const result = await provider.refund({
     providerPaymentId: pay.providerPaymentId ?? "",
     amountCents: params.amountCents,
     reason: params.reason,
+    idempotencyKey,
   });
 
   const refundId = randomUUID();
-  const [inv] = await db
-    .select({ amountPaidCents: invoices.amountPaidCents, totalCents: invoices.totalCents })
-    .from(invoices)
-    .where(eq(invoices.id, pay.invoiceId))
-    .limit(1);
-  const newPaid = Math.max(0, (inv?.amountPaidCents ?? 0) - params.amountCents);
-
   await db.batch([
     db.insert(refunds).values({
       id: refundId,
@@ -264,15 +275,18 @@ export async function refundPayment(
       // balance); only "refunded" once fully refunded — which also blocks any
       // further refund via the status guard above.
       .set({ status: fullyRefunded ? "refunded" : "succeeded", updatedAt: new Date() })
-      .where(eq(payments.id, paymentId)),
+      .where(withTenant(payments, organizationId, eq(payments.id, paymentId))),
     db
       .update(invoices)
       .set({
         amountPaidCents: newPaid,
-        state: newPaid <= 0 ? "refunded" : "open",
+        // Fully refunded -> "refunded". Partial refund of a fully-paid invoice
+        // stays "paid" (NOT chargeable — prevents over-collection). Partial
+        // refund of a partially-paid invoice stays "open" (a real balance remains).
+        state: newPaid <= 0 ? "refunded" : wasFullyPaid ? "paid" : "open",
         updatedAt: new Date(),
       })
-      .where(eq(invoices.id, pay.invoiceId)),
+      .where(withTenant(invoices, organizationId, eq(invoices.id, pay.invoiceId))),
   ]);
 
   return { ok: true, refundId };

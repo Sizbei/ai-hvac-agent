@@ -27,11 +27,14 @@ export interface PaymentProvider {
     readonly description?: string;
     readonly idempotencyKey: string;
   }): Promise<PaymentResult>;
-  /** Refund (full or partial) a prior charge. */
+  /** Refund (full or partial) a prior charge. idempotencyKey makes a retried
+   * refund return the same id (so a retry after a local write failure never
+   * issues a second real refund). */
   refund(params: {
     readonly providerPaymentId: string;
     readonly amountCents: number;
     readonly reason?: string;
+    readonly idempotencyKey: string;
   }): Promise<RefundResult>;
 }
 
@@ -59,9 +62,11 @@ export class MockPaymentProvider implements PaymentProvider {
   async refund(params: {
     providerPaymentId: string;
     amountCents: number;
+    idempotencyKey: string;
   }): Promise<RefundResult> {
     return {
-      providerRefundId: `mock_ref_${params.providerPaymentId}_${params.amountCents}`,
+      // Derived from the idempotency key so a retried refund is stable.
+      providerRefundId: `mock_ref_${params.idempotencyKey}`,
       amountCents: params.amountCents,
     };
   }
