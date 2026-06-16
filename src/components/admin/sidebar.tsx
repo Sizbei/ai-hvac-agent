@@ -14,6 +14,7 @@ import {
   Building2,
   Settings,
   ScrollText,
+  Tags,
   ChevronLeft,
   ChevronRight,
   LogOut,
@@ -71,6 +72,7 @@ const NAV_GROUPS: readonly NavGroup[] = [
     heading: 'Workspace',
     items: [
       { label: 'Staff', href: '/admin/staff', icon: UsersRound },
+      { label: 'Pricebook', href: '/admin/pricebook', icon: Tags },
       { label: 'Chatbot Settings', href: '/admin/settings', icon: Settings },
       { label: 'Communications', href: '/admin/communications/templates', icon: MessageSquare },
       { label: 'Audit Log', href: '/admin/audit-log', icon: ScrollText },
