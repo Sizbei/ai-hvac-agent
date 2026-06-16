@@ -1,8 +1,8 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { AlertCircle, Receipt } from 'lucide-react';
+import { AlertCircle, AlertTriangle, Receipt } from 'lucide-react';
 import { useInvoices } from '@/hooks/use-invoices';
 import { InvoiceStateBadge } from '@/components/admin/invoices/invoice-state-badge';
 import { Button } from '@/components/ui/button';
@@ -27,6 +27,68 @@ const FILTERS: ReadonlyArray<{ value: Filter; label: string }> = [
   { value: 'paid', label: 'Paid' },
 ];
 
+interface StuckPayment {
+  readonly id: string;
+  readonly invoiceId: string;
+  readonly amountCents: number;
+}
+
+/**
+ * "Needs attention" banner — surfaces stranded ('pending') payments that may
+ * have moved money without completing locally. Operator can reconcile on demand
+ * (the daily cron is the automatic safety net). Self-fetching so it adds no
+ * coupling to the invoices list.
+ */
+function ReconcileBanner() {
+  const [stuck, setStuck] = useState<readonly StuckPayment[]>([]);
+  const [running, setRunning] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/payments/reconcile');
+      if (!res.ok) return;
+      const body = (await res.json()) as {
+        success: boolean;
+        data: { stuck: StuckPayment[] };
+      };
+      if (body.success) setStuck(body.data.stuck);
+    } catch {
+      // banner is best-effort; silent on failure
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const reconcile = useCallback(async () => {
+    setRunning(true);
+    try {
+      await fetch('/api/admin/payments/reconcile', { method: 'POST' });
+      await load();
+    } finally {
+      setRunning(false);
+    }
+  }, [load]);
+
+  if (stuck.length === 0) return null;
+
+  return (
+    <Alert variant="destructive">
+      <AlertTriangle className="size-4" />
+      <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+        <span>
+          {stuck.length} payment{stuck.length === 1 ? '' : 's'} stuck in a pending
+          state may need reconciliation.
+        </span>
+        <Button size="sm" variant="outline" onClick={reconcile} disabled={running}>
+          {running ? 'Reconciling…' : 'Reconcile now'}
+        </Button>
+      </AlertDescription>
+    </Alert>
+  );
+}
+
 export default function InvoicesPage() {
   const { invoices, isLoading, error } = useInvoices();
   const [filter, setFilter] = useState<Filter>('all');
@@ -50,6 +112,8 @@ export default function InvoicesPage() {
           Invoices generated from sold estimates, with payments and refunds.
         </p>
       </div>
+
+      <ReconcileBanner />
 
       <div className="flex flex-wrap gap-2">
         {FILTERS.map((f) => (

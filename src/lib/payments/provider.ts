@@ -36,6 +36,13 @@ export interface PaymentProvider {
     readonly reason?: string;
     readonly idempotencyKey: string;
   }): Promise<RefundResult>;
+  /**
+   * Re-resolve a charge by its idempotency key (reconciliation). takePayment
+   * uses the local paymentId AS the createCharge idempotencyKey, so
+   * getCharge(paymentId) recovers the true provider-side status of a charge that
+   * may have succeeded after a local write failed (stranded 'pending' payment).
+   */
+  getCharge(idempotencyKey: string): Promise<PaymentResult>;
 }
 
 /**
@@ -68,6 +75,16 @@ export class MockPaymentProvider implements PaymentProvider {
       // Derived from the idempotency key so a retried refund is stable.
       providerRefundId: `mock_ref_${params.idempotencyKey}`,
       amountCents: params.amountCents,
+    };
+  }
+
+  async getCharge(idempotencyKey: string): Promise<PaymentResult> {
+    // Deterministic: mirrors createCharge's id derivation and always "succeeded"
+    // (the mock moves money in-model only), so reconciliation is testable without
+    // a live processor. A real Stripe adapter would look up the PaymentIntent.
+    return {
+      providerPaymentId: `mock_pay_${idempotencyKey}`,
+      status: "succeeded",
     };
   }
 }
