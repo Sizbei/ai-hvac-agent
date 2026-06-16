@@ -10,11 +10,11 @@
     },
     {
       "path": "/api/cron/process-communications",
-      "schedule": "* * * * *"
+      "schedule": "0 5 * * *"
     },
     {
       "path": "/api/cron/booking-recovery",
-      "schedule": "*/15 * * * *"
+      "schedule": "0 6 * * *"
     }
   ]
 }
