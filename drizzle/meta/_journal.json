@@ -281,6 +281,13 @@
       "when": 1781518273000,
       "tag": "0039_voice_transfer",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1781518274000,
+      "tag": "0040_locations_assets",
+      "breakpoints": true
     }
   ]
 }

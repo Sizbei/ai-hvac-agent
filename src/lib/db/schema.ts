@@ -10,6 +10,7 @@ import {
   uniqueIndex,
   varchar,
   jsonb,
+  doublePrecision,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -419,6 +420,9 @@ export const serviceRequests = pgTable(
       .notNull()
       .references(() => customerSessions.id),
     customerId: uuid("customer_id").references(() => customers.id),
+    // Stage 5: the physical service location for this job (one billing customer
+    // can have many sites). Nullable, populated lazily.
+    locationId: uuid("location_id"),
     assignedTo: uuid("assigned_to").references(() => users.id),
     status: requestStatusEnum("status").notNull().default("pending"),
     issueType: text("issue_type").notNull(),
@@ -656,6 +660,13 @@ export const customerEquipment = pgTable(
     }),
     locationInHome: text("location_in_home"),
     notes: text("notes"),
+    // Stage 5: the physical site this unit is installed at (assets belong to a
+    // LOCATION, not just a customer). Nullable, populated lazily.
+    locationId: uuid("location_id"),
+    // Stage 5: replacement chain — the unit that replaced this one, and when this
+    // one was retired. App-linked (no self-FK to keep the migration simple).
+    replacedByEquipmentId: uuid("replaced_by_equipment_id"),
+    retiredAt: timestamp("retired_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -735,6 +746,9 @@ export const serviceHistory = pgTable(
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id),
+    // Stage 5: the specific installed unit this visit serviced — enables a
+    // per-asset repair timeline. Nullable (older history has no asset link).
+    equipmentId: uuid("equipment_id").references(() => customerEquipment.id),
     workPerformed: text("work_performed"),
     partsUsed: text("parts_used"),
     cost: integer("cost"),
@@ -1600,5 +1614,47 @@ export const requestStatusEvents = pgTable(
   (table) => [
     index("request_status_events_request_idx").on(table.serviceRequestId),
     index("request_status_events_org_idx").on(table.organizationId),
+  ],
+);
+
+// 25. customer_locations — physical service sites (Stage 5).
+// ServiceTitan's CUSTOMER-vs-LOCATION split: one billing customer can hold many
+// service addresses (property managers, landlords, commercial multi-site, or a
+// homeowner with a rental). Jobs/equipment hang off a location. addressHash is a
+// blind index (same HMAC pattern as customers) for dedupe/matching.
+export const customerLocations = pgTable(
+  "customer_locations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    customerId: uuid("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "cascade" }),
+    // AES-256-GCM ciphertext of the service address (PII at rest).
+    addressEncrypted: text("address_encrypted").notNull(),
+    // Blind index of the normalized address for dedupe within a customer.
+    addressHash: text("address_hash"),
+    label: text("label"), // e.g. "Main St rental", "Warehouse B"
+    zone: text("zone"), // dispatch/routing zone
+    propertyType: text("property_type"),
+    accessNotes: text("access_notes"),
+    latitude: doublePrecision("latitude"),
+    longitude: doublePrecision("longitude"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("customer_locations_customer_idx").on(table.customerId),
+    index("customer_locations_org_idx").on(table.organizationId),
+    // Dedupe a location within one customer by normalized-address hash.
+    uniqueIndex("customer_locations_customer_addr_unique")
+      .on(table.customerId, table.addressHash)
+      .where(sql`${table.addressHash} IS NOT NULL`),
   ],
 );
