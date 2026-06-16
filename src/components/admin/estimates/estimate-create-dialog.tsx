@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { Plus, Trash2, Copy, Check, Sparkles } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Plus, Trash2, Copy, Check, Sparkles, BadgeCheck } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -50,18 +50,18 @@ interface EstimateCreateDialogProps {
   readonly onCreated?: () => void;
 }
 
-function emptyLine(): LineItemDraft {
+function emptyLine(defaultMember = false): LineItemDraft {
   return {
     name: '',
     quantity: '1',
     unitPrice: '',
     pricebookItemId: null,
-    useMemberPrice: false,
+    useMemberPrice: defaultMember,
   };
 }
 
-function emptyOption(name: string): OptionDraft {
-  return { name, lineItems: [emptyLine()] };
+function emptyOption(name: string, defaultMember = false): OptionDraft {
+  return { name, lineItems: [emptyLine(defaultMember)] };
 }
 
 /** Catalog unit price for a picked item, honoring the member-price toggle. */
@@ -81,6 +81,11 @@ export function EstimateCreateDialog({
   const { items, isLoading: pricebookLoading } = usePricebook();
   const itemById = new Map(items.map((i) => [i.id, i]));
 
+  // When the estimate is for a customer with an active membership, default the
+  // per-line member-price toggle ON (the server still re-snapshots price
+  // authoritatively from the per-line flag the client sends).
+  const [isMember, setIsMember] = useState(false);
+
   const [options, setOptions] = useState<OptionDraft[]>([emptyOption('Good')]);
   const [expiresInDays, setExpiresInDays] = useState('30');
   const [sendToCustomer, setSendToCustomer] = useState(false);
@@ -91,8 +96,50 @@ export function EstimateCreateDialog({
   const [isSuggesting, setIsSuggesting] = useState(false);
   const [suggestNote, setSuggestNote] = useState<string | null>(null);
 
+  // Resolve membership when the dialog opens for a specific customer, then
+  // default the first option's line to member pricing.
+  useEffect(() => {
+    if (!open || !customerId) {
+      setIsMember(false);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/admin/customers/${customerId}/membership`,
+        );
+        if (!res.ok) return;
+        const body = (await res.json()) as {
+          success: boolean;
+          data: { membership: unknown | null };
+        };
+        if (cancelled || !body.success) return;
+        const member = body.data.membership != null;
+        setIsMember(member);
+        if (member) {
+          // Default every existing catalog/manual line to member pricing.
+          setOptions((prev) =>
+            prev.map((o) => ({
+              ...o,
+              lineItems: o.lineItems.map((l) => ({
+                ...l,
+                useMemberPrice: true,
+              })),
+            })),
+          );
+        }
+      } catch {
+        // Non-fatal: fall back to standard pricing default.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, customerId]);
+
   function reset(): void {
-    setOptions([emptyOption('Good')]);
+    setOptions([emptyOption('Good', isMember)]);
     setExpiresInDays('30');
     setSendToCustomer(false);
     setError(null);
@@ -179,13 +226,13 @@ export function EstimateCreateDialog({
       });
       return;
     }
-    updateLine(oi, li, { pricebookItemId: selected, useMemberPrice: false });
+    updateLine(oi, li, { pricebookItemId: selected, useMemberPrice: isMember });
   }
 
   function addOption(): void {
     const names = ['Good', 'Better', 'Best'];
     const next = names[options.length] ?? `Option ${options.length + 1}`;
-    setOptions((prev) => [...prev, emptyOption(next)]);
+    setOptions((prev) => [...prev, emptyOption(next, isMember)]);
   }
 
   function removeOption(i: number): void {
@@ -195,7 +242,7 @@ export function EstimateCreateDialog({
   function addLine(oi: number): void {
     setOptions((prev) =>
       prev.map((o, idx) =>
-        idx === oi ? { ...o, lineItems: [...o.lineItems, emptyLine()] } : o,
+        idx === oi ? { ...o, lineItems: [...o.lineItems, emptyLine(isMember)] } : o,
       ),
     );
   }
@@ -308,6 +355,13 @@ export function EstimateCreateDialog({
           </div>
         ) : (
           <div className="space-y-4">
+            {isMember && (
+              <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800">
+                <BadgeCheck className="size-4 shrink-0" />
+                Active member — member pricing is applied by default. Toggle it per
+                line below.
+              </div>
+            )}
             {serviceRequestId && (
               <div className="space-y-2 rounded-lg border border-dashed bg-muted/30 p-3">
                 <div className="flex items-center justify-between gap-2">

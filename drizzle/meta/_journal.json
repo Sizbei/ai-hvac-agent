@@ -15,6 +15,13 @@
       "when": 1781643690354,
       "tag": "0001_money_loop_triggers",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1781644697654,
+      "tag": "0002_memberships",
+      "breakpoints": true
     }
   ]
 }
