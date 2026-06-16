@@ -1866,6 +1866,9 @@ export const estimateLineItems = pgTable(
     name: text("name").notNull(),
     quantity: integer("quantity").notNull().default(1),
     unitPriceCents: integer("unit_price_cents").notNull().default(0),
+    // Snapshot of the pricebook item's cost at quote time so margin stays
+    // historically accurate even if the catalog item later changes or deactivates.
+    costCents: integer("cost_cents").notNull().default(0),
     lineTotalCents: integer("line_total_cents").notNull().default(0),
   },
   (table) => [index("estimate_line_items_option_idx").on(table.optionId)],
@@ -1914,6 +1917,8 @@ export const invoiceLineItems = pgTable(
     name: text("name").notNull(),
     quantity: integer("quantity").notNull().default(1),
     unitPriceCents: integer("unit_price_cents").notNull().default(0),
+    // Carried over from the estimate line snapshot for historical margin accuracy.
+    costCents: integer("cost_cents").notNull().default(0),
     lineTotalCents: integer("line_total_cents").notNull().default(0),
   },
   (table) => [index("invoice_line_items_invoice_idx").on(table.invoiceId)],

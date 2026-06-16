@@ -78,6 +78,7 @@ export async function createInvoiceFromSoldEstimate(
       name: estimateLineItems.name,
       quantity: estimateLineItems.quantity,
       unitPriceCents: estimateLineItems.unitPriceCents,
+      costCents: estimateLineItems.costCents,
       lineTotalCents: estimateLineItems.lineTotalCents,
     })
     .from(estimateLineItems)

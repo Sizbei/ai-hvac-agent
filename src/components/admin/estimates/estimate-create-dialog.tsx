@@ -10,15 +10,30 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog';
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { parseDollarsToCents } from '@/lib/admin/money-format';
+import { Switch } from '@/components/ui/switch';
+import { parseDollarsToCents, formatCentsExact } from '@/lib/admin/money-format';
+import { usePricebook, type PricebookItem } from '@/hooks/use-pricebook';
+
+const MANUAL = '__manual__';
 
 interface LineItemDraft {
+  /** "" when picked from catalog (name comes from the item). */
   readonly name: string;
   readonly quantity: string;
-  readonly unitPrice: string; // dollars
+  readonly unitPrice: string; // dollars (manual lines only)
+  /** Set when the line is a catalog pick; null for a manual line. */
+  readonly pricebookItemId: string | null;
+  readonly useMemberPrice: boolean;
 }
 
 interface OptionDraft {
@@ -35,8 +50,25 @@ interface EstimateCreateDialogProps {
   readonly onCreated?: () => void;
 }
 
+function emptyLine(): LineItemDraft {
+  return {
+    name: '',
+    quantity: '1',
+    unitPrice: '',
+    pricebookItemId: null,
+    useMemberPrice: false,
+  };
+}
+
 function emptyOption(name: string): OptionDraft {
-  return { name, lineItems: [{ name: '', quantity: '1', unitPrice: '' }] };
+  return { name, lineItems: [emptyLine()] };
+}
+
+/** Catalog unit price for a picked item, honoring the member-price toggle. */
+function catalogUnitCents(item: PricebookItem, useMember: boolean): number {
+  return useMember && item.memberPriceCents != null
+    ? item.memberPriceCents
+    : item.priceCents;
 }
 
 export function EstimateCreateDialog({
@@ -46,6 +78,9 @@ export function EstimateCreateDialog({
   customerId,
   onCreated,
 }: EstimateCreateDialogProps) {
+  const { items, isLoading: pricebookLoading } = usePricebook();
+  const itemById = new Map(items.map((i) => [i.id, i]));
+
   const [options, setOptions] = useState<OptionDraft[]>([emptyOption('Good')]);
   const [expiresInDays, setExpiresInDays] = useState('30');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -80,6 +115,20 @@ export function EstimateCreateDialog({
     );
   }
 
+  /** Switch a line between a catalog pick and a manual entry. */
+  function pickItem(oi: number, li: number, selected: string): void {
+    if (selected === MANUAL) {
+      updateLine(oi, li, {
+        pricebookItemId: null,
+        useMemberPrice: false,
+        name: '',
+        unitPrice: '',
+      });
+      return;
+    }
+    updateLine(oi, li, { pricebookItemId: selected, useMemberPrice: false });
+  }
+
   function addOption(): void {
     const names = ['Good', 'Better', 'Best'];
     const next = names[options.length] ?? `Option ${options.length + 1}`;
@@ -93,9 +142,7 @@ export function EstimateCreateDialog({
   function addLine(oi: number): void {
     setOptions((prev) =>
       prev.map((o, idx) =>
-        idx === oi
-          ? { ...o, lineItems: [...o.lineItems, { name: '', quantity: '1', unitPrice: '' }] }
-          : o,
+        idx === oi ? { ...o, lineItems: [...o.lineItems, emptyLine()] } : o,
       ),
     );
   }
@@ -112,15 +159,26 @@ export function EstimateCreateDialog({
 
   async function handleSubmit(): Promise<void> {
     setError(null);
+    // Build the payload. Catalog lines submit only pricebookItemId (+ qty +
+    // member-price toggle) — the SERVER re-snapshots name/price/cost. Manual lines
+    // submit name + price.
     const payloadOptions = options.map((o) => ({
       name: o.name.trim(),
       lineItems: o.lineItems
-        .filter((l) => l.name.trim())
-        .map((l) => ({
-          name: l.name.trim(),
-          quantity: Math.max(1, parseInt(l.quantity, 10) || 1),
-          unitPriceCents: parseDollarsToCents(l.unitPrice),
-        })),
+        .filter((l) => (l.pricebookItemId ? true : l.name.trim()))
+        .map((l) =>
+          l.pricebookItemId
+            ? {
+                pricebookItemId: l.pricebookItemId,
+                quantity: Math.max(1, parseInt(l.quantity, 10) || 1),
+                useMemberPrice: l.useMemberPrice,
+              }
+            : {
+                name: l.name.trim(),
+                quantity: Math.max(1, parseInt(l.quantity, 10) || 1),
+                unitPriceCents: parseDollarsToCents(l.unitPrice),
+              },
+        ),
     }));
 
     if (payloadOptions.some((o) => !o.name || o.lineItems.length === 0)) {
@@ -218,50 +276,116 @@ export function EstimateCreateDialog({
                   )}
                 </div>
 
-                <div className="space-y-2">
-                  {opt.lineItems.map((line, li) => (
-                    <div key={li} className="flex items-center gap-2">
-                      <Input
-                        value={line.name}
-                        onChange={(e) => updateLine(oi, li, { name: e.target.value })}
-                        placeholder="Line item"
-                        className="flex-1"
-                      />
-                      <Input
-                        value={line.quantity}
-                        onChange={(e) =>
-                          updateLine(oi, li, { quantity: e.target.value })
-                        }
-                        type="number"
-                        min="1"
-                        aria-label="Quantity"
-                        className="w-16"
-                      />
-                      <Input
-                        value={line.unitPrice}
-                        onChange={(e) =>
-                          updateLine(oi, li, { unitPrice: e.target.value })
-                        }
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        placeholder="0.00"
-                        aria-label="Unit price (dollars)"
-                        className="w-24"
-                      />
-                      {opt.lineItems.length > 1 && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          onClick={() => removeLine(oi, li)}
-                          aria-label="Remove line item"
-                        >
-                          <Trash2 className="size-3.5" />
-                        </Button>
-                      )}
-                    </div>
-                  ))}
+                <div className="space-y-3">
+                  {opt.lineItems.map((line, li) => {
+                    const item = line.pricebookItemId
+                      ? itemById.get(line.pricebookItemId)
+                      : undefined;
+                    const hasMember = item?.memberPriceCents != null;
+                    return (
+                      <div
+                        key={li}
+                        className="space-y-2 rounded-md border border-dashed p-2"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Select
+                            value={line.pricebookItemId ?? MANUAL}
+                            onValueChange={(v) => pickItem(oi, li, v ?? MANUAL)}
+                          >
+                            <SelectTrigger className="flex-1">
+                              <SelectValue
+                                placeholder={
+                                  pricebookLoading
+                                    ? 'Loading catalog…'
+                                    : 'Pick from pricebook or enter manually'
+                                }
+                              />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value={MANUAL}>Manual entry</SelectItem>
+                              {items.map((it) => (
+                                <SelectItem key={it.id} value={it.id}>
+                                  {it.name} — {formatCentsExact(it.priceCents)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          {opt.lineItems.length > 1 && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              onClick={() => removeLine(oi, li)}
+                              aria-label="Remove line item"
+                            >
+                              <Trash2 className="size-3.5" />
+                            </Button>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {item ? (
+                            // Catalog line: name + price are read-only (server-priced).
+                            <div className="flex flex-1 items-center justify-between rounded-md bg-muted/40 px-2.5 py-1.5 text-sm">
+                              <span className="truncate">{item.name}</span>
+                              <span className="font-medium tabular-nums">
+                                {formatCentsExact(
+                                  catalogUnitCents(item, line.useMemberPrice),
+                                )}
+                              </span>
+                            </div>
+                          ) : (
+                            // Manual line: free name + dollar price.
+                            <>
+                              <Input
+                                value={line.name}
+                                onChange={(e) =>
+                                  updateLine(oi, li, { name: e.target.value })
+                                }
+                                placeholder="Line item"
+                                className="flex-1"
+                              />
+                              <Input
+                                value={line.unitPrice}
+                                onChange={(e) =>
+                                  updateLine(oi, li, { unitPrice: e.target.value })
+                                }
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                placeholder="0.00"
+                                aria-label="Unit price (dollars)"
+                                className="w-24"
+                              />
+                            </>
+                          )}
+                          <Input
+                            value={line.quantity}
+                            onChange={(e) =>
+                              updateLine(oi, li, { quantity: e.target.value })
+                            }
+                            type="number"
+                            min="1"
+                            aria-label="Quantity"
+                            className="w-16"
+                          />
+                        </div>
+
+                        {item && hasMember && (
+                          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <Switch
+                              checked={line.useMemberPrice}
+                              onCheckedChange={(c) =>
+                                updateLine(oi, li, { useMemberPrice: c })
+                              }
+                            />
+                            Member price (
+                            {formatCentsExact(item.memberPriceCents ?? 0)})
+                          </label>
+                        )}
+                      </div>
+                    );
+                  })}
                   <Button
                     type="button"
                     variant="outline"

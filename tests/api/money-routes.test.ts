@@ -14,6 +14,7 @@ const {
   mockCreateEstimate,
   mockListEstimates,
   mockGetDefaultTaxBps,
+  mockGetPricebookItemById,
   mockLogAudit,
 } = vi.hoisted(() => ({
   mockGetAdminSession: vi.fn(),
@@ -22,6 +23,7 @@ const {
   mockCreateEstimate: vi.fn(),
   mockListEstimates: vi.fn(),
   mockGetDefaultTaxBps: vi.fn(),
+  mockGetPricebookItemById: vi.fn(),
   mockLogAudit: vi.fn(),
 }));
 
@@ -38,6 +40,7 @@ vi.mock("@/lib/admin/estimate-queries", () => ({
 }));
 vi.mock("@/lib/admin/pricebook-queries", () => ({
   getDefaultTaxBps: (...a: unknown[]) => mockGetDefaultTaxBps(...a),
+  getPricebookItemById: (...a: unknown[]) => mockGetPricebookItemById(...a),
 }));
 vi.mock("@/lib/admin/audit", () => ({
   logAudit: (...a: unknown[]) => mockLogAudit(...a),
@@ -80,7 +83,14 @@ function jsonReq(path: string, body: unknown): NextRequest {
 beforeEach(() => {
   vi.clearAllMocks();
   mockLogAudit.mockResolvedValue(undefined);
+  mockGetDefaultTaxBps.mockResolvedValue(0);
+  mockCreateEstimate.mockResolvedValue({
+    estimateId: "est-1",
+    approvalToken: "tok-1",
+  });
 });
+
+const PB_ID = "11111111-1111-4111-8111-1111111111c1";
 
 describe("POST /api/admin/payments/[id]/refund — role gate", () => {
   it("returns 401 when there is no admin session", async () => {
@@ -195,5 +205,145 @@ describe("/api/admin/estimates — admin session required", () => {
     );
     expect(res.status).toBe(401);
     expect(mockCreateEstimate).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/admin/estimates — server-authoritative pricing (anti-tampering)", () => {
+  it("prices a catalog line from the pricebook item, IGNORING client unitPriceCents", async () => {
+    mockGetAdminSession.mockResolvedValue(session("admin"));
+    // The real catalog price/cost the server must use.
+    mockGetPricebookItemById.mockResolvedValue({
+      id: PB_ID,
+      organizationId: ORG,
+      name: "Real Catalog Item",
+      priceCents: 50000,
+      memberPriceCents: 45000,
+      costCents: 20000,
+      active: true,
+    });
+
+    const res = await estimatesPOST(
+      jsonReq("/api/admin/estimates", {
+        options: [
+          {
+            name: "Good",
+            lineItems: [
+              {
+                pricebookItemId: PB_ID,
+                // Tampered client values — must be discarded by the server.
+                name: "Spoofed Name",
+                unitPriceCents: 1, // attacker tries to pay 1 cent
+                quantity: 2,
+              },
+            ],
+          },
+        ],
+      }),
+    );
+
+    expect(res.status).toBe(201);
+    expect(mockCreateEstimate).toHaveBeenCalledTimes(1);
+    const passed = mockCreateEstimate.mock.calls[0][1] as {
+      options: Array<{
+        lineItems: Array<{
+          name: string;
+          unitPriceCents: number;
+          costCents: number;
+          pricebookItemId: string | null;
+        }>;
+      }>;
+    };
+    const line = passed.options[0].lineItems[0];
+    // Price + name + cost come from the pricebook item, NOT the client.
+    expect(line.unitPriceCents).toBe(50000);
+    expect(line.name).toBe("Real Catalog Item");
+    expect(line.costCents).toBe(20000);
+    expect(line.pricebookItemId).toBe(PB_ID);
+  });
+
+  it("uses member price when useMemberPrice is set", async () => {
+    mockGetAdminSession.mockResolvedValue(session("admin"));
+    mockGetPricebookItemById.mockResolvedValue({
+      id: PB_ID,
+      organizationId: ORG,
+      name: "Item",
+      priceCents: 50000,
+      memberPriceCents: 45000,
+      costCents: 20000,
+      active: true,
+    });
+
+    await estimatesPOST(
+      jsonReq("/api/admin/estimates", {
+        options: [
+          {
+            name: "Good",
+            lineItems: [
+              { pricebookItemId: PB_ID, quantity: 1, useMemberPrice: true },
+            ],
+          },
+        ],
+      }),
+    );
+
+    const passed = mockCreateEstimate.mock.calls[0][1] as {
+      options: Array<{ lineItems: Array<{ unitPriceCents: number }> }>;
+    };
+    expect(passed.options[0].lineItems[0].unitPriceCents).toBe(45000);
+  });
+
+  it("rejects a catalog line whose item went inactive (clean 400, no 500)", async () => {
+    mockGetAdminSession.mockResolvedValue(session("admin"));
+    mockGetPricebookItemById.mockResolvedValue({
+      id: PB_ID,
+      organizationId: ORG,
+      name: "Item",
+      priceCents: 50000,
+      memberPriceCents: null,
+      costCents: 20000,
+      active: false, // went inactive between list and submit
+    });
+
+    const res = await estimatesPOST(
+      jsonReq("/api/admin/estimates", {
+        options: [
+          { name: "Good", lineItems: [{ pricebookItemId: PB_ID, quantity: 1 }] },
+        ],
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(mockCreateEstimate).not.toHaveBeenCalled();
+  });
+
+  it("rejects a manual line missing name/price (400)", async () => {
+    mockGetAdminSession.mockResolvedValue(session("admin"));
+    const res = await estimatesPOST(
+      jsonReq("/api/admin/estimates", {
+        // No pricebookItemId and no name/price -> manual line is incomplete.
+        options: [{ name: "Good", lineItems: [{ quantity: 1 }] }],
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(mockCreateEstimate).not.toHaveBeenCalled();
+  });
+
+  it("accepts a valid manual line with costCents 0", async () => {
+    mockGetAdminSession.mockResolvedValue(session("admin"));
+    const res = await estimatesPOST(
+      jsonReq("/api/admin/estimates", {
+        options: [
+          {
+            name: "Good",
+            lineItems: [{ name: "Custom work", quantity: 1, unitPriceCents: 12500 }],
+          },
+        ],
+      }),
+    );
+    expect(res.status).toBe(201);
+    const passed = mockCreateEstimate.mock.calls[0][1] as {
+      options: Array<{ lineItems: Array<{ costCents: number; unitPriceCents: number }> }>;
+    };
+    expect(passed.options[0].lineItems[0].costCents).toBe(0);
+    expect(passed.options[0].lineItems[0].unitPriceCents).toBe(12500);
   });
 });

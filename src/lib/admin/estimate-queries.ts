@@ -28,6 +28,8 @@ export interface EstimateOptionInput {
     readonly name: string;
     readonly quantity: number;
     readonly unitPriceCents: number;
+    /** Cost snapshot at quote time (0 for manual lines). Used for margin later. */
+    readonly costCents?: number;
   }>;
 }
 
@@ -73,6 +75,7 @@ export async function createEstimate(
     name: string;
     quantity: number;
     unitPriceCents: number;
+    costCents: number;
     lineTotalCents: number;
   }> = [];
 
@@ -95,6 +98,7 @@ export async function createEstimate(
         name: li.name,
         quantity: li.quantity,
         unitPriceCents: li.unitPriceCents,
+        costCents: li.costCents ?? 0,
         // Use the SAME helper that feeds option/invoice totals so the stored
         // per-line value can't diverge from the rolled-up subtotal.
         lineTotalCents: lineTotalCents(li),

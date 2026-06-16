@@ -1,8 +1,15 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { getAdminSession } from "@/lib/auth/session";
-import { listEstimates, createEstimate } from "@/lib/admin/estimate-queries";
-import { getDefaultTaxBps } from "@/lib/admin/pricebook-queries";
+import {
+  listEstimates,
+  createEstimate,
+  type EstimateOptionInput,
+} from "@/lib/admin/estimate-queries";
+import {
+  getDefaultTaxBps,
+  getPricebookItemById,
+} from "@/lib/admin/pricebook-queries";
 import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
@@ -33,10 +40,15 @@ const createSchema = z.object({
         lineItems: z
           .array(
             z.object({
+              // A catalog line carries a pricebookItemId; the server re-snapshots
+              // its price/cost authoritatively. A manual line omits it and must
+              // supply name + unitPriceCents. Client name/price on a catalog line
+              // are ignored (anti-tampering).
               pricebookItemId: z.string().uuid().nullable().optional(),
-              name: z.string().trim().min(1).max(255),
+              name: z.string().trim().min(1).max(255).optional(),
               quantity: z.number().int().min(1),
-              unitPriceCents: z.number().int().min(0),
+              unitPriceCents: z.number().int().min(0).optional(),
+              useMemberPrice: z.boolean().optional(),
             }),
           )
           .min(1),
@@ -91,6 +103,60 @@ export async function POST(request: NextRequest) {
       return errorResponse("Invalid estimate", "VALIDATION_ERROR", 400);
     }
 
+    // Resolve every line AUTHORITATIVELY server-side. Catalog lines (those with a
+    // pricebookItemId) take name/price/cost from the tenant-scoped pricebook item
+    // — a client-sent unitPriceCents can NEVER override a catalog price. Manual
+    // lines (no pricebookItemId) require name + price and carry zero cost.
+    const resolvedOptions: EstimateOptionInput[] = [];
+    for (const opt of parsed.data.options) {
+      const resolvedLines: EstimateOptionInput["lineItems"][number][] = [];
+      for (const line of opt.lineItems) {
+        if (line.pricebookItemId) {
+          const item = await getPricebookItemById(
+            session.organizationId,
+            line.pricebookItemId,
+          );
+          // Tolerate an item that went inactive (or vanished) between list and
+          // submit: clean 400, not a 500.
+          if (!item || !item.active) {
+            return errorResponse(
+              "A selected catalog item is no longer available",
+              "VALIDATION_ERROR",
+              400,
+            );
+          }
+          const unitPriceCents =
+            line.useMemberPrice && item.memberPriceCents != null
+              ? item.memberPriceCents
+              : item.priceCents;
+          resolvedLines.push({
+            pricebookItemId: item.id,
+            name: item.name, // ignore any client-sent name
+            quantity: line.quantity,
+            unitPriceCents, // server-derived, never client
+            costCents: item.costCents,
+          });
+        } else {
+          // Manual line: must self-describe name + price.
+          if (!line.name || line.unitPriceCents == null) {
+            return errorResponse(
+              "Manual line items need a name and price",
+              "VALIDATION_ERROR",
+              400,
+            );
+          }
+          resolvedLines.push({
+            pricebookItemId: null,
+            name: line.name,
+            quantity: line.quantity,
+            unitPriceCents: line.unitPriceCents,
+            costCents: 0,
+          });
+        }
+      }
+      resolvedOptions.push({ name: opt.name, lineItems: resolvedLines });
+    }
+
     // Tax is the org's default rate, resolved server-side — never client-supplied.
     const taxBps = await getDefaultTaxBps(session.organizationId);
 
@@ -100,7 +166,7 @@ export async function POST(request: NextRequest) {
         serviceRequestId: parsed.data.serviceRequestId ?? null,
         customerId: parsed.data.customerId ?? null,
         taxBps,
-        options: parsed.data.options,
+        options: resolvedOptions,
         expiresInDays: parsed.data.expiresInDays,
       },
     );

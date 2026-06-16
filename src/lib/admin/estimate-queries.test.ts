@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
+  createEstimate,
   markEstimateSold,
   getEstimateForApproval,
 } from "./estimate-queries";
@@ -8,6 +9,8 @@ import { db } from "@/lib/db";
 vi.mock("@/lib/db", () => ({
   db: {
     select: vi.fn(),
+    insert: vi.fn(() => ({ values: vi.fn((rows: unknown) => rows) })),
+    batch: vi.fn().mockResolvedValue([]),
     update: vi.fn(() => ({
       set: vi.fn(() => ({
         where: vi.fn(() => ({ returning: vi.fn().mockResolvedValue([]) })),
@@ -39,6 +42,49 @@ function mockSelectSeq(results: unknown[][]): void {
 }
 
 beforeEach(() => vi.clearAllMocks());
+
+describe("createEstimate", () => {
+  it("snapshots costCents onto each line item row", async () => {
+    const { estimateId, approvalToken } = await createEstimate(ORG, {
+      taxBps: 0,
+      options: [
+        {
+          name: "Good",
+          lineItems: [
+            {
+              pricebookItemId: "pb-1",
+              name: "AC tune-up",
+              quantity: 2,
+              unitPriceCents: 15000,
+              costCents: 6000,
+            },
+            // manual line: no cost provided -> stored as 0
+            { name: "Misc", quantity: 1, unitPriceCents: 2500 },
+          ],
+        },
+      ],
+    });
+    expect(estimateId).toBeTruthy();
+    expect(approvalToken).toBeTruthy();
+
+    // The 3rd statement batched is the line-items insert; our values() mock
+    // returns the row array verbatim so we can assert what was stored.
+    expect(db.batch).toHaveBeenCalledTimes(1);
+    const batchArgs = vi.mocked(db.batch).mock.calls[0]![0] as unknown as unknown[];
+    const lineRows = batchArgs[2] as Array<{
+      name: string;
+      costCents: number;
+      unitPriceCents: number;
+      lineTotalCents: number;
+    }>;
+    expect(lineRows).toHaveLength(2);
+    const tuneUp = lineRows.find((r) => r.name === "AC tune-up")!;
+    expect(tuneUp.costCents).toBe(6000);
+    expect(tuneUp.lineTotalCents).toBe(30000); // qty 2 × 15000
+    const misc = lineRows.find((r) => r.name === "Misc")!;
+    expect(misc.costCents).toBe(0); // manual line defaults cost to 0
+  });
+});
 
 describe("markEstimateSold", () => {
   it("rejects a non-open estimate (status guard)", async () => {
