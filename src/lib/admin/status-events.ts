@@ -8,6 +8,7 @@
  */
 import { db } from "@/lib/db";
 import { requestStatusEvents } from "@/lib/db/schema";
+import { logger } from "@/lib/logger";
 import type { RequestStatus } from "./request-status";
 
 export type ActorType = "human" | "ai" | "system";
@@ -26,12 +27,22 @@ export async function recordStatusEvent(params: {
   readonly actorType: ActorType;
   readonly actorId?: string | null;
 }): Promise<void> {
-  await db.insert(requestStatusEvents).values({
-    organizationId: params.organizationId,
-    serviceRequestId: params.serviceRequestId,
-    fromStatus: params.fromStatus,
-    toStatus: params.toStatus,
-    actorType: params.actorType,
-    actorId: params.actorId ?? null,
-  });
+  // Best-effort: the status change has already committed by the time we log the
+  // event, so an event-write failure must NOT throw back and 500 a successful
+  // transition. Log and move on.
+  try {
+    await db.insert(requestStatusEvents).values({
+      organizationId: params.organizationId,
+      serviceRequestId: params.serviceRequestId,
+      fromStatus: params.fromStatus,
+      toStatus: params.toStatus,
+      actorType: params.actorType,
+      actorId: params.actorId ?? null,
+    });
+  } catch (error) {
+    logger.error(
+      { error, serviceRequestId: params.serviceRequestId, toStatus: params.toStatus },
+      "Failed to record request status event (non-fatal)",
+    );
+  }
 }

@@ -120,15 +120,28 @@ export async function processPendingJobs(limit = 10): Promise<{
         continue;
       }
 
-      // Mark as processing
-      await db
+      // ATOMICALLY claim the job: flip pending->processing guarded on the
+      // current status + RETURNING. If a concurrent cron drain already claimed
+      // it, this matches zero rows and we skip — so re-running the cron (or two
+      // overlapping invocations) sends each job exactly once.
+      const [claimed] = await db
         .update(communicationJobs)
         .set({
           status: "processing",
           startedAt: new Date(),
           attempts: job.attempts + 1,
         })
-        .where(eq(communicationJobs.id, job.id));
+        .where(
+          and(
+            eq(communicationJobs.id, job.id),
+            eq(communicationJobs.status, "pending"),
+          ),
+        )
+        .returning({ id: communicationJobs.id });
+
+      if (!claimed) {
+        continue; // another drain already took this job
+      }
 
       // Send the communication
       await sendCommunication(job);

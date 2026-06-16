@@ -27,7 +27,9 @@ import {
   auditLog,
   customers,
   organizationSettings,
+  communicationPreferences,
 } from "@/lib/db/schema";
+import { recordStatusEvent } from "@/lib/admin/status-events";
 import {
   resolveAfterHoursConfig,
   isAfterHours,
@@ -174,8 +176,30 @@ export async function submitSessionServiceRequest(params: {
   // the service-request insert, session-status update, and audit-log insert
   // are issued via `db.batch`, which neon executes as a single atomic
   // (non-interactive) transaction.
-  const [insertedRequests] = await db.batch([
-    db
+  // Bridge intake SMS consent into the consent gate: a customer who declined
+  // (or granted) SMS at intake must have it reflected in communicationPreferences
+  // — checkSendAllowed reads ONLY that table, so writing it here (atomically with
+  // the request, in the same batch) is what actually enforces the opt-out.
+  const consentUpsert =
+    typeof data.smsConsent === "boolean"
+      ? db
+          .insert(communicationPreferences)
+          .values({
+            organizationId,
+            customerId,
+            smsEnabled: data.smsConsent,
+            updatedAt: new Date(),
+          })
+          .onConflictDoUpdate({
+            target: [
+              communicationPreferences.organizationId,
+              communicationPreferences.customerId,
+            ],
+            set: { smsEnabled: data.smsConsent, updatedAt: new Date() },
+          })
+      : null;
+
+  const requestInsert = db
       .insert(serviceRequests)
       .values({
         id: serviceRequestId,
@@ -226,31 +250,49 @@ export async function submitSessionServiceRequest(params: {
         leadSource: data.leadSource ?? null,
         isAfterHours: afterHours,
       })
-      .returning({ id: serviceRequests.id }),
-    db
-      .update(customerSessions)
-      .set({ status: "submitted", updatedAt: new Date() })
-      // Scope by (id, org) — defense in depth, matching escalate-service.ts.
-      .where(
-        and(
-          eq(customerSessions.id, sessionId),
-          eq(customerSessions.organizationId, organizationId),
-        ),
+      .returning({ id: serviceRequests.id });
+
+  const sessionUpdate = db
+    .update(customerSessions)
+    .set({ status: "submitted", updatedAt: new Date() })
+    // Scope by (id, org) — defense in depth, matching escalate-service.ts.
+    .where(
+      and(
+        eq(customerSessions.id, sessionId),
+        eq(customerSessions.organizationId, organizationId),
       ),
-    db.insert(auditLog).values({
-      organizationId,
-      sessionId,
-      action: "service_request_created",
-      entity: "service_requests",
-      entityId: serviceRequestId,
-      ipAddress,
-    }),
-  ]);
+    );
+
+  const auditInsert = db.insert(auditLog).values({
+    organizationId,
+    actorType: "ai",
+    sessionId,
+    action: "service_request_created",
+    entity: "service_requests",
+    entityId: serviceRequestId,
+    ipAddress,
+  });
+
+  // The neon-http batch is atomic: request + session + audit (+ consent when the
+  // customer expressed an SMS preference) all commit together or not at all.
+  const [insertedRequests] = consentUpsert
+    ? await db.batch([requestInsert, sessionUpdate, auditInsert, consentUpsert])
+    : await db.batch([requestInsert, sessionUpdate, auditInsert]);
 
   const serviceRequest = insertedRequests[0];
   if (!serviceRequest) {
     return { ok: false, reason: "insert_failed" };
   }
+
+  // Criterion-4 eventing: the request's initial status. actorType=ai — this is
+  // the AI intake/voice path that produced the booking.
+  await recordStatusEvent({
+    organizationId,
+    serviceRequestId: serviceRequest.id,
+    fromStatus: null,
+    toStatus: "pending",
+    actorType: "ai",
+  });
 
   // Push this confirmed booking into FSM integrations (HCP + Fieldpulse) as
   // JOBS in the BACKGROUND — after() so the response isn't blocked, and

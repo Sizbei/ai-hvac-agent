@@ -334,8 +334,11 @@ export async function POST(request: NextRequest): Promise<Response> {
       return new Response(null, { status: 204 });
     }
 
-    // Update the service request status
-    await db
+    // Update the service request status. Org-scoped (defense in depth on top of
+    // the per-org unique fieldpulse_job_id index) and RETURNING so we only log
+    // the transition when a row actually changed — a concurrent update that
+    // moved the row first matches zero rows and must NOT emit a phantom event.
+    const [statusUpdated] = await db
       .update(serviceRequests)
       .set({
         status: newStatus,
@@ -345,11 +348,22 @@ export async function POST(request: NextRequest): Promise<Response> {
       })
       .where(
         and(
+          eq(serviceRequests.organizationId, organizationId),
           eq(serviceRequests.id, requestRow.id),
           // Guard: only update if status hasn't changed concurrently
           eq(serviceRequests.status, requestRow.status),
         ),
+      )
+      .returning({ id: serviceRequests.id });
+
+    if (!statusUpdated) {
+      // A concurrent transition won the race — don't double-audit / phantom-event.
+      logger.info(
+        { eventId, jobId, organizationId },
+        "Fieldpulse webhook: status changed concurrently, skipping audit/event",
       );
+      return new Response(null, { status: 204 });
+    }
 
     // Audit log for the status change (FORENSIC TRAIL) — actorType=system.
     await db.insert(auditLog).values({

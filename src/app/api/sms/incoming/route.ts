@@ -51,18 +51,9 @@ const ERROR_REPLY =
  */
 export async function POST(request: NextRequest) {
   const ip = request.headers.get("x-forwarded-for") ?? "unknown";
-  const rate = slidingWindow(
-    `sms:incoming:${ip}`,
-    RATE_LIMITS.chat.maxRequests,
-    RATE_LIMITS.chat.windowMs,
-  );
-  if (!rate.allowed) {
-    // Twilio retries on 5xx; a plain reply is friendlier than dead air.
-    return new Response(messagingTwiML(BUSY_REPLY), {
-      headers: MESSAGING_HEADERS,
-    });
-  }
 
+  // Verify the Twilio signature FIRST so compliance keywords (STOP) are honored
+  // even under load — a STOP must never be dropped by the rate limiter.
   const { params, valid } = await parseAndVerifyTwilioRequest(request);
   if (!valid) {
     logger.warn({ ip }, "Rejected Twilio SMS webhook: invalid signature");
@@ -79,27 +70,40 @@ export async function POST(request: NextRequest) {
     });
   }
 
+  const organizationId = DEMO_ORG_ID;
+
+  // COMPLIANCE: STOP/HELP/START handled BEFORE the rate limiter and the AI brain
+  // — an inbound "STOP" must suppress the contact and get the standard opt-out
+  // reply, never be throttled or answered conversationally.
+  const keyword = classifySmsKeyword(body);
+  if (keyword === "stop") {
+    await setDoNotContactByPhone(organizationId, from, true);
+    logger.info({ from }, "SMS opt-out (STOP)");
+    return new Response(messagingTwiML(STOP_REPLY), { headers: MESSAGING_HEADERS });
+  }
+  if (keyword === "start") {
+    await setDoNotContactByPhone(organizationId, from, false);
+    logger.info({ from }, "SMS opt-in (START)");
+    return new Response(messagingTwiML(START_REPLY), { headers: MESSAGING_HEADERS });
+  }
+  if (keyword === "help") {
+    return new Response(messagingTwiML(HELP_REPLY), { headers: MESSAGING_HEADERS });
+  }
+
+  // Rate limit normal conversational messages.
+  const rate = slidingWindow(
+    `sms:incoming:${ip}`,
+    RATE_LIMITS.chat.maxRequests,
+    RATE_LIMITS.chat.windowMs,
+  );
+  if (!rate.allowed) {
+    // Twilio retries on 5xx; a plain reply is friendlier than dead air.
+    return new Response(messagingTwiML(BUSY_REPLY), {
+      headers: MESSAGING_HEADERS,
+    });
+  }
+
   try {
-    const organizationId = DEMO_ORG_ID;
-
-    // COMPLIANCE: handle STOP/HELP/START BEFORE the AI brain ever runs — an
-    // inbound "STOP" must suppress the contact and get a standard opt-out reply,
-    // never a conversational answer from the bot.
-    const keyword = classifySmsKeyword(body);
-    if (keyword === "stop") {
-      await setDoNotContactByPhone(organizationId, from, true);
-      logger.info({ from }, "SMS opt-out (STOP)");
-      return new Response(messagingTwiML(STOP_REPLY), { headers: MESSAGING_HEADERS });
-    }
-    if (keyword === "start") {
-      await setDoNotContactByPhone(organizationId, from, false);
-      logger.info({ from }, "SMS opt-in (START)");
-      return new Response(messagingTwiML(START_REPLY), { headers: MESSAGING_HEADERS });
-    }
-    if (keyword === "help") {
-      return new Response(messagingTwiML(HELP_REPLY), { headers: MESSAGING_HEADERS });
-    }
-
     // Key the session on the sender's number so subsequent texts in the same
     // conversation resolve the same session — the SMS analogue of CallSid.
     const sessionToken = `sms:${from}`;

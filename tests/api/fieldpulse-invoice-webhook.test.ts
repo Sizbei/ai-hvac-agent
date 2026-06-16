@@ -98,10 +98,17 @@ describe("Fieldpulse Invoice Webhook", () => {
       }),
     } as never);
 
-    // Default mock for successful update
+    // Default mock for successful update. The job-status path uses
+    // .where().returning() (gated on a row); the invoice path awaits .where()
+    // directly — so .where() is both awaitable and .returning()-able.
     vi.mocked(db.update).mockReturnValue({
       set: vi.fn().mockReturnValue({
-        where: vi.fn().mockResolvedValue(undefined),
+        where: vi.fn().mockImplementation(() => {
+          const p = Promise.resolve(undefined);
+          return Object.assign(p, {
+            returning: vi.fn().mockResolvedValue([{ id: mockRequestId }]),
+          });
+        }),
       }),
     } as never);
   });
