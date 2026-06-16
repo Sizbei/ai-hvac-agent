@@ -491,6 +491,13 @@ export const serviceRequests = pgTable(
     invoiceStatus: invoiceStatusEnum("invoice_status").notNull().default("none"),
     scheduledDate: timestamp("scheduled_date", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
+    // On-site customer e-signature captured by the assigned tech at job sign-off.
+    // signatureUrl points at the R2-stored PNG (admin/server retrieval only for
+    // v1). signatureName is the customer's printed name — PII-ish but stored
+    // plaintext like estimates.signatureName (the customer's own sign-off).
+    signatureUrl: text("signature_url"),
+    signatureName: text("signature_name"),
+    signedAt: timestamp("signed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -1749,6 +1756,40 @@ export const pricebookItemMaterials = pgTable(
     quantity: integer("quantity").notNull().default(1),
   },
   (table) => [index("pricebook_item_materials_item_idx").on(table.itemId)],
+);
+
+// 28b. job_materials — materials a technician actually used on a service request
+// in the field. Distinct from estimate/invoice line snapshots: this is the ACTUAL
+// consumption, captured on-site by the assigned tech. unitCostCents/unitPriceCents
+// are snapshotted at add-time from the pricebook item (server-authoritative), or
+// default to 0 for a manual (off-catalog) line. Feeds the actual-vs-estimated
+// margin readout. Money in integer cents.
+export const jobMaterials = pgTable(
+  "job_materials",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    serviceRequestId: uuid("service_request_id")
+      .notNull()
+      .references(() => serviceRequests.id, { onDelete: "cascade" }),
+    pricebookItemId: uuid("pricebook_item_id").references(
+      () => pricebookItems.id,
+    ),
+    description: text("description"),
+    quantity: integer("quantity").notNull().default(1),
+    unitCostCents: integer("unit_cost_cents").notNull().default(0),
+    unitPriceCents: integer("unit_price_cents").notNull().default(0),
+    createdBy: uuid("created_by").references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("job_materials_org_idx").on(table.organizationId),
+    index("job_materials_request_idx").on(table.serviceRequestId),
+  ],
 );
 
 // 29. tax_rates — jurisdictional tax (rate in basis points; 825 = 8.25%).
