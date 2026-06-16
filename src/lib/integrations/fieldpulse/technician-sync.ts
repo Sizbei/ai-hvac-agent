@@ -90,8 +90,9 @@ export async function syncTechniciansFromFieldpulse(
           isActive: tech.isActive !== false, // sync active status
           // No password - technicians authenticate via Fieldpulse, not us
           passwordHash: null,
-          // Track Fieldpulse identity for email change handling
-          googleId: tech.id, // Reuse googleId column for fieldpulseUserId
+          // Track Fieldpulse identity in its own per-org-unique column (NOT
+          // google_id, whose unique index is global and collides across tenants).
+          fieldpulseUserId: tech.id,
           createdAt: new Date(),
           updatedAt: new Date(),
         })
@@ -100,7 +101,7 @@ export async function syncTechniciansFromFieldpulse(
           set: {
             name,
             isActive: tech.isActive !== false,
-            googleId: tech.id, // Update fieldpulseUserId if changed
+            fieldpulseUserId: tech.id, // Update if changed
             updatedAt: new Date(),
           },
           // Guard: never clobber a human admin/super_admin who happens to share
@@ -115,7 +116,7 @@ export async function syncTechniciansFromFieldpulse(
     }
 
     // Soft-deactivate technicians that are no longer in Fieldpulse: synced techs
-    // (googleId holds their fieldpulseUserId) whose id is NOT in the current FP
+    // (matched by fieldpulse_user_id) whose id is NOT in the current FP
     // roster. Guarded — if Fieldpulse returned NO technicians we do nothing,
     // rather than deactivating the entire roster on a transient empty response.
     const currentFpIds = technicians
@@ -129,10 +130,10 @@ export async function syncTechniciansFromFieldpulse(
           and(
             eq(users.organizationId, organizationId),
             eq(users.role, "technician"),
-            // Only synced technicians (googleId = fieldpulseUserId)…
-            isNotNull(users.googleId),
+            // Only synced technicians…
+            isNotNull(users.fieldpulseUserId),
             // …that are no longer present in Fieldpulse.
-            notInArray(users.googleId, currentFpIds),
+            notInArray(users.fieldpulseUserId, currentFpIds),
           ),
         );
     }

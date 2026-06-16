@@ -253,6 +253,13 @@
       "when": 1781518269000,
       "tag": "0035_fp_availability_sync",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1781518270000,
+      "tag": "0036_audit_hardening",
+      "breakpoints": true
     }
   ]
 }

@@ -125,6 +125,14 @@ export async function POST(request: NextRequest): Promise<Response> {
     // oracle. Accepted — no state change occurs without a valid signature.
     const signature = request.headers.get("x-fieldpulse-signature");
     const secret = await getFieldpulseWebhookSecret(organizationId);
+    // Fail closed in production when no secret is configured (per-org or env).
+    if (!secret && process.env.NODE_ENV === "production") {
+      logger.error(
+        { organizationId, eventId },
+        "Fieldpulse invoice webhook rejected: no signing secret configured",
+      );
+      return errorResponse("Webhook not configured", "NOT_CONFIGURED", 401);
+    }
     const signatureResult = verifySignature(rawBody, signature, secret);
     if (!signatureResult.valid) {
       logger.warn(
@@ -164,6 +172,9 @@ export async function POST(request: NextRequest): Promise<Response> {
         })
         .where(
           and(
+            // Scope to the org we derived from the lookup (defense in depth on
+            // top of the per-org unique fieldpulse_job_id index).
+            eq(serviceRequests.organizationId, organizationId),
             eq(serviceRequests.id, requestRow.id),
             eq(serviceRequests.invoiceStatus, requestRow.invoiceStatus),
           ),

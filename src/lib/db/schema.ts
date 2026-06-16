@@ -216,6 +216,11 @@ export const users = pgTable(
     // Set when an admin links "Sign in with Google". Unique so one Google
     // account maps to at most one user row.
     googleId: text("google_id"),
+    // The Fieldpulse user/technician id for rows synced from Fieldpulse. Stored
+    // in its OWN column (not reusing google_id, whose unique index is GLOBAL —
+    // Fieldpulse's small sequential ids collide across tenants). Uniqueness is
+    // scoped per-org below.
+    fieldpulseUserId: text("fieldpulse_user_id"),
     role: text("role", { enum: ["super_admin", "admin", "technician"] })
       .notNull()
       .default("technician"),
@@ -244,6 +249,11 @@ export const users = pgTable(
     uniqueIndex("users_google_id_unique")
       .on(table.googleId)
       .where(sql`${table.googleId} IS NOT NULL`),
+    // Fieldpulse user id is unique PER ORG (not globally) — Fieldpulse assigns
+    // small sequential ids that legitimately repeat across tenants.
+    uniqueIndex("users_org_fieldpulse_user_id_unique")
+      .on(table.organizationId, table.fieldpulseUserId)
+      .where(sql`${table.fieldpulseUserId} IS NOT NULL`),
   ],
 );
 
@@ -470,6 +480,17 @@ export const serviceRequests = pgTable(
     // service date, and cascade on customer delete) — index it to avoid a
     // full scan as the table grows.
     index("requests_customer_id_idx").on(table.customerId),
+    // Inbound HCP/Fieldpulse webhooks resolve the request by external job id on
+    // every delivery — index both so the lookup isn't a full table scan. The
+    // Fieldpulse one is UNIQUE PER ORG so a cross-tenant job-id collision can't
+    // resolve to the wrong tenant's request (pairs with the org-scoped query in
+    // invoice-sync). Partial: most rows have NULL job ids.
+    index("requests_hcp_job_id_idx")
+      .on(table.hcpJobId)
+      .where(sql`${table.hcpJobId} IS NOT NULL`),
+    uniqueIndex("requests_org_fieldpulse_job_id_unique")
+      .on(table.organizationId, table.fieldpulseJobId)
+      .where(sql`${table.fieldpulseJobId} IS NOT NULL`),
   ],
 );
 
@@ -1383,9 +1404,11 @@ export const communicationJobs = pgTable(
     // Lower = higher priority (0-100, default 50)
     priority: integer("priority").notNull().default(50),
 
-    // Recipient information
-    recipientPhone: varchar("recipient_phone", { length: 20 }),
-    recipientEmail: text("recipient_email"),
+    // Recipient PII — AES-256-GCM ciphertext (encrypted at enqueue, decrypted
+    // only in-memory at send time), matching the at-rest encryption used for all
+    // other PII in this schema. Stored as text to hold the ciphertext envelope.
+    recipientPhoneEncrypted: text("recipient_phone_encrypted"),
+    recipientEmailEncrypted: text("recipient_email_encrypted"),
 
     // Context data for template rendering
     templateVariables: jsonb("template_variables")
@@ -1404,9 +1427,15 @@ export const communicationJobs = pgTable(
     // External IDs (provider message IDs)
     externalId: varchar("external_id", { length: 255 }),
 
-    // Related entities (optional, for tracking/queries)
-    customerId: uuid("customer_id"),
-    serviceRequestId: uuid("service_request_id"),
+    // Related entities (optional, for tracking/queries). FK-constrained so a
+    // deleted customer/request auto-purges its orphan jobs.
+    customerId: uuid("customer_id").references(() => customers.id, {
+      onDelete: "cascade",
+    }),
+    serviceRequestId: uuid("service_request_id").references(
+      () => serviceRequests.id,
+      { onDelete: "cascade" },
+    ),
 
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()

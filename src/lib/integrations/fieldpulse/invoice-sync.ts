@@ -83,14 +83,21 @@ export async function syncInvoiceStatus(
     // Map the Fieldpulse status to our enum
     const newStatus = mapInvoiceStatus(invoiceStatus);
 
-    // Find the service request by fieldpulseJobId
+    // Find the service request by fieldpulseJobId — SCOPED TO THE ORG so a
+    // cross-tenant fieldpulse_job_id collision can never mutate another org's
+    // invoice state (organizationId was previously used only for the audit log).
     const [requestRow] = await db
       .select({
         id: serviceRequests.id,
         invoiceStatus: serviceRequests.invoiceStatus,
       })
       .from(serviceRequests)
-      .where(eq(serviceRequests.fieldpulseJobId, fieldpulseJobId));
+      .where(
+        and(
+          eq(serviceRequests.organizationId, organizationId),
+          eq(serviceRequests.fieldpulseJobId, fieldpulseJobId),
+        ),
+      );
 
     if (!requestRow) {
       logger.warn(
@@ -118,6 +125,7 @@ export async function syncInvoiceStatus(
       })
       .where(
         and(
+          eq(serviceRequests.organizationId, organizationId),
           eq(serviceRequests.id, requestRow.id),
           // Guard: only update if status hasn't changed concurrently
           eq(serviceRequests.invoiceStatus, requestRow.invoiceStatus),

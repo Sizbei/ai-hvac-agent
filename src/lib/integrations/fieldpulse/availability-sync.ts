@@ -128,7 +128,7 @@ async function resolveTechnicianIds(
   }
 
   const rows = await db
-    .select({ id: users.id, fieldpulseUserId: users.googleId })
+    .select({ id: users.id, fieldpulseUserId: users.fieldpulseUserId })
     .from(users)
     .where(
       withTenant(
@@ -136,8 +136,7 @@ async function resolveTechnicianIds(
         organizationId,
         eq(users.role, "technician"),
         eq(users.isActive, true),
-        // googleId holds the fieldpulseUserId for synced technicians.
-        inArray(users.googleId, fieldpulseUserIds),
+        inArray(users.fieldpulseUserId, fieldpulseUserIds),
       ),
     );
 

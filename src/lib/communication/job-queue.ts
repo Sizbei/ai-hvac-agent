@@ -9,8 +9,9 @@
  */
 
 import { db } from "@/lib/db";
-import { communicationJobs, communicationChannelEnum, communicationJobStatusEnum } from "@/lib/db/schema";
+import { communicationJobs, communicationTemplates, communicationChannelEnum, communicationJobStatusEnum } from "@/lib/db/schema";
 import { eq, and, lt, lte, asc } from "drizzle-orm";
+import { encrypt, decrypt } from "@/lib/crypto";
 import { sendSms } from "./twilio-adapter";
 import { resend } from "./resend-adapter";
 import { renderSmsTemplate } from "./sms-templates";
@@ -44,8 +45,9 @@ export async function queueCommunicationJob(job: {
       channel: job.channel as any,
       status: "pending" as any,
       priority: job.priority ?? 50,
-      recipientPhone: job.recipientPhone,
-      recipientEmail: job.recipientEmail,
+      // Encrypt recipient PII at rest.
+      recipientPhoneEncrypted: job.recipientPhone ? encrypt(job.recipientPhone) : null,
+      recipientEmailEncrypted: job.recipientEmail ? encrypt(job.recipientEmail) : null,
       templateVariables: job.templateVariables as any,
       scheduledFor: job.scheduledFor ?? new Date(),
       customerId: job.customerId,
@@ -163,7 +165,7 @@ async function sendCommunication(
 ): Promise<void> {
   // Fetch the template
   const template = await db.query.communicationTemplates.findFirst({
-    where: eq(communicationJobs.templateId, job.templateId),
+    where: eq(communicationTemplates.id, job.templateId),
   });
 
   if (!template) {
@@ -173,9 +175,17 @@ async function sendCommunication(
   // Render the message
   const variables = job.templateVariables as Record<string, unknown>;
 
+  // Decrypt recipient PII in-memory only (stored encrypted at rest).
+  const recipientPhone = job.recipientPhoneEncrypted
+    ? decrypt(job.recipientPhoneEncrypted)
+    : null;
+  const recipientEmail = job.recipientEmailEncrypted
+    ? decrypt(job.recipientEmailEncrypted)
+    : null;
+
   switch (job.channel) {
     case "sms": {
-      if (!job.recipientPhone) {
+      if (!recipientPhone) {
         throw new Error("SMS recipient phone number is required");
       }
 
@@ -183,7 +193,7 @@ async function sendCommunication(
 
       // Send via Twilio
       const result = await sendSms({
-        to: job.recipientPhone,
+        to: recipientPhone,
         body: message,
       });
 
@@ -197,7 +207,7 @@ async function sendCommunication(
     }
 
     case "email": {
-      if (!job.recipientEmail) {
+      if (!recipientEmail) {
         throw new Error("Email recipient address is required");
       }
 
@@ -209,7 +219,7 @@ async function sendCommunication(
       // Send via Resend
       const result = await resend.emails.send({
         from: "notifications@spears-services.com", // TODO: Make configurable per org
-        to: job.recipientEmail,
+        to: recipientEmail,
         subject,
         html: `<p>${body}</p>`, // Simple HTML wrapper for now
       });

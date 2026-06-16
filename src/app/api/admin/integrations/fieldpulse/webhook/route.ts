@@ -223,6 +223,19 @@ export async function POST(request: NextRequest): Promise<Response> {
     // replay guard prevent any state change without a valid signature.
     const signature = request.headers.get("x-fieldpulse-signature");
     const secret = await getFieldpulseWebhookSecret(organizationId);
+
+    // FAIL CLOSED in production: a webhook with no configured secret (per-org or
+    // env) must be rejected, not accepted — otherwise anyone who knows a jobId
+    // could forge status transitions. Dev keeps the optional-signature escape
+    // hatch. Mirrors the HCP webhook's fail-closed posture.
+    if (!secret && process.env.NODE_ENV === "production") {
+      logger.error(
+        { organizationId, eventId },
+        "Fieldpulse webhook rejected: no signing secret configured",
+      );
+      return errorResponse("Webhook not configured", "NOT_CONFIGURED", 401);
+    }
+
     const signatureResult = verifyWebhookSignature(rawBody, signature, secret);
 
     if (!signatureResult.valid) {
@@ -233,11 +246,10 @@ export async function POST(request: NextRequest): Promise<Response> {
       return errorResponse("Invalid signature", "INVALID_SIGNATURE", 401);
     }
 
-    // Log if signature verification is skipped (no secret configured)
     if (signatureResult.reason === "no_secret_configured") {
       logger.info(
         { eventId, eventType },
-        "Fieldpulse webhook: signature verification skipped (no secret configured)",
+        "Fieldpulse webhook: signature verification skipped (dev — no secret)",
       );
     }
 

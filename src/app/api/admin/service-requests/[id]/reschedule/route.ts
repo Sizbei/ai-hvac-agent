@@ -5,16 +5,20 @@
  * Handles notification triggers and reminder updates.
  */
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
 import { db } from "@/lib/db";
-import { serviceRequests, customers } from "@/lib/db/schema";
-import { eq, and } from "drizzle-orm";
+import { serviceRequests } from "@/lib/db/schema";
+import { and, eq } from "drizzle-orm";
+import { withTenant } from "@/lib/db/tenant";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { logAudit } from "@/lib/admin/audit";
 import { logger } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
+
+/** HH:MM 24-hour time. */
+const TIME_PATTERN = /^([01]?\d|2[0-3]):[0-5]\d$/;
 
 /**
  * POST /api/admin/service-requests/[id]/reschedule
@@ -23,7 +27,7 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const session = await getAdminSession();
@@ -31,24 +35,40 @@ export async function POST(
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
 
-    const serviceRequestId = params.id;
+    const { id: serviceRequestId } = await params;
 
-    // Parse request body
+    // Parse + validate request body
     const body = await request.json();
-    const { newDate, newTime } = body;
+    const { newDate, newTime } = body ?? {};
 
-    if (!newDate || !newTime) {
+    if (typeof newDate !== "string" || typeof newTime !== "string") {
       return errorResponse(
         "Missing required fields: newDate, newTime",
         "VALIDATION_ERROR",
         400,
       );
     }
+    const parsedDate = new Date(newDate);
+    if (Number.isNaN(parsedDate.getTime()) || !TIME_PATTERN.test(newTime)) {
+      return errorResponse(
+        "Invalid newDate or newTime",
+        "VALIDATION_ERROR",
+        400,
+      );
+    }
 
-    // Fetch current service request
-    const serviceRequest = await db.query.serviceRequests.findFirst({
-      where: eq(serviceRequests.id, serviceRequestId),
-    });
+    // Fetch current service request — SCOPED TO THE CALLER'S ORG so one admin
+    // can never read or reschedule another tenant's request by UUID.
+    const [serviceRequest] = await db
+      .select({ scheduledDate: serviceRequests.scheduledDate })
+      .from(serviceRequests)
+      .where(
+        withTenant(
+          serviceRequests,
+          session.organizationId,
+          eq(serviceRequests.id, serviceRequestId),
+        ),
+      );
 
     if (!serviceRequest) {
       return errorResponse("Service request not found", "NOT_FOUND", 404);
@@ -57,23 +77,29 @@ export async function POST(
     // Store old values
     const oldDate = serviceRequest.scheduledDate;
 
-    // Update service request
+    // Update service request (org-scoped).
     await db
       .update(serviceRequests)
       .set({
-        scheduledDate: new Date(newDate),
+        scheduledDate: parsedDate,
         updatedAt: new Date(),
       })
-      .where(eq(serviceRequests.id, serviceRequestId));
+      .where(
+        withTenant(
+          serviceRequests,
+          session.organizationId,
+          eq(serviceRequests.id, serviceRequestId),
+        ),
+      );
 
-    // Log audit
+    // Log audit — structured, non-PII fields only.
     await logAudit({
       organizationId: session.organizationId,
       userId: session.userId,
       action: "update",
       entity: "service_request",
       entityId: serviceRequestId,
-      details: `Rescheduled to ${newDate} at ${newTime}`,
+      details: `scheduledDate:${parsedDate.toISOString()};time:${newTime}`,
     });
 
     logger.info(
