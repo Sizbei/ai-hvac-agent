@@ -9,6 +9,7 @@ import { queueCommunicationJob } from "@/lib/communication/job-queue";
 import { getAdminSession } from "@/lib/auth/session";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +49,20 @@ export async function POST(request: NextRequest) {
     const session = await getAdminSession();
     if (!session) {
       return new NextResponse("Unauthorized", { status: 401 });
+    }
+
+    // This endpoint enqueues outbound SMS/email — rate-limit it so a leaked
+    // session can't be used to blast messages.
+    const rateCheck = slidingWindow(
+      `comms-send:${session.userId}`,
+      RATE_LIMITS.adminMutation.maxRequests,
+      RATE_LIMITS.adminMutation.windowMs,
+    );
+    if (!rateCheck.allowed) {
+      return NextResponse.json(
+        { success: false, error: "Rate limit exceeded" },
+        { status: 429 },
+      );
     }
 
     // Parse and validate request body
@@ -90,8 +105,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Never forward the raw error message to the client (leaks internals).
     return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : "Unknown error" },
+      { success: false, error: "Internal server error" },
       { status: 500 },
     );
   }
