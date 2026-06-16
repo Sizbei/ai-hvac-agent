@@ -15,6 +15,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 interface CapturedSelect {
   columns: Record<string, unknown>;
   where: unknown[];
+  joins: unknown[];
 }
 
 const { selectQueue, captured, chain } = vi.hoisted(() => {
@@ -35,6 +36,12 @@ const { selectQueue, captured, chain } = vi.hoisted(() => {
             return p;
           };
         }
+        if (prop === 'innerJoin' || prop === 'leftJoin') {
+          return (...args: unknown[]) => {
+            capture.joins.push(...args);
+            return p;
+          };
+        }
         return () => p;
       },
       apply: () => p,
@@ -48,7 +55,7 @@ const { selectQueue, captured, chain } = vi.hoisted(() => {
 vi.mock('@/lib/db', () => ({
   db: {
     select: (columns: Record<string, unknown>) => {
-      const capture: CapturedSelect = { columns: columns ?? {}, where: [] };
+      const capture: CapturedSelect = { columns: columns ?? {}, where: [], joins: [] };
       captured.push(capture);
       return chain(selectQueue.shift() ?? [], capture);
     },
@@ -102,11 +109,30 @@ vi.mock('@/lib/db/schema', () => ({
   refunds: {
     amountCents: 'refunds.amountCents',
     createdAt: 'refunds.createdAt',
+    paymentId: 'refunds.paymentId',
     organizationId: 'refunds.org',
+  },
+  serviceRequests: {
+    id: 'serviceRequests.id',
+    leadSource: 'serviceRequests.leadSource',
+    createdAt: 'serviceRequests.createdAt',
+    organizationId: 'serviceRequests.org',
+  },
+  leadSourceEnum: {
+    enumValues: [
+      'google',
+      'facebook',
+      'yelp',
+      'referral',
+      'repeat_customer',
+      'website',
+      'direct_mail',
+      'other',
+    ],
   },
 }));
 
-import { getSalesReport } from './reporting-queries';
+import { getSalesReport, getLeadSourceBreakdown } from './reporting-queries';
 
 const ORG = '00000000-0000-0000-0000-000000000001';
 
@@ -278,5 +304,147 @@ describe('getSalesReport', () => {
     });
     const r = await getSalesReport(ORG);
     expect(r.closeRatePct).toBe(33.3);
+  });
+});
+
+// getLeadSourceBreakdown runs 4 grouped selects via Promise.all, in this order:
+//   1 leads  2 booked  3 gross payments  4 refunds
+// Each returns rows of { source, value }. neon-http returns sums as strings.
+interface SourceRow {
+  source: string;
+  value: number | string | null;
+}
+function seedLeadSource(s: {
+  leads: SourceRow[];
+  booked: SourceRow[];
+  gross: SourceRow[];
+  refunds: SourceRow[];
+}): void {
+  selectQueue.push(s.leads);
+  selectQueue.push(s.booked);
+  selectQueue.push(s.gross);
+  selectQueue.push(s.refunds);
+}
+
+describe('getLeadSourceBreakdown', () => {
+  it('returns a row for every enum value plus unknown, even with no data', async () => {
+    seedLeadSource({ leads: [], booked: [], gross: [], refunds: [] });
+    const rows = await getLeadSourceBreakdown(ORG);
+    const sources = rows.map((r) => r.source).sort();
+    expect(sources).toEqual(
+      [
+        'direct_mail',
+        'facebook',
+        'google',
+        'other',
+        'referral',
+        'repeat_customer',
+        'unknown',
+        'website',
+        'yelp',
+      ].sort(),
+    );
+    // All zeroed out when there's no data.
+    for (const r of rows) {
+      expect(r.leads).toBe(0);
+      expect(r.booked).toBe(0);
+      expect(r.revenueCents).toBe(0);
+      expect(r.closeRatePct).toBe(0);
+    }
+  });
+
+  it('a zero-booking enum source still appears (not inner-joined away)', async () => {
+    // yelp has leads but no bookings/revenue.
+    seedLeadSource({
+      leads: [{ source: 'yelp', value: 5 }],
+      booked: [],
+      gross: [],
+      refunds: [],
+    });
+    const rows = await getLeadSourceBreakdown(ORG);
+    const yelp = rows.find((r) => r.source === 'yelp');
+    expect(yelp).toBeDefined();
+    expect(yelp!.leads).toBe(5);
+    expect(yelp!.booked).toBe(0);
+    expect(yelp!.revenueCents).toBe(0);
+    expect(yelp!.closeRatePct).toBe(0);
+  });
+
+  it('buckets NULL leadSource as "unknown" via coalesce in the query', async () => {
+    // The driver already coalesced NULL -> 'unknown' (the SQL coalesce). We assert
+    // the row lands under 'unknown' AND that the leads query carries a coalesce
+    // over serviceRequests.leadSource so historical NULL rows are not dropped.
+    seedLeadSource({
+      leads: [{ source: 'unknown', value: 7 }],
+      booked: [{ source: 'unknown', value: 2 }],
+      gross: [],
+      refunds: [],
+    });
+    const rows = await getLeadSourceBreakdown(ORG);
+    const unknown = rows.find((r) => r.source === 'unknown');
+    expect(unknown).toBeDefined();
+    expect(unknown!.leads).toBe(7);
+    expect(unknown!.booked).toBe(2);
+
+    // The leads select (1st of this group) groups on a coalesce of leadSource.
+    const leadsCols = captured[0].columns as Record<string, unknown>;
+    expect(
+      hasTag(
+        leadsCols.source,
+        (v) =>
+          v.kind === 'sql' &&
+          Array.isArray(v.values) &&
+          (v.values as unknown[]).includes('serviceRequests.leadSource') &&
+          (v.values as unknown[]).includes('unknown'),
+      ),
+    ).toBe(true);
+  });
+
+  it('attributes revenue (gross - refunds) per source and computes close rate', async () => {
+    // google: 10 leads, 4 booked => 40%; revenue 50000 gross - 5000 refund = 45000.
+    seedLeadSource({
+      leads: [{ source: 'google', value: 10 }],
+      booked: [{ source: 'google', value: 4 }],
+      gross: [{ source: 'google', value: '50000' }], // neon-http sums as strings
+      refunds: [{ source: 'google', value: '5000' }],
+    });
+    const rows = await getLeadSourceBreakdown(ORG);
+    const google = rows.find((r) => r.source === 'google');
+    expect(google).toBeDefined();
+    expect(google!.leads).toBe(10);
+    expect(google!.booked).toBe(4);
+    expect(google!.revenueCents).toBe(45000);
+    expect(google!.closeRatePct).toBe(40);
+  });
+
+  it('scopes the booked join on serviceRequests org + filters succeeded payments for revenue', async () => {
+    seedLeadSource({
+      leads: [{ source: 'google', value: 1 }],
+      booked: [{ source: 'google', value: 1 }],
+      gross: [{ source: 'google', value: '1000' }],
+      refunds: [],
+    });
+    await getLeadSourceBreakdown(ORG);
+
+    // The leads where (1st capture) must be tenant-scoped on serviceRequests.
+    const leadsWhere = captured[0].where;
+    expect(
+      hasTag(
+        leadsWhere,
+        (v) => v.kind === 'tenant' && v.orgId === ORG,
+      ),
+    ).toBe(true);
+
+    // The gross-revenue select (3rd capture) must constrain payments.status to
+    // 'succeeded' somewhere in its join predicates.
+    expect(
+      hasTag(
+        captured[2].joins,
+        (v) =>
+          v.kind === 'sql' &&
+          typeof v.text === 'string' &&
+          (v.text as string).includes('succeeded'),
+      ),
+    ).toBe(true);
   });
 });
