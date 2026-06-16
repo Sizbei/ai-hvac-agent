@@ -19,6 +19,7 @@ vi.mock("@/lib/db", () => ({
     update: vi.fn(),
     insert: vi.fn(),
     delete: vi.fn(),
+    batch: vi.fn().mockResolvedValue([]),
   },
 }));
 

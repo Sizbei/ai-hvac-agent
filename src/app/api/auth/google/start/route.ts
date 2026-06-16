@@ -51,7 +51,9 @@ export async function GET(request: NextRequest): Promise<Response> {
     const response = NextResponse.redirect(consentUrl);
     const cookieOpts = {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      // Secure everywhere except local dev (http) — staging/preview run over
+      // HTTPS and must not leak these OIDC guards over a non-Secure cookie.
+      secure: process.env.NODE_ENV !== "development",
       // The callback returns from Google (a cross-site GET), so "lax" is required
       // for these cookies to be sent on the redirect back.
       sameSite: "lax" as const,

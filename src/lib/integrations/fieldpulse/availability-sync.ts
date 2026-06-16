@@ -148,29 +148,6 @@ async function resolveTechnicianIds(
   return map;
 }
 
-/**
- * Clear existing availability for the given technicians (delete-then-insert).
- * Uses inArray so EVERY affected technician's stale rows are removed — not just
- * the first.
- */
-async function clearAvailabilityForTechnicians(
-  organizationId: string,
-  technicianIds: readonly string[],
-): Promise<void> {
-  if (technicianIds.length === 0) {
-    return;
-  }
-  await db
-    .delete(technicianAvailability)
-    .where(
-      withTenant(
-        technicianAvailability,
-        organizationId,
-        inArray(technicianAvailability.technicianId, [...technicianIds]),
-      ),
-    );
-}
-
 /** A validated availability row ready to insert. */
 interface AvailabilityRow {
   readonly organizationId: string;
@@ -271,10 +248,24 @@ export async function syncAvailabilityFromFieldpulse(
       new Set(rows.map((r) => r.technicianId)),
     );
 
-    // Delete-then-insert for the affected technicians only.
-    await clearAvailabilityForTechnicians(organizationId, affectedTechnicianIds);
+    // Delete-then-insert for the affected technicians, ATOMICALLY: neon-http has
+    // no interactive transactions, but db.batch executes its statements as one
+    // unit — so there's no window where a technician's old slots are deleted but
+    // the new ones aren't yet inserted. (affectedTechnicianIds is non-empty iff
+    // rows is non-empty, so both statements always run together or not at all.)
     if (rows.length > 0) {
-      await db.insert(technicianAvailability).values(rows);
+      await db.batch([
+        db
+          .delete(technicianAvailability)
+          .where(
+            withTenant(
+              technicianAvailability,
+              organizationId,
+              inArray(technicianAvailability.technicianId, affectedTechnicianIds),
+            ),
+          ),
+        db.insert(technicianAvailability).values(rows),
+      ]);
     }
 
     await markCompleted(organizationId);

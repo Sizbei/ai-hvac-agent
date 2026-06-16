@@ -104,17 +104,28 @@ export async function proxy(request: NextRequest) {
 
   // --- Admin API route protection ---
   if (pathname.startsWith("/api/admin")) {
-    const token = request.cookies.get(ADMIN_SESSION_COOKIE)?.value;
-    const session = token ? await verifyToken(token) : null;
+    // Inbound webhooks live under /api/admin/integrations/* for historical
+    // reasons but are SERVER-TO-SERVER: they authenticate via HMAC signature
+    // (see their route handlers), not an admin session. Excluding them from the
+    // session gate is required — otherwise this middleware would 401 every
+    // Fieldpulse webhook delivery.
+    const isPublicWebhook =
+      pathname === "/api/admin/integrations/fieldpulse/webhook" ||
+      pathname === "/api/admin/integrations/fieldpulse/invoice-webhook";
 
-    if (!session) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: { message: "Unauthorized", code: "UNAUTHORIZED" },
-        },
-        { status: 401 },
-      );
+    if (!isPublicWebhook) {
+      const token = request.cookies.get(ADMIN_SESSION_COOKIE)?.value;
+      const session = token ? await verifyToken(token) : null;
+
+      if (!session) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: { message: "Unauthorized", code: "UNAUTHORIZED" },
+          },
+          { status: 401 },
+        );
+      }
     }
   }
 

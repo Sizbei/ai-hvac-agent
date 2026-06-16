@@ -38,7 +38,7 @@ const templateSchema = z.object({
   templateType: z.enum(["sms", "email_html", "email_text"]),
   subjectTemplate: z.string().optional(),
   bodyTemplate: z.string().min(1),
-  variables: z.record(z.unknown()).optional(),
+  variables: z.record(z.string(), z.unknown()).optional(),
   isActive: z.boolean().optional(),
   priority: z.number().min(0).max(100).optional(),
 });

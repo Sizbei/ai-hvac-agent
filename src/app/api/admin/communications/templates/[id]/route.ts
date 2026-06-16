@@ -37,7 +37,7 @@ const updateTemplateSchema = z.object({
   templateType: z.enum(["sms", "email_html", "email_text"]).optional(),
   subjectTemplate: z.string().optional(),
   bodyTemplate: z.string().min(1).optional(),
-  variables: z.record(z.unknown()).optional(),
+  variables: z.record(z.string(), z.unknown()).optional(),
   isActive: z.boolean().optional(),
   priority: z.number().min(0).max(100).optional(),
 });
@@ -49,7 +49,7 @@ const updateTemplateSchema = z.object({
  */
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const session = await getAdminSession();
@@ -57,7 +57,7 @@ export async function PATCH(
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
 
-    const templateId = params.id;
+    const { id: templateId } = await params;
 
     // Verify template belongs to organization
     const existing = await db.query.communicationTemplates.findFirst({
@@ -145,7 +145,7 @@ export async function PATCH(
  */
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const session = await getAdminSession();
@@ -153,7 +153,7 @@ export async function DELETE(
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
 
-    const templateId = params.id;
+    const { id: templateId } = await params;
 
     // Verify template belongs to organization
     const existing = await db.query.communicationTemplates.findFirst({

@@ -86,6 +86,22 @@ const REQUIRED_ENV_VARS: readonly EnvVarSpec[] = [
     required: true,
     description: 'Secret for session token encryption',
   },
+  // Core secrets — fail fast at cold start rather than 500 at first use.
+  {
+    name: 'AUTH_SECRET',
+    required: true,
+    description: 'JWT signing secret for admin session tokens',
+  },
+  {
+    name: 'ENCRYPTION_KEY',
+    required: true,
+    description: 'AES-256-GCM key (hex) for PII encryption + blind indexes',
+  },
+  {
+    name: 'CRON_SECRET',
+    required: true,
+    description: 'Bearer secret authenticating Vercel cron endpoints',
+  },
   // App Configuration
   {
     name: 'NEXT_PUBLIC_APP_URL',
