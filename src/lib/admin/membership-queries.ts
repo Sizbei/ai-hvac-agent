@@ -28,6 +28,8 @@ export interface MembershipPlanInput {
   readonly description?: string | null;
   readonly priceCents: number;
   readonly billingPeriod: MembershipBillingPeriod;
+  /** Maintenance visits owed per year (0 = billing-only, no auto-generation). */
+  readonly visitsPerYear?: number;
 }
 
 export interface MembershipPlanRow {
@@ -36,6 +38,7 @@ export interface MembershipPlanRow {
   readonly description: string | null;
   readonly priceCents: number;
   readonly billingPeriod: string;
+  readonly visitsPerYear: number;
   readonly active: boolean;
 }
 
@@ -45,6 +48,7 @@ const PLAN_PROJECTION = {
   description: membershipPlans.description,
   priceCents: membershipPlans.priceCents,
   billingPeriod: membershipPlans.billingPeriod,
+  visitsPerYear: membershipPlans.visitsPerYear,
   active: membershipPlans.active,
 } as const;
 
@@ -60,6 +64,7 @@ export async function createMembershipPlan(
       description: input.description ?? null,
       priceCents: input.priceCents,
       billingPeriod: input.billingPeriod,
+      visitsPerYear: input.visitsPerYear ?? 0,
     })
     .returning({ id: membershipPlans.id });
   return row!.id;
@@ -107,6 +112,9 @@ export async function updateMembershipPlan(
   if (partial.priceCents !== undefined) setFields.priceCents = partial.priceCents;
   if (partial.billingPeriod !== undefined) {
     setFields.billingPeriod = partial.billingPeriod;
+  }
+  if (partial.visitsPerYear !== undefined) {
+    setFields.visitsPerYear = partial.visitsPerYear;
   }
   if (Object.keys(setFields).length === 0) return;
   await db
@@ -164,6 +172,7 @@ export async function getActiveMembership(
       planDescription: membershipPlans.description,
       planPriceCents: membershipPlans.priceCents,
       planBillingPeriod: membershipPlans.billingPeriod,
+      planVisitsPerYear: membershipPlans.visitsPerYear,
       planActive: membershipPlans.active,
     })
     .from(customerMemberships)
@@ -191,6 +200,7 @@ export async function getActiveMembership(
       description: row.planDescription,
       priceCents: row.planPriceCents,
       billingPeriod: row.planBillingPeriod,
+      visitsPerYear: row.planVisitsPerYear,
       active: row.planActive,
     },
   };

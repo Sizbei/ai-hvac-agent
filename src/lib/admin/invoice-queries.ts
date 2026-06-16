@@ -14,10 +14,12 @@ import {
   estimateLineItems,
   invoices,
   invoiceLineItems,
+  jobMaterials,
   payments,
   refunds,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
+import { rollUpActualMaterialsCost } from "@/lib/admin/margin";
 import { getPaymentProvider, type PaymentProvider } from "@/lib/payments/provider";
 
 export type CreateInvoiceResult =
@@ -542,6 +544,13 @@ export interface InvoiceDetailView {
   readonly createdAt: Date;
   readonly lineItems: InvoiceLineItemView[];
   readonly payments: PaymentView[];
+  /**
+   * ACTUAL materials cost (cents) the tech recorded on the linked service
+   * request, if any. NULL when the invoice has no linked job or no field
+   * materials were recorded. Distinct from the estimated line-snapshot cost —
+   * shown alongside it, never replacing it. ADMIN-ONLY (sensitive cost data).
+   */
+  readonly actualMaterialsCostCents: number | null;
 }
 
 /**
@@ -639,6 +648,29 @@ export async function getInvoiceDetailById(
     else refundsByPayment.set(r.paymentId, [view]);
   }
 
+  // Actual field-materials cost, rolled up from the materials the tech recorded
+  // on the linked service request. NULL when there's no linked job or no
+  // materials — so the UI can present "actual" only when it exists, alongside
+  // (never overwriting) the estimated line-snapshot cost.
+  let actualMaterialsCostCents: number | null = null;
+  if (inv.serviceRequestId) {
+    const materialRows = await db
+      .select({
+        quantity: jobMaterials.quantity,
+        unitCostCents: jobMaterials.unitCostCents,
+      })
+      .from(jobMaterials)
+      .where(
+        withTenant(
+          jobMaterials,
+          organizationId,
+          eq(jobMaterials.serviceRequestId, inv.serviceRequestId),
+        ),
+      );
+    actualMaterialsCostCents =
+      materialRows.length > 0 ? rollUpActualMaterialsCost(materialRows) : null;
+  }
+
   return {
     ...inv,
     lineItems,
@@ -646,5 +678,6 @@ export async function getInvoiceDetailById(
       ...p,
       refunds: refundsByPayment.get(p.id) ?? [],
     })),
+    actualMaterialsCostCents,
   };
 }

@@ -16,6 +16,11 @@ const {
   mockGetDefaultTaxBps,
   mockGetPricebookItemById,
   mockLogAudit,
+  mockTriggerEstimateSent,
+  mockTriggerPaymentReceipt,
+  mockProcessPendingJobs,
+  mockDbSelect,
+  capturedAfterCallbacks,
 } = vi.hoisted(() => ({
   mockGetAdminSession: vi.fn(),
   mockTakePayment: vi.fn(),
@@ -25,7 +30,40 @@ const {
   mockGetDefaultTaxBps: vi.fn(),
   mockGetPricebookItemById: vi.fn(),
   mockLogAudit: vi.fn(),
+  mockTriggerEstimateSent: vi.fn(),
+  mockTriggerPaymentReceipt: vi.fn(),
+  mockProcessPendingJobs: vi.fn(),
+  mockDbSelect: vi.fn(),
+  capturedAfterCallbacks: [] as Array<() => unknown | Promise<unknown>>,
 }));
+
+// Capture after() callbacks so we can run them deterministically and assert the
+// best-effort receipt / estimate-send side effects (Next's real after() is a
+// no-op outside a request scope).
+vi.mock("next/server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next/server")>();
+  return {
+    ...actual,
+    after: (cb: () => unknown) => {
+      capturedAfterCallbacks.push(cb);
+    },
+  };
+});
+
+async function flushAfter(): Promise<void> {
+  const cbs = capturedAfterCallbacks.splice(0);
+  for (const cb of cbs) await cb();
+}
+
+vi.mock("@/lib/communication/money-triggers", () => ({
+  triggerEstimateSent: (...a: unknown[]) => mockTriggerEstimateSent(...a),
+  triggerPaymentReceipt: (...a: unknown[]) => mockTriggerPaymentReceipt(...a),
+}));
+vi.mock("@/lib/communication/job-queue", () => ({
+  processPendingJobs: (...a: unknown[]) => mockProcessPendingJobs(...a),
+}));
+vi.mock("@/lib/db", () => ({ db: { select: (...a: unknown[]) => mockDbSelect(...a) } }));
+vi.mock("@/lib/db/tenant", () => ({ withTenant: vi.fn() }));
 
 vi.mock("@/lib/auth/session", () => ({
   getAdminSession: () => mockGetAdminSession(),
@@ -82,11 +120,21 @@ function jsonReq(path: string, body: unknown): NextRequest {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  capturedAfterCallbacks.length = 0;
   mockLogAudit.mockResolvedValue(undefined);
   mockGetDefaultTaxBps.mockResolvedValue(0);
   mockCreateEstimate.mockResolvedValue({
     estimateId: "est-1",
     approvalToken: "tok-1",
+  });
+  mockTriggerEstimateSent.mockResolvedValue(undefined);
+  mockTriggerPaymentReceipt.mockResolvedValue(undefined);
+  mockProcessPendingJobs.mockResolvedValue({ processed: 0, succeeded: 0, failed: 0 });
+  // Default invoice lookup in the receipt after() path returns a customer.
+  mockDbSelect.mockReturnValue({
+    from: () => ({
+      where: () => ({ limit: () => Promise.resolve([{ customerId: "cust-1" }]) }),
+    }),
   });
 });
 
@@ -185,6 +233,60 @@ describe("POST /api/admin/invoices/[id]/payments — admin session required", ()
       "inv-1",
       expect.objectContaining({ amountCents: 5000 }),
     );
+  });
+
+  it("enqueues a payment_receipt and drains the queue on a successful payment", async () => {
+    mockGetAdminSession.mockResolvedValue(session("admin"));
+    mockTakePayment.mockResolvedValue({
+      ok: true,
+      paymentId: "pay-1",
+      invoiceState: "paid",
+    });
+    const res = await takePaymentPOST(
+      jsonReq("/api/admin/invoices/inv-1/payments", { amountCents: 5000 }),
+      { params: Promise.resolve({ id: "inv-1" }) },
+    );
+    expect(res.status).toBe(201);
+    // The receipt work runs in after() — flush it.
+    await flushAfter();
+    expect(mockTriggerPaymentReceipt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: ORG,
+        invoiceId: "inv-1",
+        customerId: "cust-1",
+        amountCents: 5000,
+      }),
+    );
+    expect(mockProcessPendingJobs).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT enqueue a receipt when the charge failed", async () => {
+    mockGetAdminSession.mockResolvedValue(session("admin"));
+    mockTakePayment.mockResolvedValue({ ok: false, reason: "charge_failed" });
+    const res = await takePaymentPOST(
+      jsonReq("/api/admin/invoices/inv-1/payments", { amountCents: 5000 }),
+      { params: Promise.resolve({ id: "inv-1" }) },
+    );
+    expect(res.status).toBe(402);
+    await flushAfter();
+    expect(mockTriggerPaymentReceipt).not.toHaveBeenCalled();
+  });
+
+  it("a receipt failure does NOT fail the payment (best-effort)", async () => {
+    mockGetAdminSession.mockResolvedValue(session("admin"));
+    mockTakePayment.mockResolvedValue({
+      ok: true,
+      paymentId: "pay-1",
+      invoiceState: "paid",
+    });
+    mockTriggerPaymentReceipt.mockRejectedValue(new Error("twilio down"));
+    const res = await takePaymentPOST(
+      jsonReq("/api/admin/invoices/inv-1/payments", { amountCents: 5000 }),
+      { params: Promise.resolve({ id: "inv-1" }) },
+    );
+    // Response already 201 before after() runs; the error is swallowed.
+    expect(res.status).toBe(201);
+    await expect(flushAfter()).resolves.toBeUndefined();
   });
 });
 
@@ -345,5 +447,45 @@ describe("POST /api/admin/estimates — server-authoritative pricing (anti-tampe
     };
     expect(passed.options[0].lineItems[0].costCents).toBe(0);
     expect(passed.options[0].lineItems[0].unitPriceCents).toBe(12500);
+  });
+
+  it("sends the approval link to the customer when sendToCustomer + customerId are set", async () => {
+    mockGetAdminSession.mockResolvedValue(session("admin"));
+    const CUSTOMER_ID = "22222222-2222-4222-8222-222222222222";
+    const res = await estimatesPOST(
+      jsonReq("/api/admin/estimates", {
+        customerId: CUSTOMER_ID,
+        sendToCustomer: true,
+        options: [
+          { name: "Good", lineItems: [{ name: "x", quantity: 1, unitPriceCents: 100 }] },
+        ],
+      }),
+    );
+    expect(res.status).toBe(201);
+    await flushAfter();
+    expect(mockTriggerEstimateSent).toHaveBeenCalledTimes(1);
+    const arg = mockTriggerEstimateSent.mock.calls[0][0] as {
+      organizationId: string;
+      customerId: string;
+      approvalUrl: string;
+    };
+    expect(arg.organizationId).toBe(ORG);
+    expect(arg.customerId).toBe(CUSTOMER_ID);
+    expect(arg.approvalUrl).toContain("/estimates/tok-1"); // built from the token
+  });
+
+  it("does NOT send to the customer when sendToCustomer is omitted", async () => {
+    mockGetAdminSession.mockResolvedValue(session("admin"));
+    const res = await estimatesPOST(
+      jsonReq("/api/admin/estimates", {
+        customerId: "22222222-2222-4222-8222-222222222222",
+        options: [
+          { name: "Good", lineItems: [{ name: "x", quantity: 1, unitPriceCents: 100 }] },
+        ],
+      }),
+    );
+    expect(res.status).toBe(201);
+    await flushAfter();
+    expect(mockTriggerEstimateSent).not.toHaveBeenCalled();
   });
 });

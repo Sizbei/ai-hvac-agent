@@ -32,6 +32,14 @@ interface ActiveMembership {
   };
 }
 
+interface MembershipVisit {
+  readonly id: string;
+  readonly dueDate: string;
+  readonly periodKey: string;
+  readonly status: string;
+  readonly generatedServiceRequestId: string | null;
+}
+
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', {
     year: 'numeric',
@@ -49,6 +57,7 @@ export function CustomerMembershipCard({
 }: CustomerMembershipCardProps) {
   const { plans, isLoading: plansLoading } = useMembershipPlans();
   const [membership, setMembership] = useState<ActiveMembership | null>(null);
+  const [visits, setVisits] = useState<readonly MembershipVisit[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedPlanId, setSelectedPlanId] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -66,9 +75,12 @@ export function CustomerMembershipCard({
       }
       const body = (await res.json()) as {
         success: boolean;
-        data: { membership: ActiveMembership | null };
+        data: { membership: ActiveMembership | null; visits?: MembershipVisit[] };
       };
-      if (body.success) setMembership(body.data.membership);
+      if (body.success) {
+        setMembership(body.data.membership);
+        setVisits(body.data.visits ?? []);
+      }
       setError(null);
     } catch {
       setError('Could not connect to server.');
@@ -168,6 +180,27 @@ export function CustomerMembershipCard({
                 </span>
               )}
             </div>
+            {visits.length > 0 && (
+              <div className="space-y-1 border-t pt-3">
+                <p className="text-xs font-medium text-muted-foreground">
+                  Maintenance visits
+                </p>
+                <ul className="space-y-1">
+                  {visits.map((v) => (
+                    <li
+                      key={v.id}
+                      className="flex items-center justify-between gap-2 text-xs"
+                    >
+                      <span>{formatDate(v.dueDate)}</span>
+                      <Badge variant="secondary" className="capitalize">
+                        {v.status}
+                      </Badge>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             <Button
               variant="outline"
               size="sm"

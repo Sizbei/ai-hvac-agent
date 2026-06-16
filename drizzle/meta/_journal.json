@@ -22,6 +22,27 @@
       "when": 1781644697654,
       "tag": "0002_memberships",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1781646405194,
+      "tag": "0003_tech_field_workflow",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1781647049731,
+      "tag": "0004_membership_visits",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1781647736745,
+      "tag": "0005_customer_portal_token",
+      "breakpoints": true
     }
   ]
 }

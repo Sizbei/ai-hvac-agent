@@ -38,6 +38,8 @@ interface FormState {
   /** Dollars (string) — converted to cents on submit. */
   readonly price: string;
   readonly billingPeriod: BillingPeriod;
+  /** Maintenance visits owed per year (string for the input; 0 = billing-only). */
+  readonly visitsPerYear: string;
 }
 
 const INITIAL_FORM: FormState = {
@@ -45,6 +47,7 @@ const INITIAL_FORM: FormState = {
   description: '',
   price: '',
   billingPeriod: 'monthly',
+  visitsPerYear: '0',
 };
 
 function createFormState(plan: MembershipPlan | null): FormState {
@@ -54,6 +57,7 @@ function createFormState(plan: MembershipPlan | null): FormState {
     description: plan.description ?? '',
     price: (plan.priceCents / 100).toFixed(2),
     billingPeriod: plan.billingPeriod as BillingPeriod,
+    visitsPerYear: String(plan.visitsPerYear ?? 0),
   };
 }
 
@@ -101,6 +105,7 @@ export function MembershipPlanFormDialog({
         description: form.description.trim() || null,
         priceCents: parseDollarsToCents(form.price),
         billingPeriod: form.billingPeriod,
+        visitsPerYear: Number.parseInt(form.visitsPerYear, 10) || 0,
       };
       const url =
         isEditMode && editing
@@ -195,6 +200,25 @@ export function MembershipPlanFormDialog({
                 </SelectContent>
               </Select>
             </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="plan-visits">Maintenance visits / year</Label>
+            <Input
+              id="plan-visits"
+              type="number"
+              step="1"
+              min="0"
+              max="12"
+              inputMode="numeric"
+              value={form.visitsPerYear}
+              onChange={(e) => updateField('visitsPerYear', e.target.value)}
+              placeholder="0"
+            />
+            <p className="text-xs text-muted-foreground">
+              Scheduled tune-ups members get automatically. 0 = billing-only (no
+              auto-generated visits).
+            </p>
           </div>
 
           {form.price.trim() && (

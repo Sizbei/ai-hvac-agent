@@ -41,3 +41,21 @@ export function rollUpMargin(lines: readonly MarginLine[]): MarginRollup {
   const { marginCents, marginPct } = computeMargin(revenueCents, costCents);
   return { revenueCents, costCents, marginCents, marginPct };
 }
+
+/** A material a tech actually used: snapshotted unit cost × quantity. */
+export interface ActualMaterial {
+  readonly quantity: number;
+  readonly unitCostCents: number;
+}
+
+/**
+ * ACTUAL materials cost for a job: sum of (unitCostCents × quantity) over the
+ * materials the tech recorded on-site. This is the real cost incurred, distinct
+ * from the estimate's snapshotted line cost — present BOTH on the invoice, never
+ * silently overwrite the estimated figure. Pure (integer cents).
+ */
+export function rollUpActualMaterialsCost(
+  materials: readonly ActualMaterial[],
+): number {
+  return materials.reduce((sum, m) => sum + m.unitCostCents * m.quantity, 0);
+}

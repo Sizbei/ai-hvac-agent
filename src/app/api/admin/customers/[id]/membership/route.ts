@@ -7,6 +7,7 @@ import {
   cancelMembership,
   getActiveMembership,
 } from "@/lib/admin/membership-queries";
+import { listVisitsForMembership } from "@/lib/admin/membership-visit-queries";
 import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
@@ -43,7 +44,12 @@ export async function GET(
     }
 
     const membership = await getActiveMembership(session.organizationId, id);
-    return successResponse({ membership });
+    // Surface the member's scheduled/generated maintenance visits (read-only) so
+    // the detail card can list them. Only when there's an active membership.
+    const visits = membership
+      ? await listVisitsForMembership(session.organizationId, membership.id)
+      : [];
+    return successResponse({ membership, visits });
   } catch (error: unknown) {
     logger.error({ error }, "Failed to fetch customer membership");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);

@@ -28,6 +28,7 @@ function SkeletonRows() {
         <TableRow key={i}>
           <TableCell><Skeleton className="h-4 w-40" /></TableCell>
           <TableCell><Skeleton className="h-5 w-20" /></TableCell>
+          <TableCell><Skeleton className="h-4 w-12" /></TableCell>
           <TableCell><Skeleton className="h-4 w-24" /></TableCell>
           <TableCell><Skeleton className="h-7 w-32" /></TableCell>
         </TableRow>
@@ -56,6 +57,7 @@ export function MembershipPlansTable({
         <TableRow>
           <TableHead>Name</TableHead>
           <TableHead>Billing</TableHead>
+          <TableHead className="text-right">Visits/yr</TableHead>
           <TableHead className="text-right">Price</TableHead>
           <TableHead className="text-right">Actions</TableHead>
         </TableRow>
@@ -83,6 +85,9 @@ export function MembershipPlansTable({
                 <Badge variant="secondary" className="capitalize">
                   {plan.billingPeriod}
                 </Badge>
+              </TableCell>
+              <TableCell className="text-right tabular-nums">
+                {plan.visitsPerYear > 0 ? plan.visitsPerYear : '—'}
               </TableCell>
               <TableCell className="text-right tabular-nums">
                 {formatCentsExact(plan.priceCents)}

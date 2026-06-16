@@ -215,6 +215,9 @@ export async function getCustomerById(
     equipmentCount: equipmentRows.length,
     requestCount: requestCount[0]?.value ?? 0,
     lastServiceDate: null,
+    // Whether a self-service portal link is currently active. Boolean only — the
+    // hash (token material) is never sent to the client.
+    portalActive: Boolean(row.portalTokenHash),
     createdAt: row.createdAt.toISOString(),
     equipment: equipmentRows.map((e) => ({
       id: e.id,

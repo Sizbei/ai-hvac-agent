@@ -10,7 +10,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { InvoiceStateBadge } from '@/components/admin/invoices/invoice-state-badge';
 import { FinancingPanel } from '@/components/admin/financing/financing-panel';
 import { formatCentsExact, parseDollarsToCents } from '@/lib/admin/money-format';
-import { rollUpMargin } from '@/lib/admin/margin';
+import { rollUpMargin, computeMargin } from '@/lib/admin/margin';
 
 interface LineItem {
   readonly id: string;
@@ -47,6 +47,7 @@ interface InvoiceDetail {
   readonly createdAt: string;
   readonly lineItems: LineItem[];
   readonly payments: Payment[];
+  readonly actualMaterialsCostCents: number | null;
 }
 
 const REFUND_REASONS: ReadonlyArray<{ value: string; label: string }> = [
@@ -200,6 +201,14 @@ export function InvoiceDetailClient({
   // Margin is line revenue vs snapshotted line cost (excludes tax — tax is not
   // revenue). Internal/admin-only readout.
   const margin = rollUpMargin(invoice.lineItems);
+  // Actual field-materials cost the tech recorded on the linked job (if any).
+  // Shown ALONGSIDE the estimated figure — never overwriting it. The actual
+  // margin recomputes revenue minus the actual materials cost.
+  const actualMaterialsCostCents = invoice.actualMaterialsCostCents;
+  const hasActual = actualMaterialsCostCents !== null;
+  const actualMargin = hasActual
+    ? computeMargin(margin.revenueCents, actualMaterialsCostCents)
+    : null;
 
   return (
     <div className="p-6 space-y-6">
@@ -293,10 +302,13 @@ export function InvoiceDetailClient({
             </div>
           </div>
 
-          {/* Internal margin readout (admin-only; subordinate styling). */}
+          {/* Internal margin readout (admin-only; subordinate styling). When the
+              tech recorded actual field materials on the linked job, show the
+              ESTIMATED figure (line snapshots) and the ACTUAL figure side by
+              side — the estimate is never overwritten. */}
           <div className="mt-3 rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
             <div className="mb-1 text-[10px] font-medium uppercase tracking-wide">
-              Margin (internal)
+              Margin (internal){hasActual ? ' — estimated' : ''}
             </div>
             <div className="flex justify-between">
               <span>Revenue</span>
@@ -305,18 +317,39 @@ export function InvoiceDetailClient({
               </span>
             </div>
             <div className="flex justify-between">
-              <span>Cost</span>
+              <span>{hasActual ? 'Estimated cost' : 'Cost'}</span>
               <span className="tabular-nums">
                 {formatCentsExact(margin.costCents)}
               </span>
             </div>
             <div className="flex justify-between font-medium text-foreground">
-              <span>Margin</span>
+              <span>{hasActual ? 'Estimated margin' : 'Margin'}</span>
               <span className="tabular-nums">
                 {formatCentsExact(margin.marginCents)} (
                 {(margin.marginPct * 100).toFixed(1)}%)
               </span>
             </div>
+
+            {hasActual && actualMargin && (
+              <div className="mt-2 border-t pt-2">
+                <div className="mb-1 text-[10px] font-medium uppercase tracking-wide">
+                  Actual (field materials)
+                </div>
+                <div className="flex justify-between">
+                  <span>Actual materials cost</span>
+                  <span className="tabular-nums">
+                    {formatCentsExact(actualMaterialsCostCents)}
+                  </span>
+                </div>
+                <div className="flex justify-between font-medium text-foreground">
+                  <span>Actual margin</span>
+                  <span className="tabular-nums">
+                    {formatCentsExact(actualMargin.marginCents)} (
+                    {(actualMargin.marginPct * 100).toFixed(1)}%)
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>

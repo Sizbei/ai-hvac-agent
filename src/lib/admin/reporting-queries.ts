@@ -11,7 +11,14 @@
  */
 import { eq, gte, lte, sql, sum, count } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { estimates, invoices, payments, refunds } from "@/lib/db/schema";
+import {
+  estimates,
+  invoices,
+  payments,
+  refunds,
+  serviceRequests,
+  leadSourceEnum,
+} from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 
 export interface SalesReportPeriod {
@@ -188,4 +195,166 @@ export async function getSalesReport(
     invoicesCreated,
     invoicesPaid,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Marketing lead-source attribution — revenue + close-rate rolled up by the
+// lead source captured at intake (serviceRequests.leadSource).
+//
+// Attribution model: a lead is counted in the period it was CREATED. "booked"
+// and "revenue" are attributed back to that same lead cohort (we scope the
+// invoice/payment joins by the service request's createdAt, NOT the payment's
+// createdAt), so a lead and the money it produced land in the same period —
+// that is what "revenue by source for this period" means for marketing ROI.
+//
+// Tenant-scoping is doubled on every join: serviceRequests AND the joined
+// invoices/payments/refunds are each filtered by organizationId, otherwise a
+// cross-org invoice could be summed against this org's service request.
+// ---------------------------------------------------------------------------
+
+export interface LeadSourceRow {
+  /** A leadSourceEnum value, or 'unknown' for rows with NULL leadSource. */
+  readonly source: string;
+  /** Service requests with this source, created in the period. */
+  readonly leads: number;
+  /** Of those, how many reached a booked state (have at least one invoice). */
+  readonly booked: number;
+  /** Succeeded payments minus refunds attributed to this source's requests. */
+  readonly revenueCents: number;
+  /** booked / leads * 100, rounded to one decimal. 0 when no leads. */
+  readonly closeRatePct: number;
+}
+
+/** Bucket key for a possibly-NULL leadSource: NULL -> 'unknown'. */
+const UNKNOWN_SOURCE = "unknown";
+
+/**
+ * Per-lead-source revenue + close-rate for a period. Defaults to the last 30
+ * days. Returns ONE row per known leadSourceEnum value PLUS 'unknown', always —
+ * a source with zero leads still appears (sorted left from the enum domain, not
+ * inner-joined away). All money in integer cents.
+ */
+export async function getLeadSourceBreakdown(
+  organizationId: string,
+  period: SalesReportPeriod = {},
+): Promise<LeadSourceRow[]> {
+  const now = new Date();
+  const toDate = period.toDate ?? now;
+  const fromDate = period.fromDate ?? new Date(toDate.getTime() - THIRTY_DAYS_MS);
+
+  // NULL leadSource -> 'unknown' so historical rows (column added later) still
+  // reconcile into the totals instead of being dropped.
+  const sourceKey = sql<string>`coalesce(${serviceRequests.leadSource}, ${UNKNOWN_SOURCE})`;
+
+  const [leadRows, bookedRows, grossRows, refundRows] = await Promise.all([
+    // 1. Leads: service requests by source, created in the period.
+    db
+      .select({ source: sourceKey, value: count() })
+      .from(serviceRequests)
+      .where(
+        withTenant(
+          serviceRequests,
+          organizationId,
+          gte(serviceRequests.createdAt, fromDate),
+          lte(serviceRequests.createdAt, toDate),
+        ),
+      )
+      .groupBy(sourceKey),
+
+    // 2. Booked: requests (in the period) that have at least one invoice. Count
+    //    DISTINCT request ids so a request with multiple invoices counts once.
+    //    BOTH sides tenant-scoped (the join predicate adds the invoice org).
+    db
+      .select({
+        source: sourceKey,
+        value: sql<number>`count(distinct ${serviceRequests.id})`,
+      })
+      .from(serviceRequests)
+      .innerJoin(
+        invoices,
+        sql`${invoices.serviceRequestId} = ${serviceRequests.id} AND ${invoices.organizationId} = ${organizationId}`,
+      )
+      .where(
+        withTenant(
+          serviceRequests,
+          organizationId,
+          gte(serviceRequests.createdAt, fromDate),
+          lte(serviceRequests.createdAt, toDate),
+        ),
+      )
+      .groupBy(sourceKey),
+
+    // 3. Gross revenue: succeeded payments on invoices of this source's requests
+    //    (period-scoped by the REQUEST's createdAt — attribute money to the lead
+    //    cohort). Summing payment rows directly avoids fan-out. All sides scoped.
+    db
+      .select({ source: sourceKey, value: sum(payments.amountCents) })
+      .from(serviceRequests)
+      .innerJoin(
+        invoices,
+        sql`${invoices.serviceRequestId} = ${serviceRequests.id} AND ${invoices.organizationId} = ${organizationId}`,
+      )
+      .innerJoin(
+        payments,
+        sql`${payments.invoiceId} = ${invoices.id} AND ${payments.organizationId} = ${organizationId} AND ${payments.status} = 'succeeded'`,
+      )
+      .where(
+        withTenant(
+          serviceRequests,
+          organizationId,
+          gte(serviceRequests.createdAt, fromDate),
+          lte(serviceRequests.createdAt, toDate),
+        ),
+      )
+      .groupBy(sourceKey),
+
+    // 4. Refunds against those payments, subtracted in JS (kept a SEPARATE query
+    //    so the payment x refund join doesn't fan out and double-count payments).
+    db
+      .select({ source: sourceKey, value: sum(refunds.amountCents) })
+      .from(serviceRequests)
+      .innerJoin(
+        invoices,
+        sql`${invoices.serviceRequestId} = ${serviceRequests.id} AND ${invoices.organizationId} = ${organizationId}`,
+      )
+      .innerJoin(
+        payments,
+        sql`${payments.invoiceId} = ${invoices.id} AND ${payments.organizationId} = ${organizationId}`,
+      )
+      .innerJoin(
+        refunds,
+        sql`${refunds.paymentId} = ${payments.id} AND ${refunds.organizationId} = ${organizationId}`,
+      )
+      .where(
+        withTenant(
+          serviceRequests,
+          organizationId,
+          gte(serviceRequests.createdAt, fromDate),
+          lte(serviceRequests.createdAt, toDate),
+        ),
+      )
+      .groupBy(sourceKey),
+  ]);
+
+  const leadsBySource = new Map<string, number>();
+  for (const r of leadRows) leadsBySource.set(r.source, toNumber(r.value));
+  const bookedBySource = new Map<string, number>();
+  for (const r of bookedRows) bookedBySource.set(r.source, toNumber(r.value));
+  const grossBySource = new Map<string, number>();
+  for (const r of grossRows) grossBySource.set(r.source, toNumber(r.value));
+  const refundBySource = new Map<string, number>();
+  for (const r of refundRows) refundBySource.set(r.source, toNumber(r.value));
+
+  // LEFT side from the enum DOMAIN + 'unknown' so zero-lead sources still render.
+  const allSources = [...leadSourceEnum.enumValues, UNKNOWN_SOURCE];
+
+  return allSources.map((source) => {
+    const leads = leadsBySource.get(source) ?? 0;
+    const booked = bookedBySource.get(source) ?? 0;
+    const revenueCents =
+      (grossBySource.get(source) ?? 0) - (refundBySource.get(source) ?? 0);
+    const closeRatePct =
+      leads > 0 ? Math.round((booked / leads) * 1000) / 10 : 0;
+    return { source, leads, booked, revenueCents, closeRatePct };
+  });
 }

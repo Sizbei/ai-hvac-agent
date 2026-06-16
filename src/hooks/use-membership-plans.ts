@@ -8,6 +8,7 @@ export interface MembershipPlan {
   readonly description: string | null;
   readonly priceCents: number;
   readonly billingPeriod: string;
+  readonly visitsPerYear: number;
   readonly active: boolean;
 }
 

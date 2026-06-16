@@ -491,6 +491,13 @@ export const serviceRequests = pgTable(
     invoiceStatus: invoiceStatusEnum("invoice_status").notNull().default("none"),
     scheduledDate: timestamp("scheduled_date", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
+    // On-site customer e-signature captured by the assigned tech at job sign-off.
+    // signatureUrl points at the R2-stored PNG (admin/server retrieval only for
+    // v1). signatureName is the customer's printed name — PII-ish but stored
+    // plaintext like estimates.signatureName (the customer's own sign-off).
+    signatureUrl: text("signature_url"),
+    signatureName: text("signature_name"),
+    signedAt: timestamp("signed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -622,6 +629,16 @@ export const customers = pgTable(
     // admin list but fully retained (reversible), as opposed to the permanent
     // DELETE. NULL = active.
     archivedAt: timestamp("archived_at", { withTimezone: true }),
+    // Customer self-service portal: SHA-256 hash of a long-lived, customer-scoped
+    // bearer token (the plaintext is returned to the admin exactly ONCE at
+    // generation, never stored — same hashed-at-rest pattern as staff invites and
+    // estimate approval tokens). NULL = no active portal link. Rotating the link
+    // overwrites the hash (old links die). The token is the only authority for the
+    // public /portal page — org + customer are derived from THIS row, never a param.
+    portalTokenHash: text("portal_token_hash"),
+    portalTokenCreatedAt: timestamp("portal_token_created_at", {
+      withTimezone: true,
+    }),
   },
   (table) => [
     index("customers_org_id_idx").on(table.organizationId),
@@ -634,6 +651,13 @@ export const customers = pgTable(
     uniqueIndex("customers_org_phone_hash_unique")
       .on(table.organizationId, table.phoneHash)
       .where(sql`${table.phoneHash} IS NOT NULL`),
+    // Portal token lookups resolve a customer by hash on every public request —
+    // unique (a token maps to exactly one customer) + partial (most rows have no
+    // token). The global uniqueness is intentional: the hash is a 256-bit secret,
+    // so cross-org collision is infeasible and the lookup needs no org param.
+    uniqueIndex("customers_portal_token_hash_unique")
+      .on(table.portalTokenHash)
+      .where(sql`${table.portalTokenHash} IS NOT NULL`),
   ],
 );
 
@@ -1751,6 +1775,40 @@ export const pricebookItemMaterials = pgTable(
   (table) => [index("pricebook_item_materials_item_idx").on(table.itemId)],
 );
 
+// 28b. job_materials — materials a technician actually used on a service request
+// in the field. Distinct from estimate/invoice line snapshots: this is the ACTUAL
+// consumption, captured on-site by the assigned tech. unitCostCents/unitPriceCents
+// are snapshotted at add-time from the pricebook item (server-authoritative), or
+// default to 0 for a manual (off-catalog) line. Feeds the actual-vs-estimated
+// margin readout. Money in integer cents.
+export const jobMaterials = pgTable(
+  "job_materials",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    serviceRequestId: uuid("service_request_id")
+      .notNull()
+      .references(() => serviceRequests.id, { onDelete: "cascade" }),
+    pricebookItemId: uuid("pricebook_item_id").references(
+      () => pricebookItems.id,
+    ),
+    description: text("description"),
+    quantity: integer("quantity").notNull().default(1),
+    unitCostCents: integer("unit_cost_cents").notNull().default(0),
+    unitPriceCents: integer("unit_price_cents").notNull().default(0),
+    createdBy: uuid("created_by").references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("job_materials_org_idx").on(table.organizationId),
+    index("job_materials_request_idx").on(table.serviceRequestId),
+  ],
+);
+
 // 29. tax_rates — jurisdictional tax (rate in basis points; 825 = 8.25%).
 export const taxRates = pgTable(
   "tax_rates",
@@ -2005,6 +2063,17 @@ export const membershipBillingPeriodEnum = pgEnum("membership_billing_period", [
   "annual",
 ]);
 
+// Lifecycle of a single scheduled maintenance visit entitled by a membership
+// (ServiceTitan service-agreement parity). "scheduled" = planned but not yet
+// materialized into a job; "generated" = a service_request was created for it;
+// "completed" = the visit was performed; "skipped" = intentionally not done.
+export const membershipVisitStatusEnum = pgEnum("membership_visit_status", [
+  "scheduled",
+  "generated",
+  "completed",
+  "skipped",
+]);
+
 export const membershipPlans = pgTable(
   "membership_plans",
   {
@@ -2019,6 +2088,13 @@ export const membershipPlans = pgTable(
     billingPeriod: membershipBillingPeriodEnum("billing_period")
       .notNull()
       .default("monthly"),
+    // Maintenance entitlement: how many maintenance visits a member is owed per
+    // year (ServiceTitan service-agreement parity). 0 = billing-only plan (no
+    // auto-generated visits). Drives the generate-membership-visits cron.
+    visitsPerYear: integer("visits_per_year").notNull().default(0),
+    // Free-form member benefits (e.g. discount %, priority dispatch, waived
+    // diagnostic) for display/quote logic. Nullable until a plan defines any.
+    benefits: jsonb("benefits"),
     // Soft-deactivate (a plan may have historical enrollments): never hard delete.
     active: boolean("active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -2074,5 +2150,49 @@ export const customerMemberships = pgTable(
     uniqueIndex("customer_memberships_org_customer_active_unique")
       .on(table.organizationId, table.customerId)
       .where(sql`${table.status} = 'active'`),
+  ],
+);
+
+// A single maintenance visit entitled by a membership (ServiceTitan service-
+// agreement parity). The generate-membership-visits cron materializes these for
+// members whose plan.visitsPerYear>0 as their due date approaches. periodKey is
+// the idempotency bucket (e.g. "2026-H1" for the first of two annual visits):
+// the (customerMembershipId, periodKey) UNIQUE index makes generation safe to
+// re-run on a daily cron — a retried run for the same period can't duplicate.
+export const membershipVisits = pgTable(
+  "membership_visits",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    customerMembershipId: uuid("customer_membership_id")
+      .notNull()
+      .references(() => customerMemberships.id, { onDelete: "cascade" }),
+    // When the visit is due. The generated job's scheduledDate is set to this.
+    dueDate: timestamp("due_date", { withTimezone: true }).notNull(),
+    // Idempotency bucket within a membership's cycle (e.g. "2026-H1").
+    periodKey: text("period_key").notNull(),
+    status: membershipVisitStatusEnum("status").notNull().default("scheduled"),
+    // The service_request created when this visit was generated. NULL until then.
+    generatedServiceRequestId: uuid("generated_service_request_id").references(
+      () => serviceRequests.id,
+    ),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("membership_visits_org_idx").on(table.organizationId),
+    index("membership_visits_membership_idx").on(table.customerMembershipId),
+    // The idempotency guard: at most one visit row per (membership, period).
+    // A concurrent/retried cron run collides here instead of double-generating.
+    uniqueIndex("membership_visits_membership_period_unique").on(
+      table.customerMembershipId,
+      table.periodKey,
+    ),
   ],
 );

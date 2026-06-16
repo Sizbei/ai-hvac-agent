@@ -10,7 +10,7 @@ import {
   Receipt,
   Undo2,
 } from 'lucide-react';
-import { useReports } from '@/hooks/use-reports';
+import { useReports, type LeadSourceRow } from '@/hooks/use-reports';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
@@ -34,7 +34,7 @@ export default function ReportsPage() {
     return { from: from.toISOString(), to: to.toISOString() };
   }, [days]);
 
-  const { report, isLoading, error } = useReports(range);
+  const { report, leadSourceBreakdown, isLoading, error } = useReports(range);
 
   return (
     <div className="space-y-6 p-6">
@@ -144,7 +144,98 @@ export default function ReportsPage() {
           isLoading={isLoading}
         />
       </div>
+
+      {/* Lead source ROI */}
+      <LeadSourceTable rows={leadSourceBreakdown} isLoading={isLoading} />
     </div>
+  );
+}
+
+const LEAD_SOURCE_LABELS: Record<string, string> = {
+  google: 'Google',
+  facebook: 'Facebook',
+  yelp: 'Yelp',
+  referral: 'Referral',
+  repeat_customer: 'Repeat customer',
+  website: 'Website',
+  direct_mail: 'Direct mail',
+  other: 'Other',
+  unknown: 'Unknown',
+};
+
+function leadSourceLabel(source: string): string {
+  return LEAD_SOURCE_LABELS[source] ?? source;
+}
+
+interface LeadSourceTableProps {
+  readonly rows: LeadSourceRow[];
+  readonly isLoading: boolean;
+}
+
+function LeadSourceTable({ rows, isLoading }: LeadSourceTableProps) {
+  // Sort by revenue desc; revenue lives in cents so a plain numeric sort is fine.
+  const sorted = useMemo(
+    () => [...rows].sort((a, b) => b.revenueCents - a.revenueCents),
+    [rows],
+  );
+
+  return (
+    <Card className="p-4">
+      <div className="mb-3">
+        <h2 className="font-heading text-lg font-semibold tracking-tight">
+          Lead source ROI
+        </h2>
+        <p className="text-xs text-muted-foreground">
+          Revenue and close rate by where each lead came from.
+        </p>
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-2">
+          {[0, 1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-9 w-full" />
+          ))}
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b text-xs uppercase tracking-wide text-muted-foreground">
+                <th className="py-2 pr-3 text-left font-medium">Source</th>
+                <th className="py-2 px-3 text-right font-medium">Leads</th>
+                <th className="py-2 px-3 text-right font-medium">Booked</th>
+                <th className="py-2 px-3 text-right font-medium">Close rate</th>
+                <th className="py-2 pl-3 text-right font-medium">Revenue</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((row) => (
+                <tr
+                  key={row.source}
+                  className="border-b last:border-0 hover:bg-muted/40"
+                >
+                  <td className="py-2 pr-3 font-medium">
+                    {leadSourceLabel(row.source)}
+                  </td>
+                  <td className="py-2 px-3 text-right tabular-nums">
+                    {row.leads}
+                  </td>
+                  <td className="py-2 px-3 text-right tabular-nums">
+                    {row.booked}
+                  </td>
+                  <td className="py-2 px-3 text-right tabular-nums">
+                    {row.closeRatePct}%
+                  </td>
+                  <td className="py-2 pl-3 text-right font-medium tabular-nums">
+                    {formatCentsExact(row.revenueCents)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
   );
 }
 
