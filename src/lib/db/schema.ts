@@ -1761,7 +1761,13 @@ export const taxRates = pgTable(
     active: boolean("active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (table) => [index("tax_rates_org_idx").on(table.organizationId)],
+  (table) => [
+    index("tax_rates_org_idx").on(table.organizationId),
+    // At most one active default tax rate per org (deterministic getDefaultTaxBps).
+    uniqueIndex("tax_rates_org_default_unique")
+      .on(table.organizationId)
+      .where(sql`${table.isDefault} = true AND ${table.active} = true`),
+  ],
 );
 
 // ════════ Stage 9: Estimates, invoicing, payments, financing ════════
@@ -1887,6 +1893,10 @@ export const invoices = pgTable(
   (table) => [
     index("invoices_org_idx").on(table.organizationId),
     index("invoices_request_idx").on(table.serviceRequestId),
+    // One invoice per estimate (idempotent materialization).
+    uniqueIndex("invoices_estimate_unique")
+      .on(table.estimateId)
+      .where(sql`${table.estimateId} IS NOT NULL`),
   ],
 );
 

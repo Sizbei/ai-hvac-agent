@@ -75,8 +75,13 @@ export class MockPaymentProvider implements PaymentProvider {
 export function getPaymentProvider(): PaymentProvider {
   const stripeKey = process.env.STRIPE_SECRET_KEY?.trim();
   if (stripeKey) {
-    // Not yet implemented — fall back to mock so nothing breaks if the key is
-    // present before the Stripe adapter lands. Swap this for StripePaymentProvider.
+    // LOUD warning: a key is present but the Stripe adapter isn't built yet, so
+    // we're still mocking. Without this an operator who sets STRIPE_SECRET_KEY
+    // would believe real charges are happening when they are not. Swap this for
+    // `new StripePaymentProvider(stripeKey)` when the adapter lands.
+    console.error(
+      "[payments] STRIPE_SECRET_KEY is set but the Stripe adapter is not implemented — using MockPaymentProvider. NO REAL CHARGES ARE PROCESSED.",
+    );
     return new MockPaymentProvider();
   }
   return new MockPaymentProvider();

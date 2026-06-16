@@ -15,7 +15,7 @@ import {
   estimateLineItems,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
-import { computeOptionTotals } from "./money";
+import { computeOptionTotals, lineTotalCents } from "./money";
 
 function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
@@ -95,7 +95,9 @@ export async function createEstimate(
         name: li.name,
         quantity: li.quantity,
         unitPriceCents: li.unitPriceCents,
-        lineTotalCents: Math.max(0, li.quantity * li.unitPriceCents),
+        // Use the SAME helper that feeds option/invoice totals so the stored
+        // per-line value can't diverge from the rolled-up subtotal.
+        lineTotalCents: lineTotalCents(li),
       });
     }
   });

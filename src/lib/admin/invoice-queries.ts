@@ -51,6 +51,17 @@ export async function createInvoiceFromSoldEstimate(
     return { ok: false, reason: "no_sold_option" };
   }
 
+  // Idempotency: one invoice per estimate. Return the existing one instead of
+  // duplicating (paired with the unique index for the concurrent-call race).
+  const [existingInvoice] = await db
+    .select({ id: invoices.id })
+    .from(invoices)
+    .where(withTenant(invoices, organizationId, eq(invoices.estimateId, estimateId)))
+    .limit(1);
+  if (existingInvoice) {
+    return { ok: true, invoiceId: existingInvoice.id };
+  }
+
   const [opt] = await db
     .select({
       subtotalCents: estimateOptions.subtotalCents,
@@ -101,7 +112,10 @@ export async function createInvoiceFromSoldEstimate(
 
 export type TakePaymentResult =
   | { readonly ok: true; readonly paymentId: string; readonly invoiceState: string }
-  | { readonly ok: false; readonly reason: "invoice_not_found" | "charge_failed" };
+  | {
+      readonly ok: false;
+      readonly reason: "invoice_not_found" | "invoice_not_chargeable" | "charge_failed";
+    };
 
 /**
  * Charge an invoice via the payment provider, record the payment, and advance
@@ -117,6 +131,7 @@ export async function takePayment(
   const [inv] = await db
     .select({
       id: invoices.id,
+      state: invoices.state,
       totalCents: invoices.totalCents,
       amountPaidCents: invoices.amountPaidCents,
     })
@@ -124,6 +139,11 @@ export async function takePayment(
     .where(withTenant(invoices, organizationId, eq(invoices.id, invoiceId)))
     .limit(1);
   if (!inv) return { ok: false, reason: "invoice_not_found" };
+  // Only an open/draft invoice can be charged — never a paid/void/refunded one
+  // (that would over-collect or charge a cancelled invoice).
+  if (inv.state !== "open" && inv.state !== "draft") {
+    return { ok: false, reason: "invoice_not_chargeable" };
+  }
 
   const paymentId = randomUUID();
   // Record the attempt first (pending) so a provider success is never lost.
@@ -173,7 +193,10 @@ export async function takePayment(
 
 export type RefundResultOut =
   | { readonly ok: true; readonly refundId: string }
-  | { readonly ok: false; readonly reason: "payment_not_found" | "exceeds_payment" };
+  | {
+      readonly ok: false;
+      readonly reason: "payment_not_found" | "not_refundable" | "exceeds_payment";
+    };
 
 /**
  * Refund (full or partial) a succeeded payment via the provider, record the
@@ -190,15 +213,27 @@ export async function refundPayment(
       id: payments.id,
       invoiceId: payments.invoiceId,
       amountCents: payments.amountCents,
+      status: payments.status,
       providerPaymentId: payments.providerPaymentId,
     })
     .from(payments)
     .where(withTenant(payments, organizationId, eq(payments.id, paymentId)))
     .limit(1);
   if (!pay) return { ok: false, reason: "payment_not_found" };
-  if (params.amountCents > pay.amountCents) {
+  // Only a SUCCEEDED charge can be refunded (never pending/failed/already-refunded).
+  if (pay.status !== "succeeded") {
+    return { ok: false, reason: "not_refundable" };
+  }
+  // Guard against over-refunding: sum prior refunds, cap at the remaining balance.
+  const prior = await db
+    .select({ amountCents: refunds.amountCents })
+    .from(refunds)
+    .where(eq(refunds.paymentId, paymentId));
+  const alreadyRefunded = prior.reduce((s, r) => s + r.amountCents, 0);
+  if (params.amountCents <= 0 || params.amountCents > pay.amountCents - alreadyRefunded) {
     return { ok: false, reason: "exceeds_payment" };
   }
+  const fullyRefunded = alreadyRefunded + params.amountCents >= pay.amountCents;
 
   const result = await provider.refund({
     providerPaymentId: pay.providerPaymentId ?? "",
@@ -225,7 +260,10 @@ export async function refundPayment(
     }),
     db
       .update(payments)
-      .set({ status: "refunded", updatedAt: new Date() })
+      // Stay "succeeded" on a PARTIAL refund (more can be refunded up to the
+      // balance); only "refunded" once fully refunded — which also blocks any
+      // further refund via the status guard above.
+      .set({ status: fullyRefunded ? "refunded" : "succeeded", updatedAt: new Date() })
       .where(eq(payments.id, paymentId)),
     db
       .update(invoices)
