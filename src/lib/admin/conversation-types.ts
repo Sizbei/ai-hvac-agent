@@ -42,6 +42,12 @@ export interface ConversationDetail {
   // Rolling summary of turns that aged out of the model's window (long
   // conversations). null when the conversation never grew past the window.
   readonly runningSummary: string | null;
+  // Stage 3: AI post-hoc recap, classified outcome, and suggested next steps.
+  readonly summary: string | null;
+  readonly outcome: string | null;
+  readonly nextSteps: readonly string[] | null;
+  // Stage 4: "ai" (bot auto-replies) | "human" (a CSR has taken over).
+  readonly mode: string;
   // parsed from customerSessions.metadata JSON; null if absent/unparseable
   readonly metadata: Record<string, unknown> | null;
   readonly referenceNumber: string | null;

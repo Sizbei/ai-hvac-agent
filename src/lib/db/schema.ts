@@ -23,6 +23,20 @@ export const sessionStatusEnum = pgEnum("session_status", [
   "abandoned",
 ]);
 
+// AI-classified outcome of a conversation (Stage 3). Distinct from session
+// `status` (the live state machine) — this is the post-hoc "what happened".
+export const sessionOutcomeEnum = pgEnum("session_outcome", [
+  "booked",
+  "escalated",
+  "info_provided",
+  "abandoned",
+  "unresolved",
+]);
+
+// Who is driving a conversation (Stage 4). "human" suppresses the AI auto-reply
+// in the inbound webhook so a CSR can take over a thread.
+export const sessionModeEnum = pgEnum("session_mode", ["ai", "human"]);
+
 export const messageRoleEnum = pgEnum("message_role", [
   "user",
   "assistant",
@@ -332,6 +346,15 @@ export const customerSessions = pgTable(
     // full transcript every turn. NULL until the conversation first exceeds the
     // window. Written by the background compaction task.
     runningSummary: text("running_summary"),
+    // Stage 3: AI post-hoc recap + classified outcome + suggested next steps,
+    // written by an after() LLM pass when the conversation closes. `summary` is
+    // human-facing (distinct from runningSummary, the compaction working memory).
+    summary: text("summary"),
+    outcome: sessionOutcomeEnum("outcome"),
+    nextSteps: jsonb("next_steps").$type<string[]>(),
+    // Stage 4: ai = the bot auto-replies; human = a CSR has taken over the thread
+    // and the inbound webhook must NOT auto-reply.
+    mode: sessionModeEnum("mode").notNull().default("ai"),
     // The repeat customer this session resolved to, once a contact slot (email
     // or phone) matches an existing customer via blind-index lookup. NULL for
     // anonymous sessions and for sessions that never link to a known customer.

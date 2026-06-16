@@ -267,6 +267,13 @@
       "when": 1781518271000,
       "tag": "0037_compliance_eventing",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1781518272000,
+      "tag": "0038_session_summaries",
+      "breakpoints": true
     }
   ]
 }

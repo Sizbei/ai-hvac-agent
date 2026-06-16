@@ -30,6 +30,7 @@ import {
   communicationPreferences,
 } from "@/lib/db/schema";
 import { recordStatusEvent } from "@/lib/admin/status-events";
+import { summarizeAndClassifySession } from "@/lib/ai/session-outcome";
 import {
   resolveAfterHoursConfig,
   isAfterHours,
@@ -302,6 +303,15 @@ export async function submitSessionServiceRequest(params: {
   // the job) which keeps it idempotent.
   after(() => pushJobToHcp(organizationId, serviceRequest.id));
   after(() => pushJobToFieldpulse(organizationId, serviceRequest.id));
+
+  // Stage 3: AI summary + outcome for this (now booked) conversation.
+  after(() =>
+    summarizeAndClassifySession({
+      organizationId,
+      sessionId,
+      definiteOutcome: "booked",
+    }),
+  );
 
   // Record the customer's equipment from the intake (ServiceTitan asset
   // history), best-effort: a failure here must not fail the submission.

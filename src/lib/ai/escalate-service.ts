@@ -1,7 +1,9 @@
+import { after } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { customerSessions, auditLog } from "@/lib/db/schema";
 import { transition, type SessionState } from "@/lib/ai/state-machine";
+import { summarizeAndClassifySession } from "@/lib/ai/session-outcome";
 import { logger } from "@/lib/logger";
 
 export interface EscalateResult {
@@ -73,6 +75,15 @@ export async function escalateSession(params: {
   });
 
   logger.info({ sessionId }, "Session escalated to human");
+
+  // Stage 3: AI summary + outcome for the escalated conversation (background).
+  after(() =>
+    summarizeAndClassifySession({
+      organizationId,
+      sessionId,
+      definiteOutcome: "escalated",
+    }),
+  );
 
   return { ok: true };
 }
