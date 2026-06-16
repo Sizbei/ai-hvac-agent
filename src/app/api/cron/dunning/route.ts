@@ -16,6 +16,7 @@ import { organizations } from "@/lib/db/schema";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { verifyCronAuth } from "@/lib/cron-auth";
 import { sendOverdueInvoiceReminders } from "@/lib/communication/money-triggers";
+import { getCommsOutcomeSummary } from "@/lib/communication/observability";
 import { logger } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
@@ -36,6 +37,29 @@ export async function GET(request: Request) {
         considered += r.considered;
         enqueued += r.enqueued;
         skipped += r.skipped;
+
+        // Comms-outcome observability: one COUNTS-ONLY line per org per run so
+        // suppression spikes / the RESEND-unset email stall are visible in logs
+        // (no PII — only statuses + suppressed:<reason> tags).
+        try {
+          const comms = await getCommsOutcomeSummary(org.id);
+          logger.info(
+            {
+              organizationId: org.id,
+              sent: comms.sent,
+              failed: comms.failed,
+              pending: comms.pending,
+              emailStalled: comms.emailStalled,
+              suppressedByReason: comms.suppressedByReason,
+            },
+            "Comms outcome summary",
+          );
+        } catch (error) {
+          logger.error(
+            { error, organizationId: org.id },
+            "Comms outcome summary failed for org",
+          );
+        }
       } catch (error) {
         logger.error(
           { error, organizationId: org.id },

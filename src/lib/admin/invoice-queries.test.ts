@@ -73,7 +73,154 @@ describe("takePayment", () => {
   });
 });
 
-import { refundPayment } from "./invoice-queries";
+import { createInvoiceFromSoldEstimate, refundPayment } from "./invoice-queries";
+
+// ---------------------------------------------------------------------------
+// createInvoiceFromSoldEstimate — materialize an invoice from a SOLD estimate.
+// Sequences the db.select calls: 1) estimate, 2) existing-invoice (idempotency),
+// 3) option totals, 4) line items.
+// ---------------------------------------------------------------------------
+
+/** Sequence db.select results; each where() is awaitable AND .limit()-able. */
+function mockCreateSeq(results: unknown[][]): void {
+  let i = 0;
+  vi.mocked(db.select).mockImplementation(
+    () =>
+      ({
+        from: () => ({
+          where: () => {
+            const r = results[i++] ?? [];
+            const p = Promise.resolve(r);
+            return Object.assign(p, { limit: () => Promise.resolve(r) });
+          },
+        }),
+      }) as never,
+  );
+}
+
+describe("createInvoiceFromSoldEstimate", () => {
+  beforeEach(() => {
+    vi.mocked(db.insert).mockReturnValue({ values: vi.fn(() => ({})) } as never);
+  });
+
+  it("is idempotent: a second call returns the EXISTING invoice id, no new invoice", async () => {
+    mockCreateSeq([
+      [{ id: "est-1", status: "sold", soldOptionId: "opt-1", customerId: "c", serviceRequestId: null }],
+      [{ id: "inv-existing" }], // an invoice already exists for this estimate
+    ]);
+    const r = await createInvoiceFromSoldEstimate(ORG, "est-1");
+    expect(r).toEqual({ ok: true, invoiceId: "inv-existing" });
+    // No insert/batch — we returned the existing invoice instead of duplicating.
+    expect(db.batch).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-sold estimate (estimate_not_sold)", async () => {
+    mockCreateSeq([
+      [{ id: "est-1", status: "open", soldOptionId: null, customerId: "c", serviceRequestId: null }],
+    ]);
+    const r = await createInvoiceFromSoldEstimate(ORG, "est-1");
+    expect(r).toEqual({ ok: false, reason: "estimate_not_sold" });
+    expect(db.batch).not.toHaveBeenCalled();
+  });
+
+  it("rejects a missing estimate (estimate_not_sold)", async () => {
+    mockCreateSeq([[]]);
+    const r = await createInvoiceFromSoldEstimate(ORG, "est-x");
+    expect(r).toEqual({ ok: false, reason: "estimate_not_sold" });
+  });
+
+  it("rejects a sold estimate with no soldOptionId (no_sold_option)", async () => {
+    mockCreateSeq([
+      [{ id: "est-1", status: "sold", soldOptionId: null, customerId: "c", serviceRequestId: null }],
+    ]);
+    const r = await createInvoiceFromSoldEstimate(ORG, "est-1");
+    expect(r).toEqual({ ok: false, reason: "no_sold_option" });
+    expect(db.batch).not.toHaveBeenCalled();
+  });
+
+  it("creates an invoice (state 'open') from the sold option's snapshot on first call", async () => {
+    mockCreateSeq([
+      [{ id: "est-1", status: "sold", soldOptionId: "opt-1", customerId: "c", serviceRequestId: "r" }],
+      [], // no existing invoice yet
+      [{ subtotalCents: 9000, taxCents: 1000, totalCents: 10000 }], // option totals
+      [{ name: "Repair", quantity: 1, unitPriceCents: 9000, costCents: 4000, lineTotalCents: 9000 }],
+    ]);
+    const r = await createInvoiceFromSoldEstimate(ORG, "est-1");
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.invoiceId).toBeTruthy();
+    // invoice insert + line-items insert batched atomically.
+    expect(db.batch).toHaveBeenCalledTimes(1);
+  });
+});
+
+import { takePayment as takePaymentFlow } from "./invoice-queries";
+import { markEstimateSold } from "./estimate-queries";
+
+// ---------------------------------------------------------------------------
+// Money-loop FLOW: createEstimate -> markEstimateSold -> createInvoiceFromSoldEstimate
+// -> takePayment(full) -> refundPayment(partial). Asserts the invoice state at
+// each step (sold, open->paid, paid stays paid on a partial refund). DB is mocked;
+// db.select calls are sequenced per step like the refund tests above.
+// ---------------------------------------------------------------------------
+
+describe("money-loop flow (mocked db)", () => {
+  const provider = new MockPaymentProvider();
+
+  beforeEach(() => {
+    vi.mocked(db.insert).mockReturnValue({ values: vi.fn(() => ({})) } as never);
+  });
+
+  it("walks sold -> invoiced(open) -> paid -> paid (after partial refund)", async () => {
+    // 1) markEstimateSold: estimate is open, option belongs to it -> sold.
+    mockCreateSeq([
+      [{ id: "est-1", status: "open" }],
+      [{ id: "opt-1" }],
+    ]);
+    vi.mocked(db.update).mockReturnValue({
+      set: vi.fn(() => ({
+        where: vi.fn(() => ({ returning: vi.fn().mockResolvedValue([{ id: "est-1" }]) })),
+      })),
+    } as never);
+    const sold = await markEstimateSold(ORG, "est-1", "opt-1");
+    expect(sold).toEqual({ ok: true, estimateId: "est-1" });
+
+    // 2) createInvoiceFromSoldEstimate: sold estimate, no prior invoice -> open invoice.
+    mockCreateSeq([
+      [{ id: "est-1", status: "sold", soldOptionId: "opt-1", customerId: "c", serviceRequestId: null }],
+      [], // no existing invoice
+      [{ subtotalCents: 10000, taxCents: 0, totalCents: 10000 }],
+      [{ name: "Repair", quantity: 1, unitPriceCents: 10000, costCents: 4000, lineTotalCents: 10000 }],
+    ]);
+    const created = await createInvoiceFromSoldEstimate(ORG, "est-1");
+    expect(created.ok).toBe(true);
+
+    // 3) takePayment(full): open -> paid.
+    mockCreateSeq([[{ id: "inv-1", state: "open", totalCents: 10000, amountPaidCents: 0 }]]);
+    const paid = await takePaymentFlow(ORG, "inv-1", { amountCents: 10000 }, provider);
+    expect(paid.ok).toBe(true);
+    if (paid.ok) expect(paid.invoiceState).toBe("paid");
+
+    // 4) refundPayment(partial) of a fully-paid invoice: stays 'paid' (NOT chargeable).
+    mockCreateSeq([
+      [{ id: "pay-1", invoiceId: "inv-1", amountCents: 10000, status: "succeeded", providerPaymentId: "mock_pay_x" }],
+      [], // no prior refunds
+      [{ amountPaidCents: 10000, totalCents: 10000 }], // invoice was fully paid
+    ]);
+    const states: Record<string, unknown>[] = [];
+    vi.mocked(db.update).mockImplementation(
+      () =>
+        ({
+          set: (v: Record<string, unknown>) => {
+            states.push(v);
+            return { where: vi.fn().mockResolvedValue(undefined) };
+          },
+        }) as never,
+    );
+    const refunded = await refundPayment(ORG, "pay-1", { amountCents: 4000 }, provider);
+    expect(refunded.ok).toBe(true);
+    expect(states.find((s) => "state" in s)?.state).toBe("paid");
+  });
+});
 
 /** Sequence db.select results across calls; each where() is awaitable AND .limit()-able. */
 function mockSelectSeq(results: unknown[][]) {
