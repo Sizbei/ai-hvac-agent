@@ -65,14 +65,18 @@ export async function POST(
 
     // SMS is the only outbound channel today. The session token for a phone
     // thread is "sms:<E.164>"; derive the recipient from it.
-    if (conv.channel !== "sms" || !conv.token.startsWith("sms:")) {
+    const recipient = conv.token.startsWith("sms:")
+      ? conv.token.slice("sms:".length)
+      : "";
+    // A retired token looks like "sms:<phone>:<sessionId>" (closed thread) — its
+    // sliced value contains a ':'. Reject anything that isn't a clean number.
+    if (conv.channel !== "sms" || recipient.length === 0 || recipient.includes(":")) {
       return errorResponse(
-        "Replying is only supported for SMS conversations",
+        "Replying is only supported for active SMS conversations",
         "UNSUPPORTED_CHANNEL",
         400,
       );
     }
-    const recipient = conv.token.slice("sms:".length);
 
     // Consent: do-not-contact / channel-off customers are never messaged. Use
     // the "escalation" trigger semantics — a human-driven reply checks

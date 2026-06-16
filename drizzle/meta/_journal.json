@@ -288,6 +288,13 @@
       "when": 1781518274000,
       "tag": "0040_locations_assets",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1781518275000,
+      "tag": "0041_history_equipment_idx",
+      "breakpoints": true
     }
   ]
 }

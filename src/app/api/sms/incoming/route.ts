@@ -16,7 +16,7 @@ import { type ChatTurn } from "@/lib/ai/compaction";
 import { sanitizeInput } from "@/lib/ai/guardrails";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { parseAndVerifyTwilioRequest } from "@/lib/voice/request";
-import { messagingTwiML, MESSAGING_HEADERS } from "@/lib/sms/twiml";
+import { messagingTwiML, emptyMessagingTwiML, MESSAGING_HEADERS } from "@/lib/sms/twiml";
 import {
   classifySmsKeyword,
   setDoNotContactByPhone,
@@ -192,7 +192,9 @@ export async function POST(request: NextRequest) {
         role: "user",
         content: sanitized.sanitized,
       });
-      return new Response(messagingTwiML(""), { headers: MESSAGING_HEADERS });
+      // Empty <Response/> (no <Message>) so Twilio sends NO auto-reply — the CSR
+      // owns the thread now.
+      return new Response(emptyMessagingTwiML(), { headers: MESSAGING_HEADERS });
     }
 
     const history = await db

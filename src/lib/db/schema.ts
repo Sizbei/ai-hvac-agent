@@ -762,6 +762,11 @@ export const serviceHistory = pgTable(
   (table) => [
     index("history_customer_id_idx").on(table.customerId),
     index("history_org_id_idx").on(table.organizationId),
+    // Per-asset timeline lookup (getEquipmentServiceHistory) filters by
+    // equipment_id — index it (partial: most history rows have no asset link).
+    index("history_equipment_id_idx")
+      .on(table.equipmentId)
+      .where(sql`${table.equipmentId} IS NOT NULL`),
   ],
 );
 

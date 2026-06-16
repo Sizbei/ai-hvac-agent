@@ -751,9 +751,10 @@ export async function autoAssignBookedRequest(
     if (result.ok) {
       return { assigned: true, technicianId: tech.id };
     }
-    // A conflict just means this tech is busy — try the next. Any other failure
-    // (request moved on / terminal) means stop.
-    if (result.reason !== "conflict") {
+    // A conflict (busy) or a tech deactivated mid-flight just means THIS tech
+    // can't take it — try the next. Only a request-level failure (moved on /
+    // terminal / not found) means stop trying entirely.
+    if (result.reason !== "conflict" && result.reason !== "technician_not_found") {
       break;
     }
   }

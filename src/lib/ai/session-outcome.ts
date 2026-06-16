@@ -10,7 +10,7 @@
  * NEVER written to the audit log (which is PII-free by contract).
  */
 import { generateText } from "ai";
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { customerSessions, messages } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
@@ -68,12 +68,15 @@ export async function summarizeAndClassifySession(params: {
       .select({ role: messages.role, content: messages.content })
       .from(messages)
       .where(withTenant(messages, organizationId, eq(messages.sessionId, sessionId)))
-      .orderBy(messages.createdAt);
+      .orderBy(asc(messages.createdAt));
 
     const convo = turns
       .filter((m) => m.role === "user" || m.role === "assistant")
       .map((m) => `${m.role === "user" ? "Customer" : "Assistant"}: ${m.content}`)
-      .join("\n");
+      .join("\n")
+      // Cap the transcript so a very long session can't blow the model context
+      // window (keep the most recent ~12k chars — the tail carries the outcome).
+      .slice(-12000);
 
     const userTurns = turns.filter((m) => m.role === "user").length;
     if (userTurns < MIN_TURNS_FOR_SUMMARY) {

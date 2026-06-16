@@ -34,10 +34,14 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    // Step 2: Expire stale sessions — chatting/extracting older than 24h
+    // Step 2: Expire stale sessions — chatting/extracting older than 24h. Set
+    // outcome='abandoned' in the SAME write so the outcome enum is always
+    // populated (Stage 3 criterion: every closed session has an outcome). LLM
+    // recaps are reserved for the meaningful closes (booking/escalation) — an
+    // abandoned/timed-out session typically has nothing to summarize.
     const expireResult = await db
       .update(customerSessions)
-      .set({ status: "abandoned" })
+      .set({ status: "abandoned", outcome: "abandoned" })
       .where(
         sql`${customerSessions.status} IN ('chatting', 'extracting') AND ${customerSessions.updatedAt} < NOW() - INTERVAL '24 hours'`,
       );
