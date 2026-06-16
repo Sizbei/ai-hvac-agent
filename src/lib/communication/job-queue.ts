@@ -315,7 +315,14 @@ export async function retryFailedJobs(limit = 5): Promise<number> {
     await db
       .update(communicationJobs)
       .set({ status: "pending" as any })
-      .where(eq(communicationJobs.id, job.id));
+      // Guard on status='failed' so two concurrent retry drains can't both
+      // reset the same job (latent double-reset).
+      .where(
+        and(
+          eq(communicationJobs.id, job.id),
+          eq(communicationJobs.status, "failed"),
+        ),
+      );
   }
 
   return failedJobs.length;

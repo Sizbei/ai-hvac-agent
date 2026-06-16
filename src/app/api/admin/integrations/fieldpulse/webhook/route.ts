@@ -366,20 +366,26 @@ export async function POST(request: NextRequest): Promise<Response> {
     }
 
     // Audit log for the status change (FORENSIC TRAIL) — actorType=system.
-    await db.insert(auditLog).values({
-      organizationId,
-      actorType: "system",
-      action: "status_updated",
-      entity: "service_requests",
-      entityId: requestRow.id,
-      details: JSON.stringify({
-        from: requestRow.status,
-        to: newStatus,
-        source: "fieldpulse_webhook",
-        eventType,
-      }),
-      ipAddress: null, // Webhook - no client IP
-    });
+    // Best-effort: a transient audit-insert failure must NOT skip the status
+    // event below (the transition already committed).
+    try {
+      await db.insert(auditLog).values({
+        organizationId,
+        actorType: "system",
+        action: "status_updated",
+        entity: "service_requests",
+        entityId: requestRow.id,
+        details: JSON.stringify({
+          from: requestRow.status,
+          to: newStatus,
+          source: "fieldpulse_webhook",
+          eventType,
+        }),
+        ipAddress: null, // Webhook - no client IP
+      });
+    } catch (auditError) {
+      logger.error({ auditError, eventId }, "Fieldpulse webhook audit insert failed (non-fatal)");
+    }
 
     // Append to the status-event log (system actor; FSM-driven transition).
     await recordStatusEvent({

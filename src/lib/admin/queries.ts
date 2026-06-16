@@ -401,6 +401,15 @@ export async function assignTechnician(
     return { ok: false, reason: "technician_not_found" };
   }
 
+  // Capture the prior status so the status event records the real from-state
+  // (pending|scheduled|assigned), not null — needed for accurate dwell-time KPIs.
+  const [before] = await db
+    .select({ status: serviceRequests.status })
+    .from(serviceRequests)
+    .where(
+      withTenant(serviceRequests, organizationId, eq(serviceRequests.id, requestId)),
+    );
+
   const now = new Date();
   // Only flip to "assigned" from an assignable state. Guarding the status in
   // the WHERE clause also closes the lost-update race between two dispatchers:
@@ -426,25 +435,14 @@ export async function assignTechnician(
 
   if (!updated) {
     // Either the request doesn't exist (in this org) or it's in a
-    // non-assignable state. Disambiguate so the caller can explain why.
-    const [existing] = await db
-      .select({ status: serviceRequests.status })
-      .from(serviceRequests)
-      .where(
-        withTenant(
-          serviceRequests,
-          organizationId,
-          eq(serviceRequests.id, requestId),
-        ),
-      );
-
-    if (!existing) {
+    // non-assignable state. Reuse the pre-read `before` to disambiguate.
+    if (!before) {
       return { ok: false, reason: "request_not_found" };
     }
     return {
       ok: false,
       reason: "request_not_assignable",
-      currentStatus: existing.status,
+      currentStatus: before.status,
     };
   }
 
@@ -454,7 +452,7 @@ export async function assignTechnician(
   await recordStatusEvent({
     organizationId,
     serviceRequestId: requestId,
-    fromStatus: null,
+    fromStatus: before?.status ?? null,
     toStatus: "assigned",
     actorType: "human",
   });
