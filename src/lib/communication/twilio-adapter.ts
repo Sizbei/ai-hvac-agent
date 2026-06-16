@@ -7,24 +7,37 @@
 
 import { Twilio } from "twilio";
 
-// Environment variables
-const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
-const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
-const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER;
+let _twilio: Twilio | null = null;
 
-// Validate environment on import
-if (!TWILIO_ACCOUNT_SID) {
-  throw new Error("TWILIO_ACCOUNT_SID environment variable is not set");
-}
-if (!TWILIO_AUTH_TOKEN) {
-  throw new Error("TWILIO_AUTH_TOKEN environment variable is not set");
-}
-if (!TWILIO_PHONE_NUMBER) {
-  throw new Error("TWILIO_PHONE_NUMBER environment variable is not set");
+/**
+ * Lazily construct the Twilio client.
+ *
+ * Throwing at call time (rather than at module load) keeps importing this module
+ * from crashing the production build / page-data collection when the Twilio env
+ * vars are absent — only an actual SMS send fails, and only then, with a clear
+ * error.
+ */
+function getTwilio(): Twilio {
+  if (_twilio) return _twilio;
+  const sid = process.env.TWILIO_ACCOUNT_SID?.trim();
+  const token = process.env.TWILIO_AUTH_TOKEN?.trim();
+  if (!sid) {
+    throw new Error("TWILIO_ACCOUNT_SID environment variable is not set");
+  }
+  if (!token) {
+    throw new Error("TWILIO_AUTH_TOKEN environment variable is not set");
+  }
+  _twilio = new Twilio(sid, token);
+  return _twilio;
 }
 
-// Initialize Twilio client
-const twilio = new Twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+function getTwilioFromNumber(): string {
+  const num = process.env.TWILIO_PHONE_NUMBER?.trim();
+  if (!num) {
+    throw new Error("TWILIO_PHONE_NUMBER environment variable is not set");
+  }
+  return num;
+}
 
 /**
  * SMS message result
@@ -53,7 +66,7 @@ export async function sendSms(options: {
   try {
     // Validate phone number format (basic E.164 check)
     const to = normalizePhoneNumber(options.to);
-    const from = options.from || TWILIO_PHONE_NUMBER;
+    const from = options.from || getTwilioFromNumber();
 
     // Validate message length
     if (!options.body || options.body.length === 0) {
@@ -68,7 +81,7 @@ export async function sendSms(options: {
     }
 
     // Send message
-    const message = await twilio.messages.create({
+    const message = await getTwilio().messages.create({
       body: options.body,
       to,
       from,
@@ -135,7 +148,7 @@ export async function getMessageStatus(messageSid: string): Promise<{
   errorMessage?: string;
 }> {
   try {
-    const message = await twilio.messages(messageSid).fetch();
+    const message = await getTwilio().messages(messageSid).fetch();
 
     return {
       sid: message.sid,
@@ -183,6 +196,3 @@ export function parseWebhookEvent(
     ErrorMessage: event.ErrorMessage as string | undefined,
   };
 }
-
-// Export client for advanced usage
-export { twilio };

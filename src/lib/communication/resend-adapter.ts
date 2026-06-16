@@ -7,16 +7,25 @@
 
 import { Resend } from "resend";
 
-// Environment variable
-const RESEND_API_KEY = process.env.RESEND_API_KEY;
+let _resend: Resend | null = null;
 
-// Validate environment on import
-if (!RESEND_API_KEY) {
-  throw new Error("RESEND_API_KEY environment variable is not set");
+/**
+ * Lazily construct the Resend client.
+ *
+ * Throwing at call time (rather than at module load) means importing this module
+ * never crashes the production build / page-data collection when RESEND_API_KEY
+ * is absent — only an actual email send fails, and only then, with a clear
+ * error. Email is an optional integration; its missing key must not block deploy.
+ */
+export function getResend(): Resend {
+  if (_resend) return _resend;
+  const apiKey = process.env.RESEND_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error("RESEND_API_KEY environment variable is not set");
+  }
+  _resend = new Resend(apiKey);
+  return _resend;
 }
-
-// Initialize Resend client
-export const resend = new Resend(RESEND_API_KEY);
 
 /**
  * Email message result
@@ -72,7 +81,7 @@ export async function sendEmail(options: {
     if (options.text) sendOptions.text = options.text;
     if (options.replyTo) sendOptions.replyTo = options.replyTo;
 
-    const result = await resend.emails.send(sendOptions);
+    const result = await getResend().emails.send(sendOptions);
 
     // Check for errors
     if (result.error) {
@@ -138,7 +147,7 @@ export async function getBatchStatus(batchId: string): Promise<{
   try {
     // Note: Resend SDK's batch API structure may vary
     // This is a placeholder for when batch status tracking is needed
-    const batch = await (resend.batch as any).retrieve(batchId);
+    const batch = await (getResend().batch as any).retrieve(batchId);
     return batch;
   } catch (error) {
     console.error("Failed to fetch Resend batch status:", error);

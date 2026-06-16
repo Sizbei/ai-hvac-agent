@@ -14,7 +14,7 @@ import { eq, and, lt, lte, asc } from "drizzle-orm";
 import { encrypt, decrypt } from "@/lib/crypto";
 import { checkSendAllowed } from "./consent";
 import { sendSms } from "./twilio-adapter";
-import { resend } from "./resend-adapter";
+import { getResend } from "./resend-adapter";
 import { renderSmsTemplate } from "./sms-templates";
 import { renderEmailTemplate } from "./email-templates";
 
@@ -253,7 +253,7 @@ async function sendCommunication(
       const body = renderSmsTemplate(template.bodyTemplate, variables);
 
       // Send via Resend
-      const result = await resend.emails.send({
+      const result = await getResend().emails.send({
         from: "notifications@spears-services.com", // TODO: Make configurable per org
         to: recipientEmail,
         subject,
