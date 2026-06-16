@@ -302,6 +302,20 @@
       "when": 1781518276000,
       "tag": "0042_attachment_links",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1781518277000,
+      "tag": "0043_sales_spine",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1781518278000,
+      "tag": "0044_sales_guards",
+      "breakpoints": true
     }
   ]
 }
