@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Plus, Trash2, Copy, Check } from 'lucide-react';
+import { Plus, Trash2, Copy, Check, Sparkles } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -87,6 +87,8 @@ export function EstimateCreateDialog({
   const [error, setError] = useState<string | null>(null);
   const [approvalUrl, setApprovalUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [isSuggesting, setIsSuggesting] = useState(false);
+  const [suggestNote, setSuggestNote] = useState<string | null>(null);
 
   function reset(): void {
     setOptions([emptyOption('Good')]);
@@ -94,6 +96,55 @@ export function EstimateCreateDialog({
     setError(null);
     setApprovalUrl(null);
     setCopied(false);
+    setIsSuggesting(false);
+    setSuggestNote(null);
+  }
+
+  /**
+   * Ask the AI to draft line items for the linked request, then PRE-FILL the
+   * first option's lines as catalog picks. Catalog picks carry only the
+   * pricebookItemId, so the server re-snapshots price/name authoritatively on
+   * create — these are suggestions the admin reviews/edits before submitting.
+   */
+  async function handleSuggest(): Promise<void> {
+    if (!serviceRequestId) return;
+    setError(null);
+    setSuggestNote(null);
+    setIsSuggesting(true);
+    try {
+      const res = await fetch('/api/admin/estimates/suggest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serviceRequestId }),
+      });
+      const body = await res.json().catch(() => ({ success: false }));
+      if (!res.ok || !body.success) {
+        setError(body.error?.message ?? 'Could not get AI suggestions.');
+        return;
+      }
+      const suggestions = (body.data.suggestions ?? []) as Array<{
+        pricebookItemId: string;
+        quantity: number;
+      }>;
+      setSuggestNote((body.data.note as string) ?? null);
+      if (suggestions.length === 0) return;
+      const lines: LineItemDraft[] = suggestions.map((s) => ({
+        name: '',
+        quantity: String(s.quantity),
+        unitPrice: '',
+        pricebookItemId: s.pricebookItemId,
+        useMemberPrice: false,
+      }));
+      // Replace the first option's lines with the AI draft; leave other options
+      // (if the admin already added any) untouched.
+      setOptions((prev) =>
+        prev.map((o, idx) => (idx === 0 ? { ...o, lineItems: lines } : o)),
+      );
+    } catch {
+      setError('Could not connect to the server.');
+    } finally {
+      setIsSuggesting(false);
+    }
   }
 
   function updateOption(i: number, patch: Partial<OptionDraft>): void {
@@ -254,6 +305,30 @@ export function EstimateCreateDialog({
           </div>
         ) : (
           <div className="space-y-4">
+            {serviceRequestId && (
+              <div className="space-y-2 rounded-lg border border-dashed bg-muted/30 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-medium">Draft from the conversation</p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleSuggest}
+                    disabled={isSuggesting || pricebookLoading}
+                  >
+                    <Sparkles className="mr-1 size-3.5" />
+                    {isSuggesting ? 'Suggesting…' : 'Suggest with AI'}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  AI suggests pricebook lines for this request. Review and edit
+                  every line before creating — these are suggestions, not a quote.
+                </p>
+                {suggestNote && (
+                  <p className="text-xs text-muted-foreground">{suggestNote}</p>
+                )}
+              </div>
+            )}
             {options.map((opt, oi) => (
               <div key={oi} className="rounded-lg border p-3 space-y-3">
                 <div className="flex items-center gap-2">
