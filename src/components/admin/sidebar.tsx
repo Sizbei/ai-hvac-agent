@@ -21,6 +21,7 @@ import {
   X,
   MessageSquare,
   Plug,
+  FileText,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -73,6 +74,7 @@ const NAV_GROUPS: readonly NavGroup[] = [
     items: [
       { label: 'Staff', href: '/admin/staff', icon: UsersRound },
       { label: 'Pricebook', href: '/admin/pricebook', icon: Tags },
+      { label: 'Estimates', href: '/admin/estimates', icon: FileText },
       { label: 'Chatbot Settings', href: '/admin/settings', icon: Settings },
       { label: 'Communications', href: '/admin/communications/templates', icon: MessageSquare },
       { label: 'Audit Log', href: '/admin/audit-log', icon: ScrollText },

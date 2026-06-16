@@ -29,6 +29,7 @@ import { NoteFormDialog } from '@/components/admin/note-form-dialog';
 import { FollowUpFormDialog } from '@/components/admin/follow-up-form-dialog';
 import { CustomerEditDialog } from '@/components/admin/customer-edit-dialog';
 import { ConfirmDialog } from '@/components/admin/confirm-dialog';
+import { ScopedEstimatesSection } from '@/components/admin/estimates/scoped-estimates-section';
 import type { EquipmentRecord } from '@/lib/admin/crm-types';
 
 const EQUIPMENT_LABELS: Record<string, string> = {
@@ -448,6 +449,9 @@ export default function CustomerDetailPage({
           )}
         </CardContent>
       </Card>
+
+      {/* Estimates */}
+      <ScopedEstimatesSection customerId={id} variant="card" />
 
       {/* Notes */}
       <Card>
