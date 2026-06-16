@@ -22,6 +22,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { UrgencyBadge } from '@/components/admin/urgency-badge';
 import { StatusBadge } from '@/components/admin/status-badge';
 import { ScopedEstimatesSection } from '@/components/admin/estimates/scoped-estimates-section';
+import { ScopedInvoicesSection } from '@/components/admin/invoices/scoped-invoices-section';
 import {
   allowedTransitions,
   MANUAL_TARGET_STATUSES,
@@ -968,6 +969,16 @@ export function RequestDetailSheet({
               {/* Estimates */}
               <section>
                 <ScopedEstimatesSection
+                  serviceRequestId={detail.id}
+                  variant="plain"
+                />
+              </section>
+
+              <Separator />
+
+              {/* Invoices */}
+              <section>
+                <ScopedInvoicesSection
                   serviceRequestId={detail.id}
                   variant="plain"
                 />

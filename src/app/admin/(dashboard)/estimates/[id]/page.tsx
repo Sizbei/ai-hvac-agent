@@ -2,7 +2,8 @@
 
 import { use, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { ArrowLeft, Receipt } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -45,12 +46,15 @@ export default function EstimateDetailPage({
   readonly params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
+  const router = useRouter();
   const [estimate, setEstimate] = useState<EstimateDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedOption, setSelectedOption] = useState<string>('');
   const [isMarking, setIsMarking] = useState(false);
   const [markError, setMarkError] = useState<string | null>(null);
+  const [isInvoicing, setIsInvoicing] = useState(false);
+  const [invoiceError, setInvoiceError] = useState<string | null>(null);
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -101,6 +105,30 @@ export default function EstimateDetailPage({
       setIsMarking(false);
     }
   }, [id, selectedOption, load]);
+
+  const handleGenerateInvoice = useCallback(async (): Promise<void> => {
+    setIsInvoicing(true);
+    setInvoiceError(null);
+    try {
+      const res = await fetch('/api/admin/invoices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ estimateId: id }),
+      });
+      const body = await res.json().catch(() => ({ success: false }));
+      // Idempotent: an existing invoice is returned (not an error), so on success
+      // we always have an invoiceId to navigate to.
+      if (res.ok && body.success && body.data?.invoiceId) {
+        router.push(`/admin/invoices/${body.data.invoiceId}`);
+      } else {
+        setInvoiceError(body.error?.message ?? 'Failed to generate invoice');
+        setIsInvoicing(false);
+      }
+    } catch {
+      setInvoiceError('Could not connect to server.');
+      setIsInvoicing(false);
+    }
+  }, [id, router]);
 
   if (isLoading) {
     return (
@@ -221,6 +249,31 @@ export default function EstimateDetailPage({
               {estimate.signatureName ?? 'customer'}
             </span>{' '}
             on {new Date(estimate.signedAt).toLocaleString()}.
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Generate invoice — only once sold */}
+      {estimate.status === 'sold' && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Invoice</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Generate an invoice from the sold option to take payment.
+            </p>
+            <Button
+              size="sm"
+              disabled={isInvoicing}
+              onClick={handleGenerateInvoice}
+            >
+              <Receipt className="mr-2 size-4" />
+              {isInvoicing ? 'Generating…' : 'Generate invoice'}
+            </Button>
+            {invoiceError && (
+              <p className="text-xs text-destructive">{invoiceError}</p>
+            )}
           </CardContent>
         </Card>
       )}

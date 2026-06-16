@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { takePayment } from "./invoice-queries";
+import {
+  takePayment,
+  listInvoices,
+  getInvoiceDetailById,
+} from "./invoice-queries";
 import { db } from "@/lib/db";
 import { MockPaymentProvider } from "@/lib/payments/provider";
 
@@ -172,6 +176,137 @@ describe("refundPayment", () => {
     await refundPayment("org-1", "pay-1", { amountCents: 1000 }, spyProvider as never);
     expect(refundSpy).toHaveBeenCalledWith(
       expect.objectContaining({ idempotencyKey: "pay-1:2000:1000" }),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Read queries
+// ---------------------------------------------------------------------------
+
+/**
+ * Sequence db.select results across calls. Each where() result is awaitable AND
+ * supports .limit() (header reads) and .orderBy() (list reads) — both resolve to
+ * the same row set for that call.
+ */
+function mockReadSeq(results: unknown[][]) {
+  let i = 0;
+  vi.mocked(db.select).mockImplementation(
+    () =>
+      ({
+        from: () => ({
+          where: () => {
+            const r = results[i++] ?? [];
+            const p = Promise.resolve(r);
+            return Object.assign(p, {
+              limit: () => Promise.resolve(r),
+              orderBy: () => Promise.resolve(r),
+            });
+          },
+        }),
+      }) as never,
+  );
+}
+
+describe("listInvoices", () => {
+  it("returns the org's invoices in the list shape (org-scoped read)", async () => {
+    const rows = [
+      {
+        id: "inv-1",
+        state: "open",
+        totalCents: 10000,
+        amountPaidCents: 5000,
+        customerId: "cust-1",
+        serviceRequestId: null,
+        createdAt: new Date("2026-01-02"),
+      },
+      {
+        id: "inv-2",
+        state: "paid",
+        totalCents: 20000,
+        amountPaidCents: 20000,
+        customerId: null,
+        serviceRequestId: "req-1",
+        createdAt: new Date("2026-01-01"),
+      },
+    ];
+    mockReadSeq([rows]);
+    const result = await listInvoices(ORG);
+    expect(result).toHaveLength(2);
+    expect(result[0]).toEqual(
+      expect.objectContaining({
+        id: "inv-1",
+        state: "open",
+        totalCents: 10000,
+        amountPaidCents: 5000,
+      }),
+    );
+  });
+});
+
+describe("getInvoiceDetailById", () => {
+  it("returns null when the invoice is not found (or belongs to another org)", async () => {
+    mockReadSeq([[]]); // header read -> empty
+    const result = await getInvoiceDetailById(ORG, "missing-id");
+    expect(result).toBeNull();
+  });
+
+  it("nests line items and per-payment refunds", async () => {
+    mockReadSeq([
+      // 1) invoice header
+      [
+        {
+          id: "inv-1",
+          state: "open",
+          subtotalCents: 9000,
+          taxCents: 1000,
+          totalCents: 10000,
+          amountPaidCents: 4000,
+          customerId: "cust-1",
+          serviceRequestId: null,
+          estimateId: "est-1",
+          createdAt: new Date("2026-01-01"),
+        },
+      ],
+      // 2) line items
+      [
+        {
+          id: "li-1",
+          name: "Repair",
+          quantity: 1,
+          unitPriceCents: 9000,
+          lineTotalCents: 9000,
+        },
+      ],
+      // 3) payments
+      [
+        {
+          id: "pay-1",
+          amountCents: 4000,
+          status: "succeeded",
+          isDeposit: true,
+          createdAt: new Date("2026-01-01"),
+        },
+      ],
+      // 4) refunds (across the payments)
+      [
+        {
+          id: "ref-1",
+          paymentId: "pay-1",
+          amountCents: 1000,
+          reason: "customer_request",
+          createdAt: new Date("2026-01-02"),
+        },
+      ],
+    ]);
+
+    const result = await getInvoiceDetailById(ORG, "inv-1");
+    expect(result).not.toBeNull();
+    expect(result?.lineItems).toHaveLength(1);
+    expect(result?.payments).toHaveLength(1);
+    expect(result?.payments[0].refunds).toHaveLength(1);
+    expect(result?.payments[0].refunds[0]).toEqual(
+      expect.objectContaining({ amountCents: 1000, reason: "customer_request" }),
     );
   });
 });

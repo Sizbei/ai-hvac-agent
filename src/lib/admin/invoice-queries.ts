@@ -6,7 +6,7 @@
  * first-class (a half-built payments path breaks on the first chargeback).
  */
 import { randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   estimates,
@@ -290,4 +290,181 @@ export async function refundPayment(
   ]);
 
   return { ok: true, refundId };
+}
+
+// ---------------------------------------------------------------------------
+// Read queries for the admin UI (list + detail). No behavior change to the
+// mutations above — these are tenant-scoped reads only.
+// ---------------------------------------------------------------------------
+
+export interface InvoiceListRow {
+  readonly id: string;
+  readonly state: string;
+  readonly totalCents: number;
+  readonly amountPaidCents: number;
+  readonly customerId: string | null;
+  readonly serviceRequestId: string | null;
+  readonly createdAt: Date;
+}
+
+/** Admin list of an org's invoices, newest first. */
+export async function listInvoices(
+  organizationId: string,
+): Promise<InvoiceListRow[]> {
+  return db
+    .select({
+      id: invoices.id,
+      state: invoices.state,
+      totalCents: invoices.totalCents,
+      amountPaidCents: invoices.amountPaidCents,
+      customerId: invoices.customerId,
+      serviceRequestId: invoices.serviceRequestId,
+      createdAt: invoices.createdAt,
+    })
+    .from(invoices)
+    .where(withTenant(invoices, organizationId))
+    .orderBy(desc(invoices.createdAt));
+}
+
+export interface InvoiceLineItemView {
+  readonly id: string;
+  readonly name: string;
+  readonly quantity: number;
+  readonly unitPriceCents: number;
+  readonly lineTotalCents: number;
+}
+
+export interface RefundView {
+  readonly id: string;
+  readonly amountCents: number;
+  readonly reason: string | null;
+  readonly createdAt: Date;
+}
+
+export interface PaymentView {
+  readonly id: string;
+  readonly amountCents: number;
+  readonly status: string;
+  readonly isDeposit: boolean;
+  readonly createdAt: Date;
+  readonly refunds: RefundView[];
+}
+
+export interface InvoiceDetailView {
+  readonly id: string;
+  readonly state: string;
+  readonly subtotalCents: number;
+  readonly taxCents: number;
+  readonly totalCents: number;
+  readonly amountPaidCents: number;
+  readonly customerId: string | null;
+  readonly serviceRequestId: string | null;
+  readonly estimateId: string | null;
+  readonly createdAt: Date;
+  readonly lineItems: InvoiceLineItemView[];
+  readonly payments: PaymentView[];
+}
+
+/**
+ * Detail view: invoice header + its line items + its payments (each with that
+ * payment's refunds). All reads tenant-scoped. Returns null if not found.
+ */
+export async function getInvoiceDetailById(
+  organizationId: string,
+  id: string,
+): Promise<InvoiceDetailView | null> {
+  const [inv] = await db
+    .select({
+      id: invoices.id,
+      state: invoices.state,
+      subtotalCents: invoices.subtotalCents,
+      taxCents: invoices.taxCents,
+      totalCents: invoices.totalCents,
+      amountPaidCents: invoices.amountPaidCents,
+      customerId: invoices.customerId,
+      serviceRequestId: invoices.serviceRequestId,
+      estimateId: invoices.estimateId,
+      createdAt: invoices.createdAt,
+    })
+    .from(invoices)
+    .where(withTenant(invoices, organizationId, eq(invoices.id, id)))
+    .limit(1);
+
+  if (!inv) return null;
+
+  const lineItems = await db
+    .select({
+      id: invoiceLineItems.id,
+      name: invoiceLineItems.name,
+      quantity: invoiceLineItems.quantity,
+      unitPriceCents: invoiceLineItems.unitPriceCents,
+      lineTotalCents: invoiceLineItems.lineTotalCents,
+    })
+    .from(invoiceLineItems)
+    .where(
+      withTenant(
+        invoiceLineItems,
+        organizationId,
+        eq(invoiceLineItems.invoiceId, id),
+      ),
+    )
+    .orderBy(asc(invoiceLineItems.id));
+
+  const paymentRows = await db
+    .select({
+      id: payments.id,
+      amountCents: payments.amountCents,
+      status: payments.status,
+      isDeposit: payments.isDeposit,
+      createdAt: payments.createdAt,
+    })
+    .from(payments)
+    .where(withTenant(payments, organizationId, eq(payments.invoiceId, id)))
+    .orderBy(desc(payments.createdAt));
+
+  // Attach each payment's refunds. Fetch them all in one tenant-scoped query,
+  // then bucket by paymentId (avoids an N+1 over the payments).
+  const paymentIds = paymentRows.map((p) => p.id);
+  const refundRows =
+    paymentIds.length > 0
+      ? await db
+          .select({
+            id: refunds.id,
+            paymentId: refunds.paymentId,
+            amountCents: refunds.amountCents,
+            reason: refunds.reason,
+            createdAt: refunds.createdAt,
+          })
+          .from(refunds)
+          .where(
+            withTenant(
+              refunds,
+              organizationId,
+              inArray(refunds.paymentId, paymentIds),
+            ),
+          )
+          .orderBy(desc(refunds.createdAt))
+      : [];
+
+  const refundsByPayment = new Map<string, RefundView[]>();
+  for (const r of refundRows) {
+    const view: RefundView = {
+      id: r.id,
+      amountCents: r.amountCents,
+      reason: r.reason,
+      createdAt: r.createdAt,
+    };
+    const bucket = refundsByPayment.get(r.paymentId);
+    if (bucket) bucket.push(view);
+    else refundsByPayment.set(r.paymentId, [view]);
+  }
+
+  return {
+    ...inv,
+    lineItems,
+    payments: paymentRows.map((p) => ({
+      ...p,
+      refunds: refundsByPayment.get(p.id) ?? [],
+    })),
+  };
 }

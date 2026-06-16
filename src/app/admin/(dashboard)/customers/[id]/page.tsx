@@ -30,6 +30,7 @@ import { FollowUpFormDialog } from '@/components/admin/follow-up-form-dialog';
 import { CustomerEditDialog } from '@/components/admin/customer-edit-dialog';
 import { ConfirmDialog } from '@/components/admin/confirm-dialog';
 import { ScopedEstimatesSection } from '@/components/admin/estimates/scoped-estimates-section';
+import { ScopedInvoicesSection } from '@/components/admin/invoices/scoped-invoices-section';
 import type { EquipmentRecord } from '@/lib/admin/crm-types';
 
 const EQUIPMENT_LABELS: Record<string, string> = {
@@ -452,6 +453,9 @@ export default function CustomerDetailPage({
 
       {/* Estimates */}
       <ScopedEstimatesSection customerId={id} variant="card" />
+
+      {/* Invoices */}
+      <ScopedInvoicesSection customerId={id} variant="card" />
 
       {/* Notes */}
       <Card>
