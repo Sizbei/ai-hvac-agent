@@ -14,6 +14,9 @@ export interface CustomerRecord {
 }
 
 export interface CustomerDetail extends CustomerRecord {
+  /** Whether a self-service portal link is currently active for this customer.
+   * Boolean only — the portal token/hash is never exposed to the client. */
+  readonly portalActive: boolean;
   readonly equipment: readonly EquipmentRecord[];
   readonly serviceHistory: readonly ServiceHistoryRecord[];
   readonly customerNotes: readonly NoteRecord[];

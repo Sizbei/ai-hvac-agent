@@ -629,6 +629,16 @@ export const customers = pgTable(
     // admin list but fully retained (reversible), as opposed to the permanent
     // DELETE. NULL = active.
     archivedAt: timestamp("archived_at", { withTimezone: true }),
+    // Customer self-service portal: SHA-256 hash of a long-lived, customer-scoped
+    // bearer token (the plaintext is returned to the admin exactly ONCE at
+    // generation, never stored — same hashed-at-rest pattern as staff invites and
+    // estimate approval tokens). NULL = no active portal link. Rotating the link
+    // overwrites the hash (old links die). The token is the only authority for the
+    // public /portal page — org + customer are derived from THIS row, never a param.
+    portalTokenHash: text("portal_token_hash"),
+    portalTokenCreatedAt: timestamp("portal_token_created_at", {
+      withTimezone: true,
+    }),
   },
   (table) => [
     index("customers_org_id_idx").on(table.organizationId),
@@ -641,6 +651,13 @@ export const customers = pgTable(
     uniqueIndex("customers_org_phone_hash_unique")
       .on(table.organizationId, table.phoneHash)
       .where(sql`${table.phoneHash} IS NOT NULL`),
+    // Portal token lookups resolve a customer by hash on every public request —
+    // unique (a token maps to exactly one customer) + partial (most rows have no
+    // token). The global uniqueness is intentional: the hash is a 256-bit secret,
+    // so cross-org collision is infeasible and the lookup needs no org param.
+    uniqueIndex("customers_portal_token_hash_unique")
+      .on(table.portalTokenHash)
+      .where(sql`${table.portalTokenHash} IS NOT NULL`),
   ],
 );
 
