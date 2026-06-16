@@ -1223,6 +1223,10 @@ export const attachments = pgTable(
       .notNull()
       .references(() => customerSessions.id),
     messageId: uuid("message_id").references(() => messages.id),
+    // Stage 7: link media to a job and/or a specific asset (verified missing —
+    // only sessionId/messageId existed). Nullable: chat uploads have neither.
+    serviceRequestId: uuid("service_request_id"),
+    equipmentId: uuid("equipment_id"),
     filename: text("filename").notNull(),
     mimeType: text("mime_type").notNull(),
     size: integer("size").notNull(), // File size in bytes
@@ -1235,6 +1239,9 @@ export const attachments = pgTable(
     index("attachments_org_id_idx").on(table.organizationId),
     index("attachments_session_id_idx").on(table.sessionId),
     index("attachments_message_id_idx").on(table.messageId),
+    index("attachments_service_request_idx")
+      .on(table.serviceRequestId)
+      .where(sql`${table.serviceRequestId} IS NOT NULL`),
   ],
 );
 
