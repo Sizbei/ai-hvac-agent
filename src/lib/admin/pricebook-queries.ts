@@ -1,7 +1,7 @@
 /**
  * Stage 8 — pricebook + tax queries. Money in integer cents; tax in basis points.
  */
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { pricebookItems, taxRates } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
@@ -73,6 +73,247 @@ export async function listPricebookItems(
       withTenant(pricebookItems, organizationId, eq(pricebookItems.active, true)),
     )
     .orderBy(asc(pricebookItems.name));
+}
+
+/**
+ * Full admin projection of a single pricebook item, including organizationId so
+ * the route can verify ownership before a PATCH/DELETE. Org-scoped defensively.
+ */
+export interface PricebookItemAdminRow {
+  readonly id: string;
+  readonly organizationId: string;
+  readonly type: string;
+  readonly name: string;
+  readonly sku: string | null;
+  readonly description: string | null;
+  readonly categoryId: string | null;
+  readonly costCents: number;
+  readonly markupPct: number;
+  readonly priceCents: number;
+  readonly memberPriceCents: number | null;
+  readonly hours: number | null;
+  readonly warranty: string | null;
+  readonly active: boolean;
+}
+
+const ADMIN_ITEM_PROJECTION = {
+  id: pricebookItems.id,
+  organizationId: pricebookItems.organizationId,
+  type: pricebookItems.type,
+  name: pricebookItems.name,
+  sku: pricebookItems.sku,
+  description: pricebookItems.description,
+  categoryId: pricebookItems.categoryId,
+  costCents: pricebookItems.costCents,
+  markupPct: pricebookItems.markupPct,
+  priceCents: pricebookItems.priceCents,
+  memberPriceCents: pricebookItems.memberPriceCents,
+  hours: pricebookItems.hours,
+  warranty: pricebookItems.warranty,
+  active: pricebookItems.active,
+} as const;
+
+export async function getPricebookItemById(
+  organizationId: string,
+  id: string,
+): Promise<PricebookItemAdminRow | null> {
+  const [row] = await db
+    .select(ADMIN_ITEM_PROJECTION)
+    .from(pricebookItems)
+    .where(withTenant(pricebookItems, organizationId, eq(pricebookItems.id, id)))
+    .limit(1);
+  return row ?? null;
+}
+
+/** Full admin list (optionally including soft-deleted items). */
+export async function listPricebookItemsForAdmin(
+  organizationId: string,
+  opts: { readonly includeInactive?: boolean } = {},
+): Promise<readonly PricebookItemAdminRow[]> {
+  const condition = opts.includeInactive
+    ? withTenant(pricebookItems, organizationId)
+    : withTenant(pricebookItems, organizationId, eq(pricebookItems.active, true));
+  return db
+    .select(ADMIN_ITEM_PROJECTION)
+    .from(pricebookItems)
+    .where(condition)
+    .orderBy(asc(pricebookItems.name));
+}
+
+export type PricebookItemUpdate = Partial<PricebookItemInput>;
+
+export async function updatePricebookItem(
+  organizationId: string,
+  id: string,
+  partial: PricebookItemUpdate,
+): Promise<void> {
+  await db
+    .update(pricebookItems)
+    .set({ ...partial, updatedAt: new Date() })
+    .where(
+      withTenant(pricebookItems, organizationId, eq(pricebookItems.id, id)),
+    );
+}
+
+/** Soft delete — line items may FK-reference an item, so never hard delete. */
+export async function deactivatePricebookItem(
+  organizationId: string,
+  id: string,
+): Promise<void> {
+  await db
+    .update(pricebookItems)
+    .set({ active: false, updatedAt: new Date() })
+    .where(
+      withTenant(pricebookItems, organizationId, eq(pricebookItems.id, id)),
+    );
+}
+
+// ──────────────────────────── tax rates ────────────────────────────
+
+export interface TaxRateRow {
+  readonly id: string;
+  readonly name: string;
+  readonly jurisdiction: string | null;
+  readonly rateBps: number;
+  readonly isDefault: boolean;
+  readonly active: boolean;
+}
+
+export interface TaxRateInput {
+  readonly name: string;
+  readonly jurisdiction?: string | null;
+  readonly rateBps: number;
+  readonly isDefault?: boolean;
+}
+
+const TAX_PROJECTION = {
+  id: taxRates.id,
+  name: taxRates.name,
+  jurisdiction: taxRates.jurisdiction,
+  rateBps: taxRates.rateBps,
+  isDefault: taxRates.isDefault,
+  active: taxRates.active,
+} as const;
+
+/** Active tax rates for an org, default first. */
+export async function listTaxRates(
+  organizationId: string,
+): Promise<readonly TaxRateRow[]> {
+  return db
+    .select(TAX_PROJECTION)
+    .from(taxRates)
+    .where(withTenant(taxRates, organizationId, eq(taxRates.active, true)))
+    .orderBy(desc(taxRates.isDefault), asc(taxRates.name));
+}
+
+export async function getTaxRateById(
+  organizationId: string,
+  id: string,
+): Promise<TaxRateRow | null> {
+  const [row] = await db
+    .select(TAX_PROJECTION)
+    .from(taxRates)
+    .where(withTenant(taxRates, organizationId, eq(taxRates.id, id)))
+    .limit(1);
+  return row ?? null;
+}
+
+/**
+ * Clear the org's current default tax rate. Used to maintain the single-default
+ * invariant (partial unique index tax_rates_org_default_unique) before setting a
+ * new one. Returns the prepared statement so it can be batched.
+ */
+function buildUnsetDefaultStmt(organizationId: string) {
+  return db
+    .update(taxRates)
+    .set({ isDefault: false })
+    .where(
+      withTenant(taxRates, organizationId, eq(taxRates.isDefault, true)),
+    );
+}
+
+export async function createTaxRate(
+  organizationId: string,
+  input: TaxRateInput,
+): Promise<string> {
+  if (!input.isDefault) {
+    const [row] = await db
+      .insert(taxRates)
+      .values({
+        organizationId,
+        name: input.name,
+        jurisdiction: input.jurisdiction ?? null,
+        rateBps: input.rateBps,
+        isDefault: false,
+      })
+      .returning({ id: taxRates.id });
+    return row!.id;
+  }
+
+  // Setting this rate as the org default: FIRST unset the prior default, THEN
+  // insert the new default. neon-http db.batch runs statements SEQUENTIALLY in
+  // array order (it is NOT a serializable transaction) — so the unset MUST come
+  // before the set, or the partial unique index would reject two active
+  // defaults. We can't batch an insert .returning() reliably across the unset,
+  // so unset is batched alone, then we insert.
+  await db.batch([buildUnsetDefaultStmt(organizationId)]);
+  const [row] = await db
+    .insert(taxRates)
+    .values({
+      organizationId,
+      name: input.name,
+      jurisdiction: input.jurisdiction ?? null,
+      rateBps: input.rateBps,
+      isDefault: true,
+    })
+    .returning({ id: taxRates.id });
+  return row!.id;
+}
+
+export type TaxRateUpdate = Partial<TaxRateInput>;
+
+export async function updateTaxRate(
+  organizationId: string,
+  id: string,
+  partial: TaxRateUpdate,
+): Promise<void> {
+  const setFields: Record<string, unknown> = {};
+  if (partial.name !== undefined) setFields.name = partial.name;
+  if (partial.jurisdiction !== undefined) {
+    setFields.jurisdiction = partial.jurisdiction ?? null;
+  }
+  if (partial.rateBps !== undefined) setFields.rateBps = partial.rateBps;
+
+  const setStmt = db
+    .update(taxRates)
+    .set({ ...setFields, isDefault: true })
+    .where(withTenant(taxRates, organizationId, eq(taxRates.id, id)));
+
+  if (partial.isDefault === true) {
+    // Single-default invariant: unset the prior default FIRST, then set this one.
+    // neon-http db.batch is sequential (array order), NOT serializable — wrong
+    // order would violate tax_rates_org_default_unique.
+    await db.batch([buildUnsetDefaultStmt(organizationId), setStmt]);
+    return;
+  }
+
+  // Not touching the default flag: a plain field update (omit isDefault).
+  if (Object.keys(setFields).length === 0) return;
+  await db
+    .update(taxRates)
+    .set(setFields)
+    .where(withTenant(taxRates, organizationId, eq(taxRates.id, id)));
+}
+
+/** Soft delete — preserves rows that invoices may reference. */
+export async function deactivateTaxRate(
+  organizationId: string,
+  id: string,
+): Promise<void> {
+  await db
+    .update(taxRates)
+    .set({ active: false, isDefault: false })
+    .where(withTenant(taxRates, organizationId, eq(taxRates.id, id)));
 }
 
 /** The org's default tax rate in basis points (0 when none configured). */

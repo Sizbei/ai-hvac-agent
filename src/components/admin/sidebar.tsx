@@ -14,12 +14,15 @@ import {
   Building2,
   Settings,
   ScrollText,
+  Tags,
   ChevronLeft,
   ChevronRight,
   LogOut,
   X,
   MessageSquare,
   Plug,
+  FileText,
+  Receipt,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -71,6 +74,9 @@ const NAV_GROUPS: readonly NavGroup[] = [
     heading: 'Workspace',
     items: [
       { label: 'Staff', href: '/admin/staff', icon: UsersRound },
+      { label: 'Pricebook', href: '/admin/pricebook', icon: Tags },
+      { label: 'Estimates', href: '/admin/estimates', icon: FileText },
+      { label: 'Invoices', href: '/admin/invoices', icon: Receipt },
       { label: 'Chatbot Settings', href: '/admin/settings', icon: Settings },
       { label: 'Communications', href: '/admin/communications/templates', icon: MessageSquare },
       { label: 'Audit Log', href: '/admin/audit-log', icon: ScrollText },

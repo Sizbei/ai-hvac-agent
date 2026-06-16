@@ -95,9 +95,25 @@ export async function processPendingJobs(limit = 10): Promise<{
   let succeeded = 0;
   let failed = 0;
 
+  // If email isn't configured, do NOT claim email jobs: claiming then failing
+  // on getResend() would burn maxAttempts and silently drop every email. Leave
+  // them pending so they flush once RESEND_API_KEY is set. Warn once per drain.
+  const emailConfigured = Boolean(process.env.RESEND_API_KEY?.trim());
+  let warnedEmailDisabled = false;
+
   // Process each job
   for (const job of pendingJobs) {
     try {
+      if (job.channel === "email" && !emailConfigured) {
+        if (!warnedEmailDisabled) {
+          console.warn(
+            "[job-queue] RESEND_API_KEY not set — skipping email jobs (left pending, not failed). Set the key to flush them.",
+          );
+          warnedEmailDisabled = true;
+        }
+        continue;
+      }
+
       // CONSENT GATE (TCPA/CAN-SPAM): the send chokepoint. A do-not-contact
       // customer, a disabled channel/type, or quiet hours suppresses the send —
       // the job is cancelled, never delivered. Checked at SEND time (not just

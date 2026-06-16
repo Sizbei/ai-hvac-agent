@@ -14,6 +14,7 @@ import { successResponse, errorResponse } from "@/lib/api-response";
 import { logAudit } from "@/lib/admin/audit";
 import { logger } from "@/lib/logger";
 import { validateSmsTemplate } from "@/lib/communication/sms-templates";
+import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -55,6 +56,15 @@ export async function GET(request: NextRequest) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
 
+    const rateCheck = slidingWindow(
+      `admin:templates-list:${session.userId}`,
+      RATE_LIMITS.adminRead.maxRequests,
+      RATE_LIMITS.adminRead.windowMs,
+    );
+    if (!rateCheck.allowed) {
+      return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
+    }
+
     const templates = await db.query.communicationTemplates.findMany({
       where: eq(communicationTemplates.organizationId, session.organizationId),
       orderBy: [asc(communicationTemplates.triggerType), asc(communicationTemplates.priority)],
@@ -77,6 +87,15 @@ export async function POST(request: NextRequest) {
     const session = await getAdminSession();
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
+    }
+
+    const rateCheck = slidingWindow(
+      `admin:templates-create:${session.userId}`,
+      RATE_LIMITS.adminMutation.maxRequests,
+      RATE_LIMITS.adminMutation.windowMs,
+    );
+    if (!rateCheck.allowed) {
+      return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
     }
 
     const body = await request.json();

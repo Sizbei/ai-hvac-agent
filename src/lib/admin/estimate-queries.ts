@@ -7,7 +7,7 @@
  * IP/timestamp capture.
  */
 import { randomBytes, randomUUID, createHash } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   estimates,
@@ -166,12 +166,15 @@ export async function approveEstimate(params: {
     return { ok: false, reason: "expired" };
   }
 
-  // The chosen option must belong to this estimate.
+  // The chosen option must belong to this estimate AND this estimate's org
+  // (defense-in-depth: a tampered optionId from another tenant cannot pass).
   const [opt] = await db
     .select({ id: estimateOptions.id })
     .from(estimateOptions)
     .where(
-      and(
+      withTenant(
+        estimateOptions,
+        est.organizationId,
         eq(estimateOptions.estimateId, est.id),
         eq(estimateOptions.id, params.optionId),
       ),
@@ -195,4 +198,258 @@ export async function approveEstimate(params: {
 
   if (!updated) return { ok: false, reason: "already_decided" };
   return { ok: true, estimateId: updated.id };
+}
+
+export interface EstimateListRow {
+  readonly id: string;
+  readonly status: string;
+  readonly totalCents: number;
+  readonly customerId: string | null;
+  readonly serviceRequestId: string | null;
+  readonly createdAt: Date;
+  readonly expiresAt: Date | null;
+  readonly signedAt: Date | null;
+}
+
+/** Admin list of an org's estimates, newest first. */
+export async function listEstimates(
+  organizationId: string,
+): Promise<EstimateListRow[]> {
+  return db
+    .select({
+      id: estimates.id,
+      status: estimates.status,
+      totalCents: estimates.totalCents,
+      customerId: estimates.customerId,
+      serviceRequestId: estimates.serviceRequestId,
+      createdAt: estimates.createdAt,
+      expiresAt: estimates.expiresAt,
+      signedAt: estimates.signedAt,
+    })
+    .from(estimates)
+    .where(withTenant(estimates, organizationId))
+    .orderBy(desc(estimates.createdAt));
+}
+
+export interface EstimateLineItemView {
+  readonly id: string;
+  readonly pricebookItemId: string | null;
+  readonly name: string;
+  readonly quantity: number;
+  readonly unitPriceCents: number;
+  readonly lineTotalCents: number;
+}
+
+export interface EstimateOptionView {
+  readonly id: string;
+  readonly name: string;
+  readonly sortOrder: number;
+  readonly subtotalCents: number;
+  readonly taxCents: number;
+  readonly totalCents: number;
+  readonly lineItems: EstimateLineItemView[];
+}
+
+export interface EstimateDetailView {
+  readonly id: string;
+  readonly status: string;
+  readonly totalCents: number;
+  readonly customerId: string | null;
+  readonly serviceRequestId: string | null;
+  readonly soldOptionId: string | null;
+  readonly signedAt: Date | null;
+  readonly signatureName: string | null;
+  readonly expiresAt: Date | null;
+  readonly createdAt: Date;
+  readonly options: EstimateOptionView[];
+}
+
+/**
+ * Group an estimate's options + their line items into the nested view shape.
+ * Shared by the admin detail read and the public approval read.
+ */
+async function loadOptionsWithLineItems(
+  organizationId: string,
+  estimateId: string,
+): Promise<EstimateOptionView[]> {
+  const optionRows = await db
+    .select({
+      id: estimateOptions.id,
+      name: estimateOptions.name,
+      sortOrder: estimateOptions.sortOrder,
+      subtotalCents: estimateOptions.subtotalCents,
+      taxCents: estimateOptions.taxCents,
+      totalCents: estimateOptions.totalCents,
+    })
+    .from(estimateOptions)
+    .where(
+      withTenant(
+        estimateOptions,
+        organizationId,
+        eq(estimateOptions.estimateId, estimateId),
+      ),
+    )
+    .orderBy(asc(estimateOptions.sortOrder));
+
+  if (optionRows.length === 0) return [];
+
+  const optionIds = optionRows.map((o) => o.id);
+  const lineRows = await db
+    .select({
+      id: estimateLineItems.id,
+      optionId: estimateLineItems.optionId,
+      pricebookItemId: estimateLineItems.pricebookItemId,
+      name: estimateLineItems.name,
+      quantity: estimateLineItems.quantity,
+      unitPriceCents: estimateLineItems.unitPriceCents,
+      lineTotalCents: estimateLineItems.lineTotalCents,
+    })
+    .from(estimateLineItems)
+    .where(
+      withTenant(
+        estimateLineItems,
+        organizationId,
+        inArray(estimateLineItems.optionId, optionIds),
+      ),
+    )
+    .orderBy(asc(estimateLineItems.id));
+
+  const byOption = new Map<string, EstimateLineItemView[]>();
+  for (const l of lineRows) {
+    const bucket = byOption.get(l.optionId);
+    const view: EstimateLineItemView = {
+      id: l.id,
+      pricebookItemId: l.pricebookItemId,
+      name: l.name,
+      quantity: l.quantity,
+      unitPriceCents: l.unitPriceCents,
+      lineTotalCents: l.lineTotalCents,
+    };
+    if (bucket) bucket.push(view);
+    else byOption.set(l.optionId, [view]);
+  }
+
+  return optionRows.map((o) => ({ ...o, lineItems: byOption.get(o.id) ?? [] }));
+}
+
+/** Admin detail view: estimate header + its options (each with line items). */
+export async function getEstimateDetailById(
+  organizationId: string,
+  id: string,
+): Promise<EstimateDetailView | null> {
+  const [est] = await db
+    .select({
+      id: estimates.id,
+      status: estimates.status,
+      totalCents: estimates.totalCents,
+      customerId: estimates.customerId,
+      serviceRequestId: estimates.serviceRequestId,
+      soldOptionId: estimates.soldOptionId,
+      signedAt: estimates.signedAt,
+      signatureName: estimates.signatureName,
+      expiresAt: estimates.expiresAt,
+      createdAt: estimates.createdAt,
+    })
+    .from(estimates)
+    .where(withTenant(estimates, organizationId, eq(estimates.id, id)))
+    .limit(1);
+
+  if (!est) return null;
+
+  const options = await loadOptionsWithLineItems(organizationId, est.id);
+  return { ...est, options };
+}
+
+/**
+ * Admin "mark sold" path (e.g. a verbal acceptance), separate from the public
+ * e-sign flow. Status-guarded: only an `open` estimate can be marked sold, and
+ * the chosen option must belong to this estimate AND this org.
+ */
+export async function markEstimateSold(
+  organizationId: string,
+  id: string,
+  optionId: string,
+  now: Date = new Date(),
+): Promise<ApproveEstimateResult> {
+  const [est] = await db
+    .select({ id: estimates.id, status: estimates.status })
+    .from(estimates)
+    .where(withTenant(estimates, organizationId, eq(estimates.id, id)))
+    .limit(1);
+
+  if (!est) return { ok: false, reason: "not_found" };
+  if (est.status !== "open") return { ok: false, reason: "already_decided" };
+
+  const [opt] = await db
+    .select({ id: estimateOptions.id })
+    .from(estimateOptions)
+    .where(
+      withTenant(
+        estimateOptions,
+        organizationId,
+        eq(estimateOptions.estimateId, est.id),
+        eq(estimateOptions.id, optionId),
+      ),
+    )
+    .limit(1);
+  if (!opt) return { ok: false, reason: "invalid_option" };
+
+  const [updated] = await db
+    .update(estimates)
+    .set({
+      status: "sold",
+      soldOptionId: optionId,
+      signedAt: now,
+      signatureName: "(admin)",
+      updatedAt: now,
+    })
+    .where(
+      withTenant(estimates, organizationId, eq(estimates.id, est.id), eq(estimates.status, "open")),
+    )
+    .returning({ id: estimates.id });
+
+  if (!updated) return { ok: false, reason: "already_decided" };
+  return { ok: true, estimateId: updated.id };
+}
+
+export interface EstimateForApproval {
+  readonly id: string;
+  readonly status: string;
+  readonly totalCents: number;
+  readonly expiresAt: Date | null;
+  readonly options: EstimateOptionView[];
+}
+
+/**
+ * PUBLIC read for the e-sign page. Authorized BY THE TOKEN (no org filter on the
+ * token lookup — the hashed token is the bearer of authority). Never returns the
+ * token hash, signature IP, or any other estimate's data.
+ */
+export async function getEstimateForApproval(
+  token: string,
+): Promise<EstimateForApproval | null> {
+  const [est] = await db
+    .select({
+      id: estimates.id,
+      organizationId: estimates.organizationId,
+      status: estimates.status,
+      totalCents: estimates.totalCents,
+      expiresAt: estimates.expiresAt,
+    })
+    .from(estimates)
+    .where(eq(estimates.approvalTokenHash, hashToken(token)))
+    .limit(1);
+
+  if (!est) return null;
+
+  // The token has already proven org membership; scope the option/line reads to
+  // the resolved estimate's org for defense-in-depth.
+  const options = await loadOptionsWithLineItems(est.organizationId, est.id);
+  return {
+    id: est.id,
+    status: est.status,
+    totalCents: est.totalCents,
+    expiresAt: est.expiresAt,
+    options,
+  };
 }
