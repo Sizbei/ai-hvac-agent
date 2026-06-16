@@ -31,6 +31,7 @@ import { CustomerEditDialog } from '@/components/admin/customer-edit-dialog';
 import { ConfirmDialog } from '@/components/admin/confirm-dialog';
 import { ScopedEstimatesSection } from '@/components/admin/estimates/scoped-estimates-section';
 import { ScopedInvoicesSection } from '@/components/admin/invoices/scoped-invoices-section';
+import { CustomerMembershipCard } from '@/components/admin/memberships/customer-membership-card';
 import type { EquipmentRecord } from '@/lib/admin/crm-types';
 
 const EQUIPMENT_LABELS: Record<string, string> = {
@@ -324,6 +325,9 @@ export default function CustomerDetailPage({
           </div>
         </CardContent>
       </Card>
+
+      {/* Membership */}
+      <CustomerMembershipCard customerId={id} />
 
       {/* Equipment */}
       <Card>

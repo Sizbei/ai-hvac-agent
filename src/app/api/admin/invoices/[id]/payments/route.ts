@@ -1,7 +1,13 @@
-import { NextRequest } from "next/server";
+import { NextRequest, after } from "next/server";
 import { z } from "zod";
+import { eq } from "drizzle-orm";
 import { getAdminSession } from "@/lib/auth/session";
 import { takePayment } from "@/lib/admin/invoice-queries";
+import { db } from "@/lib/db";
+import { invoices } from "@/lib/db/schema";
+import { withTenant } from "@/lib/db/tenant";
+import { triggerPaymentReceipt } from "@/lib/communication/money-triggers";
+import { processPendingJobs } from "@/lib/communication/job-queue";
 import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
@@ -72,6 +78,35 @@ export async function POST(
         { error: auditError, invoiceId: id },
         "Failed to write audit log for payment",
       );
+    });
+
+    // Best-effort, non-blocking receipt. A comms failure must NEVER fail the
+    // payment that already succeeded — so this runs in after() and swallows its
+    // own errors. We enqueue a payment_receipt then drain immediately (Hobby's
+    // daily cron is too slow for a receipt; after() survives the lambda freeze).
+    const orgId = session.organizationId;
+    const amountCents = parsed.data.amountCents;
+    after(async () => {
+      try {
+        const [inv] = await db
+          .select({ customerId: invoices.customerId })
+          .from(invoices)
+          .where(withTenant(invoices, orgId, eq(invoices.id, id)))
+          .limit(1);
+        if (!inv?.customerId) return;
+        await triggerPaymentReceipt({
+          organizationId: orgId,
+          invoiceId: id,
+          customerId: inv.customerId,
+          amountCents,
+        });
+        await processPendingJobs();
+      } catch (commsError) {
+        logger.error(
+          { error: commsError, invoiceId: id },
+          "Payment receipt enqueue/drain failed (best-effort)",
+        );
+      }
     });
 
     return successResponse(

@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EstimateStatusBadge } from '@/components/admin/estimates/estimate-status-badge';
+import { FinancingPanel } from '@/components/admin/financing/financing-panel';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { rollUpMargin } from '@/lib/admin/margin';
 
@@ -306,6 +307,22 @@ export default function EstimateDetailPage({
           </CardContent>
         </Card>
       )}
+
+      {/* Financing (subordinate) — once sold, offer the customer a lender
+          prequalification link for the sold option's total. */}
+      {estimate.status === 'sold' &&
+        (() => {
+          const soldOption = estimate.options.find(
+            (o) => o.id === estimate.soldOptionId,
+          );
+          const amountCents = soldOption?.totalCents ?? estimate.totalCents;
+          return amountCents > 0 ? (
+            <FinancingPanel
+              estimateId={estimate.id}
+              requestedAmountCents={amountCents}
+            />
+          ) : null;
+        })()}
 
       {/* Mark sold (admin path) — only while open */}
       {isOpen && (

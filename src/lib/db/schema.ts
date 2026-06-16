@@ -1383,6 +1383,11 @@ export const communicationTriggerTypeEnum = pgEnum("communication_trigger_type",
   "review_request",
   "follow_up",
   "escalation",
+  // Money-loop triggers (Stage: comms+memberships): estimate approval link on
+  // send, payment receipt on a successful charge, and unpaid-invoice dunning.
+  "estimate_sent",
+  "payment_receipt",
+  "invoice_overdue",
 ]);
 
 // Job execution status
@@ -1989,4 +1994,85 @@ export const financingApplications = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [index("financing_applications_org_idx").on(table.organizationId)],
+);
+
+// ════════════════ Memberships v1: plans + enrollment ════════════════
+// A recurring service-agreement plan (the "$19/mo maintenance" SKU). Recurring
+// billing is STRIPE-GATED and mocked for v1 — currentPeriodEnd is tracked on the
+// enrollment but renewals are NOT auto-charged here.
+export const membershipBillingPeriodEnum = pgEnum("membership_billing_period", [
+  "monthly",
+  "annual",
+]);
+
+export const membershipPlans = pgTable(
+  "membership_plans",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    // The recurring price charged per billing period. Integer cents.
+    priceCents: integer("price_cents").notNull(),
+    billingPeriod: membershipBillingPeriodEnum("billing_period")
+      .notNull()
+      .default("monthly"),
+    // Soft-deactivate (a plan may have historical enrollments): never hard delete.
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [index("membership_plans_org_idx").on(table.organizationId)],
+);
+
+// A customer's enrollment in a plan. This table is the AUTHORITATIVE source of a
+// customer's membership state; customers.membershipStatus is a DERIVED cache kept
+// in sync (same db.batch) so existing member-aware readers stay correct.
+export const customerMemberships = pgTable(
+  "customer_memberships",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    customerId: uuid("customer_id")
+      .notNull()
+      .references(() => customers.id),
+    planId: uuid("plan_id")
+      .notNull()
+      .references(() => membershipPlans.id),
+    status: membershipStatusEnum("status").notNull().default("active"),
+    startedAt: timestamp("started_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    // The end of the current paid period. Tracked, but renewals are NOT
+    // auto-charged in v1 (Stripe-gated). Nullable for annual/edge cases.
+    currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    // The future Stripe Subscription id this enrollment maps to. NULL until the
+    // Stripe billing seam is built (recurring billing is mocked in v1).
+    providerSubscriptionId: text("provider_subscription_id"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("customer_memberships_org_idx").on(table.organizationId),
+    index("customer_memberships_customer_idx").on(table.customerId),
+    // A customer has AT MOST ONE active membership per org. Partial unique index
+    // (WHERE status='active') so cancelled/expired rows don't collide — this
+    // guards the double-enroll race at the DB layer.
+    uniqueIndex("customer_memberships_org_customer_active_unique")
+      .on(table.organizationId, table.customerId)
+      .where(sql`${table.status} = 'active'`),
+  ],
 );

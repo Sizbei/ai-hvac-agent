@@ -199,6 +199,58 @@ const defaultTemplates = [
     },
     priority: 30,
   },
+  {
+    key: "estimate_sent_sms",
+    name: "Estimate Sent (SMS)",
+    description: "Sends the customer the tokenized estimate approval link",
+    triggerType: "estimate_sent",
+    templateType: "sms" as const,
+    subjectTemplate: null,
+    // LINK ONLY — the binding price lives behind the tokenized page.
+    bodyTemplate: `{{companyName}}: Your estimate is ready: {{approvalUrl}}`,
+    variables: {
+      customerName: "Customer name",
+      approvalUrl: "Tokenized approval link",
+      companyName: "Company name",
+      phoneNumber: "Company phone",
+    },
+    priority: 50,
+  },
+  {
+    key: "payment_receipt_sms",
+    name: "Payment Receipt (SMS)",
+    description: "Confirms a successful payment on an invoice",
+    triggerType: "payment_receipt",
+    templateType: "sms" as const,
+    subjectTemplate: null,
+    bodyTemplate: `Thanks{{#if customerName}}, {{customerName}}{{/if}}! {{companyName}} received your payment of {{amount}} for invoice {{invoiceNumber}}.`,
+    variables: {
+      customerName: "Customer name",
+      amount: "Amount paid (formatted dollars)",
+      invoiceNumber: "Invoice reference",
+      companyName: "Company name",
+      phoneNumber: "Company phone",
+    },
+    priority: 60,
+  },
+  {
+    key: "invoice_overdue_sms",
+    name: "Invoice Overdue Reminder (SMS)",
+    description: "Polite reminder that an invoice is still open (dunning)",
+    triggerType: "invoice_overdue",
+    templateType: "sms" as const,
+    subjectTemplate: null,
+    bodyTemplate: `{{companyName}}: A friendly reminder that invoice {{invoiceNumber}} ({{amount}}) is still open. {{#if payLink}}Pay here: {{payLink}} {{/if}}Questions? Call {{phoneNumber}}.`,
+    variables: {
+      customerName: "Customer name",
+      amount: "Outstanding balance (formatted dollars)",
+      invoiceNumber: "Invoice reference",
+      payLink: "Optional payment link",
+      companyName: "Company name",
+      phoneNumber: "Company phone",
+    },
+    priority: 30,
+  },
 ];
 
 /**

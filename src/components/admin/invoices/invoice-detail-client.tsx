@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { InvoiceStateBadge } from '@/components/admin/invoices/invoice-state-badge';
+import { FinancingPanel } from '@/components/admin/financing/financing-panel';
 import { formatCentsExact, parseDollarsToCents } from '@/lib/admin/money-format';
 import { rollUpMargin } from '@/lib/admin/margin';
 
@@ -363,6 +364,15 @@ export function InvoiceDetailClient({
             {payError && <p className="text-xs text-destructive">{payError}</p>}
           </CardContent>
         </Card>
+      )}
+
+      {/* Financing (subordinate). Keyed to the invoice's estimate; only shown
+          when the invoice links to one and a balance remains to finance. */}
+      {invoice.estimateId && balance > 0 && (
+        <FinancingPanel
+          invoiceId={invoice.id}
+          requestedAmountCents={balance}
+        />
       )}
 
       {/* Payments + per-payment refunds */}

@@ -161,6 +161,27 @@ export const templateVariableSchemas = {
     managerPhone: "string",
     companyName: "string",
   },
+  estimate_sent: {
+    customerName: "string",
+    approvalUrl: "string",
+    companyName: "string",
+    phoneNumber: "string",
+  },
+  payment_receipt: {
+    customerName: "string",
+    amount: "string",
+    invoiceNumber: "string",
+    companyName: "string",
+    phoneNumber: "string",
+  },
+  invoice_overdue: {
+    customerName: "string",
+    amount: "string",
+    invoiceNumber: "string",
+    payLink: "string?",
+    companyName: "string",
+    phoneNumber: "string",
+  },
 } as const;
 
 export type TemplateVariables = typeof templateVariableSchemas;
@@ -277,5 +298,16 @@ export const defaultSmsTemplates: Record<
   },
   escalation: {
     body: `{{companyName}}: Your {{issueType}} concern has been escalated to manager {{managerName}}. They will contact you shortly at {{managerPhone}}.`,
+  },
+  // Money-loop. estimate_sent sends the LINK ONLY — the binding price lives behind
+  // the tokenized approval page (never promise pricing in an SMS body).
+  estimate_sent: {
+    body: `{{companyName}}: Your estimate is ready: {{approvalUrl}}`,
+  },
+  payment_receipt: {
+    body: `Thanks{{#if customerName}}, {{customerName}}{{/if}}! {{companyName}} received your payment of {{amount}} for invoice {{invoiceNumber}}.`,
+  },
+  invoice_overdue: {
+    body: `{{companyName}}: A friendly reminder that invoice {{invoiceNumber}} ({{amount}}) is still open. {{#if payLink}}Pay here: {{payLink}} {{/if}}Questions? Call {{phoneNumber}}.`,
   },
 } as const;

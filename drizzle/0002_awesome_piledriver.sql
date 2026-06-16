@@ -1,2 +1,0 @@
-CREATE INDEX "sessions_org_created_idx" ON "customer_sessions" USING btree ("organization_id","created_at");--> statement-breakpoint
-CREATE INDEX "messages_session_created_idx" ON "messages" USING btree ("session_id","created_at");
