@@ -1,6 +1,0 @@
-{
-  "id": "0033-snapshot",
-  "prevId": "0032-snapshot",
-  "version": "7",
-  "dialect": "postgresql"
-}
