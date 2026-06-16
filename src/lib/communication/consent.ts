@@ -43,7 +43,7 @@ interface TriggerRule {
 /** Map every trigger to its consent category. Transactional confirmations and
  *  en-route/arrival are time-sensitive and exempt from quiet hours; reminders,
  *  review requests, and follow-ups are quiet-hours-gated. */
-const TRIGGER_RULES: Record<CommTrigger, TriggerRule> = {
+export const TRIGGER_RULES: Record<CommTrigger, TriggerRule> = {
   appointment_scheduled: { toggle: "automatedConfirmations", quietHours: false },
   appointment_reminder_24h: { toggle: "appointmentReminders", quietHours: true },
   appointment_reminder_2h: { toggle: "appointmentReminders", quietHours: true },
@@ -55,6 +55,13 @@ const TRIGGER_RULES: Record<CommTrigger, TriggerRule> = {
   review_request: { toggle: "reviewRequests", quietHours: true },
   follow_up: { toggle: "marketingMessages", quietHours: true },
   escalation: { toggle: null, quietHours: false },
+  // Money-loop triggers. estimate_sent + payment_receipt are TRANSACTIONAL
+  // (an approval link the customer is waiting on; a receipt for money just
+  // taken) — exempt from quiet hours and gated only by automatedConfirmations.
+  // invoice_overdue is a dunning nudge — quiet-hours-gated like other reminders.
+  estimate_sent: { toggle: "automatedConfirmations", quietHours: false },
+  payment_receipt: { toggle: "automatedConfirmations", quietHours: false },
+  invoice_overdue: { toggle: "appointmentReminders", quietHours: true },
 };
 
 /** Preference defaults when a customer has no preferences row yet — mirrors the

@@ -1383,6 +1383,11 @@ export const communicationTriggerTypeEnum = pgEnum("communication_trigger_type",
   "review_request",
   "follow_up",
   "escalation",
+  // Money-loop triggers (Stage: comms+memberships): estimate approval link on
+  // send, payment receipt on a successful charge, and unpaid-invoice dunning.
+  "estimate_sent",
+  "payment_receipt",
+  "invoice_overdue",
 ]);
 
 // Job execution status

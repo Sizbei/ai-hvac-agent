@@ -525,6 +525,9 @@ export function getEmailSubject(
     review_request: `How was your service? - ${companyName}`,
     follow_up: `Follow Up: Your Recent Service - ${companyName}`,
     escalation: `Your Concern Has Been Escalated - ${companyName}`,
+    estimate_sent: `Your Estimate Is Ready - ${companyName}`,
+    payment_receipt: `Payment Received - ${companyName}`,
+    invoice_overdue: `Reminder: Your Invoice Is Still Open - ${companyName}`,
   };
 
   return subjects[triggerType] || `Message from ${companyName}`;

@@ -8,6 +8,13 @@
       "when": 1700000000000,
       "tag": "0000_baseline",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1781643690354,
+      "tag": "0001_money_loop_triggers",
+      "breakpoints": true
     }
   ]
 }

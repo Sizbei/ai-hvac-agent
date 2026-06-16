@@ -1,6 +1,7 @@
-import { NextRequest } from "next/server";
+import { NextRequest, after } from "next/server";
 import { z } from "zod";
 import { getAdminSession } from "@/lib/auth/session";
+import { triggerEstimateSent } from "@/lib/communication/money-triggers";
 import {
   listEstimates,
   createEstimate,
@@ -33,6 +34,9 @@ const createSchema = z.object({
   serviceRequestId: z.string().uuid().optional(),
   customerId: z.string().uuid().optional(),
   expiresInDays: z.number().int().min(1).max(365).optional(),
+  // When true (and the estimate is linked to a customer with contact info), text
+  // the customer the tokenized approval link via the consent-gated comms queue.
+  sendToCustomer: z.boolean().optional(),
   options: z
     .array(
       z.object({
@@ -187,6 +191,18 @@ export async function POST(request: NextRequest) {
     });
 
     const approvalUrl = `${process.env.NEXT_PUBLIC_APP_URL}/estimates/${approvalToken}`;
+
+    // Optionally send the approval LINK to the customer. The plaintext token is
+    // only available here at create time, so we enqueue with the built URL.
+    // Best-effort + non-blocking (after()): a comms failure must not fail create.
+    if (parsed.data.sendToCustomer && parsed.data.customerId) {
+      const orgId = session.organizationId;
+      const customerId = parsed.data.customerId;
+      after(() =>
+        triggerEstimateSent({ organizationId: orgId, customerId, approvalUrl }),
+      );
+    }
+
     return successResponse({ estimateId, approvalToken, approvalUrl }, 201);
   } catch (error: unknown) {
     if (isUniqueViolation(error)) {

@@ -83,6 +83,7 @@ export function EstimateCreateDialog({
 
   const [options, setOptions] = useState<OptionDraft[]>([emptyOption('Good')]);
   const [expiresInDays, setExpiresInDays] = useState('30');
+  const [sendToCustomer, setSendToCustomer] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [approvalUrl, setApprovalUrl] = useState<string | null>(null);
@@ -93,6 +94,7 @@ export function EstimateCreateDialog({
   function reset(): void {
     setOptions([emptyOption('Good')]);
     setExpiresInDays('30');
+    setSendToCustomer(false);
     setError(null);
     setApprovalUrl(null);
     setCopied(false);
@@ -247,6 +249,7 @@ export function EstimateCreateDialog({
           customerId,
           expiresInDays: parseInt(expiresInDays, 10) || undefined,
           options: payloadOptions,
+          sendToCustomer: customerId ? sendToCustomer : undefined,
         }),
       });
       const body = await res.json().catch(() => ({ success: false }));
@@ -493,6 +496,16 @@ export function EstimateCreateDialog({
                 className="w-32"
               />
             </div>
+
+            {customerId && (
+              <label className="flex items-center gap-2 text-sm">
+                <Switch
+                  checked={sendToCustomer}
+                  onCheckedChange={setSendToCustomer}
+                />
+                Text the customer the approval link
+              </label>
+            )}
 
             {error && <p className="text-sm text-destructive">{error}</p>}
           </div>
