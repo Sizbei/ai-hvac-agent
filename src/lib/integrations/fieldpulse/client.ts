@@ -397,6 +397,7 @@ export class RestFieldpulseClient implements FieldpulseClient {
       schedule_start: input.scheduleStart,
       schedule_end: input.scheduleEnd,
       assigned_user_id: input.assignedUserId,
+      work_status: input.workStatus,
     };
     const raw = await this.request(`/jobs/${encodeURIComponent(jobId)}`, {
       method: "PUT",

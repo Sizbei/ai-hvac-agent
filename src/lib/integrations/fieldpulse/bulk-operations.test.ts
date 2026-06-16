@@ -523,3 +523,83 @@ describe("Error aggregation", () => {
     expect(summary.failed).toBe(2);
   }, 10000);
 });
+
+describe("bulkUpdateJobStatus — Stage 3 robustness", () => {
+  let mockClient: FieldpulseClient;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    fieldpulseRateLimiter.resetAll();
+    mockClient = {
+      updateJob: vi.fn().mockResolvedValue({ id: "fp-1", customerId: "c1" }),
+      addJobNote: vi.fn().mockResolvedValue(undefined),
+    } as unknown as FieldpulseClient;
+  });
+
+  it("sends the workStatus to Fieldpulse (not the note crammed into description)", async () => {
+    await bulkUpdateJobStatus(
+      mockClient,
+      [{ fieldpulseJobId: "fp-9", serviceRequestId: "sr-9", workStatus: "completed", note: "done" }],
+      { batchDelayMs: 0, maxConcurrency: 1 },
+    );
+
+    expect(mockClient.updateJob).toHaveBeenCalledWith(
+      "fp-9",
+      expect.objectContaining({ workStatus: "completed" }),
+    );
+    // The updateJob payload must NOT use the note as the description.
+    const passed = (mockClient.updateJob as ReturnType<typeof vi.fn>).mock.calls[0]![1];
+    expect(passed.description).toBeUndefined();
+    // The note is appended via the dedicated note API instead.
+    expect(mockClient.addJobNote).toHaveBeenCalledWith("fp-9", "done");
+  });
+
+  it("stops launching new updates after a failure when continueOnError=false", async () => {
+    const updates = Array.from({ length: 10 }, (_, i) => ({
+      fieldpulseJobId: `fp-${i}`,
+      serviceRequestId: `sr-${i}`,
+      workStatus: "en_route",
+    }));
+    // First item fails; with maxConcurrency=1 the pool should abort and NOT
+    // process all 10.
+    (mockClient.updateJob as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error("validation failed"),
+    );
+
+    const summary = await bulkUpdateJobStatus(
+      mockClient,
+      updates,
+      { continueOnError: false, batchDelayMs: 0, maxConcurrency: 1, maxRetries: 0 },
+    );
+
+    expect(summary.failed).toBeGreaterThanOrEqual(1);
+    // Aborted early — far fewer than all 10 updates attempted.
+    expect((mockClient.updateJob as ReturnType<typeof vi.fn>).mock.calls.length).toBeLessThan(10);
+    expect(summary.succeeded + summary.failed).toBeLessThan(10);
+  });
+
+  it("processes every item when continueOnError=true despite failures", async () => {
+    const updates = Array.from({ length: 6 }, (_, i) => ({
+      fieldpulseJobId: `fp-${i}`,
+      serviceRequestId: `sr-${i}`,
+      workStatus: "en_route",
+    }));
+    let call = 0;
+    (mockClient.updateJob as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      call++;
+      return call % 2 === 0
+        ? Promise.reject(new Error("boom"))
+        : Promise.resolve({ id: "fp", customerId: "c" });
+    });
+
+    const summary = await bulkUpdateJobStatus(
+      mockClient,
+      updates,
+      { continueOnError: true, batchDelayMs: 0, maxConcurrency: 3, maxRetries: 0 },
+    );
+
+    expect(summary.total).toBe(6);
+    expect(summary.succeeded + summary.failed).toBe(6);
+    expect(summary.failed).toBeGreaterThan(0);
+  });
+});

@@ -68,7 +68,7 @@ describe("Fieldpulse Invoice Sync", () => {
         mockOrgId,
       );
 
-      expect(result).toBe(true);
+      expect(result).toBe("updated");
       expect(db.update).toHaveBeenCalledWith(serviceRequests);
       expect(mockInsertValues).toHaveBeenCalledWith(expect.objectContaining({
         organizationId: mockOrgId,
@@ -100,7 +100,7 @@ describe("Fieldpulse Invoice Sync", () => {
         mockOrgId,
       );
 
-      expect(result).toBe(true);
+      expect(result).toBe("updated");
     });
 
     it("should update invoice status to 'void' for voided invoices", async () => {
@@ -126,7 +126,7 @@ describe("Fieldpulse Invoice Sync", () => {
         mockOrgId,
       );
 
-      expect(result).toBe(true);
+      expect(result).toBe("updated");
     });
 
     it("should be idempotent when status already matches", async () => {
@@ -145,7 +145,7 @@ describe("Fieldpulse Invoice Sync", () => {
         mockOrgId,
       );
 
-      expect(result).toBe(false); // No update needed
+      expect(result).toBe("skipped"); // No update needed
       expect(db.update).not.toHaveBeenCalled();
     });
 
@@ -160,7 +160,7 @@ describe("Fieldpulse Invoice Sync", () => {
         mockOrgId,
       );
 
-      expect(result).toBe(false);
+      expect(result).toBe("skipped");
       expect(db.update).not.toHaveBeenCalled();
     });
 
@@ -180,7 +180,7 @@ describe("Fieldpulse Invoice Sync", () => {
         mockOrgId,
       );
 
-      expect(result).toBe(false); // No change needed (none → none)
+      expect(result).toBe("skipped"); // No change needed (none → none)
     });
 
     it("should handle database errors gracefully", async () => {
@@ -194,7 +194,7 @@ describe("Fieldpulse Invoice Sync", () => {
         mockOrgId,
       );
 
-      expect(result).toBe(false);
+      expect(result).toBe("failed");
     });
   });
 
@@ -240,11 +240,12 @@ describe("Fieldpulse Invoice Sync", () => {
       const result = await batchSyncInvoiceStatuses(updates);
 
       expect(result.success).toBe(3);
+      expect(result.skipped).toBe(0);
       expect(result.failed).toBe(0);
     });
 
-    it("should count failures separately from successes", async () => {
-      // First two succeed, third fails (no matching request)
+    it("should count skips separately from successes and failures", async () => {
+      // First two update, third is a no-match (a SKIP, not a failure)
       let callCount = 0;
       const mockWhere = vi.fn().mockImplementation(async () => {
         callCount++;
@@ -284,7 +285,8 @@ describe("Fieldpulse Invoice Sync", () => {
       const result = await batchSyncInvoiceStatuses(updates);
 
       expect(result.success).toBe(2);
-      expect(result.failed).toBe(1);
+      expect(result.skipped).toBe(1);
+      expect(result.failed).toBe(0);
     });
   });
 

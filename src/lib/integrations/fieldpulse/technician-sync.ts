@@ -12,7 +12,7 @@
  *
  * Stores fieldpulseUserId to track identity across email changes.
  */
-import { eq, and, or } from "drizzle-orm";
+import { eq, and, isNotNull, notInArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
@@ -103,6 +103,9 @@ export async function syncTechniciansFromFieldpulse(
             googleId: tech.id, // Update fieldpulseUserId if changed
             updatedAt: new Date(),
           },
+          // Guard: never clobber a human admin/super_admin who happens to share
+          // this email — only an existing technician row may be overwritten.
+          setWhere: eq(users.role, "technician"),
         })
         .returning({ id: users.id });
 
@@ -111,24 +114,28 @@ export async function syncTechniciansFromFieldpulse(
       }
     }
 
-    // Mark technicians as inactive if they're no longer in Fieldpulse
-    // (soft delete - they stay in the table but isActive=false)
-    const currentFpIds = new Set(technicians.map((t) => t.id));
-    await db
-      .update(users)
-      .set({ isActive: false, updatedAt: new Date() })
-      .where(
-        and(
-          eq(users.organizationId, organizationId),
-          eq(users.role, "technician"),
-          // googleId holds fieldpulseUserId for technicians
-          or(
-            // No fieldpulseUserId (never synced) - leave alone
-            // Actually, we should only affect synced technicians
-            // Skip for now - this is complex and can be Phase 3b
+    // Soft-deactivate technicians that are no longer in Fieldpulse: synced techs
+    // (googleId holds their fieldpulseUserId) whose id is NOT in the current FP
+    // roster. Guarded — if Fieldpulse returned NO technicians we do nothing,
+    // rather than deactivating the entire roster on a transient empty response.
+    const currentFpIds = technicians
+      .map((t) => t.id)
+      .filter((id): id is string => Boolean(id));
+    if (currentFpIds.length > 0) {
+      await db
+        .update(users)
+        .set({ isActive: false, updatedAt: new Date() })
+        .where(
+          and(
+            eq(users.organizationId, organizationId),
+            eq(users.role, "technician"),
+            // Only synced technicians (googleId = fieldpulseUserId)…
+            isNotNull(users.googleId),
+            // …that are no longer present in Fieldpulse.
+            notInArray(users.googleId, currentFpIds),
           ),
-        ),
-      );
+        );
+    }
 
     logger.info(
       { organizationId, synced },

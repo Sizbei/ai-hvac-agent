@@ -53,23 +53,41 @@ describe("Fieldpulse Invoice Webhook", () => {
   const mockOrgId = "org-789";
   const mockEventId = "evt-invoice-abc";
 
+  // The route issues two selects: the request lookup (`.where()` awaited) and
+  // the per-org webhook-secret lookup (`.where().limit(1)`). This helper returns
+  // a `where` result that is BOTH awaitable and `.limit()`-able.
+  function selectReturning(rows: unknown[]) {
+    return {
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockImplementation(() => {
+          const p = Promise.resolve(rows);
+          return Object.assign(p, {
+            limit: vi.fn().mockResolvedValue(rows),
+          });
+        }),
+      }),
+    } as never;
+  }
+
   beforeEach(() => {
     vi.clearAllMocks();
+    // No webhook secret configured in tests -> signature verification is
+    // optional (verifySignature returns valid with no_secret_configured).
+    delete process.env.FIELDPULSE_WEBHOOK_SECRET;
 
-    // Default mock for successful request lookup
-    vi.mocked(db.select).mockReturnValue({
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockResolvedValue([
-          {
-            id: mockRequestId,
-            organizationId: mockOrgId,
-            status: "completed",
-            invoiceStatus: "none",
-            fieldpulseJobId: mockFieldpulseJobId,
-          },
-        ]),
-      }),
-    } as never);
+    // Default mock for successful request lookup (the secret lookup reuses this
+    // chain and finds no webhookSecretEncrypted -> env fallback -> null).
+    vi.mocked(db.select).mockReturnValue(
+      selectReturning([
+        {
+          id: mockRequestId,
+          organizationId: mockOrgId,
+          status: "completed",
+          invoiceStatus: "none",
+          fieldpulseJobId: mockFieldpulseJobId,
+        },
+      ]),
+    );
 
     // Default mock for successful event insertion
     vi.mocked(db.insert).mockReturnValue({
@@ -169,11 +187,7 @@ describe("Fieldpulse Invoice Webhook", () => {
 
   describe("missing jobId for invoice events", () => {
     it("should return 200 when jobId is missing but no request found", async () => {
-      vi.mocked(db.select).mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockResolvedValue([]), // No matching request
-        }),
-      } as never);
+      vi.mocked(db.select).mockReturnValue(selectReturning([])); // No matching request
 
       const request = new Request("http://localhost/api/webhook", {
         method: "POST",
@@ -210,13 +224,16 @@ describe("Fieldpulse Invoice Webhook", () => {
   });
 
   describe("mixed job and invoice events", () => {
-    it("should still process job status events correctly", async () => {
+    it("should process a job status event from the payload status field", async () => {
+      // New contract: the status comes from the payload `status` field, not the
+      // eventType string. Mock request is "completed"; move it to "in_progress".
       const request = new Request("http://localhost/api/webhook", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           id: mockEventId,
-          eventType: "job.completed",
+          eventType: "job.status_updated",
+          status: "in_progress",
           jobId: mockFieldpulseJobId,
         }),
       });
@@ -225,6 +242,25 @@ describe("Fieldpulse Invoice Webhook", () => {
 
       expect(response.status).toBe(204);
       expect(db.update).toHaveBeenCalled();
+    });
+
+    it("does NOT destructively reset status when the event carries no mappable status", async () => {
+      // Regression guard: an unrecognized eventType with no status field must
+      // SKIP (200), not reset the request to "pending".
+      const request = new Request("http://localhost/api/webhook", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          id: mockEventId,
+          eventType: "job.status_updated",
+          jobId: mockFieldpulseJobId,
+        }),
+      });
+
+      const response = await POST(request as never);
+
+      expect(response.status).toBe(200);
+      expect(db.update).not.toHaveBeenCalled();
     });
   });
 });

@@ -15,6 +15,7 @@
  *
  * If a sync is already in progress, returns 409 Conflict with the current status.
  */
+import { after } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
@@ -57,13 +58,18 @@ export async function POST(): Promise<Response> {
       );
     }
 
-    // Initiate sync in the background (fire and forget)
-    // We don't await the result - it runs asynchronously
-    syncAvailabilityFromFieldpulse(session.organizationId).catch((error) => {
-      logger.error(
-        { organizationId: session.organizationId, error },
-        "Background availability sync failed",
-      );
+    // Initiate sync in the background. after() keeps the work alive past the
+    // response on Vercel (a detached promise would be frozen when the Lambda
+    // returns, leaving availabilitySyncStatus stuck "in_progress").
+    after(async () => {
+      try {
+        await syncAvailabilityFromFieldpulse(session.organizationId);
+      } catch (error) {
+        logger.error(
+          { organizationId: session.organizationId, error },
+          "Background availability sync failed",
+        );
+      }
     });
 
     logger.info(

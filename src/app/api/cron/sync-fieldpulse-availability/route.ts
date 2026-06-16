@@ -16,54 +16,26 @@
  *
  * Returns a summary of syncs initiated vs skipped (already in progress).
  */
+import { after } from "next/server";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { logger } from "@/lib/logger";
 import { db } from "@/lib/db";
 import { fieldpulseConnections } from "@/lib/db/schema";
-import { eq, and, isNotNull } from "drizzle-orm";
-import { withTenant } from "@/lib/db/tenant";
-import {
-  syncAvailabilityFromFieldpulse,
-  getAvailabilitySyncStatus,
-} from "@/lib/integrations/fieldpulse/availability-sync";
-
-/**
- * Verify the cron secret from the Authorization header.
- *
- * Expected format: Authorization: Bearer <CRON_SECRET>
- * Returns false if the header is missing, malformed, or the secret doesn't match.
- */
-function verifyCronSecret(authHeader: string | null): boolean {
-  if (!authHeader) {
-    return false;
-  }
-
-  const expectedSecret = process.env.CRON_SECRET;
-  if (!expectedSecret) {
-    logger.warn("CRON_SECRET not set - cron endpoint is disabled");
-    return false;
-  }
-
-  // Parse Bearer token
-  const parts = authHeader.split(" ");
-  if (parts.length !== 2 || parts[0] !== "Bearer") {
-    return false;
-  }
-
-  return parts[1] === expectedSecret;
-}
+import { eq, and, ne } from "drizzle-orm";
+import { verifyCronAuth } from "@/lib/cron-auth";
+import { syncAvailabilityFromFieldpulse } from "@/lib/integrations/fieldpulse/availability-sync";
 
 export async function GET(request: Request): Promise<Response> {
   try {
-    // Verify cron secret
-    const authHeader = request.headers.get("Authorization");
-    if (!verifyCronSecret(authHeader)) {
+    // Verify cron secret (timing-safe Bearer compare, fails closed).
+    if (!verifyCronAuth(request.headers.get("Authorization"))) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
 
     logger.info("Starting scheduled Fieldpulse availability sync");
 
-    // Fetch all Fieldpulse-connected organizations
+    // Fetch connected orgs that aren't already syncing — skip in-progress at the
+    // query level so the cron doesn't waste a per-org status round-trip on them.
     const connections = await db
       .select({
         organizationId: fieldpulseConnections.organizationId,
@@ -73,68 +45,41 @@ export async function GET(request: Request): Promise<Response> {
       .where(
         and(
           eq(fieldpulseConnections.connected, true),
-          // Only sync orgs that have completed a previous sync or are pending
-          // Skip those currently in progress to prevent overlap
+          ne(fieldpulseConnections.availabilitySyncStatus, "in_progress"),
         ),
       );
 
     let initiated = 0;
-    let skipped = 0;
-    const errors: Array<{ organizationId: string; error: string }> = [];
 
+    // in-progress orgs are already excluded by the query above, and the atomic
+    // claimSync inside syncAvailabilityFromFieldpulse is the REAL concurrency
+    // guard — so we don't re-check status per org (no wasted round-trips).
     for (const connection of connections) {
       const { organizationId } = connection;
 
-      try {
-        // Check if sync is already in progress for this org
-        const currentStatus = await getAvailabilitySyncStatus(organizationId);
-
-        if (currentStatus.status === "in_progress") {
-          skipped++;
-          logger.debug(
-            { organizationId },
-            "Skipping org - sync already in progress",
-          );
-          continue;
-        }
-
-        // Initiate sync in the background (fire and forget)
-        // We don't await - let each org's sync run independently
-        syncAvailabilityFromFieldpulse(organizationId).catch((error) => {
+      // Initiate sync in the background. after() keeps each org's sync alive
+      // past the cron response (a detached promise is frozen on Vercel). Each
+      // sync self-guards via claimSync, so a racing manual trigger is harmless.
+      after(async () => {
+        try {
+          await syncAvailabilityFromFieldpulse(organizationId);
+        } catch (error) {
           logger.error(
             { organizationId, error },
             "Cron-triggered availability sync failed",
           );
-        });
+        }
+      });
 
-        initiated++;
-        logger.info({ organizationId }, "Initiated cron availability sync");
-      } catch (error: unknown) {
-        const errorMessage =
-          error instanceof Error ? error.message : "Unknown error";
-        errors.push({ organizationId, error: errorMessage });
-        logger.error(
-          { organizationId, error },
-          "Failed to initiate availability sync for org",
-        );
-      }
+      initiated++;
     }
 
     logger.info(
-      {
-        totalConnections: connections.length,
-        initiated,
-        skipped,
-        errors: errors.length,
-      },
+      { totalConnections: connections.length, initiated },
       "Completed scheduled Fieldpulse availability sync",
     );
 
-    return successResponse({
-      initiated,
-      skipped,
-      errors,
-    });
+    return successResponse({ initiated });
   } catch (error: unknown) {
     logger.error({ error }, "Scheduled availability sync failed");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);

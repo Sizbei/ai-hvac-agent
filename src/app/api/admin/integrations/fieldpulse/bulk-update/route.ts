@@ -42,8 +42,21 @@ export async function POST(req: Request): Promise<Response> {
       return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
     }
 
-    const body = (await req.json()) as BulkJobStatusUpdateRequest;
-    const { updates, options = {} } = body;
+    const rawBody: unknown = await req.json();
+    // Guard the shape before trusting it — a null/array/missing-updates body
+    // must produce a clean 400, never a destructure TypeError -> 500.
+    if (
+      typeof rawBody !== "object" ||
+      rawBody === null ||
+      !Array.isArray((rawBody as { updates?: unknown }).updates)
+    ) {
+      return errorResponse(
+        "Invalid request: 'updates' must be an array",
+        "INVALID_INPUT",
+        400,
+      );
+    }
+    const { updates, options = {} } = rawBody as BulkJobStatusUpdateRequest;
 
     // Validate input
     const validationErrors = validateBulkUpdates(updates);

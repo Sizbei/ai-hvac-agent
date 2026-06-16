@@ -164,6 +164,39 @@ export function createSignatureHeader(payload: string, secret: string): string {
   return `${SIGNATURE_PREFIX}${signature}`;
 }
 
+/** Default max age for a webhook event before it's treated as a replay. */
+export const DEFAULT_WEBHOOK_MAX_AGE_MS = 5 * 60 * 1000;
+
+/**
+ * Decide whether a webhook timestamp is too old (a replay).
+ *
+ * Conservative by design: an ABSENT or UNPARSEABLE timestamp returns false (do
+ * NOT reject) — Fieldpulse's exact envelope is unconfirmed, so we never break a
+ * real webhook over a missing/odd timestamp; the idempotency ledger still stops
+ * exact duplicates. Only a present, parseable timestamp outside the window is a
+ * replay. Accepts epoch seconds, epoch ms, or an ISO string.
+ */
+export function isReplayTimestamp(
+  timestamp: number | string | undefined | null,
+  maxAgeMs: number = DEFAULT_WEBHOOK_MAX_AGE_MS,
+  now: () => number = Date.now,
+): boolean {
+  if (timestamp === undefined || timestamp === null || timestamp === "") {
+    return false;
+  }
+  let ms: number;
+  if (typeof timestamp === "number") {
+    // Heuristic: values below ~1e12 are epoch seconds, not ms.
+    ms = timestamp < 1e12 ? timestamp * 1000 : timestamp;
+  } else {
+    ms = Date.parse(timestamp);
+  }
+  if (Number.isNaN(ms)) {
+    return false;
+  }
+  return Math.abs(now() - ms) > maxAgeMs;
+}
+
 /**
  * Extracts the verification reason for logging purposes.
  * Returns a human-readable description of why verification failed.

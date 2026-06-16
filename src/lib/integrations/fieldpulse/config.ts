@@ -7,6 +7,7 @@
  * available — the single signal callers branch on to DEGRADE SAFELY.
  */
 
+import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { fieldpulseConnections } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
@@ -33,10 +34,19 @@ export async function getFieldpulseConfig(
   organizationId: string,
   baseUrl: string = FIELDPULSE_BASE_URL,
 ): Promise<FieldpulseConfig | null> {
+  // Only honor a connection that is actually connected — a residual encrypted
+  // key on a disconnected row (e.g. a partial disconnect failure) must NOT
+  // resolve a working client.
   const conn = await db
     .select({ apiKeyEncrypted: fieldpulseConnections.apiKeyEncrypted })
     .from(fieldpulseConnections)
-    .where(withTenant(fieldpulseConnections, organizationId))
+    .where(
+      withTenant(
+        fieldpulseConnections,
+        organizationId,
+        eq(fieldpulseConnections.connected, true),
+      ),
+    )
     .limit(1);
 
   let apiKey: string | null = null;
@@ -54,4 +64,42 @@ export async function getFieldpulseConfig(
   }
 
   return { apiKey, baseUrl };
+}
+
+/** The global env webhook secret (single-tenant fallback), or null. */
+export function getFieldpulseWebhookSecretEnv(): string | null {
+  return process.env.FIELDPULSE_WEBHOOK_SECRET?.trim() || null;
+}
+
+/**
+ * Resolve the webhook signing secret to verify against for an org: the org's
+ * own decrypted `webhookSecretEncrypted` when configured (connected only), else
+ * the global env secret, else null (dev mode — verification optional). The
+ * secret is never logged.
+ */
+export async function getFieldpulseWebhookSecret(
+  organizationId: string,
+): Promise<string | null> {
+  const conn = await db
+    .select({
+      webhookSecretEncrypted: fieldpulseConnections.webhookSecretEncrypted,
+    })
+    .from(fieldpulseConnections)
+    .where(
+      withTenant(
+        fieldpulseConnections,
+        organizationId,
+        eq(fieldpulseConnections.connected, true),
+      ),
+    )
+    .limit(1);
+
+  if (conn.length > 0 && conn[0].webhookSecretEncrypted) {
+    try {
+      return decrypt(conn[0].webhookSecretEncrypted);
+    } catch {
+      // Tampered/garbage ciphertext — fall back to env rather than crash.
+    }
+  }
+  return getFieldpulseWebhookSecretEnv();
 }

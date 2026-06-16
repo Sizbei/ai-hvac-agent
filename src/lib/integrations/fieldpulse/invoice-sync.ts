@@ -68,13 +68,17 @@ function mapInvoiceStatus(
  * @param fieldpulseJobId - The Fieldpulse job id to update
  * @param invoiceStatus - The invoice status from Fieldpulse
  * @param organizationId - The organization id (for audit logging)
- * @returns true if the status was updated, false if no change or error
+ * @returns "updated" when the status changed, "skipped" for a benign no-op
+ *   (no matching request, or status already current), "failed" only on error.
+ *   Distinguishing skip from fail keeps batch metrics honest.
  */
+export type InvoiceSyncOutcome = "updated" | "skipped" | "failed";
+
 export async function syncInvoiceStatus(
   fieldpulseJobId: string,
   invoiceStatus: FieldpulseInvoiceStatus | string | null | undefined,
   organizationId: string,
-): Promise<boolean> {
+): Promise<InvoiceSyncOutcome> {
   try {
     // Map the Fieldpulse status to our enum
     const newStatus = mapInvoiceStatus(invoiceStatus);
@@ -93,7 +97,7 @@ export async function syncInvoiceStatus(
         { fieldpulseJobId, invoiceStatus },
         "Invoice sync: no matching service request found",
       );
-      return false;
+      return "skipped";
     }
 
     // Guard: only update if status is changing
@@ -102,7 +106,7 @@ export async function syncInvoiceStatus(
         { fieldpulseJobId, status: newStatus },
         "Invoice sync: status already matches, skipping",
       );
-      return false;
+      return "skipped";
     }
 
     // Update the invoice status
@@ -145,10 +149,10 @@ export async function syncInvoiceStatus(
       "Invoice sync: updated service request invoice status",
     );
 
-    return true;
+    return "updated";
   } catch (error) {
     logger.error({ error, fieldpulseJobId }, "Invoice sync: failed to update");
-    return false;
+    return "failed";
   }
 }
 
@@ -168,8 +172,9 @@ export async function batchSyncInvoiceStatuses(
     invoiceStatus: FieldpulseInvoiceStatus | string | null | undefined;
     organizationId: string;
   }>,
-): Promise<{ success: number; failed: number }> {
+): Promise<{ success: number; skipped: number; failed: number }> {
   let success = 0;
+  let skipped = 0;
   let failed = 0;
 
   for (const update of updates) {
@@ -178,19 +183,21 @@ export async function batchSyncInvoiceStatuses(
       update.invoiceStatus,
       update.organizationId,
     );
-    if (result) {
+    if (result === "updated") {
       success++;
+    } else if (result === "skipped") {
+      skipped++;
     } else {
       failed++;
     }
   }
 
   logger.info(
-    { total: updates.length, success, failed },
+    { total: updates.length, success, skipped, failed },
     "Invoice batch sync completed",
   );
 
-  return { success, failed };
+  return { success, skipped, failed };
 }
 
 /**

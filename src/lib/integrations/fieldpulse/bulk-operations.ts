@@ -23,11 +23,7 @@ import type {
   BulkOperationError,
   RateLimitInfo,
 } from "./bulk-types";
-import {
-  fieldpulseRateLimiter,
-  waitForRateLimit,
-  chunk,
-} from "./rate-limiter";
+import { fieldpulseRateLimiter, waitForRateLimit } from "./rate-limiter";
 
 /**
  * Default options for bulk operations.
@@ -73,12 +69,12 @@ async function processSingleUpdate(
       setTimeout(() => reject(new Error("Request timeout")), options.requestTimeoutMs);
     });
 
-    // Attempt the update with timeout
+    // Attempt the update with timeout. The work status IS the point of a bulk
+    // status update — send it. The note is appended separately via addJobNote
+    // below, not jammed into description.
     const job = await Promise.race([
       client.updateJob(update.fieldpulseJobId, {
-        // Assuming workStatus is part of UpdateJobInput
-        // This may need adjustment based on actual Fieldpulse API
-        description: update.note,
+        workStatus: update.workStatus,
       }),
       timeoutPromise,
     ]);
@@ -152,49 +148,62 @@ async function processBatch(
   options: Required<BulkOperationOptions>,
   clientId: string,
 ): Promise<BulkJobUpdateResult[]> {
-  const results: BulkJobUpdateResult[] = [];
+  // Bounded worker pool: at most maxConcurrency workers pull from a shared
+  // index. Each worker owns and awaits its own task, so a failure NEVER orphans
+  // a sibling promise (no unhandled rejections). When continueOnError is false,
+  // `aborted` stops workers from STARTING new items — in-flight requests can't
+  // be cancelled mid-flight, but no further API budget is consumed.
+  const results = new Array<BulkJobUpdateResult | undefined>(updates.length);
+  let nextIndex = 0;
+  let aborted = false;
 
-  // Process with concurrency limit
-  const pending: Promise<void>[] = [];
-  for (const update of updates) {
-    const task = async (): Promise<void> => {
+  async function worker(): Promise<void> {
+    for (;;) {
+      if (aborted) {
+        return;
+      }
+      const index = nextIndex++;
+      if (index >= updates.length) {
+        return;
+      }
+      const update = updates[index]!;
+
       let attempt = 0;
       let processed: ProcessedUpdate;
-
-      // Retry loop for transient failures
       do {
-        processed = await processSingleUpdate(client, update, attempt, options, clientId);
-        attempt++;
-      } while (processed.shouldRetry);
-
-      results.push(processed.result);
-
-      // Continue or abort based on options
-      if (!processed.result.success && !options.continueOnError) {
-        throw new Error(
-          `Bulk operation aborted due to failure: ${update.fieldpulseJobId} - ${processed.result.error}`
+        processed = await processSingleUpdate(
+          client,
+          update,
+          attempt,
+          options,
+          clientId,
         );
+        attempt++;
+      } while (processed.shouldRetry && !aborted);
+
+      results[index] = processed.result;
+
+      if (!processed.result.success && !options.continueOnError) {
+        aborted = true;
+        return;
       }
-    };
 
-    pending.push(task());
-
-    // Limit concurrency
-    if (pending.length >= options.maxConcurrency) {
-      await Promise.all(pending);
-      pending.length = 0;
-    }
-
-    // Small delay between batches to smooth request rate
-    if (options.batchDelayMs > 0) {
-      await sleep(options.batchDelayMs);
+      // Pace each worker between its items (cheap inter-request smoothing on
+      // top of the rate limiter).
+      if (options.batchDelayMs > 0 && !aborted) {
+        await sleep(options.batchDelayMs);
+      }
     }
   }
 
-  // Wait for remaining tasks
-  await Promise.all(pending);
+  const workerCount = Math.max(
+    1,
+    Math.min(options.maxConcurrency, updates.length),
+  );
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
 
-  return results;
+  // Drop holes left by an early abort; preserve input order otherwise.
+  return results.filter((r): r is BulkJobUpdateResult => r !== undefined);
 }
 
 /**

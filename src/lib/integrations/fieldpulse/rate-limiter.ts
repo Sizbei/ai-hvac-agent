@@ -19,7 +19,16 @@ import type { RateLimitInfo } from "./bulk-types";
  * Default rate limits for Fieldpulse API (conservative defaults).
  * Adjust based on actual API documentation or observed behavior.
  */
-const DEFAULT_RATE_LIMITS = {
+/** Tunable rate-limiter options (all values are arbitrary numbers, validated
+ *  at construction). */
+export interface RateLimiterOptions {
+  readonly sustainedRps: number;
+  readonly burstCapacity: number;
+  readonly throttleReduction: number;
+  readonly minRequestIntervalMs: number;
+}
+
+const DEFAULT_RATE_LIMITS: RateLimiterOptions = {
   /** Sustained requests per second */
   sustainedRps: 2,
   /** Burst capacity (can handle small spikes) */
@@ -28,7 +37,7 @@ const DEFAULT_RATE_LIMITS = {
   throttleReduction: 0.5,
   /** Minimum time between requests in milliseconds */
   minRequestIntervalMs: 50,
-} as const;
+};
 
 /**
  * Token bucket state for a single client.
@@ -52,7 +61,15 @@ export class RateLimiter {
   private readonly throttleReduction: number;
   private readonly minRequestIntervalMs: number;
 
-  constructor(options = DEFAULT_RATE_LIMITS) {
+  constructor(options: RateLimiterOptions = DEFAULT_RATE_LIMITS) {
+    // Guard against degenerate config that would divide by zero in checkLimit
+    // (Infinity delay -> setTimeout(Infinity) hangs waitForRateLimit forever).
+    if (options.sustainedRps <= 0) {
+      throw new Error("RateLimiter: sustainedRps must be > 0");
+    }
+    if (options.burstCapacity <= 0) {
+      throw new Error("RateLimiter: burstCapacity must be > 0");
+    }
     this.sustainedRps = options.sustainedRps;
     this.burstCapacity = options.burstCapacity;
     this.throttleReduction = options.throttleReduction;
@@ -211,10 +228,23 @@ export async function waitForRateLimit(
   clientId: string,
   limiter: RateLimiter = fieldpulseRateLimiter,
 ): Promise<number> {
+  // Evict idle buckets on the hot path so the per-client map can't grow
+  // unbounded within a long-lived warm instance (cleanup() is otherwise never
+  // called). Cheap: bucket count ~= number of active orgs.
+  limiter.cleanup();
+
   const info = limiter.checkLimit(clientId);
-  const delay = info.state === "blocked"
-    ? info.resetMs + 100 // Add buffer for blocked state
-    : info.suggestedDelayMs;
+
+  // Only wait when actually constrained. In the "ok" state we do NOT impose the
+  // nominal 1000/rps spacing (which was ~500ms/request at defaults and made
+  // bulk operations dozens of times slower than intended). The token bucket
+  // already enforces the sustained rate by transitioning to blocked/throttled.
+  let delay = 0;
+  if (info.state === "blocked") {
+    delay = info.resetMs + 100; // buffer past the refill
+  } else if (info.state === "throttled") {
+    delay = info.suggestedDelayMs;
+  }
 
   if (delay > 0) {
     await sleep(delay);

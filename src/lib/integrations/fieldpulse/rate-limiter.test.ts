@@ -313,3 +313,68 @@ describe("chunk utility", () => {
     expect(chunks).toEqual([[1, 2], [3, 4], [5]]);
   });
 });
+
+describe("RateLimiter — Stage 4 robustness", () => {
+  it("rejects a non-positive sustainedRps at construction (no Infinity-delay hang)", () => {
+    expect(
+      () =>
+        new RateLimiter({
+          sustainedRps: 0,
+          burstCapacity: 10,
+          throttleReduction: 0.5,
+          minRequestIntervalMs: 50,
+        }),
+    ).toThrow(/sustainedRps/);
+  });
+
+  it("rejects a non-positive burstCapacity at construction", () => {
+    expect(
+      () =>
+        new RateLimiter({
+          sustainedRps: 2,
+          burstCapacity: 0,
+          throttleReduction: 0.5,
+          minRequestIntervalMs: 50,
+        }),
+    ).toThrow(/burstCapacity/);
+  });
+});
+
+describe("waitForRateLimit — Stage 4 robustness", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("does NOT sleep in the ok state (no artificial throughput cap)", async () => {
+    const limiter = new RateLimiter();
+    const delay = await waitForRateLimit("fresh-ok-client", limiter);
+    expect(delay).toBe(0);
+  });
+
+  it("waits when the bucket is blocked", async () => {
+    const limiter = new RateLimiter();
+    // Drain the burst capacity (10) so the next request is blocked.
+    for (let i = 0; i < 10; i++) {
+      limiter.checkLimit("drain-client");
+    }
+    const promise = waitForRateLimit("drain-client", limiter);
+    await vi.runAllTimersAsync();
+    const delay = await promise;
+    expect(delay).toBeGreaterThan(0);
+  });
+
+  it("evicts idle buckets on the hot path (bounded memory)", async () => {
+    const limiter = new RateLimiter();
+    limiter.checkLimit("idle-1");
+    limiter.checkLimit("idle-2");
+    // Advance past the 5-minute idle timeout.
+    vi.advanceTimersByTime(6 * 60 * 1000);
+    // waitForRateLimit calls cleanup() — idle buckets get a fresh start.
+    await waitForRateLimit("active-client", limiter);
+    const revived = limiter.checkLimit("idle-1");
+    expect(revived.remaining).toBe(9); // full bucket minus this request
+  });
+});

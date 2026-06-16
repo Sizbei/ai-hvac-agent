@@ -1,30 +1,36 @@
 /**
  * AVAILABILITY SYNC: mirror Fieldpulse technician availability to our calendar.
  *
- * Syncs technician working hours from Fieldpulse to our technician_availability
- * table. This enables accurate open-slot calculations when Fieldpulse is the source
- * of truth for technician schedules.
+ * Syncs technician working hours from Fieldpulse into our technician_availability
+ * table so open-slot math can use Fieldpulse as the source of truth.
  *
- * DEGRADE-SAFE: any Fieldpulse/network error is logged and swallowed. The system
- * continues to operate with locally-stored availability as a fallback.
+ * DEGRADE-SAFE: any Fieldpulse/network error is logged and swallowed; the system
+ * falls back to locally-stored availability. The status write in the failure path
+ * is ITSELF wrapped so a DB hiccup there can never leave the org stuck
+ * "in_progress".
  *
- * IDEMPOTENT: uses upsert pattern (delete-then-insert) to handle race conditions
- * gracefully. Multiple concurrent syncs for the same org are prevented by status
- * tracking.
+ * CONCURRENCY: a single atomic compare-and-set claims the sync ("in_progress")
+ * — two racing invocations cannot both proceed (the loser gets zero rows).
  *
- * TRACKING: updates lastAvailabilitySyncAt, availabilitySyncStatus, and
- * lastSyncError on the fieldpulse_connections row for monitoring and troubleshooting.
+ * IDEMPOTENT: delete-then-insert per affected technician, so a re-run converges
+ * to the same rows rather than accumulating duplicates.
  */
-import { eq, and } from "drizzle-orm";
+import { eq, and, ne, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { fieldpulseConnections, technicianAvailability, users } from "@/lib/db/schema";
+import {
+  fieldpulseConnections,
+  technicianAvailability,
+  users,
+} from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { logger } from "@/lib/logger";
 import { getFieldpulseClient } from "./client";
 import {
-  convertRecurringSlots,
-  type RecurringSlotPattern,
+  mapFieldpulseAvailability,
+  FIELDPULSE_AVAILABILITY_HORIZON_DAYS,
 } from "./availability-mapping";
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /** Sync status values - match the DB enum. */
 export type AvailabilitySyncStatus =
@@ -41,88 +47,112 @@ export interface AvailabilitySyncResult {
 }
 
 /**
- * Update sync status on the fieldpulse_connections row.
- *
- * Used to mark sync as in_progress, completed, or failed. This prevents
- * concurrent syncs and provides visibility into the sync state.
+ * Atomically claim the sync for an org via compare-and-set. Returns true only if
+ * THIS call transitioned the connected org out of "in_progress" — so two racing
+ * syncs cannot both proceed (neon-http has no transactions, but a single
+ * conditional UPDATE is atomic). Returns false when the org isn't connected or a
+ * sync is already running.
  */
-async function updateSyncStatus(
-  organizationId: string,
-  status: AvailabilitySyncStatus,
-  error?: string,
-): Promise<void> {
-  const updateData: Record<string, unknown> = {
-    availabilitySyncStatus: status,
-    updatedAt: new Date(),
-  };
+async function claimSync(organizationId: string): Promise<boolean> {
+  const claimed = await db
+    .update(fieldpulseConnections)
+    .set({ availabilitySyncStatus: "in_progress", updatedAt: new Date() })
+    .where(
+      withTenant(
+        fieldpulseConnections,
+        organizationId,
+        eq(fieldpulseConnections.connected, true),
+        ne(fieldpulseConnections.availabilitySyncStatus, "in_progress"),
+      ),
+    )
+    .returning({ id: fieldpulseConnections.id });
+  return claimed.length > 0;
+}
 
-  if (status === "completed") {
-    updateData.lastAvailabilitySyncAt = new Date();
-    updateData.lastSyncError = null;
-  } else if (status === "failed" && error) {
-    updateData.lastSyncError = error;
-  }
-
+/**
+ * Mark the sync completed (clears any prior error). Best-effort.
+ */
+async function markCompleted(organizationId: string): Promise<void> {
   await db
     .update(fieldpulseConnections)
-    .set(updateData)
-    .where(
-      withTenant(fieldpulseConnections, organizationId),
-    );
+    .set({
+      availabilitySyncStatus: "completed",
+      lastAvailabilitySyncAt: new Date(),
+      lastSyncError: null,
+      updatedAt: new Date(),
+    })
+    .where(withTenant(fieldpulseConnections, organizationId));
 }
 
 /**
- * Check if a sync is already in progress for this org.
- *
- * Returns true if status is "in_progress", preventing concurrent syncs.
+ * Mark the sync failed with an error message. Wrapped so a DB error here can
+ * never escape the caller's catch and leave the org stuck "in_progress".
  */
-async function isSyncInProgress(
+async function safeMarkFailed(
   organizationId: string,
-): Promise<boolean> {
-  const [row] = await db
-    .select({ status: fieldpulseConnections.availabilitySyncStatus })
-    .from(fieldpulseConnections)
-    .where(
-      and(
-        withTenant(fieldpulseConnections, organizationId),
-        eq(fieldpulseConnections.connected, true),
-      ),
+  error: string,
+): Promise<void> {
+  try {
+    await db
+      .update(fieldpulseConnections)
+      .set({
+        availabilitySyncStatus: "failed",
+        lastSyncError: error,
+        updatedAt: new Date(),
+      })
+      .where(withTenant(fieldpulseConnections, organizationId));
+  } catch (markError: unknown) {
+    logger.error(
+      { organizationId, markError },
+      "Failed to record availability sync failure status",
     );
-
-  return row?.status === "in_progress";
+  }
 }
 
 /**
- * Map a Fieldpulse user ID to our internal technician ID.
- *
- * Since technicians are synced separately, we need to find the matching
- * user row by the fieldpulseUserId (stored in googleId column for technicians).
- * Returns null if no match is found.
+ * Resolve the synthetic Fieldpulse technician ids ("fp_<userId>") to our internal
+ * users.id in a SINGLE batched query. "fp_any" (no specific tech) has no mapping
+ * and is dropped. Only active technicians in the org are matched.
  */
-async function findTechnicianId(
+async function resolveTechnicianIds(
   organizationId: string,
-  fieldpulseUserId: string,
-): Promise<string | null> {
-  const [user] = await db
-    .select({ id: users.id })
+  syntheticIds: readonly string[],
+): Promise<Map<string, string>> {
+  const fieldpulseUserIds = syntheticIds
+    .filter((id) => id.startsWith("fp_") && id !== "fp_any")
+    .map((id) => id.slice("fp_".length));
+
+  const map = new Map<string, string>();
+  if (fieldpulseUserIds.length === 0) {
+    return map;
+  }
+
+  const rows = await db
+    .select({ id: users.id, fieldpulseUserId: users.googleId })
     .from(users)
     .where(
-      and(
-        withTenant(users, organizationId),
+      withTenant(
+        users,
+        organizationId,
         eq(users.role, "technician"),
-        eq(users.googleId, fieldpulseUserId), // Reuse googleId for fieldpulseUserId
         eq(users.isActive, true),
+        // googleId holds the fieldpulseUserId for synced technicians.
+        inArray(users.googleId, fieldpulseUserIds),
       ),
     );
 
-  return user?.id ?? null;
+  for (const row of rows) {
+    if (row.fieldpulseUserId) {
+      map.set(`fp_${row.fieldpulseUserId}`, row.id);
+    }
+  }
+  return map;
 }
 
 /**
- * Clear existing availability for a list of technicians.
- *
- * Called before inserting new availability to ensure we don't have stale
- * slots from previous syncs.
+ * Clear existing availability for the given technicians (delete-then-insert).
+ * Uses inArray so EVERY affected technician's stale rows are removed — not just
+ * the first.
  */
 async function clearAvailabilityForTechnicians(
   organizationId: string,
@@ -131,181 +161,131 @@ async function clearAvailabilityForTechnicians(
   if (technicianIds.length === 0) {
     return;
   }
-
   await db
     .delete(technicianAvailability)
     .where(
-      and(
-        withTenant(technicianAvailability, organizationId),
-        // technicianId is the FK to users.id
-        // We need to use eq() for each technician since drizzle doesn't have an 'in' helper
-        technicianIds.length > 0
-          ? eq(technicianAvailability.technicianId, technicianIds[0])
-          : eq(technicianAvailability.organizationId, ""), // Never matches, safe no-op
+      withTenant(
+        technicianAvailability,
+        organizationId,
+        inArray(technicianAvailability.technicianId, [...technicianIds]),
       ),
     );
 }
 
-/**
- * Upsert availability slots for technicians.
- *
- * For each recurring pattern, we insert a row into technician_availability.
- * Conflicts are handled by delete-then-insert pattern (clearAvailabilityForTechnicians
- * is called first), so no ON CONFLICT logic is needed here.
- */
-async function upsertAvailabilitySlots(
-  organizationId: string,
-  slots: readonly RecurringSlotPattern[],
-): Promise<number> {
-  let upserted = 0;
-
-  for (const slot of slots) {
-    // Skip slots without a valid technician ID prefix
-    if (!slot.technicianId.startsWith("fp_")) {
-      continue;
-    }
-
-    const fieldpulseUserId = slot.technicianId.replace("fp_", "");
-    const technicianId = await findTechnicianId(organizationId, fieldpulseUserId);
-
-    if (!technicianId) {
-      logger.warn(
-        { organizationId, fieldpulseUserId },
-        "Skipping availability for unknown Fieldpulse technician",
-      );
-      continue;
-    }
-
-    // Validate dayOfWeek and minute ranges
-    if (
-      slot.dayOfWeek < 0 ||
-      slot.dayOfWeek > 6 ||
-      slot.startMinute < 0 ||
-      slot.startMinute > 1440 ||
-      slot.endMinute < 0 ||
-      slot.endMinute > 1440 ||
-      slot.startMinute >= slot.endMinute
-    ) {
-      logger.warn(
-        { organizationId, slot },
-        "Skipping invalid availability slot",
-      );
-      continue;
-    }
-
-    await db.insert(technicianAvailability).values({
-      organizationId,
-      technicianId,
-      dayOfWeek: slot.dayOfWeek,
-      startMinute: slot.startMinute,
-      endMinute: slot.endMinute,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-
-    upserted++;
-  }
-
-  return upserted;
+/** A validated availability row ready to insert. */
+interface AvailabilityRow {
+  readonly organizationId: string;
+  readonly technicianId: string;
+  readonly dayOfWeek: number;
+  readonly startMinute: number;
+  readonly endMinute: number;
+  readonly createdAt: Date;
+  readonly updatedAt: Date;
 }
 
 /**
- * Sync technician availability from Fieldpulse.
+ * Sync technician availability from Fieldpulse. Best-effort + degrade-safe:
  *
- * This is the main entry point for availability sync. It:
- * 1. Checks if a sync is already in progress (returns early if so)
- * 2. Marks sync as in_progress
- * 3. Fetches availability from Fieldpulse
- * 4. Maps to our recurring format
- * 5. Clears existing slots for affected technicians
- * 6. Upserts new slots
- * 7. Marks sync as completed (or failed on error)
- *
- * Returns the sync result with count of synced slots.
- *
- * Degrade-safe: returns success=false with error details on any failure.
+ *  - No-ops (returns success:false) when org isn't connected.
+ *  - Claims the sync atomically; a concurrent sync returns "Sync already in
+ *    progress".
+ *  - Maps Fieldpulse's real bookable windows (NOT placeholders) to recurring
+ *    weekly slots, resolves technicians in one batched query, then
+ *    delete-then-inserts the affected technicians' slots.
+ *  - Any error transitions the org to "failed" (swallowed) and returns the
+ *    message — never throws.
  */
 export async function syncAvailabilityFromFieldpulse(
   organizationId: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<AvailabilitySyncResult> {
-  // Prevent concurrent syncs
-  if (await isSyncInProgress(organizationId)) {
-    return {
-      success: false,
-      synced: 0,
-      error: "Sync already in progress",
-    };
+  const client = await getFieldpulseClient(organizationId, fetchImpl);
+  if (!client) {
+    return { success: false, synced: 0, error: "Fieldpulse not connected" };
   }
 
+  // `claimed` lives outside the try so the catch knows whether WE took the
+  // "in_progress" lock. claimSync is INSIDE the try: if it writes the lock and
+  // then throws (e.g. a Neon transport error parsing the RETURNING), the catch
+  // still runs safeMarkFailed so the org can never get stuck "in_progress".
+  let claimed = false;
   try {
-    // Mark sync as in_progress
-    await updateSyncStatus(organizationId, "in_progress");
-
-    const client = await getFieldpulseClient(organizationId, fetchImpl);
-    if (!client) {
-      await updateSyncStatus(organizationId, "failed", "Fieldpulse not connected");
-      return {
-        success: false,
-        synced: 0,
-        error: "Fieldpulse not connected",
-      };
+    // Atomic claim — prevents two concurrent syncs from racing.
+    claimed = await claimSync(organizationId);
+    if (!claimed) {
+      return { success: false, synced: 0, error: "Sync already in progress" };
     }
 
-    // Fetch availability from Fieldpulse
-    // Note: Fieldpulse may not expose a dedicated availability endpoint.
-    // This assumes the endpoint exists; if not, the error handler will degrade.
-    const horizonStart = new Date().toISOString();
-    const horizonEnd = new Date(
-      Date.now() + FIELDPULSE_AVAILABILITY_HORIZON_DAYS * 24 * 60 * 60 * 1000,
-    ).toISOString();
+    const startMs = Date.now();
+    const range = {
+      startIso: new Date(startMs).toISOString(),
+      endIso: new Date(
+        startMs + FIELDPULSE_AVAILABILITY_HORIZON_DAYS * MS_PER_DAY,
+      ).toISOString(),
+    };
 
-    const fpAvailability = await client.listAvailability({
-      startIso: horizonStart,
-      endIso: horizonEnd,
-    });
+    const fpAvailability = await client.listAvailability(range);
 
-    // Convert to recurring patterns (if Fieldpulse returns bookable windows,
-    // we'll need to infer weekly patterns - this is a placeholder)
-    const recurringSlots = convertRecurringSlots(
-      fpAvailability.map((slot) => ({
-        userId: slot.userId,
-        dayOfWeek: 0, // Placeholder - actual implementation would extract from slot
-        startTime: "08:00", // Placeholder
-        endTime: "17:00", // Placeholder
-      })),
-    );
+    // Map Fieldpulse's ACTUAL windows to recurring weekly slots (day-of-week +
+    // minutes), dropping malformed ones — no placeholder times.
+    const mapped = mapFieldpulseAvailability(fpAvailability);
 
-    // Collect unique technician IDs
-    const techIds = new Set<string>();
-    for (const slot of recurringSlots) {
-      if (slot.technicianId.startsWith("fp_")) {
-        const fieldpulseUserId = slot.technicianId.replace("fp_", "");
-        const techId = await findTechnicianId(organizationId, fieldpulseUserId);
-        if (techId) {
-          techIds.add(techId);
-        }
-      }
-    }
-
-    // Clear existing availability for affected technicians
-    await clearAvailabilityForTechnicians(organizationId, Array.from(techIds));
-
-    // Upsert new availability slots
-    const synced = await upsertAvailabilitySlots(
+    // Resolve every referenced synthetic technician id in one query.
+    const technicianIdMap = await resolveTechnicianIds(
       organizationId,
-      recurringSlots,
+      mapped.technicanIds,
     );
 
-    // Mark sync as completed
-    await updateSyncStatus(organizationId, "completed");
+    const now = new Date();
+    const rows: AvailabilityRow[] = [];
+    for (const slot of mapped.slots) {
+      const technicianId = technicianIdMap.get(slot.technicianId);
+      if (!technicianId) {
+        // Unknown / unsynced Fieldpulse technician (or "fp_any") — skip.
+        continue;
+      }
+      // mapFieldpulseAvailability already validated start<end and ranges, but
+      // re-guard defensively before writing.
+      if (
+        slot.dayOfWeek < 0 ||
+        slot.dayOfWeek > 6 ||
+        slot.startMinute < 0 ||
+        slot.startMinute > 1440 ||
+        slot.endMinute < 0 ||
+        slot.endMinute > 1440 ||
+        slot.startMinute >= slot.endMinute
+      ) {
+        continue;
+      }
+      rows.push({
+        organizationId,
+        technicianId,
+        dayOfWeek: slot.dayOfWeek,
+        startMinute: slot.startMinute,
+        endMinute: slot.endMinute,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    const affectedTechnicianIds = Array.from(
+      new Set(rows.map((r) => r.technicianId)),
+    );
+
+    // Delete-then-insert for the affected technicians only.
+    await clearAvailabilityForTechnicians(organizationId, affectedTechnicianIds);
+    if (rows.length > 0) {
+      await db.insert(technicianAvailability).values(rows);
+    }
+
+    await markCompleted(organizationId);
 
     logger.info(
-      { organizationId, synced },
+      { organizationId, synced: rows.length },
       "Synced availability from Fieldpulse",
     );
 
-    return { success: true, synced };
+    return { success: true, synced: rows.length };
   } catch (error: unknown) {
     const errorMessage =
       error instanceof Error ? error.message : "Unknown error";
@@ -315,22 +295,19 @@ export async function syncAvailabilityFromFieldpulse(
       "Fieldpulse availability sync failed (degraded)",
     );
 
-    // Mark sync as failed with error details
-    await updateSyncStatus(organizationId, "failed", errorMessage);
+    // Only release the lock WE took. If claimSync itself threw, claimed may be
+    // false yet the lock could have been written before the throw — marking
+    // failed is still safe (a contending sync would have made claimSync return
+    // false, not throw, so we never clobber another in-progress run).
+    await safeMarkFailed(organizationId, errorMessage);
 
-    return {
-      success: false,
-      synced: 0,
-      error: errorMessage,
-    };
+    return { success: false, synced: 0, error: errorMessage };
   }
 }
 
 /**
- * Get the current sync status for an organization.
- *
- * Returns the status, last sync time, and last error (if any). Used by the
- * admin UI to display sync state.
+ * Get the current sync status for an organization. Used by the admin UI to
+ * display sync state, last sync time, and last error.
  */
 export async function getAvailabilitySyncStatus(
   organizationId: string,
@@ -359,6 +336,3 @@ export async function getAvailabilitySyncStatus(
     lastError: row?.lastError ?? null,
   };
 }
-
-// Import the constant from availability-mapping
-const FIELDPULSE_AVAILABILITY_HORIZON_DAYS = 14;

@@ -10,23 +10,30 @@
  * Fieldpulse. Idempotent via fieldpulseWebhookEvents table.
  */
 import { eq, and } from "drizzle-orm";
+import { z } from "zod";
 import { db } from "@/lib/db";
 import { serviceRequests } from "@/lib/db/schema";
 import { fieldpulseWebhookEvents } from "@/lib/db/schema";
 import { logger } from "@/lib/logger";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { errorResponse } from "@/lib/api-response";
+import { getFieldpulseWebhookSecret } from "@/lib/integrations/fieldpulse/config";
+import {
+  verifySignature,
+  isReplayTimestamp,
+} from "@/lib/integrations/fieldpulse/webhook-signature";
 import type { NextRequest } from "next/server";
 
 /**
- * Expected invoice webhook envelope from Fieldpulse.
+ * Expected invoice webhook envelope from Fieldpulse. We DO NOT trust an
+ * organizationId from the payload — it is derived from the jobId lookup.
  */
-const invoiceWebhookSchema = {
-  id: "string", // Event id for idempotency
-  eventType: "string", // invoice.sent, invoice.paid, invoice.voided
-  jobId: "string", // The Fieldpulse job id
-  // May include invoice number, amount, etc.
-};
+const invoiceWebhookSchema = z.object({
+  id: z.string(), // Event id for idempotency
+  eventType: z.string(), // invoice.sent, invoice.paid, invoice.voided
+  jobId: z.string(), // The Fieldpulse job id
+  timestamp: z.union([z.number(), z.string()]).optional(), // for replay guard
+});
 
 /**
  * Map Fieldpulse invoice event types to our invoice status enum.
@@ -70,22 +77,17 @@ export async function POST(request: NextRequest): Promise<Response> {
       return errorResponse("Invalid request", "INVALID_REQUEST", 400);
     }
 
-    // Basic validation (in production, use zod schema)
-    if (
-      typeof body !== "object" ||
-      body === null ||
-      !("id" in body) ||
-      !("eventType" in body) ||
-      !("jobId" in body)
-    ) {
+    const parsed = invoiceWebhookSchema.safeParse(body);
+    if (!parsed.success) {
       return errorResponse("Invalid request", "INVALID_REQUEST", 400);
     }
+    const { id: eventId, eventType, jobId, timestamp } = parsed.data;
 
-    const { id: eventId, eventType, jobId } = body as {
-      id: string;
-      eventType: string;
-      jobId: string;
-    };
+    // Replay protection (absent/odd timestamps tolerated; ledger stops dupes).
+    if (isReplayTimestamp(timestamp)) {
+      logger.warn({ eventId, eventType }, "Fieldpulse invoice webhook rejected: stale timestamp");
+      return errorResponse("Stale request", "STALE_REQUEST", 401);
+    }
 
     // Look up the service request to get orgId
     const [requestRow] = await db
@@ -112,6 +114,24 @@ export async function POST(request: NextRequest): Promise<Response> {
     );
     if (!rateCheck.allowed) {
       return errorResponse("Too many requests", "RATE_LIMITED", 429);
+    }
+
+    // SECURITY: verify the HMAC signature against the org's secret (per-org,
+    // env fallback). Without this, anyone could forge invoice.paid events and
+    // flip billing state. Fail-closed when a secret is configured.
+    //
+    // KNOWN TRADEOFF: runs after the jobId lookup (per-org secret needs the org
+    // derived from that lookup), leaving a narrow 401-vs-200 job-id enumeration
+    // oracle. Accepted — no state change occurs without a valid signature.
+    const signature = request.headers.get("x-fieldpulse-signature");
+    const secret = await getFieldpulseWebhookSecret(organizationId);
+    const signatureResult = verifySignature(rawBody, signature, secret);
+    if (!signatureResult.valid) {
+      logger.warn(
+        { organizationId, eventId, reason: signatureResult.reason },
+        "Fieldpulse invoice webhook signature verification failed",
+      );
+      return errorResponse("Invalid signature", "INVALID_SIGNATURE", 401);
     }
 
     // Idempotency check

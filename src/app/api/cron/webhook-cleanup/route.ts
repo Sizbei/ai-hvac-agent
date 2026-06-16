@@ -18,6 +18,7 @@ import { db } from "@/lib/db";
 import { hcpWebhookEvents, fieldpulseWebhookEvents } from "@/lib/db/schema";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { logger } from "@/lib/logger";
+import { verifyCronAuth } from "@/lib/cron-auth";
 
 interface CleanupSummary {
   readonly purgedHcpEvents: number;
@@ -48,8 +49,8 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const authHeader = request.headers.get("authorization");
-  if (!authHeader || authHeader !== `Bearer ${cronSecret}`) {
+  // Timing-safe Bearer comparison (constant-time; no char-by-char leak).
+  if (!verifyCronAuth(request.headers.get("authorization"))) {
     return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
   }
 

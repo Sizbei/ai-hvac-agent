@@ -85,6 +85,7 @@ export interface UpdateJobInput {
   readonly scheduleStart?: string;
   readonly scheduleEnd?: string;
   readonly assignedUserId?: string;
+  readonly workStatus?: string; // e.g. "en_route", "in_progress", "completed"
 }
 
 /** Query to find an existing customer (by email or phone). */

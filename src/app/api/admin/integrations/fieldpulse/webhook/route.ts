@@ -39,9 +39,10 @@ import { logger } from "@/lib/logger";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { errorResponse } from "@/lib/api-response";
 import { syncInvoiceStatus } from "@/lib/integrations/fieldpulse/invoice-sync";
+import { getFieldpulseWebhookSecret } from "@/lib/integrations/fieldpulse/config";
 import {
   verifySignature,
-  getVerificationReason,
+  isReplayTimestamp,
   type SignatureVerificationResult,
 } from "@/lib/integrations/fieldpulse/webhook-signature";
 
@@ -54,8 +55,13 @@ const webhookSchema = z.object({
   eventType: z.string(), // e.g., "job.status_updated", "invoice.sent"
   jobId: z.string().optional(), // The Fieldpulse job id (for job/invoice events)
   invoiceId: z.string().optional(), // The invoice id (for invoice events)
-  // NOTE: Fieldpulse may send additional fields (timestamp, payload, etc.)
-  // that we can ignore for now. We DO NOT trust organizationId from the payload.
+  // The new work status for job events. Preferred over deriving from eventType
+  // (a "job.status_updated" eventType carries no status itself).
+  status: z.string().optional(),
+  workStatus: z.string().optional(),
+  // Optional event timestamp (epoch s/ms or ISO) for replay protection.
+  timestamp: z.union([z.number(), z.string()]).optional(),
+  // NOTE: We DO NOT trust organizationId from the payload.
 });
 
 /**
@@ -83,7 +89,7 @@ function verifyWebhookSignature(
  */
 function mapFieldpulseStatusToRequestStatus(
   fieldpulseStatus: string,
-): "pending" | "assigned" | "scheduled" | "in_progress" | "on_hold" | "completed" | "cancelled" {
+): "pending" | "assigned" | "scheduled" | "in_progress" | "on_hold" | "completed" | "cancelled" | null {
   const normalized = fieldpulseStatus.toLowerCase();
   switch (normalized) {
     case "pending":
@@ -113,12 +119,13 @@ function mapFieldpulseStatusToRequestStatus(
     case "void":
       return "cancelled";
     default:
-      // Log WARN for unknown statuses - may need mapping update
+      // Unknown status — return null so the caller SKIPS rather than
+      // destructively resetting the request to "pending".
       logger.warn(
         { fieldpulseStatus },
-        "Unknown Fieldpulse status, defaulting to pending",
+        "Unknown Fieldpulse status, skipping status update",
       );
-      return "pending";
+      return null;
   }
 }
 
@@ -143,7 +150,15 @@ export async function POST(request: NextRequest): Promise<Response> {
       return errorResponse("Invalid request", "INVALID_REQUEST", 400);
     }
 
-    const { id: eventId, eventType, jobId, invoiceId } = parsed.data;
+    const { id: eventId, eventType, jobId, invoiceId, timestamp } = parsed.data;
+
+    // Replay protection: reject events whose timestamp is well outside the
+    // allowed window (absent/odd timestamps are tolerated — the idempotency
+    // ledger still stops exact duplicates).
+    if (isReplayTimestamp(timestamp)) {
+      logger.warn({ eventId, eventType }, "Fieldpulse webhook rejected: stale timestamp");
+      return errorResponse("Stale request", "STALE_REQUEST", 401);
+    }
 
     // Determine event type: job status or invoice
     const isInvoiceEvent = eventType.startsWith("invoice.");
@@ -197,9 +212,17 @@ export async function POST(request: NextRequest): Promise<Response> {
       return errorResponse("Too many requests", "RATE_LIMITED", 429);
     }
 
-    // Verify signature if secret is configured
+    // Verify signature against the org's OWN secret (decrypted), falling back to
+    // the global env secret — not the env secret alone, which would ignore a
+    // per-org secret configured at connect time.
+    //
+    // KNOWN TRADEOFF: signature verification runs AFTER the jobId lookup because
+    // the per-org secret is keyed on the org we derive from that lookup. This
+    // leaves a narrow job-id enumeration oracle (401 vs 200) for unauthenticated
+    // callers. Accepted: job ids are low-value, and the idempotency ledger +
+    // replay guard prevent any state change without a valid signature.
     const signature = request.headers.get("x-fieldpulse-signature");
-    const secret = process.env.FIELDPULSE_WEBHOOK_SECRET ?? null;
+    const secret = await getFieldpulseWebhookSecret(organizationId);
     const signatureResult = verifyWebhookSignature(rawBody, signature, secret);
 
     if (!signatureResult.valid) {
@@ -274,8 +297,20 @@ export async function POST(request: NextRequest): Promise<Response> {
       return new Response(null, { status: 200 });
     }
 
-    // Handle job status events
-    const newStatus = mapFieldpulseStatusToRequestStatus(eventType);
+    // Handle job status events. Prefer the explicit status field from the
+    // payload; the eventType (e.g. "job.status_updated") carries no status. If
+    // neither yields a known status, SKIP rather than reset the request.
+    const rawStatus =
+      parsed.data.status ?? parsed.data.workStatus ?? eventType;
+    const newStatus = mapFieldpulseStatusToRequestStatus(rawStatus);
+
+    if (newStatus === null) {
+      logger.info(
+        { eventId, eventType, jobId },
+        "Fieldpulse webhook: no mappable job status, skipping",
+      );
+      return new Response(null, { status: 200 });
+    }
 
     // SECURITY: Only update if status is different (no-op guard)
     if (requestRow.status === newStatus) {
