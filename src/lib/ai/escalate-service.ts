@@ -77,13 +77,19 @@ export async function escalateSession(params: {
   logger.info({ sessionId }, "Session escalated to human");
 
   // Stage 3: AI summary + outcome for the escalated conversation (background).
-  after(() =>
-    summarizeAndClassifySession({
-      organizationId,
-      sessionId,
-      definiteOutcome: "escalated",
-    }),
-  );
+  // Guarded: escalateSession is always called from a request handler in prod
+  // (after() is available), but tolerate being invoked outside a request scope.
+  try {
+    after(() =>
+      summarizeAndClassifySession({
+        organizationId,
+        sessionId,
+        definiteOutcome: "escalated",
+      }),
+    );
+  } catch {
+    // No request scope (e.g. a direct/unit call) — skip the background summary.
+  }
 
   return { ok: true };
 }

@@ -274,6 +274,13 @@
       "when": 1781518272000,
       "tag": "0038_session_summaries",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1781518273000,
+      "tag": "0039_voice_transfer",
+      "breakpoints": true
     }
   ]
 }

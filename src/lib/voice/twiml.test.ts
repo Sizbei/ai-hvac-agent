@@ -3,6 +3,7 @@ import {
   gatherTwiML,
   hangupTwiML,
   sayThenHangupTwiML,
+  dialThenHangupTwiML,
   DEFAULT_VOICE,
   type VoiceMode,
 } from "./twiml";
@@ -165,5 +166,35 @@ describe("hangupTwiML", () => {
     const xml = hangupTwiML();
     expect(xml).toContain("<Response>");
     expect(xml).toContain("<Hangup/>");
+  });
+});
+
+describe("dialThenHangupTwiML (Stage 2 warm transfer)", () => {
+  it("emits a <Dial> to the number, a fallback line, and a hangup", () => {
+    const xml = dialThenHangupTwiML({
+      say: "Connecting you to a team member.",
+      number: "+15551234567",
+      fallback: "No one is available; we'll call you back.",
+    });
+    expect(xml).toContain("<Dial");
+    expect(xml).toContain("+15551234567");
+    expect(xml).toContain("<Hangup/>");
+    // Both the hand-off line and the no-answer fallback are spoken.
+    expect(xml).toContain("Connecting you");
+    expect(xml).toContain("call you back");
+    // Order: say -> dial -> fallback -> hangup.
+    expect(xml.indexOf("Connecting you")).toBeLessThan(xml.indexOf("<Dial"));
+    expect(xml.indexOf("<Dial")).toBeLessThan(xml.indexOf("call you back"));
+    expect(xml.indexOf("call you back")).toBeLessThan(xml.indexOf("<Hangup/>"));
+  });
+
+  it("XML-escapes the dialed number", () => {
+    const xml = dialThenHangupTwiML({
+      say: "x",
+      number: "+1<bad>",
+      fallback: "y",
+    });
+    expect(xml).not.toContain("<bad>");
+    expect(xml).toContain("&lt;bad&gt;");
   });
 });

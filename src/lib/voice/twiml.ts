@@ -137,6 +137,29 @@ export function sayThenHangupTwiML(
 </Response>`;
 }
 
+/**
+ * Warm transfer: speak a hand-off line, <Dial> a human, and if no one answers
+ * (Dial returns control), speak a fallback line and hang up. `timeoutSeconds`
+ * bounds the ring before falling through. Used to escalate a voice call to a
+ * real person instead of dead-air-hanging-up (Stage 2).
+ */
+export function dialThenHangupTwiML(params: {
+  readonly say: string;
+  readonly number: string;
+  readonly fallback: string;
+  readonly voice?: VoiceMode;
+  readonly timeoutSeconds?: number;
+}): string {
+  const { say, number, fallback, voice = POLLY_VOICE, timeoutSeconds = 25 } = params;
+  return `${XML_DECL}
+<Response>
+  ${speak(say, voice)}
+  <Dial timeout="${timeoutSeconds}">${escapeXml(number)}</Dial>
+  ${speak(fallback, voice)}
+  <Hangup/>
+</Response>`;
+}
+
 /** Bare hang-up (e.g. unrecoverable error). */
 export function hangupTwiML(): string {
   return `${XML_DECL}

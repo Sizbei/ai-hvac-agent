@@ -711,6 +711,55 @@ export async function placeAndAssignRequest(
   };
 }
 
+/**
+ * Stage 2 — auto-assign a freshly-booked request to the first available
+ * technician for its held window. Iterates active technicians, delegating the
+ * conflict + availability gate to placeAndAssignRequest (which writes assignedTo
+ * on success). On a conflict it tries the next tech; on any other failure it
+ * stops. Best-effort: returns {assigned:false} when nobody fits, leaving the
+ * soft-held window for a dispatcher. Designed to run in after() (off the
+ * latency-bound voice/chat turn).
+ */
+export async function autoAssignBookedRequest(
+  organizationId: string,
+  requestId: string,
+  heldSlot: {
+    readonly start: Date;
+    readonly end: Date;
+    readonly isoDay: string;
+    readonly window: ArrivalWindow;
+  },
+): Promise<{ readonly assigned: boolean; readonly technicianId?: string }> {
+  const techs = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(
+      withTenant(
+        users,
+        organizationId,
+        and(eq(users.role, "technician"), eq(users.isActive, true))!,
+      ),
+    );
+
+  for (const tech of techs) {
+    const result = await placeAndAssignRequest(
+      organizationId,
+      requestId,
+      { start: heldSlot.start, end: heldSlot.end },
+      { isoDay: heldSlot.isoDay, window: heldSlot.window, technicianId: tech.id },
+    );
+    if (result.ok) {
+      return { assigned: true, technicianId: tech.id };
+    }
+    // A conflict just means this tech is busy — try the next. Any other failure
+    // (request moved on / terminal) means stop.
+    if (result.reason !== "conflict") {
+      break;
+    }
+  }
+  return { assigned: false };
+}
+
 /** Row → ScheduledJob. Windows are non-null in every query that uses this
  * EXCEPT listUnscheduledRequests, where an unplaced request legitimately has a
  * null window — surface that as null rather than a bogus epoch date. */

@@ -1,6 +1,6 @@
 import { NextRequest, after } from "next/server";
 import { db } from "@/lib/db";
-import { customerSessions, messages } from "@/lib/db/schema";
+import { customerSessions, messages, organizationSettings } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { withTenant } from "@/lib/db/tenant";
 import { isTerminalState, type SessionState } from "@/lib/ai/state-machine";
@@ -12,6 +12,7 @@ import { parseAndVerifyTwilioRequest, resolveVoiceMode } from "@/lib/voice/reque
 import {
   gatherTwiML,
   sayThenHangupTwiML,
+  dialThenHangupTwiML,
   hangupTwiML,
   TWIML_HEADERS,
 } from "@/lib/voice/twiml";
@@ -129,6 +130,29 @@ export async function POST(request: NextRequest) {
     });
 
     if (result.endCall) {
+      // Stage 2: warm-transfer an ESCALATED call to a human via <Dial> when a
+      // transfer number is configured — instead of just hanging up. Falls back
+      // to a spoken message + hangup when no number is set or no one answers.
+      if (result.nextState === "escalated") {
+        const [orgRow] = await db
+          .select({ voiceTransferNumber: organizationSettings.voiceTransferNumber })
+          .from(organizationSettings)
+          .where(eq(organizationSettings.organizationId, organizationId))
+          .limit(1);
+        const transferNumber = orgRow?.voiceTransferNumber?.trim();
+        if (transferNumber) {
+          return new Response(
+            dialThenHangupTwiML({
+              say: result.reply,
+              number: transferNumber,
+              fallback:
+                "I'm sorry, no one is available right now. We'll call you back as soon as possible.",
+              voice,
+            }),
+            { headers: TWIML_HEADERS },
+          );
+        }
+      }
       return new Response(sayThenHangupTwiML(result.reply, voice), {
         headers: TWIML_HEADERS,
       });

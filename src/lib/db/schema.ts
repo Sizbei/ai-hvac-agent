@@ -847,6 +847,12 @@ export const organizationSettings = pgTable("organization_settings", {
   // fee is stored — the charge depends on the actual work performed.
   afterHoursConfig: jsonb("after_hours_config").$type<Record<string, unknown>>(),
 
+  // ── Voice warm transfer (Stage 2) ──
+  // E.164 number the voice agent <Dial>s when a call escalates to a human. NULL
+  // = no human leg configured; an escalated call falls back to a spoken message
+  // + async escalation (the prior hangup behavior).
+  voiceTransferNumber: text("voice_transfer_number"),
+
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),

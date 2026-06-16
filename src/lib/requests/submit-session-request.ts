@@ -52,6 +52,7 @@ import {
 } from "@/lib/admin/capacity-hold";
 import { pushJobToHcp } from "@/lib/integrations/housecall-pro/job-sync";
 import { pushJobToFieldpulse } from "@/lib/integrations/fieldpulse/job-sync";
+import type { ArrivalWindow } from "@/lib/admin/arrival-window";
 import { recordCustomerEquipment } from "@/lib/admin/crm-equipment-queries";
 import { buildEquipmentFromIntake } from "@/lib/admin/equipment-from-intake";
 import { logger } from "@/lib/logger";
@@ -303,6 +304,45 @@ export async function submitSessionServiceRequest(params: {
   // the job) which keeps it idempotent.
   after(() => pushJobToHcp(organizationId, serviceRequest.id));
   after(() => pushJobToFieldpulse(organizationId, serviceRequest.id));
+
+  // Stage 2: when we held a CONCRETE window, auto-assign a technician in the
+  // background (placeAndAssignRequest runs a conflict check — too slow for the
+  // latency-bound voice/chat turn, so it runs in after()). A booking thus lands
+  // fully dispatched (window + tech), not in the unassigned pile. Degrade-safe:
+  // if nobody fits, the soft-held window stands for a dispatcher.
+  if (heldSlot) {
+    after(async () => {
+      try {
+        // Dynamic import keeps scheduling-queries (and its request-status /
+        // schema-enum chain) off the module-load path — only loaded when a
+        // booking actually runs.
+        const { autoAssignBookedRequest } = await import(
+          "@/lib/admin/scheduling-queries"
+        );
+        const result = await autoAssignBookedRequest(
+          organizationId,
+          serviceRequest.id,
+          {
+            start: heldSlot.startUtc,
+            end: heldSlot.endUtc,
+            isoDay: heldSlot.day,
+            window: heldSlot.window as ArrivalWindow,
+          },
+        );
+        if (!result.assigned) {
+          logger.info(
+            { serviceRequestId: serviceRequest.id },
+            "Auto-assign found no available tech — left soft-held for dispatcher",
+          );
+        }
+      } catch (assignErr) {
+        logger.error(
+          { error: assignErr, serviceRequestId: serviceRequest.id },
+          "Auto-assign failed (non-fatal) — soft-held window stands",
+        );
+      }
+    });
+  }
 
   // Stage 3: AI summary + outcome for this (now booked) conversation.
   after(() =>
