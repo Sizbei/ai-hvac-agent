@@ -28,6 +28,8 @@ export interface EstimateOptionInput {
     readonly name: string;
     readonly quantity: number;
     readonly unitPriceCents: number;
+    /** Cost snapshot at quote time (0 for manual lines). Used for margin later. */
+    readonly costCents?: number;
   }>;
 }
 
@@ -73,6 +75,7 @@ export async function createEstimate(
     name: string;
     quantity: number;
     unitPriceCents: number;
+    costCents: number;
     lineTotalCents: number;
   }> = [];
 
@@ -95,6 +98,7 @@ export async function createEstimate(
         name: li.name,
         quantity: li.quantity,
         unitPriceCents: li.unitPriceCents,
+        costCents: li.costCents ?? 0,
         // Use the SAME helper that feeds option/invoice totals so the stored
         // per-line value can't diverge from the rolled-up subtotal.
         lineTotalCents: lineTotalCents(li),
@@ -237,6 +241,8 @@ export interface EstimateLineItemView {
   readonly name: string;
   readonly quantity: number;
   readonly unitPriceCents: number;
+  /** Snapshotted cost (ADMIN-ONLY — never exposed on the public approval read). */
+  readonly costCents: number;
   readonly lineTotalCents: number;
 }
 
@@ -267,10 +273,15 @@ export interface EstimateDetailView {
 /**
  * Group an estimate's options + their line items into the nested view shape.
  * Shared by the admin detail read and the public approval read.
+ *
+ * `includeCost` gates the SENSITIVE snapshotted cost: it is fetched ONLY for the
+ * admin detail read. The public approval read passes false (the default) so cost
+ * never reaches a customer-facing surface. When false, costCents is reported as 0.
  */
 async function loadOptionsWithLineItems(
   organizationId: string,
   estimateId: string,
+  includeCost = false,
 ): Promise<EstimateOptionView[]> {
   const optionRows = await db
     .select({
@@ -302,6 +313,7 @@ async function loadOptionsWithLineItems(
       name: estimateLineItems.name,
       quantity: estimateLineItems.quantity,
       unitPriceCents: estimateLineItems.unitPriceCents,
+      costCents: estimateLineItems.costCents,
       lineTotalCents: estimateLineItems.lineTotalCents,
     })
     .from(estimateLineItems)
@@ -323,6 +335,8 @@ async function loadOptionsWithLineItems(
       name: l.name,
       quantity: l.quantity,
       unitPriceCents: l.unitPriceCents,
+      // Cost is zeroed unless the caller is the admin detail read.
+      costCents: includeCost ? l.costCents : 0,
       lineTotalCents: l.lineTotalCents,
     };
     if (bucket) bucket.push(view);
@@ -356,7 +370,8 @@ export async function getEstimateDetailById(
 
   if (!est) return null;
 
-  const options = await loadOptionsWithLineItems(organizationId, est.id);
+  // Admin detail: include snapshotted cost so the UI can show margin.
+  const options = await loadOptionsWithLineItems(organizationId, est.id, true);
   return { ...est, options };
 }
 

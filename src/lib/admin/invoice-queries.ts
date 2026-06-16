@@ -6,7 +6,7 @@
  * first-class (a half-built payments path breaks on the first chargeback).
  */
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   estimates,
@@ -78,6 +78,7 @@ export async function createInvoiceFromSoldEstimate(
       name: estimateLineItems.name,
       quantity: estimateLineItems.quantity,
       unitPriceCents: estimateLineItems.unitPriceCents,
+      costCents: estimateLineItems.costCents,
       lineTotalCents: estimateLineItems.lineTotalCents,
     })
     .from(estimateLineItems)
@@ -293,6 +294,182 @@ export async function refundPayment(
 }
 
 // ---------------------------------------------------------------------------
+// Reconciliation — heal stranded payments.
+//
+// takePayment records a payment as 'pending', calls the provider, THEN flips it
+// to 'succeeded' + advances the invoice in a 2-statement db.batch. On neon-http
+// db.batch is SEQUENTIAL, not a transaction: if the provider succeeded but the
+// batch failed (or the lambda died), the payment is stranded at 'pending' with
+// money possibly moved and no local record of success. Reconciliation re-asks
+// the provider for the true charge status (via getCharge, keyed by paymentId)
+// and completes or fails the stranded payment idempotently.
+// ---------------------------------------------------------------------------
+
+export interface StuckPaymentRow {
+  readonly id: string;
+  readonly invoiceId: string;
+  readonly amountCents: number;
+  readonly createdAt: Date;
+}
+
+/**
+ * Payments stuck at status='pending' older than `olderThanMs` (default 2 min).
+ * The age cutoff avoids racing a charge that is legitimately still in flight in
+ * takePayment. Tenant-scoped.
+ */
+export async function listStuckPayments(
+  organizationId: string,
+  olderThanMs = 120000,
+): Promise<StuckPaymentRow[]> {
+  const cutoff = new Date(Date.now() - olderThanMs);
+  return db
+    .select({
+      id: payments.id,
+      invoiceId: payments.invoiceId,
+      amountCents: payments.amountCents,
+      createdAt: payments.createdAt,
+    })
+    .from(payments)
+    .where(
+      withTenant(
+        payments,
+        organizationId,
+        eq(payments.status, "pending"),
+        lt(payments.createdAt, cutoff),
+      ),
+    )
+    .orderBy(asc(payments.createdAt));
+}
+
+export type ReconcileResult =
+  | { readonly ok: true; readonly outcome: "completed"; readonly invoiceState: string }
+  | { readonly ok: true; readonly outcome: "noop" }
+  | { readonly ok: true; readonly outcome: "failed_marked" }
+  | { readonly ok: false; readonly reason: "payment_not_found" | "not_pending" };
+
+/**
+ * Reconcile a single stranded payment against the provider's true charge status.
+ * - succeeded -> complete exactly what takePayment's success path does
+ *   (payment->succeeded + recompute invoice amountPaidCents/state via db.batch),
+ *   all tenant-scoped. Idempotent: re-reads and only writes while still 'pending'.
+ * - failed -> mark the payment failed (no money moved).
+ * The provider is injectable for tests.
+ */
+export async function reconcilePayment(
+  organizationId: string,
+  paymentId: string,
+  provider: PaymentProvider = getPaymentProvider(),
+): Promise<ReconcileResult> {
+  const [pay] = await db
+    .select({
+      id: payments.id,
+      invoiceId: payments.invoiceId,
+      amountCents: payments.amountCents,
+      status: payments.status,
+    })
+    .from(payments)
+    .where(withTenant(payments, organizationId, eq(payments.id, paymentId)))
+    .limit(1);
+  if (!pay) return { ok: false, reason: "payment_not_found" };
+  // Idempotency: only a still-'pending' payment can be reconciled. If a concurrent
+  // reconcile (or a late-landing original batch) already resolved it, no-op.
+  if (pay.status !== "pending") return { ok: false, reason: "not_pending" };
+
+  // takePayment used paymentId as the createCharge idempotencyKey.
+  const charge = await provider.getCharge(paymentId);
+
+  if (charge.status === "failed") {
+    await db
+      .update(payments)
+      .set({ status: "failed", updatedAt: new Date() })
+      .where(withTenant(payments, organizationId, eq(payments.id, paymentId)));
+    return { ok: true, outcome: "failed_marked" };
+  }
+
+  // Provider still 'pending' on its side: leave it for a later sweep rather than
+  // guessing. (The mock never returns this; a real adapter might mid-auth.)
+  if (charge.status !== "succeeded") {
+    return { ok: true, outcome: "noop" };
+  }
+
+  // Re-read the invoice (tenant-scoped) to recompute paid amount/state the same
+  // way takePayment's success path does.
+  const [inv] = await db
+    .select({
+      totalCents: invoices.totalCents,
+      amountPaidCents: invoices.amountPaidCents,
+    })
+    .from(invoices)
+    .where(withTenant(invoices, organizationId, eq(invoices.id, pay.invoiceId)))
+    .limit(1);
+  if (!inv) {
+    // Invoice vanished (e.g. cascade-deleted): mark the orphan charge succeeded so
+    // it stops being "stuck", but don't fabricate an invoice update.
+    await db
+      .update(payments)
+      .set({
+        status: "succeeded",
+        providerPaymentId: charge.providerPaymentId,
+        updatedAt: new Date(),
+      })
+      .where(withTenant(payments, organizationId, eq(payments.id, paymentId)));
+    return { ok: true, outcome: "completed", invoiceState: "unknown" };
+  }
+
+  const newPaid = inv.amountPaidCents + pay.amountCents;
+  const invoiceState = newPaid >= inv.totalCents ? "paid" : "open";
+  await db.batch([
+    db
+      .update(payments)
+      .set({
+        status: "succeeded",
+        providerPaymentId: charge.providerPaymentId,
+        updatedAt: new Date(),
+      })
+      .where(withTenant(payments, organizationId, eq(payments.id, paymentId))),
+    db
+      .update(invoices)
+      .set({ amountPaidCents: newPaid, state: invoiceState, updatedAt: new Date() })
+      .where(withTenant(invoices, organizationId, eq(invoices.id, pay.invoiceId))),
+  ]);
+
+  return { ok: true, outcome: "completed", invoiceState };
+}
+
+export interface ReconcileSweepSummary {
+  readonly scanned: number;
+  readonly completed: number;
+  readonly failed: number;
+  readonly noop: number;
+}
+
+/**
+ * Sweep an org's stuck payments and reconcile each. Returns a count summary.
+ * Per-payment errors are swallowed (counted as noop) so one bad row doesn't
+ * abort the sweep.
+ */
+export async function reconcileOrgPendingPayments(
+  organizationId: string,
+  provider: PaymentProvider = getPaymentProvider(),
+): Promise<ReconcileSweepSummary> {
+  const stuck = await listStuckPayments(organizationId);
+  let completed = 0;
+  let failed = 0;
+  let noop = 0;
+  for (const p of stuck) {
+    try {
+      const r = await reconcilePayment(organizationId, p.id, provider);
+      if (r.ok && r.outcome === "completed") completed++;
+      else if (r.ok && r.outcome === "failed_marked") failed++;
+      else noop++;
+    } catch {
+      noop++;
+    }
+  }
+  return { scanned: stuck.length, completed, failed, noop };
+}
+
+// ---------------------------------------------------------------------------
 // Read queries for the admin UI (list + detail). No behavior change to the
 // mutations above — these are tenant-scoped reads only.
 // ---------------------------------------------------------------------------
@@ -331,6 +508,8 @@ export interface InvoiceLineItemView {
   readonly name: string;
   readonly quantity: number;
   readonly unitPriceCents: number;
+  /** Snapshotted cost (ADMIN-ONLY — invoices are not customer-facing here). */
+  readonly costCents: number;
   readonly lineTotalCents: number;
 }
 
@@ -398,6 +577,7 @@ export async function getInvoiceDetailById(
       name: invoiceLineItems.name,
       quantity: invoiceLineItems.quantity,
       unitPriceCents: invoiceLineItems.unitPriceCents,
+      costCents: invoiceLineItems.costCents,
       lineTotalCents: invoiceLineItems.lineTotalCents,
     })
     .from(invoiceLineItems)

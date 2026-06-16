@@ -23,6 +23,7 @@ import {
   Plug,
   FileText,
   Receipt,
+  TrendingUp,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -77,6 +78,7 @@ const NAV_GROUPS: readonly NavGroup[] = [
       { label: 'Pricebook', href: '/admin/pricebook', icon: Tags },
       { label: 'Estimates', href: '/admin/estimates', icon: FileText },
       { label: 'Invoices', href: '/admin/invoices', icon: Receipt },
+      { label: 'Reports', href: '/admin/reports', icon: TrendingUp },
       { label: 'Chatbot Settings', href: '/admin/settings', icon: Settings },
       { label: 'Communications', href: '/admin/communications/templates', icon: MessageSquare },
       { label: 'Audit Log', href: '/admin/audit-log', icon: ScrollText },

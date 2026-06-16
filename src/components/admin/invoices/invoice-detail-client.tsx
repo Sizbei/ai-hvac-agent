@@ -9,12 +9,14 @@ import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { InvoiceStateBadge } from '@/components/admin/invoices/invoice-state-badge';
 import { formatCentsExact, parseDollarsToCents } from '@/lib/admin/money-format';
+import { rollUpMargin } from '@/lib/admin/margin';
 
 interface LineItem {
   readonly id: string;
   readonly name: string;
   readonly quantity: number;
   readonly unitPriceCents: number;
+  readonly costCents: number;
   readonly lineTotalCents: number;
 }
 interface Refund {
@@ -194,6 +196,9 @@ export function InvoiceDetailClient({
   const balance = invoice.totalCents - invoice.amountPaidCents;
   const isChargeable =
     (invoice.state === 'open' || invoice.state === 'draft') && balance > 0;
+  // Margin is line revenue vs snapshotted line cost (excludes tax — tax is not
+  // revenue). Internal/admin-only readout.
+  const margin = rollUpMargin(invoice.lineItems);
 
   return (
     <div className="p-6 space-y-6">
@@ -283,6 +288,32 @@ export function InvoiceDetailClient({
               <span>Balance</span>
               <span className={balance > 0 ? 'text-amber-700' : undefined}>
                 {formatCentsExact(balance)}
+              </span>
+            </div>
+          </div>
+
+          {/* Internal margin readout (admin-only; subordinate styling). */}
+          <div className="mt-3 rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+            <div className="mb-1 text-[10px] font-medium uppercase tracking-wide">
+              Margin (internal)
+            </div>
+            <div className="flex justify-between">
+              <span>Revenue</span>
+              <span className="tabular-nums">
+                {formatCentsExact(margin.revenueCents)}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span>Cost</span>
+              <span className="tabular-nums">
+                {formatCentsExact(margin.costCents)}
+              </span>
+            </div>
+            <div className="flex justify-between font-medium text-foreground">
+              <span>Margin</span>
+              <span className="tabular-nums">
+                {formatCentsExact(margin.marginCents)} (
+                {(margin.marginPct * 100).toFixed(1)}%)
               </span>
             </div>
           </div>

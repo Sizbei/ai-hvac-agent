@@ -3,6 +3,7 @@ import {
   takePayment,
   listInvoices,
   getInvoiceDetailById,
+  reconcilePayment,
 } from "./invoice-queries";
 import { db } from "@/lib/db";
 import { MockPaymentProvider } from "@/lib/payments/provider";
@@ -308,5 +309,72 @@ describe("getInvoiceDetailById", () => {
     expect(result?.payments[0].refunds[0]).toEqual(
       expect.objectContaining({ amountCents: 1000, reason: "customer_request" }),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Reconciliation — heal stranded 'pending' payments
+// ---------------------------------------------------------------------------
+
+describe("reconcilePayment", () => {
+  beforeEach(() => {
+    vi.mocked(db.insert).mockReturnValue({
+      values: vi.fn().mockResolvedValue(undefined),
+    } as never);
+  });
+
+  it("completes a stranded 'pending' payment when the provider says succeeded", async () => {
+    mockSelectSeq([
+      // 1) the stuck payment (still pending)
+      [{ id: "pay-1", invoiceId: "inv-1", amountCents: 10000, status: "pending" }],
+      // 2) the invoice
+      [{ totalCents: 10000, amountPaidCents: 0 }],
+    ]);
+    const provider = new MockPaymentProvider(); // getCharge -> succeeded
+    const r = await reconcilePayment(ORG, "pay-1", provider);
+    expect(r).toEqual({ ok: true, outcome: "completed", invoiceState: "paid" });
+    // payment->succeeded + invoice update batched (same as takePayment success).
+    expect(db.batch).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves the invoice 'open' when a partial deposit is reconciled", async () => {
+    mockSelectSeq([
+      [{ id: "pay-1", invoiceId: "inv-1", amountCents: 5000, status: "pending" }],
+      [{ totalCents: 10000, amountPaidCents: 0 }],
+    ]);
+    const r = await reconcilePayment(ORG, "pay-1", new MockPaymentProvider());
+    expect(r).toEqual({ ok: true, outcome: "completed", invoiceState: "open" });
+  });
+
+  it("no-ops (not_pending) when the payment was already succeeded — idempotent", async () => {
+    mockSelectSeq([
+      [{ id: "pay-1", invoiceId: "inv-1", amountCents: 10000, status: "succeeded" }],
+    ]);
+    const r = await reconcilePayment(ORG, "pay-1", new MockPaymentProvider());
+    expect(r).toEqual({ ok: false, reason: "not_pending" });
+    expect(db.batch).not.toHaveBeenCalled();
+  });
+
+  it("marks the payment failed when the provider says the charge failed", async () => {
+    mockSelectSeq([
+      [{ id: "pay-1", invoiceId: "inv-1", amountCents: 10000, status: "pending" }],
+    ]);
+    const failingProvider = {
+      name: "mock",
+      createCharge: vi.fn(),
+      refund: vi.fn(),
+      getCharge: vi
+        .fn()
+        .mockResolvedValue({ providerPaymentId: "", status: "failed" }),
+    };
+    const r = await reconcilePayment(ORG, "pay-1", failingProvider as never);
+    expect(r).toEqual({ ok: true, outcome: "failed_marked" });
+    expect(db.batch).not.toHaveBeenCalled(); // no money-moving invoice update
+  });
+
+  it("returns payment_not_found when the payment is missing", async () => {
+    mockSelectSeq([[]]);
+    const r = await reconcilePayment(ORG, "pay-x", new MockPaymentProvider());
+    expect(r).toEqual({ ok: false, reason: "payment_not_found" });
   });
 });
