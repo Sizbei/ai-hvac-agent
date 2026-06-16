@@ -9,6 +9,7 @@ import { db } from "@/lib/db";
 import { communicationJobs } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { parseWebhookEvent } from "@/lib/communication/twilio-adapter";
+import { parseAndVerifyTwilioRequest } from "@/lib/voice/request";
 import { NextRequest, NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
@@ -21,33 +22,15 @@ export const runtime = "nodejs";
  */
 export async function POST(request: NextRequest) {
   try {
-    // Get the raw body for signature validation
-    const rawBody = await request.text();
-
-    // Parse form data
-    const formData = new URLSearchParams(rawBody);
-    const event: Record<string, unknown> = {};
-    for (const [key, value] of formData.entries()) {
-      event[key] = value;
-    }
-
-    // Validate signature
-    const signature = request.headers.get("X-Twilio-Signature");
-    const url = request.url;
-
-    if (!signature) {
-      console.warn("Twilio webhook missing signature");
-      return new NextResponse("Missing signature", { status: 401 });
-    }
-
-    // Parse and validate event
-    let webhookEvent;
-    try {
-      webhookEvent = parseWebhookEvent(event, signature, url);
-    } catch (error) {
-      console.error("Twilio webhook validation failed:", error);
+    // Verify the Twilio signature with the real algorithm (sorted params +
+    // forwarded public URL) and read the form params. Fails closed.
+    const { params, valid } = await parseAndVerifyTwilioRequest(request);
+    if (!valid) {
+      console.warn("Twilio webhook signature verification failed");
       return new NextResponse("Invalid signature", { status: 403 });
     }
+
+    const webhookEvent = parseWebhookEvent(params);
 
     // Find the communication job by external ID
     const job = await db.query.communicationJobs.findFirst({

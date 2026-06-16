@@ -8,19 +8,13 @@
  */
 
 import { processPendingJobs, retryFailedJobs } from "@/lib/communication/job-queue";
+import { verifyCronAuth } from "@/lib/cron-auth";
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
-export const runtime = "edge";
-
-/**
- * Verify the request is from Vercel Cron
- */
-function verifyCronRequest(request: Request): boolean {
-  // Vercel Cron adds a specific user agent
-  const userAgent = request.headers.get("user-agent");
-  return userAgent === "vercel-cron/1.0";
-}
+// nodejs runtime: verifyCronAuth uses node:crypto (timing-safe), unavailable on
+// edge; the queue also drives the Twilio/Resend SDKs.
+export const runtime = "nodejs";
 
 /**
  * GET /api/cron/process-communications
@@ -28,8 +22,9 @@ function verifyCronRequest(request: Request): boolean {
  * Called by Vercel Cron to process pending communication jobs.
  */
 export async function GET(request: Request) {
-  // Verify this is a cron request
-  if (!verifyCronRequest(request)) {
+  // Authenticate via the Bearer CRON_SECRET Vercel injects — a spoofable
+  // User-Agent is NOT authentication.
+  if (!verifyCronAuth(request.headers.get("authorization"))) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 

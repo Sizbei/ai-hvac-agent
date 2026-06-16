@@ -5,6 +5,7 @@ import { customerSessions, attachments, messages } from '@/lib/db/schema';
 import { withTenant } from '@/lib/db/tenant';
 import { getSessionToken } from '@/lib/session';
 import { isSameOriginRequest } from '@/lib/session-csrf';
+import { slidingWindow, RATE_LIMITS } from '@/lib/rate-limit';
 import { logger } from '@/lib/logger';
 import {
   getStorageClient,
@@ -39,6 +40,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { success: false, error: 'No session found' },
         { status: 401 },
+      );
+    }
+
+    // Rate limit per session — uploads are expensive (storage writes) and were
+    // previously unthrottled.
+    const rate = slidingWindow(
+      `upload:${token}`,
+      RATE_LIMITS.sessionAction.maxRequests,
+      RATE_LIMITS.sessionAction.windowMs,
+    );
+    if (!rate.allowed) {
+      return NextResponse.json(
+        { success: false, error: 'Too many uploads, please slow down' },
+        { status: 429 },
       );
     }
 

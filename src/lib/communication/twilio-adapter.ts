@@ -152,31 +152,6 @@ export async function getMessageStatus(messageSid: string): Promise<{
 }
 
 /**
- * Validate Twilio webhook request
- *
- * Use this to verify incoming webhooks are actually from Twilio.
- *
- * @param url - The full URL of the request (including query string)
- * @param signature - The X-Twilio-Signature header value
- * @param body - The raw body of the request
- * @returns true if valid, false otherwise
- */
-export function validateWebhookSignature(
-  url: string,
-  signature: string,
-  body: string,
-): boolean {
-  try {
-    // Twilio's validateRequest is on the RequestValidator
-    const validator = require("twilio/lib/jwt/taskrouter").validateRequest;
-    return validator(TWILIO_AUTH_TOKEN, signature, url, body);
-  } catch (error) {
-    console.error("Webhook validation error:", error);
-    return false;
-  }
-}
-
-/**
  * Webhook event types
  */
 export interface TwilioWebhookEvent {
@@ -189,29 +164,16 @@ export interface TwilioWebhookEvent {
 }
 
 /**
- * Parse and validate a Twilio webhook event
+ * Map an already-verified Twilio webhook form payload to a typed event.
  *
- * @param event - Raw webhook event data
- * @param signature - X-Twilio-Signature header
- * @param url - Full request URL
- * @returns Parsed event data
- * @throws Error if validation fails
+ * SIGNATURE VERIFICATION IS THE CALLER'S RESPONSIBILITY — use
+ * parseAndVerifyTwilioRequest() (src/lib/voice/request.ts), which implements
+ * Twilio's real signature algorithm over the sorted params and the forwarded
+ * public URL. This function only shapes the data.
  */
 export function parseWebhookEvent(
   event: Record<string, unknown>,
-  signature: string,
-  url: string,
 ): TwilioWebhookEvent {
-  // Build the raw form-encoded body for validation
-  const body = Object.entries(event)
-    .map(([key, value]) => `${key}=${value}`)
-    .join("&");
-
-  // Validate signature
-  if (!validateWebhookSignature(url, signature, body)) {
-    throw new Error("Invalid Twilio webhook signature");
-  }
-
   return {
     MessageSid: event.MessageSid as string,
     MessageStatus: event.MessageStatus as string,

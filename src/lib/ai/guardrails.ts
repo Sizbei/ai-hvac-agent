@@ -70,6 +70,12 @@ export function validateExtractionOutput(output: unknown): boolean {
       if (value.length > 500 && key !== 'description') return false;
       // Check for suspiciously long description
       if (key === 'description' && value.length > 1000) return false;
+      // Reject extracted values that smuggle injection content (e.g. an
+      // attacker steering the model to embed "ignore previous instructions" in a
+      // within-limit description that later flows back into a prompt).
+      for (const pattern of INJECTION_PATTERNS) {
+        if (pattern.test(value)) return false;
+      }
     }
   }
   return true;

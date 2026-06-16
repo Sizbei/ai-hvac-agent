@@ -48,7 +48,8 @@ export async function sendEmail(options: {
     const to = Array.isArray(options.to) ? options.to : [options.to];
     for (const email of to) {
       if (!isValidEmail(email)) {
-        throw new Error(`Invalid email address: ${email}`);
+        // Do NOT interpolate the address — it would leak recipient PII into logs.
+        throw new Error("Invalid email address format");
       }
     }
 
@@ -187,32 +188,41 @@ export function validateWebhookSignature(
   body: string,
 ): boolean {
   try {
-    // Resend uses HMAC-SHA256 for webhook signatures
+    // Sign with a DEDICATED webhook secret, never the API key — leaking the API
+    // key's HMAC would expose the send credential, and rotating the API key
+    // would silently break webhook verification. Fail closed if unset.
+    const secret = process.env.RESEND_WEBHOOK_SECRET?.trim();
+    if (!secret) {
+      console.error("RESEND_WEBHOOK_SECRET not configured; rejecting webhook");
+      return false;
+    }
+
     // Format: <timestamp>.<signature>
     const [timestamp, signatureHash] = signature.split(".");
-
     if (!timestamp || !signatureHash) {
       return false;
     }
 
-    // Check timestamp is within 5 minutes
+    // Check timestamp is within 5 minutes (replay protection)
     const now = Math.floor(Date.now() / 1000);
     const eventTime = parseInt(timestamp, 10);
-    if (Math.abs(now - eventTime) > 300) {
+    if (Number.isNaN(eventTime) || Math.abs(now - eventTime) > 300) {
       return false;
     }
 
-    // Verify signature
     const crypto = require("crypto");
-    const hmac = crypto.createHmac("sha256", RESEND_API_KEY);
+    const hmac = crypto.createHmac("sha256", secret);
     hmac.update(`${timestamp}.${body}`);
     const computedSignature = hmac.digest("hex");
 
-    // Timing-safe comparison
-    return crypto.timingSafeEqual(
-      Buffer.from(signatureHash),
-      Buffer.from(computedSignature),
-    );
+    // Timing-safe comparison — guard equal length first (timingSafeEqual throws
+    // on length mismatch).
+    const provided = Buffer.from(signatureHash);
+    const expected = Buffer.from(computedSignature);
+    if (provided.length !== expected.length) {
+      return false;
+    }
+    return crypto.timingSafeEqual(provided, expected);
   } catch (error) {
     console.error("Webhook signature validation error:", error);
     return false;

@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, and, desc, sql, inArray } from 'drizzle-orm';
 import { db } from '@/lib/db';
-import { customerSessions, messages, customers } from '@/lib/db/schema';
+import { customerSessions, messages } from '@/lib/db/schema';
 import { getSessionToken } from '@/lib/session';
+import { slidingWindow, RATE_LIMITS } from '@/lib/rate-limit';
 import { logger } from '@/lib/logger';
 
 /**
@@ -18,6 +19,19 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(
         { success: false, error: 'No session found' },
         { status: 401 },
+      );
+    }
+
+    // Rate limit per session (this read was previously unthrottled).
+    const rate = slidingWindow(
+      `chat:history:${token}`,
+      RATE_LIMITS.sessionAction.maxRequests,
+      RATE_LIMITS.sessionAction.windowMs,
+    );
+    if (!rate.allowed) {
+      return NextResponse.json(
+        { success: false, error: 'Too many requests' },
+        { status: 429 },
       );
     }
 
@@ -46,26 +60,7 @@ export async function GET(request: NextRequest) {
     const customerId = currentSession.customerId;
     const organizationId = currentSession.organizationId;
 
-    // Fetch past sessions for this customer (excluding current session)
-    const pastSessions = await db
-      .select({
-        id: customerSessions.id,
-        status: customerSessions.status,
-        createdAt: customerSessions.createdAt,
-      })
-      .from(customerSessions)
-      .where(
-        and(
-          eq(customerSessions.customerId, customerId),
-          eq(customerSessions.organizationId, organizationId),
-          // Exclude current session
-          eq(customerSessions.id, currentSession.id), // This will never match, need to use not()
-        ),
-      )
-      .orderBy(desc(customerSessions.createdAt))
-      .limit(10);
-
-    // Exclude current session from history
+    // Past sessions for this customer, excluding the current one (org-scoped).
     const sessions = await db
       .select({
         id: customerSessions.id,
@@ -83,29 +78,41 @@ export async function GET(request: NextRequest) {
       .orderBy(desc(customerSessions.createdAt))
       .limit(10);
 
-    // For each session, get a preview and message count
-    const sessionsWithPreview = await Promise.all(
-      sessions.map(async (session) => {
-        const sessionMessages = await db
-          .select({ content: messages.content })
+    // Fetch the recent messages for ALL these sessions in ONE query (no N+1),
+    // then group in memory.
+    const sessionIds = sessions.map((s) => s.id);
+    const allMessages = sessionIds.length
+      ? await db
+          .select({
+            sessionId: messages.sessionId,
+            content: messages.content,
+            createdAt: messages.createdAt,
+          })
           .from(messages)
-          .where(eq(messages.sessionId, session.id))
+          .where(inArray(messages.sessionId, sessionIds))
           .orderBy(desc(messages.createdAt))
-          .limit(10);
+      : [];
 
-        const firstUserMessage = sessionMessages.find((m) =>
-          m.content && !m.content.startsWith('System:')
-        );
+    const bySession = new Map<string, { content: string | null }[]>();
+    for (const m of allMessages) {
+      const list = bySession.get(m.sessionId) ?? [];
+      list.push({ content: m.content });
+      bySession.set(m.sessionId, list);
+    }
 
-        return {
-          id: session.id,
-          status: session.status,
-          createdAt: session.createdAt.toISOString(),
-          preview: firstUserMessage?.content?.slice(0, 60) ?? 'New conversation',
-          messageCount: sessionMessages.length,
-        };
-      }),
-    );
+    const sessionsWithPreview = sessions.map((session) => {
+      const sessionMessages = bySession.get(session.id) ?? [];
+      const firstUserMessage = sessionMessages.find(
+        (m) => m.content && !m.content.startsWith('System:'),
+      );
+      return {
+        id: session.id,
+        status: session.status,
+        createdAt: session.createdAt.toISOString(),
+        preview: firstUserMessage?.content?.slice(0, 60) ?? 'New conversation',
+        messageCount: sessionMessages.length,
+      };
+    });
 
     logger.info(
       { customerId, sessionCount: sessionsWithPreview.length },

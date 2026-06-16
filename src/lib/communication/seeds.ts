@@ -7,7 +7,7 @@
 
 import { db } from "@/lib/db";
 import { communicationTemplates, organizations } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 /**
  * Default templates for each trigger type
@@ -210,9 +210,13 @@ export async function seedCommunicationTemplates(
   organizationId: string,
 ): Promise<void> {
   for (const template of defaultTemplates) {
-    // Check if template already exists
+    // Check if template already exists FOR THIS ORG (templates are per-org;
+    // a global key check skipped every org after the first).
     const existing = await db.query.communicationTemplates.findFirst({
-      where: eq(communicationTemplates.key, template.key),
+      where: and(
+        eq(communicationTemplates.organizationId, organizationId),
+        eq(communicationTemplates.key, template.key),
+      ),
     });
 
     if (existing) {
