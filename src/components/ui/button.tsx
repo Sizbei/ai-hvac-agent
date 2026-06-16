@@ -44,12 +44,20 @@ function Button({
   className,
   variant = "default",
   size = "default",
+  render,
+  nativeButton,
   ...props
 }: ButtonPrimitive.Props & VariantProps<typeof buttonVariants>) {
+  // When the button is rendered AS a custom element (e.g. a Link/<a> via the
+  // `render` prop), Base UI needs nativeButton={false} — otherwise it warns that
+  // a non-<button> is removing native button semantics (a11y). Default it here so
+  // every link-style CTA is correct without per-call boilerplate.
   return (
     <ButtonPrimitive
       data-slot="button"
       className={cn(buttonVariants({ variant, size, className }))}
+      render={render}
+      nativeButton={nativeButton ?? (render !== undefined ? false : undefined)}
       {...props}
     />
   )
