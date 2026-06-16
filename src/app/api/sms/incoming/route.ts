@@ -181,6 +181,20 @@ export async function POST(request: NextRequest) {
 
     const sanitized = sanitizeInput(body);
 
+    // Stage 4: if a human CSR has taken over this thread (mode='human'), the bot
+    // must NOT auto-reply. Persist the inbound message so it shows in the inbox,
+    // then return empty TwiML — the CSR replies from the admin inbox. Checked
+    // BEFORE the AI brain so the human always wins the race.
+    if (session.mode === "human") {
+      await db.insert(messages).values({
+        organizationId,
+        sessionId: session.id,
+        role: "user",
+        content: sanitized.sanitized,
+      });
+      return new Response(messagingTwiML(""), { headers: MESSAGING_HEADERS });
+    }
+
     const history = await db
       .select({ role: messages.role, content: messages.content })
       .from(messages)
