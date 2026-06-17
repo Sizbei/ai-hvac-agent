@@ -19,11 +19,20 @@ const updateStaffSchema = z
     name: z.string().min(1).max(200).optional(),
     role: z.enum(["super_admin", "admin", "technician"]).optional(),
     isActive: z.boolean().optional(),
+    // Hourly labor rate in integer cents/hour. null clears it. Capped at
+    // $10,000/hr (1,000,000 cents) as a sanity bound.
+    laborRateCents: z.number().int().min(0).max(1_000_000).nullable().optional(),
   })
   .refine(
     (v) =>
-      v.name !== undefined || v.role !== undefined || v.isActive !== undefined,
-    { message: "At least one of name, role, or isActive is required" },
+      v.name !== undefined ||
+      v.role !== undefined ||
+      v.isActive !== undefined ||
+      v.laborRateCents !== undefined,
+    {
+      message:
+        "At least one of name, role, isActive, or laborRateCents is required",
+    },
   );
 
 export async function PATCH(request: NextRequest, { params }: RouteParams) {

@@ -103,6 +103,9 @@ export interface StaffRecord {
   readonly role: StaffRole;
   readonly isActive: boolean;
   readonly createdAt: string;
+  /** Hourly labor rate in integer cents/hour (technicians). NULL = no rate set
+   * (clock-out accrues 0 labor cost). */
+  readonly laborRateCents: number | null;
 }
 
 export interface CreateStaffInput {
@@ -118,6 +121,8 @@ export interface UpdateStaffInput {
   readonly name?: string;
   readonly role?: StaffRole;
   readonly isActive?: boolean;
+  /** Hourly labor rate in integer cents/hour; null clears it. */
+  readonly laborRateCents?: number | null;
 }
 
 export interface DashboardStats {

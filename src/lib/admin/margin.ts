@@ -59,3 +59,21 @@ export function rollUpActualMaterialsCost(
 ): number {
   return materials.reduce((sum, m) => sum + m.unitCostCents * m.quantity, 0);
 }
+
+/** A closed time entry's snapshotted labor cost (already rounded at clock-out). */
+export interface ActualLaborEntry {
+  readonly laborCostCents: number | null;
+}
+
+/**
+ * ACTUAL labor cost for a job: sum of the snapshotted laborCostCents over the
+ * tech's CLOSED time entries. Open entries (NULL laborCostCents) contribute 0 —
+ * a job that's still on the clock has no realized labor cost yet. This is the
+ * real labor incurred; on the invoice the actual margin subtracts BOTH actual
+ * materials AND this, distinct from the estimate. Pure (integer cents).
+ */
+export function rollUpActualLaborCost(
+  entries: readonly ActualLaborEntry[],
+): number {
+  return entries.reduce((sum, e) => sum + (e.laborCostCents ?? 0), 0);
+}

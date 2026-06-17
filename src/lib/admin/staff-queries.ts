@@ -96,6 +96,7 @@ function toStaffRecord(row: {
   role: StaffRole;
   isActive: boolean;
   createdAt: Date;
+  laborRateCents: number | null;
 }): StaffRecord {
   return {
     id: row.id,
@@ -104,6 +105,7 @@ function toStaffRecord(row: {
     role: row.role,
     isActive: row.isActive,
     createdAt: row.createdAt.toISOString(),
+    laborRateCents: row.laborRateCents,
   };
 }
 
@@ -114,6 +116,7 @@ const STAFF_COLUMNS = {
   role: users.role,
   isActive: users.isActive,
   createdAt: users.createdAt,
+  laborRateCents: users.laborRateCents,
 } as const;
 
 /** Normalize an email for storage and collision checks: trimmed + lowercased.
@@ -246,7 +249,8 @@ export async function updateStaff(
   const hasChange =
     input.name !== undefined ||
     input.role !== undefined ||
-    input.isActive !== undefined;
+    input.isActive !== undefined ||
+    input.laborRateCents !== undefined;
   if (!hasChange) {
     return { ok: false, reason: "no_changes" };
   }
@@ -296,6 +300,8 @@ export async function updateStaff(
   if (input.name !== undefined) updates.name = input.name;
   if (input.role !== undefined) updates.role = input.role;
   if (input.isActive !== undefined) updates.isActive = input.isActive;
+  if (input.laborRateCents !== undefined)
+    updates.laborRateCents = input.laborRateCents;
 
   let updated;
   try {

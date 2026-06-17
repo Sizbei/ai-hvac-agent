@@ -240,6 +240,11 @@ export const users = pgTable(
       .notNull()
       .default("technician"),
     isActive: boolean("is_active").notNull().default(true),
+    // A technician's hourly labor rate in integer cents/hour. Snapshotted onto a
+    // time entry at clock-out so historical job-cost is immune to later rate
+    // changes. NULL means "no rate set" — clock-out treats it as 0 (the entry's
+    // laborCostCents is 0 until a rate exists).
+    laborRateCents: integer("labor_rate_cents"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -1838,6 +1843,58 @@ export const jobMaterials = pgTable(
   (table) => [
     index("job_materials_org_idx").on(table.organizationId),
     index("job_materials_request_idx").on(table.serviceRequestId),
+  ],
+);
+
+// 28b. technician_time_entries — labor tracking / job-cost. A tech clocks IN
+// (open entry: clock_out_at NULL) and OUT (minutes + a SNAPSHOTTED labor rate →
+// labor_cost_cents) per job. The actual labor cost rolls into the invoice's
+// actual-vs-estimated margin (margin = revenue − materials − actual labor).
+// laborRateCents is snapshotted from the user's rate at clock-out so a later
+// rate change never rewrites historical cost. Money is integer cents; minutes
+// are integers.
+export const technicianTimeEntries = pgTable(
+  "technician_time_entries",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    serviceRequestId: uuid("service_request_id")
+      .notNull()
+      .references(() => serviceRequests.id, { onDelete: "cascade" }),
+    technicianId: uuid("technician_id")
+      .notNull()
+      .references(() => users.id),
+    clockInAt: timestamp("clock_in_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    // NULL while the entry is OPEN (tech still on the clock); set at clock-out.
+    clockOutAt: timestamp("clock_out_at", { withTimezone: true }),
+    // Derived on clock-out: whole minutes between clock-in and clock-out.
+    minutes: integer("minutes"),
+    // Snapshotted from the user's labor_rate_cents at clock-out (cents/hour).
+    // 0 when the tech has no rate set.
+    laborRateCents: integer("labor_rate_cents").notNull().default(0),
+    // round(minutes / 60 * laborRateCents). NULL while open.
+    laborCostCents: integer("labor_cost_cents"),
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("tte_org_idx").on(table.organizationId),
+    index("tte_request_idx").on(table.serviceRequestId),
+    // At most ONE open entry per tech per job — a tech can't double clock-in.
+    // Partial (WHERE clock_out_at IS NULL): closed entries never collide, so a
+    // tech may have many historical entries on the same job.
+    uniqueIndex("tte_open_per_tech_job_unique")
+      .on(table.serviceRequestId, table.technicianId)
+      .where(sql`${table.clockOutAt} IS NULL`),
   ],
 );
 
