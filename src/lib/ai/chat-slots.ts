@@ -52,12 +52,26 @@ export type ExtraSlots = Partial<
 //   - afterHoursShown: comma-joined after-hours moves already surfaced this
 //     session (e.g. "ask_urgency,disclose_charge"), so each disclosure is said
 //     AT MOST ONCE instead of being prepended to every intake turn.
+//   - empathyShown: "1" once the deterministic path has emitted its one-time
+//     issue acknowledgement, so the LLM seam doesn't restart the "Got it /
+//     Understood" empathy decay (CHATBOT-PLAN Step 2).
+//   - reAskStepId / reAskCount: the slot question asked last turn and how many
+//     times in a row it's been asked, so the re-ask circuit breaker can switch
+//     phrasing + offer skip/human after N identical asks (CHATBOT-PLAN Step 3).
+//   - frustrationScore / frustrationOffered: running dissatisfaction signal count
+//     and whether we've already proactively offered a human, so we offer once
+//     before the turn-limit fallback (CHATBOT-PLAN Step 5).
 // They merge/parse with the same never-clobber rule as the real slots.
 export const CONTROL_SLOT_KEYS = [
   "addressVerified",
   "addressAttempts",
   "emailAttempts",
   "afterHoursShown",
+  "empathyShown",
+  "reAskStepId",
+  "reAskCount",
+  "frustrationScore",
+  "frustrationOffered",
 ] as const;
 
 function isFilled(value: unknown): boolean {

@@ -61,6 +61,41 @@ describe("leadInForIssue", () => {
   it("returns '' for negative indices (only turn 1 acknowledges)", () => {
     expect(leadInForIssue("water_leak", "low", -1)).toBe("");
   });
+
+  // ── Step 1: de-templated openers + per-chat rotation ──
+  it("dropped the stock 'Got it.' / 'Understood.' openers entirely", () => {
+    for (const issue of ALL_ISSUES) {
+      // Sweep enough seeds to cover every variant for each issue.
+      for (let seed = 0; seed < 6; seed++) {
+        const lead = leadInForIssue(issue, "high", ACK_TURN, seed);
+        expect(lead.startsWith("Got it.")).toBe(false);
+        expect(lead.startsWith("Understood.")).toBe(false);
+        expect(lead.startsWith("Got it ")).toBe(false);
+      }
+    }
+  });
+
+  it("rotates the opener across chats (different seeds yield different lines)", () => {
+    const variants = new Set(
+      [0, 1, 2, 3, 4, 5].map((seed) =>
+        leadInForIssue("cooling_not_working", "high", ACK_TURN, seed),
+      ),
+    );
+    // The cooling issue has multiple variants — a rotating seed must surface
+    // more than one, so two consecutive chats don't read identically.
+    expect(variants.size).toBeGreaterThan(1);
+  });
+
+  it("is stable for a given (issue, seed) — same chat reads the same", () => {
+    const a = leadInForIssue("heating_not_working", "medium", ACK_TURN, 42);
+    const b = leadInForIssue("heating_not_working", "medium", ACK_TURN, 42);
+    expect(a).toBe(b);
+  });
+
+  it("defaults to a valid variant when no seed is supplied", () => {
+    const lead = leadInForIssue("water_leak", "low", ACK_TURN);
+    expect(lead.length).toBeGreaterThan(0);
+  });
 });
 
 describe("withLeadIn", () => {
