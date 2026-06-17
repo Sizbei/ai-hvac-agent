@@ -304,6 +304,14 @@ export const users = pgTable(
       table.organizationId,
       table.email,
     ),
+    // Email is also unique GLOBALLY (across all orgs). The app already treats
+    // email as a single principal — both resolveGoogleLogin and the provisioning
+    // paths look the email up cross-org with no org filter — so two concurrent
+    // same-email signups (different Google subs) must not both provision. This
+    // index makes that race a caught 23505, not a silent double-provision. The
+    // per-org index above is kept (it's the indexed lookup the per-org email
+    // checks rely on); this global index is the additional cross-org guard.
+    uniqueIndex("users_email_global_unique").on(table.email),
     // One Google account ↔ one user. Partial (WHERE google_id IS NOT NULL) so
     // the many password-only rows (NULL google_id) never collide.
     uniqueIndex("users_google_id_unique")
@@ -955,6 +963,15 @@ export const organizationSettings = pgTable("organization_settings", {
   // configured silently falls back to the env default — a mis-config never
   // breaks a customer turn. Holds an id only; the key/baseUrl live in env.
   aiModelId: text("ai_model_id"),
+
+  // ── Onboarding checklist (self-serve signup) ──
+  // Stores ONLY the non-derivable onboarding flags: { dismissed?, embedViewed? }.
+  // All other checklist steps are derived from live data (see
+  // src/lib/admin/onboarding-queries.ts). NULL = nothing dismissed/viewed yet.
+  onboardingState: jsonb("onboarding_state").$type<{
+    dismissed?: boolean;
+    embedViewed?: boolean;
+  }>(),
 
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()

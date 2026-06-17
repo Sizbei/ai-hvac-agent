@@ -31,6 +31,16 @@ function initialOidcError(): string {
   return code ? (OIDC_ERROR_MESSAGES[code] ?? '') : '';
 }
 
+/** A friendly notice the self-serve signup callback redirects with when the
+ * Google account already has an account ("?notice=existing_account"). */
+function initialNotice(): string {
+  if (typeof window === 'undefined') return '';
+  const notice = new URLSearchParams(window.location.search).get('notice');
+  return notice === 'existing_account'
+    ? 'You already have an account — sign in to continue.'
+    : '';
+}
+
 interface LoginFormProps {
   /** True when Google OIDC is configured server-side; gates the button. */
   readonly googleEnabled: boolean;
@@ -42,6 +52,7 @@ export function LoginForm({ googleEnabled }: LoginFormProps) {
   // Initialize from the ?error= the OIDC callback may have redirected with, so
   // the message is present on first paint (no effect, no flash).
   const [error, setError] = useState(() => initialOidcError());
+  const [notice] = useState(() => initialNotice());
   const [isLoading, setIsLoading] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -92,6 +103,12 @@ export function LoginForm({ googleEnabled }: LoginFormProps) {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+            {notice && !error && (
+              <Alert>
+                <AlertCircle className="size-4" />
+                <AlertDescription>{notice}</AlertDescription>
+              </Alert>
+            )}
             {error && (
               <Alert variant="destructive">
                 <AlertCircle className="size-4" />

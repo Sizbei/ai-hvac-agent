@@ -1,6 +1,6 @@
 import "server-only";
 
-import { randomUUID } from "node:crypto";
+import { randomUUID, randomBytes } from "node:crypto";
 import { eq, count } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
@@ -19,28 +19,32 @@ import {
 import { normalizeEmail } from "./staff-queries";
 
 /**
- * Tenant provisioning (Stage 9 v1).
+ * Tenant provisioning (Stage 9 v1 + self-serve signup).
  *
- * Creates a brand-new organization plus its baseline rows, then issues the
- * owner an invite through the EXISTING staff-invite mechanism. No login/session
- * code is touched: the owner accepts the invite via the unchanged accept flow,
- * signs in with Google, and runs the new org as its first admin.
+ * Two callers share the same org-creation core ({@link createOrgCore}):
+ *   - {@link provisionOrganization} — the platform-admin path: creates the org
+ *     WITHOUT an owner user and WITH `ownerEmail` set, then issues the owner an
+ *     invite through the EXISTING staff-invite mechanism (the deferred-promotion
+ *     handle that `acceptInvite` consumes). No login/session code is touched.
+ *   - `provisionOrgWithOwner` (in src/lib/auth/signup.ts) — the self-serve path:
+ *     creates the org WITH the owner user (super_admin, googleId bound) and with
+ *     `ownerEmail` NULL (no pending invite to promote later — see B1 below).
  *
  * Atomicity: neon-http has no transactions, so the multi-row create
- * (organization + organization_settings) goes through ONE `db.batch([...])`
- * (executed server-side as a single round trip). Comms templates are seeded
- * after (idempotent per-org inserts), and the owner invite is created last.
+ * (organization + organization_settings [+ owner user]) goes through ONE
+ * `db.batch([...])` executed server-side as a single unit. The org row is FIRST
+ * in the batch, so both the settings and users inserts (which FK
+ * organizations.id) resolve. IDs are generated client-side via `randomUUID()` so
+ * no mid-batch `.returning()` is needed and the caller gets `ownerUserId`. Comms
+ * templates are seeded after the batch, best-effort (a seed failure must not
+ * abort the provision, per the Stage-9 fix).
  *
- * Role note (v1): the owner is invited as `admin` — the highest role the
- * staff_invites enum can store and the only one the proven accept flow grants
- * unchanged. Because a freshly-provisioned org has NO other users, that admin is
- * the org's sole top-tier operator. Promoting the owner to `super_admin` is left
- * to a follow-up (it would require either touching the invite enum or the accept
- * flow, both out of scope for this safe v1). `organizations.ownerEmail` records
- * who the org belongs to so a later promotion step can find them.
+ * Role note (Stage-9 invite path): the owner is invited as `admin` — the highest
+ * role the staff_invites enum can store. `acceptInvite` promotes that owner to
+ * `super_admin` when their email matches the org's stored `ownerEmail`.
  */
 
-/** The invite role used for a new org's owner. See the role note above. */
+/** The invite role used for a new org's owner (Stage-9 path). */
 const OWNER_INVITE_ROLE = "admin" as const;
 
 /** Default hard cap on the number of orgs when PLATFORM_MAX_ORGS is unset,
@@ -63,19 +67,45 @@ function resolveMaxOrgs(): number {
  * isUniqueEmailViolation pattern in staff-queries: match on a stable token in
  * the message so it survives neon-http error wrapping. */
 function isSlugUniqueViolation(error: unknown): boolean {
-  const message =
-    error instanceof Error
-      ? error.message
-      : typeof error === "string"
-        ? error
-        : "";
-  // The slug index is the only unique constraint touched by this insert; match
-  // its column/constraint name (and the generic SQLSTATE) defensively.
+  const message = errorMessage(error);
+  // The slug index is the only org-level unique constraint touched by this
+  // insert; match its column/constraint name (and the generic SQLSTATE)
+  // defensively. The googleId check below runs FIRST so a users_google_id_unique
+  // violation is never miscategorized as a slug clash.
   return (
     message.includes("organizations_slug_unique") ||
-    message.includes("slug") && message.includes("23505") ||
-    message.includes("23505")
+    (message.includes("slug") && message.includes("23505"))
   );
+}
+
+/** True when an error is the GLOBAL users.google_id unique-violation
+ * (users_google_id_unique). Distinct from the slug clash: a brand-new email with
+ * a Google `sub` already bound to another user row must NOT 500 — it's a
+ * terminal "this Google account already has an account" (B3). */
+function isGoogleIdUniqueViolation(error: unknown): boolean {
+  return errorMessage(error).includes("users_google_id_unique");
+}
+
+/** True when an error is a GLOBAL users.email unique-violation
+ * (users_email_global_unique, or any users-email unique constraint). Distinct
+ * from the slug clash and the google-id clash: a brand-new Google sub whose
+ * email already belongs to a user in ANOTHER org (race loser) must NOT 500 — it
+ * is the same terminal "this account already exists" outcome as google_id_taken.
+ * Also matches the per-org index name defensively. */
+function isEmailUniqueViolation(error: unknown): boolean {
+  const message = errorMessage(error);
+  return (
+    message.includes("users_email_global_unique") ||
+    message.includes("users_org_email_unique")
+  );
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error
+    ? error.message
+    : typeof error === "string"
+      ? error
+      : "";
 }
 
 /**
@@ -90,6 +120,182 @@ export function deriveSlug(name: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 80);
+}
+
+/** A short random suffix appended to a slug on a uniqueness clash so signup (and
+ * provisioning) never hard-fail on a name collision. */
+function slugSuffix(): string {
+  return randomBytes(4).toString("hex");
+}
+
+/** The owner user to create inside the batch (self-serve path). */
+export interface OrgOwnerUser {
+  readonly email: string;
+  readonly name: string | null;
+  /** Google `sub`, bound at creation = account-takeover guard. */
+  readonly googleId: string;
+}
+
+export interface CreateOrgCoreInput {
+  readonly name: string;
+  /** User id of the actor performing the create (platform admin for Stage 9;
+   * null for self-serve, where there is no pre-existing actor). Audit trace. */
+  readonly createdBy: string | null;
+  /** Deferred-promotion handle for the Stage-9 invite path. NULL on the
+   * self-serve path (B1): the owner is created super_admin directly, so leaving
+   * ownerEmail set would strand a live acceptInvite promotion + PII. */
+  readonly ownerEmail: string | null;
+  /** When present, the owner user is created super_admin inside the same batch
+   * (self-serve path). When absent, no user is created (Stage-9 invite path). */
+  readonly ownerUser?: OrgOwnerUser;
+  /** When true, a slug unique-violation is returned as `slug_conflict` instead
+   * of being auto-suffixed. The Stage-9 admin path surfaces the clash so the
+   * admin can pick a new name; the self-serve path auto-suffixes (default). */
+  readonly slugConflictIsTerminal?: boolean;
+  /** When true, the org-count cap check is skipped (the caller already ran it).
+   * The Stage-9 path checks the cap itself before its slug/email pre-checks. */
+  readonly skipOrgCountCheck?: boolean;
+}
+
+export interface CreateOrgCoreResult {
+  readonly organizationId: string;
+  /** Present only when an ownerUser was created in the batch. */
+  readonly ownerUserId?: string;
+}
+
+export type CreateOrgCoreError =
+  | { kind: "invalid_name" }
+  | { kind: "org_limit_reached" }
+  | { kind: "google_id_taken" }
+  | { kind: "email_taken" }
+  | { kind: "slug_conflict" };
+
+export type CreateOrgCoreOutcome =
+  | { ok: true; result: CreateOrgCoreResult }
+  | { ok: false; error: CreateOrgCoreError };
+
+/**
+ * Shared org-creation core for both provisioning paths.
+ *
+ * Runs the org-count cap check, then ONE `db.batch` ordered
+ * `[organizations, organizationSettings, users?]` (org FIRST). On a slug unique
+ * violation it retries once with a short random suffix; on the GLOBAL
+ * users_google_id_unique violation it returns `google_id_taken` (mapped by the
+ * caller to a redirect, not a 500). Seeds comms templates best-effort after the
+ * batch. Returns the new ids.
+ */
+export async function createOrgCore(
+  input: CreateOrgCoreInput,
+): Promise<CreateOrgCoreOutcome> {
+  const baseSlug = deriveSlug(input.name);
+  if (baseSlug.length === 0) {
+    return { ok: false, error: { kind: "invalid_name" } };
+  }
+
+  // Hard org-count cap (SOFT ceiling — racy under concurrency, small bounded
+  // overshoot). The route's in-memory rate limiter can't throttle org creation
+  // across serverless instances, so this DB-backed count is the ceiling.
+  if (!input.skipOrgCountCheck) {
+    const maxOrgs = resolveMaxOrgs();
+    const [orgCountRow] = await db
+      .select({ value: count() })
+      .from(organizations);
+    // neon-http returns count() as a string.
+    const orgCount = Number(orgCountRow?.value ?? 0);
+    if (orgCount >= maxOrgs) {
+      return { ok: false, error: { kind: "org_limit_reached" } };
+    }
+  }
+
+  const organizationId = randomUUID();
+  const ownerUserId = input.ownerUser ? randomUUID() : undefined;
+  const name = input.name.trim();
+
+  // Build the batch statements once; only the slug differs across the retry. The
+  // batch is ordered [organizations, organizationSettings, users?]: the org row
+  // exists by the time the FK-bearing settings/users inserts run.
+  const runBatch = (slug: string) => {
+    const orgStmt = db.insert(organizations).values({
+      id: organizationId,
+      name,
+      slug,
+      status: "active",
+      createdBy: input.createdBy,
+      ownerEmail: input.ownerEmail,
+    });
+    const settingsStmt = db
+      .insert(organizationSettings)
+      .values({ organizationId });
+    // A non-empty tuple ordered [organizations, organizationSettings, users?]:
+    // the org row exists by the time the FK-bearing inserts run.
+    if (input.ownerUser && ownerUserId) {
+      const userStmt = db.insert(users).values({
+        id: ownerUserId,
+        organizationId,
+        email: input.ownerUser.email,
+        name: input.ownerUser.name ?? input.ownerUser.email,
+        role: "super_admin",
+        googleId: input.ownerUser.googleId,
+        isActive: true,
+      });
+      return db.batch([orgStmt, settingsStmt, userStmt]);
+    }
+    return db.batch([orgStmt, settingsStmt]);
+  };
+
+  try {
+    await runBatch(baseSlug);
+  } catch (error: unknown) {
+    // GLOBAL Google-id clash (B3): brand-new email, but the sub is already bound
+    // to another user. Terminal — caller redirects to login, not a 500.
+    if (isGoogleIdUniqueViolation(error)) {
+      return { ok: false, error: { kind: "google_id_taken" } };
+    }
+    // GLOBAL email clash: a concurrent same-email signup (different Google sub)
+    // won the race and provisioned first. Same terminal outcome as the google-id
+    // clash — caller redirects to login, NOT a 500. The B2 pre-check is racy; the
+    // global unique index is the authoritative backstop.
+    if (isEmailUniqueViolation(error)) {
+      return { ok: false, error: { kind: "email_taken" } };
+    }
+    // Slug clash: the Stage-9 admin path surfaces it (slug_conflict) so the
+    // admin renames; the self-serve path retries ONCE with a random suffix so
+    // signup never hard-fails on a name collision (B3 auto-suffix). A second
+    // clash is astronomically unlikely; let it throw (→ caller's try_again).
+    if (isSlugUniqueViolation(error)) {
+      if (input.slugConflictIsTerminal) {
+        return { ok: false, error: { kind: "slug_conflict" } };
+      }
+      try {
+        await runBatch(`${baseSlug}-${slugSuffix()}`.slice(0, 80));
+      } catch (retryError: unknown) {
+        if (isGoogleIdUniqueViolation(retryError)) {
+          return { ok: false, error: { kind: "google_id_taken" } };
+        }
+        if (isEmailUniqueViolation(retryError)) {
+          return { ok: false, error: { kind: "email_taken" } };
+        }
+        throw retryError;
+      }
+    } else {
+      throw error;
+    }
+  }
+
+  // Seed default comms templates for the new org (idempotent per-org inserts).
+  // Best-effort: a missing template set is far less damaging than a failed
+  // provision, so a seed failure must NOT abort. Log a warning (org id only — no
+  // PII) and continue.
+  try {
+    await seedCommunicationTemplates(organizationId);
+  } catch (error: unknown) {
+    logger.warn(
+      { error, organizationId },
+      "Failed to seed communication templates for new org; continuing",
+    );
+  }
+
+  return { ok: true, result: { organizationId, ownerUserId } };
 }
 
 export interface ProvisionInput {
@@ -118,7 +324,7 @@ export type ProvisionResult =
     };
 
 /**
- * Provision a new tenant org for `ownerEmail`.
+ * Provision a new tenant org for `ownerEmail` (platform-admin / Stage-9 path).
  *
  * Rejects (clean sentinels, no throw) when:
  *   - the name yields no usable slug ("invalid_name"),
@@ -129,6 +335,10 @@ export type ProvisionResult =
  * The owner email is checked GLOBALLY (across orgs) on purpose: the per-org
  * unique-email index only guards within one org, and a v1 owner should be a new
  * principal, not an existing user being re-homed.
+ *
+ * Behavior is UNCHANGED from before the createOrgCore refactor: it calls
+ * createOrgCore WITHOUT an ownerUser and WITH ownerEmail set, then creates the
+ * owner invite.
  */
 export async function provisionOrganization(
   input: ProvisionInput,
@@ -144,9 +354,7 @@ export async function provisionOrganization(
   // creation across serverless instances, so this DB-backed count is the
   // authoritative ceiling against runaway/abusive tenant creation.
   const maxOrgs = resolveMaxOrgs();
-  const [orgCountRow] = await db
-    .select({ value: count() })
-    .from(organizations);
+  const [orgCountRow] = await db.select({ value: count() }).from(organizations);
   // neon-http returns count() as a string.
   const orgCount = Number(orgCountRow?.value ?? 0);
   if (orgCount >= maxOrgs) {
@@ -173,50 +381,30 @@ export async function provisionOrganization(
     return { ok: false, reason: "owner_email_in_use" };
   }
 
-  // Generate the org id client-side so the batched settings insert can reference
-  // it without a round trip for .returning().
-  const organizationId = randomUUID();
-
-  // ONE batch: organization + its settings row (defaults fill the NOT-NULL JSON
-  // columns). neon-http runs the batch as a single server-side unit.
-  //
-  // The slug pre-check above is racy: two concurrent provisions with the same
-  // name both see a free slug, then the DB `.unique()` rejects the loser. Catch
-  // that unique-violation and return the same slug_conflict sentinel rather than
-  // surfacing a 500 (mirrors createStaff's isUniqueEmailViolation handling).
-  try {
-    await db.batch([
-      db.insert(organizations).values({
-        id: organizationId,
-        name: input.name.trim(),
-        slug,
-        status: "active",
-        createdBy: input.createdBy,
-        ownerEmail,
-      }),
-      db.insert(organizationSettings).values({
-        organizationId,
-      }),
-    ]);
-  } catch (error: unknown) {
-    if (isSlugUniqueViolation(error)) {
+  // Create the org + settings via the shared core: ONE batch (no ownerUser, so
+  // exactly [organizations, organizationSettings]), ownerEmail SET (the
+  // deferred-promotion handle acceptInvite consumes), slug clash surfaced as
+  // slug_conflict (admin renames), and templates seeded best-effort. The cap was
+  // already checked above, so skip the re-check.
+  const created = await createOrgCore({
+    name: input.name,
+    createdBy: input.createdBy,
+    ownerEmail,
+    slugConflictIsTerminal: true,
+    skipOrgCountCheck: true,
+  });
+  if (!created.ok) {
+    // createOrgCore can only return invalid_name (excluded by the slug guard
+    // above) or slug_conflict on this path (no ownerUser → no google_id_taken;
+    // cap skipped). Map slug_conflict; anything else is a programming error.
+    if (created.error.kind === "slug_conflict") {
       return { ok: false, reason: "slug_conflict" };
     }
-    throw error;
-  }
-
-  // Seed default comms templates for the new org (idempotent per-org inserts).
-  // Best-effort: a missing template set is far less damaging than the owner
-  // having NO way into their org, so a seed failure must NOT block the owner
-  // invite below. Log a warning (org id only — no PII) and continue.
-  try {
-    await seedCommunicationTemplates(organizationId);
-  } catch (error: unknown) {
-    logger.warn(
-      { error, organizationId },
-      "Failed to seed communication templates for new org; continuing to owner invite",
+    throw new Error(
+      `Unexpected createOrgCore error on invite path: ${created.error.kind}`,
     );
   }
+  const { organizationId } = created.result;
 
   // Issue the owner invite through the EXISTING mechanism. We create the invite
   // row directly here (not via createInvite) because createInvite reads/writes

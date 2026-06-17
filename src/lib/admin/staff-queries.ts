@@ -76,9 +76,13 @@ function isLastAdminViolation(error: unknown): boolean {
   return message.includes("last_active_admin");
 }
 
-/** True when an error is the per-org unique-email violation (index
- * users_org_email_unique, migration 0029). We match on the index name in the
- * message so it survives neon-http error wrapping (Postgres SQLSTATE 23505). */
+/** True when an error is a unique-email violation on the users table — either
+ * the per-org index (users_org_email_unique, migration 0029) or the GLOBAL
+ * cross-org index (users_email_global_unique). A cross-org invite for an email
+ * that already exists in another org now trips the global index; both map to the
+ * same friendly email_conflict sentinel (not a 500). We match on the index name
+ * in the message so it survives neon-http error wrapping (Postgres SQLSTATE
+ * 23505). */
 function isUniqueEmailViolation(error: unknown): boolean {
   const message =
     error instanceof Error
@@ -86,7 +90,10 @@ function isUniqueEmailViolation(error: unknown): boolean {
       : typeof error === "string"
         ? error
         : "";
-  return message.includes("users_org_email_unique");
+  return (
+    message.includes("users_org_email_unique") ||
+    message.includes("users_email_global_unique")
+  );
 }
 
 function toStaffRecord(row: {
