@@ -97,10 +97,11 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
       "smoke",
       "melting",
       "sparks",
+      "sparking",
       "hot wires",
     ],
     negationGuards: ["em heat", "emergency heat", "aux heat"],
-    requiredQualifiers: ["burning", "smoke", "smell", "sparks"],
+    requiredQualifiers: ["burning", "smoke", "smell", "sparks", "sparking"],
     action: "ESCALATE",
     cannedResponse:
       "A burning or electrical smell, or any smoke, is a fire risk. Please turn off the system at the thermostat or breaker if you can do so safely, leave the area, and call 911 if you see smoke or flames. I'm flagging this as an emergency for our team.",
@@ -1257,6 +1258,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
       "take cards",
       "accept check",
       "apple pay",
+      "amex",
     ],
     action: "ANSWER",
     cannedResponse:
