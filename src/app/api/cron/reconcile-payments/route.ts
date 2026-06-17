@@ -19,6 +19,7 @@ import { payments } from "@/lib/db/schema";
 import { eq, and, lt } from "drizzle-orm";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { logger } from "@/lib/logger";
+import * as Sentry from "@sentry/nextjs";
 import { verifyCronAuth } from "@/lib/cron-auth";
 import { reconcileOrgPendingPayments } from "@/lib/admin/invoice-queries";
 
@@ -80,6 +81,8 @@ export async function GET(request: NextRequest) {
     return successResponse(summary);
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    // Surface failed money-state crons to error tracking (inert without a DSN).
+    Sentry.captureException(error, { tags: { cron: "reconcile-payments" } });
     logger.error({ error: errorMessage }, "Payment reconciliation failed");
     return errorResponse("Payment reconciliation failed", "INTERNAL_ERROR", 500);
   }

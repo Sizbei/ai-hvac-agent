@@ -19,6 +19,7 @@ import { sendOverdueInvoiceReminders } from "@/lib/communication/money-triggers"
 import { enqueueWarrantyReminders } from "@/lib/admin/warranty-queries";
 import { getCommsOutcomeSummary } from "@/lib/communication/observability";
 import { logger } from "@/lib/logger";
+import * as Sentry from "@sentry/nextjs";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -90,6 +91,8 @@ export async function GET(request: Request) {
       warrantyEnqueued,
     });
   } catch (error) {
+    // Surface a fully-failed dunning sweep to error tracking (inert without a DSN).
+    Sentry.captureException(error, { tags: { cron: "dunning" } });
     logger.error({ error }, "Dunning cron failed");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);
   }

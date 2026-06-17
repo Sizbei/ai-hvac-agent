@@ -1,0 +1,53 @@
+name: Migrate (manual)
+
+# DELIBERATELY manual-only. Auto-migrate-on-push is NOT used: the migration
+# chain has been squashed/reconciled (journal on-disk vs ledger), so running it
+# automatically on every push is risky. An operator triggers this from the
+# Actions tab when a new migration is ready to apply to a chosen environment.
+#
+# Runbook: see MIGRATIONS.md.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment label (informational; DB chosen by the DATABASE_URL secret)."
+        required: true
+        default: "production"
+        type: choice
+        options:
+          - production
+          - staging
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+      - run: npm ci
+
+      # DEGRADE-SAFE guard: if no DATABASE_URL secret is configured, SKIP with a
+      # clear message instead of failing. This keeps the workflow runnable (and
+      # green) on forks / before the secret is wired, and prevents an accidental
+      # run against nothing.
+      - name: Check for DATABASE_URL secret
+        id: guard
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -z "${DATABASE_URL}" ]; then
+            echo "::warning::DATABASE_URL secret is not set — skipping migrations (no-op)."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "DATABASE_URL secret present — migrations will run against ${{ github.event.inputs.environment }}."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run migrations
+        if: steps.guard.outputs.run == 'true'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npm run db:migrate

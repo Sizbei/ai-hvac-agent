@@ -41,6 +41,7 @@
     "@react-email/components": "^1.0.12",
     "@react-email/html": "^0.0.12",
     "@react-email/text": "^0.1.6",
+    "@sentry/nextjs": "^10.58.0",
     "@vercel/analytics": "^2.0.1",
     "@vercel/otel": "^2.1.2",
     "ai": "^6.0.191",

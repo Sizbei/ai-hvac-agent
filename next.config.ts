@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { withSentryConfig } from "@sentry/nextjs";
 
 const nextConfig: NextConfig = {
   // cacheComponents temporarily disabled due to Next.js 16 + icon metadata conflict
@@ -38,4 +39,22 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+// DEGRADE-SAFE wrapper: only engage Sentry's build plugin when a DSN is set.
+// With NO SENTRY_DSN, we export the plain nextConfig untouched, so the build is
+// identical to before Sentry was added (no plugin, no source-map step). Runtime
+// error capture still works via instrumentation.ts when a DSN is later set —
+// only build-time source-map UPLOAD requires SENTRY_AUTH_TOKEN/ORG/PROJECT.
+const config: NextConfig = process.env.SENTRY_DSN
+  ? withSentryConfig(nextConfig, {
+      org: process.env.SENTRY_ORG,
+      project: process.env.SENTRY_PROJECT,
+      // Upload source maps only when an auth token is available; otherwise the
+      // plugin runs but skips the upload (no build failure on missing token).
+      authToken: process.env.SENTRY_AUTH_TOKEN,
+      silent: !process.env.CI,
+      // Keep client bundles lean; tree-shake Sentry logger statements.
+      disableLogger: true,
+    })
+  : nextConfig;
+
+export default config;
