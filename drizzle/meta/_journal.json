@@ -120,6 +120,13 @@
       "when": 1781732428375,
       "tag": "0016_users_email_global_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1781735977049,
+      "tag": "0017_gdpr_deletion",
+      "breakpoints": true
     }
   ]
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Check, Copy, Loader2, Plus } from 'lucide-react';
+import { Check, Copy, Loader2, Plus, Download, Trash2 } from 'lucide-react';
 import {
   Card,
   CardContent,
@@ -44,6 +44,7 @@ export function PlatformConsole() {
   const [orgs, setOrgs] = useState<OrgRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
+  const [purgingOrg, setPurgingOrg] = useState<OrgRow | null>(null);
 
   const loadOrgs = useCallback(async () => {
     setListError(null);
@@ -93,6 +94,7 @@ export function PlatformConsole() {
                 <TableHead>Name</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Created</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -109,13 +111,143 @@ export function PlatformConsole() {
                   <TableCell className="text-muted-foreground">
                     {new Date(o.createdAt).toLocaleDateString()}
                   </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      {/* Export is a plain download — the API streams a JSON
+                          attachment, so a same-tab navigation is simplest. */}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          window.location.href = `/api/platform/organizations/${o.id}/export`;
+                        }}
+                      >
+                        <Download className="size-4" /> Export
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => setPurgingOrg(o)}
+                      >
+                        <Trash2 className="size-4" /> Purge
+                      </Button>
+                    </div>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
         )}
       </CardContent>
+
+      <PurgeTenantDialog
+        org={purgingOrg}
+        onClose={() => setPurgingOrg(null)}
+        onPurged={() => {
+          setPurgingOrg(null);
+          void loadOrgs();
+        }}
+      />
     </Card>
+  );
+}
+
+/** Purge confirmation: the operator must type the org's exact name to enable
+ * the irreversible delete. The org row + everything it owns is destroyed. */
+function PurgeTenantDialog({
+  org,
+  onClose,
+  onPurged,
+}: {
+  readonly org: OrgRow | null;
+  readonly onClose: () => void;
+  readonly onPurged: () => void;
+}) {
+  const [confirmText, setConfirmText] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Reset the typed confirmation whenever a different org is targeted.
+  useEffect(() => {
+    setConfirmText('');
+    setError(null);
+    setSubmitting(false);
+  }, [org?.id]);
+
+  const matches = org !== null && confirmText.trim() === org.name;
+
+  async function handlePurge() {
+    if (!org || !matches) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/platform/organizations/${org.id}`, {
+        method: 'DELETE',
+      });
+      const json = await res.json().catch(() => ({ success: false }));
+      if (res.ok && json.success) {
+        onPurged();
+      } else {
+        setError(json.error?.message ?? 'Could not purge the tenant.');
+        setSubmitting(false);
+      }
+    } catch {
+      setError('Could not purge the tenant.');
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Dialog
+      open={org !== null}
+      onOpenChange={(next) => {
+        if (!next && !submitting) onClose();
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Purge tenant</DialogTitle>
+          <DialogDescription>
+            This permanently deletes{' '}
+            <span className="font-semibold">{org?.name}</span> and ALL of its
+            data — customers, jobs, invoices, conversations, files. This cannot
+            be undone. Type the organization name to confirm.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="purge-confirm">Organization name</Label>
+            <Input
+              id="purge-confirm"
+              value={confirmText}
+              onChange={(e) => setConfirmText(e.target.value)}
+              placeholder={org?.name ?? ''}
+              autoComplete="off"
+            />
+          </div>
+          {error && <p className="text-sm text-destructive">{error}</p>}
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onClose}
+              disabled={submitting}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => void handlePurge()}
+              disabled={!matches || submitting}
+            >
+              {submitting && <Loader2 className="size-4 animate-spin" />}
+              Purge permanently
+            </Button>
+          </DialogFooter>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
