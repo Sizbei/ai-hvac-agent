@@ -1,5 +1,6 @@
 'use client';
 
+import { AlertTriangle } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { UrgencyBadge } from '@/components/admin/urgency-badge';
@@ -145,7 +146,15 @@ export function DashboardListCard({
                   <MetaLine request={request} meta={meta} />
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-1">
-                  <UrgencyBadge urgency={request.urgency} />
+                  <span className="flex items-center gap-1">
+                    {request.urgency === 'emergency' && (
+                      <AlertTriangle
+                        className="size-3.5 text-destructive"
+                        aria-hidden="true"
+                      />
+                    )}
+                    <UrgencyBadge urgency={request.urgency} />
+                  </span>
                   <span className="text-[11px] text-muted-foreground">
                     {request.assignedToName ?? 'Unassigned'}
                   </span>

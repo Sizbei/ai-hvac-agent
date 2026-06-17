@@ -92,25 +92,23 @@ export function DashboardStatCards({ stats, isLoading }: DashboardStatCardsProps
         return (
           <Card
             key={config.key}
-            className="p-4 transition-shadow duration-200 hover:shadow-md hover:ring-1 hover:ring-primary/30"
+            className="flex flex-col gap-3 p-5 transition-shadow duration-200 hover:shadow-md hover:ring-1 hover:ring-primary/30"
           >
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="truncate text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  {config.label}
-                </p>
-                {isLoading || !stats ? (
-                  <Skeleton className="mt-2 h-9 w-12" />
-                ) : (
-                  <p className="mt-1 font-heading text-3xl font-bold tracking-tight tabular-nums">
-                    {formatValue(stats[config.key], config.isCurrency)}
-                  </p>
-                )}
-              </div>
-              <div className={`shrink-0 rounded-xl p-2.5 ${config.bgColor}`}>
-                <Icon className={`h-5 w-5 ${config.iconColor}`} />
-              </div>
+            <div className="flex items-center justify-between gap-3">
+              <p className="truncate text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                {config.label}
+              </p>
+              <span className={`shrink-0 rounded-lg p-2 ${config.bgColor}`}>
+                <Icon className={`h-4 w-4 ${config.iconColor}`} />
+              </span>
             </div>
+            {isLoading || !stats ? (
+              <Skeleton className="h-9 w-14" />
+            ) : (
+              <p className="font-heading text-3xl font-bold leading-none tracking-tight tabular-nums">
+                {formatValue(stats[config.key], config.isCurrency)}
+              </p>
+            )}
           </Card>
         );
       })}

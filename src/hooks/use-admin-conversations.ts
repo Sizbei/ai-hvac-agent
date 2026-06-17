@@ -39,6 +39,7 @@ export function useAdminConversations(
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
     setIsLoading(true);
+    setError(null);
 
     try {
       const params = new URLSearchParams();
