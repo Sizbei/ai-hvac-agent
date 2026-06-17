@@ -27,6 +27,7 @@ import { HousecallProPanel } from '@/components/admin/settings/housecall-pro-pan
 import { FieldpulsePanel } from '@/components/admin/settings/fieldpulse-panel';
 import { AiModelPanel } from '@/components/admin/settings/ai-model-panel';
 import { PlatformLinkPanel } from '@/components/admin/settings/platform-link-panel';
+import { BillingLinkPanel } from '@/components/admin/settings/billing-link-panel';
 
 export default function SettingsPage() {
   const settings = useOrgSettings();
@@ -132,6 +133,9 @@ export default function SettingsPage() {
             {/* Super-admin only — self-hides for everyone else (the data
                 endpoint is super_admin-gated and the panel renders null on 403). */}
             <AiModelPanel />
+            {/* Super_admin/platform-admin only — self-hides otherwise (probes
+                the gated billing endpoint and renders null on 403). */}
+            <BillingLinkPanel />
             {/* Platform-admin only — self-hides for everyone else (probes the
                 platform-gated endpoint and renders null on 403). */}
             <PlatformLinkPanel />
