@@ -1,6 +1,6 @@
 import { NextRequest, after } from "next/server";
 import { streamText } from "ai";
-import { getModel } from "@/lib/ai/provider";
+import { getModel, resolveModelEntry } from "@/lib/ai/provider";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
@@ -74,6 +74,7 @@ import {
   FRUSTRATION_HUMAN_OFFER,
 } from "@/lib/ai/conversation-style";
 import { escalateSession } from "@/lib/ai/escalate-service";
+import { recordBotEvent } from "@/lib/ai/bot-telemetry";
 import {
   parseKnownSlots,
   mergeSlots,
@@ -466,6 +467,8 @@ async function buildAccountLookupReply(
 }
 
 export async function POST(request: NextRequest) {
+  // Turn-start marker for bot-telemetry latency (Step 10). Cheap and PII-free.
+  const turnStart = performance.now();
   const ip = request.headers.get("x-forwarded-for") ?? "unknown";
   const rateCheck = slidingWindow(
     `chat:${ip}`,
@@ -974,6 +977,18 @@ export async function POST(request: NextRequest) {
             },
             "Chat turn resolved deterministically (0 LLM tokens)",
           );
+          after(() =>
+            recordBotEvent({
+              organizationId,
+              sessionId: session.id,
+              turn: newTurnCount,
+              channel: session.channel,
+              routed: true,
+              intentId: verdict.intentId,
+              action: "ACCOUNT_LOOKUP",
+              latencyMs: Math.round(performance.now() - turnStart),
+            }),
+          );
           return cannedTextResponse(replyText);
         }
         // accountReply === null (unknown intent or a read failed): fall through
@@ -1184,6 +1199,19 @@ export async function POST(request: NextRequest) {
               turnCount: newTurnCount,
             },
             "Chat turn resolved deterministically (0 LLM tokens)",
+          );
+          after(() =>
+            recordBotEvent({
+              organizationId,
+              sessionId: session.id,
+              turn: newTurnCount,
+              channel: session.channel,
+              routed: true,
+              intentId: verdict.intentId,
+              action: "ESCALATE",
+              escalated: true,
+              latencyMs: Math.round(performance.now() - turnStart),
+            }),
           );
           return cannedTextResponse(replyText);
         }
@@ -1633,19 +1661,38 @@ export async function POST(request: NextRequest) {
           })
           .where(sessionScope);
 
+        const deterministicAction =
+          isSlotProvision && verdict.action === "FALLBACK_LLM"
+            ? "SLOT_FILL"
+            : verdict.action;
         logger.info(
           {
             sessionId: session.id,
             routed: "deterministic",
             intentId: verdict.intentId,
-            action: isSlotProvision && verdict.action === "FALLBACK_LLM"
-              ? "SLOT_FILL"
-              : verdict.action,
+            action: deterministicAction,
             confidence: Number(verdict.confidence.toFixed(2)),
             extractionComplete,
             turnCount: newTurnCount,
           },
           "Chat turn resolved deterministically (0 LLM tokens)",
+        );
+        after(() =>
+          recordBotEvent({
+            organizationId,
+            sessionId: session.id,
+            turn: newTurnCount,
+            channel: session.channel,
+            routed: true,
+            // A SLOT_FILL turn fills a slot off a FALLBACK verdict, so it has no
+            // winning intent id; null it out to keep the intent distribution clean.
+            intentId:
+              deterministicAction === "SLOT_FILL" ? null : verdict.intentId,
+            action: deterministicAction,
+            extractionComplete,
+            escalated: verdict.escalate,
+            latencyMs: Math.round(performance.now() - turnStart),
+          }),
         );
 
         return cannedTextResponse(replyText);
@@ -1739,6 +1786,9 @@ export async function POST(request: NextRequest) {
     });
 
     // 8. Stream response via Vercel AI SDK per SC-09
+    // Resolve the model entry up front so its id is available for bot-telemetry
+    // (the telemetry emit below records WHICH model handled the LLM turn).
+    const llmEntry = await resolveModelEntry(organizationId);
     const result = streamText({
       model: await getModel(organizationId),
       // Generous timeout so a hung upstream can't stall the lambda until the
@@ -1802,6 +1852,20 @@ export async function POST(request: NextRequest) {
           },
           "Chat message processed",
         );
+
+        // Bot telemetry (Step 10): an LLM-fallback turn. intentId/action stay null
+        // (the deterministic router did NOT resolve this turn). extractionComplete
+        // is owned by the deterministic completion path; an LLM-fallback turn
+        // records false. Best-effort — recordBotEvent never throws.
+        await recordBotEvent({
+          organizationId,
+          sessionId: session.id,
+          turn: newTurnCount,
+          channel: session.channel,
+          routed: false,
+          model: llmEntry.modelId,
+          latencyMs: Math.round(performance.now() - turnStart),
+        });
       },
     });
 

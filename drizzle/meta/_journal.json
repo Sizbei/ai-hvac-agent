@@ -99,6 +99,13 @@
       "when": 1781687804280,
       "tag": "0013_saas_billing",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1781689953901,
+      "tag": "0014_bot_events",
+      "breakpoints": true
     }
   ]
 }
