@@ -4,7 +4,13 @@ export type IssueType = (typeof issueTypeValues)[number];
 export type Urgency = (typeof urgencyValues)[number];
 export type SlotName = "issueType" | "urgency" | "address" | "name" | "phone" | "email";
 export type RouterAction =
-  | "ANSWER" | "COLLECT_INFO" | "ESCALATE" | "SUBMIT" | "REDIRECT" | "FALLBACK_LLM";
+  | "ANSWER" | "COLLECT_INFO" | "ESCALATE" | "SUBMIT" | "REDIRECT" | "FALLBACK_LLM"
+  // An account-specific question that needs a live, customer-scoped data read
+  // (membership / next visit / balance / appointment / reschedule). The router
+  // only RECOGNIZES it and surfaces the intentId; the chat route enforces the
+  // identity gate and dispatches to the account-tools. For an UNIDENTIFIED
+  // session the route treats this exactly like FALLBACK_LLM (no leak).
+  | "ACCOUNT_LOOKUP";
 
 export interface KnowledgeBaseEntry {
   readonly id: string;

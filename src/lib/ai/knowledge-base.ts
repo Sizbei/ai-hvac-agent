@@ -1047,10 +1047,13 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     id: "scheduling-reschedule",
     category: "scheduling",
     title: "Reschedule an existing appointment",
+    // The specific "move/change my appointment" phrases moved to
+    // account-data-reschedule (a real identified-customer hand-off) to avoid a
+    // compound trip with that intent. The bare "reschedule" verb + day-change
+    // phrasings stay here as a catch-all for an unidentified mention; the route
+    // still maps this intentId to the reschedule hand-off for an identified one.
     triggerKeywords: [
       "reschedule",
-      "move my appointment",
-      "change my appointment",
       "different day",
       "push back",
     ],
@@ -1615,14 +1618,16 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
   {
     id: "membership-account",
     category: "membership",
-    title: "Membership status / enrollment / next visit",
+    title: "Membership enrollment (sign up / join)",
+    // Status / next-visit phrases ("am i a member", "my next tune up", "when is
+    // my included service") moved to the account_data intents (real identified-
+    // customer reads). This entry now owns only ENROLLMENT intent (lead capture),
+    // which still defers to the LLM. Removing the overlap also prevents a compound
+    // trip (the same phrase scoring in both 'membership' and 'account_data').
     triggerKeywords: [
-      "am i a member",
       "sign up for the plan",
       "join the membership",
       "enroll in the plan",
-      "my next tune up",
-      "when is my included service",
     ],
     action: "FALLBACK_LLM",
     cannedResponse: "",
@@ -2455,6 +2460,117 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     urgencyHint: null,
     notes:
       "Redirects ONLY genuinely out-of-scope work (plumbing-only, roofing, electrical-only, etc). Spears' in-scope lines (HVAC, refrigeration (coolers/freezers/display cases), ice machines, boilers, commercial appliances) are owned by their own COLLECT_INFO intents and MUST NOT appear here (removing 'refrigerator'/'fridge'/'appliance repair' fixed a defect where Spears' core business was being redirected away). Careful overlap guards: 'refrigerant'/'freon' = HVAC (cooling), NOT a fridge; 'water heater' = a separate appliance; 'electrical/burning smell' = HVAC emergency, not electrician work. When uncertain, FALLBACK_LLM. issueTypeMapping is null so a spurious redirect never stamps a bogus issue type.",
+  },
+
+  // ─── Category 16 — ACCOUNT DATA (identified-customer reads, v1) ─────────────
+  // These five answer ACCOUNT-SPECIFIC questions ("my balance / my membership /
+  // my next visit / my appointment", and a reschedule REQUEST) by reading the
+  // customer's own records. They carry action ACCOUNT_LOOKUP: the router only
+  // RECOGNIZES them and surfaces the intentId — the chat route enforces the
+  // identity gate (an unidentified session gets the normal identify/intake path,
+  // NEVER another customer's data) and dispatches to src/lib/ai/account-tools.ts.
+  // category 'account_data' is priority 4 (lowest tier, == meta) so they can
+  // NEVER outrank an emergency, a real issue, or booking. cannedResponse is the
+  // unidentified-session ask (used by the route when no customer is resolved);
+  // the identified reply is assembled deterministically from the tool result.
+  {
+    id: "account-data-membership-status",
+    category: "account_data",
+    title: "Membership status — am I a member / what plan",
+    triggerKeywords: [
+      "am i a member",
+      "am i on the plan",
+      "do i have a membership",
+      "what plan am i on",
+      "what is my plan",
+      "am i enrolled",
+    ],
+    action: "ACCOUNT_LOOKUP",
+    cannedResponse:
+      "I can check that for you. What's the email or phone number on your account?",
+    infoNeeded: ["email", "phone"],
+    issueTypeMapping: null,
+    urgencyHint: null,
+    notes:
+      "ACCOUNT_LOOKUP → getMembershipSummary(orgId, customerId). Only fires for an identified session; otherwise the route asks for a contact to identify (the cannedResponse). Distinct from membership-explainer (generic 'what is a plan', ANSWER).",
+  },
+  {
+    id: "account-data-next-visit",
+    category: "account_data",
+    title: "Upcoming maintenance visit — when is my next visit",
+    triggerKeywords: [
+      "when is my next visit",
+      "next maintenance visit",
+      "when is my included service",
+      "next service visit",
+    ],
+    action: "ACCOUNT_LOOKUP",
+    cannedResponse:
+      "I can look that up. What's the email or phone number on your account?",
+    infoNeeded: ["email", "phone"],
+    issueTypeMapping: null,
+    urgencyHint: null,
+    notes:
+      "ACCOUNT_LOOKUP → getNextVisit(orgId, customerId). Reads the soonest scheduled/generated membership_visit. Identity-gated by the route.",
+  },
+  {
+    id: "account-data-balance",
+    category: "account_data",
+    title: "Invoice balance — what do I owe / my balance",
+    triggerKeywords: [
+      "what do i owe",
+      "my balance",
+      "do i owe anything",
+      "outstanding balance",
+      "my invoice",
+      "unpaid invoice",
+      "my account balance",
+    ],
+    action: "ACCOUNT_LOOKUP",
+    cannedResponse:
+      "I can check your balance. What's the email or phone number on your account?",
+    infoNeeded: ["email", "phone"],
+    issueTypeMapping: null,
+    urgencyHint: null,
+    notes:
+      "ACCOUNT_LOOKUP → getOpenBalance(orgId, customerId). States the EXISTING open-invoice balance only (a fact about past transactions) — NEVER an estimate/quote. May mention the portal link when active. Identity-gated by the route.",
+  },
+  {
+    id: "account-data-appointment-status",
+    category: "account_data",
+    title: "Appointment status — is my appointment still on / when is my tech",
+    triggerKeywords: [
+      "when is my technician",
+      "when is my tech coming",
+      "when is my tech arriving",
+    ],
+    action: "ACCOUNT_LOOKUP",
+    cannedResponse:
+      "I can check on that. What's the email or phone number on your account?",
+    infoNeeded: ["email", "phone"],
+    issueTypeMapping: null,
+    urgencyHint: null,
+    notes:
+      "ACCOUNT_LOOKUP → getUpcomingAppointment(orgId, customerId). Reports scheduledDate + arrival window + status of the soonest upcoming request. Identity-gated by the route. Does NOT promise/commit a new time.",
+  },
+  {
+    id: "account-data-reschedule",
+    category: "account_data",
+    title: "Reschedule request — staff hand-off (not a self-booking)",
+    triggerKeywords: [
+      "reschedule my visit",
+      "reschedule my tech",
+      "push my visit",
+      "need a different time for my visit",
+    ],
+    action: "ACCOUNT_LOOKUP",
+    cannedResponse:
+      "I can pass that along to our team. What's the email or phone number on your account?",
+    infoNeeded: ["email", "phone"],
+    issueTypeMapping: null,
+    urgencyHint: null,
+    notes:
+      "ACCOUNT_LOOKUP → requestReschedule(orgId, customerId, detail). Records a STAFF HAND-OFF (request note) and tells the customer a human will follow up — it is NOT a booking and never mutates the schedule (the bot must not say booked/scheduled/confirmed). Identity-gated by the route.",
   },
 ];
 

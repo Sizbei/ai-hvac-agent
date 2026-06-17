@@ -102,6 +102,11 @@ const CATEGORY_PRIORITY: Record<string, number> = {
   service_logistics: 3,
   trust: 3,
   warranty: 3,
+  // Identified-customer account-data reads (membership/visit/balance/appointment/
+  // reschedule). LOWEST tier (== meta) so an account question can NEVER outrank
+  // an emergency, a real issue, or booking. The chat route enforces the identity
+  // gate before acting on an ACCOUNT_LOOKUP verdict.
+  account_data: 4,
   meta: 4,
 };
 
@@ -113,6 +118,24 @@ const LOW_HARM_ACTIONS: ReadonlySet<RouterAction> = new Set<RouterAction>([
 ]);
 
 const REQUIRED_SLOTS = ["issueType", "urgency", "address"] as const;
+
+// Legacy account/scheduling REFERENCE intents the catalog encodes as
+// FALLBACK_LLM punts, now backed by real identified-customer read-tools (see
+// src/lib/ai/account-tools.ts + the chat route's ACCOUNT_LOOKUP dispatch). When
+// one of these wins, the router emits an ACCOUNT_LOOKUP verdict so the route can
+// dispatch it for an identified customer; the route enforces the identity gate.
+// scheduling-cancel is NOT here — cancel is out of the safe v1 capability set.
+const LEGACY_ACCOUNT_REFERENCE_INTENTS: ReadonlySet<string> = new Set([
+  "account-check-status",
+  "account-change-appointment",
+  "scheduling-reschedule",
+]);
+
+// The canned identify ask carried on a legacy-intent ACCOUNT_LOOKUP verdict — the
+// chat route surfaces it verbatim for an UNIDENTIFIED session (so we ask for the
+// account contact, never leak data). Mirrors the new account_data entries' copy.
+const LEGACY_ACCOUNT_IDENTIFY_ASK =
+  "I can help with that. What's the email or phone number on your account?";
 
 // Re-export so existing importers (and tests) keep
 // `import { normalize } from "./intent-router"` working.
@@ -340,6 +363,28 @@ export function routeMessage(
       intentId: entry.id,
       confidence,
       reply: declineReply(),
+      issueType: null,
+      urgency: null,
+      escalate: false,
+    };
+  }
+
+  // Legacy account/scheduling REFERENCE intents that the catalog encodes as
+  // FALLBACK_LLM punts (account-check-status, account-change-appointment,
+  // scheduling-reschedule) are now backed by real identified-customer read-tools.
+  // Surface them as ACCOUNT_LOOKUP (with the intentId + the canned identify ask)
+  // so the chat route can dispatch them for an identified customer — WITHOUT
+  // changing the general FALLBACK_LLM contract (intentId/reply stay null for
+  // every other punt). The route enforces identity; an unidentified session gets
+  // the canned identify ask, never another customer's data. This sits ABOVE the
+  // FALLBACK/confidence gates because these entries' canned text is the safe,
+  // low-harm identify ask (no data is asserted), so a weak match is harmless.
+  if (LEGACY_ACCOUNT_REFERENCE_INTENTS.has(entry.id)) {
+    return {
+      action: "ACCOUNT_LOOKUP",
+      intentId: entry.id,
+      confidence,
+      reply: LEGACY_ACCOUNT_IDENTIFY_ASK,
       issueType: null,
       urgency: null,
       escalate: false,
