@@ -1,11 +1,12 @@
 import "server-only";
 
 import { randomBytes, createHash } from "node:crypto";
-import { and, eq, asc, gt, isNull, desc } from "drizzle-orm";
+import { and, eq, asc, gt, isNull, desc, count } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { staffInvites, users, organizations } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { canAssignRole } from "@/lib/auth/authz";
+import { getOrgEntitlements } from "@/lib/billing/entitlements";
 import type { AdminRole, AdminSessionPayload } from "@/lib/auth/types";
 import { normalizeEmail, createStaff } from "./staff-queries";
 
@@ -84,7 +85,7 @@ export type CreateInviteResult =
   | { ok: true; invite: InviteRecord; token: string }
   | {
       ok: false;
-      reason: "forbidden" | "email_conflict" | "invite_exists";
+      reason: "forbidden" | "email_conflict" | "invite_exists" | "seat_limit";
     };
 
 /**
@@ -138,6 +139,22 @@ export async function createInvite(
     .limit(1);
   if (liveInvite) {
     return { ok: false, reason: "invite_exists" };
+  }
+
+  // Seat-limit entitlement gate (Stage 10). An invite, once accepted, becomes a
+  // new active user, so block it when the org is already AT its plan's maxStaff.
+  // Count active users only (deactivated users don't consume a seat). The free
+  // tier's small cap is the floor for a NULL-plan org. This is the ONE
+  // representative entitlement enforcement in v1.
+  const { entitlements } = await getOrgEntitlements(organizationId);
+  const [seatRow] = await db
+    .select({ value: count() })
+    .from(users)
+    .where(withTenant(users, organizationId, eq(users.isActive, true)));
+  // neon-http returns count() as a string.
+  const activeStaff = Number(seatRow?.value ?? 0);
+  if (activeStaff >= entitlements.maxStaff) {
+    return { ok: false, reason: "seat_limit" };
   }
 
   const { token, tokenHash } = generateInviteToken();

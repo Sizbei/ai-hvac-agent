@@ -15,6 +15,7 @@ vi.mock('drizzle-orm', () => ({
   desc: (c: unknown) => c,
   gt: (...a: unknown[]) => ['gt', ...a],
   isNull: (c: unknown) => ['isNull', c],
+  count: () => ['count'],
 }));
 
 vi.mock('@/lib/db/schema', () => ({
@@ -45,6 +46,17 @@ vi.mock('./staff-queries', () => ({
 vi.mock('@/lib/auth/authz', () => ({
   canAssignRole: (actor: string, desired: string) =>
     actor === 'super_admin' ? true : desired === 'technician',
+}));
+
+// entitlements: seat cap is configurable per test (default high so the seat gate
+// is a no-op for the pre-existing happy-path tests).
+let mockMaxStaff = 1000;
+vi.mock('@/lib/billing/entitlements', () => ({
+  getOrgEntitlements: () =>
+    Promise.resolve({
+      plan: { id: 'test' },
+      entitlements: { maxStaff: mockMaxStaff, features: [] },
+    }),
 }));
 
 // --- Chainable db mock with per-call result queues ---
@@ -96,6 +108,7 @@ beforeEach(() => {
   selectQueue.length = 0;
   insertQueue.length = 0;
   updateQueue.length = 0;
+  mockMaxStaff = 1000;
   mockCreateStaff.mockReset();
 });
 
@@ -131,6 +144,7 @@ describe('createInvite — authorization', () => {
   it('allows a normal admin to invite a technician', async () => {
     selectQueue.push([]); // no existing user
     selectQueue.push([]); // no live invite
+    selectQueue.push([{ value: 0 }]); // seat count (under cap)
     insertQueue.push([
       {
         id: 'inv1',
@@ -156,6 +170,7 @@ describe('createInvite — authorization', () => {
   it('allows a super_admin to invite an admin', async () => {
     selectQueue.push([]);
     selectQueue.push([]);
+    selectQueue.push([{ value: 0 }]); // seat count (under cap)
     insertQueue.push([
       {
         id: 'inv2',
@@ -209,6 +224,45 @@ describe('createInvite — conflicts', () => {
     );
     // It hit the user-conflict branch using the normalized email.
     expect(res).toEqual({ ok: false, reason: 'email_conflict' });
+  });
+
+  it('rejects when the org is at its plan seat limit (entitlement gate)', async () => {
+    mockMaxStaff = 2; // cap of 2
+    selectQueue.push([]); // no existing user
+    selectQueue.push([]); // no live invite
+    selectQueue.push([{ value: 2 }]); // 2 active staff == cap
+    const res = await createInvite(
+      ORG,
+      { email: 'new@x.com', role: 'technician' },
+      'super_admin',
+      ACTOR,
+    );
+    expect(res).toEqual({ ok: false, reason: 'seat_limit' });
+    // No insert should have been attempted.
+    expect(insertQueue.length).toBe(0);
+  });
+
+  it('allows the invite when active staff is below the seat cap', async () => {
+    mockMaxStaff = 5;
+    selectQueue.push([]); // no existing user
+    selectQueue.push([]); // no live invite
+    selectQueue.push([{ value: 4 }]); // under cap
+    insertQueue.push([
+      {
+        id: 'inv9',
+        email: 'new@x.com',
+        role: 'technician',
+        expiresAt: new Date('2026-06-13T00:00:00Z'),
+        createdAt: new Date('2026-06-10T00:00:00Z'),
+      },
+    ]);
+    const res = await createInvite(
+      ORG,
+      { email: 'new@x.com', role: 'technician' },
+      'super_admin',
+      ACTOR,
+    );
+    expect(res.ok).toBe(true);
   });
 });
 

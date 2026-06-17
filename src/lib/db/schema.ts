@@ -201,14 +201,18 @@ export const availabilitySyncStatusEnum = pgEnum("availability_sync_status", [
   "failed",
 ]);
 
-// Lifecycle state of a tenant org. "active" is the default; "trial" and
-// "suspended" are reserved for Stage 10 billing/entitlement gating (no behavior
-// is wired to them yet — they are recorded so the column exists when billing
-// lands). Provisioning always creates an org as "active".
+// Lifecycle state of a tenant org. "active" is the default. The other states
+// drive Stage 10 SaaS-billing/entitlement gating:
+//   - "trial":     pre-payment grace period (treated as active by isOrgActive).
+//   - "past_due":  a subscription payment failed; the org is in dunning and is
+//                  treated as NOT active (banner shown, seat gate enforced).
+//   - "suspended": the subscription was cancelled/deleted; NOT active.
+// Provisioning always creates an org as "active".
 export const orgStatusEnum = pgEnum("org_status", [
   "active",
   "suspended",
   "trial",
+  "past_due",
 ]);
 
 // 1. organizations
@@ -227,6 +231,21 @@ export const organizations = pgTable("organizations", {
   // the org belongs to even before they accept their invite. Normalized
   // (trim+lowercase). PII — never emitted in audit details.
   ownerEmail: text("owner_email"),
+  // --- Stage 10: SaaS billing (platform subscription) ---
+  // The billing plan tier id (see src/lib/billing/plans.ts). NULL means the org
+  // is on the default/free tier — every existing row stays free without a
+  // backfill. Not an enum: plans are version-controlled config, not a DB enum,
+  // so new tiers ship without a migration.
+  plan: text("plan"),
+  // The billing provider's customer id (Stripe customer). NULL until the org
+  // first opens checkout. Not a secret (a provider-side opaque handle).
+  stripeCustomerId: text("stripe_customer_id"),
+  // The billing provider's subscription id. NULL until a subscription exists.
+  subscriptionId: text("subscription_id"),
+  // End of the current paid period (provider-reported). NULL when there is no
+  // active subscription. Used to show "renews/ends on" and to reason about
+  // grace; enforcement keys off `status`, not this timestamp.
+  currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -1234,6 +1253,38 @@ export const hcpWebhookEvents = pgTable(
       table.organizationId,
       table.eventId,
     ),
+  ],
+);
+
+// 13b. saas_billing_events — IDEMPOTENCY ledger for inbound SaaS-billing
+// (platform-subscription) webhooks. (Stage 10.)
+//
+// Unlike the per-org HCP/Fieldpulse ledgers, the SaaS-billing webhook is a
+// PLATFORM endpoint: the provider's event id is globally unique, so dedupe is on
+// `event_id` alone (a single global unique index). The handler does
+// insert-on-conflict-do-nothing and treats a zero-row insert as "already
+// processed", so a provider redelivery never re-applies a subscription change.
+// We persist only NON-secret metadata (the provider event id + type + the org it
+// targeted); never the raw payload or any secret.
+export const saasBillingEvents = pgTable(
+  "saas_billing_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    // The provider's event id (globally unique across all orgs). The dedupe key.
+    eventId: text("event_id").notNull(),
+    // The provider event type, e.g. "subscription.updated" — audit trail only.
+    eventType: text("event_type").notNull(),
+    // The org the event targeted (nullable: an event we record as seen but could
+    // not map to an org). Not org-scoped on the unique index by design.
+    organizationId: uuid("organization_id").references(() => organizations.id),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    // One ledger row per provider event id, globally — the dedupe key.
+    uniqueIndex("saas_billing_events_event_id_unique").on(table.eventId),
+    index("saas_billing_events_org_id_idx").on(table.organizationId),
   ],
 );
 

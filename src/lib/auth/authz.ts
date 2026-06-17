@@ -74,6 +74,11 @@ export function canAssignRole(
   actorRole: AdminRole,
   desiredRole: "super_admin" | "admin" | "technician",
 ): boolean {
+  // Defense-in-depth: this function never grants super_admin, regardless of the
+  // caller's static types. super_admin is reserved for the provisioned-org owner
+  // promotion (see acceptInvite) and direct super_admin management
+  // (canManageRole) — it must NEVER be assignable through the invite/assign path.
+  if (desiredRole === "super_admin") return false;
   if (actorRole === "super_admin") return true;
   return desiredRole === "technician";
 }
