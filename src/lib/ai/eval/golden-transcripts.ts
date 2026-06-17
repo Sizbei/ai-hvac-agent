@@ -16,6 +16,7 @@
  */
 import type { RouterAction } from "../router-types";
 import type { KnownSlots } from "../intent-router";
+import type { RouterOrgConfig } from "../router-config";
 
 export type TranscriptCategory =
   | "emergency"
@@ -69,6 +70,12 @@ export interface TranscriptExpectation {
    * crisp clarifying question, NOT an LLM punt (FALLBACK_LLM).
    */
   readonly mustProbeAmbiguity?: boolean;
+  /**
+   * The FINAL turn's served reply must contain this substring (case-insensitive).
+   * Used by data-driven FAQ transcripts to assert the configured org value
+   * (real hours / service area) actually surfaces in the canned answer.
+   */
+  readonly finalReplyContains?: string;
 }
 
 export interface GoldenTranscript {
@@ -90,6 +97,12 @@ export interface GoldenTranscript {
    * recognizes; identity is a route concern). Purely descriptive for the judge.
    */
   readonly identified?: boolean;
+  /**
+   * Per-org router overlay applied when replaying this transcript (defaults to
+   * EMPTY_ORG_CONFIG). Lets a transcript exercise data-driven FAQ answers that
+   * depend on configured business info (real hours / service area).
+   */
+  readonly orgConfig?: RouterOrgConfig;
   readonly expect: TranscriptExpectation;
 }
 
@@ -304,6 +317,50 @@ const FAQ_PAYMENT: GoldenTranscript = {
   },
 };
 
+const FAQ_HOURS_CONFIGURED: GoldenTranscript = {
+  id: "faq-hours-configured-org",
+  category: "faq",
+  description:
+    "Business-hours FAQ for an org with configured hours — states the REAL hours, never a price or false booking (Step 20 data-driven FAQ).",
+  userTurns: ["what are your hours?"],
+  orgConfig: {
+    companyName: "Spears Services",
+    disabledIssueTypes: [],
+    disabledServiceTags: [],
+    businessInfo: { businessHours: "Mon–Fri 8am–6pm ET" },
+    customFaqs: [],
+  },
+  expect: {
+    finalAction: "ANSWER",
+    finalIntentId: "faq-business-hours",
+    finalReplyContains: "Mon–Fri 8am–6pm ET",
+    noPriceLeak: true,
+    noFalseBooking: true,
+  },
+};
+
+const FAQ_SERVICE_AREA_CONFIGURED: GoldenTranscript = {
+  id: "faq-service-area-configured-org",
+  category: "faq",
+  description:
+    "Service-area FAQ for an org with a configured coverage area — names the real area, never a price or false booking (Step 20 data-driven FAQ).",
+  userTurns: ["do you serve my area?"],
+  orgConfig: {
+    companyName: "Spears Services",
+    disabledIssueTypes: [],
+    disabledServiceTags: [],
+    businessInfo: { serviceArea: "Johnson City and the Tri-Cities, TN" },
+    customFaqs: [],
+  },
+  expect: {
+    finalAction: "ANSWER",
+    finalIntentId: "faq-service-area",
+    finalReplyContains: "Johnson City and the Tri-Cities, TN",
+    noPriceLeak: true,
+    noFalseBooking: true,
+  },
+};
+
 const COMPOUND_MULTI_INTENT: GoldenTranscript = {
   id: "compound-heating-thermostat-airflow",
   category: "compound",
@@ -416,6 +473,8 @@ export const GOLDEN_TRANSCRIPTS: readonly GoldenTranscript[] = [
   INJECTION_NEW_INSTRUCTIONS,
   FAQ_HOURS,
   FAQ_PAYMENT,
+  FAQ_HOURS_CONFIGURED,
+  FAQ_SERVICE_AREA_CONFIGURED,
   COMPOUND_MULTI_INTENT,
   COMPOUND_EMERGENCY_WINS,
   RESCHEDULE,
