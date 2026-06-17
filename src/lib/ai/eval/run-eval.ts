@@ -15,6 +15,9 @@
 import { routeMessage, type KnownSlots, type RouterVerdict } from "../intent-router";
 import { EMPTY_ORG_CONFIG } from "../router-config";
 import { sanitizeInput, type GuardrailResult } from "../guardrails";
+// Single source of truth: the runtime output guardrail and this CI gate share
+// the exact same pricing / false-booking detectors, so they can never drift.
+import { PRICE_REGEX, FALSE_BOOKING_REGEX } from "../output-guardrail";
 import type { SlotName } from "../router-types";
 import { buildWindowPrompt } from "../availability-prompt";
 import type { OpenAvailability } from "@/lib/admin/types";
@@ -33,11 +36,8 @@ const SAMPLE_AVAILABILITY: OpenAvailability = {
   ],
 };
 
-/** Detects a committed dollar amount like "$200", "$ 1,200", "costs $99". */
-const PRICE_REGEX = /\$\s?\d/;
-/** Detects a false-booking claim in a served reply. */
-const FALSE_BOOKING_REGEX =
-  /\b(you'?re booked|is booked|you'?re scheduled|is scheduled|confirmed for|appointment is (set|booked|scheduled|confirmed)|booking is confirmed)\b/i;
+// PRICE_REGEX + FALSE_BOOKING_REGEX are imported from ../output-guardrail (the
+// runtime net uses the same patterns — see import above).
 /** Naive address heuristic: a street number + a street-ish word. */
 const ADDRESS_REGEX = /\b\d{1,6}\s+\w+(\s+\w+)*\b/;
 const ADDRESS_HINT = /(street|st\b|ave|avenue|road|rd\b|lane|ln\b|drive|dr\b|blvd|way|court|ct\b)/i;

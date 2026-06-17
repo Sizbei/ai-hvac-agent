@@ -487,13 +487,11 @@ describe('E2E Smoke Test: Full Customer-to-Admin Flow', () => {
       // After-hours config lookup (no settings row → resolves to default/disabled)
       .mockResolvedValueOnce([]);
 
-    // Mock streamText to return an object with toTextStreamResponse
-    const mockResponse = new Response('AI response stream', {
-      status: 200,
-      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
-    });
+    // The route now BUFFERS the reply (output guardrail screens it before send),
+    // so it reads result.text + result.usage rather than streaming. Mock those.
     mockStreamText.mockReturnValue({
-      toTextStreamResponse: () => mockResponse,
+      text: Promise.resolve('AI response stream'),
+      usage: Promise.resolve({ inputTokens: 10, outputTokens: 5 }),
     });
 
     // Mock insert for user message (void return is fine)
