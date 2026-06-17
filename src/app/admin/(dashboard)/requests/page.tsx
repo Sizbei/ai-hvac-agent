@@ -9,6 +9,8 @@ import { RequestTable } from '@/components/admin/request-table';
 import { RequestDetailSheet } from '@/components/admin/request-detail-sheet';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Input } from '@/components/ui/input';
+import { PageShell } from '@/components/admin/ui/page-shell';
+import { PageHeader } from '@/components/admin/ui/page-header';
 
 export default function AdminRequestsPage() {
   const [statusFilter, setStatusFilter] = useState<string>('');
@@ -28,11 +30,11 @@ export default function AdminRequestsPage() {
   });
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Service Requests</h1>
-        <span className="text-sm text-muted-foreground">{total} total</span>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Service Requests"
+        actions={<span className="text-sm text-muted-foreground">{total} total</span>}
+      />
 
       <StatsCards />
 
@@ -68,6 +70,6 @@ export default function AdminRequestsPage() {
         onClose={() => setSelectedRequestId(null)}
         onAssigned={refetch}
       />
-    </div>
+    </PageShell>
   );
 }

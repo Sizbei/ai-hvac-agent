@@ -9,6 +9,8 @@ import { TaxRatesPanel } from '@/components/admin/pricebook/tax-rates-panel';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
+import { PageShell } from '@/components/admin/ui/page-shell';
+import { PageHeader } from '@/components/admin/ui/page-header';
 import type { PricebookItem } from '@/hooks/use-pricebook';
 
 export default function PricebookPage() {
@@ -34,19 +36,17 @@ export default function PricebookPage() {
   }
 
   return (
-    <div className="p-6 space-y-8">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Pricebook</h1>
-          <p className="text-sm text-muted-foreground">
-            Manage priced services, materials, equipment, and tax rates.
-          </p>
-        </div>
-        <Button onClick={handleAddClick}>
-          <Plus className="mr-2 h-4 w-4" />
-          Add Item
-        </Button>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Pricebook"
+        subtitle="Manage priced services, materials, equipment, and tax rates."
+        actions={
+          <Button onClick={handleAddClick}>
+            <Plus className="mr-2 h-4 w-4" />
+            Add Item
+          </Button>
+        }
+      />
 
       {error && (
         <Alert variant="destructive">
@@ -76,6 +76,6 @@ export default function PricebookPage() {
         onSuccess={() => void refetch()}
         editing={editing}
       />
-    </div>
+    </PageShell>
   );
 }

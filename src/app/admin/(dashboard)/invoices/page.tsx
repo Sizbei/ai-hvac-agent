@@ -6,10 +6,14 @@ import { AlertCircle, AlertTriangle, Receipt } from 'lucide-react';
 import { useInvoices } from '@/hooks/use-invoices';
 import { InvoiceStateBadge } from '@/components/admin/invoices/invoice-state-badge';
 import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { cn } from '@/lib/utils';
+import { PageShell } from '@/components/admin/ui/page-shell';
+import { PageHeader } from '@/components/admin/ui/page-header';
+import { EmptyState } from '@/components/admin/ui/empty-state';
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', {
@@ -105,13 +109,11 @@ export default function InvoicesPage() {
   }, [invoices, filter]);
 
   return (
-    <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Invoices</h1>
-        <p className="text-sm text-muted-foreground">
-          Invoices generated from sold estimates, with payments and refunds.
-        </p>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Invoices"
+        subtitle="Invoices generated from sold estimates, with payments and refunds."
+      />
 
       <ReconcileBanner />
 
@@ -142,14 +144,17 @@ export default function InvoicesPage() {
           <Skeleton className="h-16 w-full" />
         </div>
       ) : filtered.length === 0 ? (
-        <div className="rounded-lg border border-dashed py-16 text-center">
-          <Receipt className="mx-auto size-8 text-muted-foreground" />
-          <p className="mt-3 text-sm text-muted-foreground">
-            {filter === 'all'
-              ? 'No invoices yet. Generate one from a sold estimate.'
-              : 'No invoices match this filter.'}
-          </p>
-        </div>
+        <Card className="p-5">
+          <EmptyState
+            icon={Receipt}
+            title={filter === 'all' ? 'No invoices yet' : 'No invoices match'}
+            description={
+              filter === 'all'
+                ? 'Generate an invoice from a sold estimate to start collecting payments.'
+                : 'No invoices match this filter. Try a different one.'
+            }
+          />
+        </Card>
       ) : (
         <div className="overflow-hidden rounded-lg border">
           <table className="w-full text-sm">
@@ -178,7 +183,7 @@ export default function InvoicesPage() {
                     <td
                       className={cn(
                         'px-4 py-3',
-                        balance > 0 ? 'font-medium text-amber-700' : 'text-muted-foreground',
+                        balance > 0 ? 'font-medium text-warning-foreground' : 'text-muted-foreground',
                       )}
                     >
                       {formatCentsExact(balance)}
@@ -216,6 +221,6 @@ export default function InvoicesPage() {
           </table>
         </div>
       )}
-    </div>
+    </PageShell>
   );
 }

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { UserPlus, Search, Building2, Wrench, Calendar } from 'lucide-react';
+import { UserPlus, Search, Building2, Wrench, Calendar, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
@@ -17,6 +17,9 @@ import {
 } from '@/components/ui/select';
 import { useAdminCustomers } from '@/hooks/use-admin-customers';
 import { CustomerFormDialog } from '@/components/admin/customer-form-dialog';
+import { PageShell } from '@/components/admin/ui/page-shell';
+import { PageHeader } from '@/components/admin/ui/page-header';
+import { EmptyState } from '@/components/admin/ui/empty-state';
 
 const ALL_PROPERTY_TYPES = 'all';
 
@@ -52,20 +55,20 @@ export default function CustomersPage() {
     [customers, search, propertyTypeFilter],
   );
 
+  const isFiltered = Boolean(search) || propertyTypeFilter !== ALL_PROPERTY_TYPES;
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Customers</h1>
-          <p className="text-sm text-muted-foreground">
-            {customers.length} total customers
-          </p>
-        </div>
-        <Button onClick={() => setShowCreate(true)}>
-          <UserPlus className="mr-2 size-4" />
-          Add Customer
-        </Button>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Customers"
+        subtitle={`${customers.length} total customers`}
+        actions={
+          <Button onClick={() => setShowCreate(true)}>
+            <UserPlus className="mr-2 size-4" />
+            Add Customer
+          </Button>
+        }
+      />
 
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 sm:max-w-md">
@@ -102,11 +105,25 @@ export default function CustomersPage() {
           ))}
         </div>
       ) : filtered.length === 0 ? (
-        <div className="py-12 text-center text-muted-foreground">
-          {search || propertyTypeFilter !== ALL_PROPERTY_TYPES
-            ? 'No customers match your filters.'
-            : 'No customers yet. Add your first customer to get started.'}
-        </div>
+        <Card className="p-5">
+          <EmptyState
+            icon={Users}
+            title={isFiltered ? 'No customers match' : 'No customers yet'}
+            description={
+              isFiltered
+                ? 'Try a different search term or property-type filter.'
+                : 'Add your first customer to start tracking equipment, service history, and follow-ups.'
+            }
+            action={
+              isFiltered ? undefined : (
+                <Button onClick={() => setShowCreate(true)}>
+                  <UserPlus className="mr-2 size-4" />
+                  Add Customer
+                </Button>
+              )
+            }
+          />
+        </Card>
       ) : (
         <div className="grid gap-3">
           {filtered.map((customer) => (
@@ -157,6 +174,6 @@ export default function CustomersPage() {
           refetch();
         }}
       />
-    </div>
+    </PageShell>
   );
 }

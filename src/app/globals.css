@@ -27,6 +27,15 @@
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-success-light: var(--success-light);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-light: var(--warning-light);
+  --color-danger: var(--danger);
+  --color-danger-foreground: var(--danger-foreground);
+  --color-danger-light: var(--danger-light);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -68,6 +77,17 @@
   --accent: oklch(0.968 0.007 247.896);
   --accent-foreground: oklch(0.129 0.042 264.695);
   --destructive: oklch(0.577 0.245 27.325);
+  /* Semantic status tokens — green=success, amber=warning, red=danger.
+   * *-light variants are the soft backgrounds for badges/icon chips. */
+  --success: oklch(0.6 0.14 150);
+  --success-foreground: oklch(0.99 0 0);
+  --success-light: oklch(0.95 0.04 150);
+  --warning: oklch(0.7 0.15 75);
+  --warning-foreground: oklch(0.27 0.05 75);
+  --warning-light: oklch(0.96 0.05 85);
+  --danger: oklch(0.577 0.245 27.325);
+  --danger-foreground: oklch(0.99 0 0);
+  --danger-light: oklch(0.95 0.04 25);
   --border: oklch(0.918 0.016 264.054);
   --input: oklch(0.918 0.016 264.054);
   --ring: oklch(0.72 0.13 220);
@@ -109,6 +129,16 @@
   --accent: oklch(0.269 0.015 264.695);
   --accent-foreground: oklch(0.968 0.007 247.896);
   --destructive: oklch(0.704 0.191 22.216);
+  /* Semantic status tokens (dark): brighter fills, low-chroma tinted "light" bgs. */
+  --success: oklch(0.72 0.15 150);
+  --success-foreground: oklch(0.16 0.04 150);
+  --success-light: oklch(0.3 0.07 150);
+  --warning: oklch(0.78 0.15 80);
+  --warning-foreground: oklch(0.18 0.04 80);
+  --warning-light: oklch(0.32 0.07 80);
+  --danger: oklch(0.704 0.191 22.216);
+  --danger-foreground: oklch(0.16 0.04 25);
+  --danger-light: oklch(0.32 0.09 25);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.75 0.13 220);
