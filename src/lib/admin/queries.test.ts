@@ -526,17 +526,22 @@ describe('updateTechnician', () => {
 
 describe('getDashboardStats', () => {
   it('should return the full KPI shape with numeric values', async () => {
-    // 8 select calls: pending, assignedToday, inProgress, completedToday,
-    // scheduled, onHold, emergencyOpen, afterHoursToday (count only).
+    // Single aggregate query: one row with all KPI columns (CASE-count per
+    // status). The source was refactored from 8 separate counts to one
+    // round-trip, so the mock returns one keyed row, not 8 {value} rows.
     selectResolutions = [
-      [{ value: 5 }], // pending
-      [{ value: 3 }], // assignedToday
-      [{ value: 2 }], // inProgress
-      [{ value: 1 }], // completedToday
-      [{ value: 4 }], // scheduled
-      [{ value: 2 }], // onHold
-      [{ value: 1 }], // emergencyOpen
-      [{ value: 3 }], // afterHoursToday
+      [
+        {
+          pending: 5,
+          assignedToday: 3,
+          inProgress: 2,
+          completedToday: 1,
+          scheduled: 4,
+          onHold: 2,
+          emergencyOpen: 1,
+          afterHoursToday: 3,
+        },
+      ],
     ];
 
     const result = await getDashboardStats(ORG_ID);
@@ -552,14 +557,18 @@ describe('getDashboardStats', () => {
 
   it('defaults afterHoursToday to 0 when no after-hours rows exist', async () => {
     selectResolutions = [
-      [{ value: 0 }],
-      [{ value: 0 }],
-      [{ value: 0 }],
-      [{ value: 0 }],
-      [{ value: 0 }],
-      [{ value: 0 }],
-      [{ value: 0 }],
-      [{ value: 0 }],
+      [
+        {
+          pending: 0,
+          assignedToday: 0,
+          inProgress: 0,
+          completedToday: 0,
+          scheduled: 0,
+          onHold: 0,
+          emergencyOpen: 0,
+          afterHoursToday: 0,
+        },
+      ],
     ];
 
     const result = await getDashboardStats(ORG_ID);
@@ -585,15 +594,21 @@ describe('getDashboardOverview', () => {
       holdReason: null,
       createdAt: new Date('2026-06-07T10:00:00.000Z'),
     };
+    // select 0 = getDashboardStats (single aggregate row); selects 1-3 = the
+    // three dashboard list queries.
     selectResolutions = [
-      [{ value: 1 }],
-      [{ value: 0 }],
-      [{ value: 0 }],
-      [{ value: 0 }],
-      [{ value: 1 }],
-      [{ value: 0 }],
-      [{ value: 0 }],
-      [{ value: 1 }],
+      [
+        {
+          pending: 1,
+          assignedToday: 0,
+          inProgress: 0,
+          completedToday: 0,
+          scheduled: 1,
+          onHold: 0,
+          emergencyOpen: 0,
+          afterHoursToday: 1,
+        },
+      ],
       [scheduledRow], // todaySchedule
       [], // needsAttention
       [], // awaitingFollowUp
@@ -618,15 +633,20 @@ describe('getDashboardOverview', () => {
     // query was built with isNull(assignedTo) rather than relying on the mock
     // to execute SQL filtering.
     const { isNull } = await import('drizzle-orm');
+    // select 0 = getDashboardStats (single aggregate row); selects 1-3 = lists.
     selectResolutions = [
-      [{ value: 0 }],
-      [{ value: 0 }],
-      [{ value: 0 }],
-      [{ value: 0 }],
-      [{ value: 0 }],
-      [{ value: 0 }],
-      [{ value: 0 }],
-      [{ value: 0 }],
+      [
+        {
+          pending: 0,
+          assignedToday: 0,
+          inProgress: 0,
+          completedToday: 0,
+          scheduled: 0,
+          onHold: 0,
+          emergencyOpen: 0,
+          afterHoursToday: 0,
+        },
+      ],
       [], // todaySchedule
       [], // needsAttention
       [], // awaitingFollowUp
