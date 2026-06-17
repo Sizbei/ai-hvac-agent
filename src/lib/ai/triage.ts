@@ -94,10 +94,24 @@ export const UNSKIPPABLE_CORE = [
 // (or an explicit "skip") the intake proceeds without one.
 
 /**
- * Local mirror of extraction-schema.isAddressComplete: a COMPLETE service
- * address has >=4 whitespace tokens, the first token starts with a digit
- * (street number), and it contains a 5-digit ZIP. Duplicated here (not imported)
- * so the pure triage engine has no dependency on the extraction schema.
+ * Triage's own "is this address dispatchable enough to stop re-asking?" check.
+ *
+ * Historically this mirrored extraction-schema.isAddressComplete EXACTLY: it
+ * REQUIRED a 5-digit US ZIP AND a leading street number. That over-fits to the
+ * US postal format and re-asks perfectly valid addresses that simply don't carry
+ * a ZIP in the typed string, or that lead with a unit ("Flat 2, 14 ...") — so a
+ * customer who gave a complete address still gets the annoying re-prompt.
+ *
+ * Loosened (still conservative): accept when the line has BOTH
+ *   (a) a street component — a leading street number, OR a named rural route, OR
+ *       a recognizable street-type word (St/Ave/Rd/Blvd/Ln/...), AND
+ *   (b) a locality component — a 5-digit ZIP, OR a comma-separated tail (the
+ *       "city, region" part people type after the street), OR enough tokens
+ *       (>=4) that a street + city are plausibly both present.
+ * The original ZIP+number form still passes (it satisfies both). Single words,
+ * "downtown", "my house" and other obvious junk still fail (no street component).
+ * The lookup-verification path (addressVerified) is unchanged and still trusts a
+ * geocoded pick regardless of format.
  */
 // Rural/named-route street lines ("County Road 120", "Highway 64", "FM 1325")
 // — the road's number follows its name, so the leading-digit check must not
@@ -105,15 +119,30 @@ export const UNSKIPPABLE_CORE = [
 const NAMED_ROUTE_TRIAGE =
   /\b(?:county\s+(?:road|rd)|state\s+(?:route|highway|hwy|road|rd)|(?:us\s+)?highway|hwy|route|rte|farm\s+to\s+market|fm|cr|sr|rr)\s*#?\s*\d+\b/i;
 
+// Common street-type words (US + intl). Their presence signals a real street
+// line even when the address doesn't lead with a house number (e.g. unit-first
+// formats, or "High Street, Oxford"). Word-boundary, case-insensitive.
+const STREET_TYPE_TRIAGE =
+  /\b(?:st|street|ave|avenue|rd|road|blvd|boulevard|ln|lane|dr|drive|ct|court|way|pl|place|terr?|terrace|cir|circle|pkwy|parkway|hwy|highway|close|crescent|cres|sq|square|row|walk|grove|gardens?)\b/i;
+
 function addressLooksComplete(address: string | null | undefined): boolean {
   if (!address) return false;
   const trimmed = address.trim();
   if (trimmed.length === 0) return false;
   const tokens = trimmed.split(/\s+/);
-  if (tokens.length < 4) return false;
-  if (!/^\d/.test(tokens[0]) && !NAMED_ROUTE_TRIAGE.test(trimmed)) return false;
-  if (!/\b\d{5}\b/.test(trimmed)) return false;
-  return true;
+
+  const hasZip = /\b\d{5}\b/.test(trimmed);
+  const hasStreetNumber = /^\d/.test(tokens[0]);
+  const hasNamedRoute = NAMED_ROUTE_TRIAGE.test(trimmed);
+  const hasStreetType = STREET_TYPE_TRIAGE.test(trimmed);
+  const hasStreetComponent = hasStreetNumber || hasNamedRoute || hasStreetType;
+  if (!hasStreetComponent) return false;
+
+  // A locality is present if there's a ZIP, a comma-separated tail (street, city
+  // …), or enough tokens that a street + city both plausibly appear.
+  const hasComma = trimmed.includes(',');
+  const hasLocality = hasZip || hasComma || tokens.length >= 4;
+  return hasLocality;
 }
 
 const SKIP_PATTERNS = [
@@ -197,7 +226,7 @@ const ADDRESS_STEP: TriageStep = {
 const ADDRESS_PARTS_STEP: TriageStep = {
   id: "address_parts",
   question:
-    "I want to make sure a technician can find you. What's the full US service address — street number, street, city, state, and 5-digit ZIP code?",
+    "I want to make sure a technician can find you. What's the full service address — street number and street, plus the city (and ZIP or postal code if you have it)?",
   quickReplies: [],
   optional: false,
 };
@@ -398,11 +427,69 @@ const STEP_TO_EXTRA: Record<string, string> = {
   lead_source: "leadSource",
 };
 
-// Ordered list of OPTIONAL enrichment steps the engine WILL ask after core info
-// is captured. Deliberately capped to just two so intake ends quickly: ask
-// system type, then a preferred window, then return null so the route surfaces
-// "Complete & Submit". Keeping this short is the fix for the never-ending intake.
+// Default OPTIONAL enrichment order when no issue-specific qualifier applies.
+// Deliberately capped to just two so intake ends quickly: ask system type, then
+// a preferred window, then return null so the route surfaces "Complete &
+// Submit". Keeping this short is the fix for the never-ending intake.
 const ENRICHMENT_ORDER: readonly TriageStep[] = [SYSTEM_TYPE_STEP, WINDOW_STEP];
+
+// Hard cap on enrichment questions — Step 15 is about asking BETTER questions,
+// NOT more. The selector below NEVER returns more than this many steps.
+export const MAX_ENRICHMENT_STEPS = 2;
+
+/**
+ * Per-issue enrichment plan (Step 15): for a given issue type, the highest-value
+ * qualifier(s) to ask, in priority order. WINDOW is the common closer everywhere
+ * (it's how we capture scheduling preference). Each list is capped to
+ * MAX_ENRICHMENT_STEPS by `selectEnrichmentOrder`, so adding a third entry here
+ * is harmless — only the first two that still apply are ever asked.
+ *
+ * Rationale by class:
+ *  - no-heat / no-cool: the dispatch-defining qualifier is WHO is at risk, not
+ *    what brand the box is. Ask vulnerable-occupants first (a real prioritization
+ *    signal — duration is already captured by the required DURATION_STEP), then
+ *    close with the window.
+ *  - repair-vs-replace signals (aging-equipment classes: maintenance,
+ *    installation, strange_noises, water_leak): equipment AGE is the single most
+ *    decision-relevant qualifier (drives the repair-vs-replace conversation), so
+ *    ask it first, then the window.
+ *  - everything else: the generic system-type then window (the prior behavior).
+ */
+const ENRICHMENT_BY_ISSUE: Record<string, readonly TriageStep[]> = {
+  heating_not_working: [VULNERABLE_STEP, WINDOW_STEP],
+  cooling_not_working: [VULNERABLE_STEP, WINDOW_STEP],
+  maintenance: [EQUIPMENT_AGE_STEP, WINDOW_STEP],
+  installation: [EQUIPMENT_AGE_STEP, WINDOW_STEP],
+  strange_noises: [EQUIPMENT_AGE_STEP, WINDOW_STEP],
+  water_leak: [EQUIPMENT_AGE_STEP, WINDOW_STEP],
+};
+
+/**
+ * Pick the enrichment steps to ask for this issue type, capped at
+ * MAX_ENRICHMENT_STEPS. Returns the issue-specific plan when one exists and at
+ * least its first step applies to the issue; otherwise falls back to the generic
+ * ENRICHMENT_ORDER. Pure + exported for unit testing.
+ *
+ * Note: this returns the PLAN (candidate order). `nextTriageStep` still filters
+ * each candidate by enrichmentStepApplies + extraFilledOrSkipped, so a step that
+ * doesn't apply (or was already answered/skipped) is transparently passed over —
+ * the cap bounds the PLAN length, not the count of unanswered questions, so we
+ * never silently exceed two asks.
+ */
+export function selectEnrichmentOrder(
+  issueType: string | null,
+): readonly TriageStep[] {
+  if (issueType !== null) {
+    const plan = ENRICHMENT_BY_ISSUE[issueType];
+    // Only adopt the issue-specific plan when its lead qualifier actually applies
+    // to this issue (e.g. system_type-style suppression). If the lead doesn't
+    // apply, fall back to the generic order rather than leading with the closer.
+    if (plan && enrichmentStepApplies(plan[0].id, issueType)) {
+      return plan.slice(0, MAX_ENRICHMENT_STEPS);
+    }
+  }
+  return ENRICHMENT_ORDER.slice(0, MAX_ENRICHMENT_STEPS);
+}
 
 // Service lines whose equipment is NOT described by the forced-air HVAC
 // system-type taxonomy (central_ac / furnace / heat pump / mini-split / boiler).
@@ -437,14 +524,18 @@ function enrichmentStepApplies(
 // nextTriageStep does NOT iterate this list). If the customer VOLUNTEERS one of
 // these (e.g. mentions a business name → propertyType=commercial), the caller's
 // extraction still captures it into extras; it just isn't a question we block on.
+//
+// NOTE: EQUIPMENT_AGE_STEP and VULNERABLE_STEP are NOT in this list anymore —
+// Step 15's issue-conditional plan (ENRICHMENT_BY_ISSUE) now asks them as the
+// highest-value qualifier for specific issue classes (equipment age for
+// repair-vs-replace; vulnerable-occupants for no-heat/no-cool). They still ride
+// the same ≤2 enrichment cap.
 export const ENRICHMENT_NEVER_BLOCKS: readonly TriageStep[] = [
-  EQUIPMENT_AGE_STEP,
   EQUIPMENT_BRAND_STEP,
   PROPERTY_TYPE_STEP,
   OWNER_STEP,
   WARRANTY_STEP,
   ACCESS_STEP,
-  VULNERABLE_STEP,
   CONTACT_PREF_STEP,
   LEAD_SOURCE_STEP,
 ];
@@ -646,10 +737,13 @@ export function nextTriageStep(slots: TriageSlots): TriageStep | null {
   }
   if (!slots.urgency) return URGENCY_STEP;
 
-  // 4. Optional enrichment, in order; skip any already filled or skipped, and
-  // any step that doesn't apply to this issue type (e.g. system_type for a
-  // commercial appliance / refrigeration / ice machine).
-  for (const step of ENRICHMENT_ORDER) {
+  // 4. Optional enrichment — the issue-conditional plan (Step 15), capped at
+  // MAX_ENRICHMENT_STEPS. Skip any already filled or skipped, and any step that
+  // doesn't apply to this issue type (e.g. system_type for a commercial
+  // appliance / refrigeration / ice machine). The plan picks the highest-value
+  // qualifier per issue (vulnerable-occupants for no-heat/no-cool, equipment age
+  // for repair-vs-replace classes) and falls back to [system_type, window].
+  for (const step of selectEnrichmentOrder(slots.issueType)) {
     if (!enrichmentStepApplies(step.id, slots.issueType)) continue;
     if (!extraFilledOrSkipped(slots, step)) return step;
   }

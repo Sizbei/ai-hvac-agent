@@ -48,6 +48,13 @@ When the customer gives a full name (first and last), capture both as customerNa
 
 ${JSON_INSTRUCTION}`;
 
+/**
+ * The single repair re-prompt. Terse on purpose: the model already saw the full
+ * conversation + the shape on the first call; this just insists on raw JSON. Used
+ * only after the first reply failed to parse / validate (see extractServiceRequest).
+ */
+const REPAIR_INSTRUCTION = `Your previous reply was not valid JSON. Return ONLY a single JSON object matching the exact shape above — no prose, no markdown fences, no extra keys. ${JSON_INSTRUCTION}`;
+
 const EMPTY_EXTRACTION: ExtractionResult = {
   issueType: null,
   urgency: null,
@@ -67,14 +74,105 @@ function nullify(value: unknown): string | null {
   return NULLISH.has(trimmed.toLowerCase()) ? null : trimmed;
 }
 
-/** Pull a JSON object out of a model response that may be fenced or chatty. */
-function extractJsonBlock(text: string): string | null {
+/**
+ * Scan `text` for balanced top-level `{...}` objects via brace-depth matching
+ * (string- and escape-aware so braces inside JSON string values don't fool the
+ * counter). Returns every balanced object substring found, in source order.
+ * Pure + exported for unit testing.
+ *
+ * Why not a single regex / indexOf: a chatty model can emit prose that contains
+ * stray braces, OR several objects (a "thinking" object then the answer). A flat
+ * `indexOf('{')..lastIndexOf('}')` slice grabs from the FIRST brace to the LAST,
+ * which spans across two objects and yields invalid JSON. Depth-matching gives us
+ * each real object so the caller can pick the last valid one.
+ */
+export function findBalancedObjects(text: string): string[] {
+  const objects: string[] = [];
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === '\\') {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+    } else if (ch === '{') {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (ch === '}') {
+      if (depth > 0) {
+        depth--;
+        if (depth === 0 && start !== -1) {
+          objects.push(text.slice(start, i + 1));
+          start = -1;
+        }
+      }
+    }
+  }
+  return objects;
+}
+
+/**
+ * Pull a JSON object out of a model response that may be fenced or chatty.
+ * Tolerant by design: strips ```json``` fences, ignores leading/trailing prose,
+ * and when multiple balanced objects are present returns the LAST one that
+ * actually parses (the answer typically follows any preamble/"thinking" object).
+ * Returns the raw object string, or null when nothing balanced/parseable exists.
+ * Exported for unit testing.
+ */
+export function extractJsonBlock(text: string): string | null {
+  // Prefer fenced content when present (the model was told NOT to fence, but
+  // Qwen often does anyway); fall back to the whole text otherwise.
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
   const source = fenced ? fenced[1] : text;
-  const start = source.indexOf('{');
-  const end = source.lastIndexOf('}');
-  if (start === -1 || end === -1 || end <= start) return null;
-  return source.slice(start, end + 1);
+
+  const objects = findBalancedObjects(source);
+  if (objects.length === 0) {
+    // No balanced object in the fenced region — retry against the full text in
+    // case the fence was unterminated and swallowed the real object.
+    if (fenced) {
+      const fallback = findBalancedObjects(text);
+      return pickParseableObject(fallback);
+    }
+    return null;
+  }
+  return pickParseableObject(objects);
+}
+
+/** Return the LAST object string that JSON.parses to an object, else null. */
+function pickParseableObject(objects: string[]): string | null {
+  for (let i = objects.length - 1; i >= 0; i--) {
+    try {
+      const parsed: unknown = JSON.parse(objects[i]);
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        return objects[i];
+      }
+    } catch {
+      // try the next-earlier object
+    }
+  }
+  return null;
+}
+
+/** Result of a tolerant parse: the extraction plus whether the model actually
+ * produced usable structured output (false when we fell back to EMPTY). The
+ * repair pass keys off `ok` to decide whether one re-prompt is worth it. */
+export interface ParsedExtraction {
+  readonly extraction: ExtractionResult;
+  readonly ok: boolean;
 }
 
 /**
@@ -84,16 +182,28 @@ function extractJsonBlock(text: string): string | null {
  * Exported for unit testing.
  */
 export function parseExtractionResponse(text: string): ExtractionResult {
+  return parseExtractionResult(text).extraction;
+}
+
+/**
+ * Same tolerant parse as `parseExtractionResponse` but reports whether the parse
+ * yielded structured output (`ok: false` when no balanced/parseable JSON was
+ * found OR the coerced shape failed Zod validation). Exported for the repair
+ * pass + unit testing.
+ */
+export function parseExtractionResult(text: string): ParsedExtraction {
   const block = extractJsonBlock(text);
-  if (!block) return EMPTY_EXTRACTION;
+  if (!block) return { extraction: EMPTY_EXTRACTION, ok: false };
 
   let raw: Record<string, unknown>;
   try {
     const parsed: unknown = JSON.parse(block);
-    if (typeof parsed !== 'object' || parsed === null) return EMPTY_EXTRACTION;
+    if (typeof parsed !== 'object' || parsed === null) {
+      return { extraction: EMPTY_EXTRACTION, ok: false };
+    }
     raw = parsed as Record<string, unknown>;
   } catch {
-    return EMPTY_EXTRACTION;
+    return { extraction: EMPTY_EXTRACTION, ok: false };
   }
 
   const issueType = nullify(raw.issueType);
@@ -130,7 +240,9 @@ export function parseExtractionResponse(text: string): ExtractionResult {
   };
 
   const result = extractionSchema.safeParse(coerced);
-  return result.success ? result.data : EMPTY_EXTRACTION;
+  return result.success
+    ? { extraction: result.data, ok: true }
+    : { extraction: EMPTY_EXTRACTION, ok: false };
 }
 
 export async function extractServiceRequest(
@@ -167,14 +279,57 @@ export async function extractServiceRequest(
   );
 
   const { text, usage } = aiResult;
-  const extraction = parseExtractionResponse(text);
+  let { extraction, ok } = parseExtractionResult(text);
+  let tokensUsed = (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0);
+
+  // Step 3b: ONE bounded repair pass. The Qwen/DashScope endpoint occasionally
+  // returns prose with no parseable JSON, or a shape that fails Zod (e.g. an
+  // array, or a stray field that breaks the object). Re-prompt ONCE with a terse
+  // "return ONLY valid JSON" instruction, feeding back the model's own first
+  // reply so it has the content to re-format. Best-effort: if the second attempt
+  // also fails to parse, keep the empty/partial fallback we already have — never
+  // throw. maxOutputTokens is capped tight (the object is small) so the repair
+  // can't blow latency, and it reuses the same bounded timeout.
+  if (!ok) {
+    try {
+      const { result: repairResult } = await trackAICall(
+        'extraction',
+        async () =>
+          generateText({
+            model: await getExtractionModel(organizationId),
+            system: EXTRACTION_SYSTEM,
+            messages: [
+              ...messages,
+              { role: 'assistant' as const, content: text },
+              { role: 'user' as const, content: REPAIR_INSTRUCTION },
+            ],
+            maxOutputTokens: 300,
+            abortSignal: AbortSignal.timeout(30_000),
+          }),
+        (r) => (r.usage?.inputTokens ?? 0) + (r.usage?.outputTokens ?? 0),
+      );
+      const repaired = parseExtractionResult(repairResult.text);
+      tokensUsed +=
+        (repairResult.usage?.inputTokens ?? 0) +
+        (repairResult.usage?.outputTokens ?? 0);
+      // Only adopt the repair when it actually parsed; a second failure leaves
+      // the original empty/partial fallback in place.
+      if (repaired.ok) {
+        extraction = repaired.extraction;
+        ok = true;
+      }
+    } catch {
+      // Repair is best-effort: a timeout / network error must never break the
+      // turn. Fall through with the original fallback extraction.
+    }
+  }
 
   // Step 4: Validate extraction output per SC-06
   const validOutput = validateExtractionOutput(extraction);
 
   return {
     extraction,
-    tokensUsed: (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0),
+    tokensUsed,
     guardrailResult,
     validOutput,
   };

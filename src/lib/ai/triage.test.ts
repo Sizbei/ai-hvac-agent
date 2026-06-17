@@ -7,6 +7,8 @@ import {
   UNSKIPPABLE_CORE,
   ENRICHMENT_NEVER_BLOCKS,
   MAX_ADDRESS_REPROMPTS,
+  MAX_ENRICHMENT_STEPS,
+  selectEnrichmentOrder,
   type TriageStep,
   type TriageSlots,
 } from "./triage";
@@ -123,6 +125,7 @@ describe("nextTriageStep — ordering", () => {
   it("asks system_type (capped enrichment) once required slots are filled", () => {
     const step = nextTriageStep(
       slots({
+        issueType: "thermostat_issue", // generic [system_type, window] order
         safetyScreenPassed: true,
         urgency: "high",
         address: "5 Oak St, Seattle, WA 98101",
@@ -140,6 +143,7 @@ describe("nextTriageStep — ordering", () => {
   it("returns null (ready to confirm) once core + the two capped enrichment steps are answered or skipped", () => {
     const step = nextTriageStep(
       slots({
+        issueType: "thermostat_issue", // generic [system_type, window] order
         safetyScreenPassed: true,
         urgency: "high",
         address: "5 Oak St, Seattle, WA 98101",
@@ -185,6 +189,7 @@ describe("isSkip", () => {
 describe("applyTriageAnswer — optional fields are skippable", () => {
   it("marks an optional enrichment slot as resolved (skipped) so it is not re-asked", () => {
     const before = slots({
+      issueType: "thermostat_issue", // generic [system_type, window] order
       safetyScreenPassed: true,
       urgency: "high",
       address: "5 Oak St, Seattle, WA 98101",
@@ -203,6 +208,7 @@ describe("applyTriageAnswer — optional fields are skippable", () => {
 
   it("records a real answer into the right extras slot", () => {
     const before = slots({
+      issueType: "thermostat_issue", // generic [system_type, window] order
       safetyScreenPassed: true,
       urgency: "high",
       address: "5 Oak St, Seattle, WA 98101",
@@ -358,6 +364,7 @@ describe("captureEnrichmentAnswer (review fixes)", () => {
     const { nextTriageStep, SKIP_SENTINEL } = await import("./triage");
     const step = nextTriageStep(
       slots({
+        issueType: "thermostat_issue", // generic [system_type, window] order
         safetyScreenPassed: true,
         urgency: "high",
         address: "5 Oak St, Seattle, WA 98101",
@@ -388,25 +395,31 @@ describe("enrichment cap — only system_type then preferred_window", () => {
     });
   }
 
-  it("asks system_type first, then preferred_window, then null — never the other 9", () => {
+  it("asks system_type first, then preferred_window, then null for a fallback issue", () => {
+    // thermostat_issue has no issue-specific qualifier → generic order applies.
     // 1) core filled → system_type
     const s1 = coreFilled();
+    s1.issueType = "thermostat_issue";
     expect(nextTriageStep(s1)?.id).toBe("system_type");
 
     // 2) system_type set → preferred_window (NOT equipment_age/brand/etc.)
     const s2 = coreFilled({ systemType: "central_ac" });
+    s2.issueType = "thermostat_issue";
     expect(nextTriageStep(s2)?.id).toBe("preferred_window");
 
     // 3) both capped steps set → null (route surfaces Complete & Submit)
     const s3 = coreFilled({ systemType: "central_ac", preferredWindow: "morning" });
+    s3.issueType = "thermostat_issue";
     expect(nextTriageStep(s3)).toBeNull();
   });
 
-  it("never asks any of the 9 never-block enrichment steps", () => {
+  it("never asks any of the never-block enrichment steps (fallback issue)", () => {
     const neverIds = new Set(ENRICHMENT_NEVER_BLOCKS.map((s) => s.id));
     // Walk the whole flow from a freshly-cleared safety screen, answering each
-    // step, and assert we never land on a never-block step.
+    // step, and assert we never land on a never-block step. thermostat_issue
+    // uses the generic [system_type, window] fallback order.
     let s = coreFilled();
+    s.issueType = "thermostat_issue";
     const seen: string[] = [];
     for (let i = 0; i < 20; i++) {
       const step = nextTriageStep(s);
@@ -430,6 +443,7 @@ describe("enrichment cap — only system_type then preferred_window", () => {
       preferredWindow: "morning",
       propertyType: "commercial",
     });
+    s.issueType = "thermostat_issue"; // generic [system_type, window] order
     expect(nextTriageStep(s)).toBeNull();
     expect(s.extras.propertyType).toBe("commercial");
   });
@@ -456,11 +470,11 @@ describe("enrichment cap — only system_type then preferred_window", () => {
     expect(seen).toEqual(["preferred_window"]);
   });
 
-  it("STILL asks system_type for refrigeration's relative — a true HVAC issue", () => {
+  it("STILL asks system_type for a generic-order HVAC issue (not suppressed)", () => {
     // Sanity guard: the suppression is scoped to the three non-HVAC service
-    // lines, so a normal cooling issue still gets the system_type question.
+    // lines, so a normal generic-order issue still gets the system_type question.
     const s = coreFilled();
-    s.issueType = "cooling_not_working";
+    s.issueType = "air_quality";
     expect(nextTriageStep(s)?.id).toBe("system_type");
   });
 
@@ -490,12 +504,12 @@ describe("partial address → single city/ZIP follow-up", () => {
     expect(step!.question.toLowerCase()).toMatch(/city|zip/);
   });
 
-  it("re-prompts a comma-bearing address that still lacks a US ZIP (e.g. Canadian)", () => {
-    // Previously a comma alone counted as "complete enough" and suppressed the
-    // follow-up — so a Canadian / ZIP-less address slipped through. Now we
-    // require a real US ZIP (or a verified lookup pick), so this re-prompts.
+  it("ACCEPTS a complete intl address without a US ZIP (de-US-centered, Step 14)", () => {
+    // A valid Canadian address has a street number + street type + city/region
+    // but no 5-digit US ZIP. The loosened heuristic accepts it (street component
+    // + locality) instead of trapping the customer in a US-ZIP re-prompt loop.
     const step = nextTriageStep(base("123 Main St, Toronto, ON M5V 2T6"));
-    expect(step?.id).toBe("address_parts");
+    expect(step?.id).not.toBe("address_parts");
   });
 
   it("does NOT ask address_parts when the address is already complete", () => {
@@ -521,7 +535,7 @@ describe("partial address → single city/ZIP follow-up", () => {
   });
 });
 
-describe("address must be a complete US address OR a verified lookup pick", () => {
+describe("address must have a street + locality component OR a verified lookup pick", () => {
   function base(address: string | null, extras: Record<string, unknown> = {}): TriageSlots {
     return slots({
       safetyScreenPassed: true,
@@ -530,14 +544,26 @@ describe("address must be a complete US address OR a verified lookup pick", () =
     });
   }
 
-  it("re-prompts an address with no street number", () => {
-    expect(nextTriageStep(base("Main Street, Springfield, IL 62704"))?.id).toBe(
-      "address_parts",
-    );
+  it("re-prompts obvious junk with no street component", () => {
+    // No street number, no street-type word, no named route → not dispatchable.
+    expect(nextTriageStep(base("somewhere downtown"))?.id).toBe("address_parts");
   });
 
-  it("re-prompts a US address that's missing its ZIP", () => {
-    expect(nextTriageStep(base("120 Broadway, New York, NY"))?.id).toBe(
+  it("re-prompts a bare city with no street", () => {
+    expect(nextTriageStep(base("Toronto"))?.id).toBe("address_parts");
+  });
+
+  it("accepts a street line + city even with no street NUMBER (street-type word)", () => {
+    // "Main Street, Springfield, IL 62704" has a recognizable street type and a
+    // locality — a real, dispatchable line missing only the house number, which
+    // the tech can resolve on arrival. Loosened heuristic accepts it.
+    expect(
+      nextTriageStep(base("Main Street, Springfield, IL 62704"))?.id,
+    ).not.toBe("address_parts");
+  });
+
+  it("accepts a US address that's missing its ZIP (street number + city)", () => {
+    expect(nextTriageStep(base("120 Broadway, New York, NY"))?.id).not.toBe(
       "address_parts",
     );
   });
@@ -548,16 +574,16 @@ describe("address must be a complete US address OR a verified lookup pick", () =
     );
   });
 
-  it("accepts a verified (lookup-selected) address even if it isn't US-formatted", () => {
+  it("accepts a verified (lookup-selected) address even if it isn't street-formatted", () => {
     // addressVerified = the customer picked a geocoded suggestion → "found".
     const step = nextTriageStep(
-      base("123 Main St, Toronto, ON M5V 2T6", { addressVerified: "yes" }),
+      base("Building near the lake", { addressVerified: "yes" }),
     );
     expect(step?.id).not.toBe("address_parts");
   });
 
   it("stops re-prompting after MAX_ADDRESS_REPROMPTS to avoid an endless loop", () => {
-    const stillBad = "123 Main St, Toronto, ON M5V 2T6";
+    const stillBad = "somewhere downtown"; // no street component → keeps re-asking
     // Below the cap → still re-prompting.
     expect(
       nextTriageStep(base(stillBad, { addressAttempts: MAX_ADDRESS_REPROMPTS - 1 }))
@@ -570,10 +596,10 @@ describe("address must be a complete US address OR a verified lookup pick", () =
   });
 
   it("applyTriageAnswer increments the attempt counter each re-prompt", () => {
-    const before = base("123 Main St, Toronto, ON M5V 2T6");
+    const before = base("somewhere downtown");
     const step = nextTriageStep(before)!;
     expect(step.id).toBe("address_parts");
-    const after = applyTriageAnswer(before, step, "still not a us address");
+    const after = applyTriageAnswer(before, step, "still not a real address");
     expect(Number(after.extras.addressAttempts)).toBe(1);
   });
 
@@ -639,5 +665,123 @@ describe("core fields are unskippable", () => {
     const after = applyTriageAnswer(before, step, "skip");
     expect(after.email).toBeNull();
     expect(nextTriageStep(after)?.id).toBe("email");
+  });
+});
+
+describe("Step 15 — issue-conditional enrichment (selectEnrichmentOrder)", () => {
+  function coreReady(issueType: string, extras: Record<string, unknown> = {}): TriageSlots {
+    return slots({
+      issueType,
+      safetyScreenPassed: true,
+      urgency: "high",
+      address: COMPLETE_ADDRESS,
+      name: "Jane Doe",
+      phone: "555-1234",
+      email: "jane@example.com",
+      extras: { systemDownStatus: "fully_down", problemDuration: "today", ...extras },
+    });
+  }
+
+  it("no-heat asks vulnerable-occupants first (priority signal), then window", () => {
+    expect(nextTriageStep(coreReady("heating_not_working"))?.id).toBe(
+      "vulnerable_occupants",
+    );
+    // after answering vulnerable → window
+    const next = nextTriageStep(coreReady("heating_not_working", { vulnerableOccupants: true }));
+    expect(next?.id).toBe("preferred_window");
+  });
+
+  it("no-cool asks vulnerable-occupants first, then window", () => {
+    expect(nextTriageStep(coreReady("cooling_not_working"))?.id).toBe(
+      "vulnerable_occupants",
+    );
+  });
+
+  it("repair-vs-replace classes ask equipment age first (maintenance/installation/noises/leak)", () => {
+    for (const issue of [
+      "maintenance",
+      "installation",
+      "strange_noises",
+      "water_leak",
+    ]) {
+      expect(nextTriageStep(coreReady(issue))?.id).toBe("equipment_age");
+    }
+    // after answering age → window
+    const next = nextTriageStep(coreReady("maintenance", { equipmentAgeBand: "over_15" }));
+    expect(next?.id).toBe("preferred_window");
+  });
+
+  it("falls back to [system_type, window] for an issue with no specific qualifier", () => {
+    expect(nextTriageStep(coreReady("thermostat_issue"))?.id).toBe("system_type");
+    expect(nextTriageStep(coreReady("air_quality"))?.id).toBe("system_type");
+  });
+
+  it("falls back to generic order when issueType is null (unclassified)", () => {
+    const s = coreReady("thermostat_issue");
+    s.issueType = null;
+    expect(nextTriageStep(s)?.id).toBe("system_type");
+  });
+
+  it("NEVER asks more than MAX_ENRICHMENT_STEPS (cap holds across every issue)", () => {
+    const issues = [
+      "heating_not_working",
+      "cooling_not_working",
+      "maintenance",
+      "installation",
+      "strange_noises",
+      "water_leak",
+      "thermostat_issue",
+      "air_quality",
+    ];
+    for (const issue of issues) {
+      let s = coreReady(issue);
+      const asked: string[] = [];
+      for (let i = 0; i < 10; i++) {
+        const step = nextTriageStep(s);
+        if (!step) break;
+        asked.push(step.id);
+        s = applyTriageAnswer(s, step, step.quickReplies[0]?.value ?? "morning");
+      }
+      expect(asked.length).toBeLessThanOrEqual(MAX_ENRICHMENT_STEPS);
+    }
+  });
+
+  it("selectEnrichmentOrder returns at most MAX_ENRICHMENT_STEPS steps", () => {
+    for (const issue of [
+      "heating_not_working",
+      "maintenance",
+      "thermostat_issue",
+      null,
+    ]) {
+      expect(selectEnrichmentOrder(issue).length).toBeLessThanOrEqual(
+        MAX_ENRICHMENT_STEPS,
+      );
+    }
+  });
+
+  it("issue-specific qualifiers round-trip into existing CRM extra slots (no ephemeral leakage)", () => {
+    // vulnerableOccupants + equipmentAgeBand are REAL optionalIntakeFields, so a
+    // captured answer persists to the CRM rather than being a stripped sentinel.
+    const heat = applyTriageAnswer(
+      coreReady("heating_not_working"),
+      nextTriageStep(coreReady("heating_not_working"))!,
+      "yes",
+    );
+    expect(heat.extras.vulnerableOccupants).toBe(true);
+
+    const maint = applyTriageAnswer(
+      coreReady("maintenance"),
+      nextTriageStep(coreReady("maintenance"))!,
+      "over_15",
+    );
+    expect(maint.extras.equipmentAgeBand).toBe("over_15");
+  });
+
+  it("a per-issue qualifier that is skipped is not re-asked (skip sentinel)", () => {
+    const s = coreReady("heating_not_working");
+    const step = nextTriageStep(s)!;
+    expect(step.id).toBe("vulnerable_occupants");
+    const after = applyTriageAnswer(s, step, "skip");
+    expect(nextTriageStep(after)?.id).not.toBe("vulnerable_occupants");
   });
 });

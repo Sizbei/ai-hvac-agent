@@ -564,8 +564,9 @@ describe("voiceReply", () => {
 
     const session = {
       ...baseSession,
-      // Every required core/contact slot filled so triage's pending step is the
-      // optional system_type enrichment (which voice asks).
+      // Every required core/contact slot filled so triage's pending step is an
+      // optional enrichment step voice asks (Step 15: cooling_not_working now
+      // leads with vulnerable_occupants).
       metadata: JSON.stringify({
         issueType: "cooling_not_working",
         urgency: "high",
@@ -591,7 +592,8 @@ describe("voiceReply", () => {
     const persisted = updateSetMock.mock.calls
       .map((c) => c[0] as { metadata?: string })
       .find((s) => typeof s.metadata === "string");
-    // systemType latched to the skip sentinel so the step won't be re-asked.
+    // The optional enrichment step latched to the skip sentinel so it won't be
+    // re-asked (vulnerableOccupants for cooling, per the Step 15 plan).
     expect(persisted?.metadata).toContain("__skipped__");
   });
 });
