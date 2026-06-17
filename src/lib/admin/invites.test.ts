@@ -31,6 +31,7 @@ vi.mock('@/lib/db/schema', () => ({
     createdAt: 'i.createdAt',
   },
   users: { id: 'u.id', email: 'u.email', organizationId: 'u.org' },
+  organizations: { id: 'o.id', ownerEmail: 'o.ownerEmail' },
 }));
 
 // staff-queries: real normalizeEmail behavior (trim+lowercase); createStaff mocked.
@@ -334,6 +335,7 @@ describe('acceptInvite', () => {
 
   it('creates the user with the role FROM THE INVITE, not request input', async () => {
     selectQueue.push([liveRow('technician')]); // resolve
+    selectQueue.push([{ ownerEmail: null }]); // org has no pending owner
     mockCreateStaff.mockResolvedValue({
       ok: true,
       staff: {
@@ -365,6 +367,7 @@ describe('acceptInvite', () => {
 
   it('mints an admin session for an admin-role invite', async () => {
     selectQueue.push([liveRow('admin')]);
+    selectQueue.push([{ ownerEmail: null }]); // not a provisioned-owner accept
     mockCreateStaff.mockResolvedValue({
       ok: true,
       staff: {
@@ -380,11 +383,90 @@ describe('acceptInvite', () => {
     const res = await acceptInvite('t', { name: 'A', password: 'password1' });
     expect(res.ok).toBe(true);
     if (res.ok) {
+      expect(res.accepted.role).toBe('admin');
       expect(res.accepted.session).toMatchObject({
         userId: 'user2',
         organizationId: ORG,
         role: 'admin',
       });
+    }
+  });
+
+  it('promotes the provisioned owner to super_admin and clears ownerEmail (FIX 2a)', async () => {
+    selectQueue.push([liveRow('admin')]); // resolve: admin invite to new@x.com
+    selectQueue.push([{ ownerEmail: 'NEW@x.com' }]); // org owner matches (case-insensitive)
+    mockCreateStaff.mockResolvedValue({
+      ok: true,
+      staff: {
+        id: 'owner-user',
+        name: 'Owner',
+        email: 'new@x.com',
+        role: 'admin',
+        isActive: true,
+        createdAt: '2026-06-10T00:00:00.000Z',
+      },
+    });
+    updateQueue.push([{ id: 'inv1' }]); // claim
+    updateQueue.push([]); // promote user → super_admin
+    updateQueue.push([]); // clear org ownerEmail
+
+    const res = await acceptInvite('t', { name: 'Owner', password: 'password1' });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.accepted.role).toBe('super_admin');
+      expect(res.accepted.session).toMatchObject({
+        userId: 'owner-user',
+        organizationId: ORG,
+        role: 'super_admin',
+      });
+    }
+  });
+
+  it('does NOT promote a different admin invite for the same org (FIX 2b)', async () => {
+    selectQueue.push([liveRow('admin')]); // admin invite to new@x.com
+    selectQueue.push([{ ownerEmail: 'someone-else@x.com' }]); // owner is a different email
+    mockCreateStaff.mockResolvedValue({
+      ok: true,
+      staff: {
+        id: 'admin-user',
+        name: 'A',
+        email: 'new@x.com',
+        role: 'admin',
+        isActive: true,
+        createdAt: '2026-06-10T00:00:00.000Z',
+      },
+    });
+    updateQueue.push([{ id: 'inv1' }]); // claim only — no promotion updates
+
+    const res = await acceptInvite('t', { name: 'A', password: 'password1' });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.accepted.role).toBe('admin');
+      expect(res.accepted.session).toMatchObject({ role: 'admin' });
+    }
+  });
+
+  it('handles a NULL ownerEmail (legacy org) without promotion or crash (FIX 2c)', async () => {
+    selectQueue.push([liveRow('admin')]);
+    selectQueue.push([{ ownerEmail: null }]); // legacy org: no owner recorded
+    mockCreateStaff.mockResolvedValue({
+      ok: true,
+      staff: {
+        id: 'admin-user',
+        name: 'A',
+        email: 'new@x.com',
+        role: 'admin',
+        isActive: true,
+        createdAt: '2026-06-10T00:00:00.000Z',
+      },
+    });
+    updateQueue.push([{ id: 'inv1' }]); // claim only
+
+    const res = await acceptInvite('t', { name: 'A', password: 'password1' });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.accepted.role).toBe('admin');
+      expect(res.accepted.session).toMatchObject({ role: 'admin' });
     }
   });
 
