@@ -36,6 +36,9 @@ import type {
 const MAX_ATTEMPTS = 3;
 /** Base backoff; doubles per attempt (100ms, 200ms, ...). */
 const BACKOFF_BASE_MS = 100;
+/** Per-request timeout — a hung upstream must not stall the lambda until the
+ * platform kill. Aborts the fetch and (for non-final attempts) retries. */
+const REQUEST_TIMEOUT_MS = 15_000;
 
 /** Retryable per REST norms: rate-limit + server errors. */
 function isRetryableStatus(status: number): boolean {
@@ -302,16 +305,30 @@ export class RestFieldpulseClient implements FieldpulseClient {
     init: RequestInit = {},
   ): Promise<unknown> {
     let lastStatus = 0;
+    let lastNetworkError: unknown;
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-      const res = await this.fetchImpl(`${this.config.baseUrl}${path}`, {
-        ...init,
-        headers: {
-          ...init.headers,
-          "x-api-key": this.config.apiKey,
-          accept: "application/json",
-          "content-type": "application/json",
-        },
-      });
+      let res: Response;
+      try {
+        res = await this.fetchImpl(`${this.config.baseUrl}${path}`, {
+          ...init,
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+          headers: {
+            ...init.headers,
+            "x-api-key": this.config.apiKey,
+            accept: "application/json",
+            "content-type": "application/json",
+          },
+        });
+      } catch (err) {
+        // Network error / timeout abort — retry transiently like a 5xx. The key
+        // is never in the error; we re-throw a sanitized error if attempts run out.
+        lastNetworkError = err;
+        if (attempt === MAX_ATTEMPTS - 1) {
+          throw new Error("Fieldpulse request failed: network error");
+        }
+        await sleep(BACKOFF_BASE_MS * 2 ** attempt);
+        continue;
+      }
 
       if (res.ok) {
         // 204 No Content has no body; callers that need a body never hit 204.
@@ -328,6 +345,7 @@ export class RestFieldpulseClient implements FieldpulseClient {
       await sleep(BACKOFF_BASE_MS * 2 ** attempt);
     }
     // Unreachable: the loop either returns or throws, but satisfies the compiler.
+    void lastNetworkError;
     throw new Error(`Fieldpulse request failed: HTTP ${lastStatus}`);
   }
 

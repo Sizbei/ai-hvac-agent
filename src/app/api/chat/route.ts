@@ -1741,6 +1741,9 @@ export async function POST(request: NextRequest) {
     // 8. Stream response via Vercel AI SDK per SC-09
     const result = streamText({
       model: await getModel(organizationId),
+      // Generous timeout so a hung upstream can't stall the lambda until the
+      // platform kill, while normal streams (well under 30s) are never cut.
+      abortSignal: AbortSignal.timeout(30_000),
       system:
         brandPrompt +
         customerContextHint +

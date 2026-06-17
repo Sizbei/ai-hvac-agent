@@ -159,6 +159,9 @@ export async function extractServiceRequest(
         model: await getExtractionModel(organizationId),
         system: EXTRACTION_SYSTEM,
         messages,
+        // Generous timeout so a hung upstream can't stall the lambda until the
+        // platform kill (extraction is a short single-shot call).
+        abortSignal: AbortSignal.timeout(30_000),
       }),
     (r) => (r.usage?.inputTokens ?? 0) + (r.usage?.outputTokens ?? 0),
   );

@@ -33,6 +33,9 @@ import type {
 const MAX_ATTEMPTS = 3;
 /** Base backoff; doubles per attempt (100ms, 200ms, ...). */
 const BACKOFF_BASE_MS = 100;
+/** Per-request timeout — a hung upstream must not stall the lambda until the
+ * platform kill. */
+const REQUEST_TIMEOUT_MS = 15_000;
 
 /** Retryable per HCP/REST norms: rate-limit + server errors. */
 function isRetryableStatus(status: number): boolean {
@@ -269,6 +272,7 @@ export class RestHousecallProClient implements HousecallProClient {
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
       const res = await this.fetchImpl(`${this.config.baseUrl}${path}`, {
         ...init,
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         headers: {
           ...init.headers,
           authorization: `Token ${this.config.apiKey}`,

@@ -176,4 +176,47 @@ describe("RestFieldpulseClient", () => {
       expect(result?.normalizedAddress?.streetLine2).toBe("Apt 4B");
     });
   });
+
+  describe("request retry/timeout", () => {
+    it("retries on a network error and succeeds on a later attempt", async () => {
+      // First attempt rejects (e.g. timeout abort / connection reset), second OK.
+      mockFetch
+        .mockRejectedValueOnce(new Error("network down"))
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({ customers: [] }),
+        });
+
+      const client = new RestFieldpulseClient(config, mockFetch as any);
+      const result = await client.findCustomer({ email: "a@b.com" });
+
+      expect(result).toBeNull();
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it("throws a sanitized error after exhausting attempts on network errors", async () => {
+      mockFetch.mockRejectedValue(new Error("network down"));
+
+      const client = new RestFieldpulseClient(config, mockFetch as any);
+      await expect(client.findCustomer({ email: "a@b.com" })).rejects.toThrow(
+        "Fieldpulse request failed: network error",
+      );
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+    });
+
+    it("passes an AbortSignal to fetch", async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ customers: [] }),
+      });
+
+      const client = new RestFieldpulseClient(config, mockFetch as any);
+      await client.findCustomer({ email: "a@b.com" });
+
+      const init = mockFetch.mock.calls[0][1] as RequestInit;
+      expect(init.signal).toBeInstanceOf(AbortSignal);
+    });
+  });
 });

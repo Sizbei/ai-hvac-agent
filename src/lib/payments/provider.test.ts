@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { MockPaymentProvider, getPaymentProvider } from "./provider";
 import { MockFinancingProvider, getFinancingProvider } from "../financing/provider";
 
@@ -47,5 +47,21 @@ describe("MockFinancingProvider", () => {
 
   it("getFinancingProvider returns the mock", () => {
     expect(getFinancingProvider().name).toBe("mock");
+  });
+
+  it("getFinancingProvider warns LOUDLY but still mocks when WISETACK_API_KEY is set", () => {
+    const prev = process.env.WISETACK_API_KEY;
+    process.env.WISETACK_API_KEY = "wt_test";
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const provider = getFinancingProvider();
+      expect(provider.name).toBe("mock");
+      expect(spy).toHaveBeenCalledOnce();
+      expect(spy.mock.calls[0][0]).toContain("WISETACK_API_KEY is set");
+    } finally {
+      spy.mockRestore();
+      if (prev === undefined) delete process.env.WISETACK_API_KEY;
+      else process.env.WISETACK_API_KEY = prev;
+    }
   });
 });

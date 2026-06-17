@@ -96,7 +96,11 @@ export async function sendSms(options: {
       priceUnit: message.priceUnit ?? undefined,
     };
   } catch (error) {
-    console.error("Twilio SMS error:", error);
+    // Log only the message — the raw SDK error object can embed recipient PII.
+    console.error(
+      "Twilio SMS error:",
+      error instanceof Error ? error.message : "Unknown error",
+    );
     throw new Error(
       `Failed to send SMS: ${error instanceof Error ? error.message : "Unknown error"}`,
     );

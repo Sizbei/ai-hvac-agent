@@ -78,12 +78,12 @@ export async function POST(request: NextRequest) {
   const keyword = classifySmsKeyword(body);
   if (keyword === "stop") {
     await setDoNotContactByPhone(organizationId, from, true);
-    logger.info({ from }, "SMS opt-out (STOP)");
+    logger.info({ phone: from }, "SMS opt-out (STOP)");
     return new Response(messagingTwiML(STOP_REPLY), { headers: MESSAGING_HEADERS });
   }
   if (keyword === "start") {
     await setDoNotContactByPhone(organizationId, from, false);
-    logger.info({ from }, "SMS opt-in (START)");
+    logger.info({ phone: from }, "SMS opt-in (START)");
     return new Response(messagingTwiML(START_REPLY), { headers: MESSAGING_HEADERS });
   }
   if (keyword === "help") {
@@ -155,7 +155,7 @@ export async function POST(request: NextRequest) {
         .where(eq(customerSessions.token, sessionToken))
         .limit(1);
 
-      logger.info({ from }, "SMS session started");
+      logger.info({ phone: from }, "SMS session started");
 
       // No body on the opening text (e.g. an empty MMS) — greet and wait.
       if (body.length === 0) {
@@ -242,7 +242,7 @@ export async function POST(request: NextRequest) {
       headers: MESSAGING_HEADERS,
     });
   } catch (error) {
-    logger.error({ error, from }, "SMS incoming failed");
+    logger.error({ error, phone: from }, "SMS incoming failed");
     return new Response(messagingTwiML(ERROR_REPLY), {
       headers: MESSAGING_HEADERS,
     });
