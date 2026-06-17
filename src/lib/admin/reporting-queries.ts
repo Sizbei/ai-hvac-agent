@@ -9,7 +9,7 @@
  * neon-http note: SQL aggregates (sum/count) come back as strings (or null for an
  * empty set), so each value is coerced with Number() and coalesced to 0.
  */
-import { eq, gte, lte, sql, sum, count } from "drizzle-orm";
+import { eq, gte, lte, sql, sum, count, avg } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   estimates,
@@ -18,6 +18,10 @@ import {
   refunds,
   serviceRequests,
   leadSourceEnum,
+  customerLocations,
+  technicianTimeEntries,
+  reviewRequests,
+  users,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 
@@ -357,4 +361,330 @@ export async function getLeadSourceBreakdown(
       leads > 0 ? Math.round((booked / leads) * 1000) / 10 : 0;
     return { source, leads, booked, revenueCents, closeRatePct };
   });
+}
+
+// ---------------------------------------------------------------------------
+// Multi-location rollup — jobs + revenue (+ avg rating) per service location
+// (customerLocations), with a synthetic "unassigned" bucket for service
+// requests whose locationId is NULL.
+//
+// Cohort: a job is counted in the location bucket of the request created within
+// the period (period-scoped by serviceRequests.createdAt, like lead-source).
+// Revenue is the SUM of the job's invoice totals (totalCents) — "billed on
+// their jobs" — summed off invoice rows directly (no payment fan-out). Rating
+// is the avg of any review_requests rating on the job (NULL when none captured).
+//
+// TENANT SAFETY: serviceRequests is withTenant-scoped AND every joined table
+// (invoices, review_requests, customer_locations) carries its OWN organizationId
+// predicate in the join, so a cross-org invoice/review/location can never be
+// summed against this org's requests. locationId has no FK, so the join to
+// customer_locations is a LEFT join guarded by org on BOTH sides.
+// ---------------------------------------------------------------------------
+
+export interface LocationBreakdownRow {
+  /** customerLocations.id, or the synthetic UNASSIGNED_LOCATION key. */
+  readonly locationId: string;
+  /** Location label/zone, or "Unassigned" for the NULL-location bucket. */
+  readonly label: string;
+  /** Service requests in this location bucket, created in the period. */
+  readonly jobs: number;
+  /** Sum of invoice totals on those jobs. Integer cents. */
+  readonly revenueCents: number;
+  /** Avg review rating (1-5) on those jobs, or null when none captured. */
+  readonly avgRating: number | null;
+}
+
+/** Bucket key for requests with a NULL locationId. */
+const UNASSIGNED_LOCATION = "unassigned";
+
+/**
+ * Per-location jobs + revenue (+ avg rating) for a period. Defaults to the last
+ * 30 days. Returns one row per location that had jobs in the period PLUS an
+ * "unassigned" bucket whenever any request had a NULL locationId. Money in cents.
+ */
+export async function getLocationBreakdown(
+  organizationId: string,
+  period: SalesReportPeriod = {},
+): Promise<LocationBreakdownRow[]> {
+  const now = new Date();
+  const toDate = period.toDate ?? now;
+  const fromDate = period.fromDate ?? new Date(toDate.getTime() - THIRTY_DAYS_MS);
+
+  // NULL locationId -> 'unassigned' so requests without a site still reconcile.
+  const locationKey = sql<string>`coalesce(cast(${serviceRequests.locationId} as text), ${UNASSIGNED_LOCATION})`;
+
+  const [jobRows, revenueRows, ratingRows, labelRows] = await Promise.all([
+    // 1. Jobs: service requests per location bucket, created in the period.
+    db
+      .select({ locationId: locationKey, value: count() })
+      .from(serviceRequests)
+      .where(
+        withTenant(
+          serviceRequests,
+          organizationId,
+          gte(serviceRequests.createdAt, fromDate),
+          lte(serviceRequests.createdAt, toDate),
+        ),
+      )
+      .groupBy(locationKey),
+
+    // 2. Revenue: sum invoice totals on those requests' invoices. BOTH sides
+    //    org-scoped (the join predicate adds the invoice org).
+    db
+      .select({ locationId: locationKey, value: sum(invoices.totalCents) })
+      .from(serviceRequests)
+      .innerJoin(
+        invoices,
+        sql`${invoices.serviceRequestId} = ${serviceRequests.id} AND ${invoices.organizationId} = ${organizationId}`,
+      )
+      .where(
+        withTenant(
+          serviceRequests,
+          organizationId,
+          gte(serviceRequests.createdAt, fromDate),
+          lte(serviceRequests.createdAt, toDate),
+        ),
+      )
+      .groupBy(locationKey),
+
+    // 3. Avg rating: review_requests rating on those requests (rating may be
+    //    NULL for un-responded asks; avg ignores NULLs). BOTH sides org-scoped.
+    db
+      .select({ locationId: locationKey, value: avg(reviewRequests.rating) })
+      .from(serviceRequests)
+      .innerJoin(
+        reviewRequests,
+        sql`${reviewRequests.serviceRequestId} = ${serviceRequests.id} AND ${reviewRequests.organizationId} = ${organizationId}`,
+      )
+      .where(
+        withTenant(
+          serviceRequests,
+          organizationId,
+          gte(serviceRequests.createdAt, fromDate),
+          lte(serviceRequests.createdAt, toDate),
+        ),
+      )
+      .groupBy(locationKey),
+
+    // 4. Labels: the location's label/zone. Org-scoped (the location's own org).
+    db
+      .select({
+        id: customerLocations.id,
+        label: customerLocations.label,
+        zone: customerLocations.zone,
+      })
+      .from(customerLocations)
+      .where(withTenant(customerLocations, organizationId)),
+  ]);
+
+  const jobsByLoc = new Map<string, number>();
+  for (const r of jobRows) jobsByLoc.set(r.locationId, toNumber(r.value));
+  const revenueByLoc = new Map<string, number>();
+  for (const r of revenueRows) revenueByLoc.set(r.locationId, toNumber(r.value));
+  const ratingByLoc = new Map<string, number | null>();
+  for (const r of ratingRows) {
+    // avg() returns null for an all-NULL/empty group; keep it null (honest "—").
+    ratingByLoc.set(
+      r.locationId,
+      r.value == null ? null : Math.round(Number(r.value) * 10) / 10,
+    );
+  }
+  const labelById = new Map<string, string>();
+  for (const r of labelRows) {
+    labelById.set(r.id, r.label ?? r.zone ?? "Location");
+  }
+
+  // One row per location bucket that had jobs in the period (the LEFT side is
+  // the set of buckets that actually appeared, not the full location catalog).
+  return [...jobsByLoc.keys()]
+    .map((locationId) => ({
+      locationId,
+      label:
+        locationId === UNASSIGNED_LOCATION
+          ? "Unassigned"
+          : (labelById.get(locationId) ?? "Location"),
+      jobs: jobsByLoc.get(locationId) ?? 0,
+      revenueCents: revenueByLoc.get(locationId) ?? 0,
+      avgRating: ratingByLoc.get(locationId) ?? null,
+    }))
+    .sort((a, b) => b.revenueCents - a.revenueCents);
+}
+
+// ---------------------------------------------------------------------------
+// Per-technician scorecards — one row per technician (user) with at least one
+// assigned job in the period.
+//
+// Cohort: jobs assigned to the tech (serviceRequests.assignedTo), created in the
+// period. jobsCompleted counts those in status 'completed'. revenueCents sums
+// invoice totals on the tech's jobs. laborHours sums technician_time_entries
+// minutes (the tech's OWN entries) / 60. avgRating averages review_requests
+// ratings on the tech's jobs.
+//
+// HONEST DATA: laborHours is NULL (renders "—") when the tech has NO time
+// entries at all in the period — a fake 0h would imply "worked zero hours",
+// which is misleading when time tracking simply isn't being used. avgRating is
+// NULL when no review captured a rating. onTimeRate is OMITTED entirely: the
+// schema records an arrival WINDOW (arrivalWindowStart/End) but never an ACTUAL
+// arrival timestamp, so on-time cannot be derived without inventing data.
+//
+// TENANT SAFETY: serviceRequests is withTenant-scoped AND every joined table
+// (users, invoices, technician_time_entries, review_requests) carries its OWN
+// organizationId predicate, so no cross-org row can be aggregated against this
+// org's technician.
+// ---------------------------------------------------------------------------
+
+export interface TechnicianScorecardRow {
+  readonly technicianId: string;
+  readonly name: string;
+  /** Jobs assigned to this tech, created in the period. */
+  readonly jobsAssigned: number;
+  /** Of those, how many reached status 'completed'. */
+  readonly jobsCompleted: number;
+  /** Sum of invoice totals on this tech's jobs. Integer cents. */
+  readonly revenueCents: number;
+  /** Labor hours from this tech's time entries (1dp), or null when none logged. */
+  readonly laborHours: number | null;
+  /** Avg review rating (1-5) on this tech's jobs, or null when none captured. */
+  readonly avgRating: number | null;
+}
+
+/**
+ * Per-technician scorecards for a period. Defaults to the last 30 days. Returns
+ * one row per technician with at least one assigned job in the period. Metrics
+ * that aren't computable from captured data are returned as null (the UI renders
+ * "—"), never a misleading 0. Money in integer cents.
+ */
+export async function getTechnicianScorecards(
+  organizationId: string,
+  period: SalesReportPeriod = {},
+): Promise<TechnicianScorecardRow[]> {
+  const now = new Date();
+  const toDate = period.toDate ?? now;
+  const fromDate = period.fromDate ?? new Date(toDate.getTime() - THIRTY_DAYS_MS);
+
+  const [jobRows, revenueRows, laborRows, ratingRows] = await Promise.all([
+    // 1. Jobs assigned + completed per tech, plus the tech's name. INNER join to
+    //    users (assignedTo must resolve to a real user) — org-scoped on BOTH
+    //    sides. Requests with a NULL assignedTo are dropped (no tech to score).
+    db
+      .select({
+        technicianId: serviceRequests.assignedTo,
+        name: users.name,
+        assigned: count(),
+        completed: count(
+          sql`CASE WHEN ${serviceRequests.status} = 'completed' THEN 1 END`,
+        ),
+      })
+      .from(serviceRequests)
+      .innerJoin(
+        users,
+        sql`${users.id} = ${serviceRequests.assignedTo} AND ${users.organizationId} = ${organizationId}`,
+      )
+      .where(
+        withTenant(
+          serviceRequests,
+          organizationId,
+          gte(serviceRequests.createdAt, fromDate),
+          lte(serviceRequests.createdAt, toDate),
+        ),
+      )
+      .groupBy(serviceRequests.assignedTo, users.name),
+
+    // 2. Revenue: invoice totals on the tech's jobs. ALL sides org-scoped.
+    db
+      .select({
+        technicianId: serviceRequests.assignedTo,
+        value: sum(invoices.totalCents),
+      })
+      .from(serviceRequests)
+      .innerJoin(
+        invoices,
+        sql`${invoices.serviceRequestId} = ${serviceRequests.id} AND ${invoices.organizationId} = ${organizationId}`,
+      )
+      .where(
+        withTenant(
+          serviceRequests,
+          organizationId,
+          gte(serviceRequests.createdAt, fromDate),
+          lte(serviceRequests.createdAt, toDate),
+        ),
+      )
+      .groupBy(serviceRequests.assignedTo),
+
+    // 3. Labor minutes: the tech's OWN time entries on jobs created in the
+    //    period. Scoped by the entry's technicianId (the person who logged the
+    //    time), the request cohort, and org on BOTH the entry and the request.
+    db
+      .select({
+        technicianId: technicianTimeEntries.technicianId,
+        value: sum(technicianTimeEntries.minutes),
+      })
+      .from(technicianTimeEntries)
+      .innerJoin(
+        serviceRequests,
+        sql`${serviceRequests.id} = ${technicianTimeEntries.serviceRequestId} AND ${serviceRequests.organizationId} = ${organizationId} AND ${serviceRequests.createdAt} >= ${fromDate} AND ${serviceRequests.createdAt} <= ${toDate}`,
+      )
+      .where(withTenant(technicianTimeEntries, organizationId))
+      .groupBy(technicianTimeEntries.technicianId),
+
+    // 4. Avg rating on the tech's jobs. ALL sides org-scoped.
+    db
+      .select({
+        technicianId: serviceRequests.assignedTo,
+        value: avg(reviewRequests.rating),
+      })
+      .from(serviceRequests)
+      .innerJoin(
+        reviewRequests,
+        sql`${reviewRequests.serviceRequestId} = ${serviceRequests.id} AND ${reviewRequests.organizationId} = ${organizationId}`,
+      )
+      .where(
+        withTenant(
+          serviceRequests,
+          organizationId,
+          gte(serviceRequests.createdAt, fromDate),
+          lte(serviceRequests.createdAt, toDate),
+        ),
+      )
+      .groupBy(serviceRequests.assignedTo),
+  ]);
+
+  const revenueByTech = new Map<string, number>();
+  for (const r of revenueRows) {
+    if (r.technicianId) revenueByTech.set(r.technicianId, toNumber(r.value));
+  }
+  // Map of tech -> minutes. ABSENCE means "no time entries" -> null laborHours
+  // (an honest "—"); presence with 0 minutes would still be a real 0.
+  const minutesByTech = new Map<string, number>();
+  for (const r of laborRows) {
+    if (r.technicianId) minutesByTech.set(r.technicianId, toNumber(r.value));
+  }
+  const ratingByTech = new Map<string, number | null>();
+  for (const r of ratingRows) {
+    if (!r.technicianId) continue;
+    ratingByTech.set(
+      r.technicianId,
+      r.value == null ? null : Math.round(Number(r.value) * 10) / 10,
+    );
+  }
+
+  return jobRows
+    .filter((r): r is typeof r & { technicianId: string } => r.technicianId != null)
+    .map((r) => {
+      const technicianId = r.technicianId;
+      const hasLabor = minutesByTech.has(technicianId);
+      const laborHours = hasLabor
+        ? Math.round((minutesByTech.get(technicianId)! / 60) * 10) / 10
+        : null;
+      return {
+        technicianId,
+        name: r.name,
+        jobsAssigned: toNumber(r.assigned),
+        jobsCompleted: toNumber(r.completed),
+        revenueCents: revenueByTech.get(technicianId) ?? 0,
+        laborHours,
+        avgRating: ratingByTech.get(technicianId) ?? null,
+      };
+    })
+    .sort((a, b) => b.revenueCents - a.revenueCents);
 }

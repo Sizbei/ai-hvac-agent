@@ -10,7 +10,12 @@ import {
   Receipt,
   Undo2,
 } from 'lucide-react';
-import { useReports, type LeadSourceRow } from '@/hooks/use-reports';
+import {
+  useReports,
+  type LeadSourceRow,
+  type LocationBreakdownRow,
+  type TechnicianScorecardRow,
+} from '@/hooks/use-reports';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
@@ -34,7 +39,14 @@ export default function ReportsPage() {
     return { from: from.toISOString(), to: to.toISOString() };
   }, [days]);
 
-  const { report, leadSourceBreakdown, isLoading, error } = useReports(range);
+  const {
+    report,
+    leadSourceBreakdown,
+    locationBreakdown,
+    technicianScorecards,
+    isLoading,
+    error,
+  } = useReports(range);
 
   return (
     <div className="space-y-6 p-6">
@@ -147,8 +159,25 @@ export default function ReportsPage() {
 
       {/* Lead source ROI */}
       <LeadSourceTable rows={leadSourceBreakdown} isLoading={isLoading} />
+
+      {/* By location */}
+      <LocationTable rows={locationBreakdown} isLoading={isLoading} />
+
+      {/* Technician scorecards */}
+      <TechnicianTable rows={technicianScorecards} isLoading={isLoading} />
     </div>
   );
+}
+
+/** A null metric renders an em dash, never a misleading 0. */
+const EMPTY = '—';
+
+function formatRating(rating: number | null): string {
+  return rating == null ? EMPTY : `${rating.toFixed(1)}/5`;
+}
+
+function formatHours(hours: number | null): string {
+  return hours == null ? EMPTY : `${hours.toFixed(1)}h`;
 }
 
 const LEAD_SOURCE_LABELS: Record<string, string> = {
@@ -225,6 +254,150 @@ function LeadSourceTable({ rows, isLoading }: LeadSourceTableProps) {
                   </td>
                   <td className="py-2 px-3 text-right tabular-nums">
                     {row.closeRatePct}%
+                  </td>
+                  <td className="py-2 pl-3 text-right font-medium tabular-nums">
+                    {formatCentsExact(row.revenueCents)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+interface LocationTableProps {
+  readonly rows: LocationBreakdownRow[];
+  readonly isLoading: boolean;
+}
+
+function LocationTable({ rows, isLoading }: LocationTableProps) {
+  // Server already sorts by revenue desc; copy before sort to stay immutable.
+  const sorted = useMemo(
+    () => [...rows].sort((a, b) => b.revenueCents - a.revenueCents),
+    [rows],
+  );
+
+  return (
+    <Card className="p-4">
+      <div className="mb-3">
+        <h2 className="font-heading text-lg font-semibold tracking-tight">
+          By location
+        </h2>
+        <p className="text-xs text-muted-foreground">
+          Jobs, revenue, and rating rolled up by service location.
+        </p>
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-2">
+          {[0, 1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-9 w-full" />
+          ))}
+        </div>
+      ) : sorted.length === 0 ? (
+        <p className="py-6 text-center text-sm text-muted-foreground">
+          No jobs in this period.
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b text-xs uppercase tracking-wide text-muted-foreground">
+                <th className="py-2 pr-3 text-left font-medium">Location</th>
+                <th className="py-2 px-3 text-right font-medium">Jobs</th>
+                <th className="py-2 px-3 text-right font-medium">Avg rating</th>
+                <th className="py-2 pl-3 text-right font-medium">Revenue</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((row) => (
+                <tr
+                  key={row.locationId}
+                  className="border-b last:border-0 hover:bg-muted/40"
+                >
+                  <td className="py-2 pr-3 font-medium">{row.label}</td>
+                  <td className="py-2 px-3 text-right tabular-nums">
+                    {row.jobs}
+                  </td>
+                  <td className="py-2 px-3 text-right tabular-nums">
+                    {formatRating(row.avgRating)}
+                  </td>
+                  <td className="py-2 pl-3 text-right font-medium tabular-nums">
+                    {formatCentsExact(row.revenueCents)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+interface TechnicianTableProps {
+  readonly rows: TechnicianScorecardRow[];
+  readonly isLoading: boolean;
+}
+
+function TechnicianTable({ rows, isLoading }: TechnicianTableProps) {
+  const sorted = useMemo(
+    () => [...rows].sort((a, b) => b.revenueCents - a.revenueCents),
+    [rows],
+  );
+
+  return (
+    <Card className="p-4">
+      <div className="mb-3">
+        <h2 className="font-heading text-lg font-semibold tracking-tight">
+          Technician scorecards
+        </h2>
+        <p className="text-xs text-muted-foreground">
+          Jobs, revenue, labor, and rating per technician. A dash means the data
+          wasn&apos;t captured for that metric.
+        </p>
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-2">
+          {[0, 1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-9 w-full" />
+          ))}
+        </div>
+      ) : sorted.length === 0 ? (
+        <p className="py-6 text-center text-sm text-muted-foreground">
+          No assigned jobs in this period.
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b text-xs uppercase tracking-wide text-muted-foreground">
+                <th className="py-2 pr-3 text-left font-medium">Technician</th>
+                <th className="py-2 px-3 text-right font-medium">Completed</th>
+                <th className="py-2 px-3 text-right font-medium">Labor</th>
+                <th className="py-2 px-3 text-right font-medium">Avg rating</th>
+                <th className="py-2 pl-3 text-right font-medium">Revenue</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((row) => (
+                <tr
+                  key={row.technicianId}
+                  className="border-b last:border-0 hover:bg-muted/40"
+                >
+                  <td className="py-2 pr-3 font-medium">{row.name}</td>
+                  <td className="py-2 px-3 text-right tabular-nums">
+                    {row.jobsCompleted} / {row.jobsAssigned}
+                  </td>
+                  <td className="py-2 px-3 text-right tabular-nums">
+                    {formatHours(row.laborHours)}
+                  </td>
+                  <td className="py-2 px-3 text-right tabular-nums">
+                    {formatRating(row.avgRating)}
                   </td>
                   <td className="py-2 pl-3 text-right font-medium tabular-nums">
                     {formatCentsExact(row.revenueCents)}

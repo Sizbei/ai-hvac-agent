@@ -83,6 +83,7 @@ vi.mock('drizzle-orm', () => ({
     values,
   }),
   sum: (col: unknown) => ({ kind: 'sum', col }),
+  avg: (col: unknown) => ({ kind: 'avg', col }),
   count: (arg?: unknown) => ({ kind: 'count', arg }),
 }));
 
@@ -117,6 +118,31 @@ vi.mock('@/lib/db/schema', () => ({
     leadSource: 'serviceRequests.leadSource',
     createdAt: 'serviceRequests.createdAt',
     organizationId: 'serviceRequests.org',
+    locationId: 'serviceRequests.locationId',
+    assignedTo: 'serviceRequests.assignedTo',
+    status: 'serviceRequests.status',
+  },
+  customerLocations: {
+    id: 'customerLocations.id',
+    label: 'customerLocations.label',
+    zone: 'customerLocations.zone',
+    organizationId: 'customerLocations.org',
+  },
+  technicianTimeEntries: {
+    technicianId: 'technicianTimeEntries.technicianId',
+    serviceRequestId: 'technicianTimeEntries.serviceRequestId',
+    minutes: 'technicianTimeEntries.minutes',
+    organizationId: 'technicianTimeEntries.org',
+  },
+  reviewRequests: {
+    serviceRequestId: 'reviewRequests.serviceRequestId',
+    rating: 'reviewRequests.rating',
+    organizationId: 'reviewRequests.org',
+  },
+  users: {
+    id: 'users.id',
+    name: 'users.name',
+    organizationId: 'users.org',
   },
   leadSourceEnum: {
     enumValues: [
@@ -132,7 +158,12 @@ vi.mock('@/lib/db/schema', () => ({
   },
 }));
 
-import { getSalesReport, getLeadSourceBreakdown } from './reporting-queries';
+import {
+  getSalesReport,
+  getLeadSourceBreakdown,
+  getLocationBreakdown,
+  getTechnicianScorecards,
+} from './reporting-queries';
 
 const ORG = '00000000-0000-0000-0000-000000000001';
 
@@ -446,5 +477,241 @@ describe('getLeadSourceBreakdown', () => {
           (v.text as string).includes('succeeded'),
       ),
     ).toBe(true);
+  });
+});
+
+// getLocationBreakdown runs 4 selects via Promise.all, in this order:
+//   1 jobs  2 revenue  3 rating  4 labels
+interface LocRow {
+  locationId: string;
+  value: number | string | null;
+}
+function seedLocation(s: {
+  jobs: LocRow[];
+  revenue: LocRow[];
+  rating: { locationId: string; value: number | string | null }[];
+  labels: { id: string; label: string | null; zone: string | null }[];
+}): void {
+  selectQueue.push(s.jobs);
+  selectQueue.push(s.revenue);
+  selectQueue.push(s.rating);
+  selectQueue.push(s.labels);
+}
+
+describe('getLocationBreakdown', () => {
+  it('buckets NULL locationId under "unassigned" and resolves labels', async () => {
+    seedLocation({
+      jobs: [
+        { locationId: 'loc-1', value: 4 },
+        { locationId: 'unassigned', value: 2 },
+      ],
+      revenue: [{ locationId: 'loc-1', value: '90000' }],
+      rating: [{ locationId: 'loc-1', value: '4.5' }],
+      labels: [{ id: 'loc-1', label: 'Main St', zone: null }],
+    });
+    const rows = await getLocationBreakdown(ORG);
+
+    const unassigned = rows.find((r) => r.locationId === 'unassigned');
+    expect(unassigned).toBeDefined();
+    expect(unassigned!.label).toBe('Unassigned');
+    expect(unassigned!.jobs).toBe(2);
+    expect(unassigned!.revenueCents).toBe(0);
+    expect(unassigned!.avgRating).toBeNull();
+
+    const loc1 = rows.find((r) => r.locationId === 'loc-1');
+    expect(loc1!.label).toBe('Main St');
+    expect(loc1!.jobs).toBe(4);
+    expect(loc1!.revenueCents).toBe(90000);
+    expect(loc1!.avgRating).toBe(4.5);
+  });
+
+  it('is tenant-scoped on every joined table (no cross-org leak)', async () => {
+    seedLocation({
+      jobs: [{ locationId: 'loc-1', value: 1 }],
+      revenue: [{ locationId: 'loc-1', value: '100' }],
+      rating: [],
+      labels: [{ id: 'loc-1', label: 'X', zone: null }],
+    });
+    await getLocationBreakdown(ORG);
+
+    // jobs where (capture 0) tenant-scoped on serviceRequests.
+    expect(
+      hasTag(captured[0].where, (v) => v.kind === 'tenant' && v.orgId === ORG),
+    ).toBe(true);
+
+    // revenue join (capture 1) carries the invoice org predicate.
+    expect(
+      hasTag(
+        captured[1].joins,
+        (v) =>
+          v.kind === 'sql' &&
+          typeof v.text === 'string' &&
+          (v.text as string).includes('?') &&
+          Array.isArray(v.values) &&
+          (v.values as unknown[]).includes(ORG),
+      ),
+    ).toBe(true);
+
+    // rating join (capture 2) carries the review_requests org predicate.
+    expect(
+      hasTag(
+        captured[2].joins,
+        (v) =>
+          v.kind === 'sql' &&
+          Array.isArray(v.values) &&
+          (v.values as unknown[]).includes(ORG),
+      ),
+    ).toBe(true);
+
+    // labels select (capture 3) tenant-scoped on customerLocations.
+    expect(
+      hasTag(captured[3].where, (v) => v.kind === 'tenant' && v.orgId === ORG),
+    ).toBe(true);
+  });
+
+  it('a location with jobs but no reviews shows null rating (not a fake 0)', async () => {
+    seedLocation({
+      jobs: [{ locationId: 'loc-1', value: 3 }],
+      revenue: [],
+      rating: [], // no review rows
+      labels: [{ id: 'loc-1', label: 'Depot', zone: null }],
+    });
+    const rows = await getLocationBreakdown(ORG);
+    const loc1 = rows.find((r) => r.locationId === 'loc-1');
+    expect(loc1!.avgRating).toBeNull();
+    expect(loc1!.revenueCents).toBe(0);
+  });
+});
+
+// getTechnicianScorecards runs 4 selects via Promise.all, in this order:
+//   1 jobs(+name)  2 revenue  3 labor  4 rating
+function seedTech(s: {
+  jobs: {
+    technicianId: string | null;
+    name: string;
+    assigned: number | string;
+    completed: number | string;
+  }[];
+  revenue: { technicianId: string | null; value: number | string | null }[];
+  labor: { technicianId: string | null; value: number | string | null }[];
+  rating: { technicianId: string | null; value: number | string | null }[];
+}): void {
+  selectQueue.push(s.jobs);
+  selectQueue.push(s.revenue);
+  selectQueue.push(s.labor);
+  selectQueue.push(s.rating);
+}
+
+describe('getTechnicianScorecards', () => {
+  it('aggregates revenue, completed, labor hours, and rating per tech', async () => {
+    seedTech({
+      jobs: [{ technicianId: 'tech-1', name: 'Sam', assigned: 5, completed: 3 }],
+      revenue: [{ technicianId: 'tech-1', value: '120000' }],
+      labor: [{ technicianId: 'tech-1', value: 90 }], // 90 min -> 1.5h
+      rating: [{ technicianId: 'tech-1', value: '4.8' }],
+    });
+    const rows = await getTechnicianScorecards(ORG);
+    expect(rows).toHaveLength(1);
+    const t = rows[0];
+    expect(t.technicianId).toBe('tech-1');
+    expect(t.name).toBe('Sam');
+    expect(t.jobsAssigned).toBe(5);
+    expect(t.jobsCompleted).toBe(3);
+    expect(t.revenueCents).toBe(120000);
+    expect(t.laborHours).toBe(1.5);
+    expect(t.avgRating).toBe(4.8);
+  });
+
+  it('a tech with NO time entries shows null labor hours (not a fake 0)', async () => {
+    seedTech({
+      jobs: [{ technicianId: 'tech-2', name: 'Lee', assigned: 2, completed: 1 }],
+      revenue: [],
+      labor: [], // no time entries at all for this tech
+      rating: [],
+    });
+    const rows = await getTechnicianScorecards(ORG);
+    const t = rows.find((r) => r.technicianId === 'tech-2');
+    expect(t).toBeDefined();
+    expect(t!.laborHours).toBeNull();
+    expect(t!.avgRating).toBeNull();
+    expect(t!.revenueCents).toBe(0);
+    expect(t!.jobsCompleted).toBe(1);
+  });
+
+  it('scopes every joined table by org on both sides', async () => {
+    seedTech({
+      jobs: [{ technicianId: 'tech-1', name: 'Sam', assigned: 1, completed: 1 }],
+      revenue: [{ technicianId: 'tech-1', value: '100' }],
+      labor: [{ technicianId: 'tech-1', value: 60 }],
+      rating: [{ technicianId: 'tech-1', value: '5' }],
+    });
+    await getTechnicianScorecards(ORG);
+
+    // jobs where (capture 0) tenant-scoped on serviceRequests.
+    expect(
+      hasTag(captured[0].where, (v) => v.kind === 'tenant' && v.orgId === ORG),
+    ).toBe(true);
+    // jobs join to users (capture 0) carries the users org predicate.
+    expect(
+      hasTag(
+        captured[0].joins,
+        (v) =>
+          v.kind === 'sql' &&
+          Array.isArray(v.values) &&
+          (v.values as unknown[]).includes(ORG),
+      ),
+    ).toBe(true);
+
+    // revenue join (capture 1) carries the invoice org predicate.
+    expect(
+      hasTag(
+        captured[1].joins,
+        (v) =>
+          v.kind === 'sql' &&
+          Array.isArray(v.values) &&
+          (v.values as unknown[]).includes(ORG),
+      ),
+    ).toBe(true);
+
+    // labor (capture 2): the time-entries select is tenant-scoped AND its join to
+    // serviceRequests carries the request org predicate (both-sides scoping).
+    expect(
+      hasTag(captured[2].where, (v) => v.kind === 'tenant' && v.orgId === ORG),
+    ).toBe(true);
+    expect(
+      hasTag(
+        captured[2].joins,
+        (v) =>
+          v.kind === 'sql' &&
+          Array.isArray(v.values) &&
+          (v.values as unknown[]).includes(ORG),
+      ),
+    ).toBe(true);
+
+    // rating join (capture 3) carries the review_requests org predicate.
+    expect(
+      hasTag(
+        captured[3].joins,
+        (v) =>
+          v.kind === 'sql' &&
+          Array.isArray(v.values) &&
+          (v.values as unknown[]).includes(ORG),
+      ),
+    ).toBe(true);
+  });
+
+  it('drops requests with a NULL assignedTo (no tech to score)', async () => {
+    seedTech({
+      jobs: [
+        { technicianId: 'tech-1', name: 'Sam', assigned: 1, completed: 1 },
+        { technicianId: null, name: '', assigned: 9, completed: 0 },
+      ],
+      revenue: [],
+      labor: [],
+      rating: [],
+    });
+    const rows = await getTechnicianScorecards(ORG);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].technicianId).toBe('tech-1');
   });
 });

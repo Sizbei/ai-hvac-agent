@@ -3,6 +3,8 @@ import { getAdminSession } from "@/lib/auth/session";
 import {
   getSalesReport,
   getLeadSourceBreakdown,
+  getLocationBreakdown,
+  getTechnicianScorecards,
   type SalesReportPeriod,
 } from "@/lib/admin/reporting-queries";
 import { successResponse, errorResponse } from "@/lib/api-response";
@@ -48,11 +50,23 @@ export async function GET(request: NextRequest) {
     }
 
     const period: SalesReportPeriod = { fromDate, toDate };
-    const [report, leadSourceBreakdown] = await Promise.all([
+    const [
+      report,
+      leadSourceBreakdown,
+      locationBreakdown,
+      technicianScorecards,
+    ] = await Promise.all([
       getSalesReport(session.organizationId, period),
       getLeadSourceBreakdown(session.organizationId, period),
+      getLocationBreakdown(session.organizationId, period),
+      getTechnicianScorecards(session.organizationId, period),
     ]);
-    return successResponse({ report, leadSourceBreakdown });
+    return successResponse({
+      report,
+      leadSourceBreakdown,
+      locationBreakdown,
+      technicianScorecards,
+    });
   } catch (error: unknown) {
     logger.error({ error }, "Failed to build sales report");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);

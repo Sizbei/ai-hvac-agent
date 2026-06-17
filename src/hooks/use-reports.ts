@@ -26,6 +26,24 @@ export interface LeadSourceRow {
   readonly closeRatePct: number;
 }
 
+export interface LocationBreakdownRow {
+  readonly locationId: string;
+  readonly label: string;
+  readonly jobs: number;
+  readonly revenueCents: number;
+  readonly avgRating: number | null;
+}
+
+export interface TechnicianScorecardRow {
+  readonly technicianId: string;
+  readonly name: string;
+  readonly jobsAssigned: number;
+  readonly jobsCompleted: number;
+  readonly revenueCents: number;
+  readonly laborHours: number | null;
+  readonly avgRating: number | null;
+}
+
 export interface ReportRange {
   /** ISO date strings; omit both for the server default (last 30 days). */
   readonly from?: string;
@@ -35,6 +53,8 @@ export interface ReportRange {
 interface UseReportsResult {
   readonly report: SalesReport | null;
   readonly leadSourceBreakdown: LeadSourceRow[];
+  readonly locationBreakdown: LocationBreakdownRow[];
+  readonly technicianScorecards: TechnicianScorecardRow[];
   readonly isLoading: boolean;
   readonly error: string | null;
   readonly refetch: () => Promise<void>;
@@ -48,6 +68,8 @@ interface UseReportsResult {
 export function useReports(range: ReportRange = {}): UseReportsResult {
   const [report, setReport] = useState<SalesReport | null>(null);
   const [leadSourceBreakdown, setLeadSourceBreakdown] = useState<LeadSourceRow[]>([]);
+  const [locationBreakdown, setLocationBreakdown] = useState<LocationBreakdownRow[]>([]);
+  const [technicianScorecards, setTechnicianScorecards] = useState<TechnicianScorecardRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -71,11 +93,18 @@ export function useReports(range: ReportRange = {}): UseReportsResult {
       }
       const body = (await res.json()) as {
         success: boolean;
-        data: { report: SalesReport; leadSourceBreakdown?: LeadSourceRow[] };
+        data: {
+          report: SalesReport;
+          leadSourceBreakdown?: LeadSourceRow[];
+          locationBreakdown?: LocationBreakdownRow[];
+          technicianScorecards?: TechnicianScorecardRow[];
+        };
       };
       if (body.success) {
         setReport(body.data.report);
         setLeadSourceBreakdown(body.data.leadSourceBreakdown ?? []);
+        setLocationBreakdown(body.data.locationBreakdown ?? []);
+        setTechnicianScorecards(body.data.technicianScorecards ?? []);
       }
       setError(null);
     } catch {
@@ -90,5 +119,13 @@ export function useReports(range: ReportRange = {}): UseReportsResult {
     fetchReport().finally(() => setIsLoading(false));
   }, [fetchReport]);
 
-  return { report, leadSourceBreakdown, isLoading, error, refetch: fetchReport };
+  return {
+    report,
+    leadSourceBreakdown,
+    locationBreakdown,
+    technicianScorecards,
+    isLoading,
+    error,
+    refetch: fetchReport,
+  };
 }
