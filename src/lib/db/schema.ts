@@ -261,7 +261,7 @@ export const users = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     organizationId: uuid("organization_id")
       .notNull()
-      .references(() => organizations.id),
+      .references(() => organizations.id, { onDelete: "cascade" }),
     email: text("email").notNull(),
     name: text("name").notNull(),
     // Nullable: a Google-only (OIDC) user has no password. A NULL hash means
@@ -338,7 +338,7 @@ export const staffInvites = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     organizationId: uuid("organization_id")
       .notNull()
-      .references(() => organizations.id),
+      .references(() => organizations.id, { onDelete: "cascade" }),
     // Normalized (trim + lowercase) at creation so it matches how users.email
     // is stored and how the accept flow's collision check resolves.
     email: text("email").notNull(),
@@ -381,7 +381,7 @@ export const customerSessions = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     organizationId: uuid("organization_id")
       .notNull()
-      .references(() => organizations.id),
+      .references(() => organizations.id, { onDelete: "cascade" }),
     token: text("token").notNull().unique(),
     status: sessionStatusEnum("status").notNull().default("chatting"),
     tokensUsed: integer("tokens_used").notNull().default(0),
@@ -443,7 +443,7 @@ export const messages = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     organizationId: uuid("organization_id")
       .notNull()
-      .references(() => organizations.id),
+      .references(() => organizations.id, { onDelete: "cascade" }),
     sessionId: uuid("session_id")
       .notNull()
       .references(() => customerSessions.id),
@@ -468,7 +468,7 @@ export const serviceRequests = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     organizationId: uuid("organization_id")
       .notNull()
-      .references(() => organizations.id),
+      .references(() => organizations.id, { onDelete: "cascade" }),
     sessionId: uuid("session_id")
       .notNull()
       .references(() => customerSessions.id),
@@ -591,10 +591,10 @@ export const requestNotes = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     requestId: uuid("request_id")
       .notNull()
-      .references(() => serviceRequests.id),
+      .references(() => serviceRequests.id, { onDelete: "cascade" }),
     organizationId: uuid("organization_id")
       .notNull()
-      .references(() => organizations.id),
+      .references(() => organizations.id, { onDelete: "cascade" }),
     authorId: uuid("author_id").references(() => users.id),
     content: text("content").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -638,7 +638,7 @@ export const customers = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     organizationId: uuid("organization_id")
       .notNull()
-      .references(() => organizations.id),
+      .references(() => organizations.id, { onDelete: "cascade" }),
     nameEncrypted: text("name_encrypted").notNull(),
     phoneEncrypted: text("phone_encrypted"),
     emailEncrypted: text("email_encrypted"),
@@ -692,6 +692,11 @@ export const customers = pgTable(
     portalTokenCreatedAt: timestamp("portal_token_created_at", {
       withTimezone: true,
     }),
+    // GDPR erasure marker: set when the customer's PII has been anonymized
+    // (right-to-erasure). The row is RETAINED (de-identified) so financial
+    // history stays intact, but every PII column is scrubbed and the blind
+    // indexes nulled. NULL = the customer is a normal, identified record.
+    anonymizedAt: timestamp("anonymized_at", { withTimezone: true }),
   },
   (table) => [
     index("customers_org_id_idx").on(table.organizationId),
@@ -724,7 +729,7 @@ export const customerEquipment = pgTable(
       .references(() => customers.id),
     organizationId: uuid("organization_id")
       .notNull()
-      .references(() => organizations.id),
+      .references(() => organizations.id, { onDelete: "cascade" }),
     equipmentType: equipmentTypeEnum("equipment_type").notNull(),
     make: text("make"),
     model: text("model"),
@@ -775,7 +780,7 @@ export const customerNotes = pgTable(
       .references(() => customers.id),
     organizationId: uuid("organization_id")
       .notNull()
-      .references(() => organizations.id),
+      .references(() => organizations.id, { onDelete: "cascade" }),
     authorId: uuid("author_id").references(() => users.id),
     content: text("content").notNull(),
     noteType: noteTypeEnum("note_type").notNull().default("general"),
@@ -799,7 +804,7 @@ export const followUps = pgTable(
       .references(() => customers.id),
     organizationId: uuid("organization_id")
       .notNull()
-      .references(() => organizations.id),
+      .references(() => organizations.id, { onDelete: "cascade" }),
     assignedTo: uuid("assigned_to").references(() => users.id),
     reason: text("reason").notNull(),
     dueDate: timestamp("due_date", { withTimezone: true }).notNull(),
@@ -830,7 +835,7 @@ export const serviceHistory = pgTable(
     ),
     organizationId: uuid("organization_id")
       .notNull()
-      .references(() => organizations.id),
+      .references(() => organizations.id, { onDelete: "cascade" }),
     // Stage 5: the specific installed unit this visit serviced — enables a
     // per-asset repair timeline. Nullable (older history has no asset link).
     equipmentId: uuid("equipment_id").references(() => customerEquipment.id),
@@ -867,7 +872,7 @@ export const auditLog = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     organizationId: uuid("organization_id")
       .notNull()
-      .references(() => organizations.id),
+      .references(() => organizations.id, { onDelete: "cascade" }),
     userId: uuid("user_id").references(() => users.id),
     sessionId: uuid("session_id").references(() => customerSessions.id),
     // human (a logged-in user) | ai (autonomous agent) | system (cron/webhook).
@@ -895,7 +900,7 @@ export const auditLog = pgTable(
 export const organizationSettings = pgTable("organization_settings", {
   organizationId: uuid("organization_id")
     .primaryKey()
-    .references(() => organizations.id),
+    .references(() => organizations.id, { onDelete: "cascade" }),
 
   // ── Branding (widget look) ──
   companyName: text("company_name"),
@@ -989,7 +994,7 @@ export const customFaqs = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     organizationId: uuid("organization_id")
       .notNull()
-      .references(() => organizations.id),
+      .references(() => organizations.id, { onDelete: "cascade" }),
     question: text("question").notNull(),
     answer: text("answer").notNull(),
     // Lowercased trigger phrases the matcher checks (comma/JSON array). Kept
@@ -1031,7 +1036,7 @@ export const technicianAvailability = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     organizationId: uuid("organization_id")
       .notNull()
-      .references(() => organizations.id),
+      .references(() => organizations.id, { onDelete: "cascade" }),
     technicianId: uuid("technician_id")
       .notNull()
       .references(() => users.id),
@@ -1084,7 +1089,7 @@ export const googleCalendarConnections = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     organizationId: uuid("organization_id")
       .notNull()
-      .references(() => organizations.id),
+      .references(() => organizations.id, { onDelete: "cascade" }),
     // Target calendar — "primary" or a specific calendar id.
     calendarId: text("calendar_id").notNull().default("primary"),
     // AES-256-GCM ciphertext of the OAuth refresh token. Never null while
@@ -1122,7 +1127,7 @@ export const housecallProConnections = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     organizationId: uuid("organization_id")
       .notNull()
-      .references(() => organizations.id),
+      .references(() => organizations.id, { onDelete: "cascade" }),
     // AES-256-GCM ciphertext of the HCP API key. Never null while connected;
     // cleared (and connected=false) on disconnect.
     apiKeyEncrypted: text("api_key_encrypted"),
@@ -1166,7 +1171,7 @@ export const fieldpulseConnections = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     organizationId: uuid("organization_id")
       .notNull()
-      .references(() => organizations.id),
+      .references(() => organizations.id, { onDelete: "cascade" }),
     // AES-256-GCM ciphertext of the Fieldpulse API key. Never null while connected;
     // cleared (and connected=false) on disconnect.
     apiKeyEncrypted: text("api_key_encrypted"),
@@ -1223,7 +1228,7 @@ export const fieldpulseWebhookEvents = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     organizationId: uuid("organization_id")
       .notNull()
-      .references(() => organizations.id),
+      .references(() => organizations.id, { onDelete: "cascade" }),
     // Fieldpulse's event id (the `id` field on the webhook envelope). Deduped per org.
     eventId: text("event_id").notNull(),
     // Fieldpulse event type, e.g. "job.status_updated" — stored for the audit trail only.
@@ -1251,7 +1256,7 @@ export const hcpWebhookEvents = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     organizationId: uuid("organization_id")
       .notNull()
-      .references(() => organizations.id),
+      .references(() => organizations.id, { onDelete: "cascade" }),
     // HCP's event id (the `id` field on the webhook envelope). Deduped per org.
     eventId: text("event_id").notNull(),
     // HCP event type, e.g. "job.completed" — stored for the audit trail only.
@@ -1293,7 +1298,9 @@ export const saasBillingEvents = pgTable(
     eventType: text("event_type").notNull(),
     // The org the event targeted (nullable: an event we record as seen but could
     // not map to an org). Not org-scoped on the unique index by design.
-    organizationId: uuid("organization_id").references(() => organizations.id),
+    organizationId: uuid("organization_id").references(() => organizations.id, {
+      onDelete: "cascade",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -1314,7 +1321,7 @@ export const widgetKeys = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     organizationId: uuid("organization_id")
       .notNull()
-      .references(() => organizations.id),
+      .references(() => organizations.id, { onDelete: "cascade" }),
     // SHA-256 hex of the full key. Unique so a presented key maps to one row.
     keyHash: text("key_hash").notNull().unique(),
     // Cleartext leading chars for display, e.g. "pk_live_a1b2c3d4".
@@ -1351,7 +1358,7 @@ export const attachments = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     organizationId: uuid("organization_id")
       .notNull()
-      .references(() => organizations.id),
+      .references(() => organizations.id, { onDelete: "cascade" }),
     // NULLABLE as of Stage 7: chat uploads always carry a session, but
     // admin-uploaded documents/photos (linked directly to a job/equipment/
     // customer) have no chat session. Existing rows are unaffected.
@@ -2549,7 +2556,7 @@ export const botEvents = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     organizationId: uuid("organization_id")
       .notNull()
-      .references(() => organizations.id),
+      .references(() => organizations.id, { onDelete: "cascade" }),
     // Soft reference to customer_sessions.id (no hard FK — see table note).
     sessionId: uuid("session_id"),
     // 1-based turn index within the session at the time of this event.
@@ -2589,5 +2596,34 @@ export const botEvents = pgTable(
       table.organizationId,
       table.intentId,
     ),
+  ],
+);
+
+// platform_audit_log — cross-org, platform-operator audit trail for DESTRUCTIVE
+// or evidence-bearing platform actions (tenant purge, tenant export). Crucially
+// it is NOT FK'd to organizations: a purge DELETEs the org row (cascading every
+// org-scoped table, including audit_log), so the evidence of the purge itself
+// must live in a table that SURVIVES the cascade. targetOrgId is a plain uuid
+// (no FK) for the same reason — it points at an org that may no longer exist.
+// details is PII-free by contract (counts/ids/enums only), same as audit_log.
+export const platformAuditLog = pgTable(
+  "platform_audit_log",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    action: text("action").notNull(),
+    // The platform admin who performed the action (their user id + email).
+    // Nullable so a system/cron-initiated action can be recorded too.
+    actorUserId: uuid("actor_user_id"),
+    actorEmail: text("actor_email"),
+    // The org the action targeted. NO FK — the org may be deleted by the action.
+    targetOrgId: uuid("target_org_id"),
+    details: jsonb("details"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("platform_audit_log_target_org_idx").on(table.targetOrgId),
+    index("platform_audit_log_created_idx").on(table.createdAt),
   ],
 );

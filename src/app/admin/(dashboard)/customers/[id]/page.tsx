@@ -18,6 +18,7 @@ import {
   Trash2,
   Pencil,
   Archive,
+  ShieldX,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -93,6 +94,9 @@ export default function CustomerDetailPage({
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
   const [isArchiving, setIsArchiving] = useState(false);
   const [archiveError, setArchiveError] = useState<string | null>(null);
+  const [showEraseConfirm, setShowEraseConfirm] = useState(false);
+  const [isErasing, setIsErasing] = useState(false);
+  const [eraseError, setEraseError] = useState<string | null>(null);
   const [completingId, setCompletingId] = useState<string | null>(null);
 
   const handleCompleteFollowUp = useCallback(
@@ -175,6 +179,34 @@ export default function CustomerDetailPage({
     } catch {
       setArchiveError('Network error');
       setIsArchiving(false);
+    }
+  }, [id, router]);
+
+  const handleErase = useCallback(async (): Promise<void> => {
+    setIsErasing(true);
+    setEraseError(null);
+
+    try {
+      const res = await fetch(`/api/admin/customers/${id}/erase`, {
+        method: 'POST',
+      });
+
+      const json = await res.json().catch(() => ({
+        error: { message: 'Failed to erase customer data' },
+      }));
+
+      if (res.ok && json.success) {
+        // The customer row is retained (anonymized), but the PII is gone — send
+        // the admin back to the list rather than re-render a "[deleted]" record.
+        router.push('/admin/customers');
+        return;
+      }
+
+      setEraseError(json.error?.message ?? 'Failed to erase customer data');
+      setIsErasing(false);
+    } catch {
+      setEraseError('Network error');
+      setIsErasing(false);
     }
   }, [id, router]);
 
@@ -295,6 +327,16 @@ export default function CustomerDetailPage({
         >
           <Trash2 className="size-4" />
           Delete
+        </Button>
+        <Button
+          variant="destructive"
+          onClick={() => {
+            setEraseError(null);
+            setShowEraseConfirm(true);
+          }}
+        >
+          <ShieldX className="size-4" />
+          Erase data (GDPR)
         </Button>
       </div>
 
@@ -649,6 +691,18 @@ export default function CustomerDetailPage({
         isConfirming={isDeleting}
         error={deleteError}
         onConfirm={handleDelete}
+      />
+
+      <ConfirmDialog
+        open={showEraseConfirm}
+        onOpenChange={setShowEraseConfirm}
+        title="Erase customer data (GDPR)?"
+        description="This permanently anonymizes the customer: their name, contact details, address, chat messages, notes, attachments, and signatures are erased and cannot be recovered. De-identified financial records (invoices, payments) are kept for accounting. This action is terminal."
+        confirmLabel="Erase permanently"
+        confirmingLabel="Erasing..."
+        isConfirming={isErasing}
+        error={eraseError}
+        onConfirm={handleErase}
       />
 
       <ConfirmDialog
