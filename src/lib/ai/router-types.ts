@@ -10,7 +10,14 @@ export type RouterAction =
   // only RECOGNIZES it and surfaces the intentId; the chat route enforces the
   // identity gate and dispatches to the account-tools. For an UNIDENTIFIED
   // session the route treats this exactly like FALLBACK_LLM (no leak).
-  | "ACCOUNT_LOOKUP";
+  | "ACCOUNT_LOOKUP"
+  // A deterministic ambiguity probe (CHATBOT-PLAN Step 16): the message matched
+  // a small, common ambiguity (e.g. "it's not working" — not cooling vs not
+  // heating) where a crisp clarifying question beats punting to the LLM. The
+  // router carries the question as `reply`; the chat route serves it as a canned
+  // reply (it's not FALLBACK_LLM/COLLECT_INFO/SUBMIT, so useCannedReply serves
+  // it). LOWEST precedence — emergency/compound/known-intent all win first.
+  | "CLARIFY";
 
 export interface KnowledgeBaseEntry {
   readonly id: string;
