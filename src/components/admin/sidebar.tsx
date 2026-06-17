@@ -89,7 +89,7 @@ const NAV_GROUPS: readonly NavGroup[] = [
   {
     heading: 'Integrations',
     items: [
-      { label: 'Integrations', href: '/admin/settings?tab=integrations', icon: Plug },
+      { label: 'Integrations', href: '/admin/integrations', icon: Plug },
     ],
   },
 ] as const;
