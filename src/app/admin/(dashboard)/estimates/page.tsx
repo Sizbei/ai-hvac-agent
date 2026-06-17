@@ -10,6 +10,8 @@ import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatCentsExact } from '@/lib/admin/money-format';
+import { PageShell } from '@/components/admin/ui/page-shell';
+import { PageHeader } from '@/components/admin/ui/page-header';
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', {
@@ -24,19 +26,17 @@ export default function EstimatesPage() {
   const [createOpen, setCreateOpen] = useState(false);
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Estimates</h1>
-          <p className="text-sm text-muted-foreground">
-            Good / better / best proposals with public e-sign approval.
-          </p>
-        </div>
-        <Button onClick={() => setCreateOpen(true)}>
-          <Plus className="mr-2 h-4 w-4" />
-          New estimate
-        </Button>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Estimates"
+        subtitle="Good / better / best proposals with public e-sign approval."
+        actions={
+          <Button onClick={() => setCreateOpen(true)}>
+            <Plus className="mr-2 h-4 w-4" />
+            New estimate
+          </Button>
+        }
+      />
 
       {error && (
         <Alert variant="destructive">
@@ -118,6 +118,6 @@ export default function EstimatesPage() {
         onOpenChange={setCreateOpen}
         onCreated={() => void refetch()}
       />
-    </div>
+    </PageShell>
   );
 }

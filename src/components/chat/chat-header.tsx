@@ -2,6 +2,7 @@
 
 import { PhoneForwarded, RotateCcw, History } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { BrandMark } from '@/components/admin/brand-mark';
 import type { SessionState } from '@/lib/types/chat';
 
 interface ChatHeaderProps {
@@ -13,18 +14,24 @@ interface ChatHeaderProps {
   readonly onNewConversation?: () => void;
 }
 
+// Map the session state to a SEMANTIC status color, reusing the existing theme
+// intent tokens rather than inventing new ones:
+//  - active intake → success (live, healthy)
+//  - confirming    → warning (awaiting the customer's confirm)
+//  - submitted     → primary (done, brand accent)
+//  - escalated / abandoned / done → muted (no longer an active AI thread)
 function getStatusColor(status: SessionState): string {
   switch (status) {
     case 'chatting':
     case 'extracting':
-      return 'bg-green-500';
+      return 'bg-success';
     case 'confirmed':
-      return 'bg-orange-500';
+      return 'bg-warning';
     case 'submitted':
-      return 'bg-blue-500';
+      return 'bg-primary';
     case 'escalated':
     case 'abandoned':
-      return 'bg-gray-400';
+      return 'bg-muted-foreground/40';
   }
 }
 
@@ -40,13 +47,22 @@ export function ChatHeader({
 }: ChatHeaderProps) {
   return (
     <header className="sticky top-0 z-10 flex items-center justify-between border-b bg-background/80 backdrop-blur px-4 py-3">
-      <div className="flex items-center gap-2">
-        <span
-          className={`inline-block size-2.5 rounded-full ${getStatusColor(status)}`}
-          aria-label={`Status: ${status}`}
-        />
+      <div className="flex items-center gap-2.5">
+        {/* Brand the customer chat with the Spears logo lozenge. `compact` shows
+            just the logo (the admin "Service Console" subtitle isn't customer
+            copy), paired with a chat-appropriate wordmark below. */}
+        <div className="relative">
+          <BrandMark compact />
+          {/* Semantic session-status dot, anchored to the brand lozenge. */}
+          <span
+            className={`absolute -right-0.5 -top-0.5 inline-block size-2.5 rounded-full ring-2 ring-background ${getStatusColor(status)}`}
+            aria-label={`Status: ${status}`}
+          />
+        </div>
         <div className="leading-tight">
-          <h1 className="text-base font-semibold">HVAC Assistant</h1>
+          <h1 className="font-heading text-base font-bold tracking-tight">
+            Spears Services
+          </h1>
           <p className="text-[11px] text-muted-foreground">
             AI assistant · our team follows up on every request
           </p>

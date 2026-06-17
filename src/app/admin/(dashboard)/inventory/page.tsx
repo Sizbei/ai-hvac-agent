@@ -10,6 +10,8 @@ import { PurchaseOrdersPanel } from '@/components/admin/inventory/purchase-order
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
+import { PageShell } from '@/components/admin/ui/page-shell';
+import { PageHeader } from '@/components/admin/ui/page-header';
 import type { InventoryItem } from '@/hooks/use-inventory';
 
 export default function InventoryPage() {
@@ -45,19 +47,17 @@ export default function InventoryPage() {
   }
 
   return (
-    <div className="p-6 space-y-8">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Inventory</h1>
-          <p className="text-sm text-muted-foreground">
-            Track stock for pricebook materials and order replenishment.
-          </p>
-        </div>
-        <Button onClick={handleAddClick}>
-          <Plus className="mr-2 h-4 w-4" />
-          Track Material
-        </Button>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Inventory"
+        subtitle="Track stock for pricebook materials and order replenishment."
+        actions={
+          <Button onClick={handleAddClick}>
+            <Plus className="mr-2 h-4 w-4" />
+            Track Material
+          </Button>
+        }
+      />
 
       {error && (
         <Alert variant="destructive">
@@ -89,6 +89,6 @@ export default function InventoryPage() {
         editing={editing}
         materials={materials}
       />
-    </div>
+    </PageShell>
   );
 }

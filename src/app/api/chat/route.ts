@@ -24,7 +24,7 @@ import { getSessionToken } from "@/lib/session";
 import { isSameOriginRequest, hasJsonContentType } from "@/lib/session-csrf";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { buildSystemPrompt, brandInfoFromConfig } from "@/lib/ai/system-prompt";
-import { sanitizeInput } from "@/lib/ai/guardrails";
+import { sanitizeInput, GUARDRAIL_SOFT_REPLY } from "@/lib/ai/guardrails";
 import {
   extractServiceRequest,
   type Message as AIMessage,
@@ -64,7 +64,15 @@ import {
 import { extractAllContactFields } from "@/lib/ai/extract-all-contact";
 import { detectCorrection, correctionFieldLabel } from "@/lib/ai/detect-correction";
 import { isBusinessName } from "@/lib/ai/detect-business-name";
-import { withLeadIn } from "@/lib/ai/lead-ins";
+import { withLeadIn, leadInForIssue } from "@/lib/ai/lead-ins";
+import {
+  sessionSeed,
+  buildStyleHint,
+  updateReAskState,
+  reAskBreakPrompt,
+  updateFrustration,
+  FRUSTRATION_HUMAN_OFFER,
+} from "@/lib/ai/conversation-style";
 import { escalateSession } from "@/lib/ai/escalate-service";
 import {
   parseKnownSlots,
@@ -630,16 +638,60 @@ export async function POST(request: NextRequest) {
 
     const guardrailResult = sanitizeInput(userMessage);
 
-    if (guardrailResult.flagged.length > 0) {
+    // CHATBOT-PLAN Step 4 — graceful injection handling.
+    //  - HARD severity (true injection / jailbreak / prompt-extraction): keep the
+    //    dead-end 400 hard block. A real injection must NEVER be softened into a
+    //    served LLM turn.
+    //  - SOFT severity (HVAC-scope false-positive, e.g. a stray "system:"): don't
+    //    break the chat with an error box. Save the turn, reply conversationally,
+    //    and steer back to HVAC — WITHOUT feeding the flagged text to the model.
+    if (guardrailResult.severity === "hard") {
       logger.warn(
         { sessionId: session.id, flagged: guardrailResult.flagged },
-        "Guardrail flags detected — blocking request",
+        "Guardrail HARD flags detected — blocking request",
       );
       return errorResponse(
         "Your message could not be processed. Please rephrase and try again.",
         "GUARDRAIL_BLOCKED",
         400,
       );
+    }
+
+    if (guardrailResult.severity === "soft") {
+      logger.info(
+        { sessionId: session.id, flagged: guardrailResult.flagged },
+        "Guardrail SOFT flags — answering conversationally and continuing",
+      );
+      // Persist the (sanitized) user turn and a canned in-scope reply so the chat
+      // stays coherent; bump the turn count. The flagged text never reaches the LLM.
+      const softTurnCount = session.turnCount + 1;
+      try {
+        await db.insert(messages).values([
+          {
+            organizationId,
+            sessionId: session.id,
+            role: "user" as const,
+            content: guardrailResult.sanitized,
+          },
+          {
+            organizationId,
+            sessionId: session.id,
+            role: "assistant" as const,
+            content: GUARDRAIL_SOFT_REPLY,
+            tokensUsed: 0,
+          },
+        ]);
+        await db
+          .update(customerSessions)
+          .set({ turnCount: softTurnCount, updatedAt: new Date() })
+          .where(sessionScope);
+      } catch (softError: unknown) {
+        logger.error(
+          { error: softError, sessionId: session.id },
+          "Guardrail SOFT persistence failed — returning reply anyway",
+        );
+      }
+      return cannedTextResponse(GUARDRAIL_SOFT_REPLY);
     }
 
     // 5. Load conversation history
@@ -1345,11 +1397,35 @@ export async function POST(request: NextRequest) {
           verdict.action !== "COLLECT_INFO" &&
           verdict.action !== "SUBMIT" &&
           Boolean(verdict.reply);
+        // Step 3 — generic re-ask-loop circuit breaker. Track how many turns in a
+        // row we've asked the SAME slot question; once it crosses the threshold,
+        // swap in re-phrased copy that surfaces "skip" / "talk to a human" so the
+        // customer is never trapped repeating themselves (generalizes the old
+        // address/email-only caps to any slot). Only applies when we're actually
+        // asking a slot question — not on confirm / canned-FAQ / after-hours turns.
+        const askingSlotQuestion =
+          !extractionComplete && !useCannedReply;
+        const nextSlotStepId = askingSlotQuestion
+          ? nextStepIdFor(merged)
+          : null;
+        const reAsk = updateReAskState({
+          prevStepId:
+            typeof knownSlots.extras?.reAskStepId === "string"
+              ? (knownSlots.extras.reAskStepId as string)
+              : null,
+          prevCount: Number(knownSlots.extras?.reAskCount ?? 0),
+          nextStepId: nextSlotStepId,
+        });
+        const reAskBreakCopy =
+          reAsk.shouldBreak && nextSlotStepId
+            ? reAskBreakPrompt(nextSlotStepId)
+            : null;
+
         const nextQuestion = extractionComplete
           ? CONFIRM_REPLY
           : useCannedReply
             ? verdict.reply!
-            : nextSlotPrompt(merged, windowPrompt ?? undefined);
+            : reAskBreakCopy ?? nextSlotPrompt(merged, windowPrompt ?? undefined);
 
         // After-hours disclosure (deterministic path). When this intake is
         // happening outside the org's business hours we either ask whether it's
@@ -1389,24 +1465,13 @@ export async function POST(request: NextRequest) {
           !shownKinds.includes(afterHoursDecision.kind)
             ? afterHoursDecision
             : null;
-        if (afterHoursMove) {
-          // Persist the shown flag so every later turn suppresses this move.
-          metadataStr = JSON.stringify(
-            buildExtraction(
-              mergeSlots(merged, {
-                extras: {
-                  afterHoursShown: [...shownKinds, afterHoursMove.kind].join(
-                    ",",
-                  ),
-                },
-              }),
-              (
-                conversationHistory.find((m) => m.role === "user")?.content ??
-                guardrailResult.sanitized
-              ).slice(0, 280),
-            ),
-          );
-        }
+        // After-hours "shown" flag (persisted below in the single consolidated
+        // metadata write so it isn't clobbered by the conversation-style write).
+        const afterHoursExtras = afterHoursMove
+          ? {
+              afterHoursShown: [...shownKinds, afterHoursMove.kind].join(","),
+            }
+          : {};
 
         // Compose EXACTLY ONE coherent message for this turn (Fix 1). We never
         // stack templates (after-hours line + lead-in + confirm) into one
@@ -1446,6 +1511,19 @@ export async function POST(request: NextRequest) {
         // ack (at most one of these is usually set).
         const ack = businessAck + correctionAck;
 
+        // Step 1 — rotate the lead-in variant by a stable per-session seed so two
+        // consecutive chats don't open identically. Track whether the lead-in
+        // actually emits this turn so we can persist the empathy-once flag for the
+        // LLM seam (Step 2).
+        const leadInSeed = sessionSeed(session.id);
+        const emittedLeadIn =
+          leadInForIssue(
+            merged.issueType,
+            merged.urgency,
+            newTurnCount,
+            leadInSeed,
+          ).length > 0;
+
         let replyBody: string;
         if (extractionComplete) {
           // nextQuestion is CONFIRM_REPLY here — stand-alone, no prefixes EXCEPT
@@ -1460,6 +1538,11 @@ export async function POST(request: NextRequest) {
           replyBody = afterHoursMove.copy.trim().endsWith("?")
             ? `${ack}${afterHoursMove.copy}`
             : `${ack}${afterHoursMove.copy} ${nextQuestion}`;
+        } else if (reAskBreakCopy) {
+          // Step 3 — the re-ask circuit breaker owns the turn's framing: the
+          // re-phrased copy already acknowledges the loop and offers skip/human,
+          // so no separate warmth lead-in in front of it.
+          replyBody = ack + nextQuestion;
         } else if (isExplicitCorrection || businessNameDetected) {
           // A correction / business clarification owns the turn's framing —
           // acknowledge, then ask the next question plainly (one voice).
@@ -1469,14 +1552,59 @@ export async function POST(request: NextRequest) {
           // acknowledgement of the stated issue before the next question —
           // template-based and 0-token. withLeadIn returns "" for emergency
           // urgency, so the exact safety copy is never softened. newTurnCount
-          // rotates the variant.
+          // gates empathy-once; leadInSeed rotates the variant across chats.
           replyBody = withLeadIn(
             nextQuestion,
             merged.issueType,
             merged.urgency,
             newTurnCount,
+            leadInSeed,
           );
         }
+
+        // Step 5 — frustration-aware human offer. Accumulate dissatisfaction
+        // signals across turns; once they cross the threshold, PROACTIVELY offer a
+        // human (once) before the turn-limit fallback. Suppressed when the intake
+        // is complete (we're confirming) or an after-hours move owns the turn, so
+        // we don't talk over those. The offer leads the reply so it's seen first.
+        const frustration = updateFrustration({
+          message: guardrailResult.sanitized,
+          priorScore: Number(knownSlots.extras?.frustrationScore ?? 0),
+          alreadyOffered:
+            String(knownSlots.extras?.frustrationOffered ?? "").length > 0,
+        });
+        const offerHuman =
+          frustration.offer &&
+          !extractionComplete &&
+          !afterHoursMove &&
+          // The re-ask breaker already surfaces a human escape this turn — don't
+          // stack a second human offer on top of it.
+          !reAskBreakCopy;
+        if (offerHuman) {
+          replyBody = `${FRUSTRATION_HUMAN_OFFER} ${replyBody}`;
+        }
+
+        // Persist the conversation-style state (empathy-once flag, re-ask counter,
+        // frustration running score/offered) so the next turn — deterministic OR
+        // LLM — stays coherent. Folded into the metadata extras in one write.
+        metadataStr = JSON.stringify(
+          buildExtraction(
+            mergeSlots(merged, {
+              extras: {
+                ...afterHoursExtras,
+                ...(emittedLeadIn ? { empathyShown: "1" } : {}),
+                reAskStepId: reAsk.stepId ?? "",
+                reAskCount: reAsk.count,
+                frustrationScore: frustration.total,
+                ...(offerHuman ? { frustrationOffered: "1" } : {}),
+              },
+            }),
+            (
+              conversationHistory.find((m) => m.role === "user")?.content ??
+              guardrailResult.sanitized
+            ).slice(0, 280),
+          ),
+        );
 
         const replyText = replyBody + (nearTurnLimit ? ESCALATION_NOTE : "");
 
@@ -1598,12 +1726,25 @@ export async function POST(request: NextRequest) {
         ? `\n\nALREADY CAPTURED THIS CONVERSATION (saved — never re-ask or claim you still need these): ${sessionFacts.join("; ")}.`
         : "";
 
+    // Step 2 — carry tone/voice state across the deterministic↔LLM seam. When the
+    // deterministic path has already acknowledged the issue once, tell the model
+    // NOT to restart the "Got it / Understood" empathy decay, so a chat that
+    // alternates deterministic + LLM turns reads as one continuous person rather
+    // than two voices. Also nudges tighter replies once several turns deep.
+    const empathyAlreadyGiven =
+      String(knownSlots.extras?.empathyShown ?? "").length > 0;
+    const styleHint = buildStyleHint({
+      empathyAlreadyGiven,
+      turnCount: newTurnCount,
+    });
+
     // 8. Stream response via Vercel AI SDK per SC-09
     const result = streamText({
       model: await getModel(organizationId),
       system:
         brandPrompt +
         customerContextHint +
+        styleHint +
         sessionSlotsHint +
         escalationHint +
         afterHoursHint,
@@ -1707,6 +1848,10 @@ export async function POST(request: NextRequest) {
           name: extraction.extraction.customerName ?? undefined,
           phone: extraction.extraction.customerPhone ?? undefined,
           email: extraction.extraction.customerEmail ?? undefined,
+          // Step 2 — the LLM has produced a reply (and thus acknowledged the
+          // issue) this turn, so latch the empathy-once flag so neither the
+          // deterministic nor LLM path re-acknowledges on later turns.
+          extras: { empathyShown: "1" },
         });
         const firstUserMessage =
           conversationHistory.find((m) => m.role === "user")?.content ??

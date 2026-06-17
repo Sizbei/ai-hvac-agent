@@ -23,6 +23,9 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { PageShell } from '@/components/admin/ui/page-shell';
+import { EmptyState } from '@/components/admin/ui/empty-state';
+import { StatusBadge } from '@/components/admin/status-badge';
 import { useCustomerDetail } from '@/hooks/use-admin-customers';
 import { EquipmentFormDialog } from '@/components/admin/equipment-form-dialog';
 import { NoteFormDialog } from '@/components/admin/note-form-dialog';
@@ -62,22 +65,6 @@ function warrantyStatusLabel(iso: string): string {
   if (days < 0) return 'EXPIRED';
   if (days === 0) return 'Expires today';
   return `Expires in ${days} day${days === 1 ? '' : 's'}`;
-}
-
-function StatusBadge({ status }: { readonly status: string }) {
-  const colors: Record<string, string> = {
-    pending: 'bg-yellow-100 text-yellow-800',
-    completed: 'bg-green-100 text-green-800',
-    overdue: 'bg-red-100 text-red-800',
-    cancelled: 'bg-gray-100 text-gray-800',
-  };
-  return (
-    <span
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${colors[status] ?? 'bg-gray-100 text-gray-800'}`}
-    >
-      {status}
-    </span>
-  );
 }
 
 export default function CustomerDetailPage({
@@ -236,38 +223,49 @@ export default function CustomerDetailPage({
 
   if (isLoading) {
     return (
-      <div className="space-y-6">
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-48 w-full" />
-        <Skeleton className="h-48 w-full" />
-      </div>
+      <PageShell>
+        <div className="flex items-center gap-4">
+          <Skeleton className="size-7 shrink-0 rounded-lg" />
+          <div className="flex-1 space-y-2">
+            <Skeleton className="h-7 w-48" />
+            <Skeleton className="h-4 w-32" />
+          </div>
+        </div>
+        <Skeleton className="h-40 w-full rounded-xl" />
+        <Skeleton className="h-48 w-full rounded-xl" />
+        <Skeleton className="h-48 w-full rounded-xl" />
+      </PageShell>
     );
   }
 
   if (error || !customer) {
     return (
-      <div className="py-12 text-center">
-        <p className="text-muted-foreground">{error ?? 'Customer not found'}</p>
-        <Link href="/admin/customers">
-          <Button variant="outline" className="mt-4">
-            Back to Customers
-          </Button>
-        </Link>
-      </div>
+      <PageShell>
+        <EmptyState
+          icon={Building2}
+          title="Customer not found"
+          description={error ?? 'This customer may have been deleted or archived.'}
+          action={
+            <Link href="/admin/customers">
+              <Button variant="outline">Back to Customers</Button>
+            </Link>
+          }
+        />
+      </PageShell>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <PageShell>
       {/* Header */}
       <div className="flex items-center gap-4">
         <Link href="/admin/customers">
-          <Button variant="ghost" size="icon-sm">
+          <Button variant="ghost" size="icon-sm" aria-label="Back to customers">
             <ArrowLeft className="size-4" />
           </Button>
         </Link>
         <div className="flex-1">
-          <h1 className="text-2xl font-bold tracking-tight">
+          <h1 className="font-heading text-2xl font-bold tracking-tight">
             {customer.name ?? 'Unknown Customer'}
           </h1>
           <p className="text-sm text-muted-foreground">
@@ -547,7 +545,7 @@ export default function CustomerDetailPage({
               {customer.followUps.map((f) => (
                 <div key={f.id} className="flex items-center gap-3 rounded-lg border p-3">
                   {f.status === 'completed' ? (
-                    <CheckCircle className="size-4 text-green-600" />
+                    <CheckCircle className="size-4 text-success" />
                   ) : (
                     <Clock className="size-4 text-muted-foreground" />
                   )}
@@ -669,6 +667,6 @@ export default function CustomerDetailPage({
         error={equipmentDeleteError}
         onConfirm={handleDeleteEquipment}
       />
-    </div>
+    </PageShell>
   );
 }
