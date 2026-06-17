@@ -13,10 +13,18 @@ vi.mock("@/lib/db", () => ({
     select: vi.fn(),
     insert: vi.fn(),
     batch: vi.fn().mockResolvedValue([]),
-    // update() is used to BUILD statements (passed to batch) and directly in the
-    // charge-failed path; return a chainable that resolves harmlessly.
+    // update() is used to BUILD statements (passed to batch), directly in the
+    // charge-failed/invoice-credit paths, AND for the reconcile CAS claim
+    // (.where().returning()). where() resolves harmlessly when awaited and also
+    // exposes .returning() defaulting to a WON claim (one row).
     update: vi.fn(() => ({
-      set: vi.fn(() => ({ where: vi.fn().mockResolvedValue(undefined) })),
+      set: vi.fn(() => ({
+        where: vi.fn(() =>
+          Object.assign(Promise.resolve(undefined), {
+            returning: vi.fn().mockResolvedValue([{ id: "pay-1" }]),
+          }),
+        ),
+      })),
     })),
   },
 }));
@@ -66,10 +74,16 @@ describe("takePayment", () => {
     expect(r).toEqual({ ok: false, reason: "invoice_not_found" });
   });
 
-  it("reports charge_failed when the provider declines (amount <= 0)", async () => {
+  it("rejects a non-positive amount (exceeds_balance) before hitting the provider", async () => {
     mockInvoice({ totalCents: 10000, amountPaidCents: 0 });
     const r = await takePayment(ORG, "inv-1", { amountCents: 0 }, provider);
-    expect(r).toEqual({ ok: false, reason: "charge_failed" });
+    expect(r).toEqual({ ok: false, reason: "exceeds_balance" });
+  });
+
+  it("rejects over-collection (amount > remaining balance) — never charge past the total", async () => {
+    mockInvoice({ totalCents: 10000, amountPaidCents: 8000 }); // only 2000 left
+    const r = await takePayment(ORG, "inv-1", { amountCents: 5000 }, provider);
+    expect(r).toEqual({ ok: false, reason: "exceeds_balance" });
   });
 });
 
@@ -468,6 +482,21 @@ describe("reconcilePayment", () => {
     vi.mocked(db.insert).mockReturnValue({
       values: vi.fn().mockResolvedValue(undefined),
     } as never);
+    // Earlier describes override db.update (clearAllMocks doesn't reset impls);
+    // restore a returning-capable default (CAS claim WON = one row) so the
+    // reconcile success paths work. The lost-race test overrides this locally.
+    vi.mocked(db.update).mockImplementation(
+      () =>
+        ({
+          set: vi.fn(() => ({
+            where: vi.fn(() =>
+              Object.assign(Promise.resolve(undefined), {
+                returning: vi.fn().mockResolvedValue([{ id: "pay-1" }]),
+              }),
+            ),
+          })),
+        }) as never,
+    );
   });
 
   it("completes a stranded 'pending' payment when the provider says succeeded", async () => {
@@ -480,8 +509,8 @@ describe("reconcilePayment", () => {
     const provider = new MockPaymentProvider(); // getCharge -> succeeded
     const r = await reconcilePayment(ORG, "pay-1", provider);
     expect(r).toEqual({ ok: true, outcome: "completed", invoiceState: "paid" });
-    // payment->succeeded + invoice update batched (same as takePayment success).
-    expect(db.batch).toHaveBeenCalledTimes(1);
+    // CAS claim (payment pending->succeeded) + invoice credit, NOT a batch.
+    expect(db.update).toHaveBeenCalled();
   });
 
   it("leaves the invoice 'open' when a partial deposit is reconciled", async () => {
@@ -491,6 +520,34 @@ describe("reconcilePayment", () => {
     ]);
     const r = await reconcilePayment(ORG, "pay-1", new MockPaymentProvider());
     expect(r).toEqual({ ok: true, outcome: "completed", invoiceState: "open" });
+  });
+
+  it("no-ops (does NOT re-credit) when the CAS claim loses the race to a concurrent reconcile", async () => {
+    mockSelectSeq([
+      [{ id: "pay-1", invoiceId: "inv-1", amountCents: 10000, status: "pending" }],
+      [{ totalCents: 10000, amountPaidCents: 0 }],
+    ]);
+    // Simulate the concurrent winner: the CAS update matches 0 rows (already
+    // flipped to succeeded by the other reconcile), so .returning() is empty.
+    const invoiceSets: Record<string, unknown>[] = [];
+    vi.mocked(db.update).mockImplementation(
+      () =>
+        ({
+          set: (v: Record<string, unknown>) => {
+            invoiceSets.push(v);
+            return {
+              where: () =>
+                Object.assign(Promise.resolve(undefined), {
+                  returning: vi.fn().mockResolvedValue([]), // 0 rows -> lost
+                }),
+            };
+          },
+        }) as never,
+    );
+    const r = await reconcilePayment(ORG, "pay-1", new MockPaymentProvider());
+    expect(r).toEqual({ ok: true, outcome: "noop" });
+    // The invoice amountPaidCents update must NOT have run (no double-credit).
+    expect(invoiceSets.some((s) => "amountPaidCents" in s)).toBe(false);
   });
 
   it("no-ops (not_pending) when the payment was already succeeded — idempotent", async () => {

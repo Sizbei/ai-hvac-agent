@@ -284,20 +284,25 @@ export async function updateTaxRate(
   }
   if (partial.rateBps !== undefined) setFields.rateBps = partial.rateBps;
 
-  const setStmt = db
-    .update(taxRates)
-    .set({ ...setFields, isDefault: true })
-    .where(withTenant(taxRates, organizationId, eq(taxRates.id, id)));
-
   if (partial.isDefault === true) {
-    // Single-default invariant: unset the prior default FIRST, then set this one.
-    // neon-http db.batch is sequential (array order), NOT serializable — wrong
-    // order would violate tax_rates_org_default_unique.
-    await db.batch([buildUnsetDefaultStmt(organizationId), setStmt]);
+    // Promote to default. Single-default invariant: unset the prior default
+    // FIRST, then set this one (with any other changed fields). neon-http
+    // db.batch is sequential (array order), NOT serializable — wrong order would
+    // violate tax_rates_org_default_unique.
+    await db.batch([
+      buildUnsetDefaultStmt(organizationId),
+      db
+        .update(taxRates)
+        .set({ ...setFields, isDefault: true })
+        .where(withTenant(taxRates, organizationId, eq(taxRates.id, id))),
+    ]);
     return;
   }
 
-  // Not touching the default flag: a plain field update (omit isDefault).
+  // Explicit demotion (isDefault === false) is a legal change — the partial
+  // unique index permits zero defaults — so apply it. (Previously dropped, so
+  // the default could never be cleared through this path.)
+  if (partial.isDefault === false) setFields.isDefault = false;
   if (Object.keys(setFields).length === 0) return;
   await db
     .update(taxRates)

@@ -326,6 +326,7 @@ export type PortalPayResult =
       readonly reason:
         | "invoice_not_found"
         | "invoice_not_chargeable"
+        | "exceeds_balance"
         | "charge_failed";
     };
 
