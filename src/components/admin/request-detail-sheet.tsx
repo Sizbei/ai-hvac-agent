@@ -23,6 +23,7 @@ import { UrgencyBadge } from '@/components/admin/urgency-badge';
 import { StatusBadge } from '@/components/admin/status-badge';
 import { ScopedEstimatesSection } from '@/components/admin/estimates/scoped-estimates-section';
 import { ScopedInvoicesSection } from '@/components/admin/invoices/scoped-invoices-section';
+import { AttachmentsSection } from '@/components/admin/attachments-section';
 import {
   allowedTransitions,
   MANUAL_TARGET_STATUSES,
@@ -982,6 +983,13 @@ export function RequestDetailSheet({
                   serviceRequestId={detail.id}
                   variant="plain"
                 />
+              </section>
+
+              <Separator />
+
+              {/* Attachments */}
+              <section>
+                <AttachmentsSection serviceRequestId={detail.id} />
               </section>
 
               <Separator />

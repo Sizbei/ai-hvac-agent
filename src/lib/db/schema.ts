@@ -1250,14 +1250,21 @@ export const attachments = pgTable(
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id),
-    sessionId: uuid("session_id")
-      .notNull()
-      .references(() => customerSessions.id),
+    // NULLABLE as of Stage 7: chat uploads always carry a session, but
+    // admin-uploaded documents/photos (linked directly to a job/equipment/
+    // customer) have no chat session. Existing rows are unaffected.
+    sessionId: uuid("session_id").references(() => customerSessions.id),
     messageId: uuid("message_id").references(() => messages.id),
-    // Stage 7: link media to a job and/or a specific asset (verified missing —
-    // only sessionId/messageId existed). Nullable: chat uploads have neither.
-    serviceRequestId: uuid("service_request_id"),
-    equipmentId: uuid("equipment_id"),
+    // Stage 7: link media to a job, a specific asset, and/or a customer
+    // (verified missing — only sessionId/messageId existed). All NULLABLE:
+    // existing rows (chat uploads) have none, and an admin-uploaded document
+    // may target only one of the three. FKs are no-op-on-delete to match the
+    // table's existing constraints.
+    serviceRequestId: uuid("service_request_id").references(
+      () => serviceRequests.id,
+    ),
+    equipmentId: uuid("equipment_id").references(() => customerEquipment.id),
+    customerId: uuid("customer_id").references(() => customers.id),
     filename: text("filename").notNull(),
     mimeType: text("mime_type").notNull(),
     size: integer("size").notNull(), // File size in bytes
@@ -1273,6 +1280,12 @@ export const attachments = pgTable(
     index("attachments_service_request_idx")
       .on(table.serviceRequestId)
       .where(sql`${table.serviceRequestId} IS NOT NULL`),
+    index("attachments_equipment_idx")
+      .on(table.equipmentId)
+      .where(sql`${table.equipmentId} IS NOT NULL`),
+    index("attachments_customer_idx")
+      .on(table.customerId)
+      .where(sql`${table.customerId} IS NOT NULL`),
   ],
 );
 
