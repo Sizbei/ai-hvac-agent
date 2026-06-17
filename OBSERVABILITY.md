@@ -66,3 +66,10 @@ project exists:
 
 Consider routing (1)–(4) to a dedicated incident channel and the rest to a
 lower-priority feed.
+
+## Conversation-quality eval
+
+Bot quality is measured by a separate, offline-first eval harness — see
+**[EVAL.md](./EVAL.md)**. `npm run eval` gates CI on safety properties (no price
+leak, no false booking, emergencies escalate, injections hard-block);
+`npm run eval:ab` compares registry models (Qwen vs GLM) when keys are present.

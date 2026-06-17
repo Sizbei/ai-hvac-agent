@@ -2511,3 +2511,66 @@ export const reviewRequests = pgTable(
     ),
   ],
 );
+
+// ---------------------------------------------------------------------------
+// Bot turn telemetry (CHATBOT-PLAN Step 10 prerequisite) — one row per resolved
+// chat turn, capturing ONLY the routing/outcome SIGNALS the route already
+// computes (deterministic-vs-LLM, intent, action, completion, escalation, model,
+// latency). This is the aggregatable record behind the Insights "Bot analytics"
+// section; the per-turn signals used to go only to pino->stdout.
+//
+// PII-FREE BY CONTRACT: no message text, no customer data — ids/enums/flags/
+// numbers only. The write is best-effort and fired from after() so it can never
+// fail or slow a customer turn (see src/lib/ai/bot-telemetry.ts).
+//
+// sessionId is a soft reference (NO hard FK) so a telemetry row can outlive a
+// pruned/expired session and a write is never blocked by FK timing on the hot
+// path. Tenant-scoped via organizationId like every other aggregate source.
+export const botEvents = pgTable(
+  "bot_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id),
+    // Soft reference to customer_sessions.id (no hard FK — see table note).
+    sessionId: uuid("session_id"),
+    // 1-based turn index within the session at the time of this event.
+    turn: integer("turn").notNull(),
+    // The medium the turn arrived over (mirrors sessionChannelEnum values).
+    channel: text("channel").notNull().default("web"),
+    // true  = the deterministic intent router resolved the turn (0 LLM tokens),
+    // false = the turn fell back to the LLM.
+    routed: boolean("routed").notNull(),
+    // The winning intent id (router verdict), null on an LLM-fallback turn.
+    intentId: text("intent_id"),
+    // The router action / resolution label (ANSWER, SUBMIT, ESCALATE, …), null
+    // on an LLM-fallback turn.
+    action: text("action"),
+    // The knowledge-base category of the winning intent, null when unknown.
+    category: text("category"),
+    // Whether the intake extraction was complete as of this turn.
+    extractionComplete: boolean("extraction_complete").notNull().default(false),
+    // Whether this turn escalated the session to a human.
+    escalated: boolean("escalated").notNull().default(false),
+    // Resolved model id for an LLM-fallback turn; null on a deterministic turn.
+    model: text("model"),
+    // End-to-end turn latency in ms; null when not measured.
+    latencyMs: integer("latency_ms"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    // Period-scoped aggregates filter by org + createdAt.
+    index("bot_events_org_created_idx").on(
+      table.organizationId,
+      table.createdAt,
+    ),
+    // Intent-distribution rollups group by org + intent.
+    index("bot_events_org_intent_idx").on(
+      table.organizationId,
+      table.intentId,
+    ),
+  ],
+);
