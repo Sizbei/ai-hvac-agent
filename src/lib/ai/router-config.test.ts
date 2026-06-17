@@ -132,6 +132,34 @@ describe("router org-config overlay", () => {
       expect(v.intentId).toBe("faq-business-hours");
       expect(v.reply).toBeTruthy();
     });
+
+    it("names the org's real service area when configured", () => {
+      const v = routeMessage(
+        "do you serve my area?",
+        {},
+        cfg({ businessInfo: { serviceArea: "Johnson City and the Tri-Cities, TN" } }),
+      );
+      expect(v.action).toBe("ANSWER");
+      expect(v.intentId).toBe("faq-service-area");
+      expect(v.reply).toContain("Johnson City and the Tri-Cities, TN");
+    });
+
+    it("falls back to the generic service-area answer when unconfigured", () => {
+      const v = routeMessage("do you serve my area?", {}, EMPTY_ORG_CONFIG);
+      expect(v.action).toBe("ANSWER");
+      expect(v.intentId).toBe("faq-service-area");
+      // Generic, non-committal coverage phrasing — no concrete area asserted.
+      expect(v.reply).toMatch(/wide local area|confirm coverage/i);
+    });
+
+    it("LEGAL: licensing FAQ stays cautious/generic when unconfigured", () => {
+      const v = routeMessage("are you licensed and insured?", {}, EMPTY_ORG_CONFIG);
+      expect(v.action).toBe("ANSWER");
+      expect(v.intentId).toBe("faq-licensed-insured");
+      // Must NOT assert "we are licensed and insured" as fact across tenants.
+      expect(v.reply).not.toMatch(/we are licensed/i);
+      expect(v.reply).toMatch(/can confirm the licensing/i);
+    });
   });
 
   describe("SAFETY — config never suppresses an emergency", () => {

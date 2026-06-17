@@ -11,9 +11,10 @@
  * with a resolved customerId (so consent + dedupe both apply), exactly one nudge
  * per session (the ledger periodKey is the session id).
  */
-import { and, eq, gte, lt } from "drizzle-orm";
+import { and, eq, gte, isNotNull, lt } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { customerSessions } from "@/lib/db/schema";
+import { customerSessions, customers } from "@/lib/db/schema";
+import { decrypt } from "@/lib/crypto";
 import { claimOutboundOnce } from "./outbound-ledger";
 import { checkSendAllowed } from "./consent";
 import { sendSms } from "./twilio-adapter";
@@ -110,6 +111,111 @@ export async function recoverAbandonedBookings(
   logger.info(
     { organizationId, considered: candidates.length, sent, skipped },
     "Booking recovery pass complete",
+  );
+  return { considered: candidates.length, sent, skipped };
+}
+
+function safeDecrypt(ciphertext: string | null): string | null {
+  if (!ciphertext) return null;
+  try {
+    return decrypt(ciphertext);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Run one WEB-abandon recovery pass for an org. Mirrors recoverAbandonedBookings
+ * but for the chat widget: a customer who captured a phone mid-intake (so the
+ * session resolved to a `customerId`) and then left without submitting a request
+ * gets exactly ONE consent-gated, ledger-deduped SMS nudge. The phone comes from
+ * the resolved customer record (web tokens aren't phones), so the message reuses
+ * the same SMS channel + consent + dedupe primitives.
+ *
+ * Status "abandoned" already excludes "submitted" sessions, so a completed
+ * intake is never re-engaged. Idempotent: the ledger periodKey (webrecovery:{id})
+ * claims each session once, so a cron retry sends nothing new.
+ */
+export async function recoverAbandonedWebSessions(
+  organizationId: string,
+  now: Date = new Date(),
+): Promise<RecoveryResult> {
+  const newest = new Date(now.getTime() - MIN_AGE_MS);
+  const oldest = new Date(now.getTime() - MAX_AGE_MS);
+
+  // Only sessions with a resolved customer (consent + dedupe both key on it) and
+  // a decryptable phone — join the customer to read the encrypted phone in one
+  // query. The status filter ("abandoned") guarantees no submitted request.
+  const candidates = await db
+    .select({
+      id: customerSessions.id,
+      customerId: customerSessions.customerId,
+      phoneEncrypted: customers.phoneEncrypted,
+    })
+    .from(customerSessions)
+    .innerJoin(customers, eq(customers.id, customerSessions.customerId))
+    .where(
+      and(
+        eq(customerSessions.organizationId, organizationId),
+        eq(customerSessions.status, "abandoned"),
+        eq(customerSessions.channel, "web"),
+        isNotNull(customerSessions.customerId),
+        lt(customerSessions.updatedAt, newest),
+        gte(customerSessions.updatedAt, oldest),
+      ),
+    );
+
+  let sent = 0;
+  let skipped = 0;
+  for (const c of candidates) {
+    if (!c.customerId) {
+      skipped++;
+      continue;
+    }
+    const phone = safeDecrypt(c.phoneEncrypted);
+    if (!phone) {
+      // No reachable phone on the resolved customer — nothing to text.
+      skipped++;
+      continue;
+    }
+
+    // Claim FIRST so a cron retry can't double-send, even if the send throws.
+    // Web-specific periodKey keeps it distinct from the SMS-recovery claim.
+    const claimed = await claimOutboundOnce({
+      organizationId,
+      customerId: c.customerId,
+      triggerType: "follow_up",
+      periodKey: `webrecovery:${c.id}`,
+    });
+    if (!claimed) {
+      skipped++;
+      continue;
+    }
+
+    const decision = await checkSendAllowed({
+      organizationId,
+      customerId: c.customerId,
+      channel: "sms",
+      triggerType: "follow_up",
+      now,
+    });
+    if (!decision.allowed) {
+      skipped++;
+      continue;
+    }
+
+    try {
+      await sendSms({ to: phone, body: RECOVERY_MESSAGE });
+      sent++;
+    } catch (error) {
+      logger.error({ error, sessionId: c.id }, "Web-recovery SMS failed");
+      skipped++;
+    }
+  }
+
+  logger.info(
+    { organizationId, considered: candidates.length, sent, skipped },
+    "Web-abandon recovery pass complete",
   );
   return { considered: candidates.length, sent, skipped };
 }

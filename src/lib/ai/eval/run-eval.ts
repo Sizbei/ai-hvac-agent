@@ -13,6 +13,7 @@
  * (it only sets fields the router itself reads: issueType, urgency, address).
  */
 import { routeMessage, type KnownSlots, type RouterVerdict } from "../intent-router";
+import { EMPTY_ORG_CONFIG } from "../router-config";
 import { sanitizeInput, type GuardrailResult } from "../guardrails";
 import type { SlotName } from "../router-types";
 import { buildWindowPrompt } from "../availability-prompt";
@@ -60,7 +61,8 @@ export type CheckId =
   | "account-recognition"
   | "re-ask-loop"
   | "window-offer-preference"
-  | "ambiguity-probe";
+  | "ambiguity-probe"
+  | "reply-contains";
 
 export interface CheckResult {
   readonly id: CheckId;
@@ -120,6 +122,8 @@ function replay(transcript: GoldenTranscript): TurnTrace[] {
   let slots: KnownSlots = { ...(transcript.initialSlots ?? {}) };
   const traces: TurnTrace[] = [];
 
+  const config = transcript.orgConfig ?? EMPTY_ORG_CONFIG;
+
   transcript.userTurns.forEach((input, turnIndex) => {
     const guardrail = sanitizeInput(input);
 
@@ -137,7 +141,7 @@ function replay(transcript: GoldenTranscript): TurnTrace[] {
     const addr = detectAddress(guardrail.sanitized);
     if (addr) slots = { ...slots, address: addr };
 
-    const verdict = routeMessage(guardrail.sanitized, slots);
+    const verdict = routeMessage(guardrail.sanitized, slots, config);
     slots = foldVerdictIntoSlots(slots, verdict);
 
     traces.push({ turnIndex, input, guardrail, verdict });
@@ -264,6 +268,21 @@ function evaluate(transcript: GoldenTranscript, traces: readonly TurnTrace[]): C
       pass
         ? "window offer is a preference (no booking/price leak, enum chips)"
         : `offer failed: booking=${!noBookingLeak} price=${!noPriceLeakOffer} concrete=${offersConcreteBand} enumChips=${enumChips} q="${offer.question}"`,
+    );
+  }
+
+  // reply-contains (non-critical) — the final served reply must contain the
+  // expected substring. Used by data-driven FAQ transcripts to assert the
+  // configured org value (real hours / service area) actually surfaces.
+  if (exp.finalReplyContains) {
+    const reply = finalVerdict?.reply ?? "";
+    const has = reply.toLowerCase().includes(exp.finalReplyContains.toLowerCase());
+    add(
+      "reply-contains",
+      has,
+      has
+        ? `reply contains "${exp.finalReplyContains}"`
+        : `reply "${reply}" missing "${exp.finalReplyContains}"`,
     );
   }
 
