@@ -182,6 +182,40 @@ describe('createStaff', () => {
       }),
     ).rejects.toThrow('Failed to create staff member');
   });
+
+  it('maps a per-org unique-email violation to email_conflict (race loser)', async () => {
+    selectQueue.push([]); // pre-check passes (racy)
+    insertQueue.push(
+      new Error(
+        'duplicate key value violates unique constraint "users_org_email_unique"',
+      ),
+    );
+    const r = await createStaff(ORG, {
+      name: 'Dup',
+      email: 'dup@example.com',
+      password: 'password123',
+      role: 'admin',
+    });
+    expect(r).toEqual({ ok: false, reason: 'email_conflict' });
+  });
+
+  it('maps the GLOBAL cross-org unique-email violation to email_conflict', async () => {
+    // A cross-org invite for an email that already exists in ANOTHER org trips
+    // the global index; map it to email_conflict, NOT a 500.
+    selectQueue.push([]); // per-org pre-check passes (different org)
+    insertQueue.push(
+      new Error(
+        'duplicate key value violates unique constraint "users_email_global_unique"',
+      ),
+    );
+    const r = await createStaff(ORG, {
+      name: 'CrossOrg',
+      email: 'crossorg@example.com',
+      password: 'password123',
+      role: 'admin',
+    });
+    expect(r).toEqual({ ok: false, reason: 'email_conflict' });
+  });
 });
 
 describe('updateStaff', () => {

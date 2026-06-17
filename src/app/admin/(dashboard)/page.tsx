@@ -8,6 +8,7 @@ import { DashboardStatCards } from '@/components/admin/dashboard/dashboard-stat-
 import { DashboardListCard } from '@/components/admin/dashboard/dashboard-list-card';
 import { RecentConversationsCard } from '@/components/admin/dashboard/recent-conversations-card';
 import { RequestDetailSheet } from '@/components/admin/request-detail-sheet';
+import { OnboardingChecklist } from '@/components/admin/onboarding/onboarding-checklist';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
 export default function AdminDashboardPage() {
@@ -17,6 +18,8 @@ export default function AdminDashboardPage() {
   return (
     <div className="mx-auto max-w-[1280px] space-y-7 p-6 sm:p-7">
       <DashboardGreeting />
+
+      <OnboardingChecklist />
 
       {error && (
         <Alert variant="destructive">
