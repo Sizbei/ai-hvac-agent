@@ -31,6 +31,9 @@ import {
 const CALENDAR_API_BASE = "https://www.googleapis.com/calendar/v3";
 /** Refresh a little early so a token never expires mid-request. */
 const ACCESS_TOKEN_SKEW_MS = 60_000;
+/** Per-request timeout — a hung upstream must not stall the lambda until the
+ * platform kill. */
+const REQUEST_TIMEOUT_MS = 15_000;
 
 /** Result of an upsert: the Google event id + whether it was created vs updated. */
 export interface UpsertEventResult {
@@ -120,6 +123,7 @@ export class RestGoogleCalendarClient implements GoogleCalendarClient {
   ): Promise<Response> {
     return this.fetchImpl(`${CALENDAR_API_BASE}${path}`, {
       ...init,
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       headers: {
         ...init.headers,
         authorization: `Bearer ${accessToken}`,

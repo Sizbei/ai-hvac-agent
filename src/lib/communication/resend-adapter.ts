@@ -102,7 +102,11 @@ export async function sendEmail(options: {
       subject: options.subject,
     };
   } catch (error) {
-    console.error("Resend email error:", error);
+    // Log only the message — the raw SDK error object can embed recipient PII.
+    console.error(
+      "Resend email error:",
+      error instanceof Error ? error.message : "Unknown error",
+    );
     throw new Error(
       `Failed to send email: ${error instanceof Error ? error.message : "Unknown error"}`,
     );

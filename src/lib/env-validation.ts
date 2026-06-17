@@ -29,8 +29,13 @@ const REQUIRED_ENV_VARS: readonly EnvVarSpec[] = [
   },
   // R2/S3 Storage
   {
+    // Optional: R2/attachment storage is a degrade-safe feature whose sibling
+    // vars (R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME) are all
+    // optional. r2-client.ts already fails at use-time if R2 is exercised
+    // without it, so marking this required (while its deps are optional) made a
+    // deploy that doesn't use attachments crash at cold start.
     name: 'R2_PUBLIC_URL',
-    required: true,
+    required: false,
     description: 'Public URL for R2 bucket (used to construct attachment URLs)',
   },
   {
@@ -126,11 +131,6 @@ const REQUIRED_ENV_VARS: readonly EnvVarSpec[] = [
     description: 'Twilio account SID for phone (optional)',
   },
   {
-    name: 'TWILIO_API_KEY',
-    required: false,
-    description: 'Twilio API key for phone (optional)',
-  },
-  {
     name: 'TWILIO_AUTH_TOKEN',
     required: false,
     description: 'Twilio auth token for phone (optional)',
@@ -139,11 +139,6 @@ const REQUIRED_ENV_VARS: readonly EnvVarSpec[] = [
     name: 'TWILIO_PHONE_NUMBER',
     required: false,
     description: 'Twilio phone number for incoming calls (optional)',
-  },
-  {
-    name: 'TWILITY_WHISPERNamespace',
-    required: false,
-    description: 'Twilio webhook namespace for Whisper (optional)',
   },
   {
     name: 'ROUTER_ENABLED',
