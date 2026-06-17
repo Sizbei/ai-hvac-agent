@@ -25,6 +25,7 @@ import { isSameOriginRequest, hasJsonContentType } from "@/lib/session-csrf";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { buildSystemPrompt, brandInfoFromConfig } from "@/lib/ai/system-prompt";
 import { sanitizeInput, GUARDRAIL_SOFT_REPLY } from "@/lib/ai/guardrails";
+import { screenAssistantReply } from "@/lib/ai/output-guardrail";
 import {
   extractServiceRequest,
   type Message as AIMessage,
@@ -1814,59 +1815,10 @@ export async function POST(request: NextRequest) {
         recent: conversationHistory.slice(-MAX_HISTORY) as ChatTurn[],
         current: guardrailResult.sanitized,
       }).map((m) => ({ role: m.role, content: m.content })),
-      onFinish: async ({ text, usage }) => {
-        const tokensThisCall =
-          (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0);
-
-        // Save assistant message
-        await db.insert(messages).values({
-          organizationId,
-          sessionId: session.id,
-          role: "assistant",
-          content: text,
-          tokensUsed: tokensThisCall,
-        });
-
-        // Update token usage and turn count immediately
-        const { newTotal } = addTokenUsage(
-          session.tokensUsed,
-          tokensThisCall,
-          session.tokenBudget,
-        );
-
-        await db
-          .update(customerSessions)
-          .set({
-            tokensUsed: newTotal,
-            turnCount: newTurnCount,
-            updatedAt: new Date(),
-          })
-          .where(sessionScope);
-
-        logger.info(
-          {
-            sessionId: session.id,
-            tokensUsed: tokensThisCall,
-            totalTokens: newTotal,
-            turnCount: newTurnCount,
-          },
-          "Chat message processed",
-        );
-
-        // Bot telemetry (Step 10): an LLM-fallback turn. intentId/action stay null
-        // (the deterministic router did NOT resolve this turn). extractionComplete
-        // is owned by the deterministic completion path; an LLM-fallback turn
-        // records false. Best-effort — recordBotEvent never throws.
-        await recordBotEvent({
-          organizationId,
-          sessionId: session.id,
-          turn: newTurnCount,
-          channel: session.channel,
-          routed: false,
-          model: llmEntry.modelId,
-          latencyMs: Math.round(performance.now() - turnStart),
-        });
-      },
+      // No onFinish here: the assistant reply is buffered + screened by the
+      // output guardrail below BEFORE it is persisted or sent, so the message we
+      // store (and re-feed as history / export) is exactly the SCREENED reply,
+      // never a raw pricing/false-booking leak. Bookkeeping moved inline below.
     });
 
     // Run extraction after the response is sent. We use next/server's `after()`
@@ -2033,7 +1985,75 @@ export async function POST(request: NextRequest) {
       }
     });
 
-    return result.toTextStreamResponse();
+    // Output guardrail: buffer the full reply, then screen it for the two hard
+    // safety properties (never quote a price, never claim a confirmed booking)
+    // BEFORE the customer sees it. The deterministic path is template-safe; this
+    // covers the free-form LLM-fallback reply, where the constraints are
+    // prompt-only and thus elicitable. A violating reply is replaced with a safe
+    // on-brand reply. We can't retract streamed tokens, so we serve the screened
+    // text as a single text/plain response (same shape the budget/handoff paths
+    // already use). If the model errors/aborts, this throws to the outer catch →
+    // warm handoff; the after() extraction above is already registered so the
+    // user's captured details are never lost.
+    const rawReply = await result.text;
+    const usage = await result.usage;
+    const screen = screenAssistantReply(rawReply);
+    if (!screen.safe) {
+      logger.warn(
+        { sessionId: session.id, violations: screen.violations },
+        "Output guardrail replaced an unsafe LLM reply",
+      );
+    }
+    const replyText = screen.reply;
+
+    const tokensThisCall =
+      (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0);
+    // Persist the SCREENED reply (this is what the customer received, what later
+    // turns re-read as history, and what an export would show).
+    await db.insert(messages).values({
+      organizationId,
+      sessionId: session.id,
+      role: "assistant",
+      content: replyText,
+      tokensUsed: tokensThisCall,
+    });
+    const { newTotal } = addTokenUsage(
+      session.tokensUsed,
+      tokensThisCall,
+      session.tokenBudget,
+    );
+    await db
+      .update(customerSessions)
+      .set({
+        tokensUsed: newTotal,
+        turnCount: newTurnCount,
+        updatedAt: new Date(),
+      })
+      .where(sessionScope);
+    logger.info(
+      {
+        sessionId: session.id,
+        tokensUsed: tokensThisCall,
+        totalTokens: newTotal,
+        turnCount: newTurnCount,
+      },
+      "Chat message processed",
+    );
+
+    // Bot telemetry (Step 10): an LLM-fallback turn. intentId/action stay null
+    // (the deterministic router did NOT resolve this turn). Best-effort —
+    // recordBotEvent never throws.
+    await recordBotEvent({
+      organizationId,
+      sessionId: session.id,
+      turn: newTurnCount,
+      channel: session.channel,
+      routed: false,
+      model: llmEntry.modelId,
+      latencyMs: Math.round(performance.now() - turnStart),
+    });
+
+    return cannedTextResponse(replyText);
   } catch (error) {
     logger.error({ error }, "Chat endpoint error");
     // Degrade gracefully rather than showing the customer a raw 500 error box.
