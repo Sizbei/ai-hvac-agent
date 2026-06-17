@@ -896,6 +896,13 @@ export const organizationSettings = pgTable("organization_settings", {
   // + async escalation (the prior hangup behavior).
   voiceTransferNumber: text("voice_transfer_number"),
 
+  // ── AI model selection (super-admin model switcher) ──
+  // Registry id (model-registry.ts) of the LLM this org's bot uses. NULL = use
+  // the env-default model. An unknown id or a model whose API key env var is not
+  // configured silently falls back to the env default — a mis-config never
+  // breaks a customer turn. Holds an id only; the key/baseUrl live in env.
+  aiModelId: text("ai_model_id"),
+
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),

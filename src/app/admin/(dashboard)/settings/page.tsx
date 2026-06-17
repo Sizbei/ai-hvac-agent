@@ -25,6 +25,7 @@ import { AfterHoursPanel } from '@/components/admin/settings/after-hours-panel';
 import { GoogleCalendarPanel } from '@/components/admin/settings/google-calendar-panel';
 import { HousecallProPanel } from '@/components/admin/settings/housecall-pro-panel';
 import { FieldpulsePanel } from '@/components/admin/settings/fieldpulse-panel';
+import { AiModelPanel } from '@/components/admin/settings/ai-model-panel';
 
 export default function SettingsPage() {
   const settings = useOrgSettings();
@@ -127,6 +128,9 @@ export default function SettingsPage() {
             <GoogleCalendarPanel />
             <HousecallProPanel />
             <FieldpulsePanel />
+            {/* Super-admin only — self-hides for everyone else (the data
+                endpoint is super_admin-gated and the panel renders null on 403). */}
+            <AiModelPanel />
           </TabsContent>
         </Tabs>
       )}

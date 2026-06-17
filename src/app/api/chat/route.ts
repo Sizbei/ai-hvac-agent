@@ -1436,7 +1436,7 @@ export async function POST(request: NextRequest) {
 
     // 8. Stream response via Vercel AI SDK per SC-09
     const result = streamText({
-      model: getModel(),
+      model: await getModel(organizationId),
       system:
         brandPrompt +
         customerContextHint +
@@ -1509,6 +1509,7 @@ export async function POST(request: NextRequest) {
         const extraction = await extractServiceRequest(
           conversationHistory,
           guardrailResult.sanitized,
+          organizationId,
         );
         // Re-read CURRENT metadata (not the request-time snapshot): a rapid
         // follow-up turn may have written new slots while extraction ran.

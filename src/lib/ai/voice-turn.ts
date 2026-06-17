@@ -555,7 +555,7 @@ export async function voiceReply(params: {
       : "";
 
   const { text, usage } = await generateText({
-    model: getModel(),
+    model: await getModel(organizationId),
     system: PHONE_SYSTEM_PROMPT + slotContextHint,
     messages: modelMessages,
   });

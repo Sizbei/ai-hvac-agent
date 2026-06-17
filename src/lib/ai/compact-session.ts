@@ -55,7 +55,11 @@ export async function compactSessionIfNeeded(params: {
 
   const priorSummary = fresh?.runningSummary ?? null;
 
-  const nextSummary = await summarizeOlderTurns({ priorSummary, olderTurns });
+  const nextSummary = await summarizeOlderTurns({
+    priorSummary,
+    olderTurns,
+    organizationId,
+  });
 
   // Nothing meaningful changed (model returned the same text or fell back to
   // the prior summary) — skip the write.

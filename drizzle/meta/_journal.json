@@ -43,6 +43,13 @@
       "when": 1781647736745,
       "tag": "0005_customer_portal_token",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1781656420805,
+      "tag": "0006_org_ai_model",
+      "breakpoints": true
     }
   ]
 }

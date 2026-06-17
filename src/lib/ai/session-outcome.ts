@@ -88,7 +88,7 @@ export async function summarizeAndClassifySession(params: {
     }
 
     const { text } = await generateText({
-      model: getExtractionModel(),
+      model: await getExtractionModel(organizationId),
       system: SYSTEM,
       messages: [{ role: "user", content: convo }],
     });
