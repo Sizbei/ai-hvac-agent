@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { parseExtractionResponse } from "./extract";
+import {
+  parseExtractionResponse,
+  findBalancedObjects,
+  extractJsonBlock,
+} from "./extract";
 
 describe("parseExtractionResponse", () => {
   it("parses a clean JSON object", () => {
@@ -78,5 +82,83 @@ describe("parseExtractionResponse", () => {
       '{"issueType":null,"urgency":null,"address":null,"customerName":null,"customerPhone":null,"customerEmail":null,"description":"x","isHvacRelated":"true"}',
     );
     expect(r.isHvacRelated).toBe(true);
+  });
+
+  it("picks the LAST balanced object when the model emits a preamble object then the answer", () => {
+    // Chatty models sometimes emit a "thinking" object before the real answer.
+    // indexOf('{')..lastIndexOf('}') would slice across BOTH (invalid JSON); the
+    // depth-matched extractor returns each object and we take the last parseable.
+    const r = parseExtractionResponse(
+      '{"thought":"the customer seems upset"}\n{"issueType":"water_leak","urgency":"high","address":null,"customerName":null,"customerPhone":null,"customerEmail":null,"description":"leak","isHvacRelated":true}',
+    );
+    expect(r.issueType).toBe("water_leak");
+    expect(r.description).toBe("leak");
+  });
+
+  it("handles braces inside a JSON string value (depth counter is string-aware)", () => {
+    const r = parseExtractionResponse(
+      '{"issueType":"other","urgency":null,"address":null,"customerName":null,"customerPhone":null,"customerEmail":null,"description":"weird symbols { } in the text","isHvacRelated":true}',
+    );
+    expect(r.description).toBe("weird symbols { } in the text");
+    expect(r.issueType).toBe("other");
+  });
+});
+
+describe("findBalancedObjects (tolerant JSON extractor)", () => {
+  it("returns a single balanced object", () => {
+    expect(findBalancedObjects('{"a":1}')).toEqual(['{"a":1}']);
+  });
+
+  it("returns multiple top-level objects in source order", () => {
+    expect(findBalancedObjects('{"a":1} junk {"b":2}')).toEqual([
+      '{"a":1}',
+      '{"b":2}',
+    ]);
+  });
+
+  it("treats a nested object as part of its parent (one top-level object)", () => {
+    expect(findBalancedObjects('{"a":{"b":2}}')).toEqual(['{"a":{"b":2}}']);
+  });
+
+  it("ignores braces inside string values", () => {
+    expect(findBalancedObjects('{"a":"x { y } z"}')).toEqual(['{"a":"x { y } z"}']);
+  });
+
+  it("ignores escaped quotes inside strings", () => {
+    expect(findBalancedObjects('{"a":"he said \\"hi\\" }"}')).toEqual([
+      '{"a":"he said \\"hi\\" }"}',
+    ]);
+  });
+
+  it("returns [] when there is no balanced object (unterminated brace)", () => {
+    expect(findBalancedObjects("just prose with one { brace")).toEqual([]);
+  });
+
+  it("returns [] for empty / garbage", () => {
+    expect(findBalancedObjects("")).toEqual([]);
+    expect(findBalancedObjects("no json here at all")).toEqual([]);
+  });
+});
+
+describe("extractJsonBlock", () => {
+  it("strips a json code fence", () => {
+    expect(extractJsonBlock('```json\n{"a":1}\n```')).toBe('{"a":1}');
+  });
+
+  it("ignores trailing prose", () => {
+    expect(extractJsonBlock('{"a":1}\nHope that helps!')).toBe('{"a":1}');
+  });
+
+  it("returns the last PARSEABLE object across multiple", () => {
+    expect(extractJsonBlock('{"a":1} then {"b":2}')).toBe('{"b":2}');
+  });
+
+  it("falls back to the full text when a fence is unterminated", () => {
+    // The opening fence has no closing fence; the real object is outside it.
+    expect(extractJsonBlock('```json\nbroken... {"a":1}')).toBe('{"a":1}');
+  });
+
+  it("returns null when nothing parseable is present", () => {
+    expect(extractJsonBlock("I cannot help with that.")).toBeNull();
   });
 });

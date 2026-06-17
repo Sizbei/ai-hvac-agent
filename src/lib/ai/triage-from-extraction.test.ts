@@ -96,7 +96,9 @@ describe("chipsForExtraction", () => {
     expect(values).not.toContain(""); // never an empty/free-text chip
   });
 
-  it("returns [] (intake done → Complete & Submit) once core + system_type + window are filled", () => {
+  it("returns [] (intake done → Complete & Submit) once core + issue-conditional enrichment + window are filled", () => {
+    // heating_not_working's Step 15 plan is [vulnerable_occupants, window]; fill
+    // both so the enrichment is exhausted and intake is done.
     const chips = chipsForExtraction(
       emptyExtraction({
         issueType: "heating_not_working",
@@ -107,7 +109,7 @@ describe("chipsForExtraction", () => {
         customerEmail: "ray@example.com",
         systemDownStatus: "fully_down",
         problemDuration: "a few days",
-        systemType: "central_ac",
+        vulnerableOccupants: true,
         preferredWindow: "morning",
       }),
     );

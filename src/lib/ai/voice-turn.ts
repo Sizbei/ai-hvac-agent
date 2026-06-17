@@ -63,6 +63,12 @@ import { logger } from "@/lib/logger";
 const VOICE_OPTIONAL_STEP_EXTRA: Record<string, string> = {
   system_type: "systemType",
   preferred_window: "preferredWindow",
+  // Step 15 issue-conditional qualifiers: for no-heat/no-cool triage now leads
+  // with vulnerable_occupants, and for repair-vs-replace classes with
+  // equipment_age. Voice must be able to latch an unrecognized reply to these as
+  // skipped too, or the caller loops on a qualifier the phone flow can't capture.
+  vulnerable_occupants: "vulnerableOccupants",
+  equipment_age: "equipmentAgeBand",
 };
 
 /**
