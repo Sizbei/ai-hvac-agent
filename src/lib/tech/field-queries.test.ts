@@ -6,6 +6,7 @@ import {
 } from "./field-queries";
 import { db } from "@/lib/db";
 import { getPricebookItemById } from "@/lib/admin/pricebook-queries";
+import { adjustStock } from "@/lib/admin/inventory-queries";
 
 vi.mock("@/lib/db", () => ({
   db: {
@@ -18,6 +19,10 @@ vi.mock("@/lib/db", () => ({
 
 vi.mock("@/lib/admin/pricebook-queries", () => ({
   getPricebookItemById: vi.fn(),
+}));
+
+vi.mock("@/lib/admin/inventory-queries", () => ({
+  adjustStock: vi.fn().mockResolvedValue(undefined),
 }));
 
 const ORG = "org-1";
@@ -91,6 +96,39 @@ describe("addJobMaterial — catalog line", () => {
         serviceRequestId: JOB,
       }),
     );
+    // A catalog line draws down tracked inventory by the used quantity (a
+    // no-op for untracked items). Best-effort, but always attempted.
+    expect(adjustStock).toHaveBeenCalledWith(ORG, "pb-1", -2);
+  });
+
+  it("still records the material when the stock decrement fails (best-effort)", async () => {
+    mockSelectSeq([[{ id: JOB }]]);
+    vi.mocked(getPricebookItemById).mockResolvedValue({
+      id: "pb-1",
+      organizationId: ORG,
+      type: "material",
+      name: "Capacitor",
+      sku: null,
+      description: null,
+      categoryId: null,
+      costCents: 1200,
+      markupPct: 0,
+      priceCents: 3500,
+      memberPriceCents: null,
+      hours: null,
+      warranty: null,
+      active: true,
+    });
+    vi.mocked(db.insert).mockReturnValue({
+      values: () => ({ returning: () => Promise.resolve([{ id: "mat-1" }]) }),
+    } as never);
+    vi.mocked(adjustStock).mockRejectedValueOnce(new Error("db down"));
+
+    const r = await addJobMaterial(ORG, TECH, JOB, {
+      pricebookItemId: "pb-1",
+      quantity: 1,
+    });
+    expect(r).toEqual({ ok: true, id: "mat-1" });
   });
 
   it("returns item_not_found when the pricebook item is missing", async () => {
@@ -119,6 +157,8 @@ describe("addJobMaterial — manual line", () => {
 
     expect(r).toEqual({ ok: true, id: "mat-2" });
     expect(getPricebookItemById).not.toHaveBeenCalled();
+    // Manual (off-catalog) lines never touch inventory.
+    expect(adjustStock).not.toHaveBeenCalled();
     expect(valuesSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         pricebookItemId: null,

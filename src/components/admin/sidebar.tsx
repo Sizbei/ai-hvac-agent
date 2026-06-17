@@ -26,6 +26,7 @@ import {
   TrendingUp,
   BadgeCheck,
   Star,
+  Boxes,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -78,6 +79,7 @@ const NAV_GROUPS: readonly NavGroup[] = [
     items: [
       { label: 'Staff', href: '/admin/staff', icon: UsersRound },
       { label: 'Pricebook', href: '/admin/pricebook', icon: Tags },
+      { label: 'Inventory', href: '/admin/inventory', icon: Boxes },
       { label: 'Membership Plans', href: '/admin/membership-plans', icon: BadgeCheck },
       { label: 'Estimates', href: '/admin/estimates', icon: FileText },
       { label: 'Invoices', href: '/admin/invoices', icon: Receipt },

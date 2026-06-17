@@ -1930,6 +1930,105 @@ export const taxRates = pgTable(
   ],
 );
 
+// ════════ Parity Stage 10: Purchasing / Inventory + materials BOM ════════
+// Per-org stock LINKED to pricebook material items (no second catalog). Money
+// and quantities are integers (cents / whole units). Purchase orders are
+// internal records until a real vendor API exists (mock-first vendor seam).
+
+export const purchaseOrderStatusEnum = pgEnum("purchase_order_status", [
+  "draft",
+  "ordered",
+  "received",
+  "cancelled",
+]);
+
+// inventory_items — per-org stock for a pricebook material item. quantityOnHand
+// is decremented when a tracked material is recorded as used on a job and
+// incremented when a purchase order is received. unitCostCents holds the latest
+// received cost. One row per (org, pricebook item).
+export const inventoryItems = pgTable(
+  "inventory_items",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    pricebookItemId: uuid("pricebook_item_id")
+      .notNull()
+      .references(() => pricebookItems.id, { onDelete: "cascade" }),
+    quantityOnHand: integer("quantity_on_hand").notNull().default(0),
+    reorderPoint: integer("reorder_point"),
+    unitCostCents: integer("unit_cost_cents").notNull().default(0),
+    location: text("location"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("inventory_items_org_idx").on(table.organizationId),
+    // One stock row per pricebook material per org (upsert target).
+    uniqueIndex("inventory_items_org_item_unique").on(
+      table.organizationId,
+      table.pricebookItemId,
+    ),
+  ],
+);
+
+// purchase_orders — a stock-replenishment order. Internal record (mock vendor
+// seam) until a real vendor API lands. totalCents is the sum of line totals.
+export const purchaseOrders = pgTable(
+  "purchase_orders",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    vendorName: text("vendor_name").notNull(),
+    status: purchaseOrderStatusEnum("status").notNull().default("draft"),
+    totalCents: integer("total_cents").notNull().default(0),
+    notes: text("notes"),
+    orderedAt: timestamp("ordered_at", { withTimezone: true }),
+    receivedAt: timestamp("received_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [index("purchase_orders_org_idx").on(table.organizationId)],
+);
+
+// po_line_items — a line on a purchase order. pricebookItemId is nullable (a
+// line may be a one-off, non-cataloged purchase); when set + received it drives
+// the matching inventory increment. Money in integer cents; quantity in units.
+export const poLineItems = pgTable(
+  "po_line_items",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    purchaseOrderId: uuid("purchase_order_id")
+      .notNull()
+      .references(() => purchaseOrders.id, { onDelete: "cascade" }),
+    pricebookItemId: uuid("pricebook_item_id").references(
+      () => pricebookItems.id,
+    ),
+    description: text("description").notNull(),
+    quantity: integer("quantity").notNull(),
+    unitCostCents: integer("unit_cost_cents").notNull(),
+    lineTotalCents: integer("line_total_cents").notNull(),
+  },
+  (table) => [
+    index("po_line_items_org_idx").on(table.organizationId),
+    index("po_line_items_po_idx").on(table.purchaseOrderId),
+  ],
+);
+
 // ════════ Stage 9: Estimates, invoicing, payments, financing ════════
 export const estimateStatusEnum = pgEnum("estimate_status", [
   "open",

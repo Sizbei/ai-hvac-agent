@@ -17,6 +17,7 @@ import { db } from "@/lib/db";
 import { jobMaterials, requestNotes, serviceRequests } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { getPricebookItemById } from "@/lib/admin/pricebook-queries";
+import { adjustStock } from "@/lib/admin/inventory-queries";
 import { rollUpActualMaterialsCost } from "@/lib/admin/margin";
 
 /**
@@ -132,6 +133,21 @@ export async function addJobMaterial(
   if (!created) {
     throw new Error("Failed to record job material");
   }
+
+  // Best-effort stock decrement: when this is a catalog material tracked in the
+  // org's inventory, consuming it on a job draws down on-hand stock (clamped at
+  // 0 in SQL). adjustStock is a no-op for untracked items, so manual lines and
+  // non-inventory catalog items are unaffected. A failure here must NOT fail the
+  // recorded usage — the job material is already persisted.
+  if (pricebookItemId) {
+    await adjustStock(organizationId, pricebookItemId, -input.quantity).catch(
+      () => {
+        // Inventory is a soft side effect of usage; swallow so the contract of
+        // addJobMaterial (record the material) is preserved.
+      },
+    );
+  }
+
   return { ok: true, id: created.id };
 }
 

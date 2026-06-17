@@ -78,6 +78,13 @@
       "when": 1781660183432,
       "tag": "0010_reviews",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1781660713186,
+      "tag": "0011_inventory_purchasing",
+      "breakpoints": true
     }
   ]
 }
