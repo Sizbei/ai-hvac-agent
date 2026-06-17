@@ -240,6 +240,11 @@ export const users = pgTable(
       .notNull()
       .default("technician"),
     isActive: boolean("is_active").notNull().default(true),
+    // A technician's hourly labor rate in integer cents/hour. Snapshotted onto a
+    // time entry at clock-out so historical job-cost is immune to later rate
+    // changes. NULL means "no rate set" — clock-out treats it as 0 (the entry's
+    // laborCostCents is 0 until a rate exists).
+    laborRateCents: integer("labor_rate_cents"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -682,6 +687,14 @@ export const customerEquipment = pgTable(
     laborWarrantyExpiration: timestamp("labor_warranty_expiration", {
       withTimezone: true,
     }),
+    // ── Warranty tracking + proactive-reminder fields (parity stage) ──
+    // The kind of coverage ("manufacturer", "labor", "extended") and who
+    // provides it ("Carrier", "Trane", a third-party plan). All nullable;
+    // intake/admin fill when known. No price/cents ever stored here. The
+    // warranty-expiring reminder sweep keys off the existing `warrantyExpiration`
+    // column above.
+    warrantyType: text("warranty_type"),
+    warrantyProvider: text("warranty_provider"),
     locationInHome: text("location_in_home"),
     notes: text("notes"),
     // Stage 5: the physical site this unit is installed at (assets belong to a
@@ -895,6 +908,13 @@ export const organizationSettings = pgTable("organization_settings", {
   // = no human leg configured; an escalated call falls back to a spoken message
   // + async escalation (the prior hangup behavior).
   voiceTransferNumber: text("voice_transfer_number"),
+
+  // ── AI model selection (super-admin model switcher) ──
+  // Registry id (model-registry.ts) of the LLM this org's bot uses. NULL = use
+  // the env-default model. An unknown id or a model whose API key env var is not
+  // configured silently falls back to the env default — a mis-config never
+  // breaks a customer turn. Holds an id only; the key/baseUrl live in env.
+  aiModelId: text("ai_model_id"),
 
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
@@ -1243,14 +1263,21 @@ export const attachments = pgTable(
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id),
-    sessionId: uuid("session_id")
-      .notNull()
-      .references(() => customerSessions.id),
+    // NULLABLE as of Stage 7: chat uploads always carry a session, but
+    // admin-uploaded documents/photos (linked directly to a job/equipment/
+    // customer) have no chat session. Existing rows are unaffected.
+    sessionId: uuid("session_id").references(() => customerSessions.id),
     messageId: uuid("message_id").references(() => messages.id),
-    // Stage 7: link media to a job and/or a specific asset (verified missing —
-    // only sessionId/messageId existed). Nullable: chat uploads have neither.
-    serviceRequestId: uuid("service_request_id"),
-    equipmentId: uuid("equipment_id"),
+    // Stage 7: link media to a job, a specific asset, and/or a customer
+    // (verified missing — only sessionId/messageId existed). All NULLABLE:
+    // existing rows (chat uploads) have none, and an admin-uploaded document
+    // may target only one of the three. FKs are no-op-on-delete to match the
+    // table's existing constraints.
+    serviceRequestId: uuid("service_request_id").references(
+      () => serviceRequests.id,
+    ),
+    equipmentId: uuid("equipment_id").references(() => customerEquipment.id),
+    customerId: uuid("customer_id").references(() => customers.id),
     filename: text("filename").notNull(),
     mimeType: text("mime_type").notNull(),
     size: integer("size").notNull(), // File size in bytes
@@ -1266,6 +1293,12 @@ export const attachments = pgTable(
     index("attachments_service_request_idx")
       .on(table.serviceRequestId)
       .where(sql`${table.serviceRequestId} IS NOT NULL`),
+    index("attachments_equipment_idx")
+      .on(table.equipmentId)
+      .where(sql`${table.equipmentId} IS NOT NULL`),
+    index("attachments_customer_idx")
+      .on(table.customerId)
+      .where(sql`${table.customerId} IS NOT NULL`),
   ],
 );
 
@@ -1412,6 +1445,18 @@ export const communicationTriggerTypeEnum = pgEnum("communication_trigger_type",
   "estimate_sent",
   "payment_receipt",
   "invoice_overdue",
+  // Lead-gen: a proactive nudge that an installed unit's warranty is expiring
+  // soon, inviting the customer to schedule a check-up. Marketing-ish — quiet
+  // hours apply, gated by the marketingMessages preference (see TRIGGER_RULES).
+  "warranty_expiring",
+]);
+
+// Review-request lifecycle: created (pending) -> ask sent (sent) -> customer
+// responded with a rating/feedback (responded).
+export const reviewRequestStatusEnum = pgEnum("review_request_status", [
+  "pending",
+  "sent",
+  "responded",
 ]);
 
 // Job execution status
@@ -1809,6 +1854,58 @@ export const jobMaterials = pgTable(
   ],
 );
 
+// 28b. technician_time_entries — labor tracking / job-cost. A tech clocks IN
+// (open entry: clock_out_at NULL) and OUT (minutes + a SNAPSHOTTED labor rate →
+// labor_cost_cents) per job. The actual labor cost rolls into the invoice's
+// actual-vs-estimated margin (margin = revenue − materials − actual labor).
+// laborRateCents is snapshotted from the user's rate at clock-out so a later
+// rate change never rewrites historical cost. Money is integer cents; minutes
+// are integers.
+export const technicianTimeEntries = pgTable(
+  "technician_time_entries",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    serviceRequestId: uuid("service_request_id")
+      .notNull()
+      .references(() => serviceRequests.id, { onDelete: "cascade" }),
+    technicianId: uuid("technician_id")
+      .notNull()
+      .references(() => users.id),
+    clockInAt: timestamp("clock_in_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    // NULL while the entry is OPEN (tech still on the clock); set at clock-out.
+    clockOutAt: timestamp("clock_out_at", { withTimezone: true }),
+    // Derived on clock-out: whole minutes between clock-in and clock-out.
+    minutes: integer("minutes"),
+    // Snapshotted from the user's labor_rate_cents at clock-out (cents/hour).
+    // 0 when the tech has no rate set.
+    laborRateCents: integer("labor_rate_cents").notNull().default(0),
+    // round(minutes / 60 * laborRateCents). NULL while open.
+    laborCostCents: integer("labor_cost_cents"),
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("tte_org_idx").on(table.organizationId),
+    index("tte_request_idx").on(table.serviceRequestId),
+    // At most ONE open entry per tech per job — a tech can't double clock-in.
+    // Partial (WHERE clock_out_at IS NULL): closed entries never collide, so a
+    // tech may have many historical entries on the same job.
+    uniqueIndex("tte_open_per_tech_job_unique")
+      .on(table.serviceRequestId, table.technicianId)
+      .where(sql`${table.clockOutAt} IS NULL`),
+  ],
+);
+
 // 29. tax_rates — jurisdictional tax (rate in basis points; 825 = 8.25%).
 export const taxRates = pgTable(
   "tax_rates",
@@ -1830,6 +1927,105 @@ export const taxRates = pgTable(
     uniqueIndex("tax_rates_org_default_unique")
       .on(table.organizationId)
       .where(sql`${table.isDefault} = true AND ${table.active} = true`),
+  ],
+);
+
+// ════════ Parity Stage 10: Purchasing / Inventory + materials BOM ════════
+// Per-org stock LINKED to pricebook material items (no second catalog). Money
+// and quantities are integers (cents / whole units). Purchase orders are
+// internal records until a real vendor API exists (mock-first vendor seam).
+
+export const purchaseOrderStatusEnum = pgEnum("purchase_order_status", [
+  "draft",
+  "ordered",
+  "received",
+  "cancelled",
+]);
+
+// inventory_items — per-org stock for a pricebook material item. quantityOnHand
+// is decremented when a tracked material is recorded as used on a job and
+// incremented when a purchase order is received. unitCostCents holds the latest
+// received cost. One row per (org, pricebook item).
+export const inventoryItems = pgTable(
+  "inventory_items",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    pricebookItemId: uuid("pricebook_item_id")
+      .notNull()
+      .references(() => pricebookItems.id, { onDelete: "cascade" }),
+    quantityOnHand: integer("quantity_on_hand").notNull().default(0),
+    reorderPoint: integer("reorder_point"),
+    unitCostCents: integer("unit_cost_cents").notNull().default(0),
+    location: text("location"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("inventory_items_org_idx").on(table.organizationId),
+    // One stock row per pricebook material per org (upsert target).
+    uniqueIndex("inventory_items_org_item_unique").on(
+      table.organizationId,
+      table.pricebookItemId,
+    ),
+  ],
+);
+
+// purchase_orders — a stock-replenishment order. Internal record (mock vendor
+// seam) until a real vendor API lands. totalCents is the sum of line totals.
+export const purchaseOrders = pgTable(
+  "purchase_orders",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    vendorName: text("vendor_name").notNull(),
+    status: purchaseOrderStatusEnum("status").notNull().default("draft"),
+    totalCents: integer("total_cents").notNull().default(0),
+    notes: text("notes"),
+    orderedAt: timestamp("ordered_at", { withTimezone: true }),
+    receivedAt: timestamp("received_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [index("purchase_orders_org_idx").on(table.organizationId)],
+);
+
+// po_line_items — a line on a purchase order. pricebookItemId is nullable (a
+// line may be a one-off, non-cataloged purchase); when set + received it drives
+// the matching inventory increment. Money in integer cents; quantity in units.
+export const poLineItems = pgTable(
+  "po_line_items",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    purchaseOrderId: uuid("purchase_order_id")
+      .notNull()
+      .references(() => purchaseOrders.id, { onDelete: "cascade" }),
+    pricebookItemId: uuid("pricebook_item_id").references(
+      () => pricebookItems.id,
+    ),
+    description: text("description").notNull(),
+    quantity: integer("quantity").notNull(),
+    unitCostCents: integer("unit_cost_cents").notNull(),
+    lineTotalCents: integer("line_total_cents").notNull(),
+  },
+  (table) => [
+    index("po_line_items_org_idx").on(table.organizationId),
+    index("po_line_items_po_idx").on(table.purchaseOrderId),
   ],
 );
 
@@ -2193,6 +2389,53 @@ export const membershipVisits = pgTable(
     uniqueIndex("membership_visits_membership_period_unique").on(
       table.customerMembershipId,
       table.periodKey,
+    ),
+  ],
+);
+
+// review_requests — post-completion review asks + the public response capture.
+//
+// One row per completed job (idempotency enforced both by the outbound ledger at
+// enqueue time and by the partial-unique service_request index here). The public
+// response page is bearer-authorized by reviewTokenHash (sha256 at rest, like
+// estimates/staff invites). COMPLIANCE: there is NO sentiment routing — the
+// public-review link is offered to EVERYONE who responds, regardless of rating.
+// `feedback` is PRIVATE free text and must NEVER be logged.
+export const reviewRequests = pgTable(
+  "review_requests",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    serviceRequestId: uuid("service_request_id")
+      .notNull()
+      .references(() => serviceRequests.id, { onDelete: "cascade" }),
+    customerId: uuid("customer_id").references(() => customers.id, {
+      onDelete: "set null",
+    }),
+    status: reviewRequestStatusEnum("status").notNull().default("pending"),
+    // sha256 of the plaintext token (the bearer of authority for the public page).
+    reviewTokenHash: text("review_token_hash").notNull(),
+    // 1-5 star rating, set on response. Loggable (not PII).
+    rating: integer("rating"),
+    // PRIVATE free-text feedback — NEVER log this value.
+    feedback: text("feedback"),
+    // True once the responder clicked through to the public-review platform link.
+    publicClicked: boolean("public_clicked").notNull().default(false),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    respondedAt: timestamp("responded_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("review_requests_org_idx").on(table.organizationId),
+    // Token lookup for the public response page.
+    uniqueIndex("review_requests_token_hash_unique").on(table.reviewTokenHash),
+    // One review request per completed job (idempotency backstop to the ledger).
+    uniqueIndex("review_requests_service_request_unique").on(
+      table.serviceRequestId,
     ),
   ],
 );

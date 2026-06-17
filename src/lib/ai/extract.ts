@@ -136,6 +136,7 @@ export function parseExtractionResponse(text: string): ExtractionResult {
 export async function extractServiceRequest(
   conversationHistory: Message[],
   latestUserMessage: string,
+  organizationId?: string,
 ): Promise<ExtractionPipelineResult> {
   // Step 1: Sanitize input per SC-06
   const guardrailResult = sanitizeInput(latestUserMessage);
@@ -153,9 +154,9 @@ export async function extractServiceRequest(
   // Step 3: Generate + tolerant-parse JSON, wrapped with metrics per SC-05.
   const { result: aiResult } = await trackAICall(
     'extraction',
-    () =>
+    async () =>
       generateText({
-        model: getExtractionModel(),
+        model: await getExtractionModel(organizationId),
         system: EXTRACTION_SYSTEM,
         messages,
       }),

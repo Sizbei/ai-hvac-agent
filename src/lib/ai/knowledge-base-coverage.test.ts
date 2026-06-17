@@ -13,7 +13,7 @@ import { KNOWLEDGE_BASE } from "./knowledge-base";
 interface Expectation {
   readonly message: string;
   readonly intentId: string;
-  readonly action: "ANSWER" | "FALLBACK_LLM";
+  readonly action: "ANSWER" | "FALLBACK_LLM" | "ACCOUNT_LOOKUP";
 }
 
 const EXPECTATIONS: readonly Expectation[] = [
@@ -27,7 +27,10 @@ const EXPECTATIONS: readonly Expectation[] = [
   // membership
   { message: "do you have a maintenance plan?", intentId: "membership-explainer", action: "ANSWER" },
   { message: "is the plan worth it?", intentId: "membership-worth-it", action: "ANSWER" },
-  { message: "am I a member?", intentId: "membership-account", action: "FALLBACK_LLM" },
+  // "am I a member?" is now a real identified-customer read (account_data v1):
+  // the router recognizes it as ACCOUNT_LOOKUP; the chat route enforces identity
+  // and answers from the customer's record (or asks them to identify).
+  { message: "am I a member?", intentId: "account-data-membership-status", action: "ACCOUNT_LOOKUP" },
   // efficiency
   { message: "are there rebates for a new system?", intentId: "efficiency-rebates", action: "ANSWER" },
   { message: "is there a tax credit for a new furnace?", intentId: "efficiency-tax-credit", action: "ANSWER" },
@@ -63,8 +66,10 @@ describe("expanded knowledge base — routing", () => {
     it(`routes "${message}" -> ${intentId} (${action})`, () => {
       const v = routeMessage(message);
       expect(v.action).toBe(action);
-      if (action === "ANSWER") {
-        // ANSWER verdicts carry the resolved intent + canned reply.
+      if (action === "ANSWER" || action === "ACCOUNT_LOOKUP") {
+        // ANSWER / ACCOUNT_LOOKUP verdicts carry the resolved intent. ANSWER has
+        // its canned reply; ACCOUNT_LOOKUP carries the identify-ask copy used for
+        // an unidentified session (the identified reply is built in the route).
         expect(v.intentId).toBe(intentId);
         expect(v.reply).toBeTruthy();
       } else {

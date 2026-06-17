@@ -164,7 +164,16 @@ export async function voiceReply(params: {
   const routerConfig = await getRouterConfig(organizationId).catch(
     () => EMPTY_ORG_CONFIG,
   );
-  const verdict = routeMessage(userMessage, knownSlots, routerConfig);
+  const routed = routeMessage(userMessage, knownSlots, routerConfig);
+  // Account-data intents (membership/visit/balance/appointment/reschedule) are a
+  // WEB-CHAT v1 capability. The voice channel has no identity gate wired for them
+  // yet, so coerce an ACCOUNT_LOOKUP verdict to a plain LLM fallback here — voice
+  // behavior is byte-identical to before this feature (these questions fall to
+  // the LLM, never reading account data on a phone call).
+  const verdict =
+    routed.action === "ACCOUNT_LOOKUP"
+      ? { ...routed, action: "FALLBACK_LLM" as const, reply: null }
+      : routed;
   // Multi-field capture, matching the web chat: one utterance can carry the
   // address, phone, email, AND a residual name ("Ray Chen, 865-555-1212"). The
   // narrower extractSlots used before never captured a spoken name, so triage
@@ -555,7 +564,7 @@ export async function voiceReply(params: {
       : "";
 
   const { text, usage } = await generateText({
-    model: getModel(),
+    model: await getModel(organizationId),
     system: PHONE_SYSTEM_PROMPT + slotContextHint,
     messages: modelMessages,
   });

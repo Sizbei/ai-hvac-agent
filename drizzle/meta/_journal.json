@@ -43,6 +43,48 @@
       "when": 1781647736745,
       "tag": "0005_customer_portal_token",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1781656420805,
+      "tag": "0006_org_ai_model",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1781657428961,
+      "tag": "0007_attachment_entity_links",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1781659136182,
+      "tag": "0008_equipment_warranty",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1781659618089,
+      "tag": "0009_technician_timesheets",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1781660183432,
+      "tag": "0010_reviews",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1781660713186,
+      "tag": "0011_inventory_purchasing",
+      "breakpoints": true
     }
   ]
 }

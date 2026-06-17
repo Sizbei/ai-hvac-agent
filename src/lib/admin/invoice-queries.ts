@@ -17,9 +17,13 @@ import {
   jobMaterials,
   payments,
   refunds,
+  technicianTimeEntries,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
-import { rollUpActualMaterialsCost } from "@/lib/admin/margin";
+import {
+  rollUpActualMaterialsCost,
+  rollUpActualLaborCost,
+} from "@/lib/admin/margin";
 import { getPaymentProvider, type PaymentProvider } from "@/lib/payments/provider";
 
 export type CreateInvoiceResult =
@@ -551,6 +555,13 @@ export interface InvoiceDetailView {
    * shown alongside it, never replacing it. ADMIN-ONLY (sensitive cost data).
    */
   readonly actualMaterialsCostCents: number | null;
+  /**
+   * ACTUAL labor cost (cents) from the closed time entries the tech logged on
+   * the linked service request, if any. NULL when there's no linked job or no
+   * CLOSED time entries. The actual margin subtracts actual materials + this;
+   * shown as its own line. ADMIN-ONLY (sensitive cost data).
+   */
+  readonly actualLaborCostCents: number | null;
 }
 
 /**
@@ -653,6 +664,11 @@ export async function getInvoiceDetailById(
   // materials — so the UI can present "actual" only when it exists, alongside
   // (never overwriting) the estimated line-snapshot cost.
   let actualMaterialsCostCents: number | null = null;
+  // Actual LABOR cost, rolled up from the CLOSED time entries the tech logged on
+  // the linked service request. NULL when there's no linked job or no closed
+  // entries — distinct from (and shown alongside) the actual-materials figure,
+  // so the actual margin can subtract both: revenue − materials − labor.
+  let actualLaborCostCents: number | null = null;
   if (inv.serviceRequestId) {
     const materialRows = await db
       .select({
@@ -669,6 +685,23 @@ export async function getInvoiceDetailById(
       );
     actualMaterialsCostCents =
       materialRows.length > 0 ? rollUpActualMaterialsCost(materialRows) : null;
+
+    const laborRows = await db
+      .select({ laborCostCents: technicianTimeEntries.laborCostCents })
+      .from(technicianTimeEntries)
+      .where(
+        withTenant(
+          technicianTimeEntries,
+          organizationId,
+          eq(technicianTimeEntries.serviceRequestId, inv.serviceRequestId),
+        ),
+      );
+    // Only CLOSED entries carry a non-null laborCostCents; if none are closed
+    // yet, keep NULL so the UI doesn't show a 0 "actual labor" line.
+    const hasClosedLabor = laborRows.some((r) => r.laborCostCents !== null);
+    actualLaborCostCents = hasClosedLabor
+      ? rollUpActualLaborCost(laborRows)
+      : null;
   }
 
   return {
@@ -679,5 +712,6 @@ export async function getInvoiceDetailById(
       refunds: refundsByPayment.get(p.id) ?? [],
     })),
     actualMaterialsCostCents,
+    actualLaborCostCents,
   };
 }

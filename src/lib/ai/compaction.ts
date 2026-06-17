@@ -118,6 +118,7 @@ function renderTurns(turns: readonly ChatTurn[]): string {
 export async function summarizeOlderTurns(params: {
   readonly priorSummary: string | null | undefined;
   readonly olderTurns: readonly ChatTurn[];
+  readonly organizationId?: string;
 }): Promise<string> {
   const prior = hasText(params.priorSummary) ? params.priorSummary.trim() : "";
 
@@ -130,7 +131,7 @@ export async function summarizeOlderTurns(params: {
   )}`;
 
   const { text } = await generateText({
-    model: getExtractionModel(),
+    model: await getExtractionModel(params.organizationId),
     system: SUMMARY_SYSTEM,
     messages: [{ role: "user", content: userPrompt }],
   });

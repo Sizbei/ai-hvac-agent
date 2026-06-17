@@ -53,6 +53,17 @@ function formatDate(iso: string): string {
   });
 }
 
+/** Warranty status badge text from the tracked expiry: "EXPIRED" once past,
+ * otherwise "Expires in N days" (the column the reminder sweep keys off). */
+function warrantyStatusLabel(iso: string): string {
+  const days = Math.ceil(
+    (new Date(iso).getTime() - Date.now()) / (24 * 60 * 60 * 1000),
+  );
+  if (days < 0) return 'EXPIRED';
+  if (days === 0) return 'Expires today';
+  return `Expires in ${days} day${days === 1 ? '' : 's'}`;
+}
+
 function StatusBadge({ status }: { readonly status: string }) {
   const colors: Record<string, string> = {
     pending: 'bg-yellow-100 text-yellow-800',
@@ -377,10 +388,7 @@ export default function CustomerDetailPage({
                           }
                           className="text-xs"
                         >
-                          Warranty:{' '}
-                          {new Date(eq.warrantyExpiration) < new Date()
-                            ? 'Expired'
-                            : formatDate(eq.warrantyExpiration)}
+                          {warrantyStatusLabel(eq.warrantyExpiration)}
                         </Badge>
                       )}
                       <Button

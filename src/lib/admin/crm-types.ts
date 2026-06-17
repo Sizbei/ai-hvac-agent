@@ -30,7 +30,12 @@ export interface EquipmentRecord {
   readonly model: string | null;
   readonly serialNumber: string | null;
   readonly installDate: string | null;
+  // warrantyExpiration is the single authoritative expiry the proactive
+  // reminder sweep keys off.
   readonly warrantyExpiration: string | null;
+  // Warranty-tracking fields (parity stage).
+  readonly warrantyType: string | null;
+  readonly warrantyProvider: string | null;
   readonly locationInHome: string | null;
   readonly notes: string | null;
 }
@@ -84,6 +89,8 @@ export interface CreateEquipmentInput {
   readonly serialNumber?: string;
   readonly installDate?: string;
   readonly warrantyExpiration?: string;
+  readonly warrantyType?: string;
+  readonly warrantyProvider?: string;
   readonly locationInHome?: string;
   readonly notes?: string;
 }
@@ -99,6 +106,8 @@ export interface UpdateEquipmentInput {
   readonly serialNumber?: string | null;
   readonly installDate?: string | null;
   readonly warrantyExpiration?: string | null;
+  readonly warrantyType?: string | null;
+  readonly warrantyProvider?: string | null;
   readonly locationInHome?: string | null;
   readonly notes?: string | null;
 }

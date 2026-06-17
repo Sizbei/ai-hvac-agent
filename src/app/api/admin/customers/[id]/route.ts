@@ -111,6 +111,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
             typeof body.warrantyExpiration === "string"
               ? body.warrantyExpiration
               : undefined,
+          warrantyType:
+            typeof body.warrantyType === "string"
+              ? body.warrantyType
+              : undefined,
+          warrantyProvider:
+            typeof body.warrantyProvider === "string"
+              ? body.warrantyProvider
+              : undefined,
           locationInHome:
             typeof body.locationInHome === "string"
               ? body.locationInHome
@@ -141,6 +149,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           serialNumber?: string | null;
           installDate?: string | null;
           warrantyExpiration?: string | null;
+          warrantyType?: string | null;
+          warrantyProvider?: string | null;
           locationInHome?: string | null;
           notes?: string | null;
         } = {};
@@ -161,6 +171,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         }
         if ("warrantyExpiration" in body) {
           patch.warrantyExpiration = strOrNull(body.warrantyExpiration);
+        }
+        if ("warrantyType" in body) {
+          patch.warrantyType = strOrNull(body.warrantyType);
+        }
+        if ("warrantyProvider" in body) {
+          patch.warrantyProvider = strOrNull(body.warrantyProvider);
         }
         if ("locationInHome" in body) {
           patch.locationInHome = strOrNull(body.locationInHome);

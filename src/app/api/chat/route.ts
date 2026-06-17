@@ -82,6 +82,20 @@ import {
   type CustomerContext,
 } from "@/lib/ai/customer-context";
 import { customers } from "@/lib/db/schema";
+import {
+  getMembershipSummary,
+  getNextVisit,
+  getOpenBalance,
+  getUpcomingAppointment,
+  requestReschedule,
+} from "@/lib/ai/account-tools";
+import {
+  membershipReply,
+  nextVisitReply,
+  balanceReply,
+  appointmentReply,
+  rescheduleReply,
+} from "@/lib/ai/account-reply";
 import { logger } from "@/lib/logger";
 // The deterministic router is on by default; set ROUTER_ENABLED=false to disable
 // it (kill-switch) and route every turn through the LLM.
@@ -354,6 +368,92 @@ async function fetchWindowPrompt(
       "Failed to fetch open availability for window prompt — using static prompt",
     );
     return null;
+  }
+}
+
+// Each account capability, keyed by a stable name. The new account_data intents
+// map 1:1; the legacy reference intents (which still win the phrase match and
+// return as FALLBACK_LLM with their intentId) map to the closest capability so an
+// identified customer gets a real answer instead of an LLM punt.
+type AccountCapability =
+  | "membership"
+  | "next_visit"
+  | "balance"
+  | "appointment"
+  | "reschedule";
+
+const ACCOUNT_INTENT_CAPABILITY: Record<string, AccountCapability> = {
+  // New v1 account_data intents.
+  "account-data-membership-status": "membership",
+  "account-data-next-visit": "next_visit",
+  "account-data-balance": "balance",
+  "account-data-appointment-status": "appointment",
+  "account-data-reschedule": "reschedule",
+};
+
+// Legacy reference intents the router returns as FALLBACK_LLM (with intentId
+// preserved). For an IDENTIFIED session these now resolve to an account tool;
+// unidentified sessions never reach this map (they keep the LLM identify path).
+// scheduling-cancel is deliberately absent — cancel is NOT in the safe v1 set.
+const LEGACY_ACCOUNT_INTENT_TOOL: Record<string, AccountCapability> = {
+  "membership-account": "membership",
+  "account-check-status": "appointment",
+  "account-change-appointment": "reschedule",
+  "scheduling-reschedule": "reschedule",
+};
+
+/**
+ * Dispatch an identified-customer account intent to the matching read-tool and
+ * assemble a deterministic, pricing-safe reply. The caller has ALREADY enforced
+ * the identity gate (customerId is the resolved, org-scoped customer).
+ *
+ * The reschedule capability records a STAFF HAND-OFF (a request note) and never
+ * mutates the schedule. Money is formatted at the reply layer (account-reply.ts).
+ * Returns null for an unrecognized intent id so the caller falls through to the
+ * normal path. Reads/writes are awaited HERE (before the response is returned),
+ * so on serverless they complete within the request — no detached promise that
+ * the platform freeze would kill.
+ */
+async function buildAccountLookupReply(
+  intentId: string | null,
+  organizationId: string,
+  customerId: string,
+  message: string,
+): Promise<string | null> {
+  const capability =
+    (intentId && ACCOUNT_INTENT_CAPABILITY[intentId]) ||
+    (intentId && LEGACY_ACCOUNT_INTENT_TOOL[intentId]) ||
+    null;
+  switch (capability) {
+    case "membership": {
+      const summary = await getMembershipSummary(organizationId, customerId);
+      return membershipReply(summary);
+    }
+    case "next_visit": {
+      const visit = await getNextVisit(organizationId, customerId);
+      return nextVisitReply(visit);
+    }
+    case "balance": {
+      const balance = await getOpenBalance(organizationId, customerId);
+      return balanceReply(balance);
+    }
+    case "appointment": {
+      const appointment = await getUpcomingAppointment(
+        organizationId,
+        customerId,
+      );
+      return appointmentReply(appointment);
+    }
+    case "reschedule": {
+      const handoff = await requestReschedule(
+        organizationId,
+        customerId,
+        message,
+      );
+      return rescheduleReply(handoff);
+    }
+    default:
+      return null;
   }
 }
 
@@ -764,6 +864,70 @@ export async function POST(request: NextRequest) {
         knownSlots,
         routerConfig,
       );
+
+      // ── Account-data intents (identified-customer reads, v1) ──
+      // IDENTITY GATE: an ACCOUNT_LOOKUP verdict ("my balance / my membership /
+      // my visit / my appointment", or a reschedule REQUEST) is only acted on
+      // when the session has an identified customer — session.customerId (linked
+      // on a prior turn) OR a customer resolved THIS turn via the blind-index
+      // lookup above. For an UNIDENTIFIED session we DELIBERATELY fall through:
+      // the verdict's canned reply is the "what's the email/phone on your
+      // account?" ask, surfaced by the normal deterministic path below — so we
+      // ask the customer to identify, NEVER leaking another customer's data.
+      // This block is additive and only handles the identified branch; it never
+      // touches the emergency/compound/booking precedence (those are decided
+      // inside routeMessage above and short-circuit before any account intent).
+      const accountCustomerId =
+        session.customerId ?? customerContext?.customerId ?? null;
+      // The router emits ACCOUNT_LOOKUP for BOTH the new account_data intents and
+      // the carved-out legacy reference intents (account-check-status,
+      // account-change-appointment, scheduling-reschedule). We act on it ONLY for
+      // an identified session; an unidentified one falls through to the normal
+      // deterministic path, which uses the verdict's canned identify-ask reply
+      // (no leak). buildAccountLookupReply maps the intentId to the right tool.
+      if (verdict.action === "ACCOUNT_LOOKUP" && accountCustomerId) {
+        const accountReply = await buildAccountLookupReply(
+          verdict.intentId,
+          organizationId,
+          accountCustomerId,
+          guardrailResult.sanitized,
+        ).catch((accountError: unknown) => {
+          logger.error(
+            { error: accountError, sessionId: session.id, intentId: verdict.intentId },
+            "Account-lookup failed — degrading to handoff copy",
+          );
+          return null;
+        });
+
+        if (accountReply !== null) {
+          const replyText = accountReply + (nearTurnLimit ? ESCALATION_NOTE : "");
+          await db.insert(messages).values({
+            organizationId,
+            sessionId: session.id,
+            role: "assistant",
+            content: replyText,
+            tokensUsed: 0,
+          });
+          await db
+            .update(customerSessions)
+            .set({ turnCount: newTurnCount, updatedAt: new Date() })
+            .where(sessionScope);
+          logger.info(
+            {
+              sessionId: session.id,
+              routed: "deterministic",
+              intentId: verdict.intentId,
+              action: "ACCOUNT_LOOKUP",
+              turnCount: newTurnCount,
+            },
+            "Chat turn resolved deterministically (0 LLM tokens)",
+          );
+          return cannedTextResponse(replyText);
+        }
+        // accountReply === null (unknown intent or a read failed): fall through
+        // to the normal path, which degrades gracefully.
+      }
+
       // Multi-field capture: pull EVERY recognizable contact field from this one
       // message (name + phone + email + address), not just the slot the current
       // step expects. Fixes the bug where "ray chen, 4169029212" (name + phone)
@@ -1436,7 +1600,7 @@ export async function POST(request: NextRequest) {
 
     // 8. Stream response via Vercel AI SDK per SC-09
     const result = streamText({
-      model: getModel(),
+      model: await getModel(organizationId),
       system:
         brandPrompt +
         customerContextHint +
@@ -1509,6 +1673,7 @@ export async function POST(request: NextRequest) {
         const extraction = await extractServiceRequest(
           conversationHistory,
           guardrailResult.sanitized,
+          organizationId,
         );
         // Re-read CURRENT metadata (not the request-time snapshot): a rapid
         // follow-up turn may have written new slots while extraction ran.

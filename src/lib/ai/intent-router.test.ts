@@ -184,3 +184,80 @@ describe("escalation request", () => {
     expect(v.escalate).toBe(true);
   });
 });
+
+describe("account-data intents (identified-customer reads, v1)", () => {
+  // The router only RECOGNIZES these (surfaces ACCOUNT_LOOKUP + the intentId);
+  // identity is enforced in the chat route, not here. These tests pin the
+  // recognition + the critical precedence guarantees.
+
+  it("recognizes a membership-status question as ACCOUNT_LOOKUP", () => {
+    const v = routeMessage("am i a member");
+    expect(v.action).toBe("ACCOUNT_LOOKUP");
+    expect(v.intentId).toBe("account-data-membership-status");
+  });
+
+  it("recognizes a next-visit question as ACCOUNT_LOOKUP", () => {
+    const v = routeMessage("when is my next visit");
+    expect(v.action).toBe("ACCOUNT_LOOKUP");
+    expect(v.intentId).toBe("account-data-next-visit");
+  });
+
+  it("recognizes a balance question as ACCOUNT_LOOKUP", () => {
+    const v = routeMessage("what do i owe");
+    expect(v.action).toBe("ACCOUNT_LOOKUP");
+    expect(v.intentId).toBe("account-data-balance");
+  });
+
+  it("recognizes a tech/appointment-status question as ACCOUNT_LOOKUP", () => {
+    const v = routeMessage("when is my technician");
+    expect(v.action).toBe("ACCOUNT_LOOKUP");
+    expect(v.intentId).toBe("account-data-appointment-status");
+  });
+
+  it("recognizes a reschedule request as ACCOUNT_LOOKUP", () => {
+    const v = routeMessage("push my visit");
+    expect(v.action).toBe("ACCOUNT_LOOKUP");
+    expect(v.intentId).toBe("account-data-reschedule");
+  });
+
+  it("surfaces the legacy reschedule intent as ACCOUNT_LOOKUP for the route to map", () => {
+    // "reschedule my visit" is claimed by the higher-priority scheduling intent,
+    // but that legacy reference intent is now carved out to ACCOUNT_LOOKUP so the
+    // chat route can map it to the reschedule account tool for an identified
+    // customer (an unidentified session gets the identify ask, never data).
+    const v = routeMessage("reschedule my visit");
+    expect(v.action).toBe("ACCOUNT_LOOKUP");
+    expect(v.intentId).toBe("scheduling-reschedule");
+  });
+
+  it("surfaces the legacy check-status intent as ACCOUNT_LOOKUP", () => {
+    const v = routeMessage("any update on my request");
+    expect(v.action).toBe("ACCOUNT_LOOKUP");
+    expect(v.intentId).toBe("account-check-status");
+  });
+
+  it("carries a canned identify-ask reply (used for an UNIDENTIFIED session)", () => {
+    // The route surfaces this as the 'what's your email/phone?' ask so an
+    // unidentified session never leaks another customer's data.
+    const v = routeMessage("what do i owe");
+    expect(v.reply).toBeTruthy();
+    expect(v.reply!.toLowerCase()).toContain("account");
+  });
+
+  it("an account question NEVER outranks the emergency short-circuit", () => {
+    // A hazard worded alongside an account question must still escalate — the
+    // emergency short-circuit runs FIRST and account_data is the lowest tier.
+    const v = routeMessage("my carbon monoxide alarm is going off, what do i owe");
+    expect(v.action).toBe("ESCALATE");
+    expect(v.escalate).toBe(true);
+    expect(v.intentId).toBe("emergency-carbon-monoxide");
+  });
+
+  it("a real issue outranks an account question on the same turn", () => {
+    // account_data is priority 4 (lowest); a cooling issue (priority 2) wins.
+    // (Distinct categories both scoring high would compound→FALLBACK; here the
+    // account phrase is the lower-priority loser, never the winner.)
+    const v = routeMessage("my air conditioner is not cooling");
+    expect(v.intentId).not.toBe("account-data-balance");
+  });
+});

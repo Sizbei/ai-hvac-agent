@@ -25,6 +25,9 @@ import {
   Receipt,
   TrendingUp,
   BadgeCheck,
+  Star,
+  Boxes,
+  Calculator,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -77,10 +80,13 @@ const NAV_GROUPS: readonly NavGroup[] = [
     items: [
       { label: 'Staff', href: '/admin/staff', icon: UsersRound },
       { label: 'Pricebook', href: '/admin/pricebook', icon: Tags },
+      { label: 'Inventory', href: '/admin/inventory', icon: Boxes },
       { label: 'Membership Plans', href: '/admin/membership-plans', icon: BadgeCheck },
       { label: 'Estimates', href: '/admin/estimates', icon: FileText },
       { label: 'Invoices', href: '/admin/invoices', icon: Receipt },
       { label: 'Reports', href: '/admin/reports', icon: TrendingUp },
+      { label: 'Accounting', href: '/admin/accounting', icon: Calculator },
+      { label: 'Reviews', href: '/admin/reviews', icon: Star },
       { label: 'Chatbot Settings', href: '/admin/settings', icon: Settings },
       { label: 'Communications', href: '/admin/communications/templates', icon: MessageSquare },
       { label: 'Audit Log', href: '/admin/audit-log', icon: ScrollText },
@@ -89,7 +95,7 @@ const NAV_GROUPS: readonly NavGroup[] = [
   {
     heading: 'Integrations',
     items: [
-      { label: 'Integrations', href: '/admin/settings?tab=integrations', icon: Plug },
+      { label: 'Integrations', href: '/admin/integrations', icon: Plug },
     ],
   },
 ] as const;

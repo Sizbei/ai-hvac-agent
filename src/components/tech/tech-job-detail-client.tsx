@@ -25,9 +25,43 @@ interface PricebookItem {
   readonly priceCents: number;
 }
 
+interface TimeEntry {
+  readonly id: string;
+  readonly technicianId: string;
+  readonly clockInAt: string;
+  readonly clockOutAt: string | null;
+  readonly minutes: number | null;
+  readonly laborCostCents: number | null;
+}
+
+/** Format whole minutes as "Hh Mm" (or "Mm" under an hour). */
+function formatMinutes(mins: number): string {
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+function isToday(iso: string): boolean {
+  const d = new Date(iso);
+  const now = new Date();
+  return (
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  );
+}
+
 export function TechJobDetailClient({ id }: { readonly id: string }) {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Timesheet (labor tracking)
+  const [entries, setEntries] = useState<TimeEntry[]>([]);
+  const [openSince, setOpenSince] = useState<string | null>(null);
+  const [isClocking, setIsClocking] = useState(false);
+  const [clockError, setClockError] = useState<string | null>(null);
+  // Ticks every second so the elapsed time updates live while on the clock.
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   // Material add form
   const [catalog, setCatalog] = useState<PricebookItem[]>([]);
@@ -64,6 +98,51 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
   useEffect(() => {
     void loadMaterials();
   }, [loadMaterials]);
+
+  const loadTimesheet = useCallback(async (): Promise<void> => {
+    const res = await fetch(`/api/tech/jobs/${id}/timesheet`);
+    const body = await res.json().catch(() => ({ success: false }));
+    if (res.ok && body.success) {
+      setEntries(body.data.entries);
+      setOpenSince(body.data.open ? body.data.open.clockInAt : null);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    void loadTimesheet();
+  }, [loadTimesheet]);
+
+  // Live-tick the elapsed clock only while on the clock.
+  useEffect(() => {
+    if (!openSince) return;
+    const t = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [openSince]);
+
+  const handleClock = useCallback(
+    async (action: 'clock_in' | 'clock_out'): Promise<void> => {
+      setIsClocking(true);
+      setClockError(null);
+      try {
+        const res = await fetch(`/api/tech/jobs/${id}/timesheet`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action }),
+        });
+        const body = await res.json().catch(() => ({ success: false }));
+        if (res.ok && body.success) {
+          void loadTimesheet();
+        } else {
+          setClockError(body.error?.message ?? 'Failed to update timesheet');
+        }
+      } catch {
+        setClockError('Could not connect to server.');
+      } finally {
+        setIsClocking(false);
+      }
+    },
+    [id, loadTimesheet],
+  );
 
   // Load the pricebook once for catalog selection.
   useEffect(() => {
@@ -245,6 +324,12 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
       )
     : catalog;
 
+  // Live elapsed minutes while on the clock (whole minutes, floored).
+  const elapsedMins = openSince
+    ? Math.max(0, Math.floor((nowMs - new Date(openSince).getTime()) / 60000))
+    : 0;
+  const todaysEntries = entries.filter((e) => isToday(e.clockInAt));
+
   return (
     <div className="space-y-5">
       <Link
@@ -253,6 +338,73 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
       >
         <ArrowLeft className="size-4" /> Back
       </Link>
+
+      {/* Time on this job (clock in / out) */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Time on this job</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {openSince ? (
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm text-muted-foreground">On the clock</p>
+                <p className="text-2xl font-semibold tabular-nums">
+                  {formatMinutes(elapsedMins)}
+                </p>
+              </div>
+              <Button
+                variant="destructive"
+                disabled={isClocking}
+                onClick={() => void handleClock('clock_out')}
+              >
+                {isClocking ? 'Saving…' : 'Clock Out'}
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm text-muted-foreground">Not clocked in.</p>
+              <Button
+                disabled={isClocking}
+                onClick={() => void handleClock('clock_in')}
+              >
+                {isClocking ? 'Saving…' : 'Clock In'}
+              </Button>
+            </div>
+          )}
+          {clockError && (
+            <p className="text-xs text-destructive">{clockError}</p>
+          )}
+
+          {todaysEntries.length > 0 && (
+            <ul className="space-y-1 border-t pt-3">
+              {todaysEntries.map((e) => (
+                <li
+                  key={e.id}
+                  className="flex justify-between text-sm text-muted-foreground"
+                >
+                  <span>
+                    {new Date(e.clockInAt).toLocaleTimeString([], {
+                      hour: 'numeric',
+                      minute: '2-digit',
+                    })}
+                    {' – '}
+                    {e.clockOutAt
+                      ? new Date(e.clockOutAt).toLocaleTimeString([], {
+                          hour: 'numeric',
+                          minute: '2-digit',
+                        })
+                      : 'now'}
+                  </span>
+                  <span className="tabular-nums">
+                    {e.minutes !== null ? formatMinutes(e.minutes) : '—'}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Materials used */}
       <Card>

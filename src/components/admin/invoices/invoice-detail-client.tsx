@@ -48,6 +48,7 @@ interface InvoiceDetail {
   readonly lineItems: LineItem[];
   readonly payments: Payment[];
   readonly actualMaterialsCostCents: number | null;
+  readonly actualLaborCostCents: number | null;
 }
 
 const REFUND_REASONS: ReadonlyArray<{ value: string; label: string }> = [
@@ -201,13 +202,19 @@ export function InvoiceDetailClient({
   // Margin is line revenue vs snapshotted line cost (excludes tax — tax is not
   // revenue). Internal/admin-only readout.
   const margin = rollUpMargin(invoice.lineItems);
-  // Actual field-materials cost the tech recorded on the linked job (if any).
-  // Shown ALONGSIDE the estimated figure — never overwriting it. The actual
-  // margin recomputes revenue minus the actual materials cost.
+  // Actual field costs the tech recorded on the linked job (if any): materials
+  // used + labor logged (clocked time × snapshotted rate). Shown ALONGSIDE the
+  // estimated figure — never overwriting it. The actual margin recomputes
+  // revenue minus actual materials minus actual labor (each shown as its own
+  // line; absent ones count as 0 so they're not double-counted).
   const actualMaterialsCostCents = invoice.actualMaterialsCostCents;
-  const hasActual = actualMaterialsCostCents !== null;
+  const actualLaborCostCents = invoice.actualLaborCostCents;
+  const hasActual =
+    actualMaterialsCostCents !== null || actualLaborCostCents !== null;
+  const actualTotalCostCents =
+    (actualMaterialsCostCents ?? 0) + (actualLaborCostCents ?? 0);
   const actualMargin = hasActual
-    ? computeMargin(margin.revenueCents, actualMaterialsCostCents)
+    ? computeMargin(margin.revenueCents, actualTotalCostCents)
     : null;
 
   return (
@@ -333,14 +340,24 @@ export function InvoiceDetailClient({
             {hasActual && actualMargin && (
               <div className="mt-2 border-t pt-2">
                 <div className="mb-1 text-[10px] font-medium uppercase tracking-wide">
-                  Actual (field materials)
+                  Actual (field)
                 </div>
-                <div className="flex justify-between">
-                  <span>Actual materials cost</span>
-                  <span className="tabular-nums">
-                    {formatCentsExact(actualMaterialsCostCents)}
-                  </span>
-                </div>
+                {actualMaterialsCostCents !== null && (
+                  <div className="flex justify-between">
+                    <span>Actual materials cost</span>
+                    <span className="tabular-nums">
+                      {formatCentsExact(actualMaterialsCostCents)}
+                    </span>
+                  </div>
+                )}
+                {actualLaborCostCents !== null && (
+                  <div className="flex justify-between">
+                    <span>Actual labor cost</span>
+                    <span className="tabular-nums">
+                      {formatCentsExact(actualLaborCostCents)}
+                    </span>
+                  </div>
+                )}
                 <div className="flex justify-between font-medium text-foreground">
                   <span>Actual margin</span>
                   <span className="tabular-nums">

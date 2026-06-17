@@ -137,7 +137,7 @@ export async function suggestEstimateLineItems(
     const offered = catalog.slice(0, MAX_CATALOG_ITEMS);
 
     const { text } = await generateText({
-      model: getExtractionModel(),
+      model: await getExtractionModel(organizationId),
       system: SYSTEM,
       messages: [
         {

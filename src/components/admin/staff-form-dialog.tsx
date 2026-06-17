@@ -43,6 +43,8 @@ interface FormState {
   readonly password: string;
   readonly role: StaffRole;
   readonly isActive: boolean;
+  /** Labor rate as a dollars string ('' = no rate set). */
+  readonly laborRate: string;
 }
 
 const INITIAL_FORM_STATE: FormState = {
@@ -51,7 +53,13 @@ const INITIAL_FORM_STATE: FormState = {
   password: '',
   role: 'technician',
   isActive: true,
+  laborRate: '',
 };
+
+/** Integer cents → dollars string for the form ('' when null). */
+function centsToDollars(cents: number | null): string {
+  return cents === null ? '' : (cents / 100).toFixed(2);
+}
 
 function createFormState(staff: StaffRecord | null): FormState {
   if (!staff) return INITIAL_FORM_STATE;
@@ -61,6 +69,7 @@ function createFormState(staff: StaffRecord | null): FormState {
     password: '',
     role: staff.role,
     isActive: staff.isActive,
+    laborRate: centsToDollars(staff.laborRateCents),
   };
 }
 
@@ -102,6 +111,13 @@ export function StaffFormDialog({
         return 'Password must be at least 8 characters';
       }
     }
+    const rate = form.laborRate.trim();
+    if (rate !== '') {
+      const n = Number(rate);
+      if (!Number.isFinite(n) || n < 0) {
+        return 'Labor rate must be a non-negative dollar amount';
+      }
+    }
     return null;
   }
 
@@ -134,6 +150,15 @@ export function StaffFormDialog({
         if (trimmedName !== staff.name) patch.name = trimmedName;
         if (form.role !== staff.role) patch.role = form.role;
         if (form.isActive !== staff.isActive) patch.isActive = form.isActive;
+
+        // Labor rate: dollars string → integer cents (empty clears it to null).
+        // Only patch when it actually changed from the stored value.
+        const trimmedRate = form.laborRate.trim();
+        const nextRateCents =
+          trimmedRate === '' ? null : Math.round(Number(trimmedRate) * 100);
+        if (nextRateCents !== staff.laborRateCents) {
+          patch.laborRateCents = nextRateCents;
+        }
 
         if (Object.keys(patch).length === 0) {
           // Nothing changed — close without a no-op request.
@@ -274,6 +299,26 @@ export function StaffFormDialog({
                 onCheckedChange={(checked) => updateField('isActive', checked)}
                 disabled={isSelf}
               />
+            </div>
+          )}
+
+          {isEditMode && (
+            <div className="space-y-2">
+              <Label htmlFor="staff-labor-rate">Labor rate ($/hour)</Label>
+              <Input
+                id="staff-labor-rate"
+                type="number"
+                min="0"
+                step="0.01"
+                inputMode="decimal"
+                value={form.laborRate}
+                onChange={(e) => updateField('laborRate', e.target.value)}
+                placeholder="e.g. 75.00"
+              />
+              <p className="text-xs text-muted-foreground">
+                Used for job-cost when a technician clocks time. Leave blank for
+                no rate.
+              </p>
             </div>
           )}
 
