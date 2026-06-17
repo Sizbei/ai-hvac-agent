@@ -57,6 +57,13 @@
       "when": 1781657428961,
       "tag": "0007_attachment_entity_links",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1781659136182,
+      "tag": "0008_equipment_warranty",
+      "breakpoints": true
     }
   ]
 }

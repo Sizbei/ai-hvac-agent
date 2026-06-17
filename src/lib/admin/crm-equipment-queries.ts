@@ -142,6 +142,10 @@ export async function updateEquipment(
   if (input.warrantyExpiration !== undefined) {
     updates.warrantyExpiration = parseDateOrNull(input.warrantyExpiration);
   }
+  if (input.warrantyType !== undefined) updates.warrantyType = input.warrantyType;
+  if (input.warrantyProvider !== undefined) {
+    updates.warrantyProvider = input.warrantyProvider;
+  }
   if (input.locationInHome !== undefined) {
     updates.locationInHome = input.locationInHome;
   }

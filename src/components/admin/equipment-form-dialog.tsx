@@ -36,6 +36,8 @@ interface FormState {
   readonly locationInHome: string;
   readonly installDate: string;
   readonly warrantyExpiration: string;
+  readonly warrantyType: string;
+  readonly warrantyProvider: string;
   readonly notes: string;
 }
 
@@ -47,6 +49,8 @@ const EMPTY_FORM: FormState = {
   locationInHome: '',
   installDate: '',
   warrantyExpiration: '',
+  warrantyType: '',
+  warrantyProvider: '',
   notes: '',
 };
 
@@ -66,6 +70,8 @@ function formFromEquipment(equipment: EquipmentRecord | null | undefined): FormS
     locationInHome: equipment.locationInHome ?? '',
     installDate: toDateInput(equipment.installDate),
     warrantyExpiration: toDateInput(equipment.warrantyExpiration),
+    warrantyType: equipment.warrantyType ?? '',
+    warrantyProvider: equipment.warrantyProvider ?? '',
     notes: equipment.notes ?? '',
   };
 }
@@ -118,6 +124,8 @@ export function EquipmentFormDialog({
               locationInHome: form.locationInHome.trim(),
               installDate: form.installDate,
               warrantyExpiration: form.warrantyExpiration,
+              warrantyType: form.warrantyType.trim(),
+              warrantyProvider: form.warrantyProvider.trim(),
               notes: form.notes.trim(),
             }
           : {
@@ -129,6 +137,8 @@ export function EquipmentFormDialog({
               locationInHome: form.locationInHome.trim() || undefined,
               installDate: form.installDate || undefined,
               warrantyExpiration: form.warrantyExpiration || undefined,
+              warrantyType: form.warrantyType.trim() || undefined,
+              warrantyProvider: form.warrantyProvider.trim() || undefined,
               notes: form.notes.trim() || undefined,
             };
 
@@ -247,6 +257,27 @@ export function EquipmentFormDialog({
                 type="date"
                 value={form.warrantyExpiration}
                 onChange={(e) => update('warrantyExpiration', e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label htmlFor="warranty-type">Warranty Type</Label>
+              <Input
+                id="warranty-type"
+                value={form.warrantyType}
+                onChange={(e) => update('warrantyType', e.target.value)}
+                placeholder="Manufacturer, labor, extended"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="warranty-provider">Warranty Provider</Label>
+              <Input
+                id="warranty-provider"
+                value={form.warrantyProvider}
+                onChange={(e) => update('warrantyProvider', e.target.value)}
+                placeholder="Carrier, Trane, third-party plan"
               />
             </div>
           </div>

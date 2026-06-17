@@ -62,6 +62,9 @@ export const TRIGGER_RULES: Record<CommTrigger, TriggerRule> = {
   estimate_sent: { toggle: "automatedConfirmations", quietHours: false },
   payment_receipt: { toggle: "automatedConfirmations", quietHours: false },
   invoice_overdue: { toggle: "appointmentReminders", quietHours: true },
+  // Lead-gen warranty-expiry nudge — marketing-ish: gated by the marketing
+  // preference (off by default) and quiet-hours-respecting.
+  warranty_expiring: { toggle: "marketingMessages", quietHours: true },
 };
 
 /** Preference defaults when a customer has no preferences row yet — mirrors the

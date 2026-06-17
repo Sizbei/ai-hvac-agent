@@ -182,6 +182,14 @@ export const templateVariableSchemas = {
     companyName: "string",
     phoneNumber: "string",
   },
+  // Lead-gen warranty-expiry nudge — NO price ever (a check-up invite, not a quote).
+  warranty_expiring: {
+    customerName: "string",
+    equipment: "string",
+    expiryDate: "string",
+    companyName: "string",
+    phoneNumber: "string",
+  },
 } as const;
 
 export type TemplateVariables = typeof templateVariableSchemas;
@@ -309,5 +317,9 @@ export const defaultSmsTemplates: Record<
   },
   invoice_overdue: {
     body: `{{companyName}}: A friendly reminder that invoice {{invoiceNumber}} ({{amount}}) is still open. {{#if payLink}}Pay here: {{payLink}} {{/if}}Questions? Call {{phoneNumber}}.`,
+  },
+  // Lead-gen warranty-expiry nudge — invites a check-up, NEVER quotes a price.
+  warranty_expiring: {
+    body: `{{companyName}}: Your {{equipment}} warranty expires {{expiryDate}} — reply to schedule a check-up. Questions? Call {{phoneNumber}}.`,
   },
 } as const;

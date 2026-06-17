@@ -16,6 +16,7 @@ import { organizations } from "@/lib/db/schema";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { verifyCronAuth } from "@/lib/cron-auth";
 import { sendOverdueInvoiceReminders } from "@/lib/communication/money-triggers";
+import { enqueueWarrantyReminders } from "@/lib/admin/warranty-queries";
 import { getCommsOutcomeSummary } from "@/lib/communication/observability";
 import { logger } from "@/lib/logger";
 
@@ -31,7 +32,21 @@ export async function GET(request: Request) {
     let considered = 0;
     let enqueued = 0;
     let skipped = 0;
+    let warrantyEnqueued = 0;
     for (const org of orgs) {
+      // Warranty-expiry reminder sweep (lead-gen), FOLDED into this daily cron —
+      // it ENQUEUES; the process-communications drain sends. Failure-isolated:
+      // a warranty error must never abort the dunning pass for this org.
+      try {
+        const w = await enqueueWarrantyReminders(org.id);
+        warrantyEnqueued += w.enqueued;
+      } catch (error) {
+        logger.error(
+          { error, organizationId: org.id },
+          "Warranty reminder sweep failed for org",
+        );
+      }
+
       try {
         const r = await sendOverdueInvoiceReminders(org.id);
         considered += r.considered;
@@ -67,7 +82,13 @@ export async function GET(request: Request) {
         );
       }
     }
-    return successResponse({ orgs: orgs.length, considered, enqueued, skipped });
+    return successResponse({
+      orgs: orgs.length,
+      considered,
+      enqueued,
+      skipped,
+      warrantyEnqueued,
+    });
   } catch (error) {
     logger.error({ error }, "Dunning cron failed");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);

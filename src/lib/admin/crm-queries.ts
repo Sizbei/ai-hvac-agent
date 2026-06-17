@@ -227,6 +227,8 @@ export async function getCustomerById(
       serialNumber: e.serialNumber,
       installDate: e.installDate?.toISOString() ?? null,
       warrantyExpiration: e.warrantyExpiration?.toISOString() ?? null,
+      warrantyType: e.warrantyType,
+      warrantyProvider: e.warrantyProvider,
       locationInHome: e.locationInHome,
       notes: e.notes,
     })),
@@ -323,6 +325,8 @@ export async function addEquipment(
     warrantyExpiration: input.warrantyExpiration
       ? new Date(input.warrantyExpiration)
       : null,
+    warrantyType: input.warrantyType ?? null,
+    warrantyProvider: input.warrantyProvider ?? null,
     locationInHome: input.locationInHome ?? null,
     notes: input.notes ?? null,
   });

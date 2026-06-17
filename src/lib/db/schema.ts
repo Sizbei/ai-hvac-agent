@@ -682,6 +682,14 @@ export const customerEquipment = pgTable(
     laborWarrantyExpiration: timestamp("labor_warranty_expiration", {
       withTimezone: true,
     }),
+    // ── Warranty tracking + proactive-reminder fields (parity stage) ──
+    // The kind of coverage ("manufacturer", "labor", "extended") and who
+    // provides it ("Carrier", "Trane", a third-party plan). All nullable;
+    // intake/admin fill when known. No price/cents ever stored here. The
+    // warranty-expiring reminder sweep keys off the existing `warrantyExpiration`
+    // column above.
+    warrantyType: text("warranty_type"),
+    warrantyProvider: text("warranty_provider"),
     locationInHome: text("location_in_home"),
     notes: text("notes"),
     // Stage 5: the physical site this unit is installed at (assets belong to a
@@ -1432,6 +1440,10 @@ export const communicationTriggerTypeEnum = pgEnum("communication_trigger_type",
   "estimate_sent",
   "payment_receipt",
   "invoice_overdue",
+  // Lead-gen: a proactive nudge that an installed unit's warranty is expiring
+  // soon, inviting the customer to schedule a check-up. Marketing-ish — quiet
+  // hours apply, gated by the marketingMessages preference (see TRIGGER_RULES).
+  "warranty_expiring",
 ]);
 
 // Job execution status
