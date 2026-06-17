@@ -1451,6 +1451,14 @@ export const communicationTriggerTypeEnum = pgEnum("communication_trigger_type",
   "warranty_expiring",
 ]);
 
+// Review-request lifecycle: created (pending) -> ask sent (sent) -> customer
+// responded with a rating/feedback (responded).
+export const reviewRequestStatusEnum = pgEnum("review_request_status", [
+  "pending",
+  "sent",
+  "responded",
+]);
+
 // Job execution status
 export const communicationJobStatusEnum = pgEnum("communication_job_status", [
   "pending",
@@ -2282,6 +2290,53 @@ export const membershipVisits = pgTable(
     uniqueIndex("membership_visits_membership_period_unique").on(
       table.customerMembershipId,
       table.periodKey,
+    ),
+  ],
+);
+
+// review_requests — post-completion review asks + the public response capture.
+//
+// One row per completed job (idempotency enforced both by the outbound ledger at
+// enqueue time and by the partial-unique service_request index here). The public
+// response page is bearer-authorized by reviewTokenHash (sha256 at rest, like
+// estimates/staff invites). COMPLIANCE: there is NO sentiment routing — the
+// public-review link is offered to EVERYONE who responds, regardless of rating.
+// `feedback` is PRIVATE free text and must NEVER be logged.
+export const reviewRequests = pgTable(
+  "review_requests",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    serviceRequestId: uuid("service_request_id")
+      .notNull()
+      .references(() => serviceRequests.id, { onDelete: "cascade" }),
+    customerId: uuid("customer_id").references(() => customers.id, {
+      onDelete: "set null",
+    }),
+    status: reviewRequestStatusEnum("status").notNull().default("pending"),
+    // sha256 of the plaintext token (the bearer of authority for the public page).
+    reviewTokenHash: text("review_token_hash").notNull(),
+    // 1-5 star rating, set on response. Loggable (not PII).
+    rating: integer("rating"),
+    // PRIVATE free-text feedback — NEVER log this value.
+    feedback: text("feedback"),
+    // True once the responder clicked through to the public-review platform link.
+    publicClicked: boolean("public_clicked").notNull().default(false),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    respondedAt: timestamp("responded_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("review_requests_org_idx").on(table.organizationId),
+    // Token lookup for the public response page.
+    uniqueIndex("review_requests_token_hash_unique").on(table.reviewTokenHash),
+    // One review request per completed job (idempotency backstop to the ledger).
+    uniqueIndex("review_requests_service_request_unique").on(
+      table.serviceRequestId,
     ),
   ],
 );

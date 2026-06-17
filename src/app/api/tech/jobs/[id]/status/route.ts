@@ -7,6 +7,7 @@
  * dispatcher changes.
  */
 import { NextRequest } from "next/server";
+import { after } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { getAdminSession } from "@/lib/auth/session";
@@ -14,6 +15,7 @@ import { db } from "@/lib/db";
 import { serviceRequests } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { updateRequestStatus } from "@/lib/admin/queries";
+import { createReviewRequest } from "@/lib/reviews/review-queries";
 import { MANUAL_TARGET_STATUSES } from "@/lib/admin/request-status";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { successResponse, errorResponse } from "@/lib/api-response";
@@ -47,7 +49,7 @@ export async function POST(
 
     // A tech may only advance a job assigned to THEM (org-scoped + assignee-scoped).
     const [owned] = await db
-      .select({ id: serviceRequests.id })
+      .select({ id: serviceRequests.id, customerId: serviceRequests.customerId })
       .from(serviceRequests)
       .where(
         withTenant(
@@ -85,6 +87,23 @@ export async function POST(
       { serviceRequestId: id, technicianId: session.userId, status: result.status },
       "Technician advanced job status",
     );
+
+    // On completion, enqueue the post-job review ask. Best-effort + non-blocking
+    // (after()): a comms failure must never fail the status change that already
+    // committed. Idempotent per job (the ledger claims review:{serviceRequestId}).
+    if (result.status === "completed") {
+      const orgId = session.organizationId;
+      const customerId = owned.customerId;
+      after(() =>
+        createReviewRequest(orgId, id, customerId).catch((reviewError: unknown) => {
+          logger.error(
+            { error: reviewError, serviceRequestId: id },
+            "createReviewRequest failed (best-effort)",
+          );
+        }),
+      );
+    }
+
     return successResponse({ status: result.status });
   } catch (error) {
     logger.error({ error }, "Failed to advance job status");
