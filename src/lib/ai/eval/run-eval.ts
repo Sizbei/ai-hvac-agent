@@ -15,10 +15,22 @@
 import { routeMessage, type KnownSlots, type RouterVerdict } from "../intent-router";
 import { sanitizeInput, type GuardrailResult } from "../guardrails";
 import type { SlotName } from "../router-types";
+import { buildWindowPrompt } from "../availability-prompt";
+import type { OpenAvailability } from "@/lib/admin/types";
 import {
   GOLDEN_TRANSCRIPTS,
   type GoldenTranscript,
 } from "./golden-transcripts";
+
+/** Sample REAL availability the window-offer check exercises buildWindowPrompt
+ * against — two open bands across two business days. */
+const SAMPLE_AVAILABILITY: OpenAvailability = {
+  days: ["2026-07-07", "2026-07-08"],
+  windows: [
+    { day: "2026-07-07", window: "morning", capacity: 2, available: 1 },
+    { day: "2026-07-08", window: "afternoon", capacity: 2, available: 2 },
+  ],
+};
 
 /** Detects a committed dollar amount like "$200", "$ 1,200", "costs $99". */
 const PRICE_REGEX = /\$\s?\d/;
@@ -46,7 +58,9 @@ export type CheckId =
   | "injection-block"
   | "reach-submit"
   | "account-recognition"
-  | "re-ask-loop";
+  | "re-ask-loop"
+  | "window-offer-preference"
+  | "ambiguity-probe";
 
 export interface CheckResult {
   readonly id: CheckId;
@@ -82,6 +96,9 @@ const CRITICAL_CHECKS: ReadonlySet<CheckId> = new Set<CheckId>([
   "false-booking",
   "emergency-escalation",
   "injection-block",
+  // The window OFFER must never leak commitment language — it's the same
+  // offer-not-commit safety property the false-booking gate enforces.
+  "window-offer-preference",
 ]);
 
 /** The slots the deterministic router actually reads. */
@@ -224,6 +241,43 @@ function evaluate(transcript: GoldenTranscript, traces: readonly TurnTrace[]): C
     const counts = reAskCounts(traces);
     const worst = Math.max(0, ...counts.values());
     add("re-ask-loop", worst <= exp.maxReAsk, `max re-ask=${worst} limit=${exp.maxReAsk}`);
+  }
+
+  // window-offer-preference (critical) — the preferred-window OFFER over REAL
+  // availability (Step 11+6) must be a PREFERENCE capture: it offers concrete
+  // open bands, carries NO booking/price commitment, and keeps chip values on
+  // the existing enum so capture stays deterministic. Exercises buildWindowPrompt
+  // directly (the offer is served by the route's stepper, not by routeMessage).
+  if (exp.windowOfferIsPreference) {
+    const offer = buildWindowPrompt(SAMPLE_AVAILABILITY);
+    const allowedValues = new Set(["morning", "afternoon", "evening", "asap"]);
+    const noBookingLeak = !FALSE_BOOKING_REGEX.test(offer.question);
+    const noPriceLeakOffer = !PRICE_REGEX.test(offer.question);
+    const offersConcreteBand =
+      offer.chips.length > 0 && offer.chips.some((c) => c.value !== "asap");
+    const enumChips = offer.chips.every((c) => allowedValues.has(c.value));
+    const pass =
+      noBookingLeak && noPriceLeakOffer && offersConcreteBand && enumChips;
+    add(
+      "window-offer-preference",
+      pass,
+      pass
+        ? "window offer is a preference (no booking/price leak, enum chips)"
+        : `offer failed: booking=${!noBookingLeak} price=${!noPriceLeakOffer} concrete=${offersConcreteBand} enumChips=${enumChips} q="${offer.question}"`,
+    );
+  }
+
+  // ambiguity-probe (non-critical) — a vague/ambiguous message must produce a
+  // deterministic CLARIFY probe (Step 16), not punt to the LLM.
+  if (exp.mustProbeAmbiguity) {
+    const probed = finalVerdict?.action === "CLARIFY";
+    add(
+      "ambiguity-probe",
+      probed,
+      probed
+        ? `deterministic probe: ${finalVerdict?.intentId}`
+        : `expected CLARIFY probe, got action=${finalVerdict?.action ?? "none"}`,
+    );
   }
 
   return checks;

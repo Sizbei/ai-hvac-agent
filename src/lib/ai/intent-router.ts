@@ -215,6 +215,133 @@ function isGibberish(text: string): boolean {
   });
 }
 
+// ── Deterministic ambiguity probes (CHATBOT-PLAN Step 16) ──
+//
+// When a message is genuinely ambiguous between a few common categories — and we
+// would otherwise punt to the LLM — return a crisp clarifying question instead.
+// CONSERVATIVE BY DESIGN: only a handful of clear, high-frequency ambiguities get
+// a probe; everything else still falls back to the LLM. A probe is the LOWEST-
+// precedence deterministic verdict: it is only ever reached AFTER the emergency
+// short-circuit, the custom-FAQ check, and the compound-message detector have run
+// (so it can never outrank a hazard, a compound multi-intent punt, or a confident
+// known intent). It NEVER captures a slot or commits to anything — it just asks.
+
+/** A single probe: when `applies` is true for the (text, slots), ask `question`. */
+interface AmbiguityProbe {
+  readonly id: string;
+  readonly question: string;
+  readonly applies: (text: string, known: KnownSlots) => boolean;
+}
+
+// Vague "it doesn't work" with no symptom direction → which way is it failing?
+// Only fires when the customer hasn't already told us the issue type (so we don't
+// re-ask a known direction) and the message carries NO cooling/heating/noise cue.
+// NB: normalize() turns an apostrophe into a SPACE ("isn't" → "isn t"), so each
+// contraction is listed with the apostrophe removed AND with the space variant
+// where it changes word adjacency (e.g. "isn t working").
+const VAGUE_MALFUNCTION_TERMS = [
+  "not working",
+  "isnt working",
+  "isn t working",
+  "stopped working",
+  "doesnt work",
+  "doesn t work",
+  "dont work",
+  "don t work",
+  "broken",
+  "broke",
+  "not turning on",
+  "wont turn on",
+  "won t turn on",
+  "acting up",
+  "having issues",
+  "having problems",
+];
+const DIRECTION_CUES = [
+  "cool",
+  "cold",
+  "ac",
+  "air condition",
+  "heat",
+  "warm",
+  "furnace",
+  "noise",
+  "noisy",
+  "sound",
+  "rattl",
+  "bang",
+  "squeal",
+  "grind",
+  "leak",
+  "water",
+  "smell",
+];
+
+// "Cooler" / "unit" that could be a home AC or a commercial walk-in cooler, with
+// no home/commercial signal yet → which is it? Only the refrigeration-vs-residential
+// ambiguity; a plain "ac"/"furnace" is unambiguous and not probed.
+const HOME_OR_COMMERCIAL_TERMS = ["cooler", "walk in", "walk-in", "freezer"];
+const PROPERTY_CUES = [
+  "home",
+  "house",
+  "residential",
+  "apartment",
+  "condo",
+  "commercial",
+  "business",
+  "restaurant",
+  "office",
+  "store",
+  "shop",
+];
+
+function hasAny(text: string, terms: readonly string[]): boolean {
+  return terms.some((t) => text.includes(t));
+}
+
+const AMBIGUITY_PROBES: readonly AmbiguityProbe[] = [
+  {
+    id: "clarify-malfunction-direction",
+    question:
+      "Happy to help — is it not cooling, not heating, or making a noise?",
+    applies: (text, known) =>
+      !known.issueType &&
+      hasAny(text, VAGUE_MALFUNCTION_TERMS) &&
+      !hasAny(text, DIRECTION_CUES),
+  },
+  {
+    id: "clarify-home-or-commercial",
+    question: "Got it — is this for your home or a commercial property?",
+    applies: (text, known) =>
+      !known.extras?.propertyType &&
+      hasAny(text, HOME_OR_COMMERCIAL_TERMS) &&
+      !hasAny(text, PROPERTY_CUES),
+  },
+];
+
+/**
+ * The deterministic ambiguity probe for a message, or null when none applies.
+ * Pure; reads only the normalized text + already-known slots. The first matching
+ * probe wins (ordered most-common-first). Returns a CLARIFY verdict carrying the
+ * question as `reply` — the route serves it as a canned reply (0 LLM tokens).
+ */
+function ambiguityProbe(text: string, known: KnownSlots): RouterVerdict | null {
+  for (const probe of AMBIGUITY_PROBES) {
+    if (probe.applies(text, known)) {
+      return {
+        action: "CLARIFY",
+        intentId: probe.id,
+        confidence: 0,
+        reply: probe.question,
+        issueType: null,
+        urgency: null,
+        escalate: false,
+      };
+    }
+  }
+  return null;
+}
+
 function buildReply(
   entry: KnowledgeBaseEntry,
   action: RouterAction,
@@ -318,7 +445,9 @@ export function routeMessage(
         };
       }
     }
-    return FALLBACK;
+    // Nothing matched the catalog (e.g. a bare "it's not working"). Try a
+    // deterministic ambiguity probe before punting to the LLM.
+    return ambiguityProbe(text, known) ?? FALLBACK;
   }
 
   // 2) Compound-message detector (review H4): if two or more DISTINCT
@@ -391,11 +520,20 @@ export function routeMessage(
     };
   }
 
-  if (action === "FALLBACK_LLM") return { ...FALLBACK, confidence };
+  // From here a known intent is about to PUNT to the LLM (it's a FALLBACK_LLM
+  // intent, or its confidence is below the act threshold). Before punting, try a
+  // deterministic ambiguity probe — this sits BELOW the emergency short-circuit,
+  // the custom-FAQ check, and the compound detector (all returned above), so a
+  // probe can never outrank a hazard, a multi-intent punt, or a confident intent.
+  if (action === "FALLBACK_LLM") {
+    return ambiguityProbe(text, known) ?? { ...FALLBACK, confidence };
+  }
 
-  if (confidence < LOW_HARM_THRESHOLD) return { ...FALLBACK, confidence };
+  if (confidence < LOW_HARM_THRESHOLD) {
+    return ambiguityProbe(text, known) ?? { ...FALLBACK, confidence };
+  }
   if (confidence < ACT_THRESHOLD && !LOW_HARM_ACTIONS.has(action)) {
-    return { ...FALLBACK, confidence };
+    return ambiguityProbe(text, known) ?? { ...FALLBACK, confidence };
   }
 
   // 5) COLLECT_INFO → SUBMIT promotion when required slots are complete.

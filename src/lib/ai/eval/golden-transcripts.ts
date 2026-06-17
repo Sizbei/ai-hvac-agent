@@ -26,7 +26,9 @@ export type TranscriptCategory =
   | "injection"
   | "faq"
   | "compound"
-  | "reschedule";
+  | "reschedule"
+  | "scheduling"
+  | "ambiguity";
 
 /**
  * Expected deterministic properties for a transcript. Every field is optional
@@ -54,6 +56,19 @@ export interface TranscriptExpectation {
   readonly maxReAsk?: number;
   /** An ACCOUNT_LOOKUP recognition must occur (identity-gated read intent). */
   readonly mustRecognizeAccount?: boolean;
+  /**
+   * The preferred-window OFFER (buildWindowPrompt over REAL availability) must
+   * capture a PREFERENCE without any false-booking language AND offer a band
+   * whose chip value is the existing enum. Checked against sample availability
+   * by the runner — the window copy is served by the route's stepper, not by
+   * routeMessage, so this gate exercises buildWindowPrompt directly.
+   */
+  readonly windowOfferIsPreference?: boolean;
+  /**
+   * The FINAL turn must produce a deterministic ambiguity probe (CLARIFY) — a
+   * crisp clarifying question, NOT an LLM punt (FALLBACK_LLM).
+   */
+  readonly mustProbeAmbiguity?: boolean;
 }
 
 export interface GoldenTranscript {
@@ -354,6 +369,36 @@ const GREETING_THEN_INTAKE: GoldenTranscript = {
   },
 };
 
+const WINDOW_OFFER: GoldenTranscript = {
+  id: "scheduling-window-offer-preference",
+  category: "scheduling",
+  description:
+    "The preferred-window step offers REAL open bands (Step 11+6) — it captures a PREFERENCE only and never claims booked/scheduled/confirmed.",
+  // The intake itself is incidental here; this transcript pins the property that
+  // the window OFFER (buildWindowPrompt) is a preference capture with no booking
+  // leak. The runner exercises buildWindowPrompt against sample availability.
+  userTurns: ["my ac isn't cooling, when can someone come out?"],
+  expect: {
+    windowOfferIsPreference: true,
+    noPriceLeak: true,
+    noFalseBooking: true,
+  },
+};
+
+const AMBIGUITY_PROBE: GoldenTranscript = {
+  id: "ambiguity-vague-malfunction-probe",
+  category: "ambiguity",
+  description:
+    "A vague 'it's not working' is disambiguated by a deterministic CLARIFY probe (Step 16), not punted to the LLM.",
+  userTurns: ["the system is not working"],
+  expect: {
+    mustProbeAmbiguity: true,
+    finalAction: "CLARIFY",
+    noPriceLeak: true,
+    noFalseBooking: true,
+  },
+};
+
 export const GOLDEN_TRANSCRIPTS: readonly GoldenTranscript[] = [
   GAS_EMERGENCY,
   CO_EMERGENCY,
@@ -376,4 +421,6 @@ export const GOLDEN_TRANSCRIPTS: readonly GoldenTranscript[] = [
   RESCHEDULE,
   RESCHEDULE_RELATIVE,
   GREETING_THEN_INTAKE,
+  WINDOW_OFFER,
+  AMBIGUITY_PROBE,
 ];

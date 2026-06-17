@@ -261,3 +261,57 @@ describe("account-data intents (identified-customer reads, v1)", () => {
     expect(v.intentId).not.toBe("account-data-balance");
   });
 });
+
+describe("deterministic ambiguity probes (Step 16)", () => {
+  it("probes vague malfunction with a crisp direction question (not an LLM punt)", () => {
+    const v = routeMessage("it's not working");
+    expect(v.action).toBe("CLARIFY");
+    expect(v.intentId).toBe("clarify-malfunction-direction");
+    expect(v.reply).toMatch(/not cooling, not heating, or making a noise/i);
+    expect(v.escalate).toBe(false);
+  });
+
+  it("probes a home-vs-commercial ambiguity (cooler) instead of punting", () => {
+    const v = routeMessage("my cooler is down");
+    expect(v.action).toBe("CLARIFY");
+    expect(v.intentId).toBe("clarify-home-or-commercial");
+    expect(v.reply).toMatch(/home or a commercial property/i);
+  });
+
+  it("does NOT probe a confident single-intent message", () => {
+    const v = routeMessage("my ac is blowing warm air");
+    expect(v.action).not.toBe("CLARIFY");
+  });
+
+  it("does NOT probe direction once the issue type is already known", () => {
+    const v = routeMessage("it's not working", { issueType: "cooling_not_working" });
+    expect(v.action).not.toBe("CLARIFY");
+  });
+
+  it("does NOT probe home-vs-commercial once propertyType is known", () => {
+    const v = routeMessage("my cooler is down", {
+      extras: { propertyType: "commercial" },
+    });
+    expect(v.action).not.toBe("CLARIFY");
+  });
+
+  it("NEVER outranks an emergency — a hazard still escalates", () => {
+    const v = routeMessage("i smell gas and my system is not working");
+    expect(v.action).toBe("ESCALATE");
+    expect(v.escalate).toBe(true);
+  });
+
+  it("NEVER outranks the compound detector — multi-intent still punts to LLM", () => {
+    const v = routeMessage(
+      "my furnace is not heating and my thermostat is blank and there is weak airflow",
+    );
+    expect(v.action).toBe("FALLBACK_LLM");
+  });
+
+  it("a probe is a preference/clarify only — never escalates or commits", () => {
+    const v = routeMessage("it's not working");
+    expect(v.escalate).toBe(false);
+    expect(v.issueType).toBeNull();
+    expect(v.urgency).toBeNull();
+  });
+});

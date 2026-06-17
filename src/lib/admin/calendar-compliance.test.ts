@@ -1,17 +1,20 @@
 /**
- * Calendar-compliance integration test — "the bot never over-promises timing."
+ * Calendar-compliance integration test — "the bot offers options, never commits."
  *
- * Policy: the customer-facing window offer (buildWindowPrompt) must NOT surface
- * concrete dates, openings, or any committed time/window. The bot asks a soft
- * time-of-day PREFERENCE only; the team coordinates the actual time later. This
- * test wires the real pure capacity layer (computeOpenWindows) into the prompt
- * builder exactly as the live path does, and proves that NO MATTER what the
- * calendar looks like — wide open, partially booked, or fully booked — the
- * customer prompt is identical and leaks nothing about capacity or dates.
+ * Policy (CHATBOT-PLAN Step 11+6): the customer-facing window offer
+ * (buildWindowPrompt) surfaces REAL open day/time-band options as a PREFERENCE
+ * capture — but it must NEVER commit to a time: no "booked"/"scheduled"/
+ * "confirmed"/"you're all set" language, and no $ price. The team coordinates the
+ * actual time later and the customer/staff still finalize. When the calendar has
+ * no openings (fully booked / nothing configured) the offer falls back to the
+ * generic soft time-of-day preference.
  *
- * (computeOpenWindows itself is still exercised for admin scheduling; its
- * capacity math is covered by availability.test.ts. Here we only assert the
- * customer prompt is calendar-INDEPENDENT.)
+ * This test wires the real pure capacity layer (computeOpenWindows) into the
+ * prompt builder exactly as the live path does, and proves the offer reflects the
+ * calendar (open bands appear, fully-booked bands don't) WITHOUT ever committing.
+ *
+ * (computeOpenWindows' capacity math is covered by availability.test.ts; here we
+ * assert the customer prompt's offer-not-commit contract end to end.)
  */
 import { describe, it, expect } from "vitest";
 import { computeOpenWindows } from "./availability";
@@ -27,7 +30,14 @@ import type {
 const WED = "2026-07-01";
 const THU = "2026-07-02";
 
-const EXPECTED_CHIPS = ["morning", "afternoon", "evening", "asap"];
+// Chip VALUES must always stay on the existing band enum so capture stays
+// deterministic, regardless of whether concrete bands or the fallback is shown.
+const ALLOWED_CHIP_VALUES = new Set(["morning", "afternoon", "evening", "asap"]);
+
+// Commitment language the offer must NEVER use — the offer-not-commit guardrail.
+const COMMITMENT_REGEX =
+  /\b(booked|scheduled|confirmed|you'?re all set|reserved)\b/i;
+const PRICE_REGEX = /\$\s?\d/;
 
 /** Full-day (8am–8pm Eastern) availability slot for a tech on a weekday so every
  * band has capacity unless a booking subtracts it. */
@@ -76,44 +86,68 @@ function offerFor(
   return buildWindowPrompt(open);
 }
 
-/** Assert a prompt is the calendar-independent soft-preference prompt: no date,
- * no openings, no time commitment, and exactly the four preference chips. */
-function expectSoftPreference(result: ReturnType<typeof buildWindowPrompt>) {
-  expect(result.question).toMatch(/preference on time of day/i);
-  expect(result.question).toMatch(/team coordinates the actual time/i);
-  expect(result.question).not.toMatch(/Jul \d/);
-  expect(result.question).not.toMatch(/next opening/i);
-  expect(result.question).not.toMatch(/confirm the exact time/i);
-  expect(result.chips.map((c) => c.value)).toEqual(EXPECTED_CHIPS);
+/** Assert any offer (concrete OR fallback) honors the offer-not-commit contract:
+ * no commitment language, no price, and chip values on the band enum. */
+function expectNeverCommits(result: ReturnType<typeof buildWindowPrompt>) {
+  expect(result.question).not.toMatch(COMMITMENT_REGEX);
+  expect(result.question).not.toMatch(PRICE_REGEX);
+  expect(result.chips.every((c) => ALLOWED_CHIP_VALUES.has(c.value))).toBe(true);
 }
 
-describe("calendar compliance — bot never quotes a time/window to the customer", () => {
-  it("wide-open calendar → soft preference only, no date or openings", () => {
+/** Assert the generic soft-preference fallback (used when nothing is open). */
+function expectSoftPreferenceFallback(
+  result: ReturnType<typeof buildWindowPrompt>,
+) {
+  expect(result.question).toMatch(/preference on time of day/i);
+  expect(result.question).toMatch(/team coordinates the actual time/i);
+  expect(result.chips.map((c) => c.value)).toEqual([
+    "morning",
+    "afternoon",
+    "evening",
+    "asap",
+  ]);
+  expectNeverCommits(result);
+}
+
+describe("calendar compliance — bot offers options but never commits to a time", () => {
+  it("wide-open calendar → offers concrete bands, never commits", () => {
     const techs = ["t1", "t2"];
     const availability = [fullDaySlot("t1", 3), fullDaySlot("t2", 3)];
-    expectSoftPreference(offerFor(techs, availability, [], [WED]));
+    const offer = offerFor(techs, availability, [], [WED]);
+    // A real opening is surfaced as a preference ask…
+    expect(offer.question).toMatch(/preferred time/i);
+    expect(offer.question).toMatch(/Wed (morning|afternoon|evening)/);
+    // …but never as a commitment.
+    expectNeverCommits(offer);
   });
 
-  it("partially booked calendar → SAME soft preference, leaks no capacity", () => {
+  it("partially booked calendar → only OPEN bands offered, never commits", () => {
     const techs = ["t1", "t2"];
     const availability = [fullDaySlot("t1", 3), fullDaySlot("t2", 3)];
-    // Both techs booked the morning band — capacity differs, prompt must not.
+    // Both techs booked the morning band → morning is fully booked on Wed.
     const jobs = [bookedJob("t1", WED, 8, 12), bookedJob("t2", WED, 8, 12)];
-    expectSoftPreference(offerFor(techs, availability, jobs, [WED]));
+    const offer = offerFor(techs, availability, jobs, [WED]);
+    // Afternoon/evening are still open; Wed morning is gone.
+    expect(offer.question).not.toContain("Wed morning");
+    expect(offer.question).toMatch(/Wed (afternoon|evening)/);
+    expectNeverCommits(offer);
   });
 
-  it("fully booked calendar → SAME soft preference (never reveals 'fully booked')", () => {
+  it("fully booked calendar → soft-preference fallback (never reveals 'fully booked')", () => {
     const techs = ["t1"];
     const availability = [fullDaySlot("t1", 3)];
     const jobs = [bookedJob("t1", WED, 8, 20)]; // all of Wed booked
-    expectSoftPreference(offerFor(techs, availability, jobs, [WED]));
+    const offer = offerFor(techs, availability, jobs, [WED]);
+    // No openings → generic ask, and it must not announce the calendar is full.
+    expectSoftPreferenceFallback(offer);
+    expect(offer.question).not.toMatch(/fully booked|no openings|nothing open/i);
   });
 
-  it("no availability configured → SAME soft preference", () => {
-    expectSoftPreference(offerFor(["t1"], [], [], [WED]));
+  it("no availability configured → soft-preference fallback", () => {
+    expectSoftPreferenceFallback(offerFor(["t1"], [], [], [WED]));
   });
 
-  it("multi-day mixed bookings → prompt is identical regardless", () => {
+  it("multi-day mixed bookings → offers soonest open bands, never commits", () => {
     const techs = ["t1", "t2"];
     const availability = [
       fullDaySlot("t1", 3),
@@ -126,6 +160,10 @@ describe("calendar compliance — bot never quotes a time/window to the customer
       bookedJob("t2", WED, 8, 12),
       bookedJob("t1", WED, 12, 16),
     ];
-    expectSoftPreference(offerFor(techs, availability, jobs, [WED, THU]));
+    const offer = offerFor(techs, availability, jobs, [WED, THU]);
+    // Wed morning fully booked → not offered; later open bands are.
+    expect(offer.question).not.toContain("Wed morning");
+    expect(offer.question).toMatch(/(Wed|Thu) (afternoon|evening|morning)/);
+    expectNeverCommits(offer);
   });
 });
