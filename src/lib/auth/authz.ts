@@ -22,6 +22,32 @@ export function isSuperAdmin(
 }
 
 /**
+ * Whether `session` belongs to a PLATFORM admin — the cross-org operator who may
+ * provision new tenants. This is deliberately SEPARATE from `super_admin`: a
+ * super_admin is the top role WITHIN one org and must NOT be able to create
+ * other orgs. Platform-admin authority comes only from an env allowlist
+ * (PLATFORM_ADMIN_EMAILS, comma-separated), checked by normalized email — so it
+ * cannot be granted by any in-app role change.
+ *
+ * Returns false when the env var is unset/empty (closed by default).
+ */
+export function isPlatformAdmin(
+  session: Pick<AdminSessionPayload, "email">,
+): boolean {
+  const allow = process.env.PLATFORM_ADMIN_EMAILS;
+  if (!allow) return false;
+
+  const sessionEmail = session.email.trim().toLowerCase();
+  if (!sessionEmail) return false;
+
+  return allow
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter((e) => e.length > 0)
+    .includes(sessionEmail);
+}
+
+/**
  * Whether `actorRole` is allowed to manage a user whose role is `targetRole`
  * (create, promote/demote, activate/deactivate, delete, reset password).
  *

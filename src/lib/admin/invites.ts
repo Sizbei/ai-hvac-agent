@@ -3,7 +3,7 @@ import "server-only";
 import { randomBytes, createHash } from "node:crypto";
 import { and, eq, asc, gt, isNull, desc } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { staffInvites, users } from "@/lib/db/schema";
+import { staffInvites, users, organizations } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { canAssignRole } from "@/lib/auth/authz";
 import type { AdminRole, AdminSessionPayload } from "@/lib/auth/types";
@@ -284,11 +284,16 @@ export interface AcceptedInvite {
   readonly organizationId: string;
   readonly email: string;
   readonly name: string;
-  readonly role: InvitableRole;
-  /** A ready-to-mint admin session, present ONLY for an admin-role invite. A
-   * technician holds no admin session (verifyToken rejects it), so this is null
-   * for technician invites — the account is created and the recipient is told to
-   * use the field-staff entry point, not the admin dashboard. */
+  /** The EFFECTIVE role the new user holds. Normally the invite's role
+   * (admin/technician). For the org's provisioned owner (invite.email matches
+   * the org's stored ownerEmail) this is promoted to `super_admin` — see the
+   * owner special-case in acceptInvite. */
+  readonly role: AdminRole | "technician";
+  /** A ready-to-mint admin session, present ONLY for an admin-tier invite (admin
+   * or the promoted owner's super_admin). A technician holds no admin session
+   * (verifyToken rejects it), so this is null for technician invites — the
+   * account is created and the recipient is told to use the field-staff entry
+   * point, not the admin dashboard. */
   readonly session: AdminSessionPayload | null;
 }
 
@@ -352,19 +357,66 @@ export async function acceptInvite(
       and(eq(staffInvites.id, invite.id), isNull(staffInvites.acceptedAt)),
     );
 
-  // Only an admin-role invite yields an admin session. A technician invite
+  // --- Owner promotion (provisioned-org owner only) ---
+  // The staff_invites enum can never store `super_admin`, so a normal invite can
+  // NEVER grant it (createInvite/canAssignRole are untouched). The ONE safe
+  // exception: a freshly-provisioned org records its intended owner in
+  // organizations.ownerEmail. If THIS invite's email matches that stored
+  // ownerEmail (case-insensitive), the acceptor is that owner and is promoted to
+  // super_admin so the org has a top-tier operator. A non-owner invite (email !=
+  // ownerEmail) is NEVER promoted. The promotion is a single org-scoped UPDATE
+  // (never cross-org), and ownerEmail is then consumed (set NULL) so the stored
+  // PII is removed and the promotion can't re-fire.
+  let effectiveRole: AdminRole | "technician" = invite.role;
+
+  // Read ownerEmail from the ORGANIZATIONS row (not the invite). NULL for legacy
+  // orgs and any org whose owner already accepted — handled safely below.
+  const [org] = await db
+    .select({ ownerEmail: organizations.ownerEmail })
+    .from(organizations)
+    .where(eq(organizations.id, invite.organizationId))
+    .limit(1);
+
+  const ownerEmail = org?.ownerEmail ?? null;
+  const isProvisionedOwner =
+    ownerEmail !== null &&
+    normalizeEmail(ownerEmail) === normalizeEmail(invite.email);
+
+  if (isProvisionedOwner) {
+    // Targeted, org-scoped promotion: only this user, only in this org.
+    await db
+      .update(users)
+      .set({ role: "super_admin", updatedAt: new Date() })
+      .where(
+        and(
+          eq(users.id, created.staff.id),
+          eq(users.organizationId, invite.organizationId),
+        ),
+      );
+
+    // Consume the owner claim: removes the stored PII and prevents re-promotion.
+    await db
+      .update(organizations)
+      .set({ ownerEmail: null, updatedAt: new Date() })
+      .where(eq(organizations.id, invite.organizationId));
+
+    effectiveRole = "super_admin";
+  }
+
+  // An admin-tier effective role yields an admin session. A technician invite
   // creates the user but mints no admin cookie (technician is not a session
-  // role). invite.role is the trusted source — created.staff.role echoes it.
+  // role). The session role is the EFFECTIVE role: super_admin for the promoted
+  // owner, otherwise the invite's role.
   const session: AdminSessionPayload | null =
-    invite.role === "admin"
-      ? {
+    effectiveRole === "technician"
+      ? null
+      : {
           userId: created.staff.id,
           organizationId: invite.organizationId,
           email: created.staff.email,
           name: created.staff.name,
-          role: "admin",
-        }
-      : null;
+          role: effectiveRole,
+        };
 
   return {
     ok: true,
@@ -373,7 +425,7 @@ export async function acceptInvite(
       organizationId: invite.organizationId,
       email: created.staff.email,
       name: created.staff.name,
-      role: invite.role,
+      role: effectiveRole,
       session,
     },
   };

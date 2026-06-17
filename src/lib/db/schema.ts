@@ -201,11 +201,32 @@ export const availabilitySyncStatusEnum = pgEnum("availability_sync_status", [
   "failed",
 ]);
 
+// Lifecycle state of a tenant org. "active" is the default; "trial" and
+// "suspended" are reserved for Stage 10 billing/entitlement gating (no behavior
+// is wired to them yet — they are recorded so the column exists when billing
+// lands). Provisioning always creates an org as "active".
+export const orgStatusEnum = pgEnum("org_status", [
+  "active",
+  "suspended",
+  "trial",
+]);
+
 // 1. organizations
 export const organizations = pgTable("organizations", {
   id: uuid("id").defaultRandom().primaryKey(),
   name: text("name").notNull(),
   slug: text("slug").notNull().unique(),
+  // Tenant lifecycle state. Defaults to "active" so every existing row
+  // (and the demo org) is active without a backfill.
+  status: orgStatusEnum("status").notNull().default("active"),
+  // The user id of the PLATFORM admin who provisioned this org (null for the
+  // seeded demo org and any org created before provisioning existed). Not a FK:
+  // the creator is a cross-org actor that need not live in this org's user set.
+  createdBy: uuid("created_by"),
+  // The intended first owner's email, captured at provisioning so we know who
+  // the org belongs to even before they accept their invite. Normalized
+  // (trim+lowercase). PII — never emitted in audit details.
+  ownerEmail: text("owner_email"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
