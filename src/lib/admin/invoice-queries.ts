@@ -75,7 +75,13 @@ export async function createInvoiceFromSoldEstimate(
       totalCents: estimateOptions.totalCents,
     })
     .from(estimateOptions)
-    .where(eq(estimateOptions.id, est.soldOptionId))
+    .where(
+      withTenant(
+        estimateOptions,
+        organizationId,
+        eq(estimateOptions.id, est.soldOptionId),
+      ),
+    )
     .limit(1);
   if (!opt) return { ok: false, reason: "no_sold_option" };
 
@@ -88,7 +94,13 @@ export async function createInvoiceFromSoldEstimate(
       lineTotalCents: estimateLineItems.lineTotalCents,
     })
     .from(estimateLineItems)
-    .where(eq(estimateLineItems.optionId, est.soldOptionId));
+    .where(
+      withTenant(
+        estimateLineItems,
+        organizationId,
+        eq(estimateLineItems.optionId, est.soldOptionId),
+      ),
+    );
 
   const invoiceId = randomUUID();
   const invoiceInsert = db.insert(invoices).values({
@@ -121,7 +133,11 @@ export type TakePaymentResult =
   | { readonly ok: true; readonly paymentId: string; readonly invoiceState: string }
   | {
       readonly ok: false;
-      readonly reason: "invoice_not_found" | "invoice_not_chargeable" | "charge_failed";
+      readonly reason:
+        | "invoice_not_found"
+        | "invoice_not_chargeable"
+        | "exceeds_balance"
+        | "charge_failed";
     };
 
 /**
@@ -150,6 +166,14 @@ export async function takePayment(
   // (that would over-collect or charge a cancelled invoice).
   if (inv.state !== "open" && inv.state !== "draft") {
     return { ok: false, reason: "invoice_not_chargeable" };
+  }
+  // Over-collection guard: never charge more than the invoice's remaining
+  // balance. Without this, a single call with an oversized amount (or repeated
+  // partial/deposit calls) could collect well beyond totalCents and still mark
+  // the invoice "paid". Deposits are partial and pass this fine.
+  const remainingCents = inv.totalCents - inv.amountPaidCents;
+  if (params.amountCents <= 0 || params.amountCents > remainingCents) {
+    return { ok: false, reason: "exceeds_balance" };
   }
 
   const paymentId = randomUUID();
@@ -424,20 +448,38 @@ export async function reconcilePayment(
 
   const newPaid = inv.amountPaidCents + pay.amountCents;
   const invoiceState = newPaid >= inv.totalCents ? "paid" : "open";
-  await db.batch([
-    db
-      .update(payments)
-      .set({
-        status: "succeeded",
-        providerPaymentId: charge.providerPaymentId,
-        updatedAt: new Date(),
-      })
-      .where(withTenant(payments, organizationId, eq(payments.id, paymentId))),
-    db
-      .update(invoices)
-      .set({ amountPaidCents: newPaid, state: invoiceState, updatedAt: new Date() })
-      .where(withTenant(invoices, organizationId, eq(invoices.id, pay.invoiceId))),
-  ]);
+
+  // Compare-and-set claim: flip pending->succeeded ONLY while still 'pending',
+  // and gate the invoice credit on having won that flip. neon-http has no
+  // interactive transaction, so a 2-statement db.batch can't condition the
+  // invoice UPDATE on the payment row count — two concurrent reconciles (e.g.
+  // the manual button + the cron sweep) would both pass the status pre-check and
+  // each add pay.amountCents, double-crediting the invoice. Making the status
+  // flip the atomic claim means exactly one caller proceeds to credit.
+  const claimed = await db
+    .update(payments)
+    .set({
+      status: "succeeded",
+      providerPaymentId: charge.providerPaymentId,
+      updatedAt: new Date(),
+    })
+    .where(
+      withTenant(
+        payments,
+        organizationId,
+        eq(payments.id, paymentId),
+        eq(payments.status, "pending"),
+      ),
+    )
+    .returning({ id: payments.id });
+  // Lost the race (someone else already resolved this payment): do NOT credit
+  // the invoice again.
+  if (claimed.length === 0) return { ok: true, outcome: "noop" };
+
+  await db
+    .update(invoices)
+    .set({ amountPaidCents: newPaid, state: invoiceState, updatedAt: new Date() })
+    .where(withTenant(invoices, organizationId, eq(invoices.id, pay.invoiceId)));
 
   return { ok: true, outcome: "completed", invoiceState };
 }

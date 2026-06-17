@@ -113,6 +113,9 @@ vi.mock("@/lib/db/schema", () => {
     customerEquipment: t("customerEquipment"),
     followUps: t("followUps"),
     reviewRequests: t("reviewRequests"),
+    requestNotes: t("requestNotes"),
+    customFieldValues: t("customFieldValues"),
+    technicianTimeEntries: t("technicianTimeEntries"),
     auditLog: t("auditLog"),
     platformAuditLog: t("platformAuditLog"),
   };
@@ -176,6 +179,7 @@ describe("anonymizeCustomer", () => {
     selectQueue.push([{ id: CUST }]); // existence check
     selectQueue.push([{ id: "sess-1" }, { id: "sess-2" }]); // sessions
     selectQueue.push([{ storageKey: "k1" }, { storageKey: "k2" }]); // attachments
+    selectQueue.push([{ id: "req-1" }, { id: "req-2" }]); // service requests
   }
 
   it("returns false when the customer does not exist", async () => {
@@ -247,6 +251,7 @@ describe("anonymizeCustomer", () => {
       recipientPhoneEncrypted: null,
       recipientEmailEncrypted: null,
       templateVariables: {},
+      errorMessage: null,
     });
     expect(opFor("serviceHistory")?.set).toMatchObject({
       technicianNotes: null,
@@ -280,6 +285,26 @@ describe("anonymizeCustomer", () => {
     seedExisting();
     await anonymizeCustomer(ORG, CUST);
     expect(opFor("communicationPreferences")?.op).toBe("delete");
+  });
+
+  it("deletes custom field values (free-form PII on the customer + their requests)", async () => {
+    seedExisting();
+    await anonymizeCustomer(ORG, CUST);
+    expect(opFor("customFieldValues")?.op).toBe("delete");
+  });
+
+  it("deletes internal request notes (free-text PII; requests are KEPT so no cascade)", async () => {
+    seedExisting();
+    await anonymizeCustomer(ORG, CUST);
+    expect(opFor("requestNotes")?.op).toBe("delete");
+  });
+
+  it("nulls technician time-entry notes on the customer's requests", async () => {
+    seedExisting();
+    await anonymizeCustomer(ORG, CUST);
+    const tte = opFor("technicianTimeEntries");
+    expect(tte?.op).toBe("update");
+    expect(tte?.set).toMatchObject({ note: null });
   });
 
   it("does NOT touch invoices/payments (financials are kept untouched)", async () => {

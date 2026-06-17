@@ -40,6 +40,9 @@ import {
   customerEquipment,
   followUps,
   reviewRequests,
+  requestNotes,
+  customFieldValues,
+  technicianTimeEntries,
   auditLog,
   platformAuditLog,
 } from "@/lib/db/schema";
@@ -97,8 +100,11 @@ export async function anonymizeCustomer(
   if (!existing) return false;
 
   // Pre-read: this customer's session ids (to scrub the sessions + delete their
-  // messages) and the R2 keys of their attachments (for after() cleanup).
-  const [sessionRows, attachmentRows] = await Promise.all([
+  // messages), the R2 keys of their attachments (for after() cleanup), and the
+  // ids of their service requests (request_notes / time-entry notes / custom
+  // field values keyed off those rows must be scrubbed — service_requests rows
+  // are KEPT de-identified, so their child-row cascade never fires).
+  const [sessionRows, attachmentRows, requestRows] = await Promise.all([
     db
       .select({ id: customerSessions.id })
       .from(customerSessions)
@@ -119,10 +125,21 @@ export async function anonymizeCustomer(
           eq(attachments.customerId, customerId),
         ),
       ),
+    db
+      .select({ id: serviceRequests.id })
+      .from(serviceRequests)
+      .where(
+        withTenant(
+          serviceRequests,
+          organizationId,
+          eq(serviceRequests.customerId, customerId),
+        ),
+      ),
   ]);
 
   const sessionIds = sessionRows.map((r) => r.id);
   const storageKeys = attachmentRows.map((r) => r.storageKey);
+  const requestIds = requestRows.map((r) => r.id);
 
   const now = new Date();
 
@@ -248,6 +265,9 @@ export async function anonymizeCustomer(
         recipientPhoneEncrypted: null,
         recipientEmailEncrypted: null,
         templateVariables: {},
+        // Provider error strings can embed the recipient phone/email (e.g. a
+        // Twilio "invalid number +1555…" message). Clear them too.
+        errorMessage: null,
       })
       .where(
         withTenant(
@@ -310,6 +330,43 @@ export async function anonymizeCustomer(
           communicationPreferences,
           organizationId,
           eq(communicationPreferences.customerId, customerId),
+        ),
+      ),
+    // Custom field VALUES attached to this customer (and to their kept service
+    // requests) are free-form PII (gate codes, preferred-contact text, etc.).
+    // entityId uniquely identifies the row regardless of entityType, so match by
+    // the customer's id + their request ids. [customerId, ...requestIds] is never
+    // empty, so inArray always has a target.
+    db
+      .delete(customFieldValues)
+      .where(
+        withTenant(
+          customFieldValues,
+          organizationId,
+          inArray(customFieldValues.entityId, [customerId, ...requestIds]),
+        ),
+      ),
+    // Internal dispatcher notes (free text → PII) on this customer's requests.
+    // The requests are KEPT de-identified, so the FK cascade never fires; delete
+    // the notes explicitly. inArray([]) is a valid no-op when there are none.
+    db
+      .delete(requestNotes)
+      .where(
+        withTenant(
+          requestNotes,
+          organizationId,
+          inArray(requestNotes.requestId, requestIds),
+        ),
+      ),
+    // Technician time-entry notes on this customer's requests can carry PII.
+    db
+      .update(technicianTimeEntries)
+      .set({ note: null })
+      .where(
+        withTenant(
+          technicianTimeEntries,
+          organizationId,
+          inArray(technicianTimeEntries.serviceRequestId, requestIds),
         ),
       ),
     // Audit: counts/table names ONLY — never name/email/phone.
