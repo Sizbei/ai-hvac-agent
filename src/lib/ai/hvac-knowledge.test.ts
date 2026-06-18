@@ -152,6 +152,14 @@ describe("HVAC_KNOWLEDGE_AND_SAFETY block", () => {
     it("keeps the no-invented-credentials guardrail", () => {
       expect(HVAC_KNOWLEDGE_AND_SAFETY).toMatch(/invent.*credentials|credentials|certified/i);
     });
+
+    it("specifies the answer shape (T3) and the defer-specifics habit (T4)", () => {
+      expect(HVAC_KNOWLEDGE_AND_SAFETY).toMatch(/2-4 sentences/i);
+      expect(HVAC_KNOWLEDGE_AND_SAFETY).toMatch(/pure-education/i);
+      expect(HVAC_KNOWLEDGE_AND_SAFETY).toMatch(
+        /exact spec depends|never guess a number/i,
+      );
+    });
   });
 });
 
