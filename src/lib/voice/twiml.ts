@@ -90,21 +90,35 @@ function speak(text: string, voice: VoiceMode): string {
 }
 
 /**
- * A <Gather> that collects the caller's speech and POSTs the result to `action`.
- * Speaks `say` first; if a `reprompt` is given it follows the Gather so Twilio
- * reads it when the caller stays silent (then the call can be re-driven).
+ * A <Gather> that collects the caller's speech (and optionally DTMF) and POSTs
+ * the result to `action`. Speaks `say` first; if a `reprompt` is given it
+ * follows the Gather so Twilio reads it when the caller stays silent.
+ *
+ * When `input` is "dtmf speech" (ZIP verify), the <Gather> accepts keypad digits
+ * as well as speech and returns the digits in the `Digits` field. `numDigits`
+ * caps how many digits to collect before auto-submitting (5 for a ZIP); omit
+ * to wait for `finishOnKey` or the timeout. `finishOnKey` defaults to "#" when
+ * numDigits is not set (so the caller can press # to submit).
  */
 export function gatherTwiML(params: {
   readonly say: string;
   readonly action: string;
   readonly reprompt?: string;
   readonly voice?: VoiceMode;
+  readonly input?: "speech" | "dtmf speech";
+  readonly numDigits?: number;
+  readonly finishOnKey?: string;
 }): string {
-  const { say, action, reprompt, voice = POLLY_VOICE } = params;
+  const { say, action, reprompt, voice = POLLY_VOICE, input = "speech", numDigits, finishOnKey } = params;
   const repromptLine = reprompt ? `\n  ${speak(reprompt, voice)}` : "";
+  const numDigitsAttr = numDigits !== undefined ? ` numDigits="${numDigits}"` : "";
+  const finishOnKeyAttr =
+    input === "dtmf speech" && numDigits === undefined
+      ? ` finishOnKey="${finishOnKey ?? "#"}"`
+      : "";
   return `${XML_DECL}
 <Response>
-  <Gather input="speech" action="${escapeXml(action)}" method="POST" speechTimeout="${resolveSpeechTimeout()}">
+  <Gather input="${input}" action="${escapeXml(action)}" method="POST" speechTimeout="${resolveSpeechTimeout()}"${numDigitsAttr}${finishOnKeyAttr}>
     ${speak(say, voice)}
   </Gather>${repromptLine}
 </Response>`;

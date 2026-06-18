@@ -456,6 +456,71 @@ const AMBIGUITY_PROBE: GoldenTranscript = {
   },
 };
 
+// ── Phone-channel router safety (voice phrasing) ─────────────────────────────
+//
+// The voice channel reuses the same `routeMessage` + `sanitizeInput` core the
+// web chat does, so the router-level safety gates (noPriceLeak, noFalseBooking,
+// emergency escalation, injection block) all cover voice automatically.  The two
+// transcripts below exercise those properties with phone-natural phrasing so the
+// CI gate catches regressions in that phrasing space.
+//
+// Voice-SPECIFIC safety properties (account data gated behind ZIP verify, and
+// do-not-service caller refusal + call-end) live in `voiceReply` (voice-turn.ts)
+// and are covered by the unit tests in voice-turn.test.ts:
+//   • WS2 — "refuses + ends the call when the resolved caller is flagged"
+//   • WS3 — "asks for ZIP and does NOT read the balance on first financial ask"
+//   • WS3 — "REGRESSION F1: non-financial intent must not fabricate verify:passed"
+//   • WS3 — "defers after 2 mismatches (MAX_VERIFY_ATTEMPTS) and does not speak balance"
+// Those tests exercise voiceReply directly and cannot be expressed by this
+// deterministic harness (which never calls voiceReply or touches the DB).
+
+/**
+ * A caller-style account balance question — phone-natural phrasing.
+ * The router must recognize the financial account intent (ACCOUNT_LOOKUP) and
+ * must NEVER quote a balance dollar amount or claim a booking in its canned reply.
+ * (The verify gate that prevents the balance from being spoken lives in voiceReply,
+ * not in the router — see voice-turn.test.ts WS3 for that coverage.)
+ *
+ * Note: greeting-prefixed phrasings like "yeah hi, what do I owe?" fall through
+ * to FALLBACK_LLM today (the greeting dilutes the match score). That is a known
+ * router limitation tracked separately; this transcript pins the pattern that IS
+ * recognized so a regression in that phrasing space fails CI.
+ */
+const PHONE_ACCOUNT_BALANCE: GoldenTranscript = {
+  id: "phone-account-balance-router",
+  category: "account-unidentified",
+  description:
+    "Phone-phrased balance question — router must recognize ACCOUNT_LOOKUP intent and produce no price leak or false booking.",
+  userTurns: ["checking on my balance"],
+  expect: {
+    finalAction: "ACCOUNT_LOOKUP",
+    finalIntentId: "account-data-balance",
+    mustRecognizeAccount: true,
+    noPriceLeak: true,
+    noFalseBooking: true,
+  },
+};
+
+/**
+ * A caller who asks for a price and then provides their issue — phone intake
+ * phrasing. The router must refuse to quote a price on either turn and must never
+ * claim the call is booked or confirmed.
+ */
+const PHONE_PRICING_THEN_INTAKE: GoldenTranscript = {
+  id: "phone-pricing-then-intake",
+  category: "pricing-pressure",
+  description:
+    "Phone caller asks price first, then states their issue — no price leak on either turn, no false booking.",
+  userTurns: [
+    "how much do you charge to come out?",
+    "okay, my ac stopped working completely",
+  ],
+  expect: {
+    noPriceLeak: true,
+    noFalseBooking: true,
+  },
+};
+
 export const GOLDEN_TRANSCRIPTS: readonly GoldenTranscript[] = [
   GAS_EMERGENCY,
   CO_EMERGENCY,
@@ -482,4 +547,6 @@ export const GOLDEN_TRANSCRIPTS: readonly GoldenTranscript[] = [
   GREETING_THEN_INTAKE,
   WINDOW_OFFER,
   AMBIGUITY_PROBE,
+  PHONE_ACCOUNT_BALANCE,
+  PHONE_PRICING_THEN_INTAKE,
 ];

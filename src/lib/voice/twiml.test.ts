@@ -153,6 +153,26 @@ describe("gatherTwiML", () => {
   });
 });
 
+describe("gatherTwiML DTMF", () => {
+  it("renders <Gather input='dtmf speech' numDigits='5'> when those params are passed", () => {
+    const xml = gatherTwiML({
+      say: "Please enter your 5-digit ZIP code.",
+      action: "/api/voice/gather",
+      input: "dtmf speech",
+      numDigits: 5,
+    });
+    expect(xml).toContain('input="dtmf speech"');
+    expect(xml).toContain('numDigits="5"');
+    expect(xml).not.toContain("finishOnKey");
+  });
+
+  it("defaults to speech-only input when no input param is given", () => {
+    const xml = gatherTwiML({ say: "Hello.", action: "/x" });
+    expect(xml).toContain('input="speech"');
+    expect(xml).not.toContain("dtmf");
+  });
+});
+
 describe("sayThenHangupTwiML", () => {
   it("says the message then hangs up", () => {
     const xml = sayThenHangupTwiML("Goodbye now.");

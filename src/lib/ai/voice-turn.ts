@@ -14,7 +14,20 @@
 import { generateText } from "ai";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { customerSessions, messages } from "@/lib/db/schema";
+import { customerSessions, messages, customers, customerLocations, organizationSettings } from "@/lib/db/schema";
+import { withTenant } from "@/lib/db/tenant";
+import { decrypt } from "@/lib/crypto";
+import { resolveAfterHoursConfig } from "@/lib/admin/after-hours";
+import { decideAfterHoursDisclosure } from "./after-hours-chat";
+import { checkTokenBudget, addTokenUsage } from "./token-budget";
+import { buildAccountLookupReply } from "./account-dispatch";
+import {
+  requiresVerify,
+  checkZipMatch,
+  extractZipsFromAddress,
+  MAX_VERIFY_ATTEMPTS,
+  type VerifyState,
+} from "./account-verify";
 import { getModel } from "./provider";
 import { routeMessage } from "./intent-router";
 import { extractAddressAtAddressStep } from "./slot-extract";
@@ -51,6 +64,7 @@ import { nextTriageStep, captureEnrichmentAnswer } from "./triage";
 import { buildModelMessages, MAX_HISTORY, type ChatTurn } from "./compaction";
 import type { Urgency } from "./router-types";
 import { logger } from "@/lib/logger";
+import { screenAssistantReply } from "./output-guardrail";
 
 /**
  * The optional enrichment steps voice actually asks (see VOICE_STEP_PHRASING),
@@ -124,6 +138,14 @@ export const VOICE_SUBMITTED_REPLY =
 const VOICE_OFFICE_REPLY =
   "I'm not able to book this automatically. Please give our office a call and we'll help you directly. Thanks for calling.";
 
+/** Spoken when a financial account intent requires ZIP verification. */
+const VOICE_VERIFY_ASK =
+  "To pull up your account, can you tell me or key in the 5-digit ZIP code on your account?";
+
+/** Spoken when the caller exhausts their verification attempts. */
+const VOICE_VERIFY_DEFER =
+  "I can't confirm that over the phone right now — I'll have our team follow up, or you can check your account online. Anything else I can help with?";
+
 export interface VoiceSession {
   readonly id: string;
   readonly organizationId: string;
@@ -132,6 +154,9 @@ export interface VoiceSession {
   readonly maxTurns: number;
   readonly metadata: string | null;
   readonly runningSummary?: string | null;
+  readonly customerId?: string | null;
+  readonly tokensUsed?: number;
+  readonly tokenBudget?: number;
 }
 
 export interface VoiceReplyResult {
@@ -141,6 +166,12 @@ export interface VoiceReplyResult {
   readonly endCall: boolean;
   /** The session state after this turn. */
   readonly nextState: SessionState;
+  /**
+   * When set to "dtmf_zip", the gather route should use
+   * `<Gather input="dtmf speech" numDigits="5">` so the caller can key in their
+   * ZIP on the keypad. Absent on all other turns (use the default speech gather).
+   */
+  readonly nextGatherMode?: "dtmf_zip";
 }
 
 export async function voiceReply(params: {
@@ -148,8 +179,12 @@ export async function voiceReply(params: {
   readonly history: readonly ChatTurn[];
   readonly userMessage: string;
   readonly ipAddress: string;
+  /** DTMF digits from <Gather input="dtmf speech"> — present only when the caller
+   *  pressed keypad digits (e.g. a 5-digit ZIP for the financial verify step).
+   *  Undefined/null when the turn was speech-only. */
+  readonly dtmfDigits?: string | null;
 }): Promise<VoiceReplyResult> {
-  const { session, history, userMessage, ipAddress } = params;
+  const { session, history, userMessage, ipAddress, dtmfDigits } = params;
   const organizationId = session.organizationId;
   const sessionScope = and(
     eq(customerSessions.id, session.id),
@@ -166,16 +201,218 @@ export async function voiceReply(params: {
     content: userMessage,
   });
 
+  // Do-not-service early gate (parity with the web chat). When ANI resolved this
+  // call to a flagged customer, refuse before any router/LLM work. Non-critical:
+  // a DB blip degrades to "no early gate" (the submit-time backstop still holds).
+  if (session.customerId) {
+    try {
+      const [flagRow] = await db
+        .select({ doNotService: customers.doNotService })
+        .from(customers)
+        .where(withTenant(customers, organizationId, eq(customers.id, session.customerId)))
+        .limit(1);
+      if (flagRow?.doNotService) {
+        const reply = toSpokenReply(VOICE_OFFICE_REPLY, {});
+        // Tolerate write failures so a flagged caller is STILL refused even if a
+        // bookkeeping write blips — never fall through to normal intake here.
+        await db
+          .insert(messages)
+          .values({
+            organizationId, sessionId: session.id, role: "assistant", content: reply, tokensUsed: 0,
+          })
+          .catch((e: unknown) =>
+            logger.error({ error: e, sessionId: session.id }, "do-not-service message persist failed"),
+          );
+        await db
+          .update(customerSessions)
+          .set({ turnCount: newTurnCount, updatedAt: new Date() })
+          .where(sessionScope)
+          .catch((e: unknown) =>
+            logger.error({ error: e, sessionId: session.id }, "do-not-service turn count update failed"),
+          );
+        return { reply, endCall: true, nextState: session.status };
+      }
+    } catch (e: unknown) {
+      logger.error({ error: e, sessionId: session.id }, "voice do-not-service gate read failed");
+    }
+  }
+
   const knownSlots = parseKnownSlots(session.metadata);
   const routerConfig = await getRouterConfig(organizationId).catch(
     () => EMPTY_ORG_CONFIG,
   );
   const routed = routeMessage(userMessage, knownSlots, routerConfig);
-  // Account-data intents (membership/visit/balance/appointment/reschedule) are a
-  // WEB-CHAT v1 capability. The voice channel has no identity gate wired for them
-  // yet, so coerce an ACCOUNT_LOOKUP verdict to a plain LLM fallback here — voice
-  // behavior is byte-identical to before this feature (these questions fall to
-  // the LLM, never reading account data on a phone call).
+
+  // ── Account lookup + financial verify gate (WS3) ──
+  // When the router signals ACCOUNT_LOOKUP AND we have a resolved caller, handle
+  // it here — either serve the account data (non-financial intents or passed
+  // verify) or gate financial intents behind a ZIP verification step.
+  // Falls through to the LLM coercion below only when customerId is absent.
+  if (routed.action === "ACCOUNT_LOOKUP" && session.customerId) {
+    const intentId = routed.intentId ?? null;
+
+    // Read the persisted verify state from the metadata (stored under a top-level
+    // "verify" key, outside the extraction slots, so it survives slot merges).
+    let verifyState: VerifyState | null = null;
+    try {
+      const rawMeta = session.metadata ? (JSON.parse(session.metadata) as Record<string, unknown>) : null;
+      const v = rawMeta?.verify as Partial<VerifyState> | undefined;
+      if (v && (v.status === "pending" || v.status === "passed" || v.status === "failed")) {
+        verifyState = { status: v.status, attempts: v.attempts ?? 0 };
+      }
+    } catch { /* ignore parse errors */ }
+
+    /**
+     * Helper: persist the assistant turn + verify state and return the result.
+     * Merges the NEW verify state into the existing metadata JSON so other slot
+     * data (issueType, address, etc.) is preserved.
+     *
+     * `newVerify` may be null when a non-financial intent served the account data
+     * and no verify interaction has occurred — in that case we preserve whatever
+     * the existing verifyState is (including null) rather than writing any verify
+     * key, so a subsequent financial intent still demands a real ZIP check.
+     */
+    async function persistAccountTurn(
+      reply: string,
+      newVerify: VerifyState | null,
+      opts?: { nextGatherMode?: "dtmf_zip" },
+    ): Promise<VoiceReplyResult> {
+      const spokenReply = toSpokenReply(reply, { nearLimit });
+      await db.insert(messages).values({
+        organizationId,
+        sessionId: session.id,
+        role: "assistant",
+        content: spokenReply,
+        tokensUsed: 0,
+      });
+      // Merge verify state into the existing metadata JSON without clobbering slots.
+      let existingMeta: Record<string, unknown> = {};
+      try {
+        if (session.metadata) existingMeta = JSON.parse(session.metadata) as Record<string, unknown>;
+      } catch { /* start fresh on parse error */ }
+      // Only write the verify key when we have a real state to persist.
+      // A null newVerify means the non-financial path: keep existing metadata as-is.
+      const updatedMeta = newVerify !== null
+        ? JSON.stringify({ ...existingMeta, verify: newVerify })
+        : JSON.stringify(existingMeta);
+      await db
+        .update(customerSessions)
+        .set({ metadata: updatedMeta, turnCount: newTurnCount, updatedAt: new Date() })
+        .where(sessionScope);
+      return {
+        reply: spokenReply,
+        endCall: false,
+        nextState: session.status,
+        ...(opts?.nextGatherMode ? { nextGatherMode: opts.nextGatherMode } : {}),
+      };
+    }
+
+    // Non-financial intents serve immediately with no verify step required.
+    // IMPORTANT: we must NOT fabricate a "passed" verify here. Pass the EXISTING
+    // verifyState unchanged (null if no verify has occurred, or a prior real state).
+    // A fabricated "passed" would let a subsequent financial intent skip the ZIP check.
+    if (!requiresVerify(intentId)) {
+      const accountReply = await buildAccountLookupReply(
+        intentId,
+        organizationId,
+        session.customerId,
+        userMessage,
+      ).catch(() => null);
+      if (accountReply !== null) {
+        return persistAccountTurn(accountReply, verifyState);
+      }
+      // If the dispatch returned null (unrecognized intent), fall through to LLM.
+    } else {
+      // Financial intent — apply the verify gate.
+
+      // Already passed this session → serve directly.
+      if (verifyState?.status === "passed") {
+        const accountReply = await buildAccountLookupReply(
+          intentId,
+          organizationId,
+          session.customerId,
+          userMessage,
+        ).catch(() => null);
+        if (accountReply !== null) {
+          return persistAccountTurn(accountReply, verifyState);
+        }
+      }
+
+      // Already failed → defer (no re-ask).
+      if (verifyState?.status === "failed") {
+        return persistAccountTurn(VOICE_VERIFY_DEFER, verifyState);
+      }
+
+      // Verify is pending OR not yet started → process the caller's answer.
+      if (verifyState?.status === "pending") {
+        // The verify answer is dtmfDigits (keypad) if present, else the speech.
+        const verifyAnswer = dtmfDigits ?? userMessage;
+        const currentAttempts = verifyState.attempts;
+
+        // Fetch on-file ZIPs from customer.addressEncrypted + all customerLocations.
+        const onFileZips: string[] = [];
+        try {
+          const [custRow] = await db
+            .select({ addressEncrypted: customers.addressEncrypted })
+            .from(customers)
+            .where(withTenant(customers, organizationId, eq(customers.id, session.customerId!)))
+            .limit(1);
+          if (custRow?.addressEncrypted) {
+            try {
+              onFileZips.push(...extractZipsFromAddress(decrypt(custRow.addressEncrypted)));
+            } catch { /* decrypt failure → no ZIP from this source */ }
+          }
+        } catch (e: unknown) {
+          logger.error({ error: e, sessionId: session.id }, "voice verify: customer address read failed");
+        }
+        try {
+          const locRows = await db
+            .select({ addressEncrypted: customerLocations.addressEncrypted })
+            .from(customerLocations)
+            .where(withTenant(customerLocations, organizationId, eq(customerLocations.customerId, session.customerId!)))
+            .limit(10);
+          for (const loc of locRows) {
+            try {
+              onFileZips.push(...extractZipsFromAddress(decrypt(loc.addressEncrypted)));
+            } catch { /* decrypt failure → skip this location */ }
+          }
+        } catch (e: unknown) {
+          logger.error({ error: e, sessionId: session.id }, "voice verify: location address read failed");
+        }
+
+        if (checkZipMatch(verifyAnswer, onFileZips)) {
+          // Match → verify passed. Serve the account data.
+          const passed: VerifyState = { status: "passed", attempts: currentAttempts + 1 };
+          const accountReply = await buildAccountLookupReply(
+            intentId,
+            organizationId,
+            session.customerId,
+            userMessage,
+          ).catch(() => null);
+          return persistAccountTurn(accountReply ?? VOICE_VERIFY_DEFER, passed);
+        } else {
+          // Mismatch. Check if this exhausts the allowed attempts.
+          const newAttempts = currentAttempts + 1;
+          if (newAttempts >= MAX_VERIFY_ATTEMPTS) {
+            const failed: VerifyState = { status: "failed", attempts: newAttempts };
+            return persistAccountTurn(VOICE_VERIFY_DEFER, failed);
+          } else {
+            // Re-ask (attempts < limit).
+            const reasked: VerifyState = { status: "pending", attempts: newAttempts };
+            return persistAccountTurn(VOICE_VERIFY_ASK, reasked, { nextGatherMode: "dtmf_zip" });
+          }
+        }
+      }
+
+      // No verify state yet — this is the first financial ask. Set pending and ask.
+      const initiated: VerifyState = { status: "pending", attempts: 0 };
+      return persistAccountTurn(VOICE_VERIFY_ASK, initiated, { nextGatherMode: "dtmf_zip" });
+    }
+  }
+
+  // Coerce any ACCOUNT_LOOKUP verdict without a resolved caller to FALLBACK_LLM
+  // (the resolver didn't match an ANI for this call, so we can't serve account
+  // data safely).
   const verdict =
     routed.action === "ACCOUNT_LOOKUP"
       ? { ...routed, action: "FALLBACK_LLM" as const, reply: null }
@@ -488,6 +725,48 @@ export async function voiceReply(params: {
       }
     }
 
+    // ── After-hours disclosure (WS4) ──
+    // When the intake is still in progress (not complete), check if the caller is
+    // contacting us after business hours. If so — and the disclosure hasn't already
+    // been shown this session (latch via extras.afterHoursShown) — prepend the
+    // canned charge-disclosure line to the next question. Uses the SAME pure helper
+    // the web chat uses; any config-load failure degrades to no disclosure so intake
+    // always continues. Emergencies have already returned early above.
+    let afterHoursPrefix = "";
+    if (!extractionComplete) {
+      try {
+        const [ahRow] = await db
+          .select({ afterHoursConfig: organizationSettings.afterHoursConfig })
+          .from(organizationSettings)
+          .where(eq(organizationSettings.organizationId, organizationId))
+          .limit(1);
+        const ahConfig = resolveAfterHoursConfig(ahRow?.afterHoursConfig ?? null);
+        const ahDecision = decideAfterHoursDisclosure({
+          clock: new Date(),
+          config: ahConfig,
+          urgency: (merged.urgency as Urgency | null) ?? null,
+          customerSignal: "unknown",
+        });
+        const alreadyShown = merged.extras?.afterHoursShown === "1";
+        if (ahDecision.kind === "disclose_charge" && !alreadyShown) {
+          afterHoursPrefix = ahDecision.copy + " ";
+          // Latch: re-merge with afterHoursShown so we never disclose twice.
+          const latchedMerged = mergeSlots(merged, { extras: { afterHoursShown: "1" } });
+          if (hasSlotData(latchedMerged)) {
+            const firstUser =
+              history.find((m) => m.role === "user")?.content ?? userMessage;
+            const latchedExtraction = buildExtraction(latchedMerged, firstUser.slice(0, 280));
+            metadataStr = JSON.stringify(latchedExtraction);
+          }
+        }
+      } catch (ahError: unknown) {
+        logger.error(
+          { error: ahError, sessionId: session.id },
+          "After-hours config load failed — skipping disclosure",
+        );
+      }
+    }
+
     // Loop guard: when this turn merely filled a slot (an address/phone/email was
     // just captured) and intake isn't complete yet, advance to the NEXT missing
     // slot rather than re-speaking the router's canned line — re-speaking it is
@@ -495,7 +774,7 @@ export async function voiceReply(params: {
     // (e.g. business hours) is still spoken; completion still wins with the
     // confirmation. `verdict.reply` is preferred only when it's NOT a bare slot
     // provision.
-    const nextQuestion = voiceNextSlotPrompt(merged);
+    const nextQuestion = afterHoursPrefix + voiceNextSlotPrompt(merged);
     // SUBMIT is included: the router's required-slot view (issue/urgency/
     // address) is narrower than the voice gate (phone), so its canned confirm
     // copy — which says "tap Confirm & Submit", a screen affordance — must
@@ -569,13 +848,66 @@ export async function voiceReply(params: {
       ? `\n\nALREADY CAPTURED AND SAVED (never re-ask or re-confirm these): ${knownFacts.join("; ")}.`
       : "";
 
+  // ── Token budget check (WS6) ──
+  // Mirror the web chat's graceful degradation: when the per-session token budget
+  // is exhausted, escalate to a human instead of calling the LLM. Deterministic
+  // turns above are 0-token and always proceed; only the LLM-fallback path is
+  // gated here. checkTokenBudget defaults to 40k when tokenBudget is undefined.
+  const budget = checkTokenBudget(session.tokensUsed ?? 0, session.tokenBudget);
+  if (budget.exhausted) {
+    logger.info(
+      { sessionId: session.id, tokensUsed: session.tokensUsed },
+      "Voice token budget exhausted — degrading to human handoff",
+    );
+    const budgetReply = toSpokenReply(VOICE_OFFICE_REPLY, {});
+    await db
+      .insert(messages)
+      .values({
+        organizationId,
+        sessionId: session.id,
+        role: "assistant",
+        content: budgetReply,
+        tokensUsed: 0,
+      })
+      .catch((e: unknown) =>
+        logger.error({ error: e, sessionId: session.id }, "Voice budget-handoff message persist failed"),
+      );
+    await escalateSession({
+      organizationId,
+      sessionId: session.id,
+      currentStatus: session.status,
+      ipAddress,
+    }).catch((e: unknown) =>
+      logger.error({ error: e, sessionId: session.id }, "Voice budget-handoff escalate failed"),
+    );
+    await db
+      .update(customerSessions)
+      .set({ turnCount: newTurnCount, updatedAt: new Date() })
+      .where(sessionScope)
+      .catch((e: unknown) =>
+        logger.error({ error: e, sessionId: session.id }, "Voice budget-handoff turn count update failed"),
+      );
+    return { reply: budgetReply, endCall: true, nextState: "escalated" };
+  }
+
   const { text, usage } = await generateText({
     model: await getModel(organizationId),
     system: PHONE_SYSTEM_PROMPT + slotContextHint,
     messages: modelMessages,
   });
 
-  const reply = toSpokenReply(text, { nearLimit });
+  // Output guardrail: screen the free-form LLM reply for the two hard safety
+  // properties (never quote a price, never claim a confirmed booking) BEFORE it
+  // is spoken or persisted — same net the web chat applies. Deterministic
+  // template replies above are already safe.
+  const screened = screenAssistantReply(text);
+  if (!screened.safe) {
+    logger.warn(
+      { sessionId: session.id, violations: screened.violations },
+      "Voice output guardrail replaced an unsafe LLM reply",
+    );
+  }
+  const reply = toSpokenReply(screened.reply, { nearLimit });
   const tokensThisCall =
     (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0);
 
@@ -594,9 +926,15 @@ export async function voiceReply(params: {
     session.maxTurns,
   );
 
+  const { newTotal: newTokensTotal } = addTokenUsage(
+    session.tokensUsed ?? 0,
+    tokensThisCall,
+    session.tokenBudget,
+  );
+
   await db
     .update(customerSessions)
-    .set({ status: nextState, turnCount: newTurnCount, updatedAt: new Date() })
+    .set({ status: nextState, turnCount: newTurnCount, tokensUsed: newTokensTotal, updatedAt: new Date() })
     .where(sessionScope);
 
   return { reply, endCall: false, nextState };

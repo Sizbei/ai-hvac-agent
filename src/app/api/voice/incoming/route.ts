@@ -14,6 +14,7 @@ import {
   TWIML_HEADERS,
 } from "@/lib/voice/twiml";
 import { logger } from "@/lib/logger";
+import { resolveVoiceIdentity } from "@/lib/voice/resolve-voice-identity";
 
 const GREETING =
   "Thanks for calling. I'm the HVAC assistant. What issue are you having today?";
@@ -58,6 +59,8 @@ export async function POST(request: NextRequest) {
   try {
     const organizationId = DEMO_ORG_ID;
 
+    const callerContext = await resolveVoiceIdentity(organizationId, params.From);
+
     const [limitsRow] = await db
       .select({
         chatTokenBudget: organizationSettings.chatTokenBudget,
@@ -81,6 +84,7 @@ export async function POST(request: NextRequest) {
         tokenBudget: resolveTokenBudget(limitsRow?.chatTokenBudget),
         turnCount: 0,
         maxTurns: resolveMaxTurns(limitsRow?.chatMaxTurns),
+        customerId: callerContext?.customerId ?? null,
       })
       .onConflictDoNothing({ target: customerSessions.token });
 
