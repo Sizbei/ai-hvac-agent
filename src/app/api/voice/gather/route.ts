@@ -36,6 +36,7 @@ export async function POST(request: NextRequest) {
 
   const callSid = params.CallSid;
   const speech = (params.SpeechResult ?? "").trim();
+  const digits = (params.Digits ?? "").trim();
 
   if (!callSid) {
     return new Response(hangupTwiML(), { headers: TWIML_HEADERS });
@@ -114,6 +115,7 @@ export async function POST(request: NextRequest) {
       history: chatHistory,
       userMessage: sanitized.sanitized,
       ipAddress: ip,
+      dtmfDigits: digits || null,
     });
 
     // Compaction runs in the background (same model as web), bounded so long

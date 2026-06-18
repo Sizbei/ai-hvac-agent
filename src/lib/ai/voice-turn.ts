@@ -151,8 +151,12 @@ export async function voiceReply(params: {
   readonly history: readonly ChatTurn[];
   readonly userMessage: string;
   readonly ipAddress: string;
+  /** DTMF digits from <Gather input="dtmf speech"> — present only when the caller
+   *  pressed keypad digits (e.g. a 5-digit ZIP for the financial verify step).
+   *  Undefined/null when the turn was speech-only. */
+  readonly dtmfDigits?: string | null;
 }): Promise<VoiceReplyResult> {
-  const { session, history, userMessage, ipAddress } = params;
+  const { session, history, userMessage, ipAddress, dtmfDigits } = params;
   const organizationId = session.organizationId;
   const sessionScope = and(
     eq(customerSessions.id, session.id),
