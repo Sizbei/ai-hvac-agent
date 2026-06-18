@@ -51,6 +51,7 @@ import { nextTriageStep, captureEnrichmentAnswer } from "./triage";
 import { buildModelMessages, MAX_HISTORY, type ChatTurn } from "./compaction";
 import type { Urgency } from "./router-types";
 import { logger } from "@/lib/logger";
+import { screenAssistantReply } from "./output-guardrail";
 
 /**
  * The optional enrichment steps voice actually asks (see VOICE_STEP_PHRASING),
@@ -575,7 +576,18 @@ export async function voiceReply(params: {
     messages: modelMessages,
   });
 
-  const reply = toSpokenReply(text, { nearLimit });
+  // Output guardrail: screen the free-form LLM reply for the two hard safety
+  // properties (never quote a price, never claim a confirmed booking) BEFORE it
+  // is spoken or persisted — same net the web chat applies. Deterministic
+  // template replies above are already safe.
+  const screened = screenAssistantReply(text);
+  if (!screened.safe) {
+    logger.warn(
+      { sessionId: session.id, violations: screened.violations },
+      "Voice output guardrail replaced an unsafe LLM reply",
+    );
+  }
+  const reply = toSpokenReply(screened.reply, { nearLimit });
   const tokensThisCall =
     (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0);
 

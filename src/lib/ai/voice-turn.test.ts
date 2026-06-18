@@ -603,3 +603,54 @@ describe("VOICE_CONFIRM_REPLY", () => {
     expect(VOICE_CONFIRM_REPLY.toLowerCase()).not.toContain("tap");
   });
 });
+
+describe("voiceReply output guardrail (WS1)", () => {
+  beforeEach(() => {
+    generateTextMock.mockReset();
+    insertMock.mockReset();
+    updateSetMock.mockReset();
+    escalateMock.mockReset();
+    routeMock.mockReset();
+    extractAllContactMock.mockReset();
+    extractAddressAtAddressStepMock.mockReset();
+    extractSpokenPhoneMock.mockReset();
+    detectCorrectionMock.mockReset();
+    getRouterConfigMock.mockReset();
+    getRouterConfigMock.mockResolvedValue({});
+    submitSessionMock.mockReset();
+    extractAllContactMock.mockReturnValue(noSlots());
+    extractAddressAtAddressStepMock.mockReturnValue(null);
+    extractSpokenPhoneMock.mockReturnValue(null);
+    detectCorrectionMock.mockReturnValue(null);
+  });
+
+  it("screens an unsafe LLM reply before speaking/persisting it", async () => {
+    routeMock.mockReturnValue({
+      action: "FALLBACK_LLM",
+      intentId: null,
+      confidence: 0,
+      reply: null,
+      issueType: null,
+      urgency: null,
+      escalate: false,
+    });
+    generateTextMock.mockResolvedValue({
+      text: "Great, you're all booked for Tuesday and it'll be $200.",
+      usage: { inputTokens: 5, outputTokens: 5 },
+    });
+    const result = await voiceReply({
+      session: baseSession,
+      history: [{ role: "user", content: "random question the router won't route" }],
+      userMessage: "tell me a joke about my account please",
+      ipAddress: "127.0.0.1",
+    });
+    expect(result.reply).not.toMatch(/\$\s?\d/);
+    expect(result.reply.toLowerCase()).not.toContain("booked");
+    // The persisted assistant message should also be screened.
+    const assistantInsert = insertMock.mock.calls
+      .map((c: unknown[]) => c[0] as Record<string, unknown>)
+      .find((m) => m.role === "assistant");
+    expect(String(assistantInsert?.content)).not.toMatch(/\$\s?\d/);
+    expect(String(assistantInsert?.content).toLowerCase()).not.toContain("booked");
+  });
+});
