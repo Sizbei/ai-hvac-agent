@@ -14,7 +14,8 @@
 import { generateText } from "ai";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { customerSessions, messages } from "@/lib/db/schema";
+import { customerSessions, messages, customers } from "@/lib/db/schema";
+import { withTenant } from "@/lib/db/tenant";
 import { getModel } from "./provider";
 import { routeMessage } from "./intent-router";
 import { extractAddressAtAddressStep } from "./slot-extract";
@@ -133,6 +134,7 @@ export interface VoiceSession {
   readonly maxTurns: number;
   readonly metadata: string | null;
   readonly runningSummary?: string | null;
+  readonly customerId?: string | null;
 }
 
 export interface VoiceReplyResult {
@@ -166,6 +168,31 @@ export async function voiceReply(params: {
     role: "user",
     content: userMessage,
   });
+
+  // Do-not-service early gate (parity with the web chat). When ANI resolved this
+  // call to a flagged customer, refuse before any router/LLM work. Non-critical:
+  // a DB blip degrades to "no early gate" (the submit-time backstop still holds).
+  if (session.customerId) {
+    try {
+      const [flagRow] = await db
+        .select({ doNotService: customers.doNotService })
+        .from(customers)
+        .where(withTenant(customers, organizationId, eq(customers.id, session.customerId)))
+        .limit(1);
+      if (flagRow?.doNotService) {
+        const reply = toSpokenReply(VOICE_OFFICE_REPLY, {});
+        await db.insert(messages).values({
+          organizationId, sessionId: session.id, role: "assistant", content: reply, tokensUsed: 0,
+        });
+        await db.update(customerSessions)
+          .set({ turnCount: newTurnCount, updatedAt: new Date() })
+          .where(sessionScope);
+        return { reply, endCall: true, nextState: session.status };
+      }
+    } catch (e: unknown) {
+      logger.error({ error: e, sessionId: session.id }, "voice do-not-service gate read failed");
+    }
+  }
 
   const knownSlots = parseKnownSlots(session.metadata);
   const routerConfig = await getRouterConfig(organizationId).catch(

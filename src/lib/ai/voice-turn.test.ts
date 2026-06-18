@@ -4,6 +4,7 @@ const {
   generateTextMock,
   insertMock,
   updateSetMock,
+  selectLimitMock,
   escalateMock,
   routeMock,
   extractAllContactMock,
@@ -16,6 +17,10 @@ const {
   generateTextMock: vi.fn(),
   insertMock: vi.fn(),
   updateSetMock: vi.fn(),
+  // Backs db.select().from(...).where(...).limit(n) in all paths.
+  // Default: returns [] (no flagged customer row). Override per-test to inject a
+  // doNotService row for the WS2 gate test.
+  selectLimitMock: vi.fn().mockResolvedValue([]),
   escalateMock: vi.fn(),
   routeMock: vi.fn(),
   extractAllContactMock: vi.fn(),
@@ -46,9 +51,16 @@ vi.mock("@/lib/db", () => ({
         return { where: () => Promise.resolve() };
       },
     }),
+    select: () => ({
+      from: () => ({
+        where: () => ({ limit: selectLimitMock }),
+        orderBy: () => selectLimitMock(),
+      }),
+    }),
   },
 }));
-vi.mock("@/lib/db/schema", () => ({ customerSessions: {}, messages: {} }));
+vi.mock("@/lib/db/schema", () => ({ customerSessions: {}, messages: {}, customers: {} }));
+vi.mock("@/lib/db/tenant", () => ({ withTenant: (..._a: unknown[]) => ({}) }));
 
 vi.mock("./escalate-service", () => ({ escalateSession: escalateMock }));
 vi.mock("./intent-router", () => ({ routeMessage: routeMock }));
@@ -101,6 +113,8 @@ describe("voiceReply", () => {
     generateTextMock.mockReset();
     insertMock.mockReset();
     updateSetMock.mockReset();
+    selectLimitMock.mockReset();
+    selectLimitMock.mockResolvedValue([]);
     escalateMock.mockReset();
     routeMock.mockReset();
     extractAllContactMock.mockReset();
@@ -609,6 +623,8 @@ describe("voiceReply output guardrail (WS1)", () => {
     generateTextMock.mockReset();
     insertMock.mockReset();
     updateSetMock.mockReset();
+    selectLimitMock.mockReset();
+    selectLimitMock.mockResolvedValue([]);
     escalateMock.mockReset();
     routeMock.mockReset();
     extractAllContactMock.mockReset();
@@ -652,5 +668,50 @@ describe("voiceReply output guardrail (WS1)", () => {
       .find((m) => m.role === "assistant");
     expect(String(assistantInsert?.content)).not.toMatch(/\$\s?\d/);
     expect(String(assistantInsert?.content).toLowerCase()).not.toContain("booked");
+  });
+});
+
+describe("voiceReply do-not-service (WS2)", () => {
+  beforeEach(() => {
+    generateTextMock.mockReset();
+    insertMock.mockReset();
+    updateSetMock.mockReset();
+    selectLimitMock.mockReset();
+    selectLimitMock.mockResolvedValue([]);
+    escalateMock.mockReset();
+    routeMock.mockReset();
+    extractAllContactMock.mockReset();
+    extractAddressAtAddressStepMock.mockReset();
+    extractSpokenPhoneMock.mockReset();
+    detectCorrectionMock.mockReset();
+    getRouterConfigMock.mockReset();
+    getRouterConfigMock.mockResolvedValue({});
+    submitSessionMock.mockReset();
+    extractAllContactMock.mockReturnValue(noSlots());
+    extractAddressAtAddressStepMock.mockReturnValue(null);
+    extractSpokenPhoneMock.mockReturnValue(null);
+    detectCorrectionMock.mockReturnValue(null);
+  });
+
+  it("refuses + ends the call when the resolved caller is flagged", async () => {
+    // Arrange: a customerId on the session + a customers row with doNotService=true.
+    selectLimitMock.mockResolvedValue([{ doNotService: true }]);
+    routeMock.mockReturnValue({
+      action: "FALLBACK_LLM",
+      intentId: null,
+      confidence: 0,
+      reply: null,
+      issueType: null,
+      urgency: null,
+      escalate: false,
+    });
+    const result = await voiceReply({
+      session: { id: "s1", organizationId: "o1", status: "chatting", turnCount: 1, maxTurns: 40, metadata: null, customerId: "c-flagged" },
+      history: [],
+      userMessage: "my ac is broken",
+      ipAddress: "127.0.0.1",
+    });
+    expect(result.endCall).toBe(true);
+    expect(result.reply.toLowerCase()).toContain("office");
   });
 });

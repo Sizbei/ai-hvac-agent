@@ -109,6 +109,7 @@ export async function POST(request: NextRequest) {
         maxTurns: session.maxTurns,
         metadata: session.metadata,
         runningSummary: session.runningSummary,
+        customerId: session.customerId,
       },
       history: chatHistory,
       userMessage: sanitized.sanitized,
