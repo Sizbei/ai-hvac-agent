@@ -21,11 +21,12 @@ describe("HVAC_KNOWLEDGE_AND_SAFETY block", () => {
       expect(block).toMatch(/even when|hvac framing|hvac.*expert.*also|as an hvac/i);
     });
 
-    it("provides a redirect phrase for off-scope requests", () => {
-      // Should instruct redirecting to heating/cooling questions
-      expect(HVAC_KNOWLEDGE_AND_SAFETY).toMatch(
-        /heating and cooling|heating or cooling/i,
-      );
+    it("instructs an off-scope redirect (quoted phrasing lives in RULES — single source of truth)", () => {
+      // The block tells the model to decline + redirect to HVAC; the exact brand
+      // redirect line is in buildSystemPrompt's RULES section, so there is only
+      // ONE redirect script in the assembled prompt.
+      expect(HVAC_KNOWLEDGE_AND_SAFETY).toMatch(/decline and redirect/i);
+      expect(HVAC_KNOWLEDGE_AND_SAFETY).toMatch(/RULES section/i);
     });
 
     it("explicitly covers off-HVAC categories (legal/medical/creative/coding)", () => {

@@ -67,6 +67,9 @@ describe("buildSystemPrompt — default (no brand)", () => {
     expect(prompt).toContain("SAFETY FIRST");
     // SELF-CHECKS replaced by the shared HVAC_KNOWLEDGE_AND_SAFETY block's safe-help section.
     expect(prompt).toContain("SAFE HOMEOWNER HELP");
+    // Guard against silently dropping the shared knowledge/safety/scope block.
+    expect(prompt).toContain("SCOPE BOUNDARY");
+    expect(prompt).toContain("DANGEROUS-DIY REFUSAL");
     expect(prompt).toMatch(/^\/no_think/);
   });
 
