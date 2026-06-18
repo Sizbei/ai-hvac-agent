@@ -8,8 +8,8 @@ The web chat and the voice/phone agent already share the deterministic intent ro
 
 **Decisions locked in brainstorm:**
 - **Scope:** safety-critical + intake-quality gaps. Pure polish (frustration-aware human offer, conversation-style parity, voice telemetry) and barge-in/streaming TTS are deferred to their own follow-ups.
-- **Approach C:** wire `voice-turn.ts` to the existing tested chat helpers for each gap, AND extract a channel-agnostic shared **core** for the two pieces that are currently chat-coupled and safety-relevant — the **account-identity gate** and the **after-hours decision** — so those can never drift between channels. Do NOT unify the two route orchestrations (rejected as a large, risky refactor of two mature routes for little immediate gain).
-- **Voice identity bar:** caller ANI auto-match (Twilio `From` → HMAC blind-index → `customerId`) drives greeting / repeat-customer / do-not-service with no extra step; but reading **sensitive financials** (balance, membership) aloud requires **one** lightweight confirmation of an on-file detail (service ZIP, with name as fallback). Mismatch/unresolved → safe deferral. This is marginally above web's bar, justified by ANI spoofing + the overhearable nature of spoken account data.
+- **Approach A-refined (revised after adversarial review):** wire `voice-turn.ts` to the helpers the chat route ALREADY uses, without extracting new shared "cores" and without modifying the web path. Two pieces the original draft proposed extracting are already reusable as-is: `decideAfterHoursDisclosure` (`after-hours-chat.ts`) is already a pure, channel-agnostic function, and the contact→customer blind-index lookup is already a shared query (`findCustomerIdByContact`). Refactoring the eval-gated web route to call new abstractions was rejected as gold-plating with real regression risk and little gain. The only genuinely NEW logic is voice-local: an ANI-resolution wrapper and the financial-verify gate (the web path has no verify step to share — web serves account data on contact-match).
+- **Voice identity bar:** caller ANI auto-match (Twilio `From` → `normalizePhone` → HMAC `phoneHash` → `customerId`) drives **repeat-customer context and do-not-service enforcement** with no extra step. It does NOT trigger a name greeting on the opening turn (see WS2 — privacy). Reading **sensitive financials** (balance, membership) aloud requires a lightweight confirmation of an on-file detail, entered by **DTMF keypad (primary) or speech (digit-normalized fallback)**, with up to **2 attempts**, then safe deferral. Once verified, all financial intents are unlocked for that call (per-session, not per-intent). Justified by ANI spoofing + the overhearable nature of spoken account data.
 
 ## Non-goals (v1)
 - Barge-in / streaming TTS (CHATBOT-PLAN Step 19 — a separate UX/latency effort).
@@ -19,14 +19,22 @@ The web chat and the voice/phone agent already share the deterministic intent ro
 - SMS as a third channel.
 
 ## Architecture principle
-`voice-turn.ts` remains the voice-specific orchestrator (TwiML, `<Play>`/`<Say>`, spoken-phone/digit quirks). For each gap it **calls the same helper** the chat route calls. Two helpers whose logic is today embedded in the chat route are extracted to channel-agnostic cores and called by both:
+`voice-turn.ts` remains the voice-specific orchestrator (TwiML, `<Gather>`, `<Play>`/`<Say>`, spoken-phone/digit quirks). For each gap it **calls the existing helper** the chat route already uses — no new shared modules, no changes to the web route:
 
-| New shared core | Extracted from | Consumed by |
-|---|---|---|
-| `src/lib/ai/account-identity.ts` — `resolveIdentity({ contact \| ani })` + `requiresVerify(intent)` + `checkVerify(customerId, answer)` | chat route's `lookupCustomerContext` usage + the identity gate around `ACCOUNT_LOOKUP` | chat route + voice-turn |
-| `src/lib/ai/after-hours-core.ts` — pure `decideAfterHours(config, now, signals)` returning `{ disclose, askUrgency, instruction }` | `after-hours-chat.ts` (`decideAfterHoursDisclosure`) | chat route + voice-turn |
+| Gap | Existing helper reused (no change) |
+|---|---|
+| Output guardrail | `screenAssistantReply` (`src/lib/ai/output-guardrail.ts`) |
+| Customer resolution | `findCustomerIdByContact` (blind-index lookup) |
+| Account reads | account tools + `account-reply.ts` formatting |
+| After-hours decision | `decideAfterHoursDisclosure` (`after-hours-chat.ts`, already pure) |
+| Real windows | availability query + `buildWindowPrompt` |
+| Token budget | `checkTokenBudget` |
+| Async enrichment | `extractServiceRequest` |
+| Spoken-digit parsing | `extractSpokenPhone`'s digit-word normalizer (reused for ZIP) |
 
-Everything else is direct reuse (no new module): `screenAssistantReply`, availability query + `buildWindowPrompt`, `checkTokenBudget`, `extractServiceRequest`.
+Genuinely NEW code, **voice-local only** (lives in `src/lib/voice/`, not shared, because there is no web counterpart):
+- `resolveVoiceIdentity(organizationId, ani)` — thin wrapper: `normalizePhone(ani)` → `findCustomerIdByContact` → persist `customerSessions.customerId`. Returns `null` on absent/withheld ANI or any error.
+- `account-verify.ts` — `requiresVerify(intent)` (a data-driven sensitivity map), `checkVerify(customerId, keypadOrSpokenAnswer)` (match against on-file ZIP(s) / name), and the small per-session verify state machine (below).
 
 ## Workstreams (each an isolated, independently shippable unit)
 
@@ -35,65 +43,72 @@ Everything else is direct reuse (no new module): `screenAssistantReply`, availab
 **Why first:** trivial reuse of the just-shipped guardrail; closes the most dangerous divergence (voice could speak "$300" / "you're booked").
 **Done when:** a voice LLM reply containing a price or a false-booking claim is replaced with the safe reply before TTS; unit + eval coverage (see Testing).
 
-### 2. ANI identity resolution + gate (safety-critical, shared core)
-**What:** On session-create (incoming call) and as a turn-1 backfill, resolve the caller: `Twilio From` → `normalizePhone` → HMAC blind-index → org-scoped `customers` row → persist `customerSessions.customerId`. Then:
-- **Do-not-service:** the existing early gate (`session.customerId` → `customers.doNotService` → `DO_NOT_SERVICE_REPLY`) now fires on voice too (it was dead code on voice because `customerId` was always NULL). The submit-time backstop is unchanged.
-- **Greeting/personalization:** greet by name on the first spoken turn when resolved (mirrors web's repeat-customer greeting).
-**Shared core:** `account-identity.resolveIdentity` takes `{ ani }` (voice) or `{ email, phone }` (web) and returns the resolved org-scoped `customerId | null` using the SAME blind-index lookup. Web is refactored to call it (no behavior change) so the resolution logic is single-sourced.
-**Fail-safe:** any lookup error → treat as unresolved (anonymous intake continues). ANI absent/withheld → unresolved.
+### 2. ANI identity resolution + gate (safety-critical, voice-local)
+**What:** On session-create (incoming call) and as a turn-1 backfill, resolve the caller via `resolveVoiceIdentity(orgId, Twilio From)`: `normalizePhone` → HMAC `phoneHash` → org-scoped `customers` row → persist `customerSessions.customerId`. Org is the voice session's org (today single-tenant — the incoming route's org; multi-tenant dialed-number→org routing is OUT OF SCOPE and noted in Security). Then:
+- **Do-not-service:** the existing early gate (`session.customerId` → `customers.doNotService` → `DO_NOT_SERVICE_REPLY`) now fires on voice too (it was effectively dead on voice because `customerId` was always NULL). The submit-time backstop is unchanged.
+- **Repeat-customer CONTEXT, not a name greeting:** resolution seeds repeat-customer context (history-aware replies) but does **NOT** speak the account holder's name on the opening turn. A phone number is often shared (household, business line); announcing "Hi Sarah" to whoever answers leaks the account holder's identity and is a domestic-safety hazard — this is NOT web parity (web has explicit login/contact-entry consent). Name personalization is allowed only AFTER the caller self-identifies in conversation (they state their name) — then later turns may use it naturally.
+**Fail-safe:** any lookup error → unresolved (anonymous intake continues). ANI absent/withheld/unparseable → unresolved.
 
-### 3. Voice account lookups + 1-step verify (safety-critical)
+### 3. Voice account lookups + verify gate (safety-critical, voice-local)
 **What:** Remove the `voice-turn.ts` coercion that forces `ACCOUNT_LOOKUP` → `FALLBACK_LLM`. For a resolved caller, dispatch account intents to the **same** account tools the chat route uses (`getMembershipSummary`, `getNextVisit`, `getOpenBalance`, appointment status) via `account-reply.ts` formatting.
-**Verify gate:** `account-identity.requiresVerify(intent)` returns true for **sensitive financials** (`balance`, `membership-status`). For those, before reading aloud, voice asks one confirmation ("Can you confirm the ZIP code on your account?"); `checkVerify(customerId, spokenAnswer)` compares against the decrypted on-file service ZIP (name as fallback when no address on file). The pending-verify state + which intent is gated live in `customerSessions.metadata` (e.g. `extras.pendingVerify`). On match → serve; on mismatch or no on-file detail → safe deferral ("I'll have our team follow up / you can check your account portal"), never the data. Non-financial account intents (`next_visit`, `appointment-status`) follow web parity (served on ANI match, no extra step — they reveal scheduling, not money).
-**Why ZIP:** it's overhear-resistant (caller states it, not the system) and present for any customer with a service address; name fallback covers the rare no-address record.
+**Sensitivity map (data-driven, testable):** `requiresVerify(intent)` reads a static map, not inline prose:
+`account-data-balance → financial`, `account-data-membership-status → financial`, `account-data-next-visit → none`, `account-data-appointment-status → none`, `account-data-reschedule → none` (hand-off note only; no money exposed, stays read-only on voice). Only `financial` intents gate.
+**Verify factor + input:** before reading a financial answer aloud, voice asks for the **service ZIP**, accepting **DTMF keypad entry (primary, 100% reliable) OR speech** (`<Gather input="dtmf speech">`). A spoken answer is digit-normalized with `extractSpokenPhone`'s word→digit map ("oh"/"zero" etc.) before compare. `checkVerify` matches the entered 5 digits against the decrypted ZIP of **any** of the customer's on-file service addresses (customer row + `customerLocations`). Name is the fallback factor only when no parseable 5-digit ZIP exists on file (non-US / no address).
+**State machine (per-session, in `customerSessions.metadata.extras.verify`):** `{ status: "pending" | "passed" | "failed", attempts: number }`. Up to **2 attempts** (DTMF makes this generous), then `status="failed"` → safe deferral and never re-ask this call. Once `status="passed"`, ALL financial intents are unlocked for the session (don't re-verify per intent).
+**Deferral copy (fixed):** "I can't confirm that over the phone right now — I'll have our team follow up, or you can check your account online." Never the data.
+**Non-financial account intents** (`next_visit`, `appointment-status`) are served on ANI match with no verify (web parity; they reveal scheduling, not money).
 
-### 4. After-hours disclosure (intake-quality, shared core)
-**What:** Extract the chat route's after-hours/urgency decision into pure `after-hours-core.decideAfterHours(config, now, signals)`. Voice loads the org's `afterHoursConfig` (same query the chat route uses) and, when after hours, speaks the disclosure ("since it's after our normal hours, an additional after-hours charge applies and our team will confirm the details — NEVER a dollar amount") and asks the urgency-gating question, exactly per the existing chat logic. Hazard short-circuit always wins (escalate immediately, never delay for charge talk). Disclosure-once is latched in metadata (no repeat).
-**Fail-safe:** config read error → no disclosure, intake continues (never blocks the call).
+### 4. After-hours disclosure (intake-quality, reuse existing helper)
+**What:** Voice loads the org's `afterHoursConfig` (same query the chat route uses) and calls the EXISTING pure `decideAfterHoursDisclosure(...)` (no new core). When it decides after-hours applies, voice speaks a **deterministic canned disclosure line** ("since it's after our normal hours, an additional after-hours charge applies and our team will confirm the details" — NEVER a dollar amount) and asks the urgency-gating question. NOTE the channel difference: on web the disclosure is woven into the LLM system prompt (`AFTER_HOURS_LLM_INSTRUCTION`); on voice (deterministic-first) it is a canned spoken line, and the same instruction block is appended to the voice LLM system prompt only on the fallback path. Disclosure-once is latched in metadata. Hazard short-circuit always wins: emergency/hazard detection is deterministic in the router and escalates BEFORE any after-hours talk or LLM call (never delayed for charge talk).
+**Fail-safe:** config read error → no disclosure, intake continues.
 
-### 5. Real availability window offers (intake-quality)
-**What:** At the window step, reuse the same availability query + `buildWindowPrompt` the chat route uses to offer **real** open bands ("Thursday morning or Friday afternoon") in spoken form, instead of the generic morning/afternoon/evening enum.
-**Fail-safe:** no availability / query error → fall back to the current generic-window prompt (unchanged behavior).
+### 5. Availability window offers — voice-appropriate (intake-quality)
+**What:** At the window step, fetch the same real availability the chat route uses, but render it for VOICE: offer at most **2** concrete bands and let the caller select by **DTMF or short speech** ("For Thursday morning press 1, for Friday afternoon press 2, or say another time"). A spoken day/band is matched back to the band enum (`captureEnrichmentAnswer`). Reading a long list aloud (3+ day+band options) exceeds caller working memory and has no reliable voice-select mechanism, so it is explicitly avoided.
+**Fail-safe / default:** no availability, query error, or selection miss → fall back to the current generic "morning, afternoon, or evening?" prompt (unchanged, already works). **Open question flagged for the plan:** real-window offers may prove low-value on voice vs. the generic ask; if so, this WS is the first candidate to defer, keeping the generic prompt.
 
 ### 6. Async extraction + token-budget enforcement (intake-quality)
 **What:** (a) Run `extractServiceRequest()` in `after()` from the voice turn (same pattern as chat) to enrich slots the synchronous regex missed (address completion, prose-embedded contact), merging on the next turn without blocking the spoken reply. (b) Call `checkTokenBudget()` each voice turn before the LLM call; on exhaustion, escalate via the existing `escalateSession` path with a graceful spoken handoff (parity with chat's budget escalation). Turn-limit handling already works and is unchanged.
 
 ## Data flow (voice turn, after parity)
-1. Incoming call → session create; **resolveIdentity({ ani })** → persist `customerId` (WS2).
-2. Each turn: load session+history → **do-not-service early gate** (WS2) → `sanitizeInput` (shared) → **checkTokenBudget** (WS6) → `routeMessage` (shared).
-3. If `ACCOUNT_LOOKUP` (WS3): resolved + (verify passed | non-financial) → account tool → `account-reply`; else verify-ask or safe deferral.
-4. Else deterministic intake: **after-hours decision** (WS4) → **real window offer** at window step (WS5) → slot capture (shared) → auto-submit when complete (shared).
+1. Incoming call → session create; **resolveVoiceIdentity(orgId, From)** → persist `customerId` (WS2).
+2. Each turn: load session+history → **do-not-service early gate** (WS2) → `sanitizeInput` (shared) → **checkTokenBudget** (WS6) → `routeMessage` (shared). Emergency/hazard → escalate immediately (deterministic, before any LLM).
+3. If `ACCOUNT_LOOKUP` (WS3): non-financial → serve on ANI match; financial → verify gate (DTMF/speech ZIP, ≤2 attempts) → serve on pass, safe deferral on fail.
+4. Else deterministic intake: **after-hours decision** (WS4) → **voice window offer** at window step (WS5, ≤2 bands + DTMF select, else generic) → slot capture (shared) → auto-submit when complete (shared).
 5. LLM fallback only when the router defers: `generateText` → **screenAssistantReply** (WS1) → persist screened → TTS.
-6. `after()`: **extractServiceRequest** (WS6) + compaction (shared).
+6. `after()`: **extractServiceRequest** (WS6) + compaction (shared). Best-effort: if the caller hangs up before the next turn, async enrichment may not land — acceptable because essentials (issue/address/phone) are captured synchronously.
 
 ## Error handling (fail-safe table)
 | Failure | Behavior |
 |---|---|
-| ANI lookup / blind-index error | Treat as unresolved → anonymous intake continues |
-| Verify detail missing on file | Skip financial read → safe deferral |
-| Verify mismatch | Safe deferral, no data; do NOT loop the verify endlessly (one retry then defer) |
+| ANI lookup / blind-index error / absent ANI | Treat as unresolved → anonymous intake continues |
+| Verify detail missing on file (no ZIP) | Fall back to name verify; if neither → safe deferral |
+| Verify mismatch | Re-ask up to 2 attempts total; then `failed` → safe deferral, never re-ask this call |
 | After-hours config read error | No disclosure → intake continues |
-| Availability query error / empty | Generic-window fallback (current behavior) |
+| Availability query error / empty / select miss | Generic-window fallback (current behavior) |
 | Token budget exhausted | Escalate + graceful spoken handoff |
 | LLM error/timeout | Existing graceful spoken handoff (unchanged) |
 | Output guardrail | Always applied; safe reply on violation |
 
 ## Security
-- **ANI spoofing:** mitigated by the verify step for financials; non-financial personalization (name/scheduling) accepts ANI match as web accepts a typed contact.
-- **Overhear:** financials only read after explicit caller confirmation; reschedule/payment mutations stay out of scope.
-- **No PII in logs:** identity resolution, verify, and guardrail logs carry ids/enums/violation labels only — never name/phone/ZIP/balance or the raw reply.
-- **Verify comparison:** against the **decrypted** on-file value, normalized (trim/case/spacing); ZIP compared as digits.
+- **ANI spoofing:** non-financial personalization/scheduling accepts ANI match (≈ web's typed-contact bar). Financials additionally require the ZIP verify. Brute force is bounded: an attacker needs both a spoofed matching ANI AND the ZIP, capped at 2 attempts per call, per-session — not an open guessing oracle.
+- **Caller-identity privacy:** no name is spoken from ANI match alone (shared-phone/household/domestic-safety risk); name use only after the caller self-identifies (WS2).
+- **Overhear:** financials read only after explicit verify; reschedule/payment mutations stay out of scope (read-only voice).
+- **No PII in logs:** identity/verify/guardrail logs carry ids/enums/labels only — e.g. verify logs `{ sessionId, intent, verified, attemptsRemaining }`, NEVER the entered/stored ZIP, name, phone, balance, or raw reply.
+- **Verify comparison:** entered digits vs. the **decrypted** on-file ZIP(s) (customer + `customerLocations`), compared as normalized 5-digit strings; spoken answers digit-normalized first. Decrypt error → treat as missing detail → deferral.
 - **Do-not-service:** early voice gate (now live via WS2) + the unchanged submit-time hard backstop.
-- **Org scoping:** every customer/account read is `withTenant`-scoped to the call's org (resolved from the dialed number's org mapping, never caller-supplied).
+- **Org scoping:** every customer/account read is `withTenant`-scoped to the voice session's org. NOTE: voice is currently single-tenant (the incoming route's org); a dialed-number→org mapping for multi-tenant voice is a SEPARATE effort, explicitly out of scope here — this spec does not claim it.
+
+## Latency note (voice-specific)
+Buffering the LLM reply (required for `screenAssistantReply`) + TTS render adds perceptible dead air on a call. Mitigations: emergencies never wait on the LLM (deterministic router short-circuit, step 2); `maxOutputTokens` stays low for short spoken replies; consider a brief "one moment" filler on the rare long LLM turn. Streaming TTS (Step 19) is the real fix and is out of scope.
 
 ## Testing
-- **Unit:** `account-identity` (resolve by ani/contact; requiresVerify; checkVerify match/mismatch/missing-detail; org scoping), `after-hours-core` (disclose/askUrgency/instruction across business-hours/after-hours/hazard). `screenAssistantReply` already covered.
-- **Voice integration:** `voice-turn` tests (mock Twilio request) for: output guardrail replaces an unsafe spoken reply; do-not-service caller refused; account financial requires verify then serves; verify mismatch → deferral; after-hours disclosure spoken; real window offered; budget-exhausted escalation.
-- **Eval harness:** add **voice safety transcripts** exercising the deterministic-checkable properties over the phone channel — pricing-leak, false-booking, account-data-without-verify (must not leak), do-not-service caller (must refuse). These join the existing critical gates so voice can't regress.
+- **Unit:** `resolveVoiceIdentity` (ani normalize/match/absent/error; org scoping); `account-verify` (`requiresVerify` map; `checkVerify` DTMF-match / spoken-digit-normalized match / mismatch / multi-location any-ZIP / no-ZIP→name fallback; attempt cap; per-session unlock). `decideAfterHoursDisclosure` + `screenAssistantReply` already covered.
+- **Voice integration:** `voice-turn` tests (mock Twilio request) for: output guardrail replaces an unsafe spoken reply; do-not-service caller refused; financial intent requires verify then serves; 2-attempt mismatch → deferral (no re-ask after); NO name greeting on opening turn from ANI alone; after-hours disclosure spoken; budget-exhausted escalation; emergency short-circuits before any LLM.
+- **Eval harness:** add **voice safety transcripts** for the deterministic-checkable properties over the phone channel — pricing-leak, false-booking, account-data-without-verify (must not leak), do-not-service caller (must refuse). These join the existing critical gates so voice can't regress.
 - **Gates:** `tsc`, `npm run test:unit`, `npm run eval` (0 critical failures), `npm run build` — all green before merge.
 
 ## Rollout / required external setup
-- No DB migration (reuses `customerSessions`; identity sets `customerId`; verify state in `metadata`).
-- No new env beyond the already-required Twilio + voice TTS config. Voice remains env-gated (routes already 404/no-op without Twilio config).
-- Build order (each independently shippable, safety first): **WS1 → WS2 → WS3 → WS4 → WS5 → WS6.** WS1 is a near-trivial first ship; WS2 unblocks WS3; WS4–6 are independent.
-- Confirm with the operator that **service ZIP** is the desired verify field (name fallback) before shipping WS3.
+- No DB migration (reuses `customerSessions`; identity sets `customerId`; verify state in `metadata.extras.verify`).
+- No new env beyond the already-required Twilio + voice TTS config. Voice remains env-gated (routes already 404/no-op without Twilio config). Verify uses `<Gather input="dtmf speech">` — no new dependency.
+- Build order (safety first): **WS1 → WS2 → WS3 → WS4 → WS6 → WS5.** WS1 ships alone (near-trivial). WS2 unblocks WS3 (account/do-not-service depend on resolved identity). WS4/WS6 are independent. WS5 is last and the first candidate to defer (see WS5 open question).
+- Confirm with the operator: **service ZIP** as the verify factor (name fallback), and that DTMF entry is acceptable, before shipping WS3.
