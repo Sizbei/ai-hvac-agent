@@ -36,6 +36,9 @@ export const FALSE_BOOKING_REGEX =
  *   causes icing") must NOT match.
  * - Only the how-to form matches: an action verb paired with the dangerous topic,
  *   OR phrasing that explicitly sets up step-by-step instructions.
+ * - Technician-framed actions ("a tech will recharge the system", "can replace the
+ *   capacitor") must NOT match — negative lookbehind on will/can/could/should/
+ *   would/may/to preceding the dangerous verb.
  *
  * Covered patterns (per spec):
  *   1. Refrigerant recharge/charge + gauge/valve/freon action phrasing
@@ -43,9 +46,16 @@ export const FALSE_BOOKING_REGEX =
  *   3. Capacitor discharge/replace step instructions
  *   4. High-voltage wiring / contactor wiring steps
  *   5. "here's how to" / "how to" framing for any of the above dangerous actions
+ *   6. top off refrigerant/freon
+ *   7. hook up / attach gauges
+ *   8. charge it up
+ *   9. swap contactor/capacitor/compressor
+ *  10. short capacitor / terminals
+ *  11. pop capacitor
+ *  12. light the pilot / hold knob down / set dial to pilot / press ignition
  */
 export const DANGEROUS_DIY_REGEX =
-  /(?:connect(?:ing)?\s+(?:the\s+)?(?:gauge|manifold|hose|service\s+port|low[- ]side|high[- ]side)|add(?:ing)?\s+(?:refrigerant|freon|r-?(?:22|410a?|454b?)|coolant)\b|recharge\s+your\s+(?:refrigerant|freon|system|ac|a\/c)|turn\s+(?:the\s+)?gas\s+valve\s+to\s+pilot|hold\s+(?:the\s+)?(?:igniter|pilot|reset)\s+(?:button|down|for)|relight\s+(?:the\s+)?pilot|discharge\s+(?:the\s+)?capacitor|(?:remove|replace|unscrew|disconnect)\s+(?:the\s+)?capacitor|wire\s+(?:the\s+)?(?:new\s+)?(?:contactor|capacitor|compressor|breaker|disconnect)|connect\s+(?:the\s+)?(?:l1|l2|l-1|l-2|line\s+terminal|load\s+terminal|high\s+voltage)|how\s+to\s+(?:recharge|relight|wire|discharge|replace\s+(?:a\s+)?capacitor|handle\s+refrigerant)|here'?s\s+how\s+to\s+(?:recharge|relight|wire|discharge)|steps?\s+to\s+(?:recharge|relight|replace\s+(?:a\s+)?capacitor|wire))/i;
+  /(?:connect(?:ing)?\s+(?:the\s+)?(?:gauge|manifold|hose|service\s+port|low[- ]side|high[- ]side)|top\s+off\s+(?:the\s+|your\s+)?(?:refrigerant|freon|r-?(?:22|410a?|454b?)|coolant)|add(?:ing)?(?:\s+\w+){0,3}\s+(?:refrigerant|freon|r-?(?:22|410a?|454b?)|coolant)\b|\byou\s+(?:can|could|should|would|might)\s+recharge|(?<!(?:will|can|could|should|would|may|to)\s)recharge\s+your\s+(?:refrigerant|freon|system|ac|a\/c)|(?<!(?:will|can|could|should|would|may|to|and)\s)recharge\s+the\s+(?:refrigerant|freon|system|ac|a\/c|unit)|hook(?:ing)?\s+up\s+(?:the\s+)?(?:manifold|gauge|hose)|attach(?:ing)?\s+(?:the\s+|your\s+)?gauge|charge\s+it\s+up|swap\s+(?:the\s+)?(?:contactor|capacitor|compressor)|short(?:ing)?\s+(?:the\s+)?(?:capacitor\s+)?(?:capacitor|terminals?)|pop\s+(?:the\s+)?capacitor|turn\s+(?:the\s+)?gas\s+valve\s+to\s+pilot|hold\s+(?:the\s+)?(?:igniter|pilot|reset)\s+(?:button|down|for)|hold\s+(?:the\s+)?knob\s+down|relight\s+(?:the\s+)?pilot|light\s+the\s+pilot|set\s+the\s+dial\s+to\s+pilot|press\s+the\s+ignition|discharge\s+(?:the\s+)?capacitor|(?<!(?:will|can|could|should|would|may|to)\s)(?:remove|replace|unscrew|disconnect)\s+(?:the\s+)?capacitor|wire\s+(?:the\s+)?(?:new\s+)?(?:contactor|capacitor|compressor|breaker|disconnect)|connect\s+(?:the\s+)?(?:l1|l2|l-1|l-2|line\s+terminal|load\s+terminal|high\s+voltage)|how\s+to\s+(?:recharge|relight|wire|discharge|replace\s+(?:a\s+)?capacitor|handle\s+refrigerant)|here'?s\s+how\s+to\s+(?:recharge|relight|wire|discharge)|steps?\s+to\s+(?:recharge|relight|replace\s+(?:a\s+)?capacitor|wire))/i;
 
 /**
  * Fabricated-credentials detector — first-person claims of professional
@@ -56,7 +66,7 @@ export const DANGEROUS_DIY_REGEX =
  * Does NOT match third-person talk about technician credentials.
  */
 export const CREDENTIAL_REGEX =
-  /\bI'?m\s+(?:a\s+|an\s+)?(?:EPA[-\s]certified|NATE[-\s]certified|licensed\s+(?:technician|HVAC|contractor|professional)|certified\s+(?:technician|HVAC|contractor|professional)|qualified\s+to)\b/i;
+  /\bI(?:'?m| am)\s+(?:a\s+|an\s+)?(?:EPA[-\s]certified|NATE[-\s]certified|licensed\s+(?:technician|HVAC|contractor|professional)|certified\s+(?:technician|HVAC|contractor|professional)|qualified\s+to)\b/i;
 
 export type ReplyViolation = "pricing" | "false-booking" | "dangerous-diy" | "credentials";
 
