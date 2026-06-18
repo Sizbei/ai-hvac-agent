@@ -184,12 +184,28 @@ export async function POST(request: NextRequest) {
         const extractionComplete = isVoiceExtractionComplete(mergedExtraction);
         const currentStatus = (fresh?.status ?? session.status) as SessionState;
         const nextState = determineNextState(currentStatus, extractionComplete, newTurnCount, session.maxTurns);
+        // Preserve the financial-verify state. voiceReply owns a top-level
+        // `verify` key in metadata, but buildExtraction does NOT round-trip it —
+        // so without splicing it back, this async write would wipe the verify
+        // lockout and reset MAX_VERIFY_ATTEMPTS on every non-financial turn.
+        let verifyKey: unknown;
+        try {
+          verifyKey = fresh?.metadata
+            ? (JSON.parse(fresh.metadata) as Record<string, unknown>).verify
+            : undefined;
+        } catch {
+          verifyKey = undefined;
+        }
+        const mergedWithVerify =
+          verifyKey !== undefined
+            ? { ...mergedExtraction, verify: verifyKey }
+            : mergedExtraction;
         await db
           .update(customerSessions)
           .set({
             status: nextState,
             metadata: hasSlotData(merged)
-              ? JSON.stringify(mergedExtraction)
+              ? JSON.stringify(mergedWithVerify)
               : (fresh?.metadata ?? session.metadata),
             updatedAt: new Date(),
           })

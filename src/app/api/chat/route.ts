@@ -92,7 +92,7 @@ import {
   type CustomerContext,
 } from "@/lib/ai/customer-context";
 import { customers } from "@/lib/db/schema";
-import { buildAccountLookupReply, ACCOUNT_INTENT_CAPABILITY } from "@/lib/ai/account-dispatch";
+import { buildAccountLookupReply } from "@/lib/ai/account-dispatch";
 import { logger } from "@/lib/logger";
 // The deterministic router is on by default; set ROUTER_ENABLED=false to disable
 // it (kill-switch) and route every turn through the LLM.
