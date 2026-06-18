@@ -44,6 +44,7 @@ vi.mock('@/lib/db/schema', () => ({
     routed: 'be.routed',
     escalated: 'be.escalated',
     extractionComplete: 'be.extractionComplete',
+    action: 'be.action',
     latencyMs: 'be.latencyMs',
     createdAt: 'be.createdAt',
   },
@@ -66,6 +67,7 @@ function seed(opts: {
     deterministic: number | string;
     escalated: number | string;
     complete: number | string;
+    knowledgeAnswers?: number | string;
     avgLatency: number | string | null;
   };
   intents?: { intentId: string | null; value: number | string }[];
@@ -96,6 +98,7 @@ describe('getBotAnalytics', () => {
     expect(r.deterministicRatio).toBe(0);
     expect(r.escalationRate).toBe(0);
     expect(r.extractionCompletionRate).toBe(0);
+    expect(r.knowledgeAnswerRate).toBe(0);
     expect(r.avgLatencyMs).toBeNull();
     expect(r.abandonRate).toBe(0);
     expect(r.intentDistribution).toEqual([]);
@@ -120,6 +123,22 @@ describe('getBotAnalytics', () => {
     expect(r.extractionCompletionRate).toBe(0.4);
     // avg latency rounded to whole ms.
     expect(r.avgLatencyMs).toBe(124);
+  });
+
+  it('computes knowledgeAnswerRate = knowledge turns / total', async () => {
+    // 3 knowledge answers of 10 total -> 0.3.
+    seed({
+      totals: {
+        total: '10',
+        deterministic: '6',
+        escalated: '0',
+        complete: '0',
+        knowledgeAnswers: '3',
+        avgLatency: null,
+      },
+    });
+    const r = await getBotAnalytics(ORG);
+    expect(r.knowledgeAnswerRate).toBe(0.3);
   });
 
   it('rounds a repeating ratio to 3 decimal places', async () => {

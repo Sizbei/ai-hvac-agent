@@ -45,6 +45,12 @@ export interface BotAnalytics {
   readonly escalationRate: number;
   /** extractionComplete turns / total, 0-1, rounded to 3dp. 0 when no turns. */
   readonly extractionCompletionRate: number;
+  /**
+   * Turns where the bot answered a general HVAC question (the helpful-first
+   * capability) rather than running deterministic intake — tagged on the
+   * LLM-fallback path as action='knowledge'. / total, 0-1, 3dp.
+   */
+  readonly knowledgeAnswerRate: number;
   /** Avg latencyMs across turns that recorded a latency, or null when none. */
   readonly avgLatencyMs: number | null;
   /** Sessions classified "abandoned" / sessions with ANY outcome, 0-1, 3dp. */
@@ -99,6 +105,12 @@ export async function getBotAnalytics(
         ),
         complete: count(
           sql`CASE WHEN ${botEvents.extractionComplete} = true THEN 1 END`,
+        ),
+        // General-knowledge answers (helpful-first capability) are tagged
+        // action='knowledge' on the LLM-fallback path (deterministic turns carry
+        // a real router action, so this never double-counts intake).
+        knowledgeAnswers: count(
+          sql`CASE WHEN ${botEvents.action} = 'knowledge' THEN 1 END`,
         ),
         avgLatency: avg(botEvents.latencyMs),
       })
@@ -155,6 +167,7 @@ export async function getBotAnalytics(
   const deterministic = toNumber(totals?.deterministic);
   const escalated = toNumber(totals?.escalated);
   const complete = toNumber(totals?.complete);
+  const knowledgeAnswers = toNumber(totals?.knowledgeAnswers);
   // avg() returns null for an empty/all-NULL set — keep null (honest "—").
   const avgLatencyMs =
     totals?.avgLatency == null
@@ -186,6 +199,7 @@ export async function getBotAnalytics(
     intentDistribution,
     escalationRate: ratio(escalated, totalTurns),
     extractionCompletionRate: ratio(complete, totalTurns),
+    knowledgeAnswerRate: ratio(knowledgeAnswers, totalTurns),
     avgLatencyMs,
     abandonRate: ratio(abandonedSessions, classifiedSessions),
     outcomeDistribution,
