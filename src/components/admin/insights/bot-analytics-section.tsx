@@ -1,6 +1,12 @@
 'use client';
 
-import { Cpu, AlertTriangle, ClipboardCheck, Timer } from 'lucide-react';
+import {
+  Cpu,
+  AlertTriangle,
+  ClipboardCheck,
+  Timer,
+  Lightbulb,
+} from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -126,7 +132,7 @@ export function BotAnalyticsSection() {
         </Alert>
       )}
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
         <KpiCard
           icon={Cpu}
           label="Deterministic ratio"
@@ -157,6 +163,14 @@ export function BotAnalyticsSection() {
           value={data?.avgLatencyMs != null ? `${data.avgLatencyMs} ms` : '—'}
           bg="bg-blue-100 dark:bg-blue-900/30"
           fg="text-blue-600 dark:text-blue-400"
+          isLoading={isLoading}
+        />
+        <KpiCard
+          icon={Lightbulb}
+          label="Knowledge answers"
+          value={data ? pct(data.knowledgeAnswerRate) : '0%'}
+          bg="bg-teal-100 dark:bg-teal-900/30"
+          fg="text-teal-600 dark:text-teal-400"
           isLoading={isLoading}
         />
       </div>
