@@ -49,8 +49,11 @@ const WORD_DIGITS: Record<string, string> = {
  * Twilio usually transcribes read-out numbers as numerals, but word-by-word
  * transcriptions do occur — without this, a caller's spoken number never
  * parses and the phone question loops.
+ *
+ * Exported so the ZIP-verify helper (account-verify.ts) can reuse the same
+ * "oh"/"zero" normalization for spoken ZIP codes.
  */
-function wordsToDigits(message: string): string {
+export function spokenToDigits(message: string): string {
   return message
     .toLowerCase()
     .split(/[\s,.-]+/)
@@ -59,7 +62,7 @@ function wordsToDigits(message: string): string {
 }
 
 export function extractSpokenPhone(message: string): string | null {
-  const digits = wordsToDigits(message).replace(/\D/g, "");
+  const digits = spokenToDigits(message).replace(/\D/g, "");
 
   if (digits.length === 10) {
     return formatUsPhone(digits);
