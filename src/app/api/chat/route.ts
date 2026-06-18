@@ -1948,6 +1948,10 @@ export async function POST(request: NextRequest) {
     // Bot telemetry (Step 10): an LLM-fallback turn. intentId/action stay null
     // (the deterministic router did NOT resolve this turn). Best-effort —
     // recordBotEvent never throws.
+    // Tagging all FALLBACK_LLM web turns as "knowledge" — simplification: the
+    // web LLM path today is almost exclusively general HVAC Q&A; intake slots
+    // are filled deterministically above (SLOT_FILL path). Revisit if the LLM
+    // path starts handling intake slots directly.
     await recordBotEvent({
       organizationId,
       sessionId: session.id,
@@ -1956,6 +1960,7 @@ export async function POST(request: NextRequest) {
       routed: false,
       model: llmEntry.modelId,
       latencyMs: Math.round(performance.now() - turnStart),
+      kind: "knowledge",
     });
 
     return cannedTextResponse(replyText);

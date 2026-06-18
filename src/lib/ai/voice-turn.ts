@@ -65,6 +65,7 @@ import { buildModelMessages, MAX_HISTORY, type ChatTurn } from "./compaction";
 import type { Urgency } from "./router-types";
 import { logger } from "@/lib/logger";
 import { screenAssistantReply } from "./output-guardrail";
+import { recordBotEvent } from "./bot-telemetry";
 
 /**
  * The optional enrichment steps voice actually asks (see VOICE_STEP_PHRASING),
@@ -936,6 +937,17 @@ export async function voiceReply(params: {
     .update(customerSessions)
     .set({ status: nextState, turnCount: newTurnCount, tokensUsed: newTokensTotal, updatedAt: new Date() })
     .where(sessionScope);
+
+  // Bot telemetry: tag all voice LLM-fallback turns as "knowledge" — simplification:
+  // voice LLM turns are general HVAC Q&A; intake slots are filled deterministically.
+  void recordBotEvent({
+    organizationId,
+    sessionId: session.id,
+    turn: newTurnCount,
+    channel: "phone",
+    routed: false,
+    kind: "knowledge",
+  }); // recordBotEvent never throws
 
   return { reply, endCall: false, nextState };
 }

@@ -105,4 +105,79 @@ describe('recordBotEvent', () => {
     const row = insertMock.mock.calls[0][0] as Record<string, unknown>;
     expect(row.category).toBeNull();
   });
+
+  it('persists kind:"knowledge" in the action column for an LLM-fallback turn', async () => {
+    insertMock.mockResolvedValueOnce(undefined);
+    await recordBotEvent({
+      organizationId: ORG,
+      sessionId: SESSION,
+      turn: 4,
+      channel: 'web',
+      routed: false,
+      model: 'gpt-4o',
+      kind: 'knowledge',
+    });
+    const row = insertMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(row.action).toBe('knowledge');
+    expect(row.routed).toBe(false);
+  });
+
+  it('persists kind:"intake" in the action column for an LLM-fallback turn', async () => {
+    insertMock.mockResolvedValueOnce(undefined);
+    await recordBotEvent({
+      organizationId: ORG,
+      sessionId: SESSION,
+      turn: 5,
+      channel: 'phone',
+      routed: false,
+      model: 'gpt-4o',
+      kind: 'intake',
+    });
+    const row = insertMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(row.action).toBe('intake');
+  });
+
+  it('does not overwrite a real action value when kind is set', async () => {
+    insertMock.mockResolvedValueOnce(undefined);
+    await recordBotEvent({
+      organizationId: ORG,
+      sessionId: SESSION,
+      turn: 6,
+      channel: 'web',
+      routed: true,
+      intentId: 'faq-hours',
+      action: 'ANSWER',
+      kind: 'knowledge',
+    });
+    const row = insertMock.mock.calls[0][0] as Record<string, unknown>;
+    // action from input wins; kind is ignored when a real action is supplied
+    expect(row.action).toBe('ANSWER');
+  });
+
+  it('leaves action null when kind is omitted on an LLM-fallback turn', async () => {
+    insertMock.mockResolvedValueOnce(undefined);
+    await recordBotEvent({
+      organizationId: ORG,
+      sessionId: SESSION,
+      turn: 7,
+      channel: 'web',
+      routed: false,
+    });
+    const row = insertMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(row.action).toBeNull();
+  });
+
+  it('never throws when kind is provided and db fails (best-effort)', async () => {
+    insertMock.mockRejectedValueOnce(new Error('db down'));
+    await expect(
+      recordBotEvent({
+        organizationId: ORG,
+        sessionId: SESSION,
+        turn: 8,
+        channel: 'web',
+        routed: false,
+        kind: 'knowledge',
+      }),
+    ).resolves.toBeUndefined();
+  });
 });

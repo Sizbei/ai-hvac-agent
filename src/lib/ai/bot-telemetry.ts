@@ -32,6 +32,12 @@ export interface BotEventInput {
   /** Resolved model id for an LLM turn; null/undefined on a deterministic turn. */
   readonly model?: string | null;
   readonly latencyMs?: number | null;
+  /**
+   * LLM-fallback turn classification: "knowledge" = general HVAC answer,
+   * "intake" = slot-filling / booking progression. Stored in the action column
+   * when no real router action is present (routed=false). No migration needed.
+   */
+  readonly kind?: "intake" | "knowledge";
 }
 
 /** Resolve the knowledge-base category for an intent id, null when unknown. */
@@ -45,6 +51,9 @@ function categoryForIntent(intentId: string | null | undefined): string | null {
  */
 export async function recordBotEvent(input: BotEventInput): Promise<void> {
   try {
+    // When no real router action is present (LLM-fallback turn), store the
+    // knowledge/intake kind tag in the action column — no migration needed.
+    const actionValue = input.action ?? input.kind ?? null;
     await db.insert(botEvents).values({
       organizationId: input.organizationId,
       sessionId: input.sessionId,
@@ -52,7 +61,7 @@ export async function recordBotEvent(input: BotEventInput): Promise<void> {
       channel: input.channel,
       routed: input.routed,
       intentId: input.intentId ?? null,
-      action: input.action ?? null,
+      action: actionValue,
       category: categoryForIntent(input.intentId),
       extractionComplete: input.extractionComplete ?? false,
       escalated: input.escalated ?? false,
