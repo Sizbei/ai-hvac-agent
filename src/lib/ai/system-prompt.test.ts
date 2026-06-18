@@ -61,11 +61,12 @@ describe("buildSystemPrompt — default (no brand)", () => {
     expect(prompt).not.toContain("IDENTITY:");
   });
 
-  it("retains the core intake gate, safety-first rule, and self-checks", () => {
+  it("retains the core intake gate, safety-first rule, and HVAC knowledge block", () => {
     const prompt = buildSystemPrompt();
     expect(prompt).toContain("REQUIRED before submitting");
     expect(prompt).toContain("SAFETY FIRST");
-    expect(prompt).toContain("SELF-CHECKS");
+    // SELF-CHECKS replaced by the shared HVAC_KNOWLEDGE_AND_SAFETY block's safe-help section.
+    expect(prompt).toContain("SAFE HOMEOWNER HELP");
     expect(prompt).toMatch(/^\/no_think/);
   });
 
