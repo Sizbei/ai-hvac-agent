@@ -13,6 +13,8 @@ const {
   detectCorrectionMock,
   getRouterConfigMock,
   submitSessionMock,
+  buildAccountLookupReplyMock,
+  decryptMock,
 } = vi.hoisted(() => ({
   generateTextMock: vi.fn(),
   insertMock: vi.fn(),
@@ -29,6 +31,8 @@ const {
   detectCorrectionMock: vi.fn(),
   getRouterConfigMock: vi.fn(),
   submitSessionMock: vi.fn(),
+  buildAccountLookupReplyMock: vi.fn(),
+  decryptMock: vi.fn(),
 }));
 
 vi.mock("ai", () => ({ generateText: generateTextMock }));
@@ -59,8 +63,14 @@ vi.mock("@/lib/db", () => ({
     }),
   },
 }));
-vi.mock("@/lib/db/schema", () => ({ customerSessions: {}, messages: {}, customers: {} }));
+vi.mock("@/lib/db/schema", () => ({ customerSessions: {}, messages: {}, customers: {}, customerLocations: {} }));
 vi.mock("@/lib/db/tenant", () => ({ withTenant: (..._a: unknown[]) => ({}) }));
+vi.mock("./account-dispatch", () => ({
+  buildAccountLookupReply: buildAccountLookupReplyMock,
+}));
+vi.mock("@/lib/crypto", () => ({
+  decrypt: decryptMock,
+}));
 
 vi.mock("./escalate-service", () => ({ escalateSession: escalateMock }));
 vi.mock("./intent-router", () => ({ routeMessage: routeMock }));
@@ -74,9 +84,13 @@ vi.mock("./slot-extract", async (importOriginal) => {
 vi.mock("./extract-all-contact", () => ({
   extractAllContactFields: extractAllContactMock,
 }));
-vi.mock("./extract-spoken-phone", () => ({
-  extractSpokenPhone: extractSpokenPhoneMock,
-}));
+vi.mock("./extract-spoken-phone", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./extract-spoken-phone")>();
+  return {
+    ...actual,
+    extractSpokenPhone: extractSpokenPhoneMock,
+  };
+});
 vi.mock("./detect-correction", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./detect-correction")>();
   return {
@@ -129,6 +143,10 @@ describe("voiceReply", () => {
       referenceNumber: "HVAC-TEST",
       serviceRequestId: "sr-test",
     });
+    buildAccountLookupReplyMock.mockReset();
+    buildAccountLookupReplyMock.mockResolvedValue(null);
+    decryptMock.mockReset();
+    decryptMock.mockImplementation((s: string) => s);
     extractAllContactMock.mockReturnValue(noSlots());
     extractAddressAtAddressStepMock.mockReturnValue(null);
     extractSpokenPhoneMock.mockReturnValue(null);
@@ -634,6 +652,10 @@ describe("voiceReply output guardrail (WS1)", () => {
     getRouterConfigMock.mockReset();
     getRouterConfigMock.mockResolvedValue({});
     submitSessionMock.mockReset();
+    buildAccountLookupReplyMock.mockReset();
+    buildAccountLookupReplyMock.mockResolvedValue(null);
+    decryptMock.mockReset();
+    decryptMock.mockImplementation((s: string) => s);
     extractAllContactMock.mockReturnValue(noSlots());
     extractAddressAtAddressStepMock.mockReturnValue(null);
     extractSpokenPhoneMock.mockReturnValue(null);
@@ -687,6 +709,10 @@ describe("voiceReply do-not-service (WS2)", () => {
     getRouterConfigMock.mockReset();
     getRouterConfigMock.mockResolvedValue({});
     submitSessionMock.mockReset();
+    buildAccountLookupReplyMock.mockReset();
+    buildAccountLookupReplyMock.mockResolvedValue(null);
+    decryptMock.mockReset();
+    decryptMock.mockImplementation((s: string) => s);
     extractAllContactMock.mockReturnValue(noSlots());
     extractAddressAtAddressStepMock.mockReturnValue(null);
     extractSpokenPhoneMock.mockReturnValue(null);
@@ -716,5 +742,174 @@ describe("voiceReply do-not-service (WS2)", () => {
     // The gate must fire EARLY — before any router/LLM work runs.
     expect(routeMock).not.toHaveBeenCalled();
     expect(generateTextMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("voiceReply financial verify (WS3)", () => {
+  // Common setup for the financial verify tests: customerId present, balance intent.
+  const balanceSession = {
+    id: "s-verify",
+    organizationId: "o1",
+    status: "chatting" as const,
+    turnCount: 1,
+    maxTurns: 40,
+    metadata: null as string | null,
+    customerId: "c-verify",
+  };
+
+  beforeEach(() => {
+    generateTextMock.mockReset();
+    insertMock.mockReset();
+    updateSetMock.mockReset();
+    selectLimitMock.mockReset();
+    // By default: not flagged (doNotService=false), then customer row w/ZIP, then no locations.
+    selectLimitMock
+      .mockResolvedValueOnce([{ doNotService: false }]) // do-not-service gate
+      .mockResolvedValueOnce([{ addressEncrypted: "212 E Unaka Ave, Johnson City, TN 37601" }]) // customer address
+      .mockResolvedValue([]); // customerLocations
+    escalateMock.mockReset();
+    routeMock.mockReset();
+    routeMock.mockReturnValue({
+      action: "ACCOUNT_LOOKUP",
+      intentId: "account-data-balance",
+      confidence: 0.95,
+      reply: null,
+      issueType: null,
+      urgency: null,
+      escalate: false,
+    });
+    extractAllContactMock.mockReset();
+    extractAllContactMock.mockReturnValue(noSlots());
+    extractAddressAtAddressStepMock.mockReset();
+    extractAddressAtAddressStepMock.mockReturnValue(null);
+    extractSpokenPhoneMock.mockReset();
+    extractSpokenPhoneMock.mockReturnValue(null);
+    detectCorrectionMock.mockReset();
+    detectCorrectionMock.mockReturnValue(null);
+    getRouterConfigMock.mockReset();
+    getRouterConfigMock.mockResolvedValue({});
+    submitSessionMock.mockReset();
+    buildAccountLookupReplyMock.mockReset();
+    // By default: returns the balance string.
+    buildAccountLookupReplyMock.mockResolvedValue("Your current balance is $125.00.");
+    decryptMock.mockReset();
+    // decrypt just returns the input (the test address is already plaintext).
+    decryptMock.mockImplementation((s: string) => s);
+  });
+
+  it("asks for ZIP and does NOT read the balance on first financial ask (no verify state yet)", async () => {
+    const result = await voiceReply({
+      session: balanceSession,
+      history: [],
+      userMessage: "what is my balance",
+      ipAddress: "127.0.0.1",
+    });
+
+    // Must mention ZIP and NOT speak the balance.
+    expect(result.reply.toLowerCase()).toMatch(/zip/);
+    expect(result.reply).not.toContain("$");
+    expect(result.endCall).toBe(false);
+    expect(generateTextMock).not.toHaveBeenCalled();
+
+    // Metadata must have verify.status = "pending".
+    const setCall = updateSetMock.mock.calls.find(
+      (c: unknown[]) => typeof (c[0] as Record<string, unknown>).metadata === "string",
+    );
+    expect(setCall).toBeDefined();
+    const meta = JSON.parse((setCall![0] as Record<string, unknown>).metadata as string) as Record<string, unknown>;
+    const verify = meta.verify as Record<string, unknown>;
+    expect(verify?.status).toBe("pending");
+    expect(verify?.attempts).toBe(0);
+  });
+
+  it("serves the balance after a matching DTMF ZIP (verify passes)", async () => {
+    // Session already has verify pending (asked last turn).
+    const sessionWithPending = {
+      ...balanceSession,
+      metadata: JSON.stringify({ verify: { status: "pending", attempts: 0 } }),
+    };
+    // Reset the selectLimitMock chain for this test — doNotService must come first.
+    selectLimitMock.mockReset();
+    selectLimitMock
+      .mockResolvedValueOnce([{ doNotService: false }])
+      .mockResolvedValueOnce([{ addressEncrypted: "212 E Unaka Ave, Johnson City, TN 37601" }])
+      .mockResolvedValue([]);
+
+    const result = await voiceReply({
+      session: sessionWithPending,
+      history: [],
+      userMessage: "37601", // spoken as a word (simulate DTMF as speech fallback)
+      ipAddress: "127.0.0.1",
+      dtmfDigits: "37601",
+    });
+
+    // The balance must be spoken.
+    expect(result.reply).toContain("$125.00");
+    expect(result.endCall).toBe(false);
+
+    // Metadata must have verify.status = "passed".
+    const setCall = updateSetMock.mock.calls.find(
+      (c: unknown[]) => typeof (c[0] as Record<string, unknown>).metadata === "string",
+    );
+    expect(setCall).toBeDefined();
+    const meta = JSON.parse((setCall![0] as Record<string, unknown>).metadata as string) as Record<string, unknown>;
+    const verify = meta.verify as Record<string, unknown>;
+    expect(verify?.status).toBe("passed");
+  });
+
+  it("defers after 2 mismatches (MAX_VERIFY_ATTEMPTS) and does not speak balance", async () => {
+    // Already had 1 failed attempt — this is the second (final) one.
+    const sessionWith1Attempt = {
+      ...balanceSession,
+      metadata: JSON.stringify({ verify: { status: "pending", attempts: 1 } }),
+    };
+    selectLimitMock.mockReset();
+    selectLimitMock
+      .mockResolvedValueOnce([{ doNotService: false }])
+      .mockResolvedValueOnce([{ addressEncrypted: "212 E Unaka Ave, Johnson City, TN 37601" }])
+      .mockResolvedValue([]);
+
+    const result = await voiceReply({
+      session: sessionWith1Attempt,
+      history: [],
+      userMessage: "99999", // wrong ZIP
+      ipAddress: "127.0.0.1",
+      dtmfDigits: "99999",
+    });
+
+    // Must NOT speak the balance; must give the deferral copy.
+    expect(result.reply).not.toContain("$");
+    expect(result.reply.toLowerCase()).toMatch(/follow up|office|online/);
+    expect(result.endCall).toBe(false);
+
+    // Metadata must have verify.status = "failed".
+    const setCall = updateSetMock.mock.calls.find(
+      (c: unknown[]) => typeof (c[0] as Record<string, unknown>).metadata === "string",
+    );
+    expect(setCall).toBeDefined();
+    const meta = JSON.parse((setCall![0] as Record<string, unknown>).metadata as string) as Record<string, unknown>;
+    const verify = meta.verify as Record<string, unknown>;
+    expect(verify?.status).toBe("failed");
+  });
+
+  it("falls through to FALLBACK_LLM when customerId is absent (no account lookup)", async () => {
+    const sessionNoCustomer = { ...balanceSession, customerId: null as string | null };
+    selectLimitMock.mockReset();
+    selectLimitMock.mockResolvedValue([]);
+    generateTextMock.mockResolvedValue({
+      text: "I can help you with that.",
+      usage: { inputTokens: 5, outputTokens: 5 },
+    });
+
+    const result = await voiceReply({
+      session: sessionNoCustomer,
+      history: [],
+      userMessage: "what is my balance",
+      ipAddress: "127.0.0.1",
+    });
+
+    // With no customerId the account lookup falls through to the LLM.
+    expect(generateTextMock).toHaveBeenCalledTimes(1);
+    expect(result.reply).not.toContain("$125.00");
   });
 });

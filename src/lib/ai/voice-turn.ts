@@ -14,8 +14,17 @@
 import { generateText } from "ai";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { customerSessions, messages, customers } from "@/lib/db/schema";
+import { customerSessions, messages, customers, customerLocations } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
+import { decrypt } from "@/lib/crypto";
+import { buildAccountLookupReply } from "./account-dispatch";
+import {
+  requiresVerify,
+  checkZipMatch,
+  extractZipsFromAddress,
+  MAX_VERIFY_ATTEMPTS,
+  type VerifyState,
+} from "./account-verify";
 import { getModel } from "./provider";
 import { routeMessage } from "./intent-router";
 import { extractAddressAtAddressStep } from "./slot-extract";
@@ -126,6 +135,14 @@ export const VOICE_SUBMITTED_REPLY =
 const VOICE_OFFICE_REPLY =
   "I'm not able to book this automatically. Please give our office a call and we'll help you directly. Thanks for calling.";
 
+/** Spoken when a financial account intent requires ZIP verification. */
+const VOICE_VERIFY_ASK =
+  "To pull up your account, can you tell me or key in the 5-digit ZIP code on your account?";
+
+/** Spoken when the caller exhausts their verification attempts. */
+const VOICE_VERIFY_DEFER =
+  "I can't confirm that over the phone right now — I'll have our team follow up, or you can check your account online. Anything else I can help with?";
+
 export interface VoiceSession {
   readonly id: string;
   readonly organizationId: string;
@@ -214,11 +231,162 @@ export async function voiceReply(params: {
     () => EMPTY_ORG_CONFIG,
   );
   const routed = routeMessage(userMessage, knownSlots, routerConfig);
-  // Account-data intents (membership/visit/balance/appointment/reschedule) are a
-  // WEB-CHAT v1 capability. The voice channel has no identity gate wired for them
-  // yet, so coerce an ACCOUNT_LOOKUP verdict to a plain LLM fallback here — voice
-  // behavior is byte-identical to before this feature (these questions fall to
-  // the LLM, never reading account data on a phone call).
+
+  // ── Account lookup + financial verify gate (WS3) ──
+  // When the router signals ACCOUNT_LOOKUP AND we have a resolved caller, handle
+  // it here — either serve the account data (non-financial intents or passed
+  // verify) or gate financial intents behind a ZIP verification step.
+  // Falls through to the LLM coercion below only when customerId is absent.
+  if (routed.action === "ACCOUNT_LOOKUP" && session.customerId) {
+    const intentId = routed.intentId ?? null;
+
+    // Read the persisted verify state from the metadata (stored under a top-level
+    // "verify" key, outside the extraction slots, so it survives slot merges).
+    let verifyState: VerifyState | null = null;
+    try {
+      const rawMeta = session.metadata ? (JSON.parse(session.metadata) as Record<string, unknown>) : null;
+      const v = rawMeta?.verify as Partial<VerifyState> | undefined;
+      if (v && (v.status === "pending" || v.status === "passed" || v.status === "failed")) {
+        verifyState = { status: v.status, attempts: v.attempts ?? 0 };
+      }
+    } catch { /* ignore parse errors */ }
+
+    /**
+     * Helper: persist the assistant turn + verify state and return the result.
+     * Merges the NEW verify state into the existing metadata JSON so other slot
+     * data (issueType, address, etc.) is preserved.
+     */
+    async function persistAccountTurn(
+      reply: string,
+      newVerify: VerifyState,
+    ): Promise<VoiceReplyResult> {
+      const spokenReply = toSpokenReply(reply, { nearLimit });
+      await db.insert(messages).values({
+        organizationId,
+        sessionId: session.id,
+        role: "assistant",
+        content: spokenReply,
+        tokensUsed: 0,
+      });
+      // Merge verify state into the existing metadata JSON without clobbering slots.
+      let existingMeta: Record<string, unknown> = {};
+      try {
+        if (session.metadata) existingMeta = JSON.parse(session.metadata) as Record<string, unknown>;
+      } catch { /* start fresh on parse error */ }
+      const updatedMeta = JSON.stringify({ ...existingMeta, verify: newVerify });
+      await db
+        .update(customerSessions)
+        .set({ metadata: updatedMeta, turnCount: newTurnCount, updatedAt: new Date() })
+        .where(sessionScope);
+      return { reply: spokenReply, endCall: false, nextState: session.status };
+    }
+
+    // Non-financial intents serve immediately with no verify step required.
+    if (!requiresVerify(intentId)) {
+      const accountReply = await buildAccountLookupReply(
+        intentId,
+        organizationId,
+        session.customerId,
+        userMessage,
+      ).catch(() => null);
+      if (accountReply !== null) {
+        return persistAccountTurn(
+          accountReply,
+          verifyState ?? { status: "passed", attempts: 0 },
+        );
+      }
+      // If the dispatch returned null (unrecognized intent), fall through to LLM.
+    } else {
+      // Financial intent — apply the verify gate.
+
+      // Already passed this session → serve directly.
+      if (verifyState?.status === "passed") {
+        const accountReply = await buildAccountLookupReply(
+          intentId,
+          organizationId,
+          session.customerId,
+          userMessage,
+        ).catch(() => null);
+        if (accountReply !== null) {
+          return persistAccountTurn(accountReply, verifyState);
+        }
+      }
+
+      // Already failed → defer (no re-ask).
+      if (verifyState?.status === "failed") {
+        return persistAccountTurn(VOICE_VERIFY_DEFER, verifyState);
+      }
+
+      // Verify is pending OR not yet started → process the caller's answer.
+      if (verifyState?.status === "pending") {
+        // The verify answer is dtmfDigits (keypad) if present, else the speech.
+        const verifyAnswer = dtmfDigits ?? userMessage;
+        const currentAttempts = verifyState.attempts;
+
+        // Fetch on-file ZIPs from customer.addressEncrypted + all customerLocations.
+        const onFileZips: string[] = [];
+        try {
+          const [custRow] = await db
+            .select({ addressEncrypted: customers.addressEncrypted })
+            .from(customers)
+            .where(withTenant(customers, organizationId, eq(customers.id, session.customerId!)))
+            .limit(1);
+          if (custRow?.addressEncrypted) {
+            try {
+              onFileZips.push(...extractZipsFromAddress(decrypt(custRow.addressEncrypted)));
+            } catch { /* decrypt failure → no ZIP from this source */ }
+          }
+        } catch (e: unknown) {
+          logger.error({ error: e, sessionId: session.id }, "voice verify: customer address read failed");
+        }
+        try {
+          const locRows = await db
+            .select({ addressEncrypted: customerLocations.addressEncrypted })
+            .from(customerLocations)
+            .where(withTenant(customerLocations, organizationId, eq(customerLocations.customerId, session.customerId!)))
+            .limit(10);
+          for (const loc of locRows) {
+            try {
+              onFileZips.push(...extractZipsFromAddress(decrypt(loc.addressEncrypted)));
+            } catch { /* decrypt failure → skip this location */ }
+          }
+        } catch (e: unknown) {
+          logger.error({ error: e, sessionId: session.id }, "voice verify: location address read failed");
+        }
+
+        if (checkZipMatch(verifyAnswer, onFileZips)) {
+          // Match → verify passed. Serve the account data.
+          const passed: VerifyState = { status: "passed", attempts: currentAttempts + 1 };
+          const accountReply = await buildAccountLookupReply(
+            intentId,
+            organizationId,
+            session.customerId,
+            userMessage,
+          ).catch(() => null);
+          return persistAccountTurn(accountReply ?? VOICE_VERIFY_DEFER, passed);
+        } else {
+          // Mismatch. Check if this exhausts the allowed attempts.
+          const newAttempts = currentAttempts + 1;
+          if (newAttempts >= MAX_VERIFY_ATTEMPTS) {
+            const failed: VerifyState = { status: "failed", attempts: newAttempts };
+            return persistAccountTurn(VOICE_VERIFY_DEFER, failed);
+          } else {
+            // Re-ask (attempts < limit).
+            const reasked: VerifyState = { status: "pending", attempts: newAttempts };
+            return persistAccountTurn(VOICE_VERIFY_ASK, reasked);
+          }
+        }
+      }
+
+      // No verify state yet — this is the first financial ask. Set pending and ask.
+      const initiated: VerifyState = { status: "pending", attempts: 0 };
+      return persistAccountTurn(VOICE_VERIFY_ASK, initiated);
+    }
+  }
+
+  // Coerce any ACCOUNT_LOOKUP verdict without a resolved caller to FALLBACK_LLM
+  // (the resolver didn't match an ANI for this call, so we can't serve account
+  // data safely).
   const verdict =
     routed.action === "ACCOUNT_LOOKUP"
       ? { ...routed, action: "FALLBACK_LLM" as const, reply: null }
