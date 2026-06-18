@@ -48,6 +48,24 @@ function safeDecrypt(ciphertext: string | null): string | null {
 }
 
 /**
+ * Return a shallow copy of a row with the given keys removed. Used to strip
+ * INTERNAL references from full-row exports — the data subject's own data stays,
+ * but the redundant `organizationId` (the whole export is one org) and opaque
+ * provider charge identifiers (Stripe/Wisetack ids — internal system plumbing,
+ * not the subject's personal data) are omitted from the portability snapshot.
+ */
+function omit<T extends Record<string, unknown>>(
+  row: T,
+  keys: readonly string[],
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(row)) {
+    if (!keys.includes(k)) out[k] = v;
+  }
+  return out;
+}
+
+/**
  * Builds a decrypted, secret-free export object for a single org.
  * Returns null when the org does not exist.
  */
@@ -170,17 +188,28 @@ export async function exportOrganization(
       signedAt: e.signedAt,
       createdAt: e.createdAt,
     })),
-    estimateOptions: optionRows,
-    estimateLineItems: estimateLineRows,
-    invoices: invoiceRows,
-    invoiceLineItems: invoiceLineRows,
-    payments: paymentRows,
-    refunds: refundRows,
-    financingApplications: financingRows,
-    customerEquipment: equipmentRows,
-    serviceHistory: historyRows,
-    customerMemberships: membershipRows,
-    membershipVisits: visitRows,
+    // Full-row tables: strip the redundant organizationId (the whole export is
+    // one org) and, on the money tables, the opaque provider charge identifiers
+    // (internal plumbing, not the subject's personal data). All substantive
+    // fields — amounts, statuses, equipment serials, technician notes, etc. —
+    // are the subject's data and are KEPT.
+    estimateOptions: optionRows.map((r) => omit(r, ["organizationId"])),
+    estimateLineItems: estimateLineRows.map((r) => omit(r, ["organizationId"])),
+    invoices: invoiceRows.map((r) => omit(r, ["organizationId"])),
+    invoiceLineItems: invoiceLineRows.map((r) => omit(r, ["organizationId"])),
+    payments: paymentRows.map((r) =>
+      omit(r, ["organizationId", "providerPaymentId"]),
+    ),
+    refunds: refundRows.map((r) =>
+      omit(r, ["organizationId", "providerRefundId"]),
+    ),
+    financingApplications: financingRows.map((r) =>
+      omit(r, ["organizationId", "providerAppId"]),
+    ),
+    customerEquipment: equipmentRows.map((r) => omit(r, ["organizationId"])),
+    serviceHistory: historyRows.map((r) => omit(r, ["organizationId"])),
+    customerMemberships: membershipRows.map((r) => omit(r, ["organizationId"])),
+    membershipVisits: visitRows.map((r) => omit(r, ["organizationId"])),
     messages: messageRows.map((m) => ({
       id: m.id,
       sessionId: m.sessionId,
