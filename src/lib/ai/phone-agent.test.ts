@@ -37,6 +37,10 @@ describe("PHONE_SYSTEM_PROMPT", () => {
   it("asks the model to spell back contact details", () => {
     expect(PHONE_SYSTEM_PROMPT.toLowerCase()).toContain("repeat");
   });
+
+  it("carries the prompt-tuning manner exemplars (T1)", () => {
+    expect(PHONE_SYSTEM_PROMPT).toContain("MANNER EXAMPLES");
+  });
 });
 
 describe("toSpokenReply", () => {

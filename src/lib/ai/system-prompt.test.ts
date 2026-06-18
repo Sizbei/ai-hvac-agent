@@ -70,6 +70,8 @@ describe("buildSystemPrompt — default (no brand)", () => {
     // Guard against silently dropping the shared knowledge/safety/scope block.
     expect(prompt).toContain("SCOPE BOUNDARY");
     expect(prompt).toContain("DANGEROUS-DIY REFUSAL");
+    // Guard the prompt-tuning additions (T1 exemplars + T3 answer shape).
+    expect(prompt).toContain("MANNER EXAMPLES");
     expect(prompt).toMatch(/^\/no_think/);
   });
 
