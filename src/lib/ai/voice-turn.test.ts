@@ -15,6 +15,7 @@ const {
   submitSessionMock,
   buildAccountLookupReplyMock,
   decryptMock,
+  decideAfterHoursDisclosureMock,
 } = vi.hoisted(() => ({
   generateTextMock: vi.fn(),
   insertMock: vi.fn(),
@@ -33,6 +34,8 @@ const {
   submitSessionMock: vi.fn(),
   buildAccountLookupReplyMock: vi.fn(),
   decryptMock: vi.fn(),
+  // After-hours disclosure helper mock (WS4). Default: no after-hours.
+  decideAfterHoursDisclosureMock: vi.fn().mockReturnValue({ kind: "none", afterHours: false, copy: "" }),
 }));
 
 vi.mock("ai", () => ({ generateText: generateTextMock }));
@@ -63,13 +66,22 @@ vi.mock("@/lib/db", () => ({
     }),
   },
 }));
-vi.mock("@/lib/db/schema", () => ({ customerSessions: {}, messages: {}, customers: {}, customerLocations: {} }));
+vi.mock("@/lib/db/schema", () => ({ customerSessions: {}, messages: {}, customers: {}, customerLocations: {}, organizationSettings: {} }));
 vi.mock("@/lib/db/tenant", () => ({ withTenant: (..._a: unknown[]) => ({}) }));
 vi.mock("./account-dispatch", () => ({
   buildAccountLookupReply: buildAccountLookupReplyMock,
 }));
 vi.mock("@/lib/crypto", () => ({
   decrypt: decryptMock,
+}));
+// After-hours mocks (WS4): resolveAfterHoursConfig is a pass-through (returns the
+// stored value unchanged for tests), and decideAfterHoursDisclosure is controlled
+// per-test via decideAfterHoursDisclosureMock. Default is no after-hours ("none").
+vi.mock("@/lib/admin/after-hours", () => ({
+  resolveAfterHoursConfig: (v: unknown) => v ?? { enabled: false, startHour: 8, endHour: 18, weekendsAreAfterHours: false, timezone: "UTC" },
+}));
+vi.mock("./after-hours-chat", () => ({
+  decideAfterHoursDisclosure: (...args: unknown[]) => decideAfterHoursDisclosureMock(...args),
 }));
 
 vi.mock("./escalate-service", () => ({ escalateSession: escalateMock }));
@@ -147,6 +159,8 @@ describe("voiceReply", () => {
     buildAccountLookupReplyMock.mockResolvedValue(null);
     decryptMock.mockReset();
     decryptMock.mockImplementation((s: string) => s);
+    decideAfterHoursDisclosureMock.mockReset();
+    decideAfterHoursDisclosureMock.mockReturnValue({ kind: "none", afterHours: false, copy: "" });
     extractAllContactMock.mockReturnValue(noSlots());
     extractAddressAtAddressStepMock.mockReturnValue(null);
     extractSpokenPhoneMock.mockReturnValue(null);
@@ -656,6 +670,8 @@ describe("voiceReply output guardrail (WS1)", () => {
     buildAccountLookupReplyMock.mockResolvedValue(null);
     decryptMock.mockReset();
     decryptMock.mockImplementation((s: string) => s);
+    decideAfterHoursDisclosureMock.mockReset();
+    decideAfterHoursDisclosureMock.mockReturnValue({ kind: "none", afterHours: false, copy: "" });
     extractAllContactMock.mockReturnValue(noSlots());
     extractAddressAtAddressStepMock.mockReturnValue(null);
     extractSpokenPhoneMock.mockReturnValue(null);
@@ -713,6 +729,8 @@ describe("voiceReply do-not-service (WS2)", () => {
     buildAccountLookupReplyMock.mockResolvedValue(null);
     decryptMock.mockReset();
     decryptMock.mockImplementation((s: string) => s);
+    decideAfterHoursDisclosureMock.mockReset();
+    decideAfterHoursDisclosureMock.mockReturnValue({ kind: "none", afterHours: false, copy: "" });
     extractAllContactMock.mockReturnValue(noSlots());
     extractAddressAtAddressStepMock.mockReturnValue(null);
     extractSpokenPhoneMock.mockReturnValue(null);
@@ -795,6 +813,8 @@ describe("voiceReply financial verify (WS3)", () => {
     decryptMock.mockReset();
     // decrypt just returns the input (the test address is already plaintext).
     decryptMock.mockImplementation((s: string) => s);
+    decideAfterHoursDisclosureMock.mockReset();
+    decideAfterHoursDisclosureMock.mockReturnValue({ kind: "none", afterHours: false, copy: "" });
   }
 
   beforeEach(() => {
@@ -1032,5 +1052,170 @@ describe("voiceReply financial verify (WS3)", () => {
       ipAddress: "127.0.0.1",
     });
     expect(result.nextGatherMode).toBeUndefined();
+  });
+});
+
+describe("voiceReply after-hours disclosure (WS4)", () => {
+  // The after-hours disclosure copy from after-hours-chat.ts (number-free).
+  const DISCLOSE_CHARGE_COPY =
+    "Since it's after our normal hours, there's an additional after-hours service charge, and our team will confirm the details. Let's get the rest of your information so we can get someone out to you.";
+
+  // Session with no customerId (avoids the do-not-service gate consuming
+  // the first selectLimitMock call). Issue + urgency (high) known; address
+  // missing → intake is in progress and the deterministic path is active.
+  const intakeSession = {
+    id: "s-ah",
+    organizationId: "o1",
+    status: "chatting" as const,
+    turnCount: 1,
+    maxTurns: 40,
+    metadata: JSON.stringify({
+      issueType: "cooling_not_working",
+      urgency: "high",
+      address: null,
+      customerName: null,
+      customerPhone: null,
+      customerEmail: null,
+      description: "ac out",
+      isHvacRelated: true,
+      systemDownStatus: "fully_down",
+      problemDuration: "today",
+    }),
+  };
+
+  function resetWS4Mocks() {
+    generateTextMock.mockReset();
+    insertMock.mockReset();
+    updateSetMock.mockReset();
+    selectLimitMock.mockReset();
+    // No customerId → no do-not-service gate → selectLimitMock returns the
+    // org settings row (any value works; resolveAfterHoursConfig is mocked).
+    selectLimitMock.mockResolvedValue([{ afterHoursConfig: { enabled: true } }]);
+    escalateMock.mockReset();
+    routeMock.mockReset();
+    routeMock.mockReturnValue({
+      action: "FALLBACK_LLM",
+      intentId: null,
+      confidence: 0,
+      reply: null,
+      issueType: "cooling_not_working",
+      urgency: "high",
+      escalate: false,
+    });
+    extractAllContactMock.mockReset();
+    extractAllContactMock.mockReturnValue(noSlots());
+    extractAddressAtAddressStepMock.mockReset();
+    extractAddressAtAddressStepMock.mockReturnValue(null);
+    extractSpokenPhoneMock.mockReset();
+    extractSpokenPhoneMock.mockReturnValue(null);
+    detectCorrectionMock.mockReset();
+    detectCorrectionMock.mockReturnValue(null);
+    getRouterConfigMock.mockReset();
+    getRouterConfigMock.mockResolvedValue({});
+    submitSessionMock.mockReset();
+    submitSessionMock.mockResolvedValue({ ok: true, referenceNumber: "AH-1", serviceRequestId: "sr-1" });
+    buildAccountLookupReplyMock.mockReset();
+    buildAccountLookupReplyMock.mockResolvedValue(null);
+    decryptMock.mockReset();
+    decryptMock.mockImplementation((s: string) => s);
+    // By default: after-hours + urgent → disclose_charge.
+    decideAfterHoursDisclosureMock.mockReset();
+    decideAfterHoursDisclosureMock.mockReturnValue({
+      kind: "disclose_charge",
+      afterHours: true,
+      copy: DISCLOSE_CHARGE_COPY,
+    });
+  }
+
+  beforeEach(() => resetWS4Mocks());
+
+  it("prepends the after-hours disclosure when after-hours + urgent (no dollar amount)", async () => {
+    // Provide an address slot so the turn stays on the deterministic path.
+    extractAddressAtAddressStepMock.mockReturnValue("123 Main St, Johnson City, TN 37601");
+    extractAllContactMock.mockReturnValue({
+      name: null,
+      address: "123 Main St, Johnson City, TN 37601",
+      phone: null,
+      email: null,
+    });
+
+    const result = await voiceReply({
+      session: intakeSession,
+      history: [{ role: "user", content: "my ac stopped working" }],
+      userMessage: "my address is 123 Main St",
+      ipAddress: "127.0.0.1",
+    });
+
+    // Must include the disclosure phrase ("after our normal hours").
+    expect(result.reply.toLowerCase()).toContain("after our normal hours");
+    // Must NEVER contain a dollar amount.
+    expect(result.reply).not.toMatch(/\$\s?\d/);
+    expect(result.endCall).toBe(false);
+    // LLM must not have been called (deterministic path).
+    expect(generateTextMock).not.toHaveBeenCalled();
+  });
+
+  it("does NOT disclose after-hours a second time when already latched (afterHoursShown set)", async () => {
+    const sessionAlreadyShown = {
+      ...intakeSession,
+      metadata: JSON.stringify({
+        issueType: "cooling_not_working",
+        urgency: "high",
+        address: null,
+        customerName: null,
+        customerPhone: null,
+        customerEmail: null,
+        description: "ac out",
+        isHvacRelated: true,
+        systemDownStatus: "fully_down",
+        problemDuration: "today",
+        afterHoursShown: "1",
+      }),
+    };
+    // Provide a slot so the deterministic path fires.
+    extractAllContactMock.mockReturnValue({
+      name: null,
+      address: "456 Oak Ave, Johnson City, TN 37601",
+      phone: null,
+      email: null,
+    });
+
+    const result = await voiceReply({
+      session: sessionAlreadyShown,
+      history: [{ role: "user", content: "ac is out" }],
+      userMessage: "456 Oak Ave, Johnson City, TN 37601",
+      ipAddress: "127.0.0.1",
+    });
+
+    // The disclosure phrase should NOT appear when already latched.
+    expect(result.reply.toLowerCase()).not.toContain("after our normal hours");
+  });
+
+  it("emergency escalation wins and does NOT include after-hours disclosure", async () => {
+    routeMock.mockReturnValue({
+      action: "ESCALATE",
+      intentId: "gas_smell",
+      confidence: 1,
+      reply: "Please leave the building now and call 911.",
+      issueType: "other",
+      urgency: "emergency",
+      escalate: true,
+    });
+    escalateMock.mockResolvedValue({ ok: true });
+
+    const result = await voiceReply({
+      session: intakeSession,
+      history: [],
+      userMessage: "i smell gas and its dangerous",
+      ipAddress: "127.0.0.1",
+    });
+
+    // Emergency escalates and ends the call.
+    expect(escalateMock).toHaveBeenCalled();
+    expect(result.endCall).toBe(true);
+    // The emergency reply must NOT contain after-hours disclosure.
+    expect(result.reply.toLowerCase()).not.toContain("after our normal hours");
+    // Must NOT contain a dollar amount.
+    expect(result.reply).not.toMatch(/\$\s?\d/);
   });
 });

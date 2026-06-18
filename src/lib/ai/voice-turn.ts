@@ -14,9 +14,11 @@
 import { generateText } from "ai";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { customerSessions, messages, customers, customerLocations } from "@/lib/db/schema";
+import { customerSessions, messages, customers, customerLocations, organizationSettings } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { decrypt } from "@/lib/crypto";
+import { resolveAfterHoursConfig } from "@/lib/admin/after-hours";
+import { decideAfterHoursDisclosure } from "./after-hours-chat";
 import { buildAccountLookupReply } from "./account-dispatch";
 import {
   requiresVerify,
@@ -720,6 +722,48 @@ export async function voiceReply(params: {
       }
     }
 
+    // ── After-hours disclosure (WS4) ──
+    // When the intake is still in progress (not complete), check if the caller is
+    // contacting us after business hours. If so — and the disclosure hasn't already
+    // been shown this session (latch via extras.afterHoursShown) — prepend the
+    // canned charge-disclosure line to the next question. Uses the SAME pure helper
+    // the web chat uses; any config-load failure degrades to no disclosure so intake
+    // always continues. Emergencies have already returned early above.
+    let afterHoursPrefix = "";
+    if (!extractionComplete) {
+      try {
+        const [ahRow] = await db
+          .select({ afterHoursConfig: organizationSettings.afterHoursConfig })
+          .from(organizationSettings)
+          .where(eq(organizationSettings.organizationId, organizationId))
+          .limit(1);
+        const ahConfig = resolveAfterHoursConfig(ahRow?.afterHoursConfig ?? null);
+        const ahDecision = decideAfterHoursDisclosure({
+          clock: new Date(),
+          config: ahConfig,
+          urgency: (merged.urgency as Urgency | null) ?? null,
+          customerSignal: "unknown",
+        });
+        const alreadyShown = merged.extras?.afterHoursShown === "1";
+        if (ahDecision.kind === "disclose_charge" && !alreadyShown) {
+          afterHoursPrefix = ahDecision.copy + " ";
+          // Latch: re-merge with afterHoursShown so we never disclose twice.
+          const latchedMerged = mergeSlots(merged, { extras: { afterHoursShown: "1" } });
+          if (hasSlotData(latchedMerged)) {
+            const firstUser =
+              history.find((m) => m.role === "user")?.content ?? userMessage;
+            const latchedExtraction = buildExtraction(latchedMerged, firstUser.slice(0, 280));
+            metadataStr = JSON.stringify(latchedExtraction);
+          }
+        }
+      } catch (ahError: unknown) {
+        logger.error(
+          { error: ahError, sessionId: session.id },
+          "After-hours config load failed — skipping disclosure",
+        );
+      }
+    }
+
     // Loop guard: when this turn merely filled a slot (an address/phone/email was
     // just captured) and intake isn't complete yet, advance to the NEXT missing
     // slot rather than re-speaking the router's canned line — re-speaking it is
@@ -727,7 +771,7 @@ export async function voiceReply(params: {
     // (e.g. business hours) is still spoken; completion still wins with the
     // confirmation. `verdict.reply` is preferred only when it's NOT a bare slot
     // provision.
-    const nextQuestion = voiceNextSlotPrompt(merged);
+    const nextQuestion = afterHoursPrefix + voiceNextSlotPrompt(merged);
     // SUBMIT is included: the router's required-slot view (issue/urgency/
     // address) is narrower than the voice gate (phone), so its canned confirm
     // copy — which says "tap Confirm & Submit", a screen affordance — must
