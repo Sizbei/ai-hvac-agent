@@ -161,6 +161,12 @@ export interface VoiceReplyResult {
   readonly endCall: boolean;
   /** The session state after this turn. */
   readonly nextState: SessionState;
+  /**
+   * When set to "dtmf_zip", the gather route should use
+   * `<Gather input="dtmf speech" numDigits="5">` so the caller can key in their
+   * ZIP on the keypad. Absent on all other turns (use the default speech gather).
+   */
+  readonly nextGatherMode?: "dtmf_zip";
 }
 
 export async function voiceReply(params: {
@@ -255,10 +261,16 @@ export async function voiceReply(params: {
      * Helper: persist the assistant turn + verify state and return the result.
      * Merges the NEW verify state into the existing metadata JSON so other slot
      * data (issueType, address, etc.) is preserved.
+     *
+     * `newVerify` may be null when a non-financial intent served the account data
+     * and no verify interaction has occurred — in that case we preserve whatever
+     * the existing verifyState is (including null) rather than writing any verify
+     * key, so a subsequent financial intent still demands a real ZIP check.
      */
     async function persistAccountTurn(
       reply: string,
-      newVerify: VerifyState,
+      newVerify: VerifyState | null,
+      opts?: { nextGatherMode?: "dtmf_zip" },
     ): Promise<VoiceReplyResult> {
       const spokenReply = toSpokenReply(reply, { nearLimit });
       await db.insert(messages).values({
@@ -273,15 +285,27 @@ export async function voiceReply(params: {
       try {
         if (session.metadata) existingMeta = JSON.parse(session.metadata) as Record<string, unknown>;
       } catch { /* start fresh on parse error */ }
-      const updatedMeta = JSON.stringify({ ...existingMeta, verify: newVerify });
+      // Only write the verify key when we have a real state to persist.
+      // A null newVerify means the non-financial path: keep existing metadata as-is.
+      const updatedMeta = newVerify !== null
+        ? JSON.stringify({ ...existingMeta, verify: newVerify })
+        : JSON.stringify(existingMeta);
       await db
         .update(customerSessions)
         .set({ metadata: updatedMeta, turnCount: newTurnCount, updatedAt: new Date() })
         .where(sessionScope);
-      return { reply: spokenReply, endCall: false, nextState: session.status };
+      return {
+        reply: spokenReply,
+        endCall: false,
+        nextState: session.status,
+        ...(opts?.nextGatherMode ? { nextGatherMode: opts.nextGatherMode } : {}),
+      };
     }
 
     // Non-financial intents serve immediately with no verify step required.
+    // IMPORTANT: we must NOT fabricate a "passed" verify here. Pass the EXISTING
+    // verifyState unchanged (null if no verify has occurred, or a prior real state).
+    // A fabricated "passed" would let a subsequent financial intent skip the ZIP check.
     if (!requiresVerify(intentId)) {
       const accountReply = await buildAccountLookupReply(
         intentId,
@@ -290,10 +314,7 @@ export async function voiceReply(params: {
         userMessage,
       ).catch(() => null);
       if (accountReply !== null) {
-        return persistAccountTurn(
-          accountReply,
-          verifyState ?? { status: "passed", attempts: 0 },
-        );
+        return persistAccountTurn(accountReply, verifyState);
       }
       // If the dispatch returned null (unrecognized intent), fall through to LLM.
     } else {
@@ -373,14 +394,14 @@ export async function voiceReply(params: {
           } else {
             // Re-ask (attempts < limit).
             const reasked: VerifyState = { status: "pending", attempts: newAttempts };
-            return persistAccountTurn(VOICE_VERIFY_ASK, reasked);
+            return persistAccountTurn(VOICE_VERIFY_ASK, reasked, { nextGatherMode: "dtmf_zip" });
           }
         }
       }
 
       // No verify state yet — this is the first financial ask. Set pending and ask.
       const initiated: VerifyState = { status: "pending", attempts: 0 };
-      return persistAccountTurn(VOICE_VERIFY_ASK, initiated);
+      return persistAccountTurn(VOICE_VERIFY_ASK, initiated, { nextGatherMode: "dtmf_zip" });
     }
   }
 

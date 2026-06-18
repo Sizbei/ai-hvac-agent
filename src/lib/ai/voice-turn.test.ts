@@ -757,7 +757,7 @@ describe("voiceReply financial verify (WS3)", () => {
     customerId: "c-verify",
   };
 
-  beforeEach(() => {
+  function resetWS3Mocks() {
     generateTextMock.mockReset();
     insertMock.mockReset();
     updateSetMock.mockReset();
@@ -795,6 +795,10 @@ describe("voiceReply financial verify (WS3)", () => {
     decryptMock.mockReset();
     // decrypt just returns the input (the test address is already plaintext).
     decryptMock.mockImplementation((s: string) => s);
+  }
+
+  beforeEach(() => {
+    resetWS3Mocks();
   });
 
   it("asks for ZIP and does NOT read the balance on first financial ask (no verify state yet)", async () => {
@@ -911,5 +915,122 @@ describe("voiceReply financial verify (WS3)", () => {
     // With no customerId the account lookup falls through to the LLM.
     expect(generateTextMock).toHaveBeenCalledTimes(1);
     expect(result.reply).not.toContain("$125.00");
+  });
+
+  // ── FINDING 1 REGRESSION: verify-bypass via non-financial intent ──
+  // A non-financial ACCOUNT_LOOKUP must NEVER fabricate a "passed" verify state.
+  // If a caller first asks "when is my next visit?" (non-financial → served with
+  // no verify) and then asks "what's my balance?" (financial), the second turn
+  // must gate with a ZIP ask, not serve the balance.
+  it("REGRESSION F1: non-financial intent must not fabricate verify:passed that unlocks a subsequent financial intent", async () => {
+    const nextVisitSession = {
+      ...balanceSession,
+      // session starts with NO verify state (null metadata)
+      metadata: null as string | null,
+    };
+
+    // Turn 1: non-financial intent (next-visit). Route returns non-financial.
+    routeMock.mockReturnValue({
+      action: "ACCOUNT_LOOKUP",
+      intentId: "account-data-next-visit",
+      confidence: 0.9,
+      reply: null,
+      issueType: null,
+      urgency: null,
+      escalate: false,
+    });
+    buildAccountLookupReplyMock.mockResolvedValue("Your next visit is on Monday.");
+
+    const turn1 = await voiceReply({
+      session: nextVisitSession,
+      history: [],
+      userMessage: "when is my next visit",
+      ipAddress: "127.0.0.1",
+    });
+    // Non-financial intent should be served immediately.
+    expect(turn1.reply).toContain("Monday");
+
+    // Capture the metadata written by turn 1 (should NOT be verify:passed).
+    const turn1SetCall = updateSetMock.mock.calls.find(
+      (c: unknown[]) => typeof (c[0] as Record<string, unknown>).metadata === "string",
+    );
+    const turn1MetaStr = turn1SetCall
+      ? ((turn1SetCall[0] as Record<string, unknown>).metadata as string)
+      : null;
+    if (turn1MetaStr) {
+      const turn1Meta = JSON.parse(turn1MetaStr) as Record<string, unknown>;
+      const verifyAfterTurn1 = turn1Meta.verify as Record<string, unknown> | undefined;
+      // If verify was written, it must NOT be "passed" — that would be the fabrication.
+      expect(verifyAfterTurn1?.status).not.toBe("passed");
+    }
+
+    // Turn 2: financial intent (balance). The session now carries whatever turn 1 wrote.
+    // Reset mocks but preserve the turn1 metadata as the session state.
+    resetWS3Mocks();
+    routeMock.mockReturnValue({
+      action: "ACCOUNT_LOOKUP",
+      intentId: "account-data-balance",
+      confidence: 0.95,
+      reply: null,
+      issueType: null,
+      urgency: null,
+      escalate: false,
+    });
+    buildAccountLookupReplyMock.mockResolvedValue("Your current balance is $125.00.");
+
+    const sessionAfterTurn1 = {
+      ...nextVisitSession,
+      metadata: turn1MetaStr, // whatever turn 1 persisted
+    };
+
+    const turn2 = await voiceReply({
+      session: sessionAfterTurn1,
+      history: [],
+      userMessage: "what is my balance",
+      ipAddress: "127.0.0.1",
+    });
+
+    // Turn 2 must NOT serve the balance — it must ask for ZIP (financial gate).
+    expect(turn2.reply).not.toContain("$125.00");
+    expect(turn2.reply.toLowerCase()).toMatch(/zip/);
+    // buildAccountLookupReply should NOT have been called with data served.
+    // (It may have been called and returned the sentinel — what matters is the
+    // spoken reply does NOT contain the balance string.)
+  });
+
+  // ── FINDING 2 REGRESSION: verify-ask turn must produce dtmf+speech gather ──
+  // Tested at the VoiceReplyResult level: nextGatherMode must be "dtmf_zip" on
+  // the verify-ask path, and absent on normal (non-verify) turns.
+  it("REGRESSION F2: voiceReply returns nextGatherMode='dtmf_zip' on the verify-ask turn", async () => {
+    // First financial ask — no verify state yet. Must return nextGatherMode:"dtmf_zip".
+    const result = await voiceReply({
+      session: balanceSession,
+      history: [],
+      userMessage: "what is my balance",
+      ipAddress: "127.0.0.1",
+    });
+    expect(result.nextGatherMode).toBe("dtmf_zip");
+  });
+
+  it("REGRESSION F2b: nextGatherMode is absent/undefined on a normal (non-verify) turn", async () => {
+    // Non-financial intent — must NOT set nextGatherMode.
+    routeMock.mockReturnValue({
+      action: "ACCOUNT_LOOKUP",
+      intentId: "account-data-next-visit",
+      confidence: 0.9,
+      reply: null,
+      issueType: null,
+      urgency: null,
+      escalate: false,
+    });
+    buildAccountLookupReplyMock.mockResolvedValue("Your next visit is on Monday.");
+
+    const result = await voiceReply({
+      session: balanceSession,
+      history: [],
+      userMessage: "when is my next visit",
+      ipAddress: "127.0.0.1",
+    });
+    expect(result.nextGatherMode).toBeUndefined();
   });
 });

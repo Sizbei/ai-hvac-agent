@@ -32,12 +32,11 @@ function answerToDigits(answer: string): string {
 /** True when the answer's 5 digits match ANY on-file ZIP. */
 export function checkZipMatch(answer: string, onFileZips: readonly string[]): boolean {
   const digits = answerToDigits(answer);
-  if (digits.length < 5) return false;
-  const zip5 = digits.slice(0, 5);
-  return onFileZips.includes(zip5);
+  if (digits.length !== 5) return false;
+  return onFileZips.includes(digits);
 }
 
-/** Per-session verify state persisted under metadata.extras.verify (as JSON). */
+/** Per-session verify state persisted under metadata.verify (as JSON). */
 export interface VerifyState {
   readonly status: "pending" | "passed" | "failed";
   readonly attempts: number;

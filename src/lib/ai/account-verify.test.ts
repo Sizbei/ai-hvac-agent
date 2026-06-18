@@ -30,4 +30,14 @@ describe("checkZipMatch", () => {
   it("rejects a mismatch", () => {
     expect(checkZipMatch("00000", ["37601"])).toBe(false);
   });
+  // FINDING 3 REGRESSION: a 10-digit run that happens to prefix-match a ZIP must NOT pass.
+  // Only exactly 5 digits should match (not >=5 then slice).
+  it("REGRESSION F3: rejects a 10-digit DTMF run even if the first 5 digits match the ZIP", () => {
+    // "3760112345" → slice(0,5) = "37601" which matches, but the input has 10 digits.
+    // This must be FALSE — the caller keyed 10 digits, not 5.
+    expect(checkZipMatch("3760112345", ["37601"])).toBe(false);
+  });
+  it("REGRESSION F3b: rejects a 6-digit run that prefix-matches a ZIP", () => {
+    expect(checkZipMatch("376019", ["37601"])).toBe(false);
+  });
 });

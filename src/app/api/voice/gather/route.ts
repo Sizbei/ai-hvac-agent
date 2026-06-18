@@ -74,8 +74,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // No recognized speech — re-prompt without consuming a turn.
-    if (speech.length === 0) {
+    // No recognized speech or digits — re-prompt without consuming a turn.
+    if (speech.length === 0 && digits.length === 0) {
       return new Response(
         gatherTwiML({
           say: "I'm sorry, I didn't hear anything. Could you tell me what's going on?",
@@ -162,7 +162,15 @@ export async function POST(request: NextRequest) {
     }
 
     return new Response(
-      gatherTwiML({ say: result.reply, action: "/api/voice/gather", voice }),
+      result.nextGatherMode === "dtmf_zip"
+        ? gatherTwiML({
+            say: result.reply,
+            action: "/api/voice/gather",
+            voice,
+            input: "dtmf speech",
+            numDigits: 5,
+          })
+        : gatherTwiML({ say: result.reply, action: "/api/voice/gather", voice }),
       { headers: TWIML_HEADERS },
     );
   } catch (error) {
