@@ -176,6 +176,50 @@ describe("exportOrganization", () => {
   });
 });
 
+describe("exportOrganization data minimization", () => {
+  const orgRow = [
+    { id: ORG, name: "Acme", slug: "acme", status: "active", plan: null, createdAt: new Date() },
+  ];
+
+  it("strips organizationId + providerPaymentId from payments, keeps amount/status", async () => {
+    rowsByTable.organizations = orgRow;
+    rowsByTable.payments = [
+      { id: "p1", organizationId: ORG, invoiceId: "i1", provider: "stripe", providerPaymentId: "pi_secret123", amountCents: 5000, status: "succeeded" },
+    ];
+    const result = (await exportOrganization(ORG)) as Record<string, unknown>;
+    const pay = (result.payments as Record<string, unknown>[])[0]!;
+    expect(pay).not.toHaveProperty("organizationId");
+    expect(pay).not.toHaveProperty("providerPaymentId");
+    expect(pay).toMatchObject({ id: "p1", amountCents: 5000, status: "succeeded", provider: "stripe" });
+  });
+
+  it("strips providerRefundId from refunds and providerAppId from financing", async () => {
+    rowsByTable.organizations = orgRow;
+    rowsByTable.refunds = [{ id: "r1", organizationId: ORG, providerRefundId: "re_secret", amountCents: 100 }];
+    rowsByTable.financingApplications = [{ id: "f1", organizationId: ORG, providerAppId: "app_secret", requestedAmountCents: 9000 }];
+    const result = (await exportOrganization(ORG)) as Record<string, unknown>;
+    const refund = (result.refunds as Record<string, unknown>[])[0]!;
+    expect(refund).not.toHaveProperty("providerRefundId");
+    expect(refund).toMatchObject({ amountCents: 100 });
+    const fin = (result.financingApplications as Record<string, unknown>[])[0]!;
+    expect(fin).not.toHaveProperty("providerAppId");
+    expect(fin).toMatchObject({ requestedAmountCents: 9000 });
+  });
+
+  it("KEEPS the subject's own data (equipment serial, technician notes), only dropping organizationId", async () => {
+    rowsByTable.organizations = orgRow;
+    rowsByTable.customerEquipment = [{ id: "e1", organizationId: ORG, serialNumber: "SN-123", brand: "Trane" }];
+    rowsByTable.serviceHistory = [{ id: "h1", organizationId: ORG, technicianNotes: "Replaced capacitor", customerId: "c1" }];
+    const result = (await exportOrganization(ORG)) as Record<string, unknown>;
+    const equip = (result.customerEquipment as Record<string, unknown>[])[0]!;
+    expect(equip).not.toHaveProperty("organizationId");
+    expect(equip).toMatchObject({ serialNumber: "SN-123", brand: "Trane" });
+    const hist = (result.serviceHistory as Record<string, unknown>[])[0]!;
+    expect(hist).not.toHaveProperty("organizationId");
+    expect(hist).toMatchObject({ technicianNotes: "Replaced capacitor" });
+  });
+});
+
 describe("exportCounts", () => {
   it("returns a per-array count and ignores non-array fields", () => {
     const counts = exportCounts({
