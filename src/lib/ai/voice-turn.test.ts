@@ -713,5 +713,8 @@ describe("voiceReply do-not-service (WS2)", () => {
     });
     expect(result.endCall).toBe(true);
     expect(result.reply.toLowerCase()).toContain("office");
+    // The gate must fire EARLY — before any router/LLM work runs.
+    expect(routeMock).not.toHaveBeenCalled();
+    expect(generateTextMock).not.toHaveBeenCalled();
   });
 });

@@ -14,8 +14,12 @@ describe("resolveVoiceIdentity", () => {
 
   it("returns null for absent/withheld ANI without calling the lookup", async () => {
     expect(await resolveVoiceIdentity("org1", null)).toBeNull();
+    expect(await resolveVoiceIdentity("org1", undefined)).toBeNull();
     expect(await resolveVoiceIdentity("org1", "")).toBeNull();
     expect(await resolveVoiceIdentity("org1", "anonymous")).toBeNull();
+    expect(await resolveVoiceIdentity("org1", "unavailable")).toBeNull();
+    expect(await resolveVoiceIdentity("org1", "restricted")).toBeNull();
+    expect(await resolveVoiceIdentity("org1", "unknown")).toBeNull();
     expect(lookupMock).not.toHaveBeenCalled();
   });
 

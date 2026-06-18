@@ -181,12 +181,23 @@ export async function voiceReply(params: {
         .limit(1);
       if (flagRow?.doNotService) {
         const reply = toSpokenReply(VOICE_OFFICE_REPLY, {});
-        await db.insert(messages).values({
-          organizationId, sessionId: session.id, role: "assistant", content: reply, tokensUsed: 0,
-        });
-        await db.update(customerSessions)
+        // Tolerate write failures so a flagged caller is STILL refused even if a
+        // bookkeeping write blips — never fall through to normal intake here.
+        await db
+          .insert(messages)
+          .values({
+            organizationId, sessionId: session.id, role: "assistant", content: reply, tokensUsed: 0,
+          })
+          .catch((e: unknown) =>
+            logger.error({ error: e, sessionId: session.id }, "do-not-service message persist failed"),
+          );
+        await db
+          .update(customerSessions)
           .set({ turnCount: newTurnCount, updatedAt: new Date() })
-          .where(sessionScope);
+          .where(sessionScope)
+          .catch((e: unknown) =>
+            logger.error({ error: e, sessionId: session.id }, "do-not-service turn count update failed"),
+          );
         return { reply, endCall: true, nextState: session.status };
       }
     } catch (e: unknown) {
