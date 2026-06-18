@@ -1219,3 +1219,99 @@ describe("voiceReply after-hours disclosure (WS4)", () => {
     expect(result.reply).not.toMatch(/\$\s?\d/);
   });
 });
+
+describe("voiceReply token-budget enforcement (WS6)", () => {
+  function resetWS6Mocks() {
+    generateTextMock.mockReset();
+    insertMock.mockReset();
+    updateSetMock.mockReset();
+    selectLimitMock.mockReset();
+    selectLimitMock.mockResolvedValue([]);
+    escalateMock.mockReset();
+    escalateMock.mockResolvedValue({ ok: true });
+    routeMock.mockReset();
+    routeMock.mockReturnValue({
+      action: "FALLBACK_LLM",
+      intentId: null,
+      confidence: 0,
+      reply: null,
+      issueType: null,
+      urgency: null,
+      escalate: false,
+    });
+    extractAllContactMock.mockReset();
+    extractAllContactMock.mockReturnValue(noSlots());
+    extractAddressAtAddressStepMock.mockReset();
+    extractAddressAtAddressStepMock.mockReturnValue(null);
+    extractSpokenPhoneMock.mockReset();
+    extractSpokenPhoneMock.mockReturnValue(null);
+    detectCorrectionMock.mockReset();
+    detectCorrectionMock.mockReturnValue(null);
+    getRouterConfigMock.mockReset();
+    getRouterConfigMock.mockResolvedValue({});
+    submitSessionMock.mockReset();
+    buildAccountLookupReplyMock.mockReset();
+    buildAccountLookupReplyMock.mockResolvedValue(null);
+    decryptMock.mockReset();
+    decryptMock.mockImplementation((s: string) => s);
+    decideAfterHoursDisclosureMock.mockReset();
+    decideAfterHoursDisclosureMock.mockReturnValue({ kind: "none", afterHours: false, copy: "" });
+  }
+
+  beforeEach(() => resetWS6Mocks());
+
+  it("returns a graceful handoff and escalates WITHOUT calling generateText when token budget is exhausted", async () => {
+    // tokensUsed >= tokenBudget → budget exhausted.
+    const exhaustedSession = {
+      ...baseSession,
+      tokensUsed: 40_000,
+      tokenBudget: 40_000,
+    };
+
+    const result = await voiceReply({
+      session: exhaustedSession,
+      history: [{ role: "user", content: "my furnace is loud" }],
+      userMessage: "it just keeps rattling",
+      ipAddress: "127.0.0.1",
+    });
+
+    // LLM must NOT be called.
+    expect(generateTextMock).not.toHaveBeenCalled();
+    // The session must be escalated.
+    expect(escalateMock).toHaveBeenCalled();
+    // The call should end.
+    expect(result.endCall).toBe(true);
+    expect(result.nextState).toBe("escalated");
+    // Reply should be a graceful spoken handoff (references "office" or "team").
+    expect(result.reply.toLowerCase()).toMatch(/office|team|call/);
+  });
+
+  it("accumulates token usage in the session update after a successful LLM call", async () => {
+    generateTextMock.mockResolvedValue({
+      text: "Tell me more about the noise.",
+      usage: { inputTokens: 100, outputTokens: 50 },
+    });
+
+    const sessionWithPriorTokens = {
+      ...baseSession,
+      tokensUsed: 1_000,
+      tokenBudget: 40_000,
+    };
+
+    await voiceReply({
+      session: sessionWithPriorTokens,
+      history: [{ role: "user", content: "my furnace is loud" }],
+      userMessage: "it rattles",
+      ipAddress: "1.2.3.4",
+    });
+
+    expect(generateTextMock).toHaveBeenCalledTimes(1);
+    // The session update must persist the accumulated token total.
+    const sessionUpdate = updateSetMock.mock.calls
+      .map((c: unknown[]) => c[0] as Record<string, unknown>)
+      .find((s) => typeof s.tokensUsed === "number");
+    expect(sessionUpdate).toBeDefined();
+    // 1000 prior + 100 input + 50 output = 1150.
+    expect(sessionUpdate?.tokensUsed).toBe(1150);
+  });
+});

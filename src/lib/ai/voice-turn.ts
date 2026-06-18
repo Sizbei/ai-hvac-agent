@@ -19,6 +19,7 @@ import { withTenant } from "@/lib/db/tenant";
 import { decrypt } from "@/lib/crypto";
 import { resolveAfterHoursConfig } from "@/lib/admin/after-hours";
 import { decideAfterHoursDisclosure } from "./after-hours-chat";
+import { checkTokenBudget, addTokenUsage } from "./token-budget";
 import { buildAccountLookupReply } from "./account-dispatch";
 import {
   requiresVerify,
@@ -154,6 +155,8 @@ export interface VoiceSession {
   readonly metadata: string | null;
   readonly runningSummary?: string | null;
   readonly customerId?: string | null;
+  readonly tokensUsed?: number;
+  readonly tokenBudget?: number;
 }
 
 export interface VoiceReplyResult {
@@ -845,6 +848,48 @@ export async function voiceReply(params: {
       ? `\n\nALREADY CAPTURED AND SAVED (never re-ask or re-confirm these): ${knownFacts.join("; ")}.`
       : "";
 
+  // ── Token budget check (WS6) ──
+  // Mirror the web chat's graceful degradation: when the per-session token budget
+  // is exhausted, escalate to a human instead of calling the LLM. Deterministic
+  // turns above are 0-token and always proceed; only the LLM-fallback path is
+  // gated here. checkTokenBudget defaults to 40k when tokenBudget is undefined.
+  const budget = checkTokenBudget(session.tokensUsed ?? 0, session.tokenBudget);
+  if (budget.exhausted) {
+    logger.info(
+      { sessionId: session.id, tokensUsed: session.tokensUsed },
+      "Voice token budget exhausted — degrading to human handoff",
+    );
+    const budgetReply = toSpokenReply(VOICE_OFFICE_REPLY, {});
+    await db
+      .insert(messages)
+      .values({
+        organizationId,
+        sessionId: session.id,
+        role: "assistant",
+        content: budgetReply,
+        tokensUsed: 0,
+      })
+      .catch((e: unknown) =>
+        logger.error({ error: e, sessionId: session.id }, "Voice budget-handoff message persist failed"),
+      );
+    await escalateSession({
+      organizationId,
+      sessionId: session.id,
+      currentStatus: session.status,
+      ipAddress,
+    }).catch((e: unknown) =>
+      logger.error({ error: e, sessionId: session.id }, "Voice budget-handoff escalate failed"),
+    );
+    await db
+      .update(customerSessions)
+      .set({ turnCount: newTurnCount, updatedAt: new Date() })
+      .where(sessionScope)
+      .catch((e: unknown) =>
+        logger.error({ error: e, sessionId: session.id }, "Voice budget-handoff turn count update failed"),
+      );
+    return { reply: budgetReply, endCall: true, nextState: "escalated" };
+  }
+
   const { text, usage } = await generateText({
     model: await getModel(organizationId),
     system: PHONE_SYSTEM_PROMPT + slotContextHint,
@@ -881,9 +926,15 @@ export async function voiceReply(params: {
     session.maxTurns,
   );
 
+  const { newTotal: newTokensTotal } = addTokenUsage(
+    session.tokensUsed ?? 0,
+    tokensThisCall,
+    session.tokenBudget,
+  );
+
   await db
     .update(customerSessions)
-    .set({ status: nextState, turnCount: newTurnCount, updatedAt: new Date() })
+    .set({ status: nextState, turnCount: newTurnCount, tokensUsed: newTokensTotal, updatedAt: new Date() })
     .where(sessionScope);
 
   return { reply, endCall: false, nextState };

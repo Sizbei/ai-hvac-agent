@@ -1,9 +1,9 @@
 import { NextRequest, after } from "next/server";
 import { db } from "@/lib/db";
 import { customerSessions, messages, organizationSettings } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { withTenant } from "@/lib/db/tenant";
-import { isTerminalState, type SessionState } from "@/lib/ai/state-machine";
+import { isTerminalState, determineNextState, type SessionState } from "@/lib/ai/state-machine";
 import { voiceReply } from "@/lib/ai/voice-turn";
 import { compactSessionIfNeeded } from "@/lib/ai/compact-session";
 import { type ChatTurn } from "@/lib/ai/compaction";
@@ -17,6 +17,14 @@ import {
   TWIML_HEADERS,
 } from "@/lib/voice/twiml";
 import { logger } from "@/lib/logger";
+import { extractServiceRequest } from "@/lib/ai/extract";
+import {
+  parseKnownSlots,
+  mergeSlots,
+  hasSlotData,
+  buildExtraction,
+} from "@/lib/ai/chat-slots";
+import { isVoiceExtractionComplete } from "@/lib/ai/extraction-schema";
 
 /**
  * Twilio speech-gather webhook. Verifies the signature, loads the phone session
@@ -111,12 +119,20 @@ export async function POST(request: NextRequest) {
         metadata: session.metadata,
         runningSummary: session.runningSummary,
         customerId: session.customerId,
+        tokensUsed: session.tokensUsed,
+        tokenBudget: session.tokenBudget,
       },
       history: chatHistory,
       userMessage: sanitized.sanitized,
       ipAddress: ip,
       dtmfDigits: digits || null,
     });
+
+    const sessionScope = and(
+      eq(customerSessions.id, session.id),
+      eq(customerSessions.organizationId, organizationId),
+    );
+    const newTurnCount = session.turnCount + 1;
 
     // Compaction runs in the background (same model as web), bounded so long
     // calls stay coherent without re-sending the transcript each turn.
@@ -129,6 +145,58 @@ export async function POST(request: NextRequest) {
         });
       } catch (e) {
         logger.error({ error: e, sessionId: session.id }, "Voice compaction failed");
+      }
+    });
+
+    // Async slot extraction (WS6 parity with web chat). Runs best-effort in the
+    // background so LLM turns don't lose issueType/urgency/contact info. Mirrors
+    // the chat route's merge strategy exactly: re-read fresh metadata before
+    // merging so a rapid follow-up turn's writes aren't clobbered; never overwrite
+    // a filled slot with null; only fill issueType/urgency when not already set.
+    after(async () => {
+      try {
+        const extraction = await extractServiceRequest(
+          chatHistory,
+          sanitized.sanitized,
+          organizationId,
+        );
+        // Re-read CURRENT metadata — a rapid follow-up may have written new slots.
+        const [fresh] = await db
+          .select({ metadata: customerSessions.metadata, status: customerSessions.status })
+          .from(customerSessions)
+          .where(sessionScope);
+        const freshSlots = parseKnownSlots(fresh?.metadata ?? null);
+        const merged = mergeSlots(freshSlots, {
+          // Don't overwrite a deterministic classification with a weaker LLM one.
+          issueType: freshSlots.issueType ? undefined : extraction.extraction.issueType ?? undefined,
+          urgency: freshSlots.urgency ? undefined : extraction.extraction.urgency ?? undefined,
+          address: extraction.extraction.address ?? undefined,
+          name: extraction.extraction.customerName ?? undefined,
+          phone: extraction.extraction.customerPhone ?? undefined,
+          email: extraction.extraction.customerEmail ?? undefined,
+        });
+        const firstUserContent =
+          chatHistory.find((m) => m.role === "user")?.content ?? sanitized.sanitized;
+        const mergedExtraction = buildExtraction(
+          merged,
+          extraction.extraction.description || firstUserContent.slice(0, 280),
+        );
+        const extractionComplete = isVoiceExtractionComplete(mergedExtraction);
+        const currentStatus = (fresh?.status ?? session.status) as SessionState;
+        const nextState = determineNextState(currentStatus, extractionComplete, newTurnCount, session.maxTurns);
+        await db
+          .update(customerSessions)
+          .set({
+            status: nextState,
+            metadata: hasSlotData(merged)
+              ? JSON.stringify(mergedExtraction)
+              : (fresh?.metadata ?? session.metadata),
+            updatedAt: new Date(),
+          })
+          .where(sessionScope);
+        logger.info({ sessionId: session.id, extractionComplete }, "Voice background extraction complete");
+      } catch (e) {
+        logger.error({ error: e, sessionId: session.id }, "Voice background extraction failed");
       }
     });
 
