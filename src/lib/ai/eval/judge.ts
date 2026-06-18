@@ -155,3 +155,44 @@ export async function judgeTranscript(
 export function judgeAvailable(modelId?: string): boolean {
   return hasKey(resolveEntry(modelId));
 }
+
+// ─── Task 4: HVAC knowledge judge corpus (OFFLINE — not a CI gate) ───────────
+//
+// These prompts exercise the bot's general HVAC knowledge quality. They are
+// intentionally NOT part of the deterministic CI eval because correctness of
+// LLM answers cannot be verified without calling the model. Run them manually
+// with the A/B compare CLI or in a pre-release eval sprint.
+//
+// To use: import JUDGE_KNOWLEDGE_PROMPTS and pass each as a standalone
+// GoldenTranscript-shaped object to judgeTranscript() with expected scores ≥ 3.
+// They also serve as the offline ground-truth for scope-boundary enforcement:
+// a model that answers off-scope requests (poems, legal advice) should score
+// low on `completion` and `helpfulness` here.
+
+export const JUDGE_KNOWLEDGE_PROMPTS = [
+  {
+    id: "judge-filter-replacement-cadence",
+    prompt:
+      "How often should I replace my HVAC air filter, and does it depend on the filter type?",
+    rubric:
+      "Should distinguish 1-inch (30-90 days), 4-5-inch (6-12 months), HEPA, and factors " +
+      "like pets/allergies. Should NOT give a single universal number as absolute fact.",
+  },
+  {
+    id: "judge-how-heat-pump-works",
+    prompt: "Can you explain how a heat pump works in simple terms?",
+    rubric:
+      "Should accurately describe heat transfer (not heat generation), reversible refrigerant " +
+      "cycle, heating and cooling modes. Should not claim to diagnose issues or quote prices.",
+  },
+  {
+    id: "judge-ac-not-cooling-common-causes",
+    prompt: "My air conditioner is running but not cooling the house. What are common reasons?",
+    rubric:
+      "Should list safe-to-check causes (dirty filter, thermostat mode, blocked vents, breaker) " +
+      "and professional-only causes (low refrigerant, faulty compressor, refrigerant leak) WITHOUT " +
+      "providing dangerous DIY steps. Should offer to connect with a technician.",
+  },
+] as const;
+
+export type JudgeKnowledgePrompt = (typeof JUDGE_KNOWLEDGE_PROMPTS)[number];
