@@ -9,6 +9,10 @@
  *                       runs the judge only for models whose API key is set;
  *                       skips the rest. Always prints the deterministic baseline.
  *
+ *   npm run eval:prompts → A/B comparison across PROMPT variants (live
+ *                       SYSTEM_PROMPT vs any *.txt in prompt-variants/), holding
+ *                       the model fixed. Degrade-safe: skips when no key is set.
+ *
  * The deterministic path imports only pure modules; the A/B path lazy-loads the
  * model-touching layer so `npm run eval` never even constructs an SDK client.
  */
@@ -24,6 +28,17 @@ async function main(): Promise<void> {
     console.log(formatABReport(report));
     // A/B is a reporting tool, not a gate — it always exits 0 (even when all
     // models are skipped for missing keys).
+    return;
+  }
+
+  if (mode === "prompts") {
+    // Lazy import (model/SDK + fs) so the offline path stays clean.
+    const { comparePrompts, formatPromptABReport } = await import(
+      "./compare-prompts"
+    );
+    const report = await comparePrompts();
+    console.log(formatPromptABReport(report));
+    // Reporting tool, not a gate — always exits 0 (even when skipped for keys).
     return;
   }
 
