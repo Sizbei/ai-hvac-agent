@@ -13,6 +13,10 @@
  *                       SYSTEM_PROMPT vs any *.txt in prompt-variants/), holding
  *                       the model fixed. Degrade-safe: skips when no key is set.
  *
+ *   npm run eval:behavior → A/B the tuned BEHAVIORS (no-pitch-on-education,
+ *                       offer-on-symptom, defer-specifics) across the same prompt
+ *                       variants via binary judging. Degrade-safe.
+ *
  * The deterministic path imports only pure modules; the A/B path lazy-loads the
  * model-touching layer so `npm run eval` never even constructs an SDK client.
  */
@@ -38,6 +42,17 @@ async function main(): Promise<void> {
     );
     const report = await comparePrompts();
     console.log(formatPromptABReport(report));
+    // Reporting tool, not a gate — always exits 0 (even when skipped for keys).
+    return;
+  }
+
+  if (mode === "behavior") {
+    // Lazy import (model/SDK + fs) so the offline path stays clean.
+    const { comparePromptBehaviors, formatBehaviorReport } = await import(
+      "./behavior-probe"
+    );
+    const report = await comparePromptBehaviors();
+    console.log(formatBehaviorReport(report));
     // Reporting tool, not a gate — always exits 0 (even when skipped for keys).
     return;
   }
