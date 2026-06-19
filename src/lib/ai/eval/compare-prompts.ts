@@ -33,8 +33,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { generateText } from "ai";
-import { createOpenAI } from "@ai-sdk/openai";
 import {
   judgeTranscript,
   judgeAvailable,
@@ -42,12 +40,9 @@ import {
   type JudgeScores,
   type JudgeKnowledgePrompt,
 } from "./judge";
+import { generateReply } from "./eval-llm";
 import type { GoldenTranscript } from "./golden-transcripts";
-import {
-  MODEL_REGISTRY,
-  getRegistryEntry,
-  type ModelRegistryEntry,
-} from "../model-registry";
+import { MODEL_REGISTRY, getRegistryEntry } from "../model-registry";
 import { SYSTEM_PROMPT } from "../system-prompt";
 
 /** A named full system prompt to score. */
@@ -140,40 +135,6 @@ function asTranscript(prompt: JudgeKnowledgePrompt): GoldenTranscript {
     userTurns: [prompt.prompt],
     expect: {},
   };
-}
-
-/**
- * Generate one bot answer for a prompt variant. Degrade-safe: returns
- * `{ text: null }` with a note rather than throwing on error/empty output.
- */
-async function generateReply(
-  entry: ModelRegistryEntry,
-  systemPrompt: string,
-  userPrompt: string,
-): Promise<{ text: string | null; tokens: number; note: string }> {
-  try {
-    const provider = createOpenAI({
-      baseURL: entry.baseUrl,
-      apiKey: process.env[entry.apiKeyEnv] ?? "",
-    });
-    const { text, usage } = await generateText({
-      model: provider(entry.modelId),
-      system: systemPrompt,
-      messages: [{ role: "user", content: userPrompt }],
-      abortSignal: AbortSignal.timeout(30_000),
-    });
-    const out = typeof text === "string" ? text.trim() : "";
-    const tokens = (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0);
-    return out.length
-      ? { text: out, tokens, note: "ok" }
-      : { text: null, tokens, note: "failed: empty generation" };
-  } catch (err) {
-    return {
-      text: null,
-      tokens: 0,
-      note: `error: ${err instanceof Error ? err.message : String(err)}`,
-    };
-  }
 }
 
 async function runVariant(

@@ -28,7 +28,8 @@
     "test:e2e:report": "playwright show-report",
     "eval": "npx tsx src/lib/ai/eval/cli.ts",
     "eval:ab": "npx tsx src/lib/ai/eval/cli.ts ab",
-    "eval:prompts": "npx tsx src/lib/ai/eval/cli.ts prompts"
+    "eval:prompts": "npx tsx src/lib/ai/eval/cli.ts prompts",
+    "eval:behavior": "npx tsx src/lib/ai/eval/cli.ts behavior"
   },
   "dependencies": {
     "@ai-sdk/openai": "^3.0.65",
