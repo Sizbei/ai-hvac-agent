@@ -67,6 +67,12 @@ export async function POST(
             "EXCEEDS_PAYMENT",
             422,
           );
+        case "synced_read_only":
+          return errorResponse(
+            "This invoice is synced from FieldPulse — manage refunds in FieldPulse",
+            "INVOICE_SYNCED_READ_ONLY",
+            409,
+          );
         default:
           return errorResponse("Could not refund payment", "VALIDATION_ERROR", 400);
       }
