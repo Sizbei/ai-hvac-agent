@@ -29,7 +29,7 @@
  * NOTE: Fieldpulse's webhook format is based on typical FSM patterns; the exact
  * payload structure may need adjustment when their documentation is available.
  */
-import { NextRequest } from "next/server";
+import { NextRequest, after } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { serviceRequests, organizations, auditLog } from "@/lib/db/schema";
@@ -38,7 +38,10 @@ import { eq, and } from "drizzle-orm";
 import { logger } from "@/lib/logger";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { errorResponse } from "@/lib/api-response";
-import { syncInvoiceStatus } from "@/lib/integrations/fieldpulse/invoice-sync";
+import {
+  syncInvoiceStatus,
+  pullInvoiceFromFieldpulse,
+} from "@/lib/integrations/fieldpulse/invoice-sync";
 import { getFieldpulseWebhookSecret } from "@/lib/integrations/fieldpulse/config";
 import { recordStatusEvent } from "@/lib/admin/status-events";
 import {
@@ -302,6 +305,15 @@ export async function POST(request: NextRequest): Promise<Response> {
           { eventId, eventType, jobId, invoiceStatus },
           "Fieldpulse invoice webhook processed",
         );
+        // Money-grade mirror: pull the full invoice into the native `invoices`
+        // table — parity with the separate invoice-webhook route and the HCP
+        // webhook. Scheduled ONLY here, past the idempotency-ledger insert (a
+        // replay returns 200 above and never reaches this), and only when the
+        // payload carries an invoice id. Background via after(); failures are
+        // logged in the module and recovered by the reconcile cron.
+        if (invoiceId) {
+          after(() => pullInvoiceFromFieldpulse(organizationId, invoiceId));
+        }
         return new Response(null, { status: 204 });
       }
 
