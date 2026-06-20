@@ -107,16 +107,22 @@ export interface FieldpulseAvailabilitySlot {
   readonly userId?: string; // The technician/user this slot belongs to
 }
 
-/** A Fieldpulse invoice (their "Invoice" resource). */
+/**
+ * A Fieldpulse invoice (their "Invoice" resource), narrowed to what the mirror
+ * needs. Money is in CENTS here (the client parses the API's dollar strings).
+ * Verified against the live API 2026-06-19.
+ */
 export interface FieldpulseInvoice {
   readonly id: string;
   readonly jobId?: string | null; // The associated job id
   readonly customerId?: string | null;
-  readonly status?: string | null; // "sent", "paid", "void", etc.
-  readonly total?: number | null; // Invoice amount in cents
-  readonly dueDate?: string | null; // ISO date
-  readonly paidAt?: string | null; // ISO datetime when paid
-  readonly createdAt?: string | null; // ISO datetime
+  readonly status?: string | null; // Real API: an int, stringified (informational)
+  readonly totalCents?: number | null;
+  readonly amountPaidCents?: number | null; // Real API exposes amount_paid
+  readonly amountUnpaidCents?: number | null; // Real API exposes amount_unpaid
+  readonly dueDate?: string | null;
+  readonly paidAt?: string | null; // From last_payment_date
+  readonly createdAt?: string | null;
 }
 
 /** Invoice status values from Fieldpulse (adjusted per actual docs). */

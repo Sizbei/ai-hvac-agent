@@ -276,6 +276,24 @@ export function mapFieldpulseStatusToInvoiceState(
 }
 
 /**
+ * Derive the native `invoices.state` from the invoice's AMOUNTS — authoritative,
+ * unlike the real API's opaque integer `status` (whose code meanings are
+ * unconfirmed). Paid when nothing is owed; open once invoiced; draft otherwise.
+ * (Void isn't derivable from amounts; the webhook's invoice.voided event drives
+ * the request-status void path separately.)
+ */
+function deriveInvoiceState(
+  invoice: FieldpulseInvoice,
+  totalCents: number,
+  amountPaidCents: number,
+): "draft" | "open" | "paid" | "void" {
+  if (totalCents <= 0) return "draft";
+  const unpaid = invoice.amountUnpaidCents;
+  const fullyPaid = unpaid != null ? unpaid <= 0 : amountPaidCents >= totalCents;
+  return fullyPaid ? "paid" : "open";
+}
+
+/**
  * Core upsert for one already-fetched Fieldpulse invoice. Shared by the
  * single-invoice and per-job entry points so the cron doesn't re-fetch.
  * Resolves links org-scoped, maps money to cents, and find-or-creates the native
@@ -285,11 +303,10 @@ async function upsertInvoiceRecord(
   organizationId: string,
   invoice: FieldpulseInvoice,
 ): Promise<InvoicePullOutcome> {
-  const state = mapFieldpulseStatusToInvoiceState(invoice.status);
-  const totalCents = invoice.total ?? 0;
-  // Binary: Fieldpulse's payload exposes no partial-paid amount. The invoice is
-  // read-only here, so the native balance is informational only (UI flags it).
-  const amountPaidCents = state === "paid" ? totalCents : 0;
+  const totalCents = invoice.totalCents ?? 0;
+  // Real API exposes accurate paid/unpaid amounts — use them (no longer binary).
+  const amountPaidCents = invoice.amountPaidCents ?? 0;
+  const state = deriveInvoiceState(invoice, totalCents, amountPaidCents);
 
   // Resolve links — both optional, both ORG-SCOPED compound keys so a
   // cross-tenant Fieldpulse-id collision can't attach to the wrong tenant.
