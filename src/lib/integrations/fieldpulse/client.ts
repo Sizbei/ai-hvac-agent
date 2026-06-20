@@ -138,6 +138,32 @@ export interface FieldpulseClient {
   geocodeAddress(input: GeocodeInput): Promise<FieldpulseGeocodeResult | null>;
 }
 
+// ── Real-API helpers (verified 2026-06-19 against the live FieldPulse API) ─────
+// FieldPulse returns: ids as NUMBERS, money as decimal dollar STRINGS ("200.00"),
+// and EVERY payload (list + single) wrapped in `{ error, response, total_count }`.
+// See docs/superpowers/specs/2026-06-19-fieldpulse-live-api-remediation-design.md.
+
+/** Coerce a FieldPulse id (number OR string) to a non-empty string, else null. */
+function idStr(v: unknown): string | null {
+  if (typeof v === "string" && v.length > 0) return v;
+  if (typeof v === "number" && Number.isFinite(v)) return String(v);
+  return null;
+}
+
+/** Parse FieldPulse money (dollar string "200.00" or number) to integer cents. */
+function dollarsToCents(v: unknown): number | null {
+  const n = typeof v === "number" ? v : typeof v === "string" ? parseFloat(v) : NaN;
+  return Number.isFinite(n) ? Math.round(n * 100) : null;
+}
+
+/** Unwrap the FieldPulse envelope: `{ error, response, ... }` → the payload. */
+function unwrap(raw: unknown): unknown {
+  if (raw && typeof raw === "object" && "response" in raw) {
+    return (raw as Record<string, unknown>).response;
+  }
+  return raw;
+}
+
 /** Map a raw Fieldpulse address to our type (tolerant of omitted fields). */
 function toAddress(raw: unknown): FieldpulseAddress | null {
   if (typeof raw !== "object" || raw === null) {
@@ -162,21 +188,32 @@ function toCustomer(raw: unknown): FieldpulseCustomer {
     throw new Error("Fieldpulse returned a malformed customer");
   }
   const obj = raw as Record<string, unknown>;
-  if (typeof obj.id !== "string") {
+  const id = idStr(obj.id);
+  if (!id) {
     throw new Error("Fieldpulse customer missing id");
   }
   const str = (v: unknown): string | null =>
     typeof v === "string" ? v : null;
-  const address = typeof obj.address === "object" && obj.address !== null
-    ? toAddress(obj.address)
-    : null;
+  // Real API: flat address fields (address_1/city/state/zip_code), not a nested
+  // `address` object; company is `company_name`.
+  const flat = toAddress({
+    street: obj.address_1,
+    street_line_2: obj.address_2,
+    city: obj.city,
+    state: obj.state,
+    zip: obj.zip_code,
+  });
+  const address =
+    typeof obj.address === "object" && obj.address !== null
+      ? toAddress(obj.address)
+      : flat;
   return {
-    id: obj.id,
+    id,
     firstName: str(obj.first_name),
     lastName: str(obj.last_name),
     email: str(obj.email),
     phone: str(obj.phone),
-    company: str(obj.company),
+    company: str(obj.company) ?? str(obj.company_name),
     address,
   };
 }
@@ -187,19 +224,23 @@ function toJob(raw: unknown): FieldpulseJob {
     throw new Error("Fieldpulse returned a malformed job");
   }
   const obj = raw as Record<string, unknown>;
-  if (typeof obj.id !== "string" || typeof obj.customer_id !== "string") {
+  const id = idStr(obj.id);
+  const customerId = idStr(obj.customer_id);
+  if (!id || !customerId) {
     throw new Error("Fieldpulse job missing id/customer_id");
   }
   const str = (v: unknown): string | null =>
     typeof v === "string" ? v : null;
+  // Real API: schedule is start_time/end_time; status is an int (stringified).
   return {
-    id: obj.id,
-    customerId: obj.customer_id,
-    workStatus: str(obj.work_status),
-    description: str(obj.description),
-    scheduleStart: str(obj.schedule_start),
-    scheduleEnd: str(obj.schedule_end),
-    assignedUserId: str(obj.assigned_user_id),
+    id,
+    customerId,
+    workStatus:
+      obj.status != null ? String(obj.status) : str(obj.work_status),
+    description: str(obj.description) ?? str(obj.notes),
+    scheduleStart: str(obj.start_time) ?? str(obj.schedule_start),
+    scheduleEnd: str(obj.end_time) ?? str(obj.schedule_end),
+    assignedUserId: idStr(obj.assigned_user_id),
     createdAt: str(obj.created_at),
   };
 }
@@ -214,7 +255,8 @@ function toUser(raw: unknown): FieldpulseUser | null {
     return null;
   }
   const obj = raw as Record<string, unknown>;
-  if (typeof obj.id !== "string" || obj.id.length === 0) {
+  const id = idStr(obj.id);
+  if (!id) {
     return null;
   }
   const str = (v: unknown): string | undefined =>
@@ -225,9 +267,13 @@ function toUser(raw: unknown): FieldpulseUser | null {
       : typeof obj.is_active === "boolean"
         ? obj.is_active
         : undefined;
+  // Real API: no single `name`; assemble from first/last.
+  const assembledName =
+    [str(obj.first_name), str(obj.last_name)].filter(Boolean).join(" ") ||
+    undefined;
   return {
-    id: obj.id,
-    name: str(obj.name),
+    id,
+    name: str(obj.name) ?? assembledName,
     email: str(obj.email),
     isActive,
     role: str(obj.role),
@@ -264,21 +310,25 @@ function toInvoice(raw: unknown): FieldpulseInvoice | null {
     return null;
   }
   const obj = raw as Record<string, unknown>;
-  if (typeof obj.id !== "string") {
+  const id = idStr(obj.id);
+  if (!id) {
     return null;
   }
   const str = (v: unknown): string | null =>
     typeof v === "string" ? v : null;
-  const num = (v: unknown): number | null =>
-    typeof v === "number" ? v : null;
   return {
-    id: obj.id,
-    jobId: str(obj.job_id),
-    customerId: str(obj.customer_id),
-    status: str(obj.status),
-    total: num(obj.total),
+    id,
+    jobId: idStr(obj.job_id),
+    customerId: idStr(obj.customer_id),
+    // Real status is an int (e.g. 3) — preserve as a string for reference; the
+    // mirror derives paid/open/void from the amounts below, not this code.
+    status: obj.status != null ? String(obj.status) : null,
+    totalCents: dollarsToCents(obj.total),
+    amountPaidCents: dollarsToCents(obj.amount_paid),
+    amountUnpaidCents: dollarsToCents(obj.amount_unpaid),
     dueDate: str(obj.due_date),
-    paidAt: str(obj.paid_at),
+    // Real paid timestamp is last_payment_date (fallback first_payment_date).
+    paidAt: str(obj.last_payment_date) ?? str(obj.first_payment_date),
     createdAt: str(obj.created_at),
   };
 }
@@ -364,7 +414,7 @@ export class RestFieldpulseClient implements FieldpulseClient {
       method: "POST",
       body: JSON.stringify(body),
     });
-    return toCustomer(raw);
+    return toCustomer(unwrap(raw));
   }
 
   async findCustomer(
@@ -379,14 +429,21 @@ export class RestFieldpulseClient implements FieldpulseClient {
     const raw = await this.request(`/customers?${params.toString()}`, {
       method: "GET",
     });
-    const list =
-      typeof raw === "object" && raw !== null
-        ? (raw as Record<string, unknown>).customers
-        : undefined;
+    const list = unwrap(raw);
     if (!Array.isArray(list) || list.length === 0) {
       return null;
     }
-    return toCustomer(list[0]);
+    // The `q` filter is NOT verified to narrow server-side (the `job_id` filter
+    // on /invoices is ignored), so confirm the candidate actually matches before
+    // returning — a wrong "match" would mis-link a customer on the push path.
+    const candidate = toCustomer(list[0]);
+    const wantEmail = query.email?.toLowerCase();
+    const wantPhone = query.phone?.replace(/\D/g, "");
+    const okEmail =
+      !!wantEmail && candidate.email?.toLowerCase() === wantEmail;
+    const okPhone =
+      !!wantPhone && candidate.phone?.replace(/\D/g, "") === wantPhone;
+    return okEmail || okPhone ? candidate : null;
   }
 
   async createJob(input: CreateJobInput): Promise<FieldpulseJob> {
@@ -403,7 +460,7 @@ export class RestFieldpulseClient implements FieldpulseClient {
       method: "POST",
       body: JSON.stringify(body),
     });
-    return toJob(raw);
+    return toJob(unwrap(raw));
   }
 
   async updateJob(
@@ -421,7 +478,7 @@ export class RestFieldpulseClient implements FieldpulseClient {
       method: "PUT",
       body: JSON.stringify(body),
     });
-    return toJob(raw);
+    return toJob(unwrap(raw));
   }
 
   async cancelJob(jobId: string): Promise<void> {
@@ -452,10 +509,7 @@ export class RestFieldpulseClient implements FieldpulseClient {
     const raw = await this.request(`/jobs?${params.toString()}`, {
       method: "GET",
     });
-    const list =
-      typeof raw === "object" && raw !== null
-        ? (raw as Record<string, unknown>).jobs
-        : undefined;
+    const list = unwrap(raw);
     if (!Array.isArray(list)) {
       return [];
     }
@@ -476,16 +530,13 @@ export class RestFieldpulseClient implements FieldpulseClient {
     const raw = await this.request(`/jobs/${encodeURIComponent(jobId)}`, {
       method: "GET",
     });
-    return toJob(raw);
+    return toJob(unwrap(raw));
   }
 
   async listUsers(): Promise<readonly FieldpulseUser[]> {
     // Fieldpulse exposes the user roster as the users collection.
     const raw = await this.request("/users", { method: "GET" });
-    const list =
-      typeof raw === "object" && raw !== null
-        ? (raw as Record<string, unknown>).users
-        : undefined;
+    const list = unwrap(raw);
     if (!Array.isArray(list)) {
       return [];
     }
@@ -520,14 +571,18 @@ export class RestFieldpulseClient implements FieldpulseClient {
   }
 
   async getAccountInfo(): Promise<FieldpulseAccountInfo> {
-    const raw = await this.request("/company", { method: "GET" });
-    const obj =
-      typeof raw === "object" && raw !== null
-        ? (raw as Record<string, unknown>)
+    // The real API has NO /company route (404). /users validates the key and
+    // carries the company_id, which we surface as the accountId (no company name
+    // is available from this endpoint). Throws on auth failure (request()).
+    const raw = await this.request("/users", { method: "GET" });
+    const list = unwrap(raw);
+    const first =
+      Array.isArray(list) && list.length > 0 && typeof list[0] === "object"
+        ? (list[0] as Record<string, unknown>)
         : {};
     return {
-      companyName: typeof obj.name === "string" ? obj.name : null,
-      accountId: typeof obj.id === "string" ? obj.id : null,
+      companyName: null,
+      accountId: idStr(first.company_id),
     };
   }
 
@@ -537,7 +592,7 @@ export class RestFieldpulseClient implements FieldpulseClient {
         `/invoices/${encodeURIComponent(invoiceId)}`,
         { method: "GET" },
       );
-      return toInvoice(raw);
+      return toInvoice(unwrap(raw));
     } catch {
       // Return null if invoice not found (404) or other error
       return null;
@@ -554,17 +609,16 @@ export class RestFieldpulseClient implements FieldpulseClient {
     const raw = await this.request(`/invoices?${params.toString()}`, {
       method: "GET",
     });
-    const list =
-      typeof raw === "object" && raw !== null
-        ? (raw as Record<string, unknown>).invoices
-        : undefined;
+    const list = unwrap(raw);
     if (!Array.isArray(list)) {
       return [];
     }
-    // Drop any malformed invoices rather than throwing
+    // The `job_id` query param is IGNORED server-side (verified), so filter
+    // client-side. Drop malformed invoices rather than throwing.
     return list
       .map(toInvoice)
-      .filter((i): i is FieldpulseInvoice => i !== null);
+      .filter((i): i is FieldpulseInvoice => i !== null)
+      .filter((i) => i.jobId === fieldpulseJobId);
   }
 
   async geocodeAddress(input: GeocodeInput): Promise<FieldpulseGeocodeResult | null> {

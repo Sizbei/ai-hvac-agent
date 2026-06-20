@@ -56,12 +56,16 @@ function wireDb(selectResults: unknown[][], insertedRows: unknown[]): void {
   }));
 }
 
+// Narrowed FieldpulseInvoice (already in cents — the client parses the API's
+// dollar strings). amountUnpaidCents 0 → derived state "paid".
 const INVOICE = {
   id: "fp-inv-1",
   jobId: null,
   customerId: null,
-  status: "paid",
-  total: 12500,
+  status: "3",
+  totalCents: 12500,
+  amountPaidCents: 12500,
+  amountUnpaidCents: 0,
 };
 
 beforeEach(() => {
@@ -159,8 +163,8 @@ describe("pullInvoiceFromFieldpulse — find-or-create", () => {
 describe("pullInvoicesForJob", () => {
   it("aggregates per-invoice outcomes and isolates failures", async () => {
     const list = [
-      { id: "a", jobId: null, customerId: null, status: "paid", total: 100 },
-      { id: "b", jobId: null, customerId: null, status: "sent", total: 200 },
+      { id: "a", jobId: null, customerId: null, totalCents: 100, amountPaidCents: 100, amountUnpaidCents: 0 },
+      { id: "b", jobId: null, customerId: null, totalCents: 200, amountPaidCents: 0, amountUnpaidCents: 200 },
     ];
     mockedGetClient.mockResolvedValue({
       listJobInvoices: vi.fn().mockResolvedValue(list),
