@@ -715,6 +715,10 @@ export const customers = pgTable(
     uniqueIndex("customers_org_fieldpulse_customer_id_unique")
       .on(table.organizationId, table.fieldpulseCustomerId)
       .where(sql`${table.fieldpulseCustomerId} IS NOT NULL`),
+    // Same, for the Housecall Pro invoice/customer pull resolution.
+    uniqueIndex("customers_org_hcp_customer_id_unique")
+      .on(table.organizationId, table.hcpCustomerId)
+      .where(sql`${table.hcpCustomerId} IS NOT NULL`),
     // Portal token lookups resolve a customer by hash on every public request —
     // unique (a token maps to exactly one customer) + partial (most rows have no
     // token). The global uniqueness is intentional: the hash is a 256-bit secret,
@@ -2257,6 +2261,9 @@ export const invoices = pgTable(
     // flows (takePayment/refundPayment/reconcilePayment) refuse rows where this
     // is set: Fieldpulse holds the real money for them.
     fieldpulseInvoiceId: text("fieldpulse_invoice_id"),
+    // Same as fieldpulseInvoiceId but for the Housecall Pro pull mirror. Either
+    // external id being set marks the invoice read-only in native money flows.
+    hcpInvoiceId: text("hcp_invoice_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -2272,6 +2279,10 @@ export const invoices = pgTable(
     uniqueIndex("invoices_org_fieldpulse_invoice_id_unique")
       .on(table.organizationId, table.fieldpulseInvoiceId)
       .where(sql`${table.fieldpulseInvoiceId} IS NOT NULL`),
+    // Same, for the Housecall Pro pull mirror.
+    uniqueIndex("invoices_org_hcp_invoice_id_unique")
+      .on(table.organizationId, table.hcpInvoiceId)
+      .where(sql`${table.hcpInvoiceId} IS NOT NULL`),
   ],
 );
 

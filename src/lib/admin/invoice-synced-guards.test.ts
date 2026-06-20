@@ -42,6 +42,19 @@ describe("synced-invoice money guards", () => {
     expect(charge).not.toHaveBeenCalled();
   });
 
+  it("takePayment refuses a Housecall-Pro-synced invoice too", async () => {
+    const provider = new MockPaymentProvider();
+    const charge = vi.spyOn(provider, "createCharge");
+    mockedSelect.mockReturnValueOnce(
+      limitChain([
+        { id: "inv-1", state: "open", totalCents: 10000, amountPaidCents: 0, fieldpulseInvoiceId: null, hcpInvoiceId: "hcp-1" },
+      ]) as never,
+    );
+    const r = await takePayment(ORG, "inv-1", { amountCents: 5000 }, provider);
+    expect(r).toEqual({ ok: false, reason: "synced_read_only" });
+    expect(charge).not.toHaveBeenCalled();
+  });
+
   it("refundPayment refuses a synced invoice and never refunds", async () => {
     const provider = new MockPaymentProvider();
     const refund = vi.spyOn(provider, "refund");

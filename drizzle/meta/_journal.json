@@ -134,6 +134,13 @@
       "when": 1782000000000,
       "tag": "0018_fieldpulse_invoice_mirror",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1782000001000,
+      "tag": "0019_hcp_invoice_mirror",
+      "breakpoints": true
     }
   ]
 }
