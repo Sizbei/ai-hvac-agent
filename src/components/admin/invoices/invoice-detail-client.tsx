@@ -45,6 +45,7 @@ interface InvoiceDetail {
   readonly serviceRequestId: string | null;
   readonly estimateId: string | null;
   readonly createdAt: string;
+  readonly synced: boolean;
   readonly lineItems: LineItem[];
   readonly payments: Payment[];
   readonly actualMaterialsCostCents: number | null;
@@ -231,8 +232,21 @@ export function InvoiceDetailClient({
             Created {new Date(invoice.createdAt).toLocaleDateString()}
           </p>
         </div>
+        {invoice.synced && (
+          <span className="rounded-full border bg-violet-50 px-2.5 py-0.5 text-xs font-medium text-violet-700">
+            FieldPulse
+          </span>
+        )}
         <InvoiceStateBadge state={invoice.state} />
       </div>
+
+      {invoice.synced && (
+        <div className="rounded-md border border-violet-200 bg-violet-50/60 px-3 py-2 text-sm text-violet-900">
+          Synced from FieldPulse — billing and payments are managed in FieldPulse.
+          The paid balance shown here is informational; see FieldPulse for the
+          authoritative amount.
+        </div>
+      )}
 
       {(invoice.customerId || invoice.serviceRequestId || invoice.estimateId) && (
         <div className="flex flex-wrap gap-4 text-sm">
@@ -371,8 +385,8 @@ export function InvoiceDetailClient({
         </CardContent>
       </Card>
 
-      {/* Take payment */}
-      {isChargeable && (
+      {/* Take payment — never for a read-only Fieldpulse-synced invoice. */}
+      {isChargeable && !invoice.synced && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Take payment</CardTitle>
@@ -460,7 +474,7 @@ export function InvoiceDetailClient({
                           {formatDateTime(p.createdAt)}
                         </span>
                       </div>
-                      {canRefund && refundable && refundFor !== p.id && (
+                      {canRefund && !invoice.synced && refundable && refundFor !== p.id && (
                         <Button
                           variant="outline"
                           size="sm"
@@ -494,8 +508,8 @@ export function InvoiceDetailClient({
                       </ul>
                     )}
 
-                    {/* Inline refund form (super_admin only) */}
-                    {canRefund && refundFor === p.id && (
+                    {/* Inline refund form (super_admin only; never for synced) */}
+                    {canRefund && !invoice.synced && refundFor === p.id && (
                       <div className="mt-3 space-y-2 border-t pt-3">
                         <div className="flex flex-wrap items-center gap-2">
                           <div className="relative">

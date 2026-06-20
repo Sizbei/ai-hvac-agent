@@ -175,7 +175,14 @@ export default function InvoicesPage() {
                   <tr key={inv.id} className="border-t hover:bg-muted/30">
                     <td className="px-4 py-3">{formatDate(inv.createdAt)}</td>
                     <td className="px-4 py-3">
-                      <InvoiceStateBadge state={inv.state} />
+                      <span className="inline-flex items-center gap-1.5">
+                        <InvoiceStateBadge state={inv.state} />
+                        {inv.synced && (
+                          <span className="rounded-full border bg-violet-50 px-2 py-0.5 text-[10px] font-medium text-violet-700">
+                            FieldPulse
+                          </span>
+                        )}
+                      </span>
                     </td>
                     <td className="px-4 py-3 font-medium">
                       {formatCentsExact(inv.totalCents)}

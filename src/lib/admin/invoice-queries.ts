@@ -553,13 +553,15 @@ export interface InvoiceListRow {
   readonly customerId: string | null;
   readonly serviceRequestId: string | null;
   readonly createdAt: Date;
+  /** True for a read-only invoice mirrored from Fieldpulse (never payable here). */
+  readonly synced: boolean;
 }
 
 /** Admin list of an org's invoices, newest first. */
 export async function listInvoices(
   organizationId: string,
 ): Promise<InvoiceListRow[]> {
-  return db
+  const rows = await db
     .select({
       id: invoices.id,
       state: invoices.state,
@@ -568,10 +570,16 @@ export async function listInvoices(
       customerId: invoices.customerId,
       serviceRequestId: invoices.serviceRequestId,
       createdAt: invoices.createdAt,
+      fieldpulseInvoiceId: invoices.fieldpulseInvoiceId,
     })
     .from(invoices)
     .where(withTenant(invoices, organizationId))
     .orderBy(desc(invoices.createdAt));
+  // Expose only the derived `synced` flag — the raw Fieldpulse id stays server-side.
+  return rows.map(({ fieldpulseInvoiceId, ...r }) => ({
+    ...r,
+    synced: fieldpulseInvoiceId != null,
+  }));
 }
 
 export interface InvoiceLineItemView {
@@ -611,6 +619,8 @@ export interface InvoiceDetailView {
   readonly serviceRequestId: string | null;
   readonly estimateId: string | null;
   readonly createdAt: Date;
+  /** True for a read-only invoice mirrored from Fieldpulse (never payable here). */
+  readonly synced: boolean;
   readonly lineItems: InvoiceLineItemView[];
   readonly payments: PaymentView[];
   /**
@@ -649,6 +659,7 @@ export async function getInvoiceDetailById(
       serviceRequestId: invoices.serviceRequestId,
       estimateId: invoices.estimateId,
       createdAt: invoices.createdAt,
+      fieldpulseInvoiceId: invoices.fieldpulseInvoiceId,
     })
     .from(invoices)
     .where(withTenant(invoices, organizationId, eq(invoices.id, id)))
@@ -769,8 +780,11 @@ export async function getInvoiceDetailById(
       : null;
   }
 
+  // Keep the raw Fieldpulse id server-side; expose only the derived `synced` flag.
+  const { fieldpulseInvoiceId, ...invRest } = inv;
   return {
-    ...inv,
+    ...invRest,
+    synced: fieldpulseInvoiceId != null,
     lineItems,
     payments: paymentRows.map((p) => ({
       ...p,
