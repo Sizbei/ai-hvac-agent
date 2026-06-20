@@ -17,6 +17,7 @@ vi.mock("@/lib/db", () => ({
     select: vi.fn(),
     update: vi.fn(),
     insert: vi.fn(),
+    delete: vi.fn(),
     batch: vi.fn(),
   },
 }));
@@ -33,6 +34,7 @@ const mockedDb = db as unknown as {
   select: ReturnType<typeof vi.fn>;
   update: ReturnType<typeof vi.fn>;
   insert: ReturnType<typeof vi.fn>;
+  delete: ReturnType<typeof vi.fn>;
   batch: ReturnType<typeof vi.fn>;
 };
 const mockedGetClient = getFieldpulseClient as unknown as ReturnType<typeof vi.fn>;
@@ -45,6 +47,9 @@ function wireDb(selectResults: unknown[][], insertedRows: unknown[]): void {
   }));
   mockedDb.update.mockImplementation(() => ({
     set: () => ({ where: () => ({ __stmt: "update" }) }),
+  }));
+  mockedDb.delete.mockImplementation(() => ({
+    where: () => ({ __stmt: "delete" }),
   }));
   mockedDb.batch.mockResolvedValue([]);
   mockedDb.insert.mockImplementation(() => ({
@@ -176,6 +181,12 @@ describe("pullInvoicesForJob", () => {
       from: () => ({ where: () => Promise.resolve(queue[call++] ?? []) }),
     }));
     mockedDb.batch.mockResolvedValue([]);
+    mockedDb.update.mockImplementation(() => ({
+      set: () => ({ where: () => ({ __stmt: "update" }) }),
+    }));
+    mockedDb.delete.mockImplementation(() => ({
+      where: () => ({ __stmt: "delete" }),
+    }));
     mockedDb.insert.mockImplementation(() => ({
       values: () => ({
         onConflictDoNothing: () => ({ returning: () => Promise.resolve([{ id: "inv-a" }]) }),

@@ -57,7 +57,9 @@ async function main(): Promise<void> {
       check(
         "getInvoice parses real invoice (cents money)",
         !!inv && typeof inv.totalCents === "number",
-        inv ? `id=${inv.id} totalCents=${inv.totalCents} amountPaidCents=${inv.amountPaidCents}` : "null",
+        inv
+          ? `id=${inv.id} totalCents=${inv.totalCents} amountPaidCents=${inv.amountPaidCents} lineItems=${inv.lineItems?.length ?? 0}`
+          : "null",
       );
     } catch (e) {
       check("getInvoice", false, e instanceof Error ? e.message : String(e));

@@ -108,6 +108,17 @@ export interface FieldpulseAvailabilitySlot {
 }
 
 /**
+ * One mirrored invoice line (flattened from the real API's nested
+ * line_items[].line_components[]). Money in CENTS (client parses dollar strings).
+ */
+export interface FieldpulseInvoiceLineItem {
+  readonly name: string;
+  readonly quantity: number;
+  readonly unitPriceCents: number;
+  readonly unitCostCents: number; // for margin (real API exposes unit_cost)
+}
+
+/**
  * A Fieldpulse invoice (their "Invoice" resource), narrowed to what the mirror
  * needs. Money is in CENTS here (the client parses the API's dollar strings).
  * Verified against the live API 2026-06-19.
@@ -123,6 +134,7 @@ export interface FieldpulseInvoice {
   readonly dueDate?: string | null;
   readonly paidAt?: string | null; // From last_payment_date
   readonly createdAt?: string | null;
+  readonly lineItems?: readonly FieldpulseInvoiceLineItem[];
 }
 
 /** Invoice status values from Fieldpulse (adjusted per actual docs). */

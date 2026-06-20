@@ -24,6 +24,7 @@ import type {
   FieldpulseAvailabilitySlot,
   FieldpulseCustomer,
   FieldpulseInvoice,
+  FieldpulseInvoiceLineItem,
   FieldpulseJob,
   FieldpulseUser,
   FindCustomerQuery,
@@ -330,7 +331,43 @@ function toInvoice(raw: unknown): FieldpulseInvoice | null {
     // Real paid timestamp is last_payment_date (fallback first_payment_date).
     paidAt: str(obj.last_payment_date) ?? str(obj.first_payment_date),
     createdAt: str(obj.created_at),
+    lineItems: toLineItems(obj.line_items),
   };
+}
+
+/**
+ * Flatten the real API's nested `line_items[].line_components[]` into our flat
+ * line shape (the components carry title/qty/unit_price/unit_cost). Tolerant:
+ * malformed entries are skipped, never thrown.
+ */
+function toLineItems(raw: unknown): FieldpulseInvoiceLineItem[] {
+  if (!Array.isArray(raw)) return [];
+  const out: FieldpulseInvoiceLineItem[] = [];
+  for (const li of raw) {
+    if (!li || typeof li !== "object") continue;
+    const line = li as Record<string, unknown>;
+    const lineTitle = typeof line.line_title === "string" ? line.line_title : "";
+    const comps = Array.isArray(line.line_components) ? line.line_components : [];
+    for (const c of comps) {
+      if (!c || typeof c !== "object") continue;
+      const comp = c as Record<string, unknown>;
+      const name =
+        (typeof comp.title === "string" && comp.title) ||
+        lineTitle ||
+        "Item";
+      const qty = Math.max(
+        1,
+        Math.round(Number.parseFloat(String(comp.quantity ?? "1")) || 1),
+      );
+      out.push({
+        name,
+        quantity: qty,
+        unitPriceCents: dollarsToCents(comp.unit_price) ?? 0,
+        unitCostCents: dollarsToCents(comp.unit_cost) ?? 0,
+      });
+    }
+  }
+  return out;
 }
 
 /**
