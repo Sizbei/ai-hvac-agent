@@ -22,6 +22,8 @@ import {
   verifySignature,
   isReplayTimestamp,
 } from "@/lib/integrations/fieldpulse/webhook-signature";
+import { pullInvoiceFromFieldpulse } from "@/lib/integrations/fieldpulse/invoice-sync";
+import { after } from "next/server";
 import type { NextRequest } from "next/server";
 
 /**
@@ -31,7 +33,11 @@ import type { NextRequest } from "next/server";
 const invoiceWebhookSchema = z.object({
   id: z.string(), // Event id for idempotency
   eventType: z.string(), // invoice.sent, invoice.paid, invoice.voided
-  jobId: z.string(), // The Fieldpulse job id
+  jobId: z.string(), // The Fieldpulse job id (used to derive the org)
+  // The Fieldpulse invoice id — optional so the legacy status-only path still
+  // works without it. When present (and after the event is verified + deduped),
+  // we pull the full money-grade invoice into the native `invoices` table.
+  invoiceId: z.string().optional(),
   timestamp: z.union([z.number(), z.string()]).optional(), // for replay guard
 });
 
@@ -81,7 +87,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     if (!parsed.success) {
       return errorResponse("Invalid request", "INVALID_REQUEST", 400);
     }
-    const { id: eventId, eventType, jobId, timestamp } = parsed.data;
+    const { id: eventId, eventType, jobId, invoiceId, timestamp } = parsed.data;
 
     // Replay protection (absent/odd timestamps tolerated; ledger stops dupes).
     if (isReplayTimestamp(timestamp)) {
@@ -184,6 +190,16 @@ export async function POST(request: NextRequest): Promise<Response> {
         { eventId, eventType, jobId, newStatus },
         "Fieldpulse invoice webhook: updated invoice status",
       );
+    }
+
+    // Money-grade mirror: pull the full invoice into the native `invoices` table.
+    // Scheduled ONLY here — after signature verification + the idempotency ledger
+    // insert (so a forged or replayed event never triggers a pull). Runs in the
+    // background via after() so the webhook still returns fast; failures are
+    // logged inside the module and recovered by the reconcile cron. Skipped when
+    // the payload omits invoiceId (legacy status-only event).
+    if (invoiceId) {
+      after(() => pullInvoiceFromFieldpulse(organizationId, invoiceId));
     }
 
     return new Response(null, { status: 204 });
