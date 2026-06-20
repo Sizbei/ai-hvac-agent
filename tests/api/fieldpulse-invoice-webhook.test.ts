@@ -9,6 +9,7 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { POST } from "@/app/api/admin/integrations/fieldpulse/webhook/route";
+import { pullInvoiceFromFieldpulse } from "@/lib/integrations/fieldpulse/invoice-sync";
 import { db } from "@/lib/db";
 import { serviceRequests, fieldpulseWebhookEvents, auditLog } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -45,6 +46,12 @@ vi.mock("@/lib/api-response", () => ({
 
 vi.mock("@/lib/integrations/fieldpulse/invoice-sync", () => ({
   syncInvoiceStatus: vi.fn().mockResolvedValue(true),
+  pullInvoiceFromFieldpulse: vi.fn().mockResolvedValue("created"),
+}));
+// Run after()-scheduled work synchronously so the pull can be asserted.
+vi.mock("next/server", async (orig) => ({
+  ...(await orig<Record<string, unknown>>()),
+  after: (cb: () => unknown) => cb(),
 }));
 
 describe("Fieldpulse Invoice Webhook", () => {
@@ -171,6 +178,27 @@ describe("Fieldpulse Invoice Webhook", () => {
       const response = await POST(request as never);
 
       expect(response.status).toBe(204);
+    });
+
+    it("schedules the money-grade pull when the event carries an invoiceId", async () => {
+      const request = new Request("http://localhost/api/webhook", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          id: "evt-pull-1",
+          eventType: "invoice.paid",
+          jobId: mockFieldpulseJobId,
+          invoiceId: "fp-inv-77",
+        }),
+      });
+
+      const response = await POST(request as never);
+
+      expect(response.status).toBe(204);
+      expect(vi.mocked(pullInvoiceFromFieldpulse)).toHaveBeenCalledWith(
+        mockOrgId,
+        "fp-inv-77",
+      );
     });
   });
 
