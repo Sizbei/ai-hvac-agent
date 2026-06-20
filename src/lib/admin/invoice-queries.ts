@@ -137,7 +137,8 @@ export type TakePaymentResult =
         | "invoice_not_found"
         | "invoice_not_chargeable"
         | "exceeds_balance"
-        | "charge_failed";
+        | "charge_failed"
+        | "synced_read_only";
     };
 
 /**
@@ -157,11 +158,15 @@ export async function takePayment(
       state: invoices.state,
       totalCents: invoices.totalCents,
       amountPaidCents: invoices.amountPaidCents,
+      fieldpulseInvoiceId: invoices.fieldpulseInvoiceId,
     })
     .from(invoices)
     .where(withTenant(invoices, organizationId, eq(invoices.id, invoiceId)))
     .limit(1);
   if (!inv) return { ok: false, reason: "invoice_not_found" };
+  // Read-only mirror: a Fieldpulse-synced invoice is billed/paid IN Fieldpulse.
+  // Taking a native payment here would double-charge the customer.
+  if (inv.fieldpulseInvoiceId) return { ok: false, reason: "synced_read_only" };
   // Only an open/draft invoice can be charged — never a paid/void/refunded one
   // (that would over-collect or charge a cancelled invoice).
   if (inv.state !== "open" && inv.state !== "draft") {
@@ -226,7 +231,11 @@ export type RefundResultOut =
   | { readonly ok: true; readonly refundId: string }
   | {
       readonly ok: false;
-      readonly reason: "payment_not_found" | "not_refundable" | "exceeds_payment";
+      readonly reason:
+        | "payment_not_found"
+        | "not_refundable"
+        | "exceeds_payment"
+        | "synced_read_only";
     };
 
 /**
@@ -271,10 +280,17 @@ export async function refundPayment(
   // whether it was fully paid, because a partial refund of a fully-paid invoice
   // must NOT reopen it for charging (that would allow over-collection).
   const [inv] = await db
-    .select({ amountPaidCents: invoices.amountPaidCents, totalCents: invoices.totalCents })
+    .select({
+      amountPaidCents: invoices.amountPaidCents,
+      totalCents: invoices.totalCents,
+      fieldpulseInvoiceId: invoices.fieldpulseInvoiceId,
+    })
     .from(invoices)
     .where(withTenant(invoices, organizationId, eq(invoices.id, pay.invoiceId)))
     .limit(1);
+  // Read-only mirror: refunds for a Fieldpulse-synced invoice happen IN Fieldpulse.
+  // (Defense-in-depth — a synced invoice should never have a native payment.)
+  if (inv?.fieldpulseInvoiceId) return { ok: false, reason: "synced_read_only" };
   const wasFullyPaid = (inv?.amountPaidCents ?? 0) >= (inv?.totalCents ?? 0);
   const newPaid = Math.max(0, (inv?.amountPaidCents ?? 0) - params.amountCents);
 
@@ -375,7 +391,10 @@ export type ReconcileResult =
   | { readonly ok: true; readonly outcome: "completed"; readonly invoiceState: string }
   | { readonly ok: true; readonly outcome: "noop" }
   | { readonly ok: true; readonly outcome: "failed_marked" }
-  | { readonly ok: false; readonly reason: "payment_not_found" | "not_pending" };
+  | {
+      readonly ok: false;
+      readonly reason: "payment_not_found" | "not_pending" | "synced_read_only";
+    };
 
 /**
  * Reconcile a single stranded payment against the provider's true charge status.
@@ -428,10 +447,14 @@ export async function reconcilePayment(
     .select({
       totalCents: invoices.totalCents,
       amountPaidCents: invoices.amountPaidCents,
+      fieldpulseInvoiceId: invoices.fieldpulseInvoiceId,
     })
     .from(invoices)
     .where(withTenant(invoices, organizationId, eq(invoices.id, pay.invoiceId)))
     .limit(1);
+  // Read-only mirror: never credit a Fieldpulse-synced invoice from native
+  // reconciliation (would double-credit a payment Fieldpulse already recorded).
+  if (inv?.fieldpulseInvoiceId) return { ok: false, reason: "synced_read_only" };
   if (!inv) {
     // Invoice vanished (e.g. cascade-deleted): mark the orphan charge succeeded so
     // it stops being "stuck", but don't fabricate an invoice update.
@@ -530,13 +553,15 @@ export interface InvoiceListRow {
   readonly customerId: string | null;
   readonly serviceRequestId: string | null;
   readonly createdAt: Date;
+  /** True for a read-only invoice mirrored from Fieldpulse (never payable here). */
+  readonly synced: boolean;
 }
 
 /** Admin list of an org's invoices, newest first. */
 export async function listInvoices(
   organizationId: string,
 ): Promise<InvoiceListRow[]> {
-  return db
+  const rows = await db
     .select({
       id: invoices.id,
       state: invoices.state,
@@ -545,10 +570,16 @@ export async function listInvoices(
       customerId: invoices.customerId,
       serviceRequestId: invoices.serviceRequestId,
       createdAt: invoices.createdAt,
+      fieldpulseInvoiceId: invoices.fieldpulseInvoiceId,
     })
     .from(invoices)
     .where(withTenant(invoices, organizationId))
     .orderBy(desc(invoices.createdAt));
+  // Expose only the derived `synced` flag — the raw Fieldpulse id stays server-side.
+  return rows.map(({ fieldpulseInvoiceId, ...r }) => ({
+    ...r,
+    synced: fieldpulseInvoiceId != null,
+  }));
 }
 
 export interface InvoiceLineItemView {
@@ -588,6 +619,8 @@ export interface InvoiceDetailView {
   readonly serviceRequestId: string | null;
   readonly estimateId: string | null;
   readonly createdAt: Date;
+  /** True for a read-only invoice mirrored from Fieldpulse (never payable here). */
+  readonly synced: boolean;
   readonly lineItems: InvoiceLineItemView[];
   readonly payments: PaymentView[];
   /**
@@ -626,6 +659,7 @@ export async function getInvoiceDetailById(
       serviceRequestId: invoices.serviceRequestId,
       estimateId: invoices.estimateId,
       createdAt: invoices.createdAt,
+      fieldpulseInvoiceId: invoices.fieldpulseInvoiceId,
     })
     .from(invoices)
     .where(withTenant(invoices, organizationId, eq(invoices.id, id)))
@@ -746,8 +780,11 @@ export async function getInvoiceDetailById(
       : null;
   }
 
+  // Keep the raw Fieldpulse id server-side; expose only the derived `synced` flag.
+  const { fieldpulseInvoiceId, ...invRest } = inv;
   return {
-    ...inv,
+    ...invRest,
+    synced: fieldpulseInvoiceId != null,
     lineItems,
     payments: paymentRows.map((p) => ({
       ...p,

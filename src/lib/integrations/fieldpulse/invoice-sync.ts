@@ -13,10 +13,11 @@
  */
 
 import { db } from "@/lib/db";
-import { serviceRequests, auditLog } from "@/lib/db/schema";
+import { serviceRequests, auditLog, invoices, customers } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { logger } from "@/lib/logger";
-import type { FieldpulseInvoiceStatus } from "./types";
+import { getFieldpulseClient } from "./client";
+import type { FieldpulseInvoiceStatus, FieldpulseInvoice } from "./types";
 
 /**
  * Map a Fieldpulse invoice status to our invoice status enum.
@@ -229,4 +230,250 @@ export function deriveInvoiceStatusFromInvoices(
   // Get the most recent invoice's status
   const latestStatus = invoices[0]?.status;
   return mapInvoiceStatus(latestStatus);
+}
+
+// ─── Money-grade PULL MIRROR (read-only Fieldpulse → native `invoices` table) ──
+//
+// The functions above mirror only a status enum onto service_requests. The pull
+// mirror below lands the full Fieldpulse invoice (total, state) as a row in the
+// native `invoices` table, idempotent on `fieldpulseInvoiceId`. Fieldpulse stays
+// the money authority: synced rows are read-only (native takePayment/refund/
+// reconcile refuse them — see invoice-queries.ts). See the 2026-06-19 spec.
+
+export type InvoicePullOutcome = "created" | "updated" | "skipped" | "failed";
+
+/**
+ * Map a Fieldpulse invoice status to the NATIVE `invoices.state` enum
+ * (draft|open|paid|void). Distinct from `mapInvoiceStatus` above, which targets
+ * the service_requests.invoiceStatus enum (none|sent|paid|void) — keep BOTH in
+ * step if Fieldpulse's status vocabulary changes. `refunded` is native-only and
+ * is never produced from a Fieldpulse pull.
+ */
+export function mapFieldpulseStatusToInvoiceState(
+  status: string | null | undefined,
+): "draft" | "open" | "paid" | "void" {
+  if (!status) return "draft";
+  switch (status.toLowerCase()) {
+    case "sent":
+    case "emailed":
+    case "viewed":
+    case "overdue":
+      return "open";
+    case "paid":
+    case "payment_received":
+    case "complete":
+      return "paid";
+    case "void":
+    case "voided":
+    case "cancelled":
+    case "canceled":
+      return "void";
+    case "draft":
+    case "pending":
+    default:
+      return "draft";
+  }
+}
+
+/**
+ * Core upsert for one already-fetched Fieldpulse invoice. Shared by the
+ * single-invoice and per-job entry points so the cron doesn't re-fetch.
+ * Resolves links org-scoped, maps money to cents, and find-or-creates the native
+ * row idempotently on (org, fieldpulseInvoiceId). May throw — callers catch.
+ */
+async function upsertInvoiceRecord(
+  organizationId: string,
+  invoice: FieldpulseInvoice,
+): Promise<InvoicePullOutcome> {
+  const state = mapFieldpulseStatusToInvoiceState(invoice.status);
+  const totalCents = invoice.total ?? 0;
+  // Binary: Fieldpulse's payload exposes no partial-paid amount. The invoice is
+  // read-only here, so the native balance is informational only (UI flags it).
+  const amountPaidCents = state === "paid" ? totalCents : 0;
+
+  // Resolve links — both optional, both ORG-SCOPED compound keys so a
+  // cross-tenant Fieldpulse-id collision can't attach to the wrong tenant.
+  let serviceRequestId: string | null = null;
+  if (invoice.jobId) {
+    const [r] = await db
+      .select({ id: serviceRequests.id })
+      .from(serviceRequests)
+      .where(
+        and(
+          eq(serviceRequests.organizationId, organizationId),
+          eq(serviceRequests.fieldpulseJobId, invoice.jobId),
+        ),
+      );
+    serviceRequestId = r?.id ?? null;
+  }
+  let customerId: string | null = null;
+  if (invoice.customerId) {
+    const [c] = await db
+      .select({ id: customers.id })
+      .from(customers)
+      .where(
+        and(
+          eq(customers.organizationId, organizationId),
+          eq(customers.fieldpulseCustomerId, invoice.customerId),
+        ),
+      );
+    customerId = c?.id ?? null;
+  }
+
+  const [existing] = await db
+    .select({ id: invoices.id, state: invoices.state })
+    .from(invoices)
+    .where(
+      and(
+        eq(invoices.organizationId, organizationId),
+        eq(invoices.fieldpulseInvoiceId, invoice.id),
+      ),
+    );
+
+  if (existing) {
+    // Re-sync: update money/state + audit atomically (single implicit txn).
+    await db.batch([
+      db
+        .update(invoices)
+        .set({
+          state,
+          subtotalCents: totalCents,
+          totalCents,
+          amountPaidCents,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(invoices.organizationId, organizationId),
+            eq(invoices.id, existing.id),
+          ),
+        ),
+      db.insert(auditLog).values({
+        organizationId,
+        action: "invoice_synced",
+        entity: "invoices",
+        entityId: existing.id,
+        details: JSON.stringify({
+          from: existing.state,
+          to: state,
+          source: "fieldpulse_invoice_pull",
+          fieldpulseInvoiceId: invoice.id,
+          totalCents,
+        }),
+        ipAddress: null,
+      }),
+    ]);
+    if (invoice.jobId) await syncInvoiceStatus(invoice.jobId, invoice.status, organizationId);
+    return "updated";
+  }
+
+  // First sight: insert, racing safely on the per-org partial unique index.
+  const inserted = await db
+    .insert(invoices)
+    .values({
+      organizationId,
+      fieldpulseInvoiceId: invoice.id,
+      serviceRequestId,
+      customerId,
+      state,
+      subtotalCents: totalCents,
+      taxCents: 0,
+      totalCents,
+      amountPaidCents,
+    })
+    .onConflictDoNothing()
+    .returning({ id: invoices.id });
+
+  if (inserted.length > 0) {
+    await db.insert(auditLog).values({
+      organizationId,
+      action: "invoice_synced",
+      entity: "invoices",
+      entityId: inserted[0].id,
+      details: JSON.stringify({
+        from: "new",
+        to: state,
+        source: "fieldpulse_invoice_pull",
+        fieldpulseInvoiceId: invoice.id,
+        totalCents,
+      }),
+      ipAddress: null,
+    });
+    if (invoice.jobId) await syncInvoiceStatus(invoice.jobId, invoice.status, organizationId);
+    return "created";
+  }
+
+  // Lost the race — a concurrent pull created it. The winner's write is current
+  // (the pull always reflects current Fieldpulse state), so report "updated",
+  // never "created" (keeps batch metrics honest).
+  const [now] = await db
+    .select({ id: invoices.id })
+    .from(invoices)
+    .where(
+      and(
+        eq(invoices.organizationId, organizationId),
+        eq(invoices.fieldpulseInvoiceId, invoice.id),
+      ),
+    );
+  return now ? "updated" : "skipped";
+}
+
+/**
+ * Pull one Fieldpulse invoice into the native `invoices` table (read-only mirror).
+ * Always fetches CURRENT Fieldpulse state, so webhook event ordering is
+ * irrelevant. Degrade-safe: not-connected / missing invoice / any error returns
+ * an outcome, never throws.
+ */
+export async function pullInvoiceFromFieldpulse(
+  organizationId: string,
+  fieldpulseInvoiceId: string,
+  fetchImpl?: typeof fetch,
+): Promise<InvoicePullOutcome> {
+  try {
+    const client = await getFieldpulseClient(organizationId, fetchImpl);
+    if (!client) return "skipped";
+    const invoice = await client.getInvoice(fieldpulseInvoiceId);
+    if (!invoice) return "skipped";
+    return await upsertInvoiceRecord(organizationId, invoice);
+  } catch (error) {
+    logger.warn(
+      { error, fieldpulseInvoiceId },
+      "Fieldpulse invoice pull failed (degraded)",
+    );
+    return "failed";
+  }
+}
+
+/**
+ * Pull every Fieldpulse invoice for a job (reconcile-cron backstop for missed or
+ * failed webhook pulls). Isolates per-invoice failures so one bad invoice never
+ * aborts the sweep. Degrade-safe.
+ */
+export async function pullInvoicesForJob(
+  organizationId: string,
+  fieldpulseJobId: string,
+  fetchImpl?: typeof fetch,
+): Promise<{ created: number; updated: number; skipped: number; failed: number }> {
+  const summary = { created: 0, updated: 0, skipped: 0, failed: 0 };
+  try {
+    const client = await getFieldpulseClient(organizationId, fetchImpl);
+    if (!client) return summary;
+    const list = await client.listJobInvoices(fieldpulseJobId);
+    for (const inv of list) {
+      let outcome: InvoicePullOutcome;
+      try {
+        outcome = await upsertInvoiceRecord(organizationId, inv);
+      } catch (error) {
+        logger.warn(
+          { error, fieldpulseInvoiceId: inv.id },
+          "Fieldpulse invoice pull failed for job invoice (degraded)",
+        );
+        outcome = "failed";
+      }
+      summary[outcome]++;
+    }
+  } catch (error) {
+    logger.warn({ error, fieldpulseJobId }, "Fieldpulse job-invoice pull failed (degraded)");
+  }
+  return summary;
 }

@@ -327,7 +327,9 @@ export type PortalPayResult =
         | "invoice_not_found"
         | "invoice_not_chargeable"
         | "exceeds_balance"
-        | "charge_failed";
+        | "charge_failed"
+        // A Fieldpulse-synced invoice is billed in Fieldpulse — never payable here.
+        | "synced_read_only";
     };
 
 /**

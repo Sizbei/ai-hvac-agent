@@ -709,6 +709,12 @@ export const customers = pgTable(
     uniqueIndex("customers_org_phone_hash_unique")
       .on(table.organizationId, table.phoneHash)
       .where(sql`${table.phoneHash} IS NOT NULL`),
+    // Unique per org so the Fieldpulse invoice/customer pull resolves a customer
+    // by its Fieldpulse id unambiguously (the id isn't globally unique). Partial
+    // so the many rows without a Fieldpulse id don't collide on NULL.
+    uniqueIndex("customers_org_fieldpulse_customer_id_unique")
+      .on(table.organizationId, table.fieldpulseCustomerId)
+      .where(sql`${table.fieldpulseCustomerId} IS NOT NULL`),
     // Portal token lookups resolve a customer by hash on every public request —
     // unique (a token maps to exactly one customer) + partial (most rows have no
     // token). The global uniqueness is intentional: the hash is a 256-bit secret,
@@ -2245,6 +2251,12 @@ export const invoices = pgTable(
     taxCents: integer("tax_cents").notNull().default(0),
     totalCents: integer("total_cents").notNull().default(0),
     amountPaidCents: integer("amount_paid_cents").notNull().default(0),
+    // Set ONLY for invoices pulled (read-only) from Fieldpulse. Its non-null-ness
+    // is the synced-vs-native discriminator (native invoices leave it NULL).
+    // Plaintext — Fieldpulse's public resource id, not a secret. Native money
+    // flows (takePayment/refundPayment/reconcilePayment) refuse rows where this
+    // is set: Fieldpulse holds the real money for them.
+    fieldpulseInvoiceId: text("fieldpulse_invoice_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -2255,6 +2267,11 @@ export const invoices = pgTable(
     uniqueIndex("invoices_estimate_unique")
       .on(table.estimateId)
       .where(sql`${table.estimateId} IS NOT NULL`),
+    // Idempotency key for the Fieldpulse pull mirror — unique PER ORG (Fieldpulse
+    // ids aren't globally unique). Partial so native invoices (NULL) don't collide.
+    uniqueIndex("invoices_org_fieldpulse_invoice_id_unique")
+      .on(table.organizationId, table.fieldpulseInvoiceId)
+      .where(sql`${table.fieldpulseInvoiceId} IS NOT NULL`),
   ],
 );
 

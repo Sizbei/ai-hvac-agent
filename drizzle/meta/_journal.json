@@ -127,6 +127,13 @@
       "when": 1781735977049,
       "tag": "0017_gdpr_deletion",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1782000000000,
+      "tag": "0018_fieldpulse_invoice_mirror",
+      "breakpoints": true
     }
   ]
 }

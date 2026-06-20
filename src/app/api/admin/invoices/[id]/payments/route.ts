@@ -58,6 +58,12 @@ export async function POST(
             "INVOICE_NOT_CHARGEABLE",
             409,
           );
+        case "synced_read_only":
+          return errorResponse(
+            "This invoice is synced from FieldPulse — manage payment in FieldPulse",
+            "INVOICE_SYNCED_READ_ONLY",
+            409,
+          );
         case "charge_failed":
           return errorResponse("The charge was declined", "CHARGE_FAILED", 402);
         default:
