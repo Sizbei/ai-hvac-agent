@@ -39,6 +39,22 @@ describe("RestFieldpulseClient — real API shapes", () => {
     due_date: "2026-07-09 13:00:00",
     last_payment_date: null,
     created_at: "2026-06-09 19:38:06",
+    // Real nesting: line_items[].line_components[] carry the money + labels.
+    line_items: [
+      {
+        id: 176530627,
+        line_title: "",
+        line_components: [
+          {
+            title: "AC Service Tech & Helper",
+            description: "Recharge of AC Unit",
+            quantity: "1",
+            unit_cost: "80.0000",
+            unit_price: "200.0000",
+          },
+        ],
+      },
+    ],
   };
 
   it("getInvoice parses a wrapped single resource: numeric id, dollar→cents", async () => {
@@ -51,6 +67,14 @@ describe("RestFieldpulseClient — real API shapes", () => {
     expect(inv!.amountPaidCents).toBe(0);
     expect(inv!.amountUnpaidCents).toBe(20000);
     expect(inv!.paidAt).toBeNull(); // last_payment_date, not paid_at
+    // Line items flattened from line_items[].line_components[].
+    expect(inv!.lineItems).toHaveLength(1);
+    expect(inv!.lineItems![0]).toMatchObject({
+      name: "AC Service Tech & Helper",
+      quantity: 1,
+      unitPriceCents: 20000, // "200.0000" -> cents
+      unitCostCents: 8000, // "80.0000" -> cents (margin)
+    });
   });
 
   it("getInvoice would have returned NULL before the fix (numeric id rejected)", async () => {

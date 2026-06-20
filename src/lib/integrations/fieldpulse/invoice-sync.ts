@@ -13,7 +13,13 @@
  */
 
 import { db } from "@/lib/db";
-import { serviceRequests, auditLog, invoices, customers } from "@/lib/db/schema";
+import {
+  serviceRequests,
+  auditLog,
+  invoices,
+  invoiceLineItems,
+  customers,
+} from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { logger } from "@/lib/logger";
 import { getFieldpulseClient } from "./client";
@@ -294,6 +300,35 @@ function deriveInvoiceState(
 }
 
 /**
+ * Build native `invoice_line_items` rows from the mirrored FieldPulse lines.
+ * costCents / lineTotalCents are TOTALS (qty × unit) — the shape rollUpMargin
+ * expects (revenue = Σ lineTotalCents, cost = Σ costCents).
+ */
+function lineItemRows(
+  organizationId: string,
+  invoiceId: string,
+  invoice: FieldpulseInvoice,
+): Array<{
+  organizationId: string;
+  invoiceId: string;
+  name: string;
+  quantity: number;
+  unitPriceCents: number;
+  costCents: number;
+  lineTotalCents: number;
+}> {
+  return (invoice.lineItems ?? []).map((li) => ({
+    organizationId,
+    invoiceId,
+    name: li.name,
+    quantity: li.quantity,
+    unitPriceCents: li.unitPriceCents,
+    costCents: li.quantity * li.unitCostCents,
+    lineTotalCents: li.quantity * li.unitPriceCents,
+  }));
+}
+
+/**
  * Core upsert for one already-fetched Fieldpulse invoice. Shared by the
  * single-invoice and per-job entry points so the cron doesn't re-fetch.
  * Resolves links org-scoped, maps money to cents, and find-or-creates the native
@@ -348,7 +383,9 @@ async function upsertInvoiceRecord(
     );
 
   if (existing) {
-    // Re-sync: update money/state + audit atomically (single implicit txn).
+    // Re-sync: update money/state, REPLACE line items (reflect current FP state),
+    // + audit — atomically (single implicit txn).
+    const liRows = lineItemRows(organizationId, existing.id, invoice);
     await db.batch([
       db
         .update(invoices)
@@ -365,6 +402,15 @@ async function upsertInvoiceRecord(
             eq(invoices.id, existing.id),
           ),
         ),
+      db
+        .delete(invoiceLineItems)
+        .where(
+          and(
+            eq(invoiceLineItems.organizationId, organizationId),
+            eq(invoiceLineItems.invoiceId, existing.id),
+          ),
+        ),
+      ...(liRows.length ? [db.insert(invoiceLineItems).values(liRows)] : []),
       db.insert(auditLog).values({
         organizationId,
         action: "invoice_synced",
@@ -402,20 +448,24 @@ async function upsertInvoiceRecord(
     .returning({ id: invoices.id });
 
   if (inserted.length > 0) {
-    await db.insert(auditLog).values({
-      organizationId,
-      action: "invoice_synced",
-      entity: "invoices",
-      entityId: inserted[0].id,
-      details: JSON.stringify({
-        from: "new",
-        to: state,
-        source: "fieldpulse_invoice_pull",
-        fieldpulseInvoiceId: invoice.id,
-        totalCents,
+    const liRows = lineItemRows(organizationId, inserted[0].id, invoice);
+    await db.batch([
+      db.insert(auditLog).values({
+        organizationId,
+        action: "invoice_synced",
+        entity: "invoices",
+        entityId: inserted[0].id,
+        details: JSON.stringify({
+          from: "new",
+          to: state,
+          source: "fieldpulse_invoice_pull",
+          fieldpulseInvoiceId: invoice.id,
+          totalCents,
+        }),
+        ipAddress: null,
       }),
-      ipAddress: null,
-    });
+      ...(liRows.length ? [db.insert(invoiceLineItems).values(liRows)] : []),
+    ]);
     if (invoice.jobId) await syncInvoiceStatus(invoice.jobId, invoice.status, organizationId);
     return "created";
   }
