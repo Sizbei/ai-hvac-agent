@@ -10,8 +10,8 @@ export interface InvoiceListItem {
   readonly customerId: string | null;
   readonly serviceRequestId: string | null;
   readonly createdAt: string;
-  /** True for a read-only invoice mirrored from Fieldpulse. */
-  readonly synced: boolean;
+  /** Which FSM this read-only invoice is mirrored from, or null when native. */
+  readonly syncedSource: "fieldpulse" | "housecall" | null;
 }
 
 interface UseInvoicesResult {

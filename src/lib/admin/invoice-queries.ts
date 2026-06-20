@@ -562,8 +562,21 @@ export interface InvoiceListRow {
   readonly customerId: string | null;
   readonly serviceRequestId: string | null;
   readonly createdAt: Date;
-  /** True for a read-only invoice mirrored from Fieldpulse (never payable here). */
-  readonly synced: boolean;
+  /** Which FSM this read-only invoice is mirrored from, or null when native. */
+  readonly syncedSource: "fieldpulse" | "housecall" | null;
+}
+
+/** Which FSM (if any) a row is a read-only mirror of. FieldPulse wins the rare
+ * dual-source row; null means a native (editable) invoice. */
+function deriveSyncedSource(
+  fieldpulseInvoiceId: string | null,
+  hcpInvoiceId: string | null,
+): "fieldpulse" | "housecall" | null {
+  return fieldpulseInvoiceId != null
+    ? "fieldpulse"
+    : hcpInvoiceId != null
+      ? "housecall"
+      : null;
 }
 
 /** Admin list of an org's invoices, newest first. */
@@ -580,14 +593,15 @@ export async function listInvoices(
       serviceRequestId: invoices.serviceRequestId,
       createdAt: invoices.createdAt,
       fieldpulseInvoiceId: invoices.fieldpulseInvoiceId,
+      hcpInvoiceId: invoices.hcpInvoiceId,
     })
     .from(invoices)
     .where(withTenant(invoices, organizationId))
     .orderBy(desc(invoices.createdAt));
-  // Expose only the derived `synced` flag — the raw Fieldpulse id stays server-side.
-  return rows.map(({ fieldpulseInvoiceId, ...r }) => ({
+  // Expose only the derived source — the raw FSM ids stay server-side.
+  return rows.map(({ fieldpulseInvoiceId, hcpInvoiceId, ...r }) => ({
     ...r,
-    synced: fieldpulseInvoiceId != null,
+    syncedSource: deriveSyncedSource(fieldpulseInvoiceId, hcpInvoiceId),
   }));
 }
 
@@ -628,8 +642,8 @@ export interface InvoiceDetailView {
   readonly serviceRequestId: string | null;
   readonly estimateId: string | null;
   readonly createdAt: Date;
-  /** True for a read-only invoice mirrored from Fieldpulse (never payable here). */
-  readonly synced: boolean;
+  /** Which FSM this read-only invoice is mirrored from, or null when native. */
+  readonly syncedSource: "fieldpulse" | "housecall" | null;
   readonly lineItems: InvoiceLineItemView[];
   readonly payments: PaymentView[];
   /**
@@ -669,6 +683,7 @@ export async function getInvoiceDetailById(
       estimateId: invoices.estimateId,
       createdAt: invoices.createdAt,
       fieldpulseInvoiceId: invoices.fieldpulseInvoiceId,
+      hcpInvoiceId: invoices.hcpInvoiceId,
     })
     .from(invoices)
     .where(withTenant(invoices, organizationId, eq(invoices.id, id)))
@@ -789,11 +804,11 @@ export async function getInvoiceDetailById(
       : null;
   }
 
-  // Keep the raw Fieldpulse id server-side; expose only the derived `synced` flag.
-  const { fieldpulseInvoiceId, ...invRest } = inv;
+  // Keep the raw FSM ids server-side; expose only the derived source.
+  const { fieldpulseInvoiceId, hcpInvoiceId, ...invRest } = inv;
   return {
     ...invRest,
-    synced: fieldpulseInvoiceId != null,
+    syncedSource: deriveSyncedSource(fieldpulseInvoiceId, hcpInvoiceId),
     lineItems,
     payments: paymentRows.map((p) => ({
       ...p,
