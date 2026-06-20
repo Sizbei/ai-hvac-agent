@@ -73,6 +73,23 @@ export interface HousecallJob {
 }
 
 /**
+ * An HCP invoice (their "Invoice" resource), for the read-only PULL mirror.
+ * Mirrors FieldpulseInvoice: totals + status only — NO line items, NO partial-
+ * paid amount (HCP's payload doesn't expose them in our narrowed shape). All
+ * fields optional/nullable to tolerate API drift. `total` is in cents.
+ */
+export interface HousecallInvoice {
+  readonly id: string;
+  readonly jobId?: string | null;
+  readonly customerId?: string | null;
+  readonly status?: string | null;
+  readonly total?: number | null;
+  readonly dueDate?: string | null;
+  readonly paidAt?: string | null;
+  readonly createdAt?: string | null;
+}
+
+/**
  * A single structured line item on an HCP job (a "service", "material", or
  * "labor" row the tech sees alongside the free-text description).
  *

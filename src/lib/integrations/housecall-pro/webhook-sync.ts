@@ -26,6 +26,7 @@
 import { after } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { pullInvoiceFromHousecall } from "./invoice-sync";
 import {
   auditLog,
   hcpWebhookEvents,
@@ -179,7 +180,17 @@ export async function applyWebhookEvent(
     //     Unknown/unlinkable invoice events are recorded + no-op'd.
     const invoiceStatus = eventTypeToInvoiceStatus(event.eventType);
     if (invoiceStatus) {
-      return await applyInvoiceEvent(organizationId, event, invoiceStatus);
+      const result = await applyInvoiceEvent(organizationId, event, invoiceStatus);
+      // Money-grade mirror: pull the full invoice into the native `invoices`
+      // table. Scheduled ONLY here — past the idempotency claim (a redelivery
+      // returns "duplicate" above and never reaches this) — so a replayed event
+      // never re-pulls. Background via after() so the webhook returns fast;
+      // failures are logged in the module and recovered by the reconcile cron.
+      const invoiceId = event.hcpInvoiceId;
+      if (invoiceId) {
+        after(() => pullInvoiceFromHousecall(organizationId, invoiceId));
+      }
+      return result;
     }
 
     // 2. Map the event type to a request-status target. Unknown/non-lifecycle

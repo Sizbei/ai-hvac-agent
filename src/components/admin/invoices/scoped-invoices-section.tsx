@@ -54,9 +54,9 @@ export function ScopedInvoicesSection({
         >
           <div className="flex items-center gap-3">
             <InvoiceStateBadge state={inv.state} />
-            {inv.synced && (
+            {inv.syncedSource && (
               <span className="rounded-full border bg-violet-50 px-2 py-0.5 text-[10px] font-medium text-violet-700">
-                FieldPulse
+                {inv.syncedSource === 'fieldpulse' ? 'FieldPulse' : 'Housecall Pro'}
               </span>
             )}
             <span className="text-xs text-muted-foreground">

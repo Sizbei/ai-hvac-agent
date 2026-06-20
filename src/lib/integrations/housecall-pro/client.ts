@@ -23,6 +23,7 @@ import type {
   HousecallAvailabilityRange,
   HousecallAvailabilitySlot,
   HousecallCustomer,
+  HousecallInvoice,
   HousecallJob,
   HousecallLineItem,
   HousecallTechnician,
@@ -112,6 +113,10 @@ export interface HousecallProClient {
    * and to cache non-secret account metadata. Throws on auth failure.
    */
   getAccountInfo(): Promise<HousecallAccountInfo>;
+  /** Fetch one invoice for the read-only pull mirror; null when not found. */
+  getInvoice(invoiceId: string): Promise<HousecallInvoice | null>;
+  /** List a job's invoices (reconcile-cron backstop). */
+  listJobInvoices(hcpJobId: string): Promise<readonly HousecallInvoice[]>;
 }
 
 /** Map a raw HCP address to our type (tolerant of omitted fields). */
@@ -186,6 +191,33 @@ function toLineItemsPayload(
     // (descriptive items, priced on-site), so this stays omitted in practice.
     unit_price: item.unitPriceCents,
   }));
+}
+
+/**
+ * Narrow an untrusted HCP invoice payload to {@link HousecallInvoice}, or null
+ * when it has no usable id. Tolerant of omitted/extra fields (HCP shape is
+ * inferred — key-blocked); a malformed invoice is dropped, never thrown.
+ */
+function toInvoice(raw: unknown): HousecallInvoice | null {
+  if (typeof raw !== "object" || raw === null) {
+    return null;
+  }
+  const obj = raw as Record<string, unknown>;
+  if (typeof obj.id !== "string") {
+    return null;
+  }
+  const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
+  const num = (v: unknown): number | null => (typeof v === "number" ? v : null);
+  return {
+    id: obj.id,
+    jobId: str(obj.job_id),
+    customerId: str(obj.customer_id),
+    status: str(obj.status),
+    total: num(obj.total),
+    dueDate: str(obj.due_date),
+    paidAt: str(obj.paid_at),
+    createdAt: str(obj.created_at),
+  };
 }
 
 /** Narrow an untrusted HCP job payload to {@link HousecallJob}. */
@@ -506,6 +538,38 @@ export class RestHousecallProClient implements HousecallProClient {
       companyName: typeof obj.name === "string" ? obj.name : null,
       accountId: typeof obj.id === "string" ? obj.id : null,
     };
+  }
+
+  async getInvoice(invoiceId: string): Promise<HousecallInvoice | null> {
+    try {
+      const raw = await this.request(
+        `/invoices/${encodeURIComponent(invoiceId)}`,
+        { method: "GET" },
+      );
+      return toInvoice(raw);
+    } catch {
+      // Not found (404) or other error → null so the pull degrades, never throws.
+      return null;
+    }
+  }
+
+  async listJobInvoices(
+    hcpJobId: string,
+  ): Promise<readonly HousecallInvoice[]> {
+    const params = new URLSearchParams({ job_id: hcpJobId, page_size: "50" });
+    const raw = await this.request(`/invoices?${params.toString()}`, {
+      method: "GET",
+    });
+    const list =
+      typeof raw === "object" && raw !== null
+        ? (raw as Record<string, unknown>).invoices
+        : undefined;
+    if (!Array.isArray(list)) {
+      return [];
+    }
+    return list
+      .map(toInvoice)
+      .filter((i): i is HousecallInvoice => i !== null);
   }
 }
 

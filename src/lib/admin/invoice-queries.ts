@@ -159,14 +159,17 @@ export async function takePayment(
       totalCents: invoices.totalCents,
       amountPaidCents: invoices.amountPaidCents,
       fieldpulseInvoiceId: invoices.fieldpulseInvoiceId,
+      hcpInvoiceId: invoices.hcpInvoiceId,
     })
     .from(invoices)
     .where(withTenant(invoices, organizationId, eq(invoices.id, invoiceId)))
     .limit(1);
   if (!inv) return { ok: false, reason: "invoice_not_found" };
-  // Read-only mirror: a Fieldpulse-synced invoice is billed/paid IN Fieldpulse.
-  // Taking a native payment here would double-charge the customer.
-  if (inv.fieldpulseInvoiceId) return { ok: false, reason: "synced_read_only" };
+  // Read-only mirror: an FSM-synced invoice (FieldPulse OR Housecall Pro) is
+  // billed/paid IN the FSM. Taking a native payment here would double-charge.
+  if (inv.fieldpulseInvoiceId || inv.hcpInvoiceId) {
+    return { ok: false, reason: "synced_read_only" };
+  }
   // Only an open/draft invoice can be charged — never a paid/void/refunded one
   // (that would over-collect or charge a cancelled invoice).
   if (inv.state !== "open" && inv.state !== "draft") {
@@ -284,13 +287,16 @@ export async function refundPayment(
       amountPaidCents: invoices.amountPaidCents,
       totalCents: invoices.totalCents,
       fieldpulseInvoiceId: invoices.fieldpulseInvoiceId,
+      hcpInvoiceId: invoices.hcpInvoiceId,
     })
     .from(invoices)
     .where(withTenant(invoices, organizationId, eq(invoices.id, pay.invoiceId)))
     .limit(1);
-  // Read-only mirror: refunds for a Fieldpulse-synced invoice happen IN Fieldpulse.
+  // Read-only mirror: refunds for an FSM-synced invoice happen IN the FSM.
   // (Defense-in-depth — a synced invoice should never have a native payment.)
-  if (inv?.fieldpulseInvoiceId) return { ok: false, reason: "synced_read_only" };
+  if (inv?.fieldpulseInvoiceId || inv?.hcpInvoiceId) {
+    return { ok: false, reason: "synced_read_only" };
+  }
   const wasFullyPaid = (inv?.amountPaidCents ?? 0) >= (inv?.totalCents ?? 0);
   const newPaid = Math.max(0, (inv?.amountPaidCents ?? 0) - params.amountCents);
 
@@ -448,13 +454,16 @@ export async function reconcilePayment(
       totalCents: invoices.totalCents,
       amountPaidCents: invoices.amountPaidCents,
       fieldpulseInvoiceId: invoices.fieldpulseInvoiceId,
+      hcpInvoiceId: invoices.hcpInvoiceId,
     })
     .from(invoices)
     .where(withTenant(invoices, organizationId, eq(invoices.id, pay.invoiceId)))
     .limit(1);
-  // Read-only mirror: never credit a Fieldpulse-synced invoice from native
-  // reconciliation (would double-credit a payment Fieldpulse already recorded).
-  if (inv?.fieldpulseInvoiceId) return { ok: false, reason: "synced_read_only" };
+  // Read-only mirror: never credit an FSM-synced invoice from native
+  // reconciliation (would double-credit a payment the FSM already recorded).
+  if (inv?.fieldpulseInvoiceId || inv?.hcpInvoiceId) {
+    return { ok: false, reason: "synced_read_only" };
+  }
   if (!inv) {
     // Invoice vanished (e.g. cascade-deleted): mark the orphan charge succeeded so
     // it stops being "stuck", but don't fabricate an invoice update.
@@ -553,8 +562,21 @@ export interface InvoiceListRow {
   readonly customerId: string | null;
   readonly serviceRequestId: string | null;
   readonly createdAt: Date;
-  /** True for a read-only invoice mirrored from Fieldpulse (never payable here). */
-  readonly synced: boolean;
+  /** Which FSM this read-only invoice is mirrored from, or null when native. */
+  readonly syncedSource: "fieldpulse" | "housecall" | null;
+}
+
+/** Which FSM (if any) a row is a read-only mirror of. FieldPulse wins the rare
+ * dual-source row; null means a native (editable) invoice. */
+function deriveSyncedSource(
+  fieldpulseInvoiceId: string | null,
+  hcpInvoiceId: string | null,
+): "fieldpulse" | "housecall" | null {
+  return fieldpulseInvoiceId != null
+    ? "fieldpulse"
+    : hcpInvoiceId != null
+      ? "housecall"
+      : null;
 }
 
 /** Admin list of an org's invoices, newest first. */
@@ -571,14 +593,15 @@ export async function listInvoices(
       serviceRequestId: invoices.serviceRequestId,
       createdAt: invoices.createdAt,
       fieldpulseInvoiceId: invoices.fieldpulseInvoiceId,
+      hcpInvoiceId: invoices.hcpInvoiceId,
     })
     .from(invoices)
     .where(withTenant(invoices, organizationId))
     .orderBy(desc(invoices.createdAt));
-  // Expose only the derived `synced` flag — the raw Fieldpulse id stays server-side.
-  return rows.map(({ fieldpulseInvoiceId, ...r }) => ({
+  // Expose only the derived source — the raw FSM ids stay server-side.
+  return rows.map(({ fieldpulseInvoiceId, hcpInvoiceId, ...r }) => ({
     ...r,
-    synced: fieldpulseInvoiceId != null,
+    syncedSource: deriveSyncedSource(fieldpulseInvoiceId, hcpInvoiceId),
   }));
 }
 
@@ -619,8 +642,8 @@ export interface InvoiceDetailView {
   readonly serviceRequestId: string | null;
   readonly estimateId: string | null;
   readonly createdAt: Date;
-  /** True for a read-only invoice mirrored from Fieldpulse (never payable here). */
-  readonly synced: boolean;
+  /** Which FSM this read-only invoice is mirrored from, or null when native. */
+  readonly syncedSource: "fieldpulse" | "housecall" | null;
   readonly lineItems: InvoiceLineItemView[];
   readonly payments: PaymentView[];
   /**
@@ -660,6 +683,7 @@ export async function getInvoiceDetailById(
       estimateId: invoices.estimateId,
       createdAt: invoices.createdAt,
       fieldpulseInvoiceId: invoices.fieldpulseInvoiceId,
+      hcpInvoiceId: invoices.hcpInvoiceId,
     })
     .from(invoices)
     .where(withTenant(invoices, organizationId, eq(invoices.id, id)))
@@ -780,11 +804,11 @@ export async function getInvoiceDetailById(
       : null;
   }
 
-  // Keep the raw Fieldpulse id server-side; expose only the derived `synced` flag.
-  const { fieldpulseInvoiceId, ...invRest } = inv;
+  // Keep the raw FSM ids server-side; expose only the derived source.
+  const { fieldpulseInvoiceId, hcpInvoiceId, ...invRest } = inv;
   return {
     ...invRest,
-    synced: fieldpulseInvoiceId != null,
+    syncedSource: deriveSyncedSource(fieldpulseInvoiceId, hcpInvoiceId),
     lineItems,
     payments: paymentRows.map((p) => ({
       ...p,

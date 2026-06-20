@@ -177,9 +177,11 @@ export default function InvoicesPage() {
                     <td className="px-4 py-3">
                       <span className="inline-flex items-center gap-1.5">
                         <InvoiceStateBadge state={inv.state} />
-                        {inv.synced && (
+                        {inv.syncedSource && (
                           <span className="rounded-full border bg-violet-50 px-2 py-0.5 text-[10px] font-medium text-violet-700">
-                            FieldPulse
+                            {inv.syncedSource === 'fieldpulse'
+                              ? 'FieldPulse'
+                              : 'Housecall Pro'}
                           </span>
                         )}
                       </span>

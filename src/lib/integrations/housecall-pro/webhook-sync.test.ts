@@ -108,14 +108,20 @@ vi.mock("next/server", () => ({
 vi.mock("@/lib/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
+vi.mock("./invoice-sync", () => ({
+  pullInvoiceFromHousecall: vi.fn().mockResolvedValue("created"),
+}));
 
 import { applyWebhookEvent } from "./webhook-sync";
+import { pullInvoiceFromHousecall } from "./invoice-sync";
 
+const mockedPull = pullInvoiceFromHousecall as unknown as ReturnType<typeof vi.fn>;
 const ORG = "org-1";
 const completedEvent: HcpWebhookEvent = {
   eventId: "evt_done",
   eventType: "job.completed",
   hcpJobId: "job_1",
+  hcpInvoiceId: null,
 };
 
 beforeEach(() => {
@@ -158,6 +164,7 @@ describe("applyWebhookEvent — status mapping", () => {
       eventId: "evt_s",
       eventType: "job.started",
       hcpJobId: "job_1",
+      hcpInvoiceId: null,
     });
     expect(updateRequestStatus).toHaveBeenCalledWith(ORG, "req_1", "in_progress");
   });
@@ -198,6 +205,7 @@ describe("applyWebhookEvent — unmapped event type", () => {
       eventId: "evt_paid",
       eventType: "job.paid",
       hcpJobId: "job_1",
+      hcpInvoiceId: null,
     });
     expect(result.outcome).toBe("unmapped_event");
     expect(updateRequestStatus).not.toHaveBeenCalled();
@@ -215,6 +223,7 @@ describe("applyWebhookEvent — illegal transition", () => {
       eventId: "evt_sched_late",
       eventType: "job.scheduled",
       hcpJobId: "job_1",
+      hcpInvoiceId: null,
     });
     expect(result.outcome).toBe("invalid_transition");
     expect(dbState.auditValues?.details).toContain("invalid_transition");
@@ -271,6 +280,7 @@ describe("applyWebhookEvent — completion follow-up", () => {
       eventId: "evt_start",
       eventType: "job.started",
       hcpJobId: "job_1",
+      hcpInvoiceId: null,
     });
     expect(addFollowUp).not.toHaveBeenCalled();
   });
@@ -281,6 +291,7 @@ describe("applyWebhookEvent — invoice status sync", () => {
     eventId: "evt_inv_paid",
     eventType: "invoice.paid",
     hcpJobId: "job_1",
+      hcpInvoiceId: null,
   };
 
   it("updates the matching request's invoiceStatus and audits (no state machine)", async () => {
@@ -333,9 +344,45 @@ describe("applyWebhookEvent — invoice status sync", () => {
       eventId: "evt_inv_nojob",
       eventType: "invoice.sent",
       hcpJobId: null,
+      hcpInvoiceId: null,
     });
     expect(result.outcome).toBe("unknown_job");
     // Never reached the UPDATE.
     expect(dbState.updateValues).toBeUndefined();
+  });
+});
+
+describe("applyWebhookEvent — money-grade pull scheduling", () => {
+  beforeEach(() => mockedPull.mockClear());
+
+  it("schedules the pull for an invoice event carrying an invoice id (fresh event)", async () => {
+    await applyWebhookEvent(ORG, {
+      eventId: "evt_ip",
+      eventType: "invoice.paid",
+      hcpJobId: "job_1",
+      hcpInvoiceId: "hcp-inv-9",
+    });
+    expect(mockedPull).toHaveBeenCalledWith(ORG, "hcp-inv-9");
+  });
+
+  it("does NOT pull on a redelivery (idempotency short-circuits first)", async () => {
+    dbState.ledgerInsertWins = false;
+    await applyWebhookEvent(ORG, {
+      eventId: "evt_ip",
+      eventType: "invoice.paid",
+      hcpJobId: "job_1",
+      hcpInvoiceId: "hcp-inv-9",
+    });
+    expect(mockedPull).not.toHaveBeenCalled();
+  });
+
+  it("does NOT pull when the invoice event has no invoice id", async () => {
+    await applyWebhookEvent(ORG, {
+      eventId: "evt_ip2",
+      eventType: "invoice.paid",
+      hcpJobId: "job_1",
+      hcpInvoiceId: null,
+    });
+    expect(mockedPull).not.toHaveBeenCalled();
   });
 });
