@@ -54,6 +54,11 @@ export interface HcpWebhookEvent {
   readonly eventType: string;
   /** The HCP job id this event references, or null for non-job events. */
   readonly hcpJobId: string | null;
+  /**
+   * The HCP invoice id — set ONLY for an `invoice.*` event (its resource `id`),
+   * null otherwise. Drives the money-grade pull into the native `invoices` table.
+   */
+  readonly hcpInvoiceId: string | null;
 }
 
 /**
@@ -86,7 +91,13 @@ export function parseWebhookEvent(raw: unknown): HcpWebhookEvent | null {
       : typeof data.id === "string"
         ? data.id
         : null;
-  return { eventId, eventType, hcpJobId };
+  // For an invoice event the resource `id` IS the invoice id (the money-pull
+  // target). Null for every non-invoice event.
+  const hcpInvoiceId =
+    eventType.startsWith("invoice.") && typeof data.id === "string"
+      ? data.id
+      : null;
+  return { eventId, eventType, hcpJobId, hcpInvoiceId };
 }
 
 /**

@@ -17,6 +17,7 @@ describe("parseWebhookEvent", () => {
       eventId: "evt_123",
       eventType: "job.completed",
       hcpJobId: "job_abc",
+      hcpInvoiceId: null,
     });
   });
 
@@ -30,10 +31,11 @@ describe("parseWebhookEvent", () => {
       eventId: "evt_9",
       eventType: "estimate.sent",
       hcpJobId: null,
+      hcpInvoiceId: null,
     });
   });
 
-  it("resolves an invoice event's job id from data.job_id (not the invoice id)", () => {
+  it("resolves an invoice event's job id from data.job_id and captures the invoice id", () => {
     const event = parseWebhookEvent({
       id: "evt_inv",
       event: "invoice.paid",
@@ -43,6 +45,8 @@ describe("parseWebhookEvent", () => {
       eventId: "evt_inv",
       eventType: "invoice.paid",
       hcpJobId: "job_abc",
+      // The invoice event's resource id is the invoice id — the money-pull target.
+      hcpInvoiceId: "inv_xyz",
     });
   });
 
