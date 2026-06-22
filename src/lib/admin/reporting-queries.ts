@@ -41,10 +41,14 @@ export interface SalesReport {
   readonly refundedCents: number;
   /** grossCollectedCents - refundedCents (native net). */
   readonly netCollectedCents: number;
-  /** SYNCED revenue: amount paid on FSM-synced invoices (FieldPulse/Housecall)
-   * created in the period. Reported SEPARATELY from native so the two sources are
+  /** SYNCED revenue: paid-to-date (as reported by the FSM) on FSM-synced invoices
+   * CREATED in the period. Reported SEPARATELY from native so the two sources are
    * never blended into one double-counted total (a synced invoice has no native
-   * payment rows, so it would otherwise be invisible in collected revenue). */
+   * payment rows, so it would otherwise be invisible in collected revenue).
+   * BASIS CAVEAT: this is a creation-cohort, paid-to-date figure — NOT a
+   * payment-date sum like native grossCollectedCents. Synced invoices carry no
+   * per-payment dates, so it cannot be payment-date-scoped; treat the two bases
+   * as related but not identical (don't naively add them as one "collected"). */
   readonly syncedCollectedCents: number;
   /** Open balance across ALL invoices in state 'open' (= nativeArCents + syncedArCents). */
   readonly outstandingArCents: number;
@@ -475,6 +479,11 @@ export async function getLocationBreakdown(
 
     // 2. Revenue: sum invoice totals on those requests' invoices. BOTH sides
     //    org-scoped (the join predicate adds the invoice org).
+    //    SOURCE NOTE: this is BILLED revenue across BOTH native and synced
+    //    invoices (each invoice row summed ONCE — no fan-out), so a synced org's
+    //    FSM billing IS included here. The data has no native↔synced "same-bill"
+    //    linkage, so the rare request that has BOTH (a migration anomaly) counts
+    //    both; getSalesReport holds the authoritative native/synced split.
     db
       .select({ locationId: locationKey, value: sum(invoices.totalCents) })
       .from(serviceRequests)
@@ -636,6 +645,9 @@ export async function getTechnicianScorecards(
       .groupBy(serviceRequests.assignedTo, users.name),
 
     // 2. Revenue: invoice totals on the tech's jobs. ALL sides org-scoped.
+    //    SOURCE NOTE: billed revenue across BOTH native and synced invoices (each
+    //    summed once — no fan-out); see getLocationBreakdown. getSalesReport holds
+    //    the authoritative native/synced split.
     db
       .select({
         technicianId: serviceRequests.assignedTo,
