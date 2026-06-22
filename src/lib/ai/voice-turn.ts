@@ -59,7 +59,13 @@ import {
 } from "./extraction-schema";
 import { submitSessionServiceRequest } from "@/lib/requests/submit-session-request";
 import { determineNextState, type SessionState } from "./state-machine";
-import { PHONE_SYSTEM_PROMPT, toSpokenReply, voiceNextSlotPrompt } from "./phone-agent";
+import {
+  PHONE_SYSTEM_PROMPT,
+  toSpokenReply,
+  voiceNextSlotPrompt,
+  voiceNextSlotId,
+} from "./phone-agent";
+import { buildVoiceWindowPrompt } from "./availability-prompt";
 import { nextTriageStep, captureEnrichmentAnswer } from "./triage";
 import { buildModelMessages, MAX_HISTORY, type ChatTurn } from "./compaction";
 import type { Urgency } from "./router-types";
@@ -173,6 +179,35 @@ export interface VoiceReplyResult {
    * ZIP on the keypad. Absent on all other turns (use the default speech gather).
    */
   readonly nextGatherMode?: "dtmf_zip";
+}
+
+/**
+ * WS5 (phone parity): the spoken preferred-window question built from REAL open
+ * availability — mirrors the web route's fetchWindowPrompt (next-business-day
+ * onward, skip today). Best-effort: ANY failure returns null so the caller falls
+ * back to the static voice window prompt. Availability is an enhancement, never a
+ * gate on the intake.
+ */
+async function fetchVoiceWindowQuestion(
+  organizationId: string,
+): Promise<string | null> {
+  try {
+    // Lazy import: the availability/scheduling graph is heavy (pulls the FSM
+    // scheduling sources + schema). Loading it on demand keeps it out of the
+    // voice-turn module graph (and its unit-test mocks).
+    const { getOpenAvailability, businessDaysFrom, businessTodayIso } =
+      await import("@/lib/admin/availability-queries");
+    const today = businessTodayIso(new Date());
+    const days = businessDaysFrom(today, 8).filter((d) => d !== today);
+    const availability = await getOpenAvailability(organizationId, days);
+    return buildVoiceWindowPrompt(availability).question;
+  } catch (error: unknown) {
+    logger.error(
+      { error, organizationId },
+      "Voice window availability fetch failed — using static prompt",
+    );
+    return null;
+  }
 }
 
 export async function voiceReply(params: {
@@ -775,7 +810,15 @@ export async function voiceReply(params: {
     // (e.g. business hours) is still spoken; completion still wins with the
     // confirmation. `verdict.reply` is preferred only when it's NOT a bare slot
     // provision.
-    const nextQuestion = afterHoursPrefix + voiceNextSlotPrompt(merged);
+    // WS5: at the preferred-window step, offer REAL open availability (spoken),
+    // mirroring web. Only fetch when that step is actually next; degrade-safe to
+    // the static window prompt on any failure.
+    let windowQuestion: string | null = null;
+    if (!extractionComplete && voiceNextSlotId(merged) === "preferred_window") {
+      windowQuestion = await fetchVoiceWindowQuestion(organizationId);
+    }
+    const nextQuestion =
+      afterHoursPrefix + (windowQuestion ?? voiceNextSlotPrompt(merged));
     // SUBMIT is included: the router's required-slot view (issue/urgency/
     // address) is narrower than the voice gate (phone), so its canned confirm
     // copy — which says "tap Confirm & Submit", a screen affordance — must
