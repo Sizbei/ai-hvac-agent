@@ -186,6 +186,21 @@ describe("POST /api/admin/payments/[id]/refund — role gate", () => {
     );
   });
 
+  it("surfaces a read-only synced invoice as 409 (not 500) on refund", async () => {
+    mockGetAdminSession.mockResolvedValue(session("super_admin"));
+    mockRefundPayment.mockResolvedValue({ ok: false, reason: "synced_read_only" });
+    const res = await refundPOST(
+      jsonReq("/api/admin/payments/pay-1/refund", {
+        amountCents: 1000,
+        reason: "customer_request",
+      }),
+      { params: Promise.resolve({ id: "pay-1" }) },
+    );
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+  });
+
   it("audit details carry NO PII — only ids/cents/enum", async () => {
     mockGetAdminSession.mockResolvedValue(session("super_admin"));
     mockRefundPayment.mockResolvedValue({ ok: true, refundId: "ref-1" });
@@ -233,6 +248,22 @@ describe("POST /api/admin/invoices/[id]/payments — admin session required", ()
       "inv-1",
       expect.objectContaining({ amountCents: 5000 }),
     );
+  });
+
+  it("surfaces a read-only synced invoice as 409 (not 500), with no receipt", async () => {
+    mockGetAdminSession.mockResolvedValue(session("admin"));
+    mockTakePayment.mockResolvedValue({ ok: false, reason: "synced_read_only" });
+    const res = await takePaymentPOST(
+      jsonReq("/api/admin/invoices/inv-1/payments", { amountCents: 5000 }),
+      { params: Promise.resolve({ id: "inv-1" }) },
+    );
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe("INVOICE_SYNCED_READ_ONLY");
+    // A blocked charge must NOT enqueue a receipt.
+    await flushAfter();
+    expect(mockTriggerPaymentReceipt).not.toHaveBeenCalled();
   });
 
   it("enqueues a payment_receipt and drains the queue on a successful payment", async () => {
