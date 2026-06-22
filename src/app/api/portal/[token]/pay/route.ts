@@ -62,16 +62,34 @@ export async function POST(
           // a generic 404 so an attacker can't probe invoice ownership.
           return errorResponse("Invoice not found", "NOT_FOUND", 404);
         case "invoice_not_chargeable":
+        // A synced (FieldPulse/HCP) invoice is billed in the FSM, never payable
+        // here — surface it the same as any other non-chargeable invoice.
+        case "synced_read_only":
           return errorResponse(
             "This invoice can't be paid right now",
             "NOT_CHARGEABLE",
             409,
+          );
+        case "exceeds_balance":
+          return errorResponse(
+            "That amount is more than the invoice balance",
+            "EXCEEDS_BALANCE",
+            422,
           );
         case "charge_failed":
           return errorResponse(
             "The payment could not be completed",
             "CHARGE_FAILED",
             402,
+          );
+        default:
+          // Never fall through to the success response on an unhandled rejection
+          // reason — that would tell the customer "paid: true" for a payment that
+          // did NOT happen.
+          return errorResponse(
+            "This invoice can't be paid right now",
+            "NOT_CHARGEABLE",
+            409,
           );
       }
     }

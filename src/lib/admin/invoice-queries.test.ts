@@ -85,6 +85,31 @@ describe("takePayment", () => {
     const r = await takePayment(ORG, "inv-1", { amountCents: 5000 }, provider);
     expect(r).toEqual({ ok: false, reason: "exceeds_balance" });
   });
+
+  // Concurrency guard: the invoice credit must be an ATOMIC SQL increment off the
+  // current row, NOT a precomputed absolute value (which lost-updates when two
+  // payments race — e.g. a customer double-submitting the portal pay form). We
+  // can't run a real race against a mocked db, so we lock in the invariant: the
+  // amountPaidCents written is a SQL expression, never a plain number. Kept LAST
+  // in this block because it overrides the shared db.update mock.
+  it("credits the invoice with an atomic increment, not a precomputed absolute", async () => {
+    mockInvoice({ totalCents: 10000, amountPaidCents: 0 });
+    const sets: Record<string, unknown>[] = [];
+    vi.mocked(db.update).mockImplementation(
+      () =>
+        ({
+          set: (v: Record<string, unknown>) => {
+            sets.push(v);
+            return { where: vi.fn().mockResolvedValue(undefined) };
+          },
+        }) as never,
+    );
+    const r = await takePayment(ORG, "inv-1", { amountCents: 5000 }, provider);
+    expect(r.ok).toBe(true);
+    const invSet = sets.find((s) => "amountPaidCents" in s);
+    expect(invSet).toBeDefined();
+    expect(typeof invSet?.amountPaidCents).not.toBe("number");
+  });
 });
 
 import { createInvoiceFromSoldEstimate, refundPayment } from "./invoice-queries";
@@ -324,6 +349,35 @@ describe("refundPayment", () => {
     const states = captureUpdateStates();
     await refundPayment("org-1", "pay-1", { amountCents: 2000 }, provider);
     expect(states.find((s) => "state" in s)?.state).toBe("open");
+  });
+
+  it("rejects a zero or negative refund amount (exceeds_payment) before the provider", async () => {
+    const refundSpy = vi.fn();
+    const spyProvider = { name: "mock", createCharge: vi.fn(), refund: refundSpy };
+    for (const amt of [0, -100]) {
+      mockSelectSeq([
+        [{ id: "pay-1", invoiceId: "inv-1", amountCents: 10000, status: "succeeded", providerPaymentId: "mock_pay_x" }],
+        [], // no prior refunds
+      ]);
+      const r = await refundPayment("org-1", "pay-1", { amountCents: amt }, spyProvider as never);
+      expect(r).toEqual({ ok: false, reason: "exceeds_payment" });
+    }
+    // A non-positive amount must never reach the provider (no real money moves).
+    expect(refundSpy).not.toHaveBeenCalled();
+  });
+
+  it("rolls back the invoice with an atomic decrement, not a precomputed absolute", async () => {
+    mockSelectSeq([
+      [{ id: "pay-1", invoiceId: "inv-1", amountCents: 10000, status: "succeeded", providerPaymentId: "mock_pay_x" }],
+      [], // no prior refunds
+      [{ amountPaidCents: 10000, totalCents: 10000 }],
+    ]);
+    const states = captureUpdateStates();
+    const r = await refundPayment("org-1", "pay-1", { amountCents: 4000 }, provider);
+    expect(r.ok).toBe(true);
+    const invSet = states.find((s) => "amountPaidCents" in s);
+    expect(invSet).toBeDefined();
+    expect(typeof invSet?.amountPaidCents).not.toBe("number");
   });
 
   it("passes a stable idempotency key to the provider (retry-safe, no double refund)", async () => {
@@ -580,5 +634,35 @@ describe("reconcilePayment", () => {
     mockSelectSeq([[]]);
     const r = await reconcilePayment(ORG, "pay-x", new MockPaymentProvider());
     expect(r).toEqual({ ok: false, reason: "payment_not_found" });
+  });
+
+  // The payment-status CAS stops a SECOND reconcile of the SAME payment, but two
+  // reconciles of DIFFERENT pending payments on the same invoice would still
+  // lost-update an absolute write. So the credit must be an atomic SQL increment.
+  it("credits the invoice with an atomic increment, not a precomputed absolute", async () => {
+    mockSelectSeq([
+      [{ id: "pay-1", invoiceId: "inv-1", amountCents: 5000, status: "pending" }],
+      [{ totalCents: 10000, amountPaidCents: 0 }],
+    ]);
+    const sets: Record<string, unknown>[] = [];
+    vi.mocked(db.update).mockImplementation(
+      () =>
+        ({
+          set: (v: Record<string, unknown>) => {
+            sets.push(v);
+            return {
+              where: () =>
+                Object.assign(Promise.resolve(undefined), {
+                  returning: vi.fn().mockResolvedValue([{ id: "pay-1" }]),
+                }),
+            };
+          },
+        }) as never,
+    );
+    const r = await reconcilePayment(ORG, "pay-1", new MockPaymentProvider());
+    expect(r.ok).toBe(true);
+    const invSet = sets.find((s) => "amountPaidCents" in s);
+    expect(invSet).toBeDefined();
+    expect(typeof invSet?.amountPaidCents).not.toBe("number");
   });
 });

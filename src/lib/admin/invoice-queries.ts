@@ -6,7 +6,7 @@
  * first-class (a half-built payments path breaks on the first chargeback).
  */
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, inArray, lt } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   estimates,
@@ -223,7 +223,18 @@ export async function takePayment(
       .where(eq(payments.id, paymentId)),
     db
       .update(invoices)
-      .set({ amountPaidCents: newPaid, state: invoiceState, updatedAt: new Date() })
+      // ATOMIC increment off the CURRENT row, not the earlier read. neon-http has
+      // no row locks, so writing a precomputed absolute `newPaid` would lost-update
+      // under concurrency (e.g. a customer double-submitting the portal pay form):
+      // two calls read amountPaidCents=0 and both write the same absolute value,
+      // silently dropping one payment from the invoice total. `+= amount` in SQL
+      // composes correctly regardless of interleaving. (`state` stays a best-effort
+      // hint computed from the read — the money figure is what must be exact.)
+      .set({
+        amountPaidCents: sql`${invoices.amountPaidCents} + ${params.amountCents}`,
+        state: invoiceState,
+        updatedAt: new Date(),
+      })
       .where(withTenant(invoices, organizationId, eq(invoices.id, invoiceId))),
   ]);
 
@@ -332,7 +343,10 @@ export async function refundPayment(
     db
       .update(invoices)
       .set({
-        amountPaidCents: newPaid,
+        // ATOMIC decrement off the CURRENT row (floored at 0) — same lost-update
+        // guard as takePayment: two refunds against the same invoice must not
+        // clobber each other via a precomputed absolute value.
+        amountPaidCents: sql`GREATEST(0, ${invoices.amountPaidCents} - ${params.amountCents})`,
         // Fully refunded -> "refunded". Partial refund of a fully-paid invoice
         // stays "paid" (NOT chargeable — prevents over-collection). Partial
         // refund of a partially-paid invoice stays "open" (a real balance remains).
@@ -510,7 +524,15 @@ export async function reconcilePayment(
 
   await db
     .update(invoices)
-    .set({ amountPaidCents: newPaid, state: invoiceState, updatedAt: new Date() })
+    // ATOMIC increment (see takePayment): the payment-status CAS above guarantees
+    // only one caller credits THIS payment, but two reconciles of DIFFERENT
+    // pending payments on the same invoice would still lost-update an absolute
+    // write. `+= amount` in SQL composes regardless of interleaving.
+    .set({
+      amountPaidCents: sql`${invoices.amountPaidCents} + ${pay.amountCents}`,
+      state: invoiceState,
+      updatedAt: new Date(),
+    })
     .where(withTenant(invoices, organizationId, eq(invoices.id, pay.invoiceId)));
 
   return { ok: true, outcome: "completed", invoiceState };
