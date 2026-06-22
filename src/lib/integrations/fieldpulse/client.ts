@@ -157,6 +157,39 @@ function dollarsToCents(v: unknown): number | null {
   return Number.isFinite(n) ? Math.round(n * 100) : null;
 }
 
+/**
+ * Best-guess mapping of FieldPulse's integer invoice `status` to a label.
+ *
+ * DEFENSIVE + SUPPLEMENTARY ONLY. The integer code meanings are UNCONFIRMED
+ * (blocked on a fresh FieldPulse key + vendor docs), so this is NOT used to drive
+ * the native invoice state — `deriveInvoiceState` (from the AMOUNTS) remains the
+ * source of truth. Any unrecognized code maps to "unknown" so a wrong guess can
+ * never silently mis-state an invoice; callers should treat a non-"unknown"
+ * result as a hint, never as authoritative. Confirm the codes, then promote.
+ */
+export function mapFieldpulseInvoiceStatus(
+  code: number | string | null | undefined,
+): "draft" | "open" | "paid" | "void" | "unknown" {
+  const n =
+    typeof code === "number"
+      ? code
+      : typeof code === "string" && code.trim() !== ""
+        ? Number(code)
+        : NaN;
+  switch (n) {
+    case 1:
+      return "draft";
+    case 2:
+      return "open";
+    case 3:
+      return "paid";
+    case 4:
+      return "void";
+    default:
+      return "unknown";
+  }
+}
+
 /** Unwrap the FieldPulse envelope: `{ error, response, ... }` → the payload. */
 function unwrap(raw: unknown): unknown {
   if (raw && typeof raw === "object" && "response" in raw) {
@@ -536,23 +569,67 @@ export class RestFieldpulseClient implements FieldpulseClient {
     });
   }
 
+  /**
+   * Fetch a list endpoint across pages, DEFENSIVELY — works whether or not
+   * FieldPulse actually honors a `page` param (the param name is unconfirmed,
+   * blocked on a fresh key + vendor docs). Safety properties:
+   *  - Hard MAX_PAGES cap bounds cost and can never loop forever.
+   *  - If the API IGNORES `page`, every page is byte-identical → the repeated-
+   *    batch guard stops after the first page (never an infinite loop, never
+   *    duplicates).
+   *  - Rows are deduped by id across pages; a page shorter than pageSize, or a
+   *    page that adds nothing new, ends the walk.
+   * Returns the raw row objects (callers map/validate them).
+   */
+  private async fetchAllPages(
+    basePath: string,
+    baseParams: URLSearchParams,
+    pageSize: number,
+    maxPages = 20,
+  ): Promise<unknown[]> {
+    const all: unknown[] = [];
+    const seenIds = new Set<string>();
+    let lastBatchKey: string | null = null;
+    for (let page = 1; page <= maxPages; page++) {
+      const params = new URLSearchParams(baseParams);
+      params.set("page", String(page));
+      params.set("page_size", String(pageSize));
+      const raw = await this.request(`${basePath}?${params.toString()}`, {
+        method: "GET",
+      });
+      const list = unwrap(raw);
+      if (!Array.isArray(list) || list.length === 0) break;
+      // The API ignores `page` -> identical batch -> stop (no loop, no dupes).
+      const batchKey = list
+        .map((r) => idStr((r as Record<string, unknown>)?.id) ?? "?")
+        .join(",");
+      if (batchKey === lastBatchKey) break;
+      lastBatchKey = batchKey;
+      let added = 0;
+      for (const row of list) {
+        const id = idStr((row as Record<string, unknown>)?.id);
+        if (id && seenIds.has(id)) continue;
+        if (id) seenIds.add(id);
+        all.push(row);
+        added++;
+      }
+      // Last page (short) or no new rows -> done.
+      if (list.length < pageSize || added === 0) break;
+    }
+    return all;
+  }
+
   async listCustomerJobs(
     fieldpulseCustomerId: string,
   ): Promise<readonly FieldpulseJob[]> {
-    const params = new URLSearchParams({
-      customer_id: fieldpulseCustomerId,
-      page_size: "100",
-    });
-    const raw = await this.request(`/jobs?${params.toString()}`, {
-      method: "GET",
-    });
-    const list = unwrap(raw);
-    if (!Array.isArray(list)) {
-      return [];
-    }
+    const rows = await this.fetchAllPages(
+      "/jobs",
+      new URLSearchParams({ customer_id: fieldpulseCustomerId }),
+      100,
+    );
     // Drop any malformed job rather than throwing, so a single bad row never
     // blows up the whole history read.
-    return list
+    return rows
       .map((j): FieldpulseJob | null => {
         try {
           return toJob(j);
@@ -639,20 +716,17 @@ export class RestFieldpulseClient implements FieldpulseClient {
   async listJobInvoices(
     fieldpulseJobId: string,
   ): Promise<readonly FieldpulseInvoice[]> {
-    const params = new URLSearchParams({
-      job_id: fieldpulseJobId,
-      page_size: "50",
-    });
-    const raw = await this.request(`/invoices?${params.toString()}`, {
-      method: "GET",
-    });
-    const list = unwrap(raw);
-    if (!Array.isArray(list)) {
-      return [];
-    }
-    // The `job_id` query param is IGNORED server-side (verified), so filter
-    // client-side. Drop malformed invoices rather than throwing.
-    return list
+    // The `job_id` query param is IGNORED server-side (verified), so we must
+    // page through invoices and filter client-side — otherwise a job's invoices
+    // beyond the first page would be silently missed. Pagination is bounded +
+    // defensive (see fetchAllPages).
+    const rows = await this.fetchAllPages(
+      "/invoices",
+      new URLSearchParams({ job_id: fieldpulseJobId }),
+      50,
+    );
+    // Drop malformed invoices rather than throwing.
+    return rows
       .map(toInvoice)
       .filter((i): i is FieldpulseInvoice => i !== null)
       .filter((i) => i.jobId === fieldpulseJobId);

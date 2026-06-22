@@ -219,3 +219,87 @@ describe("RestFieldpulseClient", () => {
     });
   });
 });
+
+import { mapFieldpulseInvoiceStatus } from "./client";
+
+describe("mapFieldpulseInvoiceStatus (defensive, supplementary)", () => {
+  it("maps the best-guess integer codes", () => {
+    expect(mapFieldpulseInvoiceStatus(1)).toBe("draft");
+    expect(mapFieldpulseInvoiceStatus(2)).toBe("open");
+    expect(mapFieldpulseInvoiceStatus(3)).toBe("paid");
+    expect(mapFieldpulseInvoiceStatus(4)).toBe("void");
+  });
+  it("accepts the stringified form FieldPulse sends", () => {
+    expect(mapFieldpulseInvoiceStatus("3")).toBe("paid");
+  });
+  it("returns 'unknown' for any unrecognized / missing code (never a wrong guess)", () => {
+    for (const c of [0, 5, 99, null, undefined, "", "x", NaN]) {
+      expect(mapFieldpulseInvoiceStatus(c as never)).toBe("unknown");
+    }
+  });
+});
+
+describe("RestFieldpulseClient — defensive pagination (listJobInvoices)", () => {
+  let mockFetch: ReturnType<typeof vi.fn>;
+  const config = { baseUrl: "https://api.fieldpulse.com", apiKey: "k" };
+
+  beforeEach(() => {
+    mockFetch = vi.fn();
+    vi.stubGlobal("fetch", mockFetch);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  /** A mock fetch Response carrying `n` invoice rows (ids start at `from`). */
+  function page(from: number, n: number) {
+    const rows = Array.from({ length: n }, (_, i) => ({
+      id: from + i,
+      job_id: "job-1",
+    }));
+    return { ok: true, status: 200, json: async () => ({ response: rows }) };
+  }
+
+  it("walks pages when the API honors `page` (full page → fetch next; short page → stop)", async () => {
+    mockFetch
+      .mockResolvedValueOnce(page(1, 50)) // full → continue
+      .mockResolvedValueOnce(page(51, 10)); // short → stop
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const invoices = await client.listJobInvoices("job-1");
+    expect(invoices).toHaveLength(60);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    // The 2nd request asked for page=2.
+    expect(String(mockFetch.mock.calls[1][0])).toContain("page=2");
+  });
+
+  it("does NOT loop or duplicate when the API IGNORES `page` (identical batches)", async () => {
+    // Every call returns the SAME 50 rows — a server that ignores `page`.
+    mockFetch.mockResolvedValue(page(1, 50));
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const invoices = await client.listJobInvoices("job-1");
+    expect(invoices).toHaveLength(50); // deduped, NOT 100+
+    expect(mockFetch).toHaveBeenCalledTimes(2); // page1 + page2(identical)→stop
+  });
+
+  it("stops after a single short page", async () => {
+    mockFetch.mockResolvedValueOnce(page(1, 5));
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const invoices = await client.listJobInvoices("job-1");
+    expect(invoices).toHaveLength(5);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("is bounded by the MAX_PAGES cap even if every page is full + distinct", async () => {
+    let from = 1;
+    mockFetch.mockImplementation(async () => {
+      const p = page(from, 50);
+      from += 50;
+      return p;
+    });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const invoices = await client.listJobInvoices("job-1");
+    expect(mockFetch).toHaveBeenCalledTimes(20); // hard cap, never unbounded
+    expect(invoices).toHaveLength(1000);
+  });
+});
