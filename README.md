@@ -87,6 +87,7 @@ at `/api/voice/incoming` to enable it (see [GUIDE.md](GUIDE.md#telephone-agent-v
 - **[docs/MIGRATION_GUIDE.md](docs/MIGRATION_GUIDE.md)** — feature comparison with Vercel chatbot.
 - **[docs/HVAC_IMPROVEMENTS.md](docs/HVAC_IMPROVEMENTS.md)** — HVAC-specific features and recommendations.
 - **[docs/SECURITY_AUDIT.md](docs/SECURITY_AUDIT.md)** — security audit findings and mitigations.
+- **[docs/NOTES.md](docs/NOTES.md)** — running engineering-notes / research log (decisions, tools to adopt).
 - **`/docs.html`** — interactive docs (run the app, open http://localhost:3000/docs.html):
   searchable sidebar, light/dark mode, copy buttons, example workflow, architecture.
 
