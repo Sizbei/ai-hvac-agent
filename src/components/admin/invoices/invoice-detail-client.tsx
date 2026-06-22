@@ -511,8 +511,10 @@ export function InvoiceDetailClient({
                       </ul>
                     )}
 
-                    {/* Inline refund form (super_admin only; never for synced) */}
-                    {canRefund && !invoice.syncedSource && refundFor === p.id && (
+                    {/* Inline refund form (super_admin only; never for synced;
+                        only while still refundable — matches the button gate so a
+                        fully-refunded payment can't keep an open form). */}
+                    {canRefund && !invoice.syncedSource && refundable && refundFor === p.id && (
                       <div className="mt-3 space-y-2 border-t pt-3">
                         <div className="flex flex-wrap items-center gap-2">
                           <div className="relative">
