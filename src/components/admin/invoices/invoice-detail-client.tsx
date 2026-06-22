@@ -11,6 +11,7 @@ import { InvoiceStateBadge } from '@/components/admin/invoices/invoice-state-bad
 import { FinancingPanel } from '@/components/admin/financing/financing-panel';
 import { formatCentsExact, parseDollarsToCents } from '@/lib/admin/money-format';
 import { rollUpMargin, computeMargin } from '@/lib/admin/margin';
+import { deriveInvoicePresentation } from '@/lib/admin/invoice-presentation';
 
 interface LineItem {
   readonly id: string;
@@ -197,17 +198,11 @@ export function InvoiceDetailClient({
     );
   }
 
-  const balance = invoice.totalCents - invoice.amountPaidCents;
-  const isChargeable =
-    (invoice.state === 'open' || invoice.state === 'draft') && balance > 0;
+  // Derived display/affordance state (pure, unit-tested in invoice-presentation).
   // Read-only mirror from an FSM (FieldPulse / Housecall Pro): money is managed
   // there, so native pay/refund controls are hidden and a caveat is shown.
-  const sourceLabel =
-    invoice.syncedSource === 'fieldpulse'
-      ? 'FieldPulse'
-      : invoice.syncedSource === 'housecall'
-        ? 'Housecall Pro'
-        : null;
+  const { balanceCents: balance, canTakePayment, sourceLabel } =
+    deriveInvoicePresentation(invoice);
   // Margin is line revenue vs snapshotted line cost (excludes tax — tax is not
   // revenue). Internal/admin-only readout.
   const margin = rollUpMargin(invoice.lineItems);
@@ -393,8 +388,8 @@ export function InvoiceDetailClient({
         </CardContent>
       </Card>
 
-      {/* Take payment — never for a read-only FSM-synced invoice. */}
-      {isChargeable && !invoice.syncedSource && (
+      {/* Take payment — never for a read-only FSM-synced invoice (canTakePayment). */}
+      {canTakePayment && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Take payment</CardTitle>
