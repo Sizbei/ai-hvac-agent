@@ -31,7 +31,7 @@
     "eval:prompts": "npx tsx src/lib/ai/eval/cli.ts prompts",
     "eval:behavior": "npx tsx src/lib/ai/eval/cli.ts behavior",
     "eval:promptfoo": "node scripts/promptfoo-eval.mjs",
-    "eval:promptfoo:gen": "npx tsx -e 'import {buildSystemPrompt} from \"./src/lib/ai/system-prompt\"; import {writeFileSync} from \"node:fs\"; writeFileSync(\"promptfoo/system-prompt.txt\", buildSystemPrompt());'",
+    "eval:redteam": "node scripts/promptfoo-redteam.mjs",
     "smoke:fieldpulse": "npx tsx src/lib/integrations/fieldpulse/live-smoke.ts"
   },
   "dependencies": {

@@ -50,3 +50,4 @@ src-tauri/gen/schemas
 # promptfoo local eval output/cache
 /.promptfoo/
 promptfoo/output*
+promptfoo/redteam.generated.yaml
