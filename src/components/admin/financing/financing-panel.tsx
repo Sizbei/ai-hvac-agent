@@ -95,7 +95,10 @@ export function FinancingPanel({
     } catch {
       // Clipboard unavailable — the link stays visible/selectable below.
     }
-  }, [application?.applyUrl]);
+    // Depend on the whole `application` (not `application?.applyUrl`): the React
+    // Compiler can track the object as a reactive value but not the optional
+    // member expression. Behavior is identical — applyUrl only changes with it.
+  }, [application]);
 
   if (isLoading) return null;
 

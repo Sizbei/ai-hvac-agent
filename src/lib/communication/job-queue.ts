@@ -9,7 +9,7 @@
  */
 
 import { db } from "@/lib/db";
-import { communicationJobs, communicationTemplates, communicationChannelEnum, communicationJobStatusEnum } from "@/lib/db/schema";
+import { communicationJobs, communicationTemplates, communicationChannelEnum } from "@/lib/db/schema";
 import { eq, and, lt, lte, asc } from "drizzle-orm";
 import { encrypt, decrypt } from "@/lib/crypto";
 import { checkSendAllowed } from "./consent";
@@ -28,7 +28,7 @@ export async function queueCommunicationJob(job: {
   organizationId: string;
   templateId: string;
   triggerType: string;
-  channel: typeof communicationChannelEnum;
+  channel: (typeof communicationChannelEnum.enumValues)[number];
   recipientPhone?: string;
   recipientEmail?: string;
   templateVariables: Record<string, unknown>;
@@ -42,14 +42,14 @@ export async function queueCommunicationJob(job: {
     .values({
       organizationId: job.organizationId,
       templateId: job.templateId,
-      triggerType: job.triggerType as any,
-      channel: job.channel as any,
-      status: "pending" as any,
+      triggerType: job.triggerType as (typeof communicationJobs.$inferInsert)["triggerType"],
+      channel: job.channel,
+      status: "pending",
       priority: job.priority ?? 50,
       // Encrypt recipient PII at rest.
       recipientPhoneEncrypted: job.recipientPhone ? encrypt(job.recipientPhone) : null,
       recipientEmailEncrypted: job.recipientEmail ? encrypt(job.recipientEmail) : null,
-      templateVariables: job.templateVariables as any,
+      templateVariables: job.templateVariables,
       scheduledFor: job.scheduledFor ?? new Date(),
       customerId: job.customerId,
       serviceRequestId: job.serviceRequestId,
@@ -330,7 +330,7 @@ export async function retryFailedJobs(limit = 5): Promise<number> {
     // Reset to pending so the main processor picks it up
     await db
       .update(communicationJobs)
-      .set({ status: "pending" as any })
+      .set({ status: "pending" })
       // Guard on status='failed' so two concurrent retry drains can't both
       // reset the same job (latent double-reset).
       .where(

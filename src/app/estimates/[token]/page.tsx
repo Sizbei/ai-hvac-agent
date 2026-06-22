@@ -45,6 +45,10 @@ export default async function EstimateApprovalPage({
     );
   }
 
+  // This is an async Server Component: it renders once per request on the
+  // server, so Date.now() is a correct, deterministic-per-request expiry check
+  // (the React Compiler's purity rule targets client re-renders, N/A here).
+  // eslint-disable-next-line react-hooks/purity
   if (estimate.expiresAt && estimate.expiresAt.getTime() < Date.now()) {
     return (
       <MessageState

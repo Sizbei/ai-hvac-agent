@@ -7,6 +7,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/admin/integrations/fieldpulse/webhook/route";
+import { db } from "@/lib/db";
+import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 
 // Mock dependencies
 vi.mock("@/lib/db");
@@ -38,7 +40,6 @@ describe("Fieldpulse Phase 5: Webhook Security", () => {
       });
 
       // Mock database to return request with REAL org
-      const { db } = require("@/lib/db");
       db.select = vi.fn().mockReturnValue([{
         id: mockRequestId,
         organizationId: mockOrgId, // The REAL org (not the spoofed one)
@@ -56,9 +57,7 @@ describe("Fieldpulse Phase 5: Webhook Security", () => {
         set: vi.fn().mockReturnThis(),
         where: vi.fn().mockReturnValue(undefined),
       });
-
-      const { slidingWindow } = require("@/lib/rate-limit");
-      slidingWindow.mockReturnValue({ allowed: true });
+      vi.mocked(slidingWindow).mockReturnValue({ allowed: true } as never);
 
       const response = await POST(request);
 
@@ -85,12 +84,8 @@ describe("Fieldpulse Phase 5: Webhook Security", () => {
         method: "POST",
         body: JSON.stringify(payload),
       });
-
-      const { db } = require("@/lib/db");
       db.select = vi.fn().mockReturnValue([]); // No matching request
-
-      const { slidingWindow } = require("@/lib/rate-limit");
-      slidingWindow.mockReturnValue({ allowed: true });
+      vi.mocked(slidingWindow).mockReturnValue({ allowed: true } as never);
 
       const response = await POST(request);
 
@@ -101,7 +96,6 @@ describe("Fieldpulse Phase 5: Webhook Security", () => {
 
   describe("CRITICAL FIX: Missing rate limit config", () => {
     it("should have webhook rate limit defined", () => {
-      const { RATE_LIMITS } = require("@/lib/rate-limit");
 
       // Verify the fix: webhook config exists
       expect(RATE_LIMITS).toHaveProperty("webhook");
@@ -122,17 +116,13 @@ describe("Fieldpulse Phase 5: Webhook Security", () => {
         method: "POST",
         body: JSON.stringify(payload),
       });
-
-      const { db } = require("@/lib/db");
       db.select = vi.fn().mockReturnValue([{
         id: mockRequestId,
         organizationId: mockOrgId,
         status: "in_progress",
         fieldpulseJobId: mockJobId,
       }]);
-
-      const { slidingWindow } = require("@/lib/rate-limit");
-      slidingWindow.mockReturnValue({ allowed: false }); // Rate limited
+      vi.mocked(slidingWindow).mockReturnValue({ allowed: false } as never); // Rate limited
 
       const response = await POST(request);
 
@@ -152,8 +142,6 @@ describe("Fieldpulse Phase 5: Webhook Security", () => {
         method: "POST",
         body: JSON.stringify(payload),
       });
-
-      const { db } = require("@/lib/db");
 
       // Mock request lookup
       let selectCallCount = 0;
@@ -184,9 +172,7 @@ describe("Fieldpulse Phase 5: Webhook Security", () => {
         set: vi.fn().mockReturnThis(),
         where: vi.fn().mockReturnValue(undefined),
       });
-
-      const { slidingWindow } = require("@/lib/rate-limit");
-      slidingWindow.mockReturnValue({ allowed: true });
+      vi.mocked(slidingWindow).mockReturnValue({ allowed: true } as never);
 
       const response = await POST(request);
 
@@ -211,8 +197,6 @@ describe("Fieldpulse Phase 5: Webhook Security", () => {
         method: "POST",
         body: JSON.stringify(payload),
       });
-
-      const { db } = require("@/lib/db");
       let selectCallCount = 0;
       db.select = vi.fn().mockImplementation(() => {
         selectCallCount++;
@@ -237,20 +221,19 @@ describe("Fieldpulse Phase 5: Webhook Security", () => {
         set: vi.fn().mockReturnThis(),
         where: vi.fn().mockReturnValue(undefined),
       });
-
-      const { slidingWindow } = require("@/lib/rate-limit");
-      slidingWindow.mockReturnValue({ allowed: true });
+      vi.mocked(slidingWindow).mockReturnValue({ allowed: true } as never);
 
       await POST(request);
 
       // Get the audit insert call
-      const auditInsertCalls = db.insert.mock.calls.filter(
+      const auditInsertCalls = vi.mocked(db.insert).mock.calls.filter(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mock call args are untyped
         (call: any) => call[0]?.into === "audit_log"
       );
 
       expect(auditInsertCalls.length).toBeGreaterThan(0);
 
-      const auditValues = auditInsertCalls[0][0].values;
+      const auditValues = (auditInsertCalls[0][0] as unknown as { values: { details: string } }).values;
       const details = JSON.parse(auditValues.details);
 
       expect(details).toMatchObject({
@@ -274,8 +257,6 @@ describe("Fieldpulse Phase 5: Webhook Security", () => {
         method: "POST",
         body: JSON.stringify(payload),
       });
-
-      const { db } = require("@/lib/db");
       let selectCallCount = 0;
       db.select = vi.fn().mockImplementation(() => {
         selectCallCount++;
@@ -294,9 +275,7 @@ describe("Fieldpulse Phase 5: Webhook Security", () => {
       db.insert = vi.fn().mockReturnValue({
         onConflictDoNothing: vi.fn().mockReturnValue([{ id: "webhook-123" }]),
       });
-
-      const { slidingWindow } = require("@/lib/rate-limit");
-      slidingWindow.mockReturnValue({ allowed: true });
+      vi.mocked(slidingWindow).mockReturnValue({ allowed: true } as never);
 
       const response = await POST(request);
 
@@ -319,8 +298,6 @@ describe("Fieldpulse Phase 5: Webhook Security", () => {
         method: "POST",
         body: JSON.stringify(payload),
       });
-
-      const { db } = require("@/lib/db");
       db.select = vi.fn().mockReturnValue([{
         id: mockRequestId,
         organizationId: mockOrgId,
@@ -332,9 +309,7 @@ describe("Fieldpulse Phase 5: Webhook Security", () => {
       db.insert = vi.fn().mockReturnValue({
         onConflictDoNothing: vi.fn().mockReturnValue([]), // No row inserted
       });
-
-      const { slidingWindow } = require("@/lib/rate-limit");
-      slidingWindow.mockReturnValue({ allowed: true });
+      vi.mocked(slidingWindow).mockReturnValue({ allowed: true } as never);
 
       const response = await POST(request);
 

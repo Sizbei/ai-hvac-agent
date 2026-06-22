@@ -101,8 +101,8 @@ export async function PATCH(
     const updateData: Record<string, unknown> = {};
     if (validated.name !== undefined) updateData.name = validated.name;
     if (validated.description !== undefined) updateData.description = validated.description;
-    if (validated.triggerType !== undefined) updateData.triggerType = validated.triggerType as any;
-    if (validated.templateType !== undefined) updateData.templateType = validated.templateType as any;
+    if (validated.triggerType !== undefined) updateData.triggerType = validated.triggerType;
+    if (validated.templateType !== undefined) updateData.templateType = validated.templateType;
     if (validated.subjectTemplate !== undefined) updateData.subjectTemplate = validated.subjectTemplate;
     if (validated.bodyTemplate !== undefined) updateData.bodyTemplate = validated.bodyTemplate;
     if (validated.variables !== undefined) updateData.variables = validated.variables;

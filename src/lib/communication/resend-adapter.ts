@@ -6,7 +6,7 @@
  */
 
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { Resend } from "resend";
+import { Resend, type CreateEmailOptions } from "resend";
 
 let _resend: Resend | null = null;
 
@@ -73,7 +73,14 @@ export async function sendEmail(options: {
       options.from || "Spears Services <notifications@spears-services.com>";
 
     // Send email
-    const sendOptions: any = {
+    const sendOptions: {
+      from: string;
+      to: string | string[];
+      subject: string;
+      html?: string;
+      text?: string;
+      replyTo?: string | string[];
+    } = {
       from,
       to,
       subject: options.subject,
@@ -82,7 +89,12 @@ export async function sendEmail(options: {
     if (options.text) sendOptions.text = options.text;
     if (options.replyTo) sendOptions.replyTo = options.replyTo;
 
-    const result = await getResend().emails.send(sendOptions);
+    // Either html or text is guaranteed present by the validation above, so the
+    // assembled options satisfy CreateEmailOptions' "at least one content field"
+    // constraint (which the incrementally-built object can't express statically).
+    const result = await getResend().emails.send(
+      sendOptions as CreateEmailOptions,
+    );
 
     // Check for errors
     if (result.error) {
@@ -152,7 +164,13 @@ export async function getBatchStatus(batchId: string): Promise<{
   try {
     // Note: Resend SDK's batch API structure may vary
     // This is a placeholder for when batch status tracking is needed
-    const batch = await (getResend().batch as any).retrieve(batchId);
+    const batch = await (
+      getResend().batch as unknown as {
+        retrieve: (
+          id: string,
+        ) => Promise<{ id: string; status: string; created_at: string }>;
+      }
+    ).retrieve(batchId);
     return batch;
   } catch (error) {
     console.error("Failed to fetch Resend batch status:", error);

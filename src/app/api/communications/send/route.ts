@@ -78,7 +78,7 @@ export async function POST(request: NextRequest) {
       organizationId: session.organizationId,
       templateId,
       triggerType: validated.triggerType,
-      channel: validated.channel as any, // PgEnum type issue with zod
+      channel: validated.channel,
       recipientPhone: validated.recipientPhone,
       recipientEmail: validated.recipientEmail,
       templateVariables: validated.templateVariables,

@@ -12,6 +12,8 @@ import {
   SetFieldValueInput,
   BatchSetFieldValuesInput,
   CustomFieldEntityType,
+  type CustomFieldType,
+  type CustomFieldValue,
 } from "./types";
 import { validateFieldValue } from "./validation";
 
@@ -92,8 +94,8 @@ export async function setFieldValue(
   return {
     fieldKey: fieldDef.key,
     fieldLabel: fieldDef.label,
-    fieldType: fieldDef.fieldType as any,
-    value: valueToSet as any,
+    fieldType: fieldDef.fieldType as CustomFieldType,
+    value: valueToSet as CustomFieldValue,
   };
 }
 
@@ -145,8 +147,8 @@ export async function getFieldValues(
       return {
         fieldKey: field.key,
         fieldLabel: field.label,
-        fieldType: field.fieldType as any,
-        value: v.value as any,
+        fieldType: field.fieldType as CustomFieldType,
+        value: v.value as CustomFieldValue,
       };
     });
 }

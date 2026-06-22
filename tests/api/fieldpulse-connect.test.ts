@@ -65,7 +65,7 @@ describe("Fieldpulse Phase 1: Connection Flow", () => {
       vi.mocked(db.select).mockReturnValue({
         where: vi.fn(),
         from: vi.fn(),
-      } as any);
+      } as never);
 
       const response = await POST(request);
       const data = await response.json();
@@ -88,7 +88,7 @@ describe("Fieldpulse Phase 1: Connection Flow", () => {
       vi.mocked(db.insert).mockReturnValue({
         values: vi.fn().mockReturnThis(),
         onConflictDoNothing: vi.fn().mockReturnValue([{ id: "1" }]),
-      } as any);
+      } as never);
 
       // In real test, we'd mock getFieldpulseClient to return a client
       // that successfully calls getAccountInfo
@@ -109,7 +109,7 @@ describe("Fieldpulse Phase 1: Connection Flow", () => {
         where: vi.fn().mockReturnValue({
           from: vi.fn().mockReturnValue([{ connected: true }]),
         }),
-      } as any);
+      } as never);
 
       // Verify behavior - should return conflict
       expect(typeof POST).toBe("function");
@@ -126,7 +126,7 @@ describe("Fieldpulse Phase 1: Connection Flow", () => {
       vi.mocked(db.update).mockReturnValue({
         set: vi.fn().mockReturnThis(),
         where: vi.fn().mockReturnValue(undefined),
-      } as any);
+      } as never);
 
       const response = await DisconnectPOST(request);
       expect(response.status).toBe(200);
@@ -141,7 +141,7 @@ describe("Fieldpulse Phase 1: Connection Flow", () => {
       vi.mocked(db.update).mockReturnValue({
         set: vi.fn().mockReturnThis(),
         where: vi.fn().mockReturnValue(undefined),
-      } as any);
+      } as never);
 
       const response = await DisconnectPOST(request);
       // Should still return 200 (idempotent)
@@ -160,7 +160,7 @@ describe("Fieldpulse Phase 1: Connection Flow", () => {
             apiKeyEncrypted: "encrypted:secret", // Should NOT be returned
           }]),
         }),
-      } as any);
+      } as never);
 
       const response = await GET();
       const data = await response.json();
@@ -179,7 +179,7 @@ describe("Fieldpulse Phase 1: Connection Flow", () => {
             accountInfo: null,
           }]),
         }),
-      } as any);
+      } as never);
 
       const response = await GET();
       const data = await response.json();

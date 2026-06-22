@@ -47,7 +47,7 @@ export async function triggerAppointmentScheduled(params: {
       organizationId: params.organizationId,
       templateId: smsTemplate.id,
       triggerType: "appointment_scheduled",
-      channel: "sms" as any,
+      channel: "sms",
       recipientPhone: params.customerPhone,
       templateVariables: {
         customerName: params.customerName,
@@ -82,7 +82,7 @@ export async function triggerAppointmentScheduled(params: {
         organizationId: params.organizationId,
         templateId: emailTemplate.id,
         triggerType: "appointment_scheduled",
-        channel: "email" as any,
+        channel: "email",
         recipientEmail: params.customerEmail,
         templateVariables: {
           customerName: params.customerName,
@@ -153,7 +153,7 @@ export async function scheduleAppointmentReminders(params: {
         organizationId: params.organizationId,
         templateId: smsTemplate.id,
         triggerType: "appointment_reminder_24h",
-        channel: "sms" as any,
+        channel: "sms",
         recipientPhone: params.customerPhone,
         templateVariables: {
           customerName: params.customerName,
@@ -188,7 +188,7 @@ export async function scheduleAppointmentReminders(params: {
         organizationId: params.organizationId,
         templateId: smsTemplate.id,
         triggerType: "appointment_reminder_2h",
-        channel: "sms" as any,
+        channel: "sms",
         recipientPhone: params.customerPhone,
         templateVariables: {
           customerName: params.customerName,
@@ -248,7 +248,7 @@ export async function triggerAppointmentRescheduled(params: {
       organizationId: params.organizationId,
       templateId: smsTemplate.id,
       triggerType: "appointment_rescheduled",
-      channel: "sms" as any,
+      channel: "sms",
       recipientPhone: params.customerPhone,
       templateVariables: {
         customerName: params.customerName,
@@ -323,7 +323,7 @@ export async function triggerAppointmentCancelled(params: {
       organizationId: params.organizationId,
       templateId: smsTemplate.id,
       triggerType: "appointment_cancelled",
-      channel: "sms" as any,
+      channel: "sms",
       recipientPhone: params.customerPhone,
       templateVariables: {
         customerName: params.customerName,
@@ -374,7 +374,7 @@ export async function triggerTechnicianEnroute(params: {
       organizationId: params.organizationId,
       templateId: smsTemplate.id,
       triggerType: "technician_enroute",
-      channel: "sms" as any,
+      channel: "sms",
       recipientPhone: params.customerPhone,
       templateVariables: {
         customerName: params.customerName,
@@ -429,7 +429,7 @@ export async function triggerJobCompleted(params: {
       organizationId: params.organizationId,
       templateId: smsTemplate.id,
       triggerType: "job_completed",
-      channel: "sms" as any,
+      channel: "sms",
       recipientPhone: params.customerPhone,
       templateVariables: {
         customerName: params.customerName,
@@ -463,7 +463,7 @@ export async function triggerJobCompleted(params: {
       organizationId: params.organizationId,
       templateId: emailTemplate.id,
       triggerType: "job_completed",
-      channel: "email" as any,
+      channel: "email",
       recipientEmail: params.customerEmail,
       templateVariables: {
         customerName: params.customerName,
@@ -500,7 +500,7 @@ export async function triggerJobCompleted(params: {
       organizationId: params.organizationId,
       templateId: followUpTemplate.id,
       triggerType: "follow_up",
-      channel: "sms" as any,
+      channel: "sms",
       recipientPhone: params.customerPhone,
       templateVariables: {
         customerName: params.customerName,

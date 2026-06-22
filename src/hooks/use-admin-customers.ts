@@ -25,6 +25,9 @@ export function useAdminCustomers() {
     }
   }, []);
 
+  // Idiomatic data fetch: setState runs only AFTER the awaited fetch resolves,
+  // not synchronously during the effect, so this is not a render loop.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
     void fetch_();
   }, [fetch_]);
@@ -54,6 +57,9 @@ export function useCustomerDetail(customerId: string) {
     }
   }, [customerId]);
 
+  // Idiomatic data fetch: setState runs only AFTER the awaited fetch resolves,
+  // not synchronously during the effect, so this is not a render loop.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
     fetch_();
   }, [fetch_]);

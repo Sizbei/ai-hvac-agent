@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { pushJobToFieldpulse, cancelFieldpulseJob } from "@/lib/integrations/fieldpulse/job-sync";
 import { syncCustomerToFieldpulse } from "@/lib/integrations/fieldpulse/customer-sync";
+import { db } from "@/lib/db";
 
 // Mock dependencies
 vi.mock("@/lib/db");
@@ -49,8 +50,6 @@ describe("Fieldpulse Phase 2: Job Sync Flow", () => {
       vi.doMock("./client", () => ({
         getFieldpulseClient: () => Promise.resolve(mockClient),
       }));
-
-      const { db } = require("@/lib/db");
       db.select = vi.fn().mockReturnValue([{
         id: mockCustomerId,
         fieldpulseCustomerId: null,
@@ -79,8 +78,6 @@ describe("Fieldpulse Phase 2: Job Sync Flow", () => {
       vi.doMock("./client", () => ({
         getFieldpulseClient: () => Promise.resolve(mockClient),
       }));
-
-      const { db } = require("@/lib/db");
       db.select = vi.fn().mockReturnValue([{
         id: mockCustomerId,
         fieldpulseCustomerId: null,
@@ -102,8 +99,6 @@ describe("Fieldpulse Phase 2: Job Sync Flow", () => {
       vi.doMock("./client", () => ({
         getFieldpulseClient: () => Promise.resolve(mockClient),
       }));
-
-      const { db } = require("@/lib/db");
       db.select = vi.fn().mockReturnValue([{
         id: mockCustomerId,
         fieldpulseCustomerId: mockFpCustomerId, // Already mapped
@@ -136,8 +131,6 @@ describe("Fieldpulse Phase 2: Job Sync Flow", () => {
       vi.doMock("./client", () => ({
         getFieldpulseClient: () => Promise.resolve(mockClient),
       }));
-
-      const { db } = require("@/lib/db");
       db.select = vi.fn()
         // First call: load job sync row
         .mockReturnValueOnce([{
@@ -182,8 +175,6 @@ describe("Fieldpulse Phase 2: Job Sync Flow", () => {
       vi.doMock("./client", () => ({
         getFieldpulseClient: () => Promise.resolve(mockClient),
       }));
-
-      const { db } = require("@/lib/db");
       db.select = vi.fn().mockReturnValue([{
         requestId: mockRequestId,
         fieldpulseJobId: mockFpJobId, // Already has job mapped
@@ -215,8 +206,6 @@ describe("Fieldpulse Phase 2: Job Sync Flow", () => {
       vi.doMock("./client", () => ({
         getFieldpulseClient: () => Promise.resolve(mockClient),
       }));
-
-      const { db } = require("@/lib/db");
       db.select = vi.fn().mockReturnValue([{
         fieldpulseJobId: mockFpJobId,
       }]);
@@ -234,8 +223,6 @@ describe("Fieldpulse Phase 2: Job Sync Flow", () => {
       vi.doMock("./client", () => ({
         getFieldpulseClient: () => Promise.resolve(mockClient),
       }));
-
-      const { db } = require("@/lib/db");
       db.select = vi.fn().mockReturnValue([{
         fieldpulseJobId: null, // No job mapped
       }]);
