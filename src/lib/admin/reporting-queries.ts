@@ -33,14 +33,27 @@ export interface SalesReportPeriod {
 export interface SalesReport {
   readonly fromDate: string;
   readonly toDate: string;
-  /** Succeeded payments in the period (gross, before refunds). */
+  /** NATIVE succeeded payments in the period (gross, before refunds). Synced
+   * (FSM-mirrored) invoices never have native payment rows, so this is native
+   * money only — see syncedCollectedCents for the synced side. */
   readonly grossCollectedCents: number;
-  /** Refunds issued in the period. */
+  /** Refunds issued in the period (native; synced invoices have no native refunds). */
   readonly refundedCents: number;
-  /** grossCollectedCents - refundedCents. */
+  /** grossCollectedCents - refundedCents (native net). */
   readonly netCollectedCents: number;
-  /** Open balance across invoices in state 'open' ONLY (excludes draft/paid/void/refunded). */
+  /** SYNCED revenue: amount paid on FSM-synced invoices (FieldPulse/Housecall)
+   * created in the period. Reported SEPARATELY from native so the two sources are
+   * never blended into one double-counted total (a synced invoice has no native
+   * payment rows, so it would otherwise be invisible in collected revenue). */
+  readonly syncedCollectedCents: number;
+  /** Open balance across ALL invoices in state 'open' (= nativeArCents + syncedArCents). */
   readonly outstandingArCents: number;
+  /** Open balance on NATIVE invoices only (no FSM source id). */
+  readonly nativeArCents: number;
+  /** Open balance on FSM-synced invoices only. Split out so a request that has
+   * BOTH a native and a synced invoice contributes to each bucket once, never a
+   * blended double-count. */
+  readonly syncedArCents: number;
   readonly estimatesCreated: number;
   readonly estimatesSold: number;
   readonly estimatesOpen: number;
@@ -76,6 +89,7 @@ export async function getSalesReport(
     arRow,
     estimateRow,
     invoiceRow,
+    syncedCollectedRow,
   ] = await Promise.all([
     // Gross collected: succeeded payments created within the period.
     db
@@ -110,8 +124,15 @@ export async function getSalesReport(
     // scoped — AR is a point-in-time snapshot of what is owed right now.
     db
       .select({
-        value: sum(
-          sql`${invoices.totalCents} - ${invoices.amountPaidCents}`,
+        // Split the open-AR balance by source via CASE so native and synced
+        // money are never blended: each open invoice lands in exactly ONE bucket
+        // (native = no FSM id; synced = a FieldPulse OR Housecall id), so a
+        // request with both contributes to each once, never double-counted.
+        native: sum(
+          sql`CASE WHEN ${invoices.fieldpulseInvoiceId} IS NULL AND ${invoices.hcpInvoiceId} IS NULL THEN ${invoices.totalCents} - ${invoices.amountPaidCents} ELSE 0 END`,
+        ),
+        synced: sum(
+          sql`CASE WHEN ${invoices.fieldpulseInvoiceId} IS NOT NULL OR ${invoices.hcpInvoiceId} IS NOT NULL THEN ${invoices.totalCents} - ${invoices.amountPaidCents} ELSE 0 END`,
         ),
       })
       .from(invoices)
@@ -163,12 +184,33 @@ export async function getSalesReport(
           lte(invoices.createdAt, toDate),
         ),
       ),
+
+    // Synced collected revenue: amount paid on FSM-synced invoices created in the
+    // period. Synced invoices mirror FSM billing and carry no native payment
+    // rows, so without this they'd be invisible in collected revenue. Kept as its
+    // OWN figure (never folded into grossCollectedCents) so native + synced are
+    // never blended into a double-counted total.
+    db
+      .select({ value: sum(invoices.amountPaidCents) })
+      .from(invoices)
+      .where(
+        withTenant(
+          invoices,
+          organizationId,
+          sql`(${invoices.fieldpulseInvoiceId} IS NOT NULL OR ${invoices.hcpInvoiceId} IS NOT NULL)`,
+          gte(invoices.createdAt, fromDate),
+          lte(invoices.createdAt, toDate),
+        ),
+      ),
   ]);
 
   const grossCollectedCents = toNumber(grossRow[0]?.value);
   const refundedCents = toNumber(refundRow[0]?.value);
   const netCollectedCents = grossCollectedCents - refundedCents;
-  const outstandingArCents = toNumber(arRow[0]?.value);
+  const syncedCollectedCents = toNumber(syncedCollectedRow[0]?.value);
+  const nativeArCents = toNumber(arRow[0]?.native);
+  const syncedArCents = toNumber(arRow[0]?.synced);
+  const outstandingArCents = nativeArCents + syncedArCents;
 
   const estimatesCreated = toNumber(estimateRow[0]?.created);
   const estimatesSold = toNumber(estimateRow[0]?.sold);
@@ -190,7 +232,10 @@ export async function getSalesReport(
     grossCollectedCents,
     refundedCents,
     netCollectedCents,
+    syncedCollectedCents,
     outstandingArCents,
+    nativeArCents,
+    syncedArCents,
     estimatesCreated,
     estimatesSold,
     estimatesOpen,

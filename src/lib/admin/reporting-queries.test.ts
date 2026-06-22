@@ -100,6 +100,8 @@ vi.mock('@/lib/db/schema', () => ({
     amountPaidCents: 'invoices.amountPaidCents',
     createdAt: 'invoices.createdAt',
     organizationId: 'invoices.org',
+    fieldpulseInvoiceId: 'invoices.fieldpulseInvoiceId',
+    hcpInvoiceId: 'invoices.hcpInvoiceId',
   },
   payments: {
     amountCents: 'payments.amountCents',
@@ -168,11 +170,12 @@ import {
 const ORG = '00000000-0000-0000-0000-000000000001';
 
 // Selects run via Promise.all in this fixed order:
-//   1 gross  2 refund  3 ar  4 estimates  5 invoices
+//   1 gross  2 refund  3 ar(native+synced)  4 estimates  5 invoices  6 syncedCollected
 interface Seed {
   gross: number | string | null;
   refund: number | string | null;
-  ar: number | string | null;
+  /** Open-AR split by source. Back-compat: a bare value seeds nativeAr. */
+  ar: number | string | null | { native: number | string | null; synced: number | string | null };
   estimates: {
     created: number | string;
     sold: number | string;
@@ -180,14 +183,21 @@ interface Seed {
     open: number | string;
   };
   invoices: { created: number | string; paid: number | string };
+  /** Amount paid on FSM-synced invoices created in the period. */
+  syncedCollected?: number | string | null;
 }
 
 function seed(s: Seed): void {
+  const ar =
+    s.ar !== null && typeof s.ar === 'object'
+      ? s.ar
+      : { native: s.ar, synced: null };
   selectQueue.push([{ value: s.gross }]);
   selectQueue.push([{ value: s.refund }]);
-  selectQueue.push([{ value: s.ar }]);
+  selectQueue.push([{ native: ar.native, synced: ar.synced }]);
   selectQueue.push([s.estimates]);
   selectQueue.push([s.invoices]);
+  selectQueue.push([{ value: s.syncedCollected ?? null }]);
 }
 
 beforeEach(() => {
@@ -277,18 +287,60 @@ describe('getSalesReport', () => {
     ).toBe(true);
     expect(hasTag(arWhere, (v) => v.kind === 'gte' || v.kind === 'lte')).toBe(false);
 
-    // And it sums (total - paid), not a naive total.
+    // And it sums (total - paid), not a naive total — split by source via CASE on
+    // the FSM id columns (native bucket references both fieldpulse + hcp ids).
     const arCols = captured[2].columns as Record<string, unknown>;
     expect(
       hasTag(
-        arCols.value,
+        arCols.native,
         (v) =>
           v.kind === 'sql' &&
-          typeof v.text === 'string' &&
-          (v.text as string).includes('?') &&
           Array.isArray(v.values) &&
           (v.values as unknown[]).includes('invoices.totalCents') &&
-          (v.values as unknown[]).includes('invoices.amountPaidCents'),
+          (v.values as unknown[]).includes('invoices.amountPaidCents') &&
+          (v.values as unknown[]).includes('invoices.fieldpulseInvoiceId') &&
+          (v.values as unknown[]).includes('invoices.hcpInvoiceId'),
+      ),
+    ).toBe(true);
+  });
+
+  it('splits AR by source and sums them into outstandingArCents (no blend/double-count)', async () => {
+    seed({
+      gross: 0,
+      refund: 0,
+      ar: { native: '5000', synced: '2500' },
+      estimates: { created: 0, sold: 0, expired: 0, open: 0 },
+      invoices: { created: 0, paid: 0 },
+    });
+    const r = await getSalesReport(ORG);
+    expect(r.nativeArCents).toBe(5000);
+    expect(r.syncedArCents).toBe(2500);
+    // Total is the SUM of the two source buckets — each open invoice counted once.
+    expect(r.outstandingArCents).toBe(7500);
+  });
+
+  it('surfaces synced collected revenue separately from native gross', async () => {
+    seed({
+      gross: '40000', // native succeeded payments
+      refund: 0,
+      ar: 0,
+      estimates: { created: 0, sold: 0, expired: 0, open: 0 },
+      invoices: { created: 0, paid: 0 },
+      syncedCollected: '15000', // paid on FSM-synced invoices
+    });
+    const r = await getSalesReport(ORG);
+    expect(r.grossCollectedCents).toBe(40000); // native only, unchanged
+    expect(r.syncedCollectedCents).toBe(15000); // synced, reported separately
+    // The synced-collected query (6th) filters to invoices WITH an FSM id.
+    const syncedWhere = captured[5].where;
+    expect(
+      hasTag(
+        syncedWhere,
+        (v) =>
+          v.kind === 'sql' &&
+          Array.isArray(v.values) &&
+          (v.values as unknown[]).includes('invoices.fieldpulseInvoiceId') &&
+          (v.values as unknown[]).includes('invoices.hcpInvoiceId'),
       ),
     ).toBe(true);
   });

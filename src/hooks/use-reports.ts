@@ -8,7 +8,10 @@ export interface SalesReport {
   readonly grossCollectedCents: number;
   readonly refundedCents: number;
   readonly netCollectedCents: number;
+  readonly syncedCollectedCents: number;
   readonly outstandingArCents: number;
+  readonly nativeArCents: number;
+  readonly syncedArCents: number;
   readonly estimatesCreated: number;
   readonly estimatesSold: number;
   readonly estimatesOpen: number;

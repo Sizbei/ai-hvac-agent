@@ -85,9 +85,15 @@ export default function ReportsPage() {
           value={report ? formatCentsExact(report.netCollectedCents) : null}
           hint={
             report
-              ? `${formatCentsExact(report.grossCollectedCents)} collected − ${formatCentsExact(
-                  report.refundedCents,
-                )} refunded`
+              ? // Surface synced (FSM-mirrored) revenue separately so the two
+                // sources are never read as one blended number.
+                report.syncedCollectedCents > 0
+                ? `${formatCentsExact(report.grossCollectedCents)} native − ${formatCentsExact(
+                    report.refundedCents,
+                  )} refunded · +${formatCentsExact(report.syncedCollectedCents)} synced`
+                : `${formatCentsExact(report.grossCollectedCents)} collected − ${formatCentsExact(
+                    report.refundedCents,
+                  )} refunded`
               : undefined
           }
           icon={DollarSign}
@@ -98,7 +104,13 @@ export default function ReportsPage() {
         <KpiCard
           label="Outstanding AR"
           value={report ? formatCentsExact(report.outstandingArCents) : null}
-          hint="Balance on open invoices"
+          hint={
+            report && report.syncedArCents > 0
+              ? `${formatCentsExact(report.nativeArCents)} native · ${formatCentsExact(
+                  report.syncedArCents,
+                )} synced`
+              : "Balance on open invoices"
+          }
           icon={Wallet}
           bgColor="bg-amber-100 dark:bg-amber-900/30"
           iconColor="text-amber-600 dark:text-amber-400"
