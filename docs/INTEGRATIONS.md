@@ -161,7 +161,7 @@ pay/refund controls + shows an authoritative-balance caveat for synced invoices.
   refuse any synced invoice.
 - **Source-aware reporting:** a request can legitimately have BOTH a native and a
   synced invoice; revenue/aging reads must group by source to avoid double-count.
-- **Read more:** `docs/superpowers/specs/2026-06-18-fieldpulse-invoice-sync-design.md`
+- **Read more:** `docs/superpowers/specs/2026-06-19-fieldpulse-invoice-sync-design.md`
   (FieldPulse) and `2026-06-19-hcp-invoice-parity-design.md` (HCP parity).
 
 ## Webhooks
