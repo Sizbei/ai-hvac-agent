@@ -82,6 +82,7 @@ at `/api/voice/incoming` to enable it (see [GUIDE.md](GUIDE.md#telephone-agent-v
 - **[GUIDE.md](GUIDE.md)** — product overview, customer + admin flows, env vars.
 - **[docs/INTAKE-FIELDS.md](docs/INTAKE-FIELDS.md)** — the full intake field model + triage playbook (ServiceTitan-based).
 - **[docs/API.md](docs/API.md)** — complete REST API reference (chat, admin, file upload, widget).
+- **[docs/INTEGRATIONS.md](docs/INTEGRATIONS.md)** — FieldPulse / Housecall Pro / Google Calendar: the integration pattern, the verified FieldPulse live-API contract, the invoice money-mirror, webhooks, crons, and env vars.
 - **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** — Vercel and self-hosted deployment guide.
 - **[docs/MIGRATION_GUIDE.md](docs/MIGRATION_GUIDE.md)** — feature comparison with Vercel chatbot.
 - **[docs/HVAC_IMPROVEMENTS.md](docs/HVAC_IMPROVEMENTS.md)** — HVAC-specific features and recommendations.

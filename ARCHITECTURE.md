@@ -88,7 +88,7 @@ The core idea is **spend LLM tokens only when you have to**. A deterministic 65-
 | **Summary compaction for long conversations** | Folding aged-out turns into a rolling summary keeps context coherent at flat per-turn cost, so the turn ceiling can rise (default 40) without unbounded token growth | Adds a background summarization call once a conversation crosses the window; the summary is model-generated and could lose nuance the raw transcript held |
 | **Twilio signature validation (fails closed)** | Webhooks are public endpoints; verifying `X-Twilio-Signature` (HMAC-SHA1, keyed by `TWILIO_AUTH_TOKEN`) proves authenticity. No token / bad signature ⇒ rejected | The voice endpoints do nothing useful until `TWILIO_AUTH_TOKEN` is set — intentional, but a silent "all rejected" if an operator forgets it |
 
-## 6. Data Model (11 tables, Drizzle)
+## 6. Data Model (Drizzle, ~55 tables)
 
 - **Auth / org** — `organizations`, `users` (admin + technician staff, role-gated, password-hashed).
 - **Chat** — `customer_sessions` (status state machine, token budget/usage, turn count, extracted-slot metadata, a `channel` of `web`/`phone`, and a `running_summary` for compacted long conversations) and `messages` (per-turn role/content, with `tokensUsed` recording 0 on deterministic turns).
@@ -97,6 +97,8 @@ The core idea is **spend LLM tokens only when you have to**. A deterministic 65-
 
 > **ServiceTitan "soft split".** The service address lives on the `service_requests` row (the *location*), while billing identity lives on the `customers` row — a soft Customer↔Location split, with no separate locations table (deferred; see [docs/INTAKE-FIELDS.md](docs/INTAKE-FIELDS.md)). The preferred window we capture is appointment *intent*, not a real calendar booking.
 - **Audit** — `audit_log`: append-only record of actions (escalations, request creation, feedback signals) with IP and entity references.
+- **Money loop** — `estimates` / `estimate_line_items` / `estimate_options`, `invoices` / `invoice_line_items`, `payments`, `refunds` (all amounts in **integer cents**; over-collection + over-refund guards; provider-agnostic payment seam), plus `customer_memberships`.
+- **Integrations** — per-org encrypted connections (`fieldpulse_connections`, `housecall_pro_connections`, `google_calendar_connections`) and inbound-webhook idempotency ledgers (`fieldpulse_webhook_events`, `hcp_webhook_events`). FSM invoices mirror into the native `invoices` table (read-only, keyed on `fieldpulse_invoice_id` / `hcp_invoice_id`). See **[docs/INTEGRATIONS.md](docs/INTEGRATIONS.md)**.
 
 Every table carries `organization_id` with supporting indexes; hot lookups (session token, request status, audit time) are indexed explicitly.
 
@@ -109,6 +111,7 @@ Every table carries `organization_id` with supporting indexes; hot lookups (sess
 - **Cost controls** — per-IP rate limiting, per-session token budget (default 40,000; graceful human handoff on exhaustion rather than a hard error), `maxOutputTokens: 350`, and a 10-message sliding window + rolling summary to bound quadratic context growth even on long conversations.
 - **After-hours fee honesty** — the after-hours surcharge is keyed to *when the technician goes out* (a booking-target signal derived from the customer's chosen window/urgency), not the conversation clock, so a business-hours booking is never quoted a charge even when the chat happens after hours. The dollar amount is never spoken; the confirm route computes it server-side.
 - **Safety** — emergency intents escalate deterministically and lock the session; escalation failures are logged so the audit trail is never silently lost.
+- **Integration hardening** — inbound FSM webhooks verify an HMAC signature (fail-closed in production), derive the org from a server-side lookup (never the payload), dedupe on a per-org idempotency ledger, and run background work via `after()`. FSM-synced invoices are read-only in native money flows (no double-billing). Every integration call is degrade-safe — a missing/expired credential or API error never breaks a customer turn. See **[docs/INTEGRATIONS.md](docs/INTEGRATIONS.md)**.
 - **Auditability** — `audit_log` records escalations, submissions, and 👍/👎 deflection-quality feedback.
 - **Operational hygiene** — a daily Vercel cron (`vercel.json`, 03:00 UTC) cleans up abandoned sessions; secrets are validated at startup (encryption key length, missing `DATABASE_URL`).
 
@@ -116,7 +119,7 @@ Every table carries `organization_id` with supporting indexes; hot lookups (sess
 
 - **Distributed rate limiting** — the current sliding window is in-process; move to Redis (or Upstash) so limits hold across multiple serverless instances.
 - **Trusted-proxy IP handling** — `x-forwarded-for` is currently taken at face value; parse it against a trusted proxy chain to prevent spoofed rate-limit keys.
-- **Router eval harness** — add a labeled corpus and CI eval that scores precision/recall per intent and guards against regressions (especially false-negative emergencies) before merging knowledge-base changes.
+- **Router eval harness** — _shipped_ (`src/lib/ai/eval/`, `npm run eval`): a labeled golden-transcript corpus gates critical safety properties in CI; the optional LLM-judge + model/prompt A/B layers run when keys are present. See [EVAL.md](EVAL.md). Next: grow the corpus and wire the judge into a pre-release sweep.
 - **Response caching** — canned answers are already free, but FAQ responses and admin stat aggregations could be cached/edge-served to cut DB round-trips.
 - **Semantic fallback tier** — an embedding-based matcher between the keyword router and the full LLM could resolve paraphrased FAQs at lower cost than a chat completion.
 - **Searchable encrypted PII** — deterministic/blind-index encryption for fields that need lookup (e.g. returning-customer detection by phone) without giving up at-rest protection.
