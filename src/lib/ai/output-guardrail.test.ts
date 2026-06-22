@@ -46,6 +46,19 @@ describe("screenAssistantReply", () => {
     expect(r.violations).toContain("false-booking");
   });
 
+  // REGRESSION (Stage-10 review): "you are booked" / "you're all booked" must
+  // be caught too, not just the apostrophe-form "you're booked".
+  it.each([
+    "Done — you are booked for Tuesday.",
+    "Perfect, you're all booked for tomorrow morning.",
+    "You are scheduled for a 9am visit.",
+  ])("catches the widened false-booking phrasing: %s", (text) => {
+    const r = screenAssistantReply(text);
+    expect(r.safe).toBe(false);
+    expect(r.violations).toContain("false-booking");
+    expect(r.reply).not.toMatch(FALSE_BOOKING_REGEX);
+  });
+
   it("reports BOTH violations and uses the combined safe reply", () => {
     const r = screenAssistantReply(
       "You're scheduled for tomorrow and it'll be $99.",
@@ -110,6 +123,18 @@ describe("screenAssistantReply — dangerous-DIY backstop", () => {
   it("blocks capacitor discharge instructions", () => {
     const text =
       "Discharge the capacitor with a screwdriver then unscrew it from the bracket.";
+    const r = screenAssistantReply(text);
+    expect(r.safe).toBe(false);
+    expect(r.violations).toContain("dangerous-diy");
+  });
+
+  // REGRESSION (Stage-10 review): how-to framing + "replace THE capacitor" must
+  // block. Previously the "to" lookbehind treated "to replace" as pro-framed and
+  // the how-to branch only listed "replace a capacitor" (not "the").
+  it.each([
+    "Here's how to replace the capacitor yourself: first cut the power.",
+    "How to replace the capacitor: discharge it, then swap in the new one.",
+  ])("blocks how-to 'replace the capacitor' framing: %s", (text) => {
     const r = screenAssistantReply(text);
     expect(r.safe).toBe(false);
     expect(r.violations).toContain("dangerous-diy");

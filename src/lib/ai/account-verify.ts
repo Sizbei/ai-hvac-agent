@@ -41,3 +41,30 @@ export interface VerifyState {
   readonly status: "pending" | "passed" | "failed";
   readonly attempts: number;
 }
+
+/**
+ * Splice the financial-verify state back onto a freshly-built extraction object.
+ *
+ * The voice gather route rebuilds session metadata from buildExtraction() on a
+ * background turn, but buildExtraction does NOT round-trip the top-level `verify`
+ * key that voiceReply owns. Without re-attaching it, every non-financial turn
+ * would WIPE the verify lockout and reset {@link MAX_VERIFY_ATTEMPTS} — letting a
+ * caller retry the ZIP check indefinitely. This pure helper reads `verify` off
+ * the fresh metadata JSON and re-attaches it, so the documented lockout-wipe bug
+ * cannot regress. Returns the extraction unchanged when there is no verify key
+ * (or the metadata is absent / unparseable).
+ */
+export function preserveVerifyKey<T extends object>(
+  extraction: T,
+  freshMetadataJson: string | null | undefined,
+): T {
+  let verifyKey: unknown;
+  try {
+    verifyKey = freshMetadataJson
+      ? (JSON.parse(freshMetadataJson) as Record<string, unknown>).verify
+      : undefined;
+  } catch {
+    verifyKey = undefined;
+  }
+  return verifyKey !== undefined ? { ...extraction, verify: verifyKey } : extraction;
+}

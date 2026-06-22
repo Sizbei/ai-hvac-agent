@@ -25,6 +25,7 @@ import {
   buildExtraction,
 } from "@/lib/ai/chat-slots";
 import { isVoiceExtractionComplete } from "@/lib/ai/extraction-schema";
+import { preserveVerifyKey } from "@/lib/ai/account-verify";
 
 /**
  * Twilio speech-gather webhook. Verifies the signature, loads the phone session
@@ -188,18 +189,8 @@ export async function POST(request: NextRequest) {
         // `verify` key in metadata, but buildExtraction does NOT round-trip it —
         // so without splicing it back, this async write would wipe the verify
         // lockout and reset MAX_VERIFY_ATTEMPTS on every non-financial turn.
-        let verifyKey: unknown;
-        try {
-          verifyKey = fresh?.metadata
-            ? (JSON.parse(fresh.metadata) as Record<string, unknown>).verify
-            : undefined;
-        } catch {
-          verifyKey = undefined;
-        }
-        const mergedWithVerify =
-          verifyKey !== undefined
-            ? { ...mergedExtraction, verify: verifyKey }
-            : mergedExtraction;
+        // (Pure helper + regression test in account-verify.ts.)
+        const mergedWithVerify = preserveVerifyKey(mergedExtraction, fresh?.metadata);
         await db
           .update(customerSessions)
           .set({
