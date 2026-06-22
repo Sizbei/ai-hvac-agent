@@ -5,6 +5,7 @@
  * Validates email addresses and handles delivery status webhooks.
  */
 
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { Resend } from "resend";
 
 let _resend: Resend | null = null;
@@ -223,8 +224,7 @@ export function validateWebhookSignature(
       return false;
     }
 
-    const crypto = require("crypto");
-    const hmac = crypto.createHmac("sha256", secret);
+    const hmac = createHmac("sha256", secret);
     hmac.update(`${timestamp}.${body}`);
     const computedSignature = hmac.digest("hex");
 
@@ -235,7 +235,7 @@ export function validateWebhookSignature(
     if (provided.length !== expected.length) {
       return false;
     }
-    return crypto.timingSafeEqual(provided, expected);
+    return timingSafeEqual(provided, expected);
   } catch (error) {
     console.error("Webhook signature validation error:", error);
     return false;

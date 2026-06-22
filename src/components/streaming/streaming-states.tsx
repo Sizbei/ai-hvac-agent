@@ -114,7 +114,7 @@ export function ConnectionStatus({ isOnline }: { readonly isOnline: boolean }) {
   return (
     <div className="flex items-center gap-2 border-t bg-muted/50 px-4 py-2 text-xs text-muted-foreground">
       <AlertCircle className="size-3" />
-      <span>You're offline. Messages will send when you reconnect.</span>
+      <span>You&apos;re offline. Messages will send when you reconnect.</span>
     </div>
   );
 }
