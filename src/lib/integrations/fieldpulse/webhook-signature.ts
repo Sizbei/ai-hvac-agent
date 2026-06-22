@@ -41,7 +41,12 @@ const HASH_ALGORITHM = "sha256";
  */
 export interface SignatureVerificationResult {
   valid: boolean;
-  reason?: "missing_signature" | "invalid_format" | "signature_mismatch" | "no_secret_configured";
+  reason?:
+    | "missing_signature"
+    | "invalid_format"
+    | "signature_mismatch"
+    | "no_secret_configured"
+    | "invalid_secret";
 }
 
 /**
@@ -82,6 +87,18 @@ export function verifySignature(
     return {
       valid: true,
       reason: "no_secret_configured",
+    };
+  }
+
+  // Case 1b: A configured-but-non-hex secret hex-decodes to an EMPTY key. An
+  // HMAC keyed with an empty buffer is publicly reproducible, so trusting it
+  // would let anyone forge a valid signature. FAIL CLOSED on a misconfigured
+  // secret rather than silently verifying against an empty-key MAC. (The connect
+  // route also rejects non-hex secrets at setup; this is defense-in-depth.)
+  if (Buffer.from(secret, "hex").length === 0) {
+    return {
+      valid: false,
+      reason: "invalid_secret",
     };
   }
 
@@ -211,6 +228,8 @@ export function getVerificationReason(result: SignatureVerificationResult): stri
       return "Computed signature does not match provided signature";
     case "no_secret_configured":
       return "No webhook secret configured (signature optional)";
+    case "invalid_secret":
+      return "Configured webhook secret is not valid hex (rejected to prevent an empty-key forge)";
     default:
       return "Unknown verification reason";
   }

@@ -214,6 +214,27 @@ describe("verifySignature", () => {
     });
   });
 
+  describe("misconfigured (non-hex) secret — empty-key forge guard", () => {
+    it("fails closed when the configured secret hex-decodes to an empty key", () => {
+      // A non-hex secret → Buffer.from(secret, "hex") is empty. An attacker can
+      // forge by signing with the (publicly known) empty key. Verification must
+      // reject this rather than verify against the empty-key MAC.
+      const nonHexSecret = "not-a-hex-secret";
+      const forged = createSignatureHeader(TEST_PAYLOAD, ""); // empty-key HMAC
+      const result = verifySignature(TEST_PAYLOAD, forged, nonHexSecret);
+      expect(result.valid).toBe(false);
+      expect(result.reason).toBe("invalid_secret");
+    });
+
+    it("getVerificationReason explains the invalid_secret rejection", () => {
+      const reason = getVerificationReason({
+        valid: false,
+        reason: "invalid_secret",
+      });
+      expect(reason).toMatch(/hex/i);
+    });
+  });
+
   describe("timing-safe comparison properties", () => {
     it("should produce signatures of equal length for verification", () => {
       // This ensures timingSafeEqual can be used

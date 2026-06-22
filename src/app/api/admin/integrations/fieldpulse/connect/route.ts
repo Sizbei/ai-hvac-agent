@@ -28,7 +28,15 @@ import { FIELDPULSE_BASE_URL } from "@/lib/integrations/fieldpulse/config";
  */
 const connectSchema = z.object({
   apiKey: z.string().trim().min(1, "API key is required"),
-  webhookSecret: z.string().trim().optional(),
+  // The signing secret is HMAC-keyed as hex (see webhook-signature.ts). Enforce
+  // even-length hex here so a non-hex secret can't be stored and later decode to
+  // an empty key (a publicly-forgeable HMAC). Empty string is allowed and means
+  // "no secret"; omitted preserves any previously stored secret.
+  webhookSecret: z
+    .string()
+    .trim()
+    .regex(/^([0-9a-fA-F]{2})*$/, "Webhook secret must be an even-length hex string")
+    .optional(),
 });
 
 export async function POST(request: NextRequest): Promise<Response> {
