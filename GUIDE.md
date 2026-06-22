@@ -44,7 +44,10 @@ npm run dev           # start at http://localhost:3000
 | `ROUTER_ENABLED` | *(optional)* set `false` to disable the deterministic router (kill-switch); default on |
 | `ENCRYPTION_KEY` | 32-byte hex key for AES-256-GCM PII encryption |
 | `AUTH_SECRET` | JWT signing secret for admin auth (min 32 chars) |
-| `CRON_SECRET` | Secret for the session cleanup cron job |
+| `CRON_SECRET` | Bearer secret for ALL cron routes (session cleanup + the FieldPulse/HCP reconcile sweeps); routes fail closed without it |
+| `FIELDPULSE_API_KEY` / `FIELDPULSE_WEBHOOK_SECRET` | *(optional, FSM integration)* single-tenant fallback key + inbound-webhook HMAC secret. Per-org keys set via the admin **Connect** flow (encrypted at rest) take precedence. See [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md). |
+| `HOUSECALL_API_KEY` / `HOUSECALL_WEBHOOK_SECRET` | *(optional, FSM integration)* same, for Housecall Pro |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REDIRECT_URI` | *(optional)* Google Calendar OAuth app credentials |
 | `TWILIO_ACCOUNT_SID` | *(optional, phone agent)* Twilio Account SID — enables the telephone agent |
 | `TWILIO_AUTH_TOKEN` | *(optional, phone agent)* Twilio auth token; validates inbound webhook signatures (the voice endpoints reject every request without it — fails closed) |
 | `TWILIO_VOICE` | *(optional, phone agent)* Amazon Polly neural voice for spoken replies; defaults to `Polly.Joanna-Neural` |
