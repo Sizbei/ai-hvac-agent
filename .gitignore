@@ -46,3 +46,7 @@ src-tauri/target
 src-tauri/gen/schemas
 .claude/
 .playwright-mcp/
+
+# promptfoo local eval output/cache
+/.promptfoo/
+promptfoo/output*
