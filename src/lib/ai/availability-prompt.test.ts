@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildWindowPrompt } from "./availability-prompt";
+import { buildWindowPrompt, buildVoiceWindowPrompt } from "./availability-prompt";
 import type { OpenAvailability } from "@/lib/admin/types";
 
 // buildWindowPrompt now CONSUMES real availability (CHATBOT-PLAN Step 11+6): it
@@ -105,5 +105,40 @@ describe("buildWindowPrompt — fallback when nothing is open", () => {
     expect(buildWindowPrompt({ days: [], windows: [] }).question).not.toMatch(
       COMMITMENT_REGEX,
     );
+  });
+});
+
+describe("buildVoiceWindowPrompt — spoken phone parity (WS5)", () => {
+  it("speaks up to TWO concrete openings with full weekday names", () => {
+    const { question } = buildVoiceWindowPrompt(WITH_OPENINGS);
+    // First two bookable bands, full weekday names for spoken clarity.
+    expect(question).toContain("Tuesday morning");
+    expect(question).toContain("Wednesday afternoon");
+    // Capped at two — the third bookable band (Thursday morning) is NOT spoken.
+    expect(question).not.toContain("Thursday");
+    // Elicits a band word the existing voice extraction captures.
+    expect(question).toMatch(/morning, afternoon, or evening/i);
+  });
+
+  it("never uses commitment language", () => {
+    expect(buildVoiceWindowPrompt(WITH_OPENINGS).question).not.toMatch(
+      COMMITMENT_REGEX,
+    );
+  });
+
+  it("falls back to the generic spoken question when nothing is open", () => {
+    for (const empty of [
+      null,
+      undefined,
+      { days: [], windows: [] } as OpenAvailability,
+      {
+        days: ["2026-07-07"],
+        windows: [{ day: "2026-07-07", window: "morning", capacity: 1, available: 0 }],
+      } as OpenAvailability,
+    ]) {
+      const { question } = buildVoiceWindowPrompt(empty);
+      expect(question).toMatch(/any preference on time of day/i);
+      expect(question).not.toMatch(COMMITMENT_REGEX);
+    }
   });
 });

@@ -3,6 +3,7 @@ import {
   PHONE_SYSTEM_PROMPT,
   selectSystemPrompt,
   voiceNextSlotPrompt,
+  voiceNextSlotId,
   toSpokenReply,
 } from "./phone-agent";
 import { SYSTEM_PROMPT } from "./system-prompt";
@@ -109,5 +110,37 @@ describe("voiceNextSlotPrompt (triage-driven)", () => {
         extras: { systemDownStatus: "fully_down", problemDuration: "today" },
       }).toLowerCase(),
     ).toContain("urgent");
+  });
+});
+
+describe("voiceNextSlotId (single source of truth for the next step)", () => {
+  const fullToUrgency = {
+    issueType: "ac_repair",
+    address: "5 Oak St, Seattle, WA 98101",
+    phone: "555-1234",
+    name: "Jane Doe",
+    extras: { systemDownStatus: "fully_down", problemDuration: "today" },
+  };
+
+  it("identifies the next askable step id (urgency here, matching the prompt)", () => {
+    expect(voiceNextSlotId(fullToUrgency)).toBe("urgency");
+  });
+
+  it("starts at a qualifying step for a fresh call", () => {
+    expect(voiceNextSlotId({})).toBe("system_down");
+  });
+
+  it("stays consistent with voiceNextSlotPrompt across slot states", () => {
+    for (const slots of [{}, fullToUrgency, { extras: { systemDownStatus: "fully_down" } }]) {
+      const id = voiceNextSlotId(slots);
+      const prompt = voiceNextSlotPrompt(slots);
+      // The prompt is exactly the phrasing for the id (or the wrap-up when null).
+      if (id) {
+        expect(prompt.length).toBeGreaterThan(0);
+        expect(prompt).not.toMatch(/anything else that would help/i);
+      } else {
+        expect(prompt).toMatch(/anything else that would help/i);
+      }
+    }
   });
 });

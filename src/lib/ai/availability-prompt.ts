@@ -126,3 +126,62 @@ export function buildWindowPrompt(
 
   return { question, chips };
 }
+
+// ── Voice variant (WS5 — phone parity) ───────────────────────────────────────
+// The phone agent can't render chips, so it SPEAKS up to two concrete openings
+// and asks for a time-of-day word the existing voice extraction already captures
+// (morning/afternoon/evening → extras.preferredWindow — the same band enum web
+// captures; the concrete day is coordinated by the team later, exactly like web).
+// Kept to TWO options (caller working memory) and degrades to the generic spoken
+// question when there are no real openings. Pure, no I/O — never errors.
+
+/** Most openings spoken on a call — two, so the caller can hold them in mind. */
+const MAX_VOICE_OFFERED = 2;
+
+// Full weekday name ("Tuesday") for spoken clarity, in the business timezone.
+const VOICE_WEEKDAY_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  timeZone: BUSINESS_TIME_ZONE,
+  weekday: "long",
+});
+
+function voiceWeekdayLong(isoDate: string): string | null {
+  const instant = businessWallClockToUtc(isoDate, 12, 0);
+  if (Number.isNaN(instant.getTime())) return null;
+  return VOICE_WEEKDAY_FORMATTER.format(instant);
+}
+
+const VOICE_FALLBACK_QUESTION =
+  "Any preference on time of day? Morning, afternoon, or evening? Our team coordinates the actual time with you.";
+
+/**
+ * Build the SPOKEN preferred-window prompt from REAL open availability. Names up
+ * to two concrete "Weekday band" openings and asks for a time-of-day word; falls
+ * back to the generic spoken question when there are no real openings. The
+ * captured value is the band enum (existing voice extraction handles it) — the
+ * day is coordinated by the team, mirroring the web flow. Never commits a time.
+ */
+export function buildVoiceWindowPrompt(
+  availability: OpenAvailability | null | undefined,
+): { readonly question: string } {
+  const bookable = (availability?.windows ?? []).filter(
+    (w) => w.available > 0 && BAND_LABEL[w.window] !== undefined,
+  );
+  if (bookable.length === 0) {
+    return { question: VOICE_FALLBACK_QUESTION };
+  }
+  const offered: string[] = [];
+  for (const w of bookable) {
+    if (offered.length >= MAX_VOICE_OFFERED) break;
+    const weekday = voiceWeekdayLong(w.day);
+    if (!weekday) continue;
+    offered.push(`${weekday} ${BAND_LABEL[w.window]}`);
+  }
+  if (offered.length === 0) {
+    return { question: VOICE_FALLBACK_QUESTION };
+  }
+  const optionList =
+    offered.length === 2 ? `${offered[0]} or ${offered[1]}` : offered[0];
+  // Preference phrasing only — we OFFER openings; the team coordinates the time.
+  const question = `For a preferred time, we have ${optionList} open. Which works best — morning, afternoon, or evening? Our team coordinates the actual time with you.`;
+  return { question };
+}

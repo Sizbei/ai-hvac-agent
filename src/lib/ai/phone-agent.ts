@@ -118,14 +118,22 @@ const VOICE_SKIPPED_CORE = "__voice_skipped__";
  * shared triage engine but rendered for voice and limited to the steps that
  * make sense on a call.
  */
-export function voiceNextSlotPrompt(slots: {
+interface VoiceSlotInput {
   readonly issueType?: unknown;
   readonly urgency?: unknown;
   readonly address?: unknown;
   readonly name?: unknown;
   readonly phone?: unknown;
   readonly extras?: Record<string, unknown>;
-}): string {
+}
+
+/**
+ * The id of the next voice-askable triage step for these slots, or null when the
+ * sequence is exhausted (wrap-up). Single source of truth for both the spoken
+ * prompt and any per-step override the route needs (e.g. WS5 real-availability at
+ * the `preferred_window` step).
+ */
+export function voiceNextSlotId(slots: VoiceSlotInput): string | null {
   let triageSlots: TriageSlots = {
     issueType: (slots.issueType as string | null) ?? null,
     urgency: (slots.urgency as string | null) ?? null,
@@ -148,7 +156,7 @@ export function voiceNextSlotPrompt(slots: {
     const step = nextTriageStep(triageSlots);
     if (!step) break;
     if (VOICE_ASKABLE.has(step.id)) {
-      return VOICE_STEP_PHRASING[step.id];
+      return step.id;
     }
     // CORE steps are gated on the slot VALUE (not `skipped`), so advance them by
     // setting the slot to a local sentinel. name + email are collected on web /
@@ -163,5 +171,12 @@ export function voiceNextSlotPrompt(slots: {
               skipped: { ...(triageSlots.skipped ?? {}), [step.id]: true },
             };
   }
-  return "Thanks. Is there anything else that would help the technician?";
+  return null;
+}
+
+export function voiceNextSlotPrompt(slots: VoiceSlotInput): string {
+  const id = voiceNextSlotId(slots);
+  return id
+    ? VOICE_STEP_PHRASING[id]
+    : "Thanks. Is there anything else that would help the technician?";
 }
