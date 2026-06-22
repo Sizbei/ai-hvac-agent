@@ -97,7 +97,10 @@ at `/api/voice/incoming` to enable it (see [GUIDE.md](GUIDE.md#telephone-agent-v
 | `npm run dev` | Start the dev server |
 | `npm run build` | Production build |
 | `npm run lint` | ESLint |
+| `npm run test:unit` | Unit tests (Vitest) — includes the offline eval gate |
 | `npm run test:e2e` | Run E2E tests (Playwright) |
+| `npm run eval` / `eval:ab` / `eval:prompts` / `eval:behavior` | Chatbot quality eval — deterministic gate + optional LLM-judge model/prompt A/B ([EVAL.md](EVAL.md)) |
+| `npm run smoke:fieldpulse` | Live FieldPulse API smoke test (key-gated, manual; [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md)) |
 | `npm run db:migrate` / `db:seed` / `db:studio` | Database migrate / seed / studio |
 
 ## Project Structure

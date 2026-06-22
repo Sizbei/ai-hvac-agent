@@ -417,12 +417,37 @@ Chat interface for iframe embedding.
 
 ---
 
-## Webhooks (Future)
+## Integration, Webhook & Cron Endpoints
 
-Not yet implemented, planned for:
-- Technician assignment notifications
-- Service request status updates
-- Session completion events
+Full detail in **[INTEGRATIONS.md](./INTEGRATIONS.md)**. Summary:
+
+### Integration admin (session-gated)
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/admin/integrations/{fieldpulse,housecall}/connect` | validate + store an encrypted API key |
+| `GET /api/admin/integrations/{fieldpulse,housecall}/status` | `{ configured, connected, accountInfo }` (never the key) |
+| `POST /api/admin/integrations/{fieldpulse,housecall}/disconnect` | clear credentials |
+| `GET /api/admin/integrations/google/connect` · `.../google/callback` | Google Calendar OAuth flow |
+
+### Inbound webhooks (HMAC-signed, idempotent, fail-closed in prod)
+
+| Endpoint | Source |
+|---|---|
+| `POST /api/admin/integrations/fieldpulse/webhook` | FieldPulse job + invoice events |
+| `POST /api/admin/integrations/fieldpulse/invoice-webhook` | FieldPulse invoice events (money-mirror pull) |
+| `POST /api/webhooks/housecall` | Housecall Pro job + invoice events |
+
+Each verifies an HMAC signature, derives the org from a server-side lookup
+(never the payload), and dedupes on a per-org idempotency ledger.
+
+### Cron (Bearer `CRON_SECRET`; fail closed)
+
+`GET /api/cron/sync-fieldpulse-availability`, `.../sync-fieldpulse-invoices`,
+`.../sync-housecall-invoices` — daily reconcile sweeps for connected orgs.
+
+> **Outbound notification webhooks** (technician-assignment / status-update
+> callbacks to customer systems) are not yet implemented.
 
 ---
 
