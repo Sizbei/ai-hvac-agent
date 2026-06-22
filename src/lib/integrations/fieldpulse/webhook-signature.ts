@@ -33,7 +33,6 @@ import { createHmac, timingSafeEqual } from "node:crypto";
  * Fieldpulse sends: "sha256=<hex_signature>"
  */
 const SIGNATURE_PREFIX = "sha256=";
-const SIGNATURE_HEADER = "x-fieldpulse-signature";
 const HASH_ALGORITHM = "sha256";
 
 /**

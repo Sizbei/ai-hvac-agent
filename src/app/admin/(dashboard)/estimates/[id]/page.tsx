@@ -6,7 +6,6 @@ import { useRouter } from 'next/navigation';
 import { ArrowLeft, Receipt } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EstimateStatusBadge } from '@/components/admin/estimates/estimate-status-badge';
 import { FinancingPanel } from '@/components/admin/financing/financing-panel';

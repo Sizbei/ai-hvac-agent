@@ -6,7 +6,6 @@
  *
  * Admin-session-gated + rate-limited + audited.
  */
-import { NextRequest } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
 import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
@@ -14,7 +13,7 @@ import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
 import { deleteFieldpulseConnection } from "@/lib/integrations/fieldpulse/connection-queries";
 
-export async function POST(request: NextRequest): Promise<Response> {
+export async function POST(): Promise<Response> {
   try {
     const session = await getAdminSession();
     if (!session) {

@@ -6,7 +6,7 @@ import { test, expect } from '@playwright/test';
  */
 
 test.describe('Admin Dashboard', () => {
-  test.beforeEach(async ({ page, context }) => {
+  test.beforeEach(async ({ context }) => {
     // Set up test admin session cookie
     // In production, this would use proper login flow
     await context.addCookies([
@@ -128,7 +128,7 @@ test.describe('Admin Authentication', () => {
     await expect(page.getByText(/google/i).or(page.getByRole('button', { name: /sign in/i }))).toBeVisible();
   });
 
-  test('should redirect after successful login', async ({ context, page }) => {
+  test('should redirect after successful login', async ({ page }) => {
     // Start login flow
     await page.goto('/admin/login');
 

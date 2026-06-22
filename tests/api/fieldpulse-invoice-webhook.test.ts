@@ -11,8 +11,6 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { POST } from "@/app/api/admin/integrations/fieldpulse/webhook/route";
 import { pullInvoiceFromFieldpulse } from "@/lib/integrations/fieldpulse/invoice-sync";
 import { db } from "@/lib/db";
-import { serviceRequests, fieldpulseWebhookEvents, auditLog } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
 
 // Mock dependencies
 vi.mock("@/lib/db", () => ({

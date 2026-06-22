@@ -6,7 +6,7 @@ import { test, expect } from '@playwright/test';
  */
 
 test.describe('Embedded Widget', () => {
-  test('should load widget script', async ({ page, request }) => {
+  test('should load widget script', async ({ request }) => {
     const response = await request.get('/widget.js');
     expect(response.status()).toBe(200);
     expect(response.headers()['content-type']).toContain('javascript');

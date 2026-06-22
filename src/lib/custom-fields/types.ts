@@ -5,8 +5,6 @@
  * the built-in CRM data model without code changes.
  */
 
-import { customFieldTypeEnum, customFieldEntityTypeEnum } from "@/lib/db/schema";
-
 // ── Field Definition Types ──
 
 export type CustomFieldType = "text" | "textarea" | "select" | "multiselect" | "number" | "currency" | "date" | "checkbox";

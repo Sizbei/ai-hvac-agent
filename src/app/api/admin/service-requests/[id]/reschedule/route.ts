@@ -9,7 +9,7 @@ import { NextRequest } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { serviceRequests } from "@/lib/db/schema";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { withTenant } from "@/lib/db/tenant";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { logAudit } from "@/lib/admin/audit";

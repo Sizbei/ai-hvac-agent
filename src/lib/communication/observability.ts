@@ -12,7 +12,7 @@
  * No PII: we read only status/channel/errorMessage (errorMessage on cancelled
  * jobs is the `suppressed:<reason>` enum tag, never recipient data).
  */
-import { and, eq, gte } from "drizzle-orm";
+import { gte } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { communicationJobs } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";

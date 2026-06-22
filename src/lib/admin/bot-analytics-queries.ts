@@ -10,7 +10,7 @@
  * neon-http note: SQL aggregates (count/avg) come back as strings (or null for
  * an empty set), so each value is coerced with Number() and coalesced to 0.
  */
-import { eq, gte, lte, sql, count, avg, isNotNull, desc } from "drizzle-orm";
+import { gte, lte, sql, count, avg, isNotNull, desc } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { botEvents, customerSessions } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";

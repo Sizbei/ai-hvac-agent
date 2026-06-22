@@ -125,7 +125,6 @@ export function mergeMessages<T extends { id: string }>(
   confirmed: readonly T[],
   optimistic: readonly T[],
 ): readonly T[] {
-  const confirmedMap = new Map(confirmed.map((m) => [m.id, m]));
   const result = new Map<string, T>();
 
   // Add all confirmed messages
@@ -229,16 +228,13 @@ export function createRevalidator<T>(
 
 /** Network status detection for revalidation on reconnect */
 export function createNetworkMonitor() {
-  let isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
   const listeners = new Set<(online: boolean) => void>();
 
   if (typeof window !== 'undefined') {
     const handleOnline = () => {
-      isOnline = true;
       listeners.forEach((fn) => fn(true));
     };
     const handleOffline = () => {
-      isOnline = false;
       listeners.forEach((fn) => fn(false));
     };
 

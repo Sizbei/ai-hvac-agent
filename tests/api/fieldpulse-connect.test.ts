@@ -5,13 +5,12 @@
  * Mocks the Fieldpulse API to test error handling and degrade-safety.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/admin/integrations/fieldpulse/connect/route";
 import { POST as DisconnectPOST } from "@/app/api/admin/integrations/fieldpulse/disconnect/route";
 import { GET } from "@/app/api/admin/integrations/fieldpulse/status/route";
 import { db } from "@/lib/db";
-import { fieldpulseConnections } from "@/lib/db/schema";
 
 // Mock the database
 vi.mock("@/lib/db", () => ({
@@ -47,9 +46,6 @@ vi.mock("@/lib/rate-limit", () => ({
 }));
 
 describe("Fieldpulse Phase 1: Connection Flow", () => {
-  const mockOrgId = "test-org-123";
-  const mockApiKey = "fp_test_api_key";
-
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -79,10 +75,6 @@ describe("Fieldpulse Phase 1: Connection Flow", () => {
     it("should validate API key with live probe before storing", async () => {
       // This test would mock the Fieldpulse client to return success
       // and verify the key is stored encrypted
-      const request = new NextRequest("http://localhost:3000/api/admin/integrations/fieldpulse/connect", {
-        method: "POST",
-        body: JSON.stringify({ apiKey: mockApiKey }),
-      });
 
       // Mock successful validation and insert
       vi.mocked(db.insert).mockReturnValue({
@@ -99,10 +91,6 @@ describe("Fieldpulse Phase 1: Connection Flow", () => {
 
     it("should return 409 if already connected", async () => {
       // Test duplicate connection rejection
-      const request = new NextRequest("http://localhost:3000/api/admin/integrations/fieldpulse/connect", {
-        method: "POST",
-        body: JSON.stringify({ apiKey: mockApiKey }),
-      });
 
       // Mock existing connection
       vi.mocked(db.select).mockReturnValue({
@@ -118,32 +106,24 @@ describe("Fieldpulse Phase 1: Connection Flow", () => {
 
   describe("POST /api/admin/integrations/fieldpulse/disconnect", () => {
     it("should clear credentials and set connected=false", async () => {
-      const request = new NextRequest("http://localhost:3000/api/admin/integrations/fieldpulse/disconnect", {
-        method: "POST",
-      });
-
       // Mock successful disconnect
       vi.mocked(db.update).mockReturnValue({
         set: vi.fn().mockReturnThis(),
         where: vi.fn().mockReturnValue(undefined),
       } as never);
 
-      const response = await DisconnectPOST(request);
+      const response = await DisconnectPOST();
       expect(response.status).toBe(200);
     });
 
     it("should degrade gracefully if no connection exists", async () => {
-      const request = new NextRequest("http://localhost:3000/api/admin/integrations/fieldpulse/disconnect", {
-        method: "POST",
-      });
-
       // Mock no-op (no existing connection)
       vi.mocked(db.update).mockReturnValue({
         set: vi.fn().mockReturnThis(),
         where: vi.fn().mockReturnValue(undefined),
       } as never);
 
-      const response = await DisconnectPOST(request);
+      const response = await DisconnectPOST();
       // Should still return 200 (idempotent)
       expect(response.status).toBe(200);
     });

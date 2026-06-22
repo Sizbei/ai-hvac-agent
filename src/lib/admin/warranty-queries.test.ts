@@ -44,7 +44,7 @@ vi.mock("@/lib/db", () => ({
 
 // withTenant is the org-scoping helper — capture its calls so we can assert the
 // equipment query was tenant-scoped. Return a sentinel; the mocked db ignores it.
-const withTenantSpy = vi.fn((...args: unknown[]) => "WHERE");
+const withTenantSpy = vi.fn((..._args: unknown[]) => "WHERE");
 vi.mock("@/lib/db/tenant", () => ({
   withTenant: (table: unknown, orgId: string, ...rest: unknown[]) =>
     withTenantSpy(table, orgId, ...rest),

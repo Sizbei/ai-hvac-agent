@@ -46,7 +46,6 @@ export function ChatInput({
     if (!files) return;
 
     const newAttachments: PendingAttachment[] = [];
-    const uploadPromises: Promise<void>[] = [];
 
     for (let i = 0; i < files.length && newAttachments.length < MAX_ATTACHMENTS - attachments.length; i++) {
       const file = files[i];

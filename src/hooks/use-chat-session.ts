@@ -11,7 +11,7 @@ import {
   isNameComplete,
   isEmailComplete,
 } from '@/lib/ai/extraction-schema';
-import type { ChatMessage, ExtractionField, PendingAttachment, UploadedAttachment } from '@/lib/types/chat';
+import type { ChatMessage, ExtractionField, UploadedAttachment } from '@/lib/types/chat';
 
 interface SessionData {
   readonly sessionId: string;
@@ -24,12 +24,6 @@ interface SessionData {
     readonly content: string;
     readonly createdAt: string;
   }[];
-}
-
-/** Per-message send options. `addressSelected` marks a message that came from
- * the address lookup so the backend trusts it verbatim as the service address. */
-interface SendMessageOptions {
-  readonly addressSelected?: boolean;
 }
 
 interface UseChatSessionReturn {

@@ -130,11 +130,9 @@ export interface ModelSelectionCriteria {
 /** Get model for given criteria with fallback support */
 export function getModelForCriteria(criteria: ModelSelectionCriteria) {
   const {
-    task,
     requireStreaming = true,
     requireTools = false,
     requireJson = true,
-    maxOutputTokens = 350,
     preferredTier = 'standard',
     fallbackChain = [],
   } = criteria;
@@ -254,7 +252,7 @@ export async function checkModelHealth(modelKey: string): Promise<boolean> {
 
   try {
     const client = createProviderClient(config.provider);
-    const model = client(config.modelId);
+    const _model = client(config.modelId);
 
     // Simple test: generate a short completion
     // This would be implemented with the actual provider API

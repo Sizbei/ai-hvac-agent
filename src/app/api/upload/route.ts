@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { db } from '@/lib/db';
-import { customerSessions, attachments, messages } from '@/lib/db/schema';
-import { withTenant } from '@/lib/db/tenant';
+import { customerSessions, attachments } from '@/lib/db/schema';
 import { getSessionToken } from '@/lib/session';
 import { isSameOriginRequest } from '@/lib/session-csrf';
 import { slidingWindow, RATE_LIMITS } from '@/lib/rate-limit';

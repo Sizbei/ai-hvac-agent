@@ -155,7 +155,7 @@ export async function POST(req: Request): Promise<Response> {
 /**
  * GET — current rate limit info for the organization.
  */
-export async function GET(req: Request): Promise<Response> {
+export async function GET(): Promise<Response> {
   try {
     const session = await getAdminSession();
     if (!session) {

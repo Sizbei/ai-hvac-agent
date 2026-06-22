@@ -116,7 +116,6 @@ export class RateLimiter {
     const bucket = this.getBucket(clientId);
     this.refill(bucket);
 
-    const now = Date.now();
     const allowed = bucket.tokens >= 1;
 
     if (allowed) {

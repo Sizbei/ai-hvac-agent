@@ -15,7 +15,6 @@
 import { eq, and, isNotNull, notInArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
-import { withTenant } from "@/lib/db/tenant";
 import { logger } from "@/lib/logger";
 import { getFieldpulseClient } from "./client";
 import type { FieldpulseUser } from "./types";

@@ -6,7 +6,7 @@ import { test, expect } from '@playwright/test';
  */
 
 test.describe('Security Controls', () => {
-  test('should have security headers', async ({ page, request }) => {
+  test('should have security headers', async ({ request }) => {
     const response = await request.get('/');
     const headers = response.headers();
 
@@ -33,7 +33,7 @@ test.describe('Security Controls', () => {
     expect(alertHandled).toBeUndefined();
   });
 
-  test('should have CSRF protection', async ({ page, request }) => {
+  test('should have CSRF protection', async ({ request }) => {
     // Try POST without proper CSRF token
     const response = await request.post('/api/session', {
       data: { message: 'test' },
@@ -123,7 +123,6 @@ test.describe('Session Security', () => {
     // This would test session invalidation
     // In real implementation, logout clears the session
     await page.goto('/admin/login');
-    const cookiesBefore = await page.context().cookies();
 
     // Perform logout (if implemented in test)
     // await page.getByRole('button', { name: /logout/i }).click();

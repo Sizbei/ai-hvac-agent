@@ -11,7 +11,7 @@
  * - Graceful degradation when no secret is configured
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
   computeSignature,
   verifySignature,

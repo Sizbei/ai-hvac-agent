@@ -4,7 +4,7 @@
  * CRUD operations for communication templates.
  */
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { communicationTemplates } from "@/lib/db/schema";
@@ -49,7 +49,7 @@ const templateSchema = z.object({
  *
  * List all communication templates for the organization.
  */
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
     const session = await getAdminSession();
     if (!session) {

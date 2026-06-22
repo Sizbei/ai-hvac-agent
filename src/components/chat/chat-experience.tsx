@@ -64,7 +64,7 @@ export function ChatExperience({
   const [isConfirming, setIsConfirming] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
-  const [viewingPastSessionId, setViewingPastSessionId] = useState<string | null>(null);
+  const [, setViewingPastSessionId] = useState<string | null>(null);
 
   const containerClass = cn(
     'flex flex-col',

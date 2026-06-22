@@ -6,7 +6,7 @@
 
 import { db } from "@/lib/db";
 import { customFieldDefinitions } from "@/lib/db/schema";
-import { eq, and, asc, desc } from "drizzle-orm";
+import { eq, and, asc } from "drizzle-orm";
 import {
   CustomFieldDefinition,
   CreateFieldDefinitionInput,

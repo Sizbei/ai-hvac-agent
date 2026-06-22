@@ -16,7 +16,6 @@ import { checkSendAllowed } from "./consent";
 import { sendSms } from "./twilio-adapter";
 import { getResend } from "./resend-adapter";
 import { renderSmsTemplate } from "./sms-templates";
-import { renderEmailTemplate } from "./email-templates";
 
 /**
  * Queue a new communication job

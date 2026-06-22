@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { eq, and, desc, sql, inArray } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { customerSessions, messages } from '@/lib/db/schema';
@@ -12,7 +12,7 @@ import { logger } from '@/lib/logger';
  * Fetches past conversation history for the current customer.
  * Returns sessions grouped by customerId, excluding the current active session.
  */
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
     const token = await getSessionToken();
     if (!token) {

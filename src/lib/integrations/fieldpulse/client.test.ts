@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RestFieldpulseClient } from "./client";
 import type { FieldpulseConfig } from "./config";
-import type { GeocodeInput } from "./types";
 
 describe("RestFieldpulseClient", () => {
   let mockFetch: ReturnType<typeof vi.fn>;
@@ -36,7 +35,7 @@ describe("RestFieldpulseClient", () => {
         }),
       });
 
-      const client = new RestFieldpulseClient(config, mockFetch as any);
+      const client = new RestFieldpulseClient(config, mockFetch as never);
       const result = await client.geocodeAddress({
         street: "123 Main St",
         city: "Johnson City",
@@ -68,7 +67,7 @@ describe("RestFieldpulseClient", () => {
         }),
       });
 
-      const client = new RestFieldpulseClient(config, mockFetch as any);
+      const client = new RestFieldpulseClient(config, mockFetch as never);
       const result = await client.geocodeAddress({
         street: "Invalid Address",
       });
@@ -82,7 +81,7 @@ describe("RestFieldpulseClient", () => {
     it("returns null when endpoint doesn't exist (404)", async () => {
       mockFetch.mockRejectedValue(new Error("HTTP 404"));
 
-      const client = new RestFieldpulseClient(config, mockFetch as any);
+      const client = new RestFieldpulseClient(config, mockFetch as never);
       const result = await client.geocodeAddress({
         street: "123 Main St",
       });
@@ -96,7 +95,7 @@ describe("RestFieldpulseClient", () => {
         json: async () => null,
       });
 
-      const client = new RestFieldpulseClient(config, mockFetch as any);
+      const client = new RestFieldpulseClient(config, mockFetch as never);
       const result = await client.geocodeAddress({
         street: "123 Main St",
       });
@@ -105,7 +104,7 @@ describe("RestFieldpulseClient", () => {
     });
 
     it("returns error when no address components provided", async () => {
-      const client = new RestFieldpulseClient(config, mockFetch as any);
+      const client = new RestFieldpulseClient(config, mockFetch as never);
       const result = await client.geocodeAddress({});
 
       expect(result).toEqual({
@@ -125,7 +124,7 @@ describe("RestFieldpulseClient", () => {
         }),
       });
 
-      const client = new RestFieldpulseClient(config, mockFetch as any);
+      const client = new RestFieldpulseClient(config, mockFetch as never);
       const result = await client.geocodeAddress({
         street: "123 Main St",
         city: "Johnson City",
@@ -141,7 +140,7 @@ describe("RestFieldpulseClient", () => {
         json: async () => ({ valid: true }),
       });
 
-      const client = new RestFieldpulseClient(config, mockFetch as any);
+      const client = new RestFieldpulseClient(config, mockFetch as never);
       await client.geocodeAddress({
         street: "123 Main St",
         city: "Johnson City",
@@ -168,7 +167,7 @@ describe("RestFieldpulseClient", () => {
         }),
       });
 
-      const client = new RestFieldpulseClient(config, mockFetch as any);
+      const client = new RestFieldpulseClient(config, mockFetch as never);
       const result = await client.geocodeAddress({
         street: "123 Main St",
       });
@@ -188,7 +187,7 @@ describe("RestFieldpulseClient", () => {
           json: async () => ({ customers: [] }),
         });
 
-      const client = new RestFieldpulseClient(config, mockFetch as any);
+      const client = new RestFieldpulseClient(config, mockFetch as never);
       const result = await client.findCustomer({ email: "a@b.com" });
 
       expect(result).toBeNull();
@@ -198,7 +197,7 @@ describe("RestFieldpulseClient", () => {
     it("throws a sanitized error after exhausting attempts on network errors", async () => {
       mockFetch.mockRejectedValue(new Error("network down"));
 
-      const client = new RestFieldpulseClient(config, mockFetch as any);
+      const client = new RestFieldpulseClient(config, mockFetch as never);
       await expect(client.findCustomer({ email: "a@b.com" })).rejects.toThrow(
         "Fieldpulse request failed: network error",
       );
@@ -212,7 +211,7 @@ describe("RestFieldpulseClient", () => {
         json: async () => ({ customers: [] }),
       });
 
-      const client = new RestFieldpulseClient(config, mockFetch as any);
+      const client = new RestFieldpulseClient(config, mockFetch as never);
       await client.findCustomer({ email: "a@b.com" });
 
       const init = mockFetch.mock.calls[0][1] as RequestInit;

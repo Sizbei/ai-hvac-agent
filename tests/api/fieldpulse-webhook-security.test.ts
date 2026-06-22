@@ -376,15 +376,13 @@ describe("Fieldpulse Phase 5: Webhook Security", () => {
       };
 
       // Verify mappings exist and are non-null
-      Object.entries(knownMappings).forEach(([fpStatus, expected]) => {
-        const result = expect.any(String); // Placeholder - would test actual mapper
+      Object.entries(knownMappings).forEach(([_fpStatus, expected]) => {
         expect(expected).toBeTruthy();
       });
     });
 
     it("should default to pending for unknown statuses with WARN log", () => {
       // Unknown status should log warning and default to pending
-      const unknownStatus = "weird_status";
       // Mapper should return "pending" and log warn
       // (In real test, we'd mock logger and verify warning)
     });

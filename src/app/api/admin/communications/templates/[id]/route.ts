@@ -4,7 +4,7 @@
  * Operations on individual communication templates.
  */
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { communicationTemplates } from "@/lib/db/schema";

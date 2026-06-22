@@ -6,7 +6,7 @@
  * first-class (a half-built payments path breaks on the first chargeback).
  */
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
+import { asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   estimates,

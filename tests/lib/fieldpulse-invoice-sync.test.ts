@@ -12,8 +12,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { syncInvoiceStatus, batchSyncInvoiceStatuses, deriveInvoiceStatusFromInvoices } from "@/lib/integrations/fieldpulse/invoice-sync";
 import { db } from "@/lib/db";
-import { serviceRequests, auditLog } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { serviceRequests } from "@/lib/db/schema";
 
 // Mock the database
 vi.mock("@/lib/db", () => ({
@@ -200,13 +199,6 @@ describe("Fieldpulse Invoice Sync", () => {
 
   describe("batchSyncInvoiceStatuses", () => {
     it("should process multiple invoice updates", async () => {
-      // Create separate mocks for each call (they will all succeed)
-      const createMockChain = (id: string, currentStatus: string) => {
-        const mockWhere = vi.fn().mockResolvedValue([{ id, invoiceStatus: currentStatus }]);
-        const mockFrom = vi.fn().mockReturnValue({ where: mockWhere });
-        return { from: mockFrom };
-      };
-
       // Use the same mock for all calls (all succeed)
       const mockWhere = vi.fn().mockResolvedValue([{ id: "req-1", invoiceStatus: "none" }]);
       const mockFrom = vi.fn().mockReturnValue({ where: mockWhere });

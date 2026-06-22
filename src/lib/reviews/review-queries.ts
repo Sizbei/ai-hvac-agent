@@ -15,7 +15,7 @@
 import { randomBytes, randomUUID, createHash } from "node:crypto";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { customers, reviewRequests, serviceRequests } from "@/lib/db/schema";
+import { customers, reviewRequests } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { decrypt } from "@/lib/crypto";
 import { getOrgConfig } from "@/lib/admin/org-config-queries";

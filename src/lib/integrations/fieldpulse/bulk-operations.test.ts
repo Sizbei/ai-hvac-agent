@@ -15,7 +15,6 @@ import {
 import type { FieldpulseClient } from "./client";
 import type {
   BulkJobStatusUpdate,
-  BulkOperationSummary,
 } from "./bulk-types";
 
 // Mock logger
@@ -439,7 +438,7 @@ describe("getRateLimitInfo", () => {
       getRateLimitInfo("client-1");
     }
 
-    const info1After = getRateLimitInfo("client-1");
+    getRateLimitInfo("client-1");
     const info2After = getRateLimitInfo("client-2");
 
     // Client-1 might be blocked, client-2 should still be ok

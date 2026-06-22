@@ -536,4 +536,3 @@ export function getEmailSubject(
 
 // Import template variable types
 import { templateVariableSchemas } from "./sms-templates";
-type TemplateVariableTypes = typeof templateVariableSchemas;

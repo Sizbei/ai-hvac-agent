@@ -32,7 +32,7 @@
 import { NextRequest, after } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { serviceRequests, organizations, auditLog } from "@/lib/db/schema";
+import { serviceRequests, auditLog } from "@/lib/db/schema";
 import { fieldpulseWebhookEvents } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { logger } from "@/lib/logger";
