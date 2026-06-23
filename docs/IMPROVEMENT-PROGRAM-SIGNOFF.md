@@ -41,7 +41,16 @@ perfection" claim; it records what shipped, what's deliberately deferred, and wh
 - Double-submit double-charge needs request-level idempotency (a real-Stripe-adapter concern). The client-side rate-limiter is best-effort politeness atop FieldPulse's own 429 backoff. Refund has no reconcile sweep (lower-probability than the lost-updates fixed in S1).
 
 ## Deploy status (operator's call — NOT fired autonomously)
-Local `main` is ~100+ commits ahead of `origin/main`, with uncommitted in-flight
-FieldPulse work in the tree and **two un-run migrations (0034, 0035)**. A push
-triggers a Vercel **production** deploy WITHOUT those migrations → 500s on the new
-columns. A safe deploy needs a coordinated **push + `npm run db:migrate`**.
+Local `main` is ~100+ commits ahead of `origin/main`. The working tree is **clean**
+(all in-flight FieldPulse work is committed).
+
+**Migration correction:** earlier notes referenced "two un-run migrations
+0034/0035" — that was a stale session-start snapshot. Those files do NOT exist;
+the migration history is `0000`–`0019` and `drizzle-kit check` reports it
+consistent ("Everything's fine"). The core FieldPulse tables
+(`technician_availability`, `fieldpulse_webhook_events`, invoice-mirror columns)
+ARE in committed migrations (`0000` baseline, `0017`–`0019`). The pre-deploy
+ritual remains: run `npx drizzle-kit generate` as a dry drift-check (confirms
+schema.ts has no un-migrated change) then `npm run db:migrate`, then push so Vercel
+deploys prod with the schema in place. Migration state looks sound; verify before
+shipping per [migrations-not-run-on-deploy].
