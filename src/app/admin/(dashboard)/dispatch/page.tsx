@@ -88,7 +88,12 @@ export default function DispatchPage() {
           <AlertCircle className="size-4" />
           <AlertDescription className="flex flex-wrap items-center gap-2">
             <span>{error}</span>
-            <Button variant="outline" size="sm" onClick={() => void refetch()}>
+            <Button
+              variant="outline"
+              size="sm"
+              aria-label="Retry loading dispatch board"
+              onClick={() => void refetch()}
+            >
               <RefreshCw className="mr-2 size-4" />
               Retry
             </Button>

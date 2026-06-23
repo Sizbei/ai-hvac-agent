@@ -112,7 +112,12 @@ export default function CustomersPage() {
           <AlertTitle>Couldn&apos;t load customers</AlertTitle>
           <AlertDescription className="flex flex-col items-start gap-2">
             <span>{error}</span>
-            <Button variant="outline" size="sm" onClick={() => void refetch()}>
+            <Button
+              variant="outline"
+              size="sm"
+              aria-label="Retry loading customers"
+              onClick={() => void refetch()}
+            >
               <RefreshCw className="mr-2 size-4" />
               Retry
             </Button>
