@@ -54,6 +54,10 @@ function isToday(iso: string): boolean {
 export function TechJobDetailClient({ id }: { readonly id: string }) {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  // A load failure must NOT masquerade as an empty job (no materials / not
+  // clocked in) — surface it so the tech doesn't re-add duplicates or assume
+  // they're off the clock. Either the materials or timesheet fetch can set it.
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Timesheet (labor tracking)
   const [entries, setEntries] = useState<TimeEntry[]>([]);
@@ -89,7 +93,14 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
     try {
       const res = await fetch(`/api/tech/jobs/${id}/materials`);
       const body = await res.json().catch(() => ({ success: false }));
-      if (res.ok && body.success) setMaterials(body.data.materials);
+      if (res.ok && body.success) {
+        setMaterials(body.data.materials);
+        setLoadError(null);
+      } else {
+        setLoadError("Couldn't load this job's materials.");
+      }
+    } catch {
+      setLoadError("Couldn't load this job's materials.");
     } finally {
       setIsLoading(false);
     }
@@ -100,11 +111,17 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
   }, [loadMaterials]);
 
   const loadTimesheet = useCallback(async (): Promise<void> => {
-    const res = await fetch(`/api/tech/jobs/${id}/timesheet`);
-    const body = await res.json().catch(() => ({ success: false }));
-    if (res.ok && body.success) {
-      setEntries(body.data.entries);
-      setOpenSince(body.data.open ? body.data.open.clockInAt : null);
+    try {
+      const res = await fetch(`/api/tech/jobs/${id}/timesheet`);
+      const body = await res.json().catch(() => ({ success: false }));
+      if (res.ok && body.success) {
+        setEntries(body.data.entries);
+        setOpenSince(body.data.open ? body.data.open.clockInAt : null);
+      } else {
+        setLoadError("Couldn't load this job's timesheet.");
+      }
+    } catch {
+      setLoadError("Couldn't load this job's timesheet.");
     }
   }, [id]);
 
@@ -229,8 +246,17 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
   const getCtx = () => canvasRef.current?.getContext('2d') ?? null;
 
   const pointerPos = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    const rect = canvasRef.current!.getBoundingClientRect();
-    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    const canvas = canvasRef.current!;
+    const rect = canvas.getBoundingClientRect();
+    // The canvas is rendered w-full but its backing store is a fixed 320x140, so
+    // map the CSS-pixel pointer position into backing-store coordinates — without
+    // this scale the ink lands offset/stretched wherever displayed width != 320.
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY,
+    };
   };
 
   const startDraw = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -338,6 +364,15 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
       >
         <ArrowLeft className="size-4" /> Back
       </Link>
+
+      {loadError && (
+        <div
+          role="alert"
+          className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+        >
+          {loadError} Some data may be missing — pull to refresh or reopen the job.
+        </div>
+      )}
 
       {/* Time on this job (clock in / out) */}
       <Card>
@@ -455,6 +490,7 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
               onChange={(e) => setSearch(e.target.value)}
             />
             <select
+              aria-label="Pricebook item (or choose manual entry)"
               value={selectedItemId}
               onChange={(e) => {
                 setSelectedItemId(e.target.value);
@@ -478,6 +514,7 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
             )}
             <div className="flex items-center gap-2">
               <Input
+                aria-label="Quantity"
                 type="number"
                 min="1"
                 step="1"
