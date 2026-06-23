@@ -127,7 +127,7 @@ export async function judgeTranscript(
       apiKey: process.env[entry.apiKeyEnv] ?? "",
     });
     const { text, usage } = await generateText({
-      model: provider(entry.modelId),
+      model: provider.chat(entry.modelId),
       system: JUDGE_SYSTEM,
       messages: [
         { role: "user", content: renderConversation(transcript, botReplies) },

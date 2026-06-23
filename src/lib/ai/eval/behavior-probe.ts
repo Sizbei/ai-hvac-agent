@@ -153,7 +153,7 @@ async function judgeBehavior(
       apiKey: process.env[entry.apiKeyEnv] ?? "",
     });
     const { text, usage } = await generateText({
-      model: provider(entry.modelId),
+      model: provider.chat(entry.modelId),
       system: BEHAVIOR_JUDGE_SYSTEM,
       messages: [{ role: "user", content: `Customer: ${question}\nBot: ${answer}` }],
       abortSignal: AbortSignal.timeout(30_000),

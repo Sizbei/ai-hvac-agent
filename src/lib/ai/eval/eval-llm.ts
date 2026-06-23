@@ -29,7 +29,7 @@ export async function generateReply(
       apiKey: process.env[entry.apiKeyEnv] ?? "",
     });
     const { text, usage } = await generateText({
-      model: provider(entry.modelId),
+      model: provider.chat(entry.modelId),
       system: systemPrompt,
       messages: [{ role: "user", content: userPrompt }],
       abortSignal: AbortSignal.timeout(30_000),

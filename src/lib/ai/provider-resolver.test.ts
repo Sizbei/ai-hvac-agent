@@ -26,7 +26,10 @@ vi.mock("@ai-sdk/openai", () => ({
   // createOpenAI(config) returns a factory(modelId) — we capture both so a test
   // could assert the wiring, but the resolver tests below don't need the handle.
   createOpenAI: (config: unknown) => {
+    // The real provider is callable AND exposes .chat()/.responses(); buildModel
+    // uses .chat() (Chat Completions) for our OpenAI-compatible endpoints.
     const factory = (modelId: string) => ({ __config: config, __modelId: modelId });
+    factory.chat = (modelId: string) => ({ __config: config, __modelId: modelId });
     return factory;
   },
 }));

@@ -70,7 +70,12 @@ function buildModel(entry: ModelRegistryEntry, modelId: string) {
     baseURL: entry.baseUrl,
     apiKey: process.env[entry.apiKeyEnv] ?? "",
   });
-  return provider(modelId);
+  // Use the CHAT COMPLETIONS API explicitly. @ai-sdk/openai's `provider(id)`
+  // defaults to the newer Responses API ({input,input_text}), which our
+  // OpenAI-compatible endpoints (DashScope, GLM/z.ai) don't all support — qwen-plus
+  // tolerated it but qwen-max returns 400. `.chat()` is the correct surface for a
+  // Chat-Completions-compatible endpoint and works across all qwen/GLM models.
+  return provider.chat(modelId);
 }
 
 /**
