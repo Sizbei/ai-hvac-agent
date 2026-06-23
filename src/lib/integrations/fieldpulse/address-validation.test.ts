@@ -79,7 +79,7 @@ describe("address-validation", () => {
       };
 
       vi.mocked(fetchAddressSuggestions).mockResolvedValue(lowQualitySuggestions);
-      vi.mocked(getFieldpulseClient).mockResolvedValue(mockClient as any);
+      vi.mocked(getFieldpulseClient).mockResolvedValue(mockClient as never);
 
       const result = await fetchValidatedAddressSuggestions("Main St", "org-123");
 
@@ -110,7 +110,7 @@ describe("address-validation", () => {
       };
 
       vi.mocked(fetchAddressSuggestions).mockResolvedValue(lowQualitySuggestions);
-      vi.mocked(getFieldpulseClient).mockResolvedValue(mockClient as any);
+      vi.mocked(getFieldpulseClient).mockResolvedValue(mockClient as never);
 
       const result = await fetchValidatedAddressSuggestions("Invalid", "org-123");
 
