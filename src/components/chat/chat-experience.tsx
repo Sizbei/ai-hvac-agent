@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { AlertCircle, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useChatSession } from '@/hooks/use-chat-session';
@@ -25,6 +25,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { cn } from '@/lib/utils';
 import { HistorySidebar } from '@/components/chat/history-sidebar';
+import { ConnectionStatus } from '@/components/streaming/streaming-states';
 
 const ISSUE_SUGGESTIONS: readonly Suggestion[] = [
   { label: 'AC not cooling', message: 'My air conditioner is running but not cooling — it just blows warm air.' },
@@ -65,6 +66,21 @@ export function ChatExperience({
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [, setViewingPastSessionId] = useState<string | null>(null);
+
+  // Network status for the offline affordance (ConnectionStatus renders a banner
+  // only while offline). Initialized true to avoid an SSR/client mismatch, then
+  // synced to the real value + kept current via the online/offline events.
+  const [isOnline, setIsOnline] = useState(true);
+  useEffect(() => {
+    const sync = () => setIsOnline(navigator.onLine);
+    sync();
+    window.addEventListener('online', sync);
+    window.addEventListener('offline', sync);
+    return () => {
+      window.removeEventListener('online', sync);
+      window.removeEventListener('offline', sync);
+    };
+  }, []);
 
   const containerClass = cn(
     'flex flex-col',
@@ -258,6 +274,9 @@ export function ChatExperience({
           </Button>
         </div>
       )}
+
+      {/* Offline affordance — renders a banner only while the network is down. */}
+      <ConnectionStatus isOnline={isOnline} />
 
       <ChatInput
         onSendMessage={sendMessage}
