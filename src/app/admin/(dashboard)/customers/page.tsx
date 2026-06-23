@@ -75,6 +75,7 @@ export default function CustomersPage() {
         <div className="relative flex-1 sm:max-w-md">
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
+            aria-label="Search customers"
             placeholder="Search by name, email, phone, or address..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -85,7 +86,7 @@ export default function CustomersPage() {
           value={propertyTypeFilter}
           onValueChange={(value) => setPropertyTypeFilter(value ?? ALL_PROPERTY_TYPES)}
         >
-          <SelectTrigger className="w-[180px]">
+          <SelectTrigger aria-label="Filter by property type" className="w-[180px]">
             <SelectValue placeholder="Filter by property" />
           </SelectTrigger>
           <SelectContent>

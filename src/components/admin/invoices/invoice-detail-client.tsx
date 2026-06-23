@@ -401,6 +401,7 @@ export function InvoiceDetailClient({
                   $
                 </span>
                 <Input
+                  aria-label="Payment amount in dollars"
                   type="number"
                   min="0"
                   step="0.01"
@@ -522,6 +523,7 @@ export function InvoiceDetailClient({
                               $
                             </span>
                             <Input
+                              aria-label="Refund amount in dollars"
                               type="number"
                               min="0"
                               step="0.01"
@@ -533,6 +535,7 @@ export function InvoiceDetailClient({
                             />
                           </div>
                           <select
+                            aria-label="Refund reason"
                             value={refundReason}
                             onChange={(e) => setRefundReason(e.target.value)}
                             className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
