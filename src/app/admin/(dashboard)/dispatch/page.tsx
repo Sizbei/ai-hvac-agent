@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { AlertCircle, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
 import { useDispatchBoard } from '@/hooks/use-dispatch-board';
 import { DispatchColumn } from '@/components/admin/dispatch/dispatch-column';
 import { RequestDetailSheet } from '@/components/admin/request-detail-sheet';
@@ -86,7 +86,13 @@ export default function DispatchPage() {
       {error && (
         <Alert variant="destructive">
           <AlertCircle className="size-4" />
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription className="flex flex-wrap items-center gap-2">
+            <span>{error}</span>
+            <Button variant="outline" size="sm" onClick={() => void refetch()}>
+              <RefreshCw className="mr-2 size-4" />
+              Retry
+            </Button>
+          </AlertDescription>
         </Alert>
       )}
 

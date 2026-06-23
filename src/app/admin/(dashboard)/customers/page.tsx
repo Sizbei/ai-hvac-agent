@@ -2,12 +2,13 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { UserPlus, Search, Building2, Wrench, Calendar, Users } from 'lucide-react';
+import { UserPlus, Search, Building2, Wrench, Calendar, Users, AlertCircle, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   Select,
   SelectContent,
@@ -24,7 +25,7 @@ import { EmptyState } from '@/components/admin/ui/empty-state';
 const ALL_PROPERTY_TYPES = 'all';
 
 export default function CustomersPage() {
-  const { customers, isLoading, refetch } = useAdminCustomers();
+  const { customers, isLoading, error, refetch } = useAdminCustomers();
   const [search, setSearch] = useState('');
   const [propertyTypeFilter, setPropertyTypeFilter] = useState<string>(ALL_PROPERTY_TYPES);
   const [showCreate, setShowCreate] = useState(false);
@@ -104,6 +105,18 @@ export default function CustomersPage() {
             <Skeleton key={i} className="h-24 w-full rounded-lg" />
           ))}
         </div>
+      ) : error ? (
+        <Alert variant="destructive">
+          <AlertCircle className="size-4" />
+          <AlertTitle>Couldn&apos;t load customers</AlertTitle>
+          <AlertDescription className="flex flex-col items-start gap-2">
+            <span>{error}</span>
+            <Button variant="outline" size="sm" onClick={() => void refetch()}>
+              <RefreshCw className="mr-2 size-4" />
+              Retry
+            </Button>
+          </AlertDescription>
+        </Alert>
       ) : filtered.length === 0 ? (
         <Card className="p-5">
           <EmptyState
