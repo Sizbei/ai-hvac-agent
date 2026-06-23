@@ -141,6 +141,13 @@
       "when": 1782000001000,
       "tag": "0019_hcp_invoice_mirror",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1782207733013,
+      "tag": "0020_resync_meta_snapshot",
+      "breakpoints": true
     }
   ]
 }
