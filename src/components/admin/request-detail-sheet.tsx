@@ -785,6 +785,7 @@ export function RequestDetailSheet({
                           If putting on hold:
                         </span>
                         <select
+                          aria-label="Hold reason"
                           value={holdReasonInput}
                           onChange={(e) =>
                             setHoldReasonInput(e.target.value as HoldReason)
@@ -842,6 +843,7 @@ export function RequestDetailSheet({
                         className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       />
                       <select
+                        aria-label="Arrival window"
                         value={arrivalWindowInput}
                         onChange={(e) =>
                           setArrivalWindowInput(e.target.value as ArrivalWindow)

@@ -117,6 +117,7 @@ function IntegrationCard({ item }: { readonly item: IntegrationStatusItem }) {
           <Button
             variant="outline"
             size="sm"
+            aria-label={`Manage ${item.label}`}
             render={<Link href={item.manageHref} />}
           >
             Manage
