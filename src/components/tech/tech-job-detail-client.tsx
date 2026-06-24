@@ -34,6 +34,19 @@ interface TimeEntry {
   readonly laborCostCents: number | null;
 }
 
+interface TimelineEntry {
+  readonly fromStatus: string | null;
+  readonly toStatus: string;
+  readonly actorType: string;
+  readonly at: string;
+}
+
+/** "no_cool" / "in_progress" → "No cool" / "In progress". */
+function humanizeStatus(s: string): string {
+  const spaced = s.replace(/_/g, ' ');
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
 /** Format whole minutes as "Hh Mm" (or "Mm" under an hour). */
 function formatMinutes(mins: number): string {
   const h = Math.floor(mins / 60);
@@ -89,6 +102,9 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
   const [sigStatus, setSigStatus] = useState<string | null>(null);
   const [isSigning, setIsSigning] = useState(false);
 
+  // Status timeline (read-only history of this job's transitions).
+  const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
+
   const loadMaterials = useCallback(async (): Promise<void> => {
     try {
       const res = await fetch(`/api/tech/jobs/${id}/materials`);
@@ -109,6 +125,24 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
   useEffect(() => {
     void loadMaterials();
   }, [loadMaterials]);
+
+  const loadTimeline = useCallback(async (): Promise<void> => {
+    try {
+      const res = await fetch(`/api/tech/jobs/${id}/timeline`);
+      const body = await res.json().catch(() => ({ success: false }));
+      if (res.ok && body.success) {
+        setTimeline(body.data.timeline);
+      }
+      // A timeline read failure is non-critical — the section just stays empty;
+      // it never blocks the rest of the job detail.
+    } catch {
+      /* non-critical */
+    }
+  }, [id]);
+
+  useEffect(() => {
+    void loadTimeline();
+  }, [loadTimeline]);
 
   const loadTimesheet = useCallback(async (): Promise<void> => {
     try {
@@ -597,6 +631,32 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
           </div>
           {sigStatus && (
             <p className="text-xs text-muted-foreground">{sigStatus}</p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Status timeline (read-only history) */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Status history</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {timeline.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No status changes yet.</p>
+          ) : (
+            <ol className="space-y-2">
+              {timeline.map((e, i) => (
+                <li key={i} className="flex items-baseline justify-between gap-3 text-sm">
+                  <span>
+                    {e.fromStatus ? `${humanizeStatus(e.fromStatus)} → ` : ''}
+                    <span className="font-medium">{humanizeStatus(e.toStatus)}</span>
+                  </span>
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    {new Date(e.at).toLocaleString()}
+                  </span>
+                </li>
+              ))}
+            </ol>
           )}
         </CardContent>
       </Card>
