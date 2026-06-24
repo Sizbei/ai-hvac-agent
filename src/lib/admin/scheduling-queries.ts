@@ -26,8 +26,11 @@ import {
   serviceRequests,
   technicianAvailability,
   users,
+  organizationSettings,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
+import { rankTechnicians, type DispatchSignals } from "@/lib/ai/dispatch/score";
+import { loadDispatchSignals } from "@/lib/ai/dispatch/signals";
 import { isTerminal, type RequestStatus } from "./request-status";
 import { isWindowWithinAvailability } from "./availability-coverage";
 import type { ArrivalWindow } from "./arrival-window";
@@ -711,14 +714,93 @@ export async function placeAndAssignRequest(
   };
 }
 
+/** Org opt-in for scored dispatch. Reads the single column fresh (the settings
+ * cache is for the chatbot path; a just-flipped toggle takes effect next booking).
+ * organization_settings is keyed by organizationId (PK), so eq is the tenant scope. */
+async function isAutoDispatchEnabled(organizationId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ enabled: organizationSettings.autoDispatchEnabled })
+    .from(organizationSettings)
+    .where(eq(organizationSettings.organizationId, organizationId))
+    .limit(1);
+  return row?.enabled ?? false;
+}
+
+/** The incoming job's classification, for skill matching. */
+async function loadJobClassification(
+  organizationId: string,
+  requestId: string,
+): Promise<DispatchSignals["job"] | null> {
+  const [row] = await db
+    .select({
+      jobType: serviceRequests.jobType,
+      systemType: serviceRequests.systemType,
+      urgency: serviceRequests.urgency,
+    })
+    .from(serviceRequests)
+    .where(
+      withTenant(serviceRequests, organizationId, eq(serviceRequests.id, requestId)),
+    );
+  return row
+    ? { jobType: row.jobType, systemType: row.systemType, urgency: row.urgency }
+    : null;
+}
+
+/** Flag a request as system-assigned (cosmetic; drives the board "Auto" badge). */
+async function markAutoAssigned(
+  organizationId: string,
+  requestId: string,
+): Promise<void> {
+  await db
+    .update(serviceRequests)
+    .set({ autoAssigned: true, updatedAt: new Date() })
+    .where(
+      withTenant(serviceRequests, organizationId, eq(serviceRequests.id, requestId)),
+    );
+}
+
+/** Build the ranked, skill-matched technician order for a scored auto-assign.
+ * Returns [] when no classification exists (nobody is skill-matched → dispatcher). */
+async function rankedTechnicianOrder(
+  organizationId: string,
+  requestId: string,
+  technicianIds: readonly string[],
+  isoDay: string,
+): Promise<string[]> {
+  const job = await loadJobClassification(organizationId, requestId);
+  if (!job) return [];
+  const signalsByTech = await loadDispatchSignals(
+    organizationId,
+    technicianIds,
+    job,
+    isoDay,
+  );
+  const candidates: DispatchSignals[] = technicianIds.map((technicianId) => {
+    const s = signalsByTech.get(technicianId)!;
+    return {
+      job,
+      tech: {
+        technicianId,
+        skillJobsCompleted: s.skillJobsCompleted,
+        avgRating: s.avgRating,
+        sameDayJobCount: s.sameDayJobCount,
+      },
+    };
+  });
+  return rankTechnicians(candidates).map((r) => r.technicianId);
+}
+
 /**
- * Stage 2 — auto-assign a freshly-booked request to the first available
- * technician for its held window. Iterates active technicians, delegating the
- * conflict + availability gate to placeAndAssignRequest (which writes assignedTo
- * on success). On a conflict it tries the next tech; on any other failure it
- * stops. Best-effort: returns {assigned:false} when nobody fits, leaving the
- * soft-held window for a dispatcher. Designed to run in after() (off the
- * latency-bound voice/chat turn).
+ * Stage 2 — auto-assign a freshly-booked request to a technician for its held
+ * window. When the org has opted into scored dispatch (auto_dispatch_enabled),
+ * candidates are ranked best-first by a deterministic skill/quality/load score
+ * and non-skill-matched techs are dropped; otherwise candidates are the active
+ * techs in DB order (today's first-fit — zero behavior change). Either way the
+ * conflict + availability gate is delegated to placeAndAssignRequest (which
+ * writes assignedTo on success). On a conflict it tries the next tech; on any
+ * other failure it stops. Best-effort: returns {assigned:false} when nobody
+ * fits, leaving the soft-held window for a dispatcher. Designed to run in
+ * after() (off the latency-bound voice/chat turn).
  */
 export async function autoAssignBookedRequest(
   organizationId: string,
@@ -740,16 +822,30 @@ export async function autoAssignBookedRequest(
         and(eq(users.role, "technician"), eq(users.isActive, true))!,
       ),
     );
+  if (techs.length === 0) return { assigned: false };
 
-  for (const tech of techs) {
+  // Scored mode (org opt-in) ranks skill-matched techs best-first; otherwise we
+  // keep today's first-fit (DB order) for zero behavior change.
+  const enabled = await isAutoDispatchEnabled(organizationId);
+  const order = enabled
+    ? await rankedTechnicianOrder(
+        organizationId,
+        requestId,
+        techs.map((t) => t.id),
+        heldSlot.isoDay,
+      )
+    : techs.map((t) => t.id);
+
+  for (const technicianId of order) {
     const result = await placeAndAssignRequest(
       organizationId,
       requestId,
       { start: heldSlot.start, end: heldSlot.end },
-      { isoDay: heldSlot.isoDay, window: heldSlot.window, technicianId: tech.id },
+      { isoDay: heldSlot.isoDay, window: heldSlot.window, technicianId },
     );
     if (result.ok) {
-      return { assigned: true, technicianId: tech.id };
+      await markAutoAssigned(organizationId, requestId);
+      return { assigned: true, technicianId };
     }
     // A conflict (busy) or a tech deactivated mid-flight just means THIS tech
     // can't take it — try the next. Only a request-level failure (moved on /

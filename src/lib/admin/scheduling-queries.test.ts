@@ -103,6 +103,14 @@ vi.mock("@/lib/db/schema", () => ({
     arrivalWindowEnd: "sr.awe",
     updatedAt: "sr.updated",
     createdAt: "sr.created",
+    jobType: "sr.jobType",
+    systemType: "sr.systemType",
+    urgency: "sr.urgency",
+    autoAssigned: "sr.autoAssigned",
+  },
+  organizationSettings: {
+    organizationId: "os.org",
+    autoDispatchEnabled: "os.autoDispatch",
   },
   technicianAvailability: {
     id: "ta.id",
@@ -121,6 +129,35 @@ vi.mock("@/lib/db/schema", () => ({
   },
 }));
 
+// Scored-dispatch siblings: stub the signals loader (so it doesn't touch the db
+// queue) and rankTechnicians (so the test controls the candidate order). The
+// real placeAndAssignRequest still runs, driven by the db queue, so we observe
+// WHICH tech the orchestrator tried first via the returned technicianId.
+const { rankedState } = vi.hoisted(() => ({
+  rankedState: { order: [] as string[] },
+}));
+vi.mock("@/lib/ai/dispatch/signals", () => ({
+  // Mirror the real loader's contract: a defaulted entry for every requested
+  // tech (the real one never returns a missing tech).
+  loadDispatchSignals: vi.fn(async (_org: string, ids: readonly string[]) =>
+    new Map(
+      ids.map((id) => [
+        id,
+        { skillJobsCompleted: 0, avgRating: null, sameDayJobCount: 0 },
+      ]),
+    ),
+  ),
+}));
+vi.mock("@/lib/ai/dispatch/score", () => ({
+  rankTechnicians: () =>
+    rankedState.order.map((technicianId) => ({
+      technicianId,
+      score: 1,
+      reasons: [],
+      skillMatched: true,
+    })),
+}));
+
 import {
   getTechnicianAvailability,
   setTechnicianAvailability,
@@ -130,6 +167,7 @@ import {
   listUnscheduledRequests,
   rescheduleRequest,
   placeAndAssignRequest,
+  autoAssignBookedRequest,
 } from "./scheduling-queries";
 
 const ORG = "00000000-0000-0000-0000-000000000001";
@@ -686,5 +724,77 @@ describe("placeAndAssignRequest (S4 hard enforcement)", () => {
     if (!result.ok) return;
     expect(result.assignedTo).toBeNull();
     expect(result.overriddenConflicts).toBeNull();
+  });
+});
+
+describe("autoAssignBookedRequest (scored vs first-fit)", () => {
+  // 2026-07-01 is a Wednesday; morning Eastern covers 12:00Z–16:00Z (see above).
+  const ISO_DAY = "2026-07-01";
+  const HELD = {
+    start: new Date("2026-07-01T12:00:00.000Z"),
+    end: new Date("2026-07-01T16:00:00.000Z"),
+    isoDay: ISO_DAY,
+    window: "morning" as const,
+  };
+  const T1 = "00000000-0000-0000-0000-0000000000c1";
+  const T2 = "00000000-0000-0000-0000-0000000000c2";
+  const coversMorning = [
+    { id: "av", technicianId: T1, dayOfWeek: 3, startMinute: 480, endMinute: 720 },
+  ];
+  function updatedRow(assignedTo: string) {
+    return {
+      status: "scheduled",
+      assignedTo,
+      scheduledDate: HELD.start,
+      arrivalWindowStart: HELD.start,
+      arrivalWindowEnd: HELD.end,
+    };
+  }
+  // Feed the db queue for ONE successful placeAndAssignRequest of `tech`
+  // (freshly-booked request → assignedTo null → reassigning path), plus the
+  // trailing markAutoAssigned update.
+  function queueSuccessfulPlacement(tech: string): void {
+    selectQueue.push([{ status: "pending", assignedTo: null }]); // read existing
+    selectQueue.push([{ id: tech }]); // tech verification → active
+    selectQueue.push([]); // conflict check → none
+    selectQueue.push(coversMorning); // availability → covers
+    updateQueue.push([updatedRow(tech)]); // guarded UPDATE
+    updateQueue.push([]); // markAutoAssigned UPDATE
+  }
+
+  it("disabled (default): tries technicians in DB order (first-fit, unchanged)", async () => {
+    selectQueue.push([{ id: T1 }, { id: T2 }]); // active techs (DB order)
+    selectQueue.push([{ enabled: false }]); // isAutoDispatchEnabled
+    queueSuccessfulPlacement(T1); // first DB-order tech wins
+
+    const result = await autoAssignBookedRequest(ORG, REQ, HELD);
+    expect(result).toEqual({ assigned: true, technicianId: T1 });
+  });
+
+  it("enabled: tries technicians in ranked order (best first)", async () => {
+    selectQueue.push([{ id: T1 }, { id: T2 }]); // active techs (DB order)
+    selectQueue.push([{ enabled: true }]); // isAutoDispatchEnabled
+    selectQueue.push([{ jobType: "no_cool", systemType: "central_ac", urgency: "standard" }]); // classification
+    rankedState.order = [T2, T1]; // ranker prefers T2
+    queueSuccessfulPlacement(T2); // ranked-first tech wins
+
+    const result = await autoAssignBookedRequest(ORG, REQ, HELD);
+    expect(result).toEqual({ assigned: true, technicianId: T2 });
+  });
+
+  it("enabled with no skill-matched tech → {assigned:false} (degrade-safe)", async () => {
+    selectQueue.push([{ id: T1 }, { id: T2 }]); // active techs
+    selectQueue.push([{ enabled: true }]); // isAutoDispatchEnabled
+    selectQueue.push([{ jobType: "no_cool", systemType: "central_ac", urgency: "standard" }]); // classification
+    rankedState.order = []; // ranker drops everyone (nobody qualified)
+
+    const result = await autoAssignBookedRequest(ORG, REQ, HELD);
+    expect(result).toEqual({ assigned: false });
+  });
+
+  it("no active technicians → {assigned:false} without reading settings", async () => {
+    selectQueue.push([]); // no active techs
+    const result = await autoAssignBookedRequest(ORG, REQ, HELD);
+    expect(result).toEqual({ assigned: false });
   });
 });
