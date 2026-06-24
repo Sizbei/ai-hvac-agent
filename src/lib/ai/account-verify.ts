@@ -93,16 +93,47 @@ export function advanceVerify(input: {
     return { kind: "defer", verify: state };
   }
   if (state?.status === "pending") {
-    if (checkZipMatch(zipAnswer, onFileZips)) {
-      return { kind: "serve", verify: { status: "passed", attempts: state.attempts + 1 } };
-    }
-    const attempts = state.attempts + 1;
-    return attempts >= MAX_VERIFY_ATTEMPTS
-      ? { kind: "defer", verify: { status: "failed", attempts } }
-      : { kind: "ask", verify: { status: "pending", attempts } };
+    return advanceVerifyAnswer(state, zipAnswer, onFileZips);
   }
   // No verify state yet — first financial ask.
   return { kind: "ask", verify: { status: "pending", attempts: 0 } };
+}
+
+/**
+ * Process a ZIP answer to a PENDING financial-verify challenge. Shared by
+ * {@link advanceVerify} (the intent-driven path) AND the bare-ZIP answer-turn
+ * handler in the routes: a customer who simply types/keys their ZIP in reply to
+ * the challenge produces a message the keyword router classifies as FALLBACK
+ * (not ACCOUNT_LOOKUP), so the answer turn must be handled outside the normal
+ * intent gate — but with the SAME transition logic, here, so the two paths can't
+ * diverge. Match → passed; mismatch → re-ask, or defer (lockout) at
+ * {@link MAX_VERIFY_ATTEMPTS}. Empty `onFileZips` can never match (a customer
+ * with no address on file is never auto-passed).
+ */
+export function advanceVerifyAnswer(
+  state: VerifyState,
+  zipAnswer: string,
+  onFileZips: readonly string[],
+): VerifyDecision {
+  if (checkZipMatch(zipAnswer, onFileZips)) {
+    return { kind: "serve", verify: { status: "passed", attempts: state.attempts + 1 } };
+  }
+  const attempts = state.attempts + 1;
+  return attempts >= MAX_VERIFY_ATTEMPTS
+    ? { kind: "defer", verify: { status: "failed", attempts } }
+    : { kind: "ask", verify: { status: "pending", attempts } };
+}
+
+/**
+ * True when a message is plausibly a bare ZIP answer to a verify challenge —
+ * i.e. it reduces to EXACTLY 5 digits (handles typed "37601", DTMF, and spoken
+ * "three seven six oh one"). Used by the routes to recognize the answer turn for
+ * a pending challenge WITHOUT burning a verify attempt on unrelated prose (a
+ * message with other digit counts, like "call me at 5 about 37601 Main", reduces
+ * to ≠5 digits and is left to normal routing).
+ */
+export function looksLikeZipAnswer(message: string): boolean {
+  return spokenToDigits(message).replace(/\D/g, "").length === 5;
 }
 
 /**

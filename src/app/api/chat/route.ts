@@ -96,6 +96,8 @@ import { customers, customerLocations } from "@/lib/db/schema";
 import { buildAccountLookupReply } from "@/lib/ai/account-dispatch";
 import {
   advanceVerify,
+  advanceVerifyAnswer,
+  looksLikeZipAnswer,
   requiresVerify,
   extractZipsFromAddress,
   preserveVerifyKey,
@@ -121,6 +123,11 @@ const CHAT_VERIFY_ASK =
   "To pull up your account details, can you confirm the 5-digit ZIP code on your account?";
 const CHAT_VERIFY_DEFER =
   "I can't confirm that here right now — our team can follow up, or you can check your account online. Anything else I can help with?";
+// Spoken after a correct ZIP arrives as a bare reply to the challenge. We don't
+// store which intent issued the challenge, so we confirm + invite the re-ask
+// (the next turn classifies as ACCOUNT_LOOKUP and serves the data, now verified).
+const CHAT_VERIFY_PASSED =
+  "Thanks — you're verified. What would you like to know about your account (balance or membership)?";
 
 /** Parse session metadata JSON into an object, or null when absent/unparseable. */
 function parseSessionMeta(meta: string | null): Record<string, unknown> | null {
@@ -904,6 +911,72 @@ export async function POST(request: NextRequest) {
       // inside routeMessage above and short-circuit before any account intent).
       const accountCustomerId =
         session.customerId ?? customerContext?.customerId ?? null;
+
+      // Stage 5b: a pending financial-verify challenge is answered by a BARE ZIP
+      // reply, which the keyword router classifies as FALLBACK (not ACCOUNT_LOOKUP)
+      // — so the answer turn must be handled HERE, outside the intent gate, or
+      // pending→passed is unreachable on a natural reply (the v2-review bug).
+      // SAFETY: this block NEVER serves account data — it only advances the verify
+      // state and replies with canned copy. On a pass it invites the re-ask, which
+      // the next turn serves via the gate below (now that verify is "passed"). So
+      // it cannot leak financial data even if the heuristic mis-fires.
+      {
+        const vMeta = parseSessionMeta(session.metadata);
+        const vState = (vMeta?.verify as VerifyState | undefined) ?? null;
+        if (
+          accountCustomerId &&
+          vState?.status === "pending" &&
+          // A re-stated "balance 37601" classifies as ACCOUNT_LOOKUP and goes
+          // through the gate below (which serves the right intent); only a bare
+          // ZIP reply is handled here.
+          verdict.action !== "ACCOUNT_LOOKUP" &&
+          looksLikeZipAnswer(guardrailResult.sanitized)
+        ) {
+          const onFileZips = await loadChatOnFileZips(
+            organizationId,
+            accountCustomerId,
+            session.id,
+          );
+          const decision = advanceVerifyAnswer(
+            vState,
+            guardrailResult.sanitized,
+            onFileZips,
+          );
+          const replyText =
+            decision.kind === "serve"
+              ? CHAT_VERIFY_PASSED
+              : decision.kind === "ask"
+                ? CHAT_VERIFY_ASK
+                : CHAT_VERIFY_DEFER;
+          await db.insert(messages).values({
+            organizationId,
+            sessionId: session.id,
+            role: "assistant",
+            content: replyText,
+            tokensUsed: 0,
+          });
+          await db
+            .update(customerSessions)
+            .set({
+              turnCount: newTurnCount,
+              metadata: JSON.stringify({ ...(vMeta ?? {}), verify: decision.verify }),
+              updatedAt: new Date(),
+            })
+            .where(sessionScope);
+          logger.info(
+            {
+              sessionId: session.id,
+              routed: "deterministic",
+              action: "VERIFY_ANSWER",
+              verifyStatus: decision.verify?.status,
+              turnCount: newTurnCount,
+            },
+            "Chat turn resolved deterministically (financial-verify answer)",
+          );
+          return cannedTextResponse(replyText);
+        }
+      }
+
       // The router emits ACCOUNT_LOOKUP for BOTH the new account_data intents and
       // the carved-out legacy reference intents (account-check-status,
       // account-change-appointment, scheduling-reschedule). We act on it ONLY for

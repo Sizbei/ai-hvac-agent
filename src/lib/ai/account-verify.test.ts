@@ -5,6 +5,8 @@ import {
   checkZipMatch,
   preserveVerifyKey,
   advanceVerify,
+  advanceVerifyAnswer,
+  looksLikeZipAnswer,
   MAX_VERIFY_ATTEMPTS,
   type VerifyState,
 } from "./account-verify";
@@ -171,5 +173,53 @@ describe("advanceVerify (channel-agnostic financial-verify decision)", () => {
     expect(
       advanceVerify({ intentId: "account-data-balance", state: pending, zipAnswer: "37601", onFileZips: [] }),
     ).toEqual({ kind: "ask", verify: { status: "pending", attempts: 1 } });
+  });
+});
+
+describe("advanceVerifyAnswer (bare-ZIP answer to a pending challenge)", () => {
+  const ONFILE = ["37601", "37615"] as const;
+  const pending = (attempts: number): VerifyState => ({ status: "pending", attempts });
+
+  it("correct ZIP → serve, upgraded to passed", () => {
+    expect(advanceVerifyAnswer(pending(0), "37601", ONFILE)).toEqual({
+      kind: "serve",
+      verify: { status: "passed", attempts: 1 },
+    });
+  });
+
+  it("wrong ZIP under the limit → re-ask, attempts incremented", () => {
+    expect(advanceVerifyAnswer(pending(0), "00000", ONFILE)).toEqual({
+      kind: "ask",
+      verify: { status: "pending", attempts: 1 },
+    });
+  });
+
+  it("wrong ZIP hitting MAX_VERIFY_ATTEMPTS → defer + failed (lockout)", () => {
+    expect(advanceVerifyAnswer(pending(MAX_VERIFY_ATTEMPTS - 1), "00000", ONFILE)).toEqual({
+      kind: "defer",
+      verify: { status: "failed", attempts: MAX_VERIFY_ATTEMPTS },
+    });
+  });
+
+  it("empty on-file ZIPs never auto-pass", () => {
+    expect(advanceVerifyAnswer(pending(0), "37601", []).kind).not.toBe("serve");
+  });
+});
+
+describe("looksLikeZipAnswer", () => {
+  it("recognizes a bare typed/DTMF ZIP", () => {
+    expect(looksLikeZipAnswer("37601")).toBe(true);
+    expect(looksLikeZipAnswer("  37601 ")).toBe(true);
+  });
+
+  it("recognizes a spoken ZIP ('three seven six oh one')", () => {
+    expect(looksLikeZipAnswer("three seven six oh one")).toBe(true);
+  });
+
+  it("rejects prose with other digit counts (no false answer turn)", () => {
+    expect(looksLikeZipAnswer("call me at 5 about 37601 Main")).toBe(false); // 6 digits
+    expect(looksLikeZipAnswer("what's my balance")).toBe(false); // 0 digits
+    expect(looksLikeZipAnswer("376011")).toBe(false); // 6 digits
+    expect(looksLikeZipAnswer("3760")).toBe(false); // 4 digits
   });
 });
