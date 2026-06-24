@@ -478,6 +478,10 @@ export const serviceRequests = pgTable(
     locationId: uuid("location_id"),
     assignedTo: uuid("assigned_to").references(() => users.id),
     status: requestStatusEnum("status").notNull().default("pending"),
+    // True when the system (not a human dispatcher) assigned this request — set
+    // by autoAssignBookedRequest on a successful auto-assign. Drives the board's
+    // "Auto" badge. Default false: human/drag assignments stay unflagged.
+    autoAssigned: boolean("auto_assigned").notNull().default(false),
     issueType: text("issue_type").notNull(),
     urgency: urgencyEnum("urgency").notNull(),
     description: text("description").notNull(),
@@ -987,6 +991,12 @@ export const organizationSettings = pgTable("organization_settings", {
     dismissed?: boolean;
     embedViewed?: boolean;
   }>(),
+
+  // ── Auto-dispatch (Probook-style scored assignment) ──
+  // OFF by default: when false, a freshly-booked request auto-assigns first-fit
+  // (today's behavior). When true, autoAssignBookedRequest ranks technicians by
+  // a deterministic skill/quality/load score and assigns the best one that fits.
+  autoDispatchEnabled: boolean("auto_dispatch_enabled").notNull().default(false),
 
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
