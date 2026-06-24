@@ -22,7 +22,7 @@ A 40-agent workflow re-confirmed, planned, and independently verified all 20 sta
 - **Plan corrections to heed:** S8 — FP address validation is *dead code* on free-text input, so true "parity" = write street unchanged (Photon enrichment would exceed FP). S13 — the proximity weight rebalance breaks 3 score tests, not 1. S15 — window reconstruction must read the BUSINESS-tz hour (not `getUTCHours`), and `isAutoDispatchEnabled` must be exported. S12 — 3 interface touch-points, not 2.
 
 **Verified execution order** (skip 19, 8, 11; safety/security first, then integration, then dispatch-v2):
-**5** (security parity) → **6** → **9** → **10** → **7** (Group B) → **12** → **14** → **15** → **13** → **16** → **17** → **18** (Group C) → **20** (Group D). **Done: 1–6, 9, 10.** Closed/no-op: **8** (parity already satisfied), **11** (description-parity; structured form blocked on FP API), **19** (already shipped). **Remaining: 7** (HCP availability, partially-blocked) + **Group C 12–18** (migration-gated — need `0021`/`0022` applied) + **20** (partially-done).
+**Done: 1–6, 9, 10, 20** (+ Stage 5b reachability fix on both channels). Closed/no-op: **8** (parity already satisfied), **11** (description-parity; structured form blocked on FP API), **19** (already shipped). **Remaining: 7** (HCP availability — partially blocked, needs a design call) + **Group C 12–18** (dispatch-v2, migration-gated — need `0021`/`0022` applied + dispatch v1 validated before stacking). Every cleanly buildable, migration-free, non-speculative seam is now done; the rest needs operator action (apply migrations) or a design decision.
 
 ---
 
@@ -146,7 +146,11 @@ A 40-agent workflow re-confirmed, planned, and independently verified all 20 sta
 - **Do:** Add the detail/edit page + a PATCH route (guard active-subscription side effects).
 - **Verify:** unit/integration test for update; existing list test unaffected.
 
-### Stage 20 — Tech portal mutations (photos / notes / timeline) **[M] — ⚠️ PARTIALLY-DONE (see results doc: reuse `request_status_events` for the timeline; pass `ADMIN_DOCUMENT_MIME_TYPES` for HEIC — both already exist)**
+### Stage 20 — Tech portal mutations (photos / notes / timeline) **[M] — ✅ DONE 2026-06-24 (migration-free)**
+- **Was:** notes/materials/signature/status/timesheet already existed; the missing pieces were **timeline** + **photos**.
+- **Timeline (3 slices):** `getJobTimelineForTech` (assignee-guarded, reuses the live `request_status_events` log, PII-free) → `GET /api/tech/jobs/[id]/timeline` (not_owned→404) → a "Status history" card in the portal. +6 tests.
+- **Photos (4 slices):** reuse the existing `attachments` table (Stage-7 `serviceRequestId` link — **no migration**); `addJobPhoto`/`listJobPhotos` (assignee-guarded add) → `POST` upload (R2 via the signature-route precedent, `ADMIN_DOCUMENT_MIME_TYPES` incl. iOS HEIC + 20MB limit, orphan cleanup on not_owned) → `GET` list (signed display URLs, skips storage on empty) → a "Photos" card (camera-capture input + thumbnail gallery). +13 tests.
+- **Verify:** ✅ ~19 new tests; tsc + lint + full suite (2926) + build green. No migration, no money/safety surfaces; UI verified by tsc+build (client component, no unit harness).
 - **Gap:** The tech portal is read-only + mark-complete (`src/app/tech/jobs/[id]/page.tsx`); no photo upload, job notes, or timeline. No `/api/tech/*` mutation endpoints.
 - **Do:** Add tech-scoped endpoints for job notes + photo attachment + a timeline view, reusing existing storage/notes patterns.
 - **Verify:** integration test for a tech adding a note/photo to an assigned job (tenant + role scoped).
