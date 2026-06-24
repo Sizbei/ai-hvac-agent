@@ -426,6 +426,24 @@ describe("RestHousecallProClient.listTechnicians", () => {
     );
     expect(await client.listTechnicians()).toEqual([]);
   });
+
+  it("captures the employee email (keys the roster upsert) and leaves it undefined when omitted", async () => {
+    const fetchMock = vi.fn<(url?: string, init?: RequestInit) => Promise<Response>>(async () =>
+      res({
+        employees: [
+          { id: "emp-9", first_name: "Dana", active: true, email: "dana@hcp.test" },
+          { id: "emp-10", first_name: "NoMail", active: true },
+        ],
+      }),
+    );
+    const client = new RestHousecallProClient(
+      CONFIG,
+      fetchMock as unknown as typeof fetch,
+    );
+    const techs = await client.listTechnicians();
+    expect(techs[0].email).toBe("dana@hcp.test");
+    expect(techs[1].email).toBeUndefined();
+  });
 });
 
 describe("RestHousecallProClient — error handling + retry", () => {

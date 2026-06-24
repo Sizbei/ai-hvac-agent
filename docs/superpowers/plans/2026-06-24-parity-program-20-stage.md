@@ -56,10 +56,11 @@ A 40-agent workflow re-confirmed, planned, and independently verified all 20 sta
 
 ## Group B — FieldPulse ↔ HCP integration parity
 
-### Stage 6 — HCP technician roster sync **[H, foundational]**
-- **Gap:** FieldPulse has a real roster sync that upserts `users` (`src/lib/integrations/fieldpulse/technician-sync.ts`); HCP infers **synthetic** technician IDs from availability windows (`technician-mapping.ts`) — no true roster. This undercuts dispatch scoring for HCP orgs.
-- **Do:** Add `src/lib/integrations/housecall-pro/technician-sync.ts` mirroring the FP pattern (admin-triggered upsert of real techs via the HCP client).
-- **Verify:** unit test for upsert/dedupe; existing FP test as the template.
+### Stage 6 — HCP technician roster sync **[H, foundational] — ✅ DONE 2026-06-24**
+- **Was real:** HCP had no roster sync (only synthetic tech IDs); FP upserts `users`.
+- **Done:** added `housecall-pro/technician-sync.ts` (`syncTechniciansFromHousecall`) mirroring FP — email-keyed upsert into `users` (role=technician, `setWhere` guards human admins), `housecallProUserId` identity column (+ per-org partial unique index, migration `0022`), and the **guarded** soft-deactivate (no mass-deactivate on an empty/failed roster). Captured `email` on `HousecallTechnician` + `toTechnician` (HCP has no role field, so every employee is a tech candidate; skip no-email/name). 5 new tests (4 sync incl. empty-roster-no-deactivate + degrade; 1 client email-parse). Degrade-safe, tenant-scoped, neon-http sequential awaits.
+- **Operator action:** migration `0022` is generated but NOT applied — run `npm run db:migrate` (shared-DB change, operator's call; pairs with the still-pending dispatch `0021`). The module is unwired (no admin route) — **matches FP, which also has no route** (avoids over-delivering vs the template); wiring a "Sync Technicians" button for both is a separate small follow-up.
+- **Verify:** ✅ tsc + lint + full suite (2880) + build; no prompt/money/safety surfaces touched.
 
 ### Stage 7 — HCP durable availability sync **[M] — ⚠️ PARTIALLY-DONE (see results doc; a literal `technician_availability` mirror is structurally blocked — HCP techs are synthetic)**
 - **Gap:** FP syncs availability to the `technician_availability` table via cron (`fieldpulse/availability-sync.ts` + `cron/sync-fieldpulse-availability`); HCP is cache-only (30s TTL, no persistence) via `housecall-pro/scheduling-source.ts`.

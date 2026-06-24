@@ -201,6 +201,9 @@ export interface HousecallTechnician {
   readonly name?: string;
   /** Whether the employee is active in HCP. Undefined when HCP omits it. */
   readonly isActive?: boolean;
+  /** Work email, when HCP returns one. PII; used ONLY server-side to key the
+   *  roster upsert into `users` (never crosses the public availability surface). */
+  readonly email?: string;
 }
 
 /**

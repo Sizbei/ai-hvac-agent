@@ -276,6 +276,10 @@ export const users = pgTable(
     // Fieldpulse's small sequential ids collide across tenants). Uniqueness is
     // scoped per-org below.
     fieldpulseUserId: text("fieldpulse_user_id"),
+    // Housecall Pro employee id for a synced technician. Same rationale as
+    // fieldpulseUserId: HCP's opaque ids aren't globally unique, so uniqueness is
+    // scoped per-org below (NOT global like google_id).
+    housecallProUserId: text("housecall_pro_user_id"),
     role: text("role", { enum: ["super_admin", "admin", "technician"] })
       .notNull()
       .default("technician"),
@@ -322,6 +326,11 @@ export const users = pgTable(
     uniqueIndex("users_org_fieldpulse_user_id_unique")
       .on(table.organizationId, table.fieldpulseUserId)
       .where(sql`${table.fieldpulseUserId} IS NOT NULL`),
+    // Housecall Pro employee id is unique PER ORG (not globally), same as the
+    // Fieldpulse id — HCP ids are opaque and may repeat across tenants.
+    uniqueIndex("users_org_hcp_user_id_unique")
+      .on(table.organizationId, table.housecallProUserId)
+      .where(sql`${table.housecallProUserId} IS NOT NULL`),
   ],
 );
 

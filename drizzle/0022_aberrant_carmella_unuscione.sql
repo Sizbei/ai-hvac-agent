@@ -1,0 +1,2 @@
+ALTER TABLE "users" ADD COLUMN "housecall_pro_user_id" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "users_org_hcp_user_id_unique" ON "users" USING btree ("organization_id","housecall_pro_user_id") WHERE "users"."housecall_pro_user_id" IS NOT NULL;
