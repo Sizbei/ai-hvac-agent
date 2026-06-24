@@ -16,6 +16,7 @@ const {
   buildAccountLookupReplyMock,
   decryptMock,
   decideAfterHoursDisclosureMock,
+  loadCustomerContextByIdMock,
 } = vi.hoisted(() => ({
   generateTextMock: vi.fn(),
   insertMock: vi.fn(),
@@ -36,6 +37,8 @@ const {
   decryptMock: vi.fn(),
   // After-hours disclosure helper mock (WS4). Default: no after-hours.
   decideAfterHoursDisclosureMock: vi.fn().mockReturnValue({ kind: "none", afterHours: false, copy: "" }),
+  // Returning-customer context loader (parity Stage 3). Default: no match.
+  loadCustomerContextByIdMock: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("ai", () => ({ generateText: generateTextMock }));
@@ -89,6 +92,14 @@ vi.mock("./after-hours-chat", async (importOriginal) => {
     decideAfterHoursDisclosure: (...args: unknown[]) => decideAfterHoursDisclosureMock(...args),
   };
 });
+
+// Returning-customer recognition (parity Stage 3): the loader is controlled
+// per-test; buildCustomerContextHint is a simple marker so we can assert the
+// hint reaches the LLM system prompt (the real hint is unit-tested separately).
+vi.mock("./customer-context", () => ({
+  loadCustomerContextById: loadCustomerContextByIdMock,
+  buildCustomerContextHint: (ctx: unknown) => (ctx ? " [RETURNING_CUSTOMER]" : ""),
+}));
 
 vi.mock("./escalate-service", () => ({ escalateSession: escalateMock }));
 vi.mock("./intent-router", () => ({ routeMessage: routeMock }));
@@ -167,6 +178,8 @@ describe("voiceReply", () => {
     decryptMock.mockImplementation((s: string) => s);
     decideAfterHoursDisclosureMock.mockReset();
     decideAfterHoursDisclosureMock.mockReturnValue({ kind: "none", afterHours: false, copy: "" });
+    loadCustomerContextByIdMock.mockReset();
+    loadCustomerContextByIdMock.mockResolvedValue(null);
     extractAllContactMock.mockReturnValue(noSlots());
     extractAddressAtAddressStepMock.mockReturnValue(null);
     extractSpokenPhoneMock.mockReturnValue(null);
@@ -375,6 +388,67 @@ describe("voiceReply", () => {
     expect(call.system.toLowerCase()).toContain("phone");
     expect(result.reply).toContain("noise");
     expect(result.endCall).toBe(false);
+  });
+
+  it("injects the returning-customer hint into the LLM prompt when the call resolved to a known customer", async () => {
+    routeMock.mockReturnValue({
+      action: "FALLBACK_LLM",
+      intentId: null,
+      confidence: 0,
+      reply: null,
+      issueType: null,
+      urgency: null,
+      escalate: false,
+    });
+    loadCustomerContextByIdMock.mockResolvedValue({
+      customerId: "cust-1",
+      isReturning: true,
+      priorRequestCount: 2,
+      firstName: "Jane",
+    });
+    generateTextMock.mockResolvedValue({
+      text: "Welcome back! Tell me more.",
+      usage: { inputTokens: 10, outputTokens: 5 },
+    });
+
+    const result = await voiceReply({
+      session: { ...baseSession, customerId: "cust-1" },
+      history: [{ role: "user", content: "my furnace is loud" }],
+      userMessage: "it rattles",
+      ipAddress: "1.2.3.4",
+    });
+
+    expect(loadCustomerContextByIdMock).toHaveBeenCalledWith("org-1", "cust-1");
+    const call = generateTextMock.mock.calls[0][0];
+    expect(call.system).toContain("[RETURNING_CUSTOMER]");
+    expect(result.endCall).toBe(false);
+  });
+
+  it("adds no customer hint when the call did not resolve to a customer", async () => {
+    routeMock.mockReturnValue({
+      action: "FALLBACK_LLM",
+      intentId: null,
+      confidence: 0,
+      reply: null,
+      issueType: null,
+      urgency: null,
+      escalate: false,
+    });
+    generateTextMock.mockResolvedValue({
+      text: "Tell me more.",
+      usage: { inputTokens: 10, outputTokens: 5 },
+    });
+
+    await voiceReply({
+      session: baseSession, // no customerId
+      history: [{ role: "user", content: "my furnace is loud" }],
+      userMessage: "it rattles",
+      ipAddress: "1.2.3.4",
+    });
+
+    expect(loadCustomerContextByIdMock).not.toHaveBeenCalled();
+    const call = generateTextMock.mock.calls[0][0];
+    expect(call.system).not.toContain("[RETURNING_CUSTOMER]");
   });
 
   it("captures a residual name spoken alongside a phone in one utterance", async () => {
@@ -678,6 +752,8 @@ describe("voiceReply output guardrail (WS1)", () => {
     decryptMock.mockImplementation((s: string) => s);
     decideAfterHoursDisclosureMock.mockReset();
     decideAfterHoursDisclosureMock.mockReturnValue({ kind: "none", afterHours: false, copy: "" });
+    loadCustomerContextByIdMock.mockReset();
+    loadCustomerContextByIdMock.mockResolvedValue(null);
     extractAllContactMock.mockReturnValue(noSlots());
     extractAddressAtAddressStepMock.mockReturnValue(null);
     extractSpokenPhoneMock.mockReturnValue(null);
@@ -737,6 +813,8 @@ describe("voiceReply do-not-service (WS2)", () => {
     decryptMock.mockImplementation((s: string) => s);
     decideAfterHoursDisclosureMock.mockReset();
     decideAfterHoursDisclosureMock.mockReturnValue({ kind: "none", afterHours: false, copy: "" });
+    loadCustomerContextByIdMock.mockReset();
+    loadCustomerContextByIdMock.mockResolvedValue(null);
     extractAllContactMock.mockReturnValue(noSlots());
     extractAddressAtAddressStepMock.mockReturnValue(null);
     extractSpokenPhoneMock.mockReturnValue(null);

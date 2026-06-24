@@ -19,6 +19,10 @@ import { withTenant } from "@/lib/db/tenant";
 import { decrypt } from "@/lib/crypto";
 import { resolveAfterHoursConfig } from "@/lib/admin/after-hours";
 import { decideAfterHoursDisclosure, inferBookingTarget } from "./after-hours-chat";
+import {
+  loadCustomerContextById,
+  buildCustomerContextHint,
+} from "./customer-context";
 import { checkTokenBudget, addTokenUsage } from "./token-budget";
 import { buildAccountLookupReply } from "./account-dispatch";
 import {
@@ -938,9 +942,25 @@ export async function voiceReply(params: {
     return { reply: budgetReply, endCall: true, nextState: "escalated" };
   }
 
+  // Returning-customer recognition (parity with web chat): when the call resolved
+  // to a known customer (ANI match at call start → session.customerId), surface a
+  // brief NON-PII hint (first name + prior-request count + membership) so the
+  // agent greets them by name and skips re-asking info already on file. Best-
+  // effort: any failure leaves the prompt byte-identical. The HCP service-history
+  // NOTE (enrichWithServiceHistory) is an external fetch and is intentionally NOT
+  // added on this latency-bound voice turn — tracked as a follow-up.
+  let customerHint = "";
+  if (session.customerId) {
+    const ctx = await loadCustomerContextById(
+      organizationId,
+      session.customerId,
+    ).catch(() => null);
+    customerHint = buildCustomerContextHint(ctx);
+  }
+
   const { text, usage } = await generateText({
     model: await getModel(organizationId),
-    system: PHONE_SYSTEM_PROMPT + slotContextHint,
+    system: PHONE_SYSTEM_PROMPT + slotContextHint + customerHint,
     messages: modelMessages,
   });
 

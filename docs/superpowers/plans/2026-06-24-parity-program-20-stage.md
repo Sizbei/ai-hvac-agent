@@ -22,10 +22,11 @@
 - **Was real:** voice passed no `bookingTarget`, so an after-hours caller wanting a daytime slot was wrongly warned of a charge.
 - **Done:** extracted `inferBookingTarget` from the chat route into shared `after-hours-chat.ts` (DRY, now unit-tested), and voice (`voice-turn.ts`) now computes + passes `bookingTarget` from the preferred window — parity with chat's Fix 2. Commit pairs the refactor + wiring; full suite green.
 
-### Stage 3 — Voice service-history enrichment **[M]**
-- **Gap:** Chat enriches a resolved repeat customer with a PII-free one-liner via `enrichWithServiceHistory` (`src/lib/ai/customer-context.ts`); voice only gets raw counts, so it can't personalize.
-- **Do:** Call `enrichWithServiceHistory` in `voice-turn.ts` when `resolveVoiceIdentity` matches a customer.
-- **Verify:** unit test: resolved caller → context carries the history one-liner; degrade-safe on fetch failure.
+### Stage 3 — Voice returning-customer recognition **[M] — ✅ DONE 2026-06-24 (core); HCP note sub-deferred**
+- **Was real:** voice resolved the caller (set `session.customerId`) but surfaced NO customer context in the LLM prompt — `buildCustomerContextHint` was chat-only.
+- **Done:** extracted `loadCustomerContextById` from `lookupCustomerContext` (refactor + export, unit-tested); voice-turn now loads the resolved customer's context by id and injects `buildCustomerContextHint` (first name + prior-request count + membership) into the LLM system prompt, degrade-safe — parity with chat's recognition. Tests assert the hint reaches the prompt and is absent for unknown callers.
+- **Sub-deferred (with reason):** the HCP `enrichWithServiceHistory` *note* (prior-service one-liner) is an EXTERNAL fetch; adding it to every voice LLM turn would put network latency on the latency-bound spoken turn. Needs a once-per-call cache (e.g. resolve+enrich at call start in `voice/incoming`, stash a compact hint on the session). Tracked as a follow-up; core recognition lands now with no external call.
+- **Note:** appended the existing vetted chat hint to the voice system prompt; `hvac-knowledge.ts` frozen safety blocks untouched. Recommend `npm run eval` 30/30 when keys are available (couldn't run headless).
 
 ### Stage 4 — Chat repeat-customer resolution at session start **[M]**
 - **Gap:** Voice auto-resolves identity via ANI (`src/lib/voice/resolve-voice-identity.ts`); chat only resolves once the user types an email and does not pre-populate from a known contact at session start, forcing re-asks.
