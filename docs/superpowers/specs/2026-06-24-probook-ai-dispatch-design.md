@@ -12,7 +12,7 @@ The system **already auto-assigns** a freshly-booked request at intake, but the 
 
 ## Goal
 
-Make the existing auto-assign **Probook-style**: rank technicians by a deterministic, explainable score and assign the **best** one that fits — **gated on skill** so an unqualified tech is never auto-sent — and **notify** the assigned tech. Keep the existing degrade-safe behavior (no qualified+available tech → leave soft-held in the Unassigned column for a dispatcher).
+Make the existing auto-assign **Probook-style**: rank technicians by a deterministic, explainable score and assign the **best** one that fits — **gated on skill** so an unqualified tech is never auto-sent. Keep the existing degrade-safe behavior (no qualified+available tech → leave soft-held in the Unassigned column for a dispatcher). The assignment is immediately **visible** to the tech (their portal job list) and the dispatcher (board) with no outbound message — a tech-facing push notification is deferred to v2 (see Scope; the existing comms path is customer-only and techs have no phone on file).
 
 ## Why this is small (verified against the codebase)
 
@@ -66,13 +66,13 @@ Change the loop from "techs in DB order, first calendar-fit" to:
 1. Load active technicians (unchanged, org-scoped) **plus their signals**: per-tech `skillJobsCompleted` for the job's `jobType`/`systemType` (one grouped query over completed `serviceRequests`), `avgRating`+`jobsCompleted` (reuse `getTechnicianScorecards` shape), and `sameDayJobCount` (count of the tech's jobs on `isoDay`).
 2. `scoreTechnician` each; **drop non-skill-matched** techs; sort by score desc.
 3. Iterate the ranked, skill-matched list calling the existing `placeAndAssignRequest` (its conflict/availability gate is unchanged — the **first ranked tech that also clears the calendar** wins; a busy top pick falls through to the next, exactly as today). This preserves the existing race-safety (status-guarded write + conflict check).
-4. On success: set `auto_assigned = true`, queue the **tech notification** (§3), return `{assigned:true, technicianId}`.
+4. On success: set `auto_assigned = true`, return `{assigned:true, technicianId}`.
 5. No skill-matched+available tech → `{assigned:false}` → unchanged degrade-safe behavior (soft-held → Unassigned column).
 
 Gated by org config (§5): if `autoDispatchEnabled` is false, **fall back to today's first-fit** (or skip auto-assign per existing behavior) — zero behavior change for orgs that don't opt in.
 
-### 3. Technician notification (new, idempotent)
-On a successful auto-assign, enqueue a tech-facing notification via the existing comms path (`queueCommunicationJob` / `triggerJob*` in `src/lib/communication/`), with an **idempotency key = `(serviceRequestId, "tech_assigned")`** so an intake retry can't double-send. Content: job address/window/issue summary. Consent/quiet-hours are enforced at send time by the existing queue (`checkSendAllowed`). A customer-facing "your technician is X" notice is **out of scope for v1** (avoids telling a customer a name before the team confirms).
+### 3. Technician notification — DEFERRED to v2
+The spec originally proposed an idempotency-keyed tech notification "via the existing comms path." Verified against the code, that path doesn't fit and it is **not a small addition**: every `communication_trigger_type` enum value is customer-facing (no `tech_assigned`), `users` has **no phone column** (SMS impossible), the send path (`checkSendAllowed`) is keyed to *customer* consent prefs, and `communication_jobs` has **no idempotency column** (dedupe lives in a separate `outbound_message_ledger`). Building it means a new trigger enum + migration, a seeded tech template, a staff-contact path that doesn't exist, a consent bypass, and an idempotency mechanism — its own subsystem. The auto-assignment is already **visible** to the tech (portal job list) and dispatcher (board), so v1 ships without an outbound message. Notification is tracked in Scope/v2.
 
 ### 4. Data: one boolean + one config flag
 - Migration: `ALTER TABLE service_requests ADD COLUMN auto_assigned boolean NOT NULL DEFAULT false;` (hand-authored, `IF NOT EXISTS`, + snapshot — per the repo's drizzle convention).
@@ -92,27 +92,26 @@ intake (chat/voice/admin) → request booked with held window
       load techs + signals (skill history, scorecard, same-day load)
       scoreTechnician each → drop non-skill-matched → sort desc
       for tech in ranked: placeAndAssignRequest(...) → first calendar-fit wins
-        on success: set auto_assigned=true; enqueue tech_assigned notification (idempotent)
+        on success: set auto_assigned=true (tech sees it in portal/board — no outbound msg in v1)
       none fit → {assigned:false} → soft-held → Unassigned column (unchanged)
 ```
 
 ## Error handling / degrade-safety
 - Runs in `after()` (off the latency-bound intake turn) and is **best-effort** — exactly the existing, accepted property. A lambda freeze leaves the job soft-held in **Unassigned** (visible + dispatchable), never lost. No new reconcile sweep required in v1 (the dispatcher sees unassigned jobs); a sweep is a v2 nice-to-have.
-- Notification is idempotency-keyed → intake retries don't double-send.
 - Tenant isolation: all reads/writes stay `withTenant`-scoped (existing pattern; verified clean by review).
-- neon-http has no transactions: `placeAndAssignRequest` already writes the assignment atomically in one `db.batch`; the notification is a separate enqueue (a failed enqueue leaves an assigned-but-unnotified job — acceptable, surfaced as assigned; the existing comms queue retries).
+- neon-http has no transactions: `placeAndAssignRequest` already writes the assignment atomically in one guarded UPDATE; setting `auto_assigned=true` is a second guarded write on the row it just assigned (a freeze between them leaves an assigned job whose `auto_assigned` flag is false — harmless; the job is correctly assigned, only the cosmetic "auto" badge is missing).
 
 ## Testing
 - **Scoring (pure, unit):** skill gate (0 prior jobs → not matched), skill depth/quality/load weighting, reasons text, tie-breaks, null avgRating fallback.
-- **Orchestrator:** ranked order is honored (best skill-matched tech tried first); a busy top pick falls through to the next; no skill-matched tech → `{assigned:false}`; `autoDispatchEnabled=false` → unchanged behavior. (DB mocked, matching the repo's query-test style.)
-- **Notification idempotency:** same `(requestId, tech_assigned)` enqueued twice → one job.
+- **Orchestrator:** ranked order is honored (best skill-matched tech tried first); a busy top pick falls through to the next; no skill-matched tech → `{assigned:false}`; `autoDispatchEnabled=false` → unchanged behavior; a successful auto-assign sets `auto_assigned=true`. (DB mocked, matching the repo's query-test style.)
 - **Gate:** `npm run test:unit` + `tsc` + `lint` 0 errors + `npm run build`; `npm run eval` 30/30 unaffected (no chatbot change).
 
 ## Scope
 
-**In v1:** scored + skill-gated upgrade to `autoAssignBookedRequest`; the pure scoring module; tech notification (idempotent); `auto_assigned` boolean + board badge; `auto_dispatch_enabled` org toggle (default OFF); tests.
+**In v1:** scored + skill-gated upgrade to `autoAssignBookedRequest`; the pure scoring module; `auto_assigned` boolean + board badge; `auto_dispatch_enabled` org toggle (default OFF); tests.
 
 **Out (deferred to v2, tracked not faked):**
+- **Technician push notification** (SMS/email on assign). Requires a new `tech_assigned` trigger enum + migration, a seeded tech template, a `users.phone`/staff-contact path that doesn't exist, a consent-gate bypass, and an idempotency mechanism — its own subsystem. v1 relies on the assignment being visible in the tech portal + dispatch board.
 - Dedicated `technician_skills` table + CRUD UI (v1 derives skill from `jobType`/`systemType` completion history).
 - **Proximity** scoring (needs tech base coordinates + geocoding — neither exists).
 - Tunable confidence threshold (v1 is a hard skill gate + best-of-fit).
