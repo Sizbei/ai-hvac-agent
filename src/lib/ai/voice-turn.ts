@@ -27,9 +27,8 @@ import { checkTokenBudget, addTokenUsage } from "./token-budget";
 import { buildAccountLookupReply } from "./account-dispatch";
 import {
   requiresVerify,
-  checkZipMatch,
+  advanceVerify,
   extractZipsFromAddress,
-  MAX_VERIFY_ATTEMPTS,
   type VerifyState,
 } from "./account-verify";
 import { getModel } from "./provider";
@@ -347,106 +346,75 @@ export async function voiceReply(params: {
       };
     }
 
-    // Non-financial intents serve immediately with no verify step required.
-    // IMPORTANT: we must NOT fabricate a "passed" verify here. Pass the EXISTING
-    // verifyState unchanged (null if no verify has occurred, or a prior real state).
-    // A fabricated "passed" would let a subsequent financial intent skip the ZIP check.
-    if (!requiresVerify(intentId)) {
-      const accountReply = await buildAccountLookupReply(
-        intentId,
-        organizationId,
-        session.customerId,
-        userMessage,
-      ).catch(() => null);
-      if (accountReply !== null) {
-        return persistAccountTurn(accountReply, verifyState);
-      }
-      // If the dispatch returned null (unrecognized intent), fall through to LLM.
-    } else {
-      // Financial intent — apply the verify gate.
-
-      // Already passed this session → serve directly.
-      if (verifyState?.status === "passed") {
-        const accountReply = await buildAccountLookupReply(
-          intentId,
-          organizationId,
-          session.customerId,
-          userMessage,
-        ).catch(() => null);
-        if (accountReply !== null) {
-          return persistAccountTurn(accountReply, verifyState);
+    // Decide via the shared, unit-tested engine (advanceVerify) — the SAME engine
+    // the chat route uses — so the two channels' financial-verify gates cannot
+    // drift into subtly different (and bypassable) branches. Non-financial intents
+    // serve immediately (state unchanged, never a fabricated "passed"); financial
+    // intents require a ZIP match with a per-call attempt cap.
+    //
+    // Load on-file ZIPs ONLY for a pending financial turn (the one case the engine
+    // checks them) — from the customer's address + every service location.
+    const onFileZips: string[] = [];
+    if (requiresVerify(intentId) && verifyState?.status === "pending") {
+      try {
+        const [custRow] = await db
+          .select({ addressEncrypted: customers.addressEncrypted })
+          .from(customers)
+          .where(withTenant(customers, organizationId, eq(customers.id, session.customerId!)))
+          .limit(1);
+        if (custRow?.addressEncrypted) {
+          try {
+            onFileZips.push(...extractZipsFromAddress(decrypt(custRow.addressEncrypted)));
+          } catch { /* decrypt failure → no ZIP from this source */ }
         }
+      } catch (e: unknown) {
+        logger.error({ error: e, sessionId: session.id }, "voice verify: customer address read failed");
       }
-
-      // Already failed → defer (no re-ask).
-      if (verifyState?.status === "failed") {
-        return persistAccountTurn(VOICE_VERIFY_DEFER, verifyState);
+      try {
+        const locRows = await db
+          .select({ addressEncrypted: customerLocations.addressEncrypted })
+          .from(customerLocations)
+          .where(withTenant(customerLocations, organizationId, eq(customerLocations.customerId, session.customerId!)))
+          .limit(10);
+        for (const loc of locRows) {
+          try {
+            onFileZips.push(...extractZipsFromAddress(decrypt(loc.addressEncrypted)));
+          } catch { /* decrypt failure → skip this location */ }
+        }
+      } catch (e: unknown) {
+        logger.error({ error: e, sessionId: session.id }, "voice verify: location address read failed");
       }
+    }
 
-      // Verify is pending OR not yet started → process the caller's answer.
-      if (verifyState?.status === "pending") {
-        // The verify answer is dtmfDigits (keypad) if present, else the speech.
-        const verifyAnswer = dtmfDigits ?? userMessage;
-        const currentAttempts = verifyState.attempts;
+    const decision = advanceVerify({
+      intentId,
+      state: verifyState,
+      // Keypad digits if the caller keyed them, else the spoken answer.
+      zipAnswer: dtmfDigits ?? userMessage,
+      onFileZips,
+    });
 
-        // Fetch on-file ZIPs from customer.addressEncrypted + all customerLocations.
-        const onFileZips: string[] = [];
-        try {
-          const [custRow] = await db
-            .select({ addressEncrypted: customers.addressEncrypted })
-            .from(customers)
-            .where(withTenant(customers, organizationId, eq(customers.id, session.customerId!)))
-            .limit(1);
-          if (custRow?.addressEncrypted) {
-            try {
-              onFileZips.push(...extractZipsFromAddress(decrypt(custRow.addressEncrypted)));
-            } catch { /* decrypt failure → no ZIP from this source */ }
-          }
-        } catch (e: unknown) {
-          logger.error({ error: e, sessionId: session.id }, "voice verify: customer address read failed");
-        }
-        try {
-          const locRows = await db
-            .select({ addressEncrypted: customerLocations.addressEncrypted })
-            .from(customerLocations)
-            .where(withTenant(customerLocations, organizationId, eq(customerLocations.customerId, session.customerId!)))
-            .limit(10);
-          for (const loc of locRows) {
-            try {
-              onFileZips.push(...extractZipsFromAddress(decrypt(loc.addressEncrypted)));
-            } catch { /* decrypt failure → skip this location */ }
-          }
-        } catch (e: unknown) {
-          logger.error({ error: e, sessionId: session.id }, "voice verify: location address read failed");
-        }
-
-        if (checkZipMatch(verifyAnswer, onFileZips)) {
-          // Match → verify passed. Serve the account data.
-          const passed: VerifyState = { status: "passed", attempts: currentAttempts + 1 };
-          const accountReply = await buildAccountLookupReply(
-            intentId,
-            organizationId,
-            session.customerId,
-            userMessage,
-          ).catch(() => null);
-          return persistAccountTurn(accountReply ?? VOICE_VERIFY_DEFER, passed);
-        } else {
-          // Mismatch. Check if this exhausts the allowed attempts.
-          const newAttempts = currentAttempts + 1;
-          if (newAttempts >= MAX_VERIFY_ATTEMPTS) {
-            const failed: VerifyState = { status: "failed", attempts: newAttempts };
-            return persistAccountTurn(VOICE_VERIFY_DEFER, failed);
-          } else {
-            // Re-ask (attempts < limit).
-            const reasked: VerifyState = { status: "pending", attempts: newAttempts };
-            return persistAccountTurn(VOICE_VERIFY_ASK, reasked, { nextGatherMode: "dtmf_zip" });
-          }
-        }
-      }
-
-      // No verify state yet — this is the first financial ask. Set pending and ask.
-      const initiated: VerifyState = { status: "pending", attempts: 0 };
-      return persistAccountTurn(VOICE_VERIFY_ASK, initiated, { nextGatherMode: "dtmf_zip" });
+    if (decision.kind === "ask") {
+      return persistAccountTurn(VOICE_VERIFY_ASK, decision.verify, { nextGatherMode: "dtmf_zip" });
+    }
+    if (decision.kind === "defer") {
+      return persistAccountTurn(VOICE_VERIFY_DEFER, decision.verify);
+    }
+    // decision.kind === "serve": non-financial, already passed, or a correct ZIP.
+    const accountReply = await buildAccountLookupReply(
+      intentId,
+      organizationId,
+      session.customerId,
+      userMessage,
+    ).catch(() => null);
+    if (accountReply !== null) {
+      return persistAccountTurn(accountReply, decision.verify);
+    }
+    // accountReply === null. If the caller JUST passed the ZIP this turn, persist
+    // the pass + defer (don't make them re-verify on a tool hiccup); otherwise
+    // (a non-financial / unrecognized intent) fall through to the LLM coercion.
+    if (decision.verify?.status === "passed" && verifyState?.status !== "passed") {
+      return persistAccountTurn(VOICE_VERIFY_DEFER, decision.verify);
     }
   }
 
