@@ -21,8 +21,8 @@ A 40-agent workflow re-confirmed, planned, and independently verified all 20 sta
 - **Stages 7 & 20 are `partially-done`** (not greenfield): S7 — HCP availability is cache-only; a literal `technician_availability` mirror is structurally blocked (HCP techs are synthetic), so the plan adapts. S20 — reuse `request_status_events` for the timeline and pass `ADMIN_DOCUMENT_MIME_TYPES` for HEIC (both already exist).
 - **Plan corrections to heed:** S8 — FP address validation is *dead code* on free-text input, so true "parity" = write street unchanged (Photon enrichment would exceed FP). S13 — the proximity weight rebalance breaks 3 score tests, not 1. S15 — window reconstruction must read the BUSINESS-tz hour (not `getUTCHours`), and `isAutoDispatchEnabled` must be exported. S12 — 3 interface touch-points, not 2.
 
-**Verified execution order** (skip 19 & 8; safety/security first, then integration, then dispatch-v2):
-**5** (security parity) → **6** → **9** → **11** → **10** → **7** (Group B) → **12** → **14** → **15** → **13** → **16** → **17** → **18** (Group C) → **20** (Group D). **Done: 1–6, 9.** Closed/no-op: **8** (parity already satisfied), **19** (already shipped).
+**Verified execution order** (skip 19, 8, 11; safety/security first, then integration, then dispatch-v2):
+**5** (security parity) → **6** → **9** → **10** → **7** (Group B) → **12** → **14** → **15** → **13** → **16** → **17** → **18** (Group C) → **20** (Group D). **Done: 1–6, 9.** Closed/no-op: **8** (parity already satisfied), **11** (description-parity; structured form blocked on FP API), **19** (already shipped).
 
 ---
 
@@ -86,10 +86,9 @@ A 40-agent workflow re-confirmed, planned, and independently verified all 20 sta
 - **Do:** Add `housecall-pro/bulk-operations.ts` + `/api/admin/integrations/housecall/bulk-update` if the HCP API supports it; else document HCP-only limitation explicitly.
 - **Verify:** unit test: partial failure reported per-item.
 
-### Stage 11 — FieldPulse job line-items on push **[M]**
-- **Gap:** HCP job push includes cost line-items (`housecall-pro/line-items.ts`); FP job push (`fieldpulse/job-sync.ts`) sends no line items.
-- **Do:** Add line-items to the FP job-create payload if the FP API supports it; align the shape with HCP.
-- **Verify:** unit test: pushed FP job carries the expected line items.
+### Stage 11 — FieldPulse job line-items on push **[M] — ✅ CLOSED at description-parity (verified 2026-06-24); structured form BLOCKED on FP API**
+- **Information parity already exists:** FP's job *description* already conveys the same classification HCP packs into structured line items — `Work Type: {jobType}`, `System: {systemType}`, `Issue`, `Urgency`, `Details`, `Access` (`fieldpulse/job-mapping.ts:buildDescription`). Only the wire-format differs (labelled lines vs a `line_items` array).
+- **Structured FP line items NOT built (BLOCKED — needs user/operator input):** there is **no evidence FieldPulse's `POST /jobs` accepts a `line_items` array** — the codebase only READS `line_items` off `/invoices`. Building it would (a) guess at an external API (risking a silently-4xx-dropped or job-sync-degrading payload) while (b) mirroring an *already-assumed* HCP shape (`client.ts:169` "ASSUMED HCP SHAPE"), and (c) add data redundant with the description. Per "don't guess at external APIs," deferred until **FieldPulse vendor docs / a sandbox confirm `/jobs` line-item support** (operator can confirm). Documented the design choice in `job-mapping.ts` to prevent future churn.
 
 ---
 
