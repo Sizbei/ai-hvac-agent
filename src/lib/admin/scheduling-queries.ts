@@ -746,29 +746,46 @@ async function loadJobClassification(
     : null;
 }
 
-/** Flag a request as system-assigned (cosmetic; drives the board "Auto" badge). */
+/** Flag a request as system-assigned (cosmetic; drives the board "Auto" badge).
+ * Guarded on the assignee we just placed: if a dispatcher manually reassigned the
+ * request in the race window between the assignment and this write, the guard
+ * matches nothing and we don't stamp a false "Auto" badge on a human assignment. */
 async function markAutoAssigned(
   organizationId: string,
   requestId: string,
+  technicianId: string,
 ): Promise<void> {
   await db
     .update(serviceRequests)
     .set({ autoAssigned: true, updatedAt: new Date() })
     .where(
-      withTenant(serviceRequests, organizationId, eq(serviceRequests.id, requestId)),
+      withTenant(
+        serviceRequests,
+        organizationId,
+        and(
+          eq(serviceRequests.id, requestId),
+          eq(serviceRequests.assignedTo, technicianId),
+        )!,
+      ),
     );
 }
 
 /** Build the ranked, skill-matched technician order for a scored auto-assign.
- * Returns [] when no classification exists (nobody is skill-matched → dispatcher). */
+ * Returns [] when the job IS classified but no tech is skill-matched (the hard
+ * gate did its job → leave for a dispatcher). Returns `null` when the job can't
+ * be classified at all (request gone, or no jobType/systemType) — the caller
+ * must then fall back to first-fit, so an opted-in org never auto-assigns LESS
+ * than an opted-out one (no silent regression on unclassified jobs). */
 async function rankedTechnicianOrder(
   organizationId: string,
   requestId: string,
   technicianIds: readonly string[],
   isoDay: string,
-): Promise<string[]> {
+): Promise<string[] | null> {
   const job = await loadJobClassification(organizationId, requestId);
-  if (!job) return [];
+  // Nothing to score on (request missing, or no skill classification captured)
+  // → signal the caller to first-fit rather than stranding the job.
+  if (!job || (job.jobType === null && job.systemType === null)) return null;
   const signalsByTech = await loadDispatchSignals(
     organizationId,
     technicianIds,
@@ -825,16 +842,15 @@ export async function autoAssignBookedRequest(
   if (techs.length === 0) return { assigned: false };
 
   // Scored mode (org opt-in) ranks skill-matched techs best-first; otherwise we
-  // keep today's first-fit (DB order) for zero behavior change.
+  // keep today's first-fit (DB order) for zero behavior change. A job that can't
+  // be classified (rankedTechnicianOrder → null) also falls back to first-fit so
+  // opting in never strands a job that first-fit would have placed.
+  const firstFit = techs.map((t) => t.id);
   const enabled = await isAutoDispatchEnabled(organizationId);
-  const order = enabled
-    ? await rankedTechnicianOrder(
-        organizationId,
-        requestId,
-        techs.map((t) => t.id),
-        heldSlot.isoDay,
-      )
-    : techs.map((t) => t.id);
+  const ranked = enabled
+    ? await rankedTechnicianOrder(organizationId, requestId, firstFit, heldSlot.isoDay)
+    : null;
+  const order = ranked ?? firstFit;
 
   for (const technicianId of order) {
     const result = await placeAndAssignRequest(
@@ -844,7 +860,7 @@ export async function autoAssignBookedRequest(
       { isoDay: heldSlot.isoDay, window: heldSlot.window, technicianId },
     );
     if (result.ok) {
-      await markAutoAssigned(organizationId, requestId);
+      await markAutoAssigned(organizationId, requestId, technicianId);
       return { assigned: true, technicianId };
     }
     // A conflict (busy) or a tech deactivated mid-flight just means THIS tech

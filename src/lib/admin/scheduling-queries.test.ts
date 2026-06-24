@@ -782,14 +782,25 @@ describe("autoAssignBookedRequest (scored vs first-fit)", () => {
     expect(result).toEqual({ assigned: true, technicianId: T2 });
   });
 
-  it("enabled with no skill-matched tech → {assigned:false} (degrade-safe)", async () => {
+  it("enabled with no skill-matched tech → {assigned:false} (gate did its job)", async () => {
     selectQueue.push([{ id: T1 }, { id: T2 }]); // active techs
     selectQueue.push([{ enabled: true }]); // isAutoDispatchEnabled
-    selectQueue.push([{ jobType: "no_cool", systemType: "central_ac", urgency: "standard" }]); // classification
-    rankedState.order = []; // ranker drops everyone (nobody qualified)
+    selectQueue.push([{ jobType: "no_cool", systemType: "central_ac", urgency: "standard" }]); // classified
+    rankedState.order = []; // classified, but ranker drops everyone (nobody qualified)
 
     const result = await autoAssignBookedRequest(ORG, REQ, HELD);
     expect(result).toEqual({ assigned: false });
+  });
+
+  it("enabled but job has NO classification → falls back to first-fit (no regression)", async () => {
+    selectQueue.push([{ id: T1 }, { id: T2 }]); // active techs
+    selectQueue.push([{ enabled: true }]); // isAutoDispatchEnabled
+    selectQueue.push([{ jobType: null, systemType: null, urgency: "standard" }]); // unclassified
+    // rankedTechnicianOrder returns null → order = first-fit (DB order); T1 wins.
+    queueSuccessfulPlacement(T1);
+
+    const result = await autoAssignBookedRequest(ORG, REQ, HELD);
+    expect(result).toEqual({ assigned: true, technicianId: T1 });
   });
 
   it("no active technicians → {assigned:false} without reading settings", async () => {
