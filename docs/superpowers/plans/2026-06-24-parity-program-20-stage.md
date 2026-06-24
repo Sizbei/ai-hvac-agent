@@ -72,10 +72,11 @@ A 40-agent workflow re-confirmed, planned, and independently verified all 20 sta
 - **Do:** Apply the shared address-validation path in `housecall-pro/customer-sync.ts`.
 - **Verify:** unit test: low-quality address → flagged/normalized identically to FP.
 
-### Stage 9 — HCP client rate limiter **[M, reliability]**
-- **Gap:** FP has a token-bucket adaptive limiter (`fieldpulse/rate-limiter.ts`); the HCP client has none.
-- **Do:** Wrap the HCP client calls with the same limiter pattern (extract a shared limiter if clean).
-- **Verify:** unit test: burst calls throttled; 429 backoff honored.
+### Stage 9 — HCP client rate limiter **[M, reliability] — ✅ DONE 2026-06-24**
+- **Was real:** HCP had only per-request retry; FP has a token-bucket adaptive limiter.
+- **Done (the verified approach, not a naive client wrap):** **extracted** the token-bucket `RateLimiter` to `integrations/shared/rate-limiter.ts` (with a local `RateLimitInfo` to keep the dependency arrow one-way), left `fieldpulse/rate-limiter.ts` as a re-export shim (**FP suites pass unchanged → proves the extract is behavior-preserving**), and added a `housecallRateLimiter` singleton + a `withHcpRateLimit(orgId, fn)` consumer helper (wait → reportSuccess / reportThrottle-on-429). It sits at the BATCH layer like FP's `bulk-operations`, NOT around `client.request()` (which already retries 429/5xx — wrapping would double-handle). 4 new HCP tests (success/throttle/non-429/per-org isolation).
+- **Scope (matches FP precedent):** the limiter + helper are the deliverable; the live consumer is **Stage 10 (HCP bulk-ops)** — FP's limiter is likewise consumed only by bulk-ops, never by wrapping the client. No forced call-site wire (would over-build vs the template).
+- **Verify:** ✅ tsc + lint + full suite (2884, incl. unchanged FP rate-limiter + bulk-ops suites) + build; no DB/prompt/money/safety surfaces (limiter is in-memory, keyed by orgId = tenant scope).
 
 ### Stage 10 — HCP bulk operations + admin endpoint **[M, ops]**
 - **Gap:** FP has chunked bulk-update with partial-success/retries (`fieldpulse/bulk-operations.ts` + `/api/admin/integrations/fieldpulse/bulk-update`); HCP has no equivalent.
