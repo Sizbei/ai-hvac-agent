@@ -1000,6 +1000,51 @@ describe("voiceReply financial verify (WS3)", () => {
     expect(verify?.status).toBe("failed");
   });
 
+  it("advances verify on a bare-ZIP answer turn even when the router returns FALLBACK (Stage 5b)", async () => {
+    // The REAL router classifies a bare ZIP as FALLBACK (not ACCOUNT_LOOKUP) — the
+    // v2-review dead-end. The verify answer turn must still be handled, or
+    // pending→passed is unreachable. NOTE: we do NOT mock routeMessage to
+    // ACCOUNT_LOOKUP here (that masking is exactly what hid the bug).
+    const sessionWithPending = {
+      ...balanceSession,
+      metadata: JSON.stringify({ verify: { status: "pending", attempts: 0 } }),
+    };
+    routeMock.mockReturnValue({
+      action: "FALLBACK_LLM",
+      intentId: null,
+      confidence: 0,
+      reply: null,
+      issueType: null,
+      urgency: null,
+      escalate: false,
+    });
+    selectLimitMock.mockReset();
+    selectLimitMock
+      .mockResolvedValueOnce([{ doNotService: false }]) // do-not-service gate
+      .mockResolvedValueOnce([{ addressEncrypted: "212 E Unaka Ave, Johnson City, TN 37601" }]) // customer address
+      .mockResolvedValue([]); // locations
+
+    const result = await voiceReply({
+      session: sessionWithPending,
+      history: [],
+      userMessage: "37601",
+      ipAddress: "127.0.0.1",
+      dtmfDigits: "37601",
+    });
+
+    // Verify advanced to passed (unreachable before the fix); the answer turn does
+    // NOT speak the balance (it never serves data — caller re-asks next turn), and
+    // it does NOT fall through to the LLM.
+    const setCall = updateSetMock.mock.calls.find(
+      (c: unknown[]) => typeof (c[0] as Record<string, unknown>).metadata === "string",
+    );
+    expect(setCall).toBeDefined();
+    const meta = JSON.parse((setCall![0] as Record<string, unknown>).metadata as string) as Record<string, unknown>;
+    expect((meta.verify as Record<string, unknown>)?.status).toBe("passed");
+    expect(result.reply).not.toContain("$");
+    expect(generateTextMock).not.toHaveBeenCalled();
+  });
+
   it("falls through to FALLBACK_LLM when customerId is absent (no account lookup)", async () => {
     const sessionNoCustomer = { ...balanceSession, customerId: null as string | null };
     selectLimitMock.mockReset();

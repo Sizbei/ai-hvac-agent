@@ -28,6 +28,8 @@ import { buildAccountLookupReply } from "./account-dispatch";
 import {
   requiresVerify,
   advanceVerify,
+  advanceVerifyAnswer,
+  looksLikeZipAnswer,
   extractZipsFromAddress,
   type VerifyState,
 } from "./account-verify";
@@ -156,6 +158,12 @@ const VOICE_VERIFY_ASK =
 const VOICE_VERIFY_DEFER =
   "I can't confirm that over the phone right now — I'll have our team follow up, or you can check your account online. Anything else I can help with?";
 
+/** Spoken when a correct ZIP arrives as a bare reply to the challenge. We don't
+ * store which intent issued it, so we confirm + invite the re-ask (the next turn
+ * classifies as ACCOUNT_LOOKUP and serves the data, now verified). */
+const VOICE_VERIFY_PASSED =
+  "Thanks — you're verified. What would you like to know — your balance or your membership?";
+
 export interface VoiceSession {
   readonly id: string;
   readonly organizationId: string;
@@ -283,23 +291,34 @@ export async function voiceReply(params: {
   const routed = routeMessage(userMessage, knownSlots, routerConfig);
 
   // ── Account lookup + financial verify gate (WS3) ──
-  // When the router signals ACCOUNT_LOOKUP AND we have a resolved caller, handle
-  // it here — either serve the account data (non-financial intents or passed
-  // verify) or gate financial intents behind a ZIP verification step.
-  // Falls through to the LLM coercion below only when customerId is absent.
-  if (routed.action === "ACCOUNT_LOOKUP" && session.customerId) {
-    const intentId = routed.intentId ?? null;
+  // Read the persisted verify state (top-level "verify" key, outside the slots)
+  // BEFORE the gate, so we also catch a bare-ZIP ANSWER turn: a caller replying
+  // to the challenge with just their ZIP (DTMF keypad, or a spoken/typed 5-digit)
+  // produces a message the keyword router classifies as FALLBACK, not
+  // ACCOUNT_LOOKUP — without this, pending→passed is unreachable (the v2-review
+  // dead-end).
+  let verifyState: VerifyState | null = null;
+  try {
+    const rawMeta = session.metadata ? (JSON.parse(session.metadata) as Record<string, unknown>) : null;
+    const v = rawMeta?.verify as Partial<VerifyState> | undefined;
+    if (v && (v.status === "pending" || v.status === "passed" || v.status === "failed")) {
+      verifyState = { status: v.status, attempts: v.attempts ?? 0 };
+    }
+  } catch { /* ignore parse errors */ }
 
-    // Read the persisted verify state from the metadata (stored under a top-level
-    // "verify" key, outside the extraction slots, so it survives slot merges).
-    let verifyState: VerifyState | null = null;
-    try {
-      const rawMeta = session.metadata ? (JSON.parse(session.metadata) as Record<string, unknown>) : null;
-      const v = rawMeta?.verify as Partial<VerifyState> | undefined;
-      if (v && (v.status === "pending" || v.status === "passed" || v.status === "failed")) {
-        verifyState = { status: v.status, attempts: v.attempts ?? 0 };
-      }
-    } catch { /* ignore parse errors */ }
+  const isVerifyAnswerTurn =
+    !!session.customerId &&
+    verifyState?.status === "pending" &&
+    routed.action !== "ACCOUNT_LOOKUP" &&
+    (Boolean(dtmfDigits) || looksLikeZipAnswer(userMessage));
+
+  // When the router signals ACCOUNT_LOOKUP AND we have a resolved caller (OR this
+  // is the bare-ZIP answer turn for a pending challenge), handle it here — either
+  // serve the account data (non-financial intents or passed verify) or gate
+  // financial intents behind a ZIP verification step.
+  // Falls through to the LLM coercion below only when customerId is absent.
+  if ((routed.action === "ACCOUNT_LOOKUP" || isVerifyAnswerTurn) && session.customerId) {
+    const intentId = routed.intentId ?? null;
 
     /**
      * Helper: persist the assistant turn + verify state and return the result.
@@ -355,7 +374,7 @@ export async function voiceReply(params: {
     // Load on-file ZIPs ONLY for a pending financial turn (the one case the engine
     // checks them) — from the customer's address + every service location.
     const onFileZips: string[] = [];
-    if (requiresVerify(intentId) && verifyState?.status === "pending") {
+    if ((requiresVerify(intentId) || isVerifyAnswerTurn) && verifyState?.status === "pending") {
       try {
         const [custRow] = await db
           .select({ addressEncrypted: customers.addressEncrypted })
@@ -384,6 +403,21 @@ export async function voiceReply(params: {
       } catch (e: unknown) {
         logger.error({ error: e, sessionId: session.id }, "voice verify: location address read failed");
       }
+    }
+
+    // Stage 5b: the bare-ZIP ANSWER turn (router said FALLBACK). Advance the
+    // verify state from the keyed/spoken ZIP. SAFETY: this NEVER serves account
+    // data — on a pass it invites the re-ask, which the next turn serves via the
+    // normal path now that verify is "passed" — so it cannot leak.
+    if (isVerifyAnswerTurn && verifyState) {
+      const answer = advanceVerifyAnswer(verifyState, dtmfDigits ?? userMessage, onFileZips);
+      if (answer.kind === "serve") {
+        return persistAccountTurn(VOICE_VERIFY_PASSED, answer.verify);
+      }
+      if (answer.kind === "ask") {
+        return persistAccountTurn(VOICE_VERIFY_ASK, answer.verify, { nextGatherMode: "dtmf_zip" });
+      }
+      return persistAccountTurn(VOICE_VERIFY_DEFER, answer.verify);
     }
 
     const decision = advanceVerify({
