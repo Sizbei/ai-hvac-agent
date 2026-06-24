@@ -16,8 +16,21 @@
  * the runtime net and the CI gate can never drift apart.
  */
 
-/** A committed dollar amount: "$200", "$ 1,200", "costs $99". */
+/** A committed dollar amount with the symbol: "$200", "$ 1,200", "costs $99". */
 export const PRICE_REGEX = /\$\s?\d/;
+
+/**
+ * A spoken/written dollar amount WITHOUT the "$" symbol: "200 dollars", "fifty
+ * bucks", "two hundred dollars", "1,200 dollars". TTS never renders a literal
+ * "$", so on the voice channel the model is MORE likely to emit these forms —
+ * {@link PRICE_REGEX} alone misses them. To keep false positives near zero, a
+ * number (digits OR number-words) must sit CONTIGUOUSLY before "dollars"/"bucks"
+ * (only spaces/hyphens between), so "ten years … we accept dollars" does NOT
+ * match. (Residual gap: a bare "two-fifty" with no currency word still slips
+ * through — acceptable; the currency word is what makes a match unambiguous.)
+ */
+export const PRICE_WORD_REGEX =
+  /\b(?:\d[\d,]*(?:\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|grand)(?:[\s-](?:hundred|thousand|grand|one|two|three|four|five|six|seven|eight|nine|ten|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety))*[\s-]*(?:dollars?|bucks)\b/i;
 
 /**
  * A false-booking claim — language that asserts a confirmed appointment. The bot
@@ -106,7 +119,7 @@ const SAFE_BOTH_REPLY =
  */
 export function screenAssistantReply(text: string): ReplyScreenResult {
   const violations: ReplyViolation[] = [];
-  if (PRICE_REGEX.test(text)) violations.push("pricing");
+  if (PRICE_REGEX.test(text) || PRICE_WORD_REGEX.test(text)) violations.push("pricing");
   if (FALSE_BOOKING_REGEX.test(text)) violations.push("false-booking");
   if (DANGEROUS_DIY_REGEX.test(text)) violations.push("dangerous-diy");
   if (CREDENTIAL_REGEX.test(text)) violations.push("credentials");
