@@ -1206,10 +1206,18 @@ export async function POST(request: NextRequest) {
           });
           const escMetadata = hasSlotData(escMerged)
             ? JSON.stringify(
-                buildExtraction(
-                  escMerged,
-                  (conversationHistory.find((m) => m.role === "user")
-                    ?.content ?? guardrailResult.sanitized).slice(0, 280),
+                // preserveVerifyKey: keep the financial-verify lockout across this
+                // 4th metadata rebuild (the escalation path) too. Non-exploitable
+                // today (escalation is terminal, so the next turn is blocked), but
+                // kept consistent with the other three rebuild sites for
+                // defense-in-depth should escalation ever become non-terminal.
+                preserveVerifyKey(
+                  buildExtraction(
+                    escMerged,
+                    (conversationHistory.find((m) => m.role === "user")
+                      ?.content ?? guardrailResult.sanitized).slice(0, 280),
+                  ),
+                  session.metadata,
                 ),
               )
             : session.metadata;
