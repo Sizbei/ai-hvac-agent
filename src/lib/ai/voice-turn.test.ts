@@ -80,9 +80,15 @@ vi.mock("@/lib/crypto", () => ({
 vi.mock("@/lib/admin/after-hours", () => ({
   resolveAfterHoursConfig: (v: unknown) => v ?? { enabled: false, startHour: 8, endHour: 18, weekendsAreAfterHours: false, timezone: "UTC" },
 }));
-vi.mock("./after-hours-chat", () => ({
-  decideAfterHoursDisclosure: (...args: unknown[]) => decideAfterHoursDisclosureMock(...args),
-}));
+vi.mock("./after-hours-chat", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./after-hours-chat")>();
+  return {
+    // Keep the real pure helpers (e.g. inferBookingTarget); only the
+    // decision is controlled per-test.
+    ...actual,
+    decideAfterHoursDisclosure: (...args: unknown[]) => decideAfterHoursDisclosureMock(...args),
+  };
+});
 
 vi.mock("./escalate-service", () => ({ escalateSession: escalateMock }));
 vi.mock("./intent-router", () => ({ routeMessage: routeMock }));

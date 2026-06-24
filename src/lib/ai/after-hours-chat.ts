@@ -129,6 +129,35 @@ function isUrgentUrgency(urgency: Urgency | null): boolean {
  * as a normal business-hours visit with no charge, so a customer chatting at
  * 11pm for a tomorrow-morning appointment is never threatened with a fee.
  */
+/**
+ * Derive the best-available booking target from the customer's stated preferred
+ * window and urgency signal — the proxy `decideAfterHoursDisclosure` uses to
+ * avoid threatening an after-hours charge for a request that will plainly be
+ * serviced during business hours (Fix 2). Shared by both the web chat and the
+ * voice agent so the two channels agree.
+ *
+ * A stated daytime window ("morning"/"afternoon"/"evening") maps to
+ * `business_hours` and deliberately OVERRIDES the urgency heuristic; `"asap"`
+ * maps to `now`. With no window, we fall back to the urgency signal. Anything
+ * else is `"unknown"` (the helper then leans on urgency classification).
+ */
+export function inferBookingTarget(
+  preferredWindow: unknown,
+  customerSignal: CustomerUrgencySignal,
+): BookingTarget {
+  if (preferredWindow === "asap") return "now";
+  if (
+    preferredWindow === "morning" ||
+    preferredWindow === "afternoon" ||
+    preferredWindow === "evening"
+  ) {
+    return "business_hours";
+  }
+  if (customerSignal === "not_urgent") return "business_hours";
+  if (customerSignal === "urgent") return "now";
+  return "unknown";
+}
+
 export function decideAfterHoursDisclosure(
   input: AfterHoursDecisionInput,
 ): AfterHoursDecision {

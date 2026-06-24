@@ -15,15 +15,12 @@
 
 ## Group A — Voice ↔ Chat parity (safety & trust first)
 
-### Stage 1 — Voice post-reply safety screening **[H, SAFETY]**
-- **Gap:** Chat screens every LLM fallback reply through `screenAssistantReply` (dangerous-DIY / pricing / false-booking / credential detectors) at `src/lib/ai/output-guardrail.ts`; **voice has no post-reply backstop** (prompt-enforced only). A jailbroken voice turn could leak pricing or a false booking claim undetected.
-- **Do:** Route the voice agent's final utterance through `screenAssistantReply` before TTS in `src/lib/ai/voice-turn.ts` (the generateText result path). Reuse the existing detectors; on a hit, substitute the deterministic safe reply.
-- **Verify:** unit tests for each detector firing on a voice reply; `npm run eval` 30/30 unaffected.
+### Stage 1 — Voice post-reply safety screening **[H, SAFETY] — ✅ ALREADY DONE**
+- **Re-confirmed 2026-06-24:** the gap is closed in current code. `voice-turn.ts:943-954` already routes the LLM reply through `screenAssistantReply` (all four detectors: pricing / false-booking / dangerous-diy / credentials) before TTS and persist. The original audit was stale. No work needed.
 
-### Stage 2 — After-hours booking-target inference on voice **[H, money/trust]**
-- **Gap:** Chat maps a stated preferred window ("tomorrow morning") to `business_hours` so it doesn't falsely warn of an after-hours charge (`after-hours-chat.ts` "Fix 2"). Voice does **not** — a caller after-hours saying "tomorrow morning" is still told a fee applies.
-- **Do:** Extend voice's `decideAfterHoursDisclosure` call in `voice-turn.ts` to infer `bookingTarget` from the extracted `preferred_window` (mirror the chat path).
-- **Verify:** unit test: after-hours call + future-daytime preferred window → no charge disclosure.
+### Stage 2 — After-hours booking-target inference on voice **[H, money/trust] — ✅ DONE 2026-06-24**
+- **Was real:** voice passed no `bookingTarget`, so an after-hours caller wanting a daytime slot was wrongly warned of a charge.
+- **Done:** extracted `inferBookingTarget` from the chat route into shared `after-hours-chat.ts` (DRY, now unit-tested), and voice (`voice-turn.ts`) now computes + passes `bookingTarget` from the preferred window — parity with chat's Fix 2. Commit pairs the refactor + wiring; full suite green.
 
 ### Stage 3 — Voice service-history enrichment **[M]**
 - **Gap:** Chat enriches a resolved repeat customer with a PII-free one-liner via `enrichWithServiceHistory` (`src/lib/ai/customer-context.ts`); voice only gets raw counts, so it can't personalize.

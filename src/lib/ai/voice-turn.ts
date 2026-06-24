@@ -18,7 +18,7 @@ import { customerSessions, messages, customers, customerLocations, organizationS
 import { withTenant } from "@/lib/db/tenant";
 import { decrypt } from "@/lib/crypto";
 import { resolveAfterHoursConfig } from "@/lib/admin/after-hours";
-import { decideAfterHoursDisclosure } from "./after-hours-chat";
+import { decideAfterHoursDisclosure, inferBookingTarget } from "./after-hours-chat";
 import { checkTokenBudget, addTokenUsage } from "./token-budget";
 import { buildAccountLookupReply } from "./account-dispatch";
 import {
@@ -782,6 +782,10 @@ export async function voiceReply(params: {
           config: ahConfig,
           urgency: (merged.urgency as Urgency | null) ?? null,
           customerSignal: "unknown",
+          // Parity with web chat (Fix 2): a stated daytime window means the visit
+          // is a business-hours booking, so a caller phoning at 11pm for a
+          // tomorrow-morning slot is never threatened with an after-hours charge.
+          bookingTarget: inferBookingTarget(merged.extras?.preferredWindow, "unknown"),
         });
         const alreadyShown = merged.extras?.afterHoursShown === "1";
         if (ahDecision.kind === "disclose_charge" && !alreadyShown) {

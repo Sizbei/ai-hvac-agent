@@ -15,7 +15,7 @@ import {
 } from "@/lib/admin/after-hours";
 import {
   decideAfterHoursDisclosure,
-  type BookingTarget,
+  inferBookingTarget,
   type CustomerUrgencySignal,
 } from "@/lib/ai/after-hours-chat";
 import { withTenant } from "@/lib/db/tenant";
@@ -165,40 +165,6 @@ function parseUrgencyAnswer(message: string): "low" | "medium" | "high" | "emerg
   if (/\b(this week|few days|couple days|medium)\b/.test(m)) return "medium";
   if (/\b(routine|whenever|no rush|not urgent|can wait|low|sometime)\b/.test(m)) return "low";
   return null;
-}
-
-/**
- * Infer WHEN the customer wants the service to happen — the signal that gates
- * the after-hours charge (Fix 2). The charge is keyed to when the technician
- * goes out, NOT when the customer is chatting, so a request explicitly for a
- * business-hours window must never trigger a charge even if chatting at 11pm.
- *
- * Sources, in priority order:
- *   1. The customer's stated preferred window (extras.preferredWindow):
- *      morning/afternoon/evening → business_hours; asap → now.
- *   2. The yes/no answer to our after-hours urgency ask: not_urgent →
- *      business_hours; urgent → now.
- * Otherwise "unknown" — fall back to urgency classification in the helper.
- *
- * Note we deliberately do NOT map a high/emergency urgency to "now" here; the
- * helper already handles urgency directly, and a stated business-hours window
- * should be able to override that heuristic.
- */
-function inferBookingTarget(
-  preferredWindow: unknown,
-  customerSignal: CustomerUrgencySignal,
-): BookingTarget {
-  if (preferredWindow === "asap") return "now";
-  if (
-    preferredWindow === "morning" ||
-    preferredWindow === "afternoon" ||
-    preferredWindow === "evening"
-  ) {
-    return "business_hours";
-  }
-  if (customerSignal === "not_urgent") return "business_hours";
-  if (customerSignal === "urgent") return "now";
-  return "unknown";
 }
 
 /** True when the current instant falls in the org's after-hours window — used

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   decideAfterHoursDisclosure,
+  inferBookingTarget,
   type AfterHoursDecision,
 } from "./after-hours-chat";
 import { DEFAULT_AFTER_HOURS_CONFIG } from "@/lib/admin/after-hours";
@@ -156,5 +157,33 @@ describe("decideAfterHoursDisclosure", () => {
       });
       expect(d.kind).toBe("none");
     });
+  });
+});
+
+describe("inferBookingTarget", () => {
+  it("maps 'asap' to now", () => {
+    expect(inferBookingTarget("asap", "unknown")).toBe("now");
+  });
+
+  it("maps daytime windows to business_hours", () => {
+    expect(inferBookingTarget("morning", "unknown")).toBe("business_hours");
+    expect(inferBookingTarget("afternoon", "unknown")).toBe("business_hours");
+    expect(inferBookingTarget("evening", "unknown")).toBe("business_hours");
+  });
+
+  it("a stated business-hours window overrides an urgent signal", () => {
+    // The documented behavior: a daytime window beats the urgency heuristic so
+    // a caller who wants "tomorrow morning" is never threatened with a charge.
+    expect(inferBookingTarget("morning", "urgent")).toBe("business_hours");
+  });
+
+  it("falls back to the urgency signal when no window is stated", () => {
+    expect(inferBookingTarget(undefined, "not_urgent")).toBe("business_hours");
+    expect(inferBookingTarget(undefined, "urgent")).toBe("now");
+  });
+
+  it("returns 'unknown' when neither a window nor a clear signal is present", () => {
+    expect(inferBookingTarget(undefined, "unknown")).toBe("unknown");
+    expect(inferBookingTarget("whenever", "unknown")).toBe("unknown");
   });
 });
