@@ -49,14 +49,24 @@ function JobCard({
         <span className="text-sm font-medium tabular-nums">
           {formatTime(job.arrivalWindowStart)}
         </span>
-        {job.isAfterHours && (
-          <span
-            title="After hours"
-            className="inline-flex shrink-0 items-center rounded-full border border-amber-300 bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800"
-          >
-            After-hrs
-          </span>
-        )}
+        <div className="flex shrink-0 items-center gap-1">
+          {job.autoAssigned && (
+            <span
+              title="Auto-assigned by smart dispatch"
+              className="inline-flex items-center rounded-full border border-sky-300 bg-sky-100 px-1.5 py-0.5 text-[10px] font-medium text-sky-800"
+            >
+              Auto
+            </span>
+          )}
+          {job.isAfterHours && (
+            <span
+              title="After hours"
+              className="inline-flex items-center rounded-full border border-amber-300 bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800"
+            >
+              After-hrs
+            </span>
+          )}
+        </div>
       </div>
       <div className="mt-0.5 truncate text-sm">{job.customerName ?? 'Unknown'}</div>
       <div className="truncate text-xs text-muted-foreground">

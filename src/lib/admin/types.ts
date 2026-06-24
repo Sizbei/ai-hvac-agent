@@ -155,6 +155,7 @@ export interface DashboardRequest {
   readonly arrivalWindowEnd: string | null;
   readonly followUpDate: string | null;
   readonly holdReason: string | null;
+  readonly autoAssigned: boolean;
   readonly createdAt: string;
 }
 

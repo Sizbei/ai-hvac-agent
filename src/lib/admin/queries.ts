@@ -968,6 +968,7 @@ const dashboardRequestSelect = {
   arrivalWindowEnd: serviceRequests.arrivalWindowEnd,
   followUpDate: serviceRequests.followUpDate,
   holdReason: serviceRequests.holdReason,
+  autoAssigned: serviceRequests.autoAssigned,
   createdAt: serviceRequests.createdAt,
 } as const;
 
@@ -984,6 +985,7 @@ type DashboardRequestRow = {
   readonly arrivalWindowEnd: Date | null;
   readonly followUpDate: Date | null;
   readonly holdReason: string | null;
+  readonly autoAssigned: boolean;
   readonly createdAt: Date;
 };
 
@@ -1001,6 +1003,7 @@ function toDashboardRequest(row: DashboardRequestRow): DashboardRequest {
     arrivalWindowEnd: row.arrivalWindowEnd?.toISOString() ?? null,
     followUpDate: row.followUpDate?.toISOString() ?? null,
     holdReason: row.holdReason,
+    autoAssigned: row.autoAssigned,
     createdAt: row.createdAt.toISOString(),
   };
 }
