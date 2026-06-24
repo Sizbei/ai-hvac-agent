@@ -3,6 +3,7 @@ import {
   addJobMaterial,
   removeJobMaterial,
   getActualMaterialsCostCents,
+  getJobTimelineForTech,
 } from "./field-queries";
 import { db } from "@/lib/db";
 import { getPricebookItemById } from "@/lib/admin/pricebook-queries";
@@ -234,5 +235,39 @@ describe("getActualMaterialsCostCents", () => {
     mockSelectSeq([[]]);
     const total = await getActualMaterialsCostCents(ORG, JOB);
     expect(total).toBe(0);
+  });
+});
+
+describe("getJobTimelineForTech", () => {
+  it("returns the ordered, PII-free status timeline for an owned job", async () => {
+    const at1 = new Date("2026-06-24T10:00:00.000Z");
+    const at2 = new Date("2026-06-24T12:30:00.000Z");
+    mockSelectSeq([
+      [{ id: JOB }], // ownership guard → owned
+      [
+        { fromStatus: null, toStatus: "pending", actorType: "ai", at: at1 },
+        { fromStatus: "pending", toStatus: "assigned", actorType: "system", at: at2 },
+      ],
+    ]);
+
+    const res = await getJobTimelineForTech(ORG, TECH, JOB);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.timeline).toEqual([
+      { fromStatus: null, toStatus: "pending", actorType: "ai", at: at1.toISOString() },
+      { fromStatus: "pending", toStatus: "assigned", actorType: "system", at: at2.toISOString() },
+    ]);
+  });
+
+  it("refuses a job not assigned to the tech (not_owned)", async () => {
+    mockSelectSeq([[]]); // ownership guard misses
+    const res = await getJobTimelineForTech(ORG, "other-tech", JOB);
+    expect(res).toEqual({ ok: false, reason: "not_owned" });
+  });
+
+  it("returns an empty timeline for an owned job with no events", async () => {
+    mockSelectSeq([[{ id: JOB }], []]);
+    const res = await getJobTimelineForTech(ORG, TECH, JOB);
+    expect(res).toEqual({ ok: true, timeline: [] });
   });
 });

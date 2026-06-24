@@ -14,7 +14,12 @@
  */
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { jobMaterials, requestNotes, serviceRequests } from "@/lib/db/schema";
+import {
+  jobMaterials,
+  requestNotes,
+  requestStatusEvents,
+  serviceRequests,
+} from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { getPricebookItemById } from "@/lib/admin/pricebook-queries";
 import { adjustStock } from "@/lib/admin/inventory-queries";
@@ -307,4 +312,60 @@ export async function addFieldNote(
     throw new Error("Failed to record field note");
   }
   return { ok: true, id: created.id };
+}
+
+/** A single status transition in a job's timeline. PII-free: statuses + actor
+ *  KIND + timestamp only (no actorId/name). */
+export interface JobTimelineEntry {
+  readonly fromStatus: string | null;
+  readonly toStatus: string;
+  readonly actorType: string;
+  readonly at: string; // ISO-8601
+}
+
+export type JobTimelineResult =
+  | { readonly ok: true; readonly timeline: readonly JobTimelineEntry[] }
+  | { readonly ok: false; readonly reason: "not_owned" };
+
+/**
+ * The status-transition timeline for a job the tech owns (read-only). Reuses the
+ * append-only request_status_events log (already written on every transition).
+ * Assignee + tenant guarded like every other field query; PII-free (no actorId).
+ */
+export async function getJobTimelineForTech(
+  organizationId: string,
+  techUserId: string,
+  serviceRequestId: string,
+): Promise<JobTimelineResult> {
+  const owned = await findOwnedJob(organizationId, techUserId, serviceRequestId);
+  if (!owned) {
+    return { ok: false, reason: "not_owned" };
+  }
+
+  const rows = await db
+    .select({
+      fromStatus: requestStatusEvents.fromStatus,
+      toStatus: requestStatusEvents.toStatus,
+      actorType: requestStatusEvents.actorType,
+      at: requestStatusEvents.at,
+    })
+    .from(requestStatusEvents)
+    .where(
+      withTenant(
+        requestStatusEvents,
+        organizationId,
+        eq(requestStatusEvents.serviceRequestId, serviceRequestId),
+      ),
+    )
+    .orderBy(asc(requestStatusEvents.at));
+
+  return {
+    ok: true,
+    timeline: rows.map((r) => ({
+      fromStatus: r.fromStatus,
+      toStatus: r.toStatus,
+      actorType: r.actorType,
+      at: r.at.toISOString(),
+    })),
+  };
 }
