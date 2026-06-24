@@ -92,8 +92,16 @@ import {
   enrichWithServiceHistory,
   type CustomerContext,
 } from "@/lib/ai/customer-context";
-import { customers } from "@/lib/db/schema";
+import { customers, customerLocations } from "@/lib/db/schema";
 import { buildAccountLookupReply } from "@/lib/ai/account-dispatch";
+import {
+  advanceVerify,
+  requiresVerify,
+  extractZipsFromAddress,
+  preserveVerifyKey,
+  type VerifyState,
+} from "@/lib/ai/account-verify";
+import { decrypt } from "@/lib/crypto";
 import { logger } from "@/lib/logger";
 // The deterministic router is on by default; set ROUTER_ENABLED=false to disable
 // it (kill-switch) and route every turn through the LLM.
@@ -106,6 +114,75 @@ const ESCALATION_NOTE =
 // same refusal whether they reach the flag mid-chat or at confirm time.
 const DO_NOT_SERVICE_REPLY =
   "We're unable to book this online. Please call our office so we can help you directly.";
+
+// Financial-account verify gate (Stage 5, parity with voice's VOICE_VERIFY_*).
+// Text-channel wording — no DTMF/keypad phrasing; the customer types the ZIP back.
+const CHAT_VERIFY_ASK =
+  "To pull up your account details, can you confirm the 5-digit ZIP code on your account?";
+const CHAT_VERIFY_DEFER =
+  "I can't confirm that here right now — our team can follow up, or you can check your account online. Anything else I can help with?";
+
+/** Parse session metadata JSON into an object, or null when absent/unparseable. */
+function parseSessionMeta(meta: string | null): Record<string, unknown> | null {
+  if (!meta) return null;
+  try {
+    const parsed = JSON.parse(meta);
+    return parsed && typeof parsed === "object"
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * On-file 5-digit ZIPs for the financial-verify gate: from the customer's own
+ * address plus all their service locations, org-scoped and decrypted. Mirrors
+ * the voice path (voice-turn.ts). Degrade-safe: any read/decrypt failure yields
+ * fewer ZIPs (never throws) — and an empty result can never auto-pass the gate.
+ */
+async function loadChatOnFileZips(
+  organizationId: string,
+  customerId: string,
+  sessionId: string,
+): Promise<string[]> {
+  const zips: string[] = [];
+  try {
+    const [custRow] = await db
+      .select({ addressEncrypted: customers.addressEncrypted })
+      .from(customers)
+      .where(withTenant(customers, organizationId, eq(customers.id, customerId)))
+      .limit(1);
+    if (custRow?.addressEncrypted) {
+      try {
+        zips.push(...extractZipsFromAddress(decrypt(custRow.addressEncrypted)));
+      } catch {
+        /* decrypt failure → no ZIP from this source */
+      }
+    }
+  } catch (e: unknown) {
+    logger.error({ error: e, sessionId }, "chat verify: customer address read failed");
+  }
+  try {
+    const locRows = await db
+      .select({ addressEncrypted: customerLocations.addressEncrypted })
+      .from(customerLocations)
+      .where(
+        withTenant(customerLocations, organizationId, eq(customerLocations.customerId, customerId)),
+      )
+      .limit(10);
+    for (const loc of locRows) {
+      try {
+        zips.push(...extractZipsFromAddress(decrypt(loc.addressEncrypted)));
+      } catch {
+        /* decrypt failure → skip this location */
+      }
+    }
+  } catch (e: unknown) {
+    logger.error({ error: e, sessionId }, "chat verify: location address read failed");
+  }
+  return zips;
+}
 
 // Behavioral instruction appended to the LLM system prompt (as a separate block,
 // NOT a rewrite of the brand persona) when the request is currently after-hours.
@@ -834,21 +911,33 @@ export async function POST(request: NextRequest) {
       // deterministic path, which uses the verdict's canned identify-ask reply
       // (no leak). buildAccountLookupReply maps the intentId to the right tool.
       if (verdict.action === "ACCOUNT_LOOKUP" && accountCustomerId) {
-        const accountReply = await buildAccountLookupReply(
-          verdict.intentId,
-          organizationId,
-          accountCustomerId,
-          guardrailResult.sanitized,
-        ).catch((accountError: unknown) => {
-          logger.error(
-            { error: accountError, sessionId: session.id, intentId: verdict.intentId },
-            "Account-lookup failed — degrading to handoff copy",
-          );
-          return null;
+        // FINANCIAL-VERIFY GATE (Stage 5, parity with voice): balance /
+        // membership-status are only read aloud after a ZIP match; voice already
+        // gates these and chat must not be a weaker channel. The decision is the
+        // shared pure engine (advanceVerify) so the two channels can't drift.
+        const existingMeta = parseSessionMeta(session.metadata);
+        const verifyState =
+          (existingMeta?.verify as VerifyState | undefined) ?? null;
+        // Only a pending financial turn needs the (more expensive) ZIP read.
+        const needZips =
+          requiresVerify(verdict.intentId) && verifyState?.status === "pending";
+        const onFileZips = needZips
+          ? await loadChatOnFileZips(organizationId, accountCustomerId, session.id)
+          : [];
+        const decision = advanceVerify({
+          intentId: verdict.intentId,
+          state: verifyState,
+          zipAnswer: guardrailResult.sanitized,
+          onFileZips,
         });
 
-        if (accountReply !== null) {
-          const replyText = accountReply + (nearTurnLimit ? ESCALATION_NOTE : "");
+        // Persist a deterministic account/verify turn — merging the verify state
+        // into metadata (preserving all slots) and returning. Defined inline to
+        // share the messages + session writes + telemetry across the 3 outcomes.
+        const finishAccountTurn = async (
+          replyText: string,
+          verifyToPersist: VerifyState | null,
+        ): Promise<Response> => {
           await db.insert(messages).values({
             organizationId,
             sessionId: session.id,
@@ -858,7 +947,20 @@ export async function POST(request: NextRequest) {
           });
           await db
             .update(customerSessions)
-            .set({ turnCount: newTurnCount, updatedAt: new Date() })
+            .set({
+              turnCount: newTurnCount,
+              // Only write metadata when there's verify state to persist; never
+              // fabricate a verify key on a turn that didn't produce one.
+              ...(verifyToPersist !== null
+                ? {
+                    metadata: JSON.stringify({
+                      ...(existingMeta ?? {}),
+                      verify: verifyToPersist,
+                    }),
+                  }
+                : {}),
+              updatedAt: new Date(),
+            })
             .where(sessionScope);
           logger.info(
             {
@@ -883,9 +985,46 @@ export async function POST(request: NextRequest) {
             }),
           );
           return cannedTextResponse(replyText);
+        };
+
+        if (decision.kind === "ask") {
+          return finishAccountTurn(CHAT_VERIFY_ASK, decision.verify);
         }
-        // accountReply === null (unknown intent or a read failed): fall through
-        // to the normal path, which degrades gracefully.
+        if (decision.kind === "defer") {
+          return finishAccountTurn(CHAT_VERIFY_DEFER, decision.verify);
+        }
+        // decision.kind === "serve": cleared the gate (non-financial, already
+        // passed, or a correct ZIP this turn) — read the account data.
+        const accountReply = await buildAccountLookupReply(
+          verdict.intentId,
+          organizationId,
+          accountCustomerId,
+          guardrailResult.sanitized,
+        ).catch((accountError: unknown) => {
+          logger.error(
+            { error: accountError, sessionId: session.id, intentId: verdict.intentId },
+            "Account-lookup failed — degrading to handoff copy",
+          );
+          return null;
+        });
+
+        if (accountReply !== null) {
+          return finishAccountTurn(
+            accountReply + (nearTurnLimit ? ESCALATION_NOTE : ""),
+            decision.verify,
+          );
+        }
+        // accountReply === null (unknown intent / read failed). If the customer
+        // JUST passed the ZIP check this turn, persist the pass + defer so they
+        // aren't forced to re-verify on a retry; otherwise fall through to the
+        // normal deterministic path, which degrades gracefully.
+        if (
+          decision.verify?.status === "passed" &&
+          verifyState?.status !== "passed"
+        ) {
+          return finishAccountTurn(CHAT_VERIFY_DEFER, decision.verify);
+        }
+        // fall through to the normal path.
       }
 
       // Multi-field capture: pull EVERY recognizable contact field from this one
@@ -1283,7 +1422,13 @@ export async function POST(request: NextRequest) {
             firstUserMessage.slice(0, 280),
           );
           extractionComplete = isExtractionComplete(extraction);
-          metadataStr = JSON.stringify(extraction);
+          // Preserve the financial-verify lockout (Stage 5): buildExtraction does
+          // NOT round-trip the top-level `verify` key, so without this an
+          // intervening intake turn would wipe a pending ZIP lockout and reset
+          // the attempt counter — re-attach it from the prior metadata.
+          metadataStr = JSON.stringify(
+            preserveVerifyKey(extraction, session.metadata),
+          );
         }
 
         // Stage 5.2: if the next thing to ask is the preferred-window step AND
@@ -1508,22 +1653,27 @@ export async function POST(request: NextRequest) {
         // Persist the conversation-style state (empathy-once flag, re-ask counter,
         // frustration running score/offered) so the next turn — deterministic OR
         // LLM — stays coherent. Folded into the metadata extras in one write.
+        // preserveVerifyKey re-attaches the financial-verify lockout (Stage 5),
+        // which buildExtraction does not round-trip.
         metadataStr = JSON.stringify(
-          buildExtraction(
-            mergeSlots(merged, {
-              extras: {
-                ...afterHoursExtras,
-                ...(emittedLeadIn ? { empathyShown: "1" } : {}),
-                reAskStepId: reAsk.stepId ?? "",
-                reAskCount: reAsk.count,
-                frustrationScore: frustration.total,
-                ...(offerHuman ? { frustrationOffered: "1" } : {}),
-              },
-            }),
-            (
-              conversationHistory.find((m) => m.role === "user")?.content ??
-              guardrailResult.sanitized
-            ).slice(0, 280),
+          preserveVerifyKey(
+            buildExtraction(
+              mergeSlots(merged, {
+                extras: {
+                  ...afterHoursExtras,
+                  ...(emittedLeadIn ? { empathyShown: "1" } : {}),
+                  reAskStepId: reAsk.stepId ?? "",
+                  reAskCount: reAsk.count,
+                  frustrationScore: frustration.total,
+                  ...(offerHuman ? { frustrationOffered: "1" } : {}),
+                },
+              }),
+              (
+                conversationHistory.find((m) => m.role === "user")?.content ??
+                guardrailResult.sanitized
+              ).slice(0, 280),
+            ),
+            session.metadata,
           ),
         );
 
@@ -1792,8 +1942,15 @@ export async function POST(request: NextRequest) {
             // Always write the merged extraction (the merge never nulls a
             // filled slot); only fall back to the FRESH metadata, not the stale
             // request-time snapshot, when there's nothing to write.
+            // preserveVerifyKey re-attaches the financial-verify lockout (Stage 5)
+            // from the FRESHEST metadata, which buildExtraction does not carry.
             metadata: hasSlotData(merged)
-              ? JSON.stringify(mergedExtraction)
+              ? JSON.stringify(
+                  preserveVerifyKey(
+                    mergedExtraction,
+                    fresh?.metadata ?? session.metadata,
+                  ),
+                )
               : (fresh?.metadata ?? session.metadata),
             updatedAt: new Date(),
           })
