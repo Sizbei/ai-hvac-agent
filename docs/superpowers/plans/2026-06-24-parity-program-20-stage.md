@@ -28,10 +28,10 @@
 - **Sub-deferred (with reason):** the HCP `enrichWithServiceHistory` *note* (prior-service one-liner) is an EXTERNAL fetch; adding it to every voice LLM turn would put network latency on the latency-bound spoken turn. Needs a once-per-call cache (e.g. resolve+enrich at call start in `voice/incoming`, stash a compact hint on the session). Tracked as a follow-up; core recognition lands now with no external call.
 - **Note:** appended the existing vetted chat hint to the voice system prompt; `hvac-knowledge.ts` frozen safety blocks untouched. Recommend `npm run eval` 30/30 when keys are available (couldn't run headless).
 
-### Stage 4 — Chat repeat-customer resolution at session start **[M]**
-- **Gap:** Voice auto-resolves identity via ANI (`src/lib/voice/resolve-voice-identity.ts`); chat only resolves once the user types an email and does not pre-populate from a known contact at session start, forcing re-asks.
-- **Do:** In `src/app/api/chat/route.ts` session init, if an email is supplied (widget context / prior session), resolve via the email blind index and pre-load `lookupCustomerContext`.
-- **Verify:** unit test: known email at init → name/address pre-populated, no re-ask.
+### Stage 4 — Chat customer-context persistence on linked sessions **[M] — ✅ DONE 2026-06-24**
+- **Was real (and sharper than the audit framing):** chat only resolved `customerContext` for an UNLINKED session (`!session.customerId && (email||phone)`). Once linked (turn 2+, or a resumed session), the load gate only ran the do-not-service check and never re-built the context — so the returning-customer hint + name pre-fill **vanished after turn 1**. The in-code comment even wrongly claimed "the load gate above handles linked sessions."
+- **Done:** chat now loads context by id (reusing Stage 3's `loadCustomerContextById`) on every turn of a linked session, degrade-safe; the email/phone resolution is unchanged for unlinked sessions (still links + enforces do-not-service mid-turn). This subsumes the "email supplied upfront" case (the widget/resume links the session → next turn hydrates by id) and achieves true voice↔chat persistence parity. Stale comment corrected.
+- **Verify:** `loadCustomerContextById` + `buildCustomerContextHint` are unit-tested (Stage 3); the route has no unit-test harness, so verified via `tsc` + full suite + `npm run build` (all green).
 
 ### Stage 5 — Reconcile the account-data verify gate across channels **[H, SECURITY]**
 - **Gap (confirm first):** Voice gates financial account-lookup intents behind a ZIP-verify state machine (`src/lib/ai/account-verify.ts`, `voice-turn.ts`); the audit reports chat serves the same intents without a verify step. **This contradicts [[voice-chatbot-parity]]** which lists the ZIP-verify gate as shipped — so Stage 1 step is to verify which is actually true in `src/app/api/chat/route.ts`.

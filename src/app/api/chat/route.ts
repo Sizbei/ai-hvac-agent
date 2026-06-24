@@ -87,6 +87,7 @@ import { buildModelMessages, MAX_HISTORY, type ChatTurn } from "@/lib/ai/compact
 import { compactSessionIfNeeded } from "@/lib/ai/compact-session";
 import {
   lookupCustomerContext,
+  loadCustomerContextById,
   buildCustomerContextHint,
   enrichWithServiceHistory,
   type CustomerContext,
@@ -655,18 +656,38 @@ export async function POST(request: NextRequest) {
       extras: { ...(knownSlots.extras ?? {}) },
     });
 
-    // Repeat-customer awareness: as soon as an email or phone is known (from a
-    // prior turn's metadata OR a contact slot in THIS message), resolve any
-    // existing customer — WITHOUT creating one — so we can (a) personalize the
-    // reply, (b) enforce do-not-service early, and (c) skip re-asking the name.
-    // A single indexed blind-index lookup; wrapped so a CRM blip degrades to
-    // "no context" and never blocks the streamed reply. Only when the session
-    // isn't already linked (the load gate above handles linked sessions).
+    // Repeat-customer awareness, every turn — so personalization (name greeting,
+    // skip re-asking, prior-service note) persists for the whole conversation:
+    //  - LINKED session (customerId already set on a prior turn or a resume):
+    //    load the context by id. Without this the hint vanished after turn 1.
+    //  - UNLINKED session: as soon as an email or phone is known (prior-turn
+    //    metadata OR a contact slot in THIS message), resolve any existing
+    //    customer WITHOUT creating one, link the session, and enforce
+    //    do-not-service mid-turn.
+    // Either path is a single indexed lookup, wrapped so a CRM blip degrades to
+    // "no context" and never blocks the streamed reply.
     const turnSlots = extractSlots(guardrailResult.sanitized);
     const resolvedEmail = knownSlots.email ?? turnSlots.email ?? null;
     const resolvedPhone = knownSlots.phone ?? turnSlots.phone ?? null;
     let customerContext: CustomerContext | null = null;
-    if (!session.customerId && (resolvedEmail || resolvedPhone)) {
+    if (session.customerId) {
+      // Already-linked session (resolved on a prior turn, or resumed): load the
+      // context by id so the returning-customer hint + name pre-fill PERSIST on
+      // every later turn — without this, personalization vanished after turn 1
+      // (the email-based branch below only fires for an unlinked session). Parity
+      // with the voice path. Do-not-service was already enforced by the load gate
+      // above, so this branch only re-hydrates context; degrade-safe.
+      customerContext = await loadCustomerContextById(
+        organizationId,
+        session.customerId,
+      ).catch((loadError: unknown) => {
+        logger.error(
+          { error: loadError, sessionId: session.id },
+          "Customer-context load by id failed — continuing without context",
+        );
+        return null;
+      });
+    } else if (resolvedEmail || resolvedPhone) {
       customerContext = await lookupCustomerContext(organizationId, {
         email: resolvedEmail,
         phone: resolvedPhone,
