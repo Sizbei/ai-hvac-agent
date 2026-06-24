@@ -15,6 +15,7 @@
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
+  attachments,
   jobMaterials,
   requestNotes,
   requestStatusEvents,
@@ -368,4 +369,84 @@ export async function getJobTimelineForTech(
       at: r.at.toISOString(),
     })),
   };
+}
+
+export interface JobPhotoInput {
+  readonly filename: string;
+  readonly mimeType: string;
+  readonly size: number;
+  readonly storageKey: string;
+}
+
+export type AddJobPhotoResult =
+  | { readonly ok: true; readonly id: string }
+  | { readonly ok: false; readonly reason: "not_owned" };
+
+/**
+ * Record a job photo the tech uploaded. The file itself lives in R2 (uploaded by
+ * the route); this stores the metadata in the shared `attachments` table linked
+ * to the service request (the Stage-7 serviceRequestId link). Assignee + tenant
+ * guarded — a tech may only attach to their OWN job.
+ */
+export async function addJobPhoto(
+  organizationId: string,
+  techUserId: string,
+  serviceRequestId: string,
+  input: JobPhotoInput,
+): Promise<AddJobPhotoResult> {
+  const owned = await findOwnedJob(organizationId, techUserId, serviceRequestId);
+  if (!owned) {
+    return { ok: false, reason: "not_owned" };
+  }
+
+  const [created] = await db
+    .insert(attachments)
+    .values({
+      organizationId,
+      serviceRequestId,
+      filename: input.filename,
+      mimeType: input.mimeType,
+      size: input.size,
+      storageKey: input.storageKey,
+    })
+    .returning({ id: attachments.id });
+
+  if (!created) {
+    throw new Error("Failed to record job photo");
+  }
+  return { ok: true, id: created.id };
+}
+
+export interface JobPhotoRow {
+  readonly id: string;
+  readonly filename: string;
+  readonly mimeType: string;
+  readonly size: number;
+  readonly storageKey: string;
+  readonly createdAt: Date;
+}
+
+/** List the attachments linked to a job (org-scoped), oldest first. */
+export async function listJobPhotos(
+  organizationId: string,
+  serviceRequestId: string,
+): Promise<readonly JobPhotoRow[]> {
+  return db
+    .select({
+      id: attachments.id,
+      filename: attachments.filename,
+      mimeType: attachments.mimeType,
+      size: attachments.size,
+      storageKey: attachments.storageKey,
+      createdAt: attachments.createdAt,
+    })
+    .from(attachments)
+    .where(
+      withTenant(
+        attachments,
+        organizationId,
+        eq(attachments.serviceRequestId, serviceRequestId),
+      ),
+    )
+    .orderBy(asc(attachments.createdAt));
 }
