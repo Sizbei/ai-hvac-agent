@@ -29,7 +29,12 @@ import {
   organizationSettings,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
-import { rankTechnicians, type DispatchSignals } from "@/lib/ai/dispatch/score";
+import { logger } from "@/lib/logger";
+import {
+  rankTechnicians,
+  type DispatchSignals,
+  type RankedTech,
+} from "@/lib/ai/dispatch/score";
 import { loadDispatchSignals } from "@/lib/ai/dispatch/signals";
 import { isTerminal, type RequestStatus } from "./request-status";
 import { isWindowWithinAvailability } from "./availability-coverage";
@@ -781,7 +786,7 @@ async function rankedTechnicianOrder(
   requestId: string,
   technicianIds: readonly string[],
   isoDay: string,
-): Promise<string[] | null> {
+): Promise<RankedTech[] | null> {
   const job = await loadJobClassification(organizationId, requestId);
   // Nothing to score on (request missing, or no skill classification captured)
   // → signal the caller to first-fit rather than stranding the job.
@@ -804,7 +809,7 @@ async function rankedTechnicianOrder(
       },
     };
   });
-  return rankTechnicians(candidates).map((r) => r.technicianId);
+  return rankTechnicians(candidates);
 }
 
 /**
@@ -850,7 +855,10 @@ export async function autoAssignBookedRequest(
   const ranked = enabled
     ? await rankedTechnicianOrder(organizationId, requestId, firstFit, heldSlot.isoDay)
     : null;
-  const order = ranked ?? firstFit;
+  // ranked === null  → unclassifiable (or disabled) → first-fit (DB order).
+  // ranked === []    → classified but the skill gate dropped everyone → no order.
+  const order = ranked ? ranked.map((r) => r.technicianId) : firstFit;
+  const rankedById = new Map(ranked?.map((r) => [r.technicianId, r]) ?? []);
 
   for (const technicianId of order) {
     const result = await placeAndAssignRequest(
@@ -861,6 +869,20 @@ export async function autoAssignBookedRequest(
     );
     if (result.ok) {
       await markAutoAssigned(organizationId, requestId, technicianId);
+      // Scored placement → record the explainable decision so an operator can
+      // answer "why this tech?". First-fit placements have no score to log.
+      const decision = rankedById.get(technicianId);
+      if (decision) {
+        logger.info(
+          {
+            serviceRequestId: requestId,
+            technicianId,
+            score: Number(decision.score.toFixed(3)),
+            reasons: decision.reasons,
+          },
+          "Auto-dispatch: scored assignment",
+        );
+      }
       return { assigned: true, technicianId };
     }
     // A conflict (busy) or a tech deactivated mid-flight just means THIS tech

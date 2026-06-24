@@ -133,8 +133,12 @@ vi.mock("@/lib/db/schema", () => ({
 // queue) and rankTechnicians (so the test controls the candidate order). The
 // real placeAndAssignRequest still runs, driven by the db queue, so we observe
 // WHICH tech the orchestrator tried first via the returned technicianId.
-const { rankedState } = vi.hoisted(() => ({
+const { rankedState, loggerInfo } = vi.hoisted(() => ({
   rankedState: { order: [] as string[] },
+  loggerInfo: vi.fn(),
+}));
+vi.mock("@/lib/logger", () => ({
+  logger: { info: loggerInfo, warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 vi.mock("@/lib/ai/dispatch/signals", () => ({
   // Mirror the real loader's contract: a defaulted entry for every requested
@@ -188,6 +192,7 @@ beforeEach(() => {
   insertMock.mockClear();
   batchMock.mockClear();
   batchMock.mockResolvedValue([]);
+  loggerInfo.mockClear();
 });
 
 describe("getTechnicianAvailability", () => {
@@ -769,6 +774,8 @@ describe("autoAssignBookedRequest (scored vs first-fit)", () => {
 
     const result = await autoAssignBookedRequest(ORG, REQ, HELD);
     expect(result).toEqual({ assigned: true, technicianId: T1 });
+    // First-fit has no score → nothing logged as a scored decision.
+    expect(loggerInfo).not.toHaveBeenCalled();
   });
 
   it("enabled: tries technicians in ranked order (best first)", async () => {
@@ -780,6 +787,11 @@ describe("autoAssignBookedRequest (scored vs first-fit)", () => {
 
     const result = await autoAssignBookedRequest(ORG, REQ, HELD);
     expect(result).toEqual({ assigned: true, technicianId: T2 });
+    // The scored decision is logged so an operator can audit "why this tech?".
+    expect(loggerInfo).toHaveBeenCalledWith(
+      expect.objectContaining({ serviceRequestId: REQ, technicianId: T2 }),
+      "Auto-dispatch: scored assignment",
+    );
   });
 
   it("enabled with no skill-matched tech → {assigned:false} (gate did its job)", async () => {
