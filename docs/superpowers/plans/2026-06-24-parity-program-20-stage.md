@@ -11,12 +11,25 @@
 - Each stage is self-contained and independently shippable: spec (if design choices) → plan → TDD → gates (`tsc`, `lint`, `test:unit`, `build`) → commit on branch.
 - **Preserve invariants:** frozen-safety-text in `hvac-knowledge.ts` (run `npm run eval` 30/30 after any prompt edit), money-safety guards (synced invoices read-only → 409), `metadata.verify` survival through voice gather extraction, tenant scoping (`withTenant`), no secrets/PII.
 
+## Plan & Review verification (2026-06-24)
+
+A 40-agent workflow re-confirmed, planned, and independently verified all 20 stages against current code. **Full per-stage plans, reviews, and verifier corrections live in [`2026-06-24-parity-review-results.md`](./2026-06-24-parity-review-results.md)** — read that before implementing any stage. Headline outcomes:
+
+- **Shipped Stages 1–4: all `shipped-correct`** (verifiers sound/minor). No code bugs found in merged work; only doc-precision nits (e.g. the Stage 1 line cite, fixed above). A latent cross-channel safety gap (spoken-form prices bypass `PRICE_REGEX`) is noted for a future detector-hardening stage — not a parity regression.
+- **Stage 19 is `already-closed`** — membership plans already have an edit/detail flow + PATCH (the audit premise was stale). Drop it from the backlog.
+- **Stage 5 contradiction resolved → `real-gap`:** chat genuinely lacks the ZIP-verify gate. **Security-critical plan correction:** the gate must wire `preserveVerifyKey` into chat's metadata writes (`route.ts:1286/1511` + the `1730-1797` re-read), or an intervening intake turn wipes the lockout → unlimited ZIP retries. Do not implement S5 without this.
+- **Stages 7 & 20 are `partially-done`** (not greenfield): S7 — HCP availability is cache-only; a literal `technician_availability` mirror is structurally blocked (HCP techs are synthetic), so the plan adapts. S20 — reuse `request_status_events` for the timeline and pass `ADMIN_DOCUMENT_MIME_TYPES` for HEIC (both already exist).
+- **Plan corrections to heed:** S8 — FP address validation is *dead code* on free-text input, so true "parity" = write street unchanged (Photon enrichment would exceed FP). S13 — the proximity weight rebalance breaks 3 score tests, not 1. S15 — window reconstruction must read the BUSINESS-tz hour (not `getUTCHours`), and `isAutoDispatchEnabled` must be exported. S12 — 3 interface touch-points, not 2.
+
+**Verified execution order** (skip 19; safety/security first, then integration, then dispatch-v2):
+**5** (security parity) → **6** → **9** → **8** → **11** → **10** → **7** (Group B) → **12** → **14** → **15** → **13** → **16** → **17** → **18** (Group C) → **20** (Group D). Stages 1–4 done; 19 closed.
+
 ---
 
 ## Group A — Voice ↔ Chat parity (safety & trust first)
 
 ### Stage 1 — Voice post-reply safety screening **[H, SAFETY] — ✅ ALREADY DONE**
-- **Re-confirmed 2026-06-24:** the gap is closed in current code. `voice-turn.ts:943-954` already routes the LLM reply through `screenAssistantReply` (all four detectors: pricing / false-booking / dangerous-diy / credentials) before TTS and persist. The original audit was stale. No work needed.
+- **Re-confirmed 2026-06-24:** the gap is closed in current code. `voice-turn.ts:971` (`screenAssistantReply(text)`) already routes the LLM reply through all four detectors (pricing / false-booking / dangerous-diy / credentials) before TTS and persist; the screened text is what is both spoken (`:978`) and persisted (`:986`). The original audit was stale. No work needed. (Latent cross-channel gap, not a regression: `PRICE_REGEX` only catches `$`-prefixed numerals, so spoken-form prices — "two hundred dollars" — pass on BOTH voice and chat; tracked for a future detector-hardening stage.)
 
 ### Stage 2 — After-hours booking-target inference on voice **[H, money/trust] — ✅ DONE 2026-06-24**
 - **Was real:** voice passed no `bookingTarget`, so an after-hours caller wanting a daytime slot was wrongly warned of a charge.
@@ -47,7 +60,7 @@
 - **Do:** Add `src/lib/integrations/housecall-pro/technician-sync.ts` mirroring the FP pattern (admin-triggered upsert of real techs via the HCP client).
 - **Verify:** unit test for upsert/dedupe; existing FP test as the template.
 
-### Stage 7 — HCP durable availability sync **[M]**
+### Stage 7 — HCP durable availability sync **[M] — ⚠️ PARTIALLY-DONE (see results doc; a literal `technician_availability` mirror is structurally blocked — HCP techs are synthetic)**
 - **Gap:** FP syncs availability to the `technician_availability` table via cron (`fieldpulse/availability-sync.ts` + `cron/sync-fieldpulse-availability`); HCP is cache-only (30s TTL, no persistence) via `housecall-pro/scheduling-source.ts`.
 - **Do:** Add an HCP availability sync to persist into `technician_availability` + a cron, mirroring FP. Decide cache-vs-DB consistency.
 - **Verify:** unit test for mapping HCP windows → availability rows.
@@ -115,12 +128,15 @@
 
 ## Group D — Highest-leverage half-built surfaces
 
-### Stage 19 — Membership plans edit flow **[M, CRUD completeness]**
+### Stage 19 — Membership plans edit flow **[M] — ✅ ALREADY CLOSED (verified 2026-06-24)**
+- **Re-confirmed:** the edit/detail flow + PATCH already exist (the audit premise was stale). Drop from the backlog. See results doc for evidence.
+
+#### (original gap, now obsolete)
 - **Gap:** Plans can be created/deleted but **not edited** — no `/admin/membership-plans/[id]` page and no PATCH (`src/app/api/admin/membership-plans/route.ts` has POST only). Editing means delete + recreate.
 - **Do:** Add the detail/edit page + a PATCH route (guard active-subscription side effects).
 - **Verify:** unit/integration test for update; existing list test unaffected.
 
-### Stage 20 — Tech portal mutations (photos / notes / timeline) **[M, field UX]**
+### Stage 20 — Tech portal mutations (photos / notes / timeline) **[M] — ⚠️ PARTIALLY-DONE (see results doc: reuse `request_status_events` for the timeline; pass `ADMIN_DOCUMENT_MIME_TYPES` for HEIC — both already exist)**
 - **Gap:** The tech portal is read-only + mark-complete (`src/app/tech/jobs/[id]/page.tsx`); no photo upload, job notes, or timeline. No `/api/tech/*` mutation endpoints.
 - **Do:** Add tech-scoped endpoints for job notes + photo attachment + a timeline view, reusing existing storage/notes patterns.
 - **Verify:** integration test for a tech adding a note/photo to an assigned job (tenant + role scoped).
