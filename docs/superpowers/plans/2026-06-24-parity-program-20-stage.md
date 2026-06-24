@@ -21,8 +21,8 @@ A 40-agent workflow re-confirmed, planned, and independently verified all 20 sta
 - **Stages 7 & 20 are `partially-done`** (not greenfield): S7 — HCP availability is cache-only; a literal `technician_availability` mirror is structurally blocked (HCP techs are synthetic), so the plan adapts. S20 — reuse `request_status_events` for the timeline and pass `ADMIN_DOCUMENT_MIME_TYPES` for HEIC (both already exist).
 - **Plan corrections to heed:** S8 — FP address validation is *dead code* on free-text input, so true "parity" = write street unchanged (Photon enrichment would exceed FP). S13 — the proximity weight rebalance breaks 3 score tests, not 1. S15 — window reconstruction must read the BUSINESS-tz hour (not `getUTCHours`), and `isAutoDispatchEnabled` must be exported. S12 — 3 interface touch-points, not 2.
 
-**Verified execution order** (skip 19; safety/security first, then integration, then dispatch-v2):
-**5** (security parity) → **6** → **9** → **8** → **11** → **10** → **7** (Group B) → **12** → **14** → **15** → **13** → **16** → **17** → **18** (Group C) → **20** (Group D). Stages 1–4 done; 19 closed.
+**Verified execution order** (skip 19 & 8; safety/security first, then integration, then dispatch-v2):
+**5** (security parity) → **6** → **9** → **11** → **10** → **7** (Group B) → **12** → **14** → **15** → **13** → **16** → **17** → **18** (Group C) → **20** (Group D). **Done: 1–6, 9.** Closed/no-op: **8** (parity already satisfied), **19** (already shipped).
 
 ---
 
@@ -67,10 +67,13 @@ A 40-agent workflow re-confirmed, planned, and independently verified all 20 sta
 - **Do:** Add an HCP availability sync to persist into `technician_availability` + a cron, mirroring FP. Decide cache-vs-DB consistency.
 - **Verify:** unit test for mapping HCP windows → availability rows.
 
-### Stage 8 — HCP address validation on customer sync **[M]**
-- **Gap:** FP validates addresses before sync (`fieldpulse/address-validation.ts`, Photon + geocode fallback); HCP customer-sync accepts free-text street only.
-- **Do:** Apply the shared address-validation path in `housecall-pro/customer-sync.ts`.
-- **Verify:** unit test: low-quality address → flagged/normalized identically to FP.
+### Stage 8 — HCP address validation on customer sync **[M] — ✅ CLOSED (no-op): parity already satisfied (verified 2026-06-24)**
+- **The "gap" is illusory.** FP's address validation is **dead code on the free-text customer-sync path**, verified against the code:
+  - HCP `customer-sync.ts:85` writes `{ street: contact.address }` as-is (no validation).
+  - FP `customer-sync.ts:92` only validates `if (contact.address && hasMinimumAddressQuality({ street: contact.address }))`.
+  - `hasMinimumAddressQuality` (`address-validation.ts:299`) returns `street && (city || state || zip)`. The path supplies **only a street** (our `customers.addressEncrypted` is one free-text field) → city/state/zip undefined → **always false** → FP takes the `else if` branch and writes `{ street }` as-is. Photon/geocode are **never reached**.
+- **Therefore HCP already matches FP's actual runtime behavior** (both write street-as-is). Building Photon enrichment for HCP would make it **exceed** FP — an asymmetry, the opposite of parity, and over-building. **Skip.**
+- **Separate finding (NOT a parity gap — user's call):** FP's `hasMinimumAddressQuality({ street })` guard makes its own validation unreachable for single-field free-text addresses. If address normalization is actually wanted, the real fix is to make validation fire for free-text on the FP path (then mirror to HCP) — a shared improvement, tracked here, not built autonomously since it changes (improves) live FP behavior beyond a parity bar.
 
 ### Stage 9 — HCP client rate limiter **[M, reliability] — ✅ DONE 2026-06-24**
 - **Was real:** HCP had only per-request retry; FP has a token-bucket adaptive limiter.
