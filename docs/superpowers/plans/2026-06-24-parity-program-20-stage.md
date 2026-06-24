@@ -81,10 +81,13 @@ A 40-agent workflow re-confirmed, planned, and independently verified all 20 sta
 - **Scope (matches FP precedent):** the limiter + helper are the deliverable; the live consumer is **Stage 10 (HCP bulk-ops)** — FP's limiter is likewise consumed only by bulk-ops, never by wrapping the client. No forced call-site wire (would over-build vs the template).
 - **Verify:** ✅ tsc + lint + full suite (2884, incl. unchanged FP rate-limiter + bulk-ops suites) + build; no DB/prompt/money/safety surfaces (limiter is in-memory, keyed by orgId = tenant scope).
 
-### Stage 10 — HCP bulk operations + admin endpoint **[M, ops]**
-- **Gap:** FP has chunked bulk-update with partial-success/retries (`fieldpulse/bulk-operations.ts` + `/api/admin/integrations/fieldpulse/bulk-update`); HCP has no equivalent.
-- **Do:** Add `housecall-pro/bulk-operations.ts` + `/api/admin/integrations/housecall/bulk-update` if the HCP API supports it; else document HCP-only limitation explicitly.
-- **Verify:** unit test: partial failure reported per-item.
+### Stage 10 — HCP bulk operations + admin endpoint **[M, ops] — 🟡 QUEUED (scoped; ~500-LOC port → a focused multi-tick effort, not a tick-end rush)**
+- **Gap:** FP has chunked bulk-update w/ partial-success/retries (`fieldpulse/bulk-operations.ts` + `/api/admin/integrations/fieldpulse/bulk-update`); HCP has none.
+- **Refined approach (assessed 2026-06-24):**
+  - **Option A (arbitrary status) is BLOCKED:** HCP `UpdateJobInput`/`updateJob` (`client.ts:399`) have **no `work_status`** field — only `cancelJob` (`PUT /jobs/{id}/cancel`) and `addJobNote` (`POST /jobs/{id}/notes`, note: "ASSUMED HCP SHAPE") mutate a job. A verbatim FP port (`updateJob({workStatus})`) would silently no-op.
+  - **Do Option B:** `BulkJobOperation = {hcpJobId, serviceRequestId, action: 'note'|'cancel', note?}` (drop `workStatus`). Port FP's bounded-worker-pool + validate + error-aggregation; `processSingleUpdate` → `cancelJob`/`addJobNote`. **Wire the Stage-9 limiter** (`withHcpRateLimit(orgId, fn)` — now exists) around each item — this also gives Stage 9's limiter its live consumer. Then the admin route (`/api/admin/integrations/housecall/bulk-update`, mirror FP route: `getAdminSession` 401, `slidingWindow(admin:housecall-bulk:…, adminMutation)`, `Array.isArray` body guard, `getHousecallClient` → NOT_CONFIGURED, clientId=`org:${orgId}`). No DB writes (pure HCP API + session) → no neon-http concern.
+  - **Document** the no-arbitrary-status limitation (HCP-only) per the plan's escape hatch — do NOT add an unverified `work_status` path.
+- **Verify:** unit tests — partial failure per-item, order preserved, continueOnError abort, validate rejects bad action / missing note / >1000; route tests (401/400/NOT_CONFIGURED/happy/tenant-scope).
 
 ### Stage 11 — FieldPulse job line-items on push **[M] — ✅ CLOSED at description-parity (verified 2026-06-24); structured form BLOCKED on FP API**
 - **Information parity already exists:** FP's job *description* already conveys the same classification HCP packs into structured line items — `Work Type: {jobType}`, `System: {systemType}`, `Issue`, `Urgency`, `Details`, `Access` (`fieldpulse/job-mapping.ts:buildDescription`). Only the wire-format differs (labelled lines vs a `line_items` array).
