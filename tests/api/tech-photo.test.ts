@@ -8,15 +8,19 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const {
   mockGetAdminSession,
   mockAddJobPhoto,
+  mockListJobPhotos,
   mockValidateFile,
   mockUploadFile,
   mockDeleteFile,
+  mockGetSignedReadUrl,
 } = vi.hoisted(() => ({
   mockGetAdminSession: vi.fn(),
   mockAddJobPhoto: vi.fn(),
+  mockListJobPhotos: vi.fn(),
   mockValidateFile: vi.fn(),
   mockUploadFile: vi.fn(),
   mockDeleteFile: vi.fn(),
+  mockGetSignedReadUrl: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/session", () => ({
@@ -24,6 +28,7 @@ vi.mock("@/lib/auth/session", () => ({
 }));
 vi.mock("@/lib/tech/field-queries", () => ({
   addJobPhoto: (...a: unknown[]) => mockAddJobPhoto(...a),
+  listJobPhotos: (...a: unknown[]) => mockListJobPhotos(...a),
 }));
 vi.mock("@/lib/storage/r2-client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/storage/r2-client")>();
@@ -33,6 +38,7 @@ vi.mock("@/lib/storage/r2-client", async (importOriginal) => {
       validateFile: (...a: unknown[]) => mockValidateFile(...a),
       uploadFile: (...a: unknown[]) => mockUploadFile(...a),
       deleteFile: (...a: unknown[]) => mockDeleteFile(...a),
+      getSignedReadUrl: (...a: unknown[]) => mockGetSignedReadUrl(...a),
     }),
   };
 });
@@ -44,7 +50,7 @@ vi.mock("@/lib/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-import { POST } from "@/app/api/tech/jobs/[id]/photo/route";
+import { POST, GET } from "@/app/api/tech/jobs/[id]/photo/route";
 import { NextRequest } from "next/server";
 
 const ORG = "00000000-0000-0000-0000-000000000001";
@@ -117,5 +123,37 @@ describe("POST /api/tech/jobs/[id]/photo", () => {
     expect(res.status).toBe(404);
     // The just-uploaded file is cleaned up.
     expect(mockDeleteFile).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("GET /api/tech/jobs/[id]/photo", () => {
+  const getReq = () => new NextRequest("http://test/api/tech/jobs/job-1/photo");
+
+  it("401s without a session", async () => {
+    mockGetAdminSession.mockResolvedValue(null);
+    const res = await GET(getReq(), { params });
+    expect(res.status).toBe(401);
+  });
+
+  it("returns an empty list without touching storage", async () => {
+    mockListJobPhotos.mockResolvedValue([]);
+    const res = await GET(getReq(), { params });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.photos).toEqual([]);
+    // No storage client work when there's nothing to sign.
+    expect(mockGetSignedReadUrl).not.toHaveBeenCalled();
+  });
+
+  it("signs each photo's key into a display URL", async () => {
+    mockListJobPhotos.mockResolvedValue([
+      { id: "a1", filename: "1.jpg", mimeType: "image/jpeg", size: 10, storageKey: "k1", createdAt: new Date("2026-06-24T10:00:00Z") },
+    ]);
+    mockGetSignedReadUrl.mockResolvedValue("https://r2/signed/k1");
+    const res = await GET(getReq(), { params });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.photos[0]).toMatchObject({ id: "a1", url: "https://r2/signed/k1" });
+    expect(mockGetSignedReadUrl).toHaveBeenCalledWith("k1");
   });
 });

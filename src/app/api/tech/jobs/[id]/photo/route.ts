@@ -10,7 +10,7 @@
  */
 import { NextRequest } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
-import { addJobPhoto } from "@/lib/tech/field-queries";
+import { addJobPhoto, listJobPhotos } from "@/lib/tech/field-queries";
 import {
   getStorageClient,
   generateStorageKey,
@@ -92,6 +92,40 @@ export async function POST(
     return successResponse({ id: result.id }, 201);
   } catch (error) {
     logger.error({ error }, "Failed to upload job photo");
+    return errorResponse("Internal server error", "INTERNAL_ERROR", 500);
+  }
+}
+
+export async function GET(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const session = await getAdminSession();
+    if (!session) {
+      return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
+    }
+    const { id } = await params;
+    const photos = await listJobPhotos(session.organizationId, id);
+    if (photos.length === 0) {
+      return successResponse({ photos: [] });
+    }
+    // Sign each key into a short-lived display URL. Only construct the storage
+    // client when there's something to sign (it requires R2 env to be set).
+    const storageClient = getStorageClient();
+    const withUrls = await Promise.all(
+      photos.map(async (p) => ({
+        id: p.id,
+        filename: p.filename,
+        mimeType: p.mimeType,
+        size: p.size,
+        createdAt: p.createdAt,
+        url: await storageClient.getSignedReadUrl(p.storageKey).catch(() => null),
+      })),
+    );
+    return successResponse({ photos: withUrls });
+  } catch (error) {
+    logger.error({ error }, "Failed to list job photos");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);
   }
 }
