@@ -1828,6 +1828,63 @@ export const requestStatusEvents = pgTable(
   ],
 );
 
+// ── Context layer (Probook v3, Phase 1) ───────────────────────────────────────
+// One thread per resolved customer + an append-only, PII-free event stream.
+// Mirrors requestStatusEvents: ids + enums/label-keys only, no free text.
+export const customerThreads = pgTable(
+  "customer_threads",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    customerId: uuid("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "cascade" }),
+    lastChannel: text("last_channel"),
+    lastEventAt: timestamp("last_event_at", { withTimezone: true }),
+    openEstimateCount: integer("open_estimate_count").notNull().default(0),
+    status: text("status").notNull().default("active"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("customer_threads_org_customer_unique").on(
+      table.organizationId,
+      table.customerId,
+    ),
+  ],
+);
+
+export const customerEvents = pgTable(
+  "customer_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    customerId: uuid("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "cascade" }),
+    threadId: uuid("thread_id")
+      .notNull()
+      .references(() => customerThreads.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    refId: uuid("ref_id"),
+    jobType: text("job_type"),
+    window: text("window"),
+    labelKey: text("label_key"),
+    at: timestamp("at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("customer_events_org_customer_at_idx").on(
+      table.organizationId,
+      table.customerId,
+      table.at,
+    ),
+  ],
+);
+
 // 25. customer_locations — physical service sites (Stage 5).
 // ServiceTitan's CUSTOMER-vs-LOCATION split: one billing customer can hold many
 // service addresses (property managers, landlords, commercial multi-site, or a

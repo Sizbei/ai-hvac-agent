@@ -162,6 +162,13 @@
       "when": 1782334235278,
       "tag": "0022_aberrant_carmella_unuscione",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1782348270445,
+      "tag": "0023_clumsy_scarlet_spider",
+      "breakpoints": true
     }
   ]
 }
