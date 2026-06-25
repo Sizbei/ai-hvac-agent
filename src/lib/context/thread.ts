@@ -80,7 +80,14 @@ async function ensureThreadId(
     .values({ organizationId, customerId, lastChannel: channel, lastEventAt: sql`now()` })
     .onConflictDoUpdate({
       target: [customerThreads.organizationId, customerThreads.customerId],
-      set: { lastChannel: channel, lastEventAt: sql`now()`, updatedAt: sql`now()` },
+      // Keep a previously-recorded channel when this event carries none, so a
+      // channel-less emitter (e.g. a background status change) never nulls out
+      // the last real contact channel.
+      set: {
+        lastChannel: channel ?? sql`${customerThreads.lastChannel}`,
+        lastEventAt: sql`now()`,
+        updatedAt: sql`now()`,
+      },
     })
     .returning({ id: customerThreads.id });
   return row?.id ?? null;

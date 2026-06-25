@@ -86,6 +86,11 @@ describe("appendEvent (best-effort)", () => {
     ).resolves.toBeUndefined();
 
     expect(mockLoggerError).toHaveBeenCalledTimes(1);
+    // Lock in the structured, PII-free log payload (ids + kind only).
+    expect(mockLoggerError).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId: "org1", customerId: "cust1", kind: "booking" }),
+      expect.any(String),
+    );
   });
 });
 
@@ -111,6 +116,20 @@ describe("getThread", () => {
   it("returns EMPTY_THREAD on a DB error and never throws", async () => {
     db.select.mockImplementation(() => {
       throw new Error("select boom");
+    });
+
+    const result = await getThread("org1", "cust1");
+
+    expect(result).toBe(EMPTY_THREAD);
+    expect(mockLoggerError).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails open when the EVENTS query (second select) throws, not just the first", async () => {
+    let call = 0;
+    db.select.mockImplementation(() => {
+      call += 1;
+      if (call === 1) return chain([{ lastChannel: "web", openEstimateCount: 0 }]);
+      throw new Error("events select boom");
     });
 
     const result = await getThread("org1", "cust1");
