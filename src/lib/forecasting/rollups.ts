@@ -7,13 +7,38 @@
  * Per-jobType rows carry that type's bookings; one '__all__' row per day carries
  * the day's total bookings + the session/booked funnel counts.
  */
-import { count, gte, sql } from "drizzle-orm";
+import {
+  and,
+  count,
+  eq,
+  gte,
+  isNotNull,
+  isNull,
+  inArray,
+  or,
+  sum,
+  sql,
+  type AnyColumn,
+} from "drizzle-orm";
 import { db } from "@/lib/db";
-import { customerSessions, demandDaily, serviceRequests } from "@/lib/db/schema";
+import {
+  customerSessions,
+  demandDaily,
+  invoices,
+  payments,
+  refunds,
+  revenueDaily,
+  serviceRequests,
+} from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { BUSINESS_TIME_ZONE } from "@/lib/admin/calendar-time";
 
 export const ALL_JOB_TYPES = "__all__";
+
+// Revenue bases — NEVER blended (money-safety). native = payment-date basis;
+// synced = creation-cohort, paid-to-date (synced invoices carry no payment date).
+export const NATIVE_PAYMENT = "native_payment";
+export const SYNCED_CREATION = "synced_creation";
 
 export interface DemandBookingRow {
   readonly day: string; // business-TZ yyyy-mm-dd
@@ -136,6 +161,155 @@ export async function refreshDemandDaily(
       .onConflictDoUpdate({
         target: [demandDaily.organizationId, demandDaily.day, demandDaily.jobType],
         set: { bookings: r.bookings, sessions: r.sessions, booked: r.booked },
+      });
+  }
+}
+
+export interface DayCentsRow {
+  readonly day: string;
+  readonly cents: number | string | null; // neon-http sum() → string | null
+}
+export interface RevenueDailyRow {
+  readonly day: string;
+  readonly basis: string;
+  readonly collectedCents: number;
+  readonly invoicedCents: number;
+  readonly refundedCents: number;
+}
+
+/**
+ * PURE: fold the five revenue queries into revenue_daily rows. Native and synced
+ * are emitted as SEPARATE basis rows — a day with both produces two rows and they
+ * are NEVER summed (money-safety). Synced has no native refunds (refunded = 0).
+ */
+export function buildRevenueRows(input: {
+  readonly nativeCollected: readonly DayCentsRow[];
+  readonly nativeRefunded: readonly DayCentsRow[];
+  readonly nativeInvoiced: readonly DayCentsRow[];
+  readonly syncedInvoiced: readonly DayCentsRow[];
+  readonly syncedCollected: readonly DayCentsRow[];
+}): RevenueDailyRow[] {
+  const toMap = (rows: readonly DayCentsRow[]): Map<string, number> => {
+    const m = new Map<string, number>();
+    for (const r of rows) m.set(r.day, Number(r.cents ?? 0));
+    return m;
+  };
+  const nc = toMap(input.nativeCollected);
+  const nr = toMap(input.nativeRefunded);
+  const ni = toMap(input.nativeInvoiced);
+  const si = toMap(input.syncedInvoiced);
+  const sc = toMap(input.syncedCollected);
+
+  const rows: RevenueDailyRow[] = [];
+  for (const day of new Set([...nc.keys(), ...nr.keys(), ...ni.keys()])) {
+    rows.push({
+      day,
+      basis: NATIVE_PAYMENT,
+      collectedCents: nc.get(day) ?? 0,
+      invoicedCents: ni.get(day) ?? 0,
+      refundedCents: nr.get(day) ?? 0,
+    });
+  }
+  for (const day of new Set([...si.keys(), ...sc.keys()])) {
+    rows.push({
+      day,
+      basis: SYNCED_CREATION,
+      collectedCents: sc.get(day) ?? 0,
+      invoicedCents: si.get(day) ?? 0,
+      refundedCents: 0,
+    });
+  }
+  return rows;
+}
+
+/** Refresh revenue_daily for an org. Idempotent; native/synced kept separate. */
+export async function refreshRevenueDaily(
+  organizationId: string,
+  sinceDay?: string,
+): Promise<void> {
+  const since = sinceDay ? new Date(`${sinceDay}T00:00:00.000Z`) : null;
+  const day = (col: AnyColumn) =>
+    sql<string>`to_char(date(${col} AT TIME ZONE ${BUSINESS_TIME_ZONE}), 'YYYY-MM-DD')`;
+  const dayGroup = (col: AnyColumn) =>
+    sql`date(${col} AT TIME ZONE ${BUSINESS_TIME_ZONE})`;
+  const sinceFor = (col: AnyColumn) => (since ? [gte(col, since)] : []);
+  const isSynced = or(
+    isNotNull(invoices.fieldpulseInvoiceId),
+    isNotNull(invoices.hcpInvoiceId),
+  )!;
+  const isNative = and(
+    isNull(invoices.fieldpulseInvoiceId),
+    isNull(invoices.hcpInvoiceId),
+  )!;
+  const billable = inArray(invoices.state, ["open", "paid"]);
+
+  const [nativeCollected, nativeRefunded, nativeInvoiced, syncedInvoiced, syncedCollected] =
+    await Promise.all([
+      db
+        .select({ day: day(payments.createdAt), cents: sum(payments.amountCents) })
+        .from(payments)
+        .where(
+          withTenant(
+            payments,
+            organizationId,
+            eq(payments.status, "succeeded"),
+            ...sinceFor(payments.createdAt),
+          ),
+        )
+        .groupBy(dayGroup(payments.createdAt)),
+      db
+        .select({ day: day(refunds.createdAt), cents: sum(refunds.amountCents) })
+        .from(refunds)
+        .where(withTenant(refunds, organizationId, ...sinceFor(refunds.createdAt)))
+        .groupBy(dayGroup(refunds.createdAt)),
+      db
+        .select({ day: day(invoices.createdAt), cents: sum(invoices.totalCents) })
+        .from(invoices)
+        .where(
+          withTenant(invoices, organizationId, isNative, billable, ...sinceFor(invoices.createdAt)),
+        )
+        .groupBy(dayGroup(invoices.createdAt)),
+      db
+        .select({ day: day(invoices.createdAt), cents: sum(invoices.totalCents) })
+        .from(invoices)
+        .where(
+          withTenant(invoices, organizationId, isSynced, billable, ...sinceFor(invoices.createdAt)),
+        )
+        .groupBy(dayGroup(invoices.createdAt)),
+      db
+        .select({ day: day(invoices.createdAt), cents: sum(invoices.amountPaidCents) })
+        .from(invoices)
+        .where(
+          withTenant(invoices, organizationId, isSynced, billable, ...sinceFor(invoices.createdAt)),
+        )
+        .groupBy(dayGroup(invoices.createdAt)),
+    ]);
+
+  const rows = buildRevenueRows({
+    nativeCollected,
+    nativeRefunded,
+    nativeInvoiced,
+    syncedInvoiced,
+    syncedCollected,
+  });
+  for (const r of rows) {
+    await db
+      .insert(revenueDaily)
+      .values({
+        organizationId,
+        day: r.day,
+        basis: r.basis,
+        collectedCents: r.collectedCents,
+        invoicedCents: r.invoicedCents,
+        refundedCents: r.refundedCents,
+      })
+      .onConflictDoUpdate({
+        target: [revenueDaily.organizationId, revenueDaily.day, revenueDaily.basis],
+        set: {
+          collectedCents: r.collectedCents,
+          invoicedCents: r.invoicedCents,
+          refundedCents: r.refundedCents,
+        },
       });
   }
 }
