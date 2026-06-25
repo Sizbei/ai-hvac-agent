@@ -20,12 +20,12 @@
 
 **Our realistic angle:** lead with the parts our AI-first stack makes cheap and high-leverage — **auto-QA of our own AI calls + recovery** — while being explicit that (a) **human-CSR QA/coaching/copilot (Phases C/D) only have users if the pilot has human reps** (decision gate below), and (b) **streaming voice + live-voice copilot is the genuine Avoca gap** we defer with eyes open.
 
-### Decision gate (answer before committing past Phase B)
-**Does the pilot org have human CSRs, or is it pure-AI intake?**
-- **Pure-AI:** Phases C & D (copilot, takeover, per-rep coaching — 6 stages) have **no users**; this becomes an *AI receptionist + self-QA + recovery + booking* product. Front-load A→B→E→F.
-- **Human CSRs:** front-load Phase C (the copilot is the Avoca wedge) and accept the recording/employee-monitoring compliance load early.
-
-This fork is unresolved and **defunds 25% of the program if guessed wrong** — it is operator question #1, not a footnote.
+### Decision gate — RESOLVED (2026-06-25, operator-delegated): **PURE-AI pilot**
+**Does the pilot org have human CSRs, or is it pure-AI intake? → PURE-AI.** Rationale: the stack is AI-first (voice + chat + dispatch) and the role model is `admin/technician` only — there is no human call-center to copilot or coach. Consequences (now binding on this program):
+- **Build:** `0 → A → B → E → F`. Product = **AI receptionist + self-QA of our own AI calls + missed/unbooked recovery.**
+- **Defer (no users in a pure-AI pilot):** Phase C (Stages 10–13, copilot/takeover/CSR role) and Phase D (Stages 14–16, per-rep coaching). The employee-monitoring compliance load (§3.4) is therefore **not on the critical path**.
+- **Separate sub-program:** Stage 19 (FSM write-path booking) — access-blocked, unchanged.
+- **Earliest safe, migration-free work** (loop can start now): the pure QA primitives — the **judge→real-transcript adapter** (Stage 6's pure half: split interleaved `messages` into `userTurns`/`botReplies`) and the **deterministic transcript QA flags** (Stage 8, `output-guardrail` reuse). Both are pure/tested/inert until wired, like the Probook forecasters. Everything touching the DB (Stage 0 number→org table, Stages 1/5 tables) or external data (recording, Stage 6 live run) stays operator/compliance-gated.
 
 ---
 
