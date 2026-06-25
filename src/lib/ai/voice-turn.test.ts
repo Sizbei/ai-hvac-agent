@@ -100,6 +100,17 @@ vi.mock("./customer-context", () => ({
   loadCustomerContextById: loadCustomerContextByIdMock,
   buildCustomerContextHint: (ctx: unknown) => (ctx ? " [RETURNING_CUSTOMER]" : ""),
 }));
+// Cross-channel recognition (Probook v3): getThread fails open in prod; here we
+// pin an empty thread so the additive cross-channel hint never perturbs the
+// shared db select mock or existing prompt assertions.
+vi.mock("@/lib/context/thread", () => ({
+  getThread: vi.fn().mockResolvedValue({
+    exists: false,
+    lastChannel: null,
+    openEstimateCount: 0,
+    events: [],
+  }),
+}));
 
 vi.mock("./escalate-service", () => ({ escalateSession: escalateMock }));
 vi.mock("./intent-router", () => ({ routeMessage: routeMock }));

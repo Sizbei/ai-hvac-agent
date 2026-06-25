@@ -92,6 +92,7 @@ import {
   enrichWithServiceHistory,
   type CustomerContext,
 } from "@/lib/ai/customer-context";
+import { getThread } from "@/lib/context/thread";
 import { customers, customerLocations } from "@/lib/db/schema";
 import { buildAccountLookupReply } from "@/lib/ai/account-dispatch";
 import {
@@ -1848,6 +1849,20 @@ export async function POST(request: NextRequest) {
     // info already on file. Empty string when not a returning customer.
     const customerContextHint = buildCustomerContextHint(customerContext);
 
+    // Cross-channel recognition (Probook v3): when this known customer last
+    // reached us on a DIFFERENT channel (voice/sms), tell the model so it can
+    // acknowledge the prior contact. Purely additive — getThread fails open
+    // (returns an empty thread on any error), so no try/catch and an empty hint
+    // when there's no customer/thread.
+    const crossChannelCustomerId = customerContext?.customerId ?? null;
+    const thread = crossChannelCustomerId
+      ? await getThread(organizationId, crossChannelCustomerId)
+      : null;
+    const crossChannelHint =
+      thread?.exists && thread.lastChannel && thread.lastChannel !== "web"
+        ? `\n[CONTEXT] This customer last contacted us via ${thread.lastChannel}.`
+        : "";
+
     // Brand the LLM persona from the org's stored config (companyName +
     // businessInfo), populated above via the cached router overlay. Falls back
     // to the generic HVAC persona when nothing is configured (empty BrandInfo).
@@ -1921,6 +1936,7 @@ export async function POST(request: NextRequest) {
       system:
         brandPrompt +
         customerContextHint +
+        crossChannelHint +
         styleHint +
         sessionSlotsHint +
         escalationHint +

@@ -23,6 +23,7 @@ import {
   loadCustomerContextById,
   buildCustomerContextHint,
 } from "./customer-context";
+import { getThread } from "@/lib/context/thread";
 import { checkTokenBudget, addTokenUsage } from "./token-budget";
 import { buildAccountLookupReply } from "./account-dispatch";
 import {
@@ -952,17 +953,30 @@ export async function voiceReply(params: {
   // NOTE (enrichWithServiceHistory) is an external fetch and is intentionally NOT
   // added on this latency-bound voice turn — tracked as a follow-up.
   let customerHint = "";
+  let crossChannelHint = "";
   if (session.customerId) {
     const ctx = await loadCustomerContextById(
       organizationId,
       session.customerId,
     ).catch(() => null);
     customerHint = buildCustomerContextHint(ctx);
+
+    // Cross-channel recognition (Probook v3, parity with web chat): when this
+    // known customer last reached us on a DIFFERENT channel (web/sms), tell the
+    // agent so it can acknowledge the prior contact. Purely additive — getThread
+    // fails open (returns an empty thread on any error), so no try/catch and an
+    // empty hint when there's no thread or the last channel was already voice.
+    const thread = await getThread(organizationId, session.customerId);
+    crossChannelHint =
+      thread.exists && thread.lastChannel && thread.lastChannel !== "voice"
+        ? `\n[CONTEXT] This customer last contacted us via ${thread.lastChannel}.`
+        : "";
   }
 
   const { text, usage } = await generateText({
     model: await getModel(organizationId),
-    system: PHONE_SYSTEM_PROMPT + slotContextHint + customerHint,
+    system:
+      PHONE_SYSTEM_PROMPT + slotContextHint + customerHint + crossChannelHint,
     messages: modelMessages,
   });
 
