@@ -4,13 +4,17 @@
 
 **Goal:** A consent-gated, deduped, cron-driven campaign that nudges customers about **open estimates** that have gone stale (older than N days, no sold option), recording each send as a context-layer `outbound` event so a follow-on booking is attributable.
 
-**Architecture:** Pure selection (`findStaleUnsoldEstimates`) + a per-estimate enqueue that rides the EXISTING comms rails — `claimOutboundOnce` (dedup), `checkSendAllowed` (consent + quiet hours), `queueCommunicationJob` (the queue the existing `process-communications` cron drains) — plus an `appendEvent` (Phase 1). A thin cron route triggers it per org. **No new sending path, no new migration** — reuses `communication_jobs` + `outbound_message_ledger`.
+**Architecture:** Pure selection (`findStaleUnsoldEstimates`) + a per-estimate enqueue that rides the EXISTING comms rails — `claimOutboundOnce` (dedup), `checkSendAllowed` (consent + quiet hours), `queueCommunicationJob` (the queue the existing `process-communications` cron drains) — plus an `appendEvent` (Phase 1). A thin cron route triggers it per org. **No new *sending* path** — reuses `communication_jobs` + `outbound_message_ledger`.
 
 **Tech Stack:** Drizzle/neon-http, Next.js cron routes (`CRON_SECRET`/`verifyCronAuth`), Vitest.
 
-**Source spec:** `docs/superpowers/specs/2026-06-24-probook-master-spec-v3.md` §6.5.1. **Phase 3** of §8. **No migration.**
+**Source spec:** `docs/superpowers/specs/2026-06-24-probook-master-spec-v3.md` §6.5.1. **Phase 3** of §8.
 
-**Invariants:** consent is enforced at SEND time by the existing `processPendingJobs` → `checkSendAllowed` path (do not bypass it); dedup via `claimOutboundOnce`; recipient PII is encrypted at enqueue by `queueCommunicationJob` (pass `customerId`, never raw contact). The campaign is **idempotent** (the ledger claim makes a re-run a no-op). **Operator authorization note:** this enqueues real customer messages once the cron runs in prod — it must not be scheduled/enabled without the operator's say-so (the cron entry ships disabled or behind a flag; see Task 4).
+**⚠ ONE migration is required (corrected after review):** `communication_trigger_type` is a **Postgres `pgEnum`**. Adding `estimate_followup` to it needs an `ALTER TYPE ... ADD VALUE` migration (operator-applied, like all others). The earlier "no migration" claim was wrong — `claimOutboundOnce`/`checkSendAllowed`/`TRIGGER_RULES`/`communication_jobs.triggerType` are all typed/stored against this enum, so the value must exist in the DB or inserts 500.
+
+**How the real send rail works (the model the enqueue MUST follow — corrected after review):** `queueCommunicationJob` requires a **`templateId`** (NOT NULL) and a **resolved recipient** (`recipientPhone`/`recipientEmail`) — passing `customerId` alone does NOT send (it throws "recipient required" at send). Real callers (e.g. `money-triggers.ts`, `warranty-queries.ts`) (1) look up a **per-org active template row** via `findActiveSmsTemplate(org, trigger)` and pass `templateId`, and (2) fetch the customer's contact via `getCustomerContact(org, customerId)` and pass `recipientPhone`. Templates are **per-org DB rows in `communication_templates`**, seeded via `seeds.ts`/`seedCommunicationTemplates` — NOT a code registry. So `estimate_followup` needs a seeded template per org, or `findActiveSmsTemplate` returns null and every send is silently skipped.
+
+**Invariants:** consent is enforced at SEND time by the existing `processPendingJobs` → `checkSendAllowed` path (do not bypass it); dedup via `claimOutboundOnce` (claim BEFORE enqueue → a crash under-sends, never double-sends); recipient PII is encrypted at enqueue by `queueCommunicationJob` (resolve the contact and pass `recipientPhone`/`recipientEmail`). The campaign is **idempotent** (the ledger claim makes a re-run a no-op). **Operator authorization note:** this enqueues real customer messages once the cron runs in prod — it ships **unscheduled** (no `vercel.json` entry) and the operator enables it (see Task 4).
 
 ---
 
@@ -24,25 +28,32 @@
 
 ---
 
-## Task 1: Trigger type + template + consent rule
+## Task 1: Add the `estimate_followup` trigger (enum migration + per-org seeded template + consent rule)
 
-**Files:**
-- Modify: the communication trigger enum + templates + `src/lib/communication/consent.ts` `TRIGGER_RULES`.
+**Files:** `src/lib/db/schema.ts` (the `communication_trigger_type` pgEnum) + a generated migration; `src/lib/communication/consent.ts` (`TRIGGER_RULES`); `src/lib/communication/seeds.ts` (+ `sms-templates.ts`/`email-templates.tsx`).
 
-- [ ] **Step 1: Locate the trigger machinery**
+- [ ] **Step 1: Locate the machinery**
 
-Run: `grep -rn "communicationTriggerEnum\|TRIGGER_RULES\|triggerType" src/lib/communication src/lib/db/schema.ts | head`. Identify (a) the trigger enum/union, (b) the template registry, (c) the `TRIGGER_RULES` map in `consent.ts`.
+Run: `grep -rn "communication_trigger_type\|communicationTriggerTypeEnum\|TRIGGER_RULES\|findActiveSmsTemplate\|seedCommunicationTemplates" src/lib/communication src/lib/db/schema.ts`. Confirm: (a) the trigger is a **`pgEnum`** in `schema.ts`; (b) `TRIGGER_RULES` in `consent.ts` maps trigger → consent class; (c) templates are **per-org DB rows** seeded in `seeds.ts` and resolved at send via `findActiveSmsTemplate(org, trigger)`.
 
-- [ ] **Step 2: Add `estimate_followup`**
+- [ ] **Step 2: Add the enum value + generate the migration**
 
-Add `estimate_followup` to the trigger enum/union, add a template (SMS + email body referencing "your estimate" — **no price, no PII beyond first name** which the template-variable system already injects), and a `TRIGGER_RULES` entry classifying it as a marketing/promotional type so per-type consent + quiet-hours apply. Match the shape of an existing trigger (e.g. a booking-reminder) exactly.
+Add `"estimate_followup"` to the `communicationTriggerTypeEnum` values in `schema.ts`. Run `npm run db:generate` — it emits an `ALTER TYPE "communication_trigger_type" ADD VALUE 'estimate_followup'` migration. **Do NOT `db:migrate`** (operator applies). Confirm the generated SQL is the ADD VALUE statement.
 
-- [ ] **Step 3: Typecheck + commit**
+- [ ] **Step 3: Add the consent rule**
+
+Add an `estimate_followup` entry to `TRIGGER_RULES` classifying it as **marketing/promotional** (so the per-type marketing toggle — off by default in `DEFAULT_PREFS` — and quiet-hours both apply). Match an existing marketing trigger's shape.
+
+- [ ] **Step 4: Seed a per-org template**
+
+Add an `estimate_followup` SMS template (and email if desired) to `seeds.ts`/`seedCommunicationTemplates` (and the body to `sms-templates.ts`) — body references "your estimate", uses the existing `{{customerName}}`-style variables, **no price, no PII**. Note in the plan that **each org must be (re)seeded** for sends to fire; until a template row exists for an org, `findActiveSmsTemplate` returns null and the campaign skips that org (degrade-safe, not a crash).
+
+- [ ] **Step 5: Typecheck + commit**
 
 Run: `npx tsc --noEmit` → exit 0.
 ```bash
 git add -A
-git commit -m "feat(comms): add estimate_followup trigger, template, and consent rule"
+git commit -m "feat(comms): estimate_followup trigger (enum migration + seeded template + consent rule)"
 ```
 
 ---
@@ -115,7 +126,7 @@ git commit -m "feat(outbound): findStaleUnsoldEstimates query"
 
 - [ ] **Step 1: Write the failing test**
 
-Mock `claimOutboundOnce`, `checkSendAllowed`, `queueCommunicationJob`, `appendEvent`. Assert: for two stale estimates, one already-claimed (claim returns false) → skipped; the other claimed (true) + consent allowed → `queueCommunicationJob` called once with `triggerType:'estimate_followup'`, `customerId`, and an `appendEvent({kind:'outbound', labelKey:'outbound_sent', refId: estimateId})` recorded. A consent-denied estimate → claimed but NOT enqueued (and no event). Returns a summary `{considered, enqueued, skippedClaimed, skippedConsent}`.
+Mock `claimOutboundOnce`, `checkSendAllowed`, `queueCommunicationJob`, `appendEvent`, **`findActiveSmsTemplate`, and `getCustomerContact`**. Assert: for two stale estimates, one already-claimed (claim returns false) → skipped; the other claimed (true) + consent allowed + a template row exists + a phone resolves → `queueCommunicationJob` called once with `triggerType:'estimate_followup'`, **`templateId` from the resolved template**, **`recipientPhone` from the resolved contact**, and an `appendEvent({kind:'outbound', labelKey:'outbound_sent', refId: estimateId})` recorded. A consent-denied estimate → claimed but NOT enqueued (no event). **An estimate where `findActiveSmsTemplate` returns null OR the contact has no phone → claimed but skipped (no enqueue), counted as `skippedNoTemplate`/`skippedNoContact`.** Returns a summary `{considered, enqueued, skippedClaimed, skippedConsent, skippedNoTemplate, skippedNoContact}`.
 
 - [ ] **Step 2: Run → fail.**
 
@@ -124,11 +135,14 @@ Mock `claimOutboundOnce`, `checkSendAllowed`, `queueCommunicationJob`, `appendEv
 ```ts
 import { claimOutboundOnce } from "./outbound-ledger";
 import { checkSendAllowed } from "./consent";
-import { queueCommunicationJob } from "./job-queue";
+import { queueCommunicationJob, findActiveSmsTemplate } from "./job-queue"; // import paths per the real files
+import { getCustomerContact } from "@/lib/admin/crm-queries"; // or wherever money-triggers resolves contact
 import { appendEvent } from "@/lib/context/thread";
 
 export interface FollowupSummary {
-  considered: number; enqueued: number; skippedClaimed: number; skippedConsent: number;
+  considered: number; enqueued: number;
+  skippedClaimed: number; skippedConsent: number;
+  skippedNoTemplate: number; skippedNoContact: number;
 }
 
 export async function runUnsoldEstimateFollowup(
@@ -138,12 +152,22 @@ export async function runUnsoldEstimateFollowup(
 ): Promise<FollowupSummary> {
   const olderThanDays = opts.olderThanDays ?? 7;
   const stale = await findStaleUnsoldEstimates(organizationId, olderThanDays, now);
-  const summary: FollowupSummary = { considered: stale.length, enqueued: 0, skippedClaimed: 0, skippedConsent: 0 };
+  const summary: FollowupSummary = {
+    considered: stale.length, enqueued: 0,
+    skippedClaimed: 0, skippedConsent: 0, skippedNoTemplate: 0, skippedNoContact: 0,
+  };
+
+  // Resolve the per-org template ONCE (it's the same for every estimate).
+  const template = await findActiveSmsTemplate(organizationId, "estimate_followup");
+  if (!template) {
+    // No seeded template for this org → nothing can send; degrade safe.
+    summary.skippedNoTemplate = stale.length;
+    return summary;
+  }
 
   for (const e of stale) {
-    // Dedup: one nudge per estimate (periodKey = the estimate id keeps it once-ever;
-    // use a windowed key if repeat nudges are desired later).
     const periodKey = opts.periodKeyFor?.(e) ?? `estimate_followup:${e.estimateId}`;
+    // Claim BEFORE enqueue so a crash under-sends rather than double-sends.
     const claimed = await claimOutboundOnce({
       organizationId, customerId: e.customerId, triggerType: "estimate_followup", periodKey,
     });
@@ -154,13 +178,19 @@ export async function runUnsoldEstimateFollowup(
     });
     if (!allowed.allowed) { summary.skippedConsent++; continue; }
 
+    // queueCommunicationJob needs a RESOLVED recipient — customerId alone never sends.
+    const contact = await getCustomerContact(organizationId, e.customerId);
+    if (!contact?.phone) { summary.skippedNoContact++; continue; }
+
     await queueCommunicationJob({
       organizationId,
       customerId: e.customerId,
+      templateId: template.id,            // REQUIRED — resolved per-org template
       triggerType: "estimate_followup",
       channel: "sms",
+      recipientPhone: contact.phone,      // REQUIRED — encrypted at enqueue
       serviceRequestId: e.serviceRequestId ?? undefined,
-      templateVariables: {},
+      templateVariables: { customerName: contact.firstName ?? "there" },
     });
     await appendEvent(organizationId, e.customerId, {
       kind: "outbound", labelKey: "outbound_sent", refId: e.estimateId, channel: "sms",
@@ -171,7 +201,7 @@ export async function runUnsoldEstimateFollowup(
 }
 ```
 
-Adapt the exact `queueCommunicationJob` / `checkSendAllowed` / `claimOutboundOnce` argument shapes to their real signatures (read the files). Consent is re-checked at SEND time too — this pre-check just avoids enqueuing obvious no-sends.
+**Match the real signatures (read `job-queue.ts`, `consent.ts`, `outbound-ledger.ts`, and the contact-resolver `money-triggers.ts`/`warranty-queries.ts` use):** `queueCommunicationJob` requires `templateId` + a recipient; `findActiveSmsTemplate(org, trigger)` returns the per-org template row or null; `getCustomerContact` returns `{phone, email, firstName}` (use whatever name the codebase uses — `money-triggers.ts` is the reference caller). Consent is re-checked at SEND time too — this pre-check just avoids enqueuing obvious no-sends.
 
 - [ ] **Step 4: Run → pass.** Run `npx tsc --noEmit` → exit 0. Commit:
 ```bash
@@ -189,7 +219,7 @@ git commit -m "feat(outbound): runUnsoldEstimateFollowup (dedup + consent + enqu
 
 - [ ] **Step 1: Implement (mirror an existing cron route)**
 
-Read `src/app/api/cron/generate-membership-visits/route.ts` for the exact `verifyCronAuth(req)` (Bearer `CRON_SECRET`) + `runtime="nodejs"` + `dynamic="force-dynamic"` shape. Then: verify auth → 401; iterate active orgs (reuse the existing active-org query the other crons use); `runUnsoldEstimateFollowup(org.id, new Date())` per org; return the aggregated summary.
+Read `src/app/api/cron/generate-membership-visits/route.ts` for the exact shape. **The auth call is `verifyCronAuth(request.headers.get("authorization"))`** — it takes the Authorization header string (Bearer `CRON_SECRET`), NOT the request object — plus `runtime="nodejs"` + `dynamic="force-dynamic"`. Then: verify auth → 401; iterate orgs from the `organizations` table (active/non-deleted — not the membership filter); `runUnsoldEstimateFollowup(org.id, new Date())` per org; return the aggregated summary.
 
 - [ ] **Step 2: Test** — 401 without the secret; 200 + summary with it (mock the campaign).
 

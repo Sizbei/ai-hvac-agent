@@ -47,7 +47,11 @@ export const demandDaily = pgTable("demand_daily", {
   id: uuid("id").defaultRandom().primaryKey(),
   organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
   day: date("day").notNull(),
-  jobType: text("job_type"), // null = all types
+  // NOT NULL with a sentinel for the all-types row: Postgres treats NULLs as
+  // DISTINCT in a plain unique index, so a NULL "all types" row would never
+  // match onConflictDoUpdate and would duplicate on every cron run. Use the
+  // literal '__all__' for the all-types rollup row instead of NULL.
+  jobType: text("job_type").notNull().default("__all__"),
   bookings: integer("bookings").notNull().default(0),
   sessions: integer("sessions").notNull().default(0),
   booked: integer("booked").notNull().default(0),
@@ -88,7 +92,7 @@ export const forecastAccuracy = pgTable("forecast_accuracy", {
 }, (t) => [uniqueIndex("forecast_accuracy_unique").on(t.organizationId, t.kind, t.segment, t.horizonDays, t.forDay)]);
 ```
 
-Ensure `date`, `jsonb`, `uniqueIndex` are imported from `drizzle-orm/pg-core`.
+**`jsonb` and `uniqueIndex` are already imported in `schema.ts`, but `date` is NOT** — add `date` to the `drizzle-orm/pg-core` import (it's used nowhere as a column type yet, so `tsc` will error until added).
 
 - [ ] **Step 2:** `npm run db:generate` twice is not needed — one run emits both new tables. (If you want two migrations, add `demandDaily`+`revenueDaily` first, generate `0024`, then add the snapshot tables, generate `0025`. Single migration is acceptable too.) **Do not** `db:migrate`.
 
@@ -132,7 +136,9 @@ describe("seasonalNaive", () => {
   it("returns exactly `horizonDays` future points, contiguous from the last day", () => {
     const f = seasonalNaive(series(4), 5);
     expect(f).toHaveLength(5);
-    expect(f[0].day).toBe("2026-02-03"); // day after 4 weeks from 2026-01-05
+    // series(4) = 28 points, days i=0..27 from Mon 2026-01-05 → last day is i=27 = Sun 2026-02-01;
+    // the first forecast is the day AFTER the last day = Mon 2026-02-02.
+    expect(f[0].day).toBe("2026-02-02");
   });
 
   it("falls back to the overall mean when there's <1 week of history", () => {
@@ -259,11 +265,27 @@ export function forecastRevenue(input: {
 
 const clamp01 = (n: number) => Math.min(Math.max(n, 0), 1);
 
-/** Dev/test guard: each serviceRequestId / estimateId appears in at most one stream. */
-export function assertDisjoint(input: { booked: readonly BookedJob[]; openEstimates: readonly OpenEstimate[] }): void {
+/**
+ * Dev/test guard — must cover the SAME dimensions forecastRevenue excludes on
+ * (estimateId AND serviceRequestId AND MRR's materialized request), or it gives
+ * false confidence. Throws if any entity appears in two streams.
+ */
+export function assertDisjoint(input: {
+  booked: readonly BookedJob[];
+  openEstimates: readonly OpenEstimate[];
+  mrr: readonly MrrPeriod[];
+}): void {
   const bookedEst = new Set(input.booked.map((b) => b.estimateId).filter(Boolean) as string[]);
+  const bookedReq = new Set(input.booked.map((b) => b.serviceRequestId));
   for (const e of input.openEstimates) {
-    if (bookedEst.has(e.estimateId)) throw new Error(`estimate ${e.estimateId} counted in both booked and pipeline`);
+    if (bookedEst.has(e.estimateId))
+      throw new Error(`estimate ${e.estimateId} counted in both booked and pipeline`);
+    if (e.serviceRequestId && bookedReq.has(e.serviceRequestId))
+      throw new Error(`estimate ${e.estimateId} (req ${e.serviceRequestId}) overlaps a booked job`);
+  }
+  for (const m of input.mrr) {
+    if (m.materializedServiceRequestId && bookedReq.has(m.materializedServiceRequestId))
+      throw new Error(`MRR period ${m.key} overlaps a booked materialized visit`);
   }
 }
 ```
@@ -300,7 +322,7 @@ export function assertDisjoint(input: { booked: readonly BookedJob[]; openEstima
   - Load the demand series from `demand_daily`; run `seasonalNaive` per horizon; write a `forecast_snapshots` row (kind='demand', model='seasonal_naive', payload {points}).
   - Load the revenue inputs (booked/openEstimates/mrr for the **operator-chosen basis** — passed in, NOT hardcoded; see Q3); run `forecastRevenue`; write a snapshot (kind='revenue', model='revenue_partition').
   - Each write idempotent; honor cold-start (skip a horizon the history can't support, and mark it in the payload).
-- [ ] **Step 2:** Cron route mirrors `generate-membership-visits` (`verifyCronAuth`, iterate active orgs). Ships scheduled is OK (read-only, no outbound) — but confirm with the operator before adding a `vercel.json` entry.
+- [ ] **Step 2:** Cron route mirrors `generate-membership-visits` but note the exact auth signature is `verifyCronAuth(request.headers.get("authorization"))` (it takes the header string, not the request). **Iterate orgs from the `organizations` table (active/non-deleted) — NOT the membership filter the template uses** (every org needs forecasts, with or without memberships). Use `'__all__'` for the all-types demand rollup row (not NULL). Shipping it scheduled is acceptable (read-only, no outbound) — but confirm with the operator before adding a `vercel.json` entry.
 - [ ] **Step 3:** Test (auth + calls run). `npx tsc --noEmit` → 0. Commit.
 
 ---

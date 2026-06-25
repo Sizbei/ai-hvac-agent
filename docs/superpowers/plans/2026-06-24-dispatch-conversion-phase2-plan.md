@@ -120,12 +120,18 @@ Add a reason when conversion is meaningful (after the rating reason):
 
 (`avgJobRevenueCents` is loaded as a signal and shown in suggestions/reasons but is NOT yet a scoring term — kept out of the weighted sum until there's pilot data to weight it; surface it as a reason only if desired in a later slice.)
 
-- [ ] **Step 4: Run to verify it passes**
+- [ ] **Step 4: Update the EXISTING score tests (they WILL break — this is required, not optional)**
+
+Adding `conversionRate`/`avgJobRevenueCents` as **required** fields on `DispatchSignals.tech` breaks the existing suite two ways, both of which must be fixed:
+1. **Compile break:** the existing `signals()` test helper builds a `tech` object without the two new fields → TS error. Add `conversionRate: 0, avgJobRevenueCents: 0` (or per-case overrides) to that helper.
+2. **Assertion breaks (hardcoded old weights):** the existing absolute-score assertions encode 0.5/0.3/0.2 — e.g. `expect(best.score).toBeCloseTo(1.0, 5)` (now max = 0.4+0.2+0+0.15 = 0.75) and `expect(r.score).toBeCloseTo((3.5/5)*0.3 + 0.2, 5)` (now `(3.5/5)*0.2 + 0.15`). Recompute each hardcoded expected value against the new weights (and update the explanatory comments).
+
+- [ ] **Step 5: Run to verify all pass**
 
 Run: `npx vitest run src/lib/ai/dispatch/score.test.ts`
-Expected: PASS. Also confirm existing score tests still pass (the weight change shifts absolute scores but skill-matched ordering semantics hold).
+Expected: PASS (the new conversion tests AND the updated existing assertions).
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add src/lib/ai/dispatch/score.ts src/lib/ai/dispatch/score.test.ts
@@ -213,7 +219,7 @@ export async function suggestTechnicians(
 }
 ```
 
-Implement by reusing `rankedTechnicianOrder` (or its candidate builder) from `scheduling-queries.ts` and slicing to `limit`. If `rankedTechnicianOrder` returns the ranked list already, `suggestTechnicians` = load request attrs → call it → `.slice(0, limit)`.
+Implement by reusing `rankedTechnicianOrder` from `scheduling-queries.ts` and slicing to `limit`. It returns `Promise<RankedTech[] | null>` (null when unclassified/no-match → return `[]`). **Note: `rankedTechnicianOrder` is currently NOT exported (`async function rankedTechnicianOrder` at `scheduling-queries.ts:784`) — add `export` to it (a one-line, surgical change) so `suggest.ts` can import it.** Then `suggestTechnicians` = load request attrs → `(await rankedTechnicianOrder(...)) ?? []` → `.slice(0, limit)`.
 
 - [ ] **Step 4: Run to verify it passes** → PASS.
 
