@@ -169,6 +169,13 @@
       "when": 1782348270445,
       "tag": "0023_clumsy_scarlet_spider",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1782352819525,
+      "tag": "0024_long_venom",
+      "breakpoints": true
     }
   ]
 }

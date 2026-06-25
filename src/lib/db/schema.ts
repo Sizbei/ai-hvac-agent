@@ -11,6 +11,7 @@ import {
   varchar,
   jsonb,
   doublePrecision,
+  date,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -1881,6 +1882,106 @@ export const customerEvents = pgTable(
       table.organizationId,
       table.customerId,
       table.at,
+    ),
+  ],
+);
+
+// ── Forecasting (Probook v3, Phase 4) ─────────────────────────────────────────
+// Nightly rollups + versioned snapshots. All counts/cents are integers; NO PII.
+// Native vs synced revenue are NEVER blended — kept as separate `basis` rows.
+export const demandDaily = pgTable(
+  "demand_daily",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    day: date("day").notNull(),
+    // NOT NULL with a sentinel: Postgres treats NULLs as DISTINCT in a plain
+    // unique index, so a NULL "all types" row would never match
+    // onConflictDoUpdate and would duplicate every run. Use '__all__'.
+    jobType: text("job_type").notNull().default("__all__"),
+    bookings: integer("bookings").notNull().default(0),
+    sessions: integer("sessions").notNull().default(0),
+    booked: integer("booked").notNull().default(0),
+  },
+  (table) => [
+    uniqueIndex("demand_daily_org_day_jobtype_unique").on(
+      table.organizationId,
+      table.day,
+      table.jobType,
+    ),
+  ],
+);
+
+export const revenueDaily = pgTable(
+  "revenue_daily",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    day: date("day").notNull(),
+    basis: text("basis").notNull(), // 'native_payment' | 'synced_creation' — NEVER blended
+    collectedCents: integer("collected_cents").notNull().default(0),
+    invoicedCents: integer("invoiced_cents").notNull().default(0),
+    refundedCents: integer("refunded_cents").notNull().default(0),
+  },
+  (table) => [
+    uniqueIndex("revenue_daily_org_day_basis_unique").on(
+      table.organizationId,
+      table.day,
+      table.basis,
+    ),
+  ],
+);
+
+export const forecastSnapshots = pgTable(
+  "forecast_snapshots",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(), // 'demand' | 'revenue' | 'capacity'
+    model: text("model").notNull(), // 'seasonal_naive' | 'revenue_partition' | ...
+    horizonDays: integer("horizon_days").notNull(),
+    segment: text("segment"), // jobType / revenue basis
+    generatedAt: timestamp("generated_at", { withTimezone: true }).defaultNow().notNull(),
+    payload: jsonb("payload").notNull(),
+  },
+  (table) => [
+    index("forecast_snapshots_org_kind_gen_idx").on(
+      table.organizationId,
+      table.kind,
+      table.generatedAt,
+    ),
+  ],
+);
+
+export const forecastAccuracy = pgTable(
+  "forecast_accuracy",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    model: text("model").notNull(),
+    segment: text("segment"),
+    horizonDays: integer("horizon_days").notNull(),
+    forDay: date("for_day").notNull(),
+    predicted: integer("predicted").notNull(),
+    actual: integer("actual"), // filled when the day passes
+    absError: integer("abs_error"), // |actual - predicted| — MASE numerator, NOT a percentage
+  },
+  (table) => [
+    uniqueIndex("forecast_accuracy_unique").on(
+      table.organizationId,
+      table.kind,
+      table.segment,
+      table.horizonDays,
+      table.forDay,
     ),
   ],
 );
