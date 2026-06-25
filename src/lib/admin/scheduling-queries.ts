@@ -815,6 +815,48 @@ async function rankedTechnicianOrder(
 }
 
 /**
+ * Read-only top-N technician suggestions for a request — the advisory
+ * "exceptions queue" feed (Probook v3 Phase 2). Reuses the SAME scored ranking
+ * the auto-assigner uses, so a suggestion matches what auto-assign would do, but
+ * is shown REGARDLESS of `auto_dispatch_enabled` (a dispatcher wants the ranked
+ * shortlist + reasons even when auto-assign is off) and NEVER commits an
+ * assignment — the human still places the job. Returns [] when there are no
+ * active techs, or when the job is unclassifiable / no tech is skill-matched.
+ */
+export async function suggestTechnicians(
+  organizationId: string,
+  requestId: string,
+  limit = 3,
+): Promise<RankedTech[]> {
+  const techs = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(
+      withTenant(
+        users,
+        organizationId,
+        and(eq(users.role, "technician"), eq(users.isActive, true))!,
+      ),
+    );
+  if (techs.length === 0) return [];
+
+  // Score the load signal against the request's scheduled day when set, else today.
+  const [req] = await db
+    .select({ scheduledDate: serviceRequests.scheduledDate })
+    .from(serviceRequests)
+    .where(withTenant(serviceRequests, organizationId, eq(serviceRequests.id, requestId)));
+  const isoDay = (req?.scheduledDate ?? new Date()).toISOString().slice(0, 10);
+
+  const ranked = await rankedTechnicianOrder(
+    organizationId,
+    requestId,
+    techs.map((t) => t.id),
+    isoDay,
+  );
+  return (ranked ?? []).slice(0, limit);
+}
+
+/**
  * Stage 2 — auto-assign a freshly-booked request to a technician for its held
  * window. When the org has opted into scored dispatch (auto_dispatch_enabled),
  * candidates are ranked best-first by a deterministic skill/quality/load score
