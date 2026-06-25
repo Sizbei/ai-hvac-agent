@@ -12,7 +12,11 @@
 
 **⚠ ONE migration is required (corrected after review):** `communication_trigger_type` is a **Postgres `pgEnum`**. Adding `estimate_followup` to it needs an `ALTER TYPE ... ADD VALUE` migration (operator-applied, like all others). The earlier "no migration" claim was wrong — `claimOutboundOnce`/`checkSendAllowed`/`TRIGGER_RULES`/`communication_jobs.triggerType` are all typed/stored against this enum, so the value must exist in the DB or inserts 500.
 
-**How the real send rail works (the model the enqueue MUST follow — corrected after review):** `queueCommunicationJob` requires a **`templateId`** (NOT NULL) and a **resolved recipient** (`recipientPhone`/`recipientEmail`) — passing `customerId` alone does NOT send (it throws "recipient required" at send). Real callers (e.g. `money-triggers.ts`, `warranty-queries.ts`) (1) look up a **per-org active template row** via `findActiveSmsTemplate(org, trigger)` and pass `templateId`, and (2) fetch the customer's contact via `getCustomerContact(org, customerId)` and pass `recipientPhone`. Templates are **per-org DB rows in `communication_templates`**, seeded via `seeds.ts`/`seedCommunicationTemplates` — NOT a code registry. So `estimate_followup` needs a seeded template per org, or `findActiveSmsTemplate` returns null and every send is silently skipped.
+**How the real send rail works (the model the enqueue MUST follow — corrected over two review rounds):** `queueCommunicationJob` requires a **`templateId`** (NOT NULL) and a **resolved recipient** (`recipientPhone`/`recipientEmail`) — passing `customerId` alone does NOT send (it throws "recipient required" at send). The reference caller is **`money-triggers.ts`** (`triggerEstimateSent`). Two helpers it uses are **PRIVATE (not exported)** and must be exported (or inlined) for reuse:
+- **`findActiveSmsTemplate(org, trigger)`** lives in `money-triggers.ts` (NOT `job-queue.ts`), returns `{ id } | null`, and its `trigger` param is a **closed union that excludes `estimate_followup`** — so you must **export it AND widen its param to `CommTrigger`** (or inline the equivalent `communication_templates` query filtering `templateType:'sms'`, `isActive:true`).
+- **`getCustomerContact(org, customerId)`** is duplicated privately in `money-triggers.ts`/`warranty-queries.ts`/`review-queries.ts`; it returns **`{ phone, email, name }` (NOT `firstName`)**. Export one copy (e.g. from `money-triggers.ts`) or inline it; refer to `contact.name`, not `firstName`.
+
+Templates are **per-org DB rows in `communication_templates`**, seeded via `seeds.ts`/`seedCommunicationTemplates` — NOT a code registry. So `estimate_followup` needs a seeded template per org, or `findActiveSmsTemplate` returns null and every send is silently skipped.
 
 **Invariants:** consent is enforced at SEND time by the existing `processPendingJobs` → `checkSendAllowed` path (do not bypass it); dedup via `claimOutboundOnce` (claim BEFORE enqueue → a crash under-sends, never double-sends); recipient PII is encrypted at enqueue by `queueCommunicationJob` (resolve the contact and pass `recipientPhone`/`recipientEmail`). The campaign is **idempotent** (the ledger claim makes a re-run a no-op). **Operator authorization note:** this enqueues real customer messages once the cron runs in prod — it ships **unscheduled** (no `vercel.json` entry) and the operator enables it (see Task 4).
 
@@ -46,7 +50,9 @@ Add an `estimate_followup` entry to `TRIGGER_RULES` classifying it as **marketin
 
 - [ ] **Step 4: Seed a per-org template**
 
-Add an `estimate_followup` SMS template (and email if desired) to `seeds.ts`/`seedCommunicationTemplates` (and the body to `sms-templates.ts`) — body references "your estimate", uses the existing `{{customerName}}`-style variables, **no price, no PII**. Note in the plan that **each org must be (re)seeded** for sends to fire; until a template row exists for an org, `findActiveSmsTemplate` returns null and the campaign skips that org (degrade-safe, not a crash).
+Add an `estimate_followup` row to `defaultTemplates` in `seeds.ts` with the **full required shape** (match an existing row): `key`, `name`, `description`, `triggerType: "estimate_followup"`, `templateType: "sms" as const` (so `findActiveSmsTemplate`'s `templateType:'sms'` + `isActive:true` filter matches), `bodyTemplate` ("your estimate", `{{customerName}}`, **no price, no PII**), `variables`, `priority`.
+
+**⚠ Bulk re-seed does NOT backfill existing orgs.** `seedAllOrganizationTemplates` skips any org that already has ≥1 template (`existingCount.length > 0` → skip). So adding the row to `defaultTemplates` only helps **newly-seeded** orgs. For the pilot org (already seeded), the operator must run a **targeted insert** of just the `estimate_followup` template for that org (or you add a small idempotent "insert missing default templates" path). State this explicitly — until the row exists for the pilot org, the campaign skips it degrade-safe (returns `skippedNoTemplate`, no crash).
 
 - [ ] **Step 5: Typecheck + commit**
 
@@ -135,8 +141,10 @@ Mock `claimOutboundOnce`, `checkSendAllowed`, `queueCommunicationJob`, `appendEv
 ```ts
 import { claimOutboundOnce } from "./outbound-ledger";
 import { checkSendAllowed } from "./consent";
-import { queueCommunicationJob, findActiveSmsTemplate } from "./job-queue"; // import paths per the real files
-import { getCustomerContact } from "@/lib/admin/crm-queries"; // or wherever money-triggers resolves contact
+import { queueCommunicationJob } from "./job-queue";
+// findActiveSmsTemplate + getCustomerContact are PRIVATE in money-triggers.ts — EXPORT them
+// (widen findActiveSmsTemplate's trigger param to CommTrigger) or inline equivalents here.
+import { findActiveSmsTemplate, getCustomerContact } from "./money-triggers";
 import { appendEvent } from "@/lib/context/thread";
 
 export interface FollowupSummary {
@@ -190,7 +198,7 @@ export async function runUnsoldEstimateFollowup(
       channel: "sms",
       recipientPhone: contact.phone,      // REQUIRED — encrypted at enqueue
       serviceRequestId: e.serviceRequestId ?? undefined,
-      templateVariables: { customerName: contact.firstName ?? "there" },
+      templateVariables: { customerName: contact.name ?? "there" }, // CustomerContact has `name`, not `firstName`
     });
     await appendEvent(organizationId, e.customerId, {
       kind: "outbound", labelKey: "outbound_sent", refId: e.estimateId, channel: "sms",
@@ -201,7 +209,7 @@ export async function runUnsoldEstimateFollowup(
 }
 ```
 
-**Match the real signatures (read `job-queue.ts`, `consent.ts`, `outbound-ledger.ts`, and the contact-resolver `money-triggers.ts`/`warranty-queries.ts` use):** `queueCommunicationJob` requires `templateId` + a recipient; `findActiveSmsTemplate(org, trigger)` returns the per-org template row or null; `getCustomerContact` returns `{phone, email, firstName}` (use whatever name the codebase uses — `money-triggers.ts` is the reference caller). Consent is re-checked at SEND time too — this pre-check just avoids enqueuing obvious no-sends.
+**Match the real signatures (read `job-queue.ts`, `consent.ts`, `outbound-ledger.ts`, `money-triggers.ts`):** `queueCommunicationJob` requires `templateId` + a recipient; `findActiveSmsTemplate(org, trigger)` returns `{id} | null` (export it from `money-triggers.ts` and widen its `trigger` param to `CommTrigger`); `getCustomerContact(org, customerId)` returns **`{phone, email, name}`** (export one copy; use `contact.name`). `money-triggers.ts`'s `triggerEstimateSent` is the reference caller — copy its template-resolve → contact-resolve → `queueCommunicationJob` shape exactly. Consent is re-checked at SEND time too — this pre-check just avoids enqueuing obvious no-sends.
 
 - [ ] **Step 4: Run → pass.** Run `npx tsc --noEmit` → exit 0. Commit:
 ```bash
