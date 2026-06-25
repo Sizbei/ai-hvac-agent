@@ -55,6 +55,7 @@ import { pushJobToFieldpulse } from "@/lib/integrations/fieldpulse/job-sync";
 import type { ArrivalWindow } from "@/lib/admin/arrival-window";
 import { recordCustomerEquipment } from "@/lib/admin/crm-equipment-queries";
 import { buildEquipmentFromIntake } from "@/lib/admin/equipment-from-intake";
+import { appendEvent } from "@/lib/context/thread";
 import { logger } from "@/lib/logger";
 
 export function generateReferenceNumber(): string {
@@ -304,6 +305,23 @@ export async function submitSessionServiceRequest(params: {
   // the job) which keeps it idempotent.
   after(() => pushJobToHcp(organizationId, serviceRequest.id));
   after(() => pushJobToFieldpulse(organizationId, serviceRequest.id));
+
+  // Customer-thread eventing (Probook v3): record the booking on the customer's
+  // thread for cross-channel recognition. Best-effort (appendEvent never throws)
+  // and additive — guarded on a resolved customerId since the thread is keyed by
+  // it. The fields come from in-scope values (the returned row carries only id).
+  if (customerId) {
+    after(() =>
+      appendEvent(organizationId, customerId, {
+        kind: "booking",
+        labelKey: "booked",
+        refId: serviceRequest.id,
+        jobType: jobTypeForIssue(data.issueType),
+        window: data.preferredWindow ?? null,
+        channel: "web",
+      }),
+    );
+  }
 
   // Stage 2: when we held a CONCRETE window, auto-assign a technician in the
   // background (placeAndAssignRequest runs a conflict check — too slow for the
