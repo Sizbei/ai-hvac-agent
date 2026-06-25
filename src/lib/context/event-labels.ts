@@ -36,11 +36,11 @@ export type EventLabelKey =
 
 /** The structured (PII-free) projection a renderer is allowed to read. */
 export interface CustomerEventView {
-  kind: EventKind;
-  labelKey: EventLabelKey | null;
-  jobType: string | null;
-  window: string | null;
-  refId: string | null;
+  readonly kind: EventKind;
+  readonly labelKey: EventLabelKey | null;
+  readonly jobType: string | null;
+  readonly window: string | null;
+  readonly refId: string | null;
 }
 
 /** Render a PII-free human label from structured event fields only. */

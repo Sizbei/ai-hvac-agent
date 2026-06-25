@@ -35,6 +35,17 @@ describe("renderEventLabel", () => {
     expect(renderEventLabel(e)).toBe("Outbound message sent");
   });
 
+  it("renders the fallback for a booked event with no jobType", () => {
+    const e: CustomerEventView = {
+      kind: "booking",
+      labelKey: "booked",
+      jobType: null,
+      window: null,
+      refId: null,
+    };
+    expect(renderEventLabel(e)).toBe("Booking recorded");
+  });
+
   it("renders a generic label when labelKey is null", () => {
     const e: CustomerEventView = {
       kind: "note",
