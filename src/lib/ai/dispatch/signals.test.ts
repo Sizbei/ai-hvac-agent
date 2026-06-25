@@ -30,16 +30,28 @@ beforeEach(() => {
 
 describe('loadDispatchSignals', () => {
   it('returns a defaulted row for every requested tech even with no data', async () => {
-    // job has classification → 3 queries run (skill, rating, load), all empty.
-    selectQueue.push([], [], []);
+    // job has classification → 5 queries run (skill, rating, load, conversion, revenue), all empty.
+    selectQueue.push([], [], [], [], []);
     const m = await loadDispatchSignals(
       'org',
       ['t1', 't2'],
       { jobType: 'no_cool', systemType: null },
       '2026-06-24',
     );
-    expect(m.get('t1')).toEqual({ skillJobsCompleted: 0, avgRating: null, sameDayJobCount: 0 });
-    expect(m.get('t2')).toEqual({ skillJobsCompleted: 0, avgRating: null, sameDayJobCount: 0 });
+    expect(m.get('t1')).toEqual({
+      skillJobsCompleted: 0,
+      avgRating: null,
+      sameDayJobCount: 0,
+      conversionRate: 0,
+      avgJobRevenueCents: 0,
+    });
+    expect(m.get('t2')).toEqual({
+      skillJobsCompleted: 0,
+      avgRating: null,
+      sameDayJobCount: 0,
+      conversionRate: 0,
+      avgJobRevenueCents: 0,
+    });
   });
 
   it('interprets aggregated rows into the per-tech signals', async () => {
@@ -47,6 +59,8 @@ describe('loadDispatchSignals', () => {
       [{ techId: 't1', n: 7 }], // skill
       [{ techId: 't1', rating: '4.8' }], // rating (driver returns string for avg)
       [{ techId: 't1', n: 2 }], // load
+      [{ techId: 't1', total: 4, sold: 2 }], // conversion → 0.5
+      [{ techId: 't1', avgCents: '12000' }], // avg revenue (driver returns string for avg)
     );
     const m = await loadDispatchSignals(
       'org',
@@ -54,12 +68,18 @@ describe('loadDispatchSignals', () => {
       { jobType: 'no_cool', systemType: 'central_ac' },
       '2026-06-24',
     );
-    expect(m.get('t1')).toEqual({ skillJobsCompleted: 7, avgRating: 4.8, sameDayJobCount: 2 });
+    expect(m.get('t1')).toEqual({
+      skillJobsCompleted: 7,
+      avgRating: 4.8,
+      sameDayJobCount: 2,
+      conversionRate: 0.5,
+      avgJobRevenueCents: 12000,
+    });
   });
 
   it('skips the skill query and matches nobody when the job has no classification', async () => {
-    // No jobType/systemType → skill query is short-circuited; only rating+load run.
-    selectQueue.push([], []);
+    // No jobType/systemType → skill query short-circuited; rating+load+conversion+revenue run.
+    selectQueue.push([], [], [], []);
     const m = await loadDispatchSignals(
       'org',
       ['t1'],

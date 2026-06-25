@@ -14,6 +14,8 @@ function signals(
       skillJobsCompleted: 0,
       avgRating: null,
       sameDayJobCount: 0,
+      conversionRate: 0,
+      avgJobRevenueCents: 0,
       ...over,
     },
   };
@@ -31,25 +33,38 @@ describe('scoreTechnician', () => {
     expect(r.skillMatched).toBe(true);
   });
 
-  it('weights skill depth, quality, and load into [0,1]', () => {
-    // Max signals: 10+ skill jobs, 5.0 rating, 0 load → 0.5 + 0.3 + 0.2 = 1.0
+  it('weights skill, quality, conversion, and load into [0,1]', () => {
+    // Max signals: 10+ skill jobs, 5.0 rating, 1.0 conversion, 0 load → 0.4 + 0.2 + 0.25 + 0.15 = 1.0
     const best = scoreTechnician(
-      signals('t1', { skillJobsCompleted: 10, avgRating: 5, sameDayJobCount: 0 }),
+      signals('t1', { skillJobsCompleted: 10, avgRating: 5, conversionRate: 1, sameDayJobCount: 0 }),
     );
     expect(best.score).toBeCloseTo(1.0, 5);
     // Skill depth caps at 10 jobs.
     const capped = scoreTechnician(
-      signals('t1', { skillJobsCompleted: 50, avgRating: 5, sameDayJobCount: 0 }),
+      signals('t1', { skillJobsCompleted: 50, avgRating: 5, conversionRate: 1, sameDayJobCount: 0 }),
     );
     expect(capped.score).toBeCloseTo(1.0, 5);
   });
 
   it('defaults a missing rating to 3.5/5 for the quality term', () => {
-    // skill 0 (still scored), rating null → 3.5/5 * 0.3, load 0 → 0.2
+    // skill 0 (still scored), rating null → 3.5/5 * 0.2, conversion 0, load 0 → 0.15
     const r = scoreTechnician(
       signals('t1', { skillJobsCompleted: 0, avgRating: null, sameDayJobCount: 0 }),
     );
-    expect(r.score).toBeCloseTo((3.5 / 5) * 0.3 + 0.2, 5);
+    expect(r.score).toBeCloseTo((3.5 / 5) * 0.2 + 0.15, 5);
+  });
+
+  it('rewards a higher conversion rate and surfaces a close-rate reason', () => {
+    const lo = scoreTechnician(signals('a', { skillJobsCompleted: 5, conversionRate: 0.1 }));
+    const hi = scoreTechnician(signals('b', { skillJobsCompleted: 5, conversionRate: 0.9 }));
+    expect(hi.score).toBeGreaterThan(lo.score);
+    expect(hi.reasons.some((x) => x.includes('90% close rate'))).toBe(true);
+    expect(lo.reasons.some((x) => x.includes('close rate'))).toBe(true);
+  });
+
+  it('omits the close-rate reason when conversionRate is 0', () => {
+    const r = scoreTechnician(signals('t1', { skillJobsCompleted: 3, conversionRate: 0 }));
+    expect(r.reasons.some((x) => x.includes('close rate'))).toBe(false);
   });
 
   it('penalizes same-day load, flooring at 6 jobs', () => {
@@ -86,6 +101,14 @@ describe('rankTechnicians', () => {
       signals('b', { skillJobsCompleted: 0 }),
     ]);
     expect(ranked).toEqual([]);
+  });
+
+  it('lets conversion change the order between otherwise-equal techs', () => {
+    const ranked = rankTechnicians([
+      signals('a', { skillJobsCompleted: 5, avgRating: 4, sameDayJobCount: 1, conversionRate: 0.2 }),
+      signals('b', { skillJobsCompleted: 5, avgRating: 4, sameDayJobCount: 1, conversionRate: 0.8 }),
+    ]);
+    expect(ranked.map((r) => r.technicianId)).toEqual(['b', 'a']);
   });
 
   it('breaks ties deterministically by technicianId', () => {

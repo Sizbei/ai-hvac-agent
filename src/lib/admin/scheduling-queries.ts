@@ -806,6 +806,8 @@ async function rankedTechnicianOrder(
         skillJobsCompleted: s.skillJobsCompleted,
         avgRating: s.avgRating,
         sameDayJobCount: s.sameDayJobCount,
+        conversionRate: s.conversionRate,
+        avgJobRevenueCents: s.avgJobRevenueCents,
       },
     };
   });

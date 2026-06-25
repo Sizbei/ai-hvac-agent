@@ -11,7 +11,7 @@ import {
   sql,
 } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { serviceRequests, reviewRequests } from "@/lib/db/schema";
+import { serviceRequests, reviewRequests, estimates, invoices } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 
 export interface DispatchJobAttrs {
@@ -19,11 +19,15 @@ export interface DispatchJobAttrs {
   readonly systemType: string | null;
 }
 
-/** The three raw signals the scorer consumes, per technician. */
+/** The raw signals the scorer consumes, per technician. */
 export interface TechSignalRow {
   readonly skillJobsCompleted: number;
   readonly avgRating: number | null;
   readonly sameDayJobCount: number;
+  /** Sold estimates / total estimates on this tech's jobs, in [0,1] (0 when none). */
+  readonly conversionRate: number;
+  /** Avg invoice total (cents) on this tech's completed jobs (0 when none). */
+  readonly avgJobRevenueCents: number;
 }
 
 // Open statuses that count toward a tech's same-day load (everything not
@@ -55,7 +59,13 @@ export async function loadDispatchSignals(
 ): Promise<Map<string, TechSignalRow>> {
   const result = new Map<string, TechSignalRow>();
   for (const id of technicianIds) {
-    result.set(id, { skillJobsCompleted: 0, avgRating: null, sameDayJobCount: 0 });
+    result.set(id, {
+      skillJobsCompleted: 0,
+      avgRating: null,
+      sameDayJobCount: 0,
+      conversionRate: 0,
+      avgJobRevenueCents: 0,
+    });
   }
   if (technicianIds.length === 0) return result;
 
@@ -78,7 +88,7 @@ export async function loadDispatchSignals(
         ? or(...skillMatchers)
         : null;
 
-  const [skillRows, ratingRows, loadRows] = await Promise.all([
+  const [skillRows, ratingRows, loadRows, conversionRows, revenueRows] = await Promise.all([
     skillPredicate
       ? db
           .select({ techId: serviceRequests.assignedTo, n: count() })
@@ -135,6 +145,48 @@ export async function loadDispatchSignals(
         ),
       )
       .groupBy(serviceRequests.assignedTo),
+
+    // Conversion: sold estimates / total estimates on each tech's jobs.
+    db
+      .select({
+        techId: serviceRequests.assignedTo,
+        total: count(),
+        sold: sql<number>`count(*) FILTER (WHERE ${estimates.status} = 'sold')`,
+      })
+      .from(estimates)
+      .innerJoin(
+        serviceRequests,
+        sql`${estimates.serviceRequestId} = ${serviceRequests.id} AND ${serviceRequests.organizationId} = ${organizationId}`,
+      )
+      .where(
+        withTenant(estimates, organizationId, inArray(serviceRequests.assignedTo, ids)),
+      )
+      .groupBy(serviceRequests.assignedTo),
+
+    // Avg job revenue: avg invoice total on each tech's completed jobs (native+synced,
+    // excluding draft/void). Surfaced as a reason; not yet a weighted term.
+    db
+      .select({
+        techId: serviceRequests.assignedTo,
+        avgCents: avg(invoices.totalCents),
+      })
+      .from(invoices)
+      .innerJoin(
+        serviceRequests,
+        sql`${invoices.serviceRequestId} = ${serviceRequests.id} AND ${serviceRequests.organizationId} = ${organizationId}`,
+      )
+      .where(
+        withTenant(
+          invoices,
+          organizationId,
+          and(
+            inArray(serviceRequests.assignedTo, ids),
+            eq(serviceRequests.status, "completed"),
+            inArray(invoices.state, ["open", "paid"]),
+          )!,
+        ),
+      )
+      .groupBy(serviceRequests.assignedTo),
   ]);
 
   for (const r of skillRows) {
@@ -158,6 +210,24 @@ export async function loadDispatchSignals(
       result.set(r.techId, {
         ...result.get(r.techId)!,
         sameDayJobCount: Number(r.n),
+      });
+    }
+  }
+  for (const r of conversionRows) {
+    if (r.techId && result.has(r.techId)) {
+      const total = Number(r.total);
+      const sold = Number(r.sold);
+      result.set(r.techId, {
+        ...result.get(r.techId)!,
+        conversionRate: total > 0 ? sold / total : 0,
+      });
+    }
+  }
+  for (const r of revenueRows) {
+    if (r.techId && result.has(r.techId)) {
+      result.set(r.techId, {
+        ...result.get(r.techId)!,
+        avgJobRevenueCents: r.avgCents != null ? Math.round(Number(r.avgCents)) : 0,
       });
     }
   }
