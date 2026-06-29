@@ -154,6 +154,7 @@ const REQUIRED_ENV_VARS: readonly EnvVarSpec[] = [
  */
 export function validateEnvVars(): void {
   const missing: string[] = [];
+  const invalid: string[] = [];
   const warnings: string[] = [];
 
   for (const spec of REQUIRED_ENV_VARS) {
@@ -166,11 +167,30 @@ export function validateEnvVars(): void {
     }
   }
 
+  // Format checks for present secrets — mirror the lazy checks in crypto.ts and
+  // auth/config.ts so a MALFORMED (not just missing) key fails at cold start
+  // rather than 500ing deep in the first PII write or login.
+  const encryptionKey = process.env.ENCRYPTION_KEY;
+  if (encryptionKey && encryptionKey.length !== 64) {
+    invalid.push('ENCRYPTION_KEY must be a 64-character hex string (run: openssl rand -hex 32)');
+  }
+  const authSecret = process.env.AUTH_SECRET;
+  if (authSecret && authSecret.length < 32) {
+    invalid.push('AUTH_SECRET must be at least 32 characters (run: openssl rand -hex 32)');
+  }
+
   // Fail fast on missing required vars
   if (missing.length > 0) {
     throw new Error(
       `Missing required environment variables:\n${missing.map((name) => `  - ${name}`).join('\n')}\n\n` +
         `Please set these in your deployment environment or .env.local for local development.`
+    );
+  }
+
+  // Fail fast on present-but-malformed secrets
+  if (invalid.length > 0) {
+    throw new Error(
+      `Invalid environment variables:\n${invalid.map((msg) => `  - ${msg}`).join('\n')}`
     );
   }
 
