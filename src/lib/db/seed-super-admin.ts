@@ -1,5 +1,10 @@
 /**
- * Idempotent seed: provision rchen.workmail@gmail.com as a super_admin.
+ * Idempotent seed: provision the instance owner as a super_admin.
+ *
+ * The account email/name come from SUPER_ADMIN_EMAIL / SUPER_ADMIN_NAME so a
+ * fresh deployer can bootstrap THEIR OWN owner without editing source. They
+ * fall back to the original demo values when unset, preserving the existing
+ * portfolio demo's behavior.
  *
  * This account is GOOGLE-ONLY (passwordHash = NULL) — it can sign in only via
  * "Sign in with Google" (OIDC), never with a password. It is the seeded owner of
@@ -9,7 +14,8 @@
  * reactivated (without touching an existing google_id link); otherwise it is
  * created. Safe to run repeatedly.
  *
- *   npm run db:seed:super-admin
+ *   SUPER_ADMIN_EMAIL="you@example.com" SUPER_ADMIN_NAME="Your Name" \
+ *     npm run db:seed:super-admin
  *
  * Requires DATABASE_URL. There is no transaction (neon-http) — the operations
  * are a single-row read then a single write, so this is naturally atomic enough
@@ -21,8 +27,10 @@ import { eq, and } from "drizzle-orm";
 import * as schema from "./schema";
 
 const DEMO_ORG_ID = "00000000-0000-0000-0000-000000000001";
-const SUPER_ADMIN_EMAIL = "rchen.workmail@gmail.com";
-const SUPER_ADMIN_NAME = "Raymond Chen";
+const SUPER_ADMIN_EMAIL =
+  process.env.SUPER_ADMIN_EMAIL?.trim() || "rchen.workmail@gmail.com";
+const SUPER_ADMIN_NAME =
+  process.env.SUPER_ADMIN_NAME?.trim() || "Raymond Chen";
 
 export async function seedSuperAdmin(): Promise<void> {
   if (!process.env.DATABASE_URL) {
