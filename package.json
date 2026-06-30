@@ -78,7 +78,6 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@libsql/darwin-arm64": "^0.5.29",
     "@playwright/test": "^1.60.0",
     "@tailwindcss/postcss": "^4",
     "@tauri-apps/cli": "^2.11.2",
