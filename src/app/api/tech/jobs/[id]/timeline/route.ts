@@ -5,11 +5,11 @@
  * the append-only request_status_events log. Assignee + tenant guarded in
  * field-queries (a tech may only see their OWN job's timeline). PII-free.
  *
- * Auth mirrors the other tech routes: getAdminSession (technician role) + the
+ * Auth mirrors the other tech routes: getTechSession (technician role) + the
  * assignee+tenant guard in the query layer.
  */
 import { NextRequest } from "next/server";
-import { getAdminSession } from "@/lib/auth/session";
+import { getTechSession } from "@/lib/auth/tech-session";
 import { getJobTimelineForTech } from "@/lib/tech/field-queries";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { logger } from "@/lib/logger";
@@ -21,7 +21,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const session = await getAdminSession();
+    const session = await getTechSession();
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }

@@ -290,6 +290,21 @@ export const users = pgTable(
     // changes. NULL means "no rate set" — clock-out treats it as 0 (the entry's
     // laborCostCents is 0 until a rate exists).
     laborRateCents: integer("labor_rate_cents"),
+    // ── Field location (autodispatch + live tracking) ──
+    // The tech's home/start anchor for travel-aware autodispatch (NULL = fall
+    // back to the business base). Plain coords — not blind-indexed; a tech's base
+    // is not the same PII shape as a customer address.
+    homeBaseLat: doublePrecision("home_base_lat"),
+    homeBaseLng: doublePrecision("home_base_lng"),
+    // Opt-in consent for live location sharing while on the clock. Capture is
+    // refused server-side unless this is true; turning it off revokes (and the
+    // ingest route stops accepting fixes).
+    locationSharingEnabled: boolean("location_sharing_enabled")
+      .notNull()
+      .default(false),
+    locationConsentUpdatedAt: timestamp("location_consent_updated_at", {
+      withTimezone: true,
+    }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -507,6 +522,18 @@ export const serviceRequests = pgTable(
     underWarranty: triStateEnum("under_warranty"),
     // Free-text access notes — gate code, pets, parking, unit location.
     accessNotes: text("access_notes"),
+    // ── Duration-based scheduling / autodispatch ──
+    // Estimated on-site duration in minutes (deterministic base table, optionally
+    // LLM-refined). NULL until computed at booking.
+    estimatedDurationMinutes: integer("estimated_duration_minutes"),
+    // Provenance of the estimate: 'default' | 'llm' | 'actual' | 'manual'.
+    estimatedDurationSource: text("estimated_duration_source")
+      .notNull()
+      .default("default"),
+    // Outcome of the confidence-gated autodispatch pass at booking time.
+    autoDispatchOutcome: text("auto_dispatch_outcome", {
+      enum: ["committed", "queued_ambiguous", "queued_no_fit"],
+    }),
     // Triage signals.
     systemDownStatus: systemDownStatusEnum("system_down_status"),
     problemDuration: text("problem_duration"),
@@ -1007,6 +1034,15 @@ export const organizationSettings = pgTable("organization_settings", {
   // (today's behavior). When true, autoAssignBookedRequest ranks technicians by
   // a deterministic skill/quality/load score and assigns the best one that fits.
   autoDispatchEnabled: boolean("auto_dispatch_enabled").notNull().default(false),
+  // Source of truth for scheduling. 'external' SKIPS native autodispatch (an
+  // external scheduler — FieldPulse/HCP — owns the calendar) to avoid double-
+  // booking. Default 'native' preserves today's behavior.
+  schedulingSource: text("scheduling_source", { enum: ["native", "external"] })
+    .notNull()
+    .default("native"),
+  // Number that receives "technician running behind" dispatcher SMS alerts.
+  // NULL = dispatcher delay alerts disabled.
+  dispatchAlertPhone: text("dispatch_alert_phone"),
 
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
@@ -2186,6 +2222,45 @@ export const technicianTimeEntries = pgTable(
     uniqueIndex("tte_open_per_tech_job_unique")
       .on(table.serviceRequestId, table.technicianId)
       .where(sql`${table.clockOutAt} IS NULL`),
+  ],
+);
+
+// 28b. technician_locations — consent-gated live field position fixes. One row
+// per GPS fix posted by a tech's phone while clocked in. Latest-per-tech feeds
+// travel-aware dispatch + behind-schedule projection; history is trimmed by
+// retention. Plain coords (not blind-indexed).
+export const technicianLocations = pgTable(
+  "technician_locations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    technicianId: uuid("technician_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // The job the tech was on when this fix was captured (NULL if none).
+    serviceRequestId: uuid("service_request_id").references(
+      () => serviceRequests.id,
+      { onDelete: "set null" },
+    ),
+    latitude: doublePrecision("latitude").notNull(),
+    longitude: doublePrecision("longitude").notNull(),
+    accuracyM: doublePrecision("accuracy_m"),
+    heading: doublePrecision("heading"),
+    capturedAt: timestamp("captured_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("tloc_org_idx").on(table.organizationId),
+    index("tloc_latest_idx").on(
+      table.organizationId,
+      table.technicianId,
+      table.capturedAt,
+    ),
+    index("tloc_captured_idx").on(table.capturedAt),
   ],
 );
 

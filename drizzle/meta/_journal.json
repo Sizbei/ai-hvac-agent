@@ -176,6 +176,13 @@
       "when": 1782352819525,
       "tag": "0024_long_venom",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1782857708419,
+      "tag": "0025_special_jackpot",
+      "breakpoints": true
     }
   ]
 }

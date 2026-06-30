@@ -32,9 +32,12 @@ import { withTenant } from "@/lib/db/tenant";
 import { logger } from "@/lib/logger";
 import {
   rankTechnicians,
+  classifyDispatch,
   type DispatchSignals,
   type RankedTech,
+  type DispatchOutcome,
 } from "@/lib/ai/dispatch/score";
+import { estimateJobDuration } from "@/lib/ai/dispatch/duration";
 import { loadDispatchSignals } from "@/lib/ai/dispatch/signals";
 import { isTerminal, type RequestStatus } from "./request-status";
 import { isWindowWithinAvailability } from "./availability-coverage";
@@ -731,6 +734,89 @@ async function isAutoDispatchEnabled(organizationId: string): Promise<boolean> {
   return row?.enabled ?? false;
 }
 
+/** Whether an EXTERNAL scheduler (FieldPulse/HCP) owns this org's calendar. When
+ * true, native autodispatch is skipped entirely to avoid double-booking against
+ * the system of record. Default 'native' → false (today's behavior). */
+async function isExternallyScheduled(organizationId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ source: organizationSettings.schedulingSource })
+    .from(organizationSettings)
+    .where(eq(organizationSettings.organizationId, organizationId))
+    .limit(1);
+  return row?.source === "external";
+}
+
+/** Stamp the confidence-gated autodispatch outcome on the request (annotation for
+ * the dispatcher's exception queue). The 'committed' stamp is unconditional (we
+ * just placed it); a 'queued_*' stamp is guarded on assignedTo IS NULL so a
+ * dispatcher who manually assigned in the race window isn't overwritten with a
+ * stale queue verdict. */
+async function stampDispatchOutcome(
+  organizationId: string,
+  requestId: string,
+  outcome: DispatchOutcome,
+): Promise<void> {
+  const cond =
+    outcome === "committed"
+      ? eq(serviceRequests.id, requestId)
+      : and(
+          eq(serviceRequests.id, requestId),
+          isNull(serviceRequests.assignedTo),
+        )!;
+  await db
+    .update(serviceRequests)
+    .set({ autoDispatchOutcome: outcome, updatedAt: new Date() })
+    .where(withTenant(serviceRequests, organizationId, cond));
+}
+
+/** Compute + persist the on-site duration estimate for a request, once (the AI
+ * assist). No-ops if an estimate is already stored — so it's idempotent and never
+ * re-calls the LLM. Best-effort: callers run it on the booking's after() path; a
+ * failure never affects the booking or the dispatch. */
+export async function ensureEstimatedDuration(
+  organizationId: string,
+  requestId: string,
+): Promise<void> {
+  const [row] = await db
+    .select({
+      minutes: serviceRequests.estimatedDurationMinutes,
+      jobType: serviceRequests.jobType,
+      systemType: serviceRequests.systemType,
+      equipmentAgeBand: serviceRequests.equipmentAgeBand,
+      description: serviceRequests.description,
+    })
+    .from(serviceRequests)
+    .where(
+      withTenant(serviceRequests, organizationId, eq(serviceRequests.id, requestId)),
+    )
+    .limit(1);
+  if (!row || row.minutes != null) return; // missing, or already estimated
+
+  const est = await estimateJobDuration(organizationId, {
+    jobType: row.jobType,
+    systemType: row.systemType,
+    equipmentAgeBand: row.equipmentAgeBand,
+    description: row.description,
+  });
+  await db
+    .update(serviceRequests)
+    .set({
+      estimatedDurationMinutes: est.minutes,
+      estimatedDurationSource: est.source,
+      updatedAt: new Date(),
+    })
+    .where(
+      withTenant(
+        serviceRequests,
+        organizationId,
+        and(
+          eq(serviceRequests.id, requestId),
+          isNull(serviceRequests.estimatedDurationMinutes),
+        )!,
+      ),
+    );
+}
+
 /** The incoming job's classification, for skill matching. */
 async function loadJobClassification(
   organizationId: string,
@@ -888,7 +974,16 @@ export async function autoAssignBookedRequest(
         and(eq(users.role, "technician"), eq(users.isActive, true))!,
       ),
     );
+  // Best-effort: estimate this booking's on-site duration (AI assist; deterministic
+  // base + clamped LLM refine). Runs on the booking's after() path; never blocks
+  // or fails dispatch.
+  await ensureEstimatedDuration(organizationId, requestId).catch(() => {});
+
   if (techs.length === 0) return { assigned: false };
+
+  // Skip native autodispatch when an external scheduler (FieldPulse/HCP) owns the
+  // calendar — assigning here would double-book against the system of record.
+  if (await isExternallyScheduled(organizationId)) return { assigned: false };
 
   // Scored mode (org opt-in) ranks skill-matched techs best-first; otherwise we
   // keep today's first-fit (DB order) for zero behavior change. A job that can't
@@ -904,6 +999,18 @@ export async function autoAssignBookedRequest(
   const order = ranked ? ranked.map((r) => r.technicianId) : firstFit;
   const rankedById = new Map(ranked?.map((r) => [r.technicianId, r]) ?? []);
 
+  // Confidence-gated commit (scored mode only): a near-tie between the top two,
+  // or no skill match at all, is too uncertain to auto-commit — stamp the queue
+  // verdict and leave it for a dispatcher's exception queue. First-fit mode
+  // (ranked === null) keeps placing as before (no confidence concept).
+  if (ranked) {
+    const decision = classifyDispatch(ranked);
+    if (decision.outcome !== "committed") {
+      await stampDispatchOutcome(organizationId, requestId, decision.outcome);
+      return { assigned: false };
+    }
+  }
+
   for (const technicianId of order) {
     const result = await placeAndAssignRequest(
       organizationId,
@@ -913,6 +1020,9 @@ export async function autoAssignBookedRequest(
     );
     if (result.ok) {
       await markAutoAssigned(organizationId, requestId, technicianId);
+      if (ranked) {
+        await stampDispatchOutcome(organizationId, requestId, "committed");
+      }
       // Scored placement → record the explainable decision so an operator can
       // answer "why this tech?". First-fit placements have no score to log.
       const decision = rankedById.get(technicianId);
@@ -935,6 +1045,11 @@ export async function autoAssignBookedRequest(
     if (result.reason !== "conflict" && result.reason !== "technician_not_found") {
       break;
     }
+  }
+  // Scored mode reached here = the confident top pick(s) couldn't be placed (all
+  // conflicted). Record no-fit so the dispatcher sees it in the exception queue.
+  if (ranked) {
+    await stampDispatchOutcome(organizationId, requestId, "queued_no_fit");
   }
   return { assigned: false };
 }

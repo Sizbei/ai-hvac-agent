@@ -11,7 +11,7 @@
  * PII: signatureName is the customer's printed name — it MUST NOT be logged.
  */
 import { NextRequest } from "next/server";
-import { getAdminSession } from "@/lib/auth/session";
+import { getTechSession } from "@/lib/auth/tech-session";
 import { recordSignature } from "@/lib/tech/field-queries";
 import {
   getStorageClient,
@@ -30,7 +30,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const session = await getAdminSession();
+    const session = await getTechSession();
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }

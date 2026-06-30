@@ -6,7 +6,7 @@
  */
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { getAdminSession } from "@/lib/auth/session";
+import { getTechSession } from "@/lib/auth/tech-session";
 import { addFieldNote } from "@/lib/tech/field-queries";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { successResponse, errorResponse } from "@/lib/api-response";
@@ -21,7 +21,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const session = await getAdminSession();
+    const session = await getTechSession();
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }

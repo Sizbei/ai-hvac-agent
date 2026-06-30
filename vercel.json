@@ -5,6 +5,10 @@
       "schedule": "0 3 * * *"
     },
     {
+      "path": "/api/cron/delay-sweep",
+      "schedule": "0 13 * * *"
+    },
+    {
       "path": "/api/cron/webhook-cleanup",
       "schedule": "0 4 * * *"
     },

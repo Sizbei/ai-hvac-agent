@@ -6,7 +6,7 @@
  * session (technician role). Tenant-scoped to the tech's org.
  */
 import { and, eq, inArray, asc } from "drizzle-orm";
-import { getAdminSession } from "@/lib/auth/session";
+import { getTechSession } from "@/lib/auth/tech-session";
 import { db } from "@/lib/db";
 import { serviceRequests } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
@@ -29,7 +29,7 @@ function safeDecrypt(v: string | null): string | null {
 
 export async function GET() {
   try {
-    const session = await getAdminSession();
+    const session = await getTechSession();
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }

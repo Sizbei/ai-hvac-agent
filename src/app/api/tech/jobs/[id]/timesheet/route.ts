@@ -6,12 +6,12 @@
  * POST  { action: "clock_in" | "clock_out" } — assignee + tenant guarded in
  *       timesheet-queries.
  *
- * Auth mirrors the tech materials route: getAdminSession (technician session) +
+ * Auth mirrors the tech materials route: getTechSession (technician session) +
  * the assignee+tenant guard lives in the query layer.
  */
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { getAdminSession } from "@/lib/auth/session";
+import { getTechSession } from "@/lib/auth/tech-session";
 import {
   clockIn,
   clockOut,
@@ -32,7 +32,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const session = await getAdminSession();
+    const session = await getTechSession();
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
@@ -58,7 +58,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const session = await getAdminSession();
+    const session = await getTechSession();
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }

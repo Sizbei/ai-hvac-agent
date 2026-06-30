@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { scoreTechnician, rankTechnicians, type DispatchSignals } from './score';
+import { scoreTechnician, rankTechnicians, classifyDispatch, type DispatchSignals } from './score';
 
 const job = { jobType: 'no_cool', systemType: 'central_ac', urgency: 'standard' } as const;
 
@@ -117,5 +117,54 @@ describe('rankTechnicians', () => {
       signals('alpha', { skillJobsCompleted: 5, avgRating: 4, sameDayJobCount: 1 }),
     ]);
     expect(ranked.map((r) => r.technicianId)).toEqual(['alpha', 'zeta']);
+  });
+});
+
+describe('travel-aware scoring + confidence classification', () => {
+  const baseTech = {
+    skillJobsCompleted: 5,
+    avgRating: 4 as number | null,
+    sameDayJobCount: 2,
+    conversionRate: 0.5,
+    avgJobRevenueCents: 0,
+  };
+  const job = { jobType: 'repair', systemType: null, urgency: 'standard' };
+
+  it('ranks a closer tech above a farther one, all else equal', () => {
+    const near = scoreTechnician({ job, tech: { technicianId: 'a', ...baseTech, travelKm: 2 } });
+    const far = scoreTechnician({ job, tech: { technicianId: 'b', ...baseTech, travelKm: 35 } });
+    expect(near.score).toBeGreaterThan(far.score);
+    expect(near.reasons.some((r) => r.includes('km away'))).toBe(true);
+  });
+
+  it('is byte-identical to the no-travel composite when travelKm is absent', () => {
+    const without = scoreTechnician({ job, tech: { technicianId: 'a', ...baseTech } });
+    const nullTravel = scoreTechnician({ job, tech: { technicianId: 'a', ...baseTech, travelKm: null } });
+    expect(nullTravel.score).toBe(without.score);
+  });
+
+  it('classifyDispatch: empty ranking → queued_no_fit', () => {
+    expect(classifyDispatch([]).outcome).toBe('queued_no_fit');
+  });
+
+  it('classifyDispatch: a clear winner commits to the top tech', () => {
+    const ranked = [
+      { technicianId: 'a', score: 0.8, reasons: [], skillMatched: true },
+      { technicianId: 'b', score: 0.5, reasons: [], skillMatched: true },
+    ];
+    expect(classifyDispatch(ranked)).toEqual({ outcome: 'committed', technicianId: 'a' });
+  });
+
+  it('classifyDispatch: a near-tie defers to a human (queued_ambiguous)', () => {
+    const ranked = [
+      { technicianId: 'a', score: 0.81, reasons: [], skillMatched: true },
+      { technicianId: 'b', score: 0.80, reasons: [], skillMatched: true },
+    ];
+    expect(classifyDispatch(ranked).outcome).toBe('queued_ambiguous');
+  });
+
+  it('classifyDispatch: a lone candidate commits (infinite gap)', () => {
+    const ranked = [{ technicianId: 'a', score: 0.3, reasons: [], skillMatched: true }];
+    expect(classifyDispatch(ranked)).toEqual({ outcome: 'committed', technicianId: 'a' });
   });
 });

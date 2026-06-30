@@ -20,6 +20,11 @@ export interface DispatchSignals {
     readonly conversionRate: number;
     /** Avg invoice total on this tech's completed jobs; surfaced as a reason, not yet weighted. */
     readonly avgJobRevenueCents: number;
+    /** Straight-line km from the tech's anchor (live location or home base) to the
+     * job, or null when either coordinate is unknown. When present, travel becomes
+     * the DOMINANT factor (location-primary dispatch); when null the score is
+     * byte-identical to the no-travel composite. */
+    readonly travelKm?: number | null;
   };
 }
 
@@ -40,6 +45,12 @@ const SKILL_DEPTH_CAP = 10; // jobs beyond this don't increase skill depth
 const LOAD_CAP = 6; // same-day jobs beyond this don't increase the load penalty
 const DEFAULT_RATING = 3.5; // assumed quality for a tech with no ratings yet
 
+// Travel overlay (applied only when travelKm is known). Location is primary per
+// the dispatch spec, so a known travel distance carries the largest single
+// weight; the existing skill/quality/conversion/load mix fills the remainder.
+const W_TRAVEL = 0.45;
+const TRAVEL_CAP_KM = 40; // beyond the service radius, travel score floors at 0
+
 /** A short label for the job's specialty, for human-readable reasons. */
 function skillLabel(job: DispatchSignals['job']): string {
   return job.jobType ?? job.systemType ?? 'matching';
@@ -54,10 +65,24 @@ export function scoreTechnician(signals: DispatchSignals): RankedTech {
   const conversion = Math.min(Math.max(tech.conversionRate, 0), 1);
   const load = 1 - Math.min(tech.sameDayJobCount, LOAD_CAP) / LOAD_CAP;
 
-  const score =
+  const composite =
     skillDepth * W_SKILL + quality * W_QUALITY + conversion * W_CONVERSION + load * W_LOAD;
 
+  // Travel overlay: known distance dominates (location-primary). Absent → the
+  // score equals the composite exactly, so no-travel behavior is unchanged.
+  let score = composite;
+  if (tech.travelKm != null && Number.isFinite(tech.travelKm)) {
+    const travelScore = Math.max(
+      0,
+      1 - Math.min(tech.travelKm, TRAVEL_CAP_KM) / TRAVEL_CAP_KM,
+    );
+    score = travelScore * W_TRAVEL + composite * (1 - W_TRAVEL);
+  }
+
   const reasons: string[] = [];
+  if (tech.travelKm != null && Number.isFinite(tech.travelKm)) {
+    reasons.push(`${tech.travelKm.toFixed(1)} km away`);
+  }
   reasons.push(
     skillMatched
       ? `${tech.skillJobsCompleted} prior ${skillLabel(job)} jobs`
@@ -83,4 +108,33 @@ export function rankTechnicians(candidates: readonly DispatchSignals[]): RankedT
         ? b.score - a.score
         : a.technicianId.localeCompare(b.technicianId),
     );
+}
+
+export type DispatchOutcome =
+  | "committed"
+  | "queued_ambiguous"
+  | "queued_no_fit";
+
+/** Minimum top-vs-second score gap to AUTO-COMMIT. A clear winner commits; a
+ * near-tie is too close to auto-decide and goes to a human. Gap-based (not an
+ * absolute threshold) so it's robust to the travel-present vs -absent score
+ * regimes. Provisional — tune on pilot override-rate data. */
+const MIN_CONFIDENCE_GAP = 0.08;
+
+/**
+ * Confidence-gated decision over an already-ranked (skill-matched, score-desc)
+ * candidate list. Auto-commits ONLY when there's a clear best tech; otherwise it
+ * defers to a human. Empty ranking (nobody skill-matched) → no-fit queue.
+ */
+export function classifyDispatch(ranked: readonly RankedTech[]): {
+  readonly outcome: DispatchOutcome;
+  readonly technicianId?: string;
+} {
+  if (ranked.length === 0) return { outcome: "queued_no_fit" };
+  const top = ranked[0]!;
+  const gap = ranked.length > 1 ? top.score - ranked[1]!.score : Infinity;
+  if (gap >= MIN_CONFIDENCE_GAP) {
+    return { outcome: "committed", technicianId: top.technicianId };
+  }
+  return { outcome: "queued_ambiguous" };
 }

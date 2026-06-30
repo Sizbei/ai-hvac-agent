@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatCentsExact } from '@/lib/admin/money-format';
+import { TechJobSummary } from '@/components/tech/tech-job-summary';
 
 interface Material {
   readonly id: string;
@@ -459,6 +460,9 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
       >
         <ArrowLeft className="size-4" /> Back
       </Link>
+
+      {/* All info the tech needs on-site + status controls. */}
+      <TechJobSummary id={id} onStatusChanged={() => void loadTimeline()} />
 
       {loadError && (
         <div
