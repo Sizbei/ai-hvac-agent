@@ -171,7 +171,9 @@ export function validateEnvVars(): void {
   // auth/config.ts so a MALFORMED (not just missing) key fails at cold start
   // rather than 500ing deep in the first PII write or login.
   const encryptionKey = process.env.ENCRYPTION_KEY;
-  if (encryptionKey && encryptionKey.length !== 64) {
+  // Length AND hex: Buffer.from(key, "hex") silently drops non-hex chars and
+  // zero-pads, so a 64-char non-hex value would boot clean then corrupt AES.
+  if (encryptionKey && !/^[0-9a-fA-F]{64}$/.test(encryptionKey)) {
     invalid.push('ENCRYPTION_KEY must be a 64-character hex string (run: openssl rand -hex 32)');
   }
   const authSecret = process.env.AUTH_SECRET;
