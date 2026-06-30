@@ -48,6 +48,13 @@ manually once:
 DATABASE_URL="your-neon-connection-string" npm run db:migrate
 ```
 
+> **Preview deployments do not migrate.** The migrate step is guarded to run
+> only when `VERCEL_ENV=production` (and always locally/CI). This stops PR
+> preview builds — which inherit the production `DATABASE_URL` unless you've set
+> up [Neon database branching](https://neon.tech/docs/guides/vercel) — from
+> permanently altering your prod schema with a migration from an abandoned PR.
+> If you want previews to exercise migrations, give them their own branch DB.
+
 This creates all tables, indexes, and constraints defined in the schema. The
 migration script is located at `src/lib/db/migrate.ts`.
 

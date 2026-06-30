@@ -18,9 +18,17 @@ function setEnv(overrides: Record<string, string | undefined>): void {
 }
 
 describe('validateEnvVars', () => {
-  const original = { ...process.env };
+  // Snapshot only the keys these tests touch, and restore each individually —
+  // never reassign process.env wholesale (it has special set-time coercion).
+  const KEYS = Object.keys(VALID);
+  const original: Record<string, string | undefined> = {};
+  for (const k of KEYS) original[k] = process.env[k];
+
   afterEach(() => {
-    process.env = { ...original };
+    for (const k of KEYS) {
+      if (original[k] === undefined) delete process.env[k];
+      else process.env[k] = original[k];
+    }
   });
 
   it('passes when all required vars are present and well-formed', () => {
@@ -35,6 +43,11 @@ describe('validateEnvVars', () => {
 
   it('throws when ENCRYPTION_KEY is present but not 64 chars', () => {
     setEnv({ ENCRYPTION_KEY: 'tooshort' });
+    expect(() => validateEnvVars()).toThrow(/ENCRYPTION_KEY must be a 64-character/);
+  });
+
+  it('throws when ENCRYPTION_KEY is 64 chars but not valid hex', () => {
+    setEnv({ ENCRYPTION_KEY: 'z'.repeat(64) });
     expect(() => validateEnvVars()).toThrow(/ENCRYPTION_KEY must be a 64-character/);
   });
 
