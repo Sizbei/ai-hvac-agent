@@ -722,6 +722,60 @@ export async function placeAndAssignRequest(
   };
 }
 
+/**
+ * Clear a job's placement: null its schedule + arrival window and unassign it,
+ * returning it to the unscheduled "to place" queue (status reset to 'pending').
+ * The inverse of placeAndAssignRequest — backs drag-back-to-Unscheduled. A single
+ * status-guarded UPDATE (neon-http has no transactions); terminal jobs are refused.
+ */
+export async function unscheduleRequest(
+  organizationId: string,
+  requestId: string,
+): Promise<
+  | { readonly ok: true }
+  | {
+      readonly ok: false;
+      readonly reason: "request_not_found" | "request_terminal";
+      readonly currentStatus?: string;
+    }
+> {
+  const [existing] = await db
+    .select({ status: serviceRequests.status })
+    .from(serviceRequests)
+    .where(
+      withTenant(serviceRequests, organizationId, eq(serviceRequests.id, requestId)),
+    );
+  if (!existing) return { ok: false, reason: "request_not_found" };
+  if (isTerminal(existing.status as RequestStatus)) {
+    return { ok: false, reason: "request_terminal", currentStatus: existing.status };
+  }
+
+  const [updated] = await db
+    .update(serviceRequests)
+    .set({
+      status: "pending",
+      assignedTo: null,
+      scheduledDate: null,
+      arrivalWindowStart: null,
+      arrivalWindowEnd: null,
+      updatedAt: new Date(),
+    })
+    .where(
+      withTenant(
+        serviceRequests,
+        organizationId,
+        and(
+          eq(serviceRequests.id, requestId),
+          eq(serviceRequests.status, existing.status),
+        )!,
+      ),
+    )
+    .returning({ id: serviceRequests.id });
+
+  if (!updated) return { ok: false, reason: "request_not_found" };
+  return { ok: true };
+}
+
 /** Org opt-in for scored dispatch. Reads the single column fresh (the settings
  * cache is for the chatbot path; a just-flipped toggle takes effect next booking).
  * organization_settings is keyed by organizationId (PK), so eq is the tenant scope. */
