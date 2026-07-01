@@ -23,6 +23,15 @@ import { businessWallClockToUtc, toBusinessWallClock } from "./calendar-time";
 
 const MINUTES_PER_HOUR = 60;
 
+// Bounded fallback for the UNCONFIGURED state (a tech with no availability rows
+// at all — the common pre-setup state). NOT unbounded "always open": the same
+// gate enforces server-side placement (placeAndAssignRequest), so an open default
+// would let auto-assign place jobs at any hour. Mon–Fri 8:00 AM–8:00 PM exactly
+// covers the morning/afternoon/evening/anytime window bounds. Weekends stay off
+// until real hours are set (P1 availability UI). Org-configurable default = P1.
+const DEFAULT_BUSINESS_DAY = { startMinute: 8 * 60, endMinute: 20 * 60 } as const;
+const DEFAULT_BUSINESS_WEEKDAYS: ReadonlySet<number> = new Set([1, 2, 3, 4, 5]);
+
 /**
  * The business-timezone weekday (0=Sunday…6=Saturday) a calendar date falls on.
  * Resolved from the date's Eastern NOON instant so a DST-midnight edge can never
@@ -85,6 +94,15 @@ export function isWindowWithinAvailability(
   const winStart = startHour * MINUTES_PER_HOUR;
   const winEnd = endHour * MINUTES_PER_HOUR;
   const weekday = businessWeekday(isoDay);
+
+  // Unconfigured tech (no rows at all) → bounded default business hours, so the
+  // board is usable before hours are entered without silently allowing any hour.
+  if (slots.length === 0) {
+    if (!DEFAULT_BUSINESS_WEEKDAYS.has(weekday)) return false;
+    return spanIsCovered([DEFAULT_BUSINESS_DAY], winStart, winEnd);
+  }
+
+  // Tech HAS rows: a weekday with no slot is a real day off → stays uncovered.
   const daySlots = slots.filter((slot) => slot.dayOfWeek === weekday);
   return spanIsCovered(daySlots, winStart, winEnd);
 }
