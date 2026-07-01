@@ -123,3 +123,36 @@ export function applyOptimisticReschedule(
 
   return { ...calendar, lanes, unassigned, unscheduled };
 }
+
+/**
+ * Apply an optimistic UNSCHEDULE: pull the job out of whatever lane / unassigned
+ * pile it's in, clear its window + assignee, and drop it into the unscheduled
+ * queue. Inverse of applyOptimisticReschedule. Returns the SAME reference when
+ * the job can't be found (nothing to do — caller skips).
+ */
+export function applyOptimisticUnschedule(
+  calendar: SchedulingCalendar,
+  requestId: string,
+): SchedulingCalendar {
+  const job = findJob(calendar, requestId);
+  if (!job) return calendar;
+
+  const cleared: DashboardRequest = {
+    ...job,
+    arrivalWindowStart: null,
+    arrivalWindowEnd: null,
+    assignedToName: null,
+  };
+
+  const remove = (list: readonly DashboardRequest[]) =>
+    list.filter((j) => j.id !== requestId);
+
+  const lanes = calendar.lanes.map((lane) => ({
+    ...lane,
+    jobs: remove(lane.jobs),
+  }));
+  const unassigned = remove(calendar.unassigned);
+  const unscheduled = [...remove(calendar.unscheduled), cleared];
+
+  return { ...calendar, lanes, unassigned, unscheduled };
+}
