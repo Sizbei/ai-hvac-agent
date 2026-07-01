@@ -131,7 +131,8 @@ export function rankTechnicians(candidates: readonly DispatchSignals[]): RankedT
 export type DispatchOutcome =
   | "committed"
   | "queued_ambiguous"
-  | "queued_no_fit";
+  | "queued_no_fit"
+  | "queued_needs_review";
 
 /** Minimum top-vs-second score gap to AUTO-COMMIT. A clear winner commits; a
  * near-tie is too close to auto-decide and goes to a human. Gap-based (not an

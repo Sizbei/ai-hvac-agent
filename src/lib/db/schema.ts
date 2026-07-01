@@ -531,8 +531,15 @@ export const serviceRequests = pgTable(
       .notNull()
       .default("default"),
     // Outcome of the confidence-gated autodispatch pass at booking time.
+    // ('queued_needs_review' = held back by the pre-assign booking-quality gate.)
+    // Plain text column, so adding a value needs no migration.
     autoDispatchOutcome: text("auto_dispatch_outcome", {
-      enum: ["committed", "queued_ambiguous", "queued_no_fit"],
+      enum: [
+        "committed",
+        "queued_ambiguous",
+        "queued_no_fit",
+        "queued_needs_review",
+      ],
     }),
     // Triage signals.
     systemDownStatus: systemDownStatusEnum("system_down_status"),
@@ -2338,7 +2345,12 @@ export const dispatchDecisions = pgTable(
       .notNull()
       .references(() => serviceRequests.id, { onDelete: "cascade" }),
     outcome: text("outcome", {
-      enum: ["committed", "queued_ambiguous", "queued_no_fit"],
+      enum: [
+        "committed",
+        "queued_ambiguous",
+        "queued_no_fit",
+        "queued_needs_review",
+      ],
     }).notNull(),
     // The tech auto-committed to (null when the decision was queued for a human).
     chosenTechnicianId: uuid("chosen_technician_id").references(() => users.id, {

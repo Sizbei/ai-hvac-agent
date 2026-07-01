@@ -28,7 +28,14 @@ import {
   users,
   organizationSettings,
   dispatchDecisions,
+  customerLocations,
 } from "@/lib/db/schema";
+import { haversineKm } from "@/lib/address/photon";
+import { BUSINESS_BASE_LOCATION } from "@/lib/config/business-location";
+import {
+  assessBookingQuality,
+  type BookingQualityResult,
+} from "@/lib/ai/dispatch/booking-quality";
 import { withTenant } from "@/lib/db/tenant";
 import { logger } from "@/lib/logger";
 import {
@@ -805,6 +812,52 @@ async function isExternallyScheduled(organizationId: string): Promise<boolean> {
   return row?.source === "external";
 }
 
+/** Pre-assign booking-quality assessment for a request (Probook parity: clean
+ * before assign). Presence-only reads — no decrypt/PII — plus an out-of-area check
+ * when the job has been geocoded. A missing request is treated as clean so the
+ * normal not-found path handles it. */
+async function assessBookingQualityForRequest(
+  organizationId: string,
+  requestId: string,
+): Promise<BookingQualityResult> {
+  const [row] = await db
+    .select({
+      addressEncrypted: serviceRequests.addressEncrypted,
+      phone: serviceRequests.customerPhoneEncrypted,
+      email: serviceRequests.customerEmailEncrypted,
+      issueType: serviceRequests.issueType,
+      lat: customerLocations.latitude,
+      lng: customerLocations.longitude,
+    })
+    .from(serviceRequests)
+    .leftJoin(
+      customerLocations,
+      eq(serviceRequests.locationId, customerLocations.id),
+    )
+    .where(
+      withTenant(serviceRequests, organizationId, eq(serviceRequests.id, requestId)),
+    )
+    .limit(1);
+  if (!row) return { clean: true, issues: [] };
+
+  const distanceKm =
+    row.lat != null && row.lng != null
+      ? haversineKm(
+          BUSINESS_BASE_LOCATION.latitude,
+          BUSINESS_BASE_LOCATION.longitude,
+          row.lat,
+          row.lng,
+        )
+      : null;
+
+  return assessBookingQuality({
+    hasAddress: row.addressEncrypted != null,
+    hasContact: row.phone != null || row.email != null,
+    hasIssueType: row.issueType != null,
+    distanceKm,
+  });
+}
+
 /** Stamp the confidence-gated autodispatch outcome on the request (annotation for
  * the dispatcher's exception queue). The 'committed' stamp is unconditional (we
  * just placed it); a 'queued_*' stamp is guarded on assignedTo IS NULL so a
@@ -1090,6 +1143,22 @@ export async function autoAssignBookedRequest(
   // opting in never strands a job that first-fit would have placed.
   const firstFit = techs.map((t) => t.id);
   const enabled = await isAutoDispatchEnabled(organizationId);
+
+  // Clean-before-assign gate (scored mode only): hold a dirty booking (no address /
+  // no contact / out of area) for a human to clean rather than auto-assigning a
+  // tech to it. First-fit mode is unchanged (no gate).
+  if (enabled) {
+    const quality = await assessBookingQualityForRequest(organizationId, requestId);
+    if (!quality.clean) {
+      await stampDispatchOutcome(organizationId, requestId, "queued_needs_review");
+      logger.info(
+        { serviceRequestId: requestId, issues: quality.issues },
+        "Auto-dispatch: held for review (booking quality)",
+      );
+      return { assigned: false };
+    }
+  }
+
   const ranked = enabled
     ? await rankedTechnicianOrder(organizationId, requestId, firstFit, heldSlot.isoDay)
     : null;
