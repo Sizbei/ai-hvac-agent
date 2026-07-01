@@ -61,6 +61,7 @@ import type { ArrivalWindow } from "@/lib/admin/arrival-window";
 import { recordCustomerEquipment } from "@/lib/admin/crm-equipment-queries";
 import { buildEquipmentFromIntake } from "@/lib/admin/equipment-from-intake";
 import { appendEvent } from "@/lib/context/thread";
+import { persistJobLocation } from "@/lib/requests/persist-job-location";
 import { logger } from "@/lib/logger";
 
 export function generateReferenceNumber(): string {
@@ -378,6 +379,26 @@ export async function submitSessionServiceRequest(params: {
         jobType: jobTypeForIssue(data.issueType),
         window: data.preferredWindow ?? null,
         channel: "web",
+      }),
+    );
+  }
+
+  // Cache the job's coordinates for the dispatch map + travel-aware dispatch.
+  // Geocode the plaintext service address ONCE (Photon), store it on a customer
+  // location, and link it to this request via location_id. BACKGROUND (after())
+  // so it never adds latency to the booking, and fully degrade-safe — a geocode
+  // miss or db hiccup leaves location_id null and the map falls back to on-demand
+  // geocoding, exactly as today.
+  // Guard on customerId (matching the sibling appendEvent call) — a falsy id would
+  // just be caught + logged in the helper, but skipping avoids the wasted Photon
+  // call + noisy log.
+  if (customerId) {
+    after(() =>
+      persistJobLocation({
+        organizationId,
+        customerId,
+        serviceRequestId: serviceRequest.id,
+        address: data.address,
       }),
     );
   }

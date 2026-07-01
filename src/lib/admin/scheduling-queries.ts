@@ -975,6 +975,7 @@ async function rankedTechnicianOrder(
     technicianIds,
     job,
     isoDay,
+    requestId,
   );
   const candidates: DispatchSignals[] = technicianIds.map((technicianId) => {
     const s = signalsByTech.get(technicianId)!;
@@ -987,6 +988,11 @@ async function rankedTechnicianOrder(
         sameDayJobCount: s.sameDayJobCount,
         conversionRate: s.conversionRate,
         avgJobRevenueCents: s.avgJobRevenueCents,
+        // Travel-aware dispatch: when the job has cached coords + a tech anchor
+        // is known this is a real distance and location becomes the dominant
+        // score term; null → the scorer is byte-identical to the pre-travel
+        // composite (deterministic fallback preserved).
+        travelKm: s.travelKm,
       },
     };
   });

@@ -22,6 +22,11 @@ vi.mock('@/lib/db', () => ({
   },
 }));
 
+const { getLatestTechnicianLocation } = vi.hoisted(() => ({
+  getLatestTechnicianLocation: vi.fn(async () => null),
+}));
+vi.mock('@/lib/tech/location-queries', () => ({ getLatestTechnicianLocation }));
+
 import { loadDispatchSignals } from './signals';
 
 beforeEach(() => {
@@ -44,6 +49,7 @@ describe('loadDispatchSignals', () => {
       sameDayJobCount: 0,
       conversionRate: 0,
       avgJobRevenueCents: 0,
+      travelKm: null,
     });
     expect(m.get('t2')).toEqual({
       skillJobsCompleted: 0,
@@ -51,6 +57,7 @@ describe('loadDispatchSignals', () => {
       sameDayJobCount: 0,
       conversionRate: 0,
       avgJobRevenueCents: 0,
+      travelKm: null,
     });
   });
 
@@ -74,6 +81,7 @@ describe('loadDispatchSignals', () => {
       sameDayJobCount: 2,
       conversionRate: 0.5,
       avgJobRevenueCents: 12000,
+      travelKm: null,
     });
   });
 
@@ -97,5 +105,78 @@ describe('loadDispatchSignals', () => {
       '2026-06-24',
     );
     expect(m.size).toBe(0);
+  });
+
+  describe('travel term', () => {
+    beforeEach(() => {
+      getLatestTechnicianLocation.mockReset();
+      getLatestTechnicianLocation.mockResolvedValue(null); // no live fix → home base
+    });
+
+    it('stays null with no requestId (byte-identical to today)', async () => {
+      selectQueue.push([], [], [], [], []); // 5 aggregates only
+      const m = await loadDispatchSignals(
+        'org',
+        ['t1'],
+        { jobType: 'no_cool', systemType: null },
+        '2026-06-24',
+      );
+      expect(m.get('t1')!.travelKm).toBeNull();
+    });
+
+    it('stays null when the request has no linked location', async () => {
+      // 5 aggregates + empty job-coords row → no anchor read issued.
+      selectQueue.push([], [], [], [], [], []);
+      const m = await loadDispatchSignals(
+        'org',
+        ['t1'],
+        { jobType: 'no_cool', systemType: null },
+        '2026-06-24',
+        'req-1',
+      );
+      expect(m.get('t1')!.travelKm).toBeNull();
+    });
+
+    it('computes haversine km from the tech home base to the job coords', async () => {
+      selectQueue.push(
+        [], [], [], [], [],                     // 5 aggregates
+        [{ lat: 36.33, lon: -82.38 }],          // job coords (near business base)
+        [{ id: 't1', lat: 36.0, lon: -82.0 }],  // home base
+      );
+      const m = await loadDispatchSignals(
+        'org',
+        ['t1'],
+        { jobType: 'no_cool', systemType: null },
+        '2026-06-24',
+        'req-1',
+      );
+      const km = m.get('t1')!.travelKm;
+      expect(km).not.toBeNull();
+      expect(km!).toBeGreaterThan(0);
+      expect(km!).toBeLessThan(60);
+    });
+
+    it('prefers a live GPS fix over the home base', async () => {
+      getLatestTechnicianLocation.mockResolvedValue({
+        latitude: 36.33,
+        longitude: -82.38,
+        accuracyM: null,
+        capturedAt: '2026-06-24T00:00:00.000Z',
+      } as never);
+      selectQueue.push(
+        [], [], [], [], [],
+        [{ lat: 36.33, lon: -82.38 }],           // job coords == the live fix
+        [{ id: 't1', lat: 10.0, lon: 10.0 }],    // far home base (should be ignored)
+      );
+      const m = await loadDispatchSignals(
+        'org',
+        ['t1'],
+        { jobType: 'no_cool', systemType: null },
+        '2026-06-24',
+        'req-1',
+      );
+      // Live fix coincides with the job → ~0 km, proving home base was ignored.
+      expect(m.get('t1')!.travelKm!).toBeLessThan(1);
+    });
   });
 });
