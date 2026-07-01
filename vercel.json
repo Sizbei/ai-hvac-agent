@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/cron/delay-sweep",
-      "schedule": "0 13 * * *"
+      "schedule": "*/5 * * * *"
     },
     {
       "path": "/api/cron/webhook-cleanup",
@@ -14,7 +14,7 @@
     },
     {
       "path": "/api/cron/process-communications",
-      "schedule": "0 5 * * *"
+      "schedule": "* * * * *"
     },
     {
       "path": "/api/cron/booking-recovery",
