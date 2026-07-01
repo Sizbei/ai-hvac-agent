@@ -33,15 +33,27 @@ describe('scoreTechnician', () => {
     expect(r.skillMatched).toBe(true);
   });
 
-  it('weights skill, quality, conversion, and load into [0,1]', () => {
-    // Max signals: 10+ skill jobs, 5.0 rating, 1.0 conversion, 0 load → 0.4 + 0.2 + 0.25 + 0.15 = 1.0
+  it('weights skill, quality, conversion, load, and value into [0,1]', () => {
+    // Max signals → 0.4 + 0.2 + 0.15 + 0.15 + 0.10 = 1.0 (value maxes at the $1,500 cap).
     const best = scoreTechnician(
-      signals('t1', { skillJobsCompleted: 10, avgRating: 5, conversionRate: 1, sameDayJobCount: 0 }),
+      signals('t1', {
+        skillJobsCompleted: 10,
+        avgRating: 5,
+        conversionRate: 1,
+        sameDayJobCount: 0,
+        avgJobRevenueCents: 150000,
+      }),
     );
     expect(best.score).toBeCloseTo(1.0, 5);
-    // Skill depth caps at 10 jobs.
+    // Skill depth caps at 10 jobs; value caps at the revenue cap.
     const capped = scoreTechnician(
-      signals('t1', { skillJobsCompleted: 50, avgRating: 5, conversionRate: 1, sameDayJobCount: 0 }),
+      signals('t1', {
+        skillJobsCompleted: 50,
+        avgRating: 5,
+        conversionRate: 1,
+        sameDayJobCount: 0,
+        avgJobRevenueCents: 300000,
+      }),
     );
     expect(capped.score).toBeCloseTo(1.0, 5);
   });
@@ -166,5 +178,37 @@ describe('travel-aware scoring + confidence classification', () => {
   it('classifyDispatch: a lone candidate commits (infinite gap)', () => {
     const ranked = [{ technicianId: 'a', score: 0.3, reasons: [], skillMatched: true }];
     expect(classifyDispatch(ranked)).toEqual({ outcome: 'committed', technicianId: 'a' });
+  });
+});
+
+describe('Probook-parity: expected-value term + urgency tier', () => {
+  const baseTech = {
+    skillJobsCompleted: 5,
+    avgRating: 4 as number | null,
+    sameDayJobCount: 2,
+    conversionRate: 0.5,
+    avgJobRevenueCents: 0,
+  };
+  const job = { jobType: 'repair', systemType: null, urgency: 'standard' };
+
+  it('ranks a higher-avg-ticket tech above an identical lower-ticket tech', () => {
+    const rich = scoreTechnician({ job, tech: { technicianId: 'a', ...baseTech, avgJobRevenueCents: 150000 } });
+    const poor = scoreTechnician({ job, tech: { technicianId: 'b', ...baseTech, avgJobRevenueCents: 0 } });
+    expect(rich.score).toBeGreaterThan(poor.score);
+    expect(rich.reasons.some((r) => r.includes('avg ticket'))).toBe(true);
+  });
+
+  it('an emergency auto-commits a near-tie a standard job would queue', () => {
+    // gap 0.03: below the normal 0.08 gate (queue) but above the 0.02 emergency gate (commit).
+    const ranked = [
+      { technicianId: 'a', score: 0.83, reasons: [], skillMatched: true },
+      { technicianId: 'b', score: 0.80, reasons: [], skillMatched: true },
+    ];
+    expect(classifyDispatch(ranked).outcome).toBe('queued_ambiguous');
+    expect(classifyDispatch(ranked, 'emergency')).toEqual({ outcome: 'committed', technicianId: 'a' });
+  });
+
+  it('emergency still queues when there is no eligible candidate', () => {
+    expect(classifyDispatch([], 'emergency').outcome).toBe('queued_no_fit');
   });
 });

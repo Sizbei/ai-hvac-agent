@@ -38,12 +38,19 @@ export interface RankedTech {
 // Scoring weights (sum to 1.0). Provisional — to be tuned on pilot data (spec §6.3).
 const W_SKILL = 0.4;
 const W_QUALITY = 0.2;
-const W_CONVERSION = 0.25;
+const W_CONVERSION = 0.15;
 const W_LOAD = 0.15;
+// Expected job value: Probook-parity — dispatch prefers the tech likeliest to
+// produce a high-value job, not just the nearest/most-skilled. Kept a MODEST
+// weight (carved from conversion, its revenue-adjacent sibling) to avoid the
+// cherry-pick / dispatcher-assigned-revenue-bias trap the review flagged.
+const W_VALUE = 0.1;
 
 const SKILL_DEPTH_CAP = 10; // jobs beyond this don't increase skill depth
 const LOAD_CAP = 6; // same-day jobs beyond this don't increase the load penalty
 const DEFAULT_RATING = 3.5; // assumed quality for a tech with no ratings yet
+// Avg ticket at/above this ($1,500) maxes the value term; below scales linearly.
+const REVENUE_CAP_CENTS = 150000;
 
 // Travel overlay (applied only when travelKm is known). Location is primary per
 // the dispatch spec, so a known travel distance carries the largest single
@@ -64,9 +71,16 @@ export function scoreTechnician(signals: DispatchSignals): RankedTech {
   const quality = (tech.avgRating ?? DEFAULT_RATING) / 5;
   const conversion = Math.min(Math.max(tech.conversionRate, 0), 1);
   const load = 1 - Math.min(tech.sameDayJobCount, LOAD_CAP) / LOAD_CAP;
+  const value =
+    Math.min(Math.max(tech.avgJobRevenueCents, 0), REVENUE_CAP_CENTS) /
+    REVENUE_CAP_CENTS;
 
   const composite =
-    skillDepth * W_SKILL + quality * W_QUALITY + conversion * W_CONVERSION + load * W_LOAD;
+    skillDepth * W_SKILL +
+    quality * W_QUALITY +
+    conversion * W_CONVERSION +
+    load * W_LOAD +
+    value * W_VALUE;
 
   // Travel overlay: known distance dominates (location-primary). Absent → the
   // score equals the composite exactly, so no-travel behavior is unchanged.
@@ -90,6 +104,9 @@ export function scoreTechnician(signals: DispatchSignals): RankedTech {
   );
   if (tech.avgRating != null) reasons.push(`${tech.avgRating.toFixed(1)}★`);
   if (tech.conversionRate > 0) reasons.push(`${Math.round(tech.conversionRate * 100)}% close rate`);
+  if (tech.avgJobRevenueCents > 0) {
+    reasons.push(`$${Math.round(tech.avgJobRevenueCents / 100)} avg ticket`);
+  }
   reasons.push(`${tech.sameDayJobCount} jobs today`);
 
   return { technicianId: tech.technicianId, score, reasons, skillMatched };
@@ -120,20 +137,34 @@ export type DispatchOutcome =
  * absolute threshold) so it's robust to the travel-present vs -absent score
  * regimes. Provisional — tune on pilot override-rate data. */
 const MIN_CONFIDENCE_GAP = 0.08;
+// Emergencies auto-commit on a much smaller gap: getting a qualified tech dispatched
+// FAST beats waiting for a human to pick the perfect match on a near-tie. This is the
+// Probook-parity "job priority" tier — an emergency jumps to auto-dispatch instead of
+// sitting in the exception queue.
+const EMERGENCY_MIN_CONFIDENCE_GAP = 0.02;
 
 /**
  * Confidence-gated decision over an already-ranked (skill-matched, score-desc)
  * candidate list. Auto-commits ONLY when there's a clear best tech; otherwise it
- * defers to a human. Empty ranking (nobody skill-matched) → no-fit queue.
+ * defers to a human. Empty ranking (nobody skill-matched) → no-fit queue. For an
+ * `emergency` job the gate is relaxed so a near-tie still auto-dispatches (speed
+ * over the perfect match).
  */
-export function classifyDispatch(ranked: readonly RankedTech[]): {
+export function classifyDispatch(
+  ranked: readonly RankedTech[],
+  urgency?: string,
+): {
   readonly outcome: DispatchOutcome;
   readonly technicianId?: string;
 } {
   if (ranked.length === 0) return { outcome: "queued_no_fit" };
   const top = ranked[0]!;
   const gap = ranked.length > 1 ? top.score - ranked[1]!.score : Infinity;
-  if (gap >= MIN_CONFIDENCE_GAP) {
+  const minGap =
+    urgency === "emergency"
+      ? EMERGENCY_MIN_CONFIDENCE_GAP
+      : MIN_CONFIDENCE_GAP;
+  if (gap >= minGap) {
     return { outcome: "committed", technicianId: top.technicianId };
   }
   return { outcome: "queued_ambiguous" };

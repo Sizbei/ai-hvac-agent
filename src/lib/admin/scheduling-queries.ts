@@ -1097,7 +1097,10 @@ export async function autoAssignBookedRequest(
   // verdict and leave it for a dispatcher's exception queue. First-fit mode
   // (ranked === null) keeps placing as before (no confidence concept).
   if (ranked) {
-    const decision = classifyDispatch(ranked);
+    // Load the job's urgency so an emergency relaxes the confidence gate
+    // (Probook-parity priority tier — dispatch fast rather than queue on a tie).
+    const jobClass = await loadJobClassification(organizationId, requestId);
+    const decision = classifyDispatch(ranked, jobClass?.urgency);
     if (decision.outcome !== "committed") {
       await stampDispatchOutcome(organizationId, requestId, decision.outcome);
       await recordDispatchDecision(
