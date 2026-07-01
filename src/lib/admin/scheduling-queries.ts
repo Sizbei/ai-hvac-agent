@@ -27,6 +27,7 @@ import {
   technicianAvailability,
   users,
   organizationSettings,
+  dispatchDecisions,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { logger } from "@/lib/logger";
@@ -827,6 +828,40 @@ async function stampDispatchOutcome(
     .where(withTenant(serviceRequests, organizationId, cond));
 }
 
+/** Audit one SCORED auto-dispatch decision: the ranked candidates (scores +
+ * reasons), the chosen tech, and the outcome — so an operator can answer "why
+ * this tech?" and the confidence thresholds can be tuned from real override data.
+ * Best-effort: a failure here must never affect the dispatch. */
+async function recordDispatchDecision(
+  organizationId: string,
+  requestId: string,
+  outcome: DispatchOutcome,
+  chosenTechnicianId: string | null,
+  ranked: readonly RankedTech[],
+): Promise<void> {
+  try {
+    await db.insert(dispatchDecisions).values({
+      organizationId,
+      serviceRequestId: requestId,
+      outcome,
+      chosenTechnicianId,
+      topScore: ranked[0]?.score ?? null,
+      confidenceGap:
+        ranked.length > 1 ? ranked[0]!.score - ranked[1]!.score : null,
+      candidates: ranked.map((r) => ({
+        technicianId: r.technicianId,
+        score: r.score,
+        reasons: [...r.reasons],
+      })),
+    });
+  } catch (error) {
+    logger.error(
+      { error, serviceRequestId: requestId },
+      "Failed to record dispatch decision (non-fatal)",
+    );
+  }
+}
+
 /** Compute + persist the on-site duration estimate for a request, once (the AI
  * assist). No-ops if an estimate is already stored — so it's idempotent and never
  * re-calls the LLM. Best-effort: callers run it on the booking's after() path; a
@@ -1065,6 +1100,13 @@ export async function autoAssignBookedRequest(
     const decision = classifyDispatch(ranked);
     if (decision.outcome !== "committed") {
       await stampDispatchOutcome(organizationId, requestId, decision.outcome);
+      await recordDispatchDecision(
+        organizationId,
+        requestId,
+        decision.outcome,
+        null,
+        ranked,
+      );
       return { assigned: false };
     }
   }
@@ -1086,6 +1128,13 @@ export async function autoAssignBookedRequest(
       await releaseReservationsForRequest(organizationId, requestId);
       if (ranked) {
         await stampDispatchOutcome(organizationId, requestId, "committed");
+        await recordDispatchDecision(
+          organizationId,
+          requestId,
+          "committed",
+          technicianId,
+          ranked,
+        );
       }
       // Scored placement → record the explainable decision so an operator can
       // answer "why this tech?". First-fit placements have no score to log.
@@ -1114,6 +1163,13 @@ export async function autoAssignBookedRequest(
   // conflicted). Record no-fit so the dispatcher sees it in the exception queue.
   if (ranked) {
     await stampDispatchOutcome(organizationId, requestId, "queued_no_fit");
+    await recordDispatchDecision(
+      organizationId,
+      requestId,
+      "queued_no_fit",
+      null,
+      ranked,
+    );
   }
   return { assigned: false };
 }

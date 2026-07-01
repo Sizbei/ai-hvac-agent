@@ -2324,6 +2324,43 @@ export const technicianLocations = pgTable(
   ],
 );
 
+// 28c. dispatch_decisions — one audit row per SCORED auto-dispatch decision (why
+// this tech, or why it was queued), for the dispatcher override loop + threshold
+// tuning. PII-free: technician ids + scores + reason strings only.
+export const dispatchDecisions = pgTable(
+  "dispatch_decisions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    serviceRequestId: uuid("service_request_id")
+      .notNull()
+      .references(() => serviceRequests.id, { onDelete: "cascade" }),
+    outcome: text("outcome", {
+      enum: ["committed", "queued_ambiguous", "queued_no_fit"],
+    }).notNull(),
+    // The tech auto-committed to (null when the decision was queued for a human).
+    chosenTechnicianId: uuid("chosen_technician_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    topScore: doublePrecision("top_score"),
+    confidenceGap: doublePrecision("confidence_gap"),
+    // Ranked, best-first: [{ technicianId, score, reasons: string[] }].
+    candidates: jsonb("candidates")
+      .$type<Array<{ technicianId: string; score: number; reasons: string[] }>>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("dispatch_decisions_org_idx").on(table.organizationId),
+    index("dispatch_decisions_request_idx").on(table.serviceRequestId),
+  ],
+);
+
 // 29. tax_rates — jurisdictional tax (rate in basis points; 825 = 8.25%).
 export const taxRates = pgTable(
   "tax_rates",
