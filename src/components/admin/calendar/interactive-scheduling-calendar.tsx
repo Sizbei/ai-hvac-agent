@@ -32,11 +32,12 @@ import {
 } from '@/lib/admin/calendar-time';
 import {
   applyOptimisticReschedule,
+  applyOptimisticUnschedule,
   currentScopeOf,
   UNASSIGNED_SCOPE,
 } from '@/lib/admin/calendar-optimistic';
 import { isWindowWithinAvailability } from '@/lib/admin/availability-coverage';
-import type { DragJobData, DropZoneData } from '@/lib/admin/calendar-dnd';
+import type { DragJobData, CalendarDropData } from '@/lib/admin/calendar-dnd';
 import {
   useRescheduleJob,
   type RescheduleConflictDetail,
@@ -403,7 +404,7 @@ export function InteractiveSchedulingCalendar({
     setBoard(calendar);
   }
   const [activeJob, setActiveJob] = useState<DashboardRequest | null>(null);
-  const { reschedule, isRescheduling } = useRescheduleJob();
+  const { reschedule, unschedule, isRescheduling } = useRescheduleJob();
   // Hold the pre-move board so a failed POST can roll back exactly.
   const rollbackRef = useRef<SchedulingCalendar | null>(null);
 
@@ -464,10 +465,25 @@ export function InteractiveSchedulingCalendar({
   async function handleDragEnd(event: DragEndEvent) {
     setActiveJob(null);
     const dragData = event.active.data.current as DragJobData | undefined;
-    const dropData = event.over?.data.current as DropZoneData | undefined;
-    if (!board || dragData?.kind !== 'job' || dropData?.kind !== 'window') {
+    const dropData = event.over?.data.current as CalendarDropData | undefined;
+    if (!board || dragData?.kind !== 'job') return;
+
+    // Drag-back-to-Unscheduled: clear the placement and return the card to the queue.
+    if (dropData?.kind === 'unscheduled') {
+      const prev = board;
+      const next = applyOptimisticUnschedule(prev, dragData.requestId);
+      if (next === prev) return;
+      setBoard(next);
+      const result = await unschedule(dragData.requestId);
+      if (result.status === 'error') {
+        setBoard(prev);
+        onStatus(result.message, 'error');
+      }
+      onRefetch();
       return;
     }
+
+    if (dropData?.kind !== 'window') return;
 
     const prev = board;
     const currentScope =
