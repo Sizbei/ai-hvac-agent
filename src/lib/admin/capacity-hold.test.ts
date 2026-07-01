@@ -4,6 +4,7 @@ import {
   pickBookableSlot,
   arrivalWindowForSlot,
   canHoldSlot,
+  reserveCeilingForBand,
 } from "./capacity-hold";
 import {
   businessWallClockToUtc,
@@ -190,5 +191,35 @@ describe("canHoldSlot", () => {
 
   it("is true when more than one unit is left", () => {
     expect(canHoldSlot(2)).toBe(true);
+  });
+});
+
+describe("reserveCeilingForBand", () => {
+  it("is capacity minus placed bookings (the reservation ceiling)", () => {
+    const a = avail(
+      ["2026-06-10"],
+      [{ day: "2026-06-10", window: "morning", capacity: 3, booked: 1, available: 2 }],
+    );
+    // Ceiling excludes in-flight reservations — only placed jobs reduce it — so a
+    // hold can still be claimed against the slots reservations are already using.
+    expect(reserveCeilingForBand(a, "2026-06-10", "morning")).toBe(2);
+  });
+
+  it("treats an absent `booked` as 0 (legacy fixtures)", () => {
+    const a = avail(["2026-06-10"], [win("2026-06-10", "morning", 2)]);
+    expect(reserveCeilingForBand(a, "2026-06-10", "morning")).toBe(2);
+  });
+
+  it("is 0 when the band isn't present", () => {
+    const a = avail(["2026-06-10"], []);
+    expect(reserveCeilingForBand(a, "2026-06-10", "morning")).toBe(0);
+  });
+
+  it("floors at 0 when placed exceeds capacity", () => {
+    const a = avail(
+      ["2026-06-10"],
+      [{ day: "2026-06-10", window: "morning", capacity: 1, booked: 2, available: 0 }],
+    );
+    expect(reserveCeilingForBand(a, "2026-06-10", "morning")).toBe(0);
   });
 });

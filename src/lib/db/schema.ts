@@ -1143,6 +1143,66 @@ export const technicianAvailability = pgTable(
   ],
 );
 
+// capacity_reservations — race-safe confirm-time capacity holds.
+//
+// A booking's capacity is DERIVED live (availability.ts): capacity = techs whose
+// hours cover a (day, band); consumed = assigned jobs + these reservations. A
+// fresh booking is UNASSIGNED, so it wouldn't count toward "booked" — two
+// concurrent confirms could both take the last opening and OVER-PROMISE a band.
+// This table is the missing atomic claim: at confirm time we INSERT a row at the
+// lowest free slot_ordinal in [0, ceiling) where ceiling = capacity − assigned.
+// The UNIQUE(org, day, window, slot_ordinal) is the compare-and-swap primitive
+// (neon-http has no interactive transactions / SELECT ... FOR UPDATE): a
+// concurrent confirm racing for the same ordinal fails the insert and advances;
+// when every ordinal is taken the band is genuinely full → soft booking.
+//
+// day is TEXT 'YYYY-MM-DD' (business-tz ISO), matching the availability day keys.
+// service_request_id is a PLAIN uuid (NO FK): the reservation is written BEFORE
+// the service_requests row exists in its atomic batch, so an FK would violate at
+// insert time. Its lifecycle is managed explicitly (released on cancel /
+// unschedule / assignment) rather than by cascade.
+export const capacityReservations = pgTable(
+  "capacity_reservations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    // Business-tz ISO date (YYYY-MM-DD) the band falls on.
+    day: text("day").notNull(),
+    // Arrival band: "morning" | "afternoon" | "evening".
+    window: text("window").notNull(),
+    // Position in the band's capacity, [0, ceiling). The UNIQUE below makes it
+    // the CAS token two concurrent confirms contend for.
+    slotOrdinal: integer("slot_ordinal").notNull(),
+    // The request this hold belongs to (plain uuid, no FK — see table comment).
+    // Null only transiently; used to dedupe a reservation against its own placed
+    // job and to release the hold on cancel/unschedule.
+    serviceRequestId: uuid("service_request_id"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    // The atomicity primitive: at most one reservation per (org, day, band,
+    // ordinal). Two confirms racing for the same ordinal → exactly one wins.
+    uniqueIndex("capacity_reservations_slot_unique").on(
+      table.organizationId,
+      table.day,
+      table.window,
+      table.slotOrdinal,
+    ),
+    // Availability counting reads all reservations for a (day, band).
+    index("capacity_reservations_org_day_window_idx").on(
+      table.organizationId,
+      table.day,
+      table.window,
+    ),
+    // Release-by-request (cancel / unschedule / assignment) looks up by request.
+    index("capacity_reservations_request_idx").on(table.serviceRequestId),
+  ],
+);
+
 // 15. google_calendar_connections — per-org Google Calendar OAuth link.
 // One row per organization (unique). The long-lived refresh token is stored
 // ENCRYPTED (AES-256-GCM via @/lib/crypto); the short-lived access token + its

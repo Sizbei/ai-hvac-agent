@@ -49,7 +49,12 @@ import {
 import {
   pickBookableSlot,
   arrivalWindowForSlot,
+  reserveCeilingForBand,
 } from "@/lib/admin/capacity-hold";
+import {
+  reserveCapacitySlot,
+  releaseReservationById,
+} from "@/lib/admin/capacity-reservation-queries";
 import { pushJobToHcp } from "@/lib/integrations/housecall-pro/job-sync";
 import { pushJobToFieldpulse } from "@/lib/integrations/fieldpulse/job-sync";
 import type { ArrivalWindow } from "@/lib/admin/arrival-window";
@@ -68,18 +73,26 @@ export function generateReferenceNumber(): string {
  *
  * Re-verifies the customer's preferred window against CURRENT availability
  * right before the write and, when the band still has an opening, turns the
- * soft `preferredWindow` label into a CONCRETE arrival window that consumes
- * calendar capacity. NEVER blocks the lead: any failure or a full band returns
+ * soft `preferredWindow` label into a CONCRETE arrival window AND atomically
+ * RESERVES a unit of that band's capacity (capacity_reservations) so two
+ * concurrent confirms can't both take the last opening. The UNIQUE constraint is
+ * the compare-and-swap: if the band is full at claim time the reserve returns
+ * null → soft booking. NEVER blocks the lead: any failure or a full band returns
  * null and the caller falls back to the soft booking.
+ *
+ * The returned `reservationId` lets the caller clean the hold up if the request
+ * insert it belongs to later fails.
  */
 async function holdConcreteSlot(
   organizationId: string,
   preferredWindow: string | null | undefined,
+  serviceRequestId: string,
 ): Promise<{
   readonly startUtc: Date;
   readonly endUtc: Date;
   readonly day: string;
   readonly window: string;
+  readonly reservationId: string;
 } | null> {
   if (!preferredWindow) return null;
   try {
@@ -90,8 +103,26 @@ async function holdConcreteSlot(
     const availability = await getOpenAvailability(organizationId, days);
     const slot = pickBookableSlot(availability, preferredWindow);
     if (!slot) return null; // preferred band full across the range → soft booking
+    // Atomically claim a unit of the band. Ceiling = capacity − already-placed
+    // bookings (from this same snapshot), so placed + reserved never exceeds
+    // capacity. A lost CAS across every ordinal → band full → soft booking.
+    const ceiling = reserveCeilingForBand(availability, slot.day, slot.window);
+    const reservation = await reserveCapacitySlot({
+      organizationId,
+      day: slot.day,
+      window: slot.window,
+      ceiling,
+      serviceRequestId,
+    });
+    if (!reservation) return null; // no unit could be claimed → soft booking
     const { startUtc, endUtc } = arrivalWindowForSlot(slot.day, slot.window);
-    return { startUtc, endUtc, day: slot.day, window: slot.window };
+    return {
+      startUtc,
+      endUtc,
+      day: slot.day,
+      window: slot.window,
+      reservationId: reservation.id,
+    };
   } catch (holdError: unknown) {
     logger.error(
       { error: holdError, organizationId },
@@ -165,7 +196,11 @@ export async function submitSessionServiceRequest(params: {
     settingsRow?.afterHoursConfig ?? null,
   );
 
-  const heldSlot = await holdConcreteSlot(organizationId, data.preferredWindow);
+  const heldSlot = await holdConcreteSlot(
+    organizationId,
+    data.preferredWindow,
+    serviceRequestId,
+  );
 
   // The after-hours FLAG must reflect WHEN THE TECHNICIAN GOES OUT, not when
   // the customer happens to confirm. When we hold a concrete arrival window,
@@ -278,12 +313,36 @@ export async function submitSessionServiceRequest(params: {
 
   // The neon-http batch is atomic: request + session + audit (+ consent when the
   // customer expressed an SMS preference) all commit together or not at all.
-  const [insertedRequests] = consentUpsert
-    ? await db.batch([requestInsert, sessionUpdate, auditInsert, consentUpsert])
-    : await db.batch([requestInsert, sessionUpdate, auditInsert]);
+  // If it THROWS (a documented live failure mode here — see the
+  // migrations-not-run-on-deploy note), nothing persisted, so the capacity hold
+  // we claimed for this request must be released or it squats a future slot until
+  // that day passes. Release on BOTH the throw path (here) and the empty-return
+  // path (below).
+  let batchResult;
+  try {
+    batchResult = consentUpsert
+      ? await db.batch([requestInsert, sessionUpdate, auditInsert, consentUpsert])
+      : await db.batch([requestInsert, sessionUpdate, auditInsert]);
+  } catch (batchError: unknown) {
+    if (heldSlot) {
+      await releaseReservationById(organizationId, heldSlot.reservationId);
+    }
+    logger.error(
+      { error: batchError, sessionId },
+      "Booking batch failed after the capacity hold — released the reservation",
+    );
+    return { ok: false, reason: "insert_failed" };
+  }
 
+  const insertedRequests = batchResult[0];
   const serviceRequest = insertedRequests[0];
   if (!serviceRequest) {
+    // The request never persisted — release the capacity hold we claimed for it
+    // so the orphaned reservation doesn't squat a slot forever (it's linked to a
+    // request id that will never exist). Best-effort.
+    if (heldSlot) {
+      await releaseReservationById(organizationId, heldSlot.reservationId);
+    }
     return { ok: false, reason: "insert_failed" };
   }
 

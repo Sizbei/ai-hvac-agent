@@ -61,6 +61,35 @@ export function availableForBand(
 }
 
 /**
+ * The reservation CEILING for a day+band: capacity − placed (assigned) bookings,
+ * from the same availability snapshot. This is the number of concurrent holds a
+ * band can carry so that placed + reserved stays within capacity FOR THAT
+ * SNAPSHOT. Reserving within [0, ceiling) — rather than [0, capacity) — stops a
+ * reservation from over-committing a band whose capacity is partly consumed by
+ * already-assigned jobs. 0 when the band isn't present in the availability.
+ *
+ * CAVEAT (inherent to transaction-less neon-http): the ceiling is computed from a
+ * snapshot, and the reservation UNIQUE index serializes reservations against each
+ * OTHER but not against assignments. If a job is ASSIGNED concurrently with a
+ * customer confirm (between that confirm's snapshot and its reserve insert), the
+ * two use different ceilings and placed + reserved can briefly exceed capacity —
+ * a narrow over-promise, reconciled downstream by the assign-time conflict gate /
+ * exception queue. This is strictly better than the pre-reservation behavior
+ * (which over-promised on every concurrent confirm); a hard guarantee would need
+ * a shared CAS across the reservations and jobs tables.
+ */
+export function reserveCeilingForBand(
+  availability: OpenAvailability,
+  day: string,
+  window: string,
+): number {
+  const match = availability.windows.find(
+    (w) => w.day === day && w.window === window,
+  );
+  return match ? Math.max(0, match.capacity - (match.booked ?? 0)) : 0;
+}
+
+/**
  * Turn a soft preference into a CONCRETE bookable {day, window}, or null when
  * nothing is open. Scans `availability.days` in order (it is ascending) and
  * returns the EARLIEST day whose target band still has available > 0:

@@ -183,6 +183,13 @@
       "when": 1782857708419,
       "tag": "0025_special_jackpot",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1782869356673,
+      "tag": "0026_worthless_random",
+      "breakpoints": true
     }
   ]
 }

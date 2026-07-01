@@ -40,6 +40,7 @@ import {
 import { estimateJobDuration } from "@/lib/ai/dispatch/duration";
 import { loadDispatchSignals } from "@/lib/ai/dispatch/signals";
 import { isTerminal, type RequestStatus } from "./request-status";
+import { releaseReservationsForRequest } from "./capacity-reservation-queries";
 import { isWindowWithinAvailability } from "./availability-coverage";
 import type { ArrivalWindow } from "./arrival-window";
 import type {
@@ -773,6 +774,9 @@ export async function unscheduleRequest(
     .returning({ id: serviceRequests.id });
 
   if (!updated) return { ok: false, reason: "request_not_found" };
+  // Back to the unscheduled pile → its confirm-time capacity hold no longer
+  // applies; free it so the band re-opens. Best-effort.
+  await releaseReservationsForRequest(organizationId, requestId);
   return { ok: true };
 }
 
@@ -1074,6 +1078,12 @@ export async function autoAssignBookedRequest(
     );
     if (result.ok) {
       await markAutoAssigned(organizationId, requestId, technicianId);
+      // Placed with a real tech → the request now consumes capacity as an
+      // ASSIGNED job, so its in-flight hold is redundant. Release it to free the
+      // ordinal for the next booking. Best-effort; availability dedupes a
+      // lingering hold by request id anyway, so a failed release only under-
+      // utilizes (never over-promises).
+      await releaseReservationsForRequest(organizationId, requestId);
       if (ranked) {
         await stampDispatchOutcome(organizationId, requestId, "committed");
       }

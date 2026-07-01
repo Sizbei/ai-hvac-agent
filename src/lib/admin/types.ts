@@ -317,8 +317,33 @@ export interface OpenWindow {
   readonly window: string;
   /** Active technicians whose working hours cover this band on this day. */
   readonly capacity: number;
-  /** Capacity minus techs already booked into an overlapping job. */
+  /**
+   * Techs already booked into an overlapping ASSIGNED job (assigned-placement
+   * consumption only — NOT in-flight reservations). Exposed so a confirm-time
+   * hold can derive its reservation ceiling (capacity − booked) from the same
+   * snapshot the count came from, independent of live reservation churn. A
+   * count, never a staff id — PII-free like the rest of this payload.
+   *
+   * Optional: computeOpenWindows always populates it, but hand-built fixtures
+   * (prompt/eval tests) that predate the reservation layer may omit it — absent
+   * is treated as 0 (reserveCeilingForBand). Never fed to the CAS from fixtures.
+   */
+  readonly booked?: number;
+  /** Capacity minus assigned bookings minus in-flight reservations, floored 0. */
   readonly available: number;
+}
+
+/**
+ * A single active capacity reservation, projected to the fields the pure
+ * open-window math needs (PII-free): which (day, band) it holds and the request
+ * it belongs to (for dedupe against that request's own placed job). Mirrors the
+ * capacity_reservations row without exposing its ordinal/timestamps.
+ */
+export interface CapacityReservationSlot {
+  readonly day: string;
+  readonly window: string;
+  /** Null only transiently, before the hold is linked to its request. */
+  readonly serviceRequestId: string | null;
 }
 
 /**

@@ -38,6 +38,7 @@ import {
   type RequestStatus,
 } from "./request-status";
 import { recordStatusEvent, type ActorType } from "./status-events";
+import { releaseReservationsForRequest } from "./capacity-reservation-queries";
 
 export type HoldReason = (typeof holdReasonEnum.enumValues)[number];
 import { DASHBOARD_LIST_LIMIT } from "./types";
@@ -672,6 +673,12 @@ export async function updateRequestStatus(
     };
   }
 
+  // A cancelled request frees any confirm-time capacity hold it was carrying so
+  // the band re-opens for other customers. Best-effort (release swallows errors).
+  if (updated.status === "cancelled") {
+    await releaseReservationsForRequest(organizationId, requestId);
+  }
+
   // Record the transition for KPIs / payroll / automation (best-effort: the
   // status write above already committed).
   await recordStatusEvent({
@@ -700,6 +707,14 @@ export type ScheduleRequestResult =
  * ARRIVAL WINDOW (start/end). Org-scoped. Independent of status — a dispatcher
  * can schedule before work starts. Passing `arrivalWindow: null` clears the
  * window; omitting it (undefined) leaves it untouched.
+ *
+ * TODO(capacity-reservations): a RESCHEDULE that moves the window to a different
+ * band should release the request's hold on the OLD band (and the availability
+ * dedupe only covers a hold that stays in the same band as the placed job). Not
+ * wired here yet — a stale hold on the old band only under-utilizes (never over-
+ * promises), and the common in-flight→placed path releases via
+ * autoAssignBookedRequest. Release + re-reserve on cross-band reschedule is the
+ * follow-up.
  */
 export async function scheduleRequest(
   organizationId: string,
