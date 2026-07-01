@@ -8,7 +8,7 @@
  * position isn't the same PII shape as an encrypted address). Every read/write is
  * org + technician scoped.
  */
-import { and, desc, eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { technicianLocations, users } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";

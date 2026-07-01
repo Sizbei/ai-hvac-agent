@@ -18,7 +18,8 @@ export interface DispatchSignals {
     readonly sameDayJobCount: number;
     /** Sold estimates / estimated jobs for this tech, in [0,1] (0 when unknown). */
     readonly conversionRate: number;
-    /** Avg invoice total on this tech's completed jobs; surfaced as a reason, not yet weighted. */
+    /** Avg invoice total on this tech's completed jobs — the expected-value ranking
+     * signal (W_VALUE), capped at REVENUE_CAP_CENTS, plus a "$X avg ticket" reason. */
     readonly avgJobRevenueCents: number;
     /** Straight-line km from the tech's anchor (live location or home base) to the
      * job, or null when either coordinate is unknown. When present, travel becomes
