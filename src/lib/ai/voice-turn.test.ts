@@ -1455,3 +1455,102 @@ describe("voiceReply token-budget enforcement (WS6)", () => {
     expect(sessionUpdate?.tokensUsed).toBe(1150);
   });
 });
+
+describe("voiceReply verify-lockout preservation (brain-unification #1)", () => {
+  // A caller mid financial-verify challenge: verify.pending with 2 attempts
+  // burned. An ordinary intake slot-provision turn must NOT wipe the lockout —
+  // buildExtraction does not round-trip the top-level `verify` key, so the
+  // serializer must re-attach it (the D1 drift: chat preserves it, voice wiped it).
+  const lockedSession = {
+    id: "s-verify",
+    organizationId: "o1",
+    status: "chatting" as const,
+    turnCount: 1,
+    maxTurns: 40,
+    metadata: JSON.stringify({
+      issueType: "cooling_not_working",
+      urgency: "high",
+      address: null,
+      customerName: null,
+      customerPhone: null,
+      customerEmail: null,
+      description: "ac out",
+      isHvacRelated: true,
+      verify: { status: "pending", attempts: 2 },
+    }),
+  };
+
+  beforeEach(() => {
+    generateTextMock.mockReset();
+    insertMock.mockReset();
+    updateSetMock.mockReset();
+    selectLimitMock.mockReset();
+    selectLimitMock.mockResolvedValue([]);
+    escalateMock.mockReset();
+    routeMock.mockReset();
+    routeMock.mockReturnValue({
+      action: "FALLBACK_LLM",
+      intentId: null,
+      confidence: 0,
+      reply: null,
+      issueType: "cooling_not_working",
+      urgency: "high",
+      escalate: false,
+    });
+    extractAllContactMock.mockReset();
+    extractAddressAtAddressStepMock.mockReset();
+    extractSpokenPhoneMock.mockReset();
+    extractSpokenPhoneMock.mockReturnValue(null);
+    detectCorrectionMock.mockReset();
+    detectCorrectionMock.mockReturnValue(null);
+    getRouterConfigMock.mockReset();
+    getRouterConfigMock.mockResolvedValue({});
+    submitSessionMock.mockReset();
+    submitSessionMock.mockResolvedValue({
+      ok: true,
+      referenceNumber: "V-1",
+      serviceRequestId: "sr-1",
+      heldWindow: null,
+    });
+    buildAccountLookupReplyMock.mockReset();
+    buildAccountLookupReplyMock.mockResolvedValue(null);
+    decryptMock.mockReset();
+    decryptMock.mockImplementation((s: string) => s);
+    decideAfterHoursDisclosureMock.mockReset();
+    decideAfterHoursDisclosureMock.mockReturnValue({
+      kind: "none",
+      afterHours: false,
+      copy: "",
+    });
+  });
+
+  it("keeps verify.pending + attempts through a deterministic slot-fill turn", async () => {
+    // Provide an address so the deterministic slot-fill path persists metadata.
+    extractAddressAtAddressStepMock.mockReturnValue(
+      "123 Main St, Johnson City, TN 37601",
+    );
+    extractAllContactMock.mockReturnValue({
+      name: null,
+      address: "123 Main St, Johnson City, TN 37601",
+      phone: null,
+      email: null,
+    });
+
+    await voiceReply({
+      session: lockedSession,
+      history: [{ role: "user", content: "my ac stopped working" }],
+      userMessage: "my address is 123 Main St",
+      ipAddress: "127.0.0.1",
+    });
+
+    // Find the session-metadata write and assert the lockout survived.
+    const metadataWrites = updateSetMock.mock.calls
+      .map((c) => c[0] as { metadata?: string | null })
+      .filter((v) => typeof v.metadata === "string");
+    expect(metadataWrites.length).toBeGreaterThan(0);
+    const persisted = JSON.parse(metadataWrites.at(-1)!.metadata!);
+    expect(persisted.verify).toEqual({ status: "pending", attempts: 2 });
+    // And the slot actually landed (the turn did real work).
+    expect(persisted.address).toContain("123 Main St");
+  });
+});

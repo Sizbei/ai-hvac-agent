@@ -54,6 +54,7 @@ import {
   mergeSlots,
   hasSlotData,
   buildExtraction,
+  serializeSessionMetadata,
   stripSkipSentinels,
   SKIP_SENTINEL,
 } from "./chat-slots";
@@ -654,7 +655,7 @@ export async function voiceReply(params: {
         .update(customerSessions)
         .set({
           metadata: hasSlotData(escMerged)
-            ? JSON.stringify(buildExtraction(escMerged, userMessage.slice(0, 280)))
+            ? serializeSessionMetadata(escMerged, userMessage, session.metadata)
             : session.metadata,
           turnCount: newTurnCount,
           updatedAt: new Date(),
@@ -681,7 +682,9 @@ export async function voiceReply(params: {
         history.find((m) => m.role === "user")?.content ?? userMessage;
       extraction = buildExtraction(merged, firstUser.slice(0, 280));
       extractionComplete = isVoiceExtractionComplete(extraction);
-      metadataStr = JSON.stringify(extraction);
+      // Shared serializer (brain-unification #1): re-attaches the financial-
+      // verify lockout, which a bare JSON.stringify(extraction) silently wiped.
+      metadataStr = serializeSessionMetadata(merged, firstUser, session.metadata);
     }
 
     // ── Auto-submit (voice has no Confirm & Submit button) ──
@@ -822,8 +825,7 @@ export async function voiceReply(params: {
           if (hasSlotData(latchedMerged)) {
             const firstUser =
               history.find((m) => m.role === "user")?.content ?? userMessage;
-            const latchedExtraction = buildExtraction(latchedMerged, firstUser.slice(0, 280));
-            metadataStr = JSON.stringify(latchedExtraction);
+            metadataStr = serializeSessionMetadata(latchedMerged, firstUser, session.metadata);
           }
         }
       } catch (ahError: unknown) {

@@ -1,6 +1,7 @@
 import type { KnownSlots } from "./intent-router";
 import type { ExtractionResult } from "./extraction-schema";
 import { sanitizeContactFields } from "./sanitize-fields";
+import { preserveVerifyKey } from "./account-verify";
 
 /**
  * Helpers for moving extracted slots between the session's `metadata` column
@@ -190,4 +191,24 @@ export function buildExtraction(
     isHvacRelated: true,
     ...(slots.extras ?? {}),
   });
+}
+
+/**
+ * The ONE way either brain (web chat route / voice-turn) may turn merged slots
+ * back into a session.metadata string (brain-unification extraction #1).
+ *
+ * Re-attaches the financial-verify lockout — buildExtraction does NOT
+ * round-trip the top-level `verify` key, so a bare
+ * `JSON.stringify(buildExtraction(...))` silently resets the ZIP-attempt cap
+ * (the drift chat patched with preserveVerifyKey and voice re-introduced) —
+ * and applies the canonical 280-char description truncation both brains used.
+ */
+export function serializeSessionMetadata(
+  merged: KnownSlots,
+  description: string,
+  priorMetadata: string | null | undefined,
+): string {
+  return JSON.stringify(
+    preserveVerifyKey(buildExtraction(merged, description.slice(0, 280)), priorMetadata),
+  );
 }

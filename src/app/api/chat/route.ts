@@ -81,6 +81,7 @@ import {
   mergeSlots,
   hasSlotData,
   buildExtraction,
+  serializeSessionMetadata,
   SKIP_SENTINEL,
 } from "@/lib/ai/chat-slots";
 import { buildModelMessages, MAX_HISTORY, type ChatTurn } from "@/lib/ai/compaction";
@@ -1279,20 +1280,13 @@ export async function POST(request: NextRequest) {
             email: extracted.email ?? undefined,
           });
           const escMetadata = hasSlotData(escMerged)
-            ? JSON.stringify(
-                // preserveVerifyKey: keep the financial-verify lockout across this
-                // 4th metadata rebuild (the escalation path) too. Non-exploitable
-                // today (escalation is terminal, so the next turn is blocked), but
-                // kept consistent with the other three rebuild sites for
-                // defense-in-depth should escalation ever become non-terminal.
-                preserveVerifyKey(
-                  buildExtraction(
-                    escMerged,
-                    (conversationHistory.find((m) => m.role === "user")
-                      ?.content ?? guardrailResult.sanitized).slice(0, 280),
-                  ),
-                  session.metadata,
-                ),
+            ? // Shared serializer (brain-unification #1): keeps the financial-
+              // verify lockout across this rebuild (escalation path) too.
+              serializeSessionMetadata(
+                escMerged,
+                conversationHistory.find((m) => m.role === "user")?.content ??
+                  guardrailResult.sanitized,
+                session.metadata,
               )
             : session.metadata;
           await db
@@ -1504,12 +1498,12 @@ export async function POST(request: NextRequest) {
             firstUserMessage.slice(0, 280),
           );
           extractionComplete = isExtractionComplete(extraction);
-          // Preserve the financial-verify lockout (Stage 5): buildExtraction does
-          // NOT round-trip the top-level `verify` key, so without this an
-          // intervening intake turn would wipe a pending ZIP lockout and reset
-          // the attempt counter — re-attach it from the prior metadata.
-          metadataStr = JSON.stringify(
-            preserveVerifyKey(extraction, session.metadata),
+          // Shared serializer (brain-unification #1): preserves the financial-
+          // verify lockout, which buildExtraction does not round-trip.
+          metadataStr = serializeSessionMetadata(
+            merged,
+            firstUserMessage,
+            session.metadata,
           );
         }
 
@@ -1735,28 +1729,22 @@ export async function POST(request: NextRequest) {
         // Persist the conversation-style state (empathy-once flag, re-ask counter,
         // frustration running score/offered) so the next turn — deterministic OR
         // LLM — stays coherent. Folded into the metadata extras in one write.
-        // preserveVerifyKey re-attaches the financial-verify lockout (Stage 5),
-        // which buildExtraction does not round-trip.
-        metadataStr = JSON.stringify(
-          preserveVerifyKey(
-            buildExtraction(
-              mergeSlots(merged, {
-                extras: {
-                  ...afterHoursExtras,
-                  ...(emittedLeadIn ? { empathyShown: "1" } : {}),
-                  reAskStepId: reAsk.stepId ?? "",
-                  reAskCount: reAsk.count,
-                  frustrationScore: frustration.total,
-                  ...(offerHuman ? { frustrationOffered: "1" } : {}),
-                },
-              }),
-              (
-                conversationHistory.find((m) => m.role === "user")?.content ??
-                guardrailResult.sanitized
-              ).slice(0, 280),
-            ),
-            session.metadata,
-          ),
+        // Shared serializer (brain-unification #1): preserves the financial-
+        // verify lockout, which buildExtraction does not round-trip.
+        metadataStr = serializeSessionMetadata(
+          mergeSlots(merged, {
+            extras: {
+              ...afterHoursExtras,
+              ...(emittedLeadIn ? { empathyShown: "1" } : {}),
+              reAskStepId: reAsk.stepId ?? "",
+              reAskCount: reAsk.count,
+              frustrationScore: frustration.total,
+              ...(offerHuman ? { frustrationOffered: "1" } : {}),
+            },
+          }),
+          conversationHistory.find((m) => m.role === "user")?.content ??
+            guardrailResult.sanitized,
+          session.metadata,
         );
 
         const replyText = replyBody + (nearTurnLimit ? ESCALATION_NOTE : "");
