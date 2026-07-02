@@ -49,6 +49,7 @@ import { estimateJobDuration } from "@/lib/ai/dispatch/duration";
 import { loadDispatchSignals } from "@/lib/ai/dispatch/signals";
 import { isTerminal, type RequestStatus } from "./request-status";
 import { releaseReservationsForRequest } from "./capacity-reservation-queries";
+import { notifyCustomerOfAssignment } from "./notify-assignment";
 import { isWindowWithinAvailability } from "./availability-coverage";
 import type { ArrivalWindow } from "./arrival-window";
 import type {
@@ -1198,6 +1199,18 @@ export async function autoAssignBookedRequest(
     );
     if (result.ok) {
       await markAutoAssigned(organizationId, requestId, technicianId);
+      // Book-on-the-call #2: tell the customer WHO is coming. The confirmation
+      // already promised the window (reserved before the response); the tech
+      // commits here seconds later in the background, so the follow-up rides
+      // the communications queue (consent + quiet hours enforced at send time).
+      // notifyCustomerOfAssignment never throws — assignment must not fail
+      // over a courtesy message.
+      await notifyCustomerOfAssignment({
+        organizationId,
+        requestId,
+        technicianId,
+        window: { start: heldSlot.start, end: heldSlot.end },
+      });
       // Placed with a real tech → the request now consumes capacity as an
       // ASSIGNED job, so its in-flight hold is redundant. Release it to free the
       // ordinal for the next booking. Best-effort; availability dedupes a
