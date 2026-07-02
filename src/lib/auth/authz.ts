@@ -32,10 +32,18 @@ export function isSuperAdmin(
  * Returns false when the env var is unset/empty (closed by default).
  */
 export function isPlatformAdmin(
-  session: Pick<AdminSessionPayload, "email">,
+  session: Pick<AdminSessionPayload, "email" | "organizationId">,
 ): boolean {
   const allow = process.env.PLATFORM_ADMIN_EMAILS;
-  if (!allow) return false;
+  const platformOrgId = process.env.PLATFORM_ORG_ID?.trim();
+  // Fail CLOSED unless BOTH are configured. Email alone was tenant-forgeable: a
+  // tenant super_admin can mint a user with an allowlisted email in THEIR org
+  // (the global-unique index only blocks emails that already have a row), log
+  // in, and self-escalate to all-tenant platform access (list/export ANY org).
+  // Binding to the designated platform org closes that — an attacker can't
+  // place their user in an org they don't control.
+  if (!allow || !platformOrgId) return false;
+  if (session.organizationId !== platformOrgId) return false;
 
   const sessionEmail = session.email.trim().toLowerCase();
   if (!sessionEmail) return false;
