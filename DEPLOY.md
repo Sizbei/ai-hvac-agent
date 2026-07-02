@@ -34,31 +34,60 @@ postgresql://user:password@ep-xxx.region.neon.tech/hvac_prod?sslmode=require
 
 ## 3. Run Database Migrations
 
-Run all migrations in `drizzle/` against the production database:
+**Migrations run automatically on every Vercel deploy.** `vercel.json` sets the
+build command to `npm run db:migrate && next build`, so pushing to `main` applies
+any pending migrations against the deployment's `DATABASE_URL` before the new code
+goes live. If a migration fails, the build fails and the bad deploy is blocked —
+no schema drift. Migrations are idempotent (Drizzle tracks what's applied), so
+re-deploys are safe.
+
+For the **very first** deploy (empty database), or to migrate locally, run it
+manually once:
 
 ```bash
 DATABASE_URL="your-neon-connection-string" npm run db:migrate
 ```
 
-This creates all tables, indexes, and constraints defined in the schema. The migration script is located at `src/lib/db/migrate.ts`.
+> **Preview deployments do not migrate.** The migrate step is guarded to run
+> only when `VERCEL_ENV=production` (and always locally/CI). This stops PR
+> preview builds — which inherit the production `DATABASE_URL` unless you've set
+> up [Neon database branching](https://neon.tech/docs/guides/vercel) — from
+> permanently altering your prod schema with a migration from an abandoned PR.
+> If you want previews to exercise migrations, give them their own branch DB.
 
-## 4. Seed Production Data
+This creates all tables, indexes, and constraints defined in the schema. The
+migration script is located at `src/lib/db/migrate.ts`.
 
-Seed the database with the demo organization, admin user, and technicians:
+## 4. Bootstrap the Owner Account
+
+You have two paths to create the first admin of a fresh instance. **Do not run
+`npm run db:seed` against a real production database** — that seeder is
+DEV-ONLY and creates the weak `admin@demo-hvac.com` / `admin123` demo
+credentials.
+
+### Path A — Super-admin seed (recommended for a real tenant)
+
+Provision **yourself** as the Google-only owner. The seed reads your identity
+from env, so no source edits are needed:
 
 ```bash
-DATABASE_URL="your-neon-connection-string" npm run db:seed
+DATABASE_URL="your-neon-connection-string" \
+SUPER_ADMIN_EMAIL="you@example.com" \
+SUPER_ADMIN_NAME="Your Name" \
+npm run db:seed:super-admin
 ```
 
-This creates:
+This creates a `super_admin` with **no password** — you sign in only via "Sign
+in with Google" (requires `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` /
+`GOOGLE_OIDC_REDIRECT_URI`; see §5). Idempotent and safe to re-run.
 
-- **Demo organization** — "Demo HVAC Company"
-- **Admin user** — `admin@demo-hvac.com` with password `admin123`
-- **Three technicians** — For service request assignment
+### Path B — Self-serve signup
 
-> **IMPORTANT:** Change the admin password immediately after first login in production. The default credentials are for initial setup only.
+If Google OAuth signup is configured (`GOOGLE_OIDC_SIGNUP_REDIRECT_URI` plus the
+base Google vars — the signup routes 404 until it's set), a new owner can create
+their own org by visiting `/signup`. No seed step required.
 
-### Optional: seed demo conversations (recommended for a live demo)
+### Optional: seed demo conversations (portfolio demo only)
 
 To make the admin dashboard look alive (9 realistic conversations, service
 requests with assigned technicians, AI Insights metrics, and CRM customers):
@@ -89,6 +118,9 @@ Set all environment variables in the Vercel Dashboard under **Settings > Environ
 | `ENCRYPTION_KEY` | 64-hex-char key for AES-256-GCM PII encryption | `openssl rand -hex 32` — **must match the key used to seed** |
 | `AUTH_SECRET` | Secret for admin JWT token signing (min 32 chars) | `openssl rand -hex 32` |
 | `CRON_SECRET` | Secret for cron endpoint authentication | `openssl rand -hex 32` |
+| `NEXT_PUBLIC_APP_URL` | **Required.** Absolute public base URL — validated at boot (CSRF origin checks, TTS links, widget embed) | e.g. `https://your-app.vercel.app` |
+| `SUPER_ADMIN_EMAIL` | *(setup only)* email of the Google-only owner created by `db:seed:super-admin` | your Google account email |
+| `SUPER_ADMIN_NAME` | *(setup only)* display name for that owner | your name |
 | `TWILIO_ACCOUNT_SID` | *(optional — phone agent)* Twilio Account SID | Twilio Console; omit to run web-chat-only |
 | `TWILIO_AUTH_TOKEN` | *(optional — phone agent)* validates inbound webhook signatures (fails closed without it) | Twilio Console |
 | `TWILIO_VOICE` | *(optional — phone agent)* Amazon Polly neural voice for spoken replies | defaults to `Polly.Joanna-Neural` |
@@ -155,13 +187,14 @@ Run through this checklist after each production deployment:
 ### Admin Dashboard
 
 - [ ] Visit `https://your-app.vercel.app/admin/login` — login page loads
-- [ ] Log in with `admin@demo-hvac.com` / `admin123` — dashboard loads
+- [ ] Log in as your owner account — "Sign in with Google" for the super-admin seed (Path A), or `admin@demo-hvac.com` / `admin123` only if you seeded the portfolio demo — dashboard loads
 - [ ] Dashboard displays stats cards (total requests, pending, in-progress, completed)
 - [ ] Request queue shows any submitted service requests
 - [ ] Assign a technician to a request — status updates correctly
 
 ### Infrastructure
 
+- [ ] `curl https://your-app.vercel.app/api/health` returns `{"status":"ok","database":"up"}` (HTTP 200) — confirms the app is live and can reach the DB. Wire this into any uptime monitor.
 - [ ] Cron job visible in Vercel dashboard under Settings > Cron Jobs
 - [ ] Database accessible in Neon dashboard with tables populated
 - [ ] Application logs visible in Vercel dashboard (Functions tab)
@@ -171,7 +204,7 @@ Run through this checklist after each production deployment:
 
 Complete before handling real customer data:
 
-- [ ] Change default admin password (`admin123`)
+- [ ] If you seeded the dev/demo data, change the default admin password (`admin123`) immediately — not applicable to the Google-only super-admin owner (Path A), which has no password
 - [ ] Verify `ENCRYPTION_KEY` is unique per environment (not shared with dev/staging)
 - [ ] Verify all environment variables are set in Vercel (missing vars cause runtime errors)
 - [ ] Execute a Data Processing Agreement with your LLM provider (DashScope/Alibaba Cloud, or whichever OpenAI-compatible provider you use) — see [PRIVACY.md](./PRIVACY.md)
