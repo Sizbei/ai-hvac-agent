@@ -205,8 +205,8 @@ describe("GET /api/cron/cleanup", () => {
 
     expect(response.status).toBe(200);
     expect(body.data.purgedMessages).toBe(5);
-    // delete is called twice: once for messages, once for sessions
-    expect(mockDelete).toHaveBeenCalledTimes(2);
+    // delete is called three times: messages, sessions, then the GPS-retention trim.
+    expect(mockDelete).toHaveBeenCalledTimes(3);
   });
 
   it("deletes sessions older than 90 days after their messages", async () => {
