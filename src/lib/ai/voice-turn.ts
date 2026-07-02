@@ -56,6 +56,7 @@ import {
   hasSlotData,
   buildExtraction,
   serializeSessionMetadata,
+  parseUrgencyAnswer,
   stripSkipSentinels,
   SKIP_SENTINEL,
 } from "./chat-slots";
@@ -599,11 +600,20 @@ export async function voiceReply(params: {
   const isSlotProvision =
     hasContactSlot && (Boolean(knownSlots.issueType) || history.length > 0);
 
+  // Urgency-answer capture (brain-unification D2, web parity): voice asks the
+  // urgency question (VOICE_STEP_PHRASING) but never captured the answer, so a
+  // spoken "no rush" fell to the LLM, no slot persisted, and the stepper
+  // re-asked forever. Only parsed when urgency was the pending question, so an
+  // unrelated utterance is never reinterpreted as urgency.
+  const capturedUrgency =
+    pendingStep?.id === "urgency" ? parseUrgencyAnswer(userMessage) : null;
+
   // A bare answer to the enrichment question we asked LAST turn (captured value
   // or a skip-latched optional step) must stay on the deterministic path — same
   // as the web chat. Otherwise it falls to the LLM and the captured/skipped
   // value is never persisted, so the stepper re-asks the same question forever.
-  const pendingAnswerCaptured = capturedExtras !== undefined;
+  const pendingAnswerCaptured =
+    capturedExtras !== undefined || capturedUrgency != null;
 
   // The contact-field updates to merge this turn: the extracted values, with a
   // detected correction overriding the matching field (a correction is the
@@ -654,7 +664,7 @@ export async function voiceReply(params: {
 
       const escMerged = mergeSlots(knownSlots, {
         issueType: verdict.issueType ?? undefined,
-        urgency: verdict.urgency ?? undefined,
+        urgency: capturedUrgency ?? verdict.urgency ?? undefined,
         ...slotUpdates,
       });
       await db
@@ -675,7 +685,7 @@ export async function voiceReply(params: {
     // ── Deterministic answer / slot fill ──
     const merged = mergeSlots(knownSlots, {
       issueType: verdict.issueType ?? undefined,
-      urgency: verdict.urgency ?? undefined,
+      urgency: capturedUrgency ?? verdict.urgency ?? undefined,
       ...slotUpdates,
       extras: capturedExtras,
     });

@@ -1633,3 +1633,100 @@ describe("voiceReply LLM hardening (brain-unification D5)", () => {
     expect(insertMock).toHaveBeenCalled();
   });
 });
+
+describe("voiceReply urgency-answer capture (brain-unification D2)", () => {
+  // Issue known, urgency MISSING → the stepper's pending question is urgency.
+  // Voice asks it (VOICE_STEP_PHRASING has urgency) but never captured the
+  // answer — the caller's "no rush" fell to the LLM, no slot persisted, and the
+  // stepper re-asked forever (the re-ask loop chat patched with parseUrgencyAnswer).
+  // Everything BEFORE urgency in the triage order (core + contact) must be
+  // filled for urgency to be the pending question.
+  const urgencyPendingSession = {
+    id: "s-urg",
+    organizationId: "o1",
+    status: "chatting" as const,
+    turnCount: 1,
+    maxTurns: 40,
+    metadata: JSON.stringify({
+      issueType: "cooling_not_working",
+      urgency: null,
+      address: "123 Main St, Johnson City, TN 37601",
+      customerName: "Pat Doe",
+      customerPhone: "4235550100",
+      customerEmail: "pat@example.com",
+      description: "ac out",
+      isHvacRelated: true,
+      systemDownStatus: "fully_down",
+      problemDuration: "today",
+    }),
+  };
+
+  beforeEach(() => {
+    generateTextMock.mockReset();
+    insertMock.mockReset();
+    updateSetMock.mockReset();
+    selectLimitMock.mockReset();
+    selectLimitMock.mockResolvedValue([]);
+    escalateMock.mockReset();
+    routeMock.mockReset();
+    routeMock.mockReturnValue({
+      action: "FALLBACK_LLM",
+      intentId: null,
+      confidence: 0,
+      reply: null,
+      issueType: null,
+      urgency: null,
+      escalate: false,
+    });
+    extractAllContactMock.mockReset();
+    extractAllContactMock.mockReturnValue(noSlots());
+    extractAddressAtAddressStepMock.mockReset();
+    extractAddressAtAddressStepMock.mockReturnValue(null);
+    extractSpokenPhoneMock.mockReset();
+    extractSpokenPhoneMock.mockReturnValue(null);
+    detectCorrectionMock.mockReset();
+    detectCorrectionMock.mockReturnValue(null);
+    getRouterConfigMock.mockReset();
+    getRouterConfigMock.mockResolvedValue({});
+    submitSessionMock.mockReset();
+    submitSessionMock.mockResolvedValue({
+      ok: true,
+      referenceNumber: "U-1",
+      serviceRequestId: "sr-u",
+      heldWindow: null,
+    });
+    buildAccountLookupReplyMock.mockReset();
+    buildAccountLookupReplyMock.mockResolvedValue(null);
+    decryptMock.mockReset();
+    decideAfterHoursDisclosureMock.mockReset();
+    decideAfterHoursDisclosureMock.mockReturnValue({
+      kind: "none",
+      afterHours: false,
+      copy: "",
+    });
+  });
+
+  it("captures a spoken urgency answer deterministically (no LLM) and persists it", async () => {
+    const result = await voiceReply({
+      session: urgencyPendingSession,
+      history: [
+        { role: "user", content: "my ac stopped working" },
+        { role: "assistant", content: "How urgent is this?" },
+      ],
+      userMessage: "no rush, whenever works",
+      ipAddress: "1.2.3.4",
+    });
+
+    // Deterministic path — the LLM must not be consulted for a bare answer to
+    // the question we just asked.
+    expect(generateTextMock).not.toHaveBeenCalled();
+    // The urgency landed in the persisted metadata.
+    const metadataWrites = updateSetMock.mock.calls
+      .map((c) => c[0] as { metadata?: string | null })
+      .filter((v) => typeof v.metadata === "string");
+    expect(metadataWrites.length).toBeGreaterThan(0);
+    const persisted = JSON.parse(metadataWrites.at(-1)!.metadata!);
+    expect(persisted.urgency).toBe("low");
+    expect(result.endCall).toBe(false);
+  });
+});

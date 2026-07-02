@@ -194,6 +194,33 @@ export function buildExtraction(
 }
 
 /**
+ * Map a customer's answer to the triage URGENCY step onto the canonical urgency
+ * enum (0-token). Accepts the chip values verbatim (emergency/high/medium/low)
+ * and the common natural phrasings the chips are labeled with ("emergency",
+ * "soon"/"today", "this week", "routine"/"whenever"). Returns null when the
+ * answer carries no clear urgency, so the caller can defer to the LLM rather
+ * than guess. Only call when the urgency step was the pending question.
+ * (Brain-unification D2: was inline in the chat route; voice asked the urgency
+ * question but could never capture the answer — the re-ask loop.)
+ */
+export function parseUrgencyAnswer(
+  message: string,
+): "low" | "medium" | "high" | "emergency" | null {
+  const m = message.trim().toLowerCase();
+  if (m.length === 0) return null;
+  // Exact chip values.
+  if (m === "emergency" || m === "high" || m === "medium" || m === "low") {
+    return m;
+  }
+  // Natural phrasings.
+  if (/\b(emergency|right now|immediately|can'?t wait|asap)\b/.test(m)) return "emergency";
+  if (/\b(soon|today|tonight|urgent|as soon as)\b/.test(m)) return "high";
+  if (/\b(this week|few days|couple days|medium)\b/.test(m)) return "medium";
+  if (/\b(routine|whenever|no rush|not urgent|can wait|low|sometime)\b/.test(m)) return "low";
+  return null;
+}
+
+/**
  * The ONE way either brain (web chat route / voice-turn) may turn merged slots
  * back into a session.metadata string (brain-unification extraction #1).
  *
