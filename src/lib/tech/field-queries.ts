@@ -136,6 +136,19 @@ export async function getTechJobSummary(
  * is assigned to this tech. Reused by every field mutation. Mirrors the guard in
  * the status route (org-scoped + assignee-scoped).
  */
+/** True when the job is assigned to this tech in this org — the read-side
+ * ownership gate for tech GET routes that would otherwise expose any org job's
+ * data (timesheet/materials/photos) to any technician. */
+export async function isJobOwnedByTech(
+  organizationId: string,
+  techUserId: string,
+  serviceRequestId: string,
+): Promise<boolean> {
+  return (
+    (await findOwnedJob(organizationId, techUserId, serviceRequestId)) !== null
+  );
+}
+
 async function findOwnedJob(
   organizationId: string,
   techUserId: string,

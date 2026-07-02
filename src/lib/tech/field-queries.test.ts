@@ -7,6 +7,7 @@ import {
   addJobPhoto,
   listJobPhotos,
   recordSignature,
+  isJobOwnedByTech,
 } from "./field-queries";
 import { db } from "@/lib/db";
 import { getPricebookItemById } from "@/lib/admin/pricebook-queries";
@@ -355,3 +356,15 @@ describe("listJobPhotos", () => {
     expect(out).toEqual(rows);
   });
 });
+
+describe("isJobOwnedByTech", () => {
+  it("true when the ownership read returns the job", async () => {
+    mockSelectSeq([[{ id: JOB }]]);
+    expect(await isJobOwnedByTech(ORG, TECH, JOB)).toBe(true);
+  });
+  it("false when the job is not assigned to this tech / not in org", async () => {
+    mockSelectSeq([[]]);
+    expect(await isJobOwnedByTech(ORG, TECH, JOB)).toBe(false);
+  });
+});
+

@@ -10,7 +10,7 @@
  */
 import { NextRequest } from "next/server";
 import { getTechSession } from "@/lib/auth/tech-session";
-import { addJobPhoto, listJobPhotos } from "@/lib/tech/field-queries";
+import { addJobPhoto, listJobPhotos, isJobOwnedByTech } from "@/lib/tech/field-queries";
 import {
   getStorageClient,
   generateStorageKey,
@@ -106,6 +106,9 @@ export async function GET(
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
     const { id } = await params;
+    if (!(await isJobOwnedByTech(session.organizationId, session.userId, id))) {
+      return errorResponse("Job not found", "NOT_FOUND", 404);
+    }
     const photos = await listJobPhotos(session.organizationId, id);
     if (photos.length === 0) {
       return successResponse({ photos: [] });

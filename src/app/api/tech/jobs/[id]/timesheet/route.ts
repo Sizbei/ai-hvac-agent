@@ -12,6 +12,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { getTechSession } from "@/lib/auth/tech-session";
+import { isJobOwnedByTech } from "@/lib/tech/field-queries";
 import {
   clockIn,
   clockOut,
@@ -37,6 +38,9 @@ export async function GET(
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
     const { id } = await params;
+    if (!(await isJobOwnedByTech(session.organizationId, session.userId, id))) {
+      return errorResponse("Job not found", "NOT_FOUND", 404);
+    }
     const entries = await listTimeEntries(session.organizationId, id);
     // Whether the CURRENT tech is on the clock for this job (drives the toggle).
     const openEntry =

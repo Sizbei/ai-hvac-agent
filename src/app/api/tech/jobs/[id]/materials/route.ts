@@ -16,6 +16,7 @@ import {
   addJobMaterial,
   listJobMaterials,
   removeJobMaterial,
+  isJobOwnedByTech,
 } from "@/lib/tech/field-queries";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { successResponse, errorResponse } from "@/lib/api-response";
@@ -39,6 +40,9 @@ export async function GET(
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
     const { id } = await params;
+    if (!(await isJobOwnedByTech(session.organizationId, session.userId, id))) {
+      return errorResponse("Job not found", "NOT_FOUND", 404);
+    }
     const materials = await listJobMaterials(session.organizationId, id);
     return successResponse({ materials });
   } catch (error) {
