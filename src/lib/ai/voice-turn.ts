@@ -64,6 +64,8 @@ import {
   type IssueType,
 } from "./extraction-schema";
 import { submitSessionServiceRequest } from "@/lib/requests/submit-session-request";
+import { formatArrivalWindowSpoken } from "@/lib/admin/arrival-window";
+import { BUSINESS_TIME_ZONE } from "@/lib/admin/calendar-time";
 import { determineNextState, type SessionState } from "./state-machine";
 import {
   PHONE_SYSTEM_PROMPT,
@@ -714,7 +716,25 @@ export async function voiceReply(params: {
             ipAddress,
           });
           if (submitted.ok) {
-            const reply = toSpokenReply(VOICE_SUBMITTED_REPLY, { nearLimit });
+            // Speak the CONCRETE window only when one was actually reserved
+            // (heldWindow != null). On a soft booking keep the existing
+            // "I've sent your request over" copy — never voice a window we
+            // didn't hold. The spoken line still flows through toSpokenReply
+            // (the gate that owns the final utterance), so we surface the
+            // window THROUGH it rather than bypassing it.
+            const spokenWindow = submitted.heldWindow
+              ? formatArrivalWindowSpoken(
+                  submitted.heldWindow.startUtc,
+                  submitted.heldWindow.endUtc,
+                  // Business timezone: the held bounds are Eastern-anchored, so
+                  // UTC would speak the wrong hours to the customer.
+                  BUSINESS_TIME_ZONE,
+                )
+              : null;
+            const submittedCopy = spokenWindow
+              ? `You're all set for ${spokenWindow}. Your confirmation number is ${submitted.referenceNumber}. Is there anything else I can help you with?`
+              : VOICE_SUBMITTED_REPLY;
+            const reply = toSpokenReply(submittedCopy, { nearLimit });
             await db.insert(messages).values({
               organizationId,
               sessionId: session.id,

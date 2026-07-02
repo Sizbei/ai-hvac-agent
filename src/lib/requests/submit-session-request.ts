@@ -138,6 +138,17 @@ export type SubmitSessionResult =
       readonly ok: true;
       readonly referenceNumber: string;
       readonly serviceRequestId: string;
+      // The CONCRETE arrival window this submission actually RESERVED (via the
+      // confirm-time capacity hold), or null on a soft booking. The invariant
+      // both channels rely on: a non-null value here means a real unit of
+      // capacity was claimed, so it's safe to promise the customer this window.
+      // Null → keep soft "we'll confirm your time" language.
+      readonly heldWindow: {
+        readonly day: string;
+        readonly window: string;
+        readonly startUtc: string;
+        readonly endUtc: string;
+      } | null;
     }
   | { readonly ok: false; readonly reason: "do_not_service" | "insert_failed" };
 
@@ -474,5 +485,21 @@ export async function submitSessionServiceRequest(params: {
 
   logger.info({ sessionId, referenceNumber }, "Service request submitted");
 
-  return { ok: true, referenceNumber, serviceRequestId: serviceRequest.id };
+  return {
+    ok: true,
+    referenceNumber,
+    serviceRequestId: serviceRequest.id,
+    // Surface the concretely-held window (null on soft booking). Dates → ISO so
+    // the result crosses the channel boundary as plain JSON. This is the ONLY
+    // window either channel may promise — it exists iff a capacity unit was
+    // actually reserved above.
+    heldWindow: heldSlot
+      ? {
+          day: heldSlot.day,
+          window: heldSlot.window,
+          startUtc: heldSlot.startUtc.toISOString(),
+          endUtc: heldSlot.endUtc.toISOString(),
+        }
+      : null,
+  };
 }

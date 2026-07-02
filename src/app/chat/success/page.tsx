@@ -11,6 +11,10 @@ import { Skeleton } from '@/components/ui/skeleton';
 function SuccessContent() {
   const searchParams = useSearchParams();
   const referenceNumber = searchParams.get('ref') ?? 'N/A';
+  // Present only when a concrete window was reserved (see chat page). Absent →
+  // soft booking, keep the "being processed" copy — never promise a time we
+  // didn't hold.
+  const windowLabel = searchParams.get('window');
 
   return (
     <div className="flex min-h-dvh items-center justify-center bg-background p-4">
@@ -19,10 +23,12 @@ function SuccessContent() {
 
         <div className="space-y-2">
           <h1 className="text-2xl font-semibold tracking-tight">
-            Service Request Submitted!
+            {windowLabel ? "You're booked!" : 'Service Request Submitted!'}
           </h1>
           <p className="text-sm text-muted-foreground">
-            Your request has been received and is being processed.
+            {windowLabel
+              ? `We've got you down for ${windowLabel}.`
+              : 'Your request has been received and is being processed.'}
           </p>
         </div>
 
@@ -38,8 +44,10 @@ function SuccessContent() {
         </Card>
 
         <p className="text-sm text-muted-foreground">
-          Our team will follow up with you to coordinate the details. For an
-          emergency, call us any time, day or night, at{' '}
+          {windowLabel
+            ? "We'll see you then — our team will be in touch if anything changes. "
+            : 'Our team will follow up with you to coordinate the details. '}
+          For an emergency, call us any time, day or night, at{' '}
           <span className="font-medium text-foreground">423-854-9505</span>.
         </p>
 
