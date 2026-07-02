@@ -91,6 +91,30 @@ export async function POST(request: NextRequest) {
             "Failed to record post-escalation utterance",
           );
         }
+        // Warm-transfer the emergency to a human if a number is configured —
+        // this caller escalated but was still missing address/phone, so they
+        // reached this terminal branch instead of the endCall transfer path
+        // below. Hanging up on the neediest emergency caller was the bug.
+        const closingLine =
+          "Got it — I've passed that along to our team, and I'll connect you now.";
+        const [orgRow] = await db
+          .select({ voiceTransferNumber: organizationSettings.voiceTransferNumber })
+          .from(organizationSettings)
+          .where(eq(organizationSettings.organizationId, session.organizationId))
+          .limit(1);
+        const transferNumber = orgRow?.voiceTransferNumber?.trim();
+        if (transferNumber) {
+          return new Response(
+            dialThenHangupTwiML({
+              say: closingLine,
+              number: transferNumber,
+              fallback:
+                "I'm sorry, no one is available right now. We'll call you back as soon as possible.",
+              voice,
+            }),
+            { headers: TWIML_HEADERS },
+          );
+        }
         return new Response(
           sayThenHangupTwiML(
             "Got it — I've passed that along to our team. Goodbye.",

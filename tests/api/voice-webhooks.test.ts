@@ -162,4 +162,29 @@ describe("voice webhooks", () => {
     expect(xml).toContain("<Hangup/>");
     expect(xml).toContain("leave the building");
   });
+
+  it("/gather warm-transfers an ALREADY-escalated caller (missing-info follow-up) instead of hanging up (review H4)", async () => {
+    // Session is already 'escalated' (asked for the address last turn) and the
+    // org has a transfer number → the follow-up utterance must reach a human.
+    selectResult.value = [
+      {
+        id: "s3",
+        organizationId: "o1",
+        status: "escalated",
+        turnCount: 2,
+        maxTurns: 40,
+        metadata: null,
+        runningSummary: null,
+        voiceTransferNumber: "+15551234567",
+      },
+    ];
+
+    const { POST } = await import("@/app/api/voice/gather/route");
+    const url = "https://example.com/api/voice/gather";
+    const params = { CallSid: "s3", SpeechResult: "123 Main Street" };
+    const res = await POST(makeRequest(url, params, sign(url, params)) as never);
+    const xml = await res.text();
+    expect(xml).toContain("<Dial");
+    expect(xml).toContain("+15551234567");
+  });
 });
