@@ -4,6 +4,7 @@ import {
   extractZipsFromAddress,
   checkZipMatch,
   preserveVerifyKey,
+  parseVerifyState,
   advanceVerify,
   advanceVerifyAnswer,
   looksLikeZipAnswer,
@@ -221,5 +222,30 @@ describe("looksLikeZipAnswer", () => {
     expect(looksLikeZipAnswer("what's my balance")).toBe(false); // 0 digits
     expect(looksLikeZipAnswer("376011")).toBe(false); // 6 digits
     expect(looksLikeZipAnswer("3760")).toBe(false); // 4 digits
+  });
+});
+
+describe("parseVerifyState (brain-unification D3)", () => {
+  it("parses a valid pending state and defaults attempts", () => {
+    expect(
+      parseVerifyState(JSON.stringify({ verify: { status: "pending", attempts: 2 } })),
+    ).toEqual({ status: "pending", attempts: 2 });
+    expect(
+      parseVerifyState(JSON.stringify({ verify: { status: "passed" } })),
+    ).toEqual({ status: "passed", attempts: 0 });
+  });
+
+  it("DISCARDS a malformed verify key instead of blind-casting it", () => {
+    // The chat brain used to cast these straight into advanceVerify.
+    expect(parseVerifyState(JSON.stringify({ verify: { status: "hacked" } }))).toBeNull();
+    expect(parseVerifyState(JSON.stringify({ verify: "pending" }))).toBeNull();
+    expect(parseVerifyState(JSON.stringify({ verify: 42 }))).toBeNull();
+  });
+
+  it("returns null on absent or unparseable metadata", () => {
+    expect(parseVerifyState(null)).toBeNull();
+    expect(parseVerifyState(undefined)).toBeNull();
+    expect(parseVerifyState("not json")).toBeNull();
+    expect(parseVerifyState(JSON.stringify({ issueType: "no_cool" }))).toBeNull();
   });
 });

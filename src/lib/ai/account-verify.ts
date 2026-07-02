@@ -162,3 +162,30 @@ export function preserveVerifyKey<T extends object>(
   }
   return verifyKey !== undefined ? { ...extraction, verify: verifyKey } : extraction;
 }
+
+/**
+ * VALIDATED read of the persisted verify state off a session.metadata JSON
+ * string (brain-unification D3: voice validated the enum, chat blind-cast — a
+ * malformed `verify` key must be DISCARDED, never fed into advanceVerify).
+ * Returns null on absent/unparseable metadata or an unrecognized status;
+ * defaults `attempts` to 0.
+ */
+export function parseVerifyState(
+  metadataJson: string | null | undefined,
+): VerifyState | null {
+  try {
+    const raw = metadataJson
+      ? (JSON.parse(metadataJson) as Record<string, unknown>)
+      : null;
+    const v = raw?.verify as Partial<VerifyState> | undefined;
+    if (
+      v &&
+      (v.status === "pending" || v.status === "passed" || v.status === "failed")
+    ) {
+      return { status: v.status, attempts: v.attempts ?? 0 };
+    }
+  } catch {
+    // Unparseable metadata → treated as no verify state.
+  }
+  return null;
+}

@@ -104,6 +104,7 @@ import {
   requiresVerify,
   extractZipsFromAddress,
   preserveVerifyKey,
+  parseVerifyState,
   type VerifyState,
 } from "@/lib/ai/account-verify";
 import { decrypt } from "@/lib/crypto";
@@ -901,8 +902,11 @@ export async function POST(request: NextRequest) {
       // the next turn serves via the gate below (now that verify is "passed"). So
       // it cannot leak financial data even if the heuristic mis-fires.
       {
+        // Shared VALIDATED parse (brain-unification D3): a malformed verify key
+        // is discarded, never blind-cast into advanceVerify. vMeta is still the
+        // raw object — the persist below spreads ALL metadata keys forward.
         const vMeta = parseSessionMeta(session.metadata);
-        const vState = (vMeta?.verify as VerifyState | undefined) ?? null;
+        const vState = parseVerifyState(session.metadata);
         if (
           accountCustomerId &&
           vState?.status === "pending" &&
@@ -968,9 +972,9 @@ export async function POST(request: NextRequest) {
         // membership-status are only read aloud after a ZIP match; voice already
         // gates these and chat must not be a weaker channel. The decision is the
         // shared pure engine (advanceVerify) so the two channels can't drift.
+        // Validated state for the gate; raw object for the spread-forward write.
         const existingMeta = parseSessionMeta(session.metadata);
-        const verifyState =
-          (existingMeta?.verify as VerifyState | undefined) ?? null;
+        const verifyState = parseVerifyState(session.metadata);
         // Only a pending financial turn needs the (more expensive) ZIP read.
         const needZips =
           requiresVerify(verdict.intentId) && verifyState?.status === "pending";

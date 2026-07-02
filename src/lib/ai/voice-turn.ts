@@ -33,6 +33,7 @@ import {
   advanceVerifyAnswer,
   looksLikeZipAnswer,
   extractZipsFromAddress,
+  parseVerifyState,
   type VerifyState,
 } from "./account-verify";
 import { getModel } from "./provider";
@@ -308,14 +309,8 @@ export async function voiceReply(params: {
   // produces a message the keyword router classifies as FALLBACK, not
   // ACCOUNT_LOOKUP — without this, pending→passed is unreachable (the v2-review
   // dead-end).
-  let verifyState: VerifyState | null = null;
-  try {
-    const rawMeta = session.metadata ? (JSON.parse(session.metadata) as Record<string, unknown>) : null;
-    const v = rawMeta?.verify as Partial<VerifyState> | undefined;
-    if (v && (v.status === "pending" || v.status === "passed" || v.status === "failed")) {
-      verifyState = { status: v.status, attempts: v.attempts ?? 0 };
-    }
-  } catch { /* ignore parse errors */ }
+  // Shared validated parse (brain-unification D3).
+  const verifyState: VerifyState | null = parseVerifyState(session.metadata);
 
   const isVerifyAnswerTurn =
     !!session.customerId &&
