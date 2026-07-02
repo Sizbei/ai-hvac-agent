@@ -8,7 +8,7 @@
  * position isn't the same PII shape as an encrypted address). Every read/write is
  * org + technician scoped.
  */
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { technicianLocations, users } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
@@ -140,4 +140,41 @@ export async function getLatestTechnicianLocation(
     accuracyM: row.accuracyM,
     capturedAt: row.capturedAt.toISOString(),
   };
+}
+
+/**
+ * Latest fix per technician for a set of techs, in ONE query (avoids the N+1 of
+ * calling getLatestTechnicianLocation per tech from the dispatch scorer). Rows
+ * come back newest-first and we keep the first seen per tech — the same
+ * dedupe-in-memory pattern the dispatch map uses. Techs with no fix are absent
+ * from the map. Org + technician scoped.
+ */
+export async function getLatestTechnicianLocations(
+  organizationId: string,
+  technicianIds: readonly string[],
+): Promise<Map<string, { readonly latitude: number; readonly longitude: number }>> {
+  const out = new Map<string, { latitude: number; longitude: number }>();
+  if (technicianIds.length === 0) return out;
+
+  const rows = await db
+    .select({
+      technicianId: technicianLocations.technicianId,
+      latitude: technicianLocations.latitude,
+      longitude: technicianLocations.longitude,
+    })
+    .from(technicianLocations)
+    .where(
+      withTenant(
+        technicianLocations,
+        organizationId,
+        inArray(technicianLocations.technicianId, [...technicianIds]),
+      ),
+    )
+    .orderBy(desc(technicianLocations.capturedAt));
+
+  for (const r of rows) {
+    if (out.has(r.technicianId)) continue; // rows are desc → first is latest
+    out.set(r.technicianId, { latitude: r.latitude, longitude: r.longitude });
+  }
+  return out;
 }

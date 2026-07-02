@@ -22,10 +22,13 @@ vi.mock('@/lib/db', () => ({
   },
 }));
 
-const { getLatestTechnicianLocation } = vi.hoisted(() => ({
-  getLatestTechnicianLocation: vi.fn(async () => null),
+const { getLatestTechnicianLocations } = vi.hoisted(() => ({
+  // Batch helper: latest fix per tech in one query. Default = no fixes.
+  getLatestTechnicianLocations: vi.fn(
+    async () => new Map<string, { latitude: number; longitude: number }>(),
+  ),
 }));
-vi.mock('@/lib/tech/location-queries', () => ({ getLatestTechnicianLocation }));
+vi.mock('@/lib/tech/location-queries', () => ({ getLatestTechnicianLocations }));
 
 import { loadDispatchSignals, businessDayUtcRange } from './signals';
 
@@ -124,8 +127,8 @@ describe('loadDispatchSignals', () => {
 
   describe('travel term', () => {
     beforeEach(() => {
-      getLatestTechnicianLocation.mockReset();
-      getLatestTechnicianLocation.mockResolvedValue(null); // no live fix → home base
+      getLatestTechnicianLocations.mockReset();
+      getLatestTechnicianLocations.mockResolvedValue(new Map()); // no live fix → home base
     });
 
     it('stays null with no requestId (byte-identical to today)', async () => {
@@ -172,12 +175,9 @@ describe('loadDispatchSignals', () => {
     });
 
     it('prefers a live GPS fix over the home base', async () => {
-      getLatestTechnicianLocation.mockResolvedValue({
-        latitude: 36.33,
-        longitude: -82.38,
-        accuracyM: null,
-        capturedAt: '2026-06-24T00:00:00.000Z',
-      } as never);
+      getLatestTechnicianLocations.mockResolvedValue(
+        new Map([['t1', { latitude: 36.33, longitude: -82.38 }]]) as never,
+      );
       selectQueue.push(
         [], [], [], [], [],
         [{ lat: 36.33, lon: -82.38 }],           // job coords == the live fix

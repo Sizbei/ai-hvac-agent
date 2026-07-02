@@ -21,7 +21,7 @@ import {
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { haversineKm } from "@/lib/address/photon";
-import { getLatestTechnicianLocation } from "@/lib/tech/location-queries";
+import { getLatestTechnicianLocations } from "@/lib/tech/location-queries";
 import { businessWallClockToUtc } from "@/lib/admin/calendar-time";
 
 /**
@@ -352,15 +352,11 @@ async function loadTechAnchors(
     .where(withTenant(users, organizationId, inArray(users.id, [...technicianIds])));
   const home = new Map(homeRows.map((r) => [r.id, r]));
 
-  // Latest live fix preferred (reuses the consent-gated per-tech helper).
-  const fixes = await Promise.all(
-    technicianIds.map(
-      async (id) =>
-        [id, await getLatestTechnicianLocation(organizationId, id)] as const,
-    ),
-  );
+  // Latest live fix preferred — one query for all techs (not N).
+  const fixes = await getLatestTechnicianLocations(organizationId, technicianIds);
 
-  for (const [id, fix] of fixes) {
+  for (const id of technicianIds) {
+    const fix = fixes.get(id);
     if (fix) {
       anchors.set(id, { lat: fix.latitude, lon: fix.longitude });
       continue;

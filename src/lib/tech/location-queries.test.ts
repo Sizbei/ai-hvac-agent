@@ -1,12 +1,24 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const consentRows = { current: [] as Array<{ enabled: boolean }> };
+const locationRows = {
+  current: [] as Array<{
+    technicianId: string;
+    latitude: number;
+    longitude: number;
+  }>,
+};
 const insertValues = vi.fn();
 vi.mock("@/lib/db", () => ({
   db: {
     select: () => ({
       from: () => ({
-        where: () => ({ limit: () => Promise.resolve(consentRows.current) }),
+        where: () => ({
+          // consent check: .where().limit()
+          limit: () => Promise.resolve(consentRows.current),
+          // batch latest-per-tech: .where().orderBy() (awaited directly)
+          orderBy: () => Promise.resolve(locationRows.current),
+        }),
       }),
     }),
     insert: () => ({ values: insertValues.mockResolvedValue(undefined) }),
@@ -17,11 +29,13 @@ vi.mock("@/lib/db/tenant", () => ({ withTenant: () => ({}) }));
 import {
   isValidCoordinate,
   recordTechnicianLocation,
+  getLatestTechnicianLocations,
 } from "./location-queries";
 
 beforeEach(() => {
   vi.clearAllMocks();
   consentRows.current = [];
+  locationRows.current = [];
 });
 
 const fix = {
@@ -61,5 +75,33 @@ describe("recordTechnicianLocation", () => {
     const r = await recordTechnicianLocation("o", "t", fix);
     expect(r).toEqual({ ok: true });
     expect(insertValues).toHaveBeenCalledOnce();
+  });
+});
+
+describe("getLatestTechnicianLocations (batch, one query)", () => {
+  it("returns an empty map for no technicians without querying", async () => {
+    const m = await getLatestTechnicianLocations("o", []);
+    expect(m.size).toBe(0);
+  });
+
+  it("keeps only the latest fix per tech (rows arrive newest-first)", async () => {
+    // desc(capturedAt) order → first row seen per tech is the latest.
+    locationRows.current = [
+      { technicianId: "t1", latitude: 36.3, longitude: -82.3 }, // latest t1
+      { technicianId: "t2", latitude: 40.0, longitude: -75.0 }, // latest t2
+      { technicianId: "t1", latitude: 10.0, longitude: 10.0 }, // older t1 (ignored)
+    ];
+    const m = await getLatestTechnicianLocations("o", ["t1", "t2"]);
+    expect(m.get("t1")).toEqual({ latitude: 36.3, longitude: -82.3 });
+    expect(m.get("t2")).toEqual({ latitude: 40.0, longitude: -75.0 });
+    expect(m.size).toBe(2);
+  });
+
+  it("omits techs with no fix", async () => {
+    locationRows.current = [
+      { technicianId: "t1", latitude: 36.3, longitude: -82.3 },
+    ];
+    const m = await getLatestTechnicianLocations("o", ["t1", "t2"]);
+    expect(m.has("t2")).toBe(false);
   });
 });
