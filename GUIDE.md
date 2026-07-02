@@ -51,6 +51,8 @@ npm run dev           # start at http://localhost:3000
 | `TWILIO_ACCOUNT_SID` | *(optional, phone agent)* Twilio Account SID — enables the telephone agent |
 | `TWILIO_AUTH_TOKEN` | *(optional, phone agent)* Twilio auth token; validates inbound webhook signatures (the voice endpoints reject every request without it — fails closed) |
 | `TWILIO_VOICE` | *(optional, phone agent)* Amazon Polly neural voice for spoken replies; defaults to `Polly.Joanna-Neural` |
+| `ROUTING_PROVIDER` | *(optional, dispatch)* road drive-time provider for the dispatch travel score: `ors` \| `mapbox` \| `google`; unset/`none` = straight-line distance (see [docs/DISPATCH.md](docs/DISPATCH.md)) |
+| `ORS_API_KEY` | *(optional, dispatch)* OpenRouteService key (free tier) — used when `ROUTING_PROVIDER=ors` |
 
 Generate secrets with: `openssl rand -hex 32`
 

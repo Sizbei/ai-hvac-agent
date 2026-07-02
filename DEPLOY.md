@@ -124,6 +124,8 @@ Set all environment variables in the Vercel Dashboard under **Settings > Environ
 | `TWILIO_ACCOUNT_SID` | *(optional — phone agent)* Twilio Account SID | Twilio Console; omit to run web-chat-only |
 | `TWILIO_AUTH_TOKEN` | *(optional — phone agent)* validates inbound webhook signatures (fails closed without it) | Twilio Console |
 | `TWILIO_VOICE` | *(optional — phone agent)* Amazon Polly neural voice for spoken replies | defaults to `Polly.Joanna-Neural` |
+| `ROUTING_PROVIDER` | *(optional — dispatch)* score technician travel by road drive-time instead of straight-line distance | `ors` (free, implemented); unset = off (haversine) |
+| `ORS_API_KEY` | *(optional — dispatch)* OpenRouteService API key | free signup at openrouteservice.org/dev; used when `ROUTING_PROVIDER=ors` |
 | `NODE_ENV` | Runtime environment | `production` (Vercel sets this automatically) |
 
 > The exact values for `AI_BASE_URL`, `AI_API_KEY`, and `AI_MODEL` are already in

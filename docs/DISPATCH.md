@@ -91,6 +91,30 @@ error, or an unpriced origin → `null`, and that tech falls back to haversine. 
 the `after()` dispatch path, so the call never blocks the customer. `scoreTechnician`
 prefers `travelMinutes`; `travelKm` remains the fallback and the reason line.
 
+### Enabling road drive-time
+1. Get a free key: sign up at [openrouteservice.org/dev](https://openrouteservice.org/dev/) (free tier ≈ 2k matrix requests/day — plenty for pilot volume).
+2. Set two env vars, locally (`.env.local`) **and** in Vercel → Project → Settings → Environment Variables:
+   ```
+   ROUTING_PROVIDER=ors
+   ORS_API_KEY=<your key>
+   ```
+3. Redeploy. No code or migration changes — scoring switches to drive-minutes wherever a tech can be priced, and silently falls back to haversine everywhere else.
+
+To turn it off, unset `ROUTING_PROVIDER` (or set `none`). Behavior reverts exactly.
+
+### Measuring routing vs haversine
+Every scored decision stores **both** signals per candidate in
+`dispatch_decisions.candidates` (`travelKm` + `travelMinutes`, nullable), so the
+comparison reads straight off recorded decisions — no extra instrumentation:
+
+- **Disagreement rate** — for each decision, re-rank candidates by the km-based term
+  vs the minutes-based term; count decisions where the top tech differs. High
+  disagreement = routing is changing real outcomes and is worth its cost.
+- **Override correlation** — join with dispatcher overrides: does routing-ranked
+  order predict the human's final pick better than haversine order?
+- **Tuning inputs** — the same rows feed `W_TRAVEL` / `TRAVEL_CAP_MIN` /
+  `MIN_CONFIDENCE_GAP` tuning once pilot volume exists.
+
 ## Delay detection & forecasting
 - `src/lib/dispatch/delay-detection.ts` (+ cron sweep) flags behind-schedule jobs.
 - `src/lib/forecasting/` (`revenue`, `rollups`, `seasonal-naive`) powers demand/revenue rollups adjacent to scheduling.
@@ -111,6 +135,24 @@ prefers `travelMinutes`; `travelKm` remains the fallback and the reason line.
 - ✅ **Real travel time** — road drive-time now drives the travel term when `ROUTING_PROVIDER` is set (OpenRouteService adapter shipped; see *Travel-time provider* above). Follow-ups: a persistent `travel_estimate` cache (rounded origin×dest, TTL) once volume hits ORS rate limits; traffic-aware `mapbox`/`google` adapters. ✅ Decisions now log `travelKm` + `travelMinutes` per candidate in `dispatch_decisions.candidates`, so the routing-vs-haversine A/B and `W_TRAVEL`/cap tuning read straight off recorded decisions.
 - **Confidence-gate tuning** — `MIN_CONFIDENCE_GAP` (0.08) and the scoring weights are provisional constants; tune them on pilot **override-rate** data (how often dispatchers override auto-commits) and outcome data.
 - **Explicit skill matrix** — `skillJobsCompleted` is a proxy; add a technician skill/certification matrix (by system type, refrigeration, gas) so the skill gate is capability-based, not just history-based.
+
+**Data & tuning loop** (make autopilot self-improving — highest-leverage next work):
+- **Override telemetry** — when a dispatcher reassigns an auto-committed job or manually places a queued one, record it against the `dispatch_decisions` row (autopilot's pick vs the human's final pick, who/when). This is the ground-truth label every tuning effort needs; without it "override rate" is anecdote. Small: one nullable column set from `assignTechnician`/`placeAndAssignRequest` when the request has a decision row.
+- **Shadow mode** — for orgs with `auto_dispatch_enabled` OFF, still run scoring and record the decision (never commit). Builds the tuning dataset and lets an org preview "what autopilot would have done" before opting in.
+- **"Why this tech?" UI** — the decision audit (scores, reasons, both travel signals) is already recorded; surface it as a popover on assigned jobs and in the exception queue. Dispatcher trust in autopilot comes from seeing its reasoning.
+- **Outcome digest + canary** — a daily rollup of committed vs queued vs overridden, and an alert when the commit rate collapses (the canary for silently broken geocoding, signals, or a bad weight change).
+
+**Scoring accuracy:**
+- **Chain-aware travel origin** — for a job later today, the tech's true origin is their *previous scheduled job's* location, not their current GPS/home anchor. Use the calendar predecessor's coords when one exists.
+- **Duration-fit availability** — the load term counts same-day jobs but not whether the tech's remaining open window actually fits `estimateJobDuration` before close; down-rank techs who can't fit the job.
+- **Recency-weighted signals** — `skillJobsCompleted`/`avgRating`/conversion are all-time; apply a ~90-day half-life so scores track current performance, not history.
+- **Actual-duration recalibration** — status transitions/timesheets yield actual on-site durations; compare against estimates and recalibrate the deterministic base table per org (no ML needed — a periodic multiplier per job type).
+
+**Operations:**
+- **Exception-queue one-click** — show the `suggestTechnicians` shortlist (with reasons) inline on `queued_*` jobs with a one-tap accept. A fast human loop also produces clean override labels.
+- **Emergency displacement suggestions** — when an emergency lands and nobody fits, suggest the lowest-cost existing job to bump (latest window, non-urgent, closest replacement tech) instead of just queueing.
+- **Geofenced auto-status** — the consent-gated location stream can suggest "en route"/"arrived" transitions when a fix enters the job's geofence — better delay detection and free actual-duration data.
+- **Weekly fairness term** — same-day load alone lets the top-scoring tech absorb every high-value job; add a rolling-week balance term (or tiebreak) to spread work and avoid burnout + self-reinforcing score skew.
 
 **Longer-term:**
 - **Route optimization** — sequence each tech's day (multi-stop ordering) rather than scoring one job at a time; minimize total drive time across the schedule.
