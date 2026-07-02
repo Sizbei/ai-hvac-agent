@@ -107,6 +107,10 @@ vi.mock("@/lib/db/schema", () => ({
     systemType: "sr.systemType",
     urgency: "sr.urgency",
     autoAssigned: "sr.autoAssigned",
+    locationId: "sr.locationId",
+    addressEncrypted: "sr.addressEnc",
+    customerPhoneEncrypted: "sr.phoneEnc",
+    customerEmailEncrypted: "sr.emailEnc",
   },
   organizationSettings: {
     organizationId: "os.org",
@@ -126,6 +130,12 @@ vi.mock("@/lib/db/schema", () => ({
     role: "u.role",
     isActive: "u.active",
     name: "u.name",
+  },
+  customerLocations: {
+    id: "cl.id",
+    organizationId: "cl.org",
+    latitude: "cl.lat",
+    longitude: "cl.lng",
   },
 }));
 
@@ -152,11 +162,16 @@ vi.mock("@/lib/ai/dispatch/signals", () => ({
     ),
   ),
 }));
-vi.mock("@/lib/ai/dispatch/score", () => ({
+vi.mock("@/lib/ai/dispatch/score", async (importOriginal) => ({
+  // Keep the real classifyDispatch (the confidence gate) so tests exercise the
+  // actual commit/queue decision; only stub the ranker.
+  ...(await importOriginal<typeof import("@/lib/ai/dispatch/score")>()),
+  // Descending scores (0.1 apart) so the top tech clears MIN_CONFIDENCE_GAP and
+  // classifyDispatch commits to the ranked-first tech rather than queuing a tie.
   rankTechnicians: () =>
-    rankedState.order.map((technicianId) => ({
+    rankedState.order.map((technicianId, i) => ({
       technicianId,
-      score: 1,
+      score: 1 - i * 0.1,
       reasons: [],
       skillMatched: true,
     })),
@@ -767,9 +782,28 @@ describe("autoAssignBookedRequest (scored vs first-fit)", () => {
     updateQueue.push([]); // markAutoAssigned UPDATE
   }
 
+  // The fixed lead-in autoAssignBookedRequest runs after the active-tech list and
+  // before ranking/placement: a best-effort duration estimate, an external-
+  // scheduler check, the autodispatch flag, and (scored mode only) the booking-
+  // quality gate. Each needs its own no-op row so it doesn't consume the
+  // placement queue. Caller pushes the active-tech list first.
+  function queueAutoAssignLeadIn(enabled: boolean): void {
+    selectQueue.push([]); // ensureEstimatedDuration → no existing row → no update
+    selectQueue.push([]); // isExternallyScheduled → not external
+    selectQueue.push([{ enabled }]); // isAutoDispatchEnabled
+    if (enabled) selectQueue.push([]); // assessBookingQualityForRequest → clean
+  }
+
+  const CLASSIFIED = {
+    jobType: "no_cool",
+    systemType: "central_ac",
+    urgency: "standard",
+  };
+
   it("disabled (default): tries technicians in DB order (first-fit, unchanged)", async () => {
     selectQueue.push([{ id: T1 }, { id: T2 }]); // active techs (DB order)
-    selectQueue.push([{ enabled: false }]); // isAutoDispatchEnabled
+    queueAutoAssignLeadIn(false); // duration/external/flag (scored gate skipped)
+    // Disabled → ranked === null → no classification read, no confidence gate.
     queueSuccessfulPlacement(T1); // first DB-order tech wins
 
     const result = await autoAssignBookedRequest(ORG, REQ, HELD);
@@ -780,9 +814,10 @@ describe("autoAssignBookedRequest (scored vs first-fit)", () => {
 
   it("enabled: tries technicians in ranked order (best first)", async () => {
     selectQueue.push([{ id: T1 }, { id: T2 }]); // active techs (DB order)
-    selectQueue.push([{ enabled: true }]); // isAutoDispatchEnabled
-    selectQueue.push([{ jobType: "no_cool", systemType: "central_ac", urgency: "standard" }]); // classification
-    rankedState.order = [T2, T1]; // ranker prefers T2
+    queueAutoAssignLeadIn(true); // duration/external/flag/quality-gate
+    selectQueue.push([CLASSIFIED]); // rankedTechnicianOrder → classification
+    selectQueue.push([CLASSIFIED]); // confidence gate → classification (urgency)
+    rankedState.order = [T2, T1]; // ranker prefers T2 (clear score gap → committed)
     queueSuccessfulPlacement(T2); // ranked-first tech wins
 
     const result = await autoAssignBookedRequest(ORG, REQ, HELD);
@@ -796,8 +831,9 @@ describe("autoAssignBookedRequest (scored vs first-fit)", () => {
 
   it("enabled with no skill-matched tech → {assigned:false} (gate did its job)", async () => {
     selectQueue.push([{ id: T1 }, { id: T2 }]); // active techs
-    selectQueue.push([{ enabled: true }]); // isAutoDispatchEnabled
-    selectQueue.push([{ jobType: "no_cool", systemType: "central_ac", urgency: "standard" }]); // classified
+    queueAutoAssignLeadIn(true);
+    selectQueue.push([CLASSIFIED]); // rankedTechnicianOrder → classification
+    selectQueue.push([CLASSIFIED]); // confidence gate → classification (ranked=[] is truthy)
     rankedState.order = []; // classified, but ranker drops everyone (nobody qualified)
 
     const result = await autoAssignBookedRequest(ORG, REQ, HELD);
@@ -806,9 +842,10 @@ describe("autoAssignBookedRequest (scored vs first-fit)", () => {
 
   it("enabled but job has NO classification → falls back to first-fit (no regression)", async () => {
     selectQueue.push([{ id: T1 }, { id: T2 }]); // active techs
-    selectQueue.push([{ enabled: true }]); // isAutoDispatchEnabled
+    queueAutoAssignLeadIn(true);
     selectQueue.push([{ jobType: null, systemType: null, urgency: "standard" }]); // unclassified
-    // rankedTechnicianOrder returns null → order = first-fit (DB order); T1 wins.
+    // rankedTechnicianOrder returns null → order = first-fit (DB order), no
+    // confidence gate; T1 wins.
     queueSuccessfulPlacement(T1);
 
     const result = await autoAssignBookedRequest(ORG, REQ, HELD);

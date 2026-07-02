@@ -143,8 +143,15 @@ describe("calendar compliance — bot offers options but never commits to a time
     expect(offer.question).not.toMatch(/fully booked|no openings|nothing open/i);
   });
 
-  it("no availability configured → soft-preference fallback", () => {
-    expectSoftPreferenceFallback(offerFor(["t1"], [], [], [WED]));
+  it("no availability configured → default business hours, offers bands, never commits", () => {
+    // P0 Bug 1 (default business hours for unconfigured techs): a tech with no
+    // configured availability now falls back to default hours, so we still
+    // surface concrete Wed bands as a preference rather than the generic
+    // fallback. (The fallback path stays covered by the fully-booked case above.)
+    const offer = offerFor(["t1"], [], [], [WED]);
+    expect(offer.question).toMatch(/I can note a preferred time/i);
+    expect(offer.question).toMatch(/Wed (morning|afternoon|evening)/);
+    expectNeverCommits(offer);
   });
 
   it("multi-day mixed bookings → offers soonest open bands, never commits", () => {
