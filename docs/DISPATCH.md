@@ -159,3 +159,65 @@ comparison reads straight off recorded decisions — no extra instrumentation:
 - **SLA / priority-aware scheduling** — emergency response-time targets that pre-empt and re-sequence.
 - **Real-time re-dispatch** — feed `delay-detection` back into placement to auto-reflow a slipping day (offer reschedules, reassign the tail).
 - **Learning loop** — feed the booking-outcome classifier (`booking-quality.ts` QA labels) and `dispatch_decisions` history back into the scoring weights (offline, then online).
+
+---
+
+## Sequenced plan
+
+The roadmap above, ordered by dependency. Rule of thumb: **measurement before
+tuning, trust before autonomy, data-producing work before data-consuming work.**
+
+### Phase 1 — Measure (no external dependencies; ~1–2 days)
+The prerequisite for everything below: turn dispatch from "it ran" into a labeled
+dataset.
+1. **Override telemetry** — nullable `overridden_*` fields on `dispatch_decisions`,
+   written from `assignTechnician`/`placeAndAssignRequest` when a human's pick
+   differs from the recorded decision.
+2. **Shadow mode** — score + record (never commit) for orgs with autopilot off.
+   Multiplies the dataset and gives opt-out orgs a preview.
+3. **Outcome digest + canary** — weekly committed/queued/overridden rollup; alert
+   on a commit-rate collapse.
+
+*Exit criteria: every booking yields a decision row (real or shadow); overrides are
+labeled; a rollup query exists.*
+
+### Phase 2 — Operator trust & speed (parallel with Phase 1; ~2–3 days)
+4. **"Why this tech?" popover** — render `dispatch_decisions.candidates` (scores,
+   reasons, travel signals) on assigned jobs + the exception queue.
+5. **Exception-queue one-click** — inline `suggestTechnicians` shortlist with
+   one-tap accept on `queued_*` jobs. Also produces cleaner override labels.
+
+*Exit criteria: a dispatcher can resolve a queued job in one click and see the
+system's reasoning everywhere an assignment appears.*
+
+### Phase 3 — Scoring accuracy (independent ~0.5–1 day items; ship behind tests)
+6. **Chain-aware travel origin** — predecessor job's coords as the origin for
+   later-today jobs.
+7. **Duration-fit availability** — down-rank techs whose remaining window can't fit
+   the estimated duration.
+8. **Recency-weighted signals** — ~90-day half-life on skill/rating/conversion.
+9. **Geofenced auto-status** — en-route/arrived suggestions from the location
+   stream; *produces* the actual-duration data Phase 4 consumes.
+
+### Phase 4 — Data-gated tuning (needs ~2–4 weeks of pilot traffic + Phase 1)
+10. **Weight/gap tuning** — fit `W_TRAVEL`, `TRAVEL_CAP_MIN`, `MIN_CONFIDENCE_GAP`
+    to override-rate + shadow data; adopt per-org overrides only if orgs diverge.
+11. **Routing A/B verdict** — disagreement rate + override correlation (see
+    *Measuring* above) decides: keep ORS, upgrade to a traffic-aware provider
+    (Mapbox/Google adapter), or drop routing.
+12. **Actual-duration recalibration** — periodic per-org multiplier on the duration
+    base table from Phase 3's actuals.
+13. **Travel cache** — only if ORS rate limits are actually hit.
+
+### Phase 5 — Structural bets (scope on demand, after Phase 4 evidence)
+14. **Explicit skill matrix** → 15. **Weekly fairness term** → 16. **Emergency
+    displacement** → 17. **Route optimization** → 18. **SLA pre-emption /
+    real-time re-dispatch** → 19. **Learning loop** (closed-loop weights — the
+    end state the earlier phases make safe).
+
+### External-dependency ledger (operator actions)
+| Needed for | Action |
+|---|---|
+| Activate road drive-time now | Free ORS key → set `ROUTING_PROVIDER=ors` + `ORS_API_KEY` (local + Vercel) |
+| Phase 4 tuning | Real pilot bookings flowing through intake |
+| Traffic-aware routing (Phase 4, optional) | Mapbox/Google account + budget decision |
