@@ -176,6 +176,19 @@ describe('travel-aware scoring + confidence classification', () => {
     expect(highway.reasons.some((r) => r.includes('km away'))).toBe(false);
   });
 
+  it('a nearby located tech outranks a location-less tech in the same regime (review H8)', () => {
+    // Same composite inputs; only travel differs. With a travel regime active,
+    // the unlocated tech must NOT win by escaping the travel blend.
+    const ranked = rankTechnicians([
+      { job, tech: { technicianId: 'near', ...baseTech, travelKm: 3 } },
+      { job, tech: { technicianId: 'nowhere', ...baseTech } }, // no travel signal
+    ]);
+    expect(ranked[0].technicianId).toBe('near');
+    expect(
+      ranked.find((r) => r.technicianId === 'nowhere')!.reasons,
+    ).toContain('location unknown');
+  });
+
   it('falls back to the km term when travelMinutes is null', () => {
     const r = scoreTechnician({
       job,

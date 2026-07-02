@@ -75,7 +75,15 @@ function skillLabel(job: DispatchSignals['job']): string {
   return job.jobType ?? job.systemType ?? 'matching';
 }
 
-export function scoreTechnician(signals: DispatchSignals): RankedTech {
+// Neutral travel term for a candidate with NO location signal when OTHER
+// candidates DO have one — treats unknown proximity as median rather than
+// letting an unlocated tech keep the full composite and outrank located techs.
+const NEUTRAL_TRAVEL_SCORE = 0.5;
+
+export function scoreTechnician(
+  signals: DispatchSignals,
+  opts: { readonly travelRegimeActive?: boolean } = {},
+): RankedTech {
   const { job, tech } = signals;
   const skillMatched = tech.skillJobsCompleted > 0;
 
@@ -113,6 +121,13 @@ export function scoreTechnician(signals: DispatchSignals): RankedTech {
     );
     score = travelScore * W_TRAVEL + composite * (1 - W_TRAVEL);
     travelReason = `${tech.travelKm.toFixed(1)} km away`;
+  } else if (opts.travelRegimeActive) {
+    // Regime active (some candidate has travel) but this tech has no location →
+    // blend a neutral travel term so an unlocated tech is scored in the SAME
+    // regime, not handed the full composite (which would systematically outrank
+    // located techs — including a genuinely nearby one).
+    score = NEUTRAL_TRAVEL_SCORE * W_TRAVEL + composite * (1 - W_TRAVEL);
+    travelReason = "location unknown";
   }
 
   const reasons: string[] = [];
@@ -146,8 +161,16 @@ export function scoreTechnician(signals: DispatchSignals): RankedTech {
  * Ties break by technicianId (ascending) so the ordering is fully deterministic.
  */
 export function rankTechnicians(candidates: readonly DispatchSignals[]): RankedTech[] {
+  // Single travel regime per ranking: if ANY candidate has a location signal,
+  // score the location-less ones with a neutral travel term so they can't win
+  // just by escaping the travel blend the located candidates pay.
+  const travelRegimeActive = candidates.some(
+    (c) =>
+      (c.tech.travelMinutes != null && Number.isFinite(c.tech.travelMinutes)) ||
+      (c.tech.travelKm != null && Number.isFinite(c.tech.travelKm)),
+  );
   return candidates
-    .map(scoreTechnician)
+    .map((c) => scoreTechnician(c, { travelRegimeActive }))
     .filter((r) => r.skillMatched)
     .sort((a, b) =>
       b.score !== a.score
