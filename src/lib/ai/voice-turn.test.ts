@@ -1907,8 +1907,11 @@ describe("voiceReply after-hours move machine (brain-unification D4)", () => {
       customerSignal: string;
     };
     expect(call.customerSignal).toBe("not_urgent");
-    // And the next-day offer owns the turn.
+    // And the next-day offer OWNS the turn — the slot question is not stacked on
+    // (guards against offer_next_day accidentally becoming a prefix like disclose_charge).
     expect(result.reply).toContain("next business day");
+    expect(result.reply.toLowerCase()).not.toContain("phone number");
+    expect(result.reply.toLowerCase()).not.toContain("what's the address");
   });
 
   it("coaches the LLM path with the after-hours instruction when active and undisclosed", async () => {
@@ -1932,6 +1935,41 @@ describe("voiceReply after-hours move machine (brain-unification D4)", () => {
     const call = generateTextMock.mock.calls[0]![0] as { system: string };
     expect(call.system).toContain("AFTER-HOURS");
     expect(call.system).toContain("after-hours service charge");
+  });
+
+  it("maps the legacy afterHoursShown='1' latch to disclose_charge (no re-disclosure)", async () => {
+    // Pre-D4 sessions stored the latch as "1" (not the kinds list). It must map
+    // to ["disclose_charge"], so a disclose_charge decision on such a session is
+    // treated as already-shown and NOT prepended again (no double charge line).
+    const CHARGE = "Heads up: after our normal hours there's a service charge.";
+    decideAfterHoursDisclosureMock.mockReturnValue({
+      kind: "disclose_charge",
+      afterHours: true,
+      copy: CHARGE,
+    });
+    const legacySession = {
+      ...intakeSession,
+      metadata: JSON.stringify({
+        ...JSON.parse(intakeSession.metadata),
+        afterHoursShown: "1",
+      }),
+    };
+    extractAddressAtAddressStepMock.mockReturnValue("123 Main St, Johnson City, TN 37601");
+    extractAllContactMock.mockReturnValue({
+      name: null,
+      address: "123 Main St, Johnson City, TN 37601",
+      phone: null,
+      email: null,
+    });
+
+    const result = await voiceReply({
+      session: legacySession,
+      history: [{ role: "user", content: "ac is out" }],
+      userMessage: "123 Main St",
+      ipAddress: "1.2.3.4",
+    });
+
+    expect(result.reply).not.toContain(CHARGE);
   });
 });
 

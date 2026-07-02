@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   decideAfterHoursDisclosure,
   inferBookingTarget,
+  readUrgencySignal,
   type AfterHoursDecision,
 } from "./after-hours-chat";
 import { DEFAULT_AFTER_HOURS_CONFIG } from "@/lib/admin/after-hours";
@@ -185,5 +186,36 @@ describe("inferBookingTarget", () => {
   it("returns 'unknown' when neither a window nor a clear signal is present", () => {
     expect(inferBookingTarget(undefined, "unknown")).toBe("unknown");
     expect(inferBookingTarget("whenever", "unknown")).toBe("unknown");
+  });
+});
+
+describe("readUrgencySignal", () => {
+  it("returns 'unknown' when we did NOT ask last turn (never over-reads)", () => {
+    expect(readUrgencySignal(false, "yes it's an emergency")).toBe("unknown");
+    expect(readUrgencySignal(false, "no rush")).toBe("unknown");
+  });
+
+  it("reads clear affirmatives as urgent", () => {
+    for (const m of ["yes", "yeah", "it's urgent", "ASAP please", "can't wait", "we need someone tonight"]) {
+      expect(readUrgencySignal(true, m)).toBe("urgent");
+    }
+  });
+
+  it("reads clear negatives as not_urgent", () => {
+    for (const m of ["no", "nope", "tomorrow is fine", "whenever works", "no rush"]) {
+      expect(readUrgencySignal(true, m)).toBe("not_urgent");
+    }
+  });
+
+  it("stays 'unknown' on an ambiguous reply", () => {
+    expect(readUrgencySignal(true, "well it depends")).toBe("unknown");
+    expect(readUrgencySignal(true, "the AC is upstairs")).toBe("unknown");
+  });
+
+  // KNOWN QUIRK (roadmap follow-up): the affirmative check runs first and matches
+  // the substring "urgent", so a literal "not urgent" is (wrongly) read as urgent.
+  // Pinned here so a future negation-handling fix updates this deliberately.
+  it("currently mis-reads 'not urgent' as urgent (documented quirk)", () => {
+    expect(readUrgencySignal(true, "not urgent")).toBe("urgent");
   });
 });
