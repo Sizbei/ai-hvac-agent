@@ -418,13 +418,19 @@ export function RequestDetailSheet({
     setNoteInput('');
     setNoteError(null);
 
+    // Cancellation guard: switching requests quickly can let request A's fetch
+    // resolve AFTER B's, rendering A's data while every action button targets B.
+    // Mirror the suggestions effect — ignore a stale response.
+    let cancelled = false;
     async function loadDetail(): Promise<void> {
       try {
         const res = await fetch(`/api/admin/requests/${requestId}`);
+        if (cancelled) return;
         if (!res.ok) {
           const body = await res.json().catch(() => ({
             error: { message: 'Failed to load request details' },
           }));
+          if (cancelled) return;
           setDetailError(body?.error?.message ?? 'Failed to load request details');
           return;
         }
@@ -432,6 +438,7 @@ export function RequestDetailSheet({
           success: boolean;
           data: AdminRequestDetail;
         };
+        if (cancelled) return;
         if (body.success) {
           setDetail(body.data);
           setScheduledInput(toDateInputValue(body.data.scheduledDate));
@@ -441,13 +448,16 @@ export function RequestDetailSheet({
           }
         }
       } catch {
-        setDetailError('Could not connect to server.');
+        if (!cancelled) setDetailError('Could not connect to server.');
       } finally {
-        setIsLoadingDetail(false);
+        if (!cancelled) setIsLoadingDetail(false);
       }
     }
 
     loadDetail();
+    return () => {
+      cancelled = true;
+    };
   }, [requestId]);
 
   // Fetch advisory top-3 technician suggestions when the request changes.
