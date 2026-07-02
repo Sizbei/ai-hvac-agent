@@ -91,9 +91,9 @@ a capped live lookup. Technician pins use the latest consent-gated fix (last 4h)
 3. ✅ **Signature-write TOCTOU** — `recordSignature` re-asserts `assignedTo = <tech>` in the `UPDATE` (0 rows → `not_owned`), so a reassigned job can't receive another tech's signature.
 4. ✅ **Redundant classification read** — `rankedTechnicianOrder` returns `{ ranked, job }`; the confidence gate reuses the classification (one fewer DB read per scored auto-assign).
 5. ✅ **Test-coverage gaps** — legacy `afterHoursShown="1"` latch mapping, `offer_next_day` non-stacking, and isolated `readUrgencySignal` tests added.
+6. ✅ **Urgency negation** — `readUrgencySignal` now checks negated urgency ("not urgent" / "not an emergency" / "isn't urgent") before the affirmative match, so a clear no is no longer read as urgent. A contradictory "no, it's an emergency" still reads urgent.
 
 **Near-term dispatch quality:**
-- **Urgency negation handling** — `readUrgencySignal` reads a literal "not urgent" as *urgent* (the affirmative check matches the substring "urgent" first). Check negatives before affirmatives, or exclude negated forms. (Pinned by a documented test today.)
 - **Real travel time** — replace haversine with a routing/ETA API (traffic-aware) for the travel term; haversine under-penalizes cross-town jobs.
 - **Confidence-gate tuning** — `MIN_CONFIDENCE_GAP` (0.08) and the scoring weights are provisional constants; tune them on pilot **override-rate** data (how often dispatchers override auto-commits) and outcome data.
 - **Explicit skill matrix** — `skillJobsCompleted` is a proxy; add a technician skill/certification matrix (by system type, refrigeration, gas) so the skill gate is capability-based, not just history-based.

@@ -236,6 +236,13 @@ export function readUrgencySignal(
 ): CustomerUrgencySignal {
   if (!askedUrgencyLastTurn) return "unknown";
   const m = message.trim().toLowerCase();
+  // Negated urgency FIRST — otherwise the affirmative check below matches the
+  // substring "urgent"/"emergency" inside "not urgent" / "not an emergency" and
+  // flips a clear no into a yes. Scoped to explicit negation so a contradictory
+  // "no, it's an emergency" (where "no" answers "can it wait?") still reads urgent.
+  if (/\b(not|isn'?t|no)\s+(an?\s+)?(urgent|emergency)\b/.test(m)) {
+    return "not_urgent";
+  }
   if (
     /\b(urgent|emergency|asap|right now|today|tonight|now|yes|yeah|yep|please do)\b/.test(
       m,

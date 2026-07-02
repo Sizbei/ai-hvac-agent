@@ -212,10 +212,21 @@ describe("readUrgencySignal", () => {
     expect(readUrgencySignal(true, "the AC is upstairs")).toBe("unknown");
   });
 
-  // KNOWN QUIRK (roadmap follow-up): the affirmative check runs first and matches
-  // the substring "urgent", so a literal "not urgent" is (wrongly) read as urgent.
-  // Pinned here so a future negation-handling fix updates this deliberately.
-  it("currently mis-reads 'not urgent' as urgent (documented quirk)", () => {
-    expect(readUrgencySignal(true, "not urgent")).toBe("urgent");
+  it("handles negated urgency (not urgent / not an emergency / isn't urgent) as not_urgent", () => {
+    for (const m of [
+      "not urgent",
+      "it's not urgent",
+      "not an emergency",
+      "it isn't urgent",
+      "no it's not urgent, tomorrow is fine",
+    ]) {
+      expect(readUrgencySignal(true, m)).toBe("not_urgent");
+    }
+  });
+
+  it("still reads a contradictory 'no, it's an emergency' as urgent (negation only fires on negated urgency)", () => {
+    // "no" here answers "can it wait?" with no → they mean urgent; the explicit
+    // emergency wins. Only literal negated-urgency phrases flip to not_urgent.
+    expect(readUrgencySignal(true, "no, it's an emergency")).toBe("urgent");
   });
 });
