@@ -417,3 +417,31 @@ describe('serviceRequestSchema (confirm payload)', () => {
     expect(parsed.leadSource).toBe('referral');
   });
 });
+
+describe("isExtractionComplete — address gate agrees with triage (review H3)", () => {
+  const base = (address: string, extra: Record<string, unknown> = {}) =>
+    ({
+      issueType: "cooling_not_working",
+      urgency: "high",
+      address,
+      customerName: "Ray Chen",
+      customerPhone: "4169029212",
+      customerEmail: "ray@x.com",
+      description: "ac out",
+      isHvacRelated: true,
+      ...extra,
+    }) as never;
+
+  it("accepts a structured non-US / ZIP-less address (triage advanced past it)", () => {
+    expect(isExtractionComplete(base("21 Avoca Crescent, Ballarat, Victoria 3350"))).toBe(true);
+  });
+  it("accepts an address once the re-prompt cap is hit (no submit deadlock)", () => {
+    expect(isExtractionComplete(base("asdf", { addressAttempts: 2 }))).toBe(true);
+  });
+  it("still blocks a bare partial before any re-prompt", () => {
+    expect(isExtractionComplete(base("downtown"))).toBe(false);
+  });
+  it("still accepts a complete US address", () => {
+    expect(isExtractionComplete(base("120 Broadway, Johnson City, TN 37604"))).toBe(true);
+  });
+});

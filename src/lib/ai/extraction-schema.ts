@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { addressLooksComplete, MAX_ADDRESS_REPROMPTS } from "./triage";
 
 export const urgencyValues = ['low', 'medium', 'high', 'emergency'] as const;
 
@@ -253,12 +254,18 @@ export function isExtractionComplete(extraction: ExtractionResult): boolean {
   return (
     extraction.issueType !== null &&
     extraction.urgency !== null &&
-    // addressVerified rides in from the chat route when the customer picked a
-    // geocoded autocomplete suggestion — trusted complete even when the format
-    // heuristic (house number / named route + ZIP) doesn't match.
+    // The address gate MUST accept whatever triage accepts to advance past the
+    // address step, or a customer who answered everything can never submit
+    // (deadlock). Triage stops asking when the address is strictly complete, was
+    // verified via autocomplete, LOOKS complete (a structured non-US / ZIP-less
+    // address), OR the re-prompt cap was hit — so honor all four here.
     (isAddressComplete(extraction.address) ||
       (extraction.address !== null &&
-        (extraction as Record<string, unknown>).addressVerified === "yes")) &&
+        ((extraction as Record<string, unknown>).addressVerified === "yes" ||
+          addressLooksComplete(extraction.address) ||
+          Number(
+            (extraction as Record<string, unknown>).addressAttempts ?? 0,
+          ) >= MAX_ADDRESS_REPROMPTS))) &&
     isNameComplete(extraction.customerName) &&
     isPhoneComplete(extraction.customerPhone) &&
     // A skipped email (the customer declined, or we hit MAX_EMAIL_REPROMPTS)

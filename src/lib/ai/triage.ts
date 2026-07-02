@@ -125,7 +125,7 @@ const NAMED_ROUTE_TRIAGE =
 const STREET_TYPE_TRIAGE =
   /\b(?:st|street|ave|avenue|rd|road|blvd|boulevard|ln|lane|dr|drive|ct|court|way|pl|place|terr?|terrace|cir|circle|pkwy|parkway|hwy|highway|close|crescent|cres|sq|square|row|walk|grove|gardens?)\b/i;
 
-function addressLooksComplete(address: string | null | undefined): boolean {
+export function addressLooksComplete(address: string | null | undefined): boolean {
   if (!address) return false;
   const trimmed = address.trim();
   if (trimmed.length === 0) return false;
