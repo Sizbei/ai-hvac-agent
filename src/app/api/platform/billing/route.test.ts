@@ -52,6 +52,7 @@ function postReq(body: unknown) {
 beforeEach(() => {
   vi.clearAllMocks();
   delete process.env.PLATFORM_ADMIN_EMAILS;
+  delete process.env.PLATFORM_ORG_ID;
   delete process.env.STRIPE_SECRET_KEY;
 });
 
@@ -111,6 +112,7 @@ describe("POST /api/platform/billing", () => {
 
   it("allows a platform admin even if only role=admin (env allowlist)", async () => {
     process.env.PLATFORM_ADMIN_EMAILS = "ops@x.com";
+    process.env.PLATFORM_ORG_ID = ORG;
     getAdminSession.mockResolvedValue(session("admin", "ops@x.com"));
     const res = await POST(postReq({ action: "portal" }));
     expect(res.status).toBe(200);
