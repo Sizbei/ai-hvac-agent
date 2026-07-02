@@ -159,7 +159,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function GET(_request: NextRequest) {
+export async function GET(request: NextRequest) {
   try {
     const token = await getSessionToken();
     if (!token) {
@@ -178,6 +178,23 @@ export async function GET(_request: NextRequest) {
 
     if (!session) {
       return errorResponse("Session not found", "SESSION_NOT_FOUND", 404);
+    }
+
+    // Cross-org resume guard: if a widget key is present and resolves to a
+    // DIFFERENT org than this session's, do NOT resume. A stale session cookie
+    // from org A must not be rehydrated inside org B's embedded widget (which
+    // would misattribute every new message to org A). Return NO_SESSION so the
+    // client falls through to createSession() for the correct org. No key
+    // (hosted /chat) → resume as before.
+    const widgetKey = request.headers.get("x-hvac-widget-key");
+    if (widgetKey) {
+      const resolution = await resolveOrganizationForSession({
+        publishableKey: widgetKey,
+        origin: request.headers.get("origin"),
+      });
+      if (resolution.ok && resolution.organizationId !== session.organizationId) {
+        return errorResponse("No session for this widget", "NO_SESSION", 401);
+      }
     }
 
     // Get message history for this session, scoped to the session's own org.

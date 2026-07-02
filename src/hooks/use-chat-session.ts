@@ -185,12 +185,10 @@ export function useChatSession(): UseChatSessionReturn {
         // When rendered inside the embed iframe the URL carries the org's
         // publishable widget key (?key=pk_live_…). Forward it so the session is
         // attributed to that org. The hosted /chat page has no key → demo org.
-        const headers: Record<string, string> = {};
-        if (typeof window !== 'undefined') {
-          const key = new URLSearchParams(window.location.search).get('key');
-          if (key) headers['X-HVAC-Widget-Key'] = key;
-        }
-        const res = await fetch('/api/session', { method: 'POST', headers });
+        const res = await fetch('/api/session', {
+          method: 'POST',
+          headers: widgetKeyHeaders(),
+        });
         if (!res.ok) {
           const body = await res.json().catch(() => ({ error: { message: 'Failed to create session' } }));
           setSessionError(body?.error?.message ?? 'Failed to create session');
@@ -212,10 +210,25 @@ export function useChatSession(): UseChatSessionReturn {
       }
     }
 
+    // The org's publishable widget key from ?key=… (embed iframe). Forwarded on
+    // BOTH create and resume so a session is created for / resumed within the
+    // correct org — without it, resume would rehydrate a stale cookie from
+    // another org's widget.
+    function widgetKeyHeaders(): Record<string, string> {
+      const headers: Record<string, string> = {};
+      if (typeof window !== 'undefined') {
+        const key = new URLSearchParams(window.location.search).get('key');
+        if (key) headers['X-HVAC-Widget-Key'] = key;
+      }
+      return headers;
+    }
+
     async function init(): Promise<void> {
       try {
         // Try to resume: the httpOnly session cookie survives a page refresh.
-        const res = await fetch('/api/session');
+        // Forward the widget key so a cross-org cookie is NOT resumed (server
+        // returns NO_SESSION on mismatch → we fall through to createSession).
+        const res = await fetch('/api/session', { headers: widgetKeyHeaders() });
         if (res.ok) {
           const body = (await res.json()) as {
             success: boolean;
