@@ -1772,3 +1772,165 @@ describe("voiceReply urgency-answer capture (brain-unification D2)", () => {
     expect(result.endCall).toBe(false);
   });
 });
+
+describe("voiceReply after-hours move machine (brain-unification D4)", () => {
+  const ASK_URGENCY = "I want to make sure we take care of you the right way — is this something urgent that can't wait, or would tomorrow work?";
+  const OFFER_NEXT_DAY = "Since it can wait, I can set you up for our next business day at no after-hours charge. Want me to do that?";
+
+  // Intake in progress: issue+urgency known... urgency must be UNKNOWN for the
+  // ask flow, address missing so intake is incomplete.
+  const intakeSession = {
+    id: "s-d4",
+    organizationId: "o1",
+    status: "chatting" as const,
+    turnCount: 1,
+    maxTurns: 40,
+    metadata: JSON.stringify({
+      issueType: "cooling_not_working",
+      urgency: null,
+      address: null,
+      customerName: null,
+      customerPhone: null,
+      customerEmail: null,
+      description: "ac out",
+      isHvacRelated: true,
+      systemDownStatus: "fully_down",
+      problemDuration: "today",
+    }),
+  };
+
+  beforeEach(() => {
+    generateTextMock.mockReset();
+    insertMock.mockReset();
+    updateSetMock.mockReset();
+    selectLimitMock.mockReset();
+    selectLimitMock.mockResolvedValue([{ afterHoursConfig: { enabled: true } }]);
+    escalateMock.mockReset();
+    routeMock.mockReset();
+    routeMock.mockReturnValue({
+      action: "FALLBACK_LLM",
+      intentId: null,
+      confidence: 0,
+      reply: null,
+      issueType: null,
+      urgency: null,
+      escalate: false,
+    });
+    extractAllContactMock.mockReset();
+    extractAllContactMock.mockReturnValue(noSlots());
+    extractAddressAtAddressStepMock.mockReset();
+    extractAddressAtAddressStepMock.mockReturnValue(null);
+    extractSpokenPhoneMock.mockReset();
+    extractSpokenPhoneMock.mockReturnValue(null);
+    detectCorrectionMock.mockReset();
+    detectCorrectionMock.mockReturnValue(null);
+    getRouterConfigMock.mockReset();
+    getRouterConfigMock.mockResolvedValue({});
+    submitSessionMock.mockReset();
+    submitSessionMock.mockResolvedValue({
+      ok: true,
+      referenceNumber: "D4-1",
+      serviceRequestId: "sr-d4",
+      heldWindow: null,
+    });
+    buildAccountLookupReplyMock.mockReset();
+    buildAccountLookupReplyMock.mockResolvedValue(null);
+    decryptMock.mockReset();
+    decideAfterHoursDisclosureMock.mockReset();
+  });
+
+  it("ask_urgency OWNS the spoken turn (not stacked onto the slot question) and latches", async () => {
+    decideAfterHoursDisclosureMock.mockReturnValue({
+      kind: "ask_urgency",
+      afterHours: true,
+      copy: ASK_URGENCY,
+    });
+    // A slot provision keeps the turn deterministic.
+    extractAddressAtAddressStepMock.mockReturnValue("123 Main St, Johnson City, TN 37601");
+    extractAllContactMock.mockReturnValue({
+      name: null,
+      address: "123 Main St, Johnson City, TN 37601",
+      phone: null,
+      email: null,
+    });
+
+    const result = await voiceReply({
+      session: intakeSession,
+      history: [{ role: "user", content: "ac is out" }],
+      userMessage: "my address is 123 Main St",
+      ipAddress: "1.2.3.4",
+    });
+
+    expect(result.reply).toContain("urgent");
+    // The move owns the utterance: the next slot question is NOT stacked on.
+    expect(result.reply.toLowerCase()).not.toContain("phone number");
+    expect(generateTextMock).not.toHaveBeenCalled();
+    // Latched in the web (kinds-list) format.
+    const metadataWrites = updateSetMock.mock.calls
+      .map((c) => c[0] as { metadata?: string | null })
+      .filter((v) => typeof v.metadata === "string");
+    const persisted = JSON.parse(metadataWrites.at(-1)!.metadata!);
+    expect(String(persisted.afterHoursShown)).toContain("ask_urgency");
+  });
+
+  it("reads the caller's 'no rush' answer to a latched ask_urgency as not_urgent", async () => {
+    decideAfterHoursDisclosureMock.mockReturnValue({
+      kind: "offer_next_day",
+      afterHours: true,
+      copy: OFFER_NEXT_DAY,
+    });
+    const askedSession = {
+      ...intakeSession,
+      metadata: JSON.stringify({
+        ...JSON.parse(intakeSession.metadata),
+        afterHoursShown: "ask_urgency",
+      }),
+    };
+    // Slot provision so the deterministic path runs.
+    extractAddressAtAddressStepMock.mockReturnValue("123 Main St, Johnson City, TN 37601");
+    extractAllContactMock.mockReturnValue({
+      name: null,
+      address: "123 Main St, Johnson City, TN 37601",
+      phone: null,
+      email: null,
+    });
+
+    const result = await voiceReply({
+      session: askedSession,
+      history: [{ role: "user", content: "ac is out" }],
+      userMessage: "no rush, tomorrow is fine",
+      ipAddress: "1.2.3.4",
+    });
+
+    // The decision engine received the caller's answer as a not_urgent signal.
+    const call = decideAfterHoursDisclosureMock.mock.calls.at(-1)![0] as {
+      customerSignal: string;
+    };
+    expect(call.customerSignal).toBe("not_urgent");
+    // And the next-day offer owns the turn.
+    expect(result.reply).toContain("next business day");
+  });
+
+  it("coaches the LLM path with the after-hours instruction when active and undisclosed", async () => {
+    decideAfterHoursDisclosureMock.mockReturnValue({
+      kind: "ask_urgency",
+      afterHours: true,
+      copy: ASK_URGENCY,
+    });
+    generateTextMock.mockResolvedValue({
+      text: "Happy to help.",
+      usage: { inputTokens: 5, outputTokens: 5 },
+    });
+
+    await voiceReply({
+      session: { ...intakeSession, metadata: null },
+      history: [{ role: "user", content: "hi" }],
+      userMessage: "tell me about heat pumps",
+      ipAddress: "1.2.3.4",
+    });
+
+    const call = generateTextMock.mock.calls[0]![0] as { system: string };
+    expect(call.system).toContain("AFTER-HOURS");
+    expect(call.system).toContain("after-hours service charge");
+  });
+});

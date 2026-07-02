@@ -17,6 +17,9 @@ import {
   decideAfterHoursDisclosure,
   inferBookingTarget,
   type CustomerUrgencySignal,
+  readUrgencySignal,
+  AFTER_HOURS_LLM_INSTRUCTION,
+  AFTER_HOURS_SUPPRESS_INSTRUCTION,
 } from "@/lib/ai/after-hours-chat";
 import { withTenant } from "@/lib/db/tenant";
 import { errorResponse } from "@/lib/api-response";
@@ -150,39 +153,8 @@ function parseSessionMeta(meta: string | null): Record<string, unknown> | null {
 // NOT a rewrite of the brand persona) when the request is currently after-hours.
 // Tells the model the urgent/not-urgent branch + the strict NO-dollar-amount
 // disclosure rule. Emergencies still take the brand persona's safety path first.
-const AFTER_HOURS_LLM_INSTRUCTION = `
 
-AFTER-HOURS (it is currently outside our normal business hours): Before fully committing to dispatch, find out whether the situation is urgent — UNLESS it's already clearly an emergency or high-urgency (then skip the question and treat it as urgent). If it IS urgent (or the customer confirms yes): continue the intake AND let them know that, since it's after our normal hours, an additional after-hours service charge applies and our team will confirm the details. NEVER state a dollar amount or quote a price — just that a charge applies. If it is NOT urgent: offer to set them up for our next business day at no after-hours charge, and continue accordingly. SAFETY ALWAYS WINS: if there's any hazard (gas/CO/electrical/flooding), follow the safety instructions above and connect them to a person immediately — never delay a hazard to discuss charges.`;
 
-/**
- * Interpret a customer's reply to the after-hours "is this urgent?" ask as a
- * yes/no signal. Only meaningful when we ASKED last turn (pendingStep is the
- * urgency step); otherwise we return "unknown" and let urgency classification
- * drive the decision. Conservative: only clear affirmatives/negatives flip it.
- */
-function readUrgencySignal(
-  askedUrgencyLastTurn: boolean,
-  message: string,
-): CustomerUrgencySignal {
-  if (!askedUrgencyLastTurn) return "unknown";
-  const m = message.trim().toLowerCase();
-  if (
-    /\b(urgent|emergency|asap|right now|today|tonight|now|yes|yeah|yep|please do)\b/.test(
-      m,
-    ) ||
-    /can'?t wait/.test(m)
-  ) {
-    return "urgent";
-  }
-  if (
-    /\b(no|nope|not urgent|tomorrow|next day|morning|can wait|whenever|no rush)\b/.test(
-      m,
-    )
-  ) {
-    return "not_urgent";
-  }
-  return "unknown";
-}
 
 /** True when the current instant falls in the org's after-hours window — used
  * to gate the LLM after-hours instruction block. Reuses the disclosure helper's
@@ -1809,7 +1781,7 @@ export async function POST(request: NextRequest) {
       isAfterHoursHintActive(afterHoursConfig) && !afterHoursAlreadyShown
         ? AFTER_HOURS_LLM_INSTRUCTION
         : afterHoursAlreadyShown
-          ? "\nAFTER-HOURS: the after-hours situation has ALREADY been explained to this customer. Do NOT bring up after-hours charges or hours again unless the customer asks."
+          ? AFTER_HOURS_SUPPRESS_INSTRUCTION
           : "";
 
     // Tell the model which intake slots this session has ALREADY captured.

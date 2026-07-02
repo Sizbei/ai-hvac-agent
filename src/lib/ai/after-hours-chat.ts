@@ -208,3 +208,48 @@ export function decideAfterHoursDisclosure(
   // Otherwise we don't yet know — ask.
   return { kind: "ask_urgency", afterHours: true, copy: ASK_URGENCY_COPY };
 }
+
+/**
+ * LLM coaching for after-hours turns (brain-unification D4: was inline in the
+ * chat route; both brains' fallback paths now share it). A SEPARATE block
+ * rather than an edit to the brand persona; safety always wins over charge talk.
+ */
+export const AFTER_HOURS_LLM_INSTRUCTION = `
+
+AFTER-HOURS (it is currently outside our normal business hours): Before fully committing to dispatch, find out whether the situation is urgent — UNLESS it's already clearly an emergency or high-urgency (then skip the question and treat it as urgent). If it IS urgent (or the customer confirms yes): continue the intake AND let them know that, since it's after our normal hours, an additional after-hours service charge applies and our team will confirm the details. NEVER state a dollar amount or quote a price — just that a charge applies. If it is NOT urgent: offer to set them up for our next business day at no after-hours charge, and continue accordingly. SAFETY ALWAYS WINS: if there's any hazard (gas/CO/electrical/flooding), follow the safety instructions above and connect them to a person immediately — never delay a hazard to discuss charges.`;
+
+/** Suppression note once a disclosure was already made on a deterministic turn —
+ * re-explaining the charge every LLM turn is the repetition bug in another coat. */
+export const AFTER_HOURS_SUPPRESS_INSTRUCTION =
+  "\nAFTER-HOURS: the after-hours situation has ALREADY been explained to this customer. Do NOT bring up after-hours charges or hours again unless the customer asks.";
+
+/**
+ * Interpret a customer's reply to the after-hours "is this urgent?" ask as a
+ * yes/no signal (brain-unification D4: was inline in the chat route). Only
+ * meaningful when we ASKED last turn; otherwise "unknown" lets urgency
+ * classification drive the decision. Conservative: only clear
+ * affirmatives/negatives flip it.
+ */
+export function readUrgencySignal(
+  askedUrgencyLastTurn: boolean,
+  message: string,
+): CustomerUrgencySignal {
+  if (!askedUrgencyLastTurn) return "unknown";
+  const m = message.trim().toLowerCase();
+  if (
+    /\b(urgent|emergency|asap|right now|today|tonight|now|yes|yeah|yep|please do)\b/.test(
+      m,
+    ) ||
+    /can'?t wait/.test(m)
+  ) {
+    return "urgent";
+  }
+  if (
+    /\b(no|nope|not urgent|tomorrow|next day|morning|can wait|whenever|no rush)\b/.test(
+      m,
+    )
+  ) {
+    return "not_urgent";
+  }
+  return "unknown";
+}

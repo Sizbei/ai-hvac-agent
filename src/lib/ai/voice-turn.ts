@@ -18,7 +18,13 @@ import { db } from "@/lib/db";
 import { customerSessions, messages, customers, organizationSettings } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { resolveAfterHoursConfig } from "@/lib/admin/after-hours";
-import { decideAfterHoursDisclosure, inferBookingTarget } from "./after-hours-chat";
+import {
+  decideAfterHoursDisclosure,
+  inferBookingTarget,
+  readUrgencySignal,
+  AFTER_HOURS_LLM_INSTRUCTION,
+  AFTER_HOURS_SUPPRESS_INSTRUCTION,
+} from "./after-hours-chat";
 import {
   loadCustomerContextById,
   buildCustomerContextHint,
@@ -813,14 +819,20 @@ export async function voiceReply(params: {
       }
     }
 
-    // ── After-hours disclosure (WS4) ──
-    // When the intake is still in progress (not complete), check if the caller is
-    // contacting us after business hours. If so — and the disclosure hasn't already
-    // been shown this session (latch via extras.afterHoursShown) — prepend the
-    // canned charge-disclosure line to the next question. Uses the SAME pure helper
-    // the web chat uses; any config-load failure degrades to no disclosure so intake
-    // always continues. Emergencies have already returned early above.
+    // ── After-hours move machine (WS4 → full web parity, unification D4) ──
+    // When the intake is still in progress, run the SAME decision engine the web
+    // chat runs — all three moves, not just the charge disclosure:
+    //  - ask_urgency / offer_next_day are QUESTIONS, so on voice the move OWNS
+    //    the utterance (never stacked in front of a second question);
+    //  - disclose_charge is a statement, prepended to the next slot question.
+    // The caller's answer to "is this urgent?" is read next turn via
+    // readUrgencySignal (latched last-shown move === ask_urgency, exactly like
+    // web — a "yes" answering offer_next_day is never read as "urgent").
+    // Each kind is shown at most once (comma-joined kinds latch; the legacy "1"
+    // latch voice used to write maps to its one historical kind).
+    // Any config-load failure degrades to no disclosure so intake continues.
     let afterHoursPrefix = "";
+    let afterHoursOwnsTurn: string | null = null;
     if (!extractionComplete) {
       try {
         const [ahRow] = await db
@@ -829,25 +841,49 @@ export async function voiceReply(params: {
           .where(eq(organizationSettings.organizationId, organizationId))
           .limit(1);
         const ahConfig = resolveAfterHoursConfig(ahRow?.afterHoursConfig ?? null);
+        const rawShown = String(merged.extras?.afterHoursShown ?? "");
+        const shownKinds =
+          rawShown === "1"
+            ? ["disclose_charge"]
+            : rawShown.split(",").filter(Boolean);
+        const askedUrgencyLastTurn =
+          shownKinds.at(-1) === "ask_urgency" && !knownSlots.urgency;
+        const urgencySignal = readUrgencySignal(
+          askedUrgencyLastTurn,
+          userMessage,
+        );
         const ahDecision = decideAfterHoursDisclosure({
           clock: new Date(),
           config: ahConfig,
           urgency: (merged.urgency as Urgency | null) ?? null,
-          customerSignal: "unknown",
+          customerSignal: urgencySignal,
           // Parity with web chat (Fix 2): a stated daytime window means the visit
           // is a business-hours booking, so a caller phoning at 11pm for a
           // tomorrow-morning slot is never threatened with an after-hours charge.
-          bookingTarget: inferBookingTarget(merged.extras?.preferredWindow, "unknown"),
+          bookingTarget: inferBookingTarget(
+            merged.extras?.preferredWindow,
+            urgencySignal,
+          ),
         });
-        const alreadyShown = merged.extras?.afterHoursShown === "1";
-        if (ahDecision.kind === "disclose_charge" && !alreadyShown) {
-          afterHoursPrefix = ahDecision.copy + " ";
-          // Latch: re-merge with afterHoursShown so we never disclose twice.
-          const latchedMerged = mergeSlots(merged, { extras: { afterHoursShown: "1" } });
+        if (
+          ahDecision.kind !== "none" &&
+          !shownKinds.includes(ahDecision.kind)
+        ) {
+          // Latch the kind (web-format list) so it's never re-shown.
+          const latchedMerged = mergeSlots(merged, {
+            extras: {
+              afterHoursShown: [...shownKinds, ahDecision.kind].join(","),
+            },
+          });
           if (hasSlotData(latchedMerged)) {
             const firstUser =
               history.find((m) => m.role === "user")?.content ?? userMessage;
             metadataStr = serializeSessionMetadata(latchedMerged, firstUser, session.metadata);
+          }
+          if (ahDecision.kind === "disclose_charge") {
+            afterHoursPrefix = ahDecision.copy + " ";
+          } else {
+            afterHoursOwnsTurn = ahDecision.copy;
           }
         }
       } catch (ahError: unknown) {
@@ -872,7 +908,10 @@ export async function voiceReply(params: {
     if (!extractionComplete && voiceNextSlotId(merged) === "preferred_window") {
       windowQuestion = await fetchVoiceWindowQuestion(organizationId);
     }
+    // An owning after-hours move (ask_urgency / offer_next_day) IS the turn's
+    // question — never stacked in front of the slot question.
     const nextQuestion =
+      afterHoursOwnsTurn ??
       afterHoursPrefix + (windowQuestion ?? voiceNextSlotPrompt(merged));
     // SUBMIT is included: the router's required-slot view (issue/urgency/
     // address) is narrower than the voice gate (phone), so its canned confirm
@@ -1017,6 +1056,35 @@ export async function voiceReply(params: {
         : "";
   }
 
+  // After-hours coaching for the LLM path (unification D4, web parity): when
+  // it's currently after-hours and no disclosure was made on a deterministic
+  // turn, coach the model with the shared instruction; once shown, suppress
+  // (re-explaining every LLM turn is the repetition bug in another coat).
+  // Best-effort: a config read failure just means no hint this turn.
+  let afterHoursHint = "";
+  try {
+    const alreadyShown =
+      String(knownSlots.extras?.afterHoursShown ?? "").length > 0;
+    if (alreadyShown) {
+      afterHoursHint = AFTER_HOURS_SUPPRESS_INSTRUCTION;
+    } else {
+      const [ahRow] = await db
+        .select({ afterHoursConfig: organizationSettings.afterHoursConfig })
+        .from(organizationSettings)
+        .where(eq(organizationSettings.organizationId, organizationId))
+        .limit(1);
+      const active = decideAfterHoursDisclosure({
+        clock: new Date(),
+        config: resolveAfterHoursConfig(ahRow?.afterHoursConfig ?? null),
+        urgency: null,
+        customerSignal: "unknown",
+      }).afterHours;
+      if (active) afterHoursHint = AFTER_HOURS_LLM_INSTRUCTION;
+    }
+  } catch {
+    // no hint on failure
+  }
+
   // D5 hardening (parity with the web chat's LLM call): a bounded timeout —
   // Twilio kills the webhook at ~15s, so an unbounded generateText turns a slow
   // upstream into dead air + a dropped call — and a spoken-length output cap.
@@ -1028,7 +1096,11 @@ export async function voiceReply(params: {
     ({ text, usage } = await generateText({
       model: await getModel(organizationId),
       system:
-        PHONE_SYSTEM_PROMPT + slotContextHint + customerHint + crossChannelHint,
+        PHONE_SYSTEM_PROMPT +
+        slotContextHint +
+        customerHint +
+        crossChannelHint +
+        afterHoursHint,
       messages: modelMessages,
       abortSignal: AbortSignal.timeout(VOICE_LLM_TIMEOUT_MS),
       maxOutputTokens: 300,
