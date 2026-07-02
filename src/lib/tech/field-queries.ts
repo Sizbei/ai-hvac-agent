@@ -362,7 +362,11 @@ export async function recordSignature(
     return { ok: false, reason: "not_owned" };
   }
 
-  await db
+  // Re-assert ownership IN the write (not just the read above): a job reassigned
+  // between findOwnedJob and here must not receive this tech's signature — which
+  // includes the customer's signed name (PII). The assignee guard makes the
+  // UPDATE a no-op in that race; 0 rows → treat as not_owned.
+  const [updated] = await db
     .update(serviceRequests)
     .set({
       signatureUrl: input.signatureUrl,
@@ -374,9 +378,16 @@ export async function recordSignature(
       withTenant(
         serviceRequests,
         organizationId,
-        eq(serviceRequests.id, serviceRequestId),
+        and(
+          eq(serviceRequests.id, serviceRequestId),
+          eq(serviceRequests.assignedTo, techUserId),
+        )!,
       ),
-    );
+    )
+    .returning({ id: serviceRequests.id });
+  if (!updated) {
+    return { ok: false, reason: "not_owned" };
+  }
   return { ok: true };
 }
 

@@ -6,6 +6,7 @@ import {
   getJobTimelineForTech,
   addJobPhoto,
   listJobPhotos,
+  recordSignature,
 } from "./field-queries";
 import { db } from "@/lib/db";
 import { getPricebookItemById } from "@/lib/admin/pricebook-queries";
@@ -51,6 +52,13 @@ function mockSelectSeq(results: unknown[][]): void {
       }),
     } as never;
   });
+}
+
+/** Mock db.update(...).set(...).where(...).returning() → rows. */
+function mockUpdateReturning(rows: unknown[]): void {
+  vi.mocked(db.update).mockReturnValue({
+    set: () => ({ where: () => ({ returning: () => Promise.resolve(rows) }) }),
+  } as never);
 }
 
 beforeEach(() => vi.clearAllMocks());
@@ -308,6 +316,31 @@ describe("addJobPhoto", () => {
     const r = await addJobPhoto(ORG, "other-tech", JOB, photo);
     expect(r).toEqual({ ok: false, reason: "not_owned" });
     expect(db.insert).not.toHaveBeenCalled();
+  });
+});
+
+describe("recordSignature", () => {
+  const SIG = { signatureUrl: "https://r2/sig.png", signatureName: "Jane Doe" };
+
+  it("persists the signature for the owning tech", async () => {
+    mockSelectSeq([[{ id: JOB }]]); // findOwnedJob → owned
+    mockUpdateReturning([{ id: JOB }]); // guarded UPDATE hits the row
+    const r = await recordSignature(ORG, TECH, JOB, SIG);
+    expect(r).toEqual({ ok: true });
+  });
+
+  it("refuses a job not assigned to the tech (not_owned, no write)", async () => {
+    mockSelectSeq([[]]); // findOwnedJob → none
+    const r = await recordSignature(ORG, TECH, JOB, SIG);
+    expect(r).toEqual({ ok: false, reason: "not_owned" });
+    expect(vi.mocked(db.update)).not.toHaveBeenCalled();
+  });
+
+  it("refuses if the job is reassigned between the ownership check and the write (TOCTOU)", async () => {
+    mockSelectSeq([[{ id: JOB }]]); // owned at read time…
+    mockUpdateReturning([]); // …but the assignee-guarded UPDATE matches 0 rows
+    const r = await recordSignature(ORG, TECH, JOB, SIG);
+    expect(r).toEqual({ ok: false, reason: "not_owned" });
   });
 });
 
