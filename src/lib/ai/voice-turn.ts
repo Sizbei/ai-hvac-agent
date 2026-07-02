@@ -494,10 +494,13 @@ export async function voiceReply(params: {
   // of an address we already hold — append it (web parity) so the engine sees a
   // complete address instead of looping. A reply that starts with a street
   // number is a re-given full address and replaces the base.
+  // D8 (web parity): the tail is appended from the RAW reply — a bare spoken
+  // "Johnson City 37601" has no street number, so the at-step extractor returns
+  // null; requiring an extractor match here silently dropped the tail and
+  // looped the caller.
   const partsTail =
     pendingStep?.id === "address_parts" &&
     knownSlots.address &&
-    resolvedAddress &&
     !/^\s*\d/.test(userMessage.trim()) &&
     // A reply that parsed as a phone/email answers a different field — don't
     // glue it onto the address.
@@ -568,8 +571,11 @@ export async function voiceReply(params: {
       ? { ...(capturedExtrasBase ?? {}), ...addressControl }
       : undefined;
 
+  // partsTail counts: a bare city/ZIP tail IS the answer to the pending
+  // address_parts question (D8) — without it the turn falls to the LLM and the
+  // tail never persists.
   const hasContactSlot = Boolean(
-    resolvedAddress || resolvedPhone || allContact.email || correction,
+    resolvedAddress || partsTail || resolvedPhone || allContact.email || correction,
   );
   const isSlotProvision =
     hasContactSlot && (Boolean(knownSlots.issueType) || history.length > 0);

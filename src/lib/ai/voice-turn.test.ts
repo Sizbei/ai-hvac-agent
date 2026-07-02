@@ -1934,3 +1934,96 @@ describe("voiceReply after-hours move machine (brain-unification D4)", () => {
     expect(call.system).toContain("after-hours service charge");
   });
 });
+
+describe("voiceReply address_parts spoken tail (brain-unification D8)", () => {
+  // Address street captured but no city/ZIP → triage's pending step is
+  // address_parts. The caller answers with JUST the tail ("Johnson City 37601")
+  // — no street number, so the at-step extractor returns null. Chat appends the
+  // raw reply as the tail; voice required the extractor to match, silently
+  // dropping the tail and looping.
+  const partsSession = {
+    id: "s-d8",
+    organizationId: "o1",
+    status: "chatting" as const,
+    turnCount: 1,
+    maxTurns: 40,
+    metadata: JSON.stringify({
+      issueType: "cooling_not_working",
+      urgency: "high",
+      address: "212 Unaka",
+      customerName: null,
+      customerPhone: null,
+      customerEmail: null,
+      description: "ac out",
+      isHvacRelated: true,
+      systemDownStatus: "fully_down",
+      problemDuration: "today",
+    }),
+  };
+
+  beforeEach(() => {
+    generateTextMock.mockReset();
+    insertMock.mockReset();
+    updateSetMock.mockReset();
+    selectLimitMock.mockReset();
+    selectLimitMock.mockResolvedValue([]);
+    escalateMock.mockReset();
+    routeMock.mockReset();
+    routeMock.mockReturnValue({
+      action: "FALLBACK_LLM",
+      intentId: null,
+      confidence: 0,
+      reply: null,
+      issueType: null,
+      urgency: null,
+      escalate: false,
+    });
+    extractAllContactMock.mockReset();
+    extractAllContactMock.mockReturnValue(noSlots());
+    extractAddressAtAddressStepMock.mockReset();
+    extractAddressAtAddressStepMock.mockReturnValue(null); // no street number → no match
+    extractSpokenPhoneMock.mockReset();
+    extractSpokenPhoneMock.mockReturnValue(null);
+    detectCorrectionMock.mockReset();
+    detectCorrectionMock.mockReturnValue(null);
+    getRouterConfigMock.mockReset();
+    getRouterConfigMock.mockResolvedValue({});
+    submitSessionMock.mockReset();
+    submitSessionMock.mockResolvedValue({
+      ok: true,
+      referenceNumber: "D8-1",
+      serviceRequestId: "sr-d8",
+      heldWindow: null,
+    });
+    buildAccountLookupReplyMock.mockReset();
+    buildAccountLookupReplyMock.mockResolvedValue(null);
+    decryptMock.mockReset();
+    decideAfterHoursDisclosureMock.mockReset();
+    decideAfterHoursDisclosureMock.mockReturnValue({
+      kind: "none",
+      afterHours: false,
+      copy: "",
+    });
+  });
+
+  it("appends a bare spoken city/ZIP tail to the stored street (no extractor match needed)", async () => {
+    await voiceReply({
+      session: partsSession,
+      history: [
+        { role: "user", content: "my ac is out" },
+        { role: "assistant", content: "What city and ZIP is that?" },
+      ],
+      userMessage: "Johnson City 37601",
+      ipAddress: "1.2.3.4",
+    });
+
+    // The tail landed: persisted address is street + tail (deterministic, no LLM).
+    expect(generateTextMock).not.toHaveBeenCalled();
+    const metadataWrites = updateSetMock.mock.calls
+      .map((c) => c[0] as { metadata?: string | null })
+      .filter((v) => typeof v.metadata === "string");
+    expect(metadataWrites.length).toBeGreaterThan(0);
+    const persisted = JSON.parse(metadataWrites.at(-1)!.metadata!);
+    expect(persisted.address).toBe("212 Unaka, Johnson City 37601");
+  });
+});
