@@ -640,7 +640,24 @@ export async function voiceReply(params: {
   // ── Emergency / escalation ──
   if (verdict.action !== "FALLBACK_LLM" || isSlotProvision || pendingAnswerCaptured) {
     if (verdict.escalate) {
-      const reply = toSpokenReply(verdict.reply ?? "", { nearLimit });
+      // D7 (web parity): on an emergency we MUST have a place to send help and
+      // a way to reach the caller. If address/phone is unknown, append the ask
+      // and KEEP THE CALL ALIVE one turn for the answer — the gather route
+      // records a terminal-state utterance so the dispatcher sees it. Without
+      // this, voice hung up on a blank-location emergency.
+      const escAddress = slotUpdates.address ?? knownSlots.address ?? null;
+      const escPhone = slotUpdates.phone ?? knownSlots.phone ?? null;
+      const missingAsk =
+        !escAddress && !escPhone
+          ? " So we can get help to you fast, what's the address, and a phone number to reach you?"
+          : !escAddress
+            ? " So we can dispatch help, what's the service address?"
+            : !escPhone
+              ? " What's the best phone number to reach you right now?"
+              : "";
+      const reply = toSpokenReply((verdict.reply ?? "") + missingAsk, {
+        nearLimit,
+      });
       await db.insert(messages).values({
         organizationId,
         sessionId: session.id,
@@ -673,8 +690,29 @@ export async function voiceReply(params: {
         })
         .where(sessionScope);
 
-      // An escalated call is handed to a human — end the automated leg.
-      return { reply, endCall: true, nextState: "escalated" };
+      // Telemetry parity with chat's emergency branch (guarded after(): the
+      // eval harness runs voiceReply outside a request scope).
+      const escTelemetry = () =>
+        recordBotEvent({
+          organizationId,
+          sessionId: session.id,
+          turn: newTurnCount,
+          channel: "phone",
+          routed: true,
+          intentId: verdict.intentId,
+          action: "ESCALATE",
+          escalated: true,
+        });
+      try {
+        after(escTelemetry);
+      } catch {
+        void escTelemetry();
+      }
+
+      // An escalated call is handed to a human — end the automated leg, UNLESS
+      // we just asked for the missing address/phone (one answering turn; the
+      // gather route records a terminal-state utterance for the dispatcher).
+      return { reply, endCall: missingAsk === "", nextState: "escalated" };
     }
 
     // ── Deterministic answer / slot fill ──

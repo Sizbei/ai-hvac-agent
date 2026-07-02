@@ -224,7 +224,7 @@ describe("voiceReply", () => {
     expect(insertMock).toHaveBeenCalled();
   });
 
-  it("escalates and ends the call on an emergency verdict", async () => {
+  it("escalates on an emergency and, with NO address/phone known, asks for them and stays on the line (D7)", async () => {
     routeMock.mockReturnValue({
       action: "ESCALATE",
       intentId: "gas_smell",
@@ -237,7 +237,7 @@ describe("voiceReply", () => {
     escalateMock.mockResolvedValue({ ok: true });
 
     const result = await voiceReply({
-      session: baseSession,
+      session: baseSession, // metadata null → no address, no phone
       history: [],
       userMessage: "i smell gas",
       ipAddress: "1.2.3.4",
@@ -245,6 +245,46 @@ describe("voiceReply", () => {
 
     expect(escalateMock).toHaveBeenCalled();
     expect(result.reply.toLowerCase()).toContain("leave the building");
+    // Web parity: never hang up on a blank-location emergency — ask, and keep
+    // the call alive ONE turn so the gather route can record the answer.
+    expect(result.reply.toLowerCase()).toContain("address");
+    expect(result.endCall).toBe(false);
+    expect(result.nextState).toBe("escalated");
+  });
+
+  it("escalates and ENDS the call when address + phone are already known (D7)", async () => {
+    routeMock.mockReturnValue({
+      action: "ESCALATE",
+      intentId: "gas_smell",
+      confidence: 1,
+      reply: "Please leave the building now.",
+      issueType: "other",
+      urgency: "emergency",
+      escalate: true,
+    });
+    escalateMock.mockResolvedValue({ ok: true });
+
+    const result = await voiceReply({
+      session: {
+        ...baseSession,
+        metadata: JSON.stringify({
+          issueType: "other",
+          urgency: "emergency",
+          address: "123 Main St, Johnson City, TN 37601",
+          customerName: null,
+          customerPhone: "4235550100",
+          customerEmail: null,
+          description: "gas smell",
+          isHvacRelated: true,
+        }),
+      },
+      history: [],
+      userMessage: "i smell gas",
+      ipAddress: "1.2.3.4",
+    });
+
+    expect(escalateMock).toHaveBeenCalled();
+    expect(result.reply.toLowerCase()).not.toContain("address");
     expect(result.endCall).toBe(true);
   });
 
@@ -1350,9 +1390,11 @@ describe("voiceReply after-hours disclosure (WS4)", () => {
       ipAddress: "127.0.0.1",
     });
 
-    // Emergency escalates and ends the call.
+    // Emergency escalates. (endCall is false here: the session's address is
+    // missing, so D7 asks for it and keeps the call alive one answering turn.)
     expect(escalateMock).toHaveBeenCalled();
-    expect(result.endCall).toBe(true);
+    expect(result.endCall).toBe(false);
+    expect(result.nextState).toBe("escalated");
     // The emergency reply must NOT contain after-hours disclosure.
     expect(result.reply.toLowerCase()).not.toContain("after our normal hours");
     // Must NOT contain a dollar amount.
