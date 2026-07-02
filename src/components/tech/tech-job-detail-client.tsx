@@ -257,13 +257,24 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
     [id, loadTimesheet],
   );
 
-  // Load the pricebook once for catalog selection.
+  // Load the pricebook once for catalog selection. Uses the TECH-scoped endpoint
+  // (the admin one 401s for a technician session, so the catalog stayed empty and
+  // catalog materials could never be added).
   useEffect(() => {
+    let cancelled = false;
     void (async () => {
-      const res = await fetch('/api/admin/pricebook');
-      const body = await res.json().catch(() => ({ success: false }));
-      if (res.ok && body.success) setCatalog(body.data.items);
+      try {
+        const res = await fetch('/api/tech/pricebook');
+        const body = await res.json().catch(() => ({ success: false }));
+        if (cancelled) return;
+        if (res.ok && body.success) setCatalog(body.data.items);
+      } catch {
+        // Non-fatal: the manual-description path still works; catalog stays empty.
+      }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const handleAdd = useCallback(async (): Promise<void> => {
