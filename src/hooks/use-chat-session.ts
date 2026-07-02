@@ -351,15 +351,18 @@ export function useChatSession(): UseChatSessionReturn {
       }
       setSessionError(null);
 
-      // Pass attachment IDs in the request body so the server can link them to the message
       const attachmentIds = attachments?.map((a) => a.id) ?? [];
 
+      // Attachment IDs must ride in the request OPTIONS (2nd arg) — the transport's
+      // prepareSendMessagesRequest spreads `body` into the payload. Putting them on
+      // the message object (as before) silently dropped them: the SDK only
+      // serializes known message fields, so uploads were orphaned and an
+      // attachment-only send hit the server as empty text (400).
       aiSendMessage(
-        {
-          text,
-          // Pass attachment IDs in the body so the backend can link them
-          ...(attachmentIds.length > 0 && { attachments: attachmentIds }),
-        },
+        { text },
+        attachmentIds.length > 0
+          ? { body: { attachments: attachmentIds } }
+          : undefined,
       );
     },
     [sessionStatus, isStreaming, isLoading, aiSendMessage],
