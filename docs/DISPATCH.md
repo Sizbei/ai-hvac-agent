@@ -35,7 +35,7 @@ pilot data**):
 - **Quality** — historical `avgRating`.
 - **Conversion** — revenue-adjacent history.
 - **Load** — `1 − min(sameDayJobCount, 6)/6` (busier techs score lower).
-- **Travel** — from the tech's anchor (latest live GPS fix, else configured home base) to the job via haversine; `W_TRAVEL` weight, floors at 0 beyond `TRAVEL_CAP_KM=40`. Only applied once job coords exist.
+- **Travel** — from the tech's anchor (latest live GPS fix, else configured home base) to the job. When a routing provider is configured (`ROUTING_PROVIDER`), the term uses real **road drive-time** in minutes (`TRAVEL_CAP_MIN=45`); otherwise straight-line haversine km (`TRAVEL_CAP_KM=40`). `W_TRAVEL` weight, floors at 0 beyond the cap. Only applied once job coords exist. See **Travel-time provider** below.
 
 ### 4. Confidence gate — `classifyDispatch`
 Auto-commit only a **clear winner**: `gap = top.score − second.score` must be
@@ -77,6 +77,20 @@ Admin-only, PII-light (reference/status/urgency + coords, no name/raw address). 
 use the **cached `customer_locations` coords**; only jobs not yet geocoded fall back to
 a capped live lookup. Technician pins use the latest consent-gated fix (last 4h).
 
+## Travel-time provider — `src/lib/ai/dispatch/travel.ts`
+Off by default (`ROUTING_PROVIDER=none`) → the travel term is straight-line haversine
+(historical behavior, byte-identical). Set a provider + key to score by **road
+drive-time**:
+
+- **`ors`** (OpenRouteService) — free tier, OSM-native, `ORS_API_KEY`. **Implemented.**
+- **`mapbox`** / **`google`** — traffic-aware, paid; recognized names, adapters TBD.
+
+`durationMatrix(origins, dest)` makes **one** matrix request (N tech anchors → the job)
+and returns minutes per anchor. It **never throws**: missing key, timeout (1.5 s),
+error, or an unpriced origin → `null`, and that tech falls back to haversine. Runs on
+the `after()` dispatch path, so the call never blocks the customer. `scoreTechnician`
+prefers `travelMinutes`; `travelKm` remains the fallback and the reason line.
+
 ## Delay detection & forecasting
 - `src/lib/dispatch/delay-detection.ts` (+ cron sweep) flags behind-schedule jobs.
 - `src/lib/forecasting/` (`revenue`, `rollups`, `seasonal-naive`) powers demand/revenue rollups adjacent to scheduling.
@@ -94,7 +108,7 @@ a capped live lookup. Technician pins use the latest consent-gated fix (last 4h)
 6. ✅ **Urgency negation** — `readUrgencySignal` now checks negated urgency ("not urgent" / "not an emergency" / "isn't urgent") before the affirmative match, so a clear no is no longer read as urgent. A contradictory "no, it's an emergency" still reads urgent.
 
 **Near-term dispatch quality:**
-- **Real travel time** — replace haversine with a routing/ETA API (traffic-aware) for the travel term; haversine under-penalizes cross-town jobs.
+- ✅ **Real travel time** — road drive-time now drives the travel term when `ROUTING_PROVIDER` is set (OpenRouteService adapter shipped; see *Travel-time provider* above). Follow-ups: a persistent `travel_estimate` cache (rounded origin×dest, TTL) once volume hits ORS rate limits; traffic-aware `mapbox`/`google` adapters; log `travelMinutes` alongside `travelKm` in `dispatch_decisions` for an A/B against haversine.
 - **Confidence-gate tuning** — `MIN_CONFIDENCE_GAP` (0.08) and the scoring weights are provisional constants; tune them on pilot **override-rate** data (how often dispatchers override auto-commits) and outcome data.
 - **Explicit skill matrix** — `skillJobsCompleted` is a proxy; add a technician skill/certification matrix (by system type, refrigeration, gas) so the skill gate is capability-based, not just history-based.
 
