@@ -88,7 +88,7 @@ export async function GET(request: NextRequest) {
         sql`${technicianLocations.capturedAt} < NOW() - INTERVAL '30 days'`,
       );
     const purgedLocationFixes =
-      (locResult as { rowCount?: number }).rowCount ?? 0;
+      (locResult as { rowCount?: number } | undefined)?.rowCount ?? 0;
 
     const summary: CleanupSummary = {
       expiredSessions,

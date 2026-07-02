@@ -2,6 +2,7 @@ import "server-only";
 
 import { cookies } from "next/headers";
 import { signTechToken, verifyTechToken } from "./tech-config";
+import { isSessionUserCurrent } from "./session-revocation";
 import type { TechSessionPayload } from "./tech-config";
 
 // A DISTINCT cookie from the admin session (hvac_admin_session) so the two
@@ -32,7 +33,21 @@ export async function getTechSession(): Promise<TechSessionPayload | null> {
   if (!cookie?.value) {
     return null;
   }
-  return verifyTechToken(cookie.value);
+  const payload = await verifyTechToken(cookie.value);
+  if (!payload) {
+    return null;
+  }
+  // Revocation freshness: deny a fired/deactivated technician's still-valid token.
+  if (
+    !(await isSessionUserCurrent(
+      payload.userId,
+      payload.organizationId,
+      payload.role,
+    ))
+  ) {
+    return null;
+  }
+  return payload;
 }
 
 export async function deleteTechSession(): Promise<void> {

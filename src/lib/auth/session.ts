@@ -2,6 +2,7 @@ import "server-only";
 
 import { cookies } from "next/headers";
 import { signToken, verifyToken } from "./config";
+import { isSessionUserCurrent } from "./session-revocation";
 import type { AdminSessionPayload } from "./types";
 
 const ADMIN_SESSION_COOKIE = "hvac_admin_session";
@@ -31,7 +32,22 @@ export async function getAdminSession(): Promise<AdminSessionPayload | null> {
   if (!cookie?.value) {
     return null;
   }
-  return verifyToken(cookie.value);
+  const payload = await verifyToken(cookie.value);
+  if (!payload) {
+    return null;
+  }
+  // Revocation freshness: deny if the user was deactivated/demoted/deleted since
+  // the token was issued (a 24h JWT would otherwise keep authorizing).
+  if (
+    !(await isSessionUserCurrent(
+      payload.userId,
+      payload.organizationId,
+      payload.role,
+    ))
+  ) {
+    return null;
+  }
+  return payload;
 }
 
 export async function deleteAdminSession(): Promise<void> {
