@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 
 /**
  * Pay control for a single portal invoice. Posts to the public, token-scoped
@@ -22,6 +23,7 @@ export function PayButton({
     "idle",
   );
   const [message, setMessage] = useState<string | null>(null);
+  const router = useRouter();
 
   async function handlePay(): Promise<void> {
     setStatus("paying");
@@ -39,6 +41,9 @@ export function PayButton({
       if (res.ok && json.success) {
         setStatus("paid");
         setMessage("Payment received. Thank you!");
+        // Revalidate the server component so the sibling invoice row's
+        // state badge + "$X due" reflect the payment instead of staying "open".
+        router.refresh();
         return;
       }
       setStatus("error");

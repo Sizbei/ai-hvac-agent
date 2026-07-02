@@ -1,12 +1,17 @@
 'use client';
 
-import { useDraggable } from '@dnd-kit/core';
+import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { Inbox } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { UrgencyBadge } from '@/components/admin/urgency-badge';
 import { StatusBadge } from '@/components/admin/status-badge';
-import { dragJobId, type DragJobData } from '@/lib/admin/calendar-dnd';
+import {
+  dragJobId,
+  UNSCHEDULED_DROP_ID,
+  type DragJobData,
+  type UnscheduledDropZoneData,
+} from '@/lib/admin/calendar-dnd';
 import { DASHBOARD_LIST_LIMIT, type DashboardRequest } from '@/lib/admin/types';
 
 interface DraggableUnscheduledPanelProps {
@@ -106,8 +111,21 @@ export function DraggableUnscheduledPanel({
   onSelect,
   disabled,
 }: DraggableUnscheduledPanelProps) {
+  // Drop target: releasing a placed job card here clears its placement and
+  // returns it to the queue (handled in InteractiveSchedulingCalendar).
+  const dropData: UnscheduledDropZoneData = { kind: 'unscheduled' };
+  const { setNodeRef, isOver } = useDroppable({
+    id: UNSCHEDULED_DROP_ID,
+    data: dropData,
+  });
+
   return (
-    <Card className="flex w-full flex-col p-3 lg:w-72 lg:shrink-0">
+    <Card
+      ref={setNodeRef}
+      className={`flex w-full flex-col p-3 transition-colors lg:w-72 lg:shrink-0 ${
+        isOver ? 'ring-2 ring-amber-400 bg-amber-50/50 dark:bg-amber-950/20' : ''
+      }`}
+    >
       <div className="mb-2 flex items-center gap-2">
         <Inbox className="size-4 text-amber-600 dark:text-amber-400" />
         <h2 className="text-sm font-semibold">Unscheduled</h2>

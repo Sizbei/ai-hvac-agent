@@ -63,7 +63,13 @@ export async function POST(request: NextRequest): Promise<Response> {
       RATE_LIMITS.sessionCreate.windowMs,
     );
     if (!rateCheck.allowed) {
-      return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
+      // This is a full-page POST navigation, so a raw-JSON error body would
+      // replace the document with unreadable JSON. Redirect back to the form
+      // with a friendly ?error= (matching the invalid_name path below).
+      return NextResponse.redirect(
+        new URL("/signup?error=rate_limited", request.url),
+        303,
+      );
     }
 
     // The page posts a form; accept form-encoded or JSON.
@@ -124,6 +130,11 @@ export async function POST(request: NextRequest): Promise<Response> {
     return response;
   } catch (error: unknown) {
     logger.error({ error }, "Failed to start self-serve signup");
-    return errorResponse("Internal server error", "INTERNAL_ERROR", 500);
+    // Full-page POST: redirect to the form with a friendly message instead of
+    // dumping raw JSON into the browser (try_again is already in the form's map).
+    return NextResponse.redirect(
+      new URL("/signup?error=try_again", request.url),
+      303,
+    );
   }
 }

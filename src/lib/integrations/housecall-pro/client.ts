@@ -276,7 +276,8 @@ function toTechnician(raw: unknown): HousecallTechnician | null {
       : typeof obj.is_active === "boolean"
         ? obj.is_active
         : undefined;
-  return { id: obj.id, name, isActive };
+  // Email (when present) keys the roster upsert into `users`; omitted → undefined.
+  return { id: obj.id, name, isActive, email: str(obj.email) };
 }
 
 /**

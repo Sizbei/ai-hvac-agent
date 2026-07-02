@@ -38,6 +38,9 @@ type RescheduleResult =
 
 interface UseRescheduleJobResult {
   readonly reschedule: (args: RescheduleArgs) => Promise<RescheduleResult>;
+  readonly unschedule: (
+    requestId: string,
+  ) => Promise<{ status: 'ok' } | { status: 'error'; message: string }>;
   readonly isRescheduling: boolean;
 }
 
@@ -133,5 +136,34 @@ export function useRescheduleJob(): UseRescheduleJobResult {
     [],
   );
 
-  return { reschedule, isRescheduling };
+  const unschedule = useCallback(
+    async (
+      requestId: string,
+    ): Promise<{ status: 'ok' } | { status: 'error'; message: string }> => {
+      setIsRescheduling(true);
+      try {
+        const res = await fetch(
+          `/api/admin/requests/${encodeURIComponent(requestId)}/unschedule`,
+          { method: 'POST', headers: { 'Content-Type': 'application/json' } },
+        );
+        if (res.ok) return { status: 'ok' };
+        const body = await res.json().catch(() => null);
+        return {
+          status: 'error',
+          message:
+            body?.error?.message ?? 'Failed to unschedule. Please try again.',
+        };
+      } catch {
+        return {
+          status: 'error',
+          message: 'Could not connect to server. Please try again.',
+        };
+      } finally {
+        setIsRescheduling(false);
+      }
+    },
+    [],
+  );
+
+  return { reschedule, unschedule, isRescheduling };
 }

@@ -121,6 +121,8 @@ export const orgConfigUpdateSchema = z
       .optional(),
     // After-hours pricing config. `null` resets to the system default.
     afterHoursConfig: afterHoursConfigSchema.nullable().optional(),
+    // Opt-in to Probook-style scored auto-dispatch (default false = first-fit).
+    autoDispatchEnabled: z.boolean().optional(),
   })
   .strict();
 
@@ -142,6 +144,8 @@ export interface OrgConfig {
   readonly chatMaxTurns: number | null;
   // Always resolved (defaults applied) so the admin form always has values.
   readonly afterHoursConfig: AfterHoursConfig;
+  // Opt-in to Probook-style scored auto-dispatch (default false = first-fit).
+  readonly autoDispatchEnabled: boolean;
 }
 
 export const DEFAULT_ORG_CONFIG: OrgConfig = {
@@ -157,6 +161,7 @@ export const DEFAULT_ORG_CONFIG: OrgConfig = {
   chatTokenBudget: null,
   chatMaxTurns: null,
   afterHoursConfig: DEFAULT_AFTER_HOURS_CONFIG,
+  autoDispatchEnabled: false,
 };
 
 // ── Custom FAQ ──

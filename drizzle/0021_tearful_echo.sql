@@ -1,0 +1,2 @@
+ALTER TABLE "organization_settings" ADD COLUMN "auto_dispatch_enabled" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "service_requests" ADD COLUMN "auto_assigned" boolean DEFAULT false NOT NULL;

@@ -64,16 +64,31 @@ export function PurchaseOrdersPanel({
 }: PurchaseOrdersPanelProps) {
   const [formOpen, setFormOpen] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // A failed order/receive must NOT silently no-op — "Receive" adds stock, so a
+  // swallowed failure would make an admin believe inventory was updated when it
+  // wasn't.
+  const [actionError, setActionError] = useState<string | null>(null);
 
   async function transition(id: string, action: 'order' | 'receive'): Promise<void> {
     setBusyId(id);
+    setActionError(null);
     try {
       const res = await fetch(`/api/admin/inventory/purchase-orders/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action }),
       });
-      if (res.ok) onChanged();
+      if (res.ok) {
+        onChanged();
+      } else {
+        setActionError(
+          action === 'receive'
+            ? "Couldn't receive that PO — inventory was NOT updated. Try again."
+            : "Couldn't update that purchase order. Try again.",
+        );
+      }
+    } catch {
+      setActionError('Network error — the purchase order was not updated.');
     } finally {
       setBusyId(null);
     }
@@ -94,6 +109,12 @@ export function PurchaseOrdersPanel({
           New PO
         </Button>
       </div>
+
+      {actionError && (
+        <p role="alert" className="text-sm text-destructive">
+          {actionError}
+        </p>
+      )}
 
       {!isLoading && purchaseOrders.length === 0 ? (
         <div className="py-10 text-center text-muted-foreground">

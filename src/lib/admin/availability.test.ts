@@ -79,8 +79,14 @@ describe("computeOpenWindows — capacity", () => {
     expect(out.every((w) => w.capacity === 1)).toBe(true);
   });
 
-  it("treats no availability as no bands (out-of-hours, not blanket-open)", () => {
-    expect(computeOpenWindows(["t1"], [], [], [WED])).toEqual([]);
+  it("falls back to DEFAULT business hours when a tech has NO configured availability (Bug-1 fallback)", () => {
+    // With zero availability rows, an active tech is treated as working the
+    // bounded default (Mon–Fri 8–8), so a weekday offers all bands with that
+    // tech as capacity — rather than the old fail-closed "no bands". (Mirrors the
+    // availability-coverage default-hours fallback.)
+    const out = computeOpenWindows(["t1"], [], [], [WED]);
+    expect(out.length).toBeGreaterThan(0);
+    expect(out.every((w) => w.capacity === 1 && w.available === 1)).toBe(true);
   });
 });
 
@@ -201,11 +207,91 @@ describe("computeOpenWindows — PII-free output", () => {
     );
     for (const w of out) {
       expect(Object.keys(w).sort()).toEqual(
-        ["available", "capacity", "day", "window"].sort(),
+        ["available", "booked", "capacity", "day", "window"].sort(),
       );
       // No field carries the tech id.
       expect(JSON.stringify(w)).not.toContain("tech-secret-id");
     }
+  });
+});
+
+describe("computeOpenWindows — in-flight reservations", () => {
+  const morningRes = (serviceRequestId: string | null) => ({
+    day: WED,
+    window: "morning",
+    serviceRequestId,
+  });
+
+  it("subtracts an in-flight hold from a band's availability", () => {
+    // 2 techs cover every band; one morning hold with no placed job behind it.
+    const out = computeOpenWindows(
+      ["t1", "t2"],
+      [slot("t1"), slot("t2")],
+      [],
+      [WED],
+      [morningRes("req-a")],
+    );
+    const morning = out.find((w) => w.window === "morning")!;
+    expect(morning.capacity).toBe(2);
+    expect(morning.booked).toBe(0);
+    expect(morning.available).toBe(1); // 2 − 0 placed − 1 held
+    // Other bands untouched.
+    for (const w of out.filter((w) => w.window !== "morning")) {
+      expect(w.available).toBe(2);
+    }
+  });
+
+  it("closes the band once holds equal capacity", () => {
+    const out = computeOpenWindows(
+      ["t1", "t2"],
+      [slot("t1"), slot("t2")],
+      [],
+      [WED],
+      [morningRes("req-a"), morningRes("req-b")],
+    );
+    const morning = out.find((w) => w.window === "morning")!;
+    expect(morning.available).toBe(0);
+  });
+
+  it("a null-linked hold still counts as one in-flight unit", () => {
+    const out = computeOpenWindows(
+      ["t1", "t2"],
+      [slot("t1"), slot("t2")],
+      [],
+      [WED],
+      [morningRes(null)],
+    );
+    expect(out.find((w) => w.window === "morning")!.available).toBe(1);
+  });
+
+  it("does NOT double-count a hold whose request is already a placed job", () => {
+    // t1 has an ASSIGNED morning job (id 'req-a'); a lingering hold references
+    // the SAME request. It must be counted once (as placed), not twice.
+    const placed = job("t1", WED, 8, 12, { id: "req-a" });
+    const out = computeOpenWindows(
+      ["t1", "t2"],
+      [slot("t1"), slot("t2")],
+      [placed],
+      [WED],
+      [morningRes("req-a")],
+    );
+    const morning = out.find((w) => w.window === "morning")!;
+    expect(morning.booked).toBe(1); // the placed job
+    expect(morning.available).toBe(1); // 2 − 1 placed − 0 in-flight (deduped)
+  });
+
+  it("counts a placed job AND a distinct in-flight hold together", () => {
+    const placed = job("t1", WED, 8, 12, { id: "req-a" });
+    const out = computeOpenWindows(
+      ["t1", "t2"],
+      [slot("t1"), slot("t2")],
+      [placed],
+      [WED],
+      [morningRes("req-b")], // different request → genuine second consumer
+    );
+    const morning = out.find((w) => w.window === "morning")!;
+    expect(morning.booked).toBe(1);
+    expect(morning.available).toBe(0); // 2 − 1 placed − 1 held
   });
 });
 

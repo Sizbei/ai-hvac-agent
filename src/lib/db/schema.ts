@@ -11,6 +11,7 @@ import {
   varchar,
   jsonb,
   doublePrecision,
+  date,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -276,6 +277,10 @@ export const users = pgTable(
     // Fieldpulse's small sequential ids collide across tenants). Uniqueness is
     // scoped per-org below.
     fieldpulseUserId: text("fieldpulse_user_id"),
+    // Housecall Pro employee id for a synced technician. Same rationale as
+    // fieldpulseUserId: HCP's opaque ids aren't globally unique, so uniqueness is
+    // scoped per-org below (NOT global like google_id).
+    housecallProUserId: text("housecall_pro_user_id"),
     role: text("role", { enum: ["super_admin", "admin", "technician"] })
       .notNull()
       .default("technician"),
@@ -285,6 +290,21 @@ export const users = pgTable(
     // changes. NULL means "no rate set" — clock-out treats it as 0 (the entry's
     // laborCostCents is 0 until a rate exists).
     laborRateCents: integer("labor_rate_cents"),
+    // ── Field location (autodispatch + live tracking) ──
+    // The tech's home/start anchor for travel-aware autodispatch (NULL = fall
+    // back to the business base). Plain coords — not blind-indexed; a tech's base
+    // is not the same PII shape as a customer address.
+    homeBaseLat: doublePrecision("home_base_lat"),
+    homeBaseLng: doublePrecision("home_base_lng"),
+    // Opt-in consent for live location sharing while on the clock. Capture is
+    // refused server-side unless this is true; turning it off revokes (and the
+    // ingest route stops accepting fixes).
+    locationSharingEnabled: boolean("location_sharing_enabled")
+      .notNull()
+      .default(false),
+    locationConsentUpdatedAt: timestamp("location_consent_updated_at", {
+      withTimezone: true,
+    }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -322,6 +342,11 @@ export const users = pgTable(
     uniqueIndex("users_org_fieldpulse_user_id_unique")
       .on(table.organizationId, table.fieldpulseUserId)
       .where(sql`${table.fieldpulseUserId} IS NOT NULL`),
+    // Housecall Pro employee id is unique PER ORG (not globally), same as the
+    // Fieldpulse id — HCP ids are opaque and may repeat across tenants.
+    uniqueIndex("users_org_hcp_user_id_unique")
+      .on(table.organizationId, table.housecallProUserId)
+      .where(sql`${table.housecallProUserId} IS NOT NULL`),
   ],
 );
 
@@ -478,6 +503,10 @@ export const serviceRequests = pgTable(
     locationId: uuid("location_id"),
     assignedTo: uuid("assigned_to").references(() => users.id),
     status: requestStatusEnum("status").notNull().default("pending"),
+    // True when the system (not a human dispatcher) assigned this request — set
+    // by autoAssignBookedRequest on a successful auto-assign. Drives the board's
+    // "Auto" badge. Default false: human/drag assignments stay unflagged.
+    autoAssigned: boolean("auto_assigned").notNull().default(false),
     issueType: text("issue_type").notNull(),
     urgency: urgencyEnum("urgency").notNull(),
     description: text("description").notNull(),
@@ -493,6 +522,25 @@ export const serviceRequests = pgTable(
     underWarranty: triStateEnum("under_warranty"),
     // Free-text access notes — gate code, pets, parking, unit location.
     accessNotes: text("access_notes"),
+    // ── Duration-based scheduling / autodispatch ──
+    // Estimated on-site duration in minutes (deterministic base table, optionally
+    // LLM-refined). NULL until computed at booking.
+    estimatedDurationMinutes: integer("estimated_duration_minutes"),
+    // Provenance of the estimate: 'default' | 'llm' | 'actual' | 'manual'.
+    estimatedDurationSource: text("estimated_duration_source")
+      .notNull()
+      .default("default"),
+    // Outcome of the confidence-gated autodispatch pass at booking time.
+    // ('queued_needs_review' = held back by the pre-assign booking-quality gate.)
+    // Plain text column, so adding a value needs no migration.
+    autoDispatchOutcome: text("auto_dispatch_outcome", {
+      enum: [
+        "committed",
+        "queued_ambiguous",
+        "queued_no_fit",
+        "queued_needs_review",
+      ],
+    }),
     // Triage signals.
     systemDownStatus: systemDownStatusEnum("system_down_status"),
     problemDuration: text("problem_duration"),
@@ -988,6 +1036,21 @@ export const organizationSettings = pgTable("organization_settings", {
     embedViewed?: boolean;
   }>(),
 
+  // ── Auto-dispatch (Probook-style scored assignment) ──
+  // OFF by default: when false, a freshly-booked request auto-assigns first-fit
+  // (today's behavior). When true, autoAssignBookedRequest ranks technicians by
+  // a deterministic skill/quality/load score and assigns the best one that fits.
+  autoDispatchEnabled: boolean("auto_dispatch_enabled").notNull().default(false),
+  // Source of truth for scheduling. 'external' SKIPS native autodispatch (an
+  // external scheduler — FieldPulse/HCP — owns the calendar) to avoid double-
+  // booking. Default 'native' preserves today's behavior.
+  schedulingSource: text("scheduling_source", { enum: ["native", "external"] })
+    .notNull()
+    .default("native"),
+  // Number that receives "technician running behind" dispatcher SMS alerts.
+  // NULL = dispatcher delay alerts disabled.
+  dispatchAlertPhone: text("dispatch_alert_phone"),
+
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -1084,6 +1147,66 @@ export const technicianAvailability = pgTable(
       table.dayOfWeek,
       table.startMinute,
     ),
+  ],
+);
+
+// capacity_reservations — race-safe confirm-time capacity holds.
+//
+// A booking's capacity is DERIVED live (availability.ts): capacity = techs whose
+// hours cover a (day, band); consumed = assigned jobs + these reservations. A
+// fresh booking is UNASSIGNED, so it wouldn't count toward "booked" — two
+// concurrent confirms could both take the last opening and OVER-PROMISE a band.
+// This table is the missing atomic claim: at confirm time we INSERT a row at the
+// lowest free slot_ordinal in [0, ceiling) where ceiling = capacity − assigned.
+// The UNIQUE(org, day, window, slot_ordinal) is the compare-and-swap primitive
+// (neon-http has no interactive transactions / SELECT ... FOR UPDATE): a
+// concurrent confirm racing for the same ordinal fails the insert and advances;
+// when every ordinal is taken the band is genuinely full → soft booking.
+//
+// day is TEXT 'YYYY-MM-DD' (business-tz ISO), matching the availability day keys.
+// service_request_id is a PLAIN uuid (NO FK): the reservation is written BEFORE
+// the service_requests row exists in its atomic batch, so an FK would violate at
+// insert time. Its lifecycle is managed explicitly (released on cancel /
+// unschedule / assignment) rather than by cascade.
+export const capacityReservations = pgTable(
+  "capacity_reservations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    // Business-tz ISO date (YYYY-MM-DD) the band falls on.
+    day: text("day").notNull(),
+    // Arrival band: "morning" | "afternoon" | "evening".
+    window: text("window").notNull(),
+    // Position in the band's capacity, [0, ceiling). The UNIQUE below makes it
+    // the CAS token two concurrent confirms contend for.
+    slotOrdinal: integer("slot_ordinal").notNull(),
+    // The request this hold belongs to (plain uuid, no FK — see table comment).
+    // Null only transiently; used to dedupe a reservation against its own placed
+    // job and to release the hold on cancel/unschedule.
+    serviceRequestId: uuid("service_request_id"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    // The atomicity primitive: at most one reservation per (org, day, band,
+    // ordinal). Two confirms racing for the same ordinal → exactly one wins.
+    uniqueIndex("capacity_reservations_slot_unique").on(
+      table.organizationId,
+      table.day,
+      table.window,
+      table.slotOrdinal,
+    ),
+    // Availability counting reads all reservations for a (day, band).
+    index("capacity_reservations_org_day_window_idx").on(
+      table.organizationId,
+      table.day,
+      table.window,
+    ),
+    // Release-by-request (cancel / unschedule / assignment) looks up by request.
+    index("capacity_reservations_request_idx").on(table.serviceRequestId),
   ],
 );
 
@@ -1809,6 +1932,163 @@ export const requestStatusEvents = pgTable(
   ],
 );
 
+// ── Context layer (Probook v3, Phase 1) ───────────────────────────────────────
+// One thread per resolved customer + an append-only, PII-free event stream.
+// Mirrors requestStatusEvents: ids + enums/label-keys only, no free text.
+export const customerThreads = pgTable(
+  "customer_threads",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    customerId: uuid("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "cascade" }),
+    lastChannel: text("last_channel"),
+    lastEventAt: timestamp("last_event_at", { withTimezone: true }),
+    openEstimateCount: integer("open_estimate_count").notNull().default(0),
+    status: text("status").notNull().default("active"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("customer_threads_org_customer_unique").on(
+      table.organizationId,
+      table.customerId,
+    ),
+  ],
+);
+
+export const customerEvents = pgTable(
+  "customer_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    customerId: uuid("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "cascade" }),
+    threadId: uuid("thread_id")
+      .notNull()
+      .references(() => customerThreads.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    refId: uuid("ref_id"),
+    jobType: text("job_type"),
+    window: text("window"),
+    labelKey: text("label_key"),
+    at: timestamp("at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("customer_events_org_customer_at_idx").on(
+      table.organizationId,
+      table.customerId,
+      table.at,
+    ),
+  ],
+);
+
+// ── Forecasting (Probook v3, Phase 4) ─────────────────────────────────────────
+// Nightly rollups + versioned snapshots. All counts/cents are integers; NO PII.
+// Native vs synced revenue are NEVER blended — kept as separate `basis` rows.
+export const demandDaily = pgTable(
+  "demand_daily",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    day: date("day").notNull(),
+    // NOT NULL with a sentinel: Postgres treats NULLs as DISTINCT in a plain
+    // unique index, so a NULL "all types" row would never match
+    // onConflictDoUpdate and would duplicate every run. Use '__all__'.
+    jobType: text("job_type").notNull().default("__all__"),
+    bookings: integer("bookings").notNull().default(0),
+    sessions: integer("sessions").notNull().default(0),
+    booked: integer("booked").notNull().default(0),
+  },
+  (table) => [
+    uniqueIndex("demand_daily_org_day_jobtype_unique").on(
+      table.organizationId,
+      table.day,
+      table.jobType,
+    ),
+  ],
+);
+
+export const revenueDaily = pgTable(
+  "revenue_daily",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    day: date("day").notNull(),
+    basis: text("basis").notNull(), // 'native_payment' | 'synced_creation' — NEVER blended
+    collectedCents: integer("collected_cents").notNull().default(0),
+    invoicedCents: integer("invoiced_cents").notNull().default(0),
+    refundedCents: integer("refunded_cents").notNull().default(0),
+  },
+  (table) => [
+    uniqueIndex("revenue_daily_org_day_basis_unique").on(
+      table.organizationId,
+      table.day,
+      table.basis,
+    ),
+  ],
+);
+
+export const forecastSnapshots = pgTable(
+  "forecast_snapshots",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(), // 'demand' | 'revenue' | 'capacity'
+    model: text("model").notNull(), // 'seasonal_naive' | 'revenue_partition' | ...
+    horizonDays: integer("horizon_days").notNull(),
+    segment: text("segment"), // jobType / revenue basis
+    generatedAt: timestamp("generated_at", { withTimezone: true }).defaultNow().notNull(),
+    payload: jsonb("payload").notNull(),
+  },
+  (table) => [
+    index("forecast_snapshots_org_kind_gen_idx").on(
+      table.organizationId,
+      table.kind,
+      table.generatedAt,
+    ),
+  ],
+);
+
+export const forecastAccuracy = pgTable(
+  "forecast_accuracy",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    model: text("model").notNull(),
+    segment: text("segment"),
+    horizonDays: integer("horizon_days").notNull(),
+    forDay: date("for_day").notNull(),
+    predicted: integer("predicted").notNull(),
+    actual: integer("actual"), // filled when the day passes
+    absError: integer("abs_error"), // |actual - predicted| — MASE numerator, NOT a percentage
+  },
+  (table) => [
+    uniqueIndex("forecast_accuracy_unique").on(
+      table.organizationId,
+      table.kind,
+      table.segment,
+      table.horizonDays,
+      table.forDay,
+    ),
+  ],
+);
+
 // 25. customer_locations — physical service sites (Stage 5).
 // ServiceTitan's CUSTOMER-vs-LOCATION split: one billing customer can hold many
 // service addresses (property managers, landlords, commercial multi-site, or a
@@ -2009,6 +2289,87 @@ export const technicianTimeEntries = pgTable(
     uniqueIndex("tte_open_per_tech_job_unique")
       .on(table.serviceRequestId, table.technicianId)
       .where(sql`${table.clockOutAt} IS NULL`),
+  ],
+);
+
+// 28b. technician_locations — consent-gated live field position fixes. One row
+// per GPS fix posted by a tech's phone while clocked in. Latest-per-tech feeds
+// travel-aware dispatch + behind-schedule projection; history is trimmed by
+// retention. Plain coords (not blind-indexed).
+export const technicianLocations = pgTable(
+  "technician_locations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    technicianId: uuid("technician_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // The job the tech was on when this fix was captured (NULL if none).
+    serviceRequestId: uuid("service_request_id").references(
+      () => serviceRequests.id,
+      { onDelete: "set null" },
+    ),
+    latitude: doublePrecision("latitude").notNull(),
+    longitude: doublePrecision("longitude").notNull(),
+    accuracyM: doublePrecision("accuracy_m"),
+    heading: doublePrecision("heading"),
+    capturedAt: timestamp("captured_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("tloc_org_idx").on(table.organizationId),
+    index("tloc_latest_idx").on(
+      table.organizationId,
+      table.technicianId,
+      table.capturedAt,
+    ),
+    index("tloc_captured_idx").on(table.capturedAt),
+  ],
+);
+
+// 28c. dispatch_decisions — one audit row per SCORED auto-dispatch decision (why
+// this tech, or why it was queued), for the dispatcher override loop + threshold
+// tuning. PII-free: technician ids + scores + reason strings only.
+export const dispatchDecisions = pgTable(
+  "dispatch_decisions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    serviceRequestId: uuid("service_request_id")
+      .notNull()
+      .references(() => serviceRequests.id, { onDelete: "cascade" }),
+    outcome: text("outcome", {
+      enum: [
+        "committed",
+        "queued_ambiguous",
+        "queued_no_fit",
+        "queued_needs_review",
+      ],
+    }).notNull(),
+    // The tech auto-committed to (null when the decision was queued for a human).
+    chosenTechnicianId: uuid("chosen_technician_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    topScore: doublePrecision("top_score"),
+    confidenceGap: doublePrecision("confidence_gap"),
+    // Ranked, best-first: [{ technicianId, score, reasons: string[] }].
+    candidates: jsonb("candidates")
+      .$type<Array<{ technicianId: string; score: number; reasons: string[] }>>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("dispatch_decisions_org_idx").on(table.organizationId),
+    index("dispatch_decisions_request_idx").on(table.serviceRequestId),
   ],
 );
 

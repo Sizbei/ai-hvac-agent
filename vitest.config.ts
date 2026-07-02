@@ -12,6 +12,11 @@ const INTEGRATION_SUITES = [
   "tests/api/fieldpulse-connect.test.ts",
   "tests/api/fieldpulse-job-sync.test.ts",
   "tests/api/fieldpulse-webhook-security.test.ts",
+  // Technician field-app API suites: import real DB-backed query modules
+  // (DATABASE_URL) and throw at import in the offline gate — same class as the
+  // FieldPulse suites above.
+  "tests/api/tech-photo.test.ts",
+  "tests/api/tech-timeline.test.ts",
 ];
 
 // `npm run test:integration` sets this to invert the selection: run ONLY the

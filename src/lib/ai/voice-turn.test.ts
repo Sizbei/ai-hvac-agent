@@ -16,6 +16,7 @@ const {
   buildAccountLookupReplyMock,
   decryptMock,
   decideAfterHoursDisclosureMock,
+  loadCustomerContextByIdMock,
 } = vi.hoisted(() => ({
   generateTextMock: vi.fn(),
   insertMock: vi.fn(),
@@ -36,6 +37,8 @@ const {
   decryptMock: vi.fn(),
   // After-hours disclosure helper mock (WS4). Default: no after-hours.
   decideAfterHoursDisclosureMock: vi.fn().mockReturnValue({ kind: "none", afterHours: false, copy: "" }),
+  // Returning-customer context loader (parity Stage 3). Default: no match.
+  loadCustomerContextByIdMock: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("ai", () => ({ generateText: generateTextMock }));
@@ -80,8 +83,33 @@ vi.mock("@/lib/crypto", () => ({
 vi.mock("@/lib/admin/after-hours", () => ({
   resolveAfterHoursConfig: (v: unknown) => v ?? { enabled: false, startHour: 8, endHour: 18, weekendsAreAfterHours: false, timezone: "UTC" },
 }));
-vi.mock("./after-hours-chat", () => ({
-  decideAfterHoursDisclosure: (...args: unknown[]) => decideAfterHoursDisclosureMock(...args),
+vi.mock("./after-hours-chat", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./after-hours-chat")>();
+  return {
+    // Keep the real pure helpers (e.g. inferBookingTarget); only the
+    // decision is controlled per-test.
+    ...actual,
+    decideAfterHoursDisclosure: (...args: unknown[]) => decideAfterHoursDisclosureMock(...args),
+  };
+});
+
+// Returning-customer recognition (parity Stage 3): the loader is controlled
+// per-test; buildCustomerContextHint is a simple marker so we can assert the
+// hint reaches the LLM system prompt (the real hint is unit-tested separately).
+vi.mock("./customer-context", () => ({
+  loadCustomerContextById: loadCustomerContextByIdMock,
+  buildCustomerContextHint: (ctx: unknown) => (ctx ? " [RETURNING_CUSTOMER]" : ""),
+}));
+// Cross-channel recognition (Probook v3): getThread fails open in prod; here we
+// pin an empty thread so the additive cross-channel hint never perturbs the
+// shared db select mock or existing prompt assertions.
+vi.mock("@/lib/context/thread", () => ({
+  getThread: vi.fn().mockResolvedValue({
+    exists: false,
+    lastChannel: null,
+    openEstimateCount: 0,
+    events: [],
+  }),
 }));
 
 vi.mock("./escalate-service", () => ({ escalateSession: escalateMock }));
@@ -161,6 +189,8 @@ describe("voiceReply", () => {
     decryptMock.mockImplementation((s: string) => s);
     decideAfterHoursDisclosureMock.mockReset();
     decideAfterHoursDisclosureMock.mockReturnValue({ kind: "none", afterHours: false, copy: "" });
+    loadCustomerContextByIdMock.mockReset();
+    loadCustomerContextByIdMock.mockResolvedValue(null);
     extractAllContactMock.mockReturnValue(noSlots());
     extractAddressAtAddressStepMock.mockReturnValue(null);
     extractSpokenPhoneMock.mockReturnValue(null);
@@ -194,7 +224,7 @@ describe("voiceReply", () => {
     expect(insertMock).toHaveBeenCalled();
   });
 
-  it("escalates and ends the call on an emergency verdict", async () => {
+  it("escalates on an emergency and, with NO address/phone known, asks for them and stays on the line (D7)", async () => {
     routeMock.mockReturnValue({
       action: "ESCALATE",
       intentId: "gas_smell",
@@ -207,7 +237,7 @@ describe("voiceReply", () => {
     escalateMock.mockResolvedValue({ ok: true });
 
     const result = await voiceReply({
-      session: baseSession,
+      session: baseSession, // metadata null → no address, no phone
       history: [],
       userMessage: "i smell gas",
       ipAddress: "1.2.3.4",
@@ -215,6 +245,46 @@ describe("voiceReply", () => {
 
     expect(escalateMock).toHaveBeenCalled();
     expect(result.reply.toLowerCase()).toContain("leave the building");
+    // Web parity: never hang up on a blank-location emergency — ask, and keep
+    // the call alive ONE turn so the gather route can record the answer.
+    expect(result.reply.toLowerCase()).toContain("address");
+    expect(result.endCall).toBe(false);
+    expect(result.nextState).toBe("escalated");
+  });
+
+  it("escalates and ENDS the call when address + phone are already known (D7)", async () => {
+    routeMock.mockReturnValue({
+      action: "ESCALATE",
+      intentId: "gas_smell",
+      confidence: 1,
+      reply: "Please leave the building now.",
+      issueType: "other",
+      urgency: "emergency",
+      escalate: true,
+    });
+    escalateMock.mockResolvedValue({ ok: true });
+
+    const result = await voiceReply({
+      session: {
+        ...baseSession,
+        metadata: JSON.stringify({
+          issueType: "other",
+          urgency: "emergency",
+          address: "123 Main St, Johnson City, TN 37601",
+          customerName: null,
+          customerPhone: "4235550100",
+          customerEmail: null,
+          description: "gas smell",
+          isHvacRelated: true,
+        }),
+      },
+      history: [],
+      userMessage: "i smell gas",
+      ipAddress: "1.2.3.4",
+    });
+
+    expect(escalateMock).toHaveBeenCalled();
+    expect(result.reply.toLowerCase()).not.toContain("address");
     expect(result.endCall).toBe(true);
   });
 
@@ -369,6 +439,67 @@ describe("voiceReply", () => {
     expect(call.system.toLowerCase()).toContain("phone");
     expect(result.reply).toContain("noise");
     expect(result.endCall).toBe(false);
+  });
+
+  it("injects the returning-customer hint into the LLM prompt when the call resolved to a known customer", async () => {
+    routeMock.mockReturnValue({
+      action: "FALLBACK_LLM",
+      intentId: null,
+      confidence: 0,
+      reply: null,
+      issueType: null,
+      urgency: null,
+      escalate: false,
+    });
+    loadCustomerContextByIdMock.mockResolvedValue({
+      customerId: "cust-1",
+      isReturning: true,
+      priorRequestCount: 2,
+      firstName: "Jane",
+    });
+    generateTextMock.mockResolvedValue({
+      text: "Welcome back! Tell me more.",
+      usage: { inputTokens: 10, outputTokens: 5 },
+    });
+
+    const result = await voiceReply({
+      session: { ...baseSession, customerId: "cust-1" },
+      history: [{ role: "user", content: "my furnace is loud" }],
+      userMessage: "it rattles",
+      ipAddress: "1.2.3.4",
+    });
+
+    expect(loadCustomerContextByIdMock).toHaveBeenCalledWith("org-1", "cust-1");
+    const call = generateTextMock.mock.calls[0][0];
+    expect(call.system).toContain("[RETURNING_CUSTOMER]");
+    expect(result.endCall).toBe(false);
+  });
+
+  it("adds no customer hint when the call did not resolve to a customer", async () => {
+    routeMock.mockReturnValue({
+      action: "FALLBACK_LLM",
+      intentId: null,
+      confidence: 0,
+      reply: null,
+      issueType: null,
+      urgency: null,
+      escalate: false,
+    });
+    generateTextMock.mockResolvedValue({
+      text: "Tell me more.",
+      usage: { inputTokens: 10, outputTokens: 5 },
+    });
+
+    await voiceReply({
+      session: baseSession, // no customerId
+      history: [{ role: "user", content: "my furnace is loud" }],
+      userMessage: "it rattles",
+      ipAddress: "1.2.3.4",
+    });
+
+    expect(loadCustomerContextByIdMock).not.toHaveBeenCalled();
+    const call = generateTextMock.mock.calls[0][0];
+    expect(call.system).not.toContain("[RETURNING_CUSTOMER]");
   });
 
   it("captures a residual name spoken alongside a phone in one utterance", async () => {
@@ -672,6 +803,8 @@ describe("voiceReply output guardrail (WS1)", () => {
     decryptMock.mockImplementation((s: string) => s);
     decideAfterHoursDisclosureMock.mockReset();
     decideAfterHoursDisclosureMock.mockReturnValue({ kind: "none", afterHours: false, copy: "" });
+    loadCustomerContextByIdMock.mockReset();
+    loadCustomerContextByIdMock.mockResolvedValue(null);
     extractAllContactMock.mockReturnValue(noSlots());
     extractAddressAtAddressStepMock.mockReturnValue(null);
     extractSpokenPhoneMock.mockReturnValue(null);
@@ -731,6 +864,8 @@ describe("voiceReply do-not-service (WS2)", () => {
     decryptMock.mockImplementation((s: string) => s);
     decideAfterHoursDisclosureMock.mockReset();
     decideAfterHoursDisclosureMock.mockReturnValue({ kind: "none", afterHours: false, copy: "" });
+    loadCustomerContextByIdMock.mockReset();
+    loadCustomerContextByIdMock.mockResolvedValue(null);
     extractAllContactMock.mockReturnValue(noSlots());
     extractAddressAtAddressStepMock.mockReturnValue(null);
     extractSpokenPhoneMock.mockReturnValue(null);
@@ -914,6 +1049,51 @@ describe("voiceReply financial verify (WS3)", () => {
     const meta = JSON.parse((setCall![0] as Record<string, unknown>).metadata as string) as Record<string, unknown>;
     const verify = meta.verify as Record<string, unknown>;
     expect(verify?.status).toBe("failed");
+  });
+
+  it("advances verify on a bare-ZIP answer turn even when the router returns FALLBACK (Stage 5b)", async () => {
+    // The REAL router classifies a bare ZIP as FALLBACK (not ACCOUNT_LOOKUP) — the
+    // v2-review dead-end. The verify answer turn must still be handled, or
+    // pending→passed is unreachable. NOTE: we do NOT mock routeMessage to
+    // ACCOUNT_LOOKUP here (that masking is exactly what hid the bug).
+    const sessionWithPending = {
+      ...balanceSession,
+      metadata: JSON.stringify({ verify: { status: "pending", attempts: 0 } }),
+    };
+    routeMock.mockReturnValue({
+      action: "FALLBACK_LLM",
+      intentId: null,
+      confidence: 0,
+      reply: null,
+      issueType: null,
+      urgency: null,
+      escalate: false,
+    });
+    selectLimitMock.mockReset();
+    selectLimitMock
+      .mockResolvedValueOnce([{ doNotService: false }]) // do-not-service gate
+      .mockResolvedValueOnce([{ addressEncrypted: "212 E Unaka Ave, Johnson City, TN 37601" }]) // customer address
+      .mockResolvedValue([]); // locations
+
+    const result = await voiceReply({
+      session: sessionWithPending,
+      history: [],
+      userMessage: "37601",
+      ipAddress: "127.0.0.1",
+      dtmfDigits: "37601",
+    });
+
+    // Verify advanced to passed (unreachable before the fix); the answer turn does
+    // NOT speak the balance (it never serves data — caller re-asks next turn), and
+    // it does NOT fall through to the LLM.
+    const setCall = updateSetMock.mock.calls.find(
+      (c: unknown[]) => typeof (c[0] as Record<string, unknown>).metadata === "string",
+    );
+    expect(setCall).toBeDefined();
+    const meta = JSON.parse((setCall![0] as Record<string, unknown>).metadata as string) as Record<string, unknown>;
+    expect((meta.verify as Record<string, unknown>)?.status).toBe("passed");
+    expect(result.reply).not.toContain("$");
+    expect(generateTextMock).not.toHaveBeenCalled();
   });
 
   it("falls through to FALLBACK_LLM when customerId is absent (no account lookup)", async () => {
@@ -1210,9 +1390,11 @@ describe("voiceReply after-hours disclosure (WS4)", () => {
       ipAddress: "127.0.0.1",
     });
 
-    // Emergency escalates and ends the call.
+    // Emergency escalates. (endCall is false here: the session's address is
+    // missing, so D7 asks for it and keeps the call alive one answering turn.)
     expect(escalateMock).toHaveBeenCalled();
-    expect(result.endCall).toBe(true);
+    expect(result.endCall).toBe(false);
+    expect(result.nextState).toBe("escalated");
     // The emergency reply must NOT contain after-hours disclosure.
     expect(result.reply.toLowerCase()).not.toContain("after our normal hours");
     // Must NOT contain a dollar amount.
@@ -1313,5 +1495,280 @@ describe("voiceReply token-budget enforcement (WS6)", () => {
     expect(sessionUpdate).toBeDefined();
     // 1000 prior + 100 input + 50 output = 1150.
     expect(sessionUpdate?.tokensUsed).toBe(1150);
+  });
+});
+
+describe("voiceReply verify-lockout preservation (brain-unification #1)", () => {
+  // A caller mid financial-verify challenge: verify.pending with 2 attempts
+  // burned. An ordinary intake slot-provision turn must NOT wipe the lockout —
+  // buildExtraction does not round-trip the top-level `verify` key, so the
+  // serializer must re-attach it (the D1 drift: chat preserves it, voice wiped it).
+  const lockedSession = {
+    id: "s-verify",
+    organizationId: "o1",
+    status: "chatting" as const,
+    turnCount: 1,
+    maxTurns: 40,
+    metadata: JSON.stringify({
+      issueType: "cooling_not_working",
+      urgency: "high",
+      address: null,
+      customerName: null,
+      customerPhone: null,
+      customerEmail: null,
+      description: "ac out",
+      isHvacRelated: true,
+      verify: { status: "pending", attempts: 2 },
+    }),
+  };
+
+  beforeEach(() => {
+    generateTextMock.mockReset();
+    insertMock.mockReset();
+    updateSetMock.mockReset();
+    selectLimitMock.mockReset();
+    selectLimitMock.mockResolvedValue([]);
+    escalateMock.mockReset();
+    routeMock.mockReset();
+    routeMock.mockReturnValue({
+      action: "FALLBACK_LLM",
+      intentId: null,
+      confidence: 0,
+      reply: null,
+      issueType: "cooling_not_working",
+      urgency: "high",
+      escalate: false,
+    });
+    extractAllContactMock.mockReset();
+    extractAddressAtAddressStepMock.mockReset();
+    extractSpokenPhoneMock.mockReset();
+    extractSpokenPhoneMock.mockReturnValue(null);
+    detectCorrectionMock.mockReset();
+    detectCorrectionMock.mockReturnValue(null);
+    getRouterConfigMock.mockReset();
+    getRouterConfigMock.mockResolvedValue({});
+    submitSessionMock.mockReset();
+    submitSessionMock.mockResolvedValue({
+      ok: true,
+      referenceNumber: "V-1",
+      serviceRequestId: "sr-1",
+      heldWindow: null,
+    });
+    buildAccountLookupReplyMock.mockReset();
+    buildAccountLookupReplyMock.mockResolvedValue(null);
+    decryptMock.mockReset();
+    decryptMock.mockImplementation((s: string) => s);
+    decideAfterHoursDisclosureMock.mockReset();
+    decideAfterHoursDisclosureMock.mockReturnValue({
+      kind: "none",
+      afterHours: false,
+      copy: "",
+    });
+  });
+
+  it("keeps verify.pending + attempts through a deterministic slot-fill turn", async () => {
+    // Provide an address so the deterministic slot-fill path persists metadata.
+    extractAddressAtAddressStepMock.mockReturnValue(
+      "123 Main St, Johnson City, TN 37601",
+    );
+    extractAllContactMock.mockReturnValue({
+      name: null,
+      address: "123 Main St, Johnson City, TN 37601",
+      phone: null,
+      email: null,
+    });
+
+    await voiceReply({
+      session: lockedSession,
+      history: [{ role: "user", content: "my ac stopped working" }],
+      userMessage: "my address is 123 Main St",
+      ipAddress: "127.0.0.1",
+    });
+
+    // Find the session-metadata write and assert the lockout survived.
+    const metadataWrites = updateSetMock.mock.calls
+      .map((c) => c[0] as { metadata?: string | null })
+      .filter((v) => typeof v.metadata === "string");
+    expect(metadataWrites.length).toBeGreaterThan(0);
+    const persisted = JSON.parse(metadataWrites.at(-1)!.metadata!);
+    expect(persisted.verify).toEqual({ status: "pending", attempts: 2 });
+    // And the slot actually landed (the turn did real work).
+    expect(persisted.address).toContain("123 Main St");
+  });
+});
+
+describe("voiceReply LLM hardening (brain-unification D5)", () => {
+  beforeEach(() => {
+    generateTextMock.mockReset();
+    insertMock.mockReset();
+    updateSetMock.mockReset();
+    selectLimitMock.mockReset();
+    selectLimitMock.mockResolvedValue([]);
+    escalateMock.mockReset();
+    routeMock.mockReset();
+    routeMock.mockReturnValue({
+      action: "FALLBACK_LLM",
+      intentId: null,
+      confidence: 0,
+      reply: null,
+      issueType: null,
+      urgency: null,
+      escalate: false,
+    });
+    extractAllContactMock.mockReset();
+    extractAllContactMock.mockReturnValue(noSlots());
+    extractAddressAtAddressStepMock.mockReset();
+    extractAddressAtAddressStepMock.mockReturnValue(null);
+    extractSpokenPhoneMock.mockReset();
+    extractSpokenPhoneMock.mockReturnValue(null);
+    detectCorrectionMock.mockReset();
+    detectCorrectionMock.mockReturnValue(null);
+    getRouterConfigMock.mockReset();
+    getRouterConfigMock.mockResolvedValue({});
+    submitSessionMock.mockReset();
+    buildAccountLookupReplyMock.mockReset();
+    buildAccountLookupReplyMock.mockResolvedValue(null);
+    decryptMock.mockReset();
+    decideAfterHoursDisclosureMock.mockReset();
+    decideAfterHoursDisclosureMock.mockReturnValue({
+      kind: "none",
+      afterHours: false,
+      copy: "",
+    });
+  });
+
+  it("bounds the LLM call: timeout signal + spoken-length output cap", async () => {
+    generateTextMock.mockResolvedValue({
+      text: "Happy to help with that.",
+      usage: { inputTokens: 5, outputTokens: 5 },
+    });
+
+    await voiceReply({
+      session: baseSession,
+      history: [{ role: "user", content: "hi" }],
+      userMessage: "tell me about heat pumps",
+      ipAddress: "1.2.3.4",
+    });
+
+    const call = generateTextMock.mock.calls[0]![0];
+    expect(call.abortSignal).toBeInstanceOf(AbortSignal);
+    expect(call.maxOutputTokens).toBe(300);
+  });
+
+  it("keeps the call alive with a retry line when the LLM times out / fails", async () => {
+    generateTextMock.mockRejectedValue(
+      Object.assign(new Error("The operation was aborted"), { name: "TimeoutError" }),
+    );
+
+    const result = await voiceReply({
+      session: baseSession,
+      history: [{ role: "user", content: "hi" }],
+      userMessage: "tell me about heat pumps",
+      ipAddress: "1.2.3.4",
+    });
+
+    // NOT thrown to the route (which would apologize and HANG UP): the call
+    // stays alive with a safe retry ask.
+    expect(result.endCall).toBe(false);
+    expect(result.reply.toLowerCase()).toContain("say that");
+    // The turn is still persisted like any other assistant message.
+    expect(insertMock).toHaveBeenCalled();
+  });
+});
+
+describe("voiceReply urgency-answer capture (brain-unification D2)", () => {
+  // Issue known, urgency MISSING → the stepper's pending question is urgency.
+  // Voice asks it (VOICE_STEP_PHRASING has urgency) but never captured the
+  // answer — the caller's "no rush" fell to the LLM, no slot persisted, and the
+  // stepper re-asked forever (the re-ask loop chat patched with parseUrgencyAnswer).
+  // Everything BEFORE urgency in the triage order (core + contact) must be
+  // filled for urgency to be the pending question.
+  const urgencyPendingSession = {
+    id: "s-urg",
+    organizationId: "o1",
+    status: "chatting" as const,
+    turnCount: 1,
+    maxTurns: 40,
+    metadata: JSON.stringify({
+      issueType: "cooling_not_working",
+      urgency: null,
+      address: "123 Main St, Johnson City, TN 37601",
+      customerName: "Pat Doe",
+      customerPhone: "4235550100",
+      customerEmail: "pat@example.com",
+      description: "ac out",
+      isHvacRelated: true,
+      systemDownStatus: "fully_down",
+      problemDuration: "today",
+    }),
+  };
+
+  beforeEach(() => {
+    generateTextMock.mockReset();
+    insertMock.mockReset();
+    updateSetMock.mockReset();
+    selectLimitMock.mockReset();
+    selectLimitMock.mockResolvedValue([]);
+    escalateMock.mockReset();
+    routeMock.mockReset();
+    routeMock.mockReturnValue({
+      action: "FALLBACK_LLM",
+      intentId: null,
+      confidence: 0,
+      reply: null,
+      issueType: null,
+      urgency: null,
+      escalate: false,
+    });
+    extractAllContactMock.mockReset();
+    extractAllContactMock.mockReturnValue(noSlots());
+    extractAddressAtAddressStepMock.mockReset();
+    extractAddressAtAddressStepMock.mockReturnValue(null);
+    extractSpokenPhoneMock.mockReset();
+    extractSpokenPhoneMock.mockReturnValue(null);
+    detectCorrectionMock.mockReset();
+    detectCorrectionMock.mockReturnValue(null);
+    getRouterConfigMock.mockReset();
+    getRouterConfigMock.mockResolvedValue({});
+    submitSessionMock.mockReset();
+    submitSessionMock.mockResolvedValue({
+      ok: true,
+      referenceNumber: "U-1",
+      serviceRequestId: "sr-u",
+      heldWindow: null,
+    });
+    buildAccountLookupReplyMock.mockReset();
+    buildAccountLookupReplyMock.mockResolvedValue(null);
+    decryptMock.mockReset();
+    decideAfterHoursDisclosureMock.mockReset();
+    decideAfterHoursDisclosureMock.mockReturnValue({
+      kind: "none",
+      afterHours: false,
+      copy: "",
+    });
+  });
+
+  it("captures a spoken urgency answer deterministically (no LLM) and persists it", async () => {
+    const result = await voiceReply({
+      session: urgencyPendingSession,
+      history: [
+        { role: "user", content: "my ac stopped working" },
+        { role: "assistant", content: "How urgent is this?" },
+      ],
+      userMessage: "no rush, whenever works",
+      ipAddress: "1.2.3.4",
+    });
+
+    // Deterministic path — the LLM must not be consulted for a bare answer to
+    // the question we just asked.
+    expect(generateTextMock).not.toHaveBeenCalled();
+    // The urgency landed in the persisted metadata.
+    const metadataWrites = updateSetMock.mock.calls
+      .map((c) => c[0] as { metadata?: string | null })
+      .filter((v) => typeof v.metadata === "string");
+    expect(metadataWrites.length).toBeGreaterThan(0);
+    const persisted = JSON.parse(metadataWrites.at(-1)!.metadata!);
+    expect(persisted.urgency).toBe("low");
+    expect(result.endCall).toBe(false);
   });
 });

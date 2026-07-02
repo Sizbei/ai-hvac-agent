@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   screenAssistantReply,
   PRICE_REGEX,
+  PRICE_WORD_REGEX,
   FALSE_BOOKING_REGEX,
   DANGEROUS_DIY_REGEX,
   CREDENTIAL_REGEX,
@@ -494,5 +495,32 @@ describe("screenAssistantReply — preserved false-positive guards", () => {
     expect(once.safe).toBe(false);
     const twice = screenAssistantReply(once.reply);
     expect(twice.safe).toBe(true);
+  });
+});
+
+describe("PRICE_WORD_REGEX — spoken/written dollar amounts (no $ symbol)", () => {
+  it("flags a digit amount with a currency word", () => {
+    const r = screenAssistantReply("That usually runs about 200 dollars.");
+    expect(r.safe).toBe(false);
+    expect(r.violations).toContain("pricing");
+    expect(r.reply).not.toMatch(PRICE_WORD_REGEX);
+  });
+
+  it("flags a spelled-out amount ('two hundred dollars')", () => {
+    const r = screenAssistantReply("It's usually two hundred dollars for that.");
+    expect(r.violations).toContain("pricing");
+  });
+
+  it("flags 'bucks' and comma-grouped digits", () => {
+    expect(screenAssistantReply("about fifty bucks").violations).toContain("pricing");
+    expect(screenAssistantReply("around 1,200 dollars installed").violations).toContain("pricing");
+  });
+
+  it("does NOT flag numbers unrelated to currency (no false positives)", () => {
+    // A number elsewhere + the word 'dollars' far away must not match (contiguity).
+    expect(screenAssistantReply("We have ten years of experience and accept dollars.").safe).toBe(true);
+    // Times / durations / quantities with no currency word.
+    expect(screenAssistantReply("A tech can be there in about three to five business days.").safe).toBe(true);
+    expect(screenAssistantReply("Your filter is a 20 by 25 by 1 inch.").safe).toBe(true);
   });
 });

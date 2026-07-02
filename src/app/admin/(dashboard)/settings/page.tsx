@@ -10,6 +10,7 @@ import {
   SlidersHorizontal,
   Clock,
   Plug,
+  Truck,
 } from 'lucide-react';
 import { useOrgSettings } from '@/hooks/use-org-settings';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -22,6 +23,7 @@ import { CustomFaqsPanel } from '@/components/admin/settings/custom-faqs-panel';
 import { EmbedPanel } from '@/components/admin/settings/embed-panel';
 import { ConversationLimitsPanel } from '@/components/admin/settings/conversation-limits-panel';
 import { AfterHoursPanel } from '@/components/admin/settings/after-hours-panel';
+import { DispatchPanel } from '@/components/admin/settings/dispatch-panel';
 import { GoogleCalendarPanel } from '@/components/admin/settings/google-calendar-panel';
 import { HousecallProPanel } from '@/components/admin/settings/housecall-pro-panel';
 import { FieldpulsePanel } from '@/components/admin/settings/fieldpulse-panel';
@@ -85,6 +87,10 @@ export default function SettingsPage() {
               <Clock className="size-4" />
               After-hours
             </TabsTrigger>
+            <TabsTrigger value="dispatch">
+              <Truck className="size-4" />
+              Dispatch
+            </TabsTrigger>
             <TabsTrigger value="integrations">
               <Plug className="size-4" />
               Integrations
@@ -125,6 +131,9 @@ export default function SettingsPage() {
               config={settings.config}
               onSave={settings.saveConfig}
             />
+          </TabsContent>
+          <TabsContent value="dispatch" className="mt-6">
+            <DispatchPanel config={settings.config} onSave={settings.saveConfig} />
           </TabsContent>
           <TabsContent value="integrations" className="mt-6 space-y-6">
             <GoogleCalendarPanel />

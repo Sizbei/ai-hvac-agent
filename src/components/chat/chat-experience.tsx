@@ -36,9 +36,14 @@ const ISSUE_SUGGESTIONS: readonly Suggestion[] = [
 interface ChatExperienceProps {
   /** "page" centers a max-width panel (hosted /chat); "embed" fills the iframe. */
   readonly variant?: 'page' | 'embed';
-  /** Called with the reference number after a request is successfully submitted.
-   * The page navigates to the success route; the embed shows an inline success. */
-  readonly onSubmitted?: (referenceNumber: string) => void;
+  /** Called after a request is successfully submitted, with the reference number
+   * and — when a concrete arrival window was actually reserved — its human label
+   * (null on a soft booking, so callers keep soft "we'll confirm" copy). The page
+   * navigates to the success route; the embed shows an inline success. */
+  readonly onSubmitted?: (result: {
+    referenceNumber: string;
+    arrivalWindowLabel: string | null;
+  }) => void;
 }
 
 export function ChatExperience({
@@ -151,9 +156,9 @@ export function ChatExperience({
     setIsConfirming(true);
     setConfirmError(null);
     try {
-      const { referenceNumber } = await confirm(extraction);
+      const { referenceNumber, arrivalWindowLabel } = await confirm(extraction);
       setShowConfirmation(false);
-      onSubmitted?.(referenceNumber);
+      onSubmitted?.({ referenceNumber, arrivalWindowLabel });
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Confirmation failed';

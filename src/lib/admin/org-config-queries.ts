@@ -49,6 +49,7 @@ export async function getOrgConfig(
     chatTokenBudget: row.chatTokenBudget ?? null,
     chatMaxTurns: row.chatMaxTurns ?? null,
     afterHoursConfig: resolveAfterHoursConfig(row.afterHoursConfig ?? null),
+    autoDispatchEnabled: row.autoDispatchEnabled ?? false,
   };
 }
 
@@ -86,6 +87,8 @@ export async function updateOrgConfig(
     patch.chatMaxTurns = update.chatMaxTurns;
   if (update.afterHoursConfig !== undefined)
     patch.afterHoursConfig = update.afterHoursConfig;
+  if (update.autoDispatchEnabled !== undefined)
+    patch.autoDispatchEnabled = update.autoDispatchEnabled;
 
   // Upsert keyed on the org (the PK). onConflictDoUpdate applies the same patch
   // to an existing row. The insert values fill required NOT-NULL JSON columns
@@ -106,6 +109,7 @@ export async function updateOrgConfig(
       chatTokenBudget: update.chatTokenBudget ?? null,
       chatMaxTurns: update.chatMaxTurns ?? null,
       afterHoursConfig: update.afterHoursConfig ?? null,
+      autoDispatchEnabled: update.autoDispatchEnabled ?? false,
     })
     .onConflictDoUpdate({
       target: organizationSettings.organizationId,

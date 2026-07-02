@@ -25,18 +25,26 @@ export default function EmbedPage() {
 }
 
 function EmbedContent() {
-  const [submittedRef, setSubmittedRef] = useState<string | null>(null);
+  const [submitted, setSubmitted] = useState<{
+    referenceNumber: string;
+    arrivalWindowLabel: string | null;
+  } | null>(null);
 
-  if (submittedRef) {
+  if (submitted) {
     return (
       <div className="flex h-dvh flex-col items-center justify-center gap-4 px-6 text-center">
         <CheckCircle2 className="size-12 text-primary" />
         <div>
-          <h2 className="text-lg font-semibold">Request submitted</h2>
+          <h2 className="text-lg font-semibold">
+            {submitted.arrivalWindowLabel ? "You're booked" : 'Request submitted'}
+          </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Our team will reach out shortly. Your reference number is{' '}
+            {/* Only name a window we actually reserved; otherwise soft copy. */}
+            {submitted.arrivalWindowLabel
+              ? `We've got you down for ${submitted.arrivalWindowLabel}. Your reference number is `
+              : 'Our team will reach out shortly. Your reference number is '}
             <span className="font-mono font-medium text-foreground">
-              {submittedRef}
+              {submitted.referenceNumber}
             </span>
             .
           </p>
@@ -45,7 +53,7 @@ function EmbedContent() {
     );
   }
 
-  return <ChatExperience variant="embed" onSubmitted={setSubmittedRef} />;
+  return <ChatExperience variant="embed" onSubmitted={setSubmitted} />;
 }
 
 function EmbedLoading() {

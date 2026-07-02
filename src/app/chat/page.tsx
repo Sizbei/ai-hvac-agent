@@ -8,9 +8,13 @@ export default function ChatPage() {
   return (
     <ChatExperience
       variant="page"
-      onSubmitted={(ref) =>
-        router.push(`/chat/success?ref=${encodeURIComponent(ref)}`)
-      }
+      onSubmitted={({ referenceNumber, arrivalWindowLabel }) => {
+        const params = new URLSearchParams({ ref: referenceNumber });
+        // Only carries a window when one was actually reserved — the success
+        // page keeps its soft copy otherwise.
+        if (arrivalWindowLabel) params.set('window', arrivalWindowLabel);
+        router.push(`/chat/success?${params.toString()}`);
+      }}
     />
   );
 }

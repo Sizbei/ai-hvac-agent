@@ -30,6 +30,18 @@ export interface DropZoneData {
   readonly window: RescheduleWindowRow;
 }
 
+/** The droppable payload for the "Unscheduled" queue panel — a drop here clears
+ * the job's placement and returns it to the queue. */
+export interface UnscheduledDropZoneData {
+  readonly kind: "unscheduled";
+}
+
+/** Stable droppable id for the single Unscheduled-queue zone. */
+export const UNSCHEDULED_DROP_ID = "drop:unscheduled";
+
+/** Any drop target on the calendar: a window band or the unscheduled queue. */
+export type CalendarDropData = DropZoneData | UnscheduledDropZoneData;
+
 /** Stable droppable id for a (scope, day, window) band. Scope is the lane —
  * a technicianId or the literal "unassigned" — kept in the id so two lanes on the
  * same day/window don't collide. */

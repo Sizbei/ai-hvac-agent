@@ -335,6 +335,7 @@ export default function EstimateDetailPage({
             </p>
             <div className="flex flex-wrap items-center gap-2">
               <select
+                aria-label="Estimate option to mark sold"
                 value={selectedOption}
                 onChange={(e) => setSelectedOption(e.target.value)}
                 className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"

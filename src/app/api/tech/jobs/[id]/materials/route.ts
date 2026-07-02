@@ -6,12 +6,12 @@
  *        line defaults costs to 0). Assignee + tenant guarded in field-queries.
  * DELETE remove a material by ?materialId=. Assignee + tenant guarded.
  *
- * Auth mirrors the tech status route: getAdminSession (technician role) + the
+ * Auth mirrors the tech status route: getTechSession (technician role) + the
  * assignee+tenant guard lives in the query layer.
  */
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { getAdminSession } from "@/lib/auth/session";
+import { getTechSession } from "@/lib/auth/tech-session";
 import {
   addJobMaterial,
   listJobMaterials,
@@ -34,7 +34,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const session = await getAdminSession();
+    const session = await getTechSession();
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
@@ -52,7 +52,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const session = await getAdminSession();
+    const session = await getTechSession();
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
@@ -106,7 +106,7 @@ export async function DELETE(
   _ctx: { params: Promise<{ id: string }> },
 ) {
   try {
-    const session = await getAdminSession();
+    const session = await getTechSession();
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }

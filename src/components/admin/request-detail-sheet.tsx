@@ -185,6 +185,15 @@ interface RequestDetailSheetProps {
   readonly onAssigned: () => void;
 }
 
+// One advisory, scored technician suggestion (mirrors RankedTech from the
+// dispatch scorer; the API returns these top-3 with human-readable reasons).
+interface DispatchSuggestion {
+  readonly technicianId: string;
+  readonly score: number;
+  readonly reasons: readonly string[];
+  readonly skillMatched: boolean;
+}
+
 // Invoice/payment status synced from Housecall Pro invoice.* webhooks. Hidden
 // when there's no invoice activity yet ('none' / falsy). Color cues: paid green,
 // sent blue, void muted.
@@ -280,6 +289,9 @@ export function RequestDetailSheet({
   const [selectedTechId, setSelectedTechId] = useState<string>('');
   const [isAssigning, setIsAssigning] = useState(false);
   const [assignError, setAssignError] = useState<string | null>(null);
+
+  // Advisory top-3 scored suggestions (read-only; the human still commits).
+  const [suggestions, setSuggestions] = useState<readonly DispatchSuggestion[]>([]);
 
   const [scheduledInput, setScheduledInput] = useState<string>('');
   const [arrivalWindowInput, setArrivalWindowInput] =
@@ -438,6 +450,37 @@ export function RequestDetailSheet({
     loadDetail();
   }, [requestId]);
 
+  // Fetch advisory top-3 technician suggestions when the request changes.
+  // Fail-open: any error leaves suggestions empty so the card simply hides — it
+  // must never block or break the sheet.
+  useEffect(() => {
+    if (!requestId) {
+      setSuggestions([]);
+      return;
+    }
+    let cancelled = false;
+    async function loadSuggestions(): Promise<void> {
+      try {
+        const res = await fetch(`/api/admin/dispatch/suggest/${requestId}`);
+        if (!res.ok) return;
+        const body = (await res.json()) as {
+          success: boolean;
+          data: { suggestions: DispatchSuggestion[] };
+        };
+        if (!cancelled && body.success) {
+          setSuggestions(body.data.suggestions);
+        }
+      } catch {
+        // Non-fatal: no suggestions card.
+      }
+    }
+    setSuggestions([]);
+    loadSuggestions();
+    return () => {
+      cancelled = true;
+    };
+  }, [requestId]);
+
   // A request that ALREADY HAS A TECHNICIAN is changed via REASSIGNMENT (PATCH),
   // which preserves the current status — so reassigning an on_hold or scheduled
   // job keeps its stage/hold state. Only a request with no assignee yet uses the
@@ -446,9 +489,13 @@ export function RequestDetailSheet({
   // on_hold/scheduled job via POST would silently reset it to "assigned".)
   const isReassignMode = Boolean(detail?.assignedTo);
 
-  const handleAssign = useCallback(async (): Promise<void> => {
-    if (!requestId || !selectedTechId) return;
+  // Accepts an optional techId so a one-click suggestion assigns through the
+  // SAME path as the dropdown; falls back to the dropdown selection otherwise.
+  const handleAssign = useCallback(async (techIdArg?: string): Promise<void> => {
+    const techId = techIdArg ?? selectedTechId;
+    if (!requestId || !techId) return;
 
+    setSelectedTechId(techId); // reflect the choice in the dropdown
     setIsAssigning(true);
     setAssignError(null);
 
@@ -457,7 +504,7 @@ export function RequestDetailSheet({
       const res = await fetch(`/api/admin/requests/${requestId}/assign`, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ technicianId: selectedTechId }),
+        body: JSON.stringify({ technicianId: techId }),
       });
 
       if (!res.ok) {
@@ -476,10 +523,10 @@ export function RequestDetailSheet({
         data: AdminRequest;
       };
       if (body.success && detail) {
-        const assignedTech = technicians.find((t) => t.id === selectedTechId);
+        const assignedTech = technicians.find((t) => t.id === techId);
         setDetail({
           ...detail,
-          assignedTo: selectedTechId,
+          assignedTo: techId,
           assignedToName: assignedTech?.name ?? 'Assigned',
           status: body.data.status,
         });
@@ -677,6 +724,45 @@ export function RequestDetailSheet({
               <section>
                 <h3 className="text-sm font-semibold mb-2">Assignment</h3>
                 <div className="rounded-md border p-3 space-y-3">
+                  {suggestions.length > 0 && (
+                    <div className="space-y-2">
+                      <span className="text-xs font-medium text-muted-foreground">
+                        Suggested technicians
+                      </span>
+                      {suggestions.map((s) => {
+                        const name =
+                          activeTechnicians.find((t) => t.id === s.technicianId)
+                            ?.name ?? 'Technician';
+                        const isCurrent = s.technicianId === detail.assignedTo;
+                        return (
+                          <div
+                            key={s.technicianId}
+                            className="flex items-start justify-between gap-2 rounded-md border bg-muted/30 p-2"
+                          >
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium">
+                                {name}{' '}
+                                <span className="text-xs font-normal text-muted-foreground">
+                                  · score {Math.round(s.score * 100)}
+                                </span>
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                {s.reasons.join(' · ')}
+                              </p>
+                            </div>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={isAssigning || isCurrent}
+                              onClick={() => handleAssign(s.technicianId)}
+                            >
+                              {isCurrent ? 'Assigned' : 'Assign'}
+                            </Button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                   {detail.assignedToName && (
                     <p className="text-sm">
                       Currently assigned to:{' '}
@@ -701,7 +787,7 @@ export function RequestDetailSheet({
                     </Select>
                     <Button
                       size="sm"
-                      onClick={handleAssign}
+                      onClick={() => handleAssign()}
                       disabled={
                         !selectedTechId ||
                         isAssigning ||
@@ -785,6 +871,7 @@ export function RequestDetailSheet({
                           If putting on hold:
                         </span>
                         <select
+                          aria-label="Hold reason"
                           value={holdReasonInput}
                           onChange={(e) =>
                             setHoldReasonInput(e.target.value as HoldReason)
@@ -842,6 +929,7 @@ export function RequestDetailSheet({
                         className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       />
                       <select
+                        aria-label="Arrival window"
                         value={arrivalWindowInput}
                         onChange={(e) =>
                           setArrivalWindowInput(e.target.value as ArrivalWindow)

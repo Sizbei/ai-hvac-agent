@@ -53,6 +53,7 @@ vi.mock("@/lib/crypto", () => ({
 
 import {
   lookupCustomerContext,
+  loadCustomerContextById,
   buildCustomerContextHint,
   enrichWithServiceHistory,
   type CustomerContext,
@@ -186,6 +187,42 @@ describe("lookupCustomerContext", () => {
     expect(result?.firstName).toBeNull();
     expect(result?.fullName).toBeNull();
     expect(result?.priorRequestCount).toBe(2);
+  });
+});
+
+describe("loadCustomerContextById", () => {
+  it("maps the row to a context WITHOUT a contact lookup (id is known)", async () => {
+    decryptMock.mockReturnValue("Jane Doe");
+    selectResult.value = [
+      {
+        nameEncrypted: "enc",
+        customerType: "residential",
+        membershipStatus: "active",
+        doNotService: false,
+        hcpCustomerId: "hcp-1",
+        priorRequestCount: 3,
+      },
+    ];
+
+    const result = await loadCustomerContextById(ORG, "cust-123");
+
+    expect(findIdMock).not.toHaveBeenCalled(); // no contact resolution needed
+    expect(result).toEqual({
+      customerId: "cust-123",
+      isReturning: true,
+      priorRequestCount: 3,
+      membershipStatus: "active",
+      customerType: "residential",
+      doNotService: false,
+      firstName: "Jane",
+      fullName: "Jane Doe",
+      hcpCustomerId: "hcp-1",
+    });
+  });
+
+  it("returns null when no customer row exists (raced delete)", async () => {
+    selectResult.value = [];
+    expect(await loadCustomerContextById(ORG, "gone")).toBeNull();
   });
 });
 

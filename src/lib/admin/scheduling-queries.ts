@@ -26,9 +26,30 @@ import {
   serviceRequests,
   technicianAvailability,
   users,
+  organizationSettings,
+  dispatchDecisions,
+  customerLocations,
 } from "@/lib/db/schema";
+import { haversineKm } from "@/lib/address/photon";
+import { BUSINESS_BASE_LOCATION } from "@/lib/config/business-location";
+import {
+  assessBookingQuality,
+  type BookingQualityResult,
+} from "@/lib/ai/dispatch/booking-quality";
 import { withTenant } from "@/lib/db/tenant";
+import { logger } from "@/lib/logger";
+import {
+  rankTechnicians,
+  classifyDispatch,
+  type DispatchSignals,
+  type RankedTech,
+  type DispatchOutcome,
+} from "@/lib/ai/dispatch/score";
+import { estimateJobDuration } from "@/lib/ai/dispatch/duration";
+import { loadDispatchSignals } from "@/lib/ai/dispatch/signals";
 import { isTerminal, type RequestStatus } from "./request-status";
+import { releaseReservationsForRequest } from "./capacity-reservation-queries";
+import { notifyCustomerOfAssignment } from "./notify-assignment";
 import { isWindowWithinAvailability } from "./availability-coverage";
 import type { ArrivalWindow } from "./arrival-window";
 import type {
@@ -553,6 +574,14 @@ export async function placeAndAssignRequest(
     readonly technicianId?: string;
     /** Commit despite a detected conflict/out-of-hours (dispatcher confirmed). */
     readonly override?: boolean;
+    /**
+     * Only place if the request is still unassigned. Used by background
+     * auto-dispatch so it can never overwrite an assignment a human dispatcher
+     * made (e.g. a calendar drag) during the several-second scoring window — a
+     * drag sets assignedTo without changing status, so the status CAS alone
+     * wouldn't catch it. Interactive reassignment leaves this unset.
+     */
+    readonly requireUnassigned?: boolean;
   },
 ): Promise<PlaceAndAssignResult> {
   const [existing] = await db
@@ -659,6 +688,12 @@ export async function placeAndAssignRequest(
         and(
           eq(serviceRequests.id, requestId),
           eq(serviceRequests.status, currentStatus),
+          // Auto-dispatch only: refuse to place if a human already claimed the
+          // job. A calendar drag sets assignedTo but not status, so this is the
+          // only guard that catches that race.
+          options.requireUnassigned
+            ? isNull(serviceRequests.assignedTo)
+            : undefined,
         )!,
       ),
     )
@@ -671,7 +706,8 @@ export async function placeAndAssignRequest(
     });
 
   if (!updated) {
-    // Status-guarded UPDATE matched nothing → a concurrent write moved the row.
+    // Guarded UPDATE matched nothing → a concurrent write moved the row (status
+    // changed) or, under requireUnassigned, a dispatcher claimed it first.
     return { ok: false, reason: "request_not_found" };
   }
 
@@ -712,13 +748,379 @@ export async function placeAndAssignRequest(
 }
 
 /**
- * Stage 2 — auto-assign a freshly-booked request to the first available
- * technician for its held window. Iterates active technicians, delegating the
- * conflict + availability gate to placeAndAssignRequest (which writes assignedTo
- * on success). On a conflict it tries the next tech; on any other failure it
- * stops. Best-effort: returns {assigned:false} when nobody fits, leaving the
- * soft-held window for a dispatcher. Designed to run in after() (off the
- * latency-bound voice/chat turn).
+ * Clear a job's placement: null its schedule + arrival window and unassign it,
+ * returning it to the unscheduled "to place" queue (status reset to 'pending').
+ * The inverse of placeAndAssignRequest — backs drag-back-to-Unscheduled. A single
+ * status-guarded UPDATE (neon-http has no transactions); terminal jobs are refused.
+ */
+export async function unscheduleRequest(
+  organizationId: string,
+  requestId: string,
+): Promise<
+  | { readonly ok: true }
+  | {
+      readonly ok: false;
+      readonly reason: "request_not_found" | "request_terminal";
+      readonly currentStatus?: string;
+    }
+> {
+  const [existing] = await db
+    .select({ status: serviceRequests.status })
+    .from(serviceRequests)
+    .where(
+      withTenant(serviceRequests, organizationId, eq(serviceRequests.id, requestId)),
+    );
+  if (!existing) return { ok: false, reason: "request_not_found" };
+  if (isTerminal(existing.status as RequestStatus)) {
+    return { ok: false, reason: "request_terminal", currentStatus: existing.status };
+  }
+
+  const [updated] = await db
+    .update(serviceRequests)
+    .set({
+      status: "pending",
+      assignedTo: null,
+      scheduledDate: null,
+      arrivalWindowStart: null,
+      arrivalWindowEnd: null,
+      updatedAt: new Date(),
+    })
+    .where(
+      withTenant(
+        serviceRequests,
+        organizationId,
+        and(
+          eq(serviceRequests.id, requestId),
+          eq(serviceRequests.status, existing.status),
+        )!,
+      ),
+    )
+    .returning({ id: serviceRequests.id });
+
+  if (!updated) return { ok: false, reason: "request_not_found" };
+  // Back to the unscheduled pile → its confirm-time capacity hold no longer
+  // applies; free it so the band re-opens. Best-effort.
+  await releaseReservationsForRequest(organizationId, requestId);
+  return { ok: true };
+}
+
+/** Org opt-in for scored dispatch. Reads the single column fresh (the settings
+ * cache is for the chatbot path; a just-flipped toggle takes effect next booking).
+ * organization_settings is keyed by organizationId (PK), so eq is the tenant scope. */
+async function isAutoDispatchEnabled(organizationId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ enabled: organizationSettings.autoDispatchEnabled })
+    .from(organizationSettings)
+    .where(eq(organizationSettings.organizationId, organizationId))
+    .limit(1);
+  return row?.enabled ?? false;
+}
+
+/** Whether an EXTERNAL scheduler (FieldPulse/HCP) owns this org's calendar. When
+ * true, native autodispatch is skipped entirely to avoid double-booking against
+ * the system of record. Default 'native' → false (today's behavior). */
+async function isExternallyScheduled(organizationId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ source: organizationSettings.schedulingSource })
+    .from(organizationSettings)
+    .where(eq(organizationSettings.organizationId, organizationId))
+    .limit(1);
+  return row?.source === "external";
+}
+
+/** Pre-assign booking-quality assessment for a request (Probook parity: clean
+ * before assign). Presence-only reads — no decrypt/PII — plus an out-of-area check
+ * when the job has been geocoded. A missing request is treated as clean so the
+ * normal not-found path handles it. */
+async function assessBookingQualityForRequest(
+  organizationId: string,
+  requestId: string,
+): Promise<BookingQualityResult> {
+  const [row] = await db
+    .select({
+      addressEncrypted: serviceRequests.addressEncrypted,
+      phone: serviceRequests.customerPhoneEncrypted,
+      email: serviceRequests.customerEmailEncrypted,
+      issueType: serviceRequests.issueType,
+      lat: customerLocations.latitude,
+      lng: customerLocations.longitude,
+    })
+    .from(serviceRequests)
+    .leftJoin(
+      customerLocations,
+      eq(serviceRequests.locationId, customerLocations.id),
+    )
+    .where(
+      withTenant(serviceRequests, organizationId, eq(serviceRequests.id, requestId)),
+    )
+    .limit(1);
+  if (!row) return { clean: true, issues: [] };
+
+  const distanceKm =
+    row.lat != null && row.lng != null
+      ? haversineKm(
+          BUSINESS_BASE_LOCATION.latitude,
+          BUSINESS_BASE_LOCATION.longitude,
+          row.lat,
+          row.lng,
+        )
+      : null;
+
+  return assessBookingQuality({
+    hasAddress: row.addressEncrypted != null,
+    hasContact: row.phone != null || row.email != null,
+    hasIssueType: row.issueType != null,
+    distanceKm,
+  });
+}
+
+/** Stamp the confidence-gated autodispatch outcome on the request (annotation for
+ * the dispatcher's exception queue). The 'committed' stamp is unconditional (we
+ * just placed it); a 'queued_*' stamp is guarded on assignedTo IS NULL so a
+ * dispatcher who manually assigned in the race window isn't overwritten with a
+ * stale queue verdict. */
+async function stampDispatchOutcome(
+  organizationId: string,
+  requestId: string,
+  outcome: DispatchOutcome,
+): Promise<void> {
+  const cond =
+    outcome === "committed"
+      ? eq(serviceRequests.id, requestId)
+      : and(
+          eq(serviceRequests.id, requestId),
+          isNull(serviceRequests.assignedTo),
+        )!;
+  await db
+    .update(serviceRequests)
+    .set({ autoDispatchOutcome: outcome, updatedAt: new Date() })
+    .where(withTenant(serviceRequests, organizationId, cond));
+}
+
+/** Audit one SCORED auto-dispatch decision: the ranked candidates (scores +
+ * reasons), the chosen tech, and the outcome — so an operator can answer "why
+ * this tech?" and the confidence thresholds can be tuned from real override data.
+ * Best-effort: a failure here must never affect the dispatch. */
+async function recordDispatchDecision(
+  organizationId: string,
+  requestId: string,
+  outcome: DispatchOutcome,
+  chosenTechnicianId: string | null,
+  ranked: readonly RankedTech[],
+): Promise<void> {
+  try {
+    await db.insert(dispatchDecisions).values({
+      organizationId,
+      serviceRequestId: requestId,
+      outcome,
+      chosenTechnicianId,
+      topScore: ranked[0]?.score ?? null,
+      confidenceGap:
+        ranked.length > 1 ? ranked[0]!.score - ranked[1]!.score : null,
+      candidates: ranked.map((r) => ({
+        technicianId: r.technicianId,
+        score: r.score,
+        reasons: [...r.reasons],
+      })),
+    });
+  } catch (error) {
+    logger.error(
+      { error, serviceRequestId: requestId },
+      "Failed to record dispatch decision (non-fatal)",
+    );
+  }
+}
+
+/** Compute + persist the on-site duration estimate for a request, once (the AI
+ * assist). No-ops if an estimate is already stored — so it's idempotent and never
+ * re-calls the LLM. Best-effort: callers run it on the booking's after() path; a
+ * failure never affects the booking or the dispatch. */
+export async function ensureEstimatedDuration(
+  organizationId: string,
+  requestId: string,
+): Promise<void> {
+  const [row] = await db
+    .select({
+      minutes: serviceRequests.estimatedDurationMinutes,
+      jobType: serviceRequests.jobType,
+      systemType: serviceRequests.systemType,
+      equipmentAgeBand: serviceRequests.equipmentAgeBand,
+      description: serviceRequests.description,
+    })
+    .from(serviceRequests)
+    .where(
+      withTenant(serviceRequests, organizationId, eq(serviceRequests.id, requestId)),
+    )
+    .limit(1);
+  if (!row || row.minutes != null) return; // missing, or already estimated
+
+  const est = await estimateJobDuration(organizationId, {
+    jobType: row.jobType,
+    systemType: row.systemType,
+    equipmentAgeBand: row.equipmentAgeBand,
+    description: row.description,
+  });
+  await db
+    .update(serviceRequests)
+    .set({
+      estimatedDurationMinutes: est.minutes,
+      estimatedDurationSource: est.source,
+      updatedAt: new Date(),
+    })
+    .where(
+      withTenant(
+        serviceRequests,
+        organizationId,
+        and(
+          eq(serviceRequests.id, requestId),
+          isNull(serviceRequests.estimatedDurationMinutes),
+        )!,
+      ),
+    );
+}
+
+/** The incoming job's classification, for skill matching. */
+async function loadJobClassification(
+  organizationId: string,
+  requestId: string,
+): Promise<DispatchSignals["job"] | null> {
+  const [row] = await db
+    .select({
+      jobType: serviceRequests.jobType,
+      systemType: serviceRequests.systemType,
+      urgency: serviceRequests.urgency,
+    })
+    .from(serviceRequests)
+    .where(
+      withTenant(serviceRequests, organizationId, eq(serviceRequests.id, requestId)),
+    );
+  return row
+    ? { jobType: row.jobType, systemType: row.systemType, urgency: row.urgency }
+    : null;
+}
+
+/** Flag a request as system-assigned (cosmetic; drives the board "Auto" badge).
+ * Guarded on the assignee we just placed: if a dispatcher manually reassigned the
+ * request in the race window between the assignment and this write, the guard
+ * matches nothing and we don't stamp a false "Auto" badge on a human assignment. */
+async function markAutoAssigned(
+  organizationId: string,
+  requestId: string,
+  technicianId: string,
+): Promise<void> {
+  await db
+    .update(serviceRequests)
+    .set({ autoAssigned: true, updatedAt: new Date() })
+    .where(
+      withTenant(
+        serviceRequests,
+        organizationId,
+        and(
+          eq(serviceRequests.id, requestId),
+          eq(serviceRequests.assignedTo, technicianId),
+        )!,
+      ),
+    );
+}
+
+/** Build the ranked, skill-matched technician order for a scored auto-assign.
+ * Returns [] when the job IS classified but no tech is skill-matched (the hard
+ * gate did its job → leave for a dispatcher). Returns `null` when the job can't
+ * be classified at all (request gone, or no jobType/systemType) — the caller
+ * must then fall back to first-fit, so an opted-in org never auto-assigns LESS
+ * than an opted-out one (no silent regression on unclassified jobs). */
+async function rankedTechnicianOrder(
+  organizationId: string,
+  requestId: string,
+  technicianIds: readonly string[],
+  isoDay: string,
+): Promise<RankedTech[] | null> {
+  const job = await loadJobClassification(organizationId, requestId);
+  // Nothing to score on (request missing, or no skill classification captured)
+  // → signal the caller to first-fit rather than stranding the job.
+  if (!job || (job.jobType === null && job.systemType === null)) return null;
+  const signalsByTech = await loadDispatchSignals(
+    organizationId,
+    technicianIds,
+    job,
+    isoDay,
+    requestId,
+  );
+  const candidates: DispatchSignals[] = technicianIds.map((technicianId) => {
+    const s = signalsByTech.get(technicianId)!;
+    return {
+      job,
+      tech: {
+        technicianId,
+        skillJobsCompleted: s.skillJobsCompleted,
+        avgRating: s.avgRating,
+        sameDayJobCount: s.sameDayJobCount,
+        conversionRate: s.conversionRate,
+        avgJobRevenueCents: s.avgJobRevenueCents,
+        // Travel-aware dispatch: when the job has cached coords + a tech anchor
+        // is known this is a real distance and location becomes the dominant
+        // score term; null → the scorer is byte-identical to the pre-travel
+        // composite (deterministic fallback preserved).
+        travelKm: s.travelKm,
+      },
+    };
+  });
+  return rankTechnicians(candidates);
+}
+
+/**
+ * Read-only top-N technician suggestions for a request — the advisory
+ * "exceptions queue" feed (Probook v3 Phase 2). Reuses the SAME scored ranking
+ * the auto-assigner uses, so a suggestion matches what auto-assign would do, but
+ * is shown REGARDLESS of `auto_dispatch_enabled` (a dispatcher wants the ranked
+ * shortlist + reasons even when auto-assign is off) and NEVER commits an
+ * assignment — the human still places the job. Returns [] when there are no
+ * active techs, or when the job is unclassifiable / no tech is skill-matched.
+ */
+export async function suggestTechnicians(
+  organizationId: string,
+  requestId: string,
+  limit = 3,
+): Promise<RankedTech[]> {
+  const techs = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(
+      withTenant(
+        users,
+        organizationId,
+        and(eq(users.role, "technician"), eq(users.isActive, true))!,
+      ),
+    );
+  if (techs.length === 0) return [];
+
+  // Score the load signal against the request's scheduled day when set, else today.
+  const [req] = await db
+    .select({ scheduledDate: serviceRequests.scheduledDate })
+    .from(serviceRequests)
+    .where(withTenant(serviceRequests, organizationId, eq(serviceRequests.id, requestId)));
+  const isoDay = (req?.scheduledDate ?? new Date()).toISOString().slice(0, 10);
+
+  const ranked = await rankedTechnicianOrder(
+    organizationId,
+    requestId,
+    techs.map((t) => t.id),
+    isoDay,
+  );
+  return (ranked ?? []).slice(0, limit);
+}
+
+/**
+ * Stage 2 — auto-assign a freshly-booked request to a technician for its held
+ * window. When the org has opted into scored dispatch (auto_dispatch_enabled),
+ * candidates are ranked best-first by a deterministic skill/quality/load score
+ * and non-skill-matched techs are dropped; otherwise candidates are the active
+ * techs in DB order (today's first-fit — zero behavior change). Either way the
+ * conflict + availability gate is delegated to placeAndAssignRequest (which
+ * writes assignedTo on success). On a conflict it tries the next tech; on any
+ * other failure it stops. Best-effort: returns {assigned:false} when nobody
+ * fits, leaving the soft-held window for a dispatcher. Designed to run in
+ * after() (off the latency-bound voice/chat turn).
  */
 export async function autoAssignBookedRequest(
   organizationId: string,
@@ -740,16 +1142,128 @@ export async function autoAssignBookedRequest(
         and(eq(users.role, "technician"), eq(users.isActive, true))!,
       ),
     );
+  // Best-effort: estimate this booking's on-site duration (AI assist; deterministic
+  // base + clamped LLM refine). Runs on the booking's after() path; never blocks
+  // or fails dispatch.
+  await ensureEstimatedDuration(organizationId, requestId).catch(() => {});
 
-  for (const tech of techs) {
+  if (techs.length === 0) return { assigned: false };
+
+  // Skip native autodispatch when an external scheduler (FieldPulse/HCP) owns the
+  // calendar — assigning here would double-book against the system of record.
+  if (await isExternallyScheduled(organizationId)) return { assigned: false };
+
+  // Scored mode (org opt-in) ranks skill-matched techs best-first; otherwise we
+  // keep today's first-fit (DB order) for zero behavior change. A job that can't
+  // be classified (rankedTechnicianOrder → null) also falls back to first-fit so
+  // opting in never strands a job that first-fit would have placed.
+  const firstFit = techs.map((t) => t.id);
+  const enabled = await isAutoDispatchEnabled(organizationId);
+
+  // Clean-before-assign gate (scored mode only): hold a dirty booking (no address /
+  // no contact / out of area) for a human to clean rather than auto-assigning a
+  // tech to it. First-fit mode is unchanged (no gate).
+  if (enabled) {
+    const quality = await assessBookingQualityForRequest(organizationId, requestId);
+    if (!quality.clean) {
+      await stampDispatchOutcome(organizationId, requestId, "queued_needs_review");
+      logger.info(
+        { serviceRequestId: requestId, issues: quality.issues },
+        "Auto-dispatch: held for review (booking quality)",
+      );
+      return { assigned: false };
+    }
+  }
+
+  const ranked = enabled
+    ? await rankedTechnicianOrder(organizationId, requestId, firstFit, heldSlot.isoDay)
+    : null;
+  // ranked === null  → unclassifiable (or disabled) → first-fit (DB order).
+  // ranked === []    → classified but the skill gate dropped everyone → no order.
+  const order = ranked ? ranked.map((r) => r.technicianId) : firstFit;
+  const rankedById = new Map(ranked?.map((r) => [r.technicianId, r]) ?? []);
+
+  // Confidence-gated commit (scored mode only): a near-tie between the top two,
+  // or no skill match at all, is too uncertain to auto-commit — stamp the queue
+  // verdict and leave it for a dispatcher's exception queue. First-fit mode
+  // (ranked === null) keeps placing as before (no confidence concept).
+  if (ranked) {
+    // Load the job's urgency so an emergency relaxes the confidence gate
+    // (Probook-parity priority tier — dispatch fast rather than queue on a tie).
+    const jobClass = await loadJobClassification(organizationId, requestId);
+    const decision = classifyDispatch(ranked, jobClass?.urgency);
+    if (decision.outcome !== "committed") {
+      await stampDispatchOutcome(organizationId, requestId, decision.outcome);
+      await recordDispatchDecision(
+        organizationId,
+        requestId,
+        decision.outcome,
+        null,
+        ranked,
+      );
+      return { assigned: false };
+    }
+  }
+
+  for (const technicianId of order) {
     const result = await placeAndAssignRequest(
       organizationId,
       requestId,
       { start: heldSlot.start, end: heldSlot.end },
-      { isoDay: heldSlot.isoDay, window: heldSlot.window, technicianId: tech.id },
+      {
+        isoDay: heldSlot.isoDay,
+        window: heldSlot.window,
+        technicianId,
+        // Background path: never clobber a dispatcher's manual assignment made
+        // during the scoring window.
+        requireUnassigned: true,
+      },
     );
     if (result.ok) {
-      return { assigned: true, technicianId: tech.id };
+      await markAutoAssigned(organizationId, requestId, technicianId);
+      // Book-on-the-call #2: tell the customer WHO is coming. The confirmation
+      // already promised the window (reserved before the response); the tech
+      // commits here seconds later in the background, so the follow-up rides
+      // the communications queue (consent + quiet hours enforced at send time).
+      // notifyCustomerOfAssignment never throws — assignment must not fail
+      // over a courtesy message.
+      await notifyCustomerOfAssignment({
+        organizationId,
+        requestId,
+        technicianId,
+        window: { start: heldSlot.start, end: heldSlot.end },
+      });
+      // Placed with a real tech → the request now consumes capacity as an
+      // ASSIGNED job, so its in-flight hold is redundant. Release it to free the
+      // ordinal for the next booking. Best-effort; availability dedupes a
+      // lingering hold by request id anyway, so a failed release only under-
+      // utilizes (never over-promises).
+      await releaseReservationsForRequest(organizationId, requestId);
+      if (ranked) {
+        await stampDispatchOutcome(organizationId, requestId, "committed");
+        await recordDispatchDecision(
+          organizationId,
+          requestId,
+          "committed",
+          technicianId,
+          ranked,
+        );
+      }
+      // Scored placement → record the explainable decision so an operator can
+      // answer "why this tech?". First-fit placements have no score to log.
+      const decision = rankedById.get(technicianId);
+      if (decision) {
+        logger.info(
+          {
+            serviceRequestId: requestId,
+            technicianId,
+            score: Number(decision.score.toFixed(3)),
+            reasons: decision.reasons,
+          },
+          "Auto-dispatch: scored assignment",
+        );
+      }
+      return { assigned: true, technicianId };
     }
     // A conflict (busy) or a tech deactivated mid-flight just means THIS tech
     // can't take it — try the next. Only a request-level failure (moved on /
@@ -757,6 +1271,18 @@ export async function autoAssignBookedRequest(
     if (result.reason !== "conflict" && result.reason !== "technician_not_found") {
       break;
     }
+  }
+  // Scored mode reached here = the confident top pick(s) couldn't be placed (all
+  // conflicted). Record no-fit so the dispatcher sees it in the exception queue.
+  if (ranked) {
+    await stampDispatchOutcome(organizationId, requestId, "queued_no_fit");
+    await recordDispatchDecision(
+      organizationId,
+      requestId,
+      "queued_no_fit",
+      null,
+      ranked,
+    );
   }
   return { assigned: false };
 }

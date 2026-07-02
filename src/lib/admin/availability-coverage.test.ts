@@ -82,8 +82,24 @@ describe("isWindowWithinAvailability", () => {
     expect(isWindowWithinAvailability(slots, WED_DAY, "morning")).toBe(false);
   });
 
-  it("treats NO availability as out-of-hours (not a blanket allow)", () => {
-    expect(isWindowWithinAvailability([], WED_DAY, "morning")).toBe(false);
+  it("falls back to DEFAULT business hours when the tech has NO rows at all", () => {
+    // Bug-1 fix: an unconfigured tech (zero rows) is usable on a weekday during
+    // the bounded Mon–Fri 8–8 default, rather than reading as fully out-of-hours.
+    expect(isWindowWithinAvailability([], WED_DAY, "morning")).toBe(true);
+    expect(isWindowWithinAvailability([], WED_DAY, "evening")).toBe(true);
+    expect(isWindowWithinAvailability([], WED_DAY, "anytime")).toBe(true);
+  });
+
+  it("keeps an unconfigured tech OFF on weekends (default is Mon–Fri only)", () => {
+    // 2026-07-05 is a Sunday.
+    expect(isWindowWithinAvailability([], "2026-07-05", "morning")).toBe(false);
+  });
+
+  it("does NOT fall back when the tech HAS rows but none on that weekday", () => {
+    // A tech configured for Monday only is genuinely OFF on Wednesday — this is a
+    // real day off, not the unconfigured state, so no default-hours fallback.
+    const monOnly = [slot({ dayOfWeek: 1, startMinute: 8 * 60, endMinute: 20 * 60 })];
+    expect(isWindowWithinAvailability(monOnly, WED_DAY, "morning")).toBe(false);
   });
 
   it("covers evening only when the shift reaches 8pm", () => {

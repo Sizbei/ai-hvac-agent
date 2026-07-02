@@ -100,6 +100,20 @@ export async function lookupCustomerContext(
 
   if (!customerId) return null;
 
+  return loadCustomerContextById(organizationId, customerId);
+}
+
+/**
+ * Load a returning-customer context for an ALREADY-KNOWN customer id — the
+ * resolved half of {@link lookupCustomerContext}, without the contact lookup.
+ * Used by the voice path, where the call's session already carries `customerId`
+ * (resolved from ANI at call start), so re-deriving it from a contact is
+ * unnecessary. Returns null when the row is gone (a raced delete).
+ */
+export async function loadCustomerContextById(
+  organizationId: string,
+  customerId: string,
+): Promise<CustomerContext | null> {
   // Single light query: the customer's class/membership/flag + their name
   // (to derive a first name) + a correlated count of prior requests. No
   // over-fetch — equipment/notes/history are not needed for personalization.
@@ -119,8 +133,8 @@ export async function lookupCustomerContext(
     .where(withTenant(customers, organizationId, eq(customers.id, customerId)))
     .limit(1);
 
-  // findCustomerIdByContact resolved an id, but a concurrent delete could race;
-  // treat a missing row as "no context" rather than throwing.
+  // The id was known, but a concurrent delete could race; treat a missing row
+  // as "no context" rather than throwing.
   if (!row) return null;
 
   const decryptedName = safeDecrypt(row.nameEncrypted);

@@ -4,6 +4,12 @@ import {
   extractZipsFromAddress,
   checkZipMatch,
   preserveVerifyKey,
+  parseVerifyState,
+  advanceVerify,
+  advanceVerifyAnswer,
+  looksLikeZipAnswer,
+  MAX_VERIFY_ATTEMPTS,
+  type VerifyState,
 } from "./account-verify";
 import { buildExtraction } from "./chat-slots";
 
@@ -102,5 +108,144 @@ describe("preserveVerifyKey — verify survives the gather-route rebuild", () =>
     const fresh = JSON.stringify({ verify: { status: "pending", attempts: 1 } });
     const merged = preserveVerifyKey(rebuilt, fresh) as Record<string, unknown>;
     expect(merged.verify).toEqual({ status: "pending", attempts: 1 });
+  });
+});
+
+describe("advanceVerify (channel-agnostic financial-verify decision)", () => {
+  const ONFILE = ["37601", "37615"] as const;
+
+  it("non-financial intent serves immediately and never fabricates a passed state", () => {
+    // No state → serve, state stays null (a fabricated "passed" would let a later
+    // financial ask skip the ZIP check).
+    expect(
+      advanceVerify({ intentId: "account-data-next-visit", state: null, zipAnswer: "", onFileZips: [] }),
+    ).toEqual({ kind: "serve", verify: null });
+    // An existing pending lockout is carried through UNCHANGED, not cleared.
+    const pending: VerifyState = { status: "pending", attempts: 1 };
+    expect(
+      advanceVerify({ intentId: "account-data-next-visit", state: pending, zipAnswer: "", onFileZips: [] }),
+    ).toEqual({ kind: "serve", verify: pending });
+  });
+
+  it("financial + already passed → serve, state unchanged", () => {
+    const passed: VerifyState = { status: "passed", attempts: 1 };
+    expect(
+      advanceVerify({ intentId: "account-data-balance", state: passed, zipAnswer: "", onFileZips: ONFILE }),
+    ).toEqual({ kind: "serve", verify: passed });
+  });
+
+  it("financial + already failed → defer, no re-ask", () => {
+    const failed: VerifyState = { status: "failed", attempts: 2 };
+    expect(
+      advanceVerify({ intentId: "account-data-balance", state: failed, zipAnswer: "37601", onFileZips: ONFILE }),
+    ).toEqual({ kind: "defer", verify: failed });
+  });
+
+  it("financial + no state → first ZIP challenge (pending, attempts 0)", () => {
+    expect(
+      advanceVerify({ intentId: "account-data-membership-status", state: null, zipAnswer: "", onFileZips: ONFILE }),
+    ).toEqual({ kind: "ask", verify: { status: "pending", attempts: 0 } });
+  });
+
+  it("financial + pending + correct ZIP → serve, upgraded to passed", () => {
+    const pending: VerifyState = { status: "pending", attempts: 0 };
+    expect(
+      advanceVerify({ intentId: "account-data-balance", state: pending, zipAnswer: "37601", onFileZips: ONFILE }),
+    ).toEqual({ kind: "serve", verify: { status: "passed", attempts: 1 } });
+  });
+
+  it("financial + pending + wrong ZIP under the limit → re-ask, attempts incremented", () => {
+    const pending: VerifyState = { status: "pending", attempts: 0 };
+    expect(
+      advanceVerify({ intentId: "account-data-balance", state: pending, zipAnswer: "00000", onFileZips: ONFILE }),
+    ).toEqual({ kind: "ask", verify: { status: "pending", attempts: 1 } });
+  });
+
+  it("financial + pending + wrong ZIP hitting MAX_VERIFY_ATTEMPTS → defer + failed (lockout)", () => {
+    const pending: VerifyState = { status: "pending", attempts: MAX_VERIFY_ATTEMPTS - 1 };
+    expect(
+      advanceVerify({ intentId: "account-data-balance", state: pending, zipAnswer: "00000", onFileZips: ONFILE }),
+    ).toEqual({ kind: "defer", verify: { status: "failed", attempts: MAX_VERIFY_ATTEMPTS } });
+  });
+
+  it("empty on-file ZIPs never auto-pass (a customer with no address can't be bypassed)", () => {
+    const pending: VerifyState = { status: "pending", attempts: 0 };
+    // Even a "valid-looking" ZIP can't match an empty on-file set → re-ask, not serve.
+    expect(
+      advanceVerify({ intentId: "account-data-balance", state: pending, zipAnswer: "37601", onFileZips: [] }),
+    ).toEqual({ kind: "ask", verify: { status: "pending", attempts: 1 } });
+  });
+});
+
+describe("advanceVerifyAnswer (bare-ZIP answer to a pending challenge)", () => {
+  const ONFILE = ["37601", "37615"] as const;
+  const pending = (attempts: number): VerifyState => ({ status: "pending", attempts });
+
+  it("correct ZIP → serve, upgraded to passed", () => {
+    expect(advanceVerifyAnswer(pending(0), "37601", ONFILE)).toEqual({
+      kind: "serve",
+      verify: { status: "passed", attempts: 1 },
+    });
+  });
+
+  it("wrong ZIP under the limit → re-ask, attempts incremented", () => {
+    expect(advanceVerifyAnswer(pending(0), "00000", ONFILE)).toEqual({
+      kind: "ask",
+      verify: { status: "pending", attempts: 1 },
+    });
+  });
+
+  it("wrong ZIP hitting MAX_VERIFY_ATTEMPTS → defer + failed (lockout)", () => {
+    expect(advanceVerifyAnswer(pending(MAX_VERIFY_ATTEMPTS - 1), "00000", ONFILE)).toEqual({
+      kind: "defer",
+      verify: { status: "failed", attempts: MAX_VERIFY_ATTEMPTS },
+    });
+  });
+
+  it("empty on-file ZIPs never auto-pass", () => {
+    expect(advanceVerifyAnswer(pending(0), "37601", []).kind).not.toBe("serve");
+  });
+});
+
+describe("looksLikeZipAnswer", () => {
+  it("recognizes a bare typed/DTMF ZIP", () => {
+    expect(looksLikeZipAnswer("37601")).toBe(true);
+    expect(looksLikeZipAnswer("  37601 ")).toBe(true);
+  });
+
+  it("recognizes a spoken ZIP ('three seven six oh one')", () => {
+    expect(looksLikeZipAnswer("three seven six oh one")).toBe(true);
+  });
+
+  it("rejects prose with other digit counts (no false answer turn)", () => {
+    expect(looksLikeZipAnswer("call me at 5 about 37601 Main")).toBe(false); // 6 digits
+    expect(looksLikeZipAnswer("what's my balance")).toBe(false); // 0 digits
+    expect(looksLikeZipAnswer("376011")).toBe(false); // 6 digits
+    expect(looksLikeZipAnswer("3760")).toBe(false); // 4 digits
+  });
+});
+
+describe("parseVerifyState (brain-unification D3)", () => {
+  it("parses a valid pending state and defaults attempts", () => {
+    expect(
+      parseVerifyState(JSON.stringify({ verify: { status: "pending", attempts: 2 } })),
+    ).toEqual({ status: "pending", attempts: 2 });
+    expect(
+      parseVerifyState(JSON.stringify({ verify: { status: "passed" } })),
+    ).toEqual({ status: "passed", attempts: 0 });
+  });
+
+  it("DISCARDS a malformed verify key instead of blind-casting it", () => {
+    // The chat brain used to cast these straight into advanceVerify.
+    expect(parseVerifyState(JSON.stringify({ verify: { status: "hacked" } }))).toBeNull();
+    expect(parseVerifyState(JSON.stringify({ verify: "pending" }))).toBeNull();
+    expect(parseVerifyState(JSON.stringify({ verify: 42 }))).toBeNull();
+  });
+
+  it("returns null on absent or unparseable metadata", () => {
+    expect(parseVerifyState(null)).toBeNull();
+    expect(parseVerifyState(undefined)).toBeNull();
+    expect(parseVerifyState("not json")).toBeNull();
+    expect(parseVerifyState(JSON.stringify({ issueType: "no_cool" }))).toBeNull();
   });
 });
