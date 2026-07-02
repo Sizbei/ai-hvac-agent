@@ -85,14 +85,15 @@ a capped live lookup. Technician pins use the latest consent-gated fix (last 4h)
 
 ## Roadmap — next steps to improve dispatch
 
-**Immediate hardening** (from the #18 code review; correctness/perf, no behavior change):
-1. **N+1 tech-location reads** — `loadTechAnchors` (`signals.ts`) issues one query per tech; replace with a single `DISTINCT ON (technician_id) … ORDER BY captured_at DESC`.
-2. **Timezone off-by-one** — the same-day load count parses `isoDay` as UTC midnight (`signals.ts` ~L89); use `businessWallClockToUtc` so late-evening Eastern jobs are counted on the right day.
-3. **Signature-write TOCTOU** — `recordSignature` (`src/lib/tech/field-queries.ts`) re-checks ownership before the write but not *in* the `UPDATE`; add `assignedTo = <tech>` to the WHERE so a reassigned job can't receive another tech's signature.
-4. **Redundant classification read** — `autoAssignBookedRequest` loads job classification twice; have `rankedTechnicianOrder` return it for the confidence gate.
-5. **Test-coverage gaps** — legacy `afterHoursShown="1"` latch mapping, `offer_next_day` non-stacking assertion, and an isolated `readUrgencySignal` unit test.
+**Immediate hardening — ✅ done** (from the #18 review; correctness/perf, no behavior change):
+1. ✅ **N+1 tech-location reads** — `loadTechAnchors` now calls a single batch `getLatestTechnicianLocations` (one query, dedupe-in-memory) instead of one query per tech.
+2. ✅ **Timezone off-by-one** — the same-day load count anchors its window with `businessWallClockToUtc` via `businessDayUtcRange`, so late-evening Eastern jobs are counted on the right day.
+3. ✅ **Signature-write TOCTOU** — `recordSignature` re-asserts `assignedTo = <tech>` in the `UPDATE` (0 rows → `not_owned`), so a reassigned job can't receive another tech's signature.
+4. ✅ **Redundant classification read** — `rankedTechnicianOrder` returns `{ ranked, job }`; the confidence gate reuses the classification (one fewer DB read per scored auto-assign).
+5. ✅ **Test-coverage gaps** — legacy `afterHoursShown="1"` latch mapping, `offer_next_day` non-stacking, and isolated `readUrgencySignal` tests added.
 
 **Near-term dispatch quality:**
+- **Urgency negation handling** — `readUrgencySignal` reads a literal "not urgent" as *urgent* (the affirmative check matches the substring "urgent" first). Check negatives before affirmatives, or exclude negated forms. (Pinned by a documented test today.)
 - **Real travel time** — replace haversine with a routing/ETA API (traffic-aware) for the travel term; haversine under-penalizes cross-town jobs.
 - **Confidence-gate tuning** — `MIN_CONFIDENCE_GAP` (0.08) and the scoring weights are provisional constants; tune them on pilot **override-rate** data (how often dispatchers override auto-commits) and outcome data.
 - **Explicit skill matrix** — `skillJobsCompleted` is a proxy; add a technician skill/certification matrix (by system type, refrigeration, gas) so the skill gate is capability-based, not just history-based.
