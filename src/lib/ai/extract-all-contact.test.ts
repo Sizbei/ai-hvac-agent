@@ -55,4 +55,17 @@ describe("extractAllContactFields", () => {
     const r = extractAllContactFields("my ac is broken");
     expect(r).toEqual({ name: null, phone: null, email: null, address: null });
   });
+
+  it("does not mistake issue prose for a name (review H7)", () => {
+    expect(extractAllContactFields("my ac is broken, 4169029212").name).toBeNull();
+    expect(extractAllContactFields("furnace not working 416-902-9212").name).toBeNull();
+    expect(extractAllContactFields("no heat, reach me at ray@x.com").name).toBeNull();
+    // …while the phone/email are still captured
+    expect(extractAllContactFields("my ac is broken, 4169029212").phone).toBe("4169029212");
+  });
+
+  it("still extracts a genuine name alongside contact info", () => {
+    expect(extractAllContactFields("Ray Chen, 4169029212").name).toBe("Ray Chen");
+    expect(extractAllContactFields("Sarah Miller sarah@x.com").name).toBe("Sarah Miller");
+  });
 });

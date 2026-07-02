@@ -67,6 +67,18 @@ function nameFromResidual(message: string, email: string | null): string | null 
     .trim();
 
   if (head.length === 0) return null;
+  // Reject issue prose that happens to be alphabetic: "my ac is broken,
+  // 4169029212" would otherwise resolve to the NAME "My Ac Is Broken". A real
+  // name rarely contains HVAC-symptom / negation / help vocabulary, so a
+  // deny-list is a safe conservative gate (a cue-based name still comes through
+  // detect-correction.extractNameFromCue).
+  if (
+    /\b(ac|a\/c|air|hvac|heat|heating|cool|cooling|cold|hot|warm|furnace|boiler|unit|system|thermostat|compressor|refrigerat\w*|freez\w*|leak\w*|water|smell|noise|broke\w*|break\w*|die\w*|dead|not|no|isn'?t|won'?t|can'?t|work\w*|blow\w*|run\w*|start\w*|repair|fix\w*|help|service|emergency|urgent|problem|issue|please)\b/i.test(
+      head,
+    )
+  ) {
+    return null;
+  }
   // nameFromDirectAnswer also strips "it's"/"my name is" preambles and enforces
   // the 1–4 alphabetic-word shape, so we get the same validation as a name-step
   // answer. A leading street word ("120 Broadway") already lost its number above,
