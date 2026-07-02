@@ -95,19 +95,18 @@ import {
   type CustomerContext,
 } from "@/lib/ai/customer-context";
 import { getThread } from "@/lib/context/thread";
-import { customers, customerLocations } from "@/lib/db/schema";
+import { customers } from "@/lib/db/schema";
 import { buildAccountLookupReply } from "@/lib/ai/account-dispatch";
 import {
   advanceVerify,
   advanceVerifyAnswer,
   looksLikeZipAnswer,
   requiresVerify,
-  extractZipsFromAddress,
   preserveVerifyKey,
   parseVerifyState,
   type VerifyState,
 } from "@/lib/ai/account-verify";
-import { decrypt } from "@/lib/crypto";
+import { loadOnFileZips } from "@/lib/ai/account-zips";
 import { logger } from "@/lib/logger";
 // The deterministic router is on by default; set ROUTER_ENABLED=false to disable
 // it (kill-switch) and route every turn through the LLM.
@@ -146,54 +145,6 @@ function parseSessionMeta(meta: string | null): Record<string, unknown> | null {
   }
 }
 
-/**
- * On-file 5-digit ZIPs for the financial-verify gate: from the customer's own
- * address plus all their service locations, org-scoped and decrypted. Mirrors
- * the voice path (voice-turn.ts). Degrade-safe: any read/decrypt failure yields
- * fewer ZIPs (never throws) — and an empty result can never auto-pass the gate.
- */
-async function loadChatOnFileZips(
-  organizationId: string,
-  customerId: string,
-  sessionId: string,
-): Promise<string[]> {
-  const zips: string[] = [];
-  try {
-    const [custRow] = await db
-      .select({ addressEncrypted: customers.addressEncrypted })
-      .from(customers)
-      .where(withTenant(customers, organizationId, eq(customers.id, customerId)))
-      .limit(1);
-    if (custRow?.addressEncrypted) {
-      try {
-        zips.push(...extractZipsFromAddress(decrypt(custRow.addressEncrypted)));
-      } catch {
-        /* decrypt failure → no ZIP from this source */
-      }
-    }
-  } catch (e: unknown) {
-    logger.error({ error: e, sessionId }, "chat verify: customer address read failed");
-  }
-  try {
-    const locRows = await db
-      .select({ addressEncrypted: customerLocations.addressEncrypted })
-      .from(customerLocations)
-      .where(
-        withTenant(customerLocations, organizationId, eq(customerLocations.customerId, customerId)),
-      )
-      .limit(10);
-    for (const loc of locRows) {
-      try {
-        zips.push(...extractZipsFromAddress(decrypt(loc.addressEncrypted)));
-      } catch {
-        /* decrypt failure → skip this location */
-      }
-    }
-  } catch (e: unknown) {
-    logger.error({ error: e, sessionId }, "chat verify: location address read failed");
-  }
-  return zips;
-}
 
 // Behavioral instruction appended to the LLM system prompt (as a separate block,
 // NOT a rewrite of the brand persona) when the request is currently after-hours.
@@ -916,7 +867,7 @@ export async function POST(request: NextRequest) {
           verdict.action !== "ACCOUNT_LOOKUP" &&
           looksLikeZipAnswer(guardrailResult.sanitized)
         ) {
-          const onFileZips = await loadChatOnFileZips(
+          const onFileZips = await loadOnFileZips(
             organizationId,
             accountCustomerId,
             session.id,
@@ -979,7 +930,7 @@ export async function POST(request: NextRequest) {
         const needZips =
           requiresVerify(verdict.intentId) && verifyState?.status === "pending";
         const onFileZips = needZips
-          ? await loadChatOnFileZips(organizationId, accountCustomerId, session.id)
+          ? await loadOnFileZips(organizationId, accountCustomerId, session.id)
           : [];
         const decision = advanceVerify({
           intentId: verdict.intentId,

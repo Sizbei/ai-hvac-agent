@@ -1,7 +1,12 @@
-import { desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { getAdminSession } from "@/lib/auth/session";
 import { db } from "@/lib/db";
-import { serviceRequests, users, technicianLocations } from "@/lib/db/schema";
+import {
+  serviceRequests,
+  users,
+  technicianLocations,
+  customerLocations,
+} from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { decrypt } from "@/lib/crypto";
 import { fetchAddressSuggestions } from "@/lib/address/photon";
@@ -12,8 +17,10 @@ import { logger } from "@/lib/logger";
 export const dynamic = "force-dynamic";
 
 const ACTIVE_STATUSES = ["scheduled", "assigned", "in_progress", "on_hold"] as const;
-// Geocoding is per-load and best-effort; cap the calls to bound latency + be a
-// good Photon citizen. (A persistent geocode cache is the follow-up.)
+// Most jobs carry cached coordinates from geocode-at-intake (customer_locations).
+// Only jobs still missing them (a booking taken seconds ago, pre-geocode) fall
+// back to a live Photon lookup — capped to bound latency, be a good Photon
+// citizen, and limit how much plaintext address ever leaves the system.
 const MAX_GEOCODE = 25;
 // Only show a tech's pin if their last fix is reasonably fresh.
 const TECH_FRESH_MS = 4 * 60 * 60 * 1000;
@@ -29,9 +36,10 @@ function safeDecrypt(v: string | null): string | null {
 
 /**
  * GET /api/admin/dispatch/map — the data behind the dispatch map: active jobs
- * geocoded from their service address (best-effort via Photon), each technician's
- * latest live location (consent-gated capture, last 4h), and the business base.
- * Admin session only. PII-light: returns reference/status/urgency + coords, no
+ * (coordinates from the cached customer_locations row, falling back to a live
+ * Photon lookup only for jobs not yet geocoded), each technician's latest live
+ * location (consent-gated capture, last 4h), and the business base. Admin
+ * session only. PII-light: returns reference/status/urgency + coords, no
  * customer name or raw address.
  */
 export async function GET() {
@@ -48,7 +56,11 @@ export async function GET() {
       serviceRadiusKm: BUSINESS_BASE_LOCATION.serviceRadiusKm,
     };
 
-    // ── Jobs (geocoded) ──
+    // ── Jobs ──
+    // Prefer the cached coordinates from geocode-at-intake (customer_locations),
+    // joined via the request's location_id. Only jobs still missing coords hit
+    // Photon below — so a normal map load makes zero external calls and never
+    // ships a decrypted address anywhere.
     const jobRows = await db
       .select({
         id: serviceRequests.id,
@@ -59,9 +71,18 @@ export async function GET() {
         addressEncrypted: serviceRequests.addressEncrypted,
         arrivalWindowStart: serviceRequests.arrivalWindowStart,
         technicianName: users.name,
+        cachedLat: customerLocations.latitude,
+        cachedLon: customerLocations.longitude,
       })
       .from(serviceRequests)
       .leftJoin(users, eq(serviceRequests.assignedTo, users.id))
+      .leftJoin(
+        customerLocations,
+        and(
+          eq(customerLocations.id, serviceRequests.locationId),
+          eq(customerLocations.organizationId, session.organizationId),
+        ),
+      )
       .where(
         withTenant(
           serviceRequests,
@@ -71,28 +92,45 @@ export async function GET() {
       )
       .limit(200);
 
+    type JobRow = (typeof jobRows)[number];
+    const project = (r: JobRow, latitude: number, longitude: number) => ({
+      id: r.id,
+      referenceNumber: r.referenceNumber,
+      status: r.status,
+      urgency: r.urgency,
+      issueType: r.issueType,
+      technicianName: r.technicianName,
+      arrivalWindowStart: r.arrivalWindowStart?.toISOString() ?? null,
+      latitude,
+      longitude,
+    });
+
+    const cached: ReturnType<typeof project>[] = [];
+    const needGeocode: JobRow[] = [];
+    for (const r of jobRows) {
+      if (r.cachedLat != null && r.cachedLon != null) {
+        cached.push(project(r, r.cachedLat, r.cachedLon));
+      } else {
+        needGeocode.push(r);
+      }
+    }
+
+    // Fallback for the not-yet-geocoded tail only (best-effort, capped).
     const geocoded = await Promise.all(
-      jobRows.slice(0, MAX_GEOCODE).map(async (r) => {
+      needGeocode.slice(0, MAX_GEOCODE).map(async (r) => {
         const address = safeDecrypt(r.addressEncrypted);
         if (!address) return null;
         const [hit] = await fetchAddressSuggestions(address, {
           near: { lat: base.latitude, lon: base.longitude },
         });
         if (!hit || hit.lat == null || hit.lon == null) return null;
-        return {
-          id: r.id,
-          referenceNumber: r.referenceNumber,
-          status: r.status,
-          urgency: r.urgency,
-          issueType: r.issueType,
-          technicianName: r.technicianName,
-          arrivalWindowStart: r.arrivalWindowStart?.toISOString() ?? null,
-          latitude: hit.lat,
-          longitude: hit.lon,
-        };
+        return project(r, hit.lat, hit.lon);
       }),
     );
-    const jobs = geocoded.filter((j): j is NonNullable<typeof j> => j !== null);
+    const jobs = [
+      ...cached,
+      ...geocoded.filter((j): j is NonNullable<typeof j> => j !== null),
+    ];
 
     // ── Technicians (latest fresh fix per tech) ──
     const locRows = await db
@@ -135,7 +173,7 @@ export async function GET() {
       base,
       jobs,
       technicians,
-      geocodeCapped: jobRows.length > MAX_GEOCODE,
+      geocodeCapped: needGeocode.length > MAX_GEOCODE,
     });
   } catch (error) {
     logger.error({ error }, "Failed to build dispatch map data");

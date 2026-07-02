@@ -15,9 +15,8 @@ import { generateText } from "ai";
 import { after } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { customerSessions, messages, customers, customerLocations, organizationSettings } from "@/lib/db/schema";
+import { customerSessions, messages, customers, organizationSettings } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
-import { decrypt } from "@/lib/crypto";
 import { resolveAfterHoursConfig } from "@/lib/admin/after-hours";
 import { decideAfterHoursDisclosure, inferBookingTarget } from "./after-hours-chat";
 import {
@@ -27,12 +26,12 @@ import {
 import { getThread } from "@/lib/context/thread";
 import { checkTokenBudget, addTokenUsage } from "./token-budget";
 import { buildAccountLookupReply } from "./account-dispatch";
+import { loadOnFileZips } from "./account-zips";
 import {
   requiresVerify,
   advanceVerify,
   advanceVerifyAnswer,
   looksLikeZipAnswer,
-  extractZipsFromAddress,
   parseVerifyState,
   type VerifyState,
 } from "./account-verify";
@@ -379,37 +378,11 @@ export async function voiceReply(params: {
     //
     // Load on-file ZIPs ONLY for a pending financial turn (the one case the engine
     // checks them) — from the customer's address + every service location.
-    const onFileZips: string[] = [];
-    if ((requiresVerify(intentId) || isVerifyAnswerTurn) && verifyState?.status === "pending") {
-      try {
-        const [custRow] = await db
-          .select({ addressEncrypted: customers.addressEncrypted })
-          .from(customers)
-          .where(withTenant(customers, organizationId, eq(customers.id, session.customerId!)))
-          .limit(1);
-        if (custRow?.addressEncrypted) {
-          try {
-            onFileZips.push(...extractZipsFromAddress(decrypt(custRow.addressEncrypted)));
-          } catch { /* decrypt failure → no ZIP from this source */ }
-        }
-      } catch (e: unknown) {
-        logger.error({ error: e, sessionId: session.id }, "voice verify: customer address read failed");
-      }
-      try {
-        const locRows = await db
-          .select({ addressEncrypted: customerLocations.addressEncrypted })
-          .from(customerLocations)
-          .where(withTenant(customerLocations, organizationId, eq(customerLocations.customerId, session.customerId!)))
-          .limit(10);
-        for (const loc of locRows) {
-          try {
-            onFileZips.push(...extractZipsFromAddress(decrypt(loc.addressEncrypted)));
-          } catch { /* decrypt failure → skip this location */ }
-        }
-      } catch (e: unknown) {
-        logger.error({ error: e, sessionId: session.id }, "voice verify: location address read failed");
-      }
-    }
+    const onFileZips: string[] =
+      (requiresVerify(intentId) || isVerifyAnswerTurn) &&
+      verifyState?.status === "pending"
+        ? await loadOnFileZips(organizationId, session.customerId!, session.id)
+        : [];
 
     // Stage 5b: the bare-ZIP ANSWER turn (router said FALLBACK). Advance the
     // verify state from the keyed/spoken ZIP. SAFETY: this NEVER serves account

@@ -574,6 +574,14 @@ export async function placeAndAssignRequest(
     readonly technicianId?: string;
     /** Commit despite a detected conflict/out-of-hours (dispatcher confirmed). */
     readonly override?: boolean;
+    /**
+     * Only place if the request is still unassigned. Used by background
+     * auto-dispatch so it can never overwrite an assignment a human dispatcher
+     * made (e.g. a calendar drag) during the several-second scoring window — a
+     * drag sets assignedTo without changing status, so the status CAS alone
+     * wouldn't catch it. Interactive reassignment leaves this unset.
+     */
+    readonly requireUnassigned?: boolean;
   },
 ): Promise<PlaceAndAssignResult> {
   const [existing] = await db
@@ -680,6 +688,12 @@ export async function placeAndAssignRequest(
         and(
           eq(serviceRequests.id, requestId),
           eq(serviceRequests.status, currentStatus),
+          // Auto-dispatch only: refuse to place if a human already claimed the
+          // job. A calendar drag sets assignedTo but not status, so this is the
+          // only guard that catches that race.
+          options.requireUnassigned
+            ? isNull(serviceRequests.assignedTo)
+            : undefined,
         )!,
       ),
     )
@@ -692,7 +706,8 @@ export async function placeAndAssignRequest(
     });
 
   if (!updated) {
-    // Status-guarded UPDATE matched nothing → a concurrent write moved the row.
+    // Guarded UPDATE matched nothing → a concurrent write moved the row (status
+    // changed) or, under requireUnassigned, a dispatcher claimed it first.
     return { ok: false, reason: "request_not_found" };
   }
 
@@ -1195,7 +1210,14 @@ export async function autoAssignBookedRequest(
       organizationId,
       requestId,
       { start: heldSlot.start, end: heldSlot.end },
-      { isoDay: heldSlot.isoDay, window: heldSlot.window, technicianId },
+      {
+        isoDay: heldSlot.isoDay,
+        window: heldSlot.window,
+        technicianId,
+        // Background path: never clobber a dispatcher's manual assignment made
+        // during the scoring window.
+        requireUnassigned: true,
+      },
     );
     if (result.ok) {
       await markAutoAssigned(organizationId, requestId, technicianId);
