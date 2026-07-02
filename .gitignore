@@ -22,6 +22,7 @@
 
 # misc
 .DS_Store
+Icon?
 *.pem
 
 # debug

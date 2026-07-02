@@ -1,7 +1,6 @@
 # Conversation-Quality Eval Harness
 
-Makes bot quality **measurable** and **regression-gated** (CHATBOT-PLAN Steps 8
-& 9). Three tools:
+Makes bot quality **measurable** and **regression-gated**. Three tools:
 
 1. **Deterministic eval** — runs fully offline, gates CI. Replays labeled golden
    transcripts through the pure router (`routeMessage`) + guardrails

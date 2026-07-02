@@ -10,7 +10,6 @@ node_modules
 tests
 *.test.ts
 drizzle/meta
-test_qwen.py
 
 # Local env / secrets (never upload)
 .env
