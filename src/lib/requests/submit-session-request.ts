@@ -49,12 +49,19 @@ import {
 import {
   pickBookableSlot,
   arrivalWindowForSlot,
+  reserveCeilingForBand,
 } from "@/lib/admin/capacity-hold";
+import {
+  reserveCapacitySlot,
+  releaseReservationById,
+} from "@/lib/admin/capacity-reservation-queries";
 import { pushJobToHcp } from "@/lib/integrations/housecall-pro/job-sync";
 import { pushJobToFieldpulse } from "@/lib/integrations/fieldpulse/job-sync";
 import type { ArrivalWindow } from "@/lib/admin/arrival-window";
 import { recordCustomerEquipment } from "@/lib/admin/crm-equipment-queries";
 import { buildEquipmentFromIntake } from "@/lib/admin/equipment-from-intake";
+import { appendEvent } from "@/lib/context/thread";
+import { persistJobLocation } from "@/lib/requests/persist-job-location";
 import { logger } from "@/lib/logger";
 
 export function generateReferenceNumber(): string {
@@ -67,18 +74,26 @@ export function generateReferenceNumber(): string {
  *
  * Re-verifies the customer's preferred window against CURRENT availability
  * right before the write and, when the band still has an opening, turns the
- * soft `preferredWindow` label into a CONCRETE arrival window that consumes
- * calendar capacity. NEVER blocks the lead: any failure or a full band returns
+ * soft `preferredWindow` label into a CONCRETE arrival window AND atomically
+ * RESERVES a unit of that band's capacity (capacity_reservations) so two
+ * concurrent confirms can't both take the last opening. The UNIQUE constraint is
+ * the compare-and-swap: if the band is full at claim time the reserve returns
+ * null → soft booking. NEVER blocks the lead: any failure or a full band returns
  * null and the caller falls back to the soft booking.
+ *
+ * The returned `reservationId` lets the caller clean the hold up if the request
+ * insert it belongs to later fails.
  */
 async function holdConcreteSlot(
   organizationId: string,
   preferredWindow: string | null | undefined,
+  serviceRequestId: string,
 ): Promise<{
   readonly startUtc: Date;
   readonly endUtc: Date;
   readonly day: string;
   readonly window: string;
+  readonly reservationId: string;
 } | null> {
   if (!preferredWindow) return null;
   try {
@@ -89,8 +104,26 @@ async function holdConcreteSlot(
     const availability = await getOpenAvailability(organizationId, days);
     const slot = pickBookableSlot(availability, preferredWindow);
     if (!slot) return null; // preferred band full across the range → soft booking
+    // Atomically claim a unit of the band. Ceiling = capacity − already-placed
+    // bookings (from this same snapshot), so placed + reserved never exceeds
+    // capacity. A lost CAS across every ordinal → band full → soft booking.
+    const ceiling = reserveCeilingForBand(availability, slot.day, slot.window);
+    const reservation = await reserveCapacitySlot({
+      organizationId,
+      day: slot.day,
+      window: slot.window,
+      ceiling,
+      serviceRequestId,
+    });
+    if (!reservation) return null; // no unit could be claimed → soft booking
     const { startUtc, endUtc } = arrivalWindowForSlot(slot.day, slot.window);
-    return { startUtc, endUtc, day: slot.day, window: slot.window };
+    return {
+      startUtc,
+      endUtc,
+      day: slot.day,
+      window: slot.window,
+      reservationId: reservation.id,
+    };
   } catch (holdError: unknown) {
     logger.error(
       { error: holdError, organizationId },
@@ -105,6 +138,17 @@ export type SubmitSessionResult =
       readonly ok: true;
       readonly referenceNumber: string;
       readonly serviceRequestId: string;
+      // The CONCRETE arrival window this submission actually RESERVED (via the
+      // confirm-time capacity hold), or null on a soft booking. The invariant
+      // both channels rely on: a non-null value here means a real unit of
+      // capacity was claimed, so it's safe to promise the customer this window.
+      // Null → keep soft "we'll confirm your time" language.
+      readonly heldWindow: {
+        readonly day: string;
+        readonly window: string;
+        readonly startUtc: string;
+        readonly endUtc: string;
+      } | null;
     }
   | { readonly ok: false; readonly reason: "do_not_service" | "insert_failed" };
 
@@ -164,7 +208,11 @@ export async function submitSessionServiceRequest(params: {
     settingsRow?.afterHoursConfig ?? null,
   );
 
-  const heldSlot = await holdConcreteSlot(organizationId, data.preferredWindow);
+  const heldSlot = await holdConcreteSlot(
+    organizationId,
+    data.preferredWindow,
+    serviceRequestId,
+  );
 
   // The after-hours FLAG must reflect WHEN THE TECHNICIAN GOES OUT, not when
   // the customer happens to confirm. When we hold a concrete arrival window,
@@ -277,12 +325,36 @@ export async function submitSessionServiceRequest(params: {
 
   // The neon-http batch is atomic: request + session + audit (+ consent when the
   // customer expressed an SMS preference) all commit together or not at all.
-  const [insertedRequests] = consentUpsert
-    ? await db.batch([requestInsert, sessionUpdate, auditInsert, consentUpsert])
-    : await db.batch([requestInsert, sessionUpdate, auditInsert]);
+  // If it THROWS (a documented live failure mode here — see the
+  // migrations-not-run-on-deploy note), nothing persisted, so the capacity hold
+  // we claimed for this request must be released or it squats a future slot until
+  // that day passes. Release on BOTH the throw path (here) and the empty-return
+  // path (below).
+  let batchResult;
+  try {
+    batchResult = consentUpsert
+      ? await db.batch([requestInsert, sessionUpdate, auditInsert, consentUpsert])
+      : await db.batch([requestInsert, sessionUpdate, auditInsert]);
+  } catch (batchError: unknown) {
+    if (heldSlot) {
+      await releaseReservationById(organizationId, heldSlot.reservationId);
+    }
+    logger.error(
+      { error: batchError, sessionId },
+      "Booking batch failed after the capacity hold — released the reservation",
+    );
+    return { ok: false, reason: "insert_failed" };
+  }
 
+  const insertedRequests = batchResult[0];
   const serviceRequest = insertedRequests[0];
   if (!serviceRequest) {
+    // The request never persisted — release the capacity hold we claimed for it
+    // so the orphaned reservation doesn't squat a slot forever (it's linked to a
+    // request id that will never exist). Best-effort.
+    if (heldSlot) {
+      await releaseReservationById(organizationId, heldSlot.reservationId);
+    }
     return { ok: false, reason: "insert_failed" };
   }
 
@@ -304,6 +376,43 @@ export async function submitSessionServiceRequest(params: {
   // the job) which keeps it idempotent.
   after(() => pushJobToHcp(organizationId, serviceRequest.id));
   after(() => pushJobToFieldpulse(organizationId, serviceRequest.id));
+
+  // Customer-thread eventing (Probook v3): record the booking on the customer's
+  // thread for cross-channel recognition. Best-effort (appendEvent never throws)
+  // and additive — guarded on a resolved customerId since the thread is keyed by
+  // it. The fields come from in-scope values (the returned row carries only id).
+  if (customerId) {
+    after(() =>
+      appendEvent(organizationId, customerId, {
+        kind: "booking",
+        labelKey: "booked",
+        refId: serviceRequest.id,
+        jobType: jobTypeForIssue(data.issueType),
+        window: data.preferredWindow ?? null,
+        channel: "web",
+      }),
+    );
+  }
+
+  // Cache the job's coordinates for the dispatch map + travel-aware dispatch.
+  // Geocode the plaintext service address ONCE (Photon), store it on a customer
+  // location, and link it to this request via location_id. BACKGROUND (after())
+  // so it never adds latency to the booking, and fully degrade-safe — a geocode
+  // miss or db hiccup leaves location_id null and the map falls back to on-demand
+  // geocoding, exactly as today.
+  // Guard on customerId (matching the sibling appendEvent call) — a falsy id would
+  // just be caught + logged in the helper, but skipping avoids the wasted Photon
+  // call + noisy log.
+  if (customerId) {
+    after(() =>
+      persistJobLocation({
+        organizationId,
+        customerId,
+        serviceRequestId: serviceRequest.id,
+        address: data.address,
+      }),
+    );
+  }
 
   // Stage 2: when we held a CONCRETE window, auto-assign a technician in the
   // background (placeAndAssignRequest runs a conflict check — too slow for the
@@ -376,5 +485,21 @@ export async function submitSessionServiceRequest(params: {
 
   logger.info({ sessionId, referenceNumber }, "Service request submitted");
 
-  return { ok: true, referenceNumber, serviceRequestId: serviceRequest.id };
+  return {
+    ok: true,
+    referenceNumber,
+    serviceRequestId: serviceRequest.id,
+    // Surface the concretely-held window (null on soft booking). Dates → ISO so
+    // the result crosses the channel boundary as plain JSON. This is the ONLY
+    // window either channel may promise — it exists iff a capacity unit was
+    // actually reserved above.
+    heldWindow: heldSlot
+      ? {
+          day: heldSlot.day,
+          window: heldSlot.window,
+          startUtc: heldSlot.startUtc.toISOString(),
+          endUtc: heldSlot.endUtc.toISOString(),
+        }
+      : null,
+  };
 }

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   applyOptimisticReschedule,
+  applyOptimisticUnschedule,
   currentScopeOf,
   UNASSIGNED_SCOPE,
 } from "./calendar-optimistic";
@@ -20,6 +21,7 @@ function job(overrides: Partial<DashboardRequest>): DashboardRequest {
     arrivalWindowEnd: null,
     followUpDate: null,
     holdReason: null,
+    autoAssigned: false,
     createdAt: "2026-06-01T00:00:00.000Z",
     ...overrides,
   };
@@ -166,5 +168,33 @@ describe("currentScopeOf", () => {
 
   it("returns null when the job isn't on the board", () => {
     expect(currentScopeOf(board({}), "ghost")).toBeNull();
+  });
+});
+
+describe("applyOptimisticUnschedule", () => {
+  it("moves a placed job out of its lane into the unscheduled queue and clears it", () => {
+    const placed = job({
+      id: "job-p",
+      assignedToName: "Tech A",
+      arrivalWindowStart: "2026-07-01T12:00:00.000Z",
+      arrivalWindowEnd: "2026-07-01T16:00:00.000Z",
+    });
+    const before = board({
+      lanes: [{ technicianId: TECH, technicianName: "Tech A", jobs: [placed] }],
+    });
+
+    const after = applyOptimisticUnschedule(before, "job-p");
+
+    expect(after.lanes[0].jobs).toHaveLength(0);
+    expect(after.unscheduled.map((j) => j.id)).toContain("job-p");
+    const moved = after.unscheduled.find((j) => j.id === "job-p")!;
+    expect(moved.arrivalWindowStart).toBeNull();
+    expect(moved.arrivalWindowEnd).toBeNull();
+    expect(moved.assignedToName).toBeNull();
+  });
+
+  it("returns the SAME reference when the job is not on the board", () => {
+    const before = board({});
+    expect(applyOptimisticUnschedule(before, "missing")).toBe(before);
   });
 });

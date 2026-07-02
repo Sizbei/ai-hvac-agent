@@ -62,27 +62,63 @@ export function arrivalWindowForDate(
   return { start, end };
 }
 
-/** Human label for a persisted arrival window, e.g. "Jun 10, 8:00 AM – 12:00 PM". */
+/** Human label for a persisted arrival window, e.g. "Jun 10, 8:00 AM – 12:00 PM".
+ *
+ * `timeZone` selects the wall clock to render in. Defaults to "UTC" for windows
+ * produced by arrivalWindowForDate (which anchors band hours in UTC). Windows
+ * produced by arrivalWindowForSlot / arrivalWindowUtcForBusinessDate anchor band
+ * hours in the BUSINESS timezone, so those must be rendered with the business
+ * timezone (e.g. "America/New_York") to show the real local hours to a customer —
+ * otherwise an 8 AM ET slot (12:00Z) would read as 12 PM. */
 export function formatArrivalWindow(
   startIso: string | null,
   endIso: string | null,
+  timeZone = "UTC",
 ): string | null {
   if (!startIso || !endIso) return null;
   const start = new Date(startIso);
   const end = new Date(endIso);
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
-  // The window is stored UTC-anchored (see arrivalWindowForDate), so render it
-  // in UTC for a stable label independent of the viewer's timezone.
   const day = start.toLocaleDateString(undefined, {
     month: "short",
     day: "numeric",
-    timeZone: "UTC",
+    timeZone,
   });
   const time = (d: Date) =>
     d.toLocaleTimeString(undefined, {
       hour: "numeric",
       minute: "2-digit",
-      timeZone: "UTC",
+      timeZone,
     });
   return `${day}, ${time(start)} – ${time(end)}`;
+}
+
+/**
+ * Spoken-friendly variant of the same window, for the voice channel's TTS —
+ * e.g. "Wednesday, July 10 between 8 AM and 12 PM". No en-dash or 2-digit
+ * minutes (they read awkwardly aloud); weekday + long month make the date
+ * unambiguous by ear. Same `timeZone` semantics + degrade-safe null contract as
+ * formatArrivalWindow (pass the business timezone for a slot-anchored window).
+ */
+export function formatArrivalWindowSpoken(
+  startIso: string | null,
+  endIso: string | null,
+  timeZone = "UTC",
+): string | null {
+  if (!startIso || !endIso) return null;
+  const start = new Date(startIso);
+  const end = new Date(endIso);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+  const day = start.toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    timeZone,
+  });
+  const time = (d: Date) =>
+    d.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      timeZone,
+    });
+  return `${day} between ${time(start)} and ${time(end)}`;
 }

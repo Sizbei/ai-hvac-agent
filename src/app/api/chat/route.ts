@@ -15,7 +15,7 @@ import {
 } from "@/lib/admin/after-hours";
 import {
   decideAfterHoursDisclosure,
-  type BookingTarget,
+  inferBookingTarget,
   type CustomerUrgencySignal,
 } from "@/lib/ai/after-hours-chat";
 import { withTenant } from "@/lib/db/tenant";
@@ -81,18 +81,32 @@ import {
   mergeSlots,
   hasSlotData,
   buildExtraction,
+  serializeSessionMetadata,
+  parseUrgencyAnswer,
   SKIP_SENTINEL,
 } from "@/lib/ai/chat-slots";
 import { buildModelMessages, MAX_HISTORY, type ChatTurn } from "@/lib/ai/compaction";
 import { compactSessionIfNeeded } from "@/lib/ai/compact-session";
 import {
   lookupCustomerContext,
+  loadCustomerContextById,
   buildCustomerContextHint,
   enrichWithServiceHistory,
   type CustomerContext,
 } from "@/lib/ai/customer-context";
+import { getThread } from "@/lib/context/thread";
 import { customers } from "@/lib/db/schema";
 import { buildAccountLookupReply } from "@/lib/ai/account-dispatch";
+import {
+  advanceVerify,
+  advanceVerifyAnswer,
+  looksLikeZipAnswer,
+  requiresVerify,
+  preserveVerifyKey,
+  parseVerifyState,
+  type VerifyState,
+} from "@/lib/ai/account-verify";
+import { loadOnFileZips } from "@/lib/ai/account-zips";
 import { logger } from "@/lib/logger";
 // The deterministic router is on by default; set ROUTER_ENABLED=false to disable
 // it (kill-switch) and route every turn through the LLM.
@@ -105,6 +119,32 @@ const ESCALATION_NOTE =
 // same refusal whether they reach the flag mid-chat or at confirm time.
 const DO_NOT_SERVICE_REPLY =
   "We're unable to book this online. Please call our office so we can help you directly.";
+
+// Financial-account verify gate (Stage 5, parity with voice's VOICE_VERIFY_*).
+// Text-channel wording — no DTMF/keypad phrasing; the customer types the ZIP back.
+const CHAT_VERIFY_ASK =
+  "To pull up your account details, can you confirm the 5-digit ZIP code on your account?";
+const CHAT_VERIFY_DEFER =
+  "I can't confirm that here right now — our team can follow up, or you can check your account online. Anything else I can help with?";
+// Spoken after a correct ZIP arrives as a bare reply to the challenge. We don't
+// store which intent issued the challenge, so we confirm + invite the re-ask
+// (the next turn classifies as ACCOUNT_LOOKUP and serves the data, now verified).
+const CHAT_VERIFY_PASSED =
+  "Thanks — you're verified. What would you like to know about your account (balance or membership)?";
+
+/** Parse session metadata JSON into an object, or null when absent/unparseable. */
+function parseSessionMeta(meta: string | null): Record<string, unknown> | null {
+  if (!meta) return null;
+  try {
+    const parsed = JSON.parse(meta);
+    return parsed && typeof parsed === "object"
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 
 // Behavioral instruction appended to the LLM system prompt (as a separate block,
 // NOT a rewrite of the brand persona) when the request is currently after-hours.
@@ -141,63 +181,6 @@ function readUrgencySignal(
   ) {
     return "not_urgent";
   }
-  return "unknown";
-}
-
-/**
- * Map a customer's answer to the triage URGENCY step onto the canonical urgency
- * enum (0-token). Accepts the chip values verbatim (emergency/high/medium/low)
- * and the common natural phrasings the chips are labeled with ("emergency",
- * "soon"/"today", "this week", "routine"/"whenever"). Returns null when the
- * answer carries no clear urgency, so the caller can defer to the LLM rather
- * than guess. Only called when the urgency step was the pending question.
- */
-function parseUrgencyAnswer(message: string): "low" | "medium" | "high" | "emergency" | null {
-  const m = message.trim().toLowerCase();
-  if (m.length === 0) return null;
-  // Exact chip values.
-  if (m === "emergency" || m === "high" || m === "medium" || m === "low") {
-    return m;
-  }
-  // Natural phrasings.
-  if (/\b(emergency|right now|immediately|can'?t wait|asap)\b/.test(m)) return "emergency";
-  if (/\b(soon|today|tonight|urgent|as soon as)\b/.test(m)) return "high";
-  if (/\b(this week|few days|couple days|medium)\b/.test(m)) return "medium";
-  if (/\b(routine|whenever|no rush|not urgent|can wait|low|sometime)\b/.test(m)) return "low";
-  return null;
-}
-
-/**
- * Infer WHEN the customer wants the service to happen — the signal that gates
- * the after-hours charge (Fix 2). The charge is keyed to when the technician
- * goes out, NOT when the customer is chatting, so a request explicitly for a
- * business-hours window must never trigger a charge even if chatting at 11pm.
- *
- * Sources, in priority order:
- *   1. The customer's stated preferred window (extras.preferredWindow):
- *      morning/afternoon/evening → business_hours; asap → now.
- *   2. The yes/no answer to our after-hours urgency ask: not_urgent →
- *      business_hours; urgent → now.
- * Otherwise "unknown" — fall back to urgency classification in the helper.
- *
- * Note we deliberately do NOT map a high/emergency urgency to "now" here; the
- * helper already handles urgency directly, and a stated business-hours window
- * should be able to override that heuristic.
- */
-function inferBookingTarget(
-  preferredWindow: unknown,
-  customerSignal: CustomerUrgencySignal,
-): BookingTarget {
-  if (preferredWindow === "asap") return "now";
-  if (
-    preferredWindow === "morning" ||
-    preferredWindow === "afternoon" ||
-    preferredWindow === "evening"
-  ) {
-    return "business_hours";
-  }
-  if (customerSignal === "not_urgent") return "business_hours";
-  if (customerSignal === "urgent") return "now";
   return "unknown";
 }
 
@@ -689,18 +672,38 @@ export async function POST(request: NextRequest) {
       extras: { ...(knownSlots.extras ?? {}) },
     });
 
-    // Repeat-customer awareness: as soon as an email or phone is known (from a
-    // prior turn's metadata OR a contact slot in THIS message), resolve any
-    // existing customer — WITHOUT creating one — so we can (a) personalize the
-    // reply, (b) enforce do-not-service early, and (c) skip re-asking the name.
-    // A single indexed blind-index lookup; wrapped so a CRM blip degrades to
-    // "no context" and never blocks the streamed reply. Only when the session
-    // isn't already linked (the load gate above handles linked sessions).
+    // Repeat-customer awareness, every turn — so personalization (name greeting,
+    // skip re-asking, prior-service note) persists for the whole conversation:
+    //  - LINKED session (customerId already set on a prior turn or a resume):
+    //    load the context by id. Without this the hint vanished after turn 1.
+    //  - UNLINKED session: as soon as an email or phone is known (prior-turn
+    //    metadata OR a contact slot in THIS message), resolve any existing
+    //    customer WITHOUT creating one, link the session, and enforce
+    //    do-not-service mid-turn.
+    // Either path is a single indexed lookup, wrapped so a CRM blip degrades to
+    // "no context" and never blocks the streamed reply.
     const turnSlots = extractSlots(guardrailResult.sanitized);
     const resolvedEmail = knownSlots.email ?? turnSlots.email ?? null;
     const resolvedPhone = knownSlots.phone ?? turnSlots.phone ?? null;
     let customerContext: CustomerContext | null = null;
-    if (!session.customerId && (resolvedEmail || resolvedPhone)) {
+    if (session.customerId) {
+      // Already-linked session (resolved on a prior turn, or resumed): load the
+      // context by id so the returning-customer hint + name pre-fill PERSIST on
+      // every later turn — without this, personalization vanished after turn 1
+      // (the email-based branch below only fires for an unlinked session). Parity
+      // with the voice path. Do-not-service was already enforced by the load gate
+      // above, so this branch only re-hydrates context; degrade-safe.
+      customerContext = await loadCustomerContextById(
+        organizationId,
+        session.customerId,
+      ).catch((loadError: unknown) => {
+        logger.error(
+          { error: loadError, sessionId: session.id },
+          "Customer-context load by id failed — continuing without context",
+        );
+        return null;
+      });
+    } else if (resolvedEmail || resolvedPhone) {
       customerContext = await lookupCustomerContext(organizationId, {
         email: resolvedEmail,
         phone: resolvedPhone,
@@ -840,28 +843,46 @@ export async function POST(request: NextRequest) {
       // inside routeMessage above and short-circuit before any account intent).
       const accountCustomerId =
         session.customerId ?? customerContext?.customerId ?? null;
-      // The router emits ACCOUNT_LOOKUP for BOTH the new account_data intents and
-      // the carved-out legacy reference intents (account-check-status,
-      // account-change-appointment, scheduling-reschedule). We act on it ONLY for
-      // an identified session; an unidentified one falls through to the normal
-      // deterministic path, which uses the verdict's canned identify-ask reply
-      // (no leak). buildAccountLookupReply maps the intentId to the right tool.
-      if (verdict.action === "ACCOUNT_LOOKUP" && accountCustomerId) {
-        const accountReply = await buildAccountLookupReply(
-          verdict.intentId,
-          organizationId,
-          accountCustomerId,
-          guardrailResult.sanitized,
-        ).catch((accountError: unknown) => {
-          logger.error(
-            { error: accountError, sessionId: session.id, intentId: verdict.intentId },
-            "Account-lookup failed — degrading to handoff copy",
-          );
-          return null;
-        });
 
-        if (accountReply !== null) {
-          const replyText = accountReply + (nearTurnLimit ? ESCALATION_NOTE : "");
+      // Stage 5b: a pending financial-verify challenge is answered by a BARE ZIP
+      // reply, which the keyword router classifies as FALLBACK (not ACCOUNT_LOOKUP)
+      // — so the answer turn must be handled HERE, outside the intent gate, or
+      // pending→passed is unreachable on a natural reply (the v2-review bug).
+      // SAFETY: this block NEVER serves account data — it only advances the verify
+      // state and replies with canned copy. On a pass it invites the re-ask, which
+      // the next turn serves via the gate below (now that verify is "passed"). So
+      // it cannot leak financial data even if the heuristic mis-fires.
+      {
+        // Shared VALIDATED parse (brain-unification D3): a malformed verify key
+        // is discarded, never blind-cast into advanceVerify. vMeta is still the
+        // raw object — the persist below spreads ALL metadata keys forward.
+        const vMeta = parseSessionMeta(session.metadata);
+        const vState = parseVerifyState(session.metadata);
+        if (
+          accountCustomerId &&
+          vState?.status === "pending" &&
+          // A re-stated "balance 37601" classifies as ACCOUNT_LOOKUP and goes
+          // through the gate below (which serves the right intent); only a bare
+          // ZIP reply is handled here.
+          verdict.action !== "ACCOUNT_LOOKUP" &&
+          looksLikeZipAnswer(guardrailResult.sanitized)
+        ) {
+          const onFileZips = await loadOnFileZips(
+            organizationId,
+            accountCustomerId,
+            session.id,
+          );
+          const decision = advanceVerifyAnswer(
+            vState,
+            guardrailResult.sanitized,
+            onFileZips,
+          );
+          const replyText =
+            decision.kind === "serve"
+              ? CHAT_VERIFY_PASSED
+              : decision.kind === "ask"
+                ? CHAT_VERIFY_ASK
+                : CHAT_VERIFY_DEFER;
           await db.insert(messages).values({
             organizationId,
             sessionId: session.id,
@@ -871,7 +892,83 @@ export async function POST(request: NextRequest) {
           });
           await db
             .update(customerSessions)
-            .set({ turnCount: newTurnCount, updatedAt: new Date() })
+            .set({
+              turnCount: newTurnCount,
+              metadata: JSON.stringify({ ...(vMeta ?? {}), verify: decision.verify }),
+              updatedAt: new Date(),
+            })
+            .where(sessionScope);
+          logger.info(
+            {
+              sessionId: session.id,
+              routed: "deterministic",
+              action: "VERIFY_ANSWER",
+              verifyStatus: decision.verify?.status,
+              turnCount: newTurnCount,
+            },
+            "Chat turn resolved deterministically (financial-verify answer)",
+          );
+          return cannedTextResponse(replyText);
+        }
+      }
+
+      // The router emits ACCOUNT_LOOKUP for BOTH the new account_data intents and
+      // the carved-out legacy reference intents (account-check-status,
+      // account-change-appointment, scheduling-reschedule). We act on it ONLY for
+      // an identified session; an unidentified one falls through to the normal
+      // deterministic path, which uses the verdict's canned identify-ask reply
+      // (no leak). buildAccountLookupReply maps the intentId to the right tool.
+      if (verdict.action === "ACCOUNT_LOOKUP" && accountCustomerId) {
+        // FINANCIAL-VERIFY GATE (Stage 5, parity with voice): balance /
+        // membership-status are only read aloud after a ZIP match; voice already
+        // gates these and chat must not be a weaker channel. The decision is the
+        // shared pure engine (advanceVerify) so the two channels can't drift.
+        // Validated state for the gate; raw object for the spread-forward write.
+        const existingMeta = parseSessionMeta(session.metadata);
+        const verifyState = parseVerifyState(session.metadata);
+        // Only a pending financial turn needs the (more expensive) ZIP read.
+        const needZips =
+          requiresVerify(verdict.intentId) && verifyState?.status === "pending";
+        const onFileZips = needZips
+          ? await loadOnFileZips(organizationId, accountCustomerId, session.id)
+          : [];
+        const decision = advanceVerify({
+          intentId: verdict.intentId,
+          state: verifyState,
+          zipAnswer: guardrailResult.sanitized,
+          onFileZips,
+        });
+
+        // Persist a deterministic account/verify turn — merging the verify state
+        // into metadata (preserving all slots) and returning. Defined inline to
+        // share the messages + session writes + telemetry across the 3 outcomes.
+        const finishAccountTurn = async (
+          replyText: string,
+          verifyToPersist: VerifyState | null,
+        ): Promise<Response> => {
+          await db.insert(messages).values({
+            organizationId,
+            sessionId: session.id,
+            role: "assistant",
+            content: replyText,
+            tokensUsed: 0,
+          });
+          await db
+            .update(customerSessions)
+            .set({
+              turnCount: newTurnCount,
+              // Only write metadata when there's verify state to persist; never
+              // fabricate a verify key on a turn that didn't produce one.
+              ...(verifyToPersist !== null
+                ? {
+                    metadata: JSON.stringify({
+                      ...(existingMeta ?? {}),
+                      verify: verifyToPersist,
+                    }),
+                  }
+                : {}),
+              updatedAt: new Date(),
+            })
             .where(sessionScope);
           logger.info(
             {
@@ -896,9 +993,46 @@ export async function POST(request: NextRequest) {
             }),
           );
           return cannedTextResponse(replyText);
+        };
+
+        if (decision.kind === "ask") {
+          return finishAccountTurn(CHAT_VERIFY_ASK, decision.verify);
         }
-        // accountReply === null (unknown intent or a read failed): fall through
-        // to the normal path, which degrades gracefully.
+        if (decision.kind === "defer") {
+          return finishAccountTurn(CHAT_VERIFY_DEFER, decision.verify);
+        }
+        // decision.kind === "serve": cleared the gate (non-financial, already
+        // passed, or a correct ZIP this turn) — read the account data.
+        const accountReply = await buildAccountLookupReply(
+          verdict.intentId,
+          organizationId,
+          accountCustomerId,
+          guardrailResult.sanitized,
+        ).catch((accountError: unknown) => {
+          logger.error(
+            { error: accountError, sessionId: session.id, intentId: verdict.intentId },
+            "Account-lookup failed — degrading to handoff copy",
+          );
+          return null;
+        });
+
+        if (accountReply !== null) {
+          return finishAccountTurn(
+            accountReply + (nearTurnLimit ? ESCALATION_NOTE : ""),
+            decision.verify,
+          );
+        }
+        // accountReply === null (unknown intent / read failed). If the customer
+        // JUST passed the ZIP check this turn, persist the pass + defer so they
+        // aren't forced to re-verify on a retry; otherwise fall through to the
+        // normal deterministic path, which degrades gracefully.
+        if (
+          decision.verify?.status === "passed" &&
+          verifyState?.status !== "passed"
+        ) {
+          return finishAccountTurn(CHAT_VERIFY_DEFER, decision.verify);
+        }
+        // fall through to the normal path.
       }
 
       // Multi-field capture: pull EVERY recognizable contact field from this one
@@ -1079,12 +1213,13 @@ export async function POST(request: NextRequest) {
             email: extracted.email ?? undefined,
           });
           const escMetadata = hasSlotData(escMerged)
-            ? JSON.stringify(
-                buildExtraction(
-                  escMerged,
-                  (conversationHistory.find((m) => m.role === "user")
-                    ?.content ?? guardrailResult.sanitized).slice(0, 280),
-                ),
+            ? // Shared serializer (brain-unification #1): keeps the financial-
+              // verify lockout across this rebuild (escalation path) too.
+              serializeSessionMetadata(
+                escMerged,
+                conversationHistory.find((m) => m.role === "user")?.content ??
+                  guardrailResult.sanitized,
+                session.metadata,
               )
             : session.metadata;
           await db
@@ -1296,7 +1431,13 @@ export async function POST(request: NextRequest) {
             firstUserMessage.slice(0, 280),
           );
           extractionComplete = isExtractionComplete(extraction);
-          metadataStr = JSON.stringify(extraction);
+          // Shared serializer (brain-unification #1): preserves the financial-
+          // verify lockout, which buildExtraction does not round-trip.
+          metadataStr = serializeSessionMetadata(
+            merged,
+            firstUserMessage,
+            session.metadata,
+          );
         }
 
         // Stage 5.2: if the next thing to ask is the preferred-window step AND
@@ -1521,23 +1662,22 @@ export async function POST(request: NextRequest) {
         // Persist the conversation-style state (empathy-once flag, re-ask counter,
         // frustration running score/offered) so the next turn — deterministic OR
         // LLM — stays coherent. Folded into the metadata extras in one write.
-        metadataStr = JSON.stringify(
-          buildExtraction(
-            mergeSlots(merged, {
-              extras: {
-                ...afterHoursExtras,
-                ...(emittedLeadIn ? { empathyShown: "1" } : {}),
-                reAskStepId: reAsk.stepId ?? "",
-                reAskCount: reAsk.count,
-                frustrationScore: frustration.total,
-                ...(offerHuman ? { frustrationOffered: "1" } : {}),
-              },
-            }),
-            (
-              conversationHistory.find((m) => m.role === "user")?.content ??
-              guardrailResult.sanitized
-            ).slice(0, 280),
-          ),
+        // Shared serializer (brain-unification #1): preserves the financial-
+        // verify lockout, which buildExtraction does not round-trip.
+        metadataStr = serializeSessionMetadata(
+          mergeSlots(merged, {
+            extras: {
+              ...afterHoursExtras,
+              ...(emittedLeadIn ? { empathyShown: "1" } : {}),
+              reAskStepId: reAsk.stepId ?? "",
+              reAskCount: reAsk.count,
+              frustrationScore: frustration.total,
+              ...(offerHuman ? { frustrationOffered: "1" } : {}),
+            },
+          }),
+          conversationHistory.find((m) => m.role === "user")?.content ??
+            guardrailResult.sanitized,
+          session.metadata,
         );
 
         const replyText = replyBody + (nearTurnLimit ? ESCALATION_NOTE : "");
@@ -1630,6 +1770,20 @@ export async function POST(request: NextRequest) {
     // info already on file. Empty string when not a returning customer.
     const customerContextHint = buildCustomerContextHint(customerContext);
 
+    // Cross-channel recognition (Probook v3): when this known customer last
+    // reached us on a DIFFERENT channel (voice/sms), tell the model so it can
+    // acknowledge the prior contact. Purely additive — getThread fails open
+    // (returns an empty thread on any error), so no try/catch and an empty hint
+    // when there's no customer/thread.
+    const crossChannelCustomerId = customerContext?.customerId ?? null;
+    const thread = crossChannelCustomerId
+      ? await getThread(organizationId, crossChannelCustomerId)
+      : null;
+    const crossChannelHint =
+      thread?.exists && thread.lastChannel && thread.lastChannel !== "web"
+        ? `\n[CONTEXT] This customer last contacted us via ${thread.lastChannel}.`
+        : "";
+
     // Brand the LLM persona from the org's stored config (companyName +
     // businessInfo), populated above via the cached router overlay. Falls back
     // to the generic HVAC persona when nothing is configured (empty BrandInfo).
@@ -1703,6 +1857,7 @@ export async function POST(request: NextRequest) {
       system:
         brandPrompt +
         customerContextHint +
+        crossChannelHint +
         styleHint +
         sessionSlotsHint +
         escalationHint +
@@ -1805,8 +1960,15 @@ export async function POST(request: NextRequest) {
             // Always write the merged extraction (the merge never nulls a
             // filled slot); only fall back to the FRESH metadata, not the stale
             // request-time snapshot, when there's nothing to write.
+            // preserveVerifyKey re-attaches the financial-verify lockout (Stage 5)
+            // from the FRESHEST metadata, which buildExtraction does not carry.
             metadata: hasSlotData(merged)
-              ? JSON.stringify(mergedExtraction)
+              ? JSON.stringify(
+                  preserveVerifyKey(
+                    mergedExtraction,
+                    fresh?.metadata ?? session.metadata,
+                  ),
+                )
               : (fresh?.metadata ?? session.metadata),
             updatedAt: new Date(),
           })

@@ -23,6 +23,7 @@ import {
   type SchedulingSource,
 } from "./scheduling-source";
 import { computeOpenWindows } from "./availability";
+import { getActiveReservationsForDays } from "./capacity-reservation-queries";
 import {
   BUSINESS_TIME_ZONE,
   businessWallClockToUtc,
@@ -151,11 +152,30 @@ export async function getOpenAvailability(
     );
   }
 
+  // In-flight confirm-time holds consume capacity too (an unassigned booking
+  // wouldn't count toward "booked"). Read from our own table (they never live in
+  // an external source); degrade safely — a read failure just means holds don't
+  // subtract this pass (never over-count), so the customer path never fails on it.
+  let reservations;
+  try {
+    reservations = await getActiveReservationsForDays(organizationId, days);
+  } catch (error: unknown) {
+    logger.warn(
+      {
+        organizationId,
+        error: error instanceof Error ? error.message : "unknown",
+      },
+      "Reservation read failed; computing availability without in-flight holds",
+    );
+    reservations = [];
+  }
+
   const windows = computeOpenWindows(
     facts.activeTechIds,
     facts.availability,
     facts.jobs,
     days,
+    reservations,
   );
   return { days: [...days], windows };
 }

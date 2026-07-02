@@ -1,6 +1,7 @@
 import type { KnownSlots } from "./intent-router";
 import type { ExtractionResult } from "./extraction-schema";
 import { sanitizeContactFields } from "./sanitize-fields";
+import { preserveVerifyKey } from "./account-verify";
 
 /**
  * Helpers for moving extracted slots between the session's `metadata` column
@@ -190,4 +191,51 @@ export function buildExtraction(
     isHvacRelated: true,
     ...(slots.extras ?? {}),
   });
+}
+
+/**
+ * Map a customer's answer to the triage URGENCY step onto the canonical urgency
+ * enum (0-token). Accepts the chip values verbatim (emergency/high/medium/low)
+ * and the common natural phrasings the chips are labeled with ("emergency",
+ * "soon"/"today", "this week", "routine"/"whenever"). Returns null when the
+ * answer carries no clear urgency, so the caller can defer to the LLM rather
+ * than guess. Only call when the urgency step was the pending question.
+ * (Brain-unification D2: was inline in the chat route; voice asked the urgency
+ * question but could never capture the answer — the re-ask loop.)
+ */
+export function parseUrgencyAnswer(
+  message: string,
+): "low" | "medium" | "high" | "emergency" | null {
+  const m = message.trim().toLowerCase();
+  if (m.length === 0) return null;
+  // Exact chip values.
+  if (m === "emergency" || m === "high" || m === "medium" || m === "low") {
+    return m;
+  }
+  // Natural phrasings.
+  if (/\b(emergency|right now|immediately|can'?t wait|asap)\b/.test(m)) return "emergency";
+  if (/\b(soon|today|tonight|urgent|as soon as)\b/.test(m)) return "high";
+  if (/\b(this week|few days|couple days|medium)\b/.test(m)) return "medium";
+  if (/\b(routine|whenever|no rush|not urgent|can wait|low|sometime)\b/.test(m)) return "low";
+  return null;
+}
+
+/**
+ * The ONE way either brain (web chat route / voice-turn) may turn merged slots
+ * back into a session.metadata string (brain-unification extraction #1).
+ *
+ * Re-attaches the financial-verify lockout — buildExtraction does NOT
+ * round-trip the top-level `verify` key, so a bare
+ * `JSON.stringify(buildExtraction(...))` silently resets the ZIP-attempt cap
+ * (the drift chat patched with preserveVerifyKey and voice re-introduced) —
+ * and applies the canonical 280-char description truncation both brains used.
+ */
+export function serializeSessionMetadata(
+  merged: KnownSlots,
+  description: string,
+  priorMetadata: string | null | undefined,
+): string {
+  return JSON.stringify(
+    preserveVerifyKey(buildExtraction(merged, description.slice(0, 280)), priorMetadata),
+  );
 }

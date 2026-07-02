@@ -10,7 +10,7 @@ import { NextRequest } from "next/server";
 import { after } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { getAdminSession } from "@/lib/auth/session";
+import { getTechSession } from "@/lib/auth/tech-session";
 import { db } from "@/lib/db";
 import { serviceRequests } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
@@ -28,7 +28,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const session = await getAdminSession();
+    const session = await getTechSession();
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }

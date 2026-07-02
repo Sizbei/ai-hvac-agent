@@ -47,6 +47,14 @@ export interface MappedJobFields {
   readonly scheduleStart?: string;
   /** ISO-8601 UTC. */
   readonly scheduleEnd?: string;
+  // NOTE (parity, intentional): unlike the HCP job push, FP jobs carry NO
+  // structured `line_items` array. The same classification (issue / work type /
+  // system / access) is conveyed as labelled lines in `description` below — so
+  // the information is at parity; only the wire-format differs. Structured FP
+  // job line items are NOT added because (a) there is no evidence FieldPulse's
+  // POST /jobs accepts a line_items array (the codebase only READS line_items
+  // off /invoices), and (b) they'd be redundant with the description. Revisit
+  // only if FieldPulse vendor docs confirm /jobs line-item support.
 }
 
 /**

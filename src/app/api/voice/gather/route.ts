@@ -72,6 +72,33 @@ export async function POST(request: NextRequest) {
     // SUBMITTED session gets a closing line that confirms the request is in
     // (the caller may have said "yes, one more thing" — the team handles it).
     if (isTerminalState(session.status) || session.status === "submitted") {
+      // D7: an ESCALATED emergency may have just been asked for the missing
+      // address/phone (voiceReply keeps the call alive one turn for it). Record
+      // the caller's answer so the dispatcher handling the escalation sees it —
+      // before this, the utterance was silently discarded. Best-effort.
+      if (session.status === "escalated" && speech.length > 0) {
+        try {
+          await db.insert(messages).values({
+            organizationId: session.organizationId,
+            sessionId: session.id,
+            role: "user",
+            content: sanitizeInput(speech).sanitized,
+            tokensUsed: 0,
+          });
+        } catch (recordError) {
+          logger.error(
+            { error: recordError, sessionId: session.id },
+            "Failed to record post-escalation utterance",
+          );
+        }
+        return new Response(
+          sayThenHangupTwiML(
+            "Got it — I've passed that along to our team. Goodbye.",
+            voice,
+          ),
+          { headers: TWIML_HEADERS },
+        );
+      }
       return new Response(
         sayThenHangupTwiML(
           session.status === "submitted"

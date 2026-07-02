@@ -36,7 +36,9 @@ interface UseChatSessionReturn {
   readonly isLoading: boolean;
   readonly sendMessage: (text: string, attachments?: readonly UploadedAttachment[]) => void;
   readonly escalate: () => Promise<void>;
-  readonly confirm: (data: ExtractionResult) => Promise<{ referenceNumber: string }>;
+  readonly confirm: (
+    data: ExtractionResult,
+  ) => Promise<{ referenceNumber: string; arrivalWindowLabel: string | null }>;
   /** Abandon the current session and start a fresh one (clears the transcript,
    * extraction, and status; mints a new server session + cookie). */
   readonly startNewConversation: () => Promise<void>;
@@ -382,7 +384,10 @@ export function useChatSession(): UseChatSessionReturn {
   const confirm = useCallback(
     async (
       data: ExtractionResult,
-    ): Promise<{ referenceNumber: string }> => {
+    ): Promise<{
+      referenceNumber: string;
+      arrivalWindowLabel: string | null;
+    }> => {
       const res = await fetch('/api/session/confirm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -404,11 +409,20 @@ export function useChatSession(): UseChatSessionReturn {
 
       const result = (await res.json()) as {
         success: boolean;
-        data: { referenceNumber: string; serviceRequestId: string; status: string };
+        data: {
+          referenceNumber: string;
+          serviceRequestId: string;
+          status: string;
+          // Present only when a concrete window was reserved; label is null-safe.
+          arrivalWindow: { label: string | null } | null;
+        };
       };
 
       setSessionStatus('submitted');
-      return { referenceNumber: result.data.referenceNumber };
+      return {
+        referenceNumber: result.data.referenceNumber,
+        arrivalWindowLabel: result.data.arrivalWindow?.label ?? null,
+      };
     },
     [],
   );

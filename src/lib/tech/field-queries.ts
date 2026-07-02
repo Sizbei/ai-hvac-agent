@@ -14,11 +14,122 @@
  */
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { jobMaterials, requestNotes, serviceRequests } from "@/lib/db/schema";
+import {
+  attachments,
+  jobMaterials,
+  requestNotes,
+  requestStatusEvents,
+  serviceRequests,
+} from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
+import { decrypt } from "@/lib/crypto";
+import {
+  allowedTransitions,
+  MANUAL_TARGET_STATUSES,
+  type RequestStatus,
+} from "@/lib/admin/request-status";
 import { getPricebookItemById } from "@/lib/admin/pricebook-queries";
 import { adjustStock } from "@/lib/admin/inventory-queries";
 import { rollUpActualMaterialsCost } from "@/lib/admin/margin";
+
+/** Decrypt PII, tolerating a value encrypted under a now-rotated key (returns
+ * null rather than throwing, so one bad field can't 500 the whole summary). */
+function safeDecrypt(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    return decrypt(value);
+  } catch {
+    return null;
+  }
+}
+
+/** Everything a tech needs on-site for ONE job they own (assignee+tenant). PII
+ * (name/phone/address) decrypted server-side; never log this object. */
+export interface TechJobSummary {
+  readonly id: string;
+  readonly referenceNumber: string;
+  readonly status: string;
+  readonly issueType: string;
+  readonly systemType: string | null;
+  readonly urgency: string;
+  readonly description: string | null;
+  readonly scheduledDate: string | null;
+  readonly arrivalWindowStart: string | null;
+  readonly arrivalWindowEnd: string | null;
+  readonly customerName: string | null;
+  readonly customerPhone: string | null;
+  readonly address: string | null;
+  readonly accessNotes: string | null;
+  /** Manual next-statuses the tech may advance to (FSM ∩ manual targets). */
+  readonly allowedNextStatuses: readonly string[];
+}
+
+/**
+ * Full job summary for the tech's OWN job — the where/what/who they need on-site,
+ * with name/phone/address decrypted, plus the manual next-statuses they can move
+ * to. Assignee + tenant guarded (same predicate as findOwnedJob), so it returns
+ * null when the job doesn't exist in this org or isn't assigned to this tech.
+ */
+export async function getTechJobSummary(
+  organizationId: string,
+  techUserId: string,
+  serviceRequestId: string,
+): Promise<TechJobSummary | null> {
+  const [row] = await db
+    .select({
+      id: serviceRequests.id,
+      referenceNumber: serviceRequests.referenceNumber,
+      status: serviceRequests.status,
+      issueType: serviceRequests.issueType,
+      systemType: serviceRequests.systemType,
+      urgency: serviceRequests.urgency,
+      description: serviceRequests.description,
+      scheduledDate: serviceRequests.scheduledDate,
+      arrivalWindowStart: serviceRequests.arrivalWindowStart,
+      arrivalWindowEnd: serviceRequests.arrivalWindowEnd,
+      customerNameEncrypted: serviceRequests.customerNameEncrypted,
+      customerPhoneEncrypted: serviceRequests.customerPhoneEncrypted,
+      addressEncrypted: serviceRequests.addressEncrypted,
+      accessNotes: serviceRequests.accessNotes,
+    })
+    .from(serviceRequests)
+    .where(
+      withTenant(
+        serviceRequests,
+        organizationId,
+        and(
+          eq(serviceRequests.id, serviceRequestId),
+          eq(serviceRequests.assignedTo, techUserId),
+        )!,
+      ),
+    )
+    .limit(1);
+
+  if (!row) return null;
+
+  const manual = MANUAL_TARGET_STATUSES as readonly RequestStatus[];
+  const allowedNextStatuses = allowedTransitions(
+    row.status as RequestStatus,
+  ).filter((s) => manual.includes(s));
+
+  return {
+    id: row.id,
+    referenceNumber: row.referenceNumber,
+    status: row.status,
+    issueType: row.issueType,
+    systemType: row.systemType,
+    urgency: row.urgency,
+    description: row.description,
+    scheduledDate: row.scheduledDate?.toISOString() ?? null,
+    arrivalWindowStart: row.arrivalWindowStart?.toISOString() ?? null,
+    arrivalWindowEnd: row.arrivalWindowEnd?.toISOString() ?? null,
+    customerName: safeDecrypt(row.customerNameEncrypted),
+    customerPhone: safeDecrypt(row.customerPhoneEncrypted),
+    address: safeDecrypt(row.addressEncrypted),
+    accessNotes: row.accessNotes,
+    allowedNextStatuses,
+  };
+}
 
 /**
  * Assignee + tenant guard: returns the job id only if it exists in this org AND
@@ -307,4 +418,140 @@ export async function addFieldNote(
     throw new Error("Failed to record field note");
   }
   return { ok: true, id: created.id };
+}
+
+/** A single status transition in a job's timeline. PII-free: statuses + actor
+ *  KIND + timestamp only (no actorId/name). */
+export interface JobTimelineEntry {
+  readonly fromStatus: string | null;
+  readonly toStatus: string;
+  readonly actorType: string;
+  readonly at: string; // ISO-8601
+}
+
+export type JobTimelineResult =
+  | { readonly ok: true; readonly timeline: readonly JobTimelineEntry[] }
+  | { readonly ok: false; readonly reason: "not_owned" };
+
+/**
+ * The status-transition timeline for a job the tech owns (read-only). Reuses the
+ * append-only request_status_events log (already written on every transition).
+ * Assignee + tenant guarded like every other field query; PII-free (no actorId).
+ */
+export async function getJobTimelineForTech(
+  organizationId: string,
+  techUserId: string,
+  serviceRequestId: string,
+): Promise<JobTimelineResult> {
+  const owned = await findOwnedJob(organizationId, techUserId, serviceRequestId);
+  if (!owned) {
+    return { ok: false, reason: "not_owned" };
+  }
+
+  const rows = await db
+    .select({
+      fromStatus: requestStatusEvents.fromStatus,
+      toStatus: requestStatusEvents.toStatus,
+      actorType: requestStatusEvents.actorType,
+      at: requestStatusEvents.at,
+    })
+    .from(requestStatusEvents)
+    .where(
+      withTenant(
+        requestStatusEvents,
+        organizationId,
+        eq(requestStatusEvents.serviceRequestId, serviceRequestId),
+      ),
+    )
+    .orderBy(asc(requestStatusEvents.at));
+
+  return {
+    ok: true,
+    timeline: rows.map((r) => ({
+      fromStatus: r.fromStatus,
+      toStatus: r.toStatus,
+      actorType: r.actorType,
+      at: r.at.toISOString(),
+    })),
+  };
+}
+
+export interface JobPhotoInput {
+  readonly filename: string;
+  readonly mimeType: string;
+  readonly size: number;
+  readonly storageKey: string;
+}
+
+export type AddJobPhotoResult =
+  | { readonly ok: true; readonly id: string }
+  | { readonly ok: false; readonly reason: "not_owned" };
+
+/**
+ * Record a job photo the tech uploaded. The file itself lives in R2 (uploaded by
+ * the route); this stores the metadata in the shared `attachments` table linked
+ * to the service request (the Stage-7 serviceRequestId link). Assignee + tenant
+ * guarded — a tech may only attach to their OWN job.
+ */
+export async function addJobPhoto(
+  organizationId: string,
+  techUserId: string,
+  serviceRequestId: string,
+  input: JobPhotoInput,
+): Promise<AddJobPhotoResult> {
+  const owned = await findOwnedJob(organizationId, techUserId, serviceRequestId);
+  if (!owned) {
+    return { ok: false, reason: "not_owned" };
+  }
+
+  const [created] = await db
+    .insert(attachments)
+    .values({
+      organizationId,
+      serviceRequestId,
+      filename: input.filename,
+      mimeType: input.mimeType,
+      size: input.size,
+      storageKey: input.storageKey,
+    })
+    .returning({ id: attachments.id });
+
+  if (!created) {
+    throw new Error("Failed to record job photo");
+  }
+  return { ok: true, id: created.id };
+}
+
+export interface JobPhotoRow {
+  readonly id: string;
+  readonly filename: string;
+  readonly mimeType: string;
+  readonly size: number;
+  readonly storageKey: string;
+  readonly createdAt: Date;
+}
+
+/** List the attachments linked to a job (org-scoped), oldest first. */
+export async function listJobPhotos(
+  organizationId: string,
+  serviceRequestId: string,
+): Promise<readonly JobPhotoRow[]> {
+  return db
+    .select({
+      id: attachments.id,
+      filename: attachments.filename,
+      mimeType: attachments.mimeType,
+      size: attachments.size,
+      storageKey: attachments.storageKey,
+      createdAt: attachments.createdAt,
+    })
+    .from(attachments)
+    .where(
+      withTenant(
+        attachments,
+        organizationId,
+        eq(attachments.serviceRequestId, serviceRequestId),
+      ),
+    )
+    .orderBy(asc(attachments.createdAt));
 }

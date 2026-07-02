@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatCentsExact } from '@/lib/admin/money-format';
+import { TechJobSummary } from '@/components/tech/tech-job-summary';
 
 interface Material {
   readonly id: string;
@@ -34,6 +35,28 @@ interface TimeEntry {
   readonly laborCostCents: number | null;
 }
 
+interface TimelineEntry {
+  readonly fromStatus: string | null;
+  readonly toStatus: string;
+  readonly actorType: string;
+  readonly at: string;
+}
+
+interface PhotoRow {
+  readonly id: string;
+  readonly filename: string;
+  readonly mimeType: string;
+  readonly size: number;
+  readonly createdAt: string;
+  readonly url: string | null;
+}
+
+/** "no_cool" / "in_progress" → "No cool" / "In progress". */
+function humanizeStatus(s: string): string {
+  const spaced = s.replace(/_/g, ' ');
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
 /** Format whole minutes as "Hh Mm" (or "Mm" under an hour). */
 function formatMinutes(mins: number): string {
   const h = Math.floor(mins / 60);
@@ -54,6 +77,10 @@ function isToday(iso: string): boolean {
 export function TechJobDetailClient({ id }: { readonly id: string }) {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  // A load failure must NOT masquerade as an empty job (no materials / not
+  // clocked in) — surface it so the tech doesn't re-add duplicates or assume
+  // they're off the clock. Either the materials or timesheet fetch can set it.
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Timesheet (labor tracking)
   const [entries, setEntries] = useState<TimeEntry[]>([]);
@@ -85,11 +112,26 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
   const [sigStatus, setSigStatus] = useState<string | null>(null);
   const [isSigning, setIsSigning] = useState(false);
 
+  // Status timeline (read-only history of this job's transitions).
+  const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
+
+  // Job photos (field uploads).
+  const [photos, setPhotos] = useState<PhotoRow[]>([]);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [photoStatus, setPhotoStatus] = useState<string | null>(null);
+
   const loadMaterials = useCallback(async (): Promise<void> => {
     try {
       const res = await fetch(`/api/tech/jobs/${id}/materials`);
       const body = await res.json().catch(() => ({ success: false }));
-      if (res.ok && body.success) setMaterials(body.data.materials);
+      if (res.ok && body.success) {
+        setMaterials(body.data.materials);
+        setLoadError(null);
+      } else {
+        setLoadError("Couldn't load this job's materials.");
+      }
+    } catch {
+      setLoadError("Couldn't load this job's materials.");
     } finally {
       setIsLoading(false);
     }
@@ -99,12 +141,83 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
     void loadMaterials();
   }, [loadMaterials]);
 
+  const loadTimeline = useCallback(async (): Promise<void> => {
+    try {
+      const res = await fetch(`/api/tech/jobs/${id}/timeline`);
+      const body = await res.json().catch(() => ({ success: false }));
+      if (res.ok && body.success) {
+        setTimeline(body.data.timeline);
+      }
+      // A timeline read failure is non-critical — the section just stays empty;
+      // it never blocks the rest of the job detail.
+    } catch {
+      /* non-critical */
+    }
+  }, [id]);
+
+  useEffect(() => {
+    void loadTimeline();
+  }, [loadTimeline]);
+
+  const loadPhotos = useCallback(async (): Promise<void> => {
+    try {
+      const res = await fetch(`/api/tech/jobs/${id}/photo`);
+      const body = await res.json().catch(() => ({ success: false }));
+      if (res.ok && body.success) {
+        setPhotos(body.data.photos);
+      }
+      // Non-critical: a failed list just leaves the gallery empty.
+    } catch {
+      /* non-critical */
+    }
+  }, [id]);
+
+  useEffect(() => {
+    void loadPhotos();
+  }, [loadPhotos]);
+
+  const handlePhotoChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
+      const file = e.target.files?.[0];
+      e.target.value = ''; // allow re-selecting the same file
+      if (!file) return;
+      setIsUploadingPhoto(true);
+      setPhotoStatus(null);
+      try {
+        const form = new FormData();
+        form.append('file', file);
+        const res = await fetch(`/api/tech/jobs/${id}/photo`, {
+          method: 'POST',
+          body: form,
+        });
+        if (res.ok) {
+          setPhotoStatus('Photo uploaded.');
+          await loadPhotos();
+        } else {
+          const body = await res.json().catch(() => ({}));
+          setPhotoStatus(body?.error?.message ?? "Couldn't upload that photo.");
+        }
+      } catch {
+        setPhotoStatus('Network error — the photo was not uploaded.');
+      } finally {
+        setIsUploadingPhoto(false);
+      }
+    },
+    [id, loadPhotos],
+  );
+
   const loadTimesheet = useCallback(async (): Promise<void> => {
-    const res = await fetch(`/api/tech/jobs/${id}/timesheet`);
-    const body = await res.json().catch(() => ({ success: false }));
-    if (res.ok && body.success) {
-      setEntries(body.data.entries);
-      setOpenSince(body.data.open ? body.data.open.clockInAt : null);
+    try {
+      const res = await fetch(`/api/tech/jobs/${id}/timesheet`);
+      const body = await res.json().catch(() => ({ success: false }));
+      if (res.ok && body.success) {
+        setEntries(body.data.entries);
+        setOpenSince(body.data.open ? body.data.open.clockInAt : null);
+      } else {
+        setLoadError("Couldn't load this job's timesheet.");
+      }
+    } catch {
+      setLoadError("Couldn't load this job's timesheet.");
     }
   }, [id]);
 
@@ -229,8 +342,17 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
   const getCtx = () => canvasRef.current?.getContext('2d') ?? null;
 
   const pointerPos = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    const rect = canvasRef.current!.getBoundingClientRect();
-    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    const canvas = canvasRef.current!;
+    const rect = canvas.getBoundingClientRect();
+    // The canvas is rendered w-full but its backing store is a fixed 320x140, so
+    // map the CSS-pixel pointer position into backing-store coordinates — without
+    // this scale the ink lands offset/stretched wherever displayed width != 320.
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY,
+    };
   };
 
   const startDraw = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -338,6 +460,18 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
       >
         <ArrowLeft className="size-4" /> Back
       </Link>
+
+      {/* All info the tech needs on-site + status controls. */}
+      <TechJobSummary id={id} onStatusChanged={() => void loadTimeline()} />
+
+      {loadError && (
+        <div
+          role="alert"
+          className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+        >
+          {loadError} Some data may be missing — pull to refresh or reopen the job.
+        </div>
+      )}
 
       {/* Time on this job (clock in / out) */}
       <Card>
@@ -455,6 +589,7 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
               onChange={(e) => setSearch(e.target.value)}
             />
             <select
+              aria-label="Pricebook item (or choose manual entry)"
               value={selectedItemId}
               onChange={(e) => {
                 setSelectedItemId(e.target.value);
@@ -478,6 +613,7 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
             )}
             <div className="flex items-center gap-2">
               <Input
+                aria-label="Quantity"
                 type="number"
                 min="1"
                 step="1"
@@ -560,6 +696,84 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
           </div>
           {sigStatus && (
             <p className="text-xs text-muted-foreground">{sigStatus}</p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Job photos */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Photos</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <label className="inline-flex">
+            <span className="sr-only">Add a photo</span>
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              disabled={isUploadingPhoto}
+              onChange={(e) => void handlePhotoChange(e)}
+              aria-label="Add a job photo"
+              className="text-sm file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-sm file:text-primary-foreground"
+            />
+          </label>
+          {isUploadingPhoto && (
+            <p className="text-xs text-muted-foreground">Uploading…</p>
+          )}
+          {photoStatus && (
+            <p className="text-xs text-muted-foreground">{photoStatus}</p>
+          )}
+          {photos.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No photos yet.</p>
+          ) : (
+            <div className="grid grid-cols-3 gap-2">
+              {photos.map((p) =>
+                p.url ? (
+                  <a key={p.id} href={p.url} target="_blank" rel="noreferrer">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={p.url}
+                      alt={p.filename}
+                      className="aspect-square w-full rounded-md border object-cover"
+                    />
+                  </a>
+                ) : (
+                  <div
+                    key={p.id}
+                    className="flex aspect-square w-full items-center justify-center rounded-md border text-[10px] text-muted-foreground"
+                  >
+                    {p.filename}
+                  </div>
+                ),
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Status timeline (read-only history) */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Status history</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {timeline.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No status changes yet.</p>
+          ) : (
+            <ol className="space-y-2">
+              {timeline.map((e, i) => (
+                <li key={i} className="flex items-baseline justify-between gap-3 text-sm">
+                  <span>
+                    {e.fromStatus ? `${humanizeStatus(e.fromStatus)} → ` : ''}
+                    <span className="font-medium">{humanizeStatus(e.toStatus)}</span>
+                  </span>
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    {new Date(e.at).toLocaleString()}
+                  </span>
+                </li>
+              ))}
+            </ol>
           )}
         </CardContent>
       </Card>

@@ -22,6 +22,8 @@ const SIGNUP_ERROR_MESSAGES: Record<string, string> = {
   signups_paused:
     'New signups are paused right now. Please check back soon.',
   try_again: 'Something went wrong creating your account. Please try again.',
+  rate_limited:
+    'Too many attempts. Please wait a minute and try signing up again.',
 };
 
 /** Read the ?error= code from the URL and map it to a friendly message.

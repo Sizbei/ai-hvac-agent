@@ -21,6 +21,8 @@ import {
   SKIP_SENTINEL,
 } from "@/lib/ai/chat-slots";
 import { submitSessionServiceRequest } from "@/lib/requests/submit-session-request";
+import { formatArrivalWindow } from "@/lib/admin/arrival-window";
+import { BUSINESS_TIME_ZONE } from "@/lib/admin/calendar-time";
 import { logger } from "@/lib/logger";
 export async function POST(request: NextRequest) {
   const ip = request.headers.get("x-forwarded-for") ?? "unknown";
@@ -180,11 +182,30 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Surface the CONCRETELY-held arrival window (null on a soft booking) plus a
+    // human label so the chat client can tell the customer the exact window we
+    // reserved — never a window we didn't. formatArrivalWindow degrades to null
+    // on bad/missing bounds, so a label failure can't break the confirmation.
+    const arrivalWindow = submitted.heldWindow
+      ? {
+          ...submitted.heldWindow,
+          // Render in the BUSINESS timezone: the held window's band hours are
+          // Eastern-anchored (arrivalWindowForSlot), so UTC would tell the
+          // customer the wrong hours (an 8 AM ET slot would read as 12 PM).
+          label: formatArrivalWindow(
+            submitted.heldWindow.startUtc,
+            submitted.heldWindow.endUtc,
+            BUSINESS_TIME_ZONE,
+          ),
+        }
+      : null;
+
     return successResponse(
       {
         referenceNumber: submitted.referenceNumber,
         serviceRequestId: submitted.serviceRequestId,
         status: "submitted" as const,
+        arrivalWindow,
       },
       201,
     );

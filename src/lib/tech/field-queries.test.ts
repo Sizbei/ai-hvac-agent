@@ -3,6 +3,9 @@ import {
   addJobMaterial,
   removeJobMaterial,
   getActualMaterialsCostCents,
+  getJobTimelineForTech,
+  addJobPhoto,
+  listJobPhotos,
 } from "./field-queries";
 import { db } from "@/lib/db";
 import { getPricebookItemById } from "@/lib/admin/pricebook-queries";
@@ -234,5 +237,88 @@ describe("getActualMaterialsCostCents", () => {
     mockSelectSeq([[]]);
     const total = await getActualMaterialsCostCents(ORG, JOB);
     expect(total).toBe(0);
+  });
+});
+
+describe("getJobTimelineForTech", () => {
+  it("returns the ordered, PII-free status timeline for an owned job", async () => {
+    const at1 = new Date("2026-06-24T10:00:00.000Z");
+    const at2 = new Date("2026-06-24T12:30:00.000Z");
+    mockSelectSeq([
+      [{ id: JOB }], // ownership guard → owned
+      [
+        { fromStatus: null, toStatus: "pending", actorType: "ai", at: at1 },
+        { fromStatus: "pending", toStatus: "assigned", actorType: "system", at: at2 },
+      ],
+    ]);
+
+    const res = await getJobTimelineForTech(ORG, TECH, JOB);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.timeline).toEqual([
+      { fromStatus: null, toStatus: "pending", actorType: "ai", at: at1.toISOString() },
+      { fromStatus: "pending", toStatus: "assigned", actorType: "system", at: at2.toISOString() },
+    ]);
+  });
+
+  it("refuses a job not assigned to the tech (not_owned)", async () => {
+    mockSelectSeq([[]]); // ownership guard misses
+    const res = await getJobTimelineForTech(ORG, "other-tech", JOB);
+    expect(res).toEqual({ ok: false, reason: "not_owned" });
+  });
+
+  it("returns an empty timeline for an owned job with no events", async () => {
+    mockSelectSeq([[{ id: JOB }], []]);
+    const res = await getJobTimelineForTech(ORG, TECH, JOB);
+    expect(res).toEqual({ ok: true, timeline: [] });
+  });
+});
+
+describe("addJobPhoto", () => {
+  const photo = {
+    filename: "before.jpg",
+    mimeType: "image/jpeg",
+    size: 12345,
+    storageKey: "org-1/job-1/before.jpg",
+  };
+
+  it("records the attachment for an owned job (linked to the service request)", async () => {
+    mockSelectSeq([[{ id: JOB }]]); // ownership guard → owned
+    const valuesSpy = vi.fn(() => ({
+      returning: () => Promise.resolve([{ id: "att-1" }]),
+    }));
+    vi.mocked(db.insert).mockReturnValue({ values: valuesSpy } as never);
+
+    const r = await addJobPhoto(ORG, TECH, JOB, photo);
+    expect(r).toEqual({ ok: true, id: "att-1" });
+    expect(valuesSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: ORG,
+        serviceRequestId: JOB,
+        filename: "before.jpg",
+        mimeType: "image/jpeg",
+        size: 12345,
+        storageKey: "org-1/job-1/before.jpg",
+      }),
+    );
+  });
+
+  it("refuses a job not assigned to the tech (not_owned, no insert)", async () => {
+    mockSelectSeq([[]]); // ownership guard misses
+    const r = await addJobPhoto(ORG, "other-tech", JOB, photo);
+    expect(r).toEqual({ ok: false, reason: "not_owned" });
+    expect(db.insert).not.toHaveBeenCalled();
+  });
+});
+
+describe("listJobPhotos", () => {
+  it("returns the job's attachments oldest-first (org-scoped)", async () => {
+    const rows = [
+      { id: "a1", filename: "1.jpg", mimeType: "image/jpeg", size: 10, storageKey: "k1", createdAt: new Date("2026-06-24T10:00:00Z") },
+      { id: "a2", filename: "2.png", mimeType: "image/png", size: 20, storageKey: "k2", createdAt: new Date("2026-06-24T11:00:00Z") },
+    ];
+    mockSelectSeq([rows]);
+    const out = await listJobPhotos(ORG, JOB);
+    expect(out).toEqual(rows);
   });
 });

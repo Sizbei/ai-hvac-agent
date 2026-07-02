@@ -25,7 +25,12 @@
  * │ same AvailabilitySlot / ScheduledJob shapes needs NO change here.           │
  * └────────────────────────────────────────────────────────────────────────────┘
  */
-import type { AvailabilitySlot, OpenWindow, ScheduledJob } from "./types";
+import type {
+  AvailabilitySlot,
+  CapacityReservationSlot,
+  OpenWindow,
+  ScheduledJob,
+} from "./types";
 import type { ArrivalWindow } from "./arrival-window";
 import { arrivalWindowHours } from "./arrival-window";
 import {
@@ -93,8 +98,21 @@ function bookedBandsForJob(
  *    rule the dispatch board enforces against, so customer-facing availability
  *    and admin enforcement never disagree).
  *  - BOOKED = of those covered technicians, how many already have an active job
- *    overlapping the band on that day (bookedBandsForJob).
- *  - AVAILABLE = capacity − booked, floored at 0.
+ *    overlapping the band on that day (bookedBandsForJob) — i.e. PLACED bookings.
+ *  - RESERVED (in-flight) = active capacity_reservations for the (day, band)
+ *    whose request is NOT already counted as a placed job. Fresh confirm-time
+ *    holds live here BEFORE a technician is assigned, plugging the gap where an
+ *    unassigned booking wouldn't count toward BOOKED and could be over-promised.
+ *  - AVAILABLE = capacity − booked − reserved, floored at 0.
+ *
+ * DEDUPE / COUNTING RULE (no double-counting): a request is counted ONCE.
+ *   • ASSIGNED jobs are the source of truth for PLACED bookings (BOOKED).
+ *   • RESERVATIONS are the source of truth for IN-FLIGHT bookings (no tech yet).
+ * A reservation is normally released once its request is placed/cancelled/
+ * unscheduled, so the two sets are disjoint. As defense-in-depth against a
+ * best-effort release that failed, a reservation whose service_request_id
+ * matches an assigned overlapping job in the SAME band is treated as already
+ * counted (via BOOKED) and excluded from RESERVED — never added on top.
  *
  * Only bands with capacity > 0 are returned (a band no one works is not a "0
  * available" slot to show a customer — it simply isn't offered). Output is
@@ -109,6 +127,9 @@ export function computeOpenWindows(
   availability: readonly AvailabilitySlot[],
   jobs: readonly ScheduledJob[],
   days: readonly string[],
+  // Active confirm-time holds. Optional/defaulted so callers/tests that predate
+  // the reservation layer keep working (a booking then only counts once placed).
+  reservations: readonly CapacityReservationSlot[] = [],
 ): readonly OpenWindow[] {
   const activeSet = new Set(activeTechIds);
   // Pre-group availability by tech so the per-band coverage test only sees one
@@ -138,18 +159,34 @@ export function computeOpenWindows(
       const capacity = coveringTechs.length;
       if (capacity === 0) continue;
 
-      // Of the covering techs, how many are already booked into this band today.
+      // Of the covering techs, how many are already booked into this band today
+      // (PLACED bookings). Track the request ids so a lingering reservation for
+      // an already-placed request is deduped out of the in-flight count below.
       const bookedTechs = new Set<string>();
+      const placedRequestIds = new Set<string>();
       for (const job of jobs) {
         if (!job.assignedTo || !activeSet.has(job.assignedTo)) continue;
         if (!coveringTechs.includes(job.assignedTo)) continue;
         if (bookedBandsForJob(job, day).has(band)) {
           bookedTechs.add(job.assignedTo);
+          placedRequestIds.add(job.id);
         }
       }
+      const booked = bookedTechs.size;
 
-      const available = Math.max(0, capacity - bookedTechs.size);
-      out.push({ day, window: band, capacity, available });
+      // In-flight holds for this band whose request isn't already placed (dedupe
+      // by request id — a null-linked hold is always in-flight).
+      let reserved = 0;
+      for (const r of reservations) {
+        if (r.day !== day || r.window !== band) continue;
+        if (r.serviceRequestId && placedRequestIds.has(r.serviceRequestId)) {
+          continue;
+        }
+        reserved += 1;
+      }
+
+      const available = Math.max(0, capacity - booked - reserved);
+      out.push({ day, window: band, capacity, booked, available });
     }
   }
   return out;
