@@ -22,6 +22,23 @@ import {
 import { withTenant } from "@/lib/db/tenant";
 import { haversineKm } from "@/lib/address/photon";
 import { getLatestTechnicianLocation } from "@/lib/tech/location-queries";
+import { businessWallClockToUtc } from "@/lib/admin/calendar-time";
+
+/**
+ * UTC [start, end) covering the business-timezone (Eastern) calendar day for
+ * `isoDay`. `isoDay` is produced in business-local time, so anchoring the range
+ * with businessWallClockToUtc keeps late-evening Eastern jobs on the correct day
+ * (a naive `${isoDay}T00:00Z` would shift the window ~4-5h and miscount them).
+ */
+export function businessDayUtcRange(isoDay: string): {
+  readonly start: Date;
+  readonly end: Date;
+} {
+  return {
+    start: businessWallClockToUtc(isoDay, 0, 0),
+    end: businessWallClockToUtc(isoDay, 24, 0),
+  };
+}
 
 export interface DispatchJobAttrs {
   readonly jobType: string | null;
@@ -86,8 +103,7 @@ export async function loadDispatchSignals(
   if (technicianIds.length === 0) return result;
 
   const ids = [...technicianIds];
-  const dayStart = new Date(`${isoDay}T00:00:00.000Z`);
-  const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+  const { start: dayStart, end: dayEnd } = businessDayUtcRange(isoDay);
 
   // Skill predicate from whichever classification fields are present.
   const skillMatchers = [];

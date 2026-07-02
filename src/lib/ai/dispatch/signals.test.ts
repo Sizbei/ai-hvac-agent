@@ -27,10 +27,25 @@ const { getLatestTechnicianLocation } = vi.hoisted(() => ({
 }));
 vi.mock('@/lib/tech/location-queries', () => ({ getLatestTechnicianLocation }));
 
-import { loadDispatchSignals } from './signals';
+import { loadDispatchSignals, businessDayUtcRange } from './signals';
 
 beforeEach(() => {
   selectQueue.length = 0;
+});
+
+describe('businessDayUtcRange (same-day load counts the Eastern calendar day)', () => {
+  it('summer EDT day → 04:00Z start, next-day 04:00Z end', () => {
+    const { start, end } = businessDayUtcRange('2026-07-01');
+    // EDT = UTC−4, so Eastern midnight is 04:00Z, not the naive 00:00Z.
+    expect(start.toISOString()).toBe('2026-07-01T04:00:00.000Z');
+    expect(end.toISOString()).toBe('2026-07-02T04:00:00.000Z');
+  });
+
+  it('winter EST day → 05:00Z start, next-day 05:00Z end', () => {
+    const { start, end } = businessDayUtcRange('2026-01-15');
+    expect(start.toISOString()).toBe('2026-01-15T05:00:00.000Z');
+    expect(end.toISOString()).toBe('2026-01-16T05:00:00.000Z');
+  });
 });
 
 describe('loadDispatchSignals', () => {
