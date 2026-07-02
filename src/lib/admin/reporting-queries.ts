@@ -325,7 +325,7 @@ export async function getLeadSourceBreakdown(
       .from(serviceRequests)
       .innerJoin(
         invoices,
-        sql`${invoices.serviceRequestId} = ${serviceRequests.id} AND ${invoices.organizationId} = ${organizationId}`,
+        sql`${invoices.serviceRequestId} = ${serviceRequests.id} AND ${invoices.organizationId} = ${organizationId} AND ${invoices.state} NOT IN ('draft', 'void')`,
       )
       .where(
         withTenant(
@@ -489,7 +489,7 @@ export async function getLocationBreakdown(
       .from(serviceRequests)
       .innerJoin(
         invoices,
-        sql`${invoices.serviceRequestId} = ${serviceRequests.id} AND ${invoices.organizationId} = ${organizationId}`,
+        sql`${invoices.serviceRequestId} = ${serviceRequests.id} AND ${invoices.organizationId} = ${organizationId} AND ${invoices.state} NOT IN ('draft', 'void')`,
       )
       .where(
         withTenant(
@@ -656,7 +656,7 @@ export async function getTechnicianScorecards(
       .from(serviceRequests)
       .innerJoin(
         invoices,
-        sql`${invoices.serviceRequestId} = ${serviceRequests.id} AND ${invoices.organizationId} = ${organizationId}`,
+        sql`${invoices.serviceRequestId} = ${serviceRequests.id} AND ${invoices.organizationId} = ${organizationId} AND ${invoices.state} NOT IN ('draft', 'void')`,
       )
       .where(
         withTenant(
