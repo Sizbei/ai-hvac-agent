@@ -815,8 +815,7 @@ describe("autoAssignBookedRequest (scored vs first-fit)", () => {
   it("enabled: tries technicians in ranked order (best first)", async () => {
     selectQueue.push([{ id: T1 }, { id: T2 }]); // active techs (DB order)
     queueAutoAssignLeadIn(true); // duration/external/flag/quality-gate
-    selectQueue.push([CLASSIFIED]); // rankedTechnicianOrder → classification
-    selectQueue.push([CLASSIFIED]); // confidence gate → classification (urgency)
+    selectQueue.push([CLASSIFIED]); // rankedTechnicianOrder → classification (reused by the confidence gate)
     rankedState.order = [T2, T1]; // ranker prefers T2 (clear score gap → committed)
     queueSuccessfulPlacement(T2); // ranked-first tech wins
 
@@ -832,8 +831,7 @@ describe("autoAssignBookedRequest (scored vs first-fit)", () => {
   it("enabled with no skill-matched tech → {assigned:false} (gate did its job)", async () => {
     selectQueue.push([{ id: T1 }, { id: T2 }]); // active techs
     queueAutoAssignLeadIn(true);
-    selectQueue.push([CLASSIFIED]); // rankedTechnicianOrder → classification
-    selectQueue.push([CLASSIFIED]); // confidence gate → classification (ranked=[] is truthy)
+    selectQueue.push([CLASSIFIED]); // rankedTechnicianOrder → classification (reused by the gate)
     rankedState.order = []; // classified, but ranker drops everyone (nobody qualified)
 
     const result = await autoAssignBookedRequest(ORG, REQ, HELD);

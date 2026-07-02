@@ -1034,11 +1034,16 @@ async function rankedTechnicianOrder(
   requestId: string,
   technicianIds: readonly string[],
   isoDay: string,
-): Promise<RankedTech[] | null> {
+): Promise<{
+  readonly ranked: RankedTech[] | null;
+  readonly job: DispatchSignals["job"] | null;
+}> {
   const job = await loadJobClassification(organizationId, requestId);
   // Nothing to score on (request missing, or no skill classification captured)
-  // → signal the caller to first-fit rather than stranding the job.
-  if (!job || (job.jobType === null && job.systemType === null)) return null;
+  // → signal the caller to first-fit rather than stranding the job. Return the
+  // loaded classification too, so the confidence gate reuses it (no 2nd read).
+  if (!job || (job.jobType === null && job.systemType === null))
+    return { ranked: null, job };
   const signalsByTech = await loadDispatchSignals(
     organizationId,
     technicianIds,
@@ -1065,7 +1070,7 @@ async function rankedTechnicianOrder(
       },
     };
   });
-  return rankTechnicians(candidates);
+  return { ranked: rankTechnicians(candidates), job };
 }
 
 /**
@@ -1101,7 +1106,7 @@ export async function suggestTechnicians(
     .where(withTenant(serviceRequests, organizationId, eq(serviceRequests.id, requestId)));
   const isoDay = (req?.scheduledDate ?? new Date()).toISOString().slice(0, 10);
 
-  const ranked = await rankedTechnicianOrder(
+  const { ranked } = await rankedTechnicianOrder(
     organizationId,
     requestId,
     techs.map((t) => t.id),
@@ -1175,9 +1180,10 @@ export async function autoAssignBookedRequest(
     }
   }
 
-  const ranked = enabled
+  const rankResult = enabled
     ? await rankedTechnicianOrder(organizationId, requestId, firstFit, heldSlot.isoDay)
     : null;
+  const ranked = rankResult?.ranked ?? null;
   // ranked === null  → unclassifiable (or disabled) → first-fit (DB order).
   // ranked === []    → classified but the skill gate dropped everyone → no order.
   const order = ranked ? ranked.map((r) => r.technicianId) : firstFit;
@@ -1188,10 +1194,10 @@ export async function autoAssignBookedRequest(
   // verdict and leave it for a dispatcher's exception queue. First-fit mode
   // (ranked === null) keeps placing as before (no confidence concept).
   if (ranked) {
-    // Load the job's urgency so an emergency relaxes the confidence gate
-    // (Probook-parity priority tier — dispatch fast rather than queue on a tie).
-    const jobClass = await loadJobClassification(organizationId, requestId);
-    const decision = classifyDispatch(ranked, jobClass?.urgency);
+    // Reuse the classification rankedTechnicianOrder already loaded so an
+    // emergency relaxes the confidence gate (Probook-parity priority tier) —
+    // no second DB read.
+    const decision = classifyDispatch(ranked, rankResult?.job?.urgency);
     if (decision.outcome !== "committed") {
       await stampDispatchOutcome(organizationId, requestId, decision.outcome);
       await recordDispatchDecision(
