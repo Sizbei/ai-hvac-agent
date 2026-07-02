@@ -12,6 +12,7 @@
  * over the proven core, not a second brain.
  */
 import { generateText } from "ai";
+import { after } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { customerSessions, messages, customers, customerLocations, organizationSettings } from "@/lib/db/schema";
@@ -149,6 +150,11 @@ export const VOICE_CONFIRM_REPLY =
  */
 export const VOICE_SUBMITTED_REPLY =
   "Great — I have everything I need. I've sent your request over to our team and they'll follow up with you shortly. Is there anything else I can help you with?";
+
+/** Upper bound on the LLM fallback call. Twilio kills the webhook at ~15s, so
+ * the model must answer (or we must fall back to the retry line) well inside
+ * that — leaving headroom for the turn's DB reads/writes + TwiML render. */
+const VOICE_LLM_TIMEOUT_MS = 10_000;
 
 /** Spoken when the do-not-service guard blocks an automated booking. */
 const VOICE_OFFICE_REPLY =
@@ -995,12 +1001,31 @@ export async function voiceReply(params: {
         : "";
   }
 
-  const { text, usage } = await generateText({
-    model: await getModel(organizationId),
-    system:
-      PHONE_SYSTEM_PROMPT + slotContextHint + customerHint + crossChannelHint,
-    messages: modelMessages,
-  });
+  // D5 hardening (parity with the web chat's LLM call): a bounded timeout —
+  // Twilio kills the webhook at ~15s, so an unbounded generateText turns a slow
+  // upstream into dead air + a dropped call — and a spoken-length output cap.
+  // On failure we KEEP THE CALL ALIVE with a safe retry line instead of letting
+  // the route's outer catch apologize and hang up.
+  let text: string;
+  let usage: { inputTokens?: number; outputTokens?: number } | undefined;
+  try {
+    ({ text, usage } = await generateText({
+      model: await getModel(organizationId),
+      system:
+        PHONE_SYSTEM_PROMPT + slotContextHint + customerHint + crossChannelHint,
+      messages: modelMessages,
+      abortSignal: AbortSignal.timeout(VOICE_LLM_TIMEOUT_MS),
+      maxOutputTokens: 300,
+    }));
+  } catch (llmError: unknown) {
+    logger.error(
+      { error: llmError, sessionId: session.id },
+      "Voice LLM call failed/timed out — speaking retry line, keeping call alive",
+    );
+    text =
+      "I'm sorry, I'm having a little trouble on my end. Could you say that one more time?";
+    usage = undefined;
+  }
 
   // Output guardrail: screen the free-form LLM reply for the two hard safety
   // properties (never quote a price, never claim a confirmed booking) BEFORE it
@@ -1045,14 +1070,23 @@ export async function voiceReply(params: {
 
   // Bot telemetry: tag all voice LLM-fallback turns as "knowledge" — simplification:
   // voice LLM turns are general HVAC Q&A; intake slots are filled deterministically.
-  void recordBotEvent({
-    organizationId,
-    sessionId: session.id,
-    turn: newTurnCount,
-    channel: "phone",
-    routed: false,
-    kind: "knowledge",
-  }); // recordBotEvent never throws
+  // after() (not a detached promise — Vercel freezes the lambda after the
+  // response); the eval harness calls voiceReply outside a request scope where
+  // after() throws, so fall back to fire-and-forget there.
+  const telemetry = () =>
+    recordBotEvent({
+      organizationId,
+      sessionId: session.id,
+      turn: newTurnCount,
+      channel: "phone",
+      routed: false,
+      kind: "knowledge",
+    }); // recordBotEvent never throws
+  try {
+    after(telemetry);
+  } catch {
+    void telemetry();
+  }
 
   return { reply, endCall: false, nextState };
 }

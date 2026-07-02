@@ -1554,3 +1554,82 @@ describe("voiceReply verify-lockout preservation (brain-unification #1)", () => 
     expect(persisted.address).toContain("123 Main St");
   });
 });
+
+describe("voiceReply LLM hardening (brain-unification D5)", () => {
+  beforeEach(() => {
+    generateTextMock.mockReset();
+    insertMock.mockReset();
+    updateSetMock.mockReset();
+    selectLimitMock.mockReset();
+    selectLimitMock.mockResolvedValue([]);
+    escalateMock.mockReset();
+    routeMock.mockReset();
+    routeMock.mockReturnValue({
+      action: "FALLBACK_LLM",
+      intentId: null,
+      confidence: 0,
+      reply: null,
+      issueType: null,
+      urgency: null,
+      escalate: false,
+    });
+    extractAllContactMock.mockReset();
+    extractAllContactMock.mockReturnValue(noSlots());
+    extractAddressAtAddressStepMock.mockReset();
+    extractAddressAtAddressStepMock.mockReturnValue(null);
+    extractSpokenPhoneMock.mockReset();
+    extractSpokenPhoneMock.mockReturnValue(null);
+    detectCorrectionMock.mockReset();
+    detectCorrectionMock.mockReturnValue(null);
+    getRouterConfigMock.mockReset();
+    getRouterConfigMock.mockResolvedValue({});
+    submitSessionMock.mockReset();
+    buildAccountLookupReplyMock.mockReset();
+    buildAccountLookupReplyMock.mockResolvedValue(null);
+    decryptMock.mockReset();
+    decideAfterHoursDisclosureMock.mockReset();
+    decideAfterHoursDisclosureMock.mockReturnValue({
+      kind: "none",
+      afterHours: false,
+      copy: "",
+    });
+  });
+
+  it("bounds the LLM call: timeout signal + spoken-length output cap", async () => {
+    generateTextMock.mockResolvedValue({
+      text: "Happy to help with that.",
+      usage: { inputTokens: 5, outputTokens: 5 },
+    });
+
+    await voiceReply({
+      session: baseSession,
+      history: [{ role: "user", content: "hi" }],
+      userMessage: "tell me about heat pumps",
+      ipAddress: "1.2.3.4",
+    });
+
+    const call = generateTextMock.mock.calls[0]![0];
+    expect(call.abortSignal).toBeInstanceOf(AbortSignal);
+    expect(call.maxOutputTokens).toBe(300);
+  });
+
+  it("keeps the call alive with a retry line when the LLM times out / fails", async () => {
+    generateTextMock.mockRejectedValue(
+      Object.assign(new Error("The operation was aborted"), { name: "TimeoutError" }),
+    );
+
+    const result = await voiceReply({
+      session: baseSession,
+      history: [{ role: "user", content: "hi" }],
+      userMessage: "tell me about heat pumps",
+      ipAddress: "1.2.3.4",
+    });
+
+    // NOT thrown to the route (which would apologize and HANG UP): the call
+    // stays alive with a safe retry ask.
+    expect(result.endCall).toBe(false);
+    expect(result.reply.toLowerCase()).toContain("say that");
+    // The turn is still persisted like any other assistant message.
+    expect(insertMock).toHaveBeenCalled();
+  });
+});
