@@ -132,7 +132,7 @@ variables and point a Twilio number at `/api/voice/incoming` (see
 | `npm run lint` | ESLint |
 | `npm run test:unit` | Unit tests (Vitest) — includes the offline eval gate |
 | `npm run test:e2e` | E2E tests (Playwright) |
-| `npm run eval` / `eval:ab` / `eval:prompts` | Chatbot-quality eval ([EVAL.md](EVAL.md)) |
+| `npm run eval` / `eval:ab` / `eval:prompts` / `eval:behavior` | Chatbot-quality eval ([EVAL.md](EVAL.md)) |
 | `npm run smoke:fieldpulse` | Live FieldPulse API smoke test (key-gated, manual) |
 | `npm run db:migrate` / `db:seed` / `db:studio` | Database migrate / seed / studio |
 
