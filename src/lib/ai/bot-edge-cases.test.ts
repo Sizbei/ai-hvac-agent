@@ -747,3 +747,27 @@ describe("12. knowledge-base FAQ — correct intent, strict word-boundary matchi
     expect(verdict("what services do you offer").action).toBe("FALLBACK_LLM");
   });
 });
+
+describe("emergency matching — leak false-negatives + install false-positives (review H5/H6)", () => {
+  it("escalates a real gas leak even when the appliance is named", () => {
+    expect(verdict("I smell gas coming from my gas furnace").escalate).toBe(true);
+    expect(verdict("my gas furnace smells like rotten eggs").escalate).toBe(true);
+  });
+  it("still does NOT escalate a bare appliance mention", () => {
+    expect(verdict("my gas furnace won't start").escalate).toBe(false);
+    expect(verdict("does a gas furnace produce co").escalate).toBe(false);
+  });
+  it("does NOT escalate product install / past-history questions", () => {
+    expect(verdict("do you install smoke detectors").escalate).toBe(false);
+    expect(verdict("do you install a co detector").escalate).toBe(false);
+    expect(
+      verdict("we had a burst pipe fixed last month, do you do tune ups").escalate,
+    ).toBe(false);
+  });
+  it("still escalates genuine CO / smoke / flooding emergencies", () => {
+    expect(verdict("my co detector is going off").escalate).toBe(true);
+    expect(verdict("there's smoke and a burning smell from the vents").escalate).toBe(true);
+    expect(verdict("my basement is flooding water everywhere").escalate).toBe(true);
+  });
+});
+

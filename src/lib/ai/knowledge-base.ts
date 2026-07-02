@@ -34,8 +34,11 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     ],
     negationGuards: [
       "no gas smell",
-      "gas furnace",
-      "gas stove",
+      // NOTE: "gas furnace"/"gas stove" are NOT guarded — a bare appliance
+      // mention has no gas trigger to match anyway (see triggerKeywords), and
+      // guarding them suppressed real leaks like "my gas furnace smells like
+      // rotten eggs" / "I smell gas from my gas furnace" (the most common way a
+      // customer reports a leak). Escalating a genuine gas smell wins.
       "gas line is fine",
       "em heat",
       "emergency heat",
@@ -62,7 +65,20 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
       "co2 alarm",
       "co2 detector",
     ],
-    negationGuards: ["em heat", "emergency heat", "aux heat"],
+    // Sales/install questions ("do you install a co detector") name the product
+    // but are NOT emergencies; a real alarm never asks about buying one.
+    negationGuards: [
+      "em heat",
+      "emergency heat",
+      "aux heat",
+      "do you install",
+      "do you sell",
+      "do you offer",
+      "do you carry",
+      "can you install",
+      "want to install",
+      "need to install",
+    ],
     // Require an actual danger signal — NOT the subject words "co"/"carbon
     // monoxide" themselves (the co→carbon-monoxide alias would otherwise make
     // every CO mention escalate, including informational questions).
@@ -100,7 +116,18 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
       "sparking",
       "hot wires",
     ],
-    negationGuards: ["em heat", "emergency heat", "aux heat"],
+    negationGuards: [
+      "em heat",
+      "emergency heat",
+      "aux heat",
+      "do you install",
+      "do you sell",
+      "do you offer",
+      "do you carry",
+      "can you install",
+      "want to install",
+      "need to install",
+    ],
     requiredQualifiers: ["burning", "smoke", "smell", "sparks", "sparking"],
     action: "ESCALATE",
     cannedResponse:
@@ -123,7 +150,19 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
       "gushing",
       "flood",
     ],
-    negationGuards: ["em heat", "emergency heat", "aux heat"],
+    // Past-tense resolution ("burst pipe fixed last month, do you do tune-ups")
+    // is a history mention, not an active emergency. Guards are anchored to a
+    // PAST + already-resolved phrasing so active reports ("need the burst pipe
+    // fixed, water everywhere") are unaffected.
+    negationGuards: [
+      "em heat",
+      "emergency heat",
+      "aux heat",
+      "fixed last",
+      "was fixed",
+      "already fixed",
+      "pipe fixed",
+    ],
     requiredQualifiers: [
       "flooding",
       "flood",
