@@ -19,8 +19,7 @@ Three integrations exist today:
 > integer `status` codes are **not** live-verified. Housecall Pro was built to the
 > same pattern but on *inferred* shapes — it almost certainly shares the bugs
 > FieldPulse had before the 2026-06-19 remediation; re-probe with a live HCP key
-> and apply the same fixes before trusting it. See
-> `docs/superpowers/specs/2026-06-19-fieldpulse-live-api-remediation-design.md`.
+> and apply the same fixes before trusting it.
 
 ## Anatomy of an integration (the shared pattern)
 
@@ -161,8 +160,6 @@ pay/refund controls + shows an authoritative-balance caveat for synced invoices.
   refuse any synced invoice.
 - **Source-aware reporting:** a request can legitimately have BOTH a native and a
   synced invoice; revenue/aging reads must group by source to avoid double-count.
-- **Read more:** `docs/superpowers/specs/2026-06-19-fieldpulse-invoice-sync-design.md`
-  (FieldPulse) and `2026-06-19-hcp-invoice-parity-design.md` (HCP parity).
 
 ## Webhooks
 
