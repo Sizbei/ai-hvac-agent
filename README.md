@@ -108,6 +108,7 @@ variables and point a Twilio number at `/api/voice/incoming` (see
 
 **Reference**
 - **[docs/API.md](docs/API.md)** — REST API reference (chat, admin, file upload, widget).
+- **[docs/DISPATCH.md](docs/DISPATCH.md)** — dispatch/scheduling pipeline (scoring, confidence gate, duration, tech location) + roadmap.
 - **[docs/INTEGRATIONS.md](docs/INTEGRATIONS.md)** — FieldPulse / Housecall Pro / Google Calendar.
 - **[docs/KNOWLEDGE-BASE-CATALOG.md](docs/KNOWLEDGE-BASE-CATALOG.md)** — the deterministic FAQ intents.
 - **[EVAL.md](EVAL.md)** — the conversation-quality eval harness.
