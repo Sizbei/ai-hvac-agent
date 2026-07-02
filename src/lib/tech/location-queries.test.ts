@@ -16,7 +16,13 @@ vi.mock("@/lib/db", () => ({
         where: () => ({
           // consent check: .where().limit()
           limit: () => Promise.resolve(consentRows.current),
-          // batch latest-per-tech: .where().orderBy() (awaited directly)
+        }),
+      }),
+    }),
+    // batch latest-per-tech: DISTINCT ON, .where().orderBy() (awaited directly)
+    selectDistinctOn: () => ({
+      from: () => ({
+        where: () => ({
           orderBy: () => Promise.resolve(locationRows.current),
         }),
       }),

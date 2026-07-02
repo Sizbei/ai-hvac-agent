@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { sql, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { customerSessions, messages } from "@/lib/db/schema";
+import { customerSessions, messages, technicianLocations } from "@/lib/db/schema";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { logger } from "@/lib/logger";
 import { verifyCronAuth } from "@/lib/cron-auth";
@@ -10,6 +10,7 @@ interface CleanupSummary {
   readonly expiredSessions: number;
   readonly purgedSessions: number;
   readonly purgedMessages: number;
+  readonly purgedLocationFixes: number;
 }
 
 export async function GET(request: NextRequest) {
@@ -77,10 +78,23 @@ export async function GET(request: NextRequest) {
       purgedSessions = (sessResult as { rowCount?: number }).rowCount ?? 0;
     }
 
+    // Step 4: Trim technician GPS history — dispatch/map only ever read the
+    // LATEST fix (and the map's freshness window is 4h), so old pings are pure
+    // growth. 30 days retained for future geofence/actual-duration analysis.
+    // This is the retention the technician_locations schema comment promises.
+    const locResult = await db
+      .delete(technicianLocations)
+      .where(
+        sql`${technicianLocations.capturedAt} < NOW() - INTERVAL '30 days'`,
+      );
+    const purgedLocationFixes =
+      (locResult as { rowCount?: number }).rowCount ?? 0;
+
     const summary: CleanupSummary = {
       expiredSessions,
       purgedSessions,
       purgedMessages,
+      purgedLocationFixes,
     };
 
     logger.info({ cleanup: summary }, "Session cleanup completed");

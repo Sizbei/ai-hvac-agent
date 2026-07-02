@@ -144,10 +144,11 @@ export async function getLatestTechnicianLocation(
 
 /**
  * Latest fix per technician for a set of techs, in ONE query (avoids the N+1 of
- * calling getLatestTechnicianLocation per tech from the dispatch scorer). Rows
- * come back newest-first and we keep the first seen per tech — the same
- * dedupe-in-memory pattern the dispatch map uses. Techs with no fix are absent
- * from the map. Org + technician scoped.
+ * calling getLatestTechnicianLocation per tech from the dispatch scorer).
+ * DISTINCT ON (technician_id) bounds the result to one row per tech at the
+ * database — the row transfer stays O(techs) no matter how much GPS history the
+ * table holds (history itself is trimmed by the cleanup cron's retention sweep).
+ * Techs with no fix are absent from the map. Org + technician scoped.
  */
 export async function getLatestTechnicianLocations(
   organizationId: string,
@@ -157,7 +158,7 @@ export async function getLatestTechnicianLocations(
   if (technicianIds.length === 0) return out;
 
   const rows = await db
-    .select({
+    .selectDistinctOn([technicianLocations.technicianId], {
       technicianId: technicianLocations.technicianId,
       latitude: technicianLocations.latitude,
       longitude: technicianLocations.longitude,
@@ -170,10 +171,12 @@ export async function getLatestTechnicianLocations(
         inArray(technicianLocations.technicianId, [...technicianIds]),
       ),
     )
-    .orderBy(desc(technicianLocations.capturedAt));
+    // DISTINCT ON requires ORDER BY to lead with the distinct column; the
+    // capturedAt desc tiebreak makes the one kept row the LATEST fix.
+    .orderBy(technicianLocations.technicianId, desc(technicianLocations.capturedAt));
 
   for (const r of rows) {
-    if (out.has(r.technicianId)) continue; // rows are desc → first is latest
+    if (out.has(r.technicianId)) continue; // defense-in-depth; rows are unique per tech
     out.set(r.technicianId, { latitude: r.latitude, longitude: r.longitude });
   }
   return out;

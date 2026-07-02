@@ -37,6 +37,9 @@ export function businessDayUtcRange(isoDay: string): {
 } {
   return {
     start: businessWallClockToUtc(isoDay, 0, 0),
+    // hour=24 rolls Date.UTC to midnight of isoDay+1 (JS date normalization),
+    // which businessWallClockToUtc then offset-corrects in the NEXT day's zone —
+    // exactly right across DST transitions (23h/25h business days).
     end: businessWallClockToUtc(isoDay, 24, 0),
   };
 }
