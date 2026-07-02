@@ -63,6 +63,10 @@ vi.mock("@/lib/db/schema", () => ({
     id: "m.id",
     sessionId: "m.sessionId",
   },
+  technicianLocations: {
+    id: "tl.id",
+    capturedAt: "tl.capturedAt",
+  },
 }));
 
 vi.mock("drizzle-orm", () => ({
@@ -238,6 +242,7 @@ describe("GET /api/cron/cleanup", () => {
     expect(body.data).toHaveProperty("expiredSessions");
     expect(body.data).toHaveProperty("purgedSessions");
     expect(body.data).toHaveProperty("purgedMessages");
+    expect(body.data).toHaveProperty("purgedLocationFixes");
   });
 
   it("does not expire sessions in terminal states (only purges after 90 days)", async () => {
