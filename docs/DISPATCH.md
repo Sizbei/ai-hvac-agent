@@ -108,7 +108,7 @@ prefers `travelMinutes`; `travelKm` remains the fallback and the reason line.
 6. ✅ **Urgency negation** — `readUrgencySignal` now checks negated urgency ("not urgent" / "not an emergency" / "isn't urgent") before the affirmative match, so a clear no is no longer read as urgent. A contradictory "no, it's an emergency" still reads urgent.
 
 **Near-term dispatch quality:**
-- ✅ **Real travel time** — road drive-time now drives the travel term when `ROUTING_PROVIDER` is set (OpenRouteService adapter shipped; see *Travel-time provider* above). Follow-ups: a persistent `travel_estimate` cache (rounded origin×dest, TTL) once volume hits ORS rate limits; traffic-aware `mapbox`/`google` adapters; log `travelMinutes` alongside `travelKm` in `dispatch_decisions` for an A/B against haversine.
+- ✅ **Real travel time** — road drive-time now drives the travel term when `ROUTING_PROVIDER` is set (OpenRouteService adapter shipped; see *Travel-time provider* above). Follow-ups: a persistent `travel_estimate` cache (rounded origin×dest, TTL) once volume hits ORS rate limits; traffic-aware `mapbox`/`google` adapters. ✅ Decisions now log `travelKm` + `travelMinutes` per candidate in `dispatch_decisions.candidates`, so the routing-vs-haversine A/B and `W_TRAVEL`/cap tuning read straight off recorded decisions.
 - **Confidence-gate tuning** — `MIN_CONFIDENCE_GAP` (0.08) and the scoring weights are provisional constants; tune them on pilot **override-rate** data (how often dispatchers override auto-commits) and outcome data.
 - **Explicit skill matrix** — `skillJobsCompleted` is a proxy; add a technician skill/certification matrix (by system type, refrigeration, gas) so the skill gate is capability-based, not just history-based.
 

@@ -132,6 +132,10 @@ describe('rankTechnicians', () => {
   });
 });
 
+// RankedTech factory for the classify tests (travel fields are audit-only).
+const rt = (technicianId: string, score: number) =>
+  ({ technicianId, score, reasons: [], skillMatched: true, travelKm: null, travelMinutes: null });
+
 describe('travel-aware scoring + confidence classification', () => {
   const baseTech = {
     skillJobsCompleted: 5,
@@ -180,28 +184,35 @@ describe('travel-aware scoring + confidence classification', () => {
     expect(r.reasons.some((x) => x.includes('km away'))).toBe(true);
   });
 
+  it('passes travelKm/travelMinutes through onto the ranked result (decision audit)', () => {
+    const priced = scoreTechnician({
+      job,
+      tech: { technicianId: 'a', ...baseTech, travelKm: 12.5, travelMinutes: 18 },
+    });
+    expect(priced.travelKm).toBe(12.5);
+    expect(priced.travelMinutes).toBe(18);
+    // Absent travel → nulls (not undefined) so the audit JSON shape is stable.
+    const unpriced = scoreTechnician({ job, tech: { technicianId: 'b', ...baseTech } });
+    expect(unpriced.travelKm).toBeNull();
+    expect(unpriced.travelMinutes).toBeNull();
+  });
+
   it('classifyDispatch: empty ranking → queued_no_fit', () => {
     expect(classifyDispatch([]).outcome).toBe('queued_no_fit');
   });
 
   it('classifyDispatch: a clear winner commits to the top tech', () => {
-    const ranked = [
-      { technicianId: 'a', score: 0.8, reasons: [], skillMatched: true },
-      { technicianId: 'b', score: 0.5, reasons: [], skillMatched: true },
-    ];
+    const ranked = [rt('a', 0.8), rt('b', 0.5)];
     expect(classifyDispatch(ranked)).toEqual({ outcome: 'committed', technicianId: 'a' });
   });
 
   it('classifyDispatch: a near-tie defers to a human (queued_ambiguous)', () => {
-    const ranked = [
-      { technicianId: 'a', score: 0.81, reasons: [], skillMatched: true },
-      { technicianId: 'b', score: 0.80, reasons: [], skillMatched: true },
-    ];
+    const ranked = [rt('a', 0.81), rt('b', 0.80)];
     expect(classifyDispatch(ranked).outcome).toBe('queued_ambiguous');
   });
 
   it('classifyDispatch: a lone candidate commits (infinite gap)', () => {
-    const ranked = [{ technicianId: 'a', score: 0.3, reasons: [], skillMatched: true }];
+    const ranked = [rt('a', 0.3)];
     expect(classifyDispatch(ranked)).toEqual({ outcome: 'committed', technicianId: 'a' });
   });
 });
@@ -225,10 +236,7 @@ describe('Probook-parity: expected-value term + urgency tier', () => {
 
   it('an emergency auto-commits a near-tie a standard job would queue', () => {
     // gap 0.03: below the normal 0.08 gate (queue) but above the 0.02 emergency gate (commit).
-    const ranked = [
-      { technicianId: 'a', score: 0.83, reasons: [], skillMatched: true },
-      { technicianId: 'b', score: 0.80, reasons: [], skillMatched: true },
-    ];
+    const ranked = [rt('a', 0.83), rt('b', 0.80)];
     expect(classifyDispatch(ranked).outcome).toBe('queued_ambiguous');
     expect(classifyDispatch(ranked, 'emergency')).toEqual({ outcome: 'committed', technicianId: 'a' });
   });

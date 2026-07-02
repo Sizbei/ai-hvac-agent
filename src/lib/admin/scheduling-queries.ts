@@ -921,6 +921,9 @@ async function recordDispatchDecision(
         technicianId: r.technicianId,
         score: r.score,
         reasons: [...r.reasons],
+        // Both travel signals, for the routing-vs-haversine A/B + weight tuning.
+        travelKm: r.travelKm,
+        travelMinutes: r.travelMinutes,
       })),
     });
   } catch (error) {

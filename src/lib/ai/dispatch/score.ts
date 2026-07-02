@@ -38,6 +38,12 @@ export interface RankedTech {
   readonly score: number;
   readonly reasons: readonly string[];
   readonly skillMatched: boolean;
+  /** Travel inputs passed through for the dispatch-decision audit, so recorded
+   * decisions carry BOTH signals — the routing-vs-haversine A/B and the
+   * W_TRAVEL/cap tuning read these off dispatch_decisions.candidates. Null when
+   * that signal wasn't available at scoring time. */
+  readonly travelKm: number | null;
+  readonly travelMinutes: number | null;
 }
 
 // Scoring weights (sum to 1.0). Provisional — to be tuned on pilot data (spec §6.3).
@@ -125,7 +131,14 @@ export function scoreTechnician(signals: DispatchSignals): RankedTech {
   }
   reasons.push(`${tech.sameDayJobCount} jobs today`);
 
-  return { technicianId: tech.technicianId, score, reasons, skillMatched };
+  return {
+    technicianId: tech.technicianId,
+    score,
+    reasons,
+    skillMatched,
+    travelKm: tech.travelKm ?? null,
+    travelMinutes: tech.travelMinutes ?? null,
+  };
 }
 
 /**

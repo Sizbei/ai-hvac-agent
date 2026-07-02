@@ -2358,9 +2358,18 @@ export const dispatchDecisions = pgTable(
     }),
     topScore: doublePrecision("top_score"),
     confidenceGap: doublePrecision("confidence_gap"),
-    // Ranked, best-first: [{ technicianId, score, reasons: string[] }].
+    // Ranked, best-first. travelKm/travelMinutes (nullable, added 2026-07) carry
+    // both travel signals for the routing-vs-haversine A/B; older rows omit them.
     candidates: jsonb("candidates")
-      .$type<Array<{ technicianId: string; score: number; reasons: string[] }>>()
+      .$type<
+        Array<{
+          technicianId: string;
+          score: number;
+          reasons: string[];
+          travelKm?: number | null;
+          travelMinutes?: number | null;
+        }>
+      >()
       .notNull()
       .default(sql`'[]'::jsonb`),
     createdAt: timestamp("created_at", { withTimezone: true })
