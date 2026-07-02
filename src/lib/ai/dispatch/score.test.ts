@@ -155,6 +155,31 @@ describe('travel-aware scoring + confidence classification', () => {
     expect(nullTravel.score).toBe(without.score);
   });
 
+  it('prefers drive-minutes over km when routing priced the tech', () => {
+    // A tech 35 km out but only 20 min by highway should beat one 2 km out but
+    // 40 min in traffic — proving minutes win over the straight-line term.
+    const highway = scoreTechnician({
+      job,
+      tech: { technicianId: 'a', ...baseTech, travelKm: 35, travelMinutes: 20 },
+    });
+    const crossTown = scoreTechnician({
+      job,
+      tech: { technicianId: 'b', ...baseTech, travelKm: 2, travelMinutes: 40 },
+    });
+    expect(highway.score).toBeGreaterThan(crossTown.score);
+    expect(highway.reasons.some((r) => r.includes('min drive'))).toBe(true);
+    // The km reason is not emitted when minutes are present.
+    expect(highway.reasons.some((r) => r.includes('km away'))).toBe(false);
+  });
+
+  it('falls back to the km term when travelMinutes is null', () => {
+    const r = scoreTechnician({
+      job,
+      tech: { technicianId: 'a', ...baseTech, travelKm: 10, travelMinutes: null },
+    });
+    expect(r.reasons.some((x) => x.includes('km away'))).toBe(true);
+  });
+
   it('classifyDispatch: empty ranking → queued_no_fit', () => {
     expect(classifyDispatch([]).outcome).toBe('queued_no_fit');
   });

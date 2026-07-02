@@ -30,6 +30,12 @@ const { getLatestTechnicianLocations } = vi.hoisted(() => ({
 }));
 vi.mock('@/lib/tech/location-queries', () => ({ getLatestTechnicianLocations }));
 
+const { routingEnabled, durationMatrix } = vi.hoisted(() => ({
+  routingEnabled: vi.fn(() => false), // routing off by default → haversine only
+  durationMatrix: vi.fn(async () => [] as (number | null)[]),
+}));
+vi.mock('./travel', () => ({ routingEnabled, durationMatrix }));
+
 import { loadDispatchSignals, businessDayUtcRange } from './signals';
 
 beforeEach(() => {
@@ -68,6 +74,7 @@ describe('loadDispatchSignals', () => {
       conversionRate: 0,
       avgJobRevenueCents: 0,
       travelKm: null,
+      travelMinutes: null,
     });
     expect(m.get('t2')).toEqual({
       skillJobsCompleted: 0,
@@ -76,6 +83,7 @@ describe('loadDispatchSignals', () => {
       conversionRate: 0,
       avgJobRevenueCents: 0,
       travelKm: null,
+      travelMinutes: null,
     });
   });
 
@@ -100,6 +108,7 @@ describe('loadDispatchSignals', () => {
       conversionRate: 0.5,
       avgJobRevenueCents: 12000,
       travelKm: null,
+      travelMinutes: null,
     });
   });
 
@@ -129,6 +138,9 @@ describe('loadDispatchSignals', () => {
     beforeEach(() => {
       getLatestTechnicianLocations.mockReset();
       getLatestTechnicianLocations.mockResolvedValue(new Map()); // no live fix → home base
+      routingEnabled.mockReturnValue(false); // haversine-only unless a test opts in
+      durationMatrix.mockReset();
+      durationMatrix.mockResolvedValue([]);
     });
 
     it('stays null with no requestId (byte-identical to today)', async () => {
@@ -192,6 +204,52 @@ describe('loadDispatchSignals', () => {
       );
       // Live fix coincides with the job → ~0 km, proving home base was ignored.
       expect(m.get('t1')!.travelKm!).toBeLessThan(1);
+    });
+
+    it('overlays road drive-minutes when routing is enabled (km still computed)', async () => {
+      routingEnabled.mockReturnValue(true);
+      durationMatrix.mockResolvedValue([12]); // one anchor → 12 min drive
+      getLatestTechnicianLocations.mockResolvedValue(
+        new Map([['t1', { latitude: 36.0, longitude: -82.0 }]]),
+      );
+      selectQueue.push(
+        [], [], [], [], [],
+        [{ lat: 36.33, lon: -82.38 }], // job coords
+        [{ id: 't1', lat: 36.0, lon: -82.0 }], // home base (unused; live fix present)
+      );
+      const m = await loadDispatchSignals(
+        'org',
+        ['t1'],
+        { jobType: 'no_cool', systemType: null },
+        '2026-06-24',
+        'req-1',
+      );
+      expect(m.get('t1')!.travelMinutes).toBe(12);
+      // Haversine km is still computed as the fallback signal.
+      expect(m.get('t1')!.travelKm).not.toBeNull();
+      expect(durationMatrix).toHaveBeenCalledOnce();
+    });
+
+    it('keeps travelMinutes null (haversine only) when routing prices no origin', async () => {
+      routingEnabled.mockReturnValue(true);
+      durationMatrix.mockResolvedValue([null]); // provider couldn't price the tech
+      getLatestTechnicianLocations.mockResolvedValue(
+        new Map([['t1', { latitude: 36.0, longitude: -82.0 }]]),
+      );
+      selectQueue.push(
+        [], [], [], [], [],
+        [{ lat: 36.33, lon: -82.38 }],
+        [{ id: 't1', lat: 36.0, lon: -82.0 }],
+      );
+      const m = await loadDispatchSignals(
+        'org',
+        ['t1'],
+        { jobType: 'no_cool', systemType: null },
+        '2026-06-24',
+        'req-1',
+      );
+      expect(m.get('t1')!.travelMinutes).toBeNull();
+      expect(m.get('t1')!.travelKm).not.toBeNull();
     });
   });
 });

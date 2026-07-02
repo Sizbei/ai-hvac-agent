@@ -26,6 +26,10 @@ export interface DispatchSignals {
      * the DOMINANT factor (location-primary dispatch); when null the score is
      * byte-identical to the no-travel composite. */
     readonly travelKm?: number | null;
+    /** Road drive-time (minutes) from the tech's anchor to the job, when a routing
+     * provider is configured. PREFERRED over travelKm — a tech 40 km up the
+     * highway can beat one 15 km cross-town. Null → fall back to travelKm. */
+    readonly travelMinutes?: number | null;
   };
 }
 
@@ -58,6 +62,7 @@ const REVENUE_CAP_CENTS = 150000;
 // weight; the existing skill/quality/conversion/load mix fills the remainder.
 const W_TRAVEL = 0.45;
 const TRAVEL_CAP_KM = 40; // beyond the service radius, travel score floors at 0
+const TRAVEL_CAP_MIN = 45; // drive-time equivalent; beyond this the term floors at 0
 
 /** A short label for the job's specialty, for human-readable reasons. */
 function skillLabel(job: DispatchSignals['job']): string {
@@ -83,20 +88,30 @@ export function scoreTechnician(signals: DispatchSignals): RankedTech {
     load * W_LOAD +
     value * W_VALUE;
 
-  // Travel overlay: known distance dominates (location-primary). Absent → the
-  // score equals the composite exactly, so no-travel behavior is unchanged.
+  // Travel overlay: known proximity dominates (location-primary). Prefer road
+  // drive-time (minutes) when routing priced this tech; else the straight-line km;
+  // absent both → the score equals the composite exactly (no-travel unchanged).
   let score = composite;
-  if (tech.travelKm != null && Number.isFinite(tech.travelKm)) {
+  let travelReason: string | null = null;
+  if (tech.travelMinutes != null && Number.isFinite(tech.travelMinutes)) {
+    const travelScore = Math.max(
+      0,
+      1 - Math.min(tech.travelMinutes, TRAVEL_CAP_MIN) / TRAVEL_CAP_MIN,
+    );
+    score = travelScore * W_TRAVEL + composite * (1 - W_TRAVEL);
+    travelReason = `~${Math.round(tech.travelMinutes)} min drive`;
+  } else if (tech.travelKm != null && Number.isFinite(tech.travelKm)) {
     const travelScore = Math.max(
       0,
       1 - Math.min(tech.travelKm, TRAVEL_CAP_KM) / TRAVEL_CAP_KM,
     );
     score = travelScore * W_TRAVEL + composite * (1 - W_TRAVEL);
+    travelReason = `${tech.travelKm.toFixed(1)} km away`;
   }
 
   const reasons: string[] = [];
-  if (tech.travelKm != null && Number.isFinite(tech.travelKm)) {
-    reasons.push(`${tech.travelKm.toFixed(1)} km away`);
+  if (travelReason) {
+    reasons.push(travelReason);
   }
   reasons.push(
     skillMatched

@@ -22,6 +22,7 @@ import {
 import { withTenant } from "@/lib/db/tenant";
 import { haversineKm } from "@/lib/address/photon";
 import { getLatestTechnicianLocations } from "@/lib/tech/location-queries";
+import { durationMatrix, routingEnabled } from "./travel";
 import { businessWallClockToUtc } from "@/lib/admin/calendar-time";
 
 /**
@@ -59,6 +60,11 @@ export interface TechSignalRow {
    * Null → the scorer's travel term stays dormant and scoring is byte-identical
    * to the no-travel composite. */
   readonly travelKm: number | null;
+  /** Road drive-time (minutes) from the tech's anchor to the job via the
+   * configured routing provider, or null when routing is off / the call failed /
+   * that origin couldn't be priced. Preferred over travelKm by the scorer; null →
+   * fall back to the straight-line term. */
+  readonly travelMinutes: number | null;
 }
 
 // Open statuses that count toward a tech's same-day load (everything not
@@ -98,6 +104,7 @@ export async function loadDispatchSignals(
       conversionRate: 0,
       avgJobRevenueCents: 0,
       travelKm: null,
+      travelMinutes: null,
     });
   }
   if (technicianIds.length === 0) return result;
@@ -265,13 +272,17 @@ export async function loadDispatchSignals(
   }
 
   // Travel term (dormant until here). Only when a requestId is supplied AND the
-  // request has cached job coordinates does travelKm become non-null; otherwise
-  // every travelKm stays null and the scorer is byte-identical to the composite.
+  // request has cached job coordinates does travel become non-null; otherwise
+  // every travel field stays null and the scorer is byte-identical to the composite.
   if (requestId) {
-    const travelByTech = await loadTravelKm(organizationId, requestId, technicianIds);
-    for (const [id, km] of travelByTech) {
-      if (km != null && result.has(id)) {
-        result.set(id, { ...result.get(id)!, travelKm: km });
+    const travelByTech = await loadTravelSignals(organizationId, requestId, technicianIds);
+    for (const [id, t] of travelByTech) {
+      if (result.has(id) && (t.km != null || t.minutes != null)) {
+        result.set(id, {
+          ...result.get(id)!,
+          travelKm: t.km,
+          travelMinutes: t.minutes,
+        });
       }
     }
   }
@@ -280,18 +291,20 @@ export async function loadDispatchSignals(
 }
 
 /**
- * Straight-line km from each tech's anchor to the job's cached coordinates.
- * Returns null for a tech when either the job or that tech's anchor coordinate
- * is unknown — the scorer then treats travel as dormant for that tech. When the
- * job itself has no cached location, no per-tech anchor read is issued at all.
+ * Travel signal per tech: always the straight-line `km` from the tech's anchor to
+ * the job's cached coordinates (null when either is unknown), plus optional road
+ * drive `minutes` from the configured routing provider as an overlay. The scorer
+ * prefers minutes and falls back to km, so routing is a strict best-effort
+ * improvement: when it's off or a tech can't be priced, behavior is unchanged.
+ * When the job itself has no cached location, no anchor/routing work is done.
  */
-async function loadTravelKm(
+async function loadTravelSignals(
   organizationId: string,
   requestId: string,
   technicianIds: readonly string[],
-): Promise<Map<string, number | null>> {
-  const out = new Map<string, number | null>(
-    technicianIds.map((id) => [id, null]),
+): Promise<Map<string, { km: number | null; minutes: number | null }>> {
+  const out = new Map<string, { km: number | null; minutes: number | null }>(
+    technicianIds.map((id) => [id, { km: null, minutes: null }]),
   );
   const jobCoords = await loadJobCoords(organizationId, requestId);
   if (!jobCoords) return out;
@@ -300,7 +313,30 @@ async function loadTravelKm(
   for (const id of technicianIds) {
     const a = anchors.get(id);
     if (a) {
-      out.set(id, haversineKm(a.lat, a.lon, jobCoords.lat, jobCoords.lon));
+      out.set(id, {
+        km: haversineKm(a.lat, a.lon, jobCoords.lat, jobCoords.lon),
+        minutes: null,
+      });
+    }
+  }
+
+  // Routing overlay (best-effort, one matrix call). Only techs with a known
+  // anchor are priced; a null result leaves that tech on the haversine term.
+  if (routingEnabled()) {
+    const withAnchor = technicianIds.filter((id) => anchors.get(id));
+    if (withAnchor.length > 0) {
+      const origins = withAnchor.map((id) => {
+        const a = anchors.get(id)!;
+        return { lat: a.lat, lon: a.lon };
+      });
+      const minutes = await durationMatrix(origins, {
+        lat: jobCoords.lat,
+        lon: jobCoords.lon,
+      });
+      withAnchor.forEach((id, i) => {
+        const m = minutes[i];
+        if (m != null) out.set(id, { ...out.get(id)!, minutes: m });
+      });
     }
   }
   return out;

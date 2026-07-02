@@ -1067,6 +1067,7 @@ async function rankedTechnicianOrder(
         // score term; null → the scorer is byte-identical to the pre-travel
         // composite (deterministic fallback preserved).
         travelKm: s.travelKm,
+        travelMinutes: s.travelMinutes,
       },
     };
   });
