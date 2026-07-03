@@ -7,6 +7,8 @@
  * the request. Pure (no I/O, no Date.now()) so it unit-tests deterministically.
  */
 
+import { BUSINESS_BASE_LOCATION } from "@/lib/config/business-location";
+
 export const ARRIVAL_WINDOWS = [
   "morning",
   "afternoon",
@@ -64,16 +66,15 @@ export function arrivalWindowForDate(
 
 /** Human label for a persisted arrival window, e.g. "Jun 10, 8:00 AM – 12:00 PM".
  *
- * `timeZone` selects the wall clock to render in. Defaults to "UTC" for windows
- * produced by arrivalWindowForDate (which anchors band hours in UTC). Windows
- * produced by arrivalWindowForSlot / arrivalWindowUtcForBusinessDate anchor band
- * hours in the BUSINESS timezone, so those must be rendered with the business
- * timezone (e.g. "America/New_York") to show the real local hours to a customer —
- * otherwise an 8 AM ET slot (12:00Z) would read as 12 PM. */
+ * `timeZone` selects the wall clock to render in. Defaults to the BUSINESS
+ * timezone because every live write path now anchors band hours there (via
+ * arrivalWindowUtcForBusinessDate) — so an 8 AM ET window stored as 12:00Z reads
+ * back as "8:00 AM", not "12:00 PM". (The legacy UTC-anchored arrivalWindowForDate
+ * survives only in demo seed data.) Pass an explicit tz for a non-default org. */
 export function formatArrivalWindow(
   startIso: string | null,
   endIso: string | null,
-  timeZone = "UTC",
+  timeZone: string = BUSINESS_BASE_LOCATION.timezone,
 ): string | null {
   if (!startIso || !endIso) return null;
   const start = new Date(startIso);
@@ -103,7 +104,7 @@ export function formatArrivalWindow(
 export function formatArrivalWindowSpoken(
   startIso: string | null,
   endIso: string | null,
-  timeZone = "UTC",
+  timeZone: string = BUSINESS_BASE_LOCATION.timezone,
 ): string | null {
   if (!startIso || !endIso) return null;
   const start = new Date(startIso);

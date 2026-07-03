@@ -63,16 +63,28 @@ describe("formatArrivalWindow", () => {
 describe("formatArrivalWindowSpoken", () => {
   it("renders a spoken-friendly window with no en-dash", () => {
     const { start, end } = arrivalWindowForDate(DAY, "morning");
+    // This window is UTC-anchored (arrivalWindowForDate), so render it in UTC to
+    // test the spoken SHAPE deterministically (the default is now business tz).
     const label = formatArrivalWindowSpoken(
       start.toISOString(),
       end.toISOString(),
+      "UTC",
     );
     expect(label).not.toBeNull();
     // Spoken variant must not carry the en-dash (reads awkwardly aloud) and
     // should join the bounds with the word "between".
     expect(label).not.toContain("–");
     expect(label).toContain("between");
-    // UTC-anchored, locale forced to en-US, so the wording is stable.
+    expect(label).toBe("Wednesday, June 10 between 8 AM and 12 PM");
+  });
+
+  it("defaults to the business timezone: an 8 AM ET window reads as 8 AM (review H10)", () => {
+    // 8 AM ET on Jun 10 (EDT, UTC-4) = 12:00Z; the old UTC default mislabeled it
+    // as 12 PM. No explicit tz → business tz → the real local hour.
+    const label = formatArrivalWindowSpoken(
+      "2026-06-10T12:00:00.000Z",
+      "2026-06-10T16:00:00.000Z",
+    );
     expect(label).toBe("Wednesday, June 10 between 8 AM and 12 PM");
   });
 

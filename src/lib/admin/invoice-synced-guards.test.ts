@@ -21,11 +21,6 @@ function limitChain(rows: unknown[]) {
     from: () => ({ where: () => ({ limit: () => Promise.resolve(rows) }) }),
   };
 }
-/** A `.from().where()`-shaped result (no limit — e.g. the prior-refunds sum). */
-function whereChain(rows: unknown[]) {
-  return { from: () => ({ where: () => Promise.resolve(rows) }) };
-}
-
 beforeEach(() => vi.clearAllMocks());
 
 describe("synced-invoice money guards", () => {
@@ -59,15 +54,14 @@ describe("synced-invoice money guards", () => {
     const provider = new MockPaymentProvider();
     const refund = vi.spyOn(provider, "refund");
     mockedSelect
-      // 1: the payment
+      // 1: the payment (the running refunded total now lives on the row, not a
+      // separate SUM(refunds) select)
       .mockReturnValueOnce(
         limitChain([
-          { id: "pay-1", invoiceId: "inv-1", amountCents: 5000, status: "succeeded", providerPaymentId: "ch_1" },
+          { id: "pay-1", invoiceId: "inv-1", amountCents: 5000, amountRefundedCents: 0, status: "succeeded", providerPaymentId: "ch_1" },
         ]) as never,
       )
-      // 2: prior refunds (sum)
-      .mockReturnValueOnce(whereChain([]) as never)
-      // 3: the invoice — synced
+      // 2: the invoice — synced
       .mockReturnValueOnce(
         limitChain([{ amountPaidCents: 5000, totalCents: 10000, fieldpulseInvoiceId: "fp-1" }]) as never,
       );

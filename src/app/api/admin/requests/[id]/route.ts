@@ -27,9 +27,9 @@ import {
 } from "@/lib/admin/request-status";
 import {
   ARRIVAL_WINDOWS,
-  arrivalWindowForDate,
   type ArrivalWindow,
 } from "@/lib/admin/arrival-window";
+import { arrivalWindowUtcForBusinessDate } from "@/lib/admin/calendar-time";
 import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
@@ -203,8 +203,13 @@ export async function PATCH(
       if (parsed.data.arrivalWindow === null || when === null) {
         arrivalWindow = null;
       } else if (parsed.data.arrivalWindow !== undefined && when) {
-        arrivalWindow = arrivalWindowForDate(
-          when,
+        // Anchor the band hours in the BUSINESS timezone (not UTC), matching the
+        // calendar / reschedule / auto-dispatch paths — otherwise the SAME
+        // "morning" band persists a different instant here (8:00Z = 3 AM ET)
+        // than everywhere else (8 AM ET). Use the picked calendar day (UTC date
+        // portion of the ISO scheduledDate).
+        arrivalWindow = arrivalWindowUtcForBusinessDate(
+          parsed.data.scheduledDate!.slice(0, 10),
           parsed.data.arrivalWindow as ArrivalWindow,
         );
       } else {
