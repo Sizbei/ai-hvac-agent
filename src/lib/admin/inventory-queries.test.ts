@@ -121,15 +121,17 @@ describe("createPurchaseOrder", () => {
 });
 
 describe("receivePurchaseOrder", () => {
-  function mockUpdate() {
+  function mockUpdate(claimRows: unknown[] = [{ id: "po-1" }]) {
     // Each update() returns a tagged builder whose .set()/.where() survive into
-    // the batch array so we can count + inspect them.
+    // the batch array so we can count + inspect them. .returning() (used by the
+    // atomic status-CAS claim) resolves to claimRows.
     vi.mocked(db.update).mockImplementation(
       () =>
         ({
           set: (v: Record<string, unknown>) => {
             const stmt: Record<string, unknown> = { __set: v };
             stmt.where = vi.fn(() => stmt);
+            stmt.returning = vi.fn(() => Promise.resolve(claimRows));
             return stmt;
           },
         }) as never,
@@ -154,16 +156,17 @@ describe("receivePurchaseOrder", () => {
     const batched = vi.mocked(db.batch).mock.calls[0]![0] as unknown as Array<{
       __set: Record<string, unknown>;
     }>;
-    // status-update + 2 stock increments (null-line skipped)
-    expect(batched).toHaveLength(3);
-    expect(batched[0]!.__set.status).toBe("received");
+    // The status flip is now the atomic CAS claim (separate call); the batch
+    // holds ONLY the 2 stock increments (null-line skipped).
+    expect(batched).toHaveLength(2);
     // The received cost becomes the latest unit cost on the stock row.
-    expect(batched[1]!.__set.unitCostCents).toBe(1300);
-    expect(batched[2]!.__set.unitCostCents).toBe(500);
+    expect(batched[0]!.__set.unitCostCents).toBe(1300);
+    expect(batched[1]!.__set.unitCostCents).toBe(500);
   });
 
   it("rejects receiving a PO that is already received (no double increment)", async () => {
     mockSelectSeq([[{ id: "po-1", status: "received" }]]);
+    mockUpdate([]); // the status-CAS claims 0 rows (already received / lost the race)
     const r = await receivePurchaseOrder(ORG, "po-1");
     expect(r).toEqual({ ok: false, reason: "already_received" });
     expect(db.batch).not.toHaveBeenCalled();

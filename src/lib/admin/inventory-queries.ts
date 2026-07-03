@@ -11,7 +11,7 @@
  * batched insert never needs .returning(). Every query is withTenant-scoped.
  */
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   inventoryItems,
@@ -220,7 +220,29 @@ export async function receivePurchaseOrder(
     .limit(1);
 
   if (!po) return { ok: false, reason: "not_found" };
-  if (po.status === "received") return { ok: false, reason: "already_received" };
+
+  const now = new Date();
+  // Atomically CLAIM the not-received → received transition. The `status !=
+  // 'received'` predicate makes the check-and-write a single statement, so under
+  // concurrency (a double-clicked "Receive") exactly ONE caller wins and only the
+  // winner increments stock — a prior read-then-write guard let both pass and
+  // double-incremented on-hand quantities. Trade-off: the claim and the stock
+  // increments below are separate calls (neon-http has no multi-table
+  // transaction), so a process crash in between marks the PO received without
+  // incrementing — recoverable by a manual adjustment, and far rarer/safer than
+  // silent double-stock on every race.
+  const [claimed] = await db
+    .update(purchaseOrders)
+    .set({ status: "received", receivedAt: now, updatedAt: now })
+    .where(
+      withTenant(
+        purchaseOrders,
+        organizationId,
+        and(eq(purchaseOrders.id, poId), ne(purchaseOrders.status, "received"))!,
+      ),
+    )
+    .returning({ id: purchaseOrders.id });
+  if (!claimed) return { ok: false, reason: "already_received" };
 
   const lines = await db
     .select({
@@ -235,14 +257,6 @@ export async function receivePurchaseOrder(
         organizationId,
         eq(poLineItems.purchaseOrderId, poId),
       ),
-    );
-
-  const now = new Date();
-  const markReceived = db
-    .update(purchaseOrders)
-    .set({ status: "received", receivedAt: now, updatedAt: now })
-    .where(
-      withTenant(purchaseOrders, organizationId, eq(purchaseOrders.id, poId)),
     );
 
   // Increment stock + update latest cost for each cataloged, tracked line.
@@ -265,13 +279,13 @@ export async function receivePurchaseOrder(
         ),
     );
 
-  // db.batch wants a non-empty tuple of homogeneous BatchItems; the header +
-  // stock updates are different tables, so type them as a generic batch tuple.
-  type BatchStmt = (typeof markReceived | (typeof stockUpdates)[number]);
-  await db.batch([markReceived, ...stockUpdates] as unknown as [
-    BatchStmt,
-    ...BatchStmt[],
-  ]);
+  // Apply the stock increments (the PO is already atomically marked received
+  // above). db.batch needs a non-empty tuple; a PO with no cataloged/tracked
+  // lines has nothing to increment.
+  if (stockUpdates.length > 0) {
+    type BatchStmt = (typeof stockUpdates)[number];
+    await db.batch(stockUpdates as unknown as [BatchStmt, ...BatchStmt[]]);
+  }
   return { ok: true };
 }
 
