@@ -650,20 +650,22 @@ describe("reconcilePayment", () => {
     mockSelectSeq([
       // 1) the stuck payment (still pending)
       [{ id: "pay-1", invoiceId: "inv-1", amountCents: 10000, status: "pending" }],
-      // 2) the invoice
-      [{ totalCents: 10000, amountPaidCents: 0 }],
+      // 2) the invoice — already credited at claim time (claim-before-charge), so
+      //    amountPaidCents ALREADY reflects this payment.
+      [{ totalCents: 10000, amountPaidCents: 10000 }],
     ]);
     const provider = new MockPaymentProvider(); // getCharge -> succeeded
     const r = await reconcilePayment(ORG, "pay-1", provider);
     expect(r).toEqual({ ok: true, outcome: "completed", invoiceState: "paid" });
-    // CAS claim (payment pending->succeeded) + invoice credit, NOT a batch.
+    // CAS claim (payment pending->succeeded) + state refresh, NO re-credit.
     expect(db.update).toHaveBeenCalled();
   });
 
   it("leaves the invoice 'open' when a partial deposit is reconciled", async () => {
     mockSelectSeq([
       [{ id: "pay-1", invoiceId: "inv-1", amountCents: 5000, status: "pending" }],
-      [{ totalCents: 10000, amountPaidCents: 0 }],
+      // Only the $50 deposit was credited (at claim time) against a $100 invoice.
+      [{ totalCents: 10000, amountPaidCents: 5000 }],
     ]);
     const r = await reconcilePayment(ORG, "pay-1", new MockPaymentProvider());
     expect(r).toEqual({ ok: true, outcome: "completed", invoiceState: "open" });
@@ -732,10 +734,11 @@ describe("reconcilePayment", () => {
   // The payment-status CAS stops a SECOND reconcile of the SAME payment, but two
   // reconciles of DIFFERENT pending payments on the same invoice would still
   // lost-update an absolute write. So the credit must be an atomic SQL increment.
-  it("credits the invoice with an atomic increment, not a precomputed absolute", async () => {
+  it("does NOT re-credit the invoice — the money was already credited at claim time (audit CRITICAL)", async () => {
     mockSelectSeq([
       [{ id: "pay-1", invoiceId: "inv-1", amountCents: 5000, status: "pending" }],
-      [{ totalCents: 10000, amountPaidCents: 0 }],
+      // Invoice already reflects the $50 claim credit.
+      [{ totalCents: 10000, amountPaidCents: 5000 }],
     ]);
     const sets: Record<string, unknown>[] = [];
     vi.mocked(db.update).mockImplementation(
@@ -754,8 +757,10 @@ describe("reconcilePayment", () => {
     );
     const r = await reconcilePayment(ORG, "pay-1", new MockPaymentProvider());
     expect(r.ok).toBe(true);
-    const invSet = sets.find((s) => "amountPaidCents" in s);
-    expect(invSet).toBeDefined();
-    expect(typeof invSet?.amountPaidCents).not.toBe("number");
+    // No invoice UPDATE may touch amountPaidCents — re-crediting a stranded
+    // payment double-counted it (this was the CRITICAL audit finding).
+    expect(sets.some((s) => "amountPaidCents" in s)).toBe(false);
+    // The invoice update refreshes ONLY the display state.
+    expect(sets.some((s) => "state" in s)).toBe(true);
   });
 });

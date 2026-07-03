@@ -538,8 +538,12 @@ export async function reconcilePayment(
     return { ok: true, outcome: "noop" };
   }
 
-  // Re-read the invoice (tenant-scoped) to recompute paid amount/state the same
-  // way takePayment's success path does.
+  // Re-read the invoice (tenant-scoped) to refresh the display state. NOTE: under
+  // claim-before-charge, takePayment credits the invoice at CLAIM time — BEFORE
+  // this payment row is inserted as 'pending' — so a stranded pending payment's
+  // amount is ALREADY in amountPaidCents here. Reconciliation must therefore only
+  // flip the payment status + refresh the state hint; it must NOT re-add the
+  // amount (that double-credited the invoice on every stranded payment).
   const [inv] = await db
     .select({
       totalCents: invoices.totalCents,
@@ -569,16 +573,14 @@ export async function reconcilePayment(
     return { ok: true, outcome: "completed", invoiceState: "unknown" };
   }
 
-  const newPaid = inv.amountPaidCents + pay.amountCents;
-  const invoiceState = newPaid >= inv.totalCents ? "paid" : "open";
+  // State hint from the CURRENT paid amount (which already includes this
+  // payment's claim credit) — do NOT add pay.amountCents again.
+  const invoiceState = inv.amountPaidCents >= inv.totalCents ? "paid" : "open";
 
-  // Compare-and-set claim: flip pending->succeeded ONLY while still 'pending',
-  // and gate the invoice credit on having won that flip. neon-http has no
-  // interactive transaction, so a 2-statement db.batch can't condition the
-  // invoice UPDATE on the payment row count — two concurrent reconciles (e.g.
-  // the manual button + the cron sweep) would both pass the status pre-check and
-  // each add pay.amountCents, double-crediting the invoice. Making the status
-  // flip the atomic claim means exactly one caller proceeds to credit.
+  // Compare-and-set claim: flip pending->succeeded ONLY while still 'pending', so
+  // two concurrent reconciles (the manual button + the cron sweep) can't both
+  // resolve the same payment. neon-http has no interactive transaction; the CAS
+  // is the single-writer gate.
   const claimed = await db
     .update(payments)
     .set({
@@ -595,21 +597,15 @@ export async function reconcilePayment(
       ),
     )
     .returning({ id: payments.id });
-  // Lost the race (someone else already resolved this payment): do NOT credit
-  // the invoice again.
+  // Lost the race (someone else already resolved this payment): no-op.
   if (claimed.length === 0) return { ok: true, outcome: "noop" };
 
+  // Refresh the display state ONLY — the money was already credited at claim
+  // time in takePayment. Re-adding pay.amountCents here double-credited the
+  // invoice (marking a partly-paid invoice fully paid + losing the balance).
   await db
     .update(invoices)
-    // ATOMIC increment (see takePayment): the payment-status CAS above guarantees
-    // only one caller credits THIS payment, but two reconciles of DIFFERENT
-    // pending payments on the same invoice would still lost-update an absolute
-    // write. `+= amount` in SQL composes regardless of interleaving.
-    .set({
-      amountPaidCents: sql`${invoices.amountPaidCents} + ${pay.amountCents}`,
-      state: invoiceState,
-      updatedAt: new Date(),
-    })
+    .set({ state: invoiceState, updatedAt: new Date() })
     .where(withTenant(invoices, organizationId, eq(invoices.id, pay.invoiceId)));
 
   return { ok: true, outcome: "completed", invoiceState };
