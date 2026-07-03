@@ -74,6 +74,15 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
     }
 
+    // Verify the customer belongs to THIS org before ANY mutation — without it, an
+    // admin could POST to another tenant's customer id and create org-attributed
+    // child rows (equipment/notes/follow-ups) referencing a customer they don't
+    // own. GET already gates this way; make POST consistent.
+    const owned = await getCustomerById(session.organizationId, id);
+    if (!owned) {
+      return errorResponse("Customer not found", "NOT_FOUND", 404);
+    }
+
     const body = (await request.json()) as Record<string, unknown>;
     const action = typeof body.action === "string" ? body.action : "";
 
