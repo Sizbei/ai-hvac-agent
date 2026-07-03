@@ -47,8 +47,13 @@ export async function GET(
       entries.find(
         (e) => e.technicianId === session.userId && e.clockOutAt === null,
       ) ?? null;
+    // Strip laborRateCents — that's payroll data. Returning it exposed every
+    // colleague's wage rate to any tech viewing a shared job.
+    const publicEntries = entries.map(
+      ({ laborRateCents: _laborRateCents, ...rest }) => rest,
+    );
     return successResponse({
-      entries,
+      entries: publicEntries,
       open: openEntry ? { id: openEntry.id, clockInAt: openEntry.clockInAt } : null,
     });
   } catch (error) {
