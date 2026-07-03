@@ -206,11 +206,22 @@ export function buildExtraction(
 export function parseUrgencyAnswer(
   message: string,
 ): "low" | "medium" | "high" | "emergency" | null {
-  const m = message.trim().toLowerCase();
+  // Normalize curly apostrophes so "isn't"/"isn't" both match the guards below.
+  const m = message.trim().toLowerCase().replace(/[‘’]/g, "'");
   if (m.length === 0) return null;
   // Exact chip values.
   if (m === "emergency" || m === "high" || m === "medium" || m === "low") {
     return m;
+  }
+  // Negated urgency ("it's not an emergency", "isn't urgent", "no rush") → low.
+  // MUST run before the affirmative patterns, or "not an emergency" matches the
+  // bare "emergency" token and "not urgent" matches "urgent" → wrong level.
+  if (
+    /\b(not|isn'?t|no|non)\s+(an?\s+)?(urgent|emergency|emergencies|rush)\b/.test(
+      m,
+    )
+  ) {
+    return "low";
   }
   // Natural phrasings.
   if (/\b(emergency|right now|immediately|can'?t wait|asap)\b/.test(m)) return "emergency";

@@ -4,6 +4,7 @@ import {
   mergeSlots,
   hasSlotData,
   buildExtraction,
+  parseUrgencyAnswer,
 } from "./chat-slots";
 
 describe("parseKnownSlots", () => {
@@ -177,5 +178,18 @@ describe("stripSkipSentinels", () => {
       }),
     ).toEqual({ systemType: "heat_pump", preferredWindow: "morning" });
     expect(stripSkipSentinels({})).toEqual({});
+  });
+});
+
+describe("parseUrgencyAnswer — negated urgency (audit HIGH #13)", () => {
+  it("reads negated phrasings as low, not urgent/emergency", () => {
+    expect(parseUrgencyAnswer("it's not an emergency")).toBe("low");
+    expect(parseUrgencyAnswer("not urgent")).toBe("low");
+    expect(parseUrgencyAnswer("isn’t urgent")).toBe("low"); // curly apostrophe (#37)
+    expect(parseUrgencyAnswer("no rush")).toBe("low");
+  });
+  it("still reads a genuine emergency as emergency", () => {
+    expect(parseUrgencyAnswer("it's an emergency")).toBe("emergency");
+    expect(parseUrgencyAnswer("asap")).toBe("emergency");
   });
 });
