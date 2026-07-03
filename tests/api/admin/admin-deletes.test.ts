@@ -93,6 +93,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockGetAdminSession.mockResolvedValue(SESSION);
   mockSlidingWindow.mockReturnValue({ allowed: true, remaining: 29, resetMs: 60_000 });
+  // The customer POST route now gates on org ownership (getCustomerById) before
+  // any action; default to an existing customer so the action tests reach it.
+  mockGetCustomerById.mockResolvedValue({ id: CUSTOMER_ID });
 });
 
 // Run the same contract against both delete endpoints.
