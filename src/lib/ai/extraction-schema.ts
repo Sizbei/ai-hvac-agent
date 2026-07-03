@@ -250,22 +250,29 @@ export function isPhoneComplete(phone: string | null): boolean {
   return digits.length === 10 || (digits.length === 11 && digits.startsWith('1'));
 }
 
+/**
+ * The address gate shared by every completeness check. It MUST accept whatever
+ * triage accepts to advance past the address step, or a customer who answered
+ * everything can never finish (deadlock). Triage stops asking when the address is
+ * strictly complete, was verified via autocomplete, LOOKS complete (a structured
+ * non-US / ZIP-less address), OR the re-prompt cap was hit — honor all four.
+ */
+export function isAddressResolved(extraction: ExtractionResult): boolean {
+  return (
+    isAddressComplete(extraction.address) ||
+    (extraction.address !== null &&
+      ((extraction as Record<string, unknown>).addressVerified === "yes" ||
+        addressLooksComplete(extraction.address) ||
+        Number((extraction as Record<string, unknown>).addressAttempts ?? 0) >=
+          MAX_ADDRESS_REPROMPTS))
+  );
+}
+
 export function isExtractionComplete(extraction: ExtractionResult): boolean {
   return (
     extraction.issueType !== null &&
     extraction.urgency !== null &&
-    // The address gate MUST accept whatever triage accepts to advance past the
-    // address step, or a customer who answered everything can never submit
-    // (deadlock). Triage stops asking when the address is strictly complete, was
-    // verified via autocomplete, LOOKS complete (a structured non-US / ZIP-less
-    // address), OR the re-prompt cap was hit — so honor all four here.
-    (isAddressComplete(extraction.address) ||
-      (extraction.address !== null &&
-        ((extraction as Record<string, unknown>).addressVerified === "yes" ||
-          addressLooksComplete(extraction.address) ||
-          Number(
-            (extraction as Record<string, unknown>).addressAttempts ?? 0,
-          ) >= MAX_ADDRESS_REPROMPTS))) &&
+    isAddressResolved(extraction) &&
     isNameComplete(extraction.customerName) &&
     isPhoneComplete(extraction.customerPhone) &&
     // A skipped email (the customer declined, or we hit MAX_EMAIL_REPROMPTS)
@@ -289,7 +296,9 @@ export function isVoiceExtractionComplete(extraction: ExtractionResult): boolean
   return (
     extraction.issueType !== null &&
     extraction.urgency !== null &&
-    isAddressComplete(extraction.address) &&
+    // Same address gate as chat — strict-only here deadlocked a voice caller with
+    // a structured non-US / ZIP-less address, or one who hit the re-prompt cap.
+    isAddressResolved(extraction) &&
     isPhoneComplete(extraction.customerPhone)
   );
 }
