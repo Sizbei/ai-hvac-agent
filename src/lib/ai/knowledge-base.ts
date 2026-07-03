@@ -95,6 +95,18 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
       "headache",
       "poisoning",
     ],
+    // ACTIVE danger → escalate even alongside an install/sales phrase. (alarm /
+    // detector are deliberately NOT here — those are the ambiguous subject words
+    // a pure "do you install a CO detector?" question uses, which the guard may
+    // still suppress.)
+    dangerSignals: [
+      "going off",
+      "beeping",
+      "dizzy",
+      "nausea",
+      "headache",
+      "poisoning",
+    ],
     action: "ESCALATE",
     cannedResponse:
       "A carbon monoxide alarm is a serious emergency. Please get everyone (and pets) outside to fresh air immediately and call 911 once you're out. I'm marking this urgent so our team can follow up right away.",
@@ -132,6 +144,11 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
       "need to install",
     ],
     requiredQualifiers: ["burning", "smoke", "smell", "sparks", "sparking"],
+    // Active fire/electrical danger → escalate even alongside a sales phrase
+    // ("sparks and smoke from my furnace, do you sell replacements?" — caught by
+    // "sparks"). Bare "smoke" is deliberately EXCLUDED: it matches the product
+    // "smoke detector", so "do you install smoke detectors?" must not escalate.
+    dangerSignals: ["burning", "sparks", "sparking", "melting"],
     action: "ESCALATE",
     cannedResponse:
       "A burning or electrical smell, or any smoke, is a fire risk. Please turn off the system at the thermostat or breaker if you can do so safely, leave the area, and call 911 if you see smoke or flames. I'm flagging this as an emergency for our team.",

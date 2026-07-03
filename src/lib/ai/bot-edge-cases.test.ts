@@ -758,6 +758,17 @@ describe("emergency matching — leak false-negatives + install false-positives 
     expect(verdict("my kitchen smells like gas").escalate).toBe(true);
   });
 
+  it("escalates a REAL CO/electrical emergency even when the message also asks a sales/install question (audit regression)", () => {
+    // A danger signal (going off / sparks / smoke) must override the install-question
+    // guard — a live CO alarm must never be de-escalated to an installations FAQ.
+    expect(verdict("my carbon monoxide alarm is going off, do i need to install a new detector?").escalate).toBe(true);
+    expect(verdict("sparks and smoke coming from my furnace, do you sell replacements?").escalate).toBe(true);
+    expect(verdict("i feel dizzy and my co detector is beeping").escalate).toBe(true);
+    // …but a PURE sales/install question (no danger signal) still does NOT escalate.
+    expect(verdict("do you install a co detector?").escalate).toBe(false);
+    expect(verdict("do you sell carbon monoxide detectors?").escalate).toBe(false);
+  });
+
   it("bare hours/open no longer hijack symptom prose to business-hours (M15)", () => {
     expect(verdict("the vents won't open").intentId).not.toBe("faq-business-hours");
     expect(verdict("my ac has been running for hours").intentId).not.toBe("faq-business-hours");

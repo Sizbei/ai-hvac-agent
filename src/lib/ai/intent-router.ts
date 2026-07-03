@@ -170,12 +170,25 @@ interface Scored {
 
 /** Score one entry against the normalized message, honoring guards/qualifiers. */
 function scoreEntry(entry: KnowledgeBaseEntry, text: string): number {
-  // Negation guards suppress the entry entirely.
-  if (entry.negationGuards?.some((g) => includesPhrase(text, normalize(g)))) {
+  // An unambiguous ACTIVE-danger signal forces the entry through: a real
+  // emergency ("CO alarm going off", "sparks and smoke") must escalate even when
+  // the same message also carries a sales/install phrase that would otherwise
+  // trip a negation guard. Without this, "my CO alarm is going off, do I need to
+  // install a detector?" was de-escalated to a sales FAQ (potentially lethal).
+  const hasDangerSignal = entry.dangerSignals?.some((d) =>
+    includesPhrase(text, normalize(d)),
+  );
+  // Negation guards suppress the entry entirely — UNLESS a danger signal is present.
+  if (
+    !hasDangerSignal &&
+    entry.negationGuards?.some((g) => includesPhrase(text, normalize(g)))
+  ) {
     return 0;
   }
-  // Emergency entries require a co-occurring qualifier (review H4).
+  // Emergency entries require a co-occurring qualifier (review H4). A danger
+  // signal is itself a qualifier, so its presence satisfies this too.
   if (
+    !hasDangerSignal &&
     entry.requiredQualifiers &&
     entry.requiredQualifiers.length > 0 &&
     !entry.requiredQualifiers.some((q) => includesPhrase(text, normalize(q)))

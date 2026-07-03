@@ -29,6 +29,16 @@ export interface KnowledgeBaseEntry {
   readonly negationGuards?: readonly string[];
   /** For emergency entries: at least one of these qualifier tokens MUST co-occur, else do not match. */
   readonly requiredQualifiers?: readonly string[];
+  /**
+   * Unambiguous ACTIVE-danger signals (e.g. "going off", "sparks", "dizzy"). When
+   * any is present the entry escalates even if a negationGuard also matches —
+   * a real emergency that co-mentions a sales/install phrase ("my CO alarm is
+   * going off, do I need to install a detector?") must never be de-escalated by
+   * that phrase. Also count as requiredQualifiers. Only the AMBIGUOUS subject
+   * words (alarm/detector) are still suppressible by a guard when no danger
+   * signal is present (a pure "do you install a CO detector?" sales question).
+   */
+  readonly dangerSignals?: readonly string[];
   readonly action: RouterAction;
   readonly cannedResponse: string;
   readonly infoNeeded: readonly SlotName[];
