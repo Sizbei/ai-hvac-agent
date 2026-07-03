@@ -18,7 +18,7 @@
  *   6. background: Housecall Pro job push + customer-equipment record
  */
 import { after } from "next/server";
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { randomBytes, randomUUID } from "node:crypto";
 import { db } from "@/lib/db";
 import {
@@ -150,7 +150,10 @@ export type SubmitSessionResult =
         readonly endUtc: string;
       } | null;
     }
-  | { readonly ok: false; readonly reason: "do_not_service" | "insert_failed" };
+  | {
+      readonly ok: false;
+      readonly reason: "do_not_service" | "insert_failed" | "already_submitted";
+    };
 
 export async function submitSessionServiceRequest(params: {
   readonly organizationId: string;
@@ -302,16 +305,31 @@ export async function submitSessionServiceRequest(params: {
       })
       .returning({ id: serviceRequests.id });
 
-  const sessionUpdate = db
+  // Atomically CLAIM the confirm: flip the session to "submitted" only if it is
+  // NOT already submitted. Under concurrency (a double-clicked Confirm — neon-http
+  // has no row locks) this is the single-writer gate: exactly one caller wins and
+  // creates the request, so two confirms can't insert DUPLICATE service requests
+  // and double the capacity holds. Done BEFORE the request insert (not inside the
+  // batch) because the batch's inserts run regardless of the update's row count.
+  const [claimed] = await db
     .update(customerSessions)
     .set({ status: "submitted", updatedAt: new Date() })
-    // Scope by (id, org) — defense in depth, matching escalate-service.ts.
     .where(
       and(
         eq(customerSessions.id, sessionId),
         eq(customerSessions.organizationId, organizationId),
+        ne(customerSessions.status, "submitted"),
       ),
-    );
+    )
+    .returning({ id: customerSessions.id });
+  if (!claimed) {
+    // A concurrent confirm already submitted this session — do not create a
+    // duplicate request; release the capacity hold this attempt claimed.
+    if (heldSlot) {
+      await releaseReservationById(organizationId, heldSlot.reservationId);
+    }
+    return { ok: false, reason: "already_submitted" };
+  }
 
   const auditInsert = db.insert(auditLog).values({
     organizationId,
@@ -330,18 +348,35 @@ export async function submitSessionServiceRequest(params: {
   // we claimed for this request must be released or it squats a future slot until
   // that day passes. Release on BOTH the throw path (here) and the empty-return
   // path (below).
-  let batchResult;
-  try {
-    batchResult = consentUpsert
-      ? await db.batch([requestInsert, sessionUpdate, auditInsert, consentUpsert])
-      : await db.batch([requestInsert, sessionUpdate, auditInsert]);
-  } catch (batchError: unknown) {
+  // Revert the session claim (back to a retryable intake state) + release the
+  // hold when the request insert fails AFTER we claimed the session — otherwise
+  // the session is stuck "submitted" with no request and can't be re-confirmed.
+  async function undoClaim(): Promise<void> {
+    await db
+      .update(customerSessions)
+      .set({ status: "chatting", updatedAt: new Date() })
+      .where(
+        and(
+          eq(customerSessions.id, sessionId),
+          eq(customerSessions.organizationId, organizationId),
+        ),
+      )
+      .catch(() => {});
     if (heldSlot) {
       await releaseReservationById(organizationId, heldSlot.reservationId);
     }
+  }
+
+  let batchResult;
+  try {
+    batchResult = consentUpsert
+      ? await db.batch([requestInsert, auditInsert, consentUpsert])
+      : await db.batch([requestInsert, auditInsert]);
+  } catch (batchError: unknown) {
+    await undoClaim();
     logger.error(
       { error: batchError, sessionId },
-      "Booking batch failed after the capacity hold — released the reservation",
+      "Booking batch failed after the session claim — reverted the claim + released the reservation",
     );
     return { ok: false, reason: "insert_failed" };
   }
@@ -349,12 +384,10 @@ export async function submitSessionServiceRequest(params: {
   const insertedRequests = batchResult[0];
   const serviceRequest = insertedRequests[0];
   if (!serviceRequest) {
-    // The request never persisted — release the capacity hold we claimed for it
-    // so the orphaned reservation doesn't squat a slot forever (it's linked to a
-    // request id that will never exist). Best-effort.
-    if (heldSlot) {
-      await releaseReservationById(organizationId, heldSlot.reservationId);
-    }
+    // The request never persisted — revert the session claim (so it can be
+    // re-confirmed) and release the capacity hold we claimed for it so the
+    // orphaned reservation doesn't squat a slot forever. Best-effort.
+    await undoClaim();
     return { ok: false, reason: "insert_failed" };
   }
 

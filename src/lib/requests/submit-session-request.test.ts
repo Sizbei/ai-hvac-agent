@@ -31,6 +31,7 @@ const {
 const selectLimit = vi.fn(async () => [
   { doNotService: false, afterHoursConfig: null },
 ]);
+const claimRows: { current: unknown[] } = { current: [{ id: "session-1" }] };
 const chain: Record<string, unknown> = {};
 Object.assign(chain, {
   from: () => chain,
@@ -38,7 +39,7 @@ Object.assign(chain, {
   limit: selectLimit,
   set: () => chain,
   values: () => chain,
-  returning: () => chain,
+  returning: () => Promise.resolve(claimRows.current),
   onConflictDoUpdate: () => chain,
 });
 
@@ -133,6 +134,7 @@ beforeEach(() => {
   upsertCustomerByContact.mockResolvedValue("cust-1");
   // Request insert row exists → ok path.
   batchMock.mockResolvedValue([[{ id: "req-1" }], undefined, undefined]);
+  claimRows.current = [{ id: "session-1" }]; // session confirm claim wins by default
 });
 
 describe("submitSessionServiceRequest heldWindow", () => {
@@ -185,5 +187,28 @@ describe("submitSessionServiceRequest heldWindow", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.heldWindow).toBeNull();
+  });
+});
+
+describe("submitSessionServiceRequest concurrency (M22)", () => {
+  it("returns already_submitted and creates NO request when the session claim is lost", async () => {
+    // The atomic session-status CAS matched 0 rows → a concurrent confirm already
+    // submitted. We must NOT insert a duplicate request, and must release the hold.
+    claimRows.current = [];
+    pickBookableSlot.mockReturnValue({ day: "2026-07-03", window: "morning" });
+    reserveCapacitySlot.mockResolvedValue({ id: "resv-1" });
+    arrivalWindowForSlot.mockReturnValue({
+      startUtc: new Date("2026-07-03T08:00:00.000Z"),
+      endUtc: new Date("2026-07-03T12:00:00.000Z"),
+    });
+
+    const result = await submitSessionServiceRequest({
+      ...params,
+      data: { ...baseData, preferredWindow: "morning" } as ServiceRequestData,
+    });
+
+    expect(result).toEqual({ ok: false, reason: "already_submitted" });
+    expect(batchMock).not.toHaveBeenCalled(); // no duplicate request inserted
+    expect(releaseReservationById).toHaveBeenCalledWith("org-1", "resv-1"); // hold released
   });
 });
