@@ -148,6 +148,9 @@ export async function PATCH(
     // Delete wins if both somehow apply in one PATCH.
     let calendarCancelled = false;
     let calendarScheduleChanged = false;
+    // A schedule CLEARED (date+window removed) must DELETE the calendar event —
+    // syncRequestToCalendar no-ops with no window, so it would leave a stale one.
+    let scheduleCleared = false;
 
     if (parsed.data.status !== undefined) {
       // Hold metadata only applies to an on_hold transition; updateRequestStatus
@@ -259,6 +262,7 @@ export async function PATCH(
         }),
       });
       calendarScheduleChanged = true;
+      scheduleCleared = effectiveWhen === null;
     }
 
     const detail = await getRequestById(session.organizationId, id);
@@ -270,7 +274,7 @@ export async function PATCH(
     // response; no-ops when the org isn't connected). A cancel removes the
     // event; otherwise a schedule change upserts it. syncRequestToCalendar
     // itself no-ops when the request has no arrival window.
-    if (calendarCancelled) {
+    if (calendarCancelled || scheduleCleared) {
       after(() => deleteRequestFromCalendar(session.organizationId, id));
     } else if (calendarScheduleChanged) {
       after(() => syncRequestToCalendar(session.organizationId, id));
