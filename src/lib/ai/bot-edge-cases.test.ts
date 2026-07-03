@@ -758,6 +758,14 @@ describe("emergency matching — leak false-negatives + install false-positives 
     expect(verdict("my kitchen smells like gas").escalate).toBe(true);
   });
 
+  it("escalates ACTIVE flooding even when the message says 'fixed' (audit regression)", () => {
+    // "need the burst pipe FIXED, water everywhere" is active — the past-resolution
+    // guard ("pipe fixed") must not suppress it when a flood danger signal is present.
+    expect(verdict("need the burst pipe fixed, water everywhere").escalate).toBe(true);
+    // …the genuine history mention still does NOT escalate.
+    expect(verdict("we had a burst pipe fixed last month, do you do tune ups").escalate).toBe(false);
+  });
+
   it("escalates a REAL CO/electrical emergency even when the message also asks a sales/install question (audit regression)", () => {
     // A danger signal (going off / sparks / smoke) must override the install-question
     // guard — a live CO alarm must never be de-escalated to an installations FAQ.

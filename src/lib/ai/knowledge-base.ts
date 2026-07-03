@@ -191,6 +191,11 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
       "everywhere",
       "gushing",
     ],
+    // Unambiguous ACTIVE flooding → escalate even when a past-resolution guard
+    // matches: "need the burst pipe FIXED, water everywhere" is an active
+    // emergency, not the history mention "burst pipe fixed last month". ("burst"
+    // is deliberately NOT here — it's the ambiguous word the guard keys off.)
+    dangerSignals: ["flooding", "water everywhere", "pouring", "gushing"],
     action: "ESCALATE",
     cannedResponse:
       "That sounds like a serious leak. If you can safely reach it, shut off the water supply to the unit and turn off power to it at the breaker, then move valuables away from the water. I'm flagging this as urgent so our team can respond quickly. What's the service address?",
