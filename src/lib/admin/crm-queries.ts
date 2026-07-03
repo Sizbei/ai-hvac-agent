@@ -1,4 +1,4 @@
-import { eq, ne, desc, count, sql, isNull } from "drizzle-orm";
+import { and, eq, ne, desc, count, sql, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   customers,
@@ -132,7 +132,7 @@ export async function getCustomerById(
           authorName: users.name,
         })
         .from(customerNotes)
-        .leftJoin(users, eq(customerNotes.authorId, users.id))
+        .leftJoin(users, and(eq(customerNotes.authorId, users.id), eq(users.organizationId, organizationId)))
         .where(
           withTenant(
             customerNotes,
@@ -153,7 +153,7 @@ export async function getCustomerById(
           assignedToName: users.name,
         })
         .from(followUps)
-        .leftJoin(users, eq(followUps.assignedTo, users.id))
+        .leftJoin(users, and(eq(followUps.assignedTo, users.id), eq(users.organizationId, organizationId)))
         .where(
           withTenant(
             followUps,
@@ -352,10 +352,25 @@ export async function addFollowUp(
   customerId: string,
   input: CreateFollowUpInput,
 ): Promise<void> {
+  // Verify a supplied assignee belongs to THIS org before storing it — a
+  // caller-supplied id was trusted verbatim, so a follow-up could be assigned to
+  // (and, via the org-scoped join, surface the name of) a user in another tenant.
+  let assignedTo: string | null = null;
+  if (input.assignedTo) {
+    const [member] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(and(eq(users.id, input.assignedTo), eq(users.organizationId, organizationId)))
+      .limit(1);
+    if (!member) {
+      throw new Error("Assignee is not a member of this organization");
+    }
+    assignedTo = member.id;
+  }
   await db.insert(followUps).values({
     customerId,
     organizationId,
-    assignedTo: input.assignedTo ?? null,
+    assignedTo,
     reason: input.reason,
     dueDate: new Date(input.dueDate),
     status: "pending",
