@@ -6,7 +6,7 @@
  * first-class (a half-built payments path breaks on the first chargeback).
  */
 import { randomUUID } from "node:crypto";
-import { asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   estimates,
@@ -175,17 +175,51 @@ export async function takePayment(
   if (inv.state !== "open" && inv.state !== "draft") {
     return { ok: false, reason: "invoice_not_chargeable" };
   }
-  // Over-collection guard: never charge more than the invoice's remaining
-  // balance. Without this, a single call with an oversized amount (or repeated
-  // partial/deposit calls) could collect well beyond totalCents and still mark
-  // the invoice "paid". Deposits are partial and pass this fine.
+  // Over-collection FAST-FAIL (read-based): cheap rejection of the obvious /
+  // non-racy case so we never even build a payment for an oversized amount.
   const remainingCents = inv.totalCents - inv.amountPaidCents;
   if (params.amountCents <= 0 || params.amountCents > remainingCents) {
     return { ok: false, reason: "exceeds_balance" };
   }
 
+  // ATOMIC CLAIM before charging — the authoritative over-collection guard under
+  // concurrency. A single conditional write reserves the balance: the predicate
+  // `amountPaidCents + amount <= totalCents` makes the check and the credit ONE
+  // operation, so two concurrent charges (a double-submitted pay form; neon-http
+  // has no row locks) can't both pass — the loser matches 0 rows and never hits
+  // the card. Only after the reserve succeeds do we charge; a failed charge
+  // un-claims (decrements) below. This is the exact fix for the double-charge:
+  // the prior read-then-write guard let both racers through.
+  const claim = await db
+    .update(invoices)
+    .set({
+      amountPaidCents: sql`${invoices.amountPaidCents} + ${params.amountCents}`,
+      updatedAt: new Date(),
+    })
+    .where(
+      withTenant(
+        invoices,
+        organizationId,
+        and(
+          eq(invoices.id, invoiceId),
+          inArray(invoices.state, ["open", "draft"]),
+          sql`${invoices.amountPaidCents} + ${params.amountCents} <= ${invoices.totalCents}`,
+        )!,
+      ),
+    )
+    .returning({ id: invoices.id });
+  if (!claim[0]) {
+    // Lost the race / state changed — the balance was already reserved by a
+    // concurrent charge. Do NOT touch the card.
+    return { ok: false, reason: "exceeds_balance" };
+  }
+
+  // Best-effort state hint (the money figure is exact in the DB; state is only a
+  // display hint). Derived from the read — the claim guaranteed newPaid <= total.
+  const newPaid = inv.amountPaidCents + params.amountCents;
+  const invoiceState = newPaid >= inv.totalCents ? "paid" : "open";
+
   const paymentId = randomUUID();
-  // Record the attempt first (pending) so a provider success is never lost.
   await db.insert(payments).values({
     id: paymentId,
     organizationId,
@@ -203,15 +237,27 @@ export async function takePayment(
   });
 
   if (result.status === "failed") {
-    await db
-      .update(payments)
-      .set({ status: "failed", updatedAt: new Date() })
-      .where(eq(payments.id, paymentId));
+    // UN-CLAIM: the charge never went through, so release the reserved balance
+    // (decrement off the CURRENT row) and mark the payment failed.
+    await db.batch([
+      db
+        .update(payments)
+        .set({ status: "failed", updatedAt: new Date() })
+        .where(eq(payments.id, paymentId)),
+      db
+        .update(invoices)
+        .set({
+          amountPaidCents: sql`${invoices.amountPaidCents} - ${params.amountCents}`,
+          state: "open",
+          updatedAt: new Date(),
+        })
+        .where(withTenant(invoices, organizationId, eq(invoices.id, invoiceId))),
+    ]);
     return { ok: false, reason: "charge_failed" };
   }
 
-  const newPaid = inv.amountPaidCents + params.amountCents;
-  const invoiceState = newPaid >= inv.totalCents ? "paid" : "open";
+  // Success: the invoice is already credited (the claim). Finalize the payment
+  // and set the display state. Batched so it's one round-trip.
   await db.batch([
     db
       .update(payments)
@@ -223,18 +269,7 @@ export async function takePayment(
       .where(eq(payments.id, paymentId)),
     db
       .update(invoices)
-      // ATOMIC increment off the CURRENT row, not the earlier read. neon-http has
-      // no row locks, so writing a precomputed absolute `newPaid` would lost-update
-      // under concurrency (e.g. a customer double-submitting the portal pay form):
-      // two calls read amountPaidCents=0 and both write the same absolute value,
-      // silently dropping one payment from the invoice total. `+= amount` in SQL
-      // composes correctly regardless of interleaving. (`state` stays a best-effort
-      // hint computed from the read — the money figure is what must be exact.)
-      .set({
-        amountPaidCents: sql`${invoices.amountPaidCents} + ${params.amountCents}`,
-        state: invoiceState,
-        updatedAt: new Date(),
-      })
+      .set({ state: invoiceState, updatedAt: new Date() })
       .where(withTenant(invoices, organizationId, eq(invoices.id, invoiceId))),
   ]);
 

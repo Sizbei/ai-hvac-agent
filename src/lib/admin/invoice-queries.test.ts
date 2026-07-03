@@ -100,15 +100,76 @@ describe("takePayment", () => {
         ({
           set: (v: Record<string, unknown>) => {
             sets.push(v);
-            return { where: vi.fn().mockResolvedValue(undefined) };
+            // .where() is awaitable AND exposes .returning() (the atomic CLAIM).
+            return {
+              where: vi.fn(() =>
+                Object.assign(Promise.resolve(undefined), {
+                  returning: vi.fn().mockResolvedValue([{ id: "inv-1" }]),
+                }),
+              ),
+            };
           },
         }) as never,
     );
     const r = await takePayment(ORG, "inv-1", { amountCents: 5000 }, provider);
     expect(r.ok).toBe(true);
+    // The reserve credits amountPaidCents via a SQL expression, never a number.
     const invSet = sets.find((s) => "amountPaidCents" in s);
     expect(invSet).toBeDefined();
     expect(typeof invSet?.amountPaidCents).not.toBe("number");
+  });
+
+  // The atomic claim is the authoritative race guard: when a concurrent charge
+  // already reserved the balance, this call's conditional UPDATE matches 0 rows
+  // and we must reject WITHOUT charging the card (no double-charge).
+  it("returns exceeds_balance and never charges when the claim is lost", async () => {
+    mockInvoice({ totalCents: 10000, amountPaidCents: 0 });
+    // Override db.update so the claim's .returning() yields NO row (claim lost).
+    vi.mocked(db.update).mockImplementation(
+      () =>
+        ({
+          set: () => ({
+            where: vi.fn(() =>
+              Object.assign(Promise.resolve(undefined), {
+                returning: vi.fn().mockResolvedValue([]),
+              }),
+            ),
+          }),
+        }) as never,
+    );
+    const chargeSpy = vi.spyOn(provider, "createCharge");
+    const r = await takePayment(ORG, "inv-1", { amountCents: 5000 }, provider);
+    expect(r).toEqual({ ok: false, reason: "exceeds_balance" });
+    expect(chargeSpy).not.toHaveBeenCalled();
+    chargeSpy.mockRestore();
+  });
+
+  // A failed charge must UN-CLAIM: release the reserved balance (so a later
+  // legitimate charge isn't blocked) and mark the payment failed.
+  it("un-claims the reserved balance when the charge fails", async () => {
+    mockInvoice({ totalCents: 10000, amountPaidCents: 0 });
+    // Restore a WON claim (a prior test may have overridden db.update; clearAllMocks
+    // doesn't restore implementations). .where() is awaitable (for batched builds)
+    // and exposes .returning() (for the claim).
+    vi.mocked(db.update).mockImplementation(
+      () =>
+        ({
+          set: vi.fn(() => ({
+            where: vi.fn(() =>
+              Object.assign(Promise.resolve(undefined), {
+                returning: vi.fn().mockResolvedValue([{ id: "inv-1" }]),
+              }),
+            ),
+          })),
+        }) as never,
+    );
+    vi.spyOn(provider, "createCharge").mockResolvedValueOnce({
+      status: "failed",
+    } as never);
+    const r = await takePayment(ORG, "inv-1", { amountCents: 5000 }, provider);
+    expect(r).toEqual({ ok: false, reason: "charge_failed" });
+    // payment-failed + invoice-decrement batched together (the un-claim).
+    expect(db.batch).toHaveBeenCalledTimes(1);
   });
 });
 
