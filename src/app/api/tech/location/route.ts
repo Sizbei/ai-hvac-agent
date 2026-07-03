@@ -45,6 +45,19 @@ export async function POST(request: NextRequest) {
       return errorResponse("Invalid location fix", "VALIDATION_ERROR", 400);
     }
 
+    // A GPS fix can't be from the future. A future-dated capturedAt (client clock
+    // skew or forgery) would permanently become the "latest" fix — poisoning the
+    // dispatch travel anchor and surviving the 30-day retention. Clamp anything
+    // beyond a small skew tolerance to server time.
+    const nowMs = Date.now();
+    const rawMs = parsed.data.capturedAt
+      ? new Date(parsed.data.capturedAt).getTime()
+      : nowMs;
+    const SKEW_TOLERANCE_MS = 2 * 60_000;
+    const capturedAt = new Date(
+      Number.isFinite(rawMs) && rawMs <= nowMs + SKEW_TOLERANCE_MS ? rawMs : nowMs,
+    );
+
     const result = await recordTechnicianLocation(
       session.organizationId,
       session.userId,
@@ -53,9 +66,7 @@ export async function POST(request: NextRequest) {
         longitude: parsed.data.longitude,
         accuracyM: parsed.data.accuracyM ?? null,
         heading: parsed.data.heading ?? null,
-        capturedAt: parsed.data.capturedAt
-          ? new Date(parsed.data.capturedAt)
-          : new Date(),
+        capturedAt,
         serviceRequestId: parsed.data.serviceRequestId ?? null,
       },
     );
