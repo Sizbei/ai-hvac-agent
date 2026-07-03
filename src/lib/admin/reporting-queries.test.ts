@@ -85,6 +85,7 @@ vi.mock('drizzle-orm', () => ({
   sum: (col: unknown) => ({ kind: 'sum', col }),
   avg: (col: unknown) => ({ kind: 'avg', col }),
   count: (arg?: unknown) => ({ kind: 'count', arg }),
+  inArray: (...a: unknown[]) => ({ kind: 'inArray', args: a }),
 }));
 
 vi.mock('@/lib/db/schema', () => ({
@@ -245,16 +246,20 @@ describe('getSalesReport', () => {
     expect(r.refundedCents).toBe(12000);
     expect(r.netCollectedCents).toBe(38000);
 
-    // The gross query must filter payments on status = 'succeeded'.
+    // The gross query filters payments on status IN ('succeeded','refunded') — a
+    // fully-refunded payment (status 'refunded') was still collected and must
+    // count in gross (its refund is subtracted separately).
     const grossWhere = captured[0].where;
     expect(
       hasTag(
         grossWhere,
         (v) =>
-          v.kind === 'eq' &&
+          v.kind === 'inArray' &&
           Array.isArray(v.args) &&
           (v.args as unknown[]).includes('payments.status') &&
-          (v.args as unknown[]).includes('succeeded'),
+          Array.isArray((v.args as unknown[])[1]) &&
+          ((v.args as unknown[])[1] as unknown[]).includes('succeeded') &&
+          ((v.args as unknown[])[1] as unknown[]).includes('refunded'),
       ),
     ).toBe(true);
   });

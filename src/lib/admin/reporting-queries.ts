@@ -9,7 +9,7 @@
  * neon-http note: SQL aggregates (sum/count) come back as strings (or null for an
  * empty set), so each value is coerced with Number() and coalesced to 0.
  */
-import { eq, gte, lte, sql, sum, count, avg } from "drizzle-orm";
+import { eq, gte, lte, sql, sum, count, avg, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   estimates,
@@ -95,7 +95,10 @@ export async function getSalesReport(
     invoiceRow,
     syncedCollectedRow,
   ] = await Promise.all([
-    // Gross collected: succeeded payments created within the period.
+    // Gross collected: payments that actually cleared. A FULLY-refunded payment
+    // flips status to 'refunded' — it was still collected (the refund is
+    // subtracted separately below), so it must stay in gross. Excluding it while
+    // still subtracting its refund double-reduced net collected.
     db
       .select({ value: sum(payments.amountCents) })
       .from(payments)
@@ -103,7 +106,7 @@ export async function getSalesReport(
         withTenant(
           payments,
           organizationId,
-          eq(payments.status, "succeeded"),
+          inArray(payments.status, ["succeeded", "refunded"]),
           gte(payments.createdAt, fromDate),
           lte(payments.createdAt, toDate),
         ),
