@@ -4,7 +4,12 @@ import {
   type PortalData,
 } from "@/lib/portal/portal-queries";
 import { formatCentsExact } from "@/lib/admin/money-format";
+import { BUSINESS_BASE_LOCATION } from "@/lib/config/business-location";
 import { PayButton } from "./pay-button";
+
+// Arrival windows are stored anchored to the BUSINESS timezone; render them in it
+// (not the server's UTC), or an 8 AM ET window (12:00Z) shows as "12:00 PM".
+const TZ = BUSINESS_BASE_LOCATION.timezone;
 
 // PUBLIC page — authorized BY THE TOKEN in the URL, NOT an admin session.
 // proxy.ts does not gate /portal/*. Org + customer are resolved from the token
@@ -15,6 +20,7 @@ function formatDate(d: Date): string {
     year: "numeric",
     month: "short",
     day: "numeric",
+    timeZone: TZ,
   });
 }
 
@@ -24,9 +30,14 @@ function formatWindow(start: Date | null, end: Date | null): string | null {
     weekday: "short",
     month: "short",
     day: "numeric",
+    timeZone: TZ,
   });
   const t = (d: Date) =>
-    d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+    d.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone: TZ,
+    });
   if (end) return `${day}, ${t(start)} – ${t(end)}`;
   return `${day}, ${t(start)}`;
 }

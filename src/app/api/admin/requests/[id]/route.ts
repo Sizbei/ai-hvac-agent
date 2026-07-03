@@ -216,10 +216,16 @@ export async function PATCH(
         arrivalWindow = undefined; // leave the window untouched
       }
 
+      // When a concrete window is set, store scheduledDate AS the window start so
+      // the two agree — the raw scheduledDate is UTC midnight, which in Eastern is
+      // the PREVIOUS evening, so persisting it made the bot/calendar announce the
+      // appointment a day early relative to the business-anchored window.
+      const effectiveWhen = arrivalWindow ? arrivalWindow.start : when;
+
       const result = await scheduleRequest(
         session.organizationId,
         id,
-        when,
+        effectiveWhen,
         arrivalWindow,
       );
       if (!result.ok) {
