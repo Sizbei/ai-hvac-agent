@@ -10,7 +10,11 @@
  */
 import { desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { technicianLocations, users } from "@/lib/db/schema";
+import {
+  technicianLocations,
+  users,
+  serviceRequests,
+} from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 
 export interface LocationFixInput {
@@ -61,10 +65,29 @@ export async function recordTechnicianLocation(
     return { ok: false, reason: "no_consent" };
   }
 
+  // The serviceRequestId is client-supplied. Only link it if it's a real request
+  // in THIS org — otherwise a cross-org id would be stored, and an unknown id
+  // would violate the FK and 500. Fall back to null (an unlinked fix is fine).
+  let linkedRequestId: string | null = null;
+  if (input.serviceRequestId) {
+    const [req] = await db
+      .select({ id: serviceRequests.id })
+      .from(serviceRequests)
+      .where(
+        withTenant(
+          serviceRequests,
+          organizationId,
+          eq(serviceRequests.id, input.serviceRequestId),
+        ),
+      )
+      .limit(1);
+    linkedRequestId = req?.id ?? null;
+  }
+
   await db.insert(technicianLocations).values({
     organizationId,
     technicianId,
-    serviceRequestId: input.serviceRequestId ?? null,
+    serviceRequestId: linkedRequestId,
     latitude: input.latitude,
     longitude: input.longitude,
     accuracyM: input.accuracyM ?? null,
