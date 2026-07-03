@@ -47,10 +47,15 @@ export async function GET(
       entries.find(
         (e) => e.technicianId === session.userId && e.clockOutAt === null,
       ) ?? null;
-    // Strip laborRateCents — that's payroll data. Returning it exposed every
-    // colleague's wage rate to any tech viewing a shared job.
+    // Strip BOTH laborRateCents AND laborCostCents — payroll data. Either one
+    // alone (or laborCostCents / minutes) lets any tech derive a colleague's exact
+    // hourly wage from a shared job's entries.
     const publicEntries = entries.map(
-      ({ laborRateCents: _laborRateCents, ...rest }) => rest,
+      ({
+        laborRateCents: _laborRateCents,
+        laborCostCents: _laborCostCents,
+        ...rest
+      }) => rest,
     );
     return successResponse({
       entries: publicEntries,
