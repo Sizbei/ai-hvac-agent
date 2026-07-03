@@ -19,12 +19,17 @@ export async function GET() {
     const rows = await listPricebookItemsForAdmin(session.organizationId, {
       includeInactive: false,
     });
-    const items = rows.map((i) => ({
-      id: i.id,
-      name: i.name,
-      type: i.type,
-      priceCents: i.priceCents,
-    }));
+    // Only physical goods (material / equipment) belong in the job-material
+    // picker. 'service' items are labor line items priced very differently —
+    // exposing them here let a tech book a service-priced row as a material.
+    const items = rows
+      .filter((i) => i.type === "material" || i.type === "equipment")
+      .map((i) => ({
+        id: i.id,
+        name: i.name,
+        type: i.type,
+        priceCents: i.priceCents,
+      }));
     return successResponse({ items });
   } catch (error) {
     logger.error({ error }, "Failed to load tech pricebook");

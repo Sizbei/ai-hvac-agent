@@ -284,7 +284,21 @@ export async function receivePurchaseOrder(
   // lines has nothing to increment.
   if (stockUpdates.length > 0) {
     type BatchStmt = (typeof stockUpdates)[number];
-    await db.batch(stockUpdates as unknown as [BatchStmt, ...BatchStmt[]]);
+    try {
+      await db.batch(stockUpdates as unknown as [BatchStmt, ...BatchStmt[]]);
+    } catch (err) {
+      // The stock batch threw AFTER we claimed 'received'. Revert the status so
+      // the PO isn't stranded received-without-stock (which would silently lose
+      // the inventory) — a retry can then re-attempt the whole receive.
+      await db
+        .update(purchaseOrders)
+        .set({ status: po.status, receivedAt: null, updatedAt: new Date() })
+        .where(
+          withTenant(purchaseOrders, organizationId, eq(purchaseOrders.id, poId)),
+        )
+        .catch(() => {});
+      throw err;
+    }
   }
   return { ok: true };
 }

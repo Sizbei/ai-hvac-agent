@@ -44,7 +44,13 @@ export async function GET(
       return errorResponse("Job not found", "NOT_FOUND", 404);
     }
     const materials = await listJobMaterials(session.organizationId, id);
-    return successResponse({ materials });
+    // Strip unitCostCents — vendor cost / margin data. Techs get unitPriceCents
+    // (what the customer is charged); exposing cost contradicts the H13/M34
+    // cost-hiding intent.
+    const publicMaterials = materials.map(
+      ({ unitCostCents: _unitCostCents, ...rest }) => rest,
+    );
+    return successResponse({ materials: publicMaterials });
   } catch (error) {
     logger.error({ error }, "Failed to list job materials");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);
