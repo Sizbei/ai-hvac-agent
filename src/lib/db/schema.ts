@@ -2698,6 +2698,10 @@ export const payments = pgTable(
     provider: text("provider").notNull(), // "mock" | "stripe"
     providerPaymentId: text("provider_payment_id"),
     amountCents: integer("amount_cents").notNull(),
+    // Running total refunded against this payment. Written by an ATOMIC claim
+    // (WHERE amountRefundedCents + amt <= amountCents) so concurrent refunds
+    // can't over-refund — the aggregate SUM(refunds) guard was check-then-act.
+    amountRefundedCents: integer("amount_refunded_cents").notNull().default(0),
     status: paymentStatusEnum("status").notNull().default("pending"),
     isDeposit: boolean("is_deposit").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),

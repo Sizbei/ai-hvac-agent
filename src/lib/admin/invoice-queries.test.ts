@@ -302,8 +302,7 @@ describe("money-loop flow (mocked db)", () => {
 
     // 4) refundPayment(partial) of a fully-paid invoice: stays 'paid' (NOT chargeable).
     mockCreateSeq([
-      [{ id: "pay-1", invoiceId: "inv-1", amountCents: 10000, status: "succeeded", providerPaymentId: "mock_pay_x" }],
-      [], // no prior refunds
+      [{ id: "pay-1", invoiceId: "inv-1", amountCents: 10000, amountRefundedCents: 0, status: "succeeded", providerPaymentId: "mock_pay_x" }],
       [{ amountPaidCents: 10000, totalCents: 10000 }], // invoice was fully paid
     ]);
     const states: Record<string, unknown>[] = [];
@@ -312,7 +311,13 @@ describe("money-loop flow (mocked db)", () => {
         ({
           set: (v: Record<string, unknown>) => {
             states.push(v);
-            return { where: vi.fn().mockResolvedValue(undefined) };
+            return {
+              where: vi.fn(() =>
+                Object.assign(Promise.resolve(undefined), {
+                  returning: vi.fn().mockResolvedValue([{ id: "pay-1" }]),
+                }),
+              ),
+            };
           },
         }) as never,
     );
@@ -347,8 +352,7 @@ describe("refundPayment", () => {
 
   it("refunds a succeeded payment within its balance", async () => {
     mockSelectSeq([
-      [{ id: "pay-1", invoiceId: "inv-1", amountCents: 10000, status: "succeeded", providerPaymentId: "mock_pay_x" }],
-      [], // no prior refunds
+      [{ id: "pay-1", invoiceId: "inv-1", amountCents: 10000, amountRefundedCents: 0, status: "succeeded", providerPaymentId: "mock_pay_x" }],
       [{ amountPaidCents: 10000, totalCents: 10000 }], // invoice
     ]);
     const r = await refundPayment("org-1", "pay-1", { amountCents: 4000 }, provider);
@@ -363,10 +367,37 @@ describe("refundPayment", () => {
     expect(r).toEqual({ ok: false, reason: "not_refundable" });
   });
 
+  // The atomic claim is the authoritative over-refund guard: when a concurrent
+  // refund already reserved the balance, this call's conditional UPDATE matches
+  // 0 rows and must reject WITHOUT calling the provider (no over-refund).
+  it("returns exceeds_payment and never calls the provider when the claim is lost", async () => {
+    mockSelectSeq([
+      [{ id: "pay-1", invoiceId: "inv-1", amountCents: 10000, amountRefundedCents: 0, status: "succeeded", providerPaymentId: "mock_pay_x" }],
+      [{ amountPaidCents: 10000, totalCents: 10000 }],
+    ]);
+    // Claim UPDATE returns NO row (a concurrent refund won the reservation).
+    vi.mocked(db.update).mockImplementation(
+      () =>
+        ({
+          set: () => ({
+            where: vi.fn(() =>
+              Object.assign(Promise.resolve(undefined), {
+                returning: vi.fn().mockResolvedValue([]),
+              }),
+            ),
+          }),
+        }) as never,
+    );
+    const refundSpy = vi.fn();
+    const spyProvider = { name: "mock", createCharge: vi.fn(), refund: refundSpy };
+    const r = await refundPayment("org-1", "pay-1", { amountCents: 4000 }, spyProvider as never);
+    expect(r).toEqual({ ok: false, reason: "exceeds_payment" });
+    expect(refundSpy).not.toHaveBeenCalled();
+  });
+
   it("blocks over-refunding beyond the remaining balance", async () => {
     mockSelectSeq([
-      [{ id: "pay-1", invoiceId: "inv-1", amountCents: 10000, status: "succeeded", providerPaymentId: "mock_pay_x" }],
-      [{ amountCents: 7000 }], // already refunded 7000 -> only 3000 left
+      [{ id: "pay-1", invoiceId: "inv-1", amountCents: 10000, amountRefundedCents: 7000, status: "succeeded", providerPaymentId: "mock_pay_x" }],
     ]);
     const r = await refundPayment("org-1", "pay-1", { amountCents: 5000 }, provider);
     expect(r).toEqual({ ok: false, reason: "exceeds_payment" });
@@ -381,7 +412,13 @@ describe("refundPayment", () => {
         ({
           set: (v: Record<string, unknown>) => {
             states.push(v);
-            return { where: vi.fn().mockResolvedValue(undefined) };
+            return {
+              where: vi.fn(() =>
+                Object.assign(Promise.resolve(undefined), {
+                  returning: vi.fn().mockResolvedValue([{ id: "pay-1" }]),
+                }),
+              ),
+            };
           },
         }) as never,
     );
@@ -390,8 +427,7 @@ describe("refundPayment", () => {
 
   it("keeps a fully-paid invoice 'paid' (NOT chargeable) after a PARTIAL refund — guards over-collection", async () => {
     mockSelectSeq([
-      [{ id: "pay-1", invoiceId: "inv-1", amountCents: 10000, status: "succeeded", providerPaymentId: "mock_pay_x" }],
-      [], // no prior refunds
+      [{ id: "pay-1", invoiceId: "inv-1", amountCents: 10000, amountRefundedCents: 0, status: "succeeded", providerPaymentId: "mock_pay_x" }],
       [{ amountPaidCents: 10000, totalCents: 10000 }], // invoice was FULLY paid
     ]);
     const states = captureUpdateStates();
@@ -403,8 +439,7 @@ describe("refundPayment", () => {
 
   it("reopens a partially-paid invoice ('open') after a partial refund — a real balance remains", async () => {
     mockSelectSeq([
-      [{ id: "pay-1", invoiceId: "inv-1", amountCents: 5000, status: "succeeded", providerPaymentId: "mock_pay_x" }],
-      [],
+      [{ id: "pay-1", invoiceId: "inv-1", amountCents: 5000, amountRefundedCents: 0, status: "succeeded", providerPaymentId: "mock_pay_x" }],
       [{ amountPaidCents: 5000, totalCents: 10000 }], // only partially paid
     ]);
     const states = captureUpdateStates();
@@ -417,8 +452,7 @@ describe("refundPayment", () => {
     const spyProvider = { name: "mock", createCharge: vi.fn(), refund: refundSpy };
     for (const amt of [0, -100]) {
       mockSelectSeq([
-        [{ id: "pay-1", invoiceId: "inv-1", amountCents: 10000, status: "succeeded", providerPaymentId: "mock_pay_x" }],
-        [], // no prior refunds
+        [{ id: "pay-1", invoiceId: "inv-1", amountCents: 10000, amountRefundedCents: 0, status: "succeeded", providerPaymentId: "mock_pay_x" }],
       ]);
       const r = await refundPayment("org-1", "pay-1", { amountCents: amt }, spyProvider as never);
       expect(r).toEqual({ ok: false, reason: "exceeds_payment" });
@@ -429,8 +463,7 @@ describe("refundPayment", () => {
 
   it("rolls back the invoice with an atomic decrement, not a precomputed absolute", async () => {
     mockSelectSeq([
-      [{ id: "pay-1", invoiceId: "inv-1", amountCents: 10000, status: "succeeded", providerPaymentId: "mock_pay_x" }],
-      [], // no prior refunds
+      [{ id: "pay-1", invoiceId: "inv-1", amountCents: 10000, amountRefundedCents: 0, status: "succeeded", providerPaymentId: "mock_pay_x" }],
       [{ amountPaidCents: 10000, totalCents: 10000 }],
     ]);
     const states = captureUpdateStates();
@@ -445,8 +478,7 @@ describe("refundPayment", () => {
     const refundSpy = vi.fn().mockResolvedValue({ providerRefundId: "r", amountCents: 1000 });
     const spyProvider = { name: "mock", createCharge: vi.fn(), refund: refundSpy };
     mockSelectSeq([
-      [{ id: "pay-1", invoiceId: "inv-1", amountCents: 10000, status: "succeeded", providerPaymentId: "mock_pay_x" }],
-      [{ amountCents: 2000 }], // 2000 already refunded
+      [{ id: "pay-1", invoiceId: "inv-1", amountCents: 10000, amountRefundedCents: 2000, status: "succeeded", providerPaymentId: "mock_pay_x" }],
       [{ amountPaidCents: 10000, totalCents: 10000 }],
     ]);
     captureUpdateStates();

@@ -302,6 +302,7 @@ export async function refundPayment(
       id: payments.id,
       invoiceId: payments.invoiceId,
       amountCents: payments.amountCents,
+      amountRefundedCents: payments.amountRefundedCents,
       status: payments.status,
       providerPaymentId: payments.providerPaymentId,
     })
@@ -313,13 +314,10 @@ export async function refundPayment(
   if (pay.status !== "succeeded") {
     return { ok: false, reason: "not_refundable" };
   }
-  // Guard against over-refunding: sum prior refunds, cap at the remaining balance.
-  // Tenant-scoped so a payment's refunds can't be summed across orgs.
-  const prior = await db
-    .select({ amountCents: refunds.amountCents })
-    .from(refunds)
-    .where(withTenant(refunds, organizationId, eq(refunds.paymentId, paymentId)));
-  const alreadyRefunded = prior.reduce((s, r) => s + r.amountCents, 0);
+  const alreadyRefunded = pay.amountRefundedCents;
+  // Over-refund FAST-FAIL (read-based; cheap). The atomic CLAIM below is the
+  // authoritative guard under concurrency — the prior SUM(refunds)-then-refund
+  // path let two concurrent distinct-amount refunds both pass and over-refund.
   if (params.amountCents <= 0 || params.amountCents > pay.amountCents - alreadyRefunded) {
     return { ok: false, reason: "exceeds_payment" };
   }
@@ -346,17 +344,61 @@ export async function refundPayment(
   const wasFullyPaid = (inv?.amountPaidCents ?? 0) >= (inv?.totalCents ?? 0);
   const newPaid = Math.max(0, (inv?.amountPaidCents ?? 0) - params.amountCents);
 
-  // Stable idempotency key from invariants (payment + cumulative prior refunds +
-  // this amount): a RETRY of the same logical refund yields the same key, so the
+  // ATOMIC CLAIM before the provider refund — the authoritative over-refund
+  // guard. One conditional write reserves this refund against the running total
+  // (`amountRefundedCents + amount <= amountCents`), so two concurrent refunds
+  // can't both pass and pay out more than was charged; the loser matches 0 rows
+  // and never calls the provider. Also re-checks status='succeeded' so a
+  // concurrent FULL refund (which flips status) blocks further claims.
+  const claim = await db
+    .update(payments)
+    .set({
+      amountRefundedCents: sql`${payments.amountRefundedCents} + ${params.amountCents}`,
+      updatedAt: new Date(),
+    })
+    .where(
+      withTenant(
+        payments,
+        organizationId,
+        and(
+          eq(payments.id, paymentId),
+          eq(payments.status, "succeeded"),
+          sql`${payments.amountRefundedCents} + ${params.amountCents} <= ${payments.amountCents}`,
+        )!,
+      ),
+    )
+    .returning({ id: payments.id });
+  if (!claim[0]) {
+    // Lost the race / already fully refunded — do NOT call the provider.
+    return { ok: false, reason: "exceeds_payment" };
+  }
+
+  // Stable idempotency key from invariants (payment + prior refunded total + this
+  // amount): a RETRY of the same logical refund yields the same key, so the
   // provider dedupes it — preventing a double money-out if the batch below fails
   // after the provider already succeeded.
   const idempotencyKey = `${paymentId}:${alreadyRefunded}:${params.amountCents}`;
-  const result = await provider.refund({
-    providerPaymentId: pay.providerPaymentId ?? "",
-    amountCents: params.amountCents,
-    reason: params.reason,
-    idempotencyKey,
-  });
+  let result;
+  try {
+    result = await provider.refund({
+      providerPaymentId: pay.providerPaymentId ?? "",
+      amountCents: params.amountCents,
+      reason: params.reason,
+      idempotencyKey,
+    });
+  } catch (err) {
+    // The provider never moved money — UN-CLAIM the reserved amount so a later
+    // legitimate refund isn't blocked, then surface the failure.
+    await db
+      .update(payments)
+      .set({
+        amountRefundedCents: sql`${payments.amountRefundedCents} - ${params.amountCents}`,
+        updatedAt: new Date(),
+      })
+      .where(withTenant(payments, organizationId, eq(payments.id, paymentId)))
+      .catch(() => {});
+    throw err;
+  }
 
   const refundId = randomUUID();
   await db.batch([
