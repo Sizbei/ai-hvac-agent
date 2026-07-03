@@ -46,7 +46,7 @@ const invoiceWebhookSchema = z.object({
  */
 function mapInvoiceEventToStatus(
   eventType: string,
-): "none" | "sent" | "paid" | "void" {
+): "sent" | "paid" | "void" | null {
   const normalized = eventType.toLowerCase();
   switch (normalized) {
     case "invoice.sent":
@@ -62,8 +62,10 @@ function mapInvoiceEventToStatus(
     case "invoice_cancelled":
       return "void";
     default:
+      // Unknown event → do NOT touch the status. Returning "none" here reset a
+      // real paid/sent invoice to unpaid on any unrecognized webhook.
       logger.warn({ eventType }, "Unknown Fieldpulse invoice event type");
-      return "none";
+      return null;
   }
 }
 
@@ -165,11 +167,12 @@ export async function POST(request: NextRequest): Promise<Response> {
       return new Response(null, { status: 200 });
     }
 
-    // Map event to invoice status
+    // Map event to invoice status. null = unrecognized event → leave status as-is
+    // (never reset a real paid/sent invoice on an unknown webhook).
     const newStatus = mapInvoiceEventToStatus(eventType);
 
-    // Only update if status is changing
-    if (requestRow.invoiceStatus !== newStatus) {
+    // Only update if we recognized the event AND the status is actually changing.
+    if (newStatus !== null && requestRow.invoiceStatus !== newStatus) {
       await db
         .update(serviceRequests)
         .set({
