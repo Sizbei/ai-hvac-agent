@@ -321,10 +321,12 @@ function lineItemRows(
     organizationId,
     invoiceId,
     name: li.name,
-    quantity: li.quantity,
+    // The column is an integer (display only); the MONEY below uses the exact
+    // fractional quantity so a 2.5-hr line isn't billed as 3.
+    quantity: Math.max(1, Math.round(li.quantity)),
     unitPriceCents: li.unitPriceCents,
-    costCents: li.quantity * li.unitCostCents,
-    lineTotalCents: li.quantity * li.unitPriceCents,
+    costCents: Math.round(li.quantity * li.unitCostCents),
+    lineTotalCents: Math.round(li.quantity * li.unitPriceCents),
   }));
 }
 

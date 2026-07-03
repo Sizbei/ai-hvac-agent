@@ -388,10 +388,12 @@ function toLineItems(raw: unknown): FieldpulseInvoiceLineItem[] {
         (typeof comp.title === "string" && comp.title) ||
         lineTitle ||
         "Item";
-      const qty = Math.max(
-        1,
-        Math.round(Number.parseFloat(String(comp.quantity ?? "1")) || 1),
-      );
+      // Preserve the FRACTIONAL quantity (e.g. 2.5 hrs of labor) — rounding it to
+      // a whole number here inflated the mirrored line total (qty × price). The
+      // consumer rounds it to the integer `quantity` column for display but
+      // computes the money from this exact value.
+      const parsedQty = Number.parseFloat(String(comp.quantity ?? "1"));
+      const qty = Number.isFinite(parsedQty) && parsedQty > 0 ? parsedQty : 1;
       out.push({
         name,
         quantity: qty,
