@@ -19,6 +19,7 @@ import {
   isNull,
   isNotNull,
   or,
+  sql,
   type SQL,
 } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -69,26 +70,6 @@ const ACTIVE_BOOKING_STATUSES = [
   "in_progress",
   "on_hold",
 ] as const;
-
-// The DB constraint (migration 0030) that atomically blocks a tech double-book.
-const TECH_DOUBLE_BOOK_CONSTRAINT = "service_requests_no_tech_double_book";
-
-/**
- * True when an error is the tech double-book EXCLUDE violation. Matches on the
- * Postgres exclusion_violation SQLSTATE (23P01) or the constraint name in the
- * message (neon-http surfaces one or the other). Used to translate a concurrent
- * placement collision into a `conflict` result instead of a 500.
- */
-export function isTechDoubleBookViolation(err: unknown): boolean {
-  if (typeof err !== "object" || err === null) return false;
-  const code = (err as { code?: unknown }).code;
-  if (code === "23P01") return true;
-  const message = (err as { message?: unknown }).message;
-  return (
-    typeof message === "string" &&
-    message.includes(TECH_DOUBLE_BOOK_CONSTRAINT)
-  );
-}
 
 /** Statuses an "unscheduled" request can sit in: still open intake (pending) or
  * booked-as-a-status (scheduled) but missing a tech and/or an arrival window. */
@@ -698,40 +679,58 @@ export async function placeAndAssignRequest(
         updatedAt: now,
       };
 
-  let updated;
-  try {
-    [updated] = await db
-      .update(serviceRequests)
-      .set(setValues)
-      .where(
-        withTenant(
-          serviceRequests,
-          organizationId,
-          and(
-            eq(serviceRequests.id, requestId),
-            eq(serviceRequests.status, currentStatus),
-            // Auto-dispatch only: refuse to place if a human already claimed the
-            // job. A calendar drag sets assignedTo but not status, so this is the
-            // only guard that catches that race.
-            options.requireUnassigned
-              ? isNull(serviceRequests.assignedTo)
-              : undefined,
-          )!,
-        ),
-      )
-      .returning({
-        status: serviceRequests.status,
-        assignedTo: serviceRequests.assignedTo,
-        scheduledDate: serviceRequests.scheduledDate,
-        arrivalWindowStart: serviceRequests.arrivalWindowStart,
-        arrivalWindowEnd: serviceRequests.arrivalWindowEnd,
-      });
-  } catch (err) {
-    // The DB's tech double-book EXCLUDE constraint rejected an overlapping
-    // booking a CONCURRENT placement created between our read-time conflict check
-    // and this write — the atomic guard the app-level check can't provide. Surface
-    // it as a conflict (with the now-visible conflicting jobs) rather than a 500.
-    if (isTechDoubleBookViolation(err) && !options.override && targetTech) {
+  // Atomic no-double-book guard folded INTO the write: when not overriding, the
+  // UPDATE only lands if NO active job for this tech overlaps the target window
+  // (half-open, matching checkScheduleConflict). This closes the race between the
+  // read-time conflict check above and this write WITHOUT a DB constraint —
+  // which would 500 on the intentional override path and every other write path.
+  const noDoubleBookGuard =
+    !options.override && targetTech
+      ? sql`NOT EXISTS (
+          SELECT 1 FROM ${serviceRequests} conflict_check
+          WHERE conflict_check.organization_id = ${organizationId}
+            AND conflict_check.assigned_to = ${targetTech}
+            AND conflict_check.id <> ${requestId}
+            AND conflict_check.status IN ('pending','assigned','scheduled','in_progress','on_hold')
+            AND conflict_check.arrival_window_start IS NOT NULL
+            AND conflict_check.arrival_window_end IS NOT NULL
+            AND conflict_check.arrival_window_start < ${arrivalWindow.end}
+            AND conflict_check.arrival_window_end > ${arrivalWindow.start}
+        )`
+      : undefined;
+
+  const [updated] = await db
+    .update(serviceRequests)
+    .set(setValues)
+    .where(
+      withTenant(
+        serviceRequests,
+        organizationId,
+        and(
+          eq(serviceRequests.id, requestId),
+          eq(serviceRequests.status, currentStatus),
+          // Auto-dispatch only: refuse to place if a human already claimed the
+          // job. A calendar drag sets assignedTo but not status, so this is the
+          // only guard that catches that race.
+          options.requireUnassigned
+            ? isNull(serviceRequests.assignedTo)
+            : undefined,
+          noDoubleBookGuard,
+        )!,
+      ),
+    )
+    .returning({
+      status: serviceRequests.status,
+      assignedTo: serviceRequests.assignedTo,
+      scheduledDate: serviceRequests.scheduledDate,
+      arrivalWindowStart: serviceRequests.arrivalWindowStart,
+      arrivalWindowEnd: serviceRequests.arrivalWindowEnd,
+    });
+
+  if (!updated) {
+    // The guarded UPDATE matched nothing. Disambiguate: a concurrent overlapping
+    // booking (the double-book guard) vs the row moving (status/assignee changed).
+    if (!options.override && targetTech) {
       const conflicts = await checkScheduleConflict(
         organizationId,
         targetTech,
@@ -739,18 +738,14 @@ export async function placeAndAssignRequest(
         arrivalWindow.end.toISOString(),
         requestId,
       );
-      return {
-        ok: false,
-        reason: "conflict",
-        detail: { conflicts, outsideAvailability: false },
-      };
+      if (conflicts.length > 0) {
+        return {
+          ok: false,
+          reason: "conflict",
+          detail: { conflicts, outsideAvailability: false },
+        };
+      }
     }
-    throw err;
-  }
-
-  if (!updated) {
-    // Guarded UPDATE matched nothing → a concurrent write moved the row (status
-    // changed) or, under requireUnassigned, a dispatcher claimed it first.
     return { ok: false, reason: "request_not_found" };
   }
 

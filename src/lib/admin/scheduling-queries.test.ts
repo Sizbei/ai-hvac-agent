@@ -89,6 +89,7 @@ vi.mock("drizzle-orm", () => ({
   inArray: (...a: unknown[]) => ["inArray", ...a],
   isNull: (c: unknown) => ["isNull", c],
   isNotNull: (c: unknown) => ["isNotNull", c],
+  sql: (_strings: TemplateStringsArray, ..._vals: unknown[]) => ["sql"],
 }));
 
 vi.mock("@/lib/db/schema", () => ({
@@ -186,7 +187,6 @@ import {
   listUnscheduledRequests,
   rescheduleRequest,
   placeAndAssignRequest,
-  isTechDoubleBookViolation,
   autoAssignBookedRequest,
 } from "./scheduling-queries";
 
@@ -855,24 +855,5 @@ describe("autoAssignBookedRequest (scored vs first-fit)", () => {
     selectQueue.push([]); // no active techs
     const result = await autoAssignBookedRequest(ORG, REQ, HELD);
     expect(result).toEqual({ assigned: false });
-  });
-});
-
-describe("isTechDoubleBookViolation (M21)", () => {
-  it("matches the Postgres exclusion_violation SQLSTATE (23P01)", () => {
-    expect(isTechDoubleBookViolation({ code: "23P01" })).toBe(true);
-  });
-  it("matches when the constraint name is in the message", () => {
-    expect(
-      isTechDoubleBookViolation(
-        new Error('conflicting key value violates exclusion constraint "service_requests_no_tech_double_book"'),
-      ),
-    ).toBe(true);
-  });
-  it("does NOT match an unrelated error", () => {
-    expect(isTechDoubleBookViolation(new Error("network down"))).toBe(false);
-    expect(isTechDoubleBookViolation({ code: "23505" })).toBe(false); // unique violation, not ours
-    expect(isTechDoubleBookViolation(null)).toBe(false);
-    expect(isTechDoubleBookViolation(undefined)).toBe(false);
   });
 });
