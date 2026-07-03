@@ -161,17 +161,23 @@ export function scoreTechnician(
  * Ties break by technicianId (ascending) so the ordering is fully deterministic.
  */
 export function rankTechnicians(candidates: readonly DispatchSignals[]): RankedTech[] {
-  // Single travel regime per ranking: if ANY candidate has a location signal,
-  // score the location-less ones with a neutral travel term so they can't win
-  // just by escaping the travel blend the located candidates pay.
-  const travelRegimeActive = candidates.some(
+  // Only skill-matched candidates survive the ranking, so the travel regime must
+  // be decided over THOSE — matching scoreTechnician's `skillMatched =
+  // skillJobsCompleted > 0`. A candidate that gets filtered out must NOT activate
+  // the regime: doing so applied the neutral-travel blend (a 0.55x compression of
+  // every other signal) to the survivors and shrank the top-vs-second gap below
+  // the auto-commit threshold — flipping a clear winner to queued_ambiguous.
+  const eligible = candidates.filter((c) => c.tech.skillJobsCompleted > 0);
+  // Single travel regime per ranking: if ANY eligible candidate has a location
+  // signal, score the location-less ones with a neutral travel term so they can't
+  // win just by escaping the travel blend the located candidates pay.
+  const travelRegimeActive = eligible.some(
     (c) =>
       (c.tech.travelMinutes != null && Number.isFinite(c.tech.travelMinutes)) ||
       (c.tech.travelKm != null && Number.isFinite(c.tech.travelKm)),
   );
-  return candidates
+  return eligible
     .map((c) => scoreTechnician(c, { travelRegimeActive }))
-    .filter((r) => r.skillMatched)
     .sort((a, b) =>
       b.score !== a.score
         ? b.score - a.score

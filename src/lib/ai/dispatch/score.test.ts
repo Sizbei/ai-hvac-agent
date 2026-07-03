@@ -115,6 +115,26 @@ describe('rankTechnicians', () => {
     expect(ranked).toEqual([]);
   });
 
+  it('a filtered-out (non-skill-matched) located tech does NOT activate the travel regime (audit #12)', () => {
+    // Only the UNQUALIFIED tech has a location. The two skill-matched techs are
+    // location-less, so the regime must stay OFF for them — otherwise the neutral
+    // travel blend compresses their gap and can flip a clear winner to ambiguous.
+    const withFilteredLocated = rankTechnicians([
+      signals('unqualified', { skillJobsCompleted: 0, travelKm: 1 }),
+      signals('ok', { skillJobsCompleted: 3, avgRating: 4.0, sameDayJobCount: 2 }),
+      signals('best', { skillJobsCompleted: 9, avgRating: 5.0, sameDayJobCount: 0 }),
+    ]);
+    // The same two techs scored WITHOUT any located candidate present.
+    const noLocatedAtAll = rankTechnicians([
+      signals('ok', { skillJobsCompleted: 3, avgRating: 4.0, sameDayJobCount: 2 }),
+      signals('best', { skillJobsCompleted: 9, avgRating: 5.0, sameDayJobCount: 0 }),
+    ]);
+    // Scores must be identical — the filtered-out located tech had no effect.
+    expect(withFilteredLocated.map((r) => [r.technicianId, r.score])).toEqual(
+      noLocatedAtAll.map((r) => [r.technicianId, r.score]),
+    );
+  });
+
   it('lets conversion change the order between otherwise-equal techs', () => {
     const ranked = rankTechnicians([
       signals('a', { skillJobsCompleted: 5, avgRating: 4, sameDayJobCount: 1, conversionRate: 0.2 }),
