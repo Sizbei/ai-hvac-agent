@@ -1155,10 +1155,20 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     category: "faq",
     title: "Business hours",
     triggerKeywords: [
-      "hours",
-      "open",
+      // Bare "hours"/"open" hijacked symptom prose ("running for hours", "vents
+      // won't open"); require the business-hours sense explicitly.
+      "your hours",
+      "ur hours",
+      "business hours",
+      "hours of operation",
+      "what are your hours",
       "when are you open",
-      "what time",
+      "are you open",
+      "do you open",
+      "you open today",
+      "open today",
+      "still open",
+      "what time do you open",
       "closing time",
     ],
     // "what time will the TECH arrive" is an arrival-window question, not a

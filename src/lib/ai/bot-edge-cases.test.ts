@@ -757,6 +757,14 @@ describe("emergency matching — leak false-negatives + install false-positives 
     expect(verdict("it smells like gas in here").escalate).toBe(true);
     expect(verdict("my kitchen smells like gas").escalate).toBe(true);
   });
+
+  it("bare hours/open no longer hijack symptom prose to business-hours (M15)", () => {
+    expect(verdict("the vents won't open").intentId).not.toBe("faq-business-hours");
+    expect(verdict("my ac has been running for hours").intentId).not.toBe("faq-business-hours");
+    // …real business-hours questions still route there
+    expect(verdict("what are your hours").intentId).toBe("faq-business-hours");
+    expect(verdict("are you open right now").intentId).toBe("faq-business-hours");
+  });
   it("still does NOT escalate a bare appliance mention", () => {
     expect(verdict("my gas furnace won't start").escalate).toBe(false);
     expect(verdict("does a gas furnace produce co").escalate).toBe(false);
