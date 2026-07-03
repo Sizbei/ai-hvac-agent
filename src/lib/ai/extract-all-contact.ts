@@ -72,8 +72,12 @@ function nameFromResidual(message: string, email: string | null): string | null 
   // name rarely contains HVAC-symptom / negation / help vocabulary, so a
   // deny-list is a safe conservative gate (a cue-based name still comes through
   // detect-correction.extractNameFromCue).
+  // Inflections are spelled out instead of open `\w*` wildcards: `die\w*`,
+  // `work\w*`, `run\w*` etc. matched real names (Diego, Workman, Runyon). A
+  // `\b`-bounded bare word does NOT (no boundary inside "diego"), so listing the
+  // exact forms keeps the vocab without the false-positives.
   if (
-    /\b(ac|a\/c|air|hvac|heat|heating|cool|cooling|cold|hot|warm|furnace|boiler|unit|system|thermostat|compressor|refrigerat\w*|freez\w*|leak\w*|water|smell|noise|broke\w*|break\w*|die\w*|dead|not|no|isn'?t|won'?t|can'?t|work\w*|blow\w*|run\w*|start\w*|repair|fix\w*|help|service|emergency|urgent|problem|issue|please)\b/i.test(
+    /\b(ac|a\/c|air|hvac|heat|heating|cool|cooling|cold|hot|warm|furnace|boiler|unit|system|thermostat|compressor|refrigerator|refrigeration|refrigerant|freeze|freezing|frozen|leak|leaking|leaks|leaked|water|smell|noise|broke|broken|break|breaking|die|died|dying|dead|not|no|isn'?t|won'?t|can'?t|work|working|works|blow|blowing|blows|blew|run|running|runs|start|starting|starts|started|repair|fix|fixing|fixes|fixed|help|service|emergency|urgent|problem|issue|please)\b/i.test(
       head,
     )
   ) {
