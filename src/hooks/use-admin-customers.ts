@@ -47,6 +47,7 @@ export function useCustomerDetail(customerId: string) {
       const json = await res.json();
       if (json.success) {
         setCustomer(json.data);
+        setError(null); // clear any prior failure so a recovered refetch isn't stuck showing an error
       } else {
         setError(json.error?.message ?? 'Customer not found');
       }
