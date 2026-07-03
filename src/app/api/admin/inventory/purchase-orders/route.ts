@@ -13,8 +13,10 @@ import { logger } from "@/lib/logger";
 const lineSchema = z.object({
   pricebookItemId: z.string().uuid().nullable().optional(),
   description: z.string().trim().min(1).max(255),
-  quantity: z.number().int().min(1),
-  unitCostCents: z.number().int().min(0),
+  // Upper bounds keep each value inside a signed int4 column (an unbounded
+  // quantity/cost overflowed and 500'd). Generous vs any real PO line.
+  quantity: z.number().int().min(1).max(1_000_000),
+  unitCostCents: z.number().int().min(0).max(100_000_000),
 });
 
 const createSchema = z.object({

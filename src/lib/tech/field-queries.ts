@@ -224,7 +224,10 @@ export async function addJobMaterial(
     // Catalog line: snapshot cost/price from the org's pricebook item. Costs the
     // client sent are NOT trusted — the server is authoritative.
     const item = await getPricebookItemById(organizationId, input.pricebookItemId);
-    if (!item) {
+    // Reject a missing OR soft-deleted (inactive) item — an inactive catalog row
+    // must not be bookable as a job material even via a direct POST (the tech
+    // pricebook picker already hides them).
+    if (!item || !item.active) {
       return { ok: false, reason: "item_not_found" };
     }
     pricebookItemId = item.id;
