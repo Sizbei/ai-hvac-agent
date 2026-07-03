@@ -197,6 +197,13 @@
       "when": 1782871924039,
       "tag": "0027_salty_vector",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1783054368529,
+      "tag": "0028_spotty_susan_delgado",
+      "breakpoints": true
     }
   ]
 }

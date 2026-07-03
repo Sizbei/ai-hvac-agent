@@ -49,6 +49,7 @@ export async function findLateJobsForOrg(
       referenceNumber: serviceRequests.referenceNumber,
       status: serviceRequests.status,
       arrivalWindowEnd: serviceRequests.arrivalWindowEnd,
+      delayAlertedWindowEnd: serviceRequests.delayAlertedWindowEnd,
       technicianName: users.name,
     })
     .from(serviceRequests)
@@ -66,10 +67,40 @@ export async function findLateJobsForOrg(
 
   return rows
     .filter((r) => isArrivalLate(r, now.getTime(), graceMinutes))
+    // Dedup: skip a job we've already alerted for THIS window, so the sweep
+    // doesn't re-text the dispatcher every run. Resets when rescheduled (a new
+    // arrivalWindowEnd no longer matches the marker).
+    .filter(
+      (r) =>
+        r.delayAlertedWindowEnd === null ||
+        r.delayAlertedWindowEnd.getTime() !== r.arrivalWindowEnd!.getTime(),
+    )
     .map((r) => ({
       id: r.id,
       referenceNumber: r.referenceNumber,
       technicianName: r.technicianName,
       arrivalWindowEnd: r.arrivalWindowEnd!,
     }));
+}
+
+/**
+ * Record that a "running behind" alert was sent for this job's current arrival
+ * window, so the next sweep dedupes it. Org-scoped. Best-effort — a failure just
+ * means the next sweep may re-alert (better than dropping a real alert).
+ */
+export async function markDelayAlerted(
+  organizationId: string,
+  serviceRequestId: string,
+  arrivalWindowEnd: Date,
+): Promise<void> {
+  await db
+    .update(serviceRequests)
+    .set({ delayAlertedWindowEnd: arrivalWindowEnd })
+    .where(
+      withTenant(
+        serviceRequests,
+        organizationId,
+        eq(serviceRequests.id, serviceRequestId),
+      ),
+    );
 }

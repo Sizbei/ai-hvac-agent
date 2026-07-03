@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { organizationSettings } from "@/lib/db/schema";
-import { findLateJobsForOrg } from "@/lib/dispatch/delay-detection";
+import { findLateJobsForOrg, markDelayAlerted } from "@/lib/dispatch/delay-detection";
 import { sendSms } from "@/lib/communication/twilio-adapter";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { verifyCronAuth } from "@/lib/cron-auth";
@@ -74,6 +74,13 @@ export async function GET(request: NextRequest) {
               job.arrivalWindowEnd,
             ),
           });
+          // Mark this window alerted so the next sweep dedupes it (no repeat SMS
+          // every run). Only after a successful send.
+          await markDelayAlerted(
+            org.organizationId,
+            job.id,
+            job.arrivalWindowEnd,
+          );
           alerted += 1;
         } catch (error) {
           // One failed send must not abort the sweep for other jobs/orgs.

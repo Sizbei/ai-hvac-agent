@@ -551,6 +551,13 @@ export const serviceRequests = pgTable(
     preferredWindow: preferredWindowEnum("preferred_window"),
     arrivalWindowStart: timestamp("arrival_window_start", { withTimezone: true }),
     arrivalWindowEnd: timestamp("arrival_window_end", { withTimezone: true }),
+    // The arrival window a "running behind" dispatcher SMS was last sent for.
+    // The delay-sweep cron dedupes on this so it doesn't re-alert the same late
+    // job every run; it resets naturally when the window is rescheduled (a new
+    // arrivalWindowEnd no longer matches this marker).
+    delayAlertedWindowEnd: timestamp("delay_alerted_window_end", {
+      withTimezone: true,
+    }),
     // Why a job is paused + when to revisit (set on an on_hold transition).
     holdReason: holdReasonEnum("hold_reason"),
     followUpDate: timestamp("follow_up_date", { withTimezone: true }),
