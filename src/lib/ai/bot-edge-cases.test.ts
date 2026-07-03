@@ -753,6 +753,10 @@ describe("emergency matching — leak false-negatives + install false-positives 
     expect(verdict("I smell gas coming from my gas furnace").escalate).toBe(true);
     expect(verdict("my gas furnace smells like rotten eggs").escalate).toBe(true);
   });
+  it("escalates the common 'smells like gas' inflection (M16)", () => {
+    expect(verdict("it smells like gas in here").escalate).toBe(true);
+    expect(verdict("my kitchen smells like gas").escalate).toBe(true);
+  });
   it("still does NOT escalate a bare appliance mention", () => {
     expect(verdict("my gas furnace won't start").escalate).toBe(false);
     expect(verdict("does a gas furnace produce co").escalate).toBe(false);

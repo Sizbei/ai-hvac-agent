@@ -26,6 +26,9 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     triggerKeywords: [
       "gas smell",
       "smell gas",
+      "smells like gas",
+      "smells of gas",
+      "smell like gas",
       "gas leak",
       "rotten eggs",
       "smell of gas",
@@ -44,7 +47,7 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
       "emergency heat",
       "aux heat",
     ],
-    requiredQualifiers: ["smell", "leak", "odor", "rotten eggs"],
+    requiredQualifiers: ["smell", "smells", "leak", "odor", "rotten eggs"],
     action: "ESCALATE",
     cannedResponse:
       "A gas smell can be dangerous. Please leave your home right now, avoid using any switches, phones, or flames inside, and once you're safely outside call your gas utility's emergency line or 911. I'm flagging this as an emergency so our team can follow up right away.",
