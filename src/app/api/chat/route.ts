@@ -1,7 +1,7 @@
 import { NextRequest, after } from "next/server";
 import { streamText } from "ai";
 import { getModel, resolveModelEntry } from "@/lib/ai/provider";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   customerSessions,
@@ -587,31 +587,21 @@ export async function POST(request: NextRequest) {
       })
       .returning();
 
-    // Link uploaded attachments to this message
+    // Link uploaded attachments to this message. ONE scoped update: only the
+    // provided IDs, and only within this session + org. (A prior blanket update
+    // with just the session filter re-pointed EVERY session attachment to the
+    // newest message — dropped.)
     if (attachmentIds.length > 0 && userMessageRow) {
       await db
         .update(attachments)
         .set({ messageId: userMessageRow.id })
         .where(
           and(
+            inArray(attachments.id, attachmentIds),
             eq(attachments.sessionId, session.id),
-            // Only link attachments that belong to this session and are in the provided list
-            // Using a raw OR clause for the array of IDs
+            eq(attachments.organizationId, organizationId),
           ),
         );
-      // Update each attachment individually to link to the message
-      for (const attachmentId of attachmentIds) {
-        await db
-          .update(attachments)
-          .set({ messageId: userMessageRow.id })
-          .where(
-            and(
-              eq(attachments.id, attachmentId),
-              eq(attachments.sessionId, session.id),
-              eq(attachments.organizationId, organizationId),
-            ),
-          );
-      }
       logger.info(
         {
           messageId: userMessageRow.id,
