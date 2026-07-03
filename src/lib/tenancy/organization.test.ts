@@ -40,6 +40,7 @@ vi.mock("@/lib/logger", () => ({
 import {
   resolveOrganizationForSession,
   organizationExists,
+  organizationIdForPublishableKey,
   DEMO_ORG_ID,
 } from "@/lib/tenancy/organization";
 
@@ -144,5 +145,29 @@ describe("organizationExists", () => {
   it("returns false when the org row is missing", async () => {
     mockSelectRows.value = [];
     await expect(organizationExists("ghost-org")).resolves.toBe(false);
+  });
+});
+
+describe("organizationIdForPublishableKey (cross-org resume guard — audit HIGH)", () => {
+  beforeEach(() => mockValidateKey.mockReset());
+
+  it("returns the org for a valid publishable key (no origin check)", async () => {
+    mockValidateKey.mockResolvedValue({ id: "k1", organizationId: "org-B", keyType: "publishable" });
+    expect(await organizationIdForPublishableKey("pk_live_x")).toBe("org-B");
+  });
+
+  it("returns null for a missing/blank key so the caller fails closed", async () => {
+    expect(await organizationIdForPublishableKey(null)).toBeNull();
+    expect(await organizationIdForPublishableKey("   ")).toBeNull();
+  });
+
+  it("returns null for an unknown/invalid key (validateKey null)", async () => {
+    mockValidateKey.mockResolvedValue(null);
+    expect(await organizationIdForPublishableKey("pk_live_bogus")).toBeNull();
+  });
+
+  it("returns null for a SECRET key (only publishable keys open sessions)", async () => {
+    mockValidateKey.mockResolvedValue({ id: "k1", organizationId: "org-B", keyType: "secret" });
+    expect(await organizationIdForPublishableKey("sk_live_x")).toBeNull();
   });
 });

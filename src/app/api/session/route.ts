@@ -15,7 +15,10 @@ import {
   getSessionToken,
 } from "@/lib/session";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
-import { resolveOrganizationForSession } from "@/lib/tenancy/organization";
+import {
+  resolveOrganizationForSession,
+  organizationIdForPublishableKey,
+} from "@/lib/tenancy/organization";
 import { touchKeyLastUsed } from "@/lib/widget/key-queries";
 import { resolveTokenBudget, resolveMaxTurns } from "@/lib/ai/chat-limits";
 import {
@@ -180,19 +183,18 @@ export async function GET(request: NextRequest) {
       return errorResponse("Session not found", "SESSION_NOT_FOUND", 404);
     }
 
-    // Cross-org resume guard: if a widget key is present and resolves to a
-    // DIFFERENT org than this session's, do NOT resume. A stale session cookie
-    // from org A must not be rehydrated inside org B's embedded widget (which
-    // would misattribute every new message to org A). Return NO_SESSION so the
-    // client falls through to createSession() for the correct org. No key
-    // (hosted /chat) → resume as before.
+    // Cross-org resume guard: if a widget key is present, the session may only be
+    // resumed when the key maps to the SAME org — a stale cookie from org A must
+    // not be rehydrated inside org B's embedded widget (misattributing every new
+    // message to org A). FAIL CLOSED: an invalid/unknown key or a mismatch both
+    // yield NO_SESSION so the client falls through to createSession() for the
+    // correct org. Compared key→org ONLY (no origin allowlist) — a same-origin
+    // resume GET carries no Origin header, so an origin check here would wrongly
+    // skip the guard for every allowlisted org. No key (hosted /chat) → resume.
     const widgetKey = request.headers.get("x-hvac-widget-key");
     if (widgetKey) {
-      const resolution = await resolveOrganizationForSession({
-        publishableKey: widgetKey,
-        origin: request.headers.get("origin"),
-      });
-      if (resolution.ok && resolution.organizationId !== session.organizationId) {
+      const keyOrg = await organizationIdForPublishableKey(widgetKey);
+      if (keyOrg !== session.organizationId) {
         return errorResponse("No session for this widget", "NO_SESSION", 401);
       }
     }

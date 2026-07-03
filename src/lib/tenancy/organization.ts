@@ -99,6 +99,25 @@ export async function resolveOrganizationForSession(
   };
 }
 
+/**
+ * The org a publishable widget key belongs to, WITHOUT the origin allowlist —
+ * for the session-RESUME cross-org guard only. A same-origin resume GET carries
+ * no Origin header, so running it through resolveOrganizationForSession's origin
+ * check would fail (origin_not_allowed) for any org with an allowlist and make
+ * the resume guard dead code. Origin enforcement is a session-CREATION + CSP
+ * concern; resume only needs "does this key map to my session's org?". Returns
+ * null for a missing/invalid/non-publishable key (caller must fail closed).
+ */
+export async function organizationIdForPublishableKey(
+  publishableKey: string | null | undefined,
+): Promise<string | null> {
+  const key = publishableKey?.trim();
+  if (!key) return null;
+  const validated = await validateKey(key);
+  if (!validated || validated.keyType !== "publishable") return null;
+  return validated.organizationId;
+}
+
 /** True if the organization exists. Cheap guard for resolution paths that
  * accept external input (a widget key mapping to a stale/deleted org). */
 export async function organizationExists(
