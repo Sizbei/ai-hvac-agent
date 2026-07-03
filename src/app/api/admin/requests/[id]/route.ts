@@ -194,6 +194,21 @@ export async function PATCH(
       parsed.data.scheduledDate !== undefined ||
       parsed.data.arrivalWindow !== undefined
     ) {
+      // A window needs a date to anchor to. Setting a window WITHOUT providing a
+      // date (scheduledDate undefined) would fall through to when=null and
+      // silently WIPE the existing schedule — reject it instead. (Sending
+      // scheduledDate:null explicitly still clears both, as intended.)
+      if (
+        parsed.data.arrivalWindow !== undefined &&
+        parsed.data.arrivalWindow !== null &&
+        parsed.data.scheduledDate === undefined
+      ) {
+        return errorResponse(
+          "arrivalWindow requires scheduledDate",
+          "VALIDATION_ERROR",
+          400,
+        );
+      }
       const when = parsed.data.scheduledDate
         ? new Date(parsed.data.scheduledDate)
         : null;
