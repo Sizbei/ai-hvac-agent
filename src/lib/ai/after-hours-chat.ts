@@ -235,12 +235,21 @@ export function readUrgencySignal(
   message: string,
 ): CustomerUrgencySignal {
   if (!askedUrgencyLastTurn) return "unknown";
-  const m = message.trim().toLowerCase();
+  // Normalize curly apostrophes so an iOS-typed "isn't" matches the guards.
+  const m = message.trim().toLowerCase().replace(/[‘’]/g, "'");
+  // An explicit same-day service request wins even alongside a soft "not an
+  // emergency" ("it's not an emergency but can someone come tonight?") — the
+  // concrete time is a real after-hours ask that must not be dropped.
+  const wantsToday =
+    /\b(tonight|today|right now|asap)\b/.test(m) || /can'?t wait/.test(m);
   // Negated urgency FIRST — otherwise the affirmative check below matches the
   // substring "urgent"/"emergency" inside "not urgent" / "not an emergency" and
   // flips a clear no into a yes. Scoped to explicit negation so a contradictory
   // "no, it's an emergency" (where "no" answers "can it wait?") still reads urgent.
-  if (/\b(not|isn'?t|no)\s+(an?\s+)?(urgent|emergency)\b/.test(m)) {
+  if (
+    !wantsToday &&
+    /\b(not|isn'?t|no)\s+(an?\s+)?(urgent|emergency)\b/.test(m)
+  ) {
     return "not_urgent";
   }
   if (
