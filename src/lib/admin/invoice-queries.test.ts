@@ -144,6 +144,38 @@ describe("takePayment", () => {
     chargeSpy.mockRestore();
   });
 
+  // A THROW after the claim (payment insert or a network error on createCharge)
+  // must also un-claim, or the invoice is permanently over-credited — and an
+  // insert-throw leaves no pending row for reconciliation to ever find.
+  it("un-claims (decrements) the invoice when createCharge throws", async () => {
+    mockInvoice({ totalCents: 10000, amountPaidCents: 0 });
+    const sets: Record<string, unknown>[] = [];
+    vi.mocked(db.update).mockImplementation(
+      () =>
+        ({
+          set: (v: Record<string, unknown>) => {
+            sets.push(v);
+            return {
+              where: vi.fn(() =>
+                Object.assign(Promise.resolve(undefined), {
+                  returning: vi.fn().mockResolvedValue([{ id: "inv-1" }]),
+                  catch: (cb: () => void) => Promise.resolve(undefined).catch(cb),
+                }),
+              ),
+            };
+          },
+        }) as never,
+    );
+    vi.spyOn(provider, "createCharge").mockRejectedValueOnce(new Error("network timeout"));
+    await expect(
+      takePayment(ORG, "inv-1", { amountCents: 5000 }, provider),
+    ).rejects.toThrow("network timeout");
+    // The compensating decrement ran (a SQL expression off the current row).
+    const dec = sets.find((s) => "amountPaidCents" in s);
+    expect(dec).toBeDefined();
+    expect(typeof dec?.amountPaidCents).not.toBe("number");
+  });
+
   // A failed charge must UN-CLAIM: release the reserved balance (so a later
   // legitimate charge isn't blocked) and mark the payment failed.
   it("un-claims the reserved balance when the charge fails", async () => {
@@ -708,10 +740,28 @@ describe("reconcilePayment", () => {
     expect(db.batch).not.toHaveBeenCalled();
   });
 
-  it("marks the payment failed when the provider says the charge failed", async () => {
+  it("un-credits the invoice when the provider says the charge failed (claim-before-charge)", async () => {
+    // The invoice was credited at claim time; a definitively-failed charge must
+    // decrement it back (else the invoice stays over-credited forever).
     mockSelectSeq([
       [{ id: "pay-1", invoiceId: "inv-1", amountCents: 10000, status: "pending" }],
+      [{ totalCents: 10000, amountPaidCents: 10000 }], // invoice (reconcile reads it before the CAS)
     ]);
+    const sets: Record<string, unknown>[] = [];
+    vi.mocked(db.update).mockImplementation(
+      () =>
+        ({
+          set: (v: Record<string, unknown>) => {
+            sets.push(v);
+            return {
+              where: () =>
+                Object.assign(Promise.resolve(undefined), {
+                  returning: vi.fn().mockResolvedValue([{ id: "pay-1" }]),
+                }),
+            };
+          },
+        }) as never,
+    );
     const failingProvider = {
       name: "mock",
       createCharge: vi.fn(),
@@ -722,7 +772,11 @@ describe("reconcilePayment", () => {
     };
     const r = await reconcilePayment(ORG, "pay-1", failingProvider as never);
     expect(r).toEqual({ ok: true, outcome: "failed_marked" });
-    expect(db.batch).not.toHaveBeenCalled(); // no money-moving invoice update
+    // payment flipped to failed + invoice decremented (a SQL expression).
+    expect(sets.some((s) => s.status === "failed")).toBe(true);
+    const decrement = sets.find((s) => "amountPaidCents" in s);
+    expect(decrement).toBeDefined();
+    expect(typeof decrement?.amountPaidCents).not.toBe("number");
   });
 
   it("returns payment_not_found when the payment is missing", async () => {

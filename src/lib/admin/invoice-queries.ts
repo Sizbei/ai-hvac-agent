@@ -220,21 +220,46 @@ export async function takePayment(
   const invoiceState = newPaid >= inv.totalCents ? "paid" : "open";
 
   const paymentId = randomUUID();
-  await db.insert(payments).values({
-    id: paymentId,
-    organizationId,
-    invoiceId,
-    provider: provider.name,
-    amountCents: params.amountCents,
-    status: "pending",
-    isDeposit: params.isDeposit ?? false,
-  });
+  let result;
+  try {
+    await db.insert(payments).values({
+      id: paymentId,
+      organizationId,
+      invoiceId,
+      provider: provider.name,
+      amountCents: params.amountCents,
+      status: "pending",
+      isDeposit: params.isDeposit ?? false,
+    });
 
-  const result = await provider.createCharge({
-    amountCents: params.amountCents,
-    idempotencyKey: paymentId,
-    description: `Invoice ${invoiceId}`,
-  });
+    result = await provider.createCharge({
+      amountCents: params.amountCents,
+      idempotencyKey: paymentId,
+      description: `Invoice ${invoiceId}`,
+    });
+  } catch (err) {
+    // The claim ALREADY credited the invoice. If the payment insert throws there
+    // is no pending row for reconciliation to ever find (unhealable over-credit);
+    // if createCharge throws the outcome is unknown. Either way, un-claim
+    // (decrement) so the invoice can't be permanently over-credited, and best-
+    // effort fail the payment row if it was inserted. The idempotency key guards
+    // a double-charge if the charge did land and is retried.
+    await db
+      .update(invoices)
+      .set({
+        amountPaidCents: sql`${invoices.amountPaidCents} - ${params.amountCents}`,
+        state: "open",
+        updatedAt: new Date(),
+      })
+      .where(withTenant(invoices, organizationId, eq(invoices.id, invoiceId)))
+      .catch(() => {});
+    await db
+      .update(payments)
+      .set({ status: "failed", updatedAt: new Date() })
+      .where(eq(payments.id, paymentId))
+      .catch(() => {});
+    throw err;
+  }
 
   if (result.status === "failed") {
     // UN-CLAIM: the charge never went through, so release the reserved balance
@@ -525,10 +550,31 @@ export async function reconcilePayment(
   const charge = await provider.getCharge(paymentId);
 
   if (charge.status === "failed") {
-    await db
+    // The charge did NOT go through, but the invoice was credited at claim time
+    // (claim-before-charge). Un-claim (decrement) alongside failing the payment,
+    // gated by an atomic pending->failed CAS so a concurrent reconcile can't
+    // decrement twice. Only the winner of the CAS decrements.
+    const claimedFail = await db
       .update(payments)
       .set({ status: "failed", updatedAt: new Date() })
-      .where(withTenant(payments, organizationId, eq(payments.id, paymentId)));
+      .where(
+        withTenant(
+          payments,
+          organizationId,
+          eq(payments.id, paymentId),
+          eq(payments.status, "pending"),
+        ),
+      )
+      .returning({ id: payments.id });
+    if (claimedFail.length > 0) {
+      await db
+        .update(invoices)
+        .set({
+          amountPaidCents: sql`GREATEST(0, ${invoices.amountPaidCents} - ${pay.amountCents})`,
+          updatedAt: new Date(),
+        })
+        .where(withTenant(invoices, organizationId, eq(invoices.id, pay.invoiceId)));
+    }
     return { ok: true, outcome: "failed_marked" };
   }
 
