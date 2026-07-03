@@ -74,19 +74,30 @@ export async function GET(request: NextRequest) {
               job.arrivalWindowEnd,
             ),
           });
-          // Mark this window alerted so the next sweep dedupes it (no repeat SMS
-          // every run). Only after a successful send.
+          alerted += 1;
+        } catch (error) {
+          // One failed send must not abort the sweep for other jobs/orgs. Do NOT
+          // mark: a genuinely failed send should be retried next sweep.
+          logger.error(
+            { error, requestId: job.id },
+            "delay-sweep: failed to send dispatcher alert",
+          );
+          continue;
+        }
+        // Mark AFTER a successful send, in its OWN try — a marker-write failure
+        // must not be mislogged as a send failure (the SMS already went out). If
+        // the marker write fails the next sweep may re-alert; that's the safe
+        // direction (best-effort dedup, never a dropped alert).
+        try {
           await markDelayAlerted(
             org.organizationId,
             job.id,
             job.arrivalWindowEnd,
           );
-          alerted += 1;
         } catch (error) {
-          // One failed send must not abort the sweep for other jobs/orgs.
           logger.error(
             { error, requestId: job.id },
-            "delay-sweep: failed to send dispatcher alert",
+            "delay-sweep: alert sent but dedup marker write failed (may re-alert next sweep)",
           );
         }
       }
