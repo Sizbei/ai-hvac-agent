@@ -216,6 +216,7 @@ export async function takePayment(
 
   // Best-effort state hint (the money figure is exact in the DB; state is only a
   // display hint). Derived from the read — the claim guaranteed newPaid <= total.
+  // Under concurrent partials this hint can lag briefly; the money never does.
   const newPaid = inv.amountPaidCents + params.amountCents;
   const invoiceState = newPaid >= inv.totalCents ? "paid" : "open";
 
@@ -247,8 +248,10 @@ export async function takePayment(
     await db
       .update(invoices)
       .set({
+        // Don't touch state on un-claim: the invoice was open/draft before the
+        // claim (the claim never changed state), so decrementing back leaves it
+        // correct. Forcing 'open' promoted a 'draft' invoice.
         amountPaidCents: sql`${invoices.amountPaidCents} - ${params.amountCents}`,
-        state: "open",
         updatedAt: new Date(),
       })
       .where(withTenant(invoices, organizationId, eq(invoices.id, invoiceId)))
@@ -272,8 +275,8 @@ export async function takePayment(
       db
         .update(invoices)
         .set({
+          // Leave state as-is (open/draft) — see the throw-path un-claim above.
           amountPaidCents: sql`${invoices.amountPaidCents} - ${params.amountCents}`,
-          state: "open",
           updatedAt: new Date(),
         })
         .where(withTenant(invoices, organizationId, eq(invoices.id, invoiceId))),
