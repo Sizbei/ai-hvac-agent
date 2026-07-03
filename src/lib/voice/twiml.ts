@@ -165,12 +165,17 @@ export function dialThenHangupTwiML(params: {
   readonly timeoutSeconds?: number;
 }): string {
   const { say, number, fallback, voice = POLLY_VOICE, timeoutSeconds = 25 } = params;
+  // `action` makes Twilio POST the dial OUTCOME to /api/voice/dial-status and use
+  // ITS response — the verbs after <Dial> are NOT reached. So the "no one is
+  // available" fallback is spoken ONLY when the dial didn't connect, never after
+  // a SUCCESSFUL transfer where the agent hangs up first (which previously fell
+  // through to the fallback). The fallback text (a generic, non-PII message)
+  // rides in the action query; the endpoint re-resolves the voice mode itself.
+  const action = `/api/voice/dial-status?fallback=${encodeURIComponent(fallback)}`;
   return `${XML_DECL}
 <Response>
   ${speak(say, voice)}
-  <Dial timeout="${timeoutSeconds}">${escapeXml(number)}</Dial>
-  ${speak(fallback, voice)}
-  <Hangup/>
+  <Dial action="${escapeXml(action)}" timeout="${timeoutSeconds}">${escapeXml(number)}</Dial>
 </Response>`;
 }
 

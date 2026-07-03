@@ -190,7 +190,7 @@ describe("hangupTwiML", () => {
 });
 
 describe("dialThenHangupTwiML (Stage 2 warm transfer)", () => {
-  it("emits a <Dial> to the number, a fallback line, and a hangup", () => {
+  it("emits a hand-off line then a <Dial> with a status-callback action (no inline fallback)", () => {
     const xml = dialThenHangupTwiML({
       say: "Connecting you to a team member.",
       number: "+15551234567",
@@ -198,14 +198,15 @@ describe("dialThenHangupTwiML (Stage 2 warm transfer)", () => {
     });
     expect(xml).toContain("<Dial");
     expect(xml).toContain("+15551234567");
-    expect(xml).toContain("<Hangup/>");
-    // Both the hand-off line and the no-answer fallback are spoken.
     expect(xml).toContain("Connecting you");
-    expect(xml).toContain("call you back");
-    // Order: say -> dial -> fallback -> hangup.
+    // The fallback is NOT inline — it's deferred to the dial-status action so it
+    // only plays on a FAILED dial, never after a successful transfer (audit #38).
+    expect(xml).not.toContain("call you back");
+    expect(xml).toContain("/api/voice/dial-status");
+    // The fallback rides url-encoded in the action query.
+    expect(xml).toContain(encodeURIComponent("No one is available; we'll call you back."));
+    // Order: say -> dial.
     expect(xml.indexOf("Connecting you")).toBeLessThan(xml.indexOf("<Dial"));
-    expect(xml.indexOf("<Dial")).toBeLessThan(xml.indexOf("call you back"));
-    expect(xml.indexOf("call you back")).toBeLessThan(xml.indexOf("<Hangup/>"));
   });
 
   it("XML-escapes the dialed number", () => {
