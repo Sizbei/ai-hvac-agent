@@ -213,6 +213,24 @@ describe('getOperationsMetrics', () => {
     expect(m.firstResponseSystemSeconds).toBe(5);
   });
 
+  it('does not count an in-window reassignment as first response when the true first assignment predates the window', async () => {
+    // With no SQL lower bound, the query returns the pre-window first event too.
+    queueAll({
+      assigned: [
+        // True first assignment (system) BEFORE prevFrom (2026-05-02).
+        { serviceRequestId: 'r-stale', actorType: 'system', firstAt: '2026-04-15T00:00:00Z', createdAt: new Date('2026-04-14T00:00:00Z') },
+        // Dispatcher reassigns it INSIDE the current window.
+        { serviceRequestId: 'r-stale', actorType: 'human', firstAt: '2026-06-10T00:00:00Z', createdAt: new Date('2026-04-14T00:00:00Z') },
+      ],
+    });
+    const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO });
+    // Earliest-overall winner is the pre-window system event → it falls outside
+    // both windows → NOTHING is counted. The in-window human reassignment does
+    // NOT inflate the human headline.
+    expect(m.firstResponseHumanSeconds.current).toBeNull();
+    expect(m.firstResponseSystemSeconds).toBeNull();
+  });
+
   it('returns null (not 0) for metrics with no qualifying rows', async () => {
     queueAll({}); // all defaults: empty event/paid rows, avgMinutes null, zero counts
     const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO });
@@ -262,6 +280,9 @@ describe('getOperationsMetrics', () => {
     expect(paidWhere).toContain('invoices.fieldpulseInvoiceId');
     expect(paidWhere).toContain('invoices.hcpInvoiceId');
     expect(paidWhere).toContain('paid');
+    // ...and bounded by payment date so it doesn't scan all paid history.
+    expect(paidWhere).toContain('gte');
+    expect(paidWhere).toContain('payments.createdAt');
 
     // 5th select is AR aging — scoped to open invoices.
     const agingWhere = JSON.stringify(captured[4]?.where ?? []);

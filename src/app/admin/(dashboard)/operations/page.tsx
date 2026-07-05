@@ -63,13 +63,19 @@ function countDelta(trend: MetricTrend): Delta | null {
 function DeltaPill({ delta, rangeDays }: { delta: Delta | null; rangeDays: number }) {
   if (!delta) return null;
   const Arrow = delta.up ? ArrowUp : ArrowDown;
-  // Sentiment must not rely on color alone (colorblind + screen readers): the
-  // pill carries an sr-only word, and the arrow direction is aria-hidden.
+  // Sentiment must not rely on color alone (colorblind + screen readers). The
+  // FULL spoken sentence lives in a real sr-only text node — not an aria-label on
+  // a generic span, which ARIA disallows and screen readers announce
+  // unreliably. The visual arrow + number + comparison are aria-hidden so AT
+  // hears the sr-only sentence exactly once.
   const sentiment = delta.good ? 'improved' : 'worse';
   return (
     <div className="mt-1.5 flex items-center gap-2">
+      <span className="sr-only">
+        {sentiment} by {delta.text} versus the previous {rangeDays} days
+      </span>
       <span
-        aria-label={`${sentiment} by ${delta.text} versus the previous ${rangeDays} days`}
+        aria-hidden="true"
         className={
           'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ' +
           (delta.good
@@ -77,9 +83,8 @@ function DeltaPill({ delta, rangeDays }: { delta: Delta | null; rangeDays: numbe
             : 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400')
         }
       >
-        <Arrow className="size-3" aria-hidden="true" />
-        <span aria-hidden="true">{delta.text}</span>
-        <span className="sr-only">{sentiment}</span>
+        <Arrow className="size-3" />
+        {delta.text}
       </span>
       <span className="text-xs text-muted-foreground" aria-hidden="true">
         vs prev {rangeDays} days

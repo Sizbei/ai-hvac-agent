@@ -137,11 +137,16 @@ export async function getOperationsMetrics(
         eq(serviceRequests.id, requestStatusEvents.serviceRequestId),
       )
       .where(
+        // NO lower bound on `at`: min(at) must be the request's TRUE first
+        // in_progress, not the first one inside the window. Bounding by prevFrom
+        // would let a re-opened job's in-window transition masquerade as the
+        // first response. The upper bound (< toDate_) is enough; bucketDurations
+        // then keeps only the requests whose true-first falls in a window.
+        // (Grows with history; the demand_daily-style rollup is the scale seam.)
         withTenant(
           requestStatusEvents,
           organizationId,
           eq(requestStatusEvents.toStatus, "in_progress"),
-          gte(requestStatusEvents.at, prevFrom),
           lt(requestStatusEvents.at, toDate_),
         ),
       )
@@ -150,7 +155,9 @@ export async function getOperationsMetrics(
     // First response: first assigned event per request PER actor (human/system).
     // serviceRequestId is carried so we can reduce to the EARLIEST-OVERALL
     // assignment per request in JS — a later reassignment (by either actor) must
-    // not be mistaken for the first response.
+    // not be mistaken for the first response. NO lower bound on `at` for the same
+    // reason as above: we need the genuine first assignment, so an in-window
+    // reassignment of a job first assigned long ago is correctly excluded.
     db
       .select({
         serviceRequestId: requestStatusEvents.serviceRequestId,
@@ -168,7 +175,6 @@ export async function getOperationsMetrics(
           requestStatusEvents,
           organizationId,
           eq(requestStatusEvents.toStatus, "assigned"),
-          gte(requestStatusEvents.at, prevFrom),
           lt(requestStatusEvents.at, toDate_),
         ),
       )
@@ -179,6 +185,11 @@ export async function getOperationsMetrics(
       ),
 
     // Time to paid: native paid invoices + their paid-date (last succeeded pay).
+    // Bounded to payments in [prevFrom, toDate_) so the fetch doesn't scan ALL
+    // paid history on every load. Result-preserving: the paid-date is the MAX
+    // succeeded payment, and JS keeps only paid-dates inside a window — an
+    // invoice whose last payment predates prevFrom is out of window anyway, and
+    // filtering earlier partial payments never changes an in-window max.
     db
       .select({
         firstAt: sql<string>`max(${payments.createdAt})`,
@@ -194,6 +205,8 @@ export async function getOperationsMetrics(
           isNull(invoices.fieldpulseInvoiceId),
           isNull(invoices.hcpInvoiceId),
           eq(payments.status, "succeeded"),
+          gte(payments.createdAt, prevFrom),
+          lt(payments.createdAt, toDate_),
         ),
       )
       .groupBy(invoices.id, invoices.createdAt),
