@@ -29,6 +29,7 @@ import {
   Star,
   Boxes,
   Calculator,
+  Gauge,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -86,6 +87,7 @@ const NAV_GROUPS: readonly NavGroup[] = [
       { label: 'Membership Plans', href: '/admin/membership-plans', icon: BadgeCheck },
       { label: 'Estimates', href: '/admin/estimates', icon: FileText },
       { label: 'Invoices', href: '/admin/invoices', icon: Receipt },
+      { label: 'Operations', href: '/admin/operations', icon: Gauge },
       { label: 'Reports', href: '/admin/reports', icon: TrendingUp },
       { label: 'Accounting', href: '/admin/accounting', icon: Calculator },
       { label: 'Reviews', href: '/admin/reviews', icon: Star },

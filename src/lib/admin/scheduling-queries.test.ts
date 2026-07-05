@@ -151,6 +151,11 @@ const { rankedState, loggerInfo } = vi.hoisted(() => ({
 vi.mock("@/lib/logger", () => ({
   logger: { info: loggerInfo, warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
+// Spy on the KPI status-event writer so we can assert the first-response
+// instrumentation fires (and with the right actor) without a real DB.
+vi.mock("@/lib/admin/status-events", () => ({
+  recordStatusEvent: vi.fn(),
+}));
 vi.mock("@/lib/ai/dispatch/signals", () => ({
   // Mirror the real loader's contract: a defaulted entry for every requested
   // tech (the real one never returns a missing tech).
@@ -189,6 +194,7 @@ import {
   placeAndAssignRequest,
   autoAssignBookedRequest,
 } from "./scheduling-queries";
+import { recordStatusEvent } from "@/lib/admin/status-events";
 
 const ORG = "00000000-0000-0000-0000-000000000001";
 const OTHER_ORG = "00000000-0000-0000-0000-000000000002";
@@ -209,6 +215,7 @@ beforeEach(() => {
   batchMock.mockClear();
   batchMock.mockResolvedValue([]);
   loggerInfo.mockClear();
+  vi.mocked(recordStatusEvent).mockClear();
 });
 
 describe("getTechnicianAvailability", () => {
@@ -711,6 +718,76 @@ describe("placeAndAssignRequest (S4 hard enforcement)", () => {
     // The tech-verification read is org-scoped and filters role+active.
     const techWhere = whereCalls[1][0] as { __tenant: string; conditions: unknown[] };
     expect(techWhere.__tenant).toBe(ORG);
+  });
+
+  it("records an assigned/human event on a drag reassignment (first-response KPI)", async () => {
+    selectQueue.push([{ status: "pending", assignedTo: null }]); // 0: read
+    selectQueue.push([{ id: TECH }]); // 1: tech verification → active
+    selectQueue.push([]); // 2: conflict → none
+    selectQueue.push(coversMorning); // 3: availability → covers
+    updateQueue.push([updatedRow(TECH)]); // 4: guarded UPDATE
+
+    const result = await placeAndAssignRequest(ORG, REQ, WINDOW, {
+      isoDay: ISO_DAY,
+      window: "morning",
+      technicianId: TECH,
+    });
+    expect(result.ok).toBe(true);
+    // A dispatcher drag is a human first response.
+    expect(recordStatusEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ toStatus: "assigned", actorType: "human" }),
+    );
+  });
+
+  it("records a SYSTEM assigned event when the caller marks it auto-dispatch", async () => {
+    selectQueue.push([{ status: "pending", assignedTo: null }]); // 0: read
+    selectQueue.push([{ id: TECH }]); // 1: tech verification → active
+    selectQueue.push([]); // 2: conflict → none
+    selectQueue.push(coversMorning); // 3: availability → covers
+    updateQueue.push([updatedRow(TECH)]); // 4: guarded UPDATE
+
+    await placeAndAssignRequest(ORG, REQ, WINDOW, {
+      isoDay: ISO_DAY,
+      window: "morning",
+      technicianId: TECH,
+      assignmentActor: "system",
+    });
+    expect(recordStatusEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ toStatus: "assigned", actorType: "system" }),
+    );
+  });
+
+  it("records NO event when RE-assigning an already-assigned job (not a first response)", async () => {
+    const OTHER_TECH = "00000000-0000-0000-0000-0000000000a2";
+    selectQueue.push([{ status: "assigned", assignedTo: TECH }]); // 0: read (already on TECH)
+    selectQueue.push([{ id: OTHER_TECH }]); // 1: tech verification → active
+    selectQueue.push([]); // 2: conflict → none
+    selectQueue.push(coversMorning); // 3: availability → covers
+    updateQueue.push([updatedRow(OTHER_TECH)]); // 4: guarded UPDATE
+
+    const result = await placeAndAssignRequest(ORG, REQ, WINDOW, {
+      isoDay: ISO_DAY,
+      window: "morning",
+      technicianId: OTHER_TECH,
+    });
+    expect(result.ok).toBe(true);
+    // A second-tech reassignment is a second response — no assigned event.
+    expect(recordStatusEvent).not.toHaveBeenCalled();
+  });
+
+  it("records NO event on a pure reschedule (no tech change)", async () => {
+    selectQueue.push([{ status: "scheduled", assignedTo: TECH }]); // 0: read (already on TECH)
+    selectQueue.push([]); // 1: conflict → none
+    selectQueue.push(coversMorning); // 2: availability → covers
+    updateQueue.push([updatedRow(TECH)]); // 3: guarded UPDATE
+
+    const result = await placeAndAssignRequest(ORG, REQ, WINDOW, {
+      isoDay: ISO_DAY,
+      window: "morning",
+    });
+    expect(result.ok).toBe(true);
+    // A reschedule keeps the assignee — it is not a first response.
+    expect(recordStatusEvent).not.toHaveBeenCalled();
   });
 
   it("rejects a terminal request without writing", async () => {

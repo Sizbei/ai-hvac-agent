@@ -48,6 +48,7 @@ import {
 } from "@/lib/ai/dispatch/score";
 import { estimateJobDuration } from "@/lib/ai/dispatch/duration";
 import { loadDispatchSignals } from "@/lib/ai/dispatch/signals";
+import { recordStatusEvent } from "@/lib/admin/status-events";
 import { isTerminal, type RequestStatus } from "./request-status";
 import { releaseReservationsForRequest } from "./capacity-reservation-queries";
 import { notifyCustomerOfAssignment } from "./notify-assignment";
@@ -583,6 +584,13 @@ export async function placeAndAssignRequest(
      * wouldn't catch it. Interactive reassignment leaves this unset.
      */
     readonly requireUnassigned?: boolean;
+    /**
+     * Who initiated this assignment — drives the actorType on the recorded
+     * `assigned` status event that feeds the first-response KPI. 'human' (a
+     * dispatcher drag/placement) is the default; the background auto-dispatch
+     * path passes 'system'. Only matters when this call reassigns to a new tech.
+     */
+    readonly assignmentActor?: "human" | "system";
   },
 ): Promise<PlaceAndAssignResult> {
   const [existing] = await db
@@ -747,6 +755,26 @@ export async function placeAndAssignRequest(
       }
     }
     return { ok: false, reason: "request_not_found" };
+  }
+
+  // Record the → assigned transition for the first-response KPI, but ONLY on a
+  // genuine FIRST assignment (the job was previously unassigned). A pure
+  // reschedule keeps the assignee, and RE-assigning an already-assigned job is a
+  // second response, not a first — recording either would inflate the
+  // first-response metric and fabricate a status transition the row never
+  // underwent (e.g. in_progress→assigned). Best-effort — recordStatusEvent
+  // swallows its own errors, so KPI eventing can never fail the placement. The
+  // actor distinguishes a dispatcher drag ('human') from background
+  // auto-dispatch ('system') so the KPI can isolate human acknowledgment.
+  const isFirstAssignment = reassigning && existing.assignedTo === null;
+  if (isFirstAssignment) {
+    await recordStatusEvent({
+      organizationId,
+      serviceRequestId: requestId,
+      fromStatus: currentStatus,
+      toStatus: "assigned",
+      actorType: options.assignmentActor ?? "human",
+    });
   }
 
   // On an OVERRIDE, recompute the detail we overrode so the route can audit it.
@@ -1265,6 +1293,9 @@ export async function autoAssignBookedRequest(
         // Background path: never clobber a dispatcher's manual assignment made
         // during the scoring window.
         requireUnassigned: true,
+        // The machine assigned this — tag the KPI event as a system response so
+        // it never inflates the human first-response headline.
+        assignmentActor: "system",
       },
     );
     if (result.ok) {
