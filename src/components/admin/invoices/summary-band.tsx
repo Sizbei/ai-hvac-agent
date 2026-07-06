@@ -3,14 +3,20 @@ import { formatCentsExact } from '@/lib/admin/money-format';
 import { isCollectible } from '@/lib/admin/invoice-collectible';
 import type { InvoiceListItem } from '@/hooks/use-invoices';
 import { daysBetween } from './age-chip';
-export function SummaryBand({ invoices }: { invoices: readonly InvoiceListItem[] }) {
+export function SummaryBand({
+  invoices,
+  collectedThisMonthCents,
+}: {
+  invoices: readonly InvoiceListItem[];
+  collectedThisMonthCents: number;
+}) {
   const open = invoices.filter(isCollectible);
   const outstanding = open.reduce((s, i) => s + (i.totalCents - i.amountPaidCents), 0);
   const overdue = open.filter(i => daysBetween(new Date(i.createdAt), new Date()) >= 30);
   const overdueSum = overdue.reduce((s, i) => s + (i.totalCents - i.amountPaidCents), 0);
   const oldest = overdue.reduce((m, i) => Math.max(m, daysBetween(new Date(i.createdAt), new Date())), 0);
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
       <div className="rounded-xl border bg-card p-5">
         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Outstanding</p>
         <p className="mt-2 font-heading text-2xl font-bold tabular-nums">{formatCentsExact(outstanding)}</p>
@@ -20,6 +26,11 @@ export function SummaryBand({ invoices }: { invoices: readonly InvoiceListItem[]
         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Overdue &gt; 30 days</p>
         <p className="mt-2 font-heading text-2xl font-bold tabular-nums text-rose-600">{formatCentsExact(overdueSum)}</p>
         <p className="mt-1 text-xs text-muted-foreground">{overdue.length} invoices{oldest ? ` · oldest ${oldest} days` : ''}</p>
+      </div>
+      <div className="rounded-xl border bg-card p-5">
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Collected this month</p>
+        <p className="mt-2 font-heading text-2xl font-bold tabular-nums text-emerald-700">{formatCentsExact(collectedThisMonthCents)}</p>
+        <p className="mt-1 text-xs text-muted-foreground">Payments received since the 1st</p>
       </div>
     </div>
   );

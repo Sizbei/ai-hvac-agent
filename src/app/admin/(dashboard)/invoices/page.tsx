@@ -95,7 +95,7 @@ function ReconcileBanner() {
 // ── main page ─────────────────────────────────────────────────────────────────
 
 export default function InvoicesPage() {
-  const { invoices, isLoading, error, sendReminder } = useInvoices();
+  const { invoices, collectedThisMonthCents, isLoading, error, sendReminder } = useInvoices();
   const [filter, setFilter] = useState<Filter>('overdue');
   const [search, setSearch] = useState('');
   const [flash, setFlash] = useState<{ msg: string; ok: boolean } | null>(null);
@@ -186,7 +186,7 @@ export default function InvoicesPage() {
 
       <ReconcileBanner />
 
-      <SummaryBand invoices={invoices} />
+      <SummaryBand invoices={invoices} collectedThisMonthCents={collectedThisMonthCents} />
 
       {/* flash / error feedback */}
       {flash && (
