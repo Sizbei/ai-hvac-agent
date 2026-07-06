@@ -166,6 +166,7 @@ export function InvoiceDetailClient({
       if (res.ok && body.success) {
         setPayAmount('');
         setIsDeposit(false);
+        setShowPaymentForm(false);
         void load();
       } else {
         setPayError(body.error?.message ?? 'Failed to take payment');
