@@ -21,6 +21,7 @@ import { withTenant } from "@/lib/db/tenant";
 import { decrypt } from "@/lib/crypto";
 import { formatCentsExact } from "@/lib/admin/money-format";
 import { getOrgConfig } from "@/lib/admin/org-config-queries";
+import { generatePortalToken } from "@/lib/portal/portal-queries";
 import { claimOutboundOnce } from "./outbound-ledger";
 import { queueCommunicationJob } from "./job-queue";
 import { logger } from "@/lib/logger";
@@ -223,6 +224,87 @@ export async function triggerPaymentReceipt(params: {
       "triggerPaymentReceipt failed (best-effort)",
     );
   }
+}
+
+const REMINDER_COOLDOWN_MS = 6 * 60 * 60 * 1000; // don't double-send within 6h
+
+/**
+ * One-click manual collections reminder for a single invoice. Unlike the weekly
+ * dunning sweep, this is operator-initiated, so it is NOT gated by the 7-day
+ * bucket — only a short 6h cooldown guards against accidental double-clicks.
+ * Includes a real pay link (fresh portal token). Best-effort at SEND time
+ * (consent + quiet hours enforced in processPendingJobs). Stamps
+ * lastReminderSentAt so the UI can show "Reminded Nd ago".
+ */
+export async function sendInvoiceReminder(
+  organizationId: string,
+  invoiceId: string,
+  now: Date = new Date(),
+): Promise<
+  | { readonly ok: true }
+  | { readonly ok: false; readonly reason:
+      "not_found" | "no_balance" | "no_phone" | "no_template" | "cooldown" }
+> {
+  const [inv] = await db
+    .select({
+      id: invoices.id,
+      customerId: invoices.customerId,
+      totalCents: invoices.totalCents,
+      amountPaidCents: invoices.amountPaidCents,
+      state: invoices.state,
+      lastReminderSentAt: invoices.lastReminderSentAt,
+    })
+    .from(invoices)
+    .where(withTenant(invoices, organizationId, eq(invoices.id, invoiceId)))
+    .limit(1);
+
+  if (!inv || !inv.customerId) return { ok: false, reason: "not_found" };
+  const balanceCents = inv.totalCents - inv.amountPaidCents;
+  if (inv.state === "paid" || balanceCents <= 0) return { ok: false, reason: "no_balance" };
+  if (
+    inv.lastReminderSentAt &&
+    now.getTime() - inv.lastReminderSentAt.getTime() < REMINDER_COOLDOWN_MS
+  ) {
+    return { ok: false, reason: "cooldown" };
+  }
+
+  const contact = await getCustomerContact(organizationId, inv.customerId);
+  if (!contact || !contact.phone) return { ok: false, reason: "no_phone" };
+
+  const smsTemplate = await findActiveSmsTemplate(organizationId, "invoice_overdue");
+  if (!smsTemplate) return { ok: false, reason: "no_template" };
+
+  // Real pay link: mint a fresh portal token for this customer.
+  const token = await generatePortalToken(organizationId, inv.customerId);
+  const base = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ?? "";
+  const payLink = token ? `${base}/portal/${token}` : "";
+
+  const brand = await getOrgBrand(organizationId);
+  await queueCommunicationJob({
+    organizationId,
+    templateId: smsTemplate.id,
+    triggerType: "invoice_overdue",
+    channel: "sms" as never,
+    recipientPhone: contact.phone,
+    templateVariables: {
+      customerName: contact.name ?? "",
+      amount: formatCentsExact(balanceCents),
+      invoiceNumber: invoiceRef(inv.id),
+      payLink,
+      companyName: brand.companyName,
+      phoneNumber: brand.phoneNumber,
+    },
+    priority: 30,
+    customerId: inv.customerId,
+  });
+
+  // Stamp last-reminded (best-effort; the send already committed to the queue).
+  await db
+    .update(invoices)
+    .set({ lastReminderSentAt: now, updatedAt: now })
+    .where(withTenant(invoices, organizationId, eq(invoices.id, invoiceId)));
+
+  return { ok: true };
 }
 
 export interface DunningResult {
