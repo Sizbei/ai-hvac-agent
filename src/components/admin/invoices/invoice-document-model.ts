@@ -1,4 +1,4 @@
-import { invoiceRef } from '@/lib/communication/money-triggers';
+import { invoiceRef } from '@/lib/admin/invoice-collectible';
 import type { InvoiceDetailView } from '@/lib/admin/invoice-queries';
 
 const NET_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
