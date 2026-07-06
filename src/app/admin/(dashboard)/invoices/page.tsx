@@ -1,35 +1,43 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, AlertTriangle, Receipt } from 'lucide-react';
 import { useInvoices } from '@/hooks/use-invoices';
-import { InvoiceStateBadge } from '@/components/admin/invoices/invoice-state-badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
-import { formatCentsExact } from '@/lib/admin/money-format';
 import { cn } from '@/lib/utils';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 import { EmptyState } from '@/components/admin/ui/empty-state';
+import { SummaryBand } from '@/components/admin/invoices/summary-band';
+import { InvoiceRow } from '@/components/admin/invoices/invoice-row';
+import { daysBetween } from '@/components/admin/invoices/age-chip';
+import type { InvoiceListItem } from '@/hooks/use-invoices';
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  });
+// ── helpers ──────────────────────────────────────────────────────────────────
+
+function isOverdue(inv: InvoiceListItem): boolean {
+  return (
+    inv.state !== 'paid' &&
+    inv.totalCents - inv.amountPaidCents > 0 &&
+    daysBetween(new Date(inv.createdAt), new Date()) >= 30
+  );
 }
 
-type Filter = 'all' | 'unpaid' | 'paid';
+// ── filter types ─────────────────────────────────────────────────────────────
+
+type Filter = 'overdue' | 'all' | 'unpaid' | 'paid';
 
 const FILTERS: ReadonlyArray<{ value: Filter; label: string }> = [
+  { value: 'overdue', label: 'Overdue' },
   { value: 'all', label: 'All' },
-  { value: 'unpaid', label: 'Unpaid / open' },
+  { value: 'unpaid', label: 'Unpaid' },
   { value: 'paid', label: 'Paid' },
 ];
+
+// ── ReconcileBanner (unchanged from original) ─────────────────────────────────
 
 interface StuckPayment {
   readonly id: string;
@@ -37,12 +45,6 @@ interface StuckPayment {
   readonly amountCents: number;
 }
 
-/**
- * "Needs attention" banner — surfaces stranded ('pending') payments that may
- * have moved money without completing locally. Operator can reconcile on demand
- * (the daily cron is the automatic safety net). Self-fetching so it adds no
- * coupling to the invoices list.
- */
 function ReconcileBanner() {
   const [stuck, setStuck] = useState<readonly StuckPayment[]>([]);
   const [running, setRunning] = useState(false);
@@ -93,50 +95,151 @@ function ReconcileBanner() {
   );
 }
 
+// ── main page ─────────────────────────────────────────────────────────────────
+
 export default function InvoicesPage() {
-  const { invoices, isLoading, error } = useInvoices();
-  const [filter, setFilter] = useState<Filter>('all');
+  const { invoices, isLoading, error, sendReminder } = useInvoices();
+  const [filter, setFilter] = useState<Filter>('overdue');
+  const [search, setSearch] = useState('');
+  const [flash, setFlash] = useState<{ msg: string; ok: boolean } | null>(null);
+  const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // auto-clear flash after 3s
+  useEffect(() => {
+    return () => {
+      if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+    };
+  }, []);
+
+  function showFlash(msg: string, ok: boolean) {
+    if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+    setFlash({ msg, ok });
+    flashTimerRef.current = setTimeout(() => setFlash(null), 3000);
+  }
+
+  async function handleRemind(id: string) {
+    const inv = invoices.find((i) => i.id === id);
+    const name = inv?.customerName ?? 'customer';
+    const result = await sendReminder(id);
+    if (result.ok) {
+      showFlash(`Reminder sent to ${name}`, true);
+    } else {
+      showFlash(result.reason ?? 'Failed to send reminder', false);
+    }
+  }
+
+  // count overdue for badge
+  const overdueCount = useMemo(
+    () => invoices.filter(isOverdue).length,
+    [invoices],
+  );
 
   const filtered = useMemo(() => {
-    if (filter === 'all') return invoices;
-    if (filter === 'paid') return invoices.filter((i) => i.state === 'paid');
-    // 'unpaid' — the thin overdue surface: open/draft invoices with a balance.
-    return invoices.filter(
-      (i) =>
-        (i.state === 'open' || i.state === 'draft') &&
-        i.amountPaidCents < i.totalCents,
-    );
-  }, [invoices, filter]);
+    let rows = invoices.slice();
+
+    // filter
+    if (filter === 'overdue') rows = rows.filter(isOverdue);
+    else if (filter === 'unpaid')
+      rows = rows.filter((i) => i.state !== 'paid' && i.totalCents - i.amountPaidCents > 0);
+    else if (filter === 'paid') rows = rows.filter((i) => i.state === 'paid');
+
+    // search
+    const q = search.trim().toLowerCase();
+    if (q) {
+      rows = rows.filter(
+        (i) =>
+          (i.customerName ?? '').toLowerCase().includes(q) ||
+          i.id.toLowerCase().includes(q),
+      );
+    }
+
+    // collections sort: oldest open first, paid last
+    rows.sort((a, b) => {
+      const aPaid = a.state === 'paid' ? 1 : 0;
+      const bPaid = b.state === 'paid' ? 1 : 0;
+      if (aPaid !== bPaid) return aPaid - bPaid;
+      return daysBetween(new Date(b.createdAt), new Date()) - daysBetween(new Date(a.createdAt), new Date());
+    });
+
+    return rows;
+  }, [invoices, filter, search]);
 
   return (
     <PageShell>
       <PageHeader
         title="Invoices"
-        subtitle="Invoices generated from sold estimates, with payments and refunds."
+        subtitle="Collections — who owes you, how overdue, and one tap to chase it."
       />
 
       <ReconcileBanner />
 
-      <div className="flex flex-wrap gap-2">
-        {FILTERS.map((f) => (
-          <Button
-            key={f.value}
-            variant={filter === f.value ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setFilter(f.value)}
-          >
-            {f.label}
-          </Button>
-        ))}
-      </div>
+      <SummaryBand invoices={invoices} />
 
-      {error && (
+      {/* flash / error feedback */}
+      {flash && (
+        <Alert variant={flash.ok ? 'default' : 'destructive'}>
+          <AlertCircle className="size-4" />
+          <AlertDescription>{flash.msg}</AlertDescription>
+        </Alert>
+      )}
+      {error && !flash && (
         <Alert variant="destructive">
           <AlertCircle className="size-4" />
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
 
+      {/* toolbar */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        {/* segmented filter */}
+        <div className="flex gap-1 rounded-xl border bg-card p-1 shadow-sm">
+          {FILTERS.map((f) => (
+            <button
+              key={f.value}
+              type="button"
+              onClick={() => setFilter(f.value)}
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition-colors',
+                filter === f.value
+                  ? 'bg-foreground text-background'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {f.label}
+              {f.value === 'overdue' && overdueCount > 0 && (
+                <span className="rounded-full bg-rose-600 px-1.5 py-px text-[10px] font-bold text-white">
+                  {overdueCount}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* search */}
+        <div className="flex items-center gap-2 rounded-xl border bg-card px-3 shadow-sm focus-within:ring-1 focus-within:ring-ring">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            className="shrink-0 text-muted-foreground"
+          >
+            <circle cx="11" cy="11" r="7" />
+            <path d="m21 21-4.3-4.3" />
+          </svg>
+          <input
+            type="search"
+            placeholder="Search customer or invoice ID…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="bg-transparent py-2.5 text-sm outline-none placeholder:text-muted-foreground"
+          />
+        </div>
+      </div>
+
+      {/* list */}
       {isLoading ? (
         <div className="space-y-3">
           <Skeleton className="h-16 w-full" />
@@ -147,87 +250,35 @@ export default function InvoicesPage() {
         <Card className="p-5">
           <EmptyState
             icon={Receipt}
-            title={filter === 'all' ? 'No invoices yet' : 'No invoices match'}
+            title={filter === 'all' && !search ? 'No invoices yet' : 'No invoices match'}
             description={
-              filter === 'all'
+              filter === 'all' && !search
                 ? 'Generate an invoice from a sold estimate to start collecting payments.'
                 : 'No invoices match this filter. Try a different one.'
             }
           />
         </Card>
       ) : (
-        <div className="overflow-hidden rounded-lg border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
-              <tr>
-                <th className="px-4 py-2 font-medium">Created</th>
-                <th className="px-4 py-2 font-medium">State</th>
-                <th className="px-4 py-2 font-medium">Total</th>
-                <th className="px-4 py-2 font-medium">Balance</th>
-                <th className="px-4 py-2 font-medium">Links</th>
-                <th className="px-4 py-2" />
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((inv) => {
-                const balance = inv.totalCents - inv.amountPaidCents;
-                return (
-                  <tr key={inv.id} className="border-t hover:bg-muted/30">
-                    <td className="px-4 py-3">{formatDate(inv.createdAt)}</td>
-                    <td className="px-4 py-3">
-                      <span className="inline-flex items-center gap-1.5">
-                        <InvoiceStateBadge state={inv.state} />
-                        {inv.syncedSource && (
-                          <span className="rounded-full border bg-violet-50 px-2 py-0.5 text-[10px] font-medium text-violet-700">
-                            {inv.syncedSource === 'fieldpulse'
-                              ? 'FieldPulse'
-                              : 'Housecall Pro'}
-                          </span>
-                        )}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 font-medium">
-                      {formatCentsExact(inv.totalCents)}
-                    </td>
-                    <td
-                      className={cn(
-                        'px-4 py-3',
-                        balance > 0 ? 'font-medium text-warning-foreground' : 'text-muted-foreground',
-                      )}
-                    >
-                      {formatCentsExact(balance)}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground">
-                      {inv.customerId && (
-                        <Link
-                          href={`/admin/customers/${inv.customerId}`}
-                          className="hover:underline"
-                        >
-                          Customer
-                        </Link>
-                      )}
-                      {inv.customerId && inv.serviceRequestId && ' · '}
-                      {inv.serviceRequestId && (
-                        <Link
-                          href={`/admin/requests?request=${inv.serviceRequestId}`}
-                          className="hover:underline"
-                        >
-                          Request
-                        </Link>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <Link href={`/admin/invoices/${inv.id}`}>
-                        <Button variant="outline" size="sm">
-                          View
-                        </Button>
-                      </Link>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
+          {/* header row */}
+          <div className="grid grid-cols-[minmax(200px,1fr)_90px_120px_140px_180px] items-center gap-4 bg-foreground px-6 py-2.5">
+            {(['Customer', 'Created', 'Age', 'Balance', 'Actions'] as const).map(
+              (col) => (
+                <p
+                  key={col}
+                  className={cn(
+                    'text-[10.5px] font-semibold uppercase tracking-widest text-background/60',
+                    col === 'Balance' || col === 'Actions' ? 'text-right' : '',
+                  )}
+                >
+                  {col}
+                </p>
+              ),
+            )}
+          </div>
+          {filtered.map((inv) => (
+            <InvoiceRow key={inv.id} invoice={inv} onRemind={handleRemind} />
+          ))}
         </div>
       )}
     </PageShell>

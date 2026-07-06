@@ -29,7 +29,7 @@ export default defineConfig({
     environment: "node",
     include: RUN_INTEGRATION
       ? INTEGRATION_SUITES
-      : ["src/**/*.test.ts", "tests/**/*.test.ts"],
+      : ["src/**/*.test.ts", "src/**/*.test.tsx", "tests/**/*.test.ts"],
     exclude: RUN_INTEGRATION
       ? []
       : ["**/node_modules/**", "**/dist/**", ...INTEGRATION_SUITES],
