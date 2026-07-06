@@ -2641,6 +2641,9 @@ export const invoices = pgTable(
     // Same as fieldpulseInvoiceId but for the Housecall Pro pull mirror. Either
     // external id being set marks the invoice read-only in native money flows.
     hcpInvoiceId: text("hcp_invoice_id"),
+    // When a collections reminder was last sent for this invoice. Nullable
+    // (never reminded). Powers the "Reminded 3d ago" chip and the send cooldown.
+    lastReminderSentAt: timestamp("last_reminder_sent_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
