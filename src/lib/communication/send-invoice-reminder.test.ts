@@ -107,6 +107,7 @@ beforeEach(() => {
 describe("sendInvoiceReminder", () => {
   it("enqueues invoice_overdue SMS with a real pay link and stamps lastReminderSentAt", async () => {
     // invoice read: open, $50 balance, customer c1, never reminded
+    const testNow = new Date("2026-07-06T12:00:00Z");
     selectQueue.push([{
       id: "i1",
       customerId: "c1",
@@ -120,7 +121,7 @@ describe("sendInvoiceReminder", () => {
     // active template read
     templateQueue.push({ id: "tpl-1" });
 
-    const res = await sendInvoiceReminder("org-1", "i1", new Date("2026-07-06T12:00:00Z"));
+    const res = await sendInvoiceReminder("org-1", "i1", testNow);
 
     expect(res).toEqual({ ok: true });
     const call = (queueCommunicationJob as ReturnType<typeof vi.fn>).mock.calls[0][0];
@@ -129,7 +130,7 @@ describe("sendInvoiceReminder", () => {
     expect(call.templateVariables.payLink).toBe("https://app.test/portal/TOK");
     expect(call.templateVariables.amount).toBe("$50.00");
     // stamped last_reminder_sent_at via UPDATE
-    expect(updateSetCalls[0]).toHaveProperty("lastReminderSentAt");
+    expect(updateSetCalls[0].lastReminderSentAt).toEqual(testNow);
   });
 
   it("rejects when the last reminder was under 6h ago (cooldown)", async () => {
@@ -157,5 +158,6 @@ describe("sendInvoiceReminder", () => {
     }]);
     const res = await sendInvoiceReminder("org-1", "i1", new Date());
     expect(res).toEqual({ ok: false, reason: "no_balance" });
+    expect(queueCommunicationJob).not.toHaveBeenCalled();
   });
 });
