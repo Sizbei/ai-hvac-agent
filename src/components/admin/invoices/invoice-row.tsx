@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import type { InvoiceListItem } from '@/hooks/use-invoices';
 import { formatCentsExact } from '@/lib/admin/money-format';
-import { isCollectible } from '@/lib/admin/invoice-collectible';
+import { isCollectible, invoiceRef } from '@/lib/admin/invoice-collectible';
 import { Button } from '@/components/ui/button';
 import { AgeChip, daysBetween } from './age-chip';
 
@@ -57,7 +57,7 @@ export function InvoiceRow({ invoice, onRemind, pending = false }: InvoiceRowPro
             {invoice.customerName ?? '—'}
           </p>
           <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span className="font-mono tabular-nums">#{invoice.id.slice(-6).toUpperCase()}</span>
+            <span className="font-mono tabular-nums">{invoiceRef(invoice.id)}</span>
             {invoice.syncedSource && (
               <span className="rounded border bg-violet-50 px-1.5 py-px text-[10px] font-medium text-violet-700">
                 {invoice.syncedSource === 'fieldpulse' ? 'FieldPulse' : 'Housecall Pro'}

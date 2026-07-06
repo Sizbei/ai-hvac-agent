@@ -25,7 +25,8 @@ import { generatePortalToken } from "@/lib/portal/portal-queries";
 import { claimOutboundOnce } from "./outbound-ledger";
 import { queueCommunicationJob } from "./job-queue";
 import { logger } from "@/lib/logger";
-import { isCollectible } from "@/lib/admin/invoice-collectible";
+import { isCollectible, invoiceRef } from "@/lib/admin/invoice-collectible";
+export { invoiceRef } from "@/lib/admin/invoice-collectible";
 
 const DEFAULT_COMPANY_NAME = "Spears Services";
 
@@ -101,10 +102,6 @@ async function findActiveSmsTemplate(
   return tpl ?? null;
 }
 
-/** Short, human-readable invoice reference from the UUID (we have no invoice #). */
-export function invoiceRef(invoiceId: string): string {
-  return `#${invoiceId.slice(0, 8).toUpperCase()}`;
-}
 
 /**
  * Send the estimate approval LINK to the customer (SMS, falling back to email).
