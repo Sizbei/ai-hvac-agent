@@ -16,6 +16,20 @@ export function isCollectible(inv: {
 /** Don't re-send a manual reminder within this window (client + server share it). */
 export const REMINDER_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 
+/**
+ * Returns true when enough time has passed since the last reminder to allow
+ * re-sending. Pass `Date.now()` for `nowMs` in production; inject a fixed
+ * value in tests.
+ */
+export function canResend(
+  lastReminderSentAt: string | null,
+  nowMs: number,
+  cooldownMs: number,
+): boolean {
+  if (!lastReminderSentAt) return true;
+  return nowMs - new Date(lastReminderSentAt).getTime() >= cooldownMs;
+}
+
 /** Short, human-readable invoice reference from the UUID (we have no invoice #). */
 export function invoiceRef(invoiceId: string): string {
   return `#${invoiceId.slice(0, 8).toUpperCase()}`;

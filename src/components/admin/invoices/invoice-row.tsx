@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import type { InvoiceListItem } from '@/hooks/use-invoices';
 import { formatCentsExact } from '@/lib/admin/money-format';
-import { isCollectible, invoiceRef } from '@/lib/admin/invoice-collectible';
+import { isCollectible, invoiceRef, canResend, REMINDER_COOLDOWN_MS } from '@/lib/admin/invoice-collectible';
 import { Button } from '@/components/ui/button';
 import { AgeChip, daysBetween } from './age-chip';
 
@@ -25,6 +25,11 @@ function initials(name: string | null): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
+/** True while the 6h re-send cooldown is still active. */
+function isCooldownActive(lastReminderSentAt: string | null): boolean {
+  return !canResend(lastReminderSentAt, Date.now(), REMINDER_COOLDOWN_MS);
+}
+
 /** Relative time label for lastReminderSentAt. */
 function remindedRel(iso: string): string {
   const days = daysBetween(new Date(iso), new Date());
@@ -42,6 +47,7 @@ interface InvoiceRowProps {
 export function InvoiceRow({ invoice, onRemind, pending = false }: InvoiceRowProps) {
   const balance = invoice.totalCents - invoice.amountPaidCents;
   const isPartial = invoice.state !== 'paid' && invoice.amountPaidCents > 0;
+  const cooldownActive = isCooldownActive(invoice.lastReminderSentAt ?? null);
 
   return (
     <div className="grid grid-cols-[minmax(200px,1fr)_90px_120px_140px_180px] items-center gap-4 border-t px-6 py-4 transition-colors hover:bg-muted/30 first:border-t-0">
@@ -92,14 +98,21 @@ export function InvoiceRow({ invoice, onRemind, pending = false }: InvoiceRowPro
       {/* Action rail */}
       <div className="flex items-center justify-end gap-2">
         {isCollectible(invoice) && invoice.syncedSource === null ? (
-          invoice.lastReminderSentAt ? (
+          !invoice.lastReminderSentAt ? (
+            <Button size="sm" disabled={pending} onClick={() => onRemind(invoice.id)}>
+              Send reminder
+            </Button>
+          ) : cooldownActive ? (
             <span className="inline-block rounded-lg px-2.5 py-1.5 text-xs font-semibold text-emerald-700">
               {`✓ Reminded ${remindedRel(invoice.lastReminderSentAt)}`}
             </span>
           ) : (
-            <Button size="sm" disabled={pending} onClick={() => onRemind(invoice.id)}>
-              Send reminder
-            </Button>
+            <div className="flex items-center gap-1.5">
+              <Button size="sm" disabled={pending} onClick={() => onRemind(invoice.id)}>
+                Remind again
+              </Button>
+              <span className="text-xs text-muted-foreground">{`· last ${remindedRel(invoice.lastReminderSentAt)}`}</span>
+            </div>
           )
         ) : (
           <span className="text-xs text-muted-foreground">—</span>
