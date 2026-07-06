@@ -35,9 +35,10 @@ function remindedRel(iso: string): string {
 interface InvoiceRowProps {
   readonly invoice: InvoiceListItem;
   readonly onRemind: (id: string) => void;
+  readonly pending?: boolean;
 }
 
-export function InvoiceRow({ invoice, onRemind }: InvoiceRowProps) {
+export function InvoiceRow({ invoice, onRemind, pending = false }: InvoiceRowProps) {
   const balance = invoice.totalCents - invoice.amountPaidCents;
   const isPartial = invoice.state !== 'paid' && invoice.amountPaidCents > 0;
 
@@ -91,12 +92,14 @@ export function InvoiceRow({ invoice, onRemind }: InvoiceRowProps) {
       <div className="flex items-center justify-end gap-2">
         {invoice.state === 'paid' ? (
           <span className="text-xs text-muted-foreground">—</span>
+        ) : invoice.syncedSource !== null ? (
+          <span className="text-xs text-muted-foreground">—</span>
         ) : invoice.lastReminderSentAt ? (
           <span className="inline-block rounded-lg px-2.5 py-1.5 text-xs font-semibold text-emerald-700">
             {`✓ Reminded ${remindedRel(invoice.lastReminderSentAt)}`}
           </span>
         ) : (
-          <Button size="sm" onClick={() => onRemind(invoice.id)}>
+          <Button size="sm" disabled={pending} onClick={() => onRemind(invoice.id)}>
             Send reminder
           </Button>
         )}

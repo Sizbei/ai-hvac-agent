@@ -102,6 +102,7 @@ export default function InvoicesPage() {
   const [filter, setFilter] = useState<Filter>('overdue');
   const [search, setSearch] = useState('');
   const [flash, setFlash] = useState<{ msg: string; ok: boolean } | null>(null);
+  const [pendingId, setPendingId] = useState<string | null>(null);
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // auto-clear flash after 3s
@@ -117,14 +118,29 @@ export default function InvoicesPage() {
     flashTimerRef.current = setTimeout(() => setFlash(null), 3000);
   }
 
+  const REASON_MAP: Record<string, string> = {
+    COOLDOWN: 'A reminder was already sent recently.',
+    NO_PHONE: 'No phone number on file for this customer.',
+    NO_TEMPLATE: 'No reminder template is configured.',
+    NO_BALANCE: 'This invoice has no balance due.',
+    NOT_FOUND: 'Invoice not found.',
+  };
+
   async function handleRemind(id: string) {
-    const inv = invoices.find((i) => i.id === id);
-    const name = inv?.customerName ?? 'customer';
-    const result = await sendReminder(id);
-    if (result.ok) {
-      showFlash(`Reminder sent to ${name}`, true);
-    } else {
-      showFlash(result.reason ?? 'Failed to send reminder', false);
+    if (pendingId === id) return;
+    setPendingId(id);
+    try {
+      const inv = invoices.find((i) => i.id === id);
+      const name = inv?.customerName ?? 'customer';
+      const result = await sendReminder(id);
+      if (result.ok) {
+        showFlash(`Reminder sent to ${name}`, true);
+      } else {
+        const key = (result.reason ?? '').toUpperCase();
+        showFlash(REASON_MAP[key] ?? 'Could not send reminder.', false);
+      }
+    } finally {
+      setPendingId(null);
     }
   }
 
@@ -285,7 +301,7 @@ export default function InvoicesPage() {
             )}
           </div>
           {filtered.map((inv) => (
-            <InvoiceRow key={inv.id} invoice={inv} onRemind={handleRemind} />
+            <InvoiceRow key={inv.id} invoice={inv} onRemind={handleRemind} pending={pendingId === inv.id} />
           ))}
         </div>
       )}

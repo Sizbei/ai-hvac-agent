@@ -27,7 +27,12 @@ vi.mock("@/lib/db", () => ({
     update: vi.fn(() => ({
       set: vi.fn((vals: Record<string, unknown>) => {
         updateSetCalls.push(vals);
-        return { where: vi.fn(() => Promise.resolve()) };
+        return {
+          where: vi.fn(() => ({
+            returning: vi.fn(() => Promise.resolve([{ id: 'i1' }])),
+            catch: vi.fn(() => Promise.resolve()),
+          })),
+        };
       }),
     })),
     query: {
@@ -48,6 +53,8 @@ vi.mock("drizzle-orm", () => ({
   lt: vi.fn(),
   gte: vi.fn(),
   sql: vi.fn(),
+  or: vi.fn(),
+  isNull: vi.fn(),
 }));
 
 vi.mock("@/lib/db/schema", () => ({

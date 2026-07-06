@@ -14,7 +14,7 @@
  *
  * Pattern mirrors triggers.ts (look up the active per-org template, then enqueue).
  */
-import { and, eq, lt } from "drizzle-orm";
+import { and, eq, isNull, lt, or } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { communicationTemplates, customers, invoices } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
@@ -280,30 +280,56 @@ export async function sendInvoiceReminder(
   const payLink = token ? `${base}/portal/${token}` : "";
 
   const brand = await getOrgBrand(organizationId);
-  await queueCommunicationJob({
-    organizationId,
-    templateId: smsTemplate.id,
-    triggerType: "invoice_overdue",
-    channel: "sms" as never,
-    recipientPhone: contact.phone,
-    templateVariables: {
-      customerName: contact.name ?? "",
-      amount: formatCentsExact(balanceCents),
-      invoiceNumber: invoiceRef(inv.id),
-      payLink,
-      companyName: brand.companyName,
-      phoneNumber: brand.phoneNumber,
-    },
-    priority: 30,
-    customerId: inv.customerId,
-  });
 
-  // Stamp last-reminded (best-effort; the send already committed to the queue).
-  await db
+  // ATOMIC CLAIM: stamp the cooldown window in a single guarded UPDATE. Only the
+  // first concurrent caller matches (the row's stamp is null or older than the
+  // cooldown); a racing second caller matches 0 rows and is rejected here.
+  const [claimed] = await db
     .update(invoices)
     .set({ lastReminderSentAt: now, updatedAt: now })
-    .where(withTenant(invoices, organizationId, eq(invoices.id, invoiceId)));
+    .where(
+      withTenant(
+        invoices,
+        organizationId,
+        eq(invoices.id, invoiceId),
+        or(
+          isNull(invoices.lastReminderSentAt),
+          lt(invoices.lastReminderSentAt, new Date(now.getTime() - REMINDER_COOLDOWN_MS)),
+        )!,
+      ),
+    )
+    .returning({ id: invoices.id });
+  if (!claimed) return { ok: false, reason: "cooldown" };
 
+  try {
+    await queueCommunicationJob({
+      organizationId,
+      templateId: smsTemplate.id,
+      triggerType: "invoice_overdue",
+      channel: "sms" as never,
+      recipientPhone: contact.phone,
+      templateVariables: {
+        customerName: contact.name ?? "",
+        amount: formatCentsExact(balanceCents),
+        invoiceNumber: invoiceRef(inv.id),
+        payLink,
+        companyName: brand.companyName,
+        phoneNumber: brand.phoneNumber,
+      },
+      priority: 30,
+      customerId: inv.customerId,
+    });
+  } catch (error) {
+    // Compensate: the side effect failed, so release the claim we just took by
+    // restoring the prior stamp — otherwise the cooldown would block a retry of
+    // a reminder that never actually went out. Best-effort (no transactions).
+    await db
+      .update(invoices)
+      .set({ lastReminderSentAt: inv.lastReminderSentAt })
+      .where(withTenant(invoices, organizationId, eq(invoices.id, invoiceId)))
+      .catch(() => {});
+    throw error;
+  }
   return { ok: true };
 }
 
