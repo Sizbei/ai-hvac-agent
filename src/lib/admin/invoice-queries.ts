@@ -6,7 +6,7 @@
  * first-class (a half-built payments path breaks on the first chargeback).
  */
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lt, sql, sum } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   customers,
@@ -725,6 +725,34 @@ export async function getInvoiceOrgIdentity(
     address: null,
     phone: info.success ? info.data.phone ?? null : null,
   };
+}
+
+/**
+ * Total succeeded payments received this calendar month (UTC month boundary — an
+ * acceptable approximation for a glance tile). neon-http returns sum() as a
+ * string, hence the Number() coercion.
+ */
+export async function collectedThisMonthCents(
+  organizationId: string,
+  now: Date = new Date(),
+): Promise<number> {
+  const monthStart = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
+  );
+  const [row] = await db
+    .select({ value: sum(payments.amountCents) })
+    .from(payments)
+    .where(
+      withTenant(
+        payments,
+        organizationId,
+        eq(payments.status, "succeeded"),
+        gte(payments.createdAt, monthStart),
+        lt(payments.createdAt, now),
+      ),
+    );
+  const parsed = Number(row?.value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 /**

@@ -61,6 +61,9 @@ vi.mock('@/lib/db/tenant', () => ({
 vi.mock('drizzle-orm', () => ({
   eq: (...a: unknown[]) => ({ kind: 'eq', args: a }),
   and: (...a: unknown[]) => ({ kind: 'and', args: a }),
+  gte: (...a: unknown[]) => ({ kind: 'gte', args: a }),
+  lt: (...a: unknown[]) => ({ kind: 'lt', args: a }),
+  sum: (col: unknown) => ({ kind: 'sum', col }),
   desc: (col: unknown) => ({ kind: 'desc', col }),
   sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({
     kind: 'sql',
@@ -88,6 +91,12 @@ vi.mock('@/lib/db/schema', () => ({
     nameEncrypted: 'customers.nameEncrypted',
     organizationId: 'customers.org',
   },
+  payments: {
+    amountCents: 'payments.amountCents',
+    status: 'payments.status',
+    createdAt: 'payments.createdAt',
+    organizationId: 'payments.org',
+  },
 }));
 
 vi.mock('@/lib/crypto', () => ({
@@ -99,7 +108,7 @@ beforeEach(() => {
   captured.length = 0;
 });
 
-import { listInvoices } from './invoice-queries';
+import { listInvoices, collectedThisMonthCents } from './invoice-queries';
 
 describe('listInvoices', () => {
   it('returns invoices with decrypted customer name + lastReminderSentAt, org-scoped', async () => {
@@ -118,5 +127,29 @@ describe('listInvoices', () => {
     expect(joins).toContain('customers');
     // verifies the org predicate is in the join, not just the table reference
     expect(joins).toContain('"org-1"');
+  });
+});
+
+describe('collectedThisMonthCents', () => {
+  it('sums succeeded payments for the current month (coerces neon string)', async () => {
+    selectQueue.push([{ value: '124500' }]); // neon returns sum() as a string
+    const total = await collectedThisMonthCents('org-1', new Date('2026-07-06T12:00:00Z'));
+    expect(total).toBe(124500);
+  });
+  it('returns 0 when there are no payments', async () => {
+    selectQueue.push([{ value: null }]);
+    expect(
+      await collectedThisMonthCents('org-1', new Date('2026-07-06T12:00:00Z')),
+    ).toBe(0);
+  });
+  it('scopes to the org, succeeded status, and the month window', async () => {
+    selectQueue.push([{ value: '0' }]);
+    await collectedThisMonthCents('org-1', new Date('2026-07-06T12:00:00Z'));
+    const where = JSON.stringify(captured[0].where);
+    expect(where).toContain('succeeded');
+    expect(where).toContain('org-1');
+    // month window predicates present
+    expect(where).toContain('gte');
+    expect(where).toContain('lt');
   });
 });

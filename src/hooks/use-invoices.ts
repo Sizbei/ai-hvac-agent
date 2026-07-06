@@ -18,6 +18,7 @@ export interface InvoiceListItem {
 
 interface UseInvoicesResult {
   readonly invoices: readonly InvoiceListItem[];
+  readonly collectedThisMonthCents: number;
   readonly isLoading: boolean;
   readonly error: string | null;
   readonly refetch: () => Promise<void>;
@@ -30,6 +31,7 @@ interface UseInvoicesResult {
  */
 export function useInvoices(): UseInvoicesResult {
   const [invoices, setInvoices] = useState<readonly InvoiceListItem[]>([]);
+  const [collectedThisMonthCents, setCollectedThisMonthCents] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,9 +49,12 @@ export function useInvoices(): UseInvoicesResult {
       }
       const body = (await res.json()) as {
         success: boolean;
-        data: { invoices: InvoiceListItem[] };
+        data: { invoices: InvoiceListItem[]; collectedThisMonthCents: number };
       };
-      if (body.success) setInvoices(body.data.invoices);
+      if (body.success) {
+        setInvoices(body.data.invoices);
+        setCollectedThisMonthCents(body.data.collectedThisMonthCents ?? 0);
+      }
       setError(null);
     } catch {
       setError('Could not connect to server. Please try again.');
@@ -76,5 +81,5 @@ export function useInvoices(): UseInvoicesResult {
     fetchAll().finally(() => setIsLoading(false));
   }, [fetchAll]);
 
-  return { invoices, isLoading, error, refetch: fetchAll, sendReminder };
+  return { invoices, collectedThisMonthCents, isLoading, error, refetch: fetchAll, sendReminder };
 }

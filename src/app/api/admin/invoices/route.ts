@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getAdminSession } from "@/lib/auth/session";
 import {
   listInvoices,
+  collectedThisMonthCents,
   createInvoiceFromSoldEstimate,
 } from "@/lib/admin/invoice-queries";
 import { logAudit } from "@/lib/admin/audit";
@@ -43,7 +44,8 @@ export async function GET() {
     }
 
     const invoices = await listInvoices(session.organizationId);
-    return successResponse({ invoices });
+    const collected = await collectedThisMonthCents(session.organizationId);
+    return successResponse({ invoices, collectedThisMonthCents: collected });
   } catch (error: unknown) {
     logger.error({ error }, "Failed to list invoices");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);
