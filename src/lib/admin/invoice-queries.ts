@@ -16,6 +16,7 @@ import {
   invoices,
   invoiceLineItems,
   jobMaterials,
+  organizationSettings,
   payments,
   refunds,
   serviceRequests,
@@ -695,6 +696,46 @@ export async function reconcileOrgPendingPayments(
     }
   }
   return { scanned: stuck.length, completed, failed, noop };
+}
+
+// ---------------------------------------------------------------------------
+// Org identity — used by the invoice detail page to show the business header.
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the org's display identity from organization_settings.
+ * companyName: text column (exists). address and phone: no dedicated columns
+ * exist in this schema version — both return null.
+ */
+export async function getInvoiceOrgIdentity(
+  organizationId: string,
+): Promise<{ companyName: string; address: string | null; phone: string | null }> {
+  const [row] = await db
+    .select({ companyName: organizationSettings.companyName })
+    .from(organizationSettings)
+    .where(eq(organizationSettings.organizationId, organizationId))
+    .limit(1);
+  return {
+    companyName: row?.companyName ?? "Your Company",
+    address: null,
+    phone: null,
+  };
+}
+
+/**
+ * Lightweight read of the customerId on an invoice (tenant-scoped).
+ * Returns null when the invoice is not found or has no associated customer.
+ */
+export async function getInvoiceCustomerId(
+  organizationId: string,
+  invoiceId: string,
+): Promise<string | null> {
+  const [row] = await db
+    .select({ customerId: invoices.customerId })
+    .from(invoices)
+    .where(withTenant(invoices, organizationId, eq(invoices.id, invoiceId)))
+    .limit(1);
+  return row?.customerId ?? null;
 }
 
 // ---------------------------------------------------------------------------
