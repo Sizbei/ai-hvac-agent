@@ -25,24 +25,21 @@ pass. Optimize for "who do I chase, and chase them now."
 | "Overdue" definition | **Age-based, no schema change** — open invoice older than 30 days; aging buckets 0–30 / 31–60 / 60+ (matches the Operations page AR aging) |
 | Chase action | **One-click reminder per invoice** — fires the existing `invoice_overdue` SMS (with pay link) through the comms queue; consent + quiet-hours enforced automatically |
 
-## Open decisions (recommendations below; confirm before build)
+## Resolved (list design APPROVED 2026-07-06)
 
-1. **Visual direction.** The prototype offers two:
-   - **Ledger (recommended)** — crisp, airy data table with real contrast: dark
-     header row, heavy tabular amounts, precise columns, one restrained accent.
-     Reads as professional and scannable; fits the rest of the admin.
-   - **Cockpit** — dark, action-forward worklist; each invoice a card with a
-     left severity stripe (red/amber/green by age) and the CTA up front.
-   *Recommendation: Ledger* as the shipping direction (consistency with the
-   admin), borrowing Cockpit's **left severity accent** on overdue rows.
+- **Visual direction: Ledger.** Crisp airy data table, **dark header bar** for
+  contrast, heavy tabular amounts, identity monograms (stable hue per customer),
+  age **heat-chips** (green/amber/red 0–30/31–60/60+), a right-aligned action
+  rail, and a working `⋯` overflow menu. Approved via the screenshot-iterated
+  prototype. Cockpit direction dropped.
+- **Reminded state: compact calm chip.** A single `inline-block` "✓ Reminded 3d
+  ago" in muted green that *recedes* against the blue CTAs (a handled row
+  shouldn't shout). IMPLEMENTATION NOTE: keep it a single text node — nesting
+  child `<span>`s inside a flex row blockifies the item and blows up its width.
 
-2. **Reminded-state treatment** (prototype has a live toggle):
-   - **New (recommended)** — a single calm status chip "✓ Reminded · 3d ago"
-     that flips to "Send again ↻" on hover. One element, no caption, never wraps.
-   - **Current** — outline "Send again" button + a caption underneath.
-   *Recommendation: New.*
+## Open decisions (recommendation below; confirm before build)
 
-3. **Reminder memory.** The "3d ago" needs a `last_reminder_sent_at` timestamp on
+1. **Reminder memory.** The "3d ago" needs a `last_reminder_sent_at` timestamp on
    `invoices` (one nullable column, tiny migration). *Recommendation: add it* —
    without a last-sent signal the operator nags customers daily. If rejected, the
    button ships without the "reminded" state and no schema change is needed.
