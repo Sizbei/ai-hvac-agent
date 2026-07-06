@@ -134,6 +134,13 @@ export default function InvoicesPage() {
     NOT_FOUND: 'Invoice not found.',
   };
 
+  const VOID_FAIL: Record<string, string> = {
+    synced_read_only: "Synced invoices can't be voided here.",
+    has_payments: "This invoice has payments — refund it first.",
+    not_voidable: "This invoice can't be voided.",
+    not_found: 'Invoice not found.',
+  };
+
   async function handleRemind(id: string) {
     if (pendingId === id) return;
     setPendingId(id);
@@ -175,7 +182,11 @@ export default function InvoicesPage() {
     setVoidBusy(true);
     try {
       const result = await voidInvoice(voidingId);
-      showFlash(result.ok ? 'Invoice voided' : 'Could not void this invoice', result.ok);
+      if (result.ok) {
+        showFlash('Invoice voided', true);
+      } else {
+        showFlash(VOID_FAIL[result.reason ?? ''] ?? 'Could not void this invoice.', false);
+      }
     } finally {
       setVoidBusy(false);
       setVoidingId(null);
@@ -343,7 +354,7 @@ export default function InvoicesPage() {
           ))}
         </div>
       )}
-      <Dialog open={voidingId !== null} onOpenChange={(open) => { if (!open) setVoidingId(null); }}>
+      <Dialog open={voidingId !== null} onOpenChange={(open) => { if (!open && !voidBusy) setVoidingId(null); }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Void this invoice?</DialogTitle>
