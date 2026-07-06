@@ -92,13 +92,7 @@ export function InvoiceRow({ invoice, onRemind }: InvoiceRowProps) {
         {invoice.state === 'paid' ? (
           <span className="text-xs text-muted-foreground">—</span>
         ) : invoice.lastReminderSentAt ? (
-          <span
-            role="button"
-            tabIndex={0}
-            onClick={() => onRemind(invoice.id)}
-            onKeyDown={(e) => e.key === 'Enter' && onRemind(invoice.id)}
-            className="inline-block cursor-pointer rounded-lg px-2.5 py-1.5 text-xs font-semibold text-emerald-700 transition-colors hover:bg-accent hover:text-accent-foreground"
-          >
+          <span className="inline-block rounded-lg px-2.5 py-1.5 text-xs font-semibold text-emerald-700">
             {`✓ Reminded ${remindedRel(invoice.lastReminderSentAt)}`}
           </span>
         ) : (

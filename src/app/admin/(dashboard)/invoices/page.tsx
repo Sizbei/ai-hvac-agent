@@ -182,7 +182,7 @@ export default function InvoicesPage() {
           <AlertDescription>{flash.msg}</AlertDescription>
         </Alert>
       )}
-      {error && !flash && (
+      {error && (
         <Alert variant="destructive">
           <AlertCircle className="size-4" />
           <AlertDescription>{error}</AlertDescription>
@@ -250,11 +250,19 @@ export default function InvoicesPage() {
         <Card className="p-5">
           <EmptyState
             icon={Receipt}
-            title={filter === 'all' && !search ? 'No invoices yet' : 'No invoices match'}
+            title={
+              filter === 'all' && !search
+                ? 'No invoices yet'
+                : filter === 'overdue' && !search
+                  ? "You're all caught up"
+                  : 'No invoices match'
+            }
             description={
               filter === 'all' && !search
                 ? 'Generate an invoice from a sold estimate to start collecting payments.'
-                : 'No invoices match this filter. Try a different one.'
+                : filter === 'overdue' && !search
+                  ? 'No overdue invoices right now.'
+                  : 'No invoices match this filter. Try a different one.'
             }
           />
         </Card>
