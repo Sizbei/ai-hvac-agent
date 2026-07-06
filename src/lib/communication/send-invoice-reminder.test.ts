@@ -4,7 +4,7 @@
  * job-queue, brand/contact stubs. Three cases: happy path, cooldown, no_balance.
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { sendInvoiceReminder } from "./money-triggers";
+import { sendInvoiceReminder, sendOverdueInvoiceReminders } from "./money-triggers";
 import { queueCommunicationJob } from "./job-queue";
 
 // ── Hoisted state ────────────────────────────────────────────────────────────
@@ -15,13 +15,23 @@ const { selectQueue, updateSetCalls, templateQueue } = vi.hoisted(() => ({
 }));
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
+vi.mock("./outbound-ledger", () => ({
+  claimOutboundOnce: vi.fn().mockResolvedValue(true),
+}));
+
 vi.mock("@/lib/db", () => ({
   db: {
     select: vi.fn(() => ({
       from: vi.fn(() => ({
-        where: vi.fn(() => ({
-          limit: vi.fn(() => Promise.resolve(selectQueue.shift() ?? [])),
-        })),
+        // Returns a thenable (for list queries awaited directly) that also has
+        // .limit() (for single-row queries). Both consume from selectQueue at
+        // the time where() is called, so sequencing is preserved.
+        where: vi.fn(() => {
+          const rows = selectQueue.shift() ?? [];
+          return Object.assign(Promise.resolve(rows), {
+            limit: vi.fn(() => Promise.resolve(rows)),
+          });
+        }),
       })),
     })),
     update: vi.fn(() => ({
@@ -180,5 +190,32 @@ describe("sendInvoiceReminder", () => {
     const res = await sendInvoiceReminder("org-1", "i1", new Date());
     expect(res).toEqual({ ok: false, reason: "not_collectible" });
     expect(queueCommunicationJob).not.toHaveBeenCalled();
+  });
+});
+
+describe("sendOverdueInvoiceReminders (dunning sweep)", () => {
+  it("stamps lastReminderSentAt after a successful automated enqueue", async () => {
+    const testNow = new Date("2026-07-06T12:00:00Z");
+
+    // 1st select: overdue invoice list (awaited directly, no .limit())
+    selectQueue.push([{
+      id: "inv-1",
+      customerId: "c1",
+      totalCents: 10000,
+      amountPaidCents: 0,
+    }]);
+    // 2nd select: customer contact (via getCustomerContact, uses .limit(1))
+    selectQueue.push([{ phoneEncrypted: "+15551234567", emailEncrypted: null, nameEncrypted: "Pat" }]);
+    // active invoice_overdue template
+    templateQueue.push({ id: "tpl-dun" });
+
+    const r = await sendOverdueInvoiceReminders("org-1", testNow);
+    expect(r.enqueued).toBe(1);
+    expect(queueCommunicationJob).toHaveBeenCalledOnce();
+
+    // The sweep must stamp lastReminderSentAt so the UI chip + Activity timeline
+    // reflect the automated send (same as the manual sendInvoiceReminder path).
+    const stampCall = updateSetCalls.find(c => "lastReminderSentAt" in c);
+    expect(stampCall?.lastReminderSentAt).toEqual(testNow);
   });
 });

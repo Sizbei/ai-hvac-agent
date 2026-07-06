@@ -436,6 +436,13 @@ export async function sendOverdueInvoiceReminders(
         customerId: inv.customerId,
       });
       enqueued++;
+      // Reflect the automated send in the UI (list chip + detail Activity) just like
+      // the manual path does. Best-effort — the reminder is already queued.
+      await db
+        .update(invoices)
+        .set({ lastReminderSentAt: now })
+        .where(withTenant(invoices, organizationId, eq(invoices.id, inv.id)))
+        .catch(() => {});
     } catch (error) {
       logger.error(
         { error, organizationId, invoiceId: inv.id },
