@@ -15,7 +15,7 @@ import { FinancingPanel } from '@/components/admin/financing/financing-panel';
 import { formatCentsExact, parseDollarsToCents } from '@/lib/admin/money-format';
 import { rollUpMargin, computeMargin } from '@/lib/admin/margin';
 import { deriveInvoicePresentation } from '@/lib/admin/invoice-presentation';
-import { isCollectible } from '@/lib/admin/invoice-collectible';
+import { isCollectible, invoiceRef } from '@/lib/admin/invoice-collectible';
 import type { InvoiceDetailView } from '@/lib/admin/invoice-queries';
 
 // Raw API response shape — dates arrive as ISO strings in JSON.
@@ -315,6 +315,7 @@ export function InvoiceDetailClient({
     <div className="p-6 space-y-6">
       {/* ── Toolbar ── */}
       <div className="flex flex-wrap items-center gap-3">
+        <h1 className="sr-only">Invoice {invoiceRef(invoice.id)}</h1>
         <Link href="/admin/invoices">
           <Button variant="ghost" size="icon-sm">
             <ArrowLeft className="size-4" />
