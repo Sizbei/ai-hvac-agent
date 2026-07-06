@@ -18,7 +18,9 @@ import {
   jobMaterials,
   payments,
   refunds,
+  serviceRequests,
   technicianTimeEntries,
+  users,
 } from "@/lib/db/schema";
 import { decrypt } from "@/lib/crypto";
 import { withTenant } from "@/lib/db/tenant";
@@ -830,6 +832,12 @@ export interface InvoiceDetailView {
    * shown as its own line. ADMIN-ONLY (sensitive cost data).
    */
   readonly actualLaborCostCents: number | null;
+  readonly customerName: string | null;
+  readonly customerAddress: string | null;
+  readonly customerPhone: string | null;
+  readonly technicianName: string | null;
+  readonly serviceDate: Date | null;
+  readonly lastReminderSentAt: Date | null;
 }
 
 /**
@@ -854,8 +862,17 @@ export async function getInvoiceDetailById(
       createdAt: invoices.createdAt,
       fieldpulseInvoiceId: invoices.fieldpulseInvoiceId,
       hcpInvoiceId: invoices.hcpInvoiceId,
+      nameEncrypted: customers.nameEncrypted,
+      addressEncrypted: customers.addressEncrypted,
+      phoneEncrypted: customers.phoneEncrypted,
+      technicianName: users.name,
+      serviceDate: serviceRequests.scheduledDate,
+      lastReminderSentAt: invoices.lastReminderSentAt,
     })
     .from(invoices)
+    .leftJoin(customers, and(eq(customers.id, invoices.customerId), eq(customers.organizationId, organizationId)))
+    .leftJoin(serviceRequests, and(eq(serviceRequests.id, invoices.serviceRequestId), eq(serviceRequests.organizationId, organizationId)))
+    .leftJoin(users, and(eq(users.id, serviceRequests.assignedTo), eq(users.organizationId, organizationId)))
     .where(withTenant(invoices, organizationId, eq(invoices.id, id)))
     .limit(1);
 
@@ -974,11 +991,21 @@ export async function getInvoiceDetailById(
       : null;
   }
 
-  // Keep the raw FSM ids server-side; expose only the derived source.
-  const { fieldpulseInvoiceId, hcpInvoiceId, ...invRest } = inv;
+  // Keep the raw FSM ids and encrypted fields server-side; expose only derived values.
+  const {
+    fieldpulseInvoiceId,
+    hcpInvoiceId,
+    nameEncrypted,
+    addressEncrypted,
+    phoneEncrypted,
+    ...invRest
+  } = inv;
   return {
     ...invRest,
     syncedSource: deriveSyncedSource(fieldpulseInvoiceId, hcpInvoiceId),
+    customerName: safeDecryptName(nameEncrypted),
+    customerAddress: safeDecryptName(addressEncrypted),
+    customerPhone: safeDecryptName(phoneEncrypted),
     lineItems,
     payments: paymentRows.map((p) => ({
       ...p,
