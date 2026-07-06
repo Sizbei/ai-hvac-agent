@@ -29,8 +29,6 @@ function fmt(d: Date): string {
 export function InvoiceDocument({ invoice, org }: Props) {
   const m = invoiceDocModel(invoice);
 
-  const balanceDue = invoice.totalCents - invoice.amountPaidCents;
-
   return (
     <div className="rounded-lg border bg-card shadow-sm">
       {/* ── paper body ── */}
@@ -41,15 +39,12 @@ export function InvoiceDocument({ invoice, org }: Props) {
           {/* Logo + company address */}
           <div>
             <div className="flex items-center gap-3">
-              <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-[oklch(0.62_0.13_222)] text-primary-foreground shadow-sm">
+              <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-primary/70 text-primary-foreground shadow-sm">
                 <Wind className="size-5" />
               </span>
               <div className="leading-none">
                 <p className="font-heading text-base font-bold tracking-tight text-foreground">
                   {org.companyName}
-                </p>
-                <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                  Heating &amp; Air
                 </p>
               </div>
             </div>
@@ -187,10 +182,10 @@ export function InvoiceDocument({ invoice, org }: Props) {
               <span
                 className={cn(
                   'tabular-nums',
-                  balanceDue > 0 ? 'text-destructive' : 'text-foreground',
+                  m.isOverdue ? 'text-destructive' : 'text-foreground',
                 )}
               >
-                {formatCentsExact(balanceDue)}
+                {formatCentsExact(m.amountDueCents)}
               </span>
             </div>
           </div>
