@@ -25,7 +25,7 @@ import { generatePortalToken } from "@/lib/portal/portal-queries";
 import { claimOutboundOnce } from "./outbound-ledger";
 import { queueCommunicationJob } from "./job-queue";
 import { logger } from "@/lib/logger";
-import { isCollectible, invoiceRef } from "@/lib/admin/invoice-collectible";
+import { isCollectible, invoiceRef, REMINDER_COOLDOWN_MS } from "@/lib/admin/invoice-collectible";
 export { invoiceRef } from "@/lib/admin/invoice-collectible";
 
 const DEFAULT_COMPANY_NAME = "Spears Services";
@@ -223,8 +223,6 @@ export async function triggerPaymentReceipt(params: {
     );
   }
 }
-
-const REMINDER_COOLDOWN_MS = 6 * 60 * 60 * 1000; // don't double-send within 6h
 
 /**
  * One-click manual collections reminder for a single invoice. Unlike the weekly

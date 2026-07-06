@@ -10,7 +10,6 @@ export const dynamic = "force-dynamic";
 
 const REASON_STATUS: Record<string, number> = {
   not_found: 404,
-  no_balance: 400,
   not_collectible: 400,
   no_phone: 400,
   no_template: 400,

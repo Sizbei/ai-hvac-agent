@@ -705,8 +705,8 @@ export async function reconcileOrgPendingPayments(
 
 /**
  * Returns the org's display identity from organization_settings.
- * companyName: text column (exists). address and phone: no dedicated columns
- * exist in this schema version — both return null.
+ * companyName: from the text column. phone: parsed from businessInfo JSONB (null when absent or malformed).
+ * address: no dedicated column, always returns null.
  */
 export async function getInvoiceOrgIdentity(
   organizationId: string,
