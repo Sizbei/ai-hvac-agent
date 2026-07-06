@@ -12,6 +12,8 @@ export interface InvoiceListItem {
   readonly createdAt: string;
   /** Which FSM this read-only invoice is mirrored from, or null when native. */
   readonly syncedSource: "fieldpulse" | "housecall" | null;
+  readonly customerName: string | null;
+  readonly lastReminderSentAt: string | null;
 }
 
 interface UseInvoicesResult {
@@ -19,6 +21,7 @@ interface UseInvoicesResult {
   readonly isLoading: boolean;
   readonly error: string | null;
   readonly refetch: () => Promise<void>;
+  readonly sendReminder: (id: string) => Promise<{ ok: boolean; reason?: string }>;
 }
 
 /**
@@ -55,10 +58,23 @@ export function useInvoices(): UseInvoicesResult {
     }
   }, []);
 
+  const sendReminder = useCallback(
+    async (id: string): Promise<{ ok: boolean; reason?: string }> => {
+      const res = await fetch(`/api/admin/invoices/${id}/send-reminder`, { method: 'POST' });
+      const body = (await res.json().catch(() => ({}))) as { success?: boolean; error?: { code?: string } };
+      if (res.ok && body.success) {
+        await fetchAll();
+        return { ok: true };
+      }
+      return { ok: false, reason: body.error?.code };
+    },
+    [fetchAll],
+  );
+
   useEffect(() => {
     setIsLoading(true);
     fetchAll().finally(() => setIsLoading(false));
   }, [fetchAll]);
 
-  return { invoices, isLoading, error, refetch: fetchAll };
+  return { invoices, isLoading, error, refetch: fetchAll, sendReminder };
 }
