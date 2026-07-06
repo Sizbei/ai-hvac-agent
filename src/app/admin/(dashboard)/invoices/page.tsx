@@ -141,6 +141,24 @@ export default function InvoicesPage() {
     }
   }
 
+  async function handleCopyPayLink(id: string) {
+    try {
+      const res = await fetch(`/api/admin/invoices/${id}/pay-link`, { method: 'POST' });
+      const body = (await res.json().catch(() => ({}))) as {
+        success?: boolean;
+        data?: { payLink?: string };
+      };
+      if (res.ok && body.success && body.data?.payLink) {
+        await navigator.clipboard.writeText(body.data.payLink);
+        showFlash('Pay link copied to clipboard', true);
+      } else {
+        showFlash('Could not create a pay link', false);
+      }
+    } catch {
+      showFlash('Could not create a pay link', false);
+    }
+  }
+
   // count overdue for badge
   const overdueCount = useMemo(
     () => invoices.filter(isOverdue).length,
@@ -298,7 +316,7 @@ export default function InvoicesPage() {
             )}
           </div>
           {filtered.map((inv) => (
-            <InvoiceRow key={inv.id} invoice={inv} onRemind={handleRemind} pending={pendingId === inv.id} />
+            <InvoiceRow key={inv.id} invoice={inv} onRemind={handleRemind} onCopyPayLink={handleCopyPayLink} pending={pendingId === inv.id} />
           ))}
         </div>
       )}

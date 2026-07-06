@@ -3,7 +3,14 @@ import Link from 'next/link';
 import type { InvoiceListItem } from '@/hooks/use-invoices';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { isCollectible, invoiceRef, canResend, REMINDER_COOLDOWN_MS } from '@/lib/admin/invoice-collectible';
+import { MoreHorizontal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '@/components/ui/dropdown-menu';
 import { AgeChip, daysBetween } from './age-chip';
 
 /** Stable hue from a string id — deterministic avatar colour. */
@@ -41,10 +48,11 @@ function remindedRel(iso: string): string {
 interface InvoiceRowProps {
   readonly invoice: InvoiceListItem;
   readonly onRemind: (id: string) => void;
+  readonly onCopyPayLink: (id: string) => void;
   readonly pending?: boolean;
 }
 
-export function InvoiceRow({ invoice, onRemind, pending = false }: InvoiceRowProps) {
+export function InvoiceRow({ invoice, onRemind, onCopyPayLink, pending = false }: InvoiceRowProps) {
   const balance = invoice.totalCents - invoice.amountPaidCents;
   const isPartial = invoice.state !== 'paid' && invoice.amountPaidCents > 0;
   const cooldownActive = isCooldownActive(invoice.lastReminderSentAt ?? null);
@@ -117,11 +125,23 @@ export function InvoiceRow({ invoice, onRemind, pending = false }: InvoiceRowPro
         ) : (
           <span className="text-xs text-muted-foreground">—</span>
         )}
-        <Link href={`/admin/invoices/${invoice.id}`}>
-          <Button variant="outline" size="sm">
-            View
-          </Button>
-        </Link>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={<Button variant="ghost" size="icon-sm" aria-label="More actions" />}
+          >
+            <MoreHorizontal className="size-4" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem render={<Link href={`/admin/invoices/${invoice.id}`} />}>
+              View invoice
+            </DropdownMenuItem>
+            {invoice.syncedSource === null && (
+              <DropdownMenuItem onClick={() => onCopyPayLink(invoice.id)}>
+                Copy pay link
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </div>
   );
