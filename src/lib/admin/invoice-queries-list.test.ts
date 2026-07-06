@@ -116,5 +116,7 @@ describe('listInvoices', () => {
     // customers join is org-scoped (defense in depth)
     const joins = JSON.stringify(captured.flatMap(c => c.joins));
     expect(joins).toContain('customers');
+    // verifies the org predicate is in the join, not just the table reference
+    expect(joins).toContain('"org-1"');
   });
 });
