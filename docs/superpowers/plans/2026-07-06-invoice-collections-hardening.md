@@ -148,10 +148,10 @@ After the successful `queueCommunicationJob(...)` inside the `for` loop's `try` 
 await db
   .update(invoices)
   .set({ lastReminderSentAt: now })
-  .where(withTenant(organizationId ? invoices : invoices, organizationId, eq(invoices.id, inv.id)))
+  .where(withTenant(invoices, organizationId, eq(invoices.id, inv.id)))
   .catch(() => {});
 ```
-(Use the loop's `now` and `inv.id`; `withTenant(invoices, organizationId, eq(invoices.id, inv.id))` — match the existing withTenant call style in this file.)
+(Use the loop's `now` and `inv.id`. `eq` is already imported in this file; match the existing `withTenant` call style.)
 
 - [ ] **Step 4: Run to verify pass; Step 5: tsc + commit**
 
