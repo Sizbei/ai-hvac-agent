@@ -25,14 +25,14 @@ export function collectionsStats(
     'createdAt' | 'state' | 'totalCents' | 'amountPaidCents' | 'lastReminderSentAt'
   >,
   now: Date,
-): { daysOverdue: number | null; lastRemindedRel: string | null } {
+): { daysOverdue: number | null; lastRemindedRel: string | null; balanceCents: number } {
   const balance = inv.totalCents - inv.amountPaidCents;
   const age = daysBetween(inv.createdAt, now);
   const daysOverdue =
     inv.state === 'open' && balance > 0 && age >= 30 ? age : null;
   const lastRemindedRel =
     inv.lastReminderSentAt ? rel(inv.lastReminderSentAt, now) : null;
-  return { daysOverdue, lastRemindedRel };
+  return { daysOverdue, lastRemindedRel, balanceCents: balance };
 }
 
 export function buildActivity(

@@ -20,8 +20,7 @@ const KIND_DOT: Record<ActivityEvent['kind'], string> = {
 
 export function InvoiceCollectionsSide({ invoice }: { invoice: InvoiceDetailView }) {
   const now = new Date();
-  const { daysOverdue, lastRemindedRel } = collectionsStats(invoice, now);
-  const balanceCents = invoice.totalCents - invoice.amountPaidCents;
+  const { daysOverdue, lastRemindedRel, balanceCents } = collectionsStats(invoice, now);
   const activity = buildActivity(invoice);
 
   return (
@@ -37,7 +36,7 @@ export function InvoiceCollectionsSide({ invoice }: { invoice: InvoiceDetailView
           <Row
             label="Days overdue"
             value={daysOverdue !== null ? `${daysOverdue}d` : '—'}
-            valueClassName={daysOverdue !== null ? 'text-rose-600 font-semibold' : ''}
+            valueClassName={daysOverdue !== null ? 'text-destructive font-semibold' : ''}
           />
           <Row label="Last reminder" value={lastRemindedRel ?? '—'} />
         </div>
@@ -54,7 +53,7 @@ export function InvoiceCollectionsSide({ invoice }: { invoice: InvoiceDetailView
         ) : (
           <ol className="mt-3 flex flex-col gap-3">
             {activity.map((ev, i) => (
-              <li key={i} className="flex items-start gap-2.5">
+              <li key={ev.at.toISOString() + ev.kind + i} className="flex items-start gap-2.5">
                 <span
                   className={`mt-1 size-2 shrink-0 rounded-full ${KIND_DOT[ev.kind]}`}
                 />
