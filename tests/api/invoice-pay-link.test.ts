@@ -51,7 +51,9 @@ function req() {
   return new NextRequest('http://t/api/admin/invoices/i1/pay-link', { method: 'POST' });
 }
 
-const ctx = { params: Promise.resolve({ id: 'i1' }) } as any;
+function ctx() {
+  return { params: Promise.resolve({ id: 'i1' }) } as any;
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -63,7 +65,7 @@ beforeEach(() => {
 
 describe('POST /api/admin/invoices/[id]/pay-link', () => {
   it('mints a pay link for the invoice customer', async () => {
-    const res = await POST(req(), ctx);
+    const res = await POST(req(), ctx());
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body.data.payLink).toBe('https://app.test/portal/TOK');
@@ -71,13 +73,25 @@ describe('POST /api/admin/invoices/[id]/pay-link', () => {
 
   it('401 when not admin', async () => {
     mockGetAdminSession.mockResolvedValueOnce(null);
-    const res = await POST(req(), ctx);
+    const res = await POST(req(), ctx());
     expect(res.status).toBe(401);
   });
 
   it('404 when invoice has no customer', async () => {
     mockGetInvoiceCustomerId.mockResolvedValueOnce(null);
-    const res = await POST(req(), ctx);
+    const res = await POST(req(), ctx());
+    expect(res.status).toBe(404);
+  });
+
+  it('429 when rate limited', async () => {
+    mockSlidingWindow.mockReturnValueOnce({ allowed: false });
+    const res = await POST(req(), ctx());
+    expect(res.status).toBe(429);
+  });
+
+  it('404 when portal token cannot be minted', async () => {
+    mockGeneratePortalToken.mockResolvedValueOnce(null);
+    const res = await POST(req(), ctx());
     expect(res.status).toBe(404);
   });
 });
