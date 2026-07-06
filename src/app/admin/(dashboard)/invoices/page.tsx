@@ -14,8 +14,17 @@ import { EmptyState } from '@/components/admin/ui/empty-state';
 import { SummaryBand } from '@/components/admin/invoices/summary-band';
 import { InvoiceRow } from '@/components/admin/invoices/invoice-row';
 import { daysBetween } from '@/components/admin/invoices/age-chip';
-import { isCollectible } from '@/lib/admin/invoice-collectible';
+import { isCollectible, invoiceRef } from '@/lib/admin/invoice-collectible';
 import type { InvoiceListItem } from '@/hooks/use-invoices';
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -95,11 +104,13 @@ function ReconcileBanner() {
 // ── main page ─────────────────────────────────────────────────────────────────
 
 export default function InvoicesPage() {
-  const { invoices, collectedThisMonthCents, isLoading, error, sendReminder } = useInvoices();
+  const { invoices, collectedThisMonthCents, isLoading, error, sendReminder, voidInvoice } = useInvoices();
   const [filter, setFilter] = useState<Filter>('overdue');
   const [search, setSearch] = useState('');
   const [flash, setFlash] = useState<{ msg: string; ok: boolean } | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
+  const [voidingId, setVoidingId] = useState<string | null>(null);
+  const [voidBusy, setVoidBusy] = useState(false);
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // auto-clear flash after 3s
@@ -156,6 +167,18 @@ export default function InvoicesPage() {
       }
     } catch {
       showFlash('Could not create a pay link', false);
+    }
+  }
+
+  async function handleVoidConfirm() {
+    if (!voidingId) return;
+    setVoidBusy(true);
+    try {
+      const result = await voidInvoice(voidingId);
+      showFlash(result.ok ? 'Invoice voided' : 'Could not void this invoice', result.ok);
+    } finally {
+      setVoidBusy(false);
+      setVoidingId(null);
     }
   }
 
@@ -316,10 +339,26 @@ export default function InvoicesPage() {
             )}
           </div>
           {filtered.map((inv) => (
-            <InvoiceRow key={inv.id} invoice={inv} onRemind={handleRemind} onCopyPayLink={handleCopyPayLink} pending={pendingId === inv.id} />
+            <InvoiceRow key={inv.id} invoice={inv} onRemind={handleRemind} onCopyPayLink={handleCopyPayLink} onVoid={(id) => setVoidingId(id)} pending={pendingId === inv.id} />
           ))}
         </div>
       )}
+      <Dialog open={voidingId !== null} onOpenChange={(open) => { if (!open) setVoidingId(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Void this invoice?</DialogTitle>
+            <DialogDescription>
+              {voidingId ? `${invoiceRef(voidingId)} will be marked void and can no longer be collected. This can't be undone.` : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
+            <Button variant="destructive" disabled={voidBusy} onClick={handleVoidConfirm}>
+              {voidBusy ? 'Voiding…' : 'Void invoice'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageShell>
   );
 }

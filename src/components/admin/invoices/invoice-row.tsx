@@ -49,10 +49,11 @@ interface InvoiceRowProps {
   readonly invoice: InvoiceListItem;
   readonly onRemind: (id: string) => void;
   readonly onCopyPayLink: (id: string) => void;
+  readonly onVoid: (id: string) => void;
   readonly pending?: boolean;
 }
 
-export function InvoiceRow({ invoice, onRemind, onCopyPayLink, pending = false }: InvoiceRowProps) {
+export function InvoiceRow({ invoice, onRemind, onCopyPayLink, onVoid, pending = false }: InvoiceRowProps) {
   const balance = invoice.totalCents - invoice.amountPaidCents;
   const isPartial = invoice.state !== 'paid' && invoice.amountPaidCents > 0;
   const cooldownActive = isCooldownActive(invoice.lastReminderSentAt ?? null);
@@ -140,6 +141,17 @@ export function InvoiceRow({ invoice, onRemind, onCopyPayLink, pending = false }
                 Copy pay link
               </DropdownMenuItem>
             )}
+            {invoice.syncedSource === null &&
+              invoice.state !== 'paid' &&
+              invoice.state !== 'void' &&
+              invoice.state !== 'refunded' && (
+                <DropdownMenuItem
+                  variant="destructive"
+                  onClick={() => onVoid(invoice.id)}
+                >
+                  Void invoice
+                </DropdownMenuItem>
+              )}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
