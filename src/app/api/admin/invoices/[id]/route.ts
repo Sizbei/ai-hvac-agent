@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
-import { getInvoiceDetailById } from "@/lib/admin/invoice-queries";
+import { getInvoiceDetailById, getInvoiceOrgIdentity } from "@/lib/admin/invoice-queries";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
@@ -29,7 +29,8 @@ export async function GET(
     if (!invoice) {
       return errorResponse("Invoice not found", "NOT_FOUND", 404);
     }
-    return successResponse({ invoice });
+    const org = await getInvoiceOrgIdentity(session.organizationId);
+    return successResponse({ invoice, org });
   } catch (error: unknown) {
     logger.error({ error }, "Failed to fetch invoice detail");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);
