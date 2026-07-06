@@ -187,64 +187,108 @@ git commit -m "feat(invoices): org identity + copy-pay-link endpoint"
 
 ### Task 3: Invoice document component
 
+**TESTING CONSTRAINT (read first):** This repo's vitest runs in the **`node`** environment with **no `@testing-library/react` and no jsdom** — React components are NOT render-tested here (Phase-1's age-chip test only tested pure functions). So: put the component's display LOGIC in exported **pure functions** and TDD those in a `.test.ts` (node) file. The `.tsx` component wraps those helpers and is NOT render-tested (consistent with every other admin component). Do NOT add `@testing-library/react`, jsdom, or change the vitest environment.
+
 **Files:**
-- Create: `src/components/admin/invoices/invoice-document.tsx`
-- Test: `src/components/admin/invoices/invoice-document.test.tsx`
+- Create: `src/components/admin/invoices/invoice-document.tsx` (the JSX, wraps the model)
+- Create: `src/components/admin/invoices/invoice-document-model.ts` (pure display logic)
+- Test: `src/components/admin/invoices/invoice-document-model.test.ts`
 
 **Interfaces:**
 - Consumes: the `InvoiceDetailView` fields (Task 1) + `{ companyName, address, phone }` (Task 2), `formatCentsExact`.
-- Produces: `<InvoiceDocument invoice={InvoiceDetailView} org={OrgIdentity} />` — the presentational paper: logo lockup + company lines, a bordered meta box (Invoice #, Service date, Invoice date, Due date, Amount due), Job-performed-by + Service address, the line-item table (Description / Qty·Hrs / Unit price·Rate / Amount), Notes + totals (Subtotal / Tax / Total / Amount paid / Balance due).
+- Produces:
+  - `invoiceDocModel(invoice: InvoiceDetailView): InvoiceDocModel` — pure. Returns `{ invoiceRef: string; invoiceDate: Date; serviceDate: Date | null; dueDate: Date; amountDueCents: number; isOverdue: boolean; showTechnician: boolean; showServiceAddress: boolean }`.
+  - `<InvoiceDocument invoice={InvoiceDetailView} org={OrgIdentity} />` — presentational paper consuming the model: logo lockup + company lines, bordered meta box (Invoice #, Service date, Invoice date, Due date, Amount due), Job-performed-by + Service address, line-item table (Description / Qty·Hrs / Unit price·Rate / Amount), Notes + totals (Subtotal / Tax / Total / Amount paid / Balance due).
 
 **Design decisions (resolve the mock's data gaps):**
-- **Invoice #:** use `invoiceRef(invoice.id)` (from `money-triggers.ts`) — there is no numeric invoice number. Export `invoiceRef` if not already exported, or duplicate the 1-line helper locally.
-- **Invoice date** = `createdAt`. **Service date** = `serviceDate` (nullable → omit that meta row when null). **Due date** = display-only `createdAt + 30 days` labeled "Net 30" (age-based; not stored). **Amount due** = `totalCents - amountPaidCents`, red when > 0.
-- **Job performed by** = `technicianName` (omit the block when null). **Service address** = `customerName` + `customerAddress` + `customerPhone` (render available lines only).
+- **Invoice #:** `invoiceRef(invoice.id)` (from `money-triggers.ts` — it IS exported; import it) — there is no numeric invoice number.
+- **Invoice date** = `createdAt`. **Service date** = `serviceDate` (nullable → omit that meta row when null). **Due date** = display-only `createdAt + 30 days` labeled "Net 30" (age-based; not stored). **Amount due** = `totalCents - amountPaidCents`, `isOverdue` = amountDue > 0.
+- **Job performed by** = `technicianName` (`showTechnician = technicianName != null`). **Service address** = `customerName`/`customerAddress`/`customerPhone` (`showServiceAddress = any of them non-null`; render available lines only).
+- **Company address/phone** may be null (org has no structured column yet) — render only what `org` provides.
 - Reference the approved mock for layout: `/private/tmp/claude-501/-Users-sizbei-Documents-GitHub-ai-hvac-agent/fd176dae-c5fb-4716-b3c2-66644193ea95/scratchpad/invoice-detail-mock.html`. Translate to the app's Tailwind theme tokens (no raw hex).
 
-- [ ] **Step 1: Write the failing test (the money-math the document displays)**
+- [ ] **Step 1: Write the failing test (pure model — node env, no rendering)**
 
-```tsx
-import { render, screen } from '@testing-library/react';
-import { InvoiceDocument } from './invoice-document';
+Create `src/components/admin/invoices/invoice-document-model.ts` empty-ish and the test `invoice-document-model.test.ts`:
+```ts
+import { invoiceDocModel } from './invoice-document-model';
 
-const base = { id: '1042abcd', state: 'open', subtotalCents: 227000, taxCents: 21000,
-  totalCents: 248000, amountPaidCents: 0, customerName: 'Marta Delgado',
-  customerAddress: '118 Ash St', customerPhone: '(423) 555-0148',
+const base = {
+  id: '1042abcd', totalCents: 248000, amountPaidCents: 0,
   technicianName: 'Davis Reed', serviceDate: new Date('2026-04-22'),
-  createdAt: new Date('2026-04-23'), lastReminderSentAt: null, serviceRequestId: 'sr1',
-  customerId: 'c1', estimateId: null, syncedSource: null,
-  lineItems: [{ id:'l1', name:'Condenser fan motor', quantity:1, unitPriceCents:124000, costCents:0, lineTotalCents:124000 }],
-  payments: [], actualMaterialsCostCents: null } as any;
+  customerName: 'Marta Delgado', customerAddress: '118 Ash St', customerPhone: '(423) 555-0148',
+  createdAt: new Date('2026-04-23'),
+} as any;
 
-it('renders balance due = total - amount paid', () => {
-  render(<InvoiceDocument invoice={base} org={{ companyName:'Spears Services', address:null, phone:null }} />);
-  expect(screen.getByText('Balance due')).toBeInTheDocument();
-  expect(screen.getAllByText('$2,480.00').length).toBeGreaterThan(0);
+it('computes amount due, overdue flag, and net-30 due date', () => {
+  const m = invoiceDocModel(base);
+  expect(m.amountDueCents).toBe(248000);
+  expect(m.isOverdue).toBe(true);
+  expect(m.invoiceRef).toBe('#1042ABCD'); // invoiceRef uppercases the 8-char prefix
+  expect(m.dueDate).toEqual(new Date(new Date('2026-04-23').getTime() + 30*24*3600*1000));
 });
-it('omits Job performed by when technician is null', () => {
-  render(<InvoiceDocument invoice={{ ...base, technicianName: null }} org={{ companyName:'X', address:null, phone:null }} />);
-  expect(screen.queryByText(/Job performed by/i)).toBeNull();
+it('flags which optional blocks to show', () => {
+  expect(invoiceDocModel(base).showTechnician).toBe(true);
+  expect(invoiceDocModel({ ...base, technicianName: null }).showTechnician).toBe(false);
+  expect(invoiceDocModel({ ...base, customerName: null, customerAddress: null, customerPhone: null }).showServiceAddress).toBe(false);
+});
+it('amountDue 0 when fully paid → not overdue', () => {
+  const m = invoiceDocModel({ ...base, amountPaidCents: 248000 });
+  expect(m.amountDueCents).toBe(0);
+  expect(m.isOverdue).toBe(false);
 });
 ```
-(Confirm the project's React test setup — `@testing-library/react` + jsdom — is configured; the age-chip test from Phase 1 proves `.tsx` component tests run. Match its imports.)
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `npx vitest run src/components/admin/invoices/invoice-document.test.tsx` → FAIL (no module).
+Run: `npx vitest run src/components/admin/invoices/invoice-document-model.test.ts` → FAIL (function not defined).
 
-- [ ] **Step 3: Implement `invoice-document.tsx`**
+- [ ] **Step 3: Implement the pure model, then the component**
 
-Build the presentational component per the design decisions above, using theme tokens and `formatCentsExact`. Pure display — no data fetching, no handlers. Keep it one focused file.
+`invoice-document-model.ts`:
+```ts
+import { invoiceRef } from '@/lib/communication/money-triggers';
+import type { InvoiceDetailView } from '@/lib/admin/invoice-queries';
+
+const NET_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+export interface InvoiceDocModel {
+  readonly invoiceRef: string;
+  readonly invoiceDate: Date;
+  readonly serviceDate: Date | null;
+  readonly dueDate: Date;
+  readonly amountDueCents: number;
+  readonly isOverdue: boolean;
+  readonly showTechnician: boolean;
+  readonly showServiceAddress: boolean;
+}
+
+export function invoiceDocModel(inv: InvoiceDetailView): InvoiceDocModel {
+  const amountDueCents = inv.totalCents - inv.amountPaidCents;
+  return {
+    invoiceRef: invoiceRef(inv.id),
+    invoiceDate: new Date(inv.createdAt),
+    serviceDate: inv.serviceDate ? new Date(inv.serviceDate) : null,
+    dueDate: new Date(new Date(inv.createdAt).getTime() + NET_DAYS_MS),
+    amountDueCents,
+    isOverdue: amountDueCents > 0,
+    showTechnician: inv.technicianName != null,
+    showServiceAddress:
+      inv.customerName != null || inv.customerAddress != null || inv.customerPhone != null,
+  };
+}
+```
+Then `invoice-document.tsx` — a client presentational component that calls `invoiceDocModel(invoice)` and renders the paper with theme tokens + `formatCentsExact`. No data fetching, no handlers.
 
 - [ ] **Step 4: Run to verify pass**
 
-Run the test → PASS.
+Run the model test → PASS.
 
 - [ ] **Step 5: tsc, lint, commit**
 
-Run `npx tsc --noEmit` (0) and `npx eslint src/components/admin/invoices/invoice-document.tsx` (0 errors), then:
+Run `npx tsc --noEmit` (0) and `npx eslint src/components/admin/invoices/invoice-document.tsx src/components/admin/invoices/invoice-document-model.ts` (0 errors), then:
 ```bash
-git add src/components/admin/invoices/invoice-document.tsx src/components/admin/invoices/invoice-document.test.tsx
+git add src/components/admin/invoices/invoice-document.tsx src/components/admin/invoices/invoice-document-model.ts src/components/admin/invoices/invoice-document-model.test.ts
 git commit -m "feat(invoices): invoice document (real-invoice layout)"
 ```
 
@@ -252,39 +296,66 @@ git commit -m "feat(invoices): invoice document (real-invoice layout)"
 
 ### Task 4: Collections sidebar component
 
+**TESTING CONSTRAINT:** node env, no `@testing-library/react`/jsdom (see Task 3). Put the logic in exported pure functions, TDD those in a `.test.ts`; the `.tsx` wraps them (not render-tested).
+
 **Files:**
-- Create: `src/components/admin/invoices/invoice-collections-side.tsx`
-- Test: `src/components/admin/invoices/invoice-collections-side.test.tsx`
+- Create: `src/components/admin/invoices/invoice-collections-side.tsx` (JSX)
+- Create: `src/components/admin/invoices/invoice-activity.ts` (pure logic)
+- Test: `src/components/admin/invoices/invoice-activity.test.ts`
 
 **Interfaces:**
 - Consumes: `InvoiceDetailView` (`createdAt`, `state`, `totalCents`, `amountPaidCents`, `lastReminderSentAt`, `payments`), `daysBetween` from `age-chip.tsx`, `formatCentsExact`.
-- Produces: `<InvoiceCollectionsSide invoice={InvoiceDetailView} />` — a **Collections** panel (Days overdue = `daysBetween(createdAt, now)` when open+overdue else "—", Last reminded = relative time of `lastReminderSentAt` or "Not yet") and an **Activity** panel (a timeline built from REAL events only: invoice created (`createdAt`), each payment (`payments[].createdAt`), each refund, and the last reminder (`lastReminderSentAt`) — sorted newest first). Do NOT invent a "reminders sent count"; only `lastReminderSentAt` exists.
+- Produces:
+  - `collectionsStats(inv, now): { daysOverdue: number | null; lastRemindedRel: string | null }` — pure. `daysOverdue` = `daysBetween(createdAt, now)` when open & balance>0 & age≥30, else `null` (renders "—"). `lastRemindedRel` = relative time of `lastReminderSentAt` or `null`.
+  - `buildActivity(inv): ActivityEvent[]` — pure. `ActivityEvent = { kind: 'created'|'payment'|'refund'|'reminder'; at: Date; label: string }`. Built from REAL events only: invoice created (`createdAt`), each payment (`payments[].createdAt`), each refund within payments, and the last reminder (`lastReminderSentAt` when set) — sorted newest first. Do NOT invent a "reminders sent count"; only `lastReminderSentAt` exists.
+  - `<InvoiceCollectionsSide invoice={InvoiceDetailView} />` — Collections panel + Activity panel consuming the two helpers.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing test (pure helpers — node env)**
 
-```tsx
-import { render, screen } from '@testing-library/react';
-import { InvoiceCollectionsSide } from './invoice-collections-side';
-it('shows days overdue and a "reminded" activity entry when lastReminderSentAt is set', () => {
-  const now = new Date();
-  const created = new Date(now.getTime() - 40*24*3600*1000);
-  render(<InvoiceCollectionsSide invoice={{ createdAt: created.toISOString?.() ?? created, state:'open',
-    totalCents: 5000, amountPaidCents: 0, lastReminderSentAt: new Date(now.getTime()-3*24*3600*1000),
-    payments: [] } as any} />);
-  expect(screen.getByText(/overdue/i)).toBeInTheDocument();
-  expect(screen.getByText(/remind/i)).toBeInTheDocument();
+Create `invoice-activity.ts` (empty-ish) + `invoice-activity.test.ts`:
+```ts
+import { collectionsStats, buildActivity } from './invoice-activity';
+
+const now = new Date('2026-07-06T12:00:00Z');
+const created = new Date(now.getTime() - 40 * 24 * 3600 * 1000);
+const inv = {
+  createdAt: created, state: 'open', totalCents: 5000, amountPaidCents: 0,
+  lastReminderSentAt: new Date(now.getTime() - 3 * 24 * 3600 * 1000), payments: [],
+} as any;
+
+it('reports days overdue for an open, aged, unpaid invoice', () => {
+  expect(collectionsStats(inv, now).daysOverdue).toBe(40);
+  expect(collectionsStats(inv, now).lastRemindedRel).toMatch(/3/); // "3d ago"
+});
+it('daysOverdue is null when paid', () => {
+  expect(collectionsStats({ ...inv, state: 'paid', amountPaidCents: 5000 }, now).daysOverdue).toBeNull();
+});
+it('activity includes a created event and a reminder event, newest first', () => {
+  const evs = buildActivity(inv);
+  expect(evs.some(e => e.kind === 'created')).toBe(true);
+  expect(evs.some(e => e.kind === 'reminder')).toBe(true);
+  // newest first: reminder (3d ago) before created (40d ago)
+  expect(evs[0].at.getTime()).toBeGreaterThanOrEqual(evs[evs.length - 1].at.getTime());
 });
 ```
 
-- [ ] **Step 2: Run to verify fail; Step 3: implement; Step 4: run to verify pass.**
+- [ ] **Step 2: Run to verify fail**
 
-Implement the two panels per the interface. Reuse `daysBetween`. Relative-time helper: a small local `rel(date)` returning "3d ago"/"just now" (or reuse `src/lib/admin/relative-time.ts` if it exists — check and prefer it).
+Run: `npx vitest run src/components/admin/invoices/invoice-activity.test.ts` → FAIL (functions not defined).
+
+- [ ] **Step 3: Implement the pure helpers, then the component**
+
+Implement `collectionsStats` and `buildActivity` in `invoice-activity.ts` per the interfaces (reuse `daysBetween` from `./age-chip`; for the relative-time string, check for `src/lib/admin/relative-time.ts` and reuse it if it exports a suitable helper, else write a small local `rel(date, now)` → "3d ago"/"just now"). Then `invoice-collections-side.tsx` renders the two panels from these helpers with theme tokens.
+
+- [ ] **Step 4: Run to verify pass**
+
+Run the test → PASS.
 
 - [ ] **Step 5: tsc, lint, commit**
 
-`npx tsc --noEmit` (0), `npx eslint src/components/admin/invoices/invoice-collections-side.tsx` (0 errors), then:
+`npx tsc --noEmit` (0), `npx eslint src/components/admin/invoices/invoice-collections-side.tsx src/components/admin/invoices/invoice-activity.ts` (0 errors), then:
 ```bash
-git add src/components/admin/invoices/invoice-collections-side.tsx src/components/admin/invoices/invoice-collections-side.test.tsx
+git add src/components/admin/invoices/invoice-collections-side.tsx src/components/admin/invoices/invoice-activity.ts src/components/admin/invoices/invoice-activity.test.ts
 git commit -m "feat(invoices): collections + activity sidebar"
 ```
 
