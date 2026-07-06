@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
+  customers,
   estimates,
   estimateOptions,
   estimateLineItems,
@@ -19,6 +20,7 @@ import {
   refunds,
   technicianTimeEntries,
 } from "@/lib/db/schema";
+import { decrypt } from "@/lib/crypto";
 import { withTenant } from "@/lib/db/tenant";
 import {
   rollUpActualMaterialsCost,
@@ -706,6 +708,8 @@ export interface InvoiceListRow {
   readonly customerId: string | null;
   readonly serviceRequestId: string | null;
   readonly createdAt: Date;
+  readonly customerName: string | null;
+  readonly lastReminderSentAt: Date | null;
   /** Which FSM this read-only invoice is mirrored from, or null when native. */
   readonly syncedSource: "fieldpulse" | "housecall" | null;
 }
@@ -736,17 +740,39 @@ export async function listInvoices(
       customerId: invoices.customerId,
       serviceRequestId: invoices.serviceRequestId,
       createdAt: invoices.createdAt,
+      lastReminderSentAt: invoices.lastReminderSentAt,
       fieldpulseInvoiceId: invoices.fieldpulseInvoiceId,
       hcpInvoiceId: invoices.hcpInvoiceId,
+      nameEncrypted: customers.nameEncrypted,
     })
     .from(invoices)
+    // Org-scope the join too (defense in depth): a customerId can only ever be
+    // this org's, but the predicate guarantees a cross-tenant row can't leak.
+    .leftJoin(
+      customers,
+      and(
+        eq(customers.id, invoices.customerId),
+        eq(customers.organizationId, organizationId),
+      ),
+    )
     .where(withTenant(invoices, organizationId))
     .orderBy(desc(invoices.createdAt));
-  // Expose only the derived source — the raw FSM ids stay server-side.
-  return rows.map(({ fieldpulseInvoiceId, hcpInvoiceId, ...r }) => ({
+
+  return rows.map(({ fieldpulseInvoiceId, hcpInvoiceId, nameEncrypted, ...r }) => ({
     ...r,
+    customerName: safeDecryptName(nameEncrypted),
     syncedSource: deriveSyncedSource(fieldpulseInvoiceId, hcpInvoiceId),
   }));
+}
+
+/** Decrypt an encrypted name for display; null on absent/garbled ciphertext. */
+function safeDecryptName(ciphertext: string | null): string | null {
+  if (!ciphertext) return null;
+  try {
+    return decrypt(ciphertext);
+  } catch {
+    return null;
+  }
 }
 
 export interface InvoiceLineItemView {
