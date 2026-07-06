@@ -90,6 +90,12 @@ variables and point a Twilio number at `/api/voice/incoming` (see
   **AI Insights** (deflection rate, funnel, feedback), and a customer CRM.
 - **Confidence-gated autodispatch.** Skills → travel → load scoring auto-assigns a clear
   winner and routes ambiguous jobs to an exception queue.
+- **Invoices & collections.** A collections workspace — aging summary (Outstanding /
+  Overdue >30d / Collected this month), an overdue-first list with one-click SMS
+  **reminders** (atomic 6h cooldown + re-chase), **copy pay link**, and a guarded
+  **void** — plus a real service-invoice **document** with **take payment** / refund.
+  Void/refunded invoices are never dunned; synced invoices stay read-only. See
+  **[docs/INVOICES.md](docs/INVOICES.md)**.
 - **Integrations.** Read-only invoice mirroring from **FieldPulse** and **Housecall Pro**,
   plus Google Calendar — see **[docs/INTEGRATIONS.md](docs/INTEGRATIONS.md)**.
 - **Production-minded.** AES-256-GCM PII encryption, JWT admin auth, multi-tenant query
@@ -109,6 +115,7 @@ variables and point a Twilio number at `/api/voice/incoming` (see
 **Reference**
 - **[docs/API.md](docs/API.md)** — REST API reference (chat, admin, file upload, widget).
 - **[docs/DISPATCH.md](docs/DISPATCH.md)** — dispatch/scheduling pipeline (scoring, confidence gate, duration, tech location) + roadmap.
+- **[docs/INVOICES.md](docs/INVOICES.md)** — invoices & collections workspace (business rules, reminders, void, query + HTTP API, screens).
 - **[docs/INTEGRATIONS.md](docs/INTEGRATIONS.md)** — FieldPulse / Housecall Pro / Google Calendar.
 - **[docs/KNOWLEDGE-BASE-CATALOG.md](docs/KNOWLEDGE-BASE-CATALOG.md)** — the deterministic FAQ intents.
 - **[EVAL.md](EVAL.md)** — the conversation-quality eval harness.

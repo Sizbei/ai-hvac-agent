@@ -346,6 +346,30 @@ Accept a team invite.
 
 ---
 
+## Invoice & Collections Endpoints
+
+Session-gated (`getAdminSession` → `401`), rate-limited (`RATE_LIMITS.adminRead` for reads /
+`adminMutation` for writes → `429`), tenant-scoped, and audit-logged. Full feature docs:
+**[docs/INVOICES.md](INVOICES.md)**.
+
+| Method & path | Purpose | Failure codes |
+|---|---|---|
+| `GET /api/admin/invoices` | Collections list + `collectedThisMonthCents` aggregate | `UNAUTHORIZED`, `RATE_LIMITED` |
+| `POST /api/admin/invoices` | Create an invoice from a sold estimate | — |
+| `GET /api/admin/invoices/[id]` | Invoice detail view + `{ org }` identity | `401`, `404` |
+| `POST /api/admin/invoices/[id]/send-reminder` | Send an SMS reminder (atomic 6h cooldown) | `NOT_FOUND` 404, `NOT_COLLECTIBLE` 400, `NO_PHONE`/`NO_TEMPLATE` 400, `COOLDOWN` 409 |
+| `POST /api/admin/invoices/[id]/pay-link` | Mint a customer portal pay link `{ payLink }` (refuses synced) | `SYNCED_READONLY` 409, `404` |
+| `POST /api/admin/invoices/[id]/void` | Void a native, unpaid, open/draft invoice (guarded, terminal) | `NOT_FOUND` 404, `SYNCED_READONLY`/`NOT_VOIDABLE`/`HAS_PAYMENTS` 409 |
+| `POST /api/admin/invoices/[id]/payments` | Take payment / refund (over-collection + idempotency guards) | over-collection / idempotency |
+
+**Collectibility rule:** only `state === 'open'` invoices with a positive balance are
+collectible/dunnable — `paid`, `void`, `refunded`, and `draft` are excluded (a full refund
+leaves `state='refunded'` with a positive total, so state — not balance — is the gate).
+**Synced** invoices (FieldPulse / Housecall Pro) are read-only: reminder, pay-link, void,
+and payment all refuse them.
+
+---
+
 ## Widget Endpoints
 
 ### GET /widget.js
