@@ -23,6 +23,7 @@ interface UseInvoicesResult {
   readonly error: string | null;
   readonly refetch: () => Promise<void>;
   readonly sendReminder: (id: string) => Promise<{ ok: boolean; reason?: string }>;
+  readonly voidInvoice: (id: string) => Promise<{ ok: boolean; reason?: string }>;
 }
 
 /**
@@ -76,10 +77,23 @@ export function useInvoices(): UseInvoicesResult {
     [fetchAll],
   );
 
+  const voidInvoice = useCallback(
+    async (id: string): Promise<{ ok: boolean; reason?: string }> => {
+      const res = await fetch(`/api/admin/invoices/${id}/void`, { method: 'POST' });
+      const body = (await res.json().catch(() => ({}))) as { success?: boolean; error?: { code?: string } };
+      if (res.ok && body.success) {
+        await fetchAll();
+        return { ok: true };
+      }
+      return { ok: false, reason: body.error?.code };
+    },
+    [fetchAll],
+  );
+
   useEffect(() => {
     setIsLoading(true);
     fetchAll().finally(() => setIsLoading(false));
   }, [fetchAll]);
 
-  return { invoices, collectedThisMonthCents, isLoading, error, refetch: fetchAll, sendReminder };
+  return { invoices, collectedThisMonthCents, isLoading, error, refetch: fetchAll, sendReminder, voidInvoice };
 }

@@ -47,6 +47,11 @@ vi.mock('@/lib/db', () => ({
       captured.push(capture);
       return chain(selectQueue.shift() ?? [], capture);
     },
+    update: () => {
+      const capture: CapturedSelect = { columns: {}, where: [], joins: [] };
+      captured.push(capture);
+      return chain(selectQueue.shift() ?? [], capture);
+    },
   },
 }));
 
@@ -70,6 +75,8 @@ vi.mock('drizzle-orm', () => ({
     text: strings.join('?'),
     values,
   }),
+  isNull: (c: unknown) => ({ kind: 'isNull', c }),
+  inArray: (c: unknown, arr: unknown) => ({ kind: 'inArray', c, arr }),
 }));
 
 vi.mock('@/lib/db/schema', () => ({
@@ -85,6 +92,7 @@ vi.mock('@/lib/db/schema', () => ({
     fieldpulseInvoiceId: 'invoices.fieldpulseInvoiceId',
     hcpInvoiceId: 'invoices.hcpInvoiceId',
     organizationId: 'invoices.org',
+    updatedAt: 'invoices.updatedAt',
   },
   customers: {
     id: 'customers.id',
@@ -108,7 +116,7 @@ beforeEach(() => {
   captured.length = 0;
 });
 
-import { listInvoices, collectedThisMonthCents } from './invoice-queries';
+import { listInvoices, collectedThisMonthCents, voidInvoice } from './invoice-queries';
 
 describe('listInvoices', () => {
   it('returns invoices with decrypted customer name + lastReminderSentAt, org-scoped', async () => {
@@ -151,5 +159,35 @@ describe('collectedThisMonthCents', () => {
     // month window predicates present
     expect(where).toContain('gte');
     expect(where).toContain('lt');
+  });
+});
+
+describe('voidInvoice', () => {
+  const openNative = { state: 'open', amountPaidCents: 0, fieldpulseInvoiceId: null, hcpInvoiceId: null };
+  it('voids a native, unpaid, open invoice (atomic claim returns a row)', async () => {
+    selectQueue.push([openNative]);      // the classify read
+    selectQueue.push([{ id: 'i1' }]);    // the guarded UPDATE ... RETURNING
+    expect(await voidInvoice('org-1', 'i1')).toEqual({ ok: true });
+  });
+  it('refuses a synced invoice', async () => {
+    selectQueue.push([{ ...openNative, fieldpulseInvoiceId: 'fp1' }]);
+    expect(await voidInvoice('org-1', 'i1')).toEqual({ ok: false, reason: 'synced_read_only' });
+  });
+  it('refuses an invoice with payments', async () => {
+    selectQueue.push([{ ...openNative, amountPaidCents: 5000 }]);
+    expect(await voidInvoice('org-1', 'i1')).toEqual({ ok: false, reason: 'has_payments' });
+  });
+  it('refuses a paid/terminal invoice', async () => {
+    selectQueue.push([{ ...openNative, state: 'paid' }]);
+    expect(await voidInvoice('org-1', 'i1')).toEqual({ ok: false, reason: 'not_voidable' });
+  });
+  it('returns not_found when the invoice is absent', async () => {
+    selectQueue.push([]);
+    expect(await voidInvoice('org-1', 'i1')).toEqual({ ok: false, reason: 'not_found' });
+  });
+  it('returns not_voidable when the atomic claim loses the race (no row returned)', async () => {
+    selectQueue.push([openNative]); // classify passes
+    selectQueue.push([]);            // UPDATE returns nothing
+    expect(await voidInvoice('org-1', 'i1')).toEqual({ ok: false, reason: 'not_voidable' });
   });
 });

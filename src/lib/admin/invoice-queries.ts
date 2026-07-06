@@ -6,7 +6,7 @@
  * first-class (a half-built payments path breaks on the first chargeback).
  */
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, gte, inArray, lt, sql, sum } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lt, sql, sum } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   customers,
@@ -1096,4 +1096,55 @@ export async function getInvoiceDetailById(
     actualMaterialsCostCents,
     actualLaborCostCents,
   };
+}
+
+/**
+ * Voids a NATIVE, unpaid, open/draft invoice (terminal state). Refuses synced
+ * invoices (money owned externally), invoices with any recorded payment (refund
+ * first), and already-terminal states. Read classifies the failure reason; the
+ * guarded UPDATE ... RETURNING re-checks every guard for atomicity (neon-http
+ * has no row locks).
+ */
+export async function voidInvoice(
+  organizationId: string,
+  invoiceId: string,
+  now: Date = new Date(),
+): Promise<
+  | { ok: true }
+  | { ok: false; reason: "not_found" | "synced_read_only" | "not_voidable" | "has_payments" }
+> {
+  const [inv] = await db
+    .select({
+      state: invoices.state,
+      amountPaidCents: invoices.amountPaidCents,
+      fieldpulseInvoiceId: invoices.fieldpulseInvoiceId,
+      hcpInvoiceId: invoices.hcpInvoiceId,
+    })
+    .from(invoices)
+    .where(withTenant(invoices, organizationId, eq(invoices.id, invoiceId)))
+    .limit(1);
+
+  if (!inv) return { ok: false, reason: "not_found" };
+  if (inv.fieldpulseInvoiceId || inv.hcpInvoiceId) return { ok: false, reason: "synced_read_only" };
+  if (inv.state !== "open" && inv.state !== "draft") return { ok: false, reason: "not_voidable" };
+  if (inv.amountPaidCents > 0) return { ok: false, reason: "has_payments" };
+
+  const [claimed] = await db
+    .update(invoices)
+    .set({ state: "void", updatedAt: now })
+    .where(
+      withTenant(
+        invoices,
+        organizationId,
+        eq(invoices.id, invoiceId),
+        inArray(invoices.state, ["open", "draft"]),
+        eq(invoices.amountPaidCents, 0),
+        isNull(invoices.fieldpulseInvoiceId),
+        isNull(invoices.hcpInvoiceId),
+      ),
+    )
+    .returning({ id: invoices.id });
+
+  if (!claimed) return { ok: false, reason: "not_voidable" };
+  return { ok: true };
 }
