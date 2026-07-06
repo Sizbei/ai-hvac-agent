@@ -154,7 +154,7 @@ describe("sendInvoiceReminder", () => {
     expect(queueCommunicationJob).not.toHaveBeenCalled();
   });
 
-  it("rejects a fully-paid invoice (no balance)", async () => {
+  it("rejects a fully-paid invoice (not collectible)", async () => {
     selectQueue.push([{
       id: "i1",
       customerId: "c1",
@@ -164,7 +164,21 @@ describe("sendInvoiceReminder", () => {
       lastReminderSentAt: null,
     }]);
     const res = await sendInvoiceReminder("org-1", "i1", new Date());
-    expect(res).toEqual({ ok: false, reason: "no_balance" });
+    expect(res).toEqual({ ok: false, reason: "not_collectible" });
+    expect(queueCommunicationJob).not.toHaveBeenCalled();
+  });
+
+  it("rejects a refunded invoice even when totalCents > 0 (not collectible)", async () => {
+    selectQueue.push([{
+      id: "i1",
+      customerId: "c1",
+      totalCents: 5000,
+      amountPaidCents: 0,
+      state: "refunded",
+      lastReminderSentAt: null,
+    }]);
+    const res = await sendInvoiceReminder("org-1", "i1", new Date());
+    expect(res).toEqual({ ok: false, reason: "not_collectible" });
     expect(queueCommunicationJob).not.toHaveBeenCalled();
   });
 });

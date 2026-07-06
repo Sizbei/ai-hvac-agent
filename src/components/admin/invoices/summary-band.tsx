@@ -1,9 +1,10 @@
 'use client';
 import { formatCentsExact } from '@/lib/admin/money-format';
+import { isCollectible } from '@/lib/admin/invoice-collectible';
 import type { InvoiceListItem } from '@/hooks/use-invoices';
 import { daysBetween } from './age-chip';
 export function SummaryBand({ invoices }: { invoices: readonly InvoiceListItem[] }) {
-  const open = invoices.filter(i => i.state !== 'paid' && i.totalCents - i.amountPaidCents > 0);
+  const open = invoices.filter(isCollectible);
   const outstanding = open.reduce((s, i) => s + (i.totalCents - i.amountPaidCents), 0);
   const overdue = open.filter(i => daysBetween(new Date(i.createdAt), new Date()) >= 30);
   const overdueSum = overdue.reduce((s, i) => s + (i.totalCents - i.amountPaidCents), 0);

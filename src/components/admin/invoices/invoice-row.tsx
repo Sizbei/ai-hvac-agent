@@ -2,6 +2,7 @@
 import Link from 'next/link';
 import type { InvoiceListItem } from '@/hooks/use-invoices';
 import { formatCentsExact } from '@/lib/admin/money-format';
+import { isCollectible } from '@/lib/admin/invoice-collectible';
 import { Button } from '@/components/ui/button';
 import { AgeChip, daysBetween } from './age-chip';
 
@@ -90,18 +91,18 @@ export function InvoiceRow({ invoice, onRemind, pending = false }: InvoiceRowPro
 
       {/* Action rail */}
       <div className="flex items-center justify-end gap-2">
-        {invoice.state === 'paid' ? (
-          <span className="text-xs text-muted-foreground">—</span>
-        ) : invoice.syncedSource !== null ? (
-          <span className="text-xs text-muted-foreground">—</span>
-        ) : invoice.lastReminderSentAt ? (
-          <span className="inline-block rounded-lg px-2.5 py-1.5 text-xs font-semibold text-emerald-700">
-            {`✓ Reminded ${remindedRel(invoice.lastReminderSentAt)}`}
-          </span>
+        {isCollectible(invoice) && invoice.syncedSource === null ? (
+          invoice.lastReminderSentAt ? (
+            <span className="inline-block rounded-lg px-2.5 py-1.5 text-xs font-semibold text-emerald-700">
+              {`✓ Reminded ${remindedRel(invoice.lastReminderSentAt)}`}
+            </span>
+          ) : (
+            <Button size="sm" disabled={pending} onClick={() => onRemind(invoice.id)}>
+              Send reminder
+            </Button>
+          )
         ) : (
-          <Button size="sm" disabled={pending} onClick={() => onRemind(invoice.id)}>
-            Send reminder
-          </Button>
+          <span className="text-xs text-muted-foreground">—</span>
         )}
         <Link href={`/admin/invoices/${invoice.id}`}>
           <Button variant="outline" size="sm">

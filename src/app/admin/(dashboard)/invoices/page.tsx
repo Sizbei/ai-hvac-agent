@@ -14,16 +14,13 @@ import { EmptyState } from '@/components/admin/ui/empty-state';
 import { SummaryBand } from '@/components/admin/invoices/summary-band';
 import { InvoiceRow } from '@/components/admin/invoices/invoice-row';
 import { daysBetween } from '@/components/admin/invoices/age-chip';
+import { isCollectible } from '@/lib/admin/invoice-collectible';
 import type { InvoiceListItem } from '@/hooks/use-invoices';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 function isOverdue(inv: InvoiceListItem): boolean {
-  return (
-    inv.state !== 'paid' &&
-    inv.totalCents - inv.amountPaidCents > 0 &&
-    daysBetween(new Date(inv.createdAt), new Date()) >= 30
-  );
+  return isCollectible(inv) && daysBetween(new Date(inv.createdAt), new Date()) >= 30;
 }
 
 // ── filter types ─────────────────────────────────────────────────────────────
@@ -156,7 +153,7 @@ export default function InvoicesPage() {
     // filter
     if (filter === 'overdue') rows = rows.filter(isOverdue);
     else if (filter === 'unpaid')
-      rows = rows.filter((i) => i.state !== 'paid' && i.totalCents - i.amountPaidCents > 0);
+      rows = rows.filter(isCollectible);
     else if (filter === 'paid') rows = rows.filter((i) => i.state === 'paid');
 
     // search

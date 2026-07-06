@@ -25,6 +25,7 @@ import { generatePortalToken } from "@/lib/portal/portal-queries";
 import { claimOutboundOnce } from "./outbound-ledger";
 import { queueCommunicationJob } from "./job-queue";
 import { logger } from "@/lib/logger";
+import { isCollectible } from "@/lib/admin/invoice-collectible";
 
 const DEFAULT_COMPANY_NAME = "Spears Services";
 
@@ -243,7 +244,7 @@ export async function sendInvoiceReminder(
 ): Promise<
   | { readonly ok: true }
   | { readonly ok: false; readonly reason:
-      "not_found" | "no_balance" | "no_phone" | "no_template" | "cooldown" }
+      "not_found" | "not_collectible" | "no_phone" | "no_template" | "cooldown" }
 > {
   const [inv] = await db
     .select({
@@ -259,8 +260,8 @@ export async function sendInvoiceReminder(
     .limit(1);
 
   if (!inv || !inv.customerId) return { ok: false, reason: "not_found" };
+  if (!isCollectible(inv)) return { ok: false, reason: "not_collectible" };
   const balanceCents = inv.totalCents - inv.amountPaidCents;
-  if (inv.state === "paid" || balanceCents <= 0) return { ok: false, reason: "no_balance" };
   if (
     inv.lastReminderSentAt &&
     now.getTime() - inv.lastReminderSentAt.getTime() < REMINDER_COOLDOWN_MS

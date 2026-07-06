@@ -15,6 +15,7 @@ import { FinancingPanel } from '@/components/admin/financing/financing-panel';
 import { formatCentsExact, parseDollarsToCents } from '@/lib/admin/money-format';
 import { rollUpMargin, computeMargin } from '@/lib/admin/margin';
 import { deriveInvoicePresentation } from '@/lib/admin/invoice-presentation';
+import { isCollectible } from '@/lib/admin/invoice-collectible';
 import type { InvoiceDetailView } from '@/lib/admin/invoice-queries';
 
 // Raw API response shape — dates arrive as ISO strings in JSON.
@@ -329,8 +330,8 @@ export function InvoiceDetailClient({
           </span>
         )}
         <div className="flex-1" />
-        {/* Send reminder — hidden for synced invoices and paid invoices */}
-        {!invoice.syncedSource && invoice.state !== 'paid' && (
+        {/* Send reminder — only for open collectible invoices, never synced */}
+        {isCollectible(invoice) && !invoice.syncedSource && (
           <Button
             variant="outline"
             size="sm"
