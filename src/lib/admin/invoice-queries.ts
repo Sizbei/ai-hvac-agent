@@ -30,6 +30,7 @@ import {
   rollUpActualLaborCost,
 } from "@/lib/admin/margin";
 import { getPaymentProvider, type PaymentProvider } from "@/lib/payments/provider";
+import { businessInfoSchema } from "@/lib/admin/org-config-types";
 
 export type CreateInvoiceResult =
   | { readonly ok: true; readonly invoiceId: string }
@@ -711,14 +712,18 @@ export async function getInvoiceOrgIdentity(
   organizationId: string,
 ): Promise<{ companyName: string; address: string | null; phone: string | null }> {
   const [row] = await db
-    .select({ companyName: organizationSettings.companyName })
+    .select({
+      companyName: organizationSettings.companyName,
+      businessInfo: organizationSettings.businessInfo,
+    })
     .from(organizationSettings)
     .where(eq(organizationSettings.organizationId, organizationId))
     .limit(1);
+  const info = businessInfoSchema.safeParse(row?.businessInfo ?? {});
   return {
     companyName: row?.companyName ?? "Your Company",
     address: null,
-    phone: null,
+    phone: info.success ? info.data.phone ?? null : null,
   };
 }
 
