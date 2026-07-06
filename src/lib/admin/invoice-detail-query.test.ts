@@ -181,5 +181,16 @@ describe('getInvoiceDetailById', () => {
     expect(v?.technicianName).toBe('Davis Reed');
     expect(v?.serviceDate).toEqual(new Date('2026-04-22'));
     expect(v?.lastReminderSentAt).toEqual(new Date('2026-07-03'));
+
+    // Assert that each LEFT JOIN is scoped to the organization (defense in depth).
+    // If a join's organizationId predicate is removed, this test will fail. Specifically
+    // check for the org column + org id pairing in each join's AND condition.
+    const joinsStr = JSON.stringify(captured[0].joins);
+    expect(joinsStr).toContain('"customers.org"');
+    expect(joinsStr).toContain('"serviceRequests.org"');
+    expect(joinsStr).toContain('"users.org"');
+    // Verify org-1 appears (in the predicates, paired with each org column)
+    const joinsMatch = joinsStr.match(/"org-1"/g);
+    expect(joinsMatch?.length).toBe(3); // One for each join's org predicate
   });
 });
