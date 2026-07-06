@@ -59,7 +59,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockGetAdminSession.mockResolvedValue(mockSession);
   mockSlidingWindow.mockReturnValue({ allowed: true });
-  mockGetInvoiceCustomerId.mockResolvedValue('cust-1');
+  mockGetInvoiceCustomerId.mockResolvedValue({ customerId: 'cust-1', syncedSource: null });
   mockGeneratePortalToken.mockResolvedValue('TOK');
 });
 
@@ -93,5 +93,14 @@ describe('POST /api/admin/invoices/[id]/pay-link', () => {
     mockGeneratePortalToken.mockResolvedValueOnce(null);
     const res = await POST(req(), ctx());
     expect(res.status).toBe(404);
+  });
+
+  it('409 and does not mint token for a synced invoice', async () => {
+    mockGetInvoiceCustomerId.mockResolvedValueOnce({ customerId: 'c1', syncedSource: 'fieldpulse' });
+    const res = await POST(req(), ctx());
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error.code).toBe('SYNCED_READONLY');
+    expect(mockGeneratePortalToken).not.toHaveBeenCalled();
   });
 });

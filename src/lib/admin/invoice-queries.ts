@@ -728,19 +728,27 @@ export async function getInvoiceOrgIdentity(
 }
 
 /**
- * Lightweight read of the customerId on an invoice (tenant-scoped).
- * Returns null when the invoice is not found or has no associated customer.
+ * Lightweight read of the customerId and synced-source discriminator on an
+ * invoice (tenant-scoped). Returns null when the invoice is not found.
  */
 export async function getInvoiceCustomerId(
   organizationId: string,
   invoiceId: string,
-): Promise<string | null> {
+): Promise<{ customerId: string | null; syncedSource: "fieldpulse" | "housecall" | null } | null> {
   const [row] = await db
-    .select({ customerId: invoices.customerId })
+    .select({
+      customerId: invoices.customerId,
+      fieldpulseInvoiceId: invoices.fieldpulseInvoiceId,
+      hcpInvoiceId: invoices.hcpInvoiceId,
+    })
     .from(invoices)
     .where(withTenant(invoices, organizationId, eq(invoices.id, invoiceId)))
     .limit(1);
-  return row?.customerId ?? null;
+  if (!row) return null;
+  return {
+    customerId: row.customerId,
+    syncedSource: deriveSyncedSource(row.fieldpulseInvoiceId, row.hcpInvoiceId),
+  };
 }
 
 // ---------------------------------------------------------------------------

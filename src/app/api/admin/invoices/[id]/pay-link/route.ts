@@ -26,12 +26,15 @@ export async function POST(
     }
 
     const { id } = await params;
-    const customerId = await getInvoiceCustomerId(session.organizationId, id);
-    if (!customerId) {
+    const invoiceInfo = await getInvoiceCustomerId(session.organizationId, id);
+    if (!invoiceInfo || !invoiceInfo.customerId) {
       return errorResponse("Invoice not found", "NOT_FOUND", 404);
     }
+    if (invoiceInfo.syncedSource !== null) {
+      return errorResponse("Synced invoices are read-only", "SYNCED_READONLY", 409);
+    }
 
-    const token = await generatePortalToken(session.organizationId, customerId);
+    const token = await generatePortalToken(session.organizationId, invoiceInfo.customerId);
     if (!token) {
       return errorResponse("Customer not found", "NOT_FOUND", 404);
     }
