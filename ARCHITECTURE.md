@@ -44,7 +44,7 @@ The core idea is **spend LLM tokens only when you have to**. A deterministic 65-
   sessions · messages · service_requests · CRM · audit_log
          ▲
          │  tenant-scoped, PII decrypted on read
-  Admin dashboard (queue, conversations, AI insights, CRM)
+  Admin dashboard (queue, conversations, AI insights, CRM, invoices/collections)
 ```
 
 ## 3. Request Lifecycle (one chat turn through `route.ts`)
@@ -97,7 +97,7 @@ The core idea is **spend LLM tokens only when you have to**. A deterministic 65-
 
 > **ServiceTitan "soft split".** The service address lives on the `service_requests` row (the *location*), while billing identity lives on the `customers` row — a soft Customer↔Location split, with no separate locations table (deferred; see [docs/INTAKE-FIELDS.md](docs/INTAKE-FIELDS.md)). The preferred window we capture is appointment *intent*, not a real calendar booking.
 - **Audit** — `audit_log`: append-only record of actions (escalations, request creation, feedback signals) with IP and entity references.
-- **Money loop** — `estimates` / `estimate_line_items` / `estimate_options`, `invoices` / `invoice_line_items`, `payments`, `refunds` (all amounts in **integer cents**; over-collection + over-refund guards; provider-agnostic payment seam), plus `customer_memberships`.
+- **Money loop** — `estimates` / `estimate_line_items` / `estimate_options`, `invoices` / `invoice_line_items`, `payments`, `refunds` (all amounts in **integer cents**; over-collection + over-refund guards; provider-agnostic payment seam), plus `customer_memberships`. The admin **invoices/collections** workspace (aging summary, one-click SMS reminders with an atomic cooldown, guarded void, take-payment) sits on this — see **[docs/INVOICES.md](docs/INVOICES.md)**.
 - **Integrations** — per-org encrypted connections (`fieldpulse_connections`, `housecall_pro_connections`, `google_calendar_connections`) and inbound-webhook idempotency ledgers (`fieldpulse_webhook_events`, `hcp_webhook_events`). FSM invoices mirror into the native `invoices` table (read-only, keyed on `fieldpulse_invoice_id` / `hcp_invoice_id`). See **[docs/INTEGRATIONS.md](docs/INTEGRATIONS.md)**.
 
 Every table carries `organization_id` with supporting indexes; hot lookups (session token, request status, audit time) are indexed explicitly.

@@ -230,6 +230,30 @@ A dashboard for how the AI is performing, computed entirely from existing tables
 
 ![The admin AI Insights dashboard showing the headline deflection rate and metric cards](public/screenshots/admin-insights.png)
 
+**6. Invoices & Collections** — `http://localhost:3000/admin/invoices`
+
+A **collections workspace** over the native `invoices` money table (and the read-only
+FieldPulse / Housecall Pro mirrors). It opens **overdue-first** and carries:
+
+- **Aging summary** — Outstanding, Overdue > 30 days (with the oldest age), and Collected this month.
+- **Filters** — Overdue (default) / All / Unpaid / Paid — plus search by customer or invoice #.
+- **One-click Send reminder** — an SMS with a real portal pay link, guarded by an atomic
+  6-hour cooldown; once the cooldown passes the row offers **Remind again**. The weekly
+  dunning cron stamps the same column, so automated and manual reminders both show in the UI.
+- **Row `⋯` menu** — View invoice, Copy pay link, and the destructive **Void invoice**
+  (behind a confirmation dialog; native, unpaid, open/draft invoices only).
+
+Clicking a row opens the **invoice detail** — a real service-invoice document (itemized
+lines, parties, totals) with a **Take payment** / refund toolbar and a collections sidebar
+(days overdue, reminders, activity timeline).
+
+Only **`open`** invoices with a balance are collectible — `paid`, `void`, `refunded`, and
+`draft` are never dunned (a full refund leaves `state='refunded'` with a positive total, so
+state is the gate). **Synced** invoices stay read-only. Full reference:
+**[docs/INVOICES.md](docs/INVOICES.md)**.
+
+![The invoice collections list — aging summary, overdue-first rows, one-click reminders](docs/images/invoices/list.png)
+
 ### Session States
 
 Each customer chat session moves through these states:
