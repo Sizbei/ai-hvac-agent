@@ -30,6 +30,12 @@ vi.mock("@/lib/crypto", () => ({
   encrypt: vi.fn((v: string) => `enc(${v})`),
   blindIndex: vi.fn((v: string) => `blind(${v})`),
 }));
+vi.mock("@/lib/ai/sanitize-fields", () => ({
+  sanitizeName: vi.fn((v: string) => v),
+  sanitizePhone: vi.fn((v: string) => v),
+  sanitizeEmail: vi.fn((v: string) => v),
+  sanitizeAddress: vi.fn((v: string) => v),
+}));
 vi.mock("@/lib/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
@@ -41,9 +47,9 @@ vi.mock("@/lib/admin/crm-queries", () => ({
   normalizePhone: vi.fn((v: string | null) =>
     v ? v.replace(/\D/g, "") : null,
   ),
-  computeContactHashes: vi.fn(() => ({
-    emailHash: null,
-    phoneHash: null,
+  computeContactHashes: vi.fn(({ email, phone }: { email: string | null; phone: string | null }) => ({
+    emailHash: email ? 'h:' + email : null,
+    phoneHash: phone ? 'h:' + phone : null,
   })),
 }));
 
@@ -326,6 +332,13 @@ describe("importCustomersFromFieldpulse", () => {
     expect(set).toHaveBeenCalledTimes(1);
     // Confirm we called UPDATE, not INSERT.
     expect(db.insert).not.toHaveBeenCalled();
+    // Hash assertions: makeCustomer() has email "test@example.invalid" and phone "15550109999".
+    expect(set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        emailHash: 'h:test@example.invalid',
+        phoneHash: 'h:15550109999',
+      }),
+    );
   });
 
   it("path (b): upsertCustomerByContact + fpId stamp when email present", async () => {
@@ -373,6 +386,13 @@ describe("importCustomersFromFieldpulse", () => {
     expect(upsertCustomerByContact).not.toHaveBeenCalled();
     expect(values).toHaveBeenCalledTimes(1);
     expect(counts.created).toBe(1);
+    // Hash assertions: contactless → both hashes must be null.
+    expect(values).toHaveBeenCalledWith(
+      expect.objectContaining({
+        emailHash: null,
+        phoneHash: null,
+      }),
+    );
   });
 
   it("path (c): counts skipped when contactless insert is a no-op (re-run)", async () => {

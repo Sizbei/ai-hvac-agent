@@ -70,3 +70,30 @@ New test file `import/customers.test.ts`: 26 tests covering:
 - `npx vitest run src/lib/integrations/fieldpulse` → 238 passed, 0 failed
 - `npx tsc --noEmit` → 0 errors
 - `npx eslint [changed files]` → 0 errors, 0 warnings
+
+---
+
+## Review Fixes: I-1 + I-2 (2026-07-09)
+
+### Changes Made
+
+**customers.ts**
+- Added import of `sanitizeName`, `sanitizePhone`, `sanitizeEmail`, `sanitizeAddress` from `@/lib/ai/sanitize-fields`.
+- `updateCustomerFields` (path a): wrapped all four `encrypt()` calls with the corresponding sanitize helper before encrypting.
+- Path (c) contactless insert: wrapped `nameEncrypted` with `sanitizeName` and `addressEncrypted` (when non-null) with `sanitizeAddress`. Phone and email remain `null` (no sanitize call needed).
+
+**customers.test.ts**
+- Changed `computeContactHashes` mock from always-null to derivable fake hashes: `emailHash: email ? 'h:' + email : null`, same for phone.
+- Added `vi.mock("@/lib/ai/sanitize-fields", ...)` with pass-through identity fns so the new source import resolves cleanly.
+- Added hash assertions in path (a) test: `expect(set).toHaveBeenCalledWith(expect.objectContaining({ emailHash: 'h:test@example.invalid', phoneHash: 'h:15550109999' }))`.
+- Added hash assertions in path (c) test: `expect(values).toHaveBeenCalledWith(expect.objectContaining({ emailHash: null, phoneHash: null }))`.
+- Ripple check: no other tests relied on null hashes — path (b) tests don't assert on set payload, and warning/skip tests have no hash assertions.
+
+### Test Results
+- All 238 tests pass across 13 test files (`npx vitest run src/lib/integrations/fieldpulse`).
+
+### TypeScript
+- `npx tsc --noEmit`: 0 errors.
+
+### ESLint
+- `npx eslint src/lib/integrations/fieldpulse/import/customers.ts src/lib/integrations/fieldpulse/import/customers.test.ts`: 0 errors, 0 warnings.

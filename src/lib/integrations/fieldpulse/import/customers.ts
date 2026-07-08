@@ -28,6 +28,12 @@ import { customers } from "@/lib/db/schema";
 import { logger } from "@/lib/logger";
 import { encrypt } from "@/lib/crypto";
 import {
+  sanitizeName,
+  sanitizePhone,
+  sanitizeEmail,
+  sanitizeAddress,
+} from "@/lib/ai/sanitize-fields";
+import {
   upsertCustomerByContact,
   normalizeEmail,
   normalizePhone,
@@ -245,10 +251,10 @@ export async function importCustomersFromFieldpulse(
         .insert(customers)
         .values({
           organizationId: orgId,
-          nameEncrypted: encrypt(customer.name),
+          nameEncrypted: encrypt(sanitizeName(customer.name)),
           phoneEncrypted: null,
           emailEncrypted: null,
-          addressEncrypted: customer.address ? encrypt(customer.address) : null,
+          addressEncrypted: customer.address ? encrypt(sanitizeAddress(customer.address)) : null,
           emailHash,
           phoneHash,
           fieldpulseCustomerId: customer.fpId,
@@ -311,10 +317,10 @@ async function updateCustomerFields(
   await db
     .update(customers)
     .set({
-      nameEncrypted: encrypt(customer.name),
-      emailEncrypted: customer.email ? encrypt(customer.email) : null,
-      phoneEncrypted: customer.phone ? encrypt(customer.phone) : null,
-      addressEncrypted: customer.address ? encrypt(customer.address) : null,
+      nameEncrypted: encrypt(sanitizeName(customer.name)),
+      emailEncrypted: customer.email ? encrypt(sanitizeEmail(customer.email)) : null,
+      phoneEncrypted: customer.phone ? encrypt(sanitizePhone(customer.phone)) : null,
+      addressEncrypted: customer.address ? encrypt(sanitizeAddress(customer.address)) : null,
       emailHash,
       phoneHash,
       updatedAt: new Date(),
