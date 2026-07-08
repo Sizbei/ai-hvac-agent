@@ -227,11 +227,14 @@ describe('listInvoiceReminders', () => {
     expect(rows).toEqual([]);
   });
 
-  it('where-clause contains invoice_overdue and org-1', async () => {
+  it('where-clause contains invoice_overdue, org-1, and the invoiceId filter', async () => {
     selectQueue.push([]);
     await listInvoiceReminders('org-1', 'inv-abc');
     const where = JSON.stringify(captured[captured.length - 1].where);
     expect(where).toContain('invoice_overdue');
     expect(where).toContain('org-1');
+    // A regression that drops the per-invoice filter (returning every org
+    // reminder) must fail here, not just the mapping tests.
+    expect(where).toContain('inv-abc');
   });
 });
