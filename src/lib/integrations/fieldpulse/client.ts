@@ -279,8 +279,14 @@ function toCustomer(raw: unknown): FieldpulseCustomer {
     lastName: str(obj.last_name),
     email: str(obj.email),
     phone: str(obj.phone),
+    // E.164 phone — present on Phase-0.5-verified payloads; preferred for import.
+    phoneE164: str(obj.phone_e164),
     company: str(obj.company) ?? str(obj.company_name),
     address,
+    // Import-pull fields (Phase 3). display_name is present on ALL verified rows.
+    displayName: str(obj.display_name),
+    deletedAt: str(obj.deleted_at),
+    mergedCustomerId: idStr(obj.merged_customer_id),
   };
 }
 

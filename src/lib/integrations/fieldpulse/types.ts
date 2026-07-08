@@ -12,8 +12,19 @@ export interface FieldpulseCustomer {
   readonly lastName?: string | null;
   readonly email?: string | null;
   readonly phone?: string | null;
+  // E.164-normalized phone (e.g. "+15135620292") — preferred over `phone` for
+  // import; present on Phase-0.5-verified payloads (21/50 on page 1).
+  readonly phoneE164?: string | null;
   readonly company?: string | null;
   readonly address?: FieldpulseAddress | null;
+  // Human-readable display name (present on ALL Phase-0.5-verified rows).
+  // Used as the primary name source for the inbound pull mapper.
+  readonly displayName?: string | null;
+  // Non-null when the customer has been soft-deleted — skip on import.
+  readonly deletedAt?: string | null;
+  // Non-null when the customer was merged into another — skip on import.
+  // Points at the surviving record's id.
+  readonly mergedCustomerId?: string | null;
 }
 
 /** Address shape within a customer or job. */

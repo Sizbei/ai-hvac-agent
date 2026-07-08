@@ -25,6 +25,7 @@ import { eq } from "drizzle-orm";
 import { organizations, fpImportRuns } from "../../../db/schema";
 import { getFieldpulseClient } from "../client";
 import { syncTechniciansFromFieldpulse } from "../technician-sync";
+import { importCustomersFromFieldpulse } from "./customers";
 
 dotenv.config({ path: ".env.local" });
 
@@ -63,7 +64,11 @@ export const PHASES: { name: string; fn: PhaseFn }[] = [
   },
   {
     name: "customers",
-    fn: async (_ctx, counts) => counts,
+    fn: async (ctx, counts) => {
+      if (!ctx.fpClient) throw new Error("No FieldPulse client available");
+      await importCustomersFromFieldpulse(ctx.orgId, counts, ctx.fpClient);
+      return counts;
+    },
   },
   {
     name: "jobs",
