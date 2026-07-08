@@ -16,7 +16,7 @@ import { formatCentsExact, parseDollarsToCents } from '@/lib/admin/money-format'
 import { rollUpMargin, computeMargin } from '@/lib/admin/margin';
 import { deriveInvoicePresentation } from '@/lib/admin/invoice-presentation';
 import { isCollectible, invoiceRef } from '@/lib/admin/invoice-collectible';
-import type { InvoiceDetailView } from '@/lib/admin/invoice-queries';
+import type { InvoiceDetailView, InvoiceReminderView } from '@/lib/admin/invoice-queries';
 
 // Raw API response shape — dates arrive as ISO strings in JSON.
 interface ApiRefund {
@@ -95,6 +95,7 @@ export function InvoiceDetailClient({
 }) {
   const [invoice, setInvoice] = useState<InvoiceDetailView | null>(null);
   const [org, setOrg] = useState<OrgIdentity | null>(null);
+  const [reminders, setReminders] = useState<InvoiceReminderView[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -129,11 +130,18 @@ export function InvoiceDetailClient({
       }
       const body = (await res.json()) as {
         success: boolean;
-        data: { invoice: ApiInvoice; org: OrgIdentity };
+        data: { invoice: ApiInvoice; org: OrgIdentity; reminders?: { at: string; channel: string; status: string }[] };
       };
       if (body.success) {
         setInvoice(hydrateInvoice(body.data.invoice));
         setOrg(body.data.org);
+        setReminders(
+          (body.data.reminders ?? []).map((r) => ({
+            at: new Date(r.at),
+            channel: r.channel,
+            status: r.status,
+          })),
+        );
         setError(null);
       }
     } catch {
@@ -662,7 +670,7 @@ export function InvoiceDetailClient({
         </div>
 
         {/* Right column: collections + activity sidebar */}
-        <InvoiceCollectionsSide invoice={invoice} />
+        <InvoiceCollectionsSide invoice={invoice} reminders={reminders} />
       </div>
     </div>
   );

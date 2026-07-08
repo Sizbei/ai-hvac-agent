@@ -1,7 +1,7 @@
 'use client';
 
 import { formatCentsExact } from '@/lib/admin/money-format';
-import type { InvoiceDetailView } from '@/lib/admin/invoice-queries';
+import type { InvoiceDetailView, InvoiceReminderView } from '@/lib/admin/invoice-queries';
 import { collectionsStats, buildActivity, type ActivityEvent } from './invoice-activity';
 
 const KIND_LABEL: Record<ActivityEvent['kind'], string> = {
@@ -18,10 +18,16 @@ const KIND_DOT: Record<ActivityEvent['kind'], string> = {
   reminder: 'bg-violet-500',
 };
 
-export function InvoiceCollectionsSide({ invoice }: { invoice: InvoiceDetailView }) {
+export function InvoiceCollectionsSide({
+  invoice,
+  reminders = [],
+}: {
+  invoice: InvoiceDetailView;
+  reminders?: InvoiceReminderView[];
+}) {
   const now = new Date();
   const { daysOverdue, lastRemindedRel, balanceCents } = collectionsStats(invoice, now);
-  const activity = buildActivity(invoice);
+  const activity = buildActivity(invoice, reminders);
 
   return (
     <div className="flex flex-col gap-4">
@@ -37,6 +43,10 @@ export function InvoiceCollectionsSide({ invoice }: { invoice: InvoiceDetailView
             label="Days overdue"
             value={daysOverdue !== null ? `${daysOverdue}d` : '—'}
             valueClassName={daysOverdue !== null ? 'text-destructive font-semibold' : ''}
+          />
+          <Row
+            label="Reminders sent"
+            value={String(reminders.length || (invoice.lastReminderSentAt ? 1 : 0))}
           />
           <Row label="Last reminder" value={lastRemindedRel ?? '—'} />
         </div>

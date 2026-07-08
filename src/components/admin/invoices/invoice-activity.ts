@@ -1,4 +1,4 @@
-import type { InvoiceDetailView } from '@/lib/admin/invoice-queries';
+import type { InvoiceDetailView, InvoiceReminderView } from '@/lib/admin/invoice-queries';
 import { daysBetween } from './age-chip';
 
 export type ActivityEvent = {
@@ -37,6 +37,7 @@ export function collectionsStats(
 
 export function buildActivity(
   inv: Pick<InvoiceDetailView, 'createdAt' | 'lastReminderSentAt' | 'payments'>,
+  reminders: InvoiceReminderView[] = [],
 ): ActivityEvent[] {
   const events: ActivityEvent[] = [];
 
@@ -49,7 +50,11 @@ export function buildActivity(
     }
   }
 
-  if (inv.lastReminderSentAt) {
+  if (reminders.length > 0) {
+    for (const r of reminders) {
+      events.push({ kind: 'reminder', at: r.at, label: 'Reminder sent' });
+    }
+  } else if (inv.lastReminderSentAt) {
     events.push({ kind: 'reminder', at: inv.lastReminderSentAt, label: 'Reminder sent' });
   }
 

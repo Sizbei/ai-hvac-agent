@@ -25,3 +25,20 @@ it('activity includes a created event and a reminder event, newest first', () =>
   // newest first: reminder (3d ago) before created (40d ago)
   expect(evs[0].at.getTime()).toBeGreaterThanOrEqual(evs[evs.length - 1].at.getTime());
 });
+
+const d = (s: string) => new Date(s);
+
+it('emits one reminder event per history entry, newest included, no lastReminderSentAt double-count', () => {
+  const events = buildActivity(
+    { createdAt: d('2026-06-01'), lastReminderSentAt: d('2026-07-08'), payments: [] },
+    [ { at: d('2026-07-08'), channel: 'sms', status: 'sent' },
+      { at: d('2026-07-01'), channel: 'sms', status: 'sent' } ],
+  );
+  expect(events.filter(e => e.kind === 'reminder')).toHaveLength(2);
+});
+it('falls back to lastReminderSentAt when history is empty', () => {
+  const events = buildActivity(
+    { createdAt: d('2026-06-01'), lastReminderSentAt: d('2026-07-08'), payments: [] }, [],
+  );
+  expect(events.filter(e => e.kind === 'reminder')).toHaveLength(1);
+});
