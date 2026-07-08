@@ -32,7 +32,8 @@
     "eval:behavior": "npx tsx src/lib/ai/eval/cli.ts behavior",
     "eval:promptfoo": "node scripts/promptfoo-eval.mjs",
     "eval:redteam": "node scripts/promptfoo-redteam.mjs",
-    "smoke:fieldpulse": "npx tsx src/lib/integrations/fieldpulse/live-smoke.ts"
+    "smoke:fieldpulse": "npx tsx src/lib/integrations/fieldpulse/live-smoke.ts",
+    "fp:import": "npx tsx src/lib/integrations/fieldpulse/import/run-import.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^3.0.65",

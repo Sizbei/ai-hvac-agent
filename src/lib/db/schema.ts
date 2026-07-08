@@ -3039,3 +3039,36 @@ export const platformAuditLog = pgTable(
     index("platform_audit_log_created_idx").on(table.createdAt),
   ],
 );
+
+// fp_import_runs — Observability ledger for FieldPulse full-import and
+// nightly-sweep phases. Each row records one phase execution (technicians,
+// customers, jobs, or invoices) with its outcome and row-level counts.
+// Plain text for phase/status avoids enum migration churn when phases change.
+// counts.lastPage is used as a resumability cursor if the run was interrupted.
+export const fpImportRuns = pgTable(
+  "fp_import_runs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    // 'technicians' | 'customers' | 'jobs' | 'invoices' (plain text, not enum)
+    phase: text("phase").notNull(),
+    // 'running' | 'completed' | 'failed'
+    status: text("status").notNull().default("running"),
+    // { fetched, created, updated, skipped, errors, lastPage }
+    counts: jsonb("counts").notNull().default({}),
+    // Error message when status = 'failed'; null otherwise.
+    error: text("error"),
+    startedAt: timestamp("started_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("fp_import_runs_org_started_idx").on(
+      table.organizationId,
+      table.startedAt,
+    ),
+  ],
+);

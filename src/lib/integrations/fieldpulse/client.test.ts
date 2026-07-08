@@ -303,3 +303,253 @@ describe("RestFieldpulseClient — defensive pagination (listJobInvoices)", () =
     expect(invoices).toHaveLength(1000);
   });
 });
+
+// ── listCustomers / listJobs / listInvoices ──────────────────────────────────
+
+describe("RestFieldpulseClient — listCustomers", () => {
+  let mockFetch: ReturnType<typeof vi.fn>;
+  const config = { baseUrl: "https://api.fieldpulse.com", apiKey: "k" };
+
+  beforeEach(() => {
+    mockFetch = vi.fn();
+    vi.stubGlobal("fetch", mockFetch);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  function customerPage(from: number, n: number, totalCount: number | null = null) {
+    const rows = Array.from({ length: n }, (_, i) => ({
+      id: from + i,
+      first_name: `Test${from + i}`,
+      last_name: "Customer",
+      email: `test${from + i}@example.com`,
+      phone: "555-0100",
+    }));
+    const envelope: Record<string, unknown> = { error: false, response: rows };
+    if (totalCount !== null) envelope.total_count = totalCount;
+    return { ok: true, status: 200, json: async () => envelope };
+  }
+
+  it("pages until an empty/short page and returns mapped customers + totalCount", async () => {
+    // FP /customers is fixed 50/page; total_count on first page.
+    mockFetch
+      .mockResolvedValueOnce(customerPage(1, 50, 75))
+      .mockResolvedValueOnce(customerPage(51, 25, 75));
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const { items, totalCount } = await client.listCustomers();
+    expect(items).toHaveLength(75);
+    expect(totalCount).toBe(75);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("respects maxPages override", async () => {
+    let from = 1;
+    mockFetch.mockImplementation(async () => {
+      const p = customerPage(from, 50, 500);
+      from += 50;
+      return p;
+    });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const { items } = await client.listCustomers(2);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(items).toHaveLength(100);
+  });
+
+  it("stops when the API ignores page (identical batches — no duplicates)", async () => {
+    mockFetch.mockResolvedValue(customerPage(1, 50, 50));
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const { items } = await client.listCustomers();
+    expect(items).toHaveLength(50); // deduped
+    expect(mockFetch).toHaveBeenCalledTimes(2); // page1 + page2(identical)→stop
+  });
+
+  it("surfaces totalCount null when envelope lacks the field", async () => {
+    mockFetch.mockResolvedValue(customerPage(1, 3)); // totalCount arg omitted
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const { totalCount } = await client.listCustomers();
+    expect(totalCount).toBeNull();
+  });
+});
+
+describe("RestFieldpulseClient — listJobs", () => {
+  let mockFetch: ReturnType<typeof vi.fn>;
+  const config = { baseUrl: "https://api.fieldpulse.com", apiKey: "k" };
+
+  beforeEach(() => {
+    mockFetch = vi.fn();
+    vi.stubGlobal("fetch", mockFetch);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  function jobPage(from: number, n: number, totalCount: number | null = null) {
+    const rows = Array.from({ length: n }, (_, i) => ({
+      id: from + i,
+      customer_id: 20000000 + from + i,
+      status: 1,
+      start_time: "2026-07-07 16:00:00",
+      end_time: "2026-07-07 18:00:00",
+      created_at: "2026-07-07 13:36:22",
+    }));
+    const envelope: Record<string, unknown> = { error: false, response: rows };
+    if (totalCount !== null) envelope.total_count = totalCount;
+    return { ok: true, status: 200, json: async () => envelope };
+  }
+
+  it("pages all jobs and returns mapped items + totalCount", async () => {
+    // FP /jobs is fixed 20/page (verified Phase 0.5).
+    mockFetch
+      .mockResolvedValueOnce(jobPage(1, 20, 54))
+      .mockResolvedValueOnce(jobPage(21, 20, 54))
+      .mockResolvedValueOnce(jobPage(41, 14, 54));
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const { items, totalCount } = await client.listJobs();
+    expect(items).toHaveLength(54);
+    expect(totalCount).toBe(54);
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+  });
+
+  it("respects maxPages and stops early", async () => {
+    let from = 1;
+    mockFetch.mockImplementation(async () => {
+      const p = jobPage(from, 20, 200);
+      from += 20;
+      return p;
+    });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const { items } = await client.listJobs(1);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(items).toHaveLength(20);
+  });
+
+  it("surfaces totalCount null when envelope lacks the field", async () => {
+    mockFetch.mockResolvedValue(jobPage(1, 3)); // no totalCount
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const { totalCount } = await client.listJobs();
+    expect(totalCount).toBeNull();
+  });
+});
+
+describe("RestFieldpulseClient — listInvoices", () => {
+  let mockFetch: ReturnType<typeof vi.fn>;
+  const config = { baseUrl: "https://api.fieldpulse.com", apiKey: "k" };
+
+  beforeEach(() => {
+    mockFetch = vi.fn();
+    vi.stubGlobal("fetch", mockFetch);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  function invoicePage(from: number, n: number, totalCount: number | null = null) {
+    const rows = Array.from({ length: n }, (_, i) => ({
+      id: from + i,
+      job_id: 18000000 + i,
+      customer_id: 17000000 + i,
+      status: 3,
+      total: "100.00",
+      amount_paid: "100.00",
+      amount_unpaid: "0.00",
+      created_at: "2026-06-01 12:00:00",
+    }));
+    const envelope: Record<string, unknown> = { error: false, response: rows };
+    if (totalCount !== null) envelope.total_count = totalCount;
+    return { ok: true, status: 200, json: async () => envelope };
+  }
+
+  it("pages all invoices and surfaces totalCount null (FP returns null for invoices)", async () => {
+    // Phase 0.5: /invoices total_count is null — walk until empty.
+    mockFetch
+      .mockResolvedValueOnce(invoicePage(1, 50)) // no total_count key
+      .mockResolvedValueOnce(invoicePage(51, 20));
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const { items, totalCount } = await client.listInvoices();
+    expect(items).toHaveLength(70);
+    expect(totalCount).toBeNull();
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("respects maxPages override", async () => {
+    let from = 1;
+    mockFetch.mockImplementation(async () => {
+      const p = invoicePage(from, 50);
+      from += 50;
+      return p;
+    });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const { items } = await client.listInvoices(3);
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+    expect(items).toHaveLength(150);
+  });
+
+  it("stops when the API ignores page (identical batches — no duplicates)", async () => {
+    mockFetch.mockResolvedValue(invoicePage(1, 50));
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const { items } = await client.listInvoices();
+    expect(items).toHaveLength(50);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ── listJobs real-shape fixture (Phase 0.5 sanitized fixture) ────────────────
+
+import jobFixture from "./fixtures/fp-jobs-page1-sanitized.json";
+
+describe("RestFieldpulseClient — listJobs real-shape fixture", () => {
+  let mockFetch: ReturnType<typeof vi.fn>;
+  const config = { baseUrl: "https://api.fieldpulse.com", apiKey: "k" };
+
+  beforeEach(() => {
+    mockFetch = vi.fn();
+    vi.stubGlobal("fetch", mockFetch);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("parses the sanitized Phase-0.5 job fixture: all 4 status ints, schedule, assignments", async () => {
+    // First page returns all 4 fixture jobs; second page empty → stop.
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => jobFixture,
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ error: false, response: [], total_count: 54 }),
+      });
+
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const { items, totalCount } = await client.listJobs();
+
+    expect(items).toHaveLength(4);
+    expect(totalCount).toBe(54);
+
+    // Verify one job per status int.
+    const byStatus = Object.fromEntries(items.map((j) => [j.workStatus, j]));
+    expect(byStatus["1"]).toBeDefined();
+    expect(byStatus["2"]).toBeDefined();
+    expect(byStatus["3"]).toBeDefined();
+    expect(byStatus["4"]).toBeDefined();
+
+    // Verify schedule fields map from start_time/end_time.
+    const job1 = byStatus["1"];
+    expect(job1.scheduleStart).toBe("2026-07-07 16:00:00");
+    expect(job1.scheduleEnd).toBe("2026-07-07 18:00:00");
+
+    // Verify customer id is coerced to string.
+    expect(typeof job1.customerId).toBe("string");
+
+    // Status 1 job has completed_at (useful for terminal-state correlation).
+    expect(job1.createdAt).toBe("2026-07-07 13:36:22");
+  });
+});

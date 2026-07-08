@@ -137,6 +137,27 @@ export interface FieldpulseClient {
    * Returns null if the endpoint doesn't exist or on any error (degrades gracefully).
    */
   geocodeAddress(input: GeocodeInput): Promise<FieldpulseGeocodeResult | null>;
+
+  /**
+   * Page ALL customers from the unfiltered /customers endpoint for backfill.
+   * totalCount is from the first-page `total_count` (present on /customers).
+   * maxPages defaults to 200 (enough for ~10,000 customers at 50/page).
+   */
+  listCustomers(maxPages?: number): Promise<{ items: FieldpulseCustomer[]; totalCount: number | null }>;
+
+  /**
+   * Page ALL jobs from the unfiltered /jobs endpoint for backfill.
+   * totalCount is from the first-page `total_count` (present on /jobs).
+   * maxPages defaults to 200 (enough for ~4,000 jobs at 20/page).
+   */
+  listJobs(maxPages?: number): Promise<{ items: FieldpulseJob[]; totalCount: number | null }>;
+
+  /**
+   * Page ALL invoices from the unfiltered /invoices endpoint for backfill.
+   * totalCount is null for invoices (FP returns null — size by walking until empty).
+   * maxPages defaults to 200.
+   */
+  listInvoices(maxPages?: number): Promise<{ items: FieldpulseInvoice[]; totalCount: number | null }>;
 }
 
 // ── Real-API helpers (verified 2026-06-19 against the live FieldPulse API) ─────
@@ -581,17 +602,19 @@ export class RestFieldpulseClient implements FieldpulseClient {
    *    duplicates).
    *  - Rows are deduped by id across pages; a page shorter than pageSize, or a
    *    page that adds nothing new, ends the walk.
-   * Returns the raw row objects (callers map/validate them).
+   * Returns the raw row objects (callers map/validate them) plus the
+   * `total_count` from the first page's envelope (null when absent).
    */
   private async fetchAllPages(
     basePath: string,
     baseParams: URLSearchParams,
     pageSize: number,
     maxPages = 20,
-  ): Promise<unknown[]> {
+  ): Promise<{ rows: unknown[]; totalCount: number | null }> {
     const all: unknown[] = [];
     const seenIds = new Set<string>();
     let lastBatchKey: string | null = null;
+    let totalCount: number | null = null;
     for (let page = 1; page <= maxPages; page++) {
       const params = new URLSearchParams(baseParams);
       params.set("page", String(page));
@@ -599,6 +622,11 @@ export class RestFieldpulseClient implements FieldpulseClient {
       const raw = await this.request(`${basePath}?${params.toString()}`, {
         method: "GET",
       });
+      // Capture total_count from the first page's envelope.
+      if (page === 1 && raw && typeof raw === "object" && "total_count" in raw) {
+        const tc = (raw as Record<string, unknown>).total_count;
+        totalCount = typeof tc === "number" ? tc : null;
+      }
       const list = unwrap(raw);
       if (!Array.isArray(list) || list.length === 0) break;
       // The API ignores `page` -> identical batch -> stop (no loop, no dupes).
@@ -618,13 +646,13 @@ export class RestFieldpulseClient implements FieldpulseClient {
       // Last page (short) or no new rows -> done.
       if (list.length < pageSize || added === 0) break;
     }
-    return all;
+    return { rows: all, totalCount };
   }
 
   async listCustomerJobs(
     fieldpulseCustomerId: string,
   ): Promise<readonly FieldpulseJob[]> {
-    const rows = await this.fetchAllPages(
+    const { rows } = await this.fetchAllPages(
       "/jobs",
       new URLSearchParams({ customer_id: fieldpulseCustomerId }),
       100,
@@ -722,7 +750,7 @@ export class RestFieldpulseClient implements FieldpulseClient {
     // page through invoices and filter client-side — otherwise a job's invoices
     // beyond the first page would be silently missed. Pagination is bounded +
     // defensive (see fetchAllPages).
-    const rows = await this.fetchAllPages(
+    const { rows } = await this.fetchAllPages(
       "/invoices",
       new URLSearchParams({ job_id: fieldpulseJobId }),
       50,
@@ -732,6 +760,66 @@ export class RestFieldpulseClient implements FieldpulseClient {
       .map(toInvoice)
       .filter((i): i is FieldpulseInvoice => i !== null)
       .filter((i) => i.jobId === fieldpulseJobId);
+  }
+
+  async listCustomers(
+    maxPages = 200,
+  ): Promise<{ items: FieldpulseCustomer[]; totalCount: number | null }> {
+    // /customers returns a fixed 50/page (page_size is IGNORED — Phase 0.5).
+    const { rows, totalCount } = await this.fetchAllPages(
+      "/customers",
+      new URLSearchParams(),
+      50,
+      maxPages,
+    );
+    const items = rows
+      .map((c): FieldpulseCustomer | null => {
+        try {
+          return toCustomer(c);
+        } catch {
+          return null;
+        }
+      })
+      .filter((c): c is FieldpulseCustomer => c !== null);
+    return { items, totalCount };
+  }
+
+  async listJobs(
+    maxPages = 200,
+  ): Promise<{ items: FieldpulseJob[]; totalCount: number | null }> {
+    // /jobs returns a fixed 20/page (page_size is IGNORED — Phase 0.5).
+    const { rows, totalCount } = await this.fetchAllPages(
+      "/jobs",
+      new URLSearchParams(),
+      20,
+      maxPages,
+    );
+    const items = rows
+      .map((j): FieldpulseJob | null => {
+        try {
+          return toJob(j);
+        } catch {
+          return null;
+        }
+      })
+      .filter((j): j is FieldpulseJob => j !== null);
+    return { items, totalCount };
+  }
+
+  async listInvoices(
+    maxPages = 200,
+  ): Promise<{ items: FieldpulseInvoice[]; totalCount: number | null }> {
+    // /invoices total_count is NULL (Phase 0.5) — walk until empty.
+    const { rows, totalCount } = await this.fetchAllPages(
+      "/invoices",
+      new URLSearchParams(),
+      50,
+      maxPages,
+    );
+    const items = rows
+      .map(toInvoice)
+      .filter((i): i is FieldpulseInvoice => i !== null);
+    return { items, totalCount };
   }
 
   async geocodeAddress(input: GeocodeInput): Promise<FieldpulseGeocodeResult | null> {
