@@ -146,6 +146,8 @@ describe("sendInvoiceReminder", () => {
     expect(call.templateId).toBe("tpl-1");
     expect(call.templateVariables.payLink).toBe("https://app.test/portal/TOK");
     expect(call.templateVariables.amount).toBe("$50.00");
+    // invoiceId must be included so reminder history can filter by it
+    expect(call.templateVariables.invoiceId).toBe("i1");
     // stamped last_reminder_sent_at via UPDATE
     expect(updateSetCalls[0].lastReminderSentAt).toEqual(testNow);
   });
@@ -217,5 +219,9 @@ describe("sendOverdueInvoiceReminders (dunning sweep)", () => {
     // reflect the automated send (same as the manual sendInvoiceReminder path).
     const stampCall = updateSetCalls.find(c => "lastReminderSentAt" in c);
     expect(stampCall?.lastReminderSentAt).toEqual(testNow);
+
+    // invoiceId must be included in the sweep path too
+    const sweepCall = (queueCommunicationJob as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(sweepCall.templateVariables.invoiceId).toBe("inv-1");
   });
 });

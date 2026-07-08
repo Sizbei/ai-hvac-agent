@@ -66,6 +66,7 @@ vi.mock('@/lib/db/tenant', () => ({
 vi.mock('drizzle-orm', () => ({
   eq: (...a: unknown[]) => ({ kind: 'eq', args: a }),
   and: (...a: unknown[]) => ({ kind: 'and', args: a }),
+  or: (...a: unknown[]) => ({ kind: 'or', args: a }),
   gte: (...a: unknown[]) => ({ kind: 'gte', args: a }),
   lt: (...a: unknown[]) => ({ kind: 'lt', args: a }),
   sum: (col: unknown) => ({ kind: 'sum', col }),
@@ -105,6 +106,15 @@ vi.mock('@/lib/db/schema', () => ({
     createdAt: 'payments.createdAt',
     organizationId: 'payments.org',
   },
+  communicationJobs: {
+    organizationId: 'cj.org',
+    triggerType: 'cj.triggerType',
+    channel: 'cj.channel',
+    status: 'cj.status',
+    templateVariables: 'cj.templateVariables',
+    createdAt: 'cj.createdAt',
+    completedAt: 'cj.completedAt',
+  },
 }));
 
 vi.mock('@/lib/crypto', () => ({
@@ -116,7 +126,7 @@ beforeEach(() => {
   captured.length = 0;
 });
 
-import { listInvoices, collectedThisMonthCents, voidInvoice } from './invoice-queries';
+import { listInvoices, collectedThisMonthCents, voidInvoice, listInvoiceReminders } from './invoice-queries';
 
 describe('listInvoices', () => {
   it('returns invoices with decrypted customer name + lastReminderSentAt, org-scoped', async () => {
@@ -189,5 +199,39 @@ describe('voidInvoice', () => {
     selectQueue.push([openNative]); // classify passes
     selectQueue.push([]);            // UPDATE returns nothing
     expect(await voidInvoice('org-1', 'i1')).toEqual({ ok: false, reason: 'not_voidable' });
+  });
+});
+
+describe('listInvoiceReminders', () => {
+  it('maps rows using completedAt when present, falls back to createdAt, newest first', async () => {
+    const completedAt = new Date('2026-07-01T10:00:00Z');
+    const createdAt = new Date('2026-07-01T09:00:00Z');
+    const createdAtOnly = new Date('2026-06-28T08:00:00Z');
+    selectQueue.push([
+      { channel: 'sms', status: 'completed', completedAt, createdAt },
+      { channel: 'sms', status: 'completed', completedAt: null, createdAt: createdAtOnly },
+    ]);
+    const rows = await listInvoiceReminders('org-1', 'inv-abc');
+    expect(rows).toHaveLength(2);
+    // First row: uses completedAt
+    expect(rows[0].at).toEqual(completedAt);
+    expect(rows[0].channel).toBe('sms');
+    expect(rows[0].status).toBe('completed');
+    // Second row: falls back to createdAt
+    expect(rows[1].at).toEqual(createdAtOnly);
+  });
+
+  it('returns [] when no reminder jobs exist for the invoice', async () => {
+    selectQueue.push([]);
+    const rows = await listInvoiceReminders('org-1', 'inv-none');
+    expect(rows).toEqual([]);
+  });
+
+  it('where-clause contains invoice_overdue and org-1', async () => {
+    selectQueue.push([]);
+    await listInvoiceReminders('org-1', 'inv-abc');
+    const where = JSON.stringify(captured[captured.length - 1].where);
+    expect(where).toContain('invoice_overdue');
+    expect(where).toContain('org-1');
   });
 });

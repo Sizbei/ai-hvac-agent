@@ -6,9 +6,10 @@
  * first-class (a half-built payments path breaks on the first chargeback).
  */
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, gte, inArray, isNull, lt, sql, sum } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lt, or, sql, sum } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
+  communicationJobs,
   customers,
   estimates,
   estimateOptions,
@@ -31,6 +32,7 @@ import {
 } from "@/lib/admin/margin";
 import { getPaymentProvider, type PaymentProvider } from "@/lib/payments/provider";
 import { businessInfoSchema } from "@/lib/admin/org-config-types";
+import { invoiceRef } from "@/lib/admin/invoice-collectible";
 
 export type CreateInvoiceResult =
   | { readonly ok: true; readonly invoiceId: string }
@@ -1147,4 +1149,50 @@ export async function voidInvoice(
 
   if (!claimed) return { ok: false, reason: "not_voidable" };
   return { ok: true };
+}
+
+export interface InvoiceReminderView {
+  readonly at: Date;
+  readonly channel: string;
+  readonly status: string;
+}
+
+/**
+ * Org-scoped list of reminder jobs sent for a specific invoice. Matches by
+ * invoiceId in templateVariables (new path) or by invoiceRef (legacy path
+ * for jobs queued before invoiceId was added). Newest-first, capped at 20.
+ */
+export async function listInvoiceReminders(
+  organizationId: string,
+  invoiceId: string,
+): Promise<InvoiceReminderView[]> {
+  const rows = await db
+    .select({
+      channel: communicationJobs.channel,
+      status: communicationJobs.status,
+      completedAt: communicationJobs.completedAt,
+      createdAt: communicationJobs.createdAt,
+    })
+    .from(communicationJobs)
+    .where(
+      withTenant(
+        communicationJobs,
+        organizationId,
+        and(
+          eq(communicationJobs.triggerType, "invoice_overdue"),
+          or(
+            sql`${communicationJobs.templateVariables}->>'invoiceId' = ${invoiceId}`,
+            sql`${communicationJobs.templateVariables}->>'invoiceNumber' = ${invoiceRef(invoiceId)}`,
+          ),
+        )!,
+      ),
+    )
+    .orderBy(desc(sql`COALESCE(${communicationJobs.completedAt}, ${communicationJobs.createdAt})`))
+    .limit(20);
+
+  return rows.map((r) => ({
+    at: r.completedAt ?? r.createdAt,
+    channel: r.channel,
+    status: r.status,
+  }));
 }
