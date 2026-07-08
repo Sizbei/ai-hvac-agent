@@ -18,11 +18,13 @@
  */
 import * as dotenv from "dotenv";
 import * as readline from "readline";
+import { fileURLToPath } from "node:url";
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import { eq } from "drizzle-orm";
 import { organizations, fpImportRuns } from "../../../db/schema";
 import { getFieldpulseClient } from "../client";
+import { syncTechniciansFromFieldpulse } from "../technician-sync";
 
 dotenv.config({ path: ".env.local" });
 
@@ -45,10 +47,19 @@ interface PhaseContext {
 
 type PhaseFn = (ctx: PhaseContext, counts: PhaseResult) => Promise<PhaseResult>;
 
-const PHASES: { name: string; fn: PhaseFn }[] = [
+export const PHASES: { name: string; fn: PhaseFn }[] = [
   {
     name: "technicians",
-    fn: async (_ctx, counts) => counts,
+    fn: async (ctx, counts) => {
+      // syncTechniciansFromFieldpulse reports a single `synced` count — no
+      // created/updated split is available from this function. We put `synced`
+      // into `fetched` and `updated` (both reflect the roster processed) and
+      // leave created/skipped at 0; the caller's ledger documents this gap.
+      const { synced } = await syncTechniciansFromFieldpulse(ctx.orgId);
+      counts.fetched = synced;
+      counts.updated = synced;
+      return counts;
+    },
   },
   {
     name: "customers",
@@ -313,7 +324,10 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err: unknown) => {
-  console.error("Unexpected error:", err);
-  process.exit(1);
-});
+// Only run when invoked directly (not when imported by tests).
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((err: unknown) => {
+    console.error("Unexpected error:", err);
+    process.exit(1);
+  });
+}

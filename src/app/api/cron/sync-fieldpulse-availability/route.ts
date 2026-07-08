@@ -24,6 +24,7 @@ import { fieldpulseConnections } from "@/lib/db/schema";
 import { eq, and, ne } from "drizzle-orm";
 import { verifyCronAuth } from "@/lib/cron-auth";
 import { syncAvailabilityFromFieldpulse } from "@/lib/integrations/fieldpulse/availability-sync";
+import { syncTechniciansFromFieldpulse } from "@/lib/integrations/fieldpulse/technician-sync";
 
 export async function GET(request: Request): Promise<Response> {
   try {
@@ -57,10 +58,19 @@ export async function GET(request: Request): Promise<Response> {
     for (const connection of connections) {
       const { organizationId } = connection;
 
-      // Initiate sync in the background. after() keeps each org's sync alive
-      // past the cron response (a detached promise is frozen on Vercel). Each
-      // sync self-guards via claimSync, so a racing manual trigger is harmless.
+      // Technicians run first (ordered): availability-sync resolves techs by
+      // users.fieldpulseUserId, so the roster must be current before slot mapping.
+      // Both run inside a single after() so they're sequenced per org and the
+      // cron response stays fast.
       after(async () => {
+        try {
+          await syncTechniciansFromFieldpulse(organizationId);
+        } catch (error) {
+          logger.error(
+            { organizationId, error },
+            "Cron-triggered technician sync failed",
+          );
+        }
         try {
           await syncAvailabilityFromFieldpulse(organizationId);
         } catch (error) {
