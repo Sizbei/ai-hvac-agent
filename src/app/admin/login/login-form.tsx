@@ -13,6 +13,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { EnvBadge } from '@/components/admin/env-badge';
 
 /** Generic, non-enumerating messages for the ?error= codes the OIDC callback
  * redirects with. All denial paths map to a single uninformative message. */
@@ -100,6 +101,9 @@ export function LoginForm({ googleEnabled }: LoginFormProps) {
           </div>
           <CardTitle className="font-heading text-xl">Spears Services</CardTitle>
           <CardDescription>Sign in to the service console</CardDescription>
+          <div className="mt-1 flex justify-center">
+            <EnvBadge />
+          </div>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">

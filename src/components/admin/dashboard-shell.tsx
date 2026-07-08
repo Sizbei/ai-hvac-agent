@@ -5,10 +5,12 @@ import Link from 'next/link';
 import { AlertTriangle } from 'lucide-react';
 import { Sidebar } from '@/components/admin/sidebar';
 import { AdminHeader } from '@/components/admin/admin-header';
+import type { AdminRole } from '@/lib/auth/types';
 
 interface DashboardShellProps {
   readonly adminName: string;
   readonly adminEmail: string;
+  readonly role: AdminRole;
   /** When true, the org's subscription is past_due/suspended — render the
    * non-dismissable billing banner above the content. */
   readonly billingAttention?: boolean;
@@ -18,6 +20,7 @@ interface DashboardShellProps {
 export function DashboardShell({
   adminName,
   adminEmail,
+  role,
   billingAttention = false,
   children,
 }: DashboardShellProps) {
@@ -36,6 +39,7 @@ export function DashboardShell({
       <Sidebar
         adminName={adminName}
         adminEmail={adminEmail}
+        role={role}
         isMobileOpen={isMobileOpen}
         onMobileClose={handleMobileClose}
       />

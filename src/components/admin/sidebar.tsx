@@ -39,8 +39,11 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { BrandMark } from '@/components/admin/brand-mark';
+import { EnvBadge } from '@/components/admin/env-badge';
 import { useUnscheduledCount } from '@/hooks/use-unscheduled-count';
 import { unscheduledBadge } from '@/lib/admin/unscheduled-badge';
+import { envName, parseEnvLinks } from '@/lib/admin/environment';
+import type { AdminRole } from '@/lib/auth/types';
 import { cn } from '@/lib/utils';
 
 interface NavItem {
@@ -107,6 +110,7 @@ const NAV_GROUPS: readonly NavGroup[] = [
 interface SidebarProps {
   readonly adminName: string;
   readonly adminEmail: string;
+  readonly role: AdminRole;
   readonly isMobileOpen: boolean;
   readonly onMobileClose: () => void;
 }
@@ -122,6 +126,7 @@ function initialsOf(name: string): string {
 export function Sidebar({
   adminName,
   adminEmail,
+  role,
   isMobileOpen,
   onMobileClose,
 }: SidebarProps) {
@@ -130,6 +135,13 @@ export function Sidebar({
   const [isCollapsed, setIsCollapsed] = useState(false);
   const { count: unscheduledCount } = useUnscheduledCount();
   const badge = unscheduledBadge(unscheduledCount);
+  const envLinks =
+    role === 'super_admin'
+      ? parseEnvLinks(
+          process.env.NEXT_PUBLIC_ENV_LINKS,
+          envName(),
+        )
+      : [];
 
   useEffect(() => {
     const check = () => {
@@ -242,7 +254,10 @@ export function Sidebar({
         >
           <div className="flex h-full flex-col">
             <div className="flex h-16 items-center px-4">
-              <BrandMark onDark />
+              <div className="flex flex-col gap-0.5">
+                <BrandMark onDark />
+                <EnvBadge />
+              </div>
               <Button
                 variant="ghost"
                 size="icon-sm"
@@ -268,6 +283,22 @@ export function Sidebar({
             </nav>
 
             <div className="border-t border-white/10 px-3 py-3">
+              {envLinks.length > 0 && (
+                <div className="mb-3 space-y-1">
+                  <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">
+                    Environments
+                  </p>
+                  {envLinks.map((link) => (
+                    <a
+                      key={link.name}
+                      href={link.url}
+                      className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-white/65 transition-colors hover:bg-white/[0.06] hover:text-white"
+                    >
+                      {link.name}
+                    </a>
+                  ))}
+                </div>
+              )}
               <div className="flex items-center gap-3 rounded-lg bg-white/[0.06] px-3 py-2">
                 <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/20 text-xs font-semibold text-primary">
                   {initialsOf(adminName)}
@@ -303,14 +334,21 @@ export function Sidebar({
       )}
     >
       <div className="flex h-full flex-col">
-        {/* Logo */}
+        {/* Logo + env badge */}
         <div
           className={cn(
             'flex h-16 items-center px-4',
             isCollapsed && 'justify-center px-0',
           )}
         >
-          <BrandMark onDark compact={isCollapsed} />
+          {isCollapsed ? (
+            <BrandMark onDark compact />
+          ) : (
+            <div className="flex flex-col gap-0.5">
+              <BrandMark onDark />
+              <EnvBadge />
+            </div>
+          )}
         </div>
 
         {/* Nav */}
@@ -347,6 +385,24 @@ export function Sidebar({
 
         {/* Bottom section */}
         <div className="border-t border-white/10 px-3 py-3">
+          {/* Env switcher (super_admin only, expanded only) */}
+          {!isCollapsed && envLinks.length > 0 && (
+            <div className="mb-3 space-y-1">
+              <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">
+                Environments
+              </p>
+              {envLinks.map((link) => (
+                <a
+                  key={link.name}
+                  href={link.url}
+                  className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-white/65 transition-colors hover:bg-white/[0.06] hover:text-white"
+                >
+                  {link.name}
+                </a>
+              ))}
+            </div>
+          )}
+
           {/* User info */}
           {!isCollapsed && (
             <div className="mb-1 flex items-center gap-3 rounded-lg bg-white/[0.06] px-3 py-2">

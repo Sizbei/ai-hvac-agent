@@ -36,6 +36,7 @@ export default async function DashboardLayout({
     <DashboardShell
       adminName={session.name}
       adminEmail={session.email}
+      role={session.role}
       billingAttention={billingAttention}
     >
       {children}
