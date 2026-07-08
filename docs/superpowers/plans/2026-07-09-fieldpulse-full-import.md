@@ -52,6 +52,13 @@ Extend the smoke harness to CAPTURE, against the real account, before any import
 
 **Exit criteria:** captured fixtures checked into the test fixtures dir; paging confirmed; status-int vocabulary table written into `docs/INTEGRATIONS.md`.
 
+### Phase 0.5 RESULTS (live-probed 2026-07-09, account 182499)
+
+- **Paging:** `page` param WORKS (page 2 ≠ page 1). **`page_size` is IGNORED** — `/customers` returns a fixed 50/page, `/jobs` 20/page. `total_count` present on `/customers` (2597) and `/jobs` (54); **null on `/invoices`** → invoice backfill sizes by walking pages until empty, not by total_count; the dry-run completeness assert applies only where total_count exists.
+- **Volume:** 2,597 customers (52 pages), 54 jobs (3 pages), invoices TBD (≥20). Nightly full re-page is cheap at this scale.
+- **`updated_at_from` filter: IGNORED** (2099-dated filter returned identical results) → per review I3, deltas = full re-page + client-side `updated_at` filtering. Acceptable at this volume.
+- **Job shape (fixture: fp-jobs-page1.json):** `job_type` EXISTS (free text: "HVAC DOWN", "Walk in beer cooler"), `start_time`/`end_time` (schedule → our calendar), `customer_arrival_window_start_time/_end_time`, `assignments` (tech assignment), `customer_id`, `completed_at`, `invoice_status`, `deleted_at` (**must skip soft-deleted rows**), plus `in_progress_status_log`/`on_the_way_status_log`. Status ints observed: `{1: 12, 2: 4, 3: 2, 4: 2}` — vocabulary to pin in Phase 4 by correlating with `completed_at`/status logs/FP UI (e.g. `completed_at` non-null corroborates a terminal status independent of the int).
+
 ## Phase 1 — Import runs ledger + script skeleton (1 migration)
 
 - **Migration:** `fp_import_runs` table — `id`, `organizationId`, `phase` (`technicians|customers|jobs|invoices`), `status` (`running|completed|failed`), `counts` jsonb (`{fetched, created, updated, skipped, errors}`), `error` text, `startedAt`, `finishedAt`. Observability + resumability cursor (`counts.lastPage`).
@@ -120,7 +127,17 @@ Extend the smoke harness to CAPTURE, against the real account, before any import
 - Rollback story: every imported row carries its `fieldpulse*Id`, so a bad import is identifiable (`WHERE fieldpulse_job_id IS NOT NULL AND created_at > <run start>`) and reversible per-entity without touching native data.
 - Collections/dunning safety: imported invoices are synced ⇒ read-only, never dunned, excluded from reminder flows (existing guards — verified in Phases 3–6 of the collections work).
 
-## Open questions for the user
-1. **API key** — connect FieldPulse via the admin UI (or provide the key for env use) so Phase 0 can pass.
-2. **History cutoff** — import ALL history, or only e.g. the last 12–24 months of jobs/invoices? (All is fine volume-wise for a typical shop; cutoff keeps the queue cleaner.)
-3. **Follow-ups** — confirm option (c)-then-(a) per Phase 7, or should I probe the FP API for a tasks resource first?
+## User decisions (2026-07-09)
+1. **API key** — PROVIDED; stored in `.env.local` (gitignored) + encrypted `fieldpulse_connections` row. Phase 0 smoke PASSED (account 182499, 11 users).
+2. **History cutoff** — **ALL history.**
+3. **Follow-ups** — **native-only now** (option c), with a committed later phase:
+
+## Phase 8 — Derive follow-ups from imported job data (committed later increment)
+
+Once Phases 2–5 are live: a pure-native derivation pass that creates `follow_ups`
+rows from imported FP job history — e.g. completed maintenance-type jobs → a due
+follow-up at the next service interval; warranty-dated equipment from job line
+items → warranty-expiry follow-ups (reusing the existing warranty-trigger
+machinery). No FP API dependency; idempotent (keyed on customer + reason + due
+date); runs as part of the nightly sweep. Design in its own plan when Phases 2–5
+have shipped and real imported data shapes are known.
