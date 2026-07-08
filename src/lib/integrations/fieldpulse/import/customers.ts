@@ -22,7 +22,7 @@
  *    later provides a phone) creates a separate row that the dedupe can't see.
  *    Mitigation = later reconciliation pass (name+address match → suggest merge).
  */
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { customers } from "@/lib/db/schema";
 import { logger } from "@/lib/logger";
@@ -261,6 +261,10 @@ export async function importCustomersFromFieldpulse(
         })
         .onConflictDoNothing({
           target: [customers.organizationId, customers.fieldpulseCustomerId],
+          // The unique index is PARTIAL (WHERE fieldpulse_customer_id IS NOT
+          // NULL); Postgres refuses the conflict target unless the predicate
+          // matches — live-verified failure without this on 2026-07-09.
+          where: isNotNull(customers.fieldpulseCustomerId),
         })
         .returning({ id: customers.id });
 
