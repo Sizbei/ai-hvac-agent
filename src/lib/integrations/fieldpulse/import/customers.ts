@@ -165,6 +165,8 @@ export async function importCustomersFromFieldpulse(
   // Walk the full customer list.
   const { items, totalCount } = await client.listCustomers();
   counts.fetched = items.length;
+  // Signal total to the live status page.
+  counts.total = totalCount ?? null;
 
   // Warn if the walk didn't reach the expected total_count (partial walk).
   if (totalCount !== null && items.length < totalCount) {

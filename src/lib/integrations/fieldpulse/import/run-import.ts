@@ -37,6 +37,7 @@ export interface PhaseResult {
   updated: number;
   skipped: number;
   errors: number;
+  total?: number | null;
 }
 
 interface PhaseContext {
@@ -284,6 +285,15 @@ async function main(): Promise<void> {
     const runId = runRow.id;
     const startedAt = Date.now();
 
+    // Powers the live status page — best-effort mid-run count flush every 2 s.
+    const flushInterval = setInterval(() => {
+      db.update(fpImportRuns)
+        .set({ counts: counts as unknown as Record<string, unknown> })
+        .where(eq(fpImportRuns.id, runId))
+        .execute()
+        .catch(() => {});
+    }, 2000);
+
     try {
       const result = await phase.fn(ctx, counts);
       const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
@@ -317,6 +327,8 @@ async function main(): Promise<void> {
 
       console.error(`  FAILED in ${elapsed}s — ${errorMsg}`);
       anyFailed = true;
+    } finally {
+      clearInterval(flushInterval);
     }
   }
 

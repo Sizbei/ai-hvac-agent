@@ -30,6 +30,7 @@ import {
   Boxes,
   Calculator,
   Gauge,
+  Download,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -103,6 +104,7 @@ const NAV_GROUPS: readonly NavGroup[] = [
     heading: 'Integrations',
     items: [
       { label: 'Integrations', href: '/admin/integrations', icon: Plug },
+      { label: 'FP Import', href: '/admin/fieldpulse-import', icon: Download },
     ],
   },
 ] as const;
