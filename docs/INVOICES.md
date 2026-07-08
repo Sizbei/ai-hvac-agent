@@ -39,7 +39,7 @@ and it doubles as a proper service-invoice viewer. It sits on top of the native
 | Row overflow `⋯` menu — **View invoice**, **Copy pay link**, **Void invoice** | List row |
 | Real service-invoice **document** (itemized, totals, parties) | Detail |
 | **Take payment** / refund | Detail toolbar |
-| Collections sidebar (days overdue, reminders, activity timeline) | Detail |
+| Collections sidebar (days overdue, per-send reminder history, activity timeline) | Detail |
 | Read-only **synced** invoices (FieldPulse / Housecall Pro) | List + detail (money actions disabled) |
 
 ---
@@ -203,6 +203,7 @@ returns, the guard failed.
 | `getInvoiceDetailById` | `(orgId, id) → InvoiceDetailView \| null` | LEFT JOINs customer / service request / technician; adds `customerName/Address/Phone`, `technicianName`, `serviceDate`, `lastReminderSentAt`. |
 | `getInvoiceOrgIdentity` | `(orgId) → { companyName, address, phone }` | `companyName` from the column; `phone` parsed from the `businessInfo` JSONB (null if absent/malformed); `address` is null (no structured column). |
 | `getInvoiceCustomerId` | `(orgId, id) → { customerId, syncedSource } \| null` | Lightweight lookup used by pay-link (rejects synced). |
+| `listInvoiceReminders` | `(orgId, id) → InvoiceReminderView[]` | Per-send reminder history, derived from `communication_jobs` (org-scoped, `triggerType='invoice_overdue'`, JSONB match on `templateVariables->>'invoiceId'` with an `invoiceNumber` legacy fallback), newest-first, limit 20. No dedicated table. |
 | `sendInvoiceReminder` | `(orgId, id, now?) → { ok } \| { ok:false, reason }` | See [Reminders](#reminders-one-click--automated-sweep). Reasons: `not_found`, `not_collectible`, `no_phone`, `no_template`, `cooldown`. |
 | `voidInvoice` | `(orgId, id, now?) → { ok } \| { ok:false, reason }` | Classify read → atomic guarded `UPDATE … WHERE state∈{open,draft} AND amountPaidCents=0 AND both sync-null RETURNING`. Reasons: `not_found`, `synced_read_only`, `not_voidable`, `has_payments`. |
 | `takePayment` / `refundPayment` | — | Native payment capture / refund with atomic over-collection + idempotency guards; set `state` to `paid` / `open` / `refunded`. |
@@ -220,7 +221,7 @@ audit-logged.
 |---|---|---|
 | `GET /api/admin/invoices` | List + `collectedThisMonthCents` | `UNAUTHORIZED` 401, `RATE_LIMITED` 429 |
 | `POST /api/admin/invoices` | Create invoice from a sold estimate | — |
-| `GET /api/admin/invoices/[id]` | Detail view + `{ org }` identity | 401 / 404 |
+| `GET /api/admin/invoices/[id]` | Detail view + `{ org }` identity + `reminders` history | 401 / 404 |
 | `POST /api/admin/invoices/[id]/send-reminder` | Send SMS reminder (atomic 6h cooldown) | `NOT_FOUND` 404, `NOT_COLLECTIBLE` 400, `NO_PHONE`/`NO_TEMPLATE` 400, `COOLDOWN` 409 |
 | `POST /api/admin/invoices/[id]/pay-link` | Mint a portal pay link (`{ payLink }`); refuses synced | `SYNCED_READONLY` 409, 404 |
 | `POST /api/admin/invoices/[id]/void` | Void a native, unpaid, open/draft invoice | `NOT_FOUND` 404, `SYNCED_READONLY`/`NOT_VOIDABLE`/`HAS_PAYMENTS` 409 |
@@ -242,6 +243,15 @@ Two paths, one column (`lastReminderSentAt`) so the UI reflects both:
    `invoice_overdue` SMS for overdue collectible invoices **and stamps
    `lastReminderSentAt`** on each successful send — so the list chip and the detail
    Activity timeline reflect automated reminders (no double-chasing).
+
+**Per-send history (no migration).** Every send — manual or automated — is already
+persisted as a `communication_jobs` row, so the detail page derives a true reminder
+history from it: `listInvoiceReminders` matches jobs by `templateVariables->>'invoiceId'`
+(written by both enqueue paths) with a legacy fallback on `invoiceNumber = invoiceRef(id)`
+for older rows. The detail sidebar shows a real **Reminders sent** count and one Activity
+event per send (when history exists, the legacy single `lastReminderSentAt` event is
+suppressed to avoid double-counting). GDPR erasure wipes a customer's jobs, so history
+correctly dies with the customer.
 
 **List rail states** (all gated on `isCollectible && !synced`):
 
@@ -316,8 +326,6 @@ logic in exported **pure functions** and test those:
 
 Not yet built (each a self-contained future increment):
 
-- **Reminder-history log** table — replace the single `lastReminderSentAt` with a true
-  per-send audit trail (needs a migration).
 - **Email-channel reminders** — reminders are SMS-only today (mirror the estimate-sent
   email-fallback pattern).
 - **Bulk chase** — select-many reminders.
