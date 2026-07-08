@@ -11,6 +11,7 @@
  *   --org <uuid>    (required) Target organization id.
  *   --dry-run       Fetch first page only per phase; no DB writes; print counts.
  *   --phase <name>  Run a single phase (technicians|customers|jobs|invoices).
+ *   --since <date>  deliberately deferred — Phase 0.5 verified FP ignores server-side date filters; Phase 6 deltas will full-re-page + filter client-side.
  *
  * Safety: On a real run the script prints DB host + org name and requires the
  * operator to type `import` on stdin before any write is made.
@@ -42,48 +43,24 @@ interface PhaseContext {
   fpClient: Awaited<ReturnType<typeof getFieldpulseClient>>;
 }
 
-type PhaseFn = (ctx: PhaseContext) => Promise<PhaseResult>;
+type PhaseFn = (ctx: PhaseContext, counts: PhaseResult) => Promise<PhaseResult>;
 
 const PHASES: { name: string; fn: PhaseFn }[] = [
   {
     name: "technicians",
-    fn: async (_ctx) => ({
-      fetched: 0,
-      created: 0,
-      updated: 0,
-      skipped: 0,
-      errors: 0,
-    }),
+    fn: async (_ctx, counts) => counts,
   },
   {
     name: "customers",
-    fn: async (_ctx) => ({
-      fetched: 0,
-      created: 0,
-      updated: 0,
-      skipped: 0,
-      errors: 0,
-    }),
+    fn: async (_ctx, counts) => counts,
   },
   {
     name: "jobs",
-    fn: async (_ctx) => ({
-      fetched: 0,
-      created: 0,
-      updated: 0,
-      skipped: 0,
-      errors: 0,
-    }),
+    fn: async (_ctx, counts) => counts,
   },
   {
     name: "invoices",
-    fn: async (_ctx) => ({
-      fetched: 0,
-      created: 0,
-      updated: 0,
-      skipped: 0,
-      errors: 0,
-    }),
+    fn: async (_ctx, counts) => counts,
   },
 ];
 
@@ -224,12 +201,22 @@ async function main(): Promise<void> {
           const tc =
             sample.totalCount !== null ? String(sample.totalCount) : "null";
           console.log(
-            `fetched-sample=${sample.items.length}, totalCount=${tc}`,
+            `fetched-sample=${sample.items.length}, totalCount=${tc} (first page only)`,
           );
+          // Warn if first page is empty but API reports records exist.
+          if (
+            sample.items.length === 0 &&
+            sample.totalCount !== null &&
+            sample.totalCount > 0
+          ) {
+            console.warn(
+              `WARNING: first page empty but totalCount=${sample.totalCount} — paging may be broken`,
+            );
+          }
         } else {
           // technicians — uses the existing listUsers method.
           const users = await fpClient.listUsers();
-          console.log(`fetched-sample=${users.length}, totalCount=null`);
+          console.log(`fetched-sample=${users.length}, totalCount=null (first page only)`);
         }
       } catch (err) {
         console.log(`ERROR: ${err instanceof Error ? err.message : String(err)}`);
@@ -258,6 +245,15 @@ async function main(): Promise<void> {
   for (const phase of selectedPhases) {
     console.log(`--- Phase: ${phase.name} ---`);
 
+    // Initialize counts accumulator — will be mutated during phase execution.
+    const counts: PhaseResult = {
+      fetched: 0,
+      created: 0,
+      updated: 0,
+      skipped: 0,
+      errors: 0,
+    };
+
     // Insert running row.
     const [runRow] = await db
       .insert(fpImportRuns)
@@ -265,7 +261,7 @@ async function main(): Promise<void> {
         organizationId: orgId,
         phase: phase.name,
         status: "running",
-        counts: {},
+        counts: counts as unknown as Record<string, unknown>,
       })
       .returning({ id: fpImportRuns.id });
 
@@ -273,7 +269,7 @@ async function main(): Promise<void> {
     const startedAt = Date.now();
 
     try {
-      const result = await phase.fn(ctx);
+      const result = await phase.fn(ctx, counts);
       const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
 
       await db
@@ -292,11 +288,13 @@ async function main(): Promise<void> {
       const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
       const errorMsg = err instanceof Error ? err.message : String(err);
 
+      // counts is written on failure too — it's the resume cursor for Phases 2-5
       await db
         .update(fpImportRuns)
         .set({
           status: "failed",
           error: errorMsg,
+          counts: counts as unknown as Record<string, unknown>,
           finishedAt: new Date(),
         })
         .where(eq(fpImportRuns.id, runId));
