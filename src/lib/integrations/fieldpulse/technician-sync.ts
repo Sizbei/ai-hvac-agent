@@ -24,9 +24,15 @@ import type { FieldpulseUser } from "./types";
  * (Fieldpulse may return other user types).
  */
 function isFieldpulseTechnician(user: FieldpulseUser): boolean {
-  // Fieldpulse technicians have role="technician" or similar
-  // Adjust based on actual API response
-  return user.role === "technician" || user.role === "Technician";
+  // Live-verified 2026-07-09 on account 182499: role is returned as an integer.
+  // Observed vocabulary: 1 = admin/office (incl. founder), 4 = field technician
+  // (all role-4 users hold job assignments). Keep legacy string matches for
+  // other-account safety in case the API vocabulary differs.
+  return (
+    user.role === "4" ||
+    user.role === "technician" ||
+    user.role === "Technician"
+  );
 }
 
 /**

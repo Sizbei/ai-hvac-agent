@@ -172,6 +172,17 @@ function idStr(v: unknown): string | null {
   return null;
 }
 
+/**
+ * Coerce a FieldPulse field that may be a number OR a string (e.g. `role`).
+ * Live-verified 2026-07-09: the /users endpoint returns role as an INTEGER.
+ */
+const numOrStr = (v: unknown): string | undefined =>
+  typeof v === "string" && v.length > 0
+    ? v
+    : typeof v === "number" && Number.isFinite(v)
+      ? String(v)
+      : undefined;
+
 /** Parse FieldPulse money (dollar string "200.00" or number) to integer cents. */
 function dollarsToCents(v: unknown): number | null {
   const n = typeof v === "number" ? v : typeof v === "string" ? parseFloat(v) : NaN;
@@ -331,7 +342,7 @@ function toUser(raw: unknown): FieldpulseUser | null {
     name: str(obj.name) ?? assembledName,
     email: str(obj.email),
     isActive,
-    role: str(obj.role),
+    role: numOrStr(obj.role),
   };
 }
 

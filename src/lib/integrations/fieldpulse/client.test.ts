@@ -304,6 +304,45 @@ describe("RestFieldpulseClient — defensive pagination (listJobInvoices)", () =
   });
 });
 
+describe("listUsers — toUser shape", () => {
+  let mockFetch: ReturnType<typeof vi.fn>;
+  const config = { baseUrl: "https://api.fieldpulse.com", apiKey: "k" };
+
+  beforeEach(() => {
+    mockFetch = vi.fn();
+    vi.stubGlobal("fetch", mockFetch);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("coerces numeric role to string", async () => {
+    // Real API shape: role is an integer (live-verified 2026-07-09, account 182499)
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        error: false,
+        total_count: 1,
+        response: [
+          {
+            id: 182499,
+            first_name: "Jane",
+            last_name: "Tech",
+            email: "jane@example.com",
+            active: true,
+            role: 4,            // <-- integer, not string
+          },
+        ],
+      }),
+    });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const users = await client.listUsers();
+    expect(users).toHaveLength(1);
+    expect(users[0].role).toBe("4");   // must be coerced to string "4"
+  });
+});
+
 // ── listCustomers / listJobs / listInvoices ──────────────────────────────────
 
 describe("RestFieldpulseClient — listCustomers", () => {

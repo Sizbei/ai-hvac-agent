@@ -86,6 +86,39 @@ describe("syncTechniciansFromFieldpulse", () => {
     expect(set).toHaveBeenCalledTimes(1);
   });
 
+  it("imports role-4 (numeric) users and skips role-1 (numeric) users", async () => {
+    // Live shape: role is an integer. role 4 = field technician, role 1 = admin.
+    vi.mocked(getFieldpulseClient).mockResolvedValue({
+      listUsers: vi.fn().mockResolvedValue([
+        // role-4 user — already coerced to string "4" by client.ts toUser
+        {
+          id: "fpid-4",
+          name: "Field Tech",
+          email: "tech@example.com",
+          role: "4",
+          isActive: true,
+        },
+        // role-1 user (admin/office) — must be filtered out
+        {
+          id: "fpid-1",
+          name: "Office Admin",
+          email: "admin@example.com",
+          role: "1",
+          isActive: true,
+        },
+      ]),
+    } as never);
+    const { values } = wireInsert();
+    wireUpdate();
+
+    const result = await syncTechniciansFromFieldpulse(ORG);
+
+    expect(result.synced).toBe(1);                    // only the role-4 user
+    expect(values).toHaveBeenCalledTimes(1);           // exactly one upsert
+    const upsertArg = values.mock.calls[0][0] as { email: string };
+    expect(upsertArg.email).toBe("tech@example.com");  // the role-4 user
+  });
+
   it("degrades safely (synced 0) when listUsers throws", async () => {
     vi.mocked(getFieldpulseClient).mockResolvedValue({
       listUsers: vi.fn().mockRejectedValue(new Error("FP 500")),

@@ -87,6 +87,7 @@ API Gateway in front of FieldPulse). **Auth:** `x-api-key` header.
 - **Invoice `status` is an INTEGER**; the mirror derives paid/open state from the
   **amounts** (`amount_paid`/`amount_unpaid`), which are authoritative, not the
   opaque status int.
+- **Users `role` is an INTEGER**: observed vocabulary `1` = admin/office (incl. founder), `4` = field technician. The technician-sync imports role `4`.
 - **Dates** are `"YYYY-MM-DD HH:MM:SS"`. Paid timestamp is `last_payment_date`.
 - **Working endpoints:** `/customers`, `/jobs`, `/jobs/{id}`, `/invoices`,
   `/invoices/{id}`, `/users`, `/estimates`, `/payments`, `/teams`.
