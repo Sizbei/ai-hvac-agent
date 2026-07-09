@@ -106,7 +106,10 @@ export async function importPaymentsFromFieldpulse(
       // Tally unknown statuses.
       if (payment.status != null) {
         const s = payment.status.toLowerCase().trim();
-        const known = ["paid", "completed", "approved", "pending", "processing", "failed", "declined", "error", "refunded", "returned"];
+        // Keep in sync with mapFpPaymentStatus — "4" is the live-proven
+        // succeeded int (review nit: this list once lagged the mapper and
+        // over-warned on every payment).
+        const known = ["4", "paid", "completed", "approved", "pending", "processing", "failed", "declined", "error", "refunded", "returned"];
         if (!known.includes(s)) {
           unknownStatuses.set(payment.status, (unknownStatuses.get(payment.status) ?? 0) + 1);
         }
