@@ -18,6 +18,7 @@ export interface AdminRequest {
   readonly isAfterHours: boolean;
   readonly createdAt: string;
   readonly updatedAt: string;
+  readonly syncedSource: 'fieldpulse' | 'housecall' | null;
 }
 
 // Request detail (includes decrypted PII + transcript)

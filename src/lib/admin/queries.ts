@@ -27,6 +27,7 @@ import {
   requestNotes,
   users,
   messages,
+  customers,
   requestStatusEnum,
   holdReasonEnum,
 } from "@/lib/db/schema";
@@ -145,7 +146,9 @@ export async function getRequests(
 
   const total = countResult?.value ?? 0;
 
-  // Fetch paginated results with assigned technician name
+  // Fetch paginated results with assigned technician name.
+  // LEFT JOIN customers to resolve names for FP-imported jobs (their request row
+  // has customerNameEncrypted=null; the name lives on the linked customers row).
   const rows = await db
     .select({
       id: serviceRequests.id,
@@ -155,6 +158,9 @@ export async function getRequests(
       description: serviceRequests.description,
       referenceNumber: serviceRequests.referenceNumber,
       customerNameEncrypted: serviceRequests.customerNameEncrypted,
+      customerNameFromCustomer: customers.nameEncrypted,
+      fieldpulseJobId: serviceRequests.fieldpulseJobId,
+      hcpJobId: serviceRequests.hcpJobId,
       assignedToName: users.name,
       isAfterHours: serviceRequests.isAfterHours,
       createdAt: serviceRequests.createdAt,
@@ -162,6 +168,15 @@ export async function getRequests(
     })
     .from(serviceRequests)
     .leftJoin(users, eq(serviceRequests.assignedTo, users.id))
+    // Org-scoped join (defense in depth): a customerId can only be this org's,
+    // but the predicate guarantees no cross-tenant leak.
+    .leftJoin(
+      customers,
+      and(
+        eq(customers.id, serviceRequests.customerId),
+        eq(customers.organizationId, organizationId),
+      ),
+    )
     .where(baseConditions)
     .orderBy(desc(serviceRequests.createdAt))
     .limit(limit)
@@ -174,7 +189,17 @@ export async function getRequests(
     urgency: row.urgency,
     description: row.description,
     referenceNumber: row.referenceNumber,
-    customerName: safeDecrypt(row.customerNameEncrypted),
+    // FP-imported jobs have null customerNameEncrypted; fall back to the
+    // name on the linked customers row.
+    customerName:
+      safeDecrypt(row.customerNameEncrypted) ??
+      safeDecrypt(row.customerNameFromCustomer),
+    syncedSource:
+      row.fieldpulseJobId != null
+        ? "fieldpulse"
+        : row.hcpJobId != null
+          ? "housecall"
+          : null,
     assignedToName: row.assignedToName,
     isAfterHours: row.isAfterHours,
     createdAt: row.createdAt.toISOString(),
@@ -197,9 +222,12 @@ export async function getRequestById(
       description: serviceRequests.description,
       referenceNumber: serviceRequests.referenceNumber,
       customerNameEncrypted: serviceRequests.customerNameEncrypted,
+      customerNameFromCustomer: customers.nameEncrypted,
       customerPhoneEncrypted: serviceRequests.customerPhoneEncrypted,
       customerEmailEncrypted: serviceRequests.customerEmailEncrypted,
       addressEncrypted: serviceRequests.addressEncrypted,
+      fieldpulseJobId: serviceRequests.fieldpulseJobId,
+      hcpJobId: serviceRequests.hcpJobId,
       assignedTo: serviceRequests.assignedTo,
       assignedToName: users.name,
       scheduledDate: serviceRequests.scheduledDate,
@@ -233,6 +261,13 @@ export async function getRequestById(
     })
     .from(serviceRequests)
     .leftJoin(users, eq(serviceRequests.assignedTo, users.id))
+    .leftJoin(
+      customers,
+      and(
+        eq(customers.id, serviceRequests.customerId),
+        eq(customers.organizationId, organizationId),
+      ),
+    )
     .where(
       withTenant(
         serviceRequests,
@@ -301,10 +336,20 @@ export async function getRequestById(
     urgency: row.urgency,
     description: row.description,
     referenceNumber: row.referenceNumber,
-    customerName: safeDecrypt(row.customerNameEncrypted),
+    // FP-imported jobs have null customerNameEncrypted; fall back to the
+    // name on the linked customers row.
+    customerName:
+      safeDecrypt(row.customerNameEncrypted) ??
+      safeDecrypt(row.customerNameFromCustomer),
     customerPhone: safeDecrypt(row.customerPhoneEncrypted),
     customerEmail: safeDecrypt(row.customerEmailEncrypted),
     address: safeDecrypt(row.addressEncrypted),
+    syncedSource:
+      row.fieldpulseJobId != null
+        ? "fieldpulse"
+        : row.hcpJobId != null
+          ? "housecall"
+          : null,
     assignedTo: row.assignedTo,
     assignedToName: row.assignedToName,
     scheduledDate: row.scheduledDate?.toISOString() ?? null,
@@ -472,6 +517,7 @@ export async function assignTechnician(
       isAfterHours: updated.isAfterHours,
       createdAt: updated.createdAt.toISOString(),
       updatedAt: updated.updatedAt.toISOString(),
+      syncedSource: null,
     },
   };
 }
@@ -576,6 +622,7 @@ export async function reassignTechnician(
       isAfterHours: updated.isAfterHours,
       createdAt: updated.createdAt.toISOString(),
       updatedAt: updated.updatedAt.toISOString(),
+      syncedSource: null,
     },
   };
 }

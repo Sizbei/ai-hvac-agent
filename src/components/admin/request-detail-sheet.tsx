@@ -587,6 +587,11 @@ export function RequestDetailSheet({
                     After-hours
                   </span>
                 )}
+                {detail.syncedSource && (
+                  <span className="rounded border bg-violet-50 px-1.5 py-px text-[10px] font-medium text-violet-700">
+                    {detail.syncedSource === 'fieldpulse' ? 'FieldPulse' : 'Housecall Pro'}
+                  </span>
+                )}
                 <InvoiceStatusBadge status={detail.invoiceStatus} />
               </SheetDescription>
             </SheetHeader>
@@ -1097,9 +1102,15 @@ export function RequestDetailSheet({
                 <h3 className="text-sm font-semibold mb-2">Conversation Transcript</h3>
                 <ScrollArea className="max-h-[300px] rounded-md border p-3">
                   {detail.transcript.length === 0 ? (
-                    <p className="text-sm text-muted-foreground text-center py-4">
-                      No messages recorded
-                    </p>
+                    detail.syncedSource === 'fieldpulse' ? (
+                      <p className="text-sm text-muted-foreground text-center py-4">
+                        Imported from FieldPulse — no conversation transcript
+                      </p>
+                    ) : (
+                      <p className="text-sm text-muted-foreground text-center py-4">
+                        No messages recorded
+                      </p>
+                    )
                   ) : (
                     detail.transcript.map((msg, index) => (
                       <TranscriptBubble

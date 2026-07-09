@@ -93,6 +93,9 @@ vi.mock('@/lib/db/schema', () => ({
     customerPhoneEncrypted: 'sr.customerPhoneEncrypted',
     customerEmailEncrypted: 'sr.customerEmailEncrypted',
     addressEncrypted: 'sr.addressEncrypted',
+    customerId: 'sr.customerId',
+    fieldpulseJobId: 'sr.fieldpulseJobId',
+    hcpJobId: 'sr.hcpJobId',
     assignedTo: 'sr.assignedTo',
     assignedToName: 'sr.assignedToName',
     scheduledDate: 'sr.scheduledDate',
@@ -106,6 +109,11 @@ vi.mock('@/lib/db/schema', () => ({
     updatedAt: 'sr.updatedAt',
     sessionId: 'sr.sessionId',
     organizationId: 'sr.organizationId',
+  },
+  customers: {
+    id: 'c.id',
+    organizationId: 'c.organizationId',
+    nameEncrypted: 'c.nameEncrypted',
   },
   users: {
     id: 'u.id',
@@ -263,6 +271,90 @@ describe('getRequests', () => {
 
     await getRequests(ORG_ID, { search: '   ' });
     expect(ilike).not.toHaveBeenCalled();
+  });
+
+  it('falls back to customer row name when request customerNameEncrypted is null (FP import)', async () => {
+    const now = new Date();
+    selectResolutions = [
+      [{ value: 1 }],
+      [
+        {
+          id: 'req-fp',
+          status: 'pending',
+          issueType: 'heating',
+          urgency: 'medium',
+          description: 'FP job',
+          referenceNumber: 'REF-FP',
+          customerNameEncrypted: null,
+          customerNameFromCustomer: 'enc_customer',
+          fieldpulseJobId: 'fp-123',
+          hcpJobId: null,
+          assignedToName: null,
+          isAfterHours: false,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    ];
+
+    const result = await getRequests(ORG_ID, {});
+    expect(result.requests[0].customerName).toBe('decrypted_enc_customer');
+  });
+
+  it('derives syncedSource=fieldpulse when fieldpulseJobId is set', async () => {
+    const now = new Date();
+    selectResolutions = [
+      [{ value: 1 }],
+      [
+        {
+          id: 'req-fp',
+          status: 'pending',
+          issueType: 'heating',
+          urgency: 'medium',
+          description: 'FP job',
+          referenceNumber: 'REF-FP',
+          customerNameEncrypted: null,
+          customerNameFromCustomer: 'enc_customer',
+          fieldpulseJobId: 'fp-123',
+          hcpJobId: null,
+          assignedToName: null,
+          isAfterHours: false,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    ];
+
+    const result = await getRequests(ORG_ID, {});
+    expect(result.requests[0].syncedSource).toBe('fieldpulse');
+  });
+
+  it('derives syncedSource=null when both fieldpulseJobId and hcpJobId are null', async () => {
+    const now = new Date();
+    selectResolutions = [
+      [{ value: 1 }],
+      [
+        {
+          id: 'req-native',
+          status: 'pending',
+          issueType: 'cooling',
+          urgency: 'low',
+          description: 'Native job',
+          referenceNumber: 'REF-NAT',
+          customerNameEncrypted: 'enc_native',
+          customerNameFromCustomer: null,
+          fieldpulseJobId: null,
+          hcpJobId: null,
+          assignedToName: null,
+          isAfterHours: false,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    ];
+
+    const result = await getRequests(ORG_ID, {});
+    expect(result.requests[0].syncedSource).toBeNull();
   });
 });
 

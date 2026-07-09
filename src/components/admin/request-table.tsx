@@ -88,6 +88,11 @@ export function RequestTable({ requests, isLoading, onRowClick }: RequestTablePr
                           After-hrs
                         </span>
                       )}
+                      {request.syncedSource && (
+                        <span className="rounded border bg-violet-50 px-1.5 py-px text-[10px] font-medium text-violet-700">
+                          {request.syncedSource === 'fieldpulse' ? 'FieldPulse' : 'Housecall Pro'}
+                        </span>
+                      )}
                     </span>
                   </TableCell>
                   <TableCell>
