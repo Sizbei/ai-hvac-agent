@@ -31,7 +31,7 @@
  */
 import { eq, and, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { estimates, serviceRequests, customers } from "@/lib/db/schema";
+import { estimates, estimateOptions, estimateLineItems, serviceRequests, customers } from "@/lib/db/schema";
 import { logger } from "@/lib/logger";
 import type { FieldpulseClient } from "../client";
 import type { FieldpulseEstimate } from "../types";
@@ -108,7 +108,19 @@ export async function importEstimatesFromFieldpulse(
       const customerId = est.customerId ? (customerMap.get(est.customerId) ?? null) : null;
       const serviceRequestId = est.jobId ? (jobMap.get(est.jobId) ?? null) : null;
 
-      await db
+      // Per-id enrichment to get custom_status (not present on list rows).
+      let fieldpulseStatusName: string | null = null;
+      try {
+        const detail = await client.getEstimate(est.id);
+        fieldpulseStatusName = detail?.customStatus ?? null;
+      } catch (enrichErr) {
+        logger.warn(
+          { orgId, fpEstimateId: est.id, error: enrichErr instanceof Error ? enrichErr.message : String(enrichErr) },
+          "FP estimate import: per-id enrichment failed — continuing with null status name",
+        );
+      }
+
+      const upserted = await db
         .insert(estimates)
         .values({
           organizationId: orgId,
@@ -117,6 +129,7 @@ export async function importEstimatesFromFieldpulse(
           serviceRequestId: serviceRequestId ?? undefined,
           status,
           totalCents: est.totalCents ?? 0,
+          fieldpulseStatusName,
           createdAt: parseFpDate(est.createdAt) ?? undefined,
           updatedAt: new Date(),
         })
@@ -128,9 +141,72 @@ export async function importEstimatesFromFieldpulse(
             serviceRequestId: serviceRequestId ?? undefined,
             status,
             totalCents: est.totalCents ?? 0,
+            fieldpulseStatusName,
             updatedAt: new Date(),
           },
-        });
+        })
+        .returning({ id: estimates.id });
+
+      const estimateId = upserted[0]?.id;
+
+      // Upsert line items via a synthetic "FieldPulse" option.
+      if (estimateId && est.lineItems && est.lineItems.length > 0) {
+        // Find or create the synthetic option for this estimate.
+        const existingOptions = await db
+          .select({ id: estimateOptions.id })
+          .from(estimateOptions)
+          .where(
+            and(
+              eq(estimateOptions.organizationId, orgId),
+              eq(estimateOptions.estimateId, estimateId),
+              eq(estimateOptions.name, "FieldPulse"),
+            ),
+          );
+
+        let optionId: string;
+        if (existingOptions.length > 0) {
+          optionId = existingOptions[0].id;
+        } else {
+          const inserted = await db
+            .insert(estimateOptions)
+            .values({
+              organizationId: orgId,
+              estimateId,
+              name: "FieldPulse",
+              sortOrder: 0,
+              subtotalCents: est.subtotalCents ?? 0,
+              taxCents: est.taxCents ?? 0,
+              totalCents: est.totalCents ?? 0,
+            })
+            .returning({ id: estimateOptions.id });
+          if (!inserted[0]) {
+            throw new Error("FP estimate option insert returned no row");
+          }
+          optionId = inserted[0].id;
+        }
+
+        // Build line item rows.
+        const liRows = est.lineItems.map((li) => ({
+          organizationId: orgId,
+          optionId,
+          name: li.name,
+          quantity: Math.max(1, Math.round(li.quantity)),
+          unitPriceCents: li.unitPriceCents,
+          costCents: Math.round(li.quantity * li.unitCostCents),
+          lineTotalCents: Math.round(li.quantity * li.unitPriceCents),
+        }));
+
+        // Replace line items atomically (delete + insert).
+        await db.batch([
+          db.delete(estimateLineItems).where(
+            and(
+              eq(estimateLineItems.organizationId, orgId),
+              eq(estimateLineItems.optionId, optionId),
+            ),
+          ),
+          db.insert(estimateLineItems).values(liRows),
+        ]);
+      }
 
       if (isNew) {
         existingFpIds.add(est.id);

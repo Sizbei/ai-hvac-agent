@@ -2584,6 +2584,7 @@ export const estimates = pgTable(
     signatureIp: text("signature_ip"),
     soldOptionId: uuid("sold_option_id"),
     fieldpulseEstimateId: text("fieldpulse_estimate_id"),
+    fieldpulseStatusName: text("fieldpulse_status_name"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },

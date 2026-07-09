@@ -6,6 +6,8 @@
  *    total = null); deleted-skip classification; created/updated via pre-select;
  *    customer + job resolution; per-record error containment; once-per-run warn.
  *  - mapFpEstimateStatus: status mapping for all known + unknown values.
+ *  - Phase 6 additions: line item synthetic option + upsert; status name enrichment
+ *    via getEstimate; error containment on enrichment failure.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { importEstimatesFromFieldpulse, mapFpEstimateStatus } from "./estimates";
@@ -22,6 +24,8 @@ vi.mock("@/lib/db", () => ({
   db: {
     select: vi.fn(),
     insert: vi.fn(),
+    delete: vi.fn(),
+    batch: vi.fn(),
   },
 }));
 vi.mock("@/lib/logger", () => ({
@@ -44,11 +48,60 @@ function wireSelects(results: unknown[][]) {
   });
 }
 
-function wireInsert() {
-  const conflictUpdate = vi.fn().mockResolvedValue([]);
-  const values = vi.fn().mockReturnValue({ onConflictDoUpdate: conflictUpdate });
+/**
+ * Wire the insert mock. The upsert chain is:
+ *   insert(estimates).values({}).onConflictDoUpdate({}).returning({}) → [{ id }]
+ * Option insert chain is:
+ *   insert(estimateOptions).values({}).returning({}) → [{ id }]
+ * Line item insert chain (inside db.batch):
+ *   insert(estimateLineItems).values([]) → (consumed by batch mock, not awaited directly)
+ *
+ * We use a call-count approach so the first insert (estimates) returns the
+ * upsert chain with returning, subsequent inserts return a simpler chain.
+ */
+function wireInsert(estimateNativeId = "native-estimate-uuid", optionNativeId = "native-option-uuid") {
+  let callCount = 0;
+  vi.mocked(db.insert).mockImplementation(() => {
+    callCount++;
+    if (callCount === 1) {
+      // estimates upsert: .values({}).onConflictDoUpdate({}).returning({}) → [{ id }]
+      const returning = vi.fn().mockResolvedValue([{ id: estimateNativeId }]);
+      const onConflictDoUpdate = vi.fn().mockReturnValue({ returning });
+      const values = vi.fn().mockReturnValue({ onConflictDoUpdate });
+      return { values } as never;
+    }
+    if (callCount === 2) {
+      // estimateOptions insert: .values({}).returning({}) → [{ id }]
+      const returning = vi.fn().mockResolvedValue([{ id: optionNativeId }]);
+      const values = vi.fn().mockReturnValue({ returning });
+      return { values } as never;
+    }
+    // estimateLineItems insert (inside batch): .values([]) — batch consumes it
+    const values = vi.fn().mockReturnValue({});
+    return { values } as never;
+  });
+
+  vi.mocked(db.delete).mockImplementation(() => {
+    const where = vi.fn().mockReturnValue({});
+    return { where } as never;
+  });
+
+  vi.mocked(db.batch).mockResolvedValue([] as never);
+
+  return { callCount: () => callCount };
+}
+
+/**
+ * Wire insert for the simple case (no line items): only the estimates upsert
+ * insert is called. Returns helpers to inspect the values call.
+ */
+function wireSimpleInsert(estimateNativeId = "native-estimate-uuid") {
+  const returning = vi.fn().mockResolvedValue([{ id: estimateNativeId }]);
+  const onConflictDoUpdate = vi.fn().mockReturnValue({ returning });
+  const values = vi.fn().mockReturnValue({ onConflictDoUpdate });
   vi.mocked(db.insert).mockReturnValue({ values } as never);
-  return { conflictUpdate, values };
+  vi.mocked(db.batch).mockResolvedValue([] as never);
+  return { returning, onConflictDoUpdate, values };
 }
 
 // ── Fixture helpers ───────────────────────────────────────────────────────────
@@ -78,9 +131,11 @@ function makeCounts(): PhaseResult {
 function makeClient(
   items: FieldpulseEstimate[],
   totalCount: number | null = null,
+  getEstimateResult: FieldpulseEstimate | null = null,
 ): FieldpulseClient {
   return {
     listEstimates: vi.fn().mockResolvedValue({ items, totalCount }),
+    getEstimate: vi.fn().mockResolvedValue(getEstimateResult),
   } as unknown as FieldpulseClient;
 }
 
@@ -121,7 +176,7 @@ describe("importEstimatesFromFieldpulse", () => {
     const counts = makeCounts();
     // 3 selects: existing fp ids, customers, service_requests
     wireSelects([[], [], []]);
-    wireInsert();
+    wireSimpleInsert();
 
     await importEstimatesFromFieldpulse(ORG, counts, client);
 
@@ -135,7 +190,7 @@ describe("importEstimatesFromFieldpulse", () => {
     const client = makeClient([deleted, active]);
     const counts = makeCounts();
     wireSelects([[], [], []]);
-    wireInsert();
+    wireSimpleInsert();
 
     await importEstimatesFromFieldpulse(ORG, counts, client);
 
@@ -153,7 +208,7 @@ describe("importEstimatesFromFieldpulse", () => {
       [{ fpId: "20000001", nativeId: "native-customer-uuid" }],
       [],
     ]);
-    wireInsert();
+    wireSimpleInsert();
 
     await importEstimatesFromFieldpulse(ORG, counts, client);
 
@@ -170,7 +225,7 @@ describe("importEstimatesFromFieldpulse", () => {
       [],
       [{ fpId: "10000001", nativeId: "native-sr-uuid" }],
     ]);
-    wireInsert();
+    wireSimpleInsert();
 
     await importEstimatesFromFieldpulse(ORG, counts, client);
 
@@ -183,7 +238,7 @@ describe("importEstimatesFromFieldpulse", () => {
     const client = makeClient([est]);
     const counts = makeCounts();
     wireSelects([[], [], []]);
-    wireInsert();
+    wireSimpleInsert();
 
     await importEstimatesFromFieldpulse(ORG, counts, client);
 
@@ -197,7 +252,7 @@ describe("importEstimatesFromFieldpulse", () => {
     const counts = makeCounts();
     // existing fp ids has this estimate already
     wireSelects([[{ fieldpulseEstimateId: "70000001" }], [], []]);
-    wireInsert();
+    wireSimpleInsert();
 
     await importEstimatesFromFieldpulse(ORG, counts, client);
 
@@ -216,14 +271,19 @@ describe("importEstimatesFromFieldpulse", () => {
     vi.mocked(db.insert).mockImplementation(() => {
       callCount++;
       if (callCount === 1) {
-        const onConflictDoUpdate = vi.fn().mockRejectedValue(new Error("DB explode"));
+        // First estimate insert — throw
+        const returning = vi.fn().mockRejectedValue(new Error("DB explode"));
+        const onConflictDoUpdate = vi.fn().mockReturnValue({ returning });
         const values = vi.fn().mockReturnValue({ onConflictDoUpdate });
         return { values } as never;
       }
-      const onConflictDoUpdate = vi.fn().mockResolvedValue([]);
+      // Second estimate insert — succeed
+      const returning = vi.fn().mockResolvedValue([{ id: "native-uuid-2" }]);
+      const onConflictDoUpdate = vi.fn().mockReturnValue({ returning });
       const values = vi.fn().mockReturnValue({ onConflictDoUpdate });
       return { values } as never;
     });
+    vi.mocked(db.batch).mockResolvedValue([] as never);
 
     await importEstimatesFromFieldpulse(ORG, counts, client);
 
@@ -241,9 +301,11 @@ describe("importEstimatesFromFieldpulse", () => {
     const counts = makeCounts();
     wireSelects([[], [], []]);
 
-    const onConflictDoUpdate = vi.fn().mockRejectedValue(new Error("DB explode"));
+    const returning = vi.fn().mockRejectedValue(new Error("DB explode"));
+    const onConflictDoUpdate = vi.fn().mockReturnValue({ returning });
     const values = vi.fn().mockReturnValue({ onConflictDoUpdate });
     vi.mocked(db.insert).mockReturnValue({ values } as never);
+    vi.mocked(db.batch).mockResolvedValue([] as never);
 
     await importEstimatesFromFieldpulse(ORG, counts, client);
 
@@ -258,7 +320,7 @@ describe("importEstimatesFromFieldpulse", () => {
     const client = makeClient([est]);
     const counts = makeCounts();
     wireSelects([[], [], []]);
-    wireInsert();
+    wireSimpleInsert();
 
     await importEstimatesFromFieldpulse(ORG, counts, client);
 
@@ -270,7 +332,7 @@ describe("importEstimatesFromFieldpulse", () => {
     const client = makeClient([est]);
     const counts = makeCounts();
     wireSelects([[], [], []]);
-    const { values: valuesMock } = wireInsert();
+    const { values: valuesMock } = wireSimpleInsert();
 
     await importEstimatesFromFieldpulse(ORG, counts, client);
 
@@ -296,13 +358,117 @@ describe("importEstimatesFromFieldpulse", () => {
     const client = makeClient([est]);
     const counts = makeCounts();
     wireSelects([[], [], []]);
-    wireInsert();
+    wireSimpleInsert();
 
     await importEstimatesFromFieldpulse(ORG, counts, client);
 
     expect(logger.warn).toHaveBeenCalledWith(
       expect.objectContaining({ unknownStatuses: { weird_status: 1 } }),
       expect.stringContaining("unknown FP status codes"),
+    );
+  });
+
+  // ── Phase 6: line items ───────────────────────────────────────────────────
+
+  it("creates a synthetic FieldPulse option and inserts line items when estimate has line_items", async () => {
+    const est = makeEstimate({
+      id: "70000003",
+      lineItems: [
+        { name: "Capacitor Replacement", quantity: 2, unitPriceCents: 12500, unitCostCents: 6000 },
+        { name: "Annual Tune-Up", quantity: 1, unitPriceCents: 23500, unitCostCents: 8000 },
+      ],
+    });
+    const client = makeClient([est]);
+    const counts = makeCounts();
+    // 3 pre-selects + 1 option existence check (returns empty = no existing option)
+    wireSelects([[], [], [], []]);
+    wireInsert("native-est-uuid", "native-opt-uuid");
+
+    await importEstimatesFromFieldpulse(ORG, counts, client);
+
+    expect(counts.created).toBe(1);
+    expect(counts.errors).toBe(0);
+    // db.insert called for estimates + estimateOptions + estimateLineItems (inside batch)
+    expect(db.insert).toHaveBeenCalledTimes(3);
+    // db.batch for delete + line item insert
+    expect(db.batch).toHaveBeenCalled();
+    expect(db.delete).toHaveBeenCalled();
+  });
+
+  it("reuses existing synthetic option on resync (idempotency)", async () => {
+    const est = makeEstimate({
+      id: "70000003",
+      lineItems: [
+        { name: "Capacitor Replacement", quantity: 1, unitPriceCents: 12500, unitCostCents: 6000 },
+      ],
+    });
+    const client = makeClient([est]);
+    const counts = makeCounts();
+    // 3 pre-selects + option existence check returns existing option
+    wireSelects([[], [], [], [{ id: "existing-option-uuid" }]]);
+    // Only the estimates insert is called (option already exists)
+    const returning = vi.fn().mockResolvedValue([{ id: "native-est-uuid" }]);
+    const onConflictDoUpdate = vi.fn().mockReturnValue({ returning });
+    const values = vi.fn().mockReturnValue({ onConflictDoUpdate });
+    vi.mocked(db.insert).mockReturnValue({ values } as never);
+    vi.mocked(db.delete).mockImplementation(() => ({ where: vi.fn().mockReturnValue({}) } as never));
+    vi.mocked(db.batch).mockResolvedValue([] as never);
+
+    await importEstimatesFromFieldpulse(ORG, counts, client);
+
+    expect(counts.created).toBe(1);
+    // estimates insert + estimateLineItems insert inside batch (no option insert — reused)
+    expect(db.insert).toHaveBeenCalledTimes(2);
+    // But batch (delete + line item insert) is still called
+    expect(db.batch).toHaveBeenCalled();
+    expect(db.delete).toHaveBeenCalled();
+  });
+
+  // ── Phase 6: status name enrichment ──────────────────────────────────────
+
+  it("stores fieldpulseStatusName from getEstimate customStatus", async () => {
+    const est = makeEstimate({ id: "70000001" });
+    const client = makeClient(
+      [est],
+      null,
+      makeEstimate({ id: "70000001", customStatus: "Sent" }),
+    );
+    const counts = makeCounts();
+    wireSelects([[], [], []]);
+    const { values: valuesMock, onConflictDoUpdate } = wireSimpleInsert();
+
+    await importEstimatesFromFieldpulse(ORG, counts, client);
+
+    // fieldpulseStatusName should be "Sent" in the insert values
+    const insertedValues = valuesMock.mock.calls[0]?.[0];
+    expect(insertedValues?.fieldpulseStatusName).toBe("Sent");
+    // And in the onConflictDoUpdate set
+    const updateSet = onConflictDoUpdate.mock.calls[0]?.[0]?.set;
+    expect(updateSet?.fieldpulseStatusName).toBe("Sent");
+  });
+
+  it("continues with null fieldpulseStatusName when getEstimate throws", async () => {
+    const est = makeEstimate({ id: "70000001" });
+    const client = {
+      listEstimates: vi.fn().mockResolvedValue({ items: [est], totalCount: null }),
+      getEstimate: vi.fn().mockRejectedValue(new Error("Network failure")),
+    } as unknown as FieldpulseClient;
+    const counts = makeCounts();
+    wireSelects([[], [], []]);
+    const { values: valuesMock } = wireSimpleInsert();
+
+    await importEstimatesFromFieldpulse(ORG, counts, client);
+
+    // Record is still created
+    expect(counts.created).toBe(1);
+    expect(counts.errors).toBe(0);
+    // fieldpulseStatusName defaults to null
+    const insertedValues = valuesMock.mock.calls[0]?.[0];
+    expect(insertedValues?.fieldpulseStatusName).toBeNull();
+    // A warn is logged for the enrichment failure
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ fpEstimateId: "70000001" }),
+      expect.stringContaining("per-id enrichment failed"),
     );
   });
 });

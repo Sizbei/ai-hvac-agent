@@ -215,6 +215,8 @@ export interface EstimateListRow {
   readonly signedAt: Date | null;
   /** Which FSM this estimate is a read-only mirror of, or null when native. */
   readonly syncedSource: "fieldpulse" | null;
+  /** Human-readable status label from FieldPulse (e.g. "Sent"). Null for native estimates. */
+  readonly fieldpulseStatusName: string | null;
 }
 
 /** Admin list of an org's estimates, newest first. */
@@ -232,14 +234,16 @@ export async function listEstimates(
       expiresAt: estimates.expiresAt,
       signedAt: estimates.signedAt,
       fieldpulseEstimateId: estimates.fieldpulseEstimateId,
+      fieldpulseStatusName: estimates.fieldpulseStatusName,
     })
     .from(estimates)
     .where(withTenant(estimates, organizationId))
     .orderBy(desc(estimates.createdAt));
 
-  return rows.map(({ fieldpulseEstimateId, ...r }) => ({
+  return rows.map(({ fieldpulseEstimateId, fieldpulseStatusName, ...r }) => ({
     ...r,
     syncedSource: fieldpulseEstimateId != null ? ("fieldpulse" as const) : null,
+    fieldpulseStatusName: fieldpulseStatusName ?? null,
   }));
 }
 
@@ -278,6 +282,8 @@ export interface EstimateDetailView {
   readonly options: EstimateOptionView[];
   /** Which FSM this estimate is a read-only mirror of, or null when native. */
   readonly syncedSource: "fieldpulse" | null;
+  /** Human-readable status label from FieldPulse (e.g. "Sent"). Null for native estimates. */
+  readonly fieldpulseStatusName: string | null;
 }
 
 /**
@@ -374,6 +380,7 @@ export async function getEstimateDetailById(
       expiresAt: estimates.expiresAt,
       createdAt: estimates.createdAt,
       fieldpulseEstimateId: estimates.fieldpulseEstimateId,
+      fieldpulseStatusName: estimates.fieldpulseStatusName,
     })
     .from(estimates)
     .where(withTenant(estimates, organizationId, eq(estimates.id, id)))
@@ -381,13 +388,14 @@ export async function getEstimateDetailById(
 
   if (!est) return null;
 
-  const { fieldpulseEstimateId, ...header } = est;
+  const { fieldpulseEstimateId, fieldpulseStatusName, ...header } = est;
   // Admin detail: include snapshotted cost so the UI can show margin.
   const options = await loadOptionsWithLineItems(organizationId, est.id, true);
   return {
     ...header,
     options,
     syncedSource: fieldpulseEstimateId != null ? "fieldpulse" : null,
+    fieldpulseStatusName: fieldpulseStatusName ?? null,
   };
 }
 

@@ -26,5 +26,38 @@
     "invoiced_date": "2026-07-02",
     "created_at": "2026-06-15 09:30:00",
     "deleted_at": null
+  },
+  {
+    "id": "70000003",
+    "customer_id": "20000003",
+    "job_id": "10000003",
+    "status": "1",
+    "subtotal": "485.00",
+    "tax": "38.80",
+    "total": "523.80",
+    "notes": "Tune-up and capacitor replacement",
+    "due_date": "2026-08-15",
+    "invoiced_date": null,
+    "created_at": "2026-07-05 10:00:00",
+    "deleted_at": null,
+    "line_items": [
+      {
+        "line_title": "HVAC Service",
+        "line_components": [
+          {
+            "title": "Capacitor Replacement",
+            "quantity": "2",
+            "unit_price": "125.00",
+            "unit_cost": "60.00"
+          },
+          {
+            "title": "Annual Tune-Up",
+            "quantity": "1",
+            "unit_price": "235.00",
+            "unit_cost": "80.00"
+          }
+        ]
+      }
+    ]
   }
 ]

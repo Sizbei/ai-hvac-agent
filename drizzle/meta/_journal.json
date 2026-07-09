@@ -246,6 +246,13 @@
       "when": 1783591099544,
       "tag": "0034_dapper_microchip",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1783593306315,
+      "tag": "0035_gorgeous_joystick",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,1 @@
+ALTER TABLE "estimates" ADD COLUMN "fieldpulse_status_name" text;

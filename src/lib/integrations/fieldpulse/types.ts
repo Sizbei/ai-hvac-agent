@@ -213,6 +213,10 @@ export interface FieldpulseEstimate {
   readonly invoicedDate?: string | null;
   readonly createdAt?: string | null;
   readonly deletedAt?: string | null;
+  /** Flattened line items from line_items[].line_components[] (same shape as invoices). */
+  readonly lineItems?: readonly FieldpulseInvoiceLineItem[];
+  /** Human-readable status label from the per-id GET /estimates/{id} response. */
+  readonly customStatus?: string | null;
 }
 
 /** A FieldPulse payment (their "Payments" resource). Money is in CENTS (client parses dollar strings). */

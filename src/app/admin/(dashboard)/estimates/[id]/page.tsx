@@ -41,6 +41,7 @@ interface EstimateDetail {
   readonly createdAt: string;
   readonly options: Option[];
   readonly syncedSource: 'fieldpulse' | null;
+  readonly fieldpulseStatusName: string | null;
 }
 
 export default function EstimateDetailPage({
@@ -174,6 +175,9 @@ export default function EstimateDetailPage({
         </div>
         <div className="flex items-center gap-2">
           <EstimateStatusBadge status={estimate.status} />
+          {isSynced && estimate.fieldpulseStatusName && (
+            <span className="text-[11px] text-muted-foreground ml-1">({estimate.fieldpulseStatusName})</span>
+          )}
           {isSynced && (
             <span className="rounded border bg-violet-50 px-1.5 py-px text-[10px] font-medium text-violet-700">
               FieldPulse

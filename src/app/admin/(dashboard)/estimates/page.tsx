@@ -82,6 +82,9 @@ export default function EstimatesPage() {
                           FieldPulse
                         </span>
                       )}
+                      {est.syncedSource === 'fieldpulse' && est.fieldpulseStatusName && (
+                        <span className="text-[11px] text-muted-foreground">({est.fieldpulseStatusName})</span>
+                      )}
                     </div>
                   </td>
                   <td className="px-4 py-3 font-medium">

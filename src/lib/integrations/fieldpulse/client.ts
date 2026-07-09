@@ -214,6 +214,13 @@ export interface FieldpulseClient {
    * unstable FP list pagination.
    */
   getCustomer(customerId: string): Promise<FieldpulseCustomer | null>;
+
+  /**
+   * Fetch a single estimate by Fieldpulse id.
+   * Returns null on 404 (not found) or when the payload is malformed.
+   * The per-id response carries `custom_status` which is absent from list rows.
+   */
+  getEstimate(estimateId: string): Promise<FieldpulseEstimate | null>;
 }
 
 // ── Real-API helpers (verified 2026-06-19 against the live FieldPulse API) ─────
@@ -541,6 +548,8 @@ function toEstimate(raw: unknown): FieldpulseEstimate | null {
     invoicedDate: str(obj.invoiced_date),
     createdAt: str(obj.created_at),
     deletedAt: str(obj.deleted_at),
+    lineItems: toLineItems(obj.line_items),
+    customStatus: typeof obj.custom_status === "string" ? obj.custom_status : null,
   };
 }
 
@@ -967,6 +976,19 @@ export class RestFieldpulseClient implements FieldpulseClient {
       return toCustomer(unwrap(raw));
     } catch {
       // Return null on 404 (customer not in FP list page) or malformed payload.
+      return null;
+    }
+  }
+
+  async getEstimate(estimateId: string): Promise<FieldpulseEstimate | null> {
+    try {
+      const raw = await this.request(
+        `/estimates/${encodeURIComponent(estimateId)}`,
+        { method: "GET" },
+      );
+      return toEstimate(unwrap(raw));
+    } catch {
+      // Return null on 404 or malformed payload.
       return null;
     }
   }
