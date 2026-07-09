@@ -198,3 +198,45 @@ export interface GeocodeInput {
   readonly zip?: string | null;
   readonly country?: string | null;
 }
+
+/** A FieldPulse estimate (their "Estimates" resource). Money is in CENTS (client parses dollar strings). */
+export interface FieldpulseEstimate {
+  readonly id: string;
+  readonly customerId?: string | null;
+  readonly jobId?: string | null;
+  readonly status?: string | null; // FP status string — mapped best-effort
+  readonly subtotalCents?: number | null;
+  readonly taxCents?: number | null;
+  readonly totalCents?: number | null;
+  readonly notes?: string | null;
+  readonly dueDate?: string | null;
+  readonly invoicedDate?: string | null;
+  readonly createdAt?: string | null;
+  readonly deletedAt?: string | null;
+}
+
+/** A FieldPulse payment (their "Payments" resource). Money is in CENTS (client parses dollar strings). */
+export interface FieldpulsePayment {
+  readonly id: string;
+  readonly invoiceId?: string | null; // FP invoice id (not native)
+  readonly customerId?: string | null;
+  readonly paymentDate?: string | null;
+  readonly amountCents?: number | null;
+  readonly method?: string | null; // e.g. "cash", "check", "card", "other"
+  readonly status?: string | null; // e.g. "paid", "completed", "pending"
+  readonly deletedAt?: string | null;
+}
+
+/** A FieldPulse asset (their "Assets" resource), maps to native customer_equipment. */
+export interface FieldpulseAsset {
+  readonly id: string;
+  readonly customerId?: string | null; // REQUIRED for import — skip without it
+  readonly title?: string | null; // Equipment name/description
+  readonly assetType?: string | null; // Free-text asset type (e.g. "ac", "furnace")
+  readonly tag?: string | null; // Serial/tag number
+  readonly locationDescription?: string | null; // Location in home
+  readonly installDate?: string | null; // Installation date string
+  readonly maintenanceAgreementId?: string | null;
+  readonly status?: string | null;
+  readonly deletedAt?: string | null;
+}

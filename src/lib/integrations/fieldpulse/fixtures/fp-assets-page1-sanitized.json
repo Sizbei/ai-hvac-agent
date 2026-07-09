@@ -1,0 +1,26 @@
+[
+  {
+    "id": "90000001",
+    "customer_id": "20000001",
+    "title": "Carrier AC Unit",
+    "asset_type": "ac",
+    "tag": "SN-FAKE-001",
+    "location_description": "Backyard",
+    "install_date": "2020-05-15",
+    "maintenance_agreement_id": null,
+    "status": "active",
+    "deleted_at": null
+  },
+  {
+    "id": "90000002",
+    "customer_id": "20000003",
+    "title": "Lennox Furnace",
+    "asset_type": "furnace",
+    "tag": null,
+    "location_description": "Basement",
+    "install_date": "2018-09-01",
+    "maintenance_agreement_id": "88000001",
+    "status": "active",
+    "deleted_at": null
+  }
+]

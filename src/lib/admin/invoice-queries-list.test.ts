@@ -105,6 +105,7 @@ vi.mock('@/lib/db/schema', () => ({
     status: 'payments.status',
     createdAt: 'payments.createdAt',
     organizationId: 'payments.org',
+    fieldpulsePaymentId: 'payments.fieldpulsePaymentId',
   },
   communicationJobs: {
     organizationId: 'cj.org',
@@ -160,7 +161,7 @@ describe('collectedThisMonthCents', () => {
       await collectedThisMonthCents('org-1', new Date('2026-07-06T12:00:00Z')),
     ).toBe(0);
   });
-  it('scopes to the org, succeeded status, and the month window', async () => {
+  it('scopes to the org, succeeded status, the month window, and excludes FP payments', async () => {
     selectQueue.push([{ value: '0' }]);
     await collectedThisMonthCents('org-1', new Date('2026-07-06T12:00:00Z'));
     const where = JSON.stringify(captured[0].where);
@@ -169,6 +170,9 @@ describe('collectedThisMonthCents', () => {
     // month window predicates present
     expect(where).toContain('gte');
     expect(where).toContain('lt');
+    // FP payment guard: isNull(payments.fieldpulsePaymentId)
+    expect(where).toContain('isNull');
+    expect(where).toContain('payments.fieldpulsePaymentId');
   });
 });
 

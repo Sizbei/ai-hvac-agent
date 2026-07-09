@@ -1,0 +1,22 @@
+[
+  {
+    "id": "80000001",
+    "invoice_id": "50000001",
+    "customer_id": "20000001",
+    "payment_date": "2026-07-03 14:00:00",
+    "amount": "270.00",
+    "method": "check",
+    "status": "paid",
+    "deleted_at": null
+  },
+  {
+    "id": "80000002",
+    "invoice_id": "50000002",
+    "customer_id": "20000002",
+    "payment_date": "2026-06-20 10:00:00",
+    "amount": "500.00",
+    "method": "card",
+    "status": "paid",
+    "deleted_at": null
+  }
+]

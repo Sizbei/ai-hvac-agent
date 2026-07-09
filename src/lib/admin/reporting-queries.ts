@@ -9,7 +9,7 @@
  * neon-http note: SQL aggregates (sum/count) come back as strings (or null for an
  * empty set), so each value is coerced with Number() and coalesced to 0.
  */
-import { eq, gte, lte, sql, sum, count, avg, inArray } from "drizzle-orm";
+import { eq, gte, isNull, lte, sql, sum, count, avg, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   estimates,
@@ -107,12 +107,17 @@ export async function getSalesReport(
           payments,
           organizationId,
           inArray(payments.status, ["succeeded", "refunded"]),
+          isNull(payments.fieldpulsePaymentId),
           gte(payments.createdAt, fromDate),
           lte(payments.createdAt, toDate),
         ),
       ),
 
     // Refunds issued within the period (net-collected subtracts these).
+    // NO fieldpulsePaymentId guard needed here: FP-imported payments (RECORD-ONLY)
+    // link only to FP-synced invoices, which refundPayment refuses — so refund rows
+    // can never exist against them. If that invariant ever changes, add the same
+    // IS NULL exclusion the gross-collected queries carry.
     db
       .select({ value: sum(refunds.amountCents) })
       .from(refunds)
@@ -352,7 +357,7 @@ export async function getLeadSourceBreakdown(
       )
       .innerJoin(
         payments,
-        sql`${payments.invoiceId} = ${invoices.id} AND ${payments.organizationId} = ${organizationId} AND ${payments.status} = 'succeeded'`,
+        sql`${payments.invoiceId} = ${invoices.id} AND ${payments.organizationId} = ${organizationId} AND ${payments.status} = 'succeeded' AND ${payments.fieldpulsePaymentId} IS NULL`,
       )
       .where(
         withTenant(
@@ -366,6 +371,10 @@ export async function getLeadSourceBreakdown(
 
     // 4. Refunds against those payments, subtracted in JS (kept a SEPARATE query
     //    so the payment x refund join doesn't fan out and double-count payments).
+    // NO fieldpulsePaymentId guard needed here: FP-imported payments (RECORD-ONLY)
+    // link only to FP-synced invoices, which refundPayment refuses — so refund rows
+    // can never exist against them. If that invariant ever changes, add the same
+    // IS NULL exclusion the gross-collected queries carry.
     db
       .select({ source: sourceKey, value: sum(refunds.amountCents) })
       .from(serviceRequests)

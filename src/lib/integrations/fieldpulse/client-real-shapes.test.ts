@@ -110,4 +110,134 @@ describe("RestFieldpulseClient — real API shapes", () => {
     // Probe must hit /users, not the non-existent /company route.
     expect(String(mockFetch.mock.calls[0][0])).toContain("/users");
   });
+
+  it("listEstimates parses numeric ids, dollar-string money, and the response envelope", async () => {
+    mockFetch.mockResolvedValue(
+      ok({
+        error: false,
+        response: [
+          {
+            id: 70000001,
+            customer_id: 20000001,
+            job_id: 10000001,
+            status: "2",
+            subtotal: "250.00",
+            tax: "20.00",
+            total: "270.00",
+            notes: "Replace capacitor",
+            due_date: "2026-08-01",
+            invoiced_date: null,
+            created_at: "2026-07-01 08:00:00",
+            deleted_at: null,
+          },
+        ],
+      }),
+    );
+    const { items, totalCount } = await client().listEstimates(1);
+    expect(items).toHaveLength(1);
+    expect(items[0].id).toBe("70000001"); // numeric coerced to string
+    expect(items[0].customerId).toBe("20000001");
+    expect(items[0].totalCents).toBe(27000); // "270.00" → cents
+    expect(items[0].subtotalCents).toBe(25000);
+    expect(items[0].taxCents).toBe(2000);
+    expect(items[0].status).toBe("2");
+    expect(totalCount).toBeNull(); // /estimates returns null total_count
+  });
+
+  it("listEstimates returns empty array when response is empty", async () => {
+    mockFetch.mockResolvedValue(ok({ error: false, response: [] }));
+    const { items } = await client().listEstimates(1);
+    expect(items).toHaveLength(0);
+  });
+
+  it("listPayments parses numeric ids, dollar-string money, and the response envelope", async () => {
+    mockFetch.mockResolvedValue(
+      ok({
+        error: false,
+        response: [
+          {
+            id: 80000001,
+            invoice_id: 50000001,
+            customer_id: 20000001,
+            payment_date: "2026-07-03 14:00:00",
+            amount: "270.00",
+            method: "check",
+            status: "paid",
+            deleted_at: null,
+          },
+        ],
+      }),
+    );
+    const { items, totalCount } = await client().listPayments(1);
+    expect(items).toHaveLength(1);
+    expect(items[0].id).toBe("80000001");
+    expect(items[0].invoiceId).toBe("50000001");
+    expect(items[0].amountCents).toBe(27000); // "270.00" → cents
+    expect(items[0].method).toBe("check");
+    expect(items[0].status).toBe("paid");
+    expect(totalCount).toBeNull();
+  });
+
+  it("listPayments skips entries with no id", async () => {
+    mockFetch.mockResolvedValue(
+      ok({
+        error: false,
+        response: [
+          { customer_id: 20000001, amount: "100.00" }, // no id
+          { id: 80000002, customer_id: 20000001, amount: "200.00" },
+        ],
+      }),
+    );
+    const { items } = await client().listPayments(1);
+    expect(items).toHaveLength(1);
+    expect(items[0].id).toBe("80000002");
+  });
+
+  it("listAssets parses numeric ids and maps all known fields", async () => {
+    mockFetch.mockResolvedValue(
+      ok({
+        error: false,
+        response: [
+          {
+            id: 90000001,
+            customer_id: 20000001,
+            title: "Carrier AC Unit",
+            asset_type: "ac",
+            tag: "SN-FAKE-001",
+            location_description: "Backyard",
+            install_date: "2020-05-15",
+            maintenance_agreement_id: null,
+            status: "active",
+            deleted_at: null,
+          },
+        ],
+      }),
+    );
+    const { items, totalCount } = await client().listAssets(1);
+    expect(items).toHaveLength(1);
+    expect(items[0].id).toBe("90000001");
+    expect(items[0].customerId).toBe("20000001");
+    expect(items[0].title).toBe("Carrier AC Unit");
+    expect(items[0].assetType).toBe("ac");
+    expect(items[0].tag).toBe("SN-FAKE-001");
+    expect(items[0].locationDescription).toBe("Backyard");
+    expect(items[0].installDate).toBe("2020-05-15");
+    expect(items[0].maintenanceAgreementId).toBeNull();
+    expect(totalCount).toBeNull();
+  });
+
+  it("listAssets skips entries with no id", async () => {
+    mockFetch.mockResolvedValue(
+      ok({
+        error: false,
+        response: [
+          { customer_id: 20000001, title: "No ID unit" }, // no id
+          { id: 90000002, customer_id: 20000002, title: "Has ID" },
+        ],
+      }),
+    );
+    const { items } = await client().listAssets(1);
+    expect(items).toHaveLength(1);
+    expect(items[0].id).toBe("90000002");
+  });
 });

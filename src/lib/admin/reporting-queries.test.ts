@@ -77,6 +77,7 @@ vi.mock('drizzle-orm', () => ({
   eq: (...a: unknown[]) => ({ kind: 'eq', args: a }),
   gte: (...a: unknown[]) => ({ kind: 'gte', args: a }),
   lte: (...a: unknown[]) => ({ kind: 'lte', args: a }),
+  isNull: (c: unknown) => ({ kind: 'isNull', c }),
   sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({
     kind: 'sql',
     text: strings.join('?'),
@@ -109,6 +110,8 @@ vi.mock('@/lib/db/schema', () => ({
     status: 'payments.status',
     createdAt: 'payments.createdAt',
     organizationId: 'payments.org',
+    fieldpulsePaymentId: 'payments.fieldpulsePaymentId',
+    invoiceId: 'payments.invoiceId',
   },
   refunds: {
     amountCents: 'refunds.amountCents',
@@ -532,6 +535,45 @@ describe('getLeadSourceBreakdown', () => {
           v.kind === 'sql' &&
           typeof v.text === 'string' &&
           (v.text as string).includes('succeeded'),
+      ),
+    ).toBe(true);
+
+    // The gross-revenue payments join must also exclude FP payments
+    // (IS NULL appears as a literal suffix in the sql template text).
+    expect(
+      hasTag(
+        captured[2].joins,
+        (v) =>
+          v.kind === 'sql' &&
+          typeof v.text === 'string' &&
+          (v.text as string).includes('IS NULL') &&
+          Array.isArray(v.values) &&
+          (v.values as unknown[]).some(
+            (val) => val === 'payments.fieldpulsePaymentId',
+          ),
+      ),
+    ).toBe(true);
+  });
+
+  it('getSalesReport gross collected excludes FP payments (isNull guard)', async () => {
+    seed({
+      gross: '40000',
+      refund: 0,
+      ar: 0,
+      estimates: { created: 0, sold: 0, expired: 0, open: 0 },
+      invoices: { created: 0, paid: 0 },
+    });
+    const r = await getSalesReport(ORG);
+    expect(r.grossCollectedCents).toBe(40000);
+
+    // The gross payments where (1st capture) must contain isNull(payments.fieldpulsePaymentId).
+    const grossWhere = captured[0].where;
+    expect(
+      hasTag(
+        grossWhere,
+        (v) =>
+          v.kind === 'isNull' &&
+          v.c === 'payments.fieldpulsePaymentId',
       ),
     ).toBe(true);
   });

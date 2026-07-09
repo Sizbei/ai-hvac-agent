@@ -1,0 +1,30 @@
+[
+  {
+    "id": "70000001",
+    "customer_id": "20000001",
+    "job_id": "10000001",
+    "status": "2",
+    "subtotal": "250.00",
+    "tax": "20.00",
+    "total": "270.00",
+    "notes": "Replace capacitor and inspect refrigerant",
+    "due_date": "2026-08-01",
+    "invoiced_date": null,
+    "created_at": "2026-07-01 08:00:00",
+    "deleted_at": null
+  },
+  {
+    "id": "70000002",
+    "customer_id": "20000002",
+    "job_id": null,
+    "status": "3",
+    "subtotal": "1200.00",
+    "tax": "96.00",
+    "total": "1296.00",
+    "notes": "Full system replacement",
+    "due_date": null,
+    "invoiced_date": "2026-07-02",
+    "created_at": "2026-06-15 09:30:00",
+    "deleted_at": null
+  }
+]

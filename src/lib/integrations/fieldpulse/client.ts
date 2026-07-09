@@ -23,9 +23,12 @@ import type {
   FieldpulseAvailabilityRange,
   FieldpulseAvailabilitySlot,
   FieldpulseCustomer,
+  FieldpulseEstimate,
   FieldpulseInvoice,
   FieldpulseInvoiceLineItem,
   FieldpulseJob,
+  FieldpulsePayment,
+  FieldpulseAsset,
   FieldpulseUser,
   FindCustomerQuery,
   UpdateJobInput,
@@ -158,6 +161,27 @@ export interface FieldpulseClient {
    * maxPages defaults to 200.
    */
   listInvoices(maxPages?: number): Promise<{ items: FieldpulseInvoice[]; totalCount: number | null }>;
+
+  /**
+   * Page ALL estimates from the unfiltered /estimates endpoint for backfill.
+   * totalCount is null for estimates (FP returns null — size by walking until empty).
+   * maxPages defaults to 200. pageSize is fixed at 20 (live-verified fixed page size).
+   */
+  listEstimates(maxPages?: number): Promise<{ items: FieldpulseEstimate[]; totalCount: number | null }>;
+
+  /**
+   * Page ALL payments from the unfiltered /payments endpoint for backfill.
+   * totalCount is null for payments (FP returns null — size by walking until empty).
+   * maxPages defaults to 200. pageSize is fixed at 20 (live-verified fixed page size).
+   */
+  listPayments(maxPages?: number): Promise<{ items: FieldpulsePayment[]; totalCount: number | null }>;
+
+  /**
+   * Page ALL assets from the unfiltered /assets endpoint for backfill.
+   * totalCount is null for assets (FP returns null — size by walking until empty).
+   * maxPages defaults to 200. pageSize is fixed at 20 (live-verified fixed page size).
+   */
+  listAssets(maxPages?: number): Promise<{ items: FieldpulseAsset[]; totalCount: number | null }>;
 }
 
 // ── Real-API helpers (verified 2026-06-19 against the live FieldPulse API) ─────
@@ -463,6 +487,69 @@ function toLineItems(raw: unknown): FieldpulseInvoiceLineItem[] {
     }
   }
   return out;
+}
+
+/** Narrow an untrusted FieldPulse estimate payload to FieldpulseEstimate. */
+function toEstimate(raw: unknown): FieldpulseEstimate | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const obj = raw as Record<string, unknown>;
+  const id = idStr(obj.id);
+  if (!id) return null;
+  const str = (v: unknown): string | null => typeof v === "string" ? v : null;
+  return {
+    id,
+    customerId: idStr(obj.customer_id),
+    jobId: idStr(obj.job_id),
+    status: str(obj.status),
+    subtotalCents: dollarsToCents(obj.subtotal),
+    taxCents: dollarsToCents(obj.tax),
+    totalCents: dollarsToCents(obj.total) ?? dollarsToCents(obj.grand_total),
+    notes: str(obj.notes),
+    dueDate: str(obj.due_date),
+    invoicedDate: str(obj.invoiced_date),
+    createdAt: str(obj.created_at),
+    deletedAt: str(obj.deleted_at),
+  };
+}
+
+/** Narrow an untrusted FieldPulse payment payload to FieldpulsePayment. */
+function toPayment(raw: unknown): FieldpulsePayment | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const obj = raw as Record<string, unknown>;
+  const id = idStr(obj.id);
+  if (!id) return null;
+  const str = (v: unknown): string | null => typeof v === "string" ? v : null;
+  return {
+    id,
+    invoiceId: idStr(obj.invoice_id),
+    customerId: idStr(obj.customer_id),
+    paymentDate: str(obj.payment_date),
+    amountCents: dollarsToCents(obj.amount),
+    method: str(obj.method),
+    status: str(obj.status),
+    deletedAt: str(obj.deleted_at),
+  };
+}
+
+/** Narrow an untrusted FieldPulse asset payload to FieldpulseAsset. */
+function toAsset(raw: unknown): FieldpulseAsset | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const obj = raw as Record<string, unknown>;
+  const id = idStr(obj.id);
+  if (!id) return null;
+  const str = (v: unknown): string | null => typeof v === "string" ? v : null;
+  return {
+    id,
+    customerId: idStr(obj.customer_id),
+    title: str(obj.title),
+    assetType: str(obj.asset_type),
+    tag: str(obj.tag),
+    locationDescription: str(obj.location_description),
+    installDate: str(obj.install_date),
+    maintenanceAgreementId: idStr(obj.maintenance_agreement_id),
+    status: str(obj.status),
+    deletedAt: str(obj.deleted_at),
+  };
 }
 
 /**
@@ -860,6 +947,54 @@ export class RestFieldpulseClient implements FieldpulseClient {
     const items = rows
       .map(toInvoice)
       .filter((i): i is FieldpulseInvoice => i !== null);
+    return { items, totalCount };
+  }
+
+  async listEstimates(
+    maxPages = 200,
+  ): Promise<{ items: FieldpulseEstimate[]; totalCount: number | null }> {
+    // /estimates returns a fixed 20/page (live-verified fixed size, same as invoices).
+    const { rows, totalCount } = await this.fetchAllPages(
+      "/estimates",
+      new URLSearchParams(),
+      20,
+      maxPages,
+    );
+    const items = rows
+      .map(toEstimate)
+      .filter((e): e is FieldpulseEstimate => e !== null);
+    return { items, totalCount };
+  }
+
+  async listPayments(
+    maxPages = 200,
+  ): Promise<{ items: FieldpulsePayment[]; totalCount: number | null }> {
+    // /payments returns a fixed 20/page (live-verified fixed size, same as invoices).
+    const { rows, totalCount } = await this.fetchAllPages(
+      "/payments",
+      new URLSearchParams(),
+      20,
+      maxPages,
+    );
+    const items = rows
+      .map(toPayment)
+      .filter((p): p is FieldpulsePayment => p !== null);
+    return { items, totalCount };
+  }
+
+  async listAssets(
+    maxPages = 200,
+  ): Promise<{ items: FieldpulseAsset[]; totalCount: number | null }> {
+    // /assets returns a fixed 20/page (live-verified fixed size, same as invoices).
+    const { rows, totalCount } = await this.fetchAllPages(
+      "/assets",
+      new URLSearchParams(),
+      20,
+      maxPages,
+    );
+    const items = rows
+      .map(toAsset)
+      .filter((a): a is FieldpulseAsset => a !== null);
     return { items, totalCount };
   }
 

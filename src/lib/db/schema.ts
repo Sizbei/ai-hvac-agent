@@ -822,6 +822,7 @@ export const customerEquipment = pgTable(
     // one was retired. App-linked (no self-FK to keep the migration simple).
     replacedByEquipmentId: uuid("replaced_by_equipment_id"),
     retiredAt: timestamp("retired_at", { withTimezone: true }),
+    fieldpulseAssetId: text("fieldpulse_asset_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -832,6 +833,9 @@ export const customerEquipment = pgTable(
   (table) => [
     index("equipment_customer_id_idx").on(table.customerId),
     index("equipment_org_id_idx").on(table.organizationId),
+    uniqueIndex("equipment_org_fieldpulse_asset_id_unique")
+      .on(table.organizationId, table.fieldpulseAssetId)
+      .where(sql`${table.fieldpulseAssetId} IS NOT NULL`),
   ],
 );
 
@@ -2559,6 +2563,7 @@ export const estimates = pgTable(
     signatureName: text("signature_name"),
     signatureIp: text("signature_ip"),
     soldOptionId: uuid("sold_option_id"),
+    fieldpulseEstimateId: text("fieldpulse_estimate_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -2568,6 +2573,9 @@ export const estimates = pgTable(
     uniqueIndex("estimates_approval_token_unique")
       .on(table.approvalTokenHash)
       .where(sql`${table.approvalTokenHash} IS NOT NULL`),
+    uniqueIndex("estimates_org_fieldpulse_estimate_id_unique")
+      .on(table.organizationId, table.fieldpulseEstimateId)
+      .where(sql`${table.fieldpulseEstimateId} IS NOT NULL`),
   ],
 );
 
@@ -2707,6 +2715,7 @@ export const payments = pgTable(
     amountRefundedCents: integer("amount_refunded_cents").notNull().default(0),
     status: paymentStatusEnum("status").notNull().default("pending"),
     isDeposit: boolean("is_deposit").notNull().default(false),
+    fieldpulsePaymentId: text("fieldpulse_payment_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -2715,6 +2724,9 @@ export const payments = pgTable(
     uniqueIndex("payments_provider_id_unique")
       .on(table.provider, table.providerPaymentId)
       .where(sql`${table.providerPaymentId} IS NOT NULL`),
+    uniqueIndex("payments_org_fieldpulse_payment_id_unique")
+      .on(table.organizationId, table.fieldpulsePaymentId)
+      .where(sql`${table.fieldpulsePaymentId} IS NOT NULL`),
   ],
 );
 

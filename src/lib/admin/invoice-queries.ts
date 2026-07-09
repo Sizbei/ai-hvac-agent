@@ -749,6 +749,7 @@ export async function collectedThisMonthCents(
         payments,
         organizationId,
         eq(payments.status, "succeeded"),
+        isNull(payments.fieldpulsePaymentId),
         gte(payments.createdAt, monthStart),
         lt(payments.createdAt, now),
       ),

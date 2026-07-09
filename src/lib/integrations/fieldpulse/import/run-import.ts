@@ -11,7 +11,7 @@
  *   --org <uuid>          (required) Target organization id.
  *   --dry-run             Fetch first page only per phase; no DB writes; print counts.
  *   --phase <name[,...]>  Run one or more named phases, comma-separated
- *                         (technicians|customers|jobs|invoices).
+ *                         (technicians|customers|jobs|invoices|estimates|payments|assets).
  *   --yes                 Skip the interactive `import` confirmation. FOR CI USE ONLY
  *                         (nightly GitHub Actions sweep). Never pass this interactively —
  *                         the confirmation exists to prevent accidental prod writes.
@@ -32,6 +32,9 @@ import { syncTechniciansFromFieldpulse } from "../technician-sync";
 import { importCustomersFromFieldpulse } from "./customers";
 import { importJobsFromFieldpulse } from "./jobs";
 import { importInvoicesFromFieldpulse } from "./invoices";
+import { importEstimatesFromFieldpulse } from "./estimates";
+import { importPaymentsFromFieldpulse } from "./payments";
+import { importAssetsFromFieldpulse } from "./assets";
 
 dotenv.config({ path: ".env.local" });
 
@@ -90,6 +93,30 @@ export const PHASES: { name: string; fn: PhaseFn }[] = [
     fn: async (ctx, counts) => {
       if (!ctx.fpClient) throw new Error("No FieldPulse client available");
       await importInvoicesFromFieldpulse(ctx.orgId, counts, ctx.fpClient);
+      return counts;
+    },
+  },
+  {
+    name: "estimates",
+    fn: async (ctx, counts) => {
+      if (!ctx.fpClient) throw new Error("No FieldPulse client available");
+      await importEstimatesFromFieldpulse(ctx.orgId, counts, ctx.fpClient);
+      return counts;
+    },
+  },
+  {
+    name: "payments",
+    fn: async (ctx, counts) => {
+      if (!ctx.fpClient) throw new Error("No FieldPulse client available");
+      await importPaymentsFromFieldpulse(ctx.orgId, counts, ctx.fpClient);
+      return counts;
+    },
+  },
+  {
+    name: "assets",
+    fn: async (ctx, counts) => {
+      if (!ctx.fpClient) throw new Error("No FieldPulse client available");
+      await importAssetsFromFieldpulse(ctx.orgId, counts, ctx.fpClient);
       return counts;
     },
   },
@@ -242,6 +269,12 @@ async function main(): Promise<void> {
           sample = await fpClient.listJobs(1);
         } else if (phase.name === "invoices") {
           sample = await fpClient.listInvoices(1);
+        } else if (phase.name === "estimates") {
+          sample = await fpClient.listEstimates(1);
+        } else if (phase.name === "payments") {
+          sample = await fpClient.listPayments(1);
+        } else if (phase.name === "assets") {
+          sample = await fpClient.listAssets(1);
         }
         if (sample) {
           const tc =
