@@ -8,6 +8,9 @@ export interface InvoiceDocModel {
   readonly invoiceDate: Date;
   readonly serviceDate: Date | null;
   readonly dueDate: Date;
+  /** True when dueDate is our net-30 fallback (no source-system due date) —
+   * only then may the document label the terms "Net 30". */
+  readonly derivedNetTerms: boolean;
   readonly amountDueCents: number;
   readonly isOverdue: boolean;
   readonly showTechnician: boolean;
@@ -16,11 +19,15 @@ export interface InvoiceDocModel {
 
 export function invoiceDocModel(inv: InvoiceDetailView): InvoiceDocModel {
   const amountDueCents = inv.totalCents - inv.amountPaidCents;
+  // Real issue date when the source system provides one (FP/HCP mirrors);
+  // row-creation time only for native invoices.
+  const invoiceDate = new Date(inv.issuedAt ?? inv.createdAt);
   return {
     invoiceRef: invoiceRef(inv.id),
-    invoiceDate: new Date(inv.createdAt),
+    invoiceDate,
     serviceDate: inv.serviceDate ? new Date(inv.serviceDate) : null,
-    dueDate: new Date(new Date(inv.createdAt).getTime() + NET_DAYS_MS),
+    dueDate: inv.dueDate ? new Date(inv.dueDate) : new Date(invoiceDate.getTime() + NET_DAYS_MS),
+    derivedNetTerms: inv.dueDate == null,
     amountDueCents,
     isOverdue: amountDueCents > 0,
     showTechnician: inv.technicianName != null,

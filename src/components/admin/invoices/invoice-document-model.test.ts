@@ -29,3 +29,16 @@ it('amountDue 0 when fully paid → not overdue', () => {
   expect(m.amountDueCents).toBe(0);
   expect(m.isOverdue).toBe(false);
 });
+
+it('mirrored invoices date the document by issuedAt, not import time', () => {
+  const m = invoiceDocModel({ ...base, issuedAt: new Date('2026-02-01'), dueDate: null });
+  expect(m.invoiceDate).toEqual(new Date('2026-02-01'));
+  // Net-30 fallback counts from the issue date too.
+  expect(m.dueDate).toEqual(new Date(new Date('2026-02-01').getTime() + 30 * 24 * 3600 * 1000));
+  expect(m.derivedNetTerms).toBe(true);
+});
+it('a source-system due date wins over the net-30 fallback', () => {
+  const m = invoiceDocModel({ ...base, issuedAt: new Date('2026-02-01'), dueDate: new Date('2026-02-10') });
+  expect(m.dueDate).toEqual(new Date('2026-02-10'));
+  expect(m.derivedNetTerms).toBe(false);
+});

@@ -83,14 +83,16 @@ function InvoiceRowInner({ invoice, onRemind, onCopyPayLink, onVoid, pending = f
         </div>
       </div>
 
-      {/* Issued date (source-system date for mirrored invoices; row creation for native) */}
+      {/* Issued date (source-system date for mirrored invoices; row creation
+          for native). UTC-rendered: the source dates are UTC-pinned by
+          parseFpDate, so local-zone rendering would shift them a day back. */}
       <div className="text-xs text-muted-foreground">
-        {new Date(invoice.issuedAt ?? invoice.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+        {new Date(invoice.issuedAt ?? invoice.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}
       </div>
 
       {/* Age chip */}
       <div>
-        <AgeChip issuedAt={invoice.issuedAt} createdAt={invoice.createdAt} state={invoice.state} />
+        <AgeChip issuedAt={invoice.issuedAt} dueDate={invoice.dueDate} createdAt={invoice.createdAt} state={invoice.state} />
       </div>
 
       {/* Balance */}

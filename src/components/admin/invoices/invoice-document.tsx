@@ -63,7 +63,7 @@ export function InvoiceDocument({ invoice, org }: Props) {
               <MetaRow label="Service date" value={fmt(m.serviceDate)} />
             )}
             <MetaRow label="Invoice date" value={fmt(m.invoiceDate)} />
-            <MetaRow label="Due date" value={`${fmt(m.dueDate)} · Net 30`} />
+            <MetaRow label="Due date" value={m.derivedNetTerms ? `${fmt(m.dueDate)} · Net 30` : fmt(m.dueDate)} />
             {/* Amount due — prominent row */}
             <div className="flex items-center justify-between gap-6 border-t-[1.5px] px-4 py-3">
               <span className="text-sm font-bold text-foreground">Amount due</span>

@@ -15,10 +15,13 @@ interface ScopedInvoicesSectionProps {
 }
 
 function formatDate(iso: string): string {
+  // UTC-rendered: mirrored issue dates are UTC-pinned by parseFpDate, so
+  // local-zone rendering would shift them a day back.
   return new Date(iso).toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
+    timeZone: 'UTC',
   });
 }
 
@@ -60,7 +63,7 @@ export function ScopedInvoicesSection({
               </span>
             )}
             <span className="text-xs text-muted-foreground">
-              {formatDate(inv.createdAt)}
+              {formatDate(inv.issuedAt ?? inv.createdAt)}
             </span>
           </div>
           <span className="text-sm font-medium">

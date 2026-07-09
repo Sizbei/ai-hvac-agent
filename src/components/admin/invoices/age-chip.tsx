@@ -39,11 +39,13 @@ const CLS: Record<string, string> = {
   green: 'bg-emerald-100 text-emerald-700', amber: 'bg-amber-100 text-amber-700',
   red: 'bg-rose-100 text-rose-700',
 };
-export function AgeChip({ issuedAt, createdAt, state }: { issuedAt?: string | null; createdAt: string; state: string }) {
+export function AgeChip({ issuedAt, dueDate, createdAt, state }: { issuedAt?: string | null; dueDate?: string | null; createdAt: string; state: string }) {
   if (state === 'paid') {
     return <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700"><span className="size-1.5 rounded-full bg-emerald-600" />Paid</span>;
   }
   const days = invoiceAgeDays({ issuedAt, createdAt });
-  const b = ageBucket(days);
+  // A past-due invoice is never green, even when freshly issued — the chip must
+  // agree with the due-date-driven Overdue filter/summary.
+  const b = state === 'open' && overdueByDates({ issuedAt, dueDate, createdAt }) ? 'red' : ageBucket(days);
   return <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${CLS[b]}`}><span className="size-1.5 rounded-full bg-current opacity-70" />{days} days</span>;
 }

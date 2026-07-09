@@ -23,7 +23,7 @@ export function SummaryBand({
         <p className="mt-1 text-xs text-muted-foreground">across {open.length} open invoices</p>
       </div>
       <div className="rounded-xl border border-rose-200 bg-card p-5">
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Overdue &gt; 30 days</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Overdue</p>
         <p className="mt-2 font-heading text-2xl font-bold tabular-nums text-rose-600">{formatCentsExact(overdueSum)}</p>
         <p className="mt-1 text-xs text-muted-foreground">{overdue.length} invoices{oldest ? ` · oldest ${oldest} days` : ''}</p>
       </div>

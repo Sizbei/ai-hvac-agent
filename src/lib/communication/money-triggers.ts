@@ -14,7 +14,7 @@
  *
  * Pattern mirrors triggers.ts (look up the active per-org template, then enqueue).
  */
-import { and, eq, isNull, lt, or } from "drizzle-orm";
+import { and, eq, isNull, lt, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { communicationTemplates, customers, invoices } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
@@ -368,7 +368,19 @@ export async function sendOverdueInvoiceReminders(
         invoices,
         organizationId,
         eq(invoices.state, "open"),
-        lt(invoices.createdAt, cutoff),
+        // NATIVE invoices only: FP/HCP-mirrored invoices are collected by
+        // their source platform — the UI already refuses reminders on synced
+        // rows, and dunning them here would double-text real customers.
+        isNull(invoices.fieldpulseInvoiceId),
+        isNull(invoices.hcpInvoiceId),
+        // Age from the REAL invoice dates, matching the UI's overdueByDates:
+        // 7 days past the due date when the source provides one, else 7 days
+        // since issue; created_at (row insert) is the last resort — for
+        // mirrored rows it's the import time and was the original bug.
+        lt(
+          sql`COALESCE(${invoices.dueDate}, ${invoices.issuedAt}, ${invoices.createdAt})`,
+          cutoff,
+        ),
       ),
     );
 
