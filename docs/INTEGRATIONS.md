@@ -244,3 +244,5 @@ over the env fallbacks.
   fixtures** — inferred-shape mocks are exactly what hid the FieldPulse bugs.
 - **Live smoke:** `npm run smoke:fieldpulse` (key-gated, manual) is the only
   thing that validates against the real API. Add the equivalent per provider.
+
+> **Data map:** see [FIELDPULSE-DATA.md](FIELDPULSE-DATA.md) for every imported entity, where it displays, read-only rules, and the sync schedule.

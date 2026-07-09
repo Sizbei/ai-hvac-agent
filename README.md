@@ -117,6 +117,7 @@ variables and point a Twilio number at `/api/voice/incoming` (see
 - **[docs/DISPATCH.md](docs/DISPATCH.md)** — dispatch/scheduling pipeline (scoring, confidence gate, duration, tech location) + roadmap.
 - **[docs/INVOICES.md](docs/INVOICES.md)** — invoices & collections workspace (business rules, reminders, void, query + HTTP API, screens).
 - **[docs/INTEGRATIONS.md](docs/INTEGRATIONS.md)** — FieldPulse / Housecall Pro / Google Calendar.
+- **[docs/FIELDPULSE-DATA.md](docs/FIELDPULSE-DATA.md)** — the imported FieldPulse data map (entities, display surfaces, read-only rules, sync architecture).
 - **[docs/KNOWLEDGE-BASE-CATALOG.md](docs/KNOWLEDGE-BASE-CATALOG.md)** — the deterministic FAQ intents.
 - **[EVAL.md](EVAL.md)** — the conversation-quality eval harness.
 - **`/docs.html`** — interactive docs (run the app, open http://localhost:3000/docs.html).
