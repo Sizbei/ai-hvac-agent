@@ -199,6 +199,14 @@ export interface FieldpulseClient {
    * maxPages defaults to 200. pageSize is fixed at 20.
    */
   listLocations(maxPages?: number): Promise<{ items: FieldpulseLocation[]; totalCount: number | null }>;
+
+  /**
+   * Fetch a single customer by Fieldpulse id.
+   * Returns null on 404 (not found) or when the payload is malformed.
+   * Used by the jobs importer's customer self-heal to close gaps left by
+   * unstable FP list pagination.
+   */
+  getCustomer(customerId: string): Promise<FieldpulseCustomer | null>;
 }
 
 // ── Real-API helpers (verified 2026-06-19 against the live FieldPulse API) ─────
@@ -927,6 +935,19 @@ export class RestFieldpulseClient implements FieldpulseClient {
       return toInvoice(unwrap(raw));
     } catch {
       // Return null if invoice not found (404) or other error
+      return null;
+    }
+  }
+
+  async getCustomer(customerId: string): Promise<FieldpulseCustomer | null> {
+    try {
+      const raw = await this.request(
+        `/customers/${encodeURIComponent(customerId)}`,
+        { method: "GET" },
+      );
+      return toCustomer(unwrap(raw));
+    } catch {
+      // Return null on 404 (customer not in FP list page) or malformed payload.
       return null;
     }
   }

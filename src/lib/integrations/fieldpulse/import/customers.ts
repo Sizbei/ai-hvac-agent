@@ -159,6 +159,178 @@ function composeAddress(fp: FieldpulseCustomer): string | null {
 
 // ── Importer ─────────────────────────────────────────────────────────────────
 
+/**
+ * Import a single FieldPulse customer record into the native customers table.
+ * Shared by the full walk and the jobs-importer customer self-heal.
+ *
+ * Resolution paths:
+ *  a) Existing row with matching fieldpulseCustomerId → UPDATE contact fields.
+ *  b) Record has email or phone → upsertCustomerByContact (HMAC-dedupe) → set
+ *     fieldpulseCustomerId on the returned id, guarded against the per-org unique
+ *     index so we never clobber another row that already owns the fpId.
+ *  c) Contactless (no email, no phone) → insert keyed purely on fieldpulseCustomerId.
+ *  d) Deleted/merged FP records → inserted as ARCHIVED (archivedAt set).
+ *
+ * Mutates `counts` in-place when provided (optional so callers can omit it).
+ * Returns the native customer id on success, null on skip/error.
+ */
+export async function importOneFpCustomer(
+  orgId: string,
+  fp: FieldpulseCustomer,
+  counts?: PhaseResult,
+): Promise<string | null> {
+  const mapped = mapFpCustomer(fp);
+  if (!mapped.ok) {
+    if (counts) counts.skipped++;
+    return null;
+  }
+
+  const { customer, archivedImport } = mapped;
+
+  try {
+    // Path (a): existing row keyed on fieldpulseCustomerId.
+    const existing = await findByFpId(orgId, customer.fpId);
+    if (existing) {
+      await updateCustomerFields(orgId, existing.id, customer);
+      if (counts) counts.updated++;
+      return existing.id;
+    }
+
+    // Path (d): archived import (deleted/merged FP records).
+    // NEVER route through upsertCustomerByContact — that function un-archives
+    // on contact match, which would reactivate an archived native customer.
+    // Use the fpId-keyed contactless insert path with archivedAt set instead.
+    if (archivedImport) {
+      const { emailHash, phoneHash } = computeContactHashes({
+        email: null,
+        phone: null,
+      });
+      const [inserted] = await db
+        .insert(customers)
+        .values({
+          organizationId: orgId,
+          nameEncrypted: encrypt(sanitizeName(customer.name)),
+          phoneEncrypted: null,
+          emailEncrypted: null,
+          addressEncrypted: customer.address ? encrypt(sanitizeAddress(customer.address)) : null,
+          emailHash,
+          phoneHash,
+          fieldpulseCustomerId: customer.fpId,
+          archivedAt: new Date(),
+        })
+        .onConflictDoNothing({
+          target: [customers.organizationId, customers.fieldpulseCustomerId],
+          where: isNotNull(customers.fieldpulseCustomerId),
+        })
+        .returning({ id: customers.id });
+
+      if (inserted) {
+        if (counts) {
+          counts.created++;
+          counts.archivedImported = (counts.archivedImported ?? 0) + 1;
+        }
+        return inserted.id;
+      } else {
+        if (counts) counts.skipped++;
+        return null;
+      }
+    }
+
+    if (customer.email || customer.phone) {
+      // Path (b): dedupe via HMAC blind-index → upsertCustomerByContact.
+      const nativeId = await upsertCustomerByContact(orgId, {
+        name: customer.name,
+        email: customer.email,
+        phone: customer.phone,
+        address: customer.address,
+      });
+
+      // Guard: set fieldpulseCustomerId only if the returned row doesn't already
+      // own a different fpId. The partial unique index enforces this at the DB
+      // layer (unique per org), but we guard the UPDATE to avoid a silent no-op
+      // overwrite in the unlikely case of a race (e.g. a concurrent import run).
+      const updated = await db
+        .update(customers)
+        .set({ fieldpulseCustomerId: customer.fpId, updatedAt: new Date() })
+        .where(
+          and(
+            eq(customers.id, nativeId),
+            eq(customers.organizationId, orgId),
+            sql`(${customers.fieldpulseCustomerId} IS NULL OR ${customers.fieldpulseCustomerId} = ${customer.fpId})`,
+          ),
+        )
+        .returning({ id: customers.id });
+
+      if (updated.length === 0) {
+        // Another row already owns this fpId — unique index would have thrown,
+        // but the guard caught the case where OUR row already has a DIFFERENT
+        // fpId (imported from a prior run linking to a different FP id).
+        logger.warn(
+          { orgId, fpId: customer.fpId, nativeId },
+          "FP customer: fpId guard prevented overwrite — counting as skipped",
+        );
+        if (counts) counts.skipped++;
+        return null;
+      } else {
+        // Note: created/updated distinction is approximate here — we can't
+        // cheaply tell from upsertCustomerByContact whether the row pre-existed.
+        // Counted as 'created' (most common case for backfill). A pre-existing
+        // native match is also counted as 'created'; the shortfall vs 'updated'
+        // is documented in the module header.
+        if (counts) counts.created++;
+        return nativeId;
+      }
+    }
+
+    // Path (c): contactless — insert keyed purely on fieldpulseCustomerId.
+    const { emailHash, phoneHash } = computeContactHashes({
+      email: null,
+      phone: null,
+    });
+    const [inserted] = await db
+      .insert(customers)
+      .values({
+        organizationId: orgId,
+        nameEncrypted: encrypt(sanitizeName(customer.name)),
+        phoneEncrypted: null,
+        emailEncrypted: null,
+        addressEncrypted: customer.address ? encrypt(sanitizeAddress(customer.address)) : null,
+        emailHash,
+        phoneHash,
+        fieldpulseCustomerId: customer.fpId,
+      })
+      .onConflictDoNothing({
+        target: [customers.organizationId, customers.fieldpulseCustomerId],
+        // The unique index is PARTIAL (WHERE fieldpulse_customer_id IS NOT
+        // NULL); Postgres refuses the conflict target unless the predicate
+        // matches — live-verified failure without this on 2026-07-09.
+        where: isNotNull(customers.fieldpulseCustomerId),
+      })
+      .returning({ id: customers.id });
+
+    if (inserted) {
+      if (counts) counts.created++;
+      return inserted.id;
+    } else {
+      // Row already existed for this fpId (re-run).
+      if (counts) counts.skipped++;
+      return null;
+    }
+  } catch (err) {
+    // Per-record errors must never abort the walk — log with fpId and continue.
+    if (counts) counts.errors++;
+    logger.error(
+      {
+        orgId,
+        fpId: customer.fpId,
+        error: err instanceof Error ? err.message : String(err),
+      },
+      "FP customer import: per-record error (continuing)",
+    );
+    return null;
+  }
+}
+
 export async function importCustomersFromFieldpulse(
   orgId: string,
   counts: PhaseResult,
@@ -184,149 +356,7 @@ export async function importCustomersFromFieldpulse(
   }
 
   for (const fp of items) {
-    const mapped = mapFpCustomer(fp);
-    if (!mapped.ok) {
-      counts.skipped++;
-      continue;
-    }
-
-    const { customer, archivedImport } = mapped;
-
-    try {
-      // Path (a): existing row keyed on fieldpulseCustomerId.
-      const existing = await findByFpId(orgId, customer.fpId);
-      if (existing) {
-        await updateCustomerFields(orgId, existing.id, customer);
-        counts.updated++;
-        continue;
-      }
-
-      // Path (d): archived import (deleted/merged FP records).
-      // NEVER route through upsertCustomerByContact — that function un-archives
-      // on contact match, which would reactivate an archived native customer.
-      // Use the fpId-keyed contactless insert path with archivedAt set instead.
-      if (archivedImport) {
-        const { emailHash, phoneHash } = computeContactHashes({
-          email: null,
-          phone: null,
-        });
-        const [inserted] = await db
-          .insert(customers)
-          .values({
-            organizationId: orgId,
-            nameEncrypted: encrypt(sanitizeName(customer.name)),
-            phoneEncrypted: null,
-            emailEncrypted: null,
-            addressEncrypted: customer.address ? encrypt(sanitizeAddress(customer.address)) : null,
-            emailHash,
-            phoneHash,
-            fieldpulseCustomerId: customer.fpId,
-            archivedAt: new Date(),
-          })
-          .onConflictDoNothing({
-            target: [customers.organizationId, customers.fieldpulseCustomerId],
-            where: isNotNull(customers.fieldpulseCustomerId),
-          })
-          .returning({ id: customers.id });
-
-        if (inserted) {
-          counts.created++;
-          counts.archivedImported = (counts.archivedImported ?? 0) + 1;
-        } else {
-          counts.skipped++;
-        }
-        continue;
-      }
-
-      if (customer.email || customer.phone) {
-        // Path (b): dedupe via HMAC blind-index → upsertCustomerByContact.
-        const nativeId = await upsertCustomerByContact(orgId, {
-          name: customer.name,
-          email: customer.email,
-          phone: customer.phone,
-          address: customer.address,
-        });
-
-        // Guard: set fieldpulseCustomerId only if the returned row doesn't already
-        // own a different fpId. The partial unique index enforces this at the DB
-        // layer (unique per org), but we guard the UPDATE to avoid a silent no-op
-        // overwrite in the unlikely case of a race (e.g. a concurrent import run).
-        const updated = await db
-          .update(customers)
-          .set({ fieldpulseCustomerId: customer.fpId, updatedAt: new Date() })
-          .where(
-            and(
-              eq(customers.id, nativeId),
-              eq(customers.organizationId, orgId),
-              sql`(${customers.fieldpulseCustomerId} IS NULL OR ${customers.fieldpulseCustomerId} = ${customer.fpId})`,
-            ),
-          )
-          .returning({ id: customers.id });
-
-        if (updated.length === 0) {
-          // Another row already owns this fpId — unique index would have thrown,
-          // but the guard caught the case where OUR row already has a DIFFERENT
-          // fpId (imported from a prior run linking to a different FP id).
-          logger.warn(
-            { orgId, fpId: customer.fpId, nativeId },
-            "FP customer: fpId guard prevented overwrite — counting as skipped",
-          );
-          counts.skipped++;
-        } else {
-          // Note: created/updated distinction is approximate here — we can't
-          // cheaply tell from upsertCustomerByContact whether the row pre-existed.
-          // Counted as 'created' (most common case for backfill). A pre-existing
-          // native match is also counted as 'created'; the shortfall vs 'updated'
-          // is documented in the module header.
-          counts.created++;
-        }
-        continue;
-      }
-
-      // Path (c): contactless — insert keyed purely on fieldpulseCustomerId.
-      const { emailHash, phoneHash } = computeContactHashes({
-        email: null,
-        phone: null,
-      });
-      const [inserted] = await db
-        .insert(customers)
-        .values({
-          organizationId: orgId,
-          nameEncrypted: encrypt(sanitizeName(customer.name)),
-          phoneEncrypted: null,
-          emailEncrypted: null,
-          addressEncrypted: customer.address ? encrypt(sanitizeAddress(customer.address)) : null,
-          emailHash,
-          phoneHash,
-          fieldpulseCustomerId: customer.fpId,
-        })
-        .onConflictDoNothing({
-          target: [customers.organizationId, customers.fieldpulseCustomerId],
-          // The unique index is PARTIAL (WHERE fieldpulse_customer_id IS NOT
-          // NULL); Postgres refuses the conflict target unless the predicate
-          // matches — live-verified failure without this on 2026-07-09.
-          where: isNotNull(customers.fieldpulseCustomerId),
-        })
-        .returning({ id: customers.id });
-
-      if (inserted) {
-        counts.created++;
-      } else {
-        // Row already existed for this fpId (re-run).
-        counts.skipped++;
-      }
-    } catch (err) {
-      // Per-record errors must never abort the walk — log with fpId and continue.
-      counts.errors++;
-      logger.error(
-        {
-          orgId,
-          fpId: customer.fpId,
-          error: err instanceof Error ? err.message : String(err),
-        },
-        "FP customer import: per-record error (continuing)",
-      );
-    }
+    await importOneFpCustomer(orgId, fp, counts);
   }
 }
 

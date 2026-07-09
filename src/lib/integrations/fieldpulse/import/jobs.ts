@@ -38,6 +38,7 @@ import type { FieldpulseJob, FieldpulseUser } from "../types";
 import type { PhaseResult } from "./run-import";
 import type { RequestStatus } from "@/lib/admin/request-status";
 import { generateReferenceNumber } from "@/lib/requests/submit-session-request";
+import { importOneFpCustomer } from "./customers";
 
 // ── Status map (pluggable) ─────────────────────────────────────────────────────
 // Edit this one object to expand the vocabulary when the user names their workflow.
@@ -298,6 +299,11 @@ export async function importJobsFromFieldpulse(
     return fpUserCache;
   }
 
+  // Customer self-heal cache: tracks which FP customer ids we've already attempted
+  // to fetch per-id this run (avoids duplicate getCustomer calls for jobs sharing
+  // a missing customer). Value = native customer id on success, null on 404/skip.
+  const customerHealCache = new Map<string, string | null>();
+
   const unknownTally: UnknownStatusTally = new Map();
   let missingCustomerCount = 0;
 
@@ -323,11 +329,39 @@ export async function importJobsFromFieldpulse(
 
     try {
       // Resolve customer by fieldpulseCustomerId (Phase 3 guarantees it).
-      const customerId = customerByFpId.get(job.fpCustomerId) ?? null;
+      let customerId = customerByFpId.get(job.fpCustomerId) ?? null;
       if (!customerId) {
-        missingCustomerCount++;
-        counts.skipped++;
-        continue;
+        // Customer self-heal: FP list pagination is unstable — a handful of
+        // customers slip between page boundaries and never appear in the walk.
+        // Fetch by id (once per distinct fpCustomerId per run) and import inline.
+        if (!customerHealCache.has(job.fpCustomerId)) {
+          const fpCustomer = await client.getCustomer(job.fpCustomerId);
+          if (fpCustomer) {
+            const healedId = await importOneFpCustomer(orgId, fpCustomer);
+            customerHealCache.set(job.fpCustomerId, healedId);
+            if (healedId) {
+              customerByFpId.set(job.fpCustomerId, healedId);
+              counts.customersSelfHealed = (counts.customersSelfHealed ?? 0) + 1;
+              logger.info(
+                { orgId, fpCustomerId: job.fpCustomerId, nativeId: healedId },
+                "FP job import: self-healed missing customer via per-id fetch",
+              );
+            }
+          } else {
+            // 404 or malformed — cache the miss so we don't retry for other
+            // jobs sharing this customer.
+            customerHealCache.set(job.fpCustomerId, null);
+          }
+          customerId = customerHealCache.get(job.fpCustomerId) ?? null;
+        } else {
+          customerId = customerHealCache.get(job.fpCustomerId) ?? null;
+        }
+
+        if (!customerId) {
+          missingCustomerCount++;
+          counts.skipped++;
+          continue;
+        }
       }
 
       // Resolve technician by fieldpulseUserId.

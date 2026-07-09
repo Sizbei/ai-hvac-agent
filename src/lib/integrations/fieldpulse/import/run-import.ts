@@ -53,6 +53,8 @@ export interface PhaseResult {
   archivedImported?: number;
   /** jobs phase: number of jobs with more than one tech assignment. */
   multiTechJobs?: number;
+  /** jobs phase: customers fetched per-id and imported during self-heal. */
+  customersSelfHealed?: number;
   /** locations phase: customers whose null address was filled. */
   enriched?: number;
   /** locations phase: customers already having an address (skipped enrichment). */

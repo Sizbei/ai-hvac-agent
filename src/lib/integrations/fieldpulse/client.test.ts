@@ -538,6 +538,78 @@ describe("RestFieldpulseClient — listInvoices", () => {
   });
 });
 
+// ── getCustomer ───────────────────────────────────────────────────────────────
+
+describe("RestFieldpulseClient — getCustomer", () => {
+  let mockFetch: ReturnType<typeof vi.fn>;
+  const config = { baseUrl: "https://api.fieldpulse.com", apiKey: "k" };
+
+  beforeEach(() => {
+    mockFetch = vi.fn();
+    vi.stubGlobal("fetch", mockFetch);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  /** Minimal envelope shape FP returns for a single customer. */
+  function customerEnvelope(id: number | string = 17431277) {
+    return {
+      error: false,
+      response: {
+        id,
+        first_name: "Jane",
+        last_name: "Smith",
+        display_name: "Jane Smith",
+        email: "jane@example.invalid",
+        phone: "555-010-0001",
+        phone_e164: "+15550100001",
+        address_1: "1 Main St",
+        city: "Johnson City",
+        state: "TN",
+        zip_code: "37601",
+        deleted_at: null,
+        merged_customer_id: null,
+      },
+    };
+  }
+
+  it("returns a FieldpulseCustomer on 200 with the real envelope shape", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => customerEnvelope(17431277),
+    });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const result = await client.getCustomer("17431277");
+    expect(result).not.toBeNull();
+    expect(result!.id).toBe("17431277");
+    expect(result!.displayName).toBe("Jane Smith");
+    expect(result!.email).toBe("jane@example.invalid");
+    // Verify the URL contained the customer id.
+    expect(String(mockFetch.mock.calls[0][0])).toContain("/customers/17431277");
+  });
+
+  it("returns null on 404 (customer not in FP list page)", async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 404,
+      json: async () => ({ error: "Not found" }),
+    });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const result = await client.getCustomer("99999999");
+    expect(result).toBeNull();
+  });
+
+  it("returns null on network error (degrades gracefully)", async () => {
+    mockFetch.mockRejectedValue(new Error("network down"));
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const result = await client.getCustomer("17431277");
+    expect(result).toBeNull();
+  });
+});
+
 // ── listJobs real-shape fixture (Phase 0.5 sanitized fixture) ────────────────
 
 import jobFixture from "./fixtures/fp-jobs-page1-sanitized.json";

@@ -9,13 +9,14 @@
  *  - importJobsFromFieldpulse: missing-customer skip; self-heal path;
  *    exact created/updated via pre-select Set; per-record error containment;
  *    partial-walk warning; unknown-status summary log.
+ *  - Customer self-heal: success path, 404 path, once-per-run cache.
  *
  * Uses the sanitized fixture at
  *   fixtures/fp-jobs-page1-sanitized.json (FAKE data only).
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { parseFpDate, mapFpJob, importJobsFromFieldpulse } from "./jobs";
-import type { FieldpulseJob, FieldpulseUser } from "../types";
+import type { FieldpulseJob, FieldpulseUser, FieldpulseCustomer } from "../types";
 import type { FieldpulseClient } from "../client";
 import type { PhaseResult } from "./run-import";
 
@@ -28,6 +29,9 @@ vi.mock("@/lib/db", () => ({
     update: vi.fn(),
     batch: vi.fn(),
   },
+}));
+vi.mock("./customers", () => ({
+  importOneFpCustomer: vi.fn(),
 }));
 vi.mock("@/lib/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -45,6 +49,7 @@ vi.mock("@/lib/requests/submit-session-request", () => ({
 
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { importOneFpCustomer } from "./customers";
 
 // ── Fixture helpers ───────────────────────────────────────────────────────────
 
@@ -80,10 +85,12 @@ function makeClient(
   jobs: FieldpulseJob[],
   totalCount: number | null = jobs.length,
   fpUsers: readonly FieldpulseUser[] = [],
+  getCustomerFn: (id: string) => Promise<FieldpulseCustomer | null> = () => Promise.resolve(null),
 ): FieldpulseClient {
   return {
     listJobs: vi.fn().mockResolvedValue({ items: jobs, totalCount }),
     listUsers: vi.fn().mockResolvedValue(fpUsers),
+    getCustomer: vi.fn().mockImplementation(getCustomerFn),
   } as unknown as FieldpulseClient;
 }
 
@@ -500,6 +507,91 @@ describe("importJobsFromFieldpulse", () => {
     );
     expect(summaryCall).toBeDefined();
     expect(summaryCall![0]).toMatchObject({ unknownStatusInts: { "6": 2 } });
+  });
+
+  // ── Customer self-heal ──────────────────────────────────────────────────────
+
+  function makeFpCustomer(overrides: Partial<FieldpulseCustomer> = {}): FieldpulseCustomer {
+    return {
+      id: "20000001",
+      displayName: "Self-Healed Customer",
+      firstName: "Self",
+      lastName: "Healed",
+      company: null,
+      email: "selfhealed@example.invalid",
+      phone: null,
+      phoneE164: null,
+      address: null,
+      deletedAt: null,
+      mergedCustomerId: null,
+      ...overrides,
+    };
+  }
+
+  it("customer self-heal: getCustomer → importOneFpCustomer → job created", async () => {
+    const fpCust = makeFpCustomer();
+    // getCustomer returns the missing customer; importOneFpCustomer returns a native id.
+    const client = makeClient(
+      [makeJob()],
+      1,
+      [],
+      (_id) => Promise.resolve(fpCust),
+    );
+    vi.mocked(importOneFpCustomer).mockResolvedValue("healed-cust-uuid");
+    const counts = makeCounts();
+    wireSelectSequence([
+      [], // existingFpIds
+      [], // customerByFpId — empty → triggers self-heal
+      [], // techByFpId
+    ]);
+    await importJobsFromFieldpulse(ORG, counts, client);
+    expect(client.getCustomer).toHaveBeenCalledWith("20000001");
+    expect(importOneFpCustomer).toHaveBeenCalledWith(ORG, fpCust);
+    expect(counts.customersSelfHealed).toBe(1);
+    expect(counts.created).toBe(1);
+    expect(counts.skipped).toBe(0);
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({ fpCustomerId: "20000001", nativeId: "healed-cust-uuid" }),
+      expect.stringContaining("self-healed missing customer"),
+    );
+  });
+
+  it("customer self-heal: getCustomer returns null (404) → job skipped", async () => {
+    // getCustomer returns null (404 or malformed).
+    const client = makeClient([makeJob()], 1, [], () => Promise.resolve(null));
+    const counts = makeCounts();
+    wireSelectSequence([[], [], []]);
+    await importJobsFromFieldpulse(ORG, counts, client);
+    expect(client.getCustomer).toHaveBeenCalledWith("20000001");
+    expect(importOneFpCustomer).not.toHaveBeenCalled();
+    expect(counts.skipped).toBe(1);
+    expect(counts.customersSelfHealed).toBeUndefined();
+  });
+
+  it("customer self-heal: getCustomer called once for two jobs sharing the missing customer", async () => {
+    const fpCust = makeFpCustomer();
+    const job1 = makeJob({ id: "10000001", customerId: "20000001" });
+    const job2 = makeJob({ id: "10000002", customerId: "20000001" });
+    const client = makeClient(
+      [job1, job2],
+      2,
+      [],
+      (_id) => Promise.resolve(fpCust),
+    );
+    // Second import returns native id on first call, cached thereafter.
+    vi.mocked(importOneFpCustomer).mockResolvedValue("healed-cust-uuid");
+    const counts = makeCounts();
+    wireSelectSequence([
+      [], // existingFpIds
+      [], // customerByFpId — empty for both jobs
+      [], // techByFpId
+    ]);
+    await importJobsFromFieldpulse(ORG, counts, client);
+    // getCustomer must be called exactly once despite two jobs sharing the id.
+    expect(client.getCustomer).toHaveBeenCalledTimes(1);
+    expect(importOneFpCustomer).toHaveBeenCalledTimes(1);
+    expect(counts.customersSelfHealed).toBe(1);
+    expect(counts.created).toBe(2);
   });
 
   it("multi-tech: description is annotated with additional tech names on insert", async () => {
