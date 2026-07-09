@@ -3,14 +3,18 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { CustomerRecord, CustomerDetail } from '@/lib/admin/crm-types';
 
-export function useAdminCustomers() {
+export function useAdminCustomers(includeArchived?: boolean) {
+  const shouldIncludeArchived = includeArchived ?? false;
   const [customers, setCustomers] = useState<readonly CustomerRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetch_ = useCallback(async () => {
     try {
-      const res = await fetch('/api/admin/customers');
+      const url = shouldIncludeArchived
+        ? '/api/admin/customers?includeArchived=true'
+        : '/api/admin/customers';
+      const res = await fetch(url);
       const json = await res.json();
       if (json.success) {
         setError(null);
@@ -23,7 +27,7 @@ export function useAdminCustomers() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [shouldIncludeArchived]);
 
   // Idiomatic data fetch: setState runs only AFTER the awaited fetch resolves,
   // not synchronously during the effect, so this is not a render loop.

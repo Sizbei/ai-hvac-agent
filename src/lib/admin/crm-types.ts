@@ -11,6 +11,10 @@ export interface CustomerRecord {
   readonly requestCount: number;
   readonly lastServiceDate: string | null;
   readonly createdAt: string;
+  readonly customerType: string;
+  readonly membershipStatus: string;
+  readonly fieldpulseCustomerId: string | null;
+  readonly archivedAt: string | null;
 }
 
 export interface CustomerDetail extends CustomerRecord {

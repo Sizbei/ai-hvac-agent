@@ -18,7 +18,7 @@ function isUniqueViolation(error: unknown): boolean {
   );
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const session = await getAdminSession();
     if (!session) {
@@ -34,7 +34,11 @@ export async function GET() {
       return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
     }
 
-    const result = await getCustomers(session.organizationId);
+    const includeArchived =
+      request.nextUrl.searchParams.get("includeArchived") === "true";
+    const result = await getCustomers(session.organizationId, {
+      includeArchived,
+    });
     return successResponse({ customers: result });
   } catch (error: unknown) {
     logger.error({ error }, "Failed to fetch customers");

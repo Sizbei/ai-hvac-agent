@@ -39,17 +39,16 @@ function safeDecrypt(ciphertext: string | null): string | null {
   }
 }
 
-// Upper bound on rows returned by the admin customer list. PII columns are
-// encrypted with a random IV, so search/filtering must happen client-side over
-// the loaded set — which means this query cannot stream or paginate server-side.
-// The cap keeps a pathological dataset from loading unbounded; the most recent
-// customers are returned first. At real scale, introduce a deterministic blind
-// index (HMAC of normalized email/phone) so lookups/search can be server-side.
-const CUSTOMER_LIST_LIMIT = 500;
-
 export async function getCustomers(
   organizationId: string,
+  options?: { readonly includeArchived?: boolean },
 ): Promise<readonly CustomerRecord[]> {
+  const includeArchived = options?.includeArchived ?? false;
+
+  const whereClause = includeArchived
+    ? withTenant(customers, organizationId)
+    : withTenant(customers, organizationId, isNull(customers.archivedAt));
+
   const rows = await db
     .select({
       id: customers.id,
@@ -61,6 +60,10 @@ export async function getCustomers(
       propertySqft: customers.propertySqft,
       notes: customers.notes,
       createdAt: customers.createdAt,
+      customerType: customers.customerType,
+      membershipStatus: customers.membershipStatus,
+      fieldpulseCustomerId: customers.fieldpulseCustomerId,
+      archivedAt: customers.archivedAt,
       equipmentCount: sql<number>`(
         SELECT count(*)::int FROM customer_equipment
         WHERE customer_equipment.customer_id = ${customers.id}
@@ -75,10 +78,8 @@ export async function getCustomers(
       )`,
     })
     .from(customers)
-    // Exclude archived (soft-deleted) customers from the default list.
-    .where(withTenant(customers, organizationId, isNull(customers.archivedAt)))
-    .orderBy(desc(customers.createdAt))
-    .limit(CUSTOMER_LIST_LIMIT);
+    .where(whereClause)
+    .orderBy(desc(customers.createdAt));
 
   return rows.map((row) => ({
     id: row.id,
@@ -93,6 +94,10 @@ export async function getCustomers(
     requestCount: row.requestCount ?? 0,
     lastServiceDate: row.lastServiceDate,
     createdAt: row.createdAt.toISOString(),
+    customerType: row.customerType,
+    membershipStatus: row.membershipStatus,
+    fieldpulseCustomerId: row.fieldpulseCustomerId,
+    archivedAt: row.archivedAt?.toISOString() ?? null,
   }));
 }
 
@@ -215,6 +220,10 @@ export async function getCustomerById(
     equipmentCount: equipmentRows.length,
     requestCount: requestCount[0]?.value ?? 0,
     lastServiceDate: null,
+    customerType: row.customerType,
+    membershipStatus: row.membershipStatus,
+    fieldpulseCustomerId: row.fieldpulseCustomerId,
+    archivedAt: row.archivedAt?.toISOString() ?? null,
     // Whether a self-service portal link is currently active. Boolean only — the
     // hash (token material) is never sent to the client.
     portalActive: Boolean(row.portalTokenHash),
@@ -306,6 +315,10 @@ export async function createCustomer(
     requestCount: 0,
     lastServiceDate: null,
     createdAt: created.createdAt.toISOString(),
+    customerType: created.customerType ?? 'residential',
+    membershipStatus: created.membershipStatus ?? 'none',
+    fieldpulseCustomerId: created.fieldpulseCustomerId ?? null,
+    archivedAt: null,
   };
 }
 
