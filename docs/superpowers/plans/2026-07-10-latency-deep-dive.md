@@ -58,3 +58,22 @@ Before/after table here.
 ## Deferred — "unintuitive"
 IA/navigation polish is its own brainstorm once speed lands (speed may resolve
 much of the feel).
+
+---
+
+## Phase E — closing measurements (2026-07-10, from Asia, warm)
+
+| Path | Before | After | Change |
+|---|---|---|---|
+| `/api/health` (1 DB query) | 930ms every hit | **~310ms** | crash-loop fix; now ≈ network floor |
+| `/api/admin/stats` | **HTTP 500** | 200, ~350ms warm | SQL fix |
+| List pages, first uncached load | ~1.2s TTFB + blank screen | same TTFB, instant shell + skeletons | Phase B |
+| List pages, revisit | full refetch ~1.2s+transfer | **instant** (SWR cache, bg revalidate) | Phase A |
+| Invoices GET round trips | 2 sequential | 1 (parallel) | Phase C (+3 more routes) |
+
+Authenticated re-measurement is now user-side only (password login removed by the
+google-only-login feature); the felt verdict comes from the user's click-around.
+
+**Status: Phases A/B/C shipped (each reviewed + squashed). Open: server-side
+pagination decision (R1 residual), `ep-patient-surf` purpose + prod re-sync of
+2 custom-field rows + 6 customers (R6/Phase D).**
