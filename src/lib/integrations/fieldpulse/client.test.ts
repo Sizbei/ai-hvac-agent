@@ -702,3 +702,76 @@ describe("RestFieldpulseClient — getJobRaw", () => {
     expect(result.map).toEqual(rawJob.map);
   });
 });
+
+// ── toCustomer: customFields + lead_source folding ────────────────────────────
+
+describe("RestFieldpulseClient — toCustomer customFields + lead_source folding", () => {
+  let mockFetch: ReturnType<typeof vi.fn>;
+  const config = { baseUrl: "https://api.fieldpulse.com", apiKey: "k" };
+
+  beforeEach(() => {
+    mockFetch = vi.fn();
+    vi.stubGlobal("fetch", mockFetch);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  function customerEnvelope(overrides: Record<string, unknown> = {}) {
+    return {
+      error: false,
+      response: {
+        id: 12345,
+        display_name: "Test Customer",
+        ...overrides,
+      },
+    };
+  }
+
+  it("folds customfields + lead_source together: customfields first, then Lead Source", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () =>
+        customerEnvelope({
+          customfields: [{ name: "Referral", value: "Angi" }],
+          lead_source: "Google",
+        }),
+    });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const result = await client.getCustomer("12345");
+    expect(result?.customFields).toEqual([
+      { name: "Referral", value: "Angi" },
+      { name: "Lead Source", value: "Google" },
+    ]);
+  });
+
+  it("skips malformed customfields entries (non-object, numeric value, missing keys) without throwing", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () =>
+        customerEnvelope({
+          customfields: [
+            "not-an-object",            // non-object entry
+            { name: "Score", value: 99 }, // numeric value (not a string)
+            { label: "Source" },          // missing value key
+            { name: "Good", value: "Yes" }, // valid entry
+          ],
+        }),
+    });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const result = await client.getCustomer("12345");
+    // Only the valid entry survives
+    expect(result?.customFields).toEqual([{ name: "Good", value: "Yes" }]);
+  });
+
+  it("returns null customFields when no customfields and no lead_source", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => customerEnvelope({ customfields: null }),
+    });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const result = await client.getCustomer("12345");
+    expect(result?.customFields).toBeNull();
+  });
+});

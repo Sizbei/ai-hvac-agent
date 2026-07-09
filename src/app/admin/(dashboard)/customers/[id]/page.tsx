@@ -378,6 +378,28 @@ export default function CustomerDetailPage({
         </CardContent>
       </Card>
 
+      {/* FieldPulse custom fields */}
+      {customer.fieldpulseCustomFields && customer.fieldpulseCustomFields.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <span className="rounded border bg-violet-50 px-1.5 py-px text-[10px] font-medium text-violet-700">FieldPulse</span>
+              Details
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <dl className="grid gap-1 text-sm sm:grid-cols-2">
+              {customer.fieldpulseCustomFields.map((field) => (
+                <div key={field.name} className="flex gap-2">
+                  <dt className="text-muted-foreground shrink-0">{field.name}:</dt>
+                  <dd>{field.value}</dd>
+                </div>
+              ))}
+            </dl>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Membership */}
       <CustomerMembershipCard customerId={id} />
 
@@ -415,8 +437,11 @@ export default function CustomerDetailPage({
                   className="rounded-lg border p-3"
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <p className="font-medium text-sm">
+                    <p className="flex items-center gap-1.5 font-medium text-sm">
                       {EQUIPMENT_LABELS[eq.equipmentType] ?? eq.equipmentType}
+                      {eq.fieldpulseAssetId && (
+                        <span className="rounded border bg-violet-50 px-1.5 py-px text-[10px] font-medium text-violet-700">FieldPulse</span>
+                      )}
                     </p>
                     <div className="flex items-center gap-1">
                       {eq.warrantyExpiration && (
@@ -543,9 +568,14 @@ export default function CustomerDetailPage({
               {customer.customerNotes.map((n) => (
                 <div key={n.id} className="rounded-lg border p-3">
                   <div className="flex items-center justify-between">
-                    <Badge variant="outline" className="text-xs">
-                      {n.noteType}
-                    </Badge>
+                    <div className="flex items-center gap-1.5">
+                      <Badge variant="outline" className="text-xs">
+                        {n.noteType}
+                      </Badge>
+                      {n.fieldpulseCommentId && (
+                        <span className="rounded border bg-violet-50 px-1.5 py-px text-[10px] font-medium text-violet-700">FieldPulse</span>
+                      )}
+                    </div>
                     <span className="text-xs text-muted-foreground">
                       {n.authorName ? `${n.authorName} — ` : ''}
                       {formatDate(n.createdAt)}

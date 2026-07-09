@@ -99,6 +99,12 @@ export function StaffResetPasswordDialog({
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          {staff?.isFpSynced && !staff.hasLogin && (
+            <p className="text-xs text-muted-foreground">
+              This creates a local login for a FieldPulse-synced technician.
+            </p>
+          )}
+
           <div className="space-y-2">
             <Label htmlFor="reset-password">New password</Label>
             <Input

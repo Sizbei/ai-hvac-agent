@@ -135,6 +135,7 @@ export async function getCustomerById(
           noteType: customerNotes.noteType,
           createdAt: customerNotes.createdAt,
           authorName: users.name,
+          fieldpulseCommentId: customerNotes.fieldpulseCommentId,
         })
         .from(customerNotes)
         .leftJoin(users, and(eq(customerNotes.authorId, users.id), eq(users.organizationId, organizationId)))
@@ -227,6 +228,7 @@ export async function getCustomerById(
     // Whether a self-service portal link is currently active. Boolean only — the
     // hash (token material) is never sent to the client.
     portalActive: Boolean(row.portalTokenHash),
+    fieldpulseCustomFields: row.fieldpulseCustomFields ?? null,
     createdAt: row.createdAt.toISOString(),
     equipment: equipmentRows.map((e) => ({
       id: e.id,
@@ -240,6 +242,7 @@ export async function getCustomerById(
       warrantyProvider: e.warrantyProvider,
       locationInHome: e.locationInHome,
       notes: e.notes,
+      fieldpulseAssetId: e.fieldpulseAssetId ?? null,
     })),
     serviceHistory: historyRows.map((h) => ({
       id: h.id,
@@ -260,6 +263,7 @@ export async function getCustomerById(
       content: n.content,
       noteType: n.noteType,
       createdAt: n.createdAt.toISOString(),
+      fieldpulseCommentId: n.fieldpulseCommentId ?? null,
     })),
     followUps: followUpRows.map((f) => ({
       id: f.id,

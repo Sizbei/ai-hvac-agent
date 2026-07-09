@@ -127,6 +127,10 @@ export interface StaffRecord {
   /** Hourly labor rate in integer cents/hour (technicians). NULL = no rate set
    * (clock-out accrues 0 labor cost). */
   readonly laborRateCents: number | null;
+  /** True when this user was imported from FieldPulse (fieldpulseUserId is set). */
+  readonly isFpSynced: boolean;
+  /** True when this user has a local password hash (password login is possible). */
+  readonly hasLogin: boolean;
 }
 
 export interface CreateStaffInput {

@@ -336,6 +336,29 @@ function toCustomer(raw: unknown): FieldpulseCustomer {
     typeof obj.address === "object" && obj.address !== null
       ? toAddress(obj.address)
       : flat;
+  // Parse customfields: tolerate array / absent / null / non-array.
+  const rawCf = obj.customfields;
+  const cfEntries: { name: string; value: string }[] = [];
+  if (Array.isArray(rawCf)) {
+    for (const entry of rawCf) {
+      if (!entry || typeof entry !== "object") continue;
+      const e = entry as Record<string, unknown>;
+      const name =
+        str(e.name) ?? str(e.label) ?? str(e.field_name) ?? str(e.custom_field_name);
+      const value =
+        str(e.value) ?? str(e.field_value) ?? str(e.custom_value);
+      if (name?.trim() && value?.trim()) {
+        cfEntries.push({ name: name.trim(), value: value.trim() });
+      }
+    }
+  }
+  // Fold lead_source as a synthetic custom field entry.
+  const leadSource = str(obj.lead_source);
+  if (leadSource?.trim()) {
+    cfEntries.push({ name: "Lead Source", value: leadSource.trim() });
+  }
+  const customFields = cfEntries.length > 0 ? cfEntries : null;
+
   return {
     id,
     firstName: str(obj.first_name),
@@ -350,6 +373,8 @@ function toCustomer(raw: unknown): FieldpulseCustomer {
     displayName: str(obj.display_name),
     deletedAt: str(obj.deleted_at),
     mergedCustomerId: idStr(obj.merged_customer_id),
+    customFields,
+    leadSource,
   };
 }
 

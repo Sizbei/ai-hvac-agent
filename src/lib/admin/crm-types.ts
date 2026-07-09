@@ -21,6 +21,7 @@ export interface CustomerDetail extends CustomerRecord {
   /** Whether a self-service portal link is currently active for this customer.
    * Boolean only — the portal token/hash is never exposed to the client. */
   readonly portalActive: boolean;
+  readonly fieldpulseCustomFields: readonly { readonly name: string; readonly value: string }[] | null;
   readonly equipment: readonly EquipmentRecord[];
   readonly serviceHistory: readonly ServiceHistoryRecord[];
   readonly customerNotes: readonly NoteRecord[];
@@ -42,6 +43,7 @@ export interface EquipmentRecord {
   readonly warrantyProvider: string | null;
   readonly locationInHome: string | null;
   readonly notes: string | null;
+  readonly fieldpulseAssetId: string | null;
 }
 
 export interface ServiceHistoryRecord {
@@ -64,6 +66,7 @@ export interface NoteRecord {
   readonly content: string;
   readonly noteType: string;
   readonly createdAt: string;
+  readonly fieldpulseCommentId: string | null;
 }
 
 export interface FollowUpRecord {

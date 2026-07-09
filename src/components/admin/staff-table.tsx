@@ -98,12 +98,24 @@ export function StaffTable({
             return (
               <TableRow key={member.id}>
                 <TableCell className="font-medium">
-                  {member.name}
-                  {isSelf && (
-                    <span className="ml-2 text-xs text-muted-foreground">(you)</span>
-                  )}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {member.name}
+                    {isSelf && (
+                      <span className="text-xs text-muted-foreground">(you)</span>
+                    )}
+                    {member.isFpSynced && (
+                      <span className="rounded border bg-violet-50 px-1.5 py-px text-[10px] font-medium text-violet-700">FieldPulse</span>
+                    )}
+                  </div>
                 </TableCell>
-                <TableCell>{member.email}</TableCell>
+                <TableCell>
+                  <div>
+                    {member.email}
+                    {member.isFpSynced && !member.hasLogin && (
+                      <div className="text-xs text-muted-foreground">no local login</div>
+                    )}
+                  </div>
+                </TableCell>
                 <TableCell>
                   <RoleBadge role={member.role} />
                 </TableCell>

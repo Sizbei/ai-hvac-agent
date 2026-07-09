@@ -104,6 +104,8 @@ function toStaffRecord(row: {
   isActive: boolean;
   createdAt: Date;
   laborRateCents: number | null;
+  fieldpulseUserId: string | null;
+  passwordHash: string | null;
 }): StaffRecord {
   return {
     id: row.id,
@@ -113,6 +115,8 @@ function toStaffRecord(row: {
     isActive: row.isActive,
     createdAt: row.createdAt.toISOString(),
     laborRateCents: row.laborRateCents,
+    isFpSynced: row.fieldpulseUserId != null,
+    hasLogin: row.passwordHash != null,
   };
 }
 
@@ -124,6 +128,8 @@ const STAFF_COLUMNS = {
   isActive: users.isActive,
   createdAt: users.createdAt,
   laborRateCents: users.laborRateCents,
+  fieldpulseUserId: users.fieldpulseUserId,
+  passwordHash: users.passwordHash,
 } as const;
 
 /** Normalize an email for storage and collision checks: trimmed + lowercased.

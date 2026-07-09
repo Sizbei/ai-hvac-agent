@@ -742,6 +742,11 @@ export const customers = pgTable(
     // customer to Fieldpulse. Set once and treated as idempotent: a re-sync of an
     // already-mapped customer is a no-op.
     fieldpulseCustomerId: text("fieldpulse_customer_id"),
+    // Fieldpulse custom fields (including synthetic lead_source entry).
+    // Nullable jsonb — null when the customer has no custom fields.
+    fieldpulseCustomFields: jsonb("fieldpulse_custom_fields").$type<
+      { name: string; value: string }[]
+    >(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

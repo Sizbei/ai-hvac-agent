@@ -25,6 +25,13 @@ export interface FieldpulseCustomer {
   // Non-null when the customer was merged into another — skip on import.
   // Points at the surviving record's id.
   readonly mergedCustomerId?: string | null;
+  // Parsed custom fields (name+value pairs). Null when absent or all entries
+  // were filtered (empty name/value). lead_source is folded in as a synthetic
+  // entry { name: "Lead Source", value: raw.lead_source }.
+  readonly customFields?: readonly { name: string; value: string }[] | null;
+  // Raw lead source string from the FP API — folded into customFields by the
+  // mapper; retained here so types.ts mirrors the raw API shape.
+  readonly leadSource?: string | null;
 }
 
 /** Address shape within a customer or job. */

@@ -40,8 +40,10 @@ vi.mock('@/lib/db/schema', () => ({
     role: 'u.role',
     isActive: 'u.isActive',
     passwordHash: 'u.passwordHash',
+    fieldpulseUserId: 'u.fieldpulseUserId',
     createdAt: 'u.createdAt',
     organizationId: 'u.org',
+    laborRateCents: 'u.laborRateCents',
   },
 }));
 
@@ -99,6 +101,9 @@ function row(over: Record<string, unknown> = {}) {
     role: 'admin',
     isActive: true,
     createdAt: new Date('2026-01-01T00:00:00Z'),
+    laborRateCents: null,
+    fieldpulseUserId: null,
+    passwordHash: null,
     ...over,
   };
 }
@@ -134,7 +139,26 @@ describe('listStaff', () => {
       role: 'admin',
       isActive: true,
       createdAt: '2026-01-01T00:00:00.000Z',
+      laborRateCents: null,
+      isFpSynced: false,
+      hasLogin: false,
     });
+  });
+
+  it('sets isFpSynced:true and hasLogin:false for an FP-synced passwordless tech', async () => {
+    selectQueue.push([row({ fieldpulseUserId: '12345', passwordHash: null })]);
+    const [record] = await listStaff(ORG);
+    expect(record.isFpSynced).toBe(true);
+    expect(record.hasLogin).toBe(false);
+    expect(record).not.toHaveProperty('passwordHash');
+  });
+
+  it('sets isFpSynced:false and hasLogin:true for a native user with a password hash', async () => {
+    selectQueue.push([row({ fieldpulseUserId: null, passwordHash: '$2a$12$fakehash' })]);
+    const [record] = await listStaff(ORG);
+    expect(record.isFpSynced).toBe(false);
+    expect(record.hasLogin).toBe(true);
+    expect(record).not.toHaveProperty('passwordHash');
   });
 });
 

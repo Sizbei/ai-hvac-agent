@@ -56,6 +56,7 @@ export interface MappedFpCustomer {
   readonly email: string | null;
   readonly phone: string | null;
   readonly address: string | null;
+  readonly customFields: { name: string; value: string }[] | null;
 }
 
 /**
@@ -110,6 +111,7 @@ export function mapFpCustomer(fp: FieldpulseCustomer): MapResult {
       email,
       phone,
       address,
+      customFields: fp.customFields ? [...fp.customFields] : null,
     },
   };
 }
@@ -216,6 +218,7 @@ export async function importOneFpCustomer(
           emailHash,
           phoneHash,
           fieldpulseCustomerId: customer.fpId,
+          fieldpulseCustomFields: customer.customFields ?? null,
           archivedAt: new Date(),
         })
         .onConflictDoNothing({
@@ -251,7 +254,7 @@ export async function importOneFpCustomer(
       // overwrite in the unlikely case of a race (e.g. a concurrent import run).
       const updated = await db
         .update(customers)
-        .set({ fieldpulseCustomerId: customer.fpId, updatedAt: new Date() })
+        .set({ fieldpulseCustomerId: customer.fpId, fieldpulseCustomFields: customer.customFields ?? null, updatedAt: new Date() })
         .where(
           and(
             eq(customers.id, nativeId),
@@ -301,6 +304,7 @@ export async function importOneFpCustomer(
         emailHash,
         phoneHash,
         fieldpulseCustomerId: customer.fpId,
+        fieldpulseCustomFields: customer.customFields ?? null,
       })
       .onConflictDoNothing({
         target: [customers.organizationId, customers.fieldpulseCustomerId],
@@ -436,6 +440,7 @@ async function updateCustomerFields(
       addressEncrypted: customer.address ? encrypt(sanitizeAddress(customer.address)) : null,
       emailHash,
       phoneHash,
+      fieldpulseCustomFields: customer.customFields ?? null,
       updatedAt: new Date(),
     })
     .where(

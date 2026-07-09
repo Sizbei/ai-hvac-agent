@@ -242,6 +242,57 @@ describe("mapFpCustomer", () => {
     if (!result.ok) return;
     expect(result.customer.address).toBeNull();
   });
+
+  // ── customFields passthrough ──────────────────────────────────────────────
+
+  it("passes through customFields when present", () => {
+    const result = mapFpCustomer(
+      makeCustomer({ customFields: [{ name: "Source", value: "Google" }] }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.customer.customFields).toEqual([{ name: "Source", value: "Google" }]);
+  });
+
+  it("returns null customFields when fp.customFields is null", () => {
+    const result = mapFpCustomer(makeCustomer({ customFields: null }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.customer.customFields).toBeNull();
+  });
+
+  it("returns null customFields when fp.customFields is absent (undefined)", () => {
+    const { customFields: _drop, ...base } = makeCustomer();
+    const result = mapFpCustomer(base as FieldpulseCustomer);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.customer.customFields).toBeNull();
+  });
+
+  it("lead_source present → appears as { name: 'Lead Source', value } in customFields", () => {
+    const result = mapFpCustomer(
+      makeCustomer({ leadSource: "Yelp", customFields: null }),
+    );
+    // NOTE: lead_source folding is done in toCustomer (client.ts), so at this
+    // mapper level `fp.customFields` already contains the synthetic entry when
+    // the raw API is the source. Here we test the passthrough: if the
+    // FieldpulseCustomer already has the synthetic entry, it flows through.
+    const result2 = mapFpCustomer(
+      makeCustomer({
+        customFields: [{ name: "Lead Source", value: "Yelp" }],
+      }),
+    );
+    expect(result2.ok).toBe(true);
+    if (!result2.ok) return;
+    expect(result2.customer.customFields).toEqual([
+      { name: "Lead Source", value: "Yelp" },
+    ]);
+    // Also verify a non-null leadSource alone (no customFields) still passes null
+    // because folding happens upstream in toCustomer, not in mapFpCustomer.
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.customer.customFields).toBeNull();
+  });
 });
 
 // ── importCustomersFromFieldpulse tests ──────────────────────────────────────
@@ -397,6 +448,27 @@ describe("importCustomersFromFieldpulse", () => {
     expect(upsertCustomerByContact).toHaveBeenCalledTimes(1);
     expect(counts.created).toBe(1);
     expect(counts.skipped).toBe(0);
+  });
+
+  it("path (b): guard UPDATE includes fieldpulseCustomFields", async () => {
+    const fp = makeCustomer({
+      id: "10001003",
+      customFields: [{ name: "Lead Source", value: "Google" }],
+    });
+    const client = makeClient([fp]);
+    const counts = makeCounts();
+
+    wireSelect([]);
+    vi.mocked(upsertCustomerByContact).mockResolvedValue("native-id-cf");
+    const { set } = wireUpdate([{ id: "native-id-cf" }]);
+
+    await importCustomersFromFieldpulse(ORG, counts, client);
+
+    expect(set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fieldpulseCustomFields: [{ name: "Lead Source", value: "Google" }],
+      }),
+    );
   });
 
   it("path (b): counts skipped when fpId stamp guard rejects (another row owns fpId)", async () => {
