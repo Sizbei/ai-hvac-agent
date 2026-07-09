@@ -24,6 +24,9 @@ export function useMonthCalendar(
   /** When false, the hook does not fetch or poll (used when month view is not
    * the active view, so it doesn't fire requests in the background). */
   enabled = true,
+  /** When true, completed and cancelled jobs are included in the calendar.
+   * Default false = today's behavior. */
+  includeCompleted = false,
 ): UseMonthCalendarResult {
   const [month, setMonth] = useState<MonthCalendar | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -39,9 +42,9 @@ export function useMonthCalendar(
     isFetchingRef.current = true;
 
     try {
-      const url = `/api/admin/calendar?date=${encodeURIComponent(
-        date,
-      )}&view=month`;
+      const url =
+        `/api/admin/calendar?date=${encodeURIComponent(date)}&view=month` +
+        (includeCompleted ? '&includeCompleted=true' : '');
       const res = await fetch(url);
       if (!isMountedRef.current) return;
       if (!res.ok) {
@@ -70,7 +73,7 @@ export function useMonthCalendar(
     } finally {
       isFetchingRef.current = false;
     }
-  }, [date, enabled]);
+  }, [date, enabled, includeCompleted]);
 
   useEffect(() => {
     if (!enabled) return;

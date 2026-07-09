@@ -53,6 +53,11 @@ function JobChip({
       <span className={`size-1.5 shrink-0 rounded-full ${accent.dot}`} />
       {time && <span className="shrink-0 font-medium tabular-nums">{time}</span>}
       <span className="truncate">{label}</span>
+      {job.syncedSource && (
+        <span className="ml-auto shrink-0 rounded border bg-violet-50 px-1 py-px text-[9px] font-medium text-violet-700 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-300">
+          {job.syncedSource === 'fieldpulse' ? 'FP' : 'HCP'}
+        </span>
+      )}
     </button>
   );
 }

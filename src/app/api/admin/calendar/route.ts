@@ -55,6 +55,8 @@ export async function GET(request: NextRequest) {
     const viewParam = request.nextUrl.searchParams.get("view") ?? "day";
     const view =
       viewParam === "week" || viewParam === "month" ? viewParam : "day";
+    const includeCompleted =
+      request.nextUrl.searchParams.get("includeCompleted") === "true";
 
     // Fall back to the business-tz "today" when the date is missing/invalid.
     // businessTodayIso derives Eastern's calendar date from the current instant
@@ -89,6 +91,7 @@ export async function GET(request: NextRequest) {
         end.toISOString(),
         days,
         businessMonthOf(date),
+        includeCompleted,
       );
       return successResponse(monthCalendar);
     }
@@ -98,6 +101,7 @@ export async function GET(request: NextRequest) {
       start.toISOString(),
       end.toISOString(),
       days,
+      includeCompleted,
     );
     return successResponse(calendar);
   } catch (error: unknown) {

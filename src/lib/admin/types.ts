@@ -184,6 +184,8 @@ export interface DashboardRequest {
   readonly holdReason: string | null;
   readonly autoAssigned: boolean;
   readonly createdAt: string;
+  /** Non-null when this job was imported from FieldPulse or Housecall Pro. */
+  readonly syncedSource: 'fieldpulse' | 'housecall' | null;
 }
 
 /** Max rows any single dashboard list returns. A list at this length is shown

@@ -23,6 +23,7 @@ function job(overrides: Partial<DashboardRequest>): DashboardRequest {
     holdReason: null,
     autoAssigned: false,
     createdAt: "2026-06-01T00:00:00.000Z",
+    syncedSource: null,
     ...overrides,
   };
 }

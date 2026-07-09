@@ -44,7 +44,7 @@ export function CalendarJobCard({ job, onSelect, compact }: CalendarJobCardProps
       // priority by color — consistent with the urgency badges.
       className={`flex h-full w-full flex-col overflow-hidden rounded-md border border-l-4 border-sky-200 ${accent.bar} bg-sky-50 px-2 py-1 text-left text-xs leading-tight transition-colors hover:bg-sky-100 dark:border-sky-900 dark:bg-sky-950 dark:hover:bg-sky-900`}
     >
-      <div className="flex items-center justify-between gap-1">
+      <div className="flex items-center gap-1">
         <span className="font-medium tabular-nums">{time}</span>
         {job.isAfterHours && (
           <span
@@ -52,6 +52,11 @@ export function CalendarJobCard({ job, onSelect, compact }: CalendarJobCardProps
             className="inline-flex shrink-0 items-center rounded-full border border-amber-300 bg-amber-100 px-1 text-[9px] font-medium text-amber-800"
           >
             AH
+          </span>
+        )}
+        {job.syncedSource && (
+          <span className="ml-auto shrink-0 rounded border bg-violet-50 px-1.5 py-px text-[9px] font-medium text-violet-700 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-300">
+            {job.syncedSource === 'fieldpulse' ? 'FP' : 'HCP'}
           </span>
         )}
       </div>

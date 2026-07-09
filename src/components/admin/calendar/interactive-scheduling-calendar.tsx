@@ -184,20 +184,30 @@ function DayLane({
           />
         );
       })}
-      {positioned.map(({ job, topPx, heightPx }) => (
-        <div
-          key={job.id}
-          className="absolute inset-x-0.5 z-10"
-          style={{ top: topPx, height: heightPx }}
-        >
-          <DraggableJobCard
-            job={job}
-            onSelect={onSelect}
-            compact={compact}
-            disabled={disabled}
-          />
-        </div>
-      ))}
+      {positioned.map(({ job, topPx, heightPx }) => {
+        const isTerminal =
+          job.status === 'completed' || job.status === 'cancelled';
+        return (
+          <div
+            key={job.id}
+            className="absolute inset-x-0.5 z-10"
+            style={{ top: topPx, height: heightPx }}
+          >
+            {isTerminal ? (
+              <div className="h-full w-full opacity-50">
+                <CalendarJobCard job={job} onSelect={onSelect} compact={compact} />
+              </div>
+            ) : (
+              <DraggableJobCard
+                job={job}
+                onSelect={onSelect}
+                compact={compact}
+                disabled={disabled}
+              />
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

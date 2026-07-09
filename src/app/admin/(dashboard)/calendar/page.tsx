@@ -119,6 +119,17 @@ export default function CalendarPage() {
   const [view, setView] = useState<CalendarView>('day');
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [status, setStatus] = useState<CalendarStatus | null>(null);
+  const [showCompleted, setShowCompleted] = useState<boolean>(() => {
+    try { return localStorage.getItem('calendar:showCompleted') === 'true'; } catch { return false; }
+  });
+
+  function toggleShowCompleted(): void {
+    setShowCompleted((prev) => {
+      const next = !prev;
+      try { localStorage.setItem('calendar:showCompleted', String(next)); } catch {}
+      return next;
+    });
+  }
 
   // Day/week share one hook; month uses a separate (lightweight) payload. Each
   // is enabled only for its active view so the inactive one doesn't poll.
@@ -127,13 +138,14 @@ export default function CalendarPage() {
     date,
     view,
     !isMonth,
+    showCompleted,
   );
   const {
     month,
     isLoading: monthLoading,
     error: monthError,
     refetch: refetchMonth,
-  } = useMonthCalendar(date, isMonth);
+  } = useMonthCalendar(date, isMonth, showCompleted);
 
   const isToday = date === todayBusiness();
 
@@ -166,6 +178,15 @@ export default function CalendarPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {/* Show completed toggle */}
+          <Button
+            variant={showCompleted ? 'secondary' : 'outline'}
+            size="sm"
+            onClick={toggleShowCompleted}
+          >
+            {showCompleted ? 'Hide completed' : 'Show completed'}
+          </Button>
+
           {/* View toggle */}
           <div className="flex items-center rounded-lg border p-0.5">
             <Button

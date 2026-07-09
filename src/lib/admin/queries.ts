@@ -405,6 +405,10 @@ const OPEN_STATUSES = [
   "on_hold",
 ] as const;
 
+/** Terminal statuses — included in the calendar only when the
+ * "show completed" toggle is on. Never mixed into the unscheduled queue. */
+const TERMINAL_STATUSES = ["completed", "cancelled"] as const;
+
 /** Statuses a dashboard "needs attention" queue draws from: open and not yet
  * assigned to a tech. */
 const UNASSIGNED_OPEN_STATUSES = ["pending", "scheduled"] as const;
@@ -1044,6 +1048,8 @@ const dashboardRequestSelect = {
   holdReason: serviceRequests.holdReason,
   autoAssigned: serviceRequests.autoAssigned,
   createdAt: serviceRequests.createdAt,
+  fieldpulseJobId: serviceRequests.fieldpulseJobId,
+  hcpJobId: serviceRequests.hcpJobId,
 } as const;
 
 type DashboardRequestRow = {
@@ -1061,6 +1067,8 @@ type DashboardRequestRow = {
   readonly holdReason: string | null;
   readonly autoAssigned: boolean;
   readonly createdAt: Date;
+  readonly fieldpulseJobId: string | null;
+  readonly hcpJobId: string | null;
 };
 
 function toDashboardRequest(row: DashboardRequestRow): DashboardRequest {
@@ -1079,6 +1087,7 @@ function toDashboardRequest(row: DashboardRequestRow): DashboardRequest {
     holdReason: row.holdReason,
     autoAssigned: row.autoAssigned,
     createdAt: row.createdAt.toISOString(),
+    syncedSource: row.fieldpulseJobId != null ? 'fieldpulse' : row.hcpJobId != null ? 'housecall' : null,
   };
 }
 
@@ -1268,6 +1277,7 @@ export async function getSchedulingCalendar(
   startIso: string,
   endIso: string,
   days: readonly string[],
+  includeCompleted = false,
 ): Promise<SchedulingCalendar> {
   const start = new Date(startIso);
   const end = new Date(endIso);
@@ -1303,7 +1313,12 @@ export async function getSchedulingCalendar(
           isNotNull(serviceRequests.arrivalWindowEnd),
           lt(serviceRequests.arrivalWindowStart, end),
           gt(serviceRequests.arrivalWindowEnd, start),
-          inArray(serviceRequests.status, [...OPEN_STATUSES]),
+          inArray(
+            serviceRequests.status,
+            includeCompleted
+              ? [...OPEN_STATUSES, ...TERMINAL_STATUSES]
+              : [...OPEN_STATUSES],
+          ),
         ),
       )
       .orderBy(asc(serviceRequests.arrivalWindowStart)),
@@ -1378,6 +1393,7 @@ export async function getMonthCalendar(
   endIso: string,
   gridDays: readonly string[],
   month: string,
+  includeCompleted = false,
 ): Promise<MonthCalendar> {
   const start = new Date(startIso);
   const end = new Date(endIso);
@@ -1404,7 +1420,12 @@ export async function getMonthCalendar(
         // timestamptz, matching how the day/week board passes its bounds.
         lt(serviceRequests.arrivalWindowStart, end),
         gt(serviceRequests.arrivalWindowEnd, start),
-        inArray(serviceRequests.status, [...OPEN_STATUSES]),
+        inArray(
+          serviceRequests.status,
+          includeCompleted
+            ? [...OPEN_STATUSES, ...TERMINAL_STATUSES]
+            : [...OPEN_STATUSES],
+        ),
       ),
     )
     .orderBy(asc(serviceRequests.arrivalWindowStart));

@@ -27,6 +27,9 @@ export function useSchedulingCalendar(
   /** When false, the hook does not fetch or poll (used when another view —
    * e.g. month — is active, so the inactive view doesn't fire requests). */
   enabled = true,
+  /** When true, completed and cancelled jobs are included in the calendar
+   * (rendered muted/non-draggable). Default false = today's behavior. */
+  includeCompleted = false,
 ): UseSchedulingCalendarResult {
   const [calendar, setCalendar] = useState<SchedulingCalendar | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -42,9 +45,10 @@ export function useSchedulingCalendar(
     isFetchingRef.current = true;
 
     try {
-      const url = `/api/admin/calendar?date=${encodeURIComponent(
-        date,
-      )}&view=${encodeURIComponent(view)}`;
+      const url =
+        `/api/admin/calendar?date=${encodeURIComponent(date)}` +
+        `&view=${encodeURIComponent(view)}` +
+        (includeCompleted ? '&includeCompleted=true' : '');
       const res = await fetch(url);
       if (!isMountedRef.current) return;
       if (!res.ok) {
@@ -73,7 +77,7 @@ export function useSchedulingCalendar(
     } finally {
       isFetchingRef.current = false;
     }
-  }, [date, view, enabled]);
+  }, [date, view, enabled, includeCompleted]);
 
   useEffect(() => {
     if (!enabled) return;

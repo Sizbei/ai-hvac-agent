@@ -992,6 +992,122 @@ describe('getSchedulingCalendar', () => {
       startInstant,
     );
   });
+
+  it('default (includeCompleted=false) status filter does not include terminal statuses', async () => {
+    selectResolutions = [
+      [{ id: TECH_A, name: 'Ann', email: 'a@x.io', isActive: true, createdAt: new Date() }],
+      [],
+      [],
+      [],
+    ];
+
+    const { inArray } = await import('drizzle-orm');
+    vi.mocked(inArray).mockClear();
+
+    await getSchedulingCalendar(ORG_ID, START, END, [...DAYS]);
+
+    // No inArray call should include 'completed' or 'cancelled' for the placed-jobs filter.
+    const calls = vi.mocked(inArray).mock.calls;
+    const terminalCalls = calls.filter(
+      ([, values]) =>
+        Array.isArray(values) &&
+        (values.includes('completed') || values.includes('cancelled')),
+    );
+    expect(terminalCalls).toHaveLength(0);
+  });
+
+  it('includeCompleted=true expands the placed-jobs status filter to include terminal statuses', async () => {
+    selectResolutions = [
+      [{ id: TECH_A, name: 'Ann', email: 'a@x.io', isActive: true, createdAt: new Date() }],
+      [],
+      [],
+      [],
+    ];
+
+    const { inArray } = await import('drizzle-orm');
+    vi.mocked(inArray).mockClear();
+
+    await getSchedulingCalendar(ORG_ID, START, END, [...DAYS], true);
+
+    // At least one inArray call should include 'completed' and 'cancelled' (placed-jobs query).
+    const calls = vi.mocked(inArray).mock.calls;
+    const terminalCalls = calls.filter(
+      ([, values]) =>
+        Array.isArray(values) &&
+        values.includes('completed') &&
+        values.includes('cancelled'),
+    );
+    expect(terminalCalls.length).toBeGreaterThan(0);
+  });
+
+  it('includeCompleted=true does not affect the unscheduled queue status filter', async () => {
+    selectResolutions = [
+      [{ id: TECH_A, name: 'Ann', email: 'a@x.io', isActive: true, createdAt: new Date() }],
+      [],
+      [],
+      [],
+    ];
+
+    const { inArray } = await import('drizzle-orm');
+    vi.mocked(inArray).mockClear();
+
+    await getSchedulingCalendar(ORG_ID, START, END, [...DAYS], true);
+
+    // The unscheduled queue must NEVER include terminal statuses — it uses
+    // UNASSIGNED_OPEN_STATUSES (pending, scheduled) regardless of includeCompleted.
+    const calls = vi.mocked(inArray).mock.calls;
+    // Among calls that do NOT include terminal statuses, at least one should exist
+    // (the unscheduled query). This verifies the unscheduled query wasn't expanded.
+    const unscheduledCalls = calls.filter(
+      ([, values]) =>
+        Array.isArray(values) &&
+        !values.includes('completed') &&
+        !values.includes('cancelled'),
+    );
+    expect(unscheduledCalls.length).toBeGreaterThan(0);
+  });
+
+  it('toDashboardRequest populates syncedSource from fieldpulseJobId', async () => {
+    selectResolutions = [
+      [{ id: TECH_A, name: 'Ann', email: 'a@x.io', isActive: true, createdAt: new Date() }],
+      [
+        placedRow({
+          id: 'fp-job',
+          referenceNumber: 'FP-1',
+          assignedTo: TECH_A,
+          fieldpulseJobId: 'fp-abc-123',
+          hcpJobId: null,
+        }),
+      ],
+      [],
+      [],
+    ];
+
+    const calendar = await getSchedulingCalendar(ORG_ID, START, END, [...DAYS]);
+    const job = calendar.lanes[0]?.jobs[0];
+    expect(job?.syncedSource).toBe('fieldpulse');
+  });
+
+  it('toDashboardRequest populates syncedSource as null for native requests', async () => {
+    selectResolutions = [
+      [{ id: TECH_A, name: 'Ann', email: 'a@x.io', isActive: true, createdAt: new Date() }],
+      [
+        placedRow({
+          id: 'native-job',
+          referenceNumber: 'HVAC-999',
+          assignedTo: TECH_A,
+          fieldpulseJobId: null,
+          hcpJobId: null,
+        }),
+      ],
+      [],
+      [],
+    ];
+
+    const calendar = await getSchedulingCalendar(ORG_ID, START, END, [...DAYS]);
+    const job = calendar.lanes[0]?.jobs[0];
+    expect(job?.syncedSource).toBeNull();
+  });
 });
 
 describe('getMonthCalendar', () => {
