@@ -19,6 +19,7 @@ import { parseFpDate, mapFpJob, importJobsFromFieldpulse } from "./jobs";
 import type { FieldpulseJob, FieldpulseUser, FieldpulseCustomer } from "../types";
 import type { FieldpulseClient } from "../client";
 import type { PhaseResult } from "./run-import";
+import type { UnknownStatusTally } from "./jobs";
 
 // ── Module mocks ──────────────────────────────────────────────────────────────
 
@@ -155,6 +156,42 @@ describe("mapFpJob", () => {
     if (!result.ok) return;
     expect(result.job.status).toBe("completed");
     expect(tally.size).toBe(0);
+  });
+
+  it("maps statusInt 1 → pending", () => {
+    const tally: UnknownStatusTally = new Map();
+    const result = mapFpJob(makeJob({ statusInt: 1, workStatus: '1', completedAt: null }), tally);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.job.status).toBe('pending');
+    expect(tally.size).toBe(0);
+  });
+
+  it("maps statusInt 2 → assigned", () => {
+    const tally: UnknownStatusTally = new Map();
+    const result = mapFpJob(makeJob({ statusInt: 2, workStatus: '2', completedAt: null }), tally);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.job.status).toBe('assigned');
+    expect(tally.size).toBe(0);
+  });
+
+  it("maps statusInt 3 → in_progress", () => {
+    const tally: UnknownStatusTally = new Map();
+    const result = mapFpJob(makeJob({ statusInt: 3, workStatus: '3', completedAt: null }), tally);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.job.status).toBe('in_progress');
+    expect(tally.size).toBe(0);
+  });
+
+  it("maps statusInt 6 → pending + tallies unknown", () => {
+    const tally: UnknownStatusTally = new Map();
+    const result = mapFpJob(makeJob({ statusInt: 6, workStatus: '6', completedAt: null }), tally);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.job.status).toBe('pending');
+    expect(tally.get('6')).toBe(1);
   });
 
   it("unknown statusInt → 'pending' + tallied", () => {

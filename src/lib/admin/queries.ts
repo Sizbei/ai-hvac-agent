@@ -48,6 +48,7 @@ import { businessIsoDate } from "./calendar-time";
 import type {
   AdminRequest,
   AdminRequestDetail,
+  FieldpulseJobMetrics,
   TechnicianRecord,
   DashboardStats,
   DashboardRequest,
@@ -258,6 +259,7 @@ export async function getRequestById(
       contactPreference: serviceRequests.contactPreference,
       smsConsent: serviceRequests.smsConsent,
       leadSource: serviceRequests.leadSource,
+      fieldpulseMetrics: serviceRequests.fieldpulseMetrics,
     })
     .from(serviceRequests)
     .leftJoin(users, eq(serviceRequests.assignedTo, users.id))
@@ -381,6 +383,7 @@ export async function getRequestById(
       smsConsent: row.smsConsent,
       leadSource: row.leadSource,
     },
+    fieldpulseMetrics: (row.fieldpulseMetrics as FieldpulseJobMetrics | null) ?? null,
   };
 }
 

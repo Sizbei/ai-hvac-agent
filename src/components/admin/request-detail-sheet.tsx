@@ -42,6 +42,8 @@ import type {
   TechnicianRecord,
   RequestNote,
 } from '@/lib/admin/types';
+import { humanizeSeconds } from '@/lib/admin/duration-format';
+import { formatCentsExact } from '@/lib/admin/money-format';
 
 // Only manual targets can ever be a transition button — narrowing the map to
 // those keys makes any drift from the state machine a compile error rather than
@@ -625,6 +627,40 @@ export function RequestDetailSheet({
                   )}
                 </div>
               </section>
+
+              {/* FieldPulse operational metrics (only for enriched FP jobs) */}
+              {detail.fieldpulseMetrics && (
+                <section>
+                  <h3 className="text-sm font-semibold mb-2">FieldPulse metrics</h3>
+                  <div className="rounded-md border p-3 space-y-1">
+                    {detail.fieldpulseMetrics.totalPriceCents != null && (
+                      <InfoRow
+                        label="Total price"
+                        value={formatCentsExact(detail.fieldpulseMetrics.totalPriceCents)}
+                      />
+                    )}
+                    {(detail.fieldpulseMetrics.statusLogSeconds.on_the_way ?? 0) > 0 && (
+                      <InfoRow
+                        label="Time on the way"
+                        value={humanizeSeconds(detail.fieldpulseMetrics.statusLogSeconds.on_the_way)}
+                      />
+                    )}
+                    {(detail.fieldpulseMetrics.statusLogSeconds.in_progress ?? 0) > 0 && (
+                      <InfoRow
+                        label="Time in progress"
+                        value={humanizeSeconds(detail.fieldpulseMetrics.statusLogSeconds.in_progress)}
+                      />
+                    )}
+                    {detail.fieldpulseMetrics.totalPriceCents == null &&
+                      (detail.fieldpulseMetrics.statusLogSeconds.on_the_way ?? 0) <= 0 &&
+                      (detail.fieldpulseMetrics.statusLogSeconds.in_progress ?? 0) <= 0 && (
+                        <p className="text-sm text-muted-foreground italic">
+                          No metrics reported
+                        </p>
+                      )}
+                  </div>
+                </section>
+              )}
 
               {/* Intake details — everything the chat/voice agent captured.
                   Only shown when at least one field was filled in, so sparse

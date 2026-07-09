@@ -41,6 +41,26 @@ export interface AdminRequestDetail extends AdminRequest {
   readonly notes: readonly RequestNote[];
   // ── ServiceTitan-style intake details (all nullable; PII-free) ──
   readonly intake: RequestIntakeDetails;
+  // FieldPulse per-job operational metrics; null unless this is an FP-imported
+  // job the job-metrics phase has enriched.
+  readonly fieldpulseMetrics: FieldpulseJobMetrics | null;
+}
+
+/**
+ * Operational metrics pulled from FieldPulse per-job GET /jobs/{id} (the
+ * fieldpulse_metrics jsonb column). All fields nullable — the FP API may not
+ * report them for every job. statusLogSeconds are seconds spent per FP
+ * pipeline stage (pending → on_the_way → in_progress → completed).
+ */
+export interface FieldpulseJobMetrics {
+  readonly statusLogSeconds: {
+    readonly pending: number | null;
+    readonly on_the_way: number | null;
+    readonly in_progress: number | null;
+    readonly completed: number | null;
+  };
+  readonly totalPriceCents: number | null;
+  readonly mapCoords: unknown | null;
 }
 
 // Comprehensive intake fields gathered by the chat/voice agent. Surfaced in the

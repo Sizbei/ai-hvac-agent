@@ -666,3 +666,39 @@ describe("RestFieldpulseClient — listJobs real-shape fixture", () => {
     expect(job1.createdAt).toBe("2026-07-07 13:36:22");
   });
 });
+
+// ── getJobRaw seam-guard ──────────────────────────────────────────────────────
+
+describe("RestFieldpulseClient — getJobRaw", () => {
+  let mockFetch: ReturnType<typeof vi.fn>;
+  const config = { baseUrl: "https://api.fieldpulse.com", apiKey: "k" };
+
+  beforeEach(() => {
+    mockFetch = vi.fn();
+    vi.stubGlobal("fetch", mockFetch);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("returns unwrapped raw payload preserving status_log, total_price, and map", async () => {
+    const rawJob = {
+      id: 42,
+      status_log: { pending: 0, on_the_way: 5940, in_progress: 108756, completed: 0 },
+      total_price: "245.00",
+      map: { lat: 36.3, lng: -82.3 },
+    };
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ error: false, response: rawJob }),
+    });
+
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const result = await client.getJobRaw("42") as Record<string, unknown>;
+
+    expect(result.status_log).toEqual(rawJob.status_log);
+    expect(result.total_price).toBe("245.00");
+    expect(result.map).toEqual(rawJob.map);
+  });
+});

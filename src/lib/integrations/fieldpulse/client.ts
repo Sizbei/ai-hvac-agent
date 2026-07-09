@@ -104,6 +104,13 @@ export interface FieldpulseClient {
   getJob(jobId: string): Promise<FieldpulseJob>;
 
   /**
+   * Fetch a job's RAW API payload (unwrapped but NOT mapped through toJob).
+   * The job-metrics enrichment needs fields toJob's whitelist drops:
+   * status_log, total_price, map.
+   */
+  getJobRaw(jobId: string): Promise<unknown>;
+
+  /**
    * List the org's user (technician) roster. Used to derive the active technician
    * set the scheduling source reports. Tolerant of omitted fields; the active
    * filter is applied by the mapping, not here.
@@ -871,6 +878,18 @@ export class RestFieldpulseClient implements FieldpulseClient {
       method: "GET",
     });
     return toJob(unwrap(raw));
+  }
+
+  /**
+   * Fetch a job's RAW API payload (unwrapped but NOT mapped through toJob).
+   * The job-metrics enrichment needs fields toJob's whitelist drops:
+   * status_log, total_price, map.
+   */
+  async getJobRaw(jobId: string): Promise<unknown> {
+    const raw = await this.request(`/jobs/${encodeURIComponent(jobId)}`, {
+      method: "GET",
+    });
+    return unwrap(raw);
   }
 
   async listUsers(): Promise<readonly FieldpulseUser[]> {

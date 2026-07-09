@@ -45,8 +45,25 @@ import { importOneFpCustomer, createDeletedPlaceholderCustomer } from "./custome
 // Key = FP integer status stringified; value = native RequestStatus.
 // ONLY confirmed meanings belong here — live account 182499 shows:
 //   "4" (×9, ALL have completedAt) → completed.
-// "1","2","3","6" are unmapped and fall back to "pending" + tally until named.
-const FP_JOB_STATUS_MAP: Record<string, RequestStatus> = { "4": "completed" };
+//   "1","2","3" confirmed via status_log evidence (2026-07-09).
+// "6" is unmapped and falls back to "pending" + tally (custom/unknown workflow step).
+// Evidence (live-probed 2026-07-09, account 182499):
+//   status_log seconds per stage: { in_progress: 108756, on_the_way: 5940, pending: 0, completed: 0 }
+//   This reveals the canonical FP pipeline: pending → on_the_way → in_progress → completed
+//   Confirmed mappings:
+//     "1" = pending  (named in pipeline; 0 s elapsed = not yet started)
+//     "2" = on_the_way (5940 s logged = technician en route; maps to native "assigned" — closest
+//            native status for "tech dispatched, not yet on site"; "scheduled" has no dispatch
+//            commitment, "in_progress" means already working; "assigned" is the correct seam)
+//     "3" = in_progress (108756 s logged = tech actively on site)
+//     "4" = completed (×9 live jobs, all with completedAt; confirmed Phase 4)
+//     "6" stays unmapped → falls through to "pending" + tally (custom/unknown workflow step)
+const FP_JOB_STATUS_MAP: Record<string, RequestStatus> = {
+  "1": "pending",
+  "2": "assigned",
+  "3": "in_progress",
+  "4": "completed",
+};
 
 // ── Date parser ────────────────────────────────────────────────────────────────
 

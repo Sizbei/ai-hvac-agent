@@ -606,6 +606,21 @@ export const serviceRequests = pgTable(
     signatureUrl: text("signature_url"),
     signatureName: text("signature_name"),
     signedAt: timestamp("signed_at", { withTimezone: true }),
+    // Operational metrics pulled from FieldPulse per-job GET /jobs/{id}.
+    // Populated by the "job-metrics" import phase (idempotent overwrite).
+    // Shape: { statusLogSeconds: { pending, on_the_way, in_progress, completed },
+    //          totalPriceCents, mapCoords }
+    // Null when the phase hasn't run or the job has no metrics.
+    fieldpulseMetrics: jsonb("fieldpulse_metrics").$type<{
+      statusLogSeconds: {
+        pending: number | null;
+        on_the_way: number | null;
+        in_progress: number | null;
+        completed: number | null;
+      };
+      totalPriceCents: number | null;
+      mapCoords: unknown | null;
+    }>(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
