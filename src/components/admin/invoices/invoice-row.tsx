@@ -1,4 +1,5 @@
 'use client';
+import { memo } from 'react';
 import Link from 'next/link';
 import type { InvoiceListItem } from '@/hooks/use-invoices';
 import { formatCentsExact } from '@/lib/admin/money-format';
@@ -53,7 +54,7 @@ interface InvoiceRowProps {
   readonly pending?: boolean;
 }
 
-export function InvoiceRow({ invoice, onRemind, onCopyPayLink, onVoid, pending = false }: InvoiceRowProps) {
+function InvoiceRowInner({ invoice, onRemind, onCopyPayLink, onVoid, pending = false }: InvoiceRowProps) {
   const balance = invoice.totalCents - invoice.amountPaidCents;
   const isPartial = invoice.state !== 'paid' && invoice.amountPaidCents > 0;
   const cooldownActive = isCooldownActive(invoice.lastReminderSentAt ?? null);
@@ -158,3 +159,5 @@ export function InvoiceRow({ invoice, onRemind, onCopyPayLink, onVoid, pending =
     </div>
   );
 }
+
+export const InvoiceRow = memo(InvoiceRowInner);
