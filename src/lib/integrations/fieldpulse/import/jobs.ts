@@ -54,6 +54,11 @@ const FP_JOB_STATUS_MAP: Record<string, RequestStatus> = { "4": "completed" };
  * Accepts both the FP list format ("YYYY-MM-DD HH:MM:SS") and the ISO 8601
  * format used in some fields ("YYYY-MM-DDTHH:MM:SS.000000Z").
  * Returns null on any malformed input so callers degrade gracefully.
+ *
+ * The bare format carries no timezone; we treat it as UTC — LIVE-VERIFIED
+ * (2026-07-09, account 182499): schedule hours span 12-23 UTC with zero
+ * morning values, which as Eastern wall-times would mean a shop that never
+ * works mornings; as UTC they map to 8am-7pm Eastern — a normal service day.
  */
 export function parseFpDate(raw: string | null | undefined): Date | null {
   if (!raw || typeof raw !== "string") return null;
