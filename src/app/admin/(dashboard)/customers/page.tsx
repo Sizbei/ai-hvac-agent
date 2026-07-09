@@ -17,8 +17,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { CardSkeleton } from '@/components/admin/skeletons';
 import {
   Select,
   SelectContent,
@@ -214,9 +214,9 @@ export default function CustomersPage() {
       </div>
 
       {isLoading ? (
-        <div className="space-y-3">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <Skeleton key={i} className="h-24 w-full rounded-lg" />
+        <div className="grid gap-3">
+          {Array.from({ length: 6 }, (_, i) => (
+            <CardSkeleton key={i} />
           ))}
         </div>
       ) : error ? (

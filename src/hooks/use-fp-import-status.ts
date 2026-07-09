@@ -16,13 +16,29 @@ interface UseFpImportStatusResult {
   readonly runs: readonly FpImportRun[];
   readonly isLoading: boolean;
   readonly error: string | null;
+  /** Manually re-fetch when polling is idle (no active run). */
+  readonly refresh: () => void;
+  /** True while at least one run has status 'running'. When false, polling stops. */
+  readonly isPolling: boolean;
+}
+
+/**
+ * Returns the next poll delay in ms, or null when polling should stop.
+ * Exported as a pure function so it can be unit-tested without a DOM.
+ */
+export function nextPollDelay(runs: readonly FpImportRun[]): number | null {
+  const hasRunning = runs.some((r) => r.status === 'running');
+  return hasRunning ? 2500 : null;
 }
 
 export function useFpImportStatus(): UseFpImportStatusResult {
   const [runs, setRuns] = useState<readonly FpImportRun[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isPolling, setIsPolling] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Used to trigger a manual refresh from outside the polling loop.
+  const [refreshToken, setRefreshToken] = useState(0);
 
   const fetchStatus = useCallback(async (): Promise<readonly FpImportRun[]> => {
     try {
@@ -51,8 +67,14 @@ export function useFpImportStatus(): UseFpImportStatusResult {
       const fetched = await fetchStatus();
       if (cancelled) return;
       setIsLoading(false);
-      const hasRunning = fetched.some((r) => r.status === 'running');
-      timerRef.current = setTimeout(tick, hasRunning ? 2500 : 10000);
+      const delay = nextPollDelay(fetched);
+      if (delay !== null) {
+        setIsPolling(true);
+        timerRef.current = setTimeout(tick, delay);
+      } else {
+        // No active run — stop polling until a manual refresh.
+        setIsPolling(false);
+      }
     }
 
     setIsLoading(true);
@@ -62,7 +84,12 @@ export function useFpImportStatus(): UseFpImportStatusResult {
       cancelled = true;
       if (timerRef.current !== null) clearTimeout(timerRef.current);
     };
-  }, [fetchStatus]);
+    // refreshToken intentionally re-runs the effect for manual refresh.
+  }, [fetchStatus, refreshToken]);
 
-  return { runs, isLoading, error };
+  const refresh = useCallback(() => {
+    setRefreshToken((t) => t + 1);
+  }, []);
+
+  return { runs, isLoading, error, refresh, isPolling };
 }

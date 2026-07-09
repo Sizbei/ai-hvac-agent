@@ -6,11 +6,11 @@ import { useInvoices } from '@/hooks/use-invoices';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 import { EmptyState } from '@/components/admin/ui/empty-state';
+import { TableSkeleton, StatTileSkeleton } from '@/components/admin/skeletons';
 import { SummaryBand } from '@/components/admin/invoices/summary-band';
 import { InvoiceRow } from '@/components/admin/invoices/invoice-row';
 import { daysBetween } from '@/components/admin/invoices/age-chip';
@@ -289,7 +289,11 @@ export default function InvoicesPage() {
 
       <ReconcileBanner />
 
-      <SummaryBand invoices={invoices} collectedThisMonthCents={collectedThisMonthCents} />
+      {/* Suppress the zero-data band on uncached first load — the skeleton
+          stat tiles below own that state (review fix). */}
+      {!isLoading && (
+        <SummaryBand invoices={invoices} collectedThisMonthCents={collectedThisMonthCents} />
+      )}
 
       {/* flash / error feedback */}
       {flash && (
@@ -399,11 +403,15 @@ export default function InvoicesPage() {
 
       {/* list */}
       {isLoading ? (
-        <div className="space-y-3">
-          <Skeleton className="h-16 w-full" />
-          <Skeleton className="h-16 w-full" />
-          <Skeleton className="h-16 w-full" />
-        </div>
+        <>
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <StatTileSkeleton />
+            <StatTileSkeleton />
+            <StatTileSkeleton />
+            <StatTileSkeleton />
+          </div>
+          <TableSkeleton rows={8} cols={5} />
+        </>
       ) : filteredSorted.length === 0 ? (
         <Card className="p-5">
           <EmptyState

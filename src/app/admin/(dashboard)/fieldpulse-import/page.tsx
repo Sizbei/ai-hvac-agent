@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { RefreshCw } from 'lucide-react';
 import { useFpImportStatus } from '@/hooks/use-fp-import-status';
 import {
   latestRunPerPhase,
@@ -12,6 +13,7 @@ import {
 } from '@/components/admin/fp-import/import-status-model';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 const PIPELINE_ORDER = ['technicians', 'customers', 'jobs', 'invoices'] as const;
@@ -156,7 +158,7 @@ function RecentRunsTable({ runs }: { runs: readonly FpImportRunSummary[] }) {
 export default function FieldpulseImportPage() {
   // Cast at the boundary: FpImportRun.counts is Record<string,unknown> but
   // presenter functions expect FpImportRunSummary (with typed FpRunCounts).
-  const { runs: rawRuns, isLoading, error } = useFpImportStatus();
+  const { runs: rawRuns, isLoading, error, refresh, isPolling } = useFpImportStatus();
   const runs = rawRuns as readonly FpImportRunSummary[];
 
   const latestPerPhase = latestRunPerPhase(runs);
@@ -179,7 +181,18 @@ export default function FieldpulseImportPage() {
 
   return (
     <PageShell>
-      <PageHeader title="FieldPulse Import" subtitle="Live import progress by phase" />
+      <PageHeader
+        title="FieldPulse Import"
+        subtitle={isPolling ? 'Live import progress by phase' : 'Import progress by phase'}
+        actions={
+          !isPolling ? (
+            <Button variant="outline" size="sm" onClick={refresh}>
+              <RefreshCw className="mr-2 size-4" />
+              Refresh
+            </Button>
+          ) : undefined
+        }
+      />
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 
