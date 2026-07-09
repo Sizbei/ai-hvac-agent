@@ -52,3 +52,23 @@ End-to-end walkthrough of every surface with prod data (screenshot evidence in d
 1. Status 6's name (only remaining unknown — everything else evidence-mapped).
 2. Phase 2 export default (native-only + separate synced section) — confirm.
 3. Phase 8 demo-tech deactivation — final OK.
+
+---
+
+## PROGRAM CLOSE-OUT (2026-07-09)
+
+- Phases 1–9: merged + deployed individually, each live-verified against prod.
+- Phase 10: delta-audit = ALL 10 original findings FIXED (file:line evidence);
+  whole-program Opus review = SOUND WITH FOLLOW-UPS (0 Critical). Follow-ups
+  (HCP-synced metric asymmetry, nightly on_hold stomp, stale option totals,
+  approveEstimate gate) fixed in `feat/fp-display-p10-fixes`.
+- Docs: `docs/FIELDPULSE-DATA.md` (entity/display/read-only map).
+
+### Committed follow-up (next session): seam-guard tests
+Root cause of all three probe-vs-mapper misses (status_log whitelist,
+custom_status object, nameless custom fields): FP's LIST and DETAIL endpoint
+shapes differ, and mappers were written against one but fed the other. Guards to
+add: (a) per-entity sanitized fixtures for BOTH list and per-id payloads,
+asserted against the mapper each endpoint actually feeds
+(extend `client-real-shapes.test.ts`); (b) "no silent drop" assertions — a
+valued-but-unnamed / object-wrapped field must survive mapping, never null out.
