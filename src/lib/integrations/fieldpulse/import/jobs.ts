@@ -28,7 +28,7 @@
  *   - issueType and description: plaintext (operational, non-identifying).
  *   - FP job notes + field_notes → description (plaintext, operator-facing).
  */
-import { eq, and, isNotNull } from "drizzle-orm";
+import { eq, and, isNotNull, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db";
 import { serviceRequests, customers, users, customerSessions } from "@/lib/db/schema";
@@ -483,10 +483,14 @@ export async function importJobsFromFieldpulse(
       } else {
         // Update: status, schedule, arrival window, tech assignment, description.
         // Never touch rows without fieldpulseJobId (native requests stay disjoint).
+        //
+        // on_hold is a native-only operator intent that the FP status map can never
+        // produce. The nightly sweep must not revert it — keep the existing status
+        // when the row is already on_hold; use the incoming FP-derived status otherwise.
         await db
           .update(serviceRequests)
           .set({
-            status: job.status,
+            status: sql`CASE WHEN ${serviceRequests.status} = 'on_hold' THEN ${serviceRequests.status} ELSE ${job.status} END`,
             assignedTo,
             description: finalDescription,
             scheduledDate: job.scheduledDate,

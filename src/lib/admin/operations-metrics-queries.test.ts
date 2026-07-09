@@ -72,6 +72,7 @@ vi.mock('drizzle-orm', () => ({
   lt: (...a: unknown[]) => ({ kind: 'lt', args: a }),
   isNull: (col: unknown) => ({ kind: 'isNull', col }),
   isNotNull: (col: unknown) => ({ kind: 'isNotNull', col }),
+  or: (...a: unknown[]) => ({ kind: 'or', args: a }),
   count: (arg?: unknown) => ({ kind: 'count', arg }),
   sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({
     kind: 'sql',
@@ -301,10 +302,12 @@ describe('getOperationsMetrics', () => {
     expect(agingWhere).toContain('invoices.fieldpulseInvoiceId');
     expect(agingWhere).toContain('invoices.hcpInvoiceId');
 
-    // 6th select is synced AR aging — IS NOT NULL on fieldpulseInvoiceId.
+    // 6th select is synced AR aging — OR(isNotNull(fieldpulseInvoiceId), isNotNull(hcpInvoiceId))
+    // so both FP-synced and HCP-synced open invoices are included.
     const syncedAgingWhere = JSON.stringify(captured[5]?.where ?? []);
     expect(syncedAgingWhere).toContain('isNotNull');
     expect(syncedAgingWhere).toContain('invoices.fieldpulseInvoiceId');
+    expect(syncedAgingWhere).toContain('invoices.hcpInvoiceId');
 
     // 7th select is native jobsCurrent — IS NULL guards on both job id columns.
     const jobsCurrentWhere = JSON.stringify(captured[6]?.where ?? []);
@@ -312,9 +315,11 @@ describe('getOperationsMetrics', () => {
     expect(jobsCurrentWhere).toContain('serviceRequests.fieldpulseJobId');
     expect(jobsCurrentWhere).toContain('serviceRequests.hcpJobId');
 
-    // 9th select is importedJobsCurrent — IS NOT NULL on fieldpulseJobId.
+    // 9th select is importedJobsCurrent — OR(isNotNull(fieldpulseJobId), isNotNull(hcpJobId))
+    // so both FP-synced and HCP-synced jobs are included in the imported count.
     const importedJobsWhere = JSON.stringify(captured[8]?.where ?? []);
     expect(importedJobsWhere).toContain('isNotNull');
     expect(importedJobsWhere).toContain('serviceRequests.fieldpulseJobId');
+    expect(importedJobsWhere).toContain('serviceRequests.hcpJobId');
   });
 });

@@ -166,6 +166,16 @@ export async function importEstimatesFromFieldpulse(
         let optionId: string;
         if (existingOptions.length > 0) {
           optionId = existingOptions[0].id;
+          // Re-import: refresh totals from the fresh FP values so a price change
+          // in FieldPulse is reflected here on the next nightly sweep.
+          await db
+            .update(estimateOptions)
+            .set({
+              subtotalCents: est.subtotalCents ?? 0,
+              taxCents: est.taxCents ?? 0,
+              totalCents: est.totalCents ?? 0,
+            })
+            .where(eq(estimateOptions.id, optionId));
         } else {
           const inserted = await db
             .insert(estimateOptions)

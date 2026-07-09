@@ -187,6 +187,9 @@ export async function approveEstimate(params: {
   if (!opt) return { ok: false, reason: "invalid_option" };
 
   // Status-guarded update closes the double-approval race.
+  // isNull(fieldpulseEstimateId) is defense-in-depth: synced FP estimates carry
+  // no approvalTokenHash so this branch is unreachable for them today, but the
+  // gate keeps that invariant honest in case the lookup path ever changes.
   const [updated] = await db
     .update(estimates)
     .set({
@@ -197,7 +200,7 @@ export async function approveEstimate(params: {
       signatureIp: params.signatureIp,
       updatedAt: now,
     })
-    .where(and(eq(estimates.id, est.id), eq(estimates.status, "open")))
+    .where(and(eq(estimates.id, est.id), eq(estimates.status, "open"), isNull(estimates.fieldpulseEstimateId)))
     .returning({ id: estimates.id });
 
   if (!updated) return { ok: false, reason: "already_decided" };

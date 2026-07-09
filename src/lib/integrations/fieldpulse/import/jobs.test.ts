@@ -433,6 +433,37 @@ describe("importJobsFromFieldpulse", () => {
     expect(db.update).toHaveBeenCalledTimes(1);
   });
 
+  it("on_hold preservation: row already on_hold + FP incoming completed → UPDATE uses CASE preserving on_hold", async () => {
+    // The status column in the UPDATE .set() must be a SQL CASE expression so the
+    // nightly sweep cannot flip an operator-held row back to a FP-derived status.
+    const job = makeJob({ statusInt: 4, completedAt: "2026-07-07T18:00:00.000Z" }); // maps to "completed"
+    const client = makeClient([job]);
+    const counts = makeCounts();
+    wireSelectSequence([
+      [{ fieldpulseJobId: "10000001" }], // existingFpIds → update path
+      [{ id: "cust-uuid", fieldpulseCustomerId: "20000001" }],
+      [],
+    ]);
+    // Capture the `set` argument to inspect the status value.
+    let capturedSet: Record<string, unknown> | undefined;
+    const where = vi.fn().mockResolvedValue([{ id: "req-1" }]);
+    const set = vi.fn().mockImplementation((s: Record<string, unknown>) => {
+      capturedSet = s;
+      return { where };
+    });
+    vi.mocked(db.update).mockReturnValue({ set } as never);
+
+    await importJobsFromFieldpulse(ORG, counts, client);
+
+    expect(counts.updated).toBe(1);
+    // The status field must be a SQL expression (object with .kind='sql' from
+    // the drizzle sql`` template), not a plain string — this is the CASE guard.
+    expect(capturedSet).toBeDefined();
+    const statusVal = capturedSet!.status;
+    // drizzle sql template produces an object; a plain string would mean no guard.
+    expect(typeof statusVal).not.toBe("string");
+  });
+
   it("resolves technician from pre-selected cache", async () => {
     const client = makeClient([makeJob()]);
     const counts = makeCounts();

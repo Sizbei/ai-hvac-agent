@@ -13,7 +13,7 @@
  * thousands of rows over a year) this is well within budget. If it ever slows,
  * the seam to precompute into demand_daily-style rollups is here.
  */
-import { eq, gte, lt, isNull, isNotNull, sql, count } from "drizzle-orm";
+import { eq, gte, lt, isNull, isNotNull, or, sql, count } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   serviceRequests,
@@ -250,8 +250,9 @@ export async function getOperationsMetrics(
         ),
       ),
 
-    // AR aging (SYNCED FP): single aggregate for the one-line summary shown
-    // below the native buckets. Not split by age — managed in FieldPulse.
+    // AR aging (SYNCED): single aggregate for the one-line summary shown
+    // below the native buckets. Covers both FP and HCP-synced open invoices —
+    // a HCP-synced invoice has hcpInvoiceId set and must not be silently excluded.
     db
       .select({
         totalCents: sql<string>`coalesce(sum(${invoices.totalCents} - ${invoices.amountPaidCents}), 0)`,
@@ -263,7 +264,7 @@ export async function getOperationsMetrics(
           invoices,
           organizationId,
           eq(invoices.state, "open"),
-          isNotNull(invoices.fieldpulseInvoiceId),
+          or(isNotNull(invoices.fieldpulseInvoiceId), isNotNull(invoices.hcpInvoiceId))!,
           sql`${invoices.amountPaidCents} < ${invoices.totalCents}`,
         ),
       ),
@@ -299,6 +300,7 @@ export async function getOperationsMetrics(
       ),
 
     // Imported jobs booked — current window only (for the "+N imported" suffix).
+    // Includes both FP-synced (fieldpulseJobId) and HCP-synced (hcpJobId) rows.
     db
       .select({ value: count() })
       .from(serviceRequests)
@@ -306,7 +308,7 @@ export async function getOperationsMetrics(
         withTenant(
           serviceRequests,
           organizationId,
-          isNotNull(serviceRequests.fieldpulseJobId),
+          or(isNotNull(serviceRequests.fieldpulseJobId), isNotNull(serviceRequests.hcpJobId))!,
           gte(serviceRequests.createdAt, fromDate),
           lt(serviceRequests.createdAt, toDate_),
         ),

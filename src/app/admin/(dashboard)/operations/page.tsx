@@ -303,13 +303,13 @@ export default function OperationsPage() {
               </div>
               {(metrics?.syncedArTotalCents ?? 0) > 0 && (
                 <p className="mt-2 text-xs text-muted-foreground">
-                  FieldPulse AR:{' '}
+                  Synced (FieldPulse/HCP) AR:{' '}
                   <span className="font-semibold text-foreground">
                     {formatCentsExact(metrics!.syncedArTotalCents)}
                   </span>{' '}
                   across {metrics!.syncedArCount} invoice
                   {metrics!.syncedArCount !== 1 ? 's' : ''} — managed in
-                  FieldPulse
+                  external systems
                 </p>
               )}
             </>

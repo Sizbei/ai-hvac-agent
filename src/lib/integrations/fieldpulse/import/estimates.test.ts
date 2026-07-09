@@ -24,6 +24,7 @@ vi.mock("@/lib/db", () => ({
   db: {
     select: vi.fn(),
     insert: vi.fn(),
+    update: vi.fn(),
     delete: vi.fn(),
     batch: vi.fn(),
   },
@@ -413,6 +414,8 @@ describe("importEstimatesFromFieldpulse", () => {
     vi.mocked(db.insert).mockReturnValue({ values } as never);
     vi.mocked(db.delete).mockImplementation(() => ({ where: vi.fn().mockReturnValue({}) } as never));
     vi.mocked(db.batch).mockResolvedValue([] as never);
+    // option UPDATE (totals refresh) on the reuse path
+    vi.mocked(db.update).mockReturnValue({ set: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue([]) }) } as never);
 
     await importEstimatesFromFieldpulse(ORG, counts, client);
 
@@ -422,6 +425,47 @@ describe("importEstimatesFromFieldpulse", () => {
     // But batch (delete + line item insert) is still called
     expect(db.batch).toHaveBeenCalled();
     expect(db.delete).toHaveBeenCalled();
+    // totals refresh update must have been called
+    expect(db.update).toHaveBeenCalled();
+  });
+
+  it("re-import with changed totals updates option row (M3 fix)", async () => {
+    const est = makeEstimate({
+      id: "70000003",
+      subtotalCents: 50000,
+      taxCents: 4000,
+      totalCents: 54000,
+      lineItems: [
+        { name: "New Part", quantity: 1, unitPriceCents: 50000, unitCostCents: 20000 },
+      ],
+    });
+    const client = makeClient([est]);
+    const counts = makeCounts();
+    // 3 pre-selects + option existence check returns existing option
+    wireSelects([[], [], [], [{ id: "existing-option-uuid" }]]);
+    const returning = vi.fn().mockResolvedValue([{ id: "native-est-uuid" }]);
+    const onConflictDoUpdate = vi.fn().mockReturnValue({ returning });
+    const values = vi.fn().mockReturnValue({ onConflictDoUpdate });
+    vi.mocked(db.insert).mockReturnValue({ values } as never);
+    vi.mocked(db.delete).mockImplementation(() => ({ where: vi.fn().mockReturnValue({}) } as never));
+    vi.mocked(db.batch).mockResolvedValue([] as never);
+
+    let capturedUpdateSet: Record<string, unknown> | undefined;
+    vi.mocked(db.update).mockReturnValue({
+      set: vi.fn().mockImplementation((s: Record<string, unknown>) => {
+        capturedUpdateSet = s;
+        return { where: vi.fn().mockResolvedValue([]) };
+      }),
+    } as never);
+
+    await importEstimatesFromFieldpulse(ORG, counts, client);
+
+    // The option UPDATE must carry the fresh totals from the FP response.
+    expect(capturedUpdateSet).toMatchObject({
+      subtotalCents: 50000,
+      taxCents: 4000,
+      totalCents: 54000,
+    });
   });
 
   // ── Phase 6: status name enrichment ──────────────────────────────────────
