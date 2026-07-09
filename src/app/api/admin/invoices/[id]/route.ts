@@ -25,14 +25,14 @@ export async function GET(
     }
 
     const { id } = await context.params;
-    const invoice = await getInvoiceDetailById(session.organizationId, id);
-    if (!invoice) {
-      return errorResponse("Invoice not found", "NOT_FOUND", 404);
-    }
-    const [org, reminders] = await Promise.all([
+    const [invoice, org, reminders] = await Promise.all([
+      getInvoiceDetailById(session.organizationId, id),
       getInvoiceOrgIdentity(session.organizationId),
       listInvoiceReminders(session.organizationId, id),
     ]);
+    if (!invoice) {
+      return errorResponse("Invoice not found", "NOT_FOUND", 404);
+    }
     return successResponse({ invoice, org, reminders });
   } catch (error: unknown) {
     logger.error({ error }, "Failed to fetch invoice detail");

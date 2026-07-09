@@ -111,7 +111,7 @@ export async function getCustomerById(
 
   if (!row) return null;
 
-  const [equipmentRows, noteRows, followUpRows, historyRows] =
+  const [equipmentRows, noteRows, followUpRows, historyRows, requestCountRows] =
     await Promise.all([
       db
         .select()
@@ -193,18 +193,19 @@ export async function getCustomerById(
           ),
         )
         .orderBy(desc(serviceHistory.createdAt)),
-    ]);
 
-  const requestCount = await db
-    .select({ value: count() })
-    .from(serviceRequests)
-    .where(
-      withTenant(
-        serviceRequests,
-        organizationId,
-        eq(serviceRequests.customerId, customerId),
-      ),
-    );
+      // requestCount folded in to avoid a sequential round trip after the block.
+      db
+        .select({ value: count() })
+        .from(serviceRequests)
+        .where(
+          withTenant(
+            serviceRequests,
+            organizationId,
+            eq(serviceRequests.customerId, customerId),
+          ),
+        ),
+    ]);
 
   return {
     id: row.id,
@@ -216,7 +217,7 @@ export async function getCustomerById(
     propertySqft: row.propertySqft,
     notes: row.notes,
     equipmentCount: equipmentRows.length,
-    requestCount: requestCount[0]?.value ?? 0,
+    requestCount: requestCountRows[0]?.value ?? 0,
     lastServiceDate: null,
     customerType: row.customerType,
     membershipStatus: row.membershipStatus,

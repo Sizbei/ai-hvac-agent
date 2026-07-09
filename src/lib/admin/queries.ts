@@ -282,47 +282,50 @@ export async function getRequestById(
     return null;
   }
 
-  // Fetch conversation transcript for this session
-  const messageRows = await db
-    .select({
-      role: messages.role,
-      content: messages.content,
-      createdAt: messages.createdAt,
-    })
-    .from(messages)
-    .where(
-      withTenant(
-        messages,
-        organizationId,
-        eq(messages.sessionId, row.sessionId),
-      ),
-    )
-    .orderBy(asc(messages.createdAt));
+  // Fetch transcript and notes in parallel — both are independent of each other.
+  const [messageRows, noteRows] = await Promise.all([
+    // Conversation transcript for this session.
+    db
+      .select({
+        role: messages.role,
+        content: messages.content,
+        createdAt: messages.createdAt,
+      })
+      .from(messages)
+      .where(
+        withTenant(
+          messages,
+          organizationId,
+          eq(messages.sessionId, row.sessionId),
+        ),
+      )
+      .orderBy(asc(messages.createdAt)),
+
+    // Internal staff notes (newest first), with the author's display name.
+    db
+      .select({
+        id: requestNotes.id,
+        content: requestNotes.content,
+        createdAt: requestNotes.createdAt,
+        authorName: users.name,
+      })
+      .from(requestNotes)
+      .leftJoin(users, eq(requestNotes.authorId, users.id))
+      .where(
+        withTenant(
+          requestNotes,
+          organizationId,
+          eq(requestNotes.requestId, requestId),
+        ),
+      )
+      .orderBy(desc(requestNotes.createdAt)),
+  ]);
 
   const transcript: readonly TranscriptMessage[] = messageRows.map((m) => ({
     role: m.role,
     content: m.content,
     createdAt: m.createdAt.toISOString(),
   }));
-
-  // Internal staff notes (newest first), with the author's display name.
-  const noteRows = await db
-    .select({
-      id: requestNotes.id,
-      content: requestNotes.content,
-      createdAt: requestNotes.createdAt,
-      authorName: users.name,
-    })
-    .from(requestNotes)
-    .leftJoin(users, eq(requestNotes.authorId, users.id))
-    .where(
-      withTenant(
-        requestNotes,
-        organizationId,
-        eq(requestNotes.requestId, requestId),
-      ),
-    )
-    .orderBy(desc(requestNotes.createdAt));
 
   const notes: readonly RequestNote[] = noteRows.map((n) => ({
     id: n.id,

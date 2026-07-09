@@ -43,8 +43,10 @@ export async function GET() {
       return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
     }
 
-    const invoices = await listInvoices(session.organizationId);
-    const collected = await collectedThisMonthCents(session.organizationId);
+    const [invoices, collected] = await Promise.all([
+      listInvoices(session.organizationId),
+      collectedThisMonthCents(session.organizationId),
+    ]);
     const response = successResponse({ invoices, collectedThisMonthCents: collected });
     response.headers.set('Cache-Control', 'private, max-age=0, stale-while-revalidate=30');
     return response;
