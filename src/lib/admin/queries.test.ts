@@ -356,6 +356,34 @@ describe('getRequests', () => {
     const result = await getRequests(ORG_ID, {});
     expect(result.requests[0].syncedSource).toBeNull();
   });
+
+  it('derives syncedSource=housecall when hcpJobId is set and fieldpulseJobId is null', async () => {
+    const now = new Date();
+    selectResolutions = [
+      [{ value: 1 }],
+      [
+        {
+          id: 'req-hcp',
+          status: 'completed',
+          issueType: 'cooling',
+          urgency: 'medium',
+          description: 'HCP job',
+          referenceNumber: 'HCP-001',
+          customerNameEncrypted: null,
+          customerNameFromCustomer: null,
+          fieldpulseJobId: null,
+          hcpJobId: 'hcp-456',
+          assignedToName: null,
+          isAfterHours: false,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    ];
+
+    const result = await getRequests(ORG_ID, {});
+    expect(result.requests[0].syncedSource).toBe('housecall');
+  });
 });
 
 describe('getRequestById', () => {
