@@ -85,6 +85,8 @@ vi.mock('@/lib/db/schema', () => ({
     id: 'serviceRequests.id',
     createdAt: 'serviceRequests.createdAt',
     organizationId: 'serviceRequests.org',
+    fieldpulseJobId: 'serviceRequests.fieldpulseJobId',
+    hcpJobId: 'serviceRequests.hcpJobId',
   },
   requestStatusEvents: {
     at: 'requestStatusEvents.at',
@@ -122,15 +124,21 @@ const ORG = 'org-1';
 const FROM = new Date('2026-06-01T00:00:00Z');
 const TO = new Date('2026-07-01T00:00:00Z'); // 30-day span → prevFrom 2026-05-02
 
-/** Queue the 7 select results in the exact order getOperationsMetrics issues them. */
+/**
+ * Queue the 9 select results in the exact order getOperationsMetrics issues them:
+ * inProgress, assigned, paid, onSite, aging (native), syncedAging,
+ * jobsCurrent (native), jobsPrevious (native), importedJobsCurrent.
+ */
 function queueAll(rows: {
   inProgress?: unknown[];
   assigned?: unknown[];
   paid?: unknown[];
   onSite?: unknown[];
   aging?: unknown[];
+  syncedAging?: unknown[];
   jobsCurrent?: unknown[];
   jobsPrevious?: unknown[];
+  importedJobsCurrent?: unknown[];
 }) {
   selectQueue.push(
     rows.inProgress ?? [],
@@ -138,8 +146,10 @@ function queueAll(rows: {
     rows.paid ?? [],
     rows.onSite ?? [{ avgMinutes: null }],
     rows.aging ?? [{ b0: '0', b30: '0', b60: '0' }],
+    rows.syncedAging ?? [{ totalCents: '0', count: '0' }],
     rows.jobsCurrent ?? [{ value: '0' }],
     rows.jobsPrevious ?? [{ value: '0' }],
+    rows.importedJobsCurrent ?? [{ value: '0' }],
   );
 }
 
@@ -284,8 +294,27 @@ describe('getOperationsMetrics', () => {
     expect(paidWhere).toContain('gte');
     expect(paidWhere).toContain('payments.createdAt');
 
-    // 5th select is AR aging — scoped to open invoices.
+    // 5th select is native AR aging — scoped to open invoices with IS NULL guards.
     const agingWhere = JSON.stringify(captured[4]?.where ?? []);
     expect(agingWhere).toContain('open');
+    expect(agingWhere).toContain('isNull');
+    expect(agingWhere).toContain('invoices.fieldpulseInvoiceId');
+    expect(agingWhere).toContain('invoices.hcpInvoiceId');
+
+    // 6th select is synced AR aging — IS NOT NULL on fieldpulseInvoiceId.
+    const syncedAgingWhere = JSON.stringify(captured[5]?.where ?? []);
+    expect(syncedAgingWhere).toContain('isNotNull');
+    expect(syncedAgingWhere).toContain('invoices.fieldpulseInvoiceId');
+
+    // 7th select is native jobsCurrent — IS NULL guards on both job id columns.
+    const jobsCurrentWhere = JSON.stringify(captured[6]?.where ?? []);
+    expect(jobsCurrentWhere).toContain('isNull');
+    expect(jobsCurrentWhere).toContain('serviceRequests.fieldpulseJobId');
+    expect(jobsCurrentWhere).toContain('serviceRequests.hcpJobId');
+
+    // 9th select is importedJobsCurrent — IS NOT NULL on fieldpulseJobId.
+    const importedJobsWhere = JSON.stringify(captured[8]?.where ?? []);
+    expect(importedJobsWhere).toContain('isNotNull');
+    expect(importedJobsWhere).toContain('serviceRequests.fieldpulseJobId');
   });
 });

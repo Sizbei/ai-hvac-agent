@@ -101,7 +101,14 @@ export function StatsCards() {
                 {isLoading || !stats ? (
                   <Skeleton className="h-7 w-10 mt-1" />
                 ) : (
-                  <p className="text-2xl font-bold">{stats[config.key]}</p>
+                  <p className="text-2xl font-bold">
+                    {stats[config.key]}
+                    {config.key === 'pending' && (stats.importedPending ?? 0) > 0 && (
+                      <span className="ml-1.5 text-xs font-normal text-muted-foreground">
+                        +{stats.importedPending} imported
+                      </span>
+                    )}
+                  </p>
                 )}
               </div>
             </div>

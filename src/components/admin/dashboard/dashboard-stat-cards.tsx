@@ -107,6 +107,11 @@ export function DashboardStatCards({ stats, isLoading }: DashboardStatCardsProps
             ) : (
               <p className="font-heading text-3xl font-bold leading-none tracking-tight tabular-nums">
                 {formatValue(stats[config.key], config.isCurrency)}
+                {config.key === 'pending' && (stats.importedPending ?? 0) > 0 && (
+                  <span className="ml-1.5 text-sm font-normal text-muted-foreground">
+                    +{stats.importedPending} imported
+                  </span>
+                )}
               </p>
             )}
           </Card>

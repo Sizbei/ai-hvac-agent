@@ -20,7 +20,13 @@ export interface OperationsMetrics {
   readonly onSiteSeconds: number | null;
   readonly timeToPaidSeconds: MetricTrend;
   readonly arAging: ArAging;
+  /** Total outstanding cents across FP-synced open invoices. */
+  readonly syncedArTotalCents: number;
+  /** Count of FP-synced open invoices contributing to syncedArTotalCents. */
+  readonly syncedArCount: number;
   readonly jobsBooked: MetricTrend;
+  /** Count of FP-imported service requests in the current window. */
+  readonly importedJobsCurrent: number;
   readonly firstResponseHumanSeconds: MetricTrend;
   readonly firstResponseSystemSeconds: number | null;
 }

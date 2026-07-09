@@ -216,13 +216,20 @@ export default function OperationsPage() {
         <KpiCard
           label="Jobs booked"
           icon={ClipboardList}
-          value={metrics ? String(metrics.jobsBooked.current ?? 0) : null}
+          value={
+            metrics
+              ? String(metrics.jobsBooked.current ?? 0) +
+                ((metrics.importedJobsCurrent ?? 0) > 0
+                  ? ` +${metrics.importedJobsCurrent} imported`
+                  : '')
+              : null
+          }
           delta={metrics ? countDelta(metrics.jobsBooked) : null}
           rangeDays={days}
           isLoading={isLoading}
           foot={
             metrics
-              ? `Service requests created · ${(
+              ? `Native service requests · ${(
                   (metrics.jobsBooked.current ?? 0) / Math.max(1, metrics.rangeDays)
                 ).toFixed(1)} / day avg`
               : undefined
@@ -294,6 +301,17 @@ export default function OperationsPage() {
                   {formatCentsExact(agingTotal)}
                 </span>
               </div>
+              {(metrics?.syncedArTotalCents ?? 0) > 0 && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  FieldPulse AR:{' '}
+                  <span className="font-semibold text-foreground">
+                    {formatCentsExact(metrics!.syncedArTotalCents)}
+                  </span>{' '}
+                  across {metrics!.syncedArCount} invoice
+                  {metrics!.syncedArCount !== 1 ? 's' : ''} — managed in
+                  FieldPulse
+                </p>
+              )}
             </>
           )}
         </Card>

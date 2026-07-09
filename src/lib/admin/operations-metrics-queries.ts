@@ -122,8 +122,10 @@ export async function getOperationsMetrics(
     paidRows,
     onSiteRow,
     agingRow,
+    syncedAgingRow,
     jobsCurrentRow,
     jobsPreviousRow,
+    importedJobsCurrentRow,
   ] = await Promise.all([
     // Response time: first in_progress event per request across the two windows.
     db
@@ -227,7 +229,9 @@ export async function getOperationsMetrics(
         ),
       ),
 
-    // AR aging: outstanding on OPEN invoices as of now, bucketed by invoice age.
+    // AR aging (NATIVE only): outstanding on open invoices as of now, bucketed
+    // by invoice age. Synced FP/HCP invoices excluded — they are managed in
+    // their own systems. Mirrors the timeToPaid native-only filter above.
     db
       .select({
         b0: sql<string>`coalesce(sum(${invoices.totalCents} - ${invoices.amountPaidCents}) filter (where ${invoices.createdAt} >= ${cut30}), 0)`,
@@ -240,11 +244,31 @@ export async function getOperationsMetrics(
           invoices,
           organizationId,
           eq(invoices.state, "open"),
+          isNull(invoices.fieldpulseInvoiceId),
+          isNull(invoices.hcpInvoiceId),
           sql`${invoices.amountPaidCents} < ${invoices.totalCents}`,
         ),
       ),
 
-    // Jobs booked — current window.
+    // AR aging (SYNCED FP): single aggregate for the one-line summary shown
+    // below the native buckets. Not split by age — managed in FieldPulse.
+    db
+      .select({
+        totalCents: sql<string>`coalesce(sum(${invoices.totalCents} - ${invoices.amountPaidCents}), 0)`,
+        count: sql<string>`count(*)`,
+      })
+      .from(invoices)
+      .where(
+        withTenant(
+          invoices,
+          organizationId,
+          eq(invoices.state, "open"),
+          isNotNull(invoices.fieldpulseInvoiceId),
+          sql`${invoices.amountPaidCents} < ${invoices.totalCents}`,
+        ),
+      ),
+
+    // Jobs booked — current window (NATIVE only: FP/HCP-imported excluded).
     db
       .select({ value: count() })
       .from(serviceRequests)
@@ -252,12 +276,14 @@ export async function getOperationsMetrics(
         withTenant(
           serviceRequests,
           organizationId,
+          isNull(serviceRequests.fieldpulseJobId),
+          isNull(serviceRequests.hcpJobId),
           gte(serviceRequests.createdAt, fromDate),
           lt(serviceRequests.createdAt, toDate_),
         ),
       ),
 
-    // Jobs booked — previous window.
+    // Jobs booked — previous window (NATIVE only).
     db
       .select({ value: count() })
       .from(serviceRequests)
@@ -265,8 +291,24 @@ export async function getOperationsMetrics(
         withTenant(
           serviceRequests,
           organizationId,
+          isNull(serviceRequests.fieldpulseJobId),
+          isNull(serviceRequests.hcpJobId),
           gte(serviceRequests.createdAt, prevFrom),
           lt(serviceRequests.createdAt, fromDate),
+        ),
+      ),
+
+    // Imported jobs booked — current window only (for the "+N imported" suffix).
+    db
+      .select({ value: count() })
+      .from(serviceRequests)
+      .where(
+        withTenant(
+          serviceRequests,
+          organizationId,
+          isNotNull(serviceRequests.fieldpulseJobId),
+          gte(serviceRequests.createdAt, fromDate),
+          lt(serviceRequests.createdAt, toDate_),
         ),
       ),
   ]);
@@ -329,10 +371,15 @@ export async function getOperationsMetrics(
     totalOutstandingCents: b0 + b30 + b60,
   };
 
+  const syncedArTotalCents = toNumber(syncedAgingRow[0]?.totalCents);
+  const syncedArCount = toNumber(syncedAgingRow[0]?.count);
+
   const jobsBooked: MetricTrend = {
     current: toNumber(jobsCurrentRow[0]?.value),
     previous: toNumber(jobsPreviousRow[0]?.value),
   };
+
+  const importedJobsCurrent = toNumber(importedJobsCurrentRow[0]?.value);
 
   return {
     rangeDays,
@@ -340,7 +387,10 @@ export async function getOperationsMetrics(
     onSiteSeconds,
     timeToPaidSeconds,
     arAging,
+    syncedArTotalCents,
+    syncedArCount,
     jobsBooked,
+    importedJobsCurrent,
     firstResponseHumanSeconds,
     firstResponseSystemSeconds,
   };

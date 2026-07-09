@@ -13,7 +13,7 @@
  * queried, period-scoped journal lines. Money is converted cents->dollars at the
  * export boundary (in accounting-export.ts), never here and never in the DB.
  */
-import type { JournalLine } from "@/lib/admin/accounting-export";
+import type { AccountingExportResult } from "@/lib/admin/accounting-export";
 import { buildCsv } from "@/lib/admin/accounting-export";
 
 export interface AccountingProvider {
@@ -23,23 +23,23 @@ export interface AccountingProvider {
   readonly fileExtension: string;
   /** MIME type for the download response. */
   readonly contentType: string;
-  /** Serialize a period journal to the provider's file format. */
-  format(journal: readonly JournalLine[]): string;
+  /** Serialize the partitioned export to the provider's file format. */
+  format(result: AccountingExportResult): string;
 }
 
 /**
  * Deterministic provider used when no real accounting integration is configured.
- * Produces a QBO-importable CSV (a flat journal: one row per line). It never
- * talks to an external service — the operator downloads the file and imports it
- * into QuickBooks (or any ledger) manually.
+ * Produces a CSV with two clearly separated sections (native + FP-synced). It
+ * never talks to an external service — the operator downloads the file and
+ * imports it into QuickBooks (or any ledger) manually.
  */
 export class MockAccountingProvider implements AccountingProvider {
   readonly name = "mock";
   readonly fileExtension = "csv";
   readonly contentType = "text/csv";
 
-  format(journal: readonly JournalLine[]): string {
-    return buildCsv(journal);
+  format(result: AccountingExportResult): string {
+    return buildCsv(result);
   }
 }
 

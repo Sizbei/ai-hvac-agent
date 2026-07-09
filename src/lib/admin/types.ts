@@ -138,6 +138,12 @@ export interface DashboardStats {
   readonly emergencyOpen: number;
   /** Requests created today that were flagged after-hours. */
   readonly afterHoursToday: number;
+  /**
+   * FP/HCP-imported service requests currently in "pending" state.
+   * Shown as "+N imported" suffix next to the native pending count.
+   * 0 when no imported jobs are pending.
+   */
+  readonly importedPending: number;
 }
 
 /** A single request as it appears in a dashboard list (today's schedule,

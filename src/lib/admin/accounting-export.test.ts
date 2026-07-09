@@ -64,8 +64,16 @@ vi.mock('@/lib/db/tenant', () => ({
 
 // Schema is only referenced by identity in the queries; stub the touched tables.
 vi.mock('@/lib/db/schema', () => ({
-  invoices: { createdAt: 'invoices.createdAt' },
-  payments: { status: 'payments.status', createdAt: 'payments.createdAt' },
+  invoices: {
+    createdAt: 'invoices.createdAt',
+    fieldpulseInvoiceId: 'invoices.fieldpulseInvoiceId',
+    hcpInvoiceId: 'invoices.hcpInvoiceId',
+  },
+  payments: {
+    status: 'payments.status',
+    createdAt: 'payments.createdAt',
+    fieldpulsePaymentId: 'payments.fieldpulsePaymentId',
+  },
   refunds: { createdAt: 'refunds.createdAt' },
   technicianTimeEntries: {
     clockOutAt: 'tte.clockOutAt',
@@ -78,7 +86,8 @@ vi.mock('drizzle-orm', () => ({
   eq: () => 'eq',
   gte: () => 'gte',
   lte: () => 'lte',
-  isNotNull: () => 'isNotNull',
+  isNull: (col: unknown) => ({ kind: 'isNull', col }),
+  isNotNull: (col: unknown) => ({ kind: 'isNotNull', col }),
 }));
 
 import { getAccountingExport, buildCsv } from './accounting-export';
@@ -92,15 +101,25 @@ beforeEach(() => {
   captured.length = 0;
 });
 
-/** Queue results in the builder's Promise.all order: invoices, payments, refunds, labor. */
+/**
+ * Queue results in the builder's Promise.all order:
+ * nativeInvoices, syncedInvoices, nativePayments, syncedPayments, refunds, labor.
+ */
 function queue(opts: {
-  invoices?: unknown[];
-  payments?: unknown[];
+  nativeInvoices?: unknown[];
+  syncedInvoices?: unknown[];
+  nativePayments?: unknown[];
+  syncedPayments?: unknown[];
   refunds?: unknown[];
   labor?: unknown[];
+  // Convenience aliases that map to native-only (old callers).
+  invoices?: unknown[];
+  payments?: unknown[];
 }) {
-  selectQueue.push(opts.invoices ?? []);
-  selectQueue.push(opts.payments ?? []);
+  selectQueue.push(opts.nativeInvoices ?? opts.invoices ?? []);
+  selectQueue.push(opts.syncedInvoices ?? []);
+  selectQueue.push(opts.nativePayments ?? opts.payments ?? []);
+  selectQueue.push(opts.syncedPayments ?? []);
   selectQueue.push(opts.refunds ?? []);
   selectQueue.push(opts.labor ?? []);
 }
@@ -108,10 +127,10 @@ function queue(opts: {
 describe('getAccountingExport', () => {
   it('emits invoice/payment/refund/labor lines with dollar amounts (cents/100)', async () => {
     queue({
-      invoices: [
+      nativeInvoices: [
         { id: 'inv-1', subtotalCents: 10000, taxCents: 825, createdAt: new Date('2026-01-05T12:00:00Z') },
       ],
-      payments: [
+      nativePayments: [
         { id: 'pay-1', invoiceId: 'inv-1', amountCents: 10825, createdAt: new Date('2026-01-06T12:00:00Z') },
       ],
       refunds: [
@@ -122,10 +141,11 @@ describe('getAccountingExport', () => {
       ],
     });
 
-    const journal = await getAccountingExport(ORG, { fromDate: FROM, toDate: TO });
+    const result = await getAccountingExport(ORG, { fromDate: FROM, toDate: TO });
+    const native = result.native;
 
-    const byType = Object.fromEntries(journal.map((l) => [l.type, l]));
-    expect(journal).toHaveLength(4);
+    const byType = Object.fromEntries(native.map((l) => [l.type, l]));
+    expect(native).toHaveLength(4);
 
     // Amounts are DOLLARS, not cents.
     expect(byType.invoice.amountDollars).toBe(108.25); // 10000 + 825 = 10825 cents
@@ -140,7 +160,7 @@ describe('getAccountingExport', () => {
     expect(byType.labor.account).toBe('Labor Cost');
 
     // No cents leak: nothing in the journal equals a raw cents figure.
-    for (const line of journal) {
+    for (const line of native) {
       expect(line.amountDollars).toBeLessThan(10825);
     }
 
@@ -151,27 +171,28 @@ describe('getAccountingExport', () => {
 
   it('memos carry IDs only — no customer names, emails, or PII', async () => {
     queue({
-      invoices: [{ id: 'inv-1', subtotalCents: 100, taxCents: 0, createdAt: FROM }],
-      payments: [{ id: 'pay-1', invoiceId: 'inv-1', amountCents: 100, createdAt: FROM }],
+      nativeInvoices: [{ id: 'inv-1', subtotalCents: 100, taxCents: 0, createdAt: FROM }],
+      nativePayments: [{ id: 'pay-1', invoiceId: 'inv-1', amountCents: 100, createdAt: FROM }],
       refunds: [{ id: 'ref-1', paymentId: 'pay-1', amountCents: 50, createdAt: FROM }],
       labor: [{ id: 'tte-1', serviceRequestId: 'req-1', laborCostCents: 200, clockOutAt: FROM }],
     });
 
-    const journal = await getAccountingExport(ORG, { fromDate: FROM, toDate: TO });
+    const result = await getAccountingExport(ORG, { fromDate: FROM, toDate: TO });
+    const native = result.native;
 
-    for (const line of journal) {
+    for (const line of native) {
       // Memo references only opaque ids/labels we put in — no '@' (emails) and
       // no free-text customer fields.
       expect(line.memo).not.toContain('@');
     }
-    expect(journal.find((l) => l.type === 'invoice')!.memo).toBe('Invoice inv-1');
-    expect(journal.find((l) => l.type === 'payment')!.memo).toBe(
+    expect(native.find((l) => l.type === 'invoice')!.memo).toBe('Invoice inv-1');
+    expect(native.find((l) => l.type === 'payment')!.memo).toBe(
       'Payment pay-1 (invoice inv-1)',
     );
-    expect(journal.find((l) => l.type === 'refund')!.memo).toBe(
+    expect(native.find((l) => l.type === 'refund')!.memo).toBe(
       'Refund ref-1 (payment pay-1)',
     );
-    expect(journal.find((l) => l.type === 'labor')!.memo).toBe(
+    expect(native.find((l) => l.type === 'labor')!.memo).toBe(
       'Time entry tte-1 (request req-1)',
     );
   });
@@ -180,8 +201,9 @@ describe('getAccountingExport', () => {
     queue({});
     await getAccountingExport(ORG, { fromDate: FROM, toDate: TO });
 
-    // 4 selects captured, each tenant-scoped to ORG.
-    expect(captured).toHaveLength(4);
+    // 6 selects captured (nativeInvoices, syncedInvoices, nativePayments,
+    // syncedPayments, refunds, labor), each tenant-scoped to ORG.
+    expect(captured).toHaveLength(6);
     for (const cap of captured) {
       const arg = cap.where[0] as { __tenant?: string };
       expect(arg.__tenant).toBe(ORG);
@@ -190,44 +212,126 @@ describe('getAccountingExport', () => {
 
   it('skips zero-value invoices but keeps real rows', async () => {
     queue({
-      invoices: [
+      nativeInvoices: [
         { id: 'inv-zero', subtotalCents: 0, taxCents: 0, createdAt: FROM },
         { id: 'inv-real', subtotalCents: 5000, taxCents: 0, createdAt: FROM },
       ],
     });
-    const journal = await getAccountingExport(ORG, { fromDate: FROM, toDate: TO });
-    const invoiceLines = journal.filter((l) => l.type === 'invoice');
+    const result = await getAccountingExport(ORG, { fromDate: FROM, toDate: TO });
+    const invoiceLines = result.native.filter((l) => l.type === 'invoice');
     expect(invoiceLines).toHaveLength(1);
     expect(invoiceLines[0].memo).toBe('Invoice inv-real');
+  });
+
+  it('partitions native and synced rows into separate sections — subtotals never blend', async () => {
+    queue({
+      nativeInvoices: [
+        { id: 'inv-n1', subtotalCents: 10000, taxCents: 0, createdAt: FROM },
+      ],
+      syncedInvoices: [
+        { id: 'inv-fp1', subtotalCents: 50000, taxCents: 0, createdAt: FROM },
+      ],
+      nativePayments: [
+        { id: 'pay-n1', invoiceId: 'inv-n1', amountCents: 10000, createdAt: FROM },
+      ],
+      syncedPayments: [
+        { id: 'pay-fp1', invoiceId: 'inv-fp1', amountCents: 50000, createdAt: FROM },
+      ],
+    });
+
+    const result = await getAccountingExport(ORG, { fromDate: FROM, toDate: TO });
+
+    // Native section: 1 invoice + 1 payment
+    expect(result.native.filter((l) => l.type === 'invoice')).toHaveLength(1);
+    expect(result.native.find((l) => l.type === 'invoice')!.memo).toBe('Invoice inv-n1');
+    expect(result.native.filter((l) => l.type === 'payment')).toHaveLength(1);
+
+    // Synced section: 1 invoice + 1 payment — separate, not blended with native
+    expect(result.synced.filter((l) => l.type === 'invoice')).toHaveLength(1);
+    expect(result.synced.find((l) => l.type === 'invoice')!.memo).toBe('Invoice inv-fp1');
+    expect(result.synced.filter((l) => l.type === 'payment')).toHaveLength(1);
+
+    // The FP invoice does NOT appear in native and vice versa
+    expect(result.native.some((l) => l.memo.includes('inv-fp1'))).toBe(false);
+    expect(result.synced.some((l) => l.memo.includes('inv-n1'))).toBe(false);
+  });
+
+  it('native query carries IS NULL discriminators; synced query carries IS NOT NULL', async () => {
+    queue({});
+    await getAccountingExport(ORG, { fromDate: FROM, toDate: TO });
+
+    // 1st captured = native invoices query
+    const nativeInvWhere = JSON.stringify(captured[0]?.where ?? []);
+    expect(nativeInvWhere).toContain('isNull');
+    expect(nativeInvWhere).toContain('invoices.fieldpulseInvoiceId');
+    expect(nativeInvWhere).toContain('invoices.hcpInvoiceId');
+
+    // 2nd captured = synced invoices query
+    const syncedInvWhere = JSON.stringify(captured[1]?.where ?? []);
+    expect(syncedInvWhere).toContain('isNotNull');
+    expect(syncedInvWhere).toContain('invoices.fieldpulseInvoiceId');
+
+    // 3rd captured = native payments query
+    const nativePayWhere = JSON.stringify(captured[2]?.where ?? []);
+    expect(nativePayWhere).toContain('isNull');
+    expect(nativePayWhere).toContain('payments.fieldpulsePaymentId');
+
+    // 4th captured = synced payments query
+    const syncedPayWhere = JSON.stringify(captured[3]?.where ?? []);
+    expect(syncedPayWhere).toContain('isNotNull');
+    expect(syncedPayWhere).toContain('payments.fieldpulsePaymentId');
   });
 });
 
 describe('buildCsv', () => {
-  it('produces a header + one row per line with 2dp dollar amounts', () => {
-    const csv = buildCsv([
-      {
-        date: '2026-01-05',
-        type: 'invoice',
-        account: 'Sales Revenue',
-        memo: 'Invoice inv-1',
-        amountDollars: 108.25,
-      },
-    ]);
-    const lines = csv.trim().split('\n');
-    expect(lines[0]).toBe('Date,Type,Account,Memo,Amount');
-    expect(lines[1]).toBe('2026-01-05,invoice,Sales Revenue,Invoice inv-1,108.25');
+  const nativeLine = {
+    date: '2026-01-05',
+    type: 'invoice' as const,
+    account: 'Sales Revenue' as const,
+    memo: 'Invoice inv-1',
+    amountDollars: 108.25,
+  };
+
+  const syncedLine = {
+    date: '2026-01-06',
+    type: 'invoice' as const,
+    account: 'Sales Revenue' as const,
+    memo: 'Invoice fp-1',
+    amountDollars: 200.00,
+  };
+
+  it('produces header + native section + synced section with separate subtotals', () => {
+    const csv = buildCsv({ native: [nativeLine], synced: [syncedLine] });
+    // Header first
+    expect(csv).toContain('Date,Type,Account,Memo,Amount');
+    // Native section marker
+    expect(csv).toContain('# NATIVE');
+    expect(csv).toContain('Invoice inv-1');
+    expect(csv).toContain('Native subtotal');
+    expect(csv).toContain('108.25');
+    // Synced section marker
+    expect(csv).toContain('# SYNCED FROM FIELDPULSE');
+    expect(csv).toContain('Invoice fp-1');
+    expect(csv).toContain('FieldPulse synced subtotal');
+    expect(csv).toContain('200.00');
+    // No blended grand total
+    expect(csv).not.toContain('308.25');
+  });
+
+  it('native line has 2dp dollar amounts', () => {
+    const csv = buildCsv({ native: [nativeLine], synced: [] });
+    expect(csv).toContain('2026-01-05,invoice,Sales Revenue,Invoice inv-1,108.25');
   });
 
   it('escapes fields containing commas or quotes', () => {
-    const csv = buildCsv([
-      {
-        date: '2026-01-05',
-        type: 'refund',
-        account: 'Refunds & Allowances',
-        memo: 'Refund a, "b"',
-        amountDollars: 1,
-      },
-    ]);
+    const refundLine = {
+      date: '2026-01-05',
+      type: 'refund' as const,
+      account: 'Refunds & Allowances' as const,
+      memo: 'Refund a, "b"',
+      amountDollars: 1,
+    };
+    const csv = buildCsv({ native: [refundLine], synced: [] });
     expect(csv).toContain('"Refund a, ""b"""');
   });
 });

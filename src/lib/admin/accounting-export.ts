@@ -16,7 +16,7 @@
  * ids) — never customer names, emails, addresses, or free-text. The exported
  * FILE does contain amounts, so the route that serves it is super_admin-gated.
  */
-import { eq, gte, lte, isNotNull } from "drizzle-orm";
+import { eq, gte, lte, isNotNull, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   invoices,
@@ -53,6 +53,20 @@ export interface AccountingExportPeriod {
   readonly toDate: Date;
 }
 
+/**
+ * The full export result, partitioned to prevent accidental blending.
+ *
+ * `native` — transactions created natively in this system; safe to import into
+ *   your ledger.
+ * `synced` — transactions mirrored read-only from FieldPulse; already recorded
+ *   in FieldPulse's own books. Listed separately for reconciliation only — do
+ *   NOT import them alongside `native` rows or money will be double-counted.
+ */
+export interface AccountingExportResult {
+  readonly native: readonly JournalLine[];
+  readonly synced: readonly JournalLine[];
+}
+
 /** Integer cents -> decimal dollars, rounded to 2 dp (no float drift). */
 function centsToDollars(cents: number): number {
   return Math.round(cents) / 100;
@@ -64,19 +78,33 @@ function isoDate(d: Date): string {
 }
 
 /**
- * Build the period journal for an org: invoice (revenue), payment (cash
- * received), refund (contra), and labor-cost lines. All reads tenant-scoped and
- * period-scoped by the row's createdAt (labor by clockOutAt — when the cost is
- * realized). Money converted cents->dollars here only.
+ * Build the period journal for an org, partitioned into native and
+ * FieldPulse-synced sections. All reads are tenant-scoped and period-scoped.
+ *
+ * NATIVE (fieldpulseInvoiceId IS NULL, fieldpulsePaymentId IS NULL):
+ *   invoice → Sales Revenue, payment → Undeposited Funds, refund → contra,
+ *   labor → Labor Cost. Safe to import into your ledger.
+ *
+ * SYNCED (fieldpulseInvoiceId/fieldpulsePaymentId IS NOT NULL):
+ *   FieldPulse already books these. Listed for reconciliation only — importing
+ *   them alongside native rows double-counts money. Refunds and labor rows are
+ *   always native (no FP mirror for those tables).
  */
 export async function getAccountingExport(
   organizationId: string,
   period: AccountingExportPeriod,
-): Promise<JournalLine[]> {
+): Promise<AccountingExportResult> {
   const { fromDate, toDate } = period;
 
-  const [invoiceRows, paymentRows, refundRows, laborRows] = await Promise.all([
-    // Invoices created in the period -> revenue recognized (credit Sales Revenue).
+  const [
+    nativeInvoiceRows,
+    syncedInvoiceRows,
+    nativePaymentRows,
+    syncedPaymentRows,
+    refundRows,
+    laborRows,
+  ] = await Promise.all([
+    // Native invoices (not from FP or HCP) -> revenue recognized.
     db
       .select({
         id: invoices.id,
@@ -89,12 +117,33 @@ export async function getAccountingExport(
         withTenant(
           invoices,
           organizationId,
+          isNull(invoices.fieldpulseInvoiceId),
+          isNull(invoices.hcpInvoiceId),
           gte(invoices.createdAt, fromDate),
           lte(invoices.createdAt, toDate),
         ),
       ),
 
-    // Succeeded payments in the period -> cash received (debit Undeposited Funds).
+    // Synced invoices (FP-mirrored) — listed separately, NOT imported to ledger.
+    db
+      .select({
+        id: invoices.id,
+        subtotalCents: invoices.subtotalCents,
+        taxCents: invoices.taxCents,
+        createdAt: invoices.createdAt,
+      })
+      .from(invoices)
+      .where(
+        withTenant(
+          invoices,
+          organizationId,
+          isNotNull(invoices.fieldpulseInvoiceId),
+          gte(invoices.createdAt, fromDate),
+          lte(invoices.createdAt, toDate),
+        ),
+      ),
+
+    // Native payments (not FP-synced) -> cash received.
     db
       .select({
         id: payments.id,
@@ -108,12 +157,34 @@ export async function getAccountingExport(
           payments,
           organizationId,
           eq(payments.status, "succeeded"),
+          isNull(payments.fieldpulsePaymentId),
+          gte(payments.createdAt, fromDate),
+          lte(payments.createdAt, toDate),
+        ),
+      ),
+
+    // Synced payments (FP-mirrored) — listed separately, NOT imported to ledger.
+    db
+      .select({
+        id: payments.id,
+        invoiceId: payments.invoiceId,
+        amountCents: payments.amountCents,
+        createdAt: payments.createdAt,
+      })
+      .from(payments)
+      .where(
+        withTenant(
+          payments,
+          organizationId,
+          eq(payments.status, "succeeded"),
+          isNotNull(payments.fieldpulsePaymentId),
           gte(payments.createdAt, fromDate),
           lte(payments.createdAt, toDate),
         ),
       ),
 
     // Refunds issued in the period -> contra (Refunds & Allowances).
+    // Refunds are always native; no FP mirror for this table.
     db
       .select({
         id: refunds.id,
@@ -153,13 +224,13 @@ export async function getAccountingExport(
       ),
   ]);
 
-  const lines: JournalLine[] = [];
+  const native: JournalLine[] = [];
+  const synced: JournalLine[] = [];
 
-  for (const inv of invoiceRows) {
-    // Revenue = subtotal + tax (the full invoiced amount). Skip zero-value rows.
+  for (const inv of nativeInvoiceRows) {
     const revenueCents = inv.subtotalCents + inv.taxCents;
     if (revenueCents === 0) continue;
-    lines.push({
+    native.push({
       date: isoDate(inv.createdAt),
       type: "invoice",
       account: "Sales Revenue",
@@ -168,8 +239,30 @@ export async function getAccountingExport(
     });
   }
 
-  for (const pay of paymentRows) {
-    lines.push({
+  for (const inv of syncedInvoiceRows) {
+    const revenueCents = inv.subtotalCents + inv.taxCents;
+    if (revenueCents === 0) continue;
+    synced.push({
+      date: isoDate(inv.createdAt),
+      type: "invoice",
+      account: "Sales Revenue",
+      memo: `Invoice ${inv.id}`,
+      amountDollars: centsToDollars(revenueCents),
+    });
+  }
+
+  for (const pay of nativePaymentRows) {
+    native.push({
+      date: isoDate(pay.createdAt),
+      type: "payment",
+      account: "Undeposited Funds",
+      memo: `Payment ${pay.id} (invoice ${pay.invoiceId})`,
+      amountDollars: centsToDollars(pay.amountCents),
+    });
+  }
+
+  for (const pay of syncedPaymentRows) {
+    synced.push({
       date: isoDate(pay.createdAt),
       type: "payment",
       account: "Undeposited Funds",
@@ -179,7 +272,7 @@ export async function getAccountingExport(
   }
 
   for (const ref of refundRows) {
-    lines.push({
+    native.push({
       date: isoDate(ref.createdAt),
       type: "refund",
       account: "Refunds & Allowances",
@@ -191,7 +284,7 @@ export async function getAccountingExport(
   for (const lab of laborRows) {
     // clockOutAt is non-null here (filtered above); guard for the type only.
     const date = lab.clockOutAt ? isoDate(lab.clockOutAt) : isoDate(fromDate);
-    lines.push({
+    native.push({
       date,
       type: "labor",
       account: "Labor Cost",
@@ -200,7 +293,7 @@ export async function getAccountingExport(
     });
   }
 
-  return lines;
+  return { native, synced };
 }
 
 /** RFC-4180 field escaping: quote when the value has a comma, quote, or newline. */
@@ -214,23 +307,58 @@ function csvField(value: string | number): string {
 
 const CSV_HEADER = ["Date", "Type", "Account", "Memo", "Amount"] as const;
 
+/** Serialize one section of lines (header already written) into CSV rows. */
+function csvRows(lines: readonly JournalLine[]): string[] {
+  return lines.map((line) =>
+    [
+      csvField(line.date),
+      csvField(line.type),
+      csvField(line.account),
+      csvField(line.memo),
+      csvField(line.amountDollars.toFixed(2)),
+    ].join(","),
+  );
+}
+
 /**
- * Serialize a journal to a QBO-importable CSV string. Amount is decimal dollars
- * with 2 fixed places. Header row + one row per line.
+ * Serialize a partitioned export to CSV with two clearly separated sections:
+ *
+ * 1. NATIVE rows — import these into your ledger.
+ * 2. SYNCED FROM FIELDPULSE rows — for reconciliation only; already booked in
+ *    FieldPulse. Do NOT import alongside section 1 or money will double-count.
+ *
+ * Each section has its own subtotal row. A blended grand total is intentionally
+ * omitted to prevent accidental double-booking.
  */
-export function buildCsv(journal: readonly JournalLine[]): string {
-  const rows = [CSV_HEADER.join(",")];
-  for (const line of journal) {
-    rows.push(
-      [
-        csvField(line.date),
-        csvField(line.type),
-        csvField(line.account),
-        csvField(line.memo),
-        csvField(line.amountDollars.toFixed(2)),
-      ].join(","),
-    );
-  }
-  // Trailing newline so the file ends cleanly (most importers tolerate either).
+export function buildCsv(result: AccountingExportResult): string {
+  const nativeTotal = result.native.reduce((s, l) => s + l.amountDollars, 0);
+  const syncedTotal = result.synced.reduce((s, l) => s + l.amountDollars, 0);
+
+  const rows: string[] = [
+    CSV_HEADER.join(","),
+    // ── Section 1: native rows (safe to import) ──────────────────────────────
+    csvField("# NATIVE — import into your ledger"),
+    ...csvRows(result.native),
+    [
+      csvField(""),
+      csvField("subtotal"),
+      csvField(""),
+      csvField("Native subtotal"),
+      csvField(nativeTotal.toFixed(2)),
+    ].join(","),
+    // ── Section 2: FieldPulse-synced rows (reconciliation only) ─────────────
+    csvField(
+      "# SYNCED FROM FIELDPULSE (already booked in FieldPulse — not native revenue — do NOT import)",
+    ),
+    ...csvRows(result.synced),
+    [
+      csvField(""),
+      csvField("subtotal"),
+      csvField(""),
+      csvField("FieldPulse synced subtotal"),
+      csvField(syncedTotal.toFixed(2)),
+    ].join(","),
+  ];
+
   return rows.join("\n") + "\n";
 }

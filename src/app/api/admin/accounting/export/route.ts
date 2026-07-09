@@ -96,7 +96,8 @@ export async function GET(request: NextRequest): Promise<Response> {
       details: JSON.stringify({
         from: fromDate.toISOString(),
         to: toDate.toISOString(),
-        rowCount: journal.length,
+        nativeRowCount: journal.native.length,
+        syncedRowCount: journal.synced.length,
         provider: provider.name,
       }),
     }).catch((auditError: unknown) => {

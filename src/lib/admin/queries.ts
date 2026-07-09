@@ -933,23 +933,31 @@ export async function getDashboardStats(
 
   // Use a single aggregate query with CASE statements for all counts.
   // This is much faster than 7 separate count queries (1 DB round-trip vs 7).
+  //
+  // NATIVE vs IMPORTED: all status buckets count only native (non-FP/non-HCP)
+  // service requests. importedPending is the FP-imported pending count for the
+  // "+N imported" suffix shown in the UI.
   const [result] = await db
     .select({
-      pending: count(sql`CASE WHEN ${serviceRequests.status} = 'pending' THEN 1 END`),
+      pending: count(sql`CASE WHEN ${serviceRequests.status} = 'pending' AND ${serviceRequests.fieldpulseJobId} IS NULL AND ${serviceRequests.hcpJobId} IS NULL THEN 1 END`),
       assignedToday: count(
-        sql`CASE WHEN ${serviceRequests.status} = 'assigned' AND ${serviceRequests.updatedAt} >= ${todayStart} THEN 1 END`,
+        sql`CASE WHEN ${serviceRequests.status} = 'assigned' AND ${serviceRequests.updatedAt} >= ${todayStart} AND ${serviceRequests.fieldpulseJobId} IS NULL AND ${serviceRequests.hcpJobId} IS NULL THEN 1 END`,
       ),
-      inProgress: count(sql`CASE WHEN ${serviceRequests.status} = 'in_progress' THEN 1 END`),
+      inProgress: count(sql`CASE WHEN ${serviceRequests.status} = 'in_progress' AND ${serviceRequests.fieldpulseJobId} IS NULL AND ${serviceRequests.hcpJobId} IS NULL THEN 1 END`),
       completedToday: count(
-        sql`CASE WHEN ${serviceRequests.status} = 'completed' AND ${serviceRequests.completedAt} >= ${todayStart} THEN 1 END`,
+        sql`CASE WHEN ${serviceRequests.status} = 'completed' AND ${serviceRequests.completedAt} >= ${todayStart} AND ${serviceRequests.fieldpulseJobId} IS NULL AND ${serviceRequests.hcpJobId} IS NULL THEN 1 END`,
       ),
-      scheduled: count(sql`CASE WHEN ${serviceRequests.status} = 'scheduled' THEN 1 END`),
-      onHold: count(sql`CASE WHEN ${serviceRequests.status} = 'on_hold' THEN 1 END`),
+      scheduled: count(sql`CASE WHEN ${serviceRequests.status} = 'scheduled' AND ${serviceRequests.fieldpulseJobId} IS NULL AND ${serviceRequests.hcpJobId} IS NULL THEN 1 END`),
+      onHold: count(sql`CASE WHEN ${serviceRequests.status} = 'on_hold' AND ${serviceRequests.fieldpulseJobId} IS NULL AND ${serviceRequests.hcpJobId} IS NULL THEN 1 END`),
       emergencyOpen: count(
-        sql`CASE WHEN ${serviceRequests.urgency} = 'emergency' AND ${serviceRequests.status} IN ${sql`[${OPEN_STATUSES.join(',')}]`} THEN 1 END`,
+        sql`CASE WHEN ${serviceRequests.urgency} = 'emergency' AND ${serviceRequests.status} IN ${sql`[${OPEN_STATUSES.join(',')}]`} AND ${serviceRequests.fieldpulseJobId} IS NULL AND ${serviceRequests.hcpJobId} IS NULL THEN 1 END`,
       ),
       afterHoursToday: count(
-        sql`CASE WHEN ${serviceRequests.isAfterHours} = true AND ${serviceRequests.createdAt} >= ${todayStart} THEN 1 END`,
+        sql`CASE WHEN ${serviceRequests.isAfterHours} = true AND ${serviceRequests.createdAt} >= ${todayStart} AND ${serviceRequests.fieldpulseJobId} IS NULL AND ${serviceRequests.hcpJobId} IS NULL THEN 1 END`,
+      ),
+      // Imported (FP or HCP) jobs in pending state — shown as "+N imported" suffix.
+      importedPending: count(
+        sql`CASE WHEN ${serviceRequests.status} = 'pending' AND (${serviceRequests.fieldpulseJobId} IS NOT NULL OR ${serviceRequests.hcpJobId} IS NOT NULL) THEN 1 END`,
       ),
     })
     .from(serviceRequests)
@@ -964,6 +972,7 @@ export async function getDashboardStats(
     onHold: result?.onHold ?? 0,
     emergencyOpen: result?.emergencyOpen ?? 0,
     afterHoursToday: result?.afterHoursToday ?? 0,
+    importedPending: result?.importedPending ?? 0,
   };
 }
 

@@ -42,12 +42,28 @@ export interface OperationsMetrics {
   // 2. AR days for invoicing.
   /** Avg seconds from native invoice created → paid. Synced FP/HCP excluded. */
   readonly timeToPaidSeconds: MetricTrend;
-  /** Point-in-time aging of currently-open receivables (independent of window). */
+  /**
+   * Point-in-time aging of NATIVE open receivables (independent of window).
+   * FieldPulse-synced and HCP-synced open invoices are excluded from these
+   * buckets — they are managed in their respective source systems.
+   */
   readonly arAging: ArAging;
+  /** Total outstanding cents across FP-synced open invoices (for summary line). */
+  readonly syncedArTotalCents: number;
+  /** Count of FP-synced open invoices in the AR summary. */
+  readonly syncedArCount: number;
 
   // 3. Customer service volume.
-  /** Count of service requests created in the window. */
+  /**
+   * Count of NATIVE service requests created in the window (FP/HCP-imported
+   * excluded — they were already booked in the source system).
+   */
   readonly jobsBooked: MetricTrend;
+  /**
+   * Count of FP-imported service requests in the current window.
+   * Shown as "+N imported" suffix next to the native jobsBooked.
+   */
+  readonly importedJobsCurrent: number;
 
   // 4. Waiting times.
   /** Avg seconds created → a HUMAN dispatcher assigns the job. The headline. */
