@@ -30,9 +30,14 @@ export function invoiceAgeDays(inv: InvoiceAgeDates, now: Date = new Date()): nu
  * isCollectible) stay at the call site. */
 export function overdueByDates(inv: InvoiceAgeDates, now: Date = new Date()): boolean {
   if (inv.dueDate != null) {
-    return daysBetween(new Date(inv.dueDate), now) >= 1;
+    return daysPastDue(inv, now) >= 1;
   }
   return invoiceAgeDays(inv, now) >= 30;
+}
+
+/** Whole days past the due date; 0 when not yet due or no due date. */
+export function daysPastDue(inv: InvoiceAgeDates, now: Date = new Date()): number {
+  return inv.dueDate != null ? daysBetween(new Date(inv.dueDate), now) : 0;
 }
 
 const CLS: Record<string, string> = {
@@ -43,9 +48,15 @@ export function AgeChip({ issuedAt, dueDate, createdAt, state }: { issuedAt?: st
   if (state === 'paid') {
     return <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700"><span className="size-1.5 rounded-full bg-emerald-600" />Paid</span>;
   }
+  // Days PAST DUE is the number that matters for collections when the source
+  // system gave us a due date (FP's issue dates are onboarding artifacts for
+  // migrated books); otherwise fall back to age since issue. A past-due open
+  // invoice is never green — the chip must agree with the Overdue filter.
+  const overdueDays = state === 'open' ? daysPastDue({ issuedAt, dueDate, createdAt }) : 0;
+  if (overdueDays >= 1) {
+    return <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${CLS.red}`}><span className="size-1.5 rounded-full bg-current opacity-70" />{overdueDays}d overdue</span>;
+  }
   const days = invoiceAgeDays({ issuedAt, createdAt });
-  // A past-due invoice is never green, even when freshly issued — the chip must
-  // agree with the due-date-driven Overdue filter/summary.
   const b = state === 'open' && overdueByDates({ issuedAt, dueDate, createdAt }) ? 'red' : ageBucket(days);
   return <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${CLS[b]}`}><span className="size-1.5 rounded-full bg-current opacity-70" />{days} days</span>;
 }
