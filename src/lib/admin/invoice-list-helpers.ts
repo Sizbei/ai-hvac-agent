@@ -24,15 +24,24 @@ export type SortKey = 'newest' | 'oldest' | 'balance-high' | 'age-oldest';
 
 export interface SortableInvoice {
   readonly createdAt: string;
+  /** Source-system issue date (FP/HCP mirrors); date sorts prefer it so a
+   * bulk import day doesn't flatten the ordering. */
+  readonly issuedAt?: string | null;
   readonly totalCents: number;
   readonly amountPaidCents: number;
   readonly state: string;
 }
 
+/** The date an invoice was actually issued — source-system date when known,
+ * row creation otherwise. */
+function issueTime(inv: SortableInvoice): number {
+  return new Date(inv.issuedAt ?? inv.createdAt).getTime();
+}
+
 /**
  * Sort a copy of `rows` by `key`. Does NOT mutate input.
- * - 'newest': createdAt descending
- * - 'oldest': createdAt ascending
+ * - 'newest': issue date descending
+ * - 'oldest': issue date ascending
  * - 'balance-high': (totalCents - amountPaidCents) descending
  * - 'age-oldest': (totalCents - amountPaidCents > 0 ? daysOld : -1) descending (unpaid first by age, paid last)
  */
@@ -40,9 +49,9 @@ export function sortInvoices<T extends SortableInvoice>(rows: readonly T[], key:
   const copy = [...rows];
   switch (key) {
     case 'newest':
-      return copy.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      return copy.sort((a, b) => issueTime(b) - issueTime(a));
     case 'oldest':
-      return copy.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      return copy.sort((a, b) => issueTime(a) - issueTime(b));
     case 'balance-high':
       return copy.sort((a, b) => {
         const balA = a.totalCents - a.amountPaidCents;
@@ -54,7 +63,7 @@ export function sortInvoices<T extends SortableInvoice>(rows: readonly T[], key:
       const daysOld = (inv: SortableInvoice) => {
         const balance = inv.totalCents - inv.amountPaidCents;
         if (balance <= 0) return -1;
-        return (now - new Date(inv.createdAt).getTime()) / (1000 * 60 * 60 * 24);
+        return (now - issueTime(inv)) / (1000 * 60 * 60 * 24);
       };
       return copy.sort((a, b) => daysOld(b) - daysOld(a));
     }

@@ -42,3 +42,29 @@ it('falls back to lastReminderSentAt when history is empty', () => {
   );
   expect(events.filter(e => e.kind === 'reminder')).toHaveLength(1);
 });
+
+it('daysOverdue counts from the due date when the source system provides one', () => {
+  // Issued 60d ago, due 10d ago → overdue by 10 days (not 60).
+  const withDue = {
+    ...inv,
+    issuedAt: new Date(now.getTime() - 60 * 24 * 3600 * 1000),
+    dueDate: new Date(now.getTime() - 10 * 24 * 3600 * 1000),
+  };
+  expect(collectionsStats(withDue, now).daysOverdue).toBe(10);
+});
+it('a future due date is never overdue, regardless of age', () => {
+  const future = {
+    ...inv,
+    issuedAt: new Date(now.getTime() - 90 * 24 * 3600 * 1000),
+    dueDate: new Date(now.getTime() + 5 * 24 * 3600 * 1000),
+  };
+  expect(collectionsStats(future, now).daysOverdue).toBeNull();
+});
+it('without a due date, age counts from issuedAt (mirrored) over createdAt (import time)', () => {
+  const mirrored = {
+    ...inv,
+    createdAt: new Date(now.getTime() - 1 * 24 * 3600 * 1000), // imported yesterday
+    issuedAt: new Date(now.getTime() - 45 * 24 * 3600 * 1000), // issued 45d ago
+  };
+  expect(collectionsStats(mirrored, now).daysOverdue).toBe(45);
+});

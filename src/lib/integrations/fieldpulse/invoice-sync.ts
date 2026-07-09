@@ -23,6 +23,7 @@ import {
 import { eq, and } from "drizzle-orm";
 import { logger } from "@/lib/logger";
 import { getFieldpulseClient } from "./client";
+import { parseFpDate } from "./fp-dates";
 import type { FieldpulseInvoiceStatus, FieldpulseInvoice } from "./types";
 
 /**
@@ -399,6 +400,11 @@ export async function upsertInvoiceRecord(
           subtotalCents: totalCents,
           totalCents,
           amountPaidCents,
+          // Real-world dates from FP (issuedAt = created there, not imported
+          // here). Written on UPDATE too so a re-import backfills rows that
+          // predate these columns.
+          issuedAt: parseFpDate(invoice.createdAt),
+          dueDate: parseFpDate(invoice.dueDate),
           updatedAt: new Date(),
         })
         .where(
@@ -448,6 +454,8 @@ export async function upsertInvoiceRecord(
       taxCents: 0,
       totalCents,
       amountPaidCents,
+      issuedAt: parseFpDate(invoice.createdAt),
+      dueDate: parseFpDate(invoice.dueDate),
     })
     .onConflictDoNothing()
     .returning({ id: invoices.id });

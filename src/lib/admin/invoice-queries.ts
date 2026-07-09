@@ -799,6 +799,11 @@ export interface InvoiceListRow {
   readonly customerId: string | null;
   readonly serviceRequestId: string | null;
   readonly createdAt: Date;
+  /** When the invoice was issued in the source system (FP/HCP mirrors); null
+   * for native invoices — age math falls back to createdAt. */
+  readonly issuedAt: Date | null;
+  /** Source-system due date; drives overdue when present. */
+  readonly dueDate: Date | null;
   readonly customerName: string | null;
   readonly lastReminderSentAt: Date | null;
   /** Which FSM this read-only invoice is mirrored from, or null when native. */
@@ -831,6 +836,8 @@ export async function listInvoices(
       customerId: invoices.customerId,
       serviceRequestId: invoices.serviceRequestId,
       createdAt: invoices.createdAt,
+      issuedAt: invoices.issuedAt,
+      dueDate: invoices.dueDate,
       lastReminderSentAt: invoices.lastReminderSentAt,
       fieldpulseInvoiceId: invoices.fieldpulseInvoiceId,
       hcpInvoiceId: invoices.hcpInvoiceId,
@@ -903,6 +910,11 @@ export interface InvoiceDetailView {
   readonly serviceRequestId: string | null;
   readonly estimateId: string | null;
   readonly createdAt: Date;
+  /** When the invoice was issued in the source system (FP/HCP mirrors); null
+   * for native invoices — age math falls back to createdAt. */
+  readonly issuedAt: Date | null;
+  /** Source-system due date; drives overdue when present. */
+  readonly dueDate: Date | null;
   /** Which FSM this read-only invoice is mirrored from, or null when native. */
   readonly syncedSource: "fieldpulse" | "housecall" | null;
   readonly lineItems: InvoiceLineItemView[];
@@ -949,6 +961,8 @@ export async function getInvoiceDetailById(
       serviceRequestId: invoices.serviceRequestId,
       estimateId: invoices.estimateId,
       createdAt: invoices.createdAt,
+      issuedAt: invoices.issuedAt,
+      dueDate: invoices.dueDate,
       fieldpulseInvoiceId: invoices.fieldpulseInvoiceId,
       hcpInvoiceId: invoices.hcpInvoiceId,
       nameEncrypted: customers.nameEncrypted,

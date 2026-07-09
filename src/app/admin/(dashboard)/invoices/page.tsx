@@ -13,7 +13,7 @@ import { EmptyState } from '@/components/admin/ui/empty-state';
 import { TableSkeleton, StatTileSkeleton } from '@/components/admin/skeletons';
 import { SummaryBand } from '@/components/admin/invoices/summary-band';
 import { InvoiceRow } from '@/components/admin/invoices/invoice-row';
-import { daysBetween } from '@/components/admin/invoices/age-chip';
+import { overdueByDates } from '@/components/admin/invoices/age-chip';
 import { isCollectible, invoiceRef } from '@/lib/admin/invoice-collectible';
 import { paginate, pageLabel, sortInvoices, type SortKey } from '@/lib/admin/invoice-list-helpers';
 import type { InvoiceListItem } from '@/hooks/use-invoices';
@@ -30,7 +30,7 @@ import {
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 function isOverdue(inv: InvoiceListItem): boolean {
-  return isCollectible(inv) && daysBetween(new Date(inv.createdAt), new Date()) >= 30;
+  return isCollectible(inv) && overdueByDates(inv);
 }
 
 // ── filter types ─────────────────────────────────────────────────────────────

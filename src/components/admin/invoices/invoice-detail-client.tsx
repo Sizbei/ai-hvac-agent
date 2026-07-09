@@ -44,6 +44,8 @@ interface ApiInvoice {
   readonly serviceRequestId: string | null;
   readonly estimateId: string | null;
   readonly createdAt: string;
+  readonly issuedAt: string | null;
+  readonly dueDate: string | null;
   readonly syncedSource: 'fieldpulse' | 'housecall' | null;
   readonly lineItems: InvoiceDetailView['lineItems'];
   readonly payments: ApiPayment[];
@@ -73,6 +75,8 @@ function hydrateInvoice(raw: ApiInvoice): InvoiceDetailView {
   return {
     ...raw,
     createdAt: new Date(raw.createdAt),
+    issuedAt: raw.issuedAt ? new Date(raw.issuedAt) : null,
+    dueDate: raw.dueDate ? new Date(raw.dueDate) : null,
     serviceDate: raw.serviceDate ? new Date(raw.serviceDate) : null,
     lastReminderSentAt: raw.lastReminderSentAt ? new Date(raw.lastReminderSentAt) : null,
     payments: raw.payments.map((p) => ({
@@ -331,7 +335,7 @@ export function InvoiceDetailClient({
         </Link>
         <div className="flex items-center gap-2">
           <InvoiceStateBadge state={invoice.state} />
-          <AgeChip createdAt={invoice.createdAt.toISOString()} state={invoice.state} />
+          <AgeChip issuedAt={invoice.issuedAt?.toISOString() ?? null} createdAt={invoice.createdAt.toISOString()} state={invoice.state} />
         </div>
         {sourceLabel && (
           <span className="rounded-full border bg-violet-50 px-2.5 py-0.5 text-xs font-medium text-violet-700">

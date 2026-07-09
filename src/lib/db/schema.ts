@@ -2678,6 +2678,15 @@ export const invoices = pgTable(
     // When a collections reminder was last sent for this invoice. Nullable
     // (never reminded). Powers the "Reminded 3d ago" chip and the send cooldown.
     lastReminderSentAt: timestamp("last_reminder_sent_at", { withTimezone: true }),
+    // Real-world invoice dates from the source system. For pull-mirrored
+    // invoices (FieldPulse/HCP) issuedAt is when the invoice was created THERE
+    // — createdAt is only when WE imported the row, which made every mirrored
+    // invoice look 0 days old. Null for native invoices (age falls back to
+    // createdAt) or when the source omits the field.
+    issuedAt: timestamp("issued_at", { withTimezone: true }),
+    // Payment due date from the source system; drives overdue (falls back to
+    // the age>=30 heuristic when null).
+    dueDate: timestamp("due_date", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },

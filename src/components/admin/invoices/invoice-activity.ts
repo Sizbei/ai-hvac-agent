@@ -1,5 +1,5 @@
 import type { InvoiceDetailView, InvoiceReminderView } from '@/lib/admin/invoice-queries';
-import { daysBetween } from './age-chip';
+import { daysBetween, invoiceAgeDays, overdueByDates } from './age-chip';
 
 export type ActivityEvent = {
   kind: 'created' | 'payment' | 'refund' | 'reminder';
@@ -23,13 +23,19 @@ export function collectionsStats(
   inv: Pick<
     InvoiceDetailView,
     'createdAt' | 'state' | 'totalCents' | 'amountPaidCents' | 'lastReminderSentAt'
-  >,
+  > &
+    Partial<Pick<InvoiceDetailView, 'issuedAt' | 'dueDate'>>,
   now: Date,
 ): { daysOverdue: number | null; lastRemindedRel: string | null; balanceCents: number } {
   const balance = inv.totalCents - inv.amountPaidCents;
-  const age = daysBetween(inv.createdAt, now);
-  const daysOverdue =
-    inv.state === 'open' && balance > 0 && age >= 30 ? age : null;
+  // With a source-system due date, "overdue" = days past due; otherwise the
+  // legacy heuristic: age (from real issue date when known) >= 30 days.
+  const overdue = inv.state === 'open' && balance > 0 && overdueByDates(inv, now);
+  const daysOverdue = overdue
+    ? inv.dueDate != null
+      ? daysBetween(new Date(inv.dueDate), now)
+      : invoiceAgeDays(inv, now)
+    : null;
   const lastRemindedRel =
     inv.lastReminderSentAt ? rel(inv.lastReminderSentAt, now) : null;
   return { daysOverdue, lastRemindedRel, balanceCents: balance };

@@ -15,6 +15,9 @@ import { db } from "@/lib/db";
 import { invoices, customers, serviceRequests, auditLog } from "@/lib/db/schema";
 import { logger } from "@/lib/logger";
 import { getHousecallClient } from "./client";
+// Same normalizing parser as the FieldPulse mirror (pure module) — HCP dates
+// are ISO and pass through it unchanged.
+import { parseFpDate } from "../fieldpulse/fp-dates";
 import type { HousecallInvoice } from "./types";
 
 export type InvoicePullOutcome = "created" | "updated" | "skipped" | "failed";
@@ -137,6 +140,10 @@ async function upsertHcpInvoiceRecord(
           subtotalCents: totalCents,
           totalCents,
           amountPaidCents,
+          // Real-world dates from HCP (issuedAt = created there). Written on
+          // UPDATE too so a re-sync backfills rows that predate these columns.
+          issuedAt: parseFpDate(invoice.createdAt),
+          dueDate: parseFpDate(invoice.dueDate),
           updatedAt: new Date(),
         })
         .where(
@@ -176,6 +183,8 @@ async function upsertHcpInvoiceRecord(
       taxCents: 0,
       totalCents,
       amountPaidCents,
+      issuedAt: parseFpDate(invoice.createdAt),
+      dueDate: parseFpDate(invoice.dueDate),
     })
     .onConflictDoNothing()
     .returning({ id: invoices.id });

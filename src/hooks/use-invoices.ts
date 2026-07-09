@@ -11,6 +11,11 @@ export interface InvoiceListItem {
   readonly customerId: string | null;
   readonly serviceRequestId: string | null;
   readonly createdAt: string;
+  /** Issue date in the source system (FP/HCP mirrors); null for native
+   * invoices — age falls back to createdAt. */
+  readonly issuedAt: string | null;
+  /** Source-system due date; drives overdue when present. */
+  readonly dueDate: string | null;
   /** Which FSM this read-only invoice is mirrored from, or null when native. */
   readonly syncedSource: "fieldpulse" | "housecall" | null;
   readonly customerName: string | null;
