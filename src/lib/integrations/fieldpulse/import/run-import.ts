@@ -27,6 +27,7 @@ import { getFieldpulseClient } from "../client";
 import { syncTechniciansFromFieldpulse } from "../technician-sync";
 import { importCustomersFromFieldpulse } from "./customers";
 import { importJobsFromFieldpulse } from "./jobs";
+import { importInvoicesFromFieldpulse } from "./invoices";
 
 dotenv.config({ path: ".env.local" });
 
@@ -82,7 +83,11 @@ export const PHASES: { name: string; fn: PhaseFn }[] = [
   },
   {
     name: "invoices",
-    fn: async (_ctx, counts) => counts,
+    fn: async (ctx, counts) => {
+      if (!ctx.fpClient) throw new Error("No FieldPulse client available");
+      await importInvoicesFromFieldpulse(ctx.orgId, counts, ctx.fpClient);
+      return counts;
+    },
   },
 ];
 

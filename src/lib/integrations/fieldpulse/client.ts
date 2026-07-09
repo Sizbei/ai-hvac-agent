@@ -423,6 +423,7 @@ function toInvoice(raw: unknown): FieldpulseInvoice | null {
     // Real paid timestamp is last_payment_date (fallback first_payment_date).
     paidAt: str(obj.last_payment_date) ?? str(obj.first_payment_date),
     createdAt: str(obj.created_at),
+    deletedAt: str(obj.deleted_at),
     lineItems: toLineItems(obj.line_items),
   };
 }

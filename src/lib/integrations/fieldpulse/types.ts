@@ -165,6 +165,8 @@ export interface FieldpulseInvoice {
   readonly paidAt?: string | null; // From last_payment_date
   readonly createdAt?: string | null;
   readonly lineItems?: readonly FieldpulseInvoiceLineItem[];
+  // Non-null when the invoice has been soft-deleted — skip on import.
+  readonly deletedAt?: string | null;
 }
 
 /** Invoice status values from Fieldpulse (adjusted per actual docs). */

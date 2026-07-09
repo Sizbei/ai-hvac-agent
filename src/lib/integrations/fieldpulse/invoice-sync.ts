@@ -335,8 +335,11 @@ function lineItemRows(
  * single-invoice and per-job entry points so the cron doesn't re-fetch.
  * Resolves links org-scoped, maps money to cents, and find-or-creates the native
  * row idempotently on (org, fieldpulseInvoiceId). May throw — callers catch.
+ *
+ * Exported so the Phase 5 backfill (import/invoices.ts) can feed already-fetched
+ * invoices in without the N wasteful re-fetches that pullInvoiceFromFieldpulse adds.
  */
-async function upsertInvoiceRecord(
+export async function upsertInvoiceRecord(
   organizationId: string,
   invoice: FieldpulseInvoice,
 ): Promise<InvoicePullOutcome> {
