@@ -345,10 +345,19 @@ function toCustomer(raw: unknown): FieldpulseCustomer {
       const e = entry as Record<string, unknown>;
       const name =
         str(e.name) ?? str(e.label) ?? str(e.field_name) ?? str(e.custom_field_name);
+      // Live-verified 2026-07-09: entries carry NO name — only
+      // {field_instance_id, value}; the definitions endpoint 403s on this
+      // gateway. Keep valued entries under a fallback label so the values
+      // (self-explanatory, e.g. "Commercial") still display.
       const value =
-        str(e.value) ?? str(e.field_value) ?? str(e.custom_value);
-      if (name?.trim() && value?.trim()) {
-        cfEntries.push({ name: name.trim(), value: value.trim() });
+        str(e.value) ?? str(e.field_value) ?? str(e.custom_value) ??
+        (typeof e.value === "number" ? String(e.value) : undefined);
+      const fieldInstanceId =
+        typeof e.field_instance_id === "number" ? e.field_instance_id : null;
+      const resolvedName =
+        name?.trim() || (fieldInstanceId != null ? `Custom field #${fieldInstanceId}` : null);
+      if (resolvedName && value?.trim()) {
+        cfEntries.push({ name: resolvedName, value: value.trim() });
       }
     }
   }

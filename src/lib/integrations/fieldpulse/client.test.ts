@@ -746,23 +746,29 @@ describe("RestFieldpulseClient — toCustomer customFields + lead_source folding
     ]);
   });
 
-  it("skips malformed customfields entries (non-object, numeric value, missing keys) without throwing", async () => {
+  it("tolerates malformed customfields entries; coerces numeric values; falls back to field_instance_id labels", async () => {
     mockFetch.mockResolvedValue({
       ok: true,
       json: async () =>
         customerEnvelope({
           customfields: [
-            "not-an-object",            // non-object entry
-            { name: "Score", value: 99 }, // numeric value (not a string)
-            { label: "Source" },          // missing value key
+            "not-an-object",            // non-object entry → dropped
+            { name: "Score", value: 99 }, // numeric value → coerced to "99"
+            { label: "Source" },          // missing value key → dropped
             { name: "Good", value: "Yes" }, // valid entry
+            // Live-verified real shape: NO name, only field_instance_id + value
+            { field_instance_id: 164098, value: "Commercial" },
+            { field_instance_id: 164099, value: "" }, // empty value → dropped
           ],
         }),
     });
     const client = new RestFieldpulseClient(config, mockFetch as never);
     const result = await client.getCustomer("12345");
-    // Only the valid entry survives
-    expect(result?.customFields).toEqual([{ name: "Good", value: "Yes" }]);
+    expect(result?.customFields).toEqual([
+      { name: "Score", value: "99" },
+      { name: "Good", value: "Yes" },
+      { name: "Custom field #164098", value: "Commercial" },
+    ]);
   });
 
   it("returns null customFields when no customfields and no lead_source", async () => {
