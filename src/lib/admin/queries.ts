@@ -1004,7 +1004,13 @@ export async function getDashboardStats(
       scheduled: count(sql`CASE WHEN ${serviceRequests.status} = 'scheduled' AND ${serviceRequests.fieldpulseJobId} IS NULL AND ${serviceRequests.hcpJobId} IS NULL THEN 1 END`),
       onHold: count(sql`CASE WHEN ${serviceRequests.status} = 'on_hold' AND ${serviceRequests.fieldpulseJobId} IS NULL AND ${serviceRequests.hcpJobId} IS NULL THEN 1 END`),
       emergencyOpen: count(
-        sql`CASE WHEN ${serviceRequests.urgency} = 'emergency' AND ${serviceRequests.status} IN ${sql`[${OPEN_STATUSES.join(',')}]`} AND ${serviceRequests.fieldpulseJobId} IS NULL AND ${serviceRequests.hcpJobId} IS NULL THEN 1 END`,
+        // NOTE: was `IN ${sql`[...]`}` which rendered literal `IN [$1]` —
+        // invalid SQL (Postgres 42601) that 500'd the dashboard stats endpoint
+        // in prod. sql.join builds a proper parameterized IN list.
+        sql`CASE WHEN ${serviceRequests.urgency} = 'emergency' AND ${serviceRequests.status} IN (${sql.join(
+          OPEN_STATUSES.map((s) => sql`${s}`),
+          sql`, `,
+        )}) AND ${serviceRequests.fieldpulseJobId} IS NULL AND ${serviceRequests.hcpJobId} IS NULL THEN 1 END`,
       ),
       afterHoursToday: count(
         sql`CASE WHEN ${serviceRequests.isAfterHours} = true AND ${serviceRequests.createdAt} >= ${todayStart} AND ${serviceRequests.fieldpulseJobId} IS NULL AND ${serviceRequests.hcpJobId} IS NULL THEN 1 END`,
