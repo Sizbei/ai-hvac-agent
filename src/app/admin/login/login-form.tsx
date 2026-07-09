@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { EnvBadge } from '@/components/admin/env-badge';
+import type { LoginMode } from '@/lib/auth/login-mode';
 
 /** Generic, non-enumerating messages for the ?error= codes the OIDC callback
  * redirects with. All denial paths map to a single uninformative message. */
@@ -43,45 +44,15 @@ function initialNotice(): string {
 }
 
 interface LoginFormProps {
+  /** Which UI to render — Google-only (policy) or the password fallback. */
+  readonly mode: LoginMode;
   /** True when Google OIDC is configured server-side; gates the button. */
   readonly googleEnabled: boolean;
 }
 
-export function LoginForm({ googleEnabled }: LoginFormProps) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  // Initialize from the ?error= the OIDC callback may have redirected with, so
-  // the message is present on first paint (no effect, no flash).
+export function LoginForm({ mode, googleEnabled }: LoginFormProps) {
   const [error, setError] = useState(() => initialOidcError());
   const [notice] = useState(() => initialNotice());
-  const [isLoading, setIsLoading] = useState(false);
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setIsLoading(true);
-    setError('');
-
-    try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      });
-      const data: unknown = await res.json();
-
-      if (!res.ok) {
-        const errorData = data as { error?: { message?: string } };
-        setError(errorData.error?.message ?? 'Login failed');
-        return;
-      }
-
-      window.location.href = '/admin/requests';
-    } catch {
-      setError('Network error. Please try again.');
-    } finally {
-      setIsLoading(false);
-    }
-  }
 
   return (
     <div className="relative flex min-h-dvh items-center justify-center overflow-hidden bg-gradient-to-br from-[oklch(0.22_0.05_258)] to-[oklch(0.16_0.05_260)] px-4">
@@ -105,81 +76,140 @@ export function LoginForm({ googleEnabled }: LoginFormProps) {
             <EnvBadge />
           </div>
         </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            {notice && !error && (
-              <Alert>
-                <AlertCircle className="size-4" />
-                <AlertDescription>{notice}</AlertDescription>
-              </Alert>
-            )}
-            {error && (
-              <Alert variant="destructive">
-                <AlertCircle className="size-4" />
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            )}
+        <CardContent className="flex flex-col gap-4">
+          {notice && !error && (
+            <Alert>
+              <AlertCircle className="size-4" />
+              <AlertDescription>{notice}</AlertDescription>
+            </Alert>
+          )}
+          {error && (
+            <Alert variant="destructive">
+              <AlertCircle className="size-4" />
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
 
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="admin@demo-hvac.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                autoFocus
-                disabled={isLoading}
-              />
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                disabled={isLoading}
-              />
-            </div>
-
-            <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" />
-                  Signing in...
-                </>
-              ) : (
-                'Sign In'
-              )}
-            </Button>
-          </form>
-
-          {googleEnabled && (
+          {mode === 'google' ? (
             <>
-              <div className="my-4 flex items-center gap-3">
-                <span className="h-px flex-1 bg-border" />
-                <span className="text-xs text-muted-foreground">or</span>
-                <span className="h-px flex-1 bg-border" />
-              </div>
-              {/* A plain styled anchor (not fetch) — the OAuth flow is a
-                  full-page redirect to Google and back. */}
-              <a
-                href="/api/auth/google/start"
-                aria-disabled={isLoading}
-                className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-input bg-background px-4 text-sm font-medium shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-disabled:pointer-events-none aria-disabled:opacity-50"
-              >
-                <GoogleGlyph />
-                Sign in with Google
-              </a>
+              <GoogleSignInButton prominent />
+              <p className="text-center text-xs text-muted-foreground">
+                Use the Google account your administrator invited.
+              </p>
+            </>
+          ) : (
+            <>
+              <PasswordForm onError={setError} />
+              {googleEnabled && (
+                <>
+                  <div className="flex items-center gap-3">
+                    <span className="h-px flex-1 bg-border" />
+                    <span className="text-xs text-muted-foreground">or</span>
+                    <span className="h-px flex-1 bg-border" />
+                  </div>
+                  <GoogleSignInButton />
+                </>
+              )}
             </>
           )}
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+/** Email + password fallback. Shown only when Google OIDC is not configured
+ * (dev/preview/bootstrap) or via the ?password=1 break-glass override. */
+function PasswordForm({ onError }: { readonly onError: (msg: string) => void }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setIsLoading(true);
+    onError('');
+
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      const data: unknown = await res.json();
+
+      if (!res.ok) {
+        const errorData = data as { error?: { message?: string } };
+        onError(errorData.error?.message ?? 'Login failed');
+        return;
+      }
+
+      window.location.href = '/admin/requests';
+    } catch {
+      onError('Network error. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="email">Email</Label>
+        <Input
+          id="email"
+          type="email"
+          placeholder="you@company.com"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          required
+          autoFocus
+          disabled={isLoading}
+        />
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="password">Password</Label>
+        <Input
+          id="password"
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          required
+          disabled={isLoading}
+        />
+      </div>
+
+      <Button type="submit" className="w-full" disabled={isLoading}>
+        {isLoading ? (
+          <>
+            <Loader2 className="size-4 animate-spin" />
+            Signing in...
+          </>
+        ) : (
+          'Sign In'
+        )}
+      </Button>
+    </form>
+  );
+}
+
+/** "Continue with Google" — a plain styled anchor (not fetch): the OAuth flow
+ * is a full-page redirect to Google and back. `prominent` is the Google-only
+ * hero treatment; the default is the compact under-the-form variant. */
+function GoogleSignInButton({ prominent = false }: { readonly prominent?: boolean }) {
+  return (
+    <a
+      href="/api/auth/google/start"
+      className={
+        prominent
+          ? 'inline-flex h-11 w-full items-center justify-center gap-2.5 rounded-md border border-input bg-background px-4 text-sm font-medium shadow-xs transition-all duration-200 ease-out hover:bg-accent hover:text-accent-foreground hover:shadow-md focus-visible:ring-[3px] focus-visible:ring-ring/50'
+          : 'inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-input bg-background px-4 text-sm font-medium shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50'
+      }
+    >
+      <GoogleGlyph />
+      Continue with Google
+    </a>
   );
 }
 

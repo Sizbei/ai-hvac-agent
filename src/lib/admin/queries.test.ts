@@ -64,8 +64,12 @@ vi.mock('drizzle-orm', () => ({
   eq: vi.fn((...args: unknown[]) => args),
   and: vi.fn((...args: unknown[]) => args),
   // sql is used both as a tagged-template (sql`...`) and as sql<T>`...`; a plain
-  // mock fn satisfies both call shapes.
-  sql: vi.fn((...args: unknown[]) => args),
+  // mock fn satisfies both call shapes. sql.join builds parameterized IN lists
+  // (getDashboardStats emergencyOpen).
+  sql: Object.assign(
+    vi.fn((...args: unknown[]) => args),
+    { join: vi.fn((parts: unknown[], sep: unknown) => ({ parts, sep })) },
+  ),
   count: vi.fn(() => 'count'),
   desc: vi.fn((col: unknown) => col),
   asc: vi.fn((col: unknown) => col),
