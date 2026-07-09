@@ -31,6 +31,7 @@ import {
   Calculator,
   Gauge,
   Download,
+  Search,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -271,6 +272,21 @@ export function Sidebar({
               </Button>
             </div>
 
+            {/* Search button (mobile) */}
+            <div className="px-3 pb-1 pt-2">
+              <button
+                type="button"
+                onClick={() =>
+                  window.dispatchEvent(new CustomEvent('global-search:open'))
+                }
+                className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-white/65 transition-colors hover:bg-white/[0.06] hover:text-white"
+              >
+                <Search className="size-5 shrink-0" />
+                <span className="flex-1 text-left">Search</span>
+                <kbd className="text-xs opacity-50">⌘K</kbd>
+              </button>
+            </div>
+
             <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-3">
               {NAV_GROUPS.map((group) => (
                 <div key={group.heading} className="space-y-1">
@@ -350,6 +366,41 @@ export function Sidebar({
               <BrandMark onDark />
               <EnvBadge />
             </div>
+          )}
+        </div>
+
+        {/* Search button (desktop) */}
+        <div className="px-3 pb-1 pt-2">
+          {isCollapsed ? (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger render={<div />}>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      window.dispatchEvent(new CustomEvent('global-search:open'))
+                    }
+                    className="flex w-full items-center justify-center rounded-lg py-2 text-white/65 transition-colors hover:bg-white/[0.06] hover:text-white"
+                    aria-label="Search"
+                  >
+                    <Search className="size-5 shrink-0" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right">Search ⌘K</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          ) : (
+            <button
+              type="button"
+              onClick={() =>
+                window.dispatchEvent(new CustomEvent('global-search:open'))
+              }
+              className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-white/65 transition-colors hover:bg-white/[0.06] hover:text-white"
+            >
+              <Search className="size-5 shrink-0" />
+              <span className="flex-1 text-left">Search</span>
+              <kbd className="text-xs opacity-50">⌘K</kbd>
+            </button>
           )}
         </div>
 

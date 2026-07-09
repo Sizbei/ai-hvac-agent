@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { AlertTriangle } from 'lucide-react';
 import { Sidebar } from '@/components/admin/sidebar';
 import { AdminHeader } from '@/components/admin/admin-header';
+import { GlobalSearch } from '@/components/admin/global-search';
 import type { AdminRole } from '@/lib/auth/types';
 
 interface DashboardShellProps {
@@ -63,6 +64,7 @@ export function DashboardShell({
             </Link>
           </div>
         )}
+        <GlobalSearch />
         <main className="flex-1 overflow-auto">{children}</main>
       </div>
     </div>
