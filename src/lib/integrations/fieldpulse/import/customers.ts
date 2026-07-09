@@ -262,15 +262,18 @@ export async function importOneFpCustomer(
         .returning({ id: customers.id });
 
       if (updated.length === 0) {
-        // Another row already owns this fpId — unique index would have thrown,
-        // but the guard caught the case where OUR row already has a DIFFERENT
-        // fpId (imported from a prior run linking to a different FP id).
+        // The contact-matched native row already owns a DIFFERENT fpId — this
+        // FP record is a duplicate person in FieldPulse (live-verified: the 12
+        // orphan jobs' customers are contact-dupes of already-imported rows).
+        // The fpId LINK is refused (never clobber), but the resolved native id
+        // is still THE person — return it so callers (the jobs self-heal) can
+        // attach dependent records to the right customer.
         logger.warn(
           { orgId, fpId: customer.fpId, nativeId },
-          "FP customer: fpId guard prevented overwrite — counting as skipped",
+          "FP customer: fpId guard prevented overwrite — linking skipped, resolved to existing row",
         );
         if (counts) counts.skipped++;
-        return null;
+        return nativeId;
       } else {
         // Note: created/updated distinction is approximate here — we can't
         // cheaply tell from upsertCustomerByContact whether the row pre-existed.
