@@ -9,7 +9,6 @@ node_modules
 # Docs, tests, and tooling that don't belong in the serverless bundle
 tests
 *.test.ts
-drizzle/meta
 
 # Local env / secrets (never upload)
 .env
