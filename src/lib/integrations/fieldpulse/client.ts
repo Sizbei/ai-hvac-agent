@@ -549,7 +549,14 @@ function toEstimate(raw: unknown): FieldpulseEstimate | null {
     createdAt: str(obj.created_at),
     deletedAt: str(obj.deleted_at),
     lineItems: toLineItems(obj.line_items),
-    customStatus: typeof obj.custom_status === "string" ? obj.custom_status : null,
+    // custom_status is an OBJECT on this gateway ({name, icon, color, type, ...} —
+    // live-verified 2026-07-09); accept a bare string too for shape drift.
+    customStatus:
+      typeof obj.custom_status === "string"
+        ? obj.custom_status
+        : typeof (obj.custom_status as Record<string, unknown> | null)?.name === "string"
+          ? ((obj.custom_status as Record<string, unknown>).name as string)
+          : null,
   };
 }
 

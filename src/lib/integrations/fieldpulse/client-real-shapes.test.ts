@@ -150,6 +150,31 @@ describe("RestFieldpulseClient — real API shapes", () => {
     expect(items).toHaveLength(0);
   });
 
+  it("getEstimate unwraps the custom_status OBJECT to its name (live-verified shape)", async () => {
+    // Live 2026-07-09: custom_status = {id, name: "Sent", icon, color, type, ...}
+    // — NOT a bare string. A string-only mapper nulled every status name in prod.
+    mockFetch.mockResolvedValue(
+      ok({
+        error: false,
+        response: {
+          id: 70000001,
+          customer_id: 20000001,
+          status: 1,
+          total: "270.00",
+          custom_status: {
+            id: 1878569,
+            name: "Sent",
+            icon: "envelope",
+            color: "#57cfff",
+            type: "estimate_sent",
+          },
+        },
+      }),
+    );
+    const est = await client().getEstimate("70000001");
+    expect(est?.customStatus).toBe("Sent");
+  });
+
   it("listPayments parses numeric ids, dollar-string money, and the response envelope", async () => {
     mockFetch.mockResolvedValue(
       ok({
