@@ -1,15 +1,38 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import type { CustomerRecord, CustomerDetail } from '@/lib/admin/crm-types';
+import type { CustomerListRecord, CustomerDetail } from '@/lib/admin/crm-types';
+import { createSwrCache } from '@/lib/admin/swr-cache';
+
+interface CustomersPayload {
+  readonly customers: readonly CustomerListRecord[];
+}
+
+const customersCache = createSwrCache<CustomersPayload>(60_000); // 60s TTL
 
 export function useAdminCustomers(includeArchived?: boolean) {
   const shouldIncludeArchived = includeArchived ?? false;
-  const [customers, setCustomers] = useState<readonly CustomerRecord[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [customers, setCustomers] = useState<readonly CustomerListRecord[]>([]);
+  // Start as loading only if there is no cached data to show immediately.
+  const [isLoading, setIsLoading] = useState(
+    () => customersCache.get('customers:' + String(shouldIncludeArchived)) === null,
+  );
   const [error, setError] = useState<string | null>(null);
 
-  const fetch_ = useCallback(async () => {
+  const fetch_ = useCallback(async ({ bust = false }: { bust?: boolean } = {}) => {
+    const key = 'customers:' + String(shouldIncludeArchived);
+
+    if (bust) {
+      customersCache.invalidate(key);
+    }
+
+    const cached = customersCache.get(key);
+    const hasCachedData = cached !== null;
+
+    if (hasCachedData) {
+      setCustomers(cached.data.customers);
+    }
+
     try {
       const url = shouldIncludeArchived
         ? '/api/admin/customers?includeArchived=true'
@@ -19,11 +42,16 @@ export function useAdminCustomers(includeArchived?: boolean) {
       if (json.success) {
         setError(null);
         setCustomers(json.data.customers);
+        customersCache.set(key, { customers: json.data.customers });
       } else {
-        setError(json.error?.message ?? 'Failed to load customers');
+        if (!hasCachedData) {
+          setError(json.error?.message ?? 'Failed to load customers');
+        }
       }
     } catch {
-      setError('Network error');
+      if (!hasCachedData) {
+        setError('Network error');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -36,7 +64,9 @@ export function useAdminCustomers(includeArchived?: boolean) {
     void fetch_();
   }, [fetch_]);
 
-  return { customers, isLoading, error, refetch: fetch_ } as const;
+  const refetch = useCallback(() => fetch_({ bust: true }), [fetch_]);
+
+  return { customers, isLoading, error, refetch } as const;
 }
 
 export function useCustomerDetail(customerId: string) {

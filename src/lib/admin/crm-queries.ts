@@ -21,6 +21,7 @@ import {
 } from "@/lib/ai/sanitize-fields";
 import type {
   CustomerRecord,
+  CustomerListRecord,
   CustomerDetail,
   CreateCustomerInput,
   CreateEquipmentInput,
@@ -42,7 +43,7 @@ function safeDecrypt(ciphertext: string | null): string | null {
 export async function getCustomers(
   organizationId: string,
   options?: { readonly includeArchived?: boolean },
-): Promise<readonly CustomerRecord[]> {
+): Promise<readonly CustomerListRecord[]> {
   const includeArchived = options?.includeArchived ?? false;
 
   const whereClause = includeArchived
@@ -57,8 +58,6 @@ export async function getCustomers(
       emailEncrypted: customers.emailEncrypted,
       addressEncrypted: customers.addressEncrypted,
       propertyType: customers.propertyType,
-      propertySqft: customers.propertySqft,
-      notes: customers.notes,
       createdAt: customers.createdAt,
       customerType: customers.customerType,
       membershipStatus: customers.membershipStatus,
@@ -88,8 +87,6 @@ export async function getCustomers(
     email: safeDecrypt(row.emailEncrypted),
     address: safeDecrypt(row.addressEncrypted),
     propertyType: row.propertyType,
-    propertySqft: row.propertySqft,
-    notes: row.notes,
     equipmentCount: row.equipmentCount ?? 0,
     requestCount: row.requestCount ?? 0,
     lastServiceDate: row.lastServiceDate,

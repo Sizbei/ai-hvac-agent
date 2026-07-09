@@ -1,3 +1,21 @@
+/** Slim record used on the customer list page — excludes heavy/unused fields. */
+export interface CustomerListRecord {
+  readonly id: string;
+  readonly name: string | null;
+  readonly phone: string | null;
+  readonly email: string | null;
+  readonly address: string | null;
+  readonly propertyType: string | null;   // used for the property-type filter dropdown
+  readonly equipmentCount: number;
+  readonly requestCount: number;
+  readonly lastServiceDate: string | null;
+  readonly createdAt: string;
+  readonly customerType: string;
+  readonly membershipStatus: string;
+  readonly fieldpulseCustomerId: string | null;
+  readonly archivedAt: string | null;
+}
+
 export interface CustomerRecord {
   readonly id: string;
   readonly name: string | null;

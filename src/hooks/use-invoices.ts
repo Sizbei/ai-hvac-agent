@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { createSwrCache } from '@/lib/admin/swr-cache';
 
 export interface InvoiceListItem {
   readonly id: string;
@@ -16,6 +17,11 @@ export interface InvoiceListItem {
   readonly lastReminderSentAt: string | null;
 }
 
+interface InvoicesPayload {
+  readonly invoices: readonly InvoiceListItem[];
+  readonly collectedThisMonthCents: number;
+}
+
 interface UseInvoicesResult {
   readonly invoices: readonly InvoiceListItem[];
   readonly collectedThisMonthCents: number;
@@ -26,6 +32,9 @@ interface UseInvoicesResult {
   readonly voidInvoice: (id: string) => Promise<{ ok: boolean; reason?: string }>;
 }
 
+const invoicesCache = createSwrCache<InvoicesPayload>(60_000); // 60s TTL
+const CACHE_KEY = 'invoices';
+
 /**
  * Loads the org's invoices on mount, refetches after mutations. No polling —
  * invoices change at human pace. Modeled on use-estimates.
@@ -33,19 +42,35 @@ interface UseInvoicesResult {
 export function useInvoices(): UseInvoicesResult {
   const [invoices, setInvoices] = useState<readonly InvoiceListItem[]>([]);
   const [collectedThisMonthCents, setCollectedThisMonthCents] = useState(0);
-  const [isLoading, setIsLoading] = useState(true);
+  // Start as loading only if there is no cached data to show immediately.
+  const [isLoading, setIsLoading] = useState(() => invoicesCache.get(CACHE_KEY) === null);
   const [error, setError] = useState<string | null>(null);
 
   const isFetchingRef = useRef(false);
+  const fetchGenerationRef = useRef(0);
 
   const fetchAll = useCallback(async (): Promise<void> => {
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
+    const generation = ++fetchGenerationRef.current;
+
+    const cached = invoicesCache.get(CACHE_KEY);
+    const hasCachedData = cached !== null;
+
+    if (hasCachedData) {
+      setInvoices(cached.data.invoices);
+      setCollectedThisMonthCents(cached.data.collectedThisMonthCents);
+      setIsLoading(false);
+    }
 
     try {
       const res = await fetch('/api/admin/invoices');
       if (!res.ok) {
-        setError('Failed to load invoices');
+        // Generation-gated like the success path: a stale in-flight error must
+        // not overwrite state after a newer fetch has already resolved.
+        if (!hasCachedData && generation === fetchGenerationRef.current) {
+          setError('Failed to load invoices');
+        }
         return;
       }
       const body = (await res.json()) as {
@@ -53,14 +78,24 @@ export function useInvoices(): UseInvoicesResult {
         data: { invoices: InvoiceListItem[]; collectedThisMonthCents: number };
       };
       if (body.success) {
-        setInvoices(body.data.invoices);
-        setCollectedThisMonthCents(body.data.collectedThisMonthCents ?? 0);
+        const fresh: InvoicesPayload = {
+          invoices: body.data.invoices,
+          collectedThisMonthCents: body.data.collectedThisMonthCents ?? 0,
+        };
+        if (generation === fetchGenerationRef.current) {
+          setInvoices(fresh.invoices);
+          setCollectedThisMonthCents(fresh.collectedThisMonthCents);
+          invoicesCache.set(CACHE_KEY, fresh);
+          setError(null);
+        }
       }
-      setError(null);
     } catch {
-      setError('Could not connect to server. Please try again.');
+      if (!hasCachedData && generation === fetchGenerationRef.current) {
+        setError('Could not connect to server. Please try again.');
+      }
     } finally {
       isFetchingRef.current = false;
+      setIsLoading(false);
     }
   }, []);
 
@@ -69,6 +104,9 @@ export function useInvoices(): UseInvoicesResult {
       const res = await fetch(`/api/admin/invoices/${id}/send-reminder`, { method: 'POST' });
       const body = (await res.json().catch(() => ({}))) as { success?: boolean; error?: { code?: string } };
       if (res.ok && body.success) {
+        invoicesCache.invalidate(CACHE_KEY);
+        isFetchingRef.current = false; // a stale in-flight revalidation must not block the post-mutation refetch
+        ++fetchGenerationRef.current; // discard any stale in-flight response
         await fetchAll();
         return { ok: true };
       }
@@ -82,6 +120,9 @@ export function useInvoices(): UseInvoicesResult {
       const res = await fetch(`/api/admin/invoices/${id}/void`, { method: 'POST' });
       const body = (await res.json().catch(() => ({}))) as { success?: boolean; error?: { code?: string } };
       if (res.ok && body.success) {
+        invoicesCache.invalidate(CACHE_KEY);
+        isFetchingRef.current = false; // a stale in-flight revalidation must not block the post-mutation refetch
+        ++fetchGenerationRef.current; // discard any stale in-flight response
         await fetchAll();
         return { ok: true };
       }
@@ -91,8 +132,7 @@ export function useInvoices(): UseInvoicesResult {
   );
 
   useEffect(() => {
-    setIsLoading(true);
-    fetchAll().finally(() => setIsLoading(false));
+    void fetchAll();
   }, [fetchAll]);
 
   return { invoices, collectedThisMonthCents, isLoading, error, refetch: fetchAll, sendReminder, voidInvoice };

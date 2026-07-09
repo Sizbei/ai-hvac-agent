@@ -45,7 +45,9 @@ export async function GET() {
 
     const invoices = await listInvoices(session.organizationId);
     const collected = await collectedThisMonthCents(session.organizationId);
-    return successResponse({ invoices, collectedThisMonthCents: collected });
+    const response = successResponse({ invoices, collectedThisMonthCents: collected });
+    response.headers.set('Cache-Control', 'private, max-age=0, stale-while-revalidate=30');
+    return response;
   } catch (error: unknown) {
     logger.error({ error }, "Failed to list invoices");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);

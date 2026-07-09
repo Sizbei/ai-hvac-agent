@@ -32,7 +32,7 @@ import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 import { EmptyState } from '@/components/admin/ui/empty-state';
 import { paginate, pageLabel } from '@/lib/admin/invoice-list-helpers';
-import type { CustomerRecord } from '@/lib/admin/crm-types';
+import type { CustomerListRecord } from '@/lib/admin/crm-types';
 
 const ALL_PROPERTY_TYPES = 'all';
 const PER_PAGE = 50;
@@ -40,7 +40,7 @@ const PER_PAGE = 50;
 // ── CustomerRow ────────────────────────────────────────────────────────────────
 
 interface CustomerRowProps {
-  customer: CustomerRecord;
+  customer: CustomerListRecord;
 }
 
 const CustomerRow = memo(function CustomerRow({ customer }: CustomerRowProps) {

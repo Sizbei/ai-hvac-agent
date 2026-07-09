@@ -39,7 +39,9 @@ export async function GET(request: NextRequest) {
     const result = await getCustomers(session.organizationId, {
       includeArchived,
     });
-    return successResponse({ customers: result });
+    const response = successResponse({ customers: result });
+    response.headers.set('Cache-Control', 'private, max-age=0, stale-while-revalidate=30');
+    return response;
   } catch (error: unknown) {
     logger.error({ error }, "Failed to fetch customers");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);
