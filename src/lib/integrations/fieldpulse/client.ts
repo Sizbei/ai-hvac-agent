@@ -1098,7 +1098,7 @@ export class RestFieldpulseClient implements FieldpulseClient {
   }
 
   async listLocations(
-    maxPages = 200,
+    maxPages = 1000,
   ): Promise<{ items: FieldpulseLocation[]; totalCount: number | null }> {
     // /locations returns a fixed 20/page (same page-size trap as invoices).
     const { rows, totalCount } = await this.fetchAllPages(
