@@ -1,0 +1,22 @@
+# Sub-daily crons that Vercel's Hobby plan can't schedule (daily-only limit).
+# Runs every 5 minutes and pings the same cron endpoints Vercel would, using
+# the CRON_SECRET bearer the routes already verify. If the account upgrades to
+# Vercel Pro, move these back into vercel.json "crons" and delete this file.
+name: sub-daily-crons
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: process-communications (comms job queue)
+        run: |
+          curl -fsS -m 60 -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "https://ai-hvac-agent-lovat.vercel.app/api/cron/process-communications" || echo "process-communications ping failed (non-fatal)"
+      - name: delay-sweep (technician delay alerts)
+        run: |
+          curl -fsS -m 60 -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "https://ai-hvac-agent-lovat.vercel.app/api/cron/delay-sweep" || echo "delay-sweep ping failed (non-fatal)"
