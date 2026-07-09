@@ -22,11 +22,13 @@ import type {
   FieldpulseAddress,
   FieldpulseAvailabilityRange,
   FieldpulseAvailabilitySlot,
+  FieldpulseComment,
   FieldpulseCustomer,
   FieldpulseEstimate,
   FieldpulseInvoice,
   FieldpulseInvoiceLineItem,
   FieldpulseJob,
+  FieldpulseLocation,
   FieldpulsePayment,
   FieldpulseAsset,
   FieldpulseUser,
@@ -182,6 +184,21 @@ export interface FieldpulseClient {
    * maxPages defaults to 200. pageSize is fixed at 20 (live-verified fixed page size).
    */
   listAssets(maxPages?: number): Promise<{ items: FieldpulseAsset[]; totalCount: number | null }>;
+
+  /**
+   * Page ALL comments from the unfiltered /comments endpoint for backfill.
+   * totalCount is null for comments (FP returns null — size by walking until empty).
+   * maxPages defaults to 200. pageSize is fixed at 20 (live-verified fixed page size,
+   * same trap as invoices — passing 50 would stop the walk prematurely).
+   */
+  listComments(maxPages?: number): Promise<{ items: FieldpulseComment[]; totalCount: number | null }>;
+
+  /**
+   * Page ALL locations from the unfiltered /locations endpoint for backfill.
+   * totalCount is null for locations (FP returns null — size by walking until empty).
+   * maxPages defaults to 200. pageSize is fixed at 20.
+   */
+  listLocations(maxPages?: number): Promise<{ items: FieldpulseLocation[]; totalCount: number | null }>;
 }
 
 // ── Real-API helpers (verified 2026-06-19 against the live FieldPulse API) ─────
@@ -549,6 +566,51 @@ function toAsset(raw: unknown): FieldpulseAsset | null {
     maintenanceAgreementId: idStr(obj.maintenance_agreement_id),
     status: str(obj.status),
     deletedAt: str(obj.deleted_at),
+  };
+}
+
+/** Narrow an untrusted FieldPulse comment payload to {@link FieldpulseComment}. */
+function toComment(raw: unknown): FieldpulseComment | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const obj = raw as Record<string, unknown>;
+  const id = idStr(obj.id);
+  if (!id) return null;
+  const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
+  return {
+    id,
+    text: str(obj.text),
+    authorId: idStr(obj.author_id),
+    commentableId: idStr(obj.commentable_id),
+    commentableType: str(obj.commentable_type),
+    createdAt: str(obj.created_at),
+    isVisibleInCustomerPortal:
+      typeof obj.is_visible_in_customer_portal === "boolean"
+        ? obj.is_visible_in_customer_portal
+        : null,
+    deletedAt: str(obj.deleted_at),
+  };
+}
+
+/** Narrow an untrusted FieldPulse location payload to {@link FieldpulseLocation}. */
+function toLocation(raw: unknown): FieldpulseLocation | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const obj = raw as Record<string, unknown>;
+  const id = idStr(obj.id);
+  if (!id) return null;
+  const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
+  return {
+    id,
+    objectId: idStr(obj.object_id),
+    objectType: str(obj.object_type),
+    title: str(obj.title),
+    address1: str(obj.address_1),
+    address2: str(obj.address_2),
+    city: str(obj.city),
+    state: str(obj.state),
+    zipCode: str(obj.zip_code),
+    isMainLocation:
+      typeof obj.is_main_location === "boolean" ? obj.is_main_location : null,
+    notes: str(obj.notes),
   };
 }
 
@@ -995,6 +1057,38 @@ export class RestFieldpulseClient implements FieldpulseClient {
     const items = rows
       .map(toAsset)
       .filter((a): a is FieldpulseAsset => a !== null);
+    return { items, totalCount };
+  }
+
+  async listComments(
+    maxPages = 200,
+  ): Promise<{ items: FieldpulseComment[]; totalCount: number | null }> {
+    // /comments returns a fixed 20/page (same page-size trap as invoices).
+    const { rows, totalCount } = await this.fetchAllPages(
+      "/comments",
+      new URLSearchParams(),
+      20,
+      maxPages,
+    );
+    const items = rows
+      .map(toComment)
+      .filter((c): c is FieldpulseComment => c !== null);
+    return { items, totalCount };
+  }
+
+  async listLocations(
+    maxPages = 200,
+  ): Promise<{ items: FieldpulseLocation[]; totalCount: number | null }> {
+    // /locations returns a fixed 20/page (same page-size trap as invoices).
+    const { rows, totalCount } = await this.fetchAllPages(
+      "/locations",
+      new URLSearchParams(),
+      20,
+      maxPages,
+    );
+    const items = rows
+      .map(toLocation)
+      .filter((l): l is FieldpulseLocation => l !== null);
     return { items, totalCount };
   }
 

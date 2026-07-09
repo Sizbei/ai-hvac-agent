@@ -856,10 +856,15 @@ export const customerNotes = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
+    // FieldPulse import: idempotent key for comment-sourced notes.
+    fieldpulseCommentId: text("fieldpulse_comment_id"),
   },
   (table) => [
     index("notes_customer_id_idx").on(table.customerId),
     index("notes_org_id_idx").on(table.organizationId),
+    uniqueIndex("notes_org_fp_comment_id_unique")
+      .on(table.organizationId, table.fieldpulseCommentId)
+      .where(sql`${table.fieldpulseCommentId} IS NOT NULL`),
   ],
 );
 

@@ -84,8 +84,10 @@ export interface MappedFpJob {
   readonly arrivalWindowEnd: Date | null;
   readonly completedAt: Date | null;
   readonly scheduledDate: Date | null;
-  /** First assignment's user_id. */
+  /** First assignment's user_id (primary assignee). */
   readonly assignedFpUserId: string | null;
+  /** Additional assignment user_ids beyond the first (for description annotation). */
+  readonly additionalFpUserIds: readonly string[];
 }
 
 export type MapJobResult =
@@ -148,8 +150,12 @@ export function mapFpJob(
   const arrivalWindowStart = parseFpDate(fp.arrivalWindowStart) ?? scheduleStart;
   const arrivalWindowEnd = parseFpDate(fp.arrivalWindowEnd) ?? scheduleEnd;
 
-  // First assignment's user id.
+  // First assignment's user id (primary assignee); additional ones are tallied.
   const assignedFpUserId = fp.assignments?.[0]?.userId ?? null;
+  const additionalFpUserIds =
+    fp.assignments && fp.assignments.length > 1
+      ? fp.assignments.slice(1).map((a) => a.userId)
+      : [];
 
   return {
     ok: true,
@@ -166,6 +172,7 @@ export function mapFpJob(
       completedAt,
       scheduledDate,
       assignedFpUserId,
+      additionalFpUserIds,
     },
   };
 }
@@ -352,6 +359,21 @@ export async function importJobsFromFieldpulse(
         }
       }
 
+      // Multi-tech: serviceRequests.assignedTo is single — keep first assignment
+      // as assignedTo (above); for jobs with >1 assignment, append a line to the
+      // description so the scheduler can see the additional techs. Resolve names
+      // via the once-per-run FP roster cache.
+      let finalDescription = job.description;
+      if (job.additionalFpUserIds.length > 0) {
+        counts.multiTechJobs = (counts.multiTechJobs ?? 0) + 1;
+        const fpRoster = await resolveFpUserCache();
+        const additionalNames = job.additionalFpUserIds.map((uid) => {
+          const u = fpRoster.get(uid);
+          return u?.name?.trim() || `FP user #${uid}`;
+        });
+        finalDescription = `${job.description}\nAlso assigned in FieldPulse: ${additionalNames.join(", ")}`;
+      }
+
       const isNew = !existingFpIds.has(job.fpId);
 
       if (isNew) {
@@ -381,7 +403,7 @@ export async function importJobsFromFieldpulse(
             status: job.status,
             issueType: job.issueType,
             urgency: "medium",
-            description: job.description,
+            description: finalDescription,
             scheduledDate: job.scheduledDate,
             arrivalWindowStart: job.arrivalWindowStart,
             arrivalWindowEnd: job.arrivalWindowEnd,
@@ -401,7 +423,7 @@ export async function importJobsFromFieldpulse(
           .set({
             status: job.status,
             assignedTo,
-            description: job.description,
+            description: finalDescription,
             scheduledDate: job.scheduledDate,
             arrivalWindowStart: job.arrivalWindowStart,
             arrivalWindowEnd: job.arrivalWindowEnd,

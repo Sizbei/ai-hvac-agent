@@ -151,22 +151,30 @@ describe("mapFpCustomer", () => {
     expect(result.customer.phone).toBeNull();
   });
 
-  it("skips deleted records", () => {
+  it("maps deleted record as archivedImport=true", () => {
     const result = mapFpCustomer(
       makeCustomer({ deletedAt: "2026-02-01 09:00:00" }),
     );
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.reason).toBe("deleted");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.archivedImport).toBe(true);
+    expect(result.customer.fpId).toBe("10001001");
   });
 
-  it("skips merged records", () => {
+  it("maps merged record as archivedImport=true", () => {
     const result = mapFpCustomer(
       makeCustomer({ mergedCustomerId: "10001001" }),
     );
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.reason).toBe("merged");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.archivedImport).toBe(true);
+  });
+
+  it("maps active record as archivedImport=false", () => {
+    const result = mapFpCustomer(makeCustomer());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.archivedImport).toBe(false);
   });
 
   it("skips records with no name at all", () => {
@@ -282,24 +290,57 @@ describe("importCustomersFromFieldpulse", () => {
     vi.clearAllMocks();
   });
 
-  it("counts skipped for deleted records", async () => {
-    const client = makeClient([makeCustomer({ deletedAt: "2026-01-01 00:00:00" })]);
+  it("path (d): imports deleted record as archived (NOT skipped)", async () => {
+    const fp = makeCustomer({ deletedAt: "2026-01-01 00:00:00" });
+    const client = makeClient([fp]);
     const counts = makeCounts();
+
+    // No existing fpId row.
     wireSelect([]);
+    const { values } = wireInsert([{ id: "archived-id" }]);
+
     await importCustomersFromFieldpulse(ORG, counts, client);
+
     expect(counts.fetched).toBe(1);
-    expect(counts.skipped).toBe(1);
-    expect(counts.created).toBe(0);
-    expect(counts.updated).toBe(0);
-    expect(db.select).not.toHaveBeenCalled();
+    expect(counts.created).toBe(1);
+    expect(counts.skipped).toBe(0);
+    // Must use INSERT path, NOT upsertCustomerByContact.
+    expect(upsertCustomerByContact).not.toHaveBeenCalled();
+    // Must have archivedAt set.
+    expect(values).toHaveBeenCalledWith(
+      expect.objectContaining({ archivedAt: expect.any(Date) }),
+    );
   });
 
-  it("counts skipped for merged records", async () => {
-    const client = makeClient([makeCustomer({ mergedCustomerId: "99999" })]);
+  it("path (d): imports merged record as archived", async () => {
+    const fp = makeCustomer({ mergedCustomerId: "99999" });
+    const client = makeClient([fp]);
     const counts = makeCounts();
+
+    wireSelect([]);
+    const { values } = wireInsert([{ id: "archived-merged-id" }]);
+
     await importCustomersFromFieldpulse(ORG, counts, client);
+
+    expect(counts.created).toBe(1);
+    expect(upsertCustomerByContact).not.toHaveBeenCalled();
+    expect(values).toHaveBeenCalledWith(
+      expect.objectContaining({ archivedAt: expect.any(Date) }),
+    );
+  });
+
+  it("path (d): counts skipped when archived insert is a re-run no-op", async () => {
+    const fp = makeCustomer({ deletedAt: "2026-01-01 00:00:00" });
+    const client = makeClient([fp]);
+    const counts = makeCounts();
+
+    wireSelect([]);
+    wireInsert([]); // onConflictDoNothing → no row
+
+    await importCustomersFromFieldpulse(ORG, counts, client);
+
+    expect(counts.created).toBe(0);
     expect(counts.skipped).toBe(1);
-    expect(db.select).not.toHaveBeenCalled();
   });
 
   it("counts skipped for unnamed records", async () => {

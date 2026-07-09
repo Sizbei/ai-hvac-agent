@@ -227,6 +227,39 @@ export interface FieldpulsePayment {
   readonly deletedAt?: string | null;
 }
 
+/**
+ * A FieldPulse comment (their "Comments" resource).
+ * Live-verified 2026-07-09: all 11 records have commentable_type = BaseJob.
+ */
+export interface FieldpulseComment {
+  readonly id: string;
+  readonly text?: string | null;
+  readonly authorId?: string | null;
+  readonly commentableId?: string | null;
+  readonly commentableType?: string | null;
+  readonly createdAt?: string | null;
+  readonly isVisibleInCustomerPortal?: boolean | null;
+  readonly deletedAt?: string | null;
+}
+
+/**
+ * A FieldPulse location (their "Locations" resource).
+ * Live-verified 2026-07-09: object_types = BaseCustomer | BaseInvoice.
+ */
+export interface FieldpulseLocation {
+  readonly id: string;
+  readonly objectId?: string | null;
+  readonly objectType?: string | null; // "BaseCustomer" | "BaseInvoice"
+  readonly title?: string | null;
+  readonly address1?: string | null;
+  readonly address2?: string | null;
+  readonly city?: string | null;
+  readonly state?: string | null;
+  readonly zipCode?: string | null;
+  readonly isMainLocation?: boolean | null;
+  readonly notes?: string | null;
+}
+
 /** A FieldPulse asset (their "Assets" resource), maps to native customer_equipment. */
 export interface FieldpulseAsset {
   readonly id: string;

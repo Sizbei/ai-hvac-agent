@@ -1,0 +1,2 @@
+ALTER TABLE "customer_notes" ADD COLUMN "fieldpulse_comment_id" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "notes_org_fp_comment_id_unique" ON "customer_notes" USING btree ("organization_id","fieldpulse_comment_id") WHERE "customer_notes"."fieldpulse_comment_id" IS NOT NULL;

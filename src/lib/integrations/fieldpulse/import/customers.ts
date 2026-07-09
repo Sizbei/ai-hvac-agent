@@ -11,6 +11,11 @@
  *     index so we never clobber another row that already owns the fpId.
  *  c) Contactless (no email, no phone) → insert keyed purely on fieldpulseCustomerId
  *     via onConflictDoNothing on the partial unique index.
+ *  d) Deleted/merged FP records → inserted as ARCHIVED (archivedAt set), keyed
+ *     on fieldpulseCustomerId via the contactless path. This makes the orphaned
+ *     jobs importable without un-archiving or merging into active native customers.
+ *     These records are deliberately NOT routed through upsertCustomerByContact
+ *     because that function would un-archive a returning customer on contact match.
  *
  * Known limitations (documented, not silent):
  *  - created/updated split for path (b) is approximate: upsertCustomerByContact
@@ -57,10 +62,10 @@ export interface MappedFpCustomer {
  * Skip reason for records that must not be imported.
  * Returned instead of a MappedFpCustomer when the record should be skipped.
  */
-export type SkipReason = "deleted" | "merged" | "unnamed";
+export type SkipReason = "unnamed";
 
 export type MapResult =
-  | { readonly ok: true; readonly customer: MappedFpCustomer }
+  | { readonly ok: true; readonly customer: MappedFpCustomer; readonly archivedImport: boolean }
   | { readonly ok: false; readonly reason: SkipReason };
 
 /**
@@ -71,15 +76,11 @@ export type MapResult =
  * Address: compose address_1[, address_2], city, state zip_code (skips empty parts).
  */
 export function mapFpCustomer(fp: FieldpulseCustomer): MapResult {
-  // Skip-classify before anything else.
-  if (fp.deletedAt != null) {
-    return { ok: false, reason: "deleted" };
-  }
-  if (fp.mergedCustomerId != null) {
-    return { ok: false, reason: "merged" };
-  }
+  // Deleted/merged: import as archived to allow orphaned jobs to be imported.
+  // These are kept distinct from active customers — never contact-dedupe-merged.
+  const archivedImport = fp.deletedAt != null || fp.mergedCustomerId != null;
 
-  // Name resolution.
+  // Name resolution (required even for archived records).
   const name = resolveName(fp);
   if (!name) {
     return { ok: false, reason: "unnamed" };
@@ -102,6 +103,7 @@ export function mapFpCustomer(fp: FieldpulseCustomer): MapResult {
 
   return {
     ok: true,
+    archivedImport,
     customer: {
       fpId: fp.id,
       name,
@@ -188,7 +190,7 @@ export async function importCustomersFromFieldpulse(
       continue;
     }
 
-    const { customer } = mapped;
+    const { customer, archivedImport } = mapped;
 
     try {
       // Path (a): existing row keyed on fieldpulseCustomerId.
@@ -196,6 +198,43 @@ export async function importCustomersFromFieldpulse(
       if (existing) {
         await updateCustomerFields(orgId, existing.id, customer);
         counts.updated++;
+        continue;
+      }
+
+      // Path (d): archived import (deleted/merged FP records).
+      // NEVER route through upsertCustomerByContact — that function un-archives
+      // on contact match, which would reactivate an archived native customer.
+      // Use the fpId-keyed contactless insert path with archivedAt set instead.
+      if (archivedImport) {
+        const { emailHash, phoneHash } = computeContactHashes({
+          email: null,
+          phone: null,
+        });
+        const [inserted] = await db
+          .insert(customers)
+          .values({
+            organizationId: orgId,
+            nameEncrypted: encrypt(sanitizeName(customer.name)),
+            phoneEncrypted: null,
+            emailEncrypted: null,
+            addressEncrypted: customer.address ? encrypt(sanitizeAddress(customer.address)) : null,
+            emailHash,
+            phoneHash,
+            fieldpulseCustomerId: customer.fpId,
+            archivedAt: new Date(),
+          })
+          .onConflictDoNothing({
+            target: [customers.organizationId, customers.fieldpulseCustomerId],
+            where: isNotNull(customers.fieldpulseCustomerId),
+          })
+          .returning({ id: customers.id });
+
+        if (inserted) {
+          counts.created++;
+          counts.archivedImported = (counts.archivedImported ?? 0) + 1;
+        } else {
+          counts.skipped++;
+        }
         continue;
       }
 
