@@ -197,6 +197,35 @@ export interface FieldpulseGeocodeResult {
   readonly error?: string | null;
 }
 
+/**
+ * A FieldPulse pricebook item (their "Items" resource).
+ *
+ * Row keys observed: id (number), name, default_taxable, default_unit_price
+ * (dollar string or number), type, is_active, plus qbo_* noise.
+ * All fields are optional/nullable to tolerate API shape drift.
+ */
+export interface FieldpulseItem {
+  readonly id: string;
+  readonly name: string;
+  /** Price in integer cents (parsed from dollar string or number). */
+  readonly priceCents: number;
+  /** Whether this item is taxable by default. */
+  readonly taxable: boolean;
+  /** Whether this item is active (not archived). */
+  readonly isActive: boolean;
+  /**
+   * Item type mapped to the native pricebookItemTypeEnum.
+   * "service" | "material" | "equipment" — unknown FP types map to "service"
+   * (tallied separately by the importer so no mapping decision is silent).
+   */
+  readonly type: "service" | "material" | "equipment";
+  /**
+   * The raw FP `type` string before mapping (preserved for importer tallying).
+   * Null/undefined when absent from the API payload.
+   */
+  readonly rawFpType: string | null;
+}
+
 /** Input to validate an address against Fieldpulse. */
 export interface GeocodeInput {
   readonly street?: string | null;

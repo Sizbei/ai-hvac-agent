@@ -37,6 +37,7 @@ import { importPaymentsFromFieldpulse } from "./payments";
 import { importAssetsFromFieldpulse } from "./assets";
 import { importCommentsFromFieldpulse } from "./comments";
 import { importLocationsFromFieldpulse } from "./locations";
+import { importItemsFromFieldpulse } from "./items";
 import { enrichJobMetrics } from "./job-metrics";
 
 dotenv.config({ path: ".env.local" });
@@ -146,6 +147,14 @@ export const PHASES: { name: string; fn: PhaseFn }[] = [
     fn: async (ctx, counts) => {
       if (!ctx.fpClient) throw new Error("No FieldPulse client available");
       await importLocationsFromFieldpulse(ctx.orgId, counts, ctx.fpClient);
+      return counts;
+    },
+  },
+  {
+    name: "items",
+    fn: async (ctx, counts) => {
+      if (!ctx.fpClient) throw new Error("No FieldPulse client available");
+      await importItemsFromFieldpulse(ctx.orgId, counts, ctx.fpClient);
       return counts;
     },
   },
@@ -316,6 +325,8 @@ async function main(): Promise<void> {
           sample = await fpClient.listComments(1);
         } else if (phase.name === "locations") {
           sample = await fpClient.listLocations(1);
+        } else if (phase.name === "items") {
+          sample = await fpClient.listItems(1);
         } else if (phase.name === "job-metrics") {
           // Per-id enrichment phase — no list endpoint. In a real run,
           // iterates all service_requests with fieldpulseJobId.

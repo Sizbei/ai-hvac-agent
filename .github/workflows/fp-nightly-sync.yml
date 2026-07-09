@@ -63,5 +63,5 @@ jobs:
         run: |
           npx tsx src/lib/integrations/fieldpulse/import/run-import.ts \
             --org ${{ vars.FP_SYNC_ORG_ID }} \
-            --phase technicians,customers,jobs,invoices,estimates,payments,assets,comments,locations,job-metrics \
+            --phase technicians,customers,jobs,invoices,estimates,payments,assets,comments,locations,items,job-metrics \
             --yes

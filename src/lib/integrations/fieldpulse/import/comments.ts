@@ -72,9 +72,21 @@ export async function importCommentsFromFieldpulse(
   counts: PhaseResult,
   client: FieldpulseClient,
 ): Promise<void> {
-  const { items, totalCount } = await client.listComments();
+  const { items, totalCount, cappedByMaxPages } = await client.listComments();
   counts.fetched = items.length;
   counts.total = totalCount ?? null;
+
+  if (cappedByMaxPages) {
+    logger.warn(
+      {
+        orgId,
+        fetched: items.length,
+        note: "Walk exhausted maxPages on a full page — possible truncation; raise maxPages or investigate",
+      },
+      "FP comments import: walk may be incomplete (cappedByMaxPages=true)",
+    );
+    (counts as unknown as Record<string, unknown>).cappedNote = "cappedByMaxPages";
+  }
 
   if (totalCount !== null && items.length < totalCount) {
     logger.warn(

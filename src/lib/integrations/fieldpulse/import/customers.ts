@@ -379,10 +379,22 @@ export async function importCustomersFromFieldpulse(
   client: FieldpulseClient,
 ): Promise<void> {
   // Walk the full customer list.
-  const { items, totalCount } = await client.listCustomers();
+  const { items, totalCount, cappedByMaxPages } = await client.listCustomers();
   counts.fetched = items.length;
   // Signal total to the live status page.
   counts.total = totalCount ?? null;
+
+  if (cappedByMaxPages) {
+    logger.warn(
+      {
+        orgId,
+        fetched: items.length,
+        note: "Walk exhausted maxPages on a full page — possible truncation; raise maxPages or investigate",
+      },
+      "FP customers import: walk may be incomplete (cappedByMaxPages=true)",
+    );
+    (counts as unknown as Record<string, unknown>).cappedNote = "cappedByMaxPages";
+  }
 
   // Warn if the walk didn't reach the expected total_count (partial walk).
   if (totalCount !== null && items.length < totalCount) {

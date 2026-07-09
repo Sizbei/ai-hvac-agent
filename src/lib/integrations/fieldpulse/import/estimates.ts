@@ -54,9 +54,21 @@ export async function importEstimatesFromFieldpulse(
   counts: PhaseResult,
   client: FieldpulseClient,
 ): Promise<void> {
-  const { items, totalCount } = await client.listEstimates();
+  const { items, totalCount, cappedByMaxPages } = await client.listEstimates();
   counts.fetched = items.length;
   counts.total = totalCount ?? null; // always null per Phase-9 (same as /invoices)
+
+  if (cappedByMaxPages) {
+    logger.warn(
+      {
+        orgId,
+        fetched: items.length,
+        note: "Walk exhausted maxPages on a full page — possible truncation; raise maxPages or investigate",
+      },
+      "FP estimates import: walk may be incomplete (cappedByMaxPages=true)",
+    );
+    (counts as unknown as Record<string, unknown>).cappedNote = "cappedByMaxPages";
+  }
 
   // Pre-select existing fieldpulseEstimateIds for this org.
   const existingRows = await db

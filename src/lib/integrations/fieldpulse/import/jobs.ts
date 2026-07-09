@@ -256,9 +256,21 @@ export async function importJobsFromFieldpulse(
   client: FieldpulseClient,
 ): Promise<void> {
   // Full job list walk.
-  const { items, totalCount } = await client.listJobs();
+  const { items, totalCount, cappedByMaxPages } = await client.listJobs();
   counts.fetched = items.length;
   counts.total = totalCount ?? null;
+
+  if (cappedByMaxPages) {
+    logger.warn(
+      {
+        orgId,
+        fetched: items.length,
+        note: "Walk exhausted maxPages on a full page — possible truncation; raise maxPages or investigate",
+      },
+      "FP jobs import: walk may be incomplete (cappedByMaxPages=true)",
+    );
+    (counts as unknown as Record<string, unknown>).cappedNote = "cappedByMaxPages";
+  }
 
   if (totalCount !== null && items.length < totalCount) {
     logger.warn(

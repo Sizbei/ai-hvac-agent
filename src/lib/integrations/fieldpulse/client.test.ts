@@ -781,3 +781,229 @@ describe("RestFieldpulseClient — toCustomer customFields + lead_source folding
     expect(result?.customFields).toBeNull();
   });
 });
+
+// ── cappedByMaxPages flag ─────────────────────────────────────────────────────
+
+describe("RestFieldpulseClient — cappedByMaxPages flag", () => {
+  let mockFetch: ReturnType<typeof vi.fn>;
+  const config = { baseUrl: "https://api.fieldpulse.com", apiKey: "k" };
+
+  beforeEach(() => {
+    mockFetch = vi.fn();
+    vi.stubGlobal("fetch", mockFetch);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  function fullPage(from: number, pageSize = 20) {
+    // A complete page of `pageSize` rows — the condition that triggers the cap.
+    const rows = Array.from({ length: pageSize }, (_, i) => ({
+      id: from + i,
+      customer_id: 9000000 + from + i,
+      status: 1,
+      start_time: "2026-07-07 16:00:00",
+      end_time: "2026-07-07 18:00:00",
+      created_at: "2026-07-07 13:36:22",
+    }));
+    return { ok: true, status: 200, json: async () => ({ error: false, response: rows }) };
+  }
+
+  function shortPage(from: number, pageSize = 20, count = 5) {
+    const rows = Array.from({ length: count }, (_, i) => ({
+      id: from + i,
+      customer_id: 9000000 + from + i,
+      status: 1,
+      start_time: "2026-07-07 16:00:00",
+      end_time: "2026-07-07 18:00:00",
+      created_at: "2026-07-07 13:36:22",
+    }));
+    void pageSize;
+    return { ok: true, status: 200, json: async () => ({ error: false, response: rows }) };
+  }
+
+  it("cappedByMaxPages=true when walk ends at maxPages with a full page", async () => {
+    // maxPages=2, both pages are full → walk stopped by cap, not naturally.
+    mockFetch
+      .mockResolvedValueOnce(fullPage(1))
+      .mockResolvedValueOnce(fullPage(21));
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const { cappedByMaxPages } = await client.listJobs(2);
+    expect(cappedByMaxPages).toBe(true);
+  });
+
+  it("cappedByMaxPages=false when walk ends naturally on a short page", async () => {
+    // maxPages=10, but the data ends after 2 pages naturally.
+    mockFetch
+      .mockResolvedValueOnce(fullPage(1))
+      .mockResolvedValueOnce(shortPage(21, 20, 5)); // short page → natural end
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const { cappedByMaxPages } = await client.listJobs(10);
+    expect(cappedByMaxPages).toBe(false);
+  });
+
+  it("cappedByMaxPages=false when walk ends naturally on empty page", async () => {
+    mockFetch
+      .mockResolvedValueOnce(fullPage(1))
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ error: false, response: [] }) });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const { cappedByMaxPages } = await client.listJobs(10);
+    expect(cappedByMaxPages).toBe(false);
+  });
+});
+
+// ── listItems ─────────────────────────────────────────────────────────────────
+
+describe("RestFieldpulseClient — listItems", () => {
+  let mockFetch: ReturnType<typeof vi.fn>;
+  const config = { baseUrl: "https://api.fieldpulse.com", apiKey: "k" };
+
+  beforeEach(() => {
+    mockFetch = vi.fn();
+    vi.stubGlobal("fetch", mockFetch);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  function itemPage(from: number, n: number, totalCount: number | null = null) {
+    const rows = Array.from({ length: n }, (_, i) => ({
+      id: from + i,
+      name: `Item ${from + i}`,
+      default_unit_price: "99.00",
+      default_taxable: true,
+      is_active: true,
+      type: "service",
+    }));
+    const envelope: Record<string, unknown> = { error: false, response: rows };
+    if (totalCount !== null) envelope.total_count = totalCount;
+    return { ok: true, status: 200, json: async () => envelope };
+  }
+
+  it("pages /items at 20/page, total_count null, maps FieldpulseItem correctly", async () => {
+    mockFetch
+      .mockResolvedValueOnce(itemPage(1, 20))
+      .mockResolvedValueOnce(itemPage(21, 20))
+      .mockResolvedValueOnce(itemPage(41, 7)); // short final page
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const { items, totalCount, cappedByMaxPages } = await client.listItems();
+    expect(items).toHaveLength(47);
+    expect(totalCount).toBeNull();
+    expect(cappedByMaxPages).toBe(false);
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+    // Spot-check mapper output.
+    expect(items[0].priceCents).toBe(9900);
+    expect(items[0].taxable).toBe(true);
+    expect(items[0].isActive).toBe(true);
+    expect(items[0].type).toBe("service");
+    expect(items[0].rawFpType).toBe("service");
+  });
+
+  it("skips nameless rows in toItem (name missing or blank)", async () => {
+    const rows = [
+      { id: 1, name: "Valid Item", default_unit_price: "10.00", is_active: true, type: "service" },
+      { id: 2, name: "", default_unit_price: "10.00", is_active: true, type: "service" }, // blank
+      { id: 3, name: "  ", default_unit_price: "10.00", is_active: true }, // whitespace
+    ];
+    mockFetch.mockResolvedValueOnce({
+      ok: true, status: 200,
+      json: async () => ({ error: false, response: rows }),
+    }).mockResolvedValueOnce({
+      ok: true, status: 200,
+      json: async () => ({ error: false, response: [] }),
+    });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const { items } = await client.listItems();
+    expect(items).toHaveLength(1);
+    expect(items[0].name).toBe("Valid Item");
+  });
+
+  it("maps material and equipment type strings correctly", async () => {
+    const rows = [
+      { id: 1, name: "Filter", default_unit_price: "5.00", is_active: true, type: "material" },
+      { id: 2, name: "Compressor", default_unit_price: "500.00", is_active: true, type: "equipment" },
+      { id: 3, name: "Unknown Type Item", default_unit_price: "0.00", is_active: true, type: "hvac_widget" },
+    ];
+    mockFetch.mockResolvedValueOnce({
+      ok: true, status: 200,
+      json: async () => ({ error: false, response: rows }),
+    }).mockResolvedValueOnce({
+      ok: true, status: 200,
+      json: async () => ({ error: false, response: [] }),
+    });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const { items } = await client.listItems();
+    expect(items[0].type).toBe("material");
+    expect(items[1].type).toBe("equipment");
+    expect(items[2].type).toBe("service"); // unknown → fallback
+    expect(items[2].rawFpType).toBe("hvac_widget");
+  });
+
+  it("parses dollar string price defensively (number or string)", async () => {
+    const rows = [
+      { id: 1, name: "String Price", default_unit_price: "149.99", is_active: true, type: "service" },
+      { id: 2, name: "Number Price", default_unit_price: 149.99, is_active: true, type: "service" },
+      { id: 3, name: "Null Price", default_unit_price: null, is_active: true, type: "service" },
+    ];
+    mockFetch.mockResolvedValueOnce({
+      ok: true, status: 200,
+      json: async () => ({ error: false, response: rows }),
+    }).mockResolvedValueOnce({
+      ok: true, status: 200,
+      json: async () => ({ error: false, response: [] }),
+    });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const { items } = await client.listItems();
+    expect(items[0].priceCents).toBe(14999);
+    expect(items[1].priceCents).toBe(14999);
+    expect(items[2].priceCents).toBe(0); // null → 0
+  });
+
+  it("treats absent is_active as active=true (inclusive default)", async () => {
+    const rows = [
+      { id: 1, name: "No active field", default_unit_price: "10.00", type: "service" },
+    ];
+    mockFetch.mockResolvedValueOnce({
+      ok: true, status: 200,
+      json: async () => ({ error: false, response: rows }),
+    }).mockResolvedValueOnce({
+      ok: true, status: 200,
+      json: async () => ({ error: false, response: [] }),
+    });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const { items } = await client.listItems();
+    expect(items[0].isActive).toBe(true);
+  });
+
+  it("respects maxPages override", async () => {
+    let from = 1;
+    mockFetch.mockImplementation(async () => {
+      const p = itemPage(from, 20);
+      from += 20;
+      return p;
+    });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const { items, cappedByMaxPages } = await client.listItems(3);
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+    expect(items).toHaveLength(60);
+    expect(cappedByMaxPages).toBe(true);
+  });
+
+  it("identical-batch stop AT page===maxPages with full page → cappedByMaxPages=false (repeated-batch break wins)", async () => {
+    // The API ignores the `page` param and returns the same batch every call.
+    // When the repeated-batch break fires at page === maxPages the cap flag
+    // must remain false — we stopped because the API looped, not because we
+    // hit the ceiling.
+    const page1 = itemPage(1, 20); // full page of 20
+    mockFetch
+      .mockResolvedValueOnce(page1) // page 1 — accepted
+      .mockResolvedValueOnce(page1); // page 2 (maxPages=2) — identical → break
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const { items, cappedByMaxPages } = await client.listItems(2);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(items).toHaveLength(20); // only the first batch kept (no dupes)
+    expect(cappedByMaxPages).toBe(false);
+  });
+});

@@ -52,9 +52,21 @@ export async function importPaymentsFromFieldpulse(
   counts: PhaseResult,
   client: FieldpulseClient,
 ): Promise<void> {
-  const { items, totalCount } = await client.listPayments();
+  const { items, totalCount, cappedByMaxPages } = await client.listPayments();
   counts.fetched = items.length;
   counts.total = totalCount ?? null;
+
+  if (cappedByMaxPages) {
+    logger.warn(
+      {
+        orgId,
+        fetched: items.length,
+        note: "Walk exhausted maxPages on a full page — possible truncation; raise maxPages or investigate",
+      },
+      "FP payments import: walk may be incomplete (cappedByMaxPages=true)",
+    );
+    (counts as unknown as Record<string, unknown>).cappedNote = "cappedByMaxPages";
+  }
 
   // Pre-select existing fieldpulsePaymentIds for this org.
   const existingRows = await db

@@ -2211,6 +2211,9 @@ export const pricebookItems = pgTable(
     hours: integer("hours"), // labor hours (estimating)
     warranty: text("warranty"),
     active: boolean("active").notNull().default(true),
+    // FieldPulse provenance — set on items mirrored from the /items endpoint.
+    // NULL for natively-created items.
+    fieldpulseItemId: text("fieldpulse_item_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -2220,6 +2223,11 @@ export const pricebookItems = pgTable(
     uniqueIndex("pricebook_items_org_sku_unique")
       .on(table.organizationId, table.sku)
       .where(sql`${table.sku} IS NOT NULL`),
+    // Per-org unique on FieldPulse item id — partial (WHERE IS NOT NULL) to
+    // allow multiple native items with null fieldpulseItemId per org.
+    uniqueIndex("pricebook_items_org_fp_item_id_unique")
+      .on(table.organizationId, table.fieldpulseItemId)
+      .where(sql`${table.fieldpulseItemId} IS NOT NULL`),
   ],
 );
 

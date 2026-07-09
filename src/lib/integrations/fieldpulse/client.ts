@@ -27,6 +27,7 @@ import type {
   FieldpulseEstimate,
   FieldpulseInvoice,
   FieldpulseInvoiceLineItem,
+  FieldpulseItem,
   FieldpulseJob,
   FieldpulseLocation,
   FieldpulsePayment,
@@ -153,59 +154,76 @@ export interface FieldpulseClient {
   /**
    * Page ALL customers from the unfiltered /customers endpoint for backfill.
    * totalCount is from the first-page `total_count` (present on /customers).
-   * maxPages defaults to 200 (enough for ~10,000 customers at 50/page).
+   * maxPages defaults to 1000 (enough for ~50,000 customers at 50/page).
+   * cappedByMaxPages is true when the walk was stopped by the maxPages limit
+   * (last page was full) — indicates possible truncation when total_count is null.
    */
-  listCustomers(maxPages?: number): Promise<{ items: FieldpulseCustomer[]; totalCount: number | null }>;
+  listCustomers(maxPages?: number): Promise<{ items: FieldpulseCustomer[]; totalCount: number | null; cappedByMaxPages: boolean }>;
 
   /**
    * Page ALL jobs from the unfiltered /jobs endpoint for backfill.
    * totalCount is from the first-page `total_count` (present on /jobs).
-   * maxPages defaults to 200 (enough for ~4,000 jobs at 20/page).
+   * maxPages defaults to 1000 (enough for ~20,000 jobs at 20/page).
+   * cappedByMaxPages is true when the walk was stopped by the maxPages limit.
    */
-  listJobs(maxPages?: number): Promise<{ items: FieldpulseJob[]; totalCount: number | null }>;
+  listJobs(maxPages?: number): Promise<{ items: FieldpulseJob[]; totalCount: number | null; cappedByMaxPages: boolean }>;
 
   /**
    * Page ALL invoices from the unfiltered /invoices endpoint for backfill.
    * totalCount is null for invoices (FP returns null — size by walking until empty).
-   * maxPages defaults to 200.
+   * maxPages defaults to 1000.
+   * cappedByMaxPages is true when the walk was stopped by the maxPages limit.
    */
-  listInvoices(maxPages?: number): Promise<{ items: FieldpulseInvoice[]; totalCount: number | null }>;
+  listInvoices(maxPages?: number): Promise<{ items: FieldpulseInvoice[]; totalCount: number | null; cappedByMaxPages: boolean }>;
 
   /**
    * Page ALL estimates from the unfiltered /estimates endpoint for backfill.
    * totalCount is null for estimates (FP returns null — size by walking until empty).
-   * maxPages defaults to 200. pageSize is fixed at 20 (live-verified fixed page size).
+   * maxPages defaults to 1000. pageSize is fixed at 20 (live-verified fixed page size).
+   * cappedByMaxPages is true when the walk was stopped by the maxPages limit.
    */
-  listEstimates(maxPages?: number): Promise<{ items: FieldpulseEstimate[]; totalCount: number | null }>;
+  listEstimates(maxPages?: number): Promise<{ items: FieldpulseEstimate[]; totalCount: number | null; cappedByMaxPages: boolean }>;
 
   /**
    * Page ALL payments from the unfiltered /payments endpoint for backfill.
    * totalCount is null for payments (FP returns null — size by walking until empty).
-   * maxPages defaults to 200. pageSize is fixed at 20 (live-verified fixed page size).
+   * maxPages defaults to 1000. pageSize is fixed at 20 (live-verified fixed page size).
+   * cappedByMaxPages is true when the walk was stopped by the maxPages limit.
    */
-  listPayments(maxPages?: number): Promise<{ items: FieldpulsePayment[]; totalCount: number | null }>;
+  listPayments(maxPages?: number): Promise<{ items: FieldpulsePayment[]; totalCount: number | null; cappedByMaxPages: boolean }>;
 
   /**
    * Page ALL assets from the unfiltered /assets endpoint for backfill.
    * totalCount is null for assets (FP returns null — size by walking until empty).
-   * maxPages defaults to 200. pageSize is fixed at 20 (live-verified fixed page size).
+   * maxPages defaults to 1000. pageSize is fixed at 20 (live-verified fixed page size).
+   * cappedByMaxPages is true when the walk was stopped by the maxPages limit.
    */
-  listAssets(maxPages?: number): Promise<{ items: FieldpulseAsset[]; totalCount: number | null }>;
+  listAssets(maxPages?: number): Promise<{ items: FieldpulseAsset[]; totalCount: number | null; cappedByMaxPages: boolean }>;
 
   /**
    * Page ALL comments from the unfiltered /comments endpoint for backfill.
    * totalCount is null for comments (FP returns null — size by walking until empty).
-   * maxPages defaults to 200. pageSize is fixed at 20 (live-verified fixed page size,
+   * maxPages defaults to 1000. pageSize is fixed at 20 (live-verified fixed page size,
    * same trap as invoices — passing 50 would stop the walk prematurely).
+   * cappedByMaxPages is true when the walk was stopped by the maxPages limit.
    */
-  listComments(maxPages?: number): Promise<{ items: FieldpulseComment[]; totalCount: number | null }>;
+  listComments(maxPages?: number): Promise<{ items: FieldpulseComment[]; totalCount: number | null; cappedByMaxPages: boolean }>;
 
   /**
    * Page ALL locations from the unfiltered /locations endpoint for backfill.
    * totalCount is null for locations (FP returns null — size by walking until empty).
-   * maxPages defaults to 200. pageSize is fixed at 20.
+   * maxPages defaults to 1000. pageSize is fixed at 20.
+   * cappedByMaxPages is true when the walk was stopped by the maxPages limit.
    */
-  listLocations(maxPages?: number): Promise<{ items: FieldpulseLocation[]; totalCount: number | null }>;
+  listLocations(maxPages?: number): Promise<{ items: FieldpulseLocation[]; totalCount: number | null; cappedByMaxPages: boolean }>;
+
+  /**
+   * Page ALL pricebook items from the unfiltered /items endpoint for backfill.
+   * totalCount is null for items (FP returns null — size by walking until empty).
+   * maxPages defaults to 2000 (enough for ~40,000 items at 20/page).
+   * cappedByMaxPages is true when the walk was stopped by the maxPages limit.
+   */
+  listItems(maxPages?: number): Promise<{ items: FieldpulseItem[]; totalCount: number | null; cappedByMaxPages: boolean }>;
 
   /**
    * Fetch a single customer by Fieldpulse id.
@@ -656,6 +674,53 @@ function toComment(raw: unknown): FieldpulseComment | null {
   };
 }
 
+/**
+ * Canonical FP type-string sets used by mapFpItemType and isUnknownFpType in
+ * items.ts. Exported so both places stay in sync from a single source of truth.
+ */
+/** FP type strings that map explicitly to "service" (not as a fallback). */
+export const FP_ITEM_SERVICE_TYPES = new Set(["service", "services", "labor"]);
+/** FP type strings that map to "material". */
+export const FP_ITEM_MATERIAL_TYPES = new Set(["material", "materials", "parts", "part"]);
+/** FP type strings that map to "equipment". */
+export const FP_ITEM_EQUIPMENT_TYPES = new Set(["equipment", "equip"]);
+
+/**
+ * Map a raw FieldPulse `type` string onto the native pricebookItemTypeEnum values.
+ *
+ * FP type vocabulary is unconfirmed (endpoint newly probed 2026-07-10). The
+ * mapping is best-effort and CONSERVATIVE: only clear service/material/equipment
+ * keywords are matched; everything else (including unknown codes) maps to
+ * "service" (the most generic value) and is tallied by the importer so the
+ * caller can see how many unknowns occurred. Never fabricate specificity.
+ */
+function mapFpItemType(
+  raw: unknown,
+): "service" | "material" | "equipment" {
+  const s = typeof raw === "string" ? raw.toLowerCase().trim() : "";
+  if (FP_ITEM_MATERIAL_TYPES.has(s)) return "material";
+  if (FP_ITEM_EQUIPMENT_TYPES.has(s)) return "equipment";
+  // "service", "services", "labor", numeric codes, empty, or anything else:
+  return "service";
+}
+
+/** Narrow an untrusted FieldPulse item payload to {@link FieldpulseItem}, or null. */
+function toItem(raw: unknown): FieldpulseItem | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const obj = raw as Record<string, unknown>;
+  const id = idStr(obj.id);
+  if (!id) return null;
+  const name = typeof obj.name === "string" ? obj.name.trim() : "";
+  if (!name) return null; // nameless items are skipped (tallied by the importer)
+  const priceCents = dollarsToCents(obj.default_unit_price) ?? 0;
+  const taxable = obj.default_taxable === true || obj.default_taxable === 1;
+  // is_active: treat absent/null as active (inclusive default).
+  const isActive = obj.is_active !== false && obj.is_active !== 0;
+  const rawFpType = typeof obj.type === "string" ? obj.type : null;
+  const type = mapFpItemType(obj.type);
+  return { id, name, priceCents, taxable, isActive, type, rawFpType };
+}
+
 /** Narrow an untrusted FieldPulse location payload to {@link FieldpulseLocation}. */
 function toLocation(raw: unknown): FieldpulseLocation | null {
   if (typeof raw !== "object" || raw === null) return null;
@@ -863,11 +928,12 @@ export class RestFieldpulseClient implements FieldpulseClient {
     baseParams: URLSearchParams,
     pageSize: number,
     maxPages = 20,
-  ): Promise<{ rows: unknown[]; totalCount: number | null }> {
+  ): Promise<{ rows: unknown[]; totalCount: number | null; cappedByMaxPages: boolean }> {
     const all: unknown[] = [];
     const seenIds = new Set<string>();
     let lastBatchKey: string | null = null;
     let totalCount: number | null = null;
+    let cappedByMaxPages = false;
     for (let page = 1; page <= maxPages; page++) {
       const params = new URLSearchParams(baseParams);
       params.set("page", String(page));
@@ -896,10 +962,14 @@ export class RestFieldpulseClient implements FieldpulseClient {
         all.push(row);
         added++;
       }
-      // Last page (short) or no new rows -> done.
+      // Last page (short) or no new rows -> done naturally.
       if (list.length < pageSize || added === 0) break;
+      // Exhausted maxPages on a full page → walk was truncated by the cap.
+      if (page === maxPages) {
+        cappedByMaxPages = true;
+      }
     }
-    return { rows: all, totalCount };
+    return { rows: all, totalCount, cappedByMaxPages };
   }
 
   async listCustomerJobs(
@@ -1054,10 +1124,10 @@ export class RestFieldpulseClient implements FieldpulseClient {
   }
 
   async listCustomers(
-    maxPages = 200,
-  ): Promise<{ items: FieldpulseCustomer[]; totalCount: number | null }> {
+    maxPages = 1000,
+  ): Promise<{ items: FieldpulseCustomer[]; totalCount: number | null; cappedByMaxPages: boolean }> {
     // /customers returns a fixed 50/page (page_size is IGNORED — Phase 0.5).
-    const { rows, totalCount } = await this.fetchAllPages(
+    const { rows, totalCount, cappedByMaxPages } = await this.fetchAllPages(
       "/customers",
       new URLSearchParams(),
       50,
@@ -1072,14 +1142,14 @@ export class RestFieldpulseClient implements FieldpulseClient {
         }
       })
       .filter((c): c is FieldpulseCustomer => c !== null);
-    return { items, totalCount };
+    return { items, totalCount, cappedByMaxPages };
   }
 
   async listJobs(
-    maxPages = 200,
-  ): Promise<{ items: FieldpulseJob[]; totalCount: number | null }> {
+    maxPages = 1000,
+  ): Promise<{ items: FieldpulseJob[]; totalCount: number | null; cappedByMaxPages: boolean }> {
     // /jobs returns a fixed 20/page (page_size is IGNORED — Phase 0.5).
-    const { rows, totalCount } = await this.fetchAllPages(
+    const { rows, totalCount, cappedByMaxPages } = await this.fetchAllPages(
       "/jobs",
       new URLSearchParams(),
       20,
@@ -1094,16 +1164,16 @@ export class RestFieldpulseClient implements FieldpulseClient {
         }
       })
       .filter((j): j is FieldpulseJob => j !== null);
-    return { items, totalCount };
+    return { items, totalCount, cappedByMaxPages };
   }
 
   async listInvoices(
-    maxPages = 200,
-  ): Promise<{ items: FieldpulseInvoice[]; totalCount: number | null }> {
+    maxPages = 1000,
+  ): Promise<{ items: FieldpulseInvoice[]; totalCount: number | null; cappedByMaxPages: boolean }> {
     // /invoices total_count is NULL (Phase 0.5) — walk until empty. FP returns
     // a fixed 20/page here (live-verified 2026-07-09: pages 2-3 existed with
     // fresh ids); passing 50 made page 1 look "short" and stopped the walk.
-    const { rows, totalCount } = await this.fetchAllPages(
+    const { rows, totalCount, cappedByMaxPages } = await this.fetchAllPages(
       "/invoices",
       new URLSearchParams(),
       20,
@@ -1112,14 +1182,14 @@ export class RestFieldpulseClient implements FieldpulseClient {
     const items = rows
       .map(toInvoice)
       .filter((i): i is FieldpulseInvoice => i !== null);
-    return { items, totalCount };
+    return { items, totalCount, cappedByMaxPages };
   }
 
   async listEstimates(
-    maxPages = 200,
-  ): Promise<{ items: FieldpulseEstimate[]; totalCount: number | null }> {
+    maxPages = 1000,
+  ): Promise<{ items: FieldpulseEstimate[]; totalCount: number | null; cappedByMaxPages: boolean }> {
     // /estimates returns a fixed 20/page (live-verified fixed size, same as invoices).
-    const { rows, totalCount } = await this.fetchAllPages(
+    const { rows, totalCount, cappedByMaxPages } = await this.fetchAllPages(
       "/estimates",
       new URLSearchParams(),
       20,
@@ -1128,14 +1198,14 @@ export class RestFieldpulseClient implements FieldpulseClient {
     const items = rows
       .map(toEstimate)
       .filter((e): e is FieldpulseEstimate => e !== null);
-    return { items, totalCount };
+    return { items, totalCount, cappedByMaxPages };
   }
 
   async listPayments(
-    maxPages = 200,
-  ): Promise<{ items: FieldpulsePayment[]; totalCount: number | null }> {
+    maxPages = 1000,
+  ): Promise<{ items: FieldpulsePayment[]; totalCount: number | null; cappedByMaxPages: boolean }> {
     // /payments returns a fixed 20/page (live-verified fixed size, same as invoices).
-    const { rows, totalCount } = await this.fetchAllPages(
+    const { rows, totalCount, cappedByMaxPages } = await this.fetchAllPages(
       "/payments",
       new URLSearchParams(),
       20,
@@ -1144,14 +1214,14 @@ export class RestFieldpulseClient implements FieldpulseClient {
     const items = rows
       .map(toPayment)
       .filter((p): p is FieldpulsePayment => p !== null);
-    return { items, totalCount };
+    return { items, totalCount, cappedByMaxPages };
   }
 
   async listAssets(
-    maxPages = 200,
-  ): Promise<{ items: FieldpulseAsset[]; totalCount: number | null }> {
+    maxPages = 1000,
+  ): Promise<{ items: FieldpulseAsset[]; totalCount: number | null; cappedByMaxPages: boolean }> {
     // /assets returns a fixed 20/page (live-verified fixed size, same as invoices).
-    const { rows, totalCount } = await this.fetchAllPages(
+    const { rows, totalCount, cappedByMaxPages } = await this.fetchAllPages(
       "/assets",
       new URLSearchParams(),
       20,
@@ -1160,14 +1230,14 @@ export class RestFieldpulseClient implements FieldpulseClient {
     const items = rows
       .map(toAsset)
       .filter((a): a is FieldpulseAsset => a !== null);
-    return { items, totalCount };
+    return { items, totalCount, cappedByMaxPages };
   }
 
   async listComments(
-    maxPages = 200,
-  ): Promise<{ items: FieldpulseComment[]; totalCount: number | null }> {
+    maxPages = 1000,
+  ): Promise<{ items: FieldpulseComment[]; totalCount: number | null; cappedByMaxPages: boolean }> {
     // /comments returns a fixed 20/page (same page-size trap as invoices).
-    const { rows, totalCount } = await this.fetchAllPages(
+    const { rows, totalCount, cappedByMaxPages } = await this.fetchAllPages(
       "/comments",
       new URLSearchParams(),
       20,
@@ -1176,14 +1246,14 @@ export class RestFieldpulseClient implements FieldpulseClient {
     const items = rows
       .map(toComment)
       .filter((c): c is FieldpulseComment => c !== null);
-    return { items, totalCount };
+    return { items, totalCount, cappedByMaxPages };
   }
 
   async listLocations(
     maxPages = 1000,
-  ): Promise<{ items: FieldpulseLocation[]; totalCount: number | null }> {
+  ): Promise<{ items: FieldpulseLocation[]; totalCount: number | null; cappedByMaxPages: boolean }> {
     // /locations returns a fixed 20/page (same page-size trap as invoices).
-    const { rows, totalCount } = await this.fetchAllPages(
+    const { rows, totalCount, cappedByMaxPages } = await this.fetchAllPages(
       "/locations",
       new URLSearchParams(),
       20,
@@ -1192,7 +1262,24 @@ export class RestFieldpulseClient implements FieldpulseClient {
     const items = rows
       .map(toLocation)
       .filter((l): l is FieldpulseLocation => l !== null);
-    return { items, totalCount };
+    return { items, totalCount, cappedByMaxPages };
+  }
+
+  async listItems(
+    maxPages = 2000,
+  ): Promise<{ items: FieldpulseItem[]; totalCount: number | null; cappedByMaxPages: boolean }> {
+    // /items returns a fixed 20/page (live-verified: 877 pages × 20 = ~17,536 rows).
+    // total_count is NULL for items — walk until empty.
+    const { rows, totalCount, cappedByMaxPages } = await this.fetchAllPages(
+      "/items",
+      new URLSearchParams(),
+      20,
+      maxPages,
+    );
+    const items = rows
+      .map(toItem)
+      .filter((i): i is FieldpulseItem => i !== null);
+    return { items, totalCount, cappedByMaxPages };
   }
 
   async geocodeAddress(input: GeocodeInput): Promise<FieldpulseGeocodeResult | null> {

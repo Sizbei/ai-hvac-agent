@@ -1,0 +1,2 @@
+ALTER TABLE "pricebook_items" ADD COLUMN "fieldpulse_item_id" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "pricebook_items_org_fp_item_id_unique" ON "pricebook_items" USING btree ("organization_id","fieldpulse_item_id") WHERE "pricebook_items"."fieldpulse_item_id" IS NOT NULL;

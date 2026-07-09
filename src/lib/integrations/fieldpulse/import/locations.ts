@@ -83,9 +83,21 @@ export async function importLocationsFromFieldpulse(
   counts: PhaseResult,
   client: FieldpulseClient,
 ): Promise<void> {
-  const { items, totalCount } = await client.listLocations();
+  const { items, totalCount, cappedByMaxPages } = await client.listLocations();
   counts.fetched = items.length;
   counts.total = totalCount ?? null;
+
+  if (cappedByMaxPages) {
+    logger.warn(
+      {
+        orgId,
+        fetched: items.length,
+        note: "Walk exhausted maxPages on a full page — possible truncation; raise maxPages or investigate",
+      },
+      "FP locations import: walk may be incomplete (cappedByMaxPages=true)",
+    );
+    (counts as unknown as Record<string, unknown>).cappedNote = "cappedByMaxPages";
+  }
 
   if (totalCount !== null && items.length < totalCount) {
     logger.warn(

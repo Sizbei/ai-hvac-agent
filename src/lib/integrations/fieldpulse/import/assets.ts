@@ -47,9 +47,21 @@ export async function importAssetsFromFieldpulse(
   counts: PhaseResult,
   client: FieldpulseClient,
 ): Promise<void> {
-  const { items, totalCount } = await client.listAssets();
+  const { items, totalCount, cappedByMaxPages } = await client.listAssets();
   counts.fetched = items.length;
   counts.total = totalCount ?? null;
+
+  if (cappedByMaxPages) {
+    logger.warn(
+      {
+        orgId,
+        fetched: items.length,
+        note: "Walk exhausted maxPages on a full page — possible truncation; raise maxPages or investigate",
+      },
+      "FP assets import: walk may be incomplete (cappedByMaxPages=true)",
+    );
+    (counts as unknown as Record<string, unknown>).cappedNote = "cappedByMaxPages";
+  }
 
   // Pre-select existing fieldpulseAssetIds for this org.
   const existingRows = await db

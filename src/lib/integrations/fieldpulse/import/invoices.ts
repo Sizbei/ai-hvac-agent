@@ -33,9 +33,21 @@ export async function importInvoicesFromFieldpulse(
 ): Promise<void> {
   // Full invoice walk. totalCount is NULL on /invoices (Phase 0.5) so we size
   // by paging-until-empty; set total = null explicitly (indeterminate).
-  const { items, totalCount } = await client.listInvoices();
+  const { items, totalCount, cappedByMaxPages } = await client.listInvoices();
   counts.fetched = items.length;
   counts.total = totalCount ?? null; // always null per Phase-0.5 verification
+
+  if (cappedByMaxPages) {
+    logger.warn(
+      {
+        orgId,
+        fetched: items.length,
+        note: "Walk exhausted maxPages on a full page — possible truncation; raise maxPages or investigate",
+      },
+      "FP invoices import: walk may be incomplete (cappedByMaxPages=true)",
+    );
+    (counts as unknown as Record<string, unknown>).cappedNote = "cappedByMaxPages";
+  }
 
   // Pre-select existing fieldpulseInvoiceIds for this org → exact created/updated split.
   const existingRows = await db
