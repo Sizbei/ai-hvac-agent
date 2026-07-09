@@ -16,11 +16,13 @@ export async function createAdminSession(
   cookieStore.set(ADMIN_SESSION_COOKIE, token, {
     httpOnly: true,
     secure: true, // Always secure - use HTTPS in development too
-    // "strict" so the admin session cookie is never sent on cross-site
-    // requests — this blocks CSRF against the state-changing /api/admin/*
-    // endpoints (assign, delete, create). The admin UI is same-origin, so
-    // strict has no UX cost here.
-    sameSite: "strict",
+    // "lax", not "strict": the Google OIDC callback sets this cookie mid-way
+    // through a navigation chain that ORIGINATES on accounts.google.com, and
+    // browsers refuse to attach strict cookies to the follow-up /admin request
+    // — the user lands back on the login page despite a successful login.
+    // Lax still withholds the cookie on cross-site POST/fetch, which is what
+    // protects the state-changing /api/admin/* endpoints from CSRF.
+    sameSite: "lax",
     maxAge: ADMIN_SESSION_MAX_AGE,
     path: "/",
   });
