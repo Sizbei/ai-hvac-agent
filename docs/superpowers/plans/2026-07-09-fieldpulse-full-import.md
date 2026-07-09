@@ -132,6 +132,15 @@ Extend the smoke harness to CAPTURE, against the real account, before any import
 2. **History cutoff** — **ALL history.**
 3. **Follow-ups** — **native-only now** (option c), with a committed later phase:
 
+## Phase 9 — Estimates + payments + assets (USER-REQUESTED 2026-07-09, un-descoped)
+
+Endpoint sweep (live, account 182499) found these pullable; user said "add it in":
+- **`/estimates`** (20/page, money fields + job_id/customer_id) → native `estimates`, new `fieldpulse_estimate_id` col. Synced-read-only semantics like invoices.
+- **`/payments`** (20/page: invoice_id, amount, method, payment_date, status) → native `payments`, new `fieldpulse_payment_id` col, linked to invoices by `fieldpulse_invoice_id`. **Money-safety decision:** imported payments are RECORD-ONLY — excluded from native money aggregates (`collectedThisMonthCents`, reporting gross/net which are documented native-only) via `fieldpulse_payment_id IS NULL` filters; they render as history on synced invoices. No reconciliation writes to invoice `amountPaidCents` (FP already supplies it on the invoice mirror).
+- **`/assets`** (20/page: customer_id, asset_type, install_date, tag, maintenance_agreement_id) → native `customer_equipment`, new `fieldpulse_asset_id` col. Feeds Phase 8's follow-up derivation.
+One migration (3 per-org partial-unique fp-id columns), three importers on the established skeleton, wired as phases `estimates`/`payments`/`assets` (after invoices; assets after customers).
+Descoped from the sweep (documented decision): `/locations`, `/comments`, `/timesheets` (later increments); `/teams`, `/tags`, `/subtasks` (thin value). 403 = not on this gateway: maintenance_agreements, leads, purchase_orders, files, notes.
+
 ## Phase 8 — Derive follow-ups from imported job data (committed later increment)
 
 Once Phases 2–5 are live: a pure-native derivation pass that creates `follow_ups`
