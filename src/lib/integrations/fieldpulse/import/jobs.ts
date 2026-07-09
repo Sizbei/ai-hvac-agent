@@ -38,7 +38,7 @@ import type { FieldpulseJob, FieldpulseUser } from "../types";
 import type { PhaseResult } from "./run-import";
 import type { RequestStatus } from "@/lib/admin/request-status";
 import { generateReferenceNumber } from "@/lib/requests/submit-session-request";
-import { importOneFpCustomer } from "./customers";
+import { importOneFpCustomer, createDeletedPlaceholderCustomer } from "./customers";
 
 // ── Status map (pluggable) ─────────────────────────────────────────────────────
 // Edit this one object to expand the vocabulary when the user names their workflow.
@@ -348,9 +348,23 @@ export async function importJobsFromFieldpulse(
               );
             }
           } else {
-            // 404 or malformed — cache the miss so we don't retry for other
-            // jobs sharing this customer.
-            customerHealCache.set(job.fpCustomerId, null);
+            // 404 = HARD-DELETED in FieldPulse (absent from list AND per-id —
+            // live-verified: six such customers own ten real calendar jobs).
+            // The calendar must still show those jobs: key an archived
+            // placeholder customer on the dead fp id.
+            const placeholderId = await createDeletedPlaceholderCustomer(
+              orgId,
+              job.fpCustomerId,
+            );
+            customerHealCache.set(job.fpCustomerId, placeholderId);
+            if (placeholderId) {
+              customerByFpId.set(job.fpCustomerId, placeholderId);
+              counts.customersSelfHealed = (counts.customersSelfHealed ?? 0) + 1;
+              logger.info(
+                { orgId, fpCustomerId: job.fpCustomerId, nativeId: placeholderId },
+                "FP job import: customer hard-deleted in FP — archived placeholder created",
+              );
+            }
           }
           customerId = customerHealCache.get(job.fpCustomerId) ?? null;
         } else {

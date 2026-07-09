@@ -334,6 +334,41 @@ export async function importOneFpCustomer(
   }
 }
 
+/**
+ * Placeholder for a customer that is HARD-DELETED in FieldPulse (absent from
+ * the list walk AND 404 on per-id fetch — live-verified 2026-07-09: six such
+ * customers own ten real calendar jobs, incl. future ones). The jobs must land
+ * on the calendar, so we key an ARCHIVED, contactless placeholder on the dead
+ * fp id; future runs resolve it instantly via the fpId path. Idempotent.
+ */
+export async function createDeletedPlaceholderCustomer(
+  orgId: string,
+  fpCustomerId: string,
+): Promise<string | null> {
+  const [inserted] = await db
+    .insert(customers)
+    .values({
+      organizationId: orgId,
+      nameEncrypted: encrypt(sanitizeName(`FieldPulse customer (deleted #${fpCustomerId})`)),
+      phoneEncrypted: null,
+      emailEncrypted: null,
+      addressEncrypted: null,
+      emailHash: null,
+      phoneHash: null,
+      fieldpulseCustomerId: fpCustomerId,
+      archivedAt: new Date(),
+    })
+    .onConflictDoNothing({
+      target: [customers.organizationId, customers.fieldpulseCustomerId],
+      where: isNotNull(customers.fieldpulseCustomerId),
+    })
+    .returning({ id: customers.id });
+  if (inserted) return inserted.id;
+  // Re-run: the placeholder already exists — resolve it.
+  const existing = await findByFpId(orgId, fpCustomerId);
+  return existing?.id ?? null;
+}
+
 export async function importCustomersFromFieldpulse(
   orgId: string,
   counts: PhaseResult,

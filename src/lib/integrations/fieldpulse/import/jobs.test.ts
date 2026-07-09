@@ -32,6 +32,7 @@ vi.mock("@/lib/db", () => ({
 }));
 vi.mock("./customers", () => ({
   importOneFpCustomer: vi.fn(),
+  createDeletedPlaceholderCustomer: vi.fn(),
 }));
 vi.mock("@/lib/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -49,7 +50,7 @@ vi.mock("@/lib/requests/submit-session-request", () => ({
 
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
-import { importOneFpCustomer } from "./customers";
+import { importOneFpCustomer, createDeletedPlaceholderCustomer } from "./customers";
 
 // ── Fixture helpers ───────────────────────────────────────────────────────────
 
@@ -556,14 +557,27 @@ describe("importJobsFromFieldpulse", () => {
     );
   });
 
-  it("customer self-heal: getCustomer returns null (404) → job skipped", async () => {
-    // getCustomer returns null (404 or malformed).
+  it("customer self-heal: 404 (hard-deleted in FP) → archived placeholder created, job imported", async () => {
+    // getCustomer returns null (hard-deleted). Live-verified: six such
+    // customers own ten real calendar jobs — the placeholder path keeps them.
     const client = makeClient([makeJob()], 1, [], () => Promise.resolve(null));
+    vi.mocked(createDeletedPlaceholderCustomer).mockResolvedValue("placeholder-uuid");
     const counts = makeCounts();
     wireSelectSequence([[], [], []]);
     await importJobsFromFieldpulse(ORG, counts, client);
     expect(client.getCustomer).toHaveBeenCalledWith("20000001");
     expect(importOneFpCustomer).not.toHaveBeenCalled();
+    expect(createDeletedPlaceholderCustomer).toHaveBeenCalledWith(ORG, "20000001");
+    expect(counts.created).toBe(1);
+    expect(counts.customersSelfHealed).toBe(1);
+  });
+
+  it("customer self-heal: 404 AND placeholder creation fails → job skipped", async () => {
+    const client = makeClient([makeJob()], 1, [], () => Promise.resolve(null));
+    vi.mocked(createDeletedPlaceholderCustomer).mockResolvedValue(null);
+    const counts = makeCounts();
+    wireSelectSequence([[], [], []]);
+    await importJobsFromFieldpulse(ORG, counts, client);
     expect(counts.skipped).toBe(1);
     expect(counts.customersSelfHealed).toBeUndefined();
   });
