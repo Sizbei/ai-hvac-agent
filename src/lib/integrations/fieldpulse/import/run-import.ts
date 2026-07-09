@@ -5,16 +5,20 @@
  * Every phase is idempotent (upserts keyed on per-org fieldpulse*Id indexes).
  *
  * Usage:
- *   npm run fp:import -- --org <uuid> [--dry-run] [--phase <name>]
+ *   npm run fp:import -- --org <uuid> [--dry-run] [--phase <name>[,<name>...]] [--yes]
  *
  * Flags:
- *   --org <uuid>    (required) Target organization id.
- *   --dry-run       Fetch first page only per phase; no DB writes; print counts.
- *   --phase <name>  Run a single phase (technicians|customers|jobs|invoices).
- *   --since <date>  deliberately deferred — Phase 0.5 verified FP ignores server-side date filters; Phase 6 deltas will full-re-page + filter client-side.
+ *   --org <uuid>          (required) Target organization id.
+ *   --dry-run             Fetch first page only per phase; no DB writes; print counts.
+ *   --phase <name[,...]>  Run one or more named phases, comma-separated
+ *                         (technicians|customers|jobs|invoices).
+ *   --yes                 Skip the interactive `import` confirmation. FOR CI USE ONLY
+ *                         (nightly GitHub Actions sweep). Never pass this interactively —
+ *                         the confirmation exists to prevent accidental prod writes.
+ *   --since <date>        deliberately deferred — Phase 0.5 verified FP ignores server-side date filters; Phase 6 deltas will full-re-page + filter client-side.
  *
  * Safety: On a real run the script prints DB host + org name and requires the
- * operator to type `import` on stdin before any write is made.
+ * operator to type `import` on stdin before any write is made (unless --yes is given).
  */
 import * as dotenv from "dotenv";
 import * as readline from "readline";
@@ -93,15 +97,19 @@ export const PHASES: { name: string; fn: PhaseFn }[] = [
 
 // ── Argument parsing ─────────────────────────────────────────────────────────
 
-function parseArgs(argv: string[]): {
+export function parseArgs(argv: string[]): {
   orgId: string;
   dryRun: boolean;
-  phaseFilter: string | null;
+  /** Phase names to run. null = run all. */
+  phaseNames: string[] | null;
+  /** Skip interactive confirmation. FOR CI (nightly sweep) ONLY. */
+  yes: boolean;
 } {
   const args = argv.slice(2);
   let orgId: string | null = null;
   let dryRun = false;
   let phaseFilter: string | null = null;
+  let yes = false;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--org" && args[i + 1]) {
@@ -110,6 +118,8 @@ function parseArgs(argv: string[]): {
       dryRun = true;
     } else if (args[i] === "--phase" && args[i + 1]) {
       phaseFilter = args[++i];
+    } else if (args[i] === "--yes") {
+      yes = true;
     }
   }
 
@@ -118,7 +128,12 @@ function parseArgs(argv: string[]): {
     process.exit(1);
   }
 
-  return { orgId, dryRun, phaseFilter };
+  // Support comma-separated phase list: --phase technicians,customers,jobs
+  const phaseNames = phaseFilter
+    ? phaseFilter.split(",").map((s) => s.trim()).filter(Boolean)
+    : null;
+
+  return { orgId, dryRun, phaseNames, yes };
 }
 
 // ── DB host (no credentials) ─────────────────────────────────────────────────
@@ -153,7 +168,7 @@ async function requireConfirmation(prompt: string): Promise<void> {
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  const { orgId, dryRun, phaseFilter } = parseArgs(process.argv);
+  const { orgId, dryRun, phaseNames, yes } = parseArgs(process.argv);
 
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
@@ -183,8 +198,8 @@ async function main(): Promise<void> {
   console.log(`  Org id  : ${org.id}`);
   console.log(`  Org name: ${org.name}`);
   console.log(`  Dry run : ${dryRun}`);
-  if (phaseFilter) {
-    console.log(`  Phase   : ${phaseFilter}`);
+  if (phaseNames) {
+    console.log(`  Phase(s): ${phaseNames.join(", ")}`);
   }
   console.log("");
 
@@ -196,15 +211,19 @@ async function main(): Promise<void> {
   }
 
   // Select phases to run.
-  const selectedPhases = phaseFilter
-    ? PHASES.filter((p) => p.name === phaseFilter)
-    : PHASES;
-
-  if (phaseFilter && selectedPhases.length === 0) {
-    console.error(
-      `ERROR: Unknown phase "${phaseFilter}". Valid: ${PHASES.map((p) => p.name).join(", ")}`,
-    );
-    process.exit(1);
+  let selectedPhases = PHASES;
+  if (phaseNames) {
+    // Validate all names before running any phase.
+    const validNames = new Set(PHASES.map((p) => p.name));
+    const invalid = phaseNames.filter((n) => !validNames.has(n));
+    if (invalid.length > 0) {
+      console.error(
+        `ERROR: Unknown phase(s): "${invalid.join('", "')}". Valid: ${PHASES.map((p) => p.name).join(", ")}`,
+      );
+      process.exit(1);
+    }
+    // Preserve canonical dependency order regardless of user-supplied order.
+    selectedPhases = PHASES.filter((p) => phaseNames.includes(p.name));
   }
 
   const ctx: PhaseContext = { orgId, dryRun, db, fpClient };
@@ -253,16 +272,20 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Real run: require confirmation before any write.
+  // Real run: require confirmation before any write (unless --yes for CI).
   console.log("Phases to run:", selectedPhases.map((p) => p.name).join(", "));
   console.log("");
-  try {
-    await requireConfirmation(
-      'Type "import" and press Enter to begin writing to the database: ',
-    );
-  } catch (err) {
-    console.log(`Aborted: ${err instanceof Error ? err.message : String(err)}`);
-    process.exit(1);
+  if (yes) {
+    console.log("(--yes flag: skipping interactive confirmation — CI mode)");
+  } else {
+    try {
+      await requireConfirmation(
+        'Type "import" and press Enter to begin writing to the database: ',
+      );
+    } catch (err) {
+      console.log(`Aborted: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
   }
 
   console.log("");

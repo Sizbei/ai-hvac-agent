@@ -126,6 +126,30 @@ NOT part of the CI suite. Optional `FIELDPULSE_SMOKE_INVOICE_ID` /
 `FIELDPULSE_SMOKE_JOB_ID` exercise the invoice paths. The real-shape unit test
 (`client-real-shapes.test.ts`) locks the contract in CI.
 
+### Steady-state sync (Phase 6)
+
+| Layer | What syncs | When | Notes |
+|---|---|---|---|
+| Webhooks | Job status changes, invoice events | Real-time (on FP event) | Fail-closed HMAC; idempotency ledger; scheduled via `after()` |
+| Vercel daily cron | Technician roster + availability | 10:00 UTC | `/api/cron/sync-fieldpulse-availability` |
+| Vercel daily cron | Invoices for tracked jobs | 11:00 UTC | `/api/cron/sync-fieldpulse-invoices` |
+| **GitHub Actions nightly** | **technicians, customers, jobs, invoices (full re-page)** | **08:30 UTC** | `.github/workflows/fp-nightly-sync.yml`; runs BEFORE Vercel crons |
+
+The GH Actions sweep runs before the Vercel crons (08:30 vs 10:00 UTC) so fresh
+data is in place before the availability and invoice crons process it. All sweep
+runs are recorded in `fp_import_runs` (same ledger as the initial backfill) and
+visible at `/admin/fieldpulse-import`.
+
+**Delta semantics:** FP ignores server-side `updated_at` filters (verified
+2026-07-09), so each nightly sweep is a full re-page + idempotent upsert. At
+current volume (2,597 customers, 54 jobs) a complete sweep takes ≈20 minutes —
+well within GitHub Actions limits but impossible in a Vercel function.
+
+**Convergence guarantee:** both the live webhook and the nightly sweep write
+current FP state. A webhook write is never stomped permanently by a lagging list
+— the next sweep self-corrects from a fresh FP read. Sweeps must never write
+from a cached list (see comment in each sweep module).
+
 ## Housecall Pro
 
 Same module anatomy and the same invoice money-mirror, built to **parity** with

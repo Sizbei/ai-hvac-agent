@@ -102,12 +102,22 @@ Extend the smoke harness to CAPTURE, against the real account, before any import
 - This closes the known gap: the daily invoice cron only sweeps invoices for jobs we already track; the backfill catches the org's full history. Synced invoices stay read-only in native money flows (existing guard) — and are **excluded from collections dunning** (existing `syncedSource` gates).
 - **Steady state:** unchanged — webhooks + the existing daily sweep; consider pointing the sweep's per-job pull at the delta path once the backfill exists.
 
-## Phase 6 — Steady-state consolidation
+## Phase 6 — Steady-state consolidation ✅ DONE (2026-07-09)
 
-- Extend the daily FP cron chain to: technicians → customers delta → jobs delta → (existing) availability + invoices. Per-org `after()` fan-out, `fp_import_runs` rows for each sweep (same observability as the backfill).
-- **Delta semantics depend on Phase 0.5** (review I3): if FP honors a server-side `updated_at` filter, `--since` is a cheap delta; if not (likely — FP ignores even `job_id` on `/invoices`), the nightly sweep is a **full re-page with client-side date filtering** — still idempotent and safe, just costlier; size it (records × 100/page × token bucket) and accept, or reduce cadence.
-- **Webhook/sweep convergence (review I4):** both the live webhook and the nightly sweep write *current FP state* (same principle as the invoice mirror), so they converge rather than conflict; the sweep must always write from a fresh FP read, never a cached one, so a lagging list can't stomp a newer webhook write with stale data for long — the next sweep self-corrects. State this invariant in the sweep's module comment.
-- Add an **Integrations UI status card**: last import/sweep per entity + counts + last error (reads `fp_import_runs`), so drift is visible without the DB.
+**Implemented:** GitHub Actions nightly full sweep (`.github/workflows/fp-nightly-sync.yml`).
+
+- **Why Actions not Vercel:** customers sweep ≈ 20 min (52 pages × ~2,600 upserts); serverless maxDuration is 5 min. The technicians sync stays in the existing Vercel daily cron (seconds, not minutes).
+- **Schedule:** 08:30 UTC — before Vercel availability cron (10:00) and invoice cron (11:00) so fresh data is in place first.
+- **`--yes` flag** added to `run-import.ts` to skip interactive confirmation for CI. The prompt remains REQUIRED without the flag; `--yes` is documented CI-only in the script header.
+- **`--phase` comma list** support: `--phase technicians,customers,jobs,invoices` runs all four in canonical dependency order. Single-phase behavior unchanged.
+- **Delta semantics (Phase 0.5 verified I3):** FP ignores server-side `updated_at` filters → nightly sweep is a full re-page + idempotent upsert. At current volume (~2,600 customers, 54 jobs) this is ≈20 minutes, within Actions limits. Acceptable at this scale.
+- **Webhook/sweep convergence (I4):** both write current FP state. Sweep reads fresh from FP, never a cache — a lagging list can't permanently stomp a newer webhook write; the next sweep self-corrects.
+- **Observability:** every sweep run is recorded in `fp_import_runs` (same ledger as the backfill), visible at `/admin/fieldpulse-import`.
+- **Required repo secrets/variables:** `DATABASE_URL`, `FIELDPULSE_API_KEY`, `ENCRYPTION_KEY` (secrets) + `FP_SYNC_ORG_ID` (repo variable). Documented in workflow comments; must be set manually.
+
+**Not included in this phase (deferred):**
+- Integrations UI status card (last sweep per entity): deferred to a later UI increment; `fp_import_runs` data is already there, ready to surface.
+- Per-org `after()` fan-out for multi-org sweeps: current workflow syncs one org (via `FP_SYNC_ORG_ID`); multi-org loop is a later extension when needed.
 
 ## Phase 7 — Deferred entities (explicit decisions, not oversights)
 
