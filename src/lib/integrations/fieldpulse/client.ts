@@ -848,11 +848,13 @@ export class RestFieldpulseClient implements FieldpulseClient {
   async listInvoices(
     maxPages = 200,
   ): Promise<{ items: FieldpulseInvoice[]; totalCount: number | null }> {
-    // /invoices total_count is NULL (Phase 0.5) — walk until empty.
+    // /invoices total_count is NULL (Phase 0.5) — walk until empty. FP returns
+    // a fixed 20/page here (live-verified 2026-07-09: pages 2-3 existed with
+    // fresh ids); passing 50 made page 1 look "short" and stopped the walk.
     const { rows, totalCount } = await this.fetchAllPages(
       "/invoices",
       new URLSearchParams(),
-      50,
+      20,
       maxPages,
     );
     const items = rows

@@ -502,36 +502,38 @@ describe("RestFieldpulseClient — listInvoices", () => {
     return { ok: true, status: 200, json: async () => envelope };
   }
 
-  it("pages all invoices and surfaces totalCount null (FP returns null for invoices)", async () => {
-    // Phase 0.5: /invoices total_count is null — walk until empty.
+  it("pages all invoices at FP's fixed 20/page and surfaces totalCount null", async () => {
+    // Phase 0.5: /invoices total_count is null AND FP returns a fixed 20/page
+    // (live-verified: passing 50 made page 1 look "short" and stopped the walk).
     mockFetch
-      .mockResolvedValueOnce(invoicePage(1, 50)) // no total_count key
-      .mockResolvedValueOnce(invoicePage(51, 20));
+      .mockResolvedValueOnce(invoicePage(1, 20)) // no total_count key
+      .mockResolvedValueOnce(invoicePage(21, 20))
+      .mockResolvedValueOnce(invoicePage(41, 7)); // short final page
     const client = new RestFieldpulseClient(config, mockFetch as never);
     const { items, totalCount } = await client.listInvoices();
-    expect(items).toHaveLength(70);
+    expect(items).toHaveLength(47);
     expect(totalCount).toBeNull();
-    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(mockFetch).toHaveBeenCalledTimes(3);
   });
 
   it("respects maxPages override", async () => {
     let from = 1;
     mockFetch.mockImplementation(async () => {
-      const p = invoicePage(from, 50);
-      from += 50;
+      const p = invoicePage(from, 20);
+      from += 20;
       return p;
     });
     const client = new RestFieldpulseClient(config, mockFetch as never);
     const { items } = await client.listInvoices(3);
     expect(mockFetch).toHaveBeenCalledTimes(3);
-    expect(items).toHaveLength(150);
+    expect(items).toHaveLength(60);
   });
 
   it("stops when the API ignores page (identical batches — no duplicates)", async () => {
-    mockFetch.mockResolvedValue(invoicePage(1, 50));
+    mockFetch.mockResolvedValue(invoicePage(1, 20));
     const client = new RestFieldpulseClient(config, mockFetch as never);
     const { items } = await client.listInvoices();
-    expect(items).toHaveLength(50);
+    expect(items).toHaveLength(20);
     expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 });
