@@ -34,6 +34,12 @@ export function mapFpPaymentStatus(
   fpStatus: string | null | undefined,
 ): "succeeded" | "pending" | "failed" | "refunded" {
   const s = (fpStatus ?? "").toLowerCase().trim();
+  // FP payment status is an INTEGER on this gateway. "4" = succeeded —
+  // LIVE-PROVEN (2026-07-09, account 182499): all 2,363 imported payments carry
+  // status 4, and on every one of the 2,249 fully-paid invoices they sum
+  // EXACTLY to the invoice's amount_paid_cents. Money that reconciles to the
+  // cent is settled money.
+  if (s === "4") return "succeeded";
   if (["paid", "completed", "approved"].includes(s)) return "succeeded";
   if (["pending", "processing"].includes(s)) return "pending";
   if (["failed", "declined", "error"].includes(s)) return "failed";
