@@ -80,6 +80,12 @@ export async function POST(request: NextRequest) {
 
     if (!result.ok) {
       switch (result.reason) {
+        case "synced_read_only":
+          return errorResponse(
+            "This estimate is synced from FieldPulse — invoicing is managed there",
+            "SYNCED_READ_ONLY",
+            409,
+          );
         case "estimate_not_sold":
           return errorResponse(
             "Only a sold estimate can be invoiced",

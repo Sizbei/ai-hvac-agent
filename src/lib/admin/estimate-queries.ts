@@ -7,7 +7,7 @@
  * IP/timestamp capture.
  */
 import { randomBytes, randomUUID, createHash } from "node:crypto";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   estimates,
@@ -138,7 +138,7 @@ export async function createEstimate(
 
 export type ApproveEstimateResult =
   | { readonly ok: true; readonly estimateId: string }
-  | { readonly ok: false; readonly reason: "not_found" | "expired" | "already_decided" | "invalid_option" };
+  | { readonly ok: false; readonly reason: "not_found" | "expired" | "already_decided" | "invalid_option" | "synced_read_only" };
 
 /**
  * Approve + e-sign an estimate from the public token page: flips it to "sold",
@@ -213,13 +213,15 @@ export interface EstimateListRow {
   readonly createdAt: Date;
   readonly expiresAt: Date | null;
   readonly signedAt: Date | null;
+  /** Which FSM this estimate is a read-only mirror of, or null when native. */
+  readonly syncedSource: "fieldpulse" | null;
 }
 
 /** Admin list of an org's estimates, newest first. */
 export async function listEstimates(
   organizationId: string,
 ): Promise<EstimateListRow[]> {
-  return db
+  const rows = await db
     .select({
       id: estimates.id,
       status: estimates.status,
@@ -229,10 +231,16 @@ export async function listEstimates(
       createdAt: estimates.createdAt,
       expiresAt: estimates.expiresAt,
       signedAt: estimates.signedAt,
+      fieldpulseEstimateId: estimates.fieldpulseEstimateId,
     })
     .from(estimates)
     .where(withTenant(estimates, organizationId))
     .orderBy(desc(estimates.createdAt));
+
+  return rows.map(({ fieldpulseEstimateId, ...r }) => ({
+    ...r,
+    syncedSource: fieldpulseEstimateId != null ? ("fieldpulse" as const) : null,
+  }));
 }
 
 export interface EstimateLineItemView {
@@ -268,6 +276,8 @@ export interface EstimateDetailView {
   readonly expiresAt: Date | null;
   readonly createdAt: Date;
   readonly options: EstimateOptionView[];
+  /** Which FSM this estimate is a read-only mirror of, or null when native. */
+  readonly syncedSource: "fieldpulse" | null;
 }
 
 /**
@@ -363,6 +373,7 @@ export async function getEstimateDetailById(
       signatureName: estimates.signatureName,
       expiresAt: estimates.expiresAt,
       createdAt: estimates.createdAt,
+      fieldpulseEstimateId: estimates.fieldpulseEstimateId,
     })
     .from(estimates)
     .where(withTenant(estimates, organizationId, eq(estimates.id, id)))
@@ -370,9 +381,14 @@ export async function getEstimateDetailById(
 
   if (!est) return null;
 
+  const { fieldpulseEstimateId, ...header } = est;
   // Admin detail: include snapshotted cost so the UI can show margin.
   const options = await loadOptionsWithLineItems(organizationId, est.id, true);
-  return { ...est, options };
+  return {
+    ...header,
+    options,
+    syncedSource: fieldpulseEstimateId != null ? "fieldpulse" : null,
+  };
 }
 
 /**
@@ -387,12 +403,13 @@ export async function markEstimateSold(
   now: Date = new Date(),
 ): Promise<ApproveEstimateResult> {
   const [est] = await db
-    .select({ id: estimates.id, status: estimates.status })
+    .select({ id: estimates.id, status: estimates.status, fieldpulseEstimateId: estimates.fieldpulseEstimateId })
     .from(estimates)
     .where(withTenant(estimates, organizationId, eq(estimates.id, id)))
     .limit(1);
 
   if (!est) return { ok: false, reason: "not_found" };
+  if (est.fieldpulseEstimateId != null) return { ok: false, reason: "synced_read_only" };
   if (est.status !== "open") return { ok: false, reason: "already_decided" };
 
   const [opt] = await db
@@ -419,7 +436,13 @@ export async function markEstimateSold(
       updatedAt: now,
     })
     .where(
-      withTenant(estimates, organizationId, eq(estimates.id, est.id), eq(estimates.status, "open")),
+      withTenant(
+        estimates,
+        organizationId,
+        eq(estimates.id, est.id),
+        eq(estimates.status, "open"),
+        isNull(estimates.fieldpulseEstimateId),
+      ),
     )
     .returning({ id: estimates.id });
 

@@ -78,6 +78,12 @@ export async function PATCH(
 
     if (!result.ok) {
       switch (result.reason) {
+        case "synced_read_only":
+          return errorResponse(
+            "This estimate is synced from FieldPulse — status is managed there",
+            "SYNCED_READ_ONLY",
+            409,
+          );
         case "not_found":
           return errorResponse("Estimate not found", "NOT_FOUND", 404);
         case "already_decided":

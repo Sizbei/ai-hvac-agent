@@ -88,7 +88,7 @@ describe("createEstimate", () => {
 
 describe("markEstimateSold", () => {
   it("rejects a non-open estimate (status guard)", async () => {
-    mockSelectSeq([[{ id: "est-1", status: "sold" }]]);
+    mockSelectSeq([[{ id: "est-1", status: "sold", fieldpulseEstimateId: null }]]);
     const r = await markEstimateSold(ORG, "est-1", "opt-1");
     expect(r).toEqual({ ok: false, reason: "already_decided" });
   });
@@ -101,7 +101,7 @@ describe("markEstimateSold", () => {
 
   it("rejects an option that does not belong to the estimate", async () => {
     mockSelectSeq([
-      [{ id: "est-1", status: "open" }], // estimate is open
+      [{ id: "est-1", status: "open", fieldpulseEstimateId: null }], // native, open
       [], // option lookup finds nothing
     ]);
     const r = await markEstimateSold(ORG, "est-1", "opt-bad");
@@ -110,7 +110,7 @@ describe("markEstimateSold", () => {
 
   it("marks an open estimate sold for a valid option", async () => {
     mockSelectSeq([
-      [{ id: "est-1", status: "open" }],
+      [{ id: "est-1", status: "open", fieldpulseEstimateId: null }],
       [{ id: "opt-1" }],
     ]);
     vi.mocked(db.update).mockReturnValue({
@@ -122,6 +122,13 @@ describe("markEstimateSold", () => {
     } as never);
     const r = await markEstimateSold(ORG, "est-1", "opt-1");
     expect(r).toEqual({ ok: true, estimateId: "est-1" });
+  });
+
+  it("refuses a FieldPulse-synced estimate and never writes", async () => {
+    mockSelectSeq([[{ id: "est-fp", status: "open", fieldpulseEstimateId: "fp-123" }]]);
+    const r = await markEstimateSold(ORG, "est-fp", "opt-1");
+    expect(r).toEqual({ ok: false, reason: "synced_read_only" });
+    expect(db.update).not.toHaveBeenCalled();
   });
 });
 

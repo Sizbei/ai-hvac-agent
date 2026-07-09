@@ -40,6 +40,7 @@ interface EstimateDetail {
   readonly expiresAt: string | null;
   readonly createdAt: string;
   readonly options: Option[];
+  readonly syncedSource: 'fieldpulse' | null;
 }
 
 export default function EstimateDetailPage({
@@ -155,6 +156,7 @@ export default function EstimateDetailPage({
   }
 
   const isOpen = estimate.status === 'open';
+  const isSynced = estimate.syncedSource === 'fieldpulse';
 
   return (
     <div className="p-6 space-y-6">
@@ -170,8 +172,22 @@ export default function EstimateDetailPage({
             Created {new Date(estimate.createdAt).toLocaleDateString()}
           </p>
         </div>
-        <EstimateStatusBadge status={estimate.status} />
+        <div className="flex items-center gap-2">
+          <EstimateStatusBadge status={estimate.status} />
+          {isSynced && (
+            <span className="rounded border bg-violet-50 px-1.5 py-px text-[10px] font-medium text-violet-700">
+              FieldPulse
+            </span>
+          )}
+        </div>
       </div>
+
+      {/* ── Synced source banner ── */}
+      {isSynced && (
+        <div className="rounded-md border border-violet-200 bg-violet-50/60 px-3 py-2 text-sm text-violet-900">
+          Synced from FieldPulse — estimates are managed there.
+        </div>
+      )}
 
       {(estimate.customerId || estimate.serviceRequestId) && (
         <div className="flex gap-4 text-sm">
@@ -282,8 +298,8 @@ export default function EstimateDetailPage({
         </Card>
       )}
 
-      {/* Generate invoice — only once sold */}
-      {estimate.status === 'sold' && (
+      {/* Generate invoice — only once sold; never for synced estimates */}
+      {estimate.status === 'sold' && !isSynced && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Invoice</CardTitle>
@@ -323,8 +339,8 @@ export default function EstimateDetailPage({
           ) : null;
         })()}
 
-      {/* Mark sold (admin path) — only while open */}
-      {isOpen && (
+      {/* Mark sold (admin path) — only while open and not synced */}
+      {isOpen && !isSynced && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Mark sold</CardTitle>

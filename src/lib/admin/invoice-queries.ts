@@ -36,7 +36,7 @@ import { invoiceRef } from "@/lib/admin/invoice-collectible";
 
 export type CreateInvoiceResult =
   | { readonly ok: true; readonly invoiceId: string }
-  | { readonly ok: false; readonly reason: "estimate_not_sold" | "no_sold_option" };
+  | { readonly ok: false; readonly reason: "estimate_not_sold" | "no_sold_option" | "synced_read_only" };
 
 /**
  * Materialize an invoice from a SOLD estimate: snapshot the chosen option's line
@@ -53,6 +53,7 @@ export async function createInvoiceFromSoldEstimate(
       soldOptionId: estimates.soldOptionId,
       customerId: estimates.customerId,
       serviceRequestId: estimates.serviceRequestId,
+      fieldpulseEstimateId: estimates.fieldpulseEstimateId,
     })
     .from(estimates)
     .where(withTenant(estimates, organizationId, eq(estimates.id, estimateId)))
@@ -60,6 +61,9 @@ export async function createInvoiceFromSoldEstimate(
 
   if (!est || est.status !== "sold") {
     return { ok: false, reason: "estimate_not_sold" };
+  }
+  if (est.fieldpulseEstimateId != null) {
+    return { ok: false, reason: "synced_read_only" };
   }
   if (!est.soldOptionId) {
     return { ok: false, reason: "no_sold_option" };

@@ -11,6 +11,7 @@ export interface EstimateListItem {
   readonly createdAt: string;
   readonly expiresAt: string | null;
   readonly signedAt: string | null;
+  readonly syncedSource: 'fieldpulse' | null;
 }
 
 interface UseEstimatesResult {

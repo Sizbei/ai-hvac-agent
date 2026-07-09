@@ -75,7 +75,14 @@ export default function EstimatesPage() {
                 <tr key={est.id} className="border-t hover:bg-muted/30">
                   <td className="px-4 py-3">{formatDate(est.createdAt)}</td>
                   <td className="px-4 py-3">
-                    <EstimateStatusBadge status={est.status} />
+                    <div className="flex items-center gap-1.5">
+                      <EstimateStatusBadge status={est.status} />
+                      {est.syncedSource === 'fieldpulse' && (
+                        <span className="rounded border bg-violet-50 px-1.5 py-px text-[10px] font-medium text-violet-700">
+                          FieldPulse
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3 font-medium">
                     {formatCentsExact(est.totalCents)}
