@@ -47,6 +47,25 @@ export interface FieldpulseJob {
   readonly scheduleEnd?: string | null; // ISO datetime
   readonly assignedUserId?: string | null; // The Fieldpulse user/technician id
   readonly createdAt?: string | null; // ISO datetime
+  // ── Phase-4 import fields (LIVE-VERIFIED 2026-07-09, account 182499) ──
+  // Free-text work classification (e.g. "HVAC DOWN", "Walk in beer cooler").
+  readonly jobType?: string | null;
+  // Secondary title — used as fallback when jobType is absent.
+  readonly subtitle?: string | null;
+  // Tech's internal notes (field_notes) and customer-visible notes (notes).
+  readonly fieldNotes?: string | null;
+  readonly notes?: string | null;
+  // Integer status code (vocabulary: 4=completed confirmed; 1,2,3,6 TBD).
+  readonly statusInt?: number | null;
+  // Non-null when the job is soft-deleted — skip on import.
+  readonly deletedAt?: string | null;
+  // Non-null for terminal jobs (status 4, all have completed_at set).
+  readonly completedAt?: string | null;
+  // Customer-facing arrival window (may differ from schedule start/end).
+  readonly arrivalWindowStart?: string | null;
+  readonly arrivalWindowEnd?: string | null;
+  // All technician assignments for this job; first entry is the primary.
+  readonly assignments?: readonly { readonly userId: string }[];
 }
 
 /** A Fieldpulse user/team member (for technician roster). */

@@ -303,6 +303,16 @@ function toJob(raw: unknown): FieldpulseJob {
   }
   const str = (v: unknown): string | null =>
     typeof v === "string" ? v : null;
+  // Parse assignments[].user_id for Phase-4 import.
+  const assignments = Array.isArray(obj.assignments)
+    ? obj.assignments
+        .map((a): { readonly userId: string } | null => {
+          if (!a || typeof a !== "object") return null;
+          const uid = idStr((a as Record<string, unknown>).user_id);
+          return uid ? { userId: uid } : null;
+        })
+        .filter((a): a is { readonly userId: string } => a !== null)
+    : undefined;
   // Real API: schedule is start_time/end_time; status is an int (stringified).
   return {
     id,
@@ -314,6 +324,17 @@ function toJob(raw: unknown): FieldpulseJob {
     scheduleEnd: str(obj.end_time) ?? str(obj.schedule_end),
     assignedUserId: idStr(obj.assigned_user_id),
     createdAt: str(obj.created_at),
+    // Phase-4 import fields (LIVE-VERIFIED 2026-07-09).
+    jobType: str(obj.job_type),
+    subtitle: str(obj.subtitle),
+    fieldNotes: str(obj.field_notes),
+    notes: str(obj.notes),
+    statusInt: typeof obj.status === "number" ? obj.status : null,
+    deletedAt: str(obj.deleted_at),
+    completedAt: str(obj.completed_at),
+    arrivalWindowStart: str(obj.customer_arrival_window_start_time),
+    arrivalWindowEnd: str(obj.customer_arrival_window_end_time),
+    assignments,
   };
 }
 
