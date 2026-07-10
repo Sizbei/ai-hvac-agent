@@ -225,8 +225,11 @@ export async function getRequestById(
       customerNameEncrypted: serviceRequests.customerNameEncrypted,
       customerNameFromCustomer: customers.nameEncrypted,
       customerPhoneEncrypted: serviceRequests.customerPhoneEncrypted,
+      customerPhoneFromCustomer: customers.phoneEncrypted,
       customerEmailEncrypted: serviceRequests.customerEmailEncrypted,
+      customerEmailFromCustomer: customers.emailEncrypted,
       addressEncrypted: serviceRequests.addressEncrypted,
+      addressFromCustomer: customers.addressEncrypted,
       fieldpulseJobId: serviceRequests.fieldpulseJobId,
       hcpJobId: serviceRequests.hcpJobId,
       assignedTo: serviceRequests.assignedTo,
@@ -347,9 +350,18 @@ export async function getRequestById(
     customerName:
       safeDecrypt(row.customerNameEncrypted) ??
       safeDecrypt(row.customerNameFromCustomer),
-    customerPhone: safeDecrypt(row.customerPhoneEncrypted),
-    customerEmail: safeDecrypt(row.customerEmailEncrypted),
-    address: safeDecrypt(row.addressEncrypted),
+    // FP/HCP-imported jobs carry no per-request PII — the contact details live
+    // on the linked customers row. Fall back to it (same pattern as the name)
+    // so the detail sheet shows phone/email/address for imported bookings.
+    customerPhone:
+      safeDecrypt(row.customerPhoneEncrypted) ??
+      safeDecrypt(row.customerPhoneFromCustomer),
+    customerEmail:
+      safeDecrypt(row.customerEmailEncrypted) ??
+      safeDecrypt(row.customerEmailFromCustomer),
+    address:
+      safeDecrypt(row.addressEncrypted) ??
+      safeDecrypt(row.addressFromCustomer),
     syncedSource:
       row.fieldpulseJobId != null
         ? "fieldpulse"
