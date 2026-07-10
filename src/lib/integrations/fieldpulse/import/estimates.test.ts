@@ -516,3 +516,60 @@ describe("importEstimatesFromFieldpulse", () => {
     );
   });
 });
+
+
+// ── Spillover integration: est._raw → buildFpSpillover → fieldpulseData ────────
+
+describe("importEstimatesFromFieldpulse — fieldpulseData spillover from raw payload", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("captures unpromoted safe raw fields and excludes promoted/denied ones", async () => {
+    const est = makeEstimate({
+      lineItems: [], // no line items → simple insert path
+      _raw: {
+        // Unpromoted, non-denied primitive — should SURVIVE (denylist mode).
+        discount_type: "percent",
+        // Promoted fields — excluded (already typed columns).
+        id: "70000001",
+        customer_id: "20000001",
+        status: "2",
+        subtotal: "250.00",
+        total: "270.00",
+        due_date: "2026-08-01",
+        name: "HVAC Repair Quote",
+        // Globally denied — excluded (qbo_ prefix / estimate_display_ prefix).
+        qbo_estimate_id: "qb-est-1",
+        estimate_display_settings: "compact",
+      },
+    });
+    const client = makeClient([est]);
+    const counts = makeCounts();
+    // Pre-selects: existingFpIds, customerMap, jobMap.
+    wireSelects([[], [], []]);
+    const { values } = wireSimpleInsert();
+
+    await importEstimatesFromFieldpulse(ORG, counts, client);
+
+    expect(values).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fieldpulseData: { discount_type: "percent" },
+      }),
+    );
+  });
+
+  it("fieldpulseData is null when _raw is absent (fallback to {})", async () => {
+    const est = makeEstimate({ lineItems: [] }); // no _raw
+    const client = makeClient([est]);
+    const counts = makeCounts();
+    wireSelects([[], [], []]);
+    const { values } = wireSimpleInsert();
+
+    await importEstimatesFromFieldpulse(ORG, counts, client);
+
+    expect(values).toHaveBeenCalledWith(
+      expect.objectContaining({ fieldpulseData: null }),
+    );
+  });
+});

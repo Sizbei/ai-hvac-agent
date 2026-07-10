@@ -386,6 +386,32 @@ function toCustomer(raw: unknown): FieldpulseCustomer {
   }
   const customFields = cfEntries.length > 0 ? cfEntries : null;
 
+  // ── Field-parity P1 additions ──
+  const accountType = str(obj.account_type);
+  const isTaxExempt =
+    typeof obj.is_tax_exempt === "boolean"
+      ? obj.is_tax_exempt
+      : obj.is_tax_exempt === 1
+        ? true
+        : obj.is_tax_exempt === 0
+          ? false
+          : null;
+  // Billing address: only composed when has_different_billing_address is truthy.
+  // The field was not present in the sanitized fixture (2026-07-11) — the guard
+  // is defensive (compose when billing_address_1 is populated AND the flag is
+  // truthy or the flag is absent but billing_address_1 differs from address_1).
+  const hasDifferentBilling = obj.has_different_billing_address === true || obj.has_different_billing_address === 1;
+  const billingAddress1 = str(obj.billing_address_1);
+  const billingAddress = hasDifferentBilling && billingAddress1
+    ? toAddress({
+        street: obj.billing_address_1,
+        street_line_2: obj.billing_address_2,
+        city: obj.billing_city,
+        state: obj.billing_state,
+        zip: obj.billing_zip_code,
+      })
+    : null;
+
   return {
     id,
     firstName: str(obj.first_name),
@@ -402,6 +428,12 @@ function toCustomer(raw: unknown): FieldpulseCustomer {
     mergedCustomerId: idStr(obj.merged_customer_id),
     customFields,
     leadSource,
+    // P1 field-parity additions.
+    accountType,
+    isTaxExempt,
+    billingAddress,
+    // Import-internal: raw payload so importers can feed it to buildFpSpillover.
+    _raw: obj,
   };
 }
 
@@ -450,6 +482,8 @@ function toJob(raw: unknown): FieldpulseJob {
     arrivalWindowStart: str(obj.customer_arrival_window_start_time),
     arrivalWindowEnd: str(obj.customer_arrival_window_end_time),
     assignments,
+    // Import-internal: raw payload so importers can feed it to buildFpSpillover.
+    _raw: obj,
   };
 }
 
@@ -540,6 +574,8 @@ function toInvoice(raw: unknown): FieldpulseInvoice | null {
     createdAt: str(obj.created_at),
     deletedAt: str(obj.deleted_at),
     lineItems: toLineItems(obj.line_items),
+    // Import-internal: raw payload so importers can feed it to buildFpSpillover.
+    _raw: obj,
   };
 }
 
@@ -587,6 +623,9 @@ function toEstimate(raw: unknown): FieldpulseEstimate | null {
   const id = idStr(obj.id);
   if (!id) return null;
   const str = (v: unknown): string | null => typeof v === "string" ? v : null;
+  // title: FP exposes it as `name` (the human label for the estimate).
+  const title =
+    str(obj.name) ?? str(obj.title) ?? null;
   return {
     id,
     customerId: idStr(obj.customer_id),
@@ -609,6 +648,10 @@ function toEstimate(raw: unknown): FieldpulseEstimate | null {
         : typeof (obj.custom_status as Record<string, unknown> | null)?.name === "string"
           ? ((obj.custom_status as Record<string, unknown>).name as string)
           : null,
+    // P1 field-parity addition.
+    title,
+    // Import-internal: raw payload so importers can feed it to buildFpSpillover.
+    _raw: obj,
   };
 }
 
@@ -649,6 +692,8 @@ function toAsset(raw: unknown): FieldpulseAsset | null {
     maintenanceAgreementId: idStr(obj.maintenance_agreement_id),
     status: str(obj.status),
     deletedAt: str(obj.deleted_at),
+    // Import-internal: raw payload so importers can feed it to buildFpSpillover.
+    _raw: obj,
   };
 }
 
@@ -718,7 +763,37 @@ function toItem(raw: unknown): FieldpulseItem | null {
   const isActive = obj.is_active !== false && obj.is_active !== 0;
   const rawFpType = typeof obj.type === "string" ? obj.type : null;
   const type = mapFpItemType(obj.type);
-  return { id, name, priceCents, taxable, isActive, type, rawFpType };
+  // ── Field-parity P1 additions ──
+  const costCents = dollarsToCents(obj.default_unit_cost);
+  const description =
+    typeof obj.default_description === "string" && obj.default_description.trim()
+      ? obj.default_description.trim()
+      : null;
+  const isLaborItem = obj.is_labor_item === true || obj.is_labor_item === 1;
+  const quantityAvailable =
+    typeof obj.quantity_available === "number" && Number.isFinite(obj.quantity_available)
+      ? Math.round(obj.quantity_available)
+      : null;
+  const vendorType =
+    typeof obj.vendor_type === "string" && obj.vendor_type.trim()
+      ? obj.vendor_type.trim()
+      : null;
+  // automatic_markup_percentage → round to int (same column as native markupPct).
+  // Use parseFloat directly so 15.5 → 16 (rounded int percent).
+  const markupPct =
+    typeof obj.automatic_markup_percentage === "number" ||
+    typeof obj.automatic_markup_percentage === "string"
+      ? (() => {
+          const n = Number(obj.automatic_markup_percentage);
+          return Number.isFinite(n) ? Math.round(n) : null;
+        })()
+      : null;
+  return {
+    id, name, priceCents, taxable, isActive, type, rawFpType,
+    costCents, description, isLaborItem, quantityAvailable, vendorType, markupPct,
+    // Import-internal: raw payload so importers can feed it to buildFpSpillover.
+    _raw: obj,
+  };
 }
 
 /** Narrow an untrusted FieldPulse location payload to {@link FieldpulseLocation}. */

@@ -37,6 +37,7 @@ import type { FieldpulseClient } from "../client";
 import type { FieldpulseEstimate } from "../types";
 import type { PhaseResult } from "./run-import";
 import { parseFpDate } from "./jobs";
+import { buildFpSpillover } from "./spillover";
 
 export function mapFpEstimateStatus(
   fpStatus: string | null | undefined,
@@ -132,6 +133,15 @@ export async function importEstimatesFromFieldpulse(
         );
       }
 
+      // P1: parse due_date and title.
+      const dueDate = parseFpDate(est.dueDate) ?? null;
+      const title = est.title ?? null;
+
+      // Spillover: build from the raw FP estimate payload (snake_case fields).
+      // est._raw is threaded through toEstimate(); the denylist model captures
+      // any unpromoted, non-denied primitive long-tail fields FP may carry.
+      const fpSpillover = buildFpSpillover(est._raw ?? {}, "estimates");
+
       const upserted = await db
         .insert(estimates)
         .values({
@@ -142,6 +152,9 @@ export async function importEstimatesFromFieldpulse(
           status,
           totalCents: est.totalCents ?? 0,
           fieldpulseStatusName,
+          dueDate: dueDate ?? undefined,
+          title: title ?? undefined,
+          fieldpulseData: fpSpillover,
           createdAt: parseFpDate(est.createdAt) ?? undefined,
           updatedAt: new Date(),
         })
@@ -154,6 +167,9 @@ export async function importEstimatesFromFieldpulse(
             status,
             totalCents: est.totalCents ?? 0,
             fieldpulseStatusName,
+            dueDate: dueDate ?? undefined,
+            title: title ?? undefined,
+            fieldpulseData: fpSpillover,
             updatedAt: new Date(),
           },
         })

@@ -274,6 +274,13 @@
       "when": 1783626831156,
       "tag": "0038_fp_item_id",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1783715603860,
+      "tag": "0039_fp_field_parity_p1",
+      "breakpoints": true
     }
   ]
 }

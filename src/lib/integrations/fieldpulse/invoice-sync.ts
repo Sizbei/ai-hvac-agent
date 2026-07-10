@@ -25,6 +25,7 @@ import { logger } from "@/lib/logger";
 import { getFieldpulseClient } from "./client";
 import { parseFpDate } from "./fp-dates";
 import type { FieldpulseInvoiceStatus, FieldpulseInvoice } from "./types";
+import { buildFpSpillover } from "./import/spillover";
 
 /**
  * Map a Fieldpulse invoice status to our invoice status enum.
@@ -388,6 +389,11 @@ export async function upsertInvoiceRecord(
       ),
     );
 
+  // Spillover: build from the raw FP invoice payload (snake_case fields).
+  // invoice._raw is threaded through toInvoice(); the denylist model captures
+  // any unpromoted, non-denied primitive long-tail fields FP may carry.
+  const fpSpillover = buildFpSpillover(invoice._raw ?? {}, "invoices");
+
   if (existing) {
     // Re-sync: update money/state, REPLACE line items (reflect current FP state),
     // + audit — atomically (single implicit txn).
@@ -405,6 +411,7 @@ export async function upsertInvoiceRecord(
           // predate these columns.
           issuedAt: parseFpDate(invoice.createdAt),
           dueDate: parseFpDate(invoice.dueDate),
+          fieldpulseData: fpSpillover,
           updatedAt: new Date(),
         })
         .where(
@@ -456,6 +463,7 @@ export async function upsertInvoiceRecord(
       amountPaidCents,
       issuedAt: parseFpDate(invoice.createdAt),
       dueDate: parseFpDate(invoice.dueDate),
+      fieldpulseData: fpSpillover,
     })
     .onConflictDoNothing()
     .returning({ id: invoices.id });

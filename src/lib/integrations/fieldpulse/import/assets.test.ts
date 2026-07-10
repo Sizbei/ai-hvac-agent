@@ -272,3 +272,58 @@ describe("importAssetsFromFieldpulse", () => {
     expect(db.insert).not.toHaveBeenCalled();
   });
 });
+
+
+// ── Spillover integration: asset._raw → buildFpSpillover → fieldpulseData ──────
+
+describe("importAssetsFromFieldpulse — fieldpulseData spillover from raw payload", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("captures unpromoted safe raw fields and excludes promoted/denied ones", async () => {
+    const asset = makeAsset({
+      _raw: {
+        // Unpromoted, non-denied primitive — should SURVIVE (denylist mode).
+        manufacturer: "Carrier",
+        // Promoted fields — excluded (already typed columns).
+        id: "90000001",
+        customer_id: "20000001",
+        title: "Carrier AC Unit",
+        asset_type: "ac",
+        tag: "SN-FAKE-001",
+        install_date: "2020-05-15",
+        status: "active",
+        // Globally denied — excluded (qbo_ prefix).
+        qbo_id: "qb-asset-1",
+      },
+    });
+    const client = makeClient([asset]);
+    const counts = makeCounts();
+    // Pre-selects: existingFpIds, customerMap (has the customer).
+    wireSelects([[], [{ fpId: "20000001", nativeId: "cust-uuid" }]]);
+    const { values } = wireInsert();
+
+    await importAssetsFromFieldpulse(ORG, counts, client);
+
+    expect(values).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fieldpulseData: { manufacturer: "Carrier" },
+      }),
+    );
+  });
+
+  it("fieldpulseData is null when _raw is absent (fallback to {})", async () => {
+    const asset = makeAsset(); // no _raw
+    const client = makeClient([asset]);
+    const counts = makeCounts();
+    wireSelects([[], [{ fpId: "20000001", nativeId: "cust-uuid" }]]);
+    const { values } = wireInsert();
+
+    await importAssetsFromFieldpulse(ORG, counts, client);
+
+    expect(values).toHaveBeenCalledWith(
+      expect.objectContaining({ fieldpulseData: null }),
+    );
+  });
+});

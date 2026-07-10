@@ -621,6 +621,9 @@ export const serviceRequests = pgTable(
       totalPriceCents: number | null;
       mapCoords: unknown | null;
     }>(),
+    // fieldpulse_data: spillover jsonb for FP job fields not promoted to typed columns.
+    // Only non-PII safe fields (tags, is_multiday_job). NULL on native rows.
+    fieldpulseData: jsonb("fieldpulse_data"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -772,6 +775,17 @@ export const customers = pgTable(
     // history stays intact, but every PII column is scrubbed and the blind
     // indexes nulled. NULL = the customer is a normal, identified record.
     anonymizedAt: timestamp("anonymized_at", { withTimezone: true }),
+    // ── FieldPulse field-parity P1 promotions ──
+    // is_tax_exempt: from FP `is_tax_exempt`. NULL on native rows.
+    isTaxExempt: boolean("is_tax_exempt"),
+    // billing_address_encrypted: encrypted billing address when different from service
+    // address (FP `billing_address_1/2/city/state/zip`). NULL on native rows.
+    // SECURITY: same encrypt() + sanitizeAddress pattern as addressEncrypted.
+    billingAddressEncrypted: text("billing_address_encrypted"),
+    // fieldpulse_data: spillover jsonb for safe non-PII FP fields not promoted to typed
+    // columns. Subject to strict ALLOWLIST — PII fields can NEVER enter this column.
+    // See buildFpSpillover docs for the enforced allowlist.
+    fieldpulseData: jsonb("fieldpulse_data"),
   },
   (table) => [
     index("customers_org_id_idx").on(table.organizationId),
@@ -843,6 +857,8 @@ export const customerEquipment = pgTable(
     replacedByEquipmentId: uuid("replaced_by_equipment_id"),
     retiredAt: timestamp("retired_at", { withTimezone: true }),
     fieldpulseAssetId: text("fieldpulse_asset_id"),
+    // fieldpulse_data: spillover jsonb for FP asset fields not promoted to typed columns.
+    fieldpulseData: jsonb("fieldpulse_data"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -2214,6 +2230,16 @@ export const pricebookItems = pgTable(
     // FieldPulse provenance — set on items mirrored from the /items endpoint.
     // NULL for natively-created items.
     fieldpulseItemId: text("fieldpulse_item_id"),
+    // ── FieldPulse field-parity P1 promotions ──
+    // is_labor_item: true when FP marks this as a labor line.
+    isLaborItem: boolean("is_labor_item").notNull().default(false),
+    // quantity_available: FP inventory stock count. NULL = untracked / display-only.
+    quantityAvailable: integer("quantity_available"),
+    // vendor_type: FP free-text vendor classification (e.g. "carrier", "trane").
+    vendorType: text("vendor_type"),
+    // fieldpulse_data: spillover jsonb for FP fields not promoted to typed columns.
+    // Only set on FP-mirrored rows (fieldpulse_item_id IS NOT NULL). NULL on native rows.
+    fieldpulseData: jsonb("fieldpulse_data"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -2598,6 +2624,13 @@ export const estimates = pgTable(
     soldOptionId: uuid("sold_option_id"),
     fieldpulseEstimateId: text("fieldpulse_estimate_id"),
     fieldpulseStatusName: text("fieldpulse_status_name"),
+    // ── FieldPulse field-parity P1 promotions ──
+    // due_date: real FP due date (NULL for native estimates).
+    dueDate: timestamp("due_date", { withTimezone: true }),
+    // title: human-readable estimate title from FP (NULL for native estimates).
+    title: text("title"),
+    // fieldpulse_data: spillover jsonb for FP fields not promoted to typed columns.
+    fieldpulseData: jsonb("fieldpulse_data"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -2695,6 +2728,8 @@ export const invoices = pgTable(
     // Payment due date from the source system; drives overdue (falls back to
     // the age>=30 heuristic when null).
     dueDate: timestamp("due_date", { withTimezone: true }),
+    // fieldpulse_data: spillover jsonb for FP invoice fields not promoted to typed columns.
+    fieldpulseData: jsonb("fieldpulse_data"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },

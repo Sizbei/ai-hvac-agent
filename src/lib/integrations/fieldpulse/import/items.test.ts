@@ -41,6 +41,13 @@ function makeItem(overrides: Partial<FieldpulseItem> = {}): FieldpulseItem {
     isActive: true,
     type: "service",
     rawFpType: "service",
+    // P1 field-parity defaults (required by the interface; null = absent from FP)
+    costCents: null,
+    description: null,
+    isLaborItem: false,
+    quantityAvailable: null,
+    vendorType: null,
+    markupPct: null,
     ...overrides,
   };
 }
@@ -255,5 +262,57 @@ describe("importItemsFromFieldpulse", () => {
     expect(counts.fetched).toBe(2);
     expect(counts.updated).toBe(1);
     expect(counts.created).toBe(1);
+  });
+});
+
+
+// ── Spillover integration: fp._raw → buildFpSpillover → fieldpulseData ─────────
+
+describe("importItemsFromFieldpulse — fieldpulseData spillover from raw payload", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("captures unpromoted safe raw fields and excludes promoted/denied ones", async () => {
+    const item = makeItem({
+      _raw: {
+        // Unpromoted, non-denied primitive — should SURVIVE (denylist mode).
+        unit_of_measure: "each",
+        // Promoted fields — excluded (already typed columns).
+        id: "10001",
+        name: "Diagnostic Service",
+        default_unit_price: "99.00",
+        default_unit_cost: "45.00",
+        is_active: true,
+        // Globally denied — excluded (qbo_ prefix).
+        qbo_item_id: "qb-item-1",
+      },
+    });
+    const client = makeClient([item]);
+    const counts = makeCounts();
+    wireSelect([]);
+    const { values } = wireInsert();
+
+    await importItemsFromFieldpulse(ORG, counts, client);
+
+    expect(values).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fieldpulseData: { unit_of_measure: "each" },
+      }),
+    );
+  });
+
+  it("fieldpulseData is null when _raw is absent (fallback to {})", async () => {
+    const item = makeItem(); // no _raw
+    const client = makeClient([item]);
+    const counts = makeCounts();
+    wireSelect([]);
+    const { values } = wireInsert();
+
+    await importItemsFromFieldpulse(ORG, counts, client);
+
+    expect(values).toHaveBeenCalledWith(
+      expect.objectContaining({ fieldpulseData: null }),
+    );
   });
 });

@@ -32,6 +32,17 @@ export interface FieldpulseCustomer {
   // Raw lead source string from the FP API — folded into customFields by the
   // mapper; retained here so types.ts mirrors the raw API shape.
   readonly leadSource?: string | null;
+  // ── Field-parity P1 additions ──
+  // Raw FP account_type string (e.g. "residential", "commercial"). NULL when absent.
+  readonly accountType?: string | null;
+  // Whether this customer is tax-exempt per FP. NULL when absent.
+  readonly isTaxExempt?: boolean | null;
+  // Billing address fields — only when has_different_billing_address is true in FP.
+  readonly billingAddress?: FieldpulseAddress | null;
+  // ── Import-internal: raw FP API payload ──
+  // Retained by toCustomer() so importers can pass it to buildFpSpillover.
+  // NOT written to any DB column directly; treated as opaque by callers.
+  readonly _raw?: Record<string, unknown>;
 }
 
 /** Address shape within a customer or job. */
@@ -73,6 +84,10 @@ export interface FieldpulseJob {
   readonly arrivalWindowEnd?: string | null;
   // All technician assignments for this job; first entry is the primary.
   readonly assignments?: readonly { readonly userId: string }[];
+  // ── Import-internal: raw FP API payload ──
+  // Retained by toJob() so importers can pass it to buildFpSpillover.
+  // NOT written to any DB column directly; treated as opaque by callers.
+  readonly _raw?: Record<string, unknown>;
 }
 
 /** A Fieldpulse user/team member (for technician roster). */
@@ -174,6 +189,10 @@ export interface FieldpulseInvoice {
   readonly lineItems?: readonly FieldpulseInvoiceLineItem[];
   // Non-null when the invoice has been soft-deleted — skip on import.
   readonly deletedAt?: string | null;
+  // ── Import-internal: raw FP API payload ──
+  // Retained by toInvoice() so importers can pass it to buildFpSpillover.
+  // NOT written to any DB column directly; treated as opaque by callers.
+  readonly _raw?: Record<string, unknown>;
 }
 
 /** Invoice status values from Fieldpulse (adjusted per actual docs). */
@@ -224,6 +243,26 @@ export interface FieldpulseItem {
    * Null/undefined when absent from the API payload.
    */
   readonly rawFpType: string | null;
+  // ── Field-parity P1 additions ──
+  /** Cost in integer cents from `default_unit_cost`. NULL when absent. */
+  readonly costCents: number | null;
+  /** Default description text from `default_description`. NULL when absent. */
+  readonly description: string | null;
+  /** True when FP `is_labor_item` is set. */
+  readonly isLaborItem: boolean;
+  /** FP inventory stock count from `quantity_available`. NULL when absent/untracked. */
+  readonly quantityAvailable: number | null;
+  /** FP vendor type string from `vendor_type`. NULL when absent. */
+  readonly vendorType: string | null;
+  /**
+   * Markup percentage from `automatic_markup_percentage`, rounded to int.
+   * NULL when absent.
+   */
+  readonly markupPct: number | null;
+  // ── Import-internal: raw FP API payload ──
+  // Retained by toItem() so importers can pass it to buildFpSpillover.
+  // NOT written to any DB column directly; treated as opaque by callers.
+  readonly _raw?: Record<string, unknown>;
 }
 
 /** Input to validate an address against Fieldpulse. */
@@ -253,6 +292,13 @@ export interface FieldpulseEstimate {
   readonly lineItems?: readonly FieldpulseInvoiceLineItem[];
   /** Human-readable status label from the per-id GET /estimates/{id} response. */
   readonly customStatus?: string | null;
+  // ── Field-parity P1 additions ──
+  /** Human-readable estimate title from FP `name` or `title`. NULL when absent. */
+  readonly title?: string | null;
+  // ── Import-internal: raw FP API payload ──
+  // Retained by toEstimate() so importers can pass it to buildFpSpillover.
+  // NOT written to any DB column directly; treated as opaque by callers.
+  readonly _raw?: Record<string, unknown>;
 }
 
 /** A FieldPulse payment (their "Payments" resource). Money is in CENTS (client parses dollar strings). */
@@ -312,4 +358,8 @@ export interface FieldpulseAsset {
   readonly maintenanceAgreementId?: string | null;
   readonly status?: string | null;
   readonly deletedAt?: string | null;
+  // ── Import-internal: raw FP API payload ──
+  // Retained by toAsset() so importers can pass it to buildFpSpillover.
+  // NOT written to any DB column directly; treated as opaque by callers.
+  readonly _raw?: Record<string, unknown>;
 }

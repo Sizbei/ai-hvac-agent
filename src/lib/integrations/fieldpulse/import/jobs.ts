@@ -39,6 +39,7 @@ import type { PhaseResult } from "./run-import";
 import type { RequestStatus } from "@/lib/admin/request-status";
 import { generateReferenceNumber } from "@/lib/requests/submit-session-request";
 import { importOneFpCustomer, createDeletedPlaceholderCustomer } from "./customers";
+import { buildFpSpillover } from "./spillover";
 
 // ── Status map (pluggable) ─────────────────────────────────────────────────────
 // Edit this one object to expand the vocabulary when the user names their workflow.
@@ -356,6 +357,11 @@ export async function importJobsFromFieldpulse(
 
     const { job } = mapped;
 
+    // Build spillover from the raw FP job payload (snake_case fields).
+    // fp._raw is threaded through toJob(); JOBS_SAFE allowlist in buildFpSpillover
+    // ensures only safe fields (tags, is_multiday_job, tags_string) survive.
+    const fpJobSpillover = buildFpSpillover(fp._raw ?? {}, "jobs");
+
     try {
       // Resolve customer by fieldpulseCustomerId (Phase 3 guarantees it).
       let customerId = customerByFpId.get(job.fpCustomerId) ?? null;
@@ -488,6 +494,7 @@ export async function importJobsFromFieldpulse(
             referenceNumber,
             fieldpulseJobId: job.fpId,
             isAfterHours: false,
+            fieldpulseData: fpJobSpillover,
           }),
         ]);
         existingFpIds.add(job.fpId);
@@ -509,6 +516,7 @@ export async function importJobsFromFieldpulse(
             arrivalWindowStart: job.arrivalWindowStart,
             arrivalWindowEnd: job.arrivalWindowEnd,
             completedAt: job.completedAt,
+            fieldpulseData: fpJobSpillover,
             updatedAt: new Date(),
           })
           .where(

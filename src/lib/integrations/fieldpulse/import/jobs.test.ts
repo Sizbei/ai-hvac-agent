@@ -721,3 +721,100 @@ describe("importJobsFromFieldpulse", () => {
     expect(counts.created).toBe(1);
   });
 });
+
+
+// ── Spillover integration: fp._raw → buildFpSpillover → fieldpulseData ──────────
+
+describe("importJobsFromFieldpulse — fieldpulseData spillover from raw payload", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(db.batch).mockResolvedValue([[], []] as never);
+    const defaultInsertRet = vi.fn().mockResolvedValue([{ id: "default-id" }]);
+    const defaultOnConflictDoUpdate = vi.fn().mockReturnValue({ returning: defaultInsertRet });
+    const defaultOnConflictDoNothing = vi.fn().mockReturnValue({ returning: defaultInsertRet });
+    const defaultValues = vi.fn().mockReturnValue({
+      onConflictDoUpdate: defaultOnConflictDoUpdate,
+      onConflictDoNothing: defaultOnConflictDoNothing,
+      returning: defaultInsertRet,
+    });
+    vi.mocked(db.insert).mockReturnValue({ values: defaultValues } as never);
+  });
+
+  it("passes JOBS_SAFE fields from fp._raw to fieldpulseData", async () => {
+    // Simulate a FieldpulseJob as returned by toJob() — _raw carries snake_case
+    // API payload that buildFpSpillover can see.
+    const fpWithRaw: FieldpulseJob = {
+      ...makeJob(),
+      _raw: {
+        id: "10000001",
+        customer_id: "20000001",
+        status: 1,
+        // JOBS_SAFE fields — should survive
+        tags: ["urgent", "repeat-customer"],
+        is_multiday_job: false,
+        tags_string: "urgent, repeat-customer",
+        // Non-safe fields — denied by JOBS_SAFE allowlist
+        billing: 1,
+        some_unclassified_field: "secret",
+      },
+    };
+
+    const client = makeClient([fpWithRaw]);
+    const counts = makeCounts();
+
+    // Wire: customer exists, job is new.
+    wireSelectSequence([
+      [], // existingFpIds → new
+      [{ id: "cust-uuid", fieldpulseCustomerId: "20000001" }],
+      [], // techByFpId
+    ]);
+
+    vi.mocked(db.batch).mockResolvedValue([[], []] as never);
+
+    await importJobsFromFieldpulse(ORG, counts, client);
+    expect(counts.created).toBe(1);
+
+    // Directly verify buildFpSpillover gives the right output for this _raw.
+    // This is the integration assertion: the raw payload that _raw would contain
+    // at import time produces the expected spillover keys.
+    const { buildFpSpillover } = await import("./spillover");
+    const spillover = buildFpSpillover(fpWithRaw._raw ?? {}, "jobs");
+    expect(spillover).not.toBeNull();
+    // tags array → comma-joined string
+    expect(spillover?.tags).toBe("urgent, repeat-customer");
+    // boolean false is NOT empty
+    expect(spillover?.is_multiday_job).toBe(false);
+    expect(spillover?.tags_string).toBe("urgent, repeat-customer");
+    // Denied fields must not appear
+    expect(spillover).not.toHaveProperty("billing");
+    expect(spillover).not.toHaveProperty("some_unclassified_field");
+    expect(spillover).not.toHaveProperty("id");
+    expect(spillover).not.toHaveProperty("customer_id");
+  });
+
+  it("fieldpulseData is null when fp._raw has no JOBS_SAFE fields", async () => {
+    const fpWithRaw: FieldpulseJob = {
+      ...makeJob(),
+      _raw: {
+        id: "10000002",
+        customer_id: "20000001",
+        status: 1,
+        billing: 2,           // denied
+        some_field: "value",  // not in JOBS_SAFE — denied
+      },
+    };
+
+    const { buildFpSpillover } = await import("./spillover");
+    const spillover = buildFpSpillover(fpWithRaw._raw ?? {}, "jobs");
+    expect(spillover).toBeNull();
+  });
+
+  it("fieldpulseData is null when fp._raw is absent (fallback to {})", async () => {
+    // No _raw on the object.
+    const fpNoRaw: FieldpulseJob = makeJob();
+
+    const { buildFpSpillover } = await import("./spillover");
+    const spillover = buildFpSpillover(fpNoRaw._raw ?? {}, "jobs");
+    expect(spillover).toBeNull();
+  });
+});

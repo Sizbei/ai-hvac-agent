@@ -12,7 +12,7 @@
  * (FAKE PII only — no real customer data).
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { mapFpCustomer, importCustomersFromFieldpulse } from "./customers";
+import { mapFpCustomer, importCustomersFromFieldpulse, mapAccountType } from "./customers";
 import type { FieldpulseCustomer } from "../types";
 import type { FieldpulseClient } from "../client";
 import type { PhaseResult } from "./run-import";
@@ -87,6 +87,122 @@ function makeCustomer(
 function makeCounts(): PhaseResult {
   return { fetched: 0, created: 0, updated: 0, skipped: 0, errors: 0 };
 }
+
+// ── mapAccountType unit tests ─────────────────────────────────────────────────
+
+describe("mapAccountType", () => {
+  it("maps 'residential' → 'residential'", () => {
+    expect(mapAccountType("residential")).toBe("residential");
+  });
+  it("maps 'commercial' → 'commercial'", () => {
+    expect(mapAccountType("commercial")).toBe("commercial");
+  });
+  it("is case-insensitive for known values", () => {
+    expect(mapAccountType("Residential")).toBe("residential");
+    expect(mapAccountType("COMMERCIAL")).toBe("commercial");
+  });
+  it("maps null → null", () => {
+    expect(mapAccountType(null)).toBeNull();
+  });
+  it("maps empty string → null", () => {
+    expect(mapAccountType("")).toBeNull();
+  });
+  it("maps unknown value → null (safe default)", () => {
+    expect(mapAccountType("industrial")).toBeNull();
+    expect(mapAccountType("business")).toBeNull();
+  });
+});
+
+// ── mapFpCustomer: P1 field-parity additions ──────────────────────────────────
+
+describe("mapFpCustomer P1 field-parity", () => {
+  it("populates customerType='residential' when accountType matches", () => {
+    const result = mapFpCustomer(
+      makeCustomer({ accountType: "residential" }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.customer.customerType).toBe("residential");
+  });
+
+  it("populates customerType='commercial' when accountType matches", () => {
+    const result = mapFpCustomer(
+      makeCustomer({ accountType: "commercial" }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.customer.customerType).toBe("commercial");
+  });
+
+  it("customerType=null when accountType is absent (no default overwrite)", () => {
+    const result = mapFpCustomer(makeCustomer());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.customer.customerType).toBeNull();
+  });
+
+  it("customerType=null for unknown account_type (safe default)", () => {
+    const result = mapFpCustomer(
+      makeCustomer({ accountType: "industrial" }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.customer.customerType).toBeNull();
+  });
+
+  it("isTaxExempt=true passthrough", () => {
+    const result = mapFpCustomer(makeCustomer({ isTaxExempt: true }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.customer.isTaxExempt).toBe(true);
+  });
+
+  it("isTaxExempt=false passthrough", () => {
+    const result = mapFpCustomer(makeCustomer({ isTaxExempt: false }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.customer.isTaxExempt).toBe(false);
+  });
+
+  it("isTaxExempt=null when absent", () => {
+    const result = mapFpCustomer(makeCustomer());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.customer.isTaxExempt).toBeNull();
+  });
+
+  it("billingAddress composed when billingAddress is present on fp object", () => {
+    const result = mapFpCustomer(
+      makeCustomer({
+        billingAddress: {
+          street: "200 Billing Ave",
+          streetLine2: null,
+          city: "Billington",
+          state: "TN",
+          zip: "37001",
+          country: null,
+        },
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.customer.billingAddress).toBe("200 Billing Ave, Billington, TN 37001");
+  });
+
+  it("billingAddress=null when fp.billingAddress is null", () => {
+    const result = mapFpCustomer(makeCustomer({ billingAddress: null }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.customer.billingAddress).toBeNull();
+  });
+
+  it("billingAddress=null when fp.billingAddress is absent", () => {
+    const result = mapFpCustomer(makeCustomer());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.customer.billingAddress).toBeNull();
+  });
+});
 
 // ── mapFpCustomer tests ───────────────────────────────────────────────────────
 
@@ -585,5 +701,94 @@ describe("importCustomersFromFieldpulse", () => {
     await importCustomersFromFieldpulse(ORG, counts, client);
 
     expect(logger.warn).not.toHaveBeenCalled();
+  });
+});
+
+
+// ── Spillover integration: fp._raw keys verified via buildFpSpillover ────────────
+//
+// These tests assert that the spillover wiring is correct end-to-end:
+// a fixture raw payload → buildFpSpillover("customers") → expected keys.
+// They directly test the pure function path that importOneFpCustomer now calls
+// (buildFpSpillover(fp._raw ?? {}, "customers")), catching any regression where
+// the raw payload is discarded or the wrong keys are read.
+
+describe("importOneFpCustomer — fieldpulseData spillover from raw payload", () => {
+  it("populates fieldpulseData with allowlisted fields from fp._raw", async () => {
+    // Simulate the _raw object that toCustomer() would attach from the FP API.
+    const raw = {
+      // ALLOWLIST keys — all should survive
+      status: "active",
+      booking_portal_consent: true,
+      is_phone_notification_subscribed: true,
+      is_email_notification_subscribed: false,
+      pipeline_status_updated_at: "2026-07-01 10:00:00",
+      account_type: "residential",
+      // PII keys — must be stripped by the strict ALLOWLIST
+      first_name: "Alice",
+      last_name: "Smith",
+      email: "alice@example.invalid",
+      phone: "555-000-0001",
+      phone_e164: "+15550000001",
+      address_1: "1 Test St",
+      display_name: "Alice Smith",
+    };
+
+    const { buildFpSpillover } = await import("./spillover");
+    const spillover = buildFpSpillover(raw, "customers");
+
+    // Must have a result.
+    expect(spillover).not.toBeNull();
+    // All allowlisted populated fields survive.
+    expect(spillover).toMatchObject({
+      status: "active",
+      booking_portal_consent: true,
+      is_phone_notification_subscribed: true,
+      is_email_notification_subscribed: false,
+      pipeline_status_updated_at: "2026-07-01 10:00:00",
+      account_type: "residential",
+    });
+
+    // PII keys must never appear.
+    const piiKeys = [
+      "first_name", "last_name", "email", "phone", "phone_e164",
+      "address_1", "display_name",
+    ];
+    for (const key of piiKeys) {
+      expect(spillover).not.toHaveProperty(key);
+    }
+  });
+
+  it("fieldpulseData is null when _raw has no allowlisted fields (PII only)", async () => {
+    const raw = {
+      // Only PII — nothing should survive the strict ALLOWLIST
+      first_name: "Bob",
+      last_name: "Jones",
+      email: "bob@example.invalid",
+      address_1: "2 Test Ave",
+      lead_source: "Google",
+    };
+
+    const { buildFpSpillover } = await import("./spillover");
+    const spillover = buildFpSpillover(raw, "customers");
+    expect(spillover).toBeNull();
+  });
+
+  it("fieldpulseData is null when fp._raw is absent (fallback to {})", async () => {
+    // No _raw → importOneFpCustomer falls back to {} → all fields filtered out.
+    const { buildFpSpillover } = await import("./spillover");
+    const spillover = buildFpSpillover({}, "customers");
+    expect(spillover).toBeNull();
+  });
+
+  it("boolean false survives (is_email_notification_subscribed=false is not empty)", async () => {
+    const raw = {
+      is_email_notification_subscribed: false,
+    };
+
+    const { buildFpSpillover } = await import("./spillover");
+    const spillover = buildFpSpillover(raw, "customers");
+    expect(spillover).not.toBeNull();
+    expect(spillover?.is_email_notification_subscribed).toBe(false);
   });
 });

@@ -47,6 +47,7 @@ import {
 import type { FieldpulseClient } from "../client";
 import type { FieldpulseCustomer } from "../types";
 import type { PhaseResult } from "./run-import";
+import { buildFpSpillover } from "./spillover";
 
 // ── Mapper ────────────────────────────────────────────────────────────────────
 
@@ -57,6 +58,10 @@ export interface MappedFpCustomer {
   readonly phone: string | null;
   readonly address: string | null;
   readonly customFields: { name: string; value: string }[] | null;
+  // P1 field-parity additions.
+  readonly customerType: "residential" | "commercial" | null;
+  readonly isTaxExempt: boolean | null;
+  readonly billingAddress: string | null;
 }
 
 /**
@@ -102,6 +107,20 @@ export function mapFpCustomer(fp: FieldpulseCustomer): MapResult {
   // Address: compose from flat fields, skipping empty parts.
   const address = composeAddress(fp);
 
+  // P1: customerType — map FP account_type into the existing enum.
+  // Decision (2026-07-11): the sanitized fixture has no account_type field.
+  // We map "residential"/"commercial" directly; anything else → null (use default).
+  // No separate account_type column added (enum covers known values).
+  const customerType = mapAccountType(fp.accountType ?? null);
+
+  // P1: is_tax_exempt — pass through as-is.
+  const isTaxExempt = fp.isTaxExempt ?? null;
+
+  // P1: billing address — compose only when the client surfaced it.
+  // has_different_billing_address was NOT present in the sanitized fixture (2026-07-11);
+  // the client gates on it and populates billingAddress only when the flag is truthy.
+  const billingAddress = composeBillingAddress(fp);
+
   return {
     ok: true,
     archivedImport,
@@ -112,8 +131,52 @@ export function mapFpCustomer(fp: FieldpulseCustomer): MapResult {
       phone,
       address,
       customFields: fp.customFields ? [...fp.customFields] : null,
+      customerType,
+      isTaxExempt,
+      billingAddress,
     },
   };
+}
+
+/**
+ * Map FP `account_type` string to the native customerTypeEnum.
+ * "residential" / "commercial" map directly.
+ * Anything else (including null/unknown) returns null → importer keeps the
+ * existing default ("residential") without overwriting it.
+ *
+ * Decision: no separate `account_type` column added. The sanitized fixture
+ * does not expose `account_type` and the live census is unverified; if future
+ * FP data carries non-enum values, this returns null (safe default) and the
+ * raw value is captured in spillover via the CUSTOMERS_ALLOWLIST.
+ */
+export function mapAccountType(raw: string | null): "residential" | "commercial" | null {
+  if (!raw) return null;
+  const s = raw.toLowerCase().trim();
+  if (s === "residential") return "residential";
+  if (s === "commercial") return "commercial";
+  return null; // unknown value — keep default
+}
+
+function composeBillingAddress(fp: FieldpulseCustomer): string | null {
+  const addr = fp.billingAddress;
+  if (!addr) return null;
+
+  const parts: string[] = [];
+  const street = addr.street?.trim();
+  const street2 = addr.streetLine2?.trim();
+  const city = addr.city?.trim();
+  const state = addr.state?.trim();
+  const zip = addr.zip?.trim();
+
+  if (street) parts.push(street);
+  if (street2) parts.push(street2);
+
+  const cityStateZip = [city, state && zip ? `${state} ${zip}` : state ?? zip]
+    .filter(Boolean)
+    .join(", ");
+  if (cityStateZip) parts.push(cityStateZip);
+
+  return parts.length > 0 ? parts.join(", ") : null;
 }
 
 function resolveName(fp: FieldpulseCustomer): string | null {
@@ -190,10 +253,15 @@ export async function importOneFpCustomer(
   const { customer, archivedImport } = mapped;
 
   try {
+    // Build customer spillover (strict ALLOWLIST — no PII in jsonb).
+    // fp._raw is the raw FP API payload threaded through toCustomer(); the
+    // ALLOWLIST in buildFpSpillover guarantees only safe, non-PII keys survive.
+    const fpSpillover = buildFpSpillover(fp._raw ?? {}, "customers");
+
     // Path (a): existing row keyed on fieldpulseCustomerId.
     const existing = await findByFpId(orgId, customer.fpId);
     if (existing) {
-      await updateCustomerFields(orgId, existing.id, customer);
+      await updateCustomerFields(orgId, existing.id, customer, fpSpillover);
       if (counts) counts.updated++;
       return existing.id;
     }
@@ -219,6 +287,9 @@ export async function importOneFpCustomer(
           phoneHash,
           fieldpulseCustomerId: customer.fpId,
           fieldpulseCustomFields: customer.customFields ?? null,
+          isTaxExempt: customer.isTaxExempt ?? null,
+          billingAddressEncrypted: customer.billingAddress ? encrypt(sanitizeAddress(customer.billingAddress)) : null,
+          fieldpulseData: fpSpillover,
           archivedAt: new Date(),
         })
         .onConflictDoNothing({
@@ -254,7 +325,15 @@ export async function importOneFpCustomer(
       // overwrite in the unlikely case of a race (e.g. a concurrent import run).
       const updated = await db
         .update(customers)
-        .set({ fieldpulseCustomerId: customer.fpId, fieldpulseCustomFields: customer.customFields ?? null, updatedAt: new Date() })
+        .set({
+          fieldpulseCustomerId: customer.fpId,
+          fieldpulseCustomFields: customer.customFields ?? null,
+          isTaxExempt: customer.isTaxExempt ?? null,
+          billingAddressEncrypted: customer.billingAddress ? encrypt(sanitizeAddress(customer.billingAddress)) : null,
+          fieldpulseData: fpSpillover,
+          ...(customer.customerType ? { customerType: customer.customerType } : {}),
+          updatedAt: new Date(),
+        })
         .where(
           and(
             eq(customers.id, nativeId),
@@ -305,6 +384,10 @@ export async function importOneFpCustomer(
         phoneHash,
         fieldpulseCustomerId: customer.fpId,
         fieldpulseCustomFields: customer.customFields ?? null,
+        isTaxExempt: customer.isTaxExempt ?? null,
+        billingAddressEncrypted: customer.billingAddress ? encrypt(sanitizeAddress(customer.billingAddress)) : null,
+        fieldpulseData: fpSpillover,
+        ...(customer.customerType ? { customerType: customer.customerType } : {}),
       })
       .onConflictDoNothing({
         target: [customers.organizationId, customers.fieldpulseCustomerId],
@@ -437,6 +520,7 @@ async function updateCustomerFields(
   orgId: string,
   customerId: string,
   customer: MappedFpCustomer,
+  fpSpillover: ReturnType<typeof buildFpSpillover> = null,
 ): Promise<void> {
   const { emailHash, phoneHash } = computeContactHashes({
     email: customer.email,
@@ -453,6 +537,10 @@ async function updateCustomerFields(
       emailHash,
       phoneHash,
       fieldpulseCustomFields: customer.customFields ?? null,
+      isTaxExempt: customer.isTaxExempt ?? null,
+      billingAddressEncrypted: customer.billingAddress ? encrypt(sanitizeAddress(customer.billingAddress)) : null,
+      fieldpulseData: fpSpillover,
+      ...(customer.customerType ? { customerType: customer.customerType } : {}),
       updatedAt: new Date(),
     })
     .where(

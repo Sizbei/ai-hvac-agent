@@ -35,6 +35,7 @@ import {
 import type { FieldpulseClient } from "../client";
 import type { FieldpulseItem } from "../types";
 import type { PhaseResult } from "./run-import";
+import { buildFpSpillover } from "./spillover";
 
 /**
  * Returns true when the rawFpType from FP was not in any known explicit set.
@@ -108,6 +109,11 @@ export async function importItemsFromFieldpulse(
 
       const isNew = !existingFpIds.has(fp.id);
 
+      // Build spillover from the raw FP item payload (snake_case fields).
+      // fp._raw is threaded through toItem(); the denylist model captures any
+      // unpromoted, non-denied primitive long-tail fields FP may carry.
+      const fpSpillover = buildFpSpillover(fp._raw ?? {}, "items");
+
       await db
         .insert(pricebookItems)
         .values({
@@ -115,20 +121,37 @@ export async function importItemsFromFieldpulse(
           fieldpulseItemId: fp.id,
           type: fp.type,
           name,
+          // description and costCents are existing columns — map from FP now.
+          description: fp.description ?? null,
           priceCents: fp.priceCents,
+          costCents: fp.costCents ?? 0,
+          // markupPct: FP-owned on synced rows. Use mapped value when present.
+          markupPct: fp.markupPct ?? 0,
           active: fp.isActive,
-          // costCents and markupPct are not available from FP /items; use defaults.
-          costCents: 0,
-          markupPct: 0,
+          // P1 new columns.
+          isLaborItem: fp.isLaborItem,
+          quantityAvailable: fp.quantityAvailable ?? null,
+          vendorType: fp.vendorType ?? null,
+          fieldpulseData: fpSpillover,
         })
         .onConflictDoUpdate({
+          // FP-owned fields on mirrored rows: cost/markup/description are overwritten
+          // nightly (FP is the source of truth for synced items). Native items with
+          // fieldpulse_item_id NULL are never touched by this conflict target.
           target: [pricebookItems.organizationId, pricebookItems.fieldpulseItemId],
           targetWhere: sql`${pricebookItems.fieldpulseItemId} IS NOT NULL`,
           set: {
             name,
             type: fp.type,
+            description: fp.description ?? null,
             priceCents: fp.priceCents,
+            costCents: fp.costCents ?? 0,
+            markupPct: fp.markupPct ?? 0,
             active: fp.isActive,
+            isLaborItem: fp.isLaborItem,
+            quantityAvailable: fp.quantityAvailable ?? null,
+            vendorType: fp.vendorType ?? null,
+            fieldpulseData: fpSpillover,
             updatedAt: new Date(),
           },
         });

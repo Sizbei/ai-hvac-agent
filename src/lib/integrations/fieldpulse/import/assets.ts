@@ -26,6 +26,7 @@ import type { FieldpulseClient } from "../client";
 import type { FieldpulseAsset } from "../types";
 import type { PhaseResult } from "./run-import";
 import { parseFpDate } from "./jobs";
+import { buildFpSpillover } from "./spillover";
 
 export function mapFpAssetType(
   assetType: string | null | undefined,
@@ -108,6 +109,10 @@ export async function importAssetsFromFieldpulse(
       const isNew = !existingFpIds.has(asset.id);
       const mappedType = mapFpAssetType(asset.assetType);
       const parsedInstallDate = parseFpDate(asset.installDate);
+      // Spillover: build from the raw FP asset payload (snake_case fields).
+      // asset._raw is threaded through toAsset(); the denylist model captures
+      // any unpromoted, non-denied primitive long-tail fields FP may carry.
+      const fpSpillover = buildFpSpillover(asset._raw ?? {}, "assets");
 
       await db
         .insert(customerEquipment)
@@ -120,6 +125,7 @@ export async function importAssetsFromFieldpulse(
           installDate: parsedInstallDate,
           notes: asset.title ?? null,
           locationInHome: asset.locationDescription ?? null,
+          fieldpulseData: fpSpillover,
           updatedAt: new Date(),
         })
         .onConflictDoUpdate({
@@ -131,6 +137,7 @@ export async function importAssetsFromFieldpulse(
             installDate: parsedInstallDate,
             notes: asset.title ?? null,
             locationInHome: asset.locationDescription ?? null,
+            fieldpulseData: fpSpillover,
             updatedAt: new Date(),
           },
         });

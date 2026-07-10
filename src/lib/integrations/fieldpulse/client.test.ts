@@ -991,6 +991,165 @@ describe("RestFieldpulseClient — listItems", () => {
     expect(cappedByMaxPages).toBe(true);
   });
 
+  // ── P1 field-parity additions ─────────────────────────────────────────────
+
+  it("toItem: maps costCents from default_unit_cost (dollar string → cents)", async () => {
+    const rows = [
+      { id: 1, name: "Diagnostic", default_unit_price: "99.00", default_unit_cost: "45.50", is_active: true, type: "service" },
+    ];
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ error: false, response: rows }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ error: false, response: [] }) });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const { items } = await client.listItems();
+    expect(items[0].costCents).toBe(4550);
+  });
+
+  it("toItem: maps costCents=null when default_unit_cost is null", async () => {
+    const rows = [
+      { id: 1, name: "Diagnostic", default_unit_price: "99.00", default_unit_cost: null, is_active: true, type: "service" },
+    ];
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ error: false, response: rows }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ error: false, response: [] }) });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const { items } = await client.listItems();
+    expect(items[0].costCents).toBeNull();
+  });
+
+  it("toItem: maps description from default_description (trimmed)", async () => {
+    const rows = [
+      { id: 1, name: "Filter Change", default_unit_price: "0.00", default_description: "  Replace 1-inch filter  ", is_active: true, type: "service" },
+    ];
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ error: false, response: rows }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ error: false, response: [] }) });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const { items } = await client.listItems();
+    expect(items[0].description).toBe("Replace 1-inch filter");
+  });
+
+  it("toItem: maps description=null when default_description is absent/blank", async () => {
+    const rows = [
+      { id: 1, name: "Filter Change", default_unit_price: "0.00", is_active: true, type: "service" },
+    ];
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ error: false, response: rows }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ error: false, response: [] }) });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const { items } = await client.listItems();
+    expect(items[0].description).toBeNull();
+  });
+
+  it("toItem: maps isLaborItem=true from is_labor_item=true", async () => {
+    const rows = [
+      { id: 1, name: "Labor", default_unit_price: "100.00", is_labor_item: true, is_active: true, type: "service" },
+    ];
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ error: false, response: rows }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ error: false, response: [] }) });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const { items } = await client.listItems();
+    expect(items[0].isLaborItem).toBe(true);
+  });
+
+  it("toItem: maps isLaborItem=true from is_labor_item=1 (integer coerce)", async () => {
+    const rows = [
+      { id: 1, name: "Labor 2", default_unit_price: "80.00", is_labor_item: 1, is_active: true, type: "service" },
+    ];
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ error: false, response: rows }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ error: false, response: [] }) });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const { items } = await client.listItems();
+    expect(items[0].isLaborItem).toBe(true);
+  });
+
+  it("toItem: maps isLaborItem=false when is_labor_item is absent", async () => {
+    const rows = [
+      { id: 1, name: "Part", default_unit_price: "5.00", is_active: true, type: "material" },
+    ];
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ error: false, response: rows }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ error: false, response: [] }) });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const { items } = await client.listItems();
+    expect(items[0].isLaborItem).toBe(false);
+  });
+
+  it("toItem: maps quantityAvailable from quantity_available (rounds)", async () => {
+    const rows = [
+      { id: 1, name: "Capacitor", default_unit_price: "25.00", quantity_available: 9.7, is_active: true, type: "material" },
+    ];
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ error: false, response: rows }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ error: false, response: [] }) });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const { items } = await client.listItems();
+    expect(items[0].quantityAvailable).toBe(10);
+  });
+
+  it("toItem: maps quantityAvailable=null when absent", async () => {
+    const rows = [
+      { id: 1, name: "Capacitor", default_unit_price: "25.00", is_active: true, type: "material" },
+    ];
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ error: false, response: rows }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ error: false, response: [] }) });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const { items } = await client.listItems();
+    expect(items[0].quantityAvailable).toBeNull();
+  });
+
+  it("toItem: maps vendorType from vendor_type (trimmed)", async () => {
+    const rows = [
+      { id: 1, name: "Compressor", default_unit_price: "450.00", vendor_type: "  carrier  ", is_active: true, type: "equipment" },
+    ];
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ error: false, response: rows }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ error: false, response: [] }) });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const { items } = await client.listItems();
+    expect(items[0].vendorType).toBe("carrier");
+  });
+
+  it("toItem: maps markupPct as rounded int percentage (NOT dollarsToCents)", async () => {
+    const rows = [
+      { id: 1, name: "Filter", default_unit_price: "10.00", automatic_markup_percentage: 15.6, is_active: true, type: "material" },
+    ];
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ error: false, response: rows }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ error: false, response: [] }) });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const { items } = await client.listItems();
+    // 15.6% → Math.round(15.6) = 16 (not 1560 as dollarsToCents would give)
+    expect(items[0].markupPct).toBe(16);
+  });
+
+  it("toItem: markupPct=0 from automatic_markup_percentage=0", async () => {
+    const rows = [
+      { id: 1, name: "Part", default_unit_price: "5.00", automatic_markup_percentage: 0, is_active: true, type: "material" },
+    ];
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ error: false, response: rows }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ error: false, response: [] }) });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const { items } = await client.listItems();
+    expect(items[0].markupPct).toBe(0);
+  });
+
+  it("toItem: markupPct=null when automatic_markup_percentage is absent", async () => {
+    const rows = [
+      { id: 1, name: "Part", default_unit_price: "5.00", is_active: true, type: "material" },
+    ];
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ error: false, response: rows }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ error: false, response: [] }) });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const { items } = await client.listItems();
+    expect(items[0].markupPct).toBeNull();
+  });
+
   it("identical-batch stop AT page===maxPages with full page → cappedByMaxPages=false (repeated-batch break wins)", async () => {
     // The API ignores the `page` param and returns the same batch every call.
     // When the repeated-batch break fires at page === maxPages the cap flag
@@ -1005,5 +1164,217 @@ describe("RestFieldpulseClient — listItems", () => {
     expect(mockFetch).toHaveBeenCalledTimes(2);
     expect(items).toHaveLength(20); // only the first batch kept (no dupes)
     expect(cappedByMaxPages).toBe(false);
+  });
+});
+
+// ── toCustomer: P1 field-parity additions ────────────────────────────────────
+
+describe("RestFieldpulseClient — toCustomer P1 field-parity", () => {
+  let mockFetch: ReturnType<typeof vi.fn>;
+  const config = { baseUrl: "https://api.fieldpulse.com", apiKey: "k" };
+
+  beforeEach(() => {
+    mockFetch = vi.fn();
+    vi.stubGlobal("fetch", mockFetch);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  function customerEnvelope(overrides: Record<string, unknown> = {}) {
+    return {
+      error: false,
+      response: {
+        id: 10001001,
+        display_name: "Test Customer",
+        ...overrides,
+      },
+    };
+  }
+
+  it("maps accountType from account_type string", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true, json: async () => customerEnvelope({ account_type: "commercial" }),
+    });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const result = await client.getCustomer("10001001");
+    expect(result?.accountType).toBe("commercial");
+  });
+
+  it("maps accountType=null when account_type is absent", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true, json: async () => customerEnvelope({}),
+    });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const result = await client.getCustomer("10001001");
+    expect(result?.accountType).toBeNull();
+  });
+
+  it("maps isTaxExempt=true from boolean", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true, json: async () => customerEnvelope({ is_tax_exempt: true }),
+    });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const result = await client.getCustomer("10001001");
+    expect(result?.isTaxExempt).toBe(true);
+  });
+
+  it("maps isTaxExempt=false from 0 (integer coerce)", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true, json: async () => customerEnvelope({ is_tax_exempt: 0 }),
+    });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const result = await client.getCustomer("10001001");
+    expect(result?.isTaxExempt).toBe(false);
+  });
+
+  it("maps isTaxExempt=true from 1 (integer coerce)", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true, json: async () => customerEnvelope({ is_tax_exempt: 1 }),
+    });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const result = await client.getCustomer("10001001");
+    expect(result?.isTaxExempt).toBe(true);
+  });
+
+  it("maps isTaxExempt=null when absent", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true, json: async () => customerEnvelope({}),
+    });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const result = await client.getCustomer("10001001");
+    expect(result?.isTaxExempt).toBeNull();
+  });
+
+  it("maps billingAddress when has_different_billing_address=true and billing_address_1 is populated", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () =>
+        customerEnvelope({
+          has_different_billing_address: true,
+          billing_address_1: "200 Billing Ave",
+          billing_address_2: null,
+          billing_city: "Billington",
+          billing_state: "TN",
+          billing_zip_code: "37001",
+        }),
+    });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const result = await client.getCustomer("10001001");
+    expect(result?.billingAddress).not.toBeNull();
+    expect(result?.billingAddress?.street).toBe("200 Billing Ave");
+    expect(result?.billingAddress?.city).toBe("Billington");
+    expect(result?.billingAddress?.state).toBe("TN");
+    expect(result?.billingAddress?.zip).toBe("37001");
+  });
+
+  it("maps billingAddress=null when has_different_billing_address is absent/false", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () =>
+        customerEnvelope({
+          has_different_billing_address: false,
+          billing_address_1: "200 Billing Ave",
+        }),
+    });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const result = await client.getCustomer("10001001");
+    expect(result?.billingAddress).toBeNull();
+  });
+
+  it("maps billingAddress=null when has_different_billing_address=true but billing_address_1 is absent", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () =>
+        customerEnvelope({
+          has_different_billing_address: true,
+          // no billing_address_1
+        }),
+    });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const result = await client.getCustomer("10001001");
+    expect(result?.billingAddress).toBeNull();
+  });
+});
+
+// ── toEstimate: P1 field-parity additions ────────────────────────────────────
+
+describe("RestFieldpulseClient — toEstimate P1 field-parity", () => {
+  let mockFetch: ReturnType<typeof vi.fn>;
+  const config = { baseUrl: "https://api.fieldpulse.com", apiKey: "k" };
+
+  beforeEach(() => {
+    mockFetch = vi.fn();
+    vi.stubGlobal("fetch", mockFetch);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  function estEnvelope(overrides: Record<string, unknown> = {}) {
+    return {
+      error: false,
+      response: {
+        id: 70000001,
+        customer_id: 20000001,
+        status: "2",
+        subtotal: "250.00",
+        total: "270.00",
+        created_at: "2026-07-01 08:00:00",
+        ...overrides,
+      },
+    };
+  }
+
+  it("maps title from the `name` field (FP list API uses `name`, not `title`)", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true, status: 200,
+      json: async () => estEnvelope({ name: "HVAC Repair Quote" }),
+    });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const result = await client.getEstimate("70000001");
+    expect(result?.title).toBe("HVAC Repair Quote");
+  });
+
+  it("maps title from `title` as fallback when `name` is absent", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true, status: 200,
+      json: async () => estEnvelope({ title: "Fallback Title" }),
+    });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const result = await client.getEstimate("70000001");
+    expect(result?.title).toBe("Fallback Title");
+  });
+
+  it("maps title=null when both name and title are absent", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true, status: 200,
+      json: async () => estEnvelope({}),
+    });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const result = await client.getEstimate("70000001");
+    expect(result?.title).toBeNull();
+  });
+
+  it("maps dueDate from due_date string", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true, status: 200,
+      json: async () => estEnvelope({ due_date: "2026-08-01" }),
+    });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const result = await client.getEstimate("70000001");
+    expect(result?.dueDate).toBe("2026-08-01");
+  });
+
+  it("maps dueDate=null when due_date is absent", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true, status: 200,
+      json: async () => estEnvelope({}),
+    });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const result = await client.getEstimate("70000001");
+    expect(result?.dueDate).toBeNull();
   });
 });
