@@ -21,6 +21,7 @@ entity, the surface it displays on, its mutability, and the metric semantics.
 | Estimates (+187 line items, FP status names) | `estimates.fieldpulse_estimate_id`, `fieldpulse_status_name` | 36 | Estimates list/detail (pills, FP status name, read-only banner) | **NO** — mark-sold / generate-invoice refuse synced (server-side) |
 | Payments | `payments.fieldpulse_payment_id` (provider `fieldpulse`) | 2,363 | Invoice detail payment history; accounting export (separate synced section) | **NO** — record-only |
 | Assets | `customer_equipment.fieldpulse_asset_id` | 4 | Customer profile equipment card (FP pill) | yes (attributed) |
+| **Pricebook items** | `pricebook_items.fieldpulse_item_id` | **17,536** | Pricebook page (`/admin/pricebook`) | yes (attributed) — catalog, not ledger data |
 | Job comments | `customer_notes.fieldpulse_comment_id` | 8 | Customer profile notes (FP pill) | yes (attributed) |
 | Customer custom fields + lead source | `customers.fieldpulse_custom_fields` jsonb | sparse | Profile "FieldPulse details" block | n/a (overwritten on sync) |
 | Locations | (address enrichment only) | 411 filled | Customer profile address | fills NULL addresses only, never overwrites |
@@ -58,7 +59,9 @@ names via per-id `custom_status` (Sent / Completed / Draft / Accepted / Lost…)
 - **Real-time:** FieldPulse webhooks (job status, invoice events) — HMAC-verified,
   idempotency-ledgered, org derived server-side.
 - **Nightly (08:30 UTC):** `.github/workflows/fp-nightly-sync.yml` runs the full
-  import (`technicians,customers,jobs,invoices,estimates,payments,assets,comments,locations`)
+  import (all 11 phases incl. `items` and `job-metrics`; `timeout-minutes: 150` —
+  the full sweep exceeds the old 45; manual runs can pass a `phases` input for a
+  single-phase dispatch)
   — idempotent full re-page (FP ignores server-side date filters), current-FP-state-wins.
   Secrets: `DATABASE_URL`, `FIELDPULSE_API_KEY`, `ENCRYPTION_KEY`; org id in the
   `FP_SYNC_ORG_ID` repo variable.
@@ -81,6 +84,11 @@ names via per-id `custom_status` (Sent / Completed / Draft / Accepted / Lost…)
   `customfields` details); `custom_status` is an OBJECT (`{name, …}`); custom-field
   entries carry NO name (only `field_instance_id` — displayed under fallback labels).
 - Money is dollar-strings (`dollarsToCents`), ids are numbers (`idStr`).
+- `/items` (the pricebook, ~17.5k rows = the "articles") pages at a fixed 20/page
+  with NULL total_count over ~877 pages — the API does NOT cap at 10k, but our
+  client walks now guard against their own `maxPages` ceilings: any walk that
+  ends AT the cap with a full page logs a loud truncation warning
+  (`cappedByMaxPages`) in every importer.
 
 ## Finding things
 
