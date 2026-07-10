@@ -16,7 +16,7 @@ drives "overdue" (age-based fallback when null).
 
 | Table | New columns | Source → mapping |
 |---|---|---|
-| `pricebook_items` | `cost_cents` int, `description` text, `is_labor_item` bool, `quantity_available` int NULL, `vendor_type` text NULL | `default_unit_cost`→dollarsToCents; `default_description`; `is_labor_item`; `quantity_available`; `vendor_type`. Also map `automatic_markup_percentage`→existing `markup_pct` (round to int). |
+| `pricebook_items` | `is_labor_item` bool, `quantity_available` int NULL, `vendor_type` text NULL — (`cost_cents` and `description` columns ALREADY EXIST natively; they need mapping only, no migration) | `default_unit_cost`→dollarsToCents; `default_description`; `is_labor_item`; `quantity_available`; `vendor_type`. Also map `automatic_markup_percentage`→existing `markup_pct` (round to int). |
 | `invoices` | `due_date` timestamptz NULL | `due_date` via parseFpDate |
 | `estimates` | `due_date` timestamptz NULL, `title` text NULL | `due_date`; `title` |
 | `customers` | `account_type` text NULL, `is_tax_exempt` bool NULL, `billing_address_encrypted` text NULL | `account_type`; `is_tax_exempt`; compose billing_address_1/2/city/state/zip ONLY when `has_different_billing_address`, sanitize+encrypt exactly like the service address |
