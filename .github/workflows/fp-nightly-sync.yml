@@ -31,7 +31,13 @@ on:
   schedule:
     # 08:30 UTC daily — before Vercel crons at 10:00 and 11:00 UTC
     - cron: "30 8 * * *"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      phases:
+        description: "Comma-separated phase list (defaults to the full sweep)"
+        required: false
+        default: ""
+
 
 concurrency:
   group: fp-nightly-sync
@@ -40,7 +46,7 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 150
 
     steps:
       - name: Checkout
@@ -63,5 +69,5 @@ jobs:
         run: |
           npx tsx src/lib/integrations/fieldpulse/import/run-import.ts \
             --org ${{ vars.FP_SYNC_ORG_ID }} \
-            --phase technicians,customers,jobs,invoices,estimates,payments,assets,comments,locations,items,job-metrics \
+            --phase ${{ inputs.phases != '' && inputs.phases || 'technicians,customers,jobs,invoices,estimates,payments,assets,comments,locations,items,job-metrics' }} \
             --yes
