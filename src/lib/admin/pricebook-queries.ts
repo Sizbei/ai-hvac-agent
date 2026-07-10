@@ -96,6 +96,7 @@ export interface PricebookItemAdminRow {
   readonly active: boolean;
   readonly isLaborItem: boolean;
   readonly fieldpulseItemId: string | null;
+  readonly fieldpulseData: Record<string, unknown> | null;
 }
 
 const ADMIN_ITEM_PROJECTION = {
@@ -115,6 +116,7 @@ const ADMIN_ITEM_PROJECTION = {
   active: pricebookItems.active,
   isLaborItem: pricebookItems.isLaborItem,
   fieldpulseItemId: pricebookItems.fieldpulseItemId,
+  fieldpulseData: pricebookItems.fieldpulseData,
 } as const;
 
 export async function getPricebookItemById(
@@ -126,7 +128,8 @@ export async function getPricebookItemById(
     .from(pricebookItems)
     .where(withTenant(pricebookItems, organizationId, eq(pricebookItems.id, id)))
     .limit(1);
-  return row ?? null;
+  // Drizzle types jsonb columns as `unknown`; we cast to our narrower type.
+  return (row as PricebookItemAdminRow | undefined) ?? null;
 }
 
 /** Full admin list (optionally including soft-deleted items). */
@@ -137,11 +140,12 @@ export async function listPricebookItemsForAdmin(
   const condition = opts.includeInactive
     ? withTenant(pricebookItems, organizationId)
     : withTenant(pricebookItems, organizationId, eq(pricebookItems.active, true));
+  // Drizzle types jsonb columns as `unknown`; we cast to our narrower type.
   return db
     .select(ADMIN_ITEM_PROJECTION)
     .from(pricebookItems)
     .where(condition)
-    .orderBy(asc(pricebookItems.name));
+    .orderBy(asc(pricebookItems.name)) as Promise<readonly PricebookItemAdminRow[]>;
 }
 
 export type PricebookItemUpdate = Partial<PricebookItemInput>;

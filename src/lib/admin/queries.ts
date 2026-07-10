@@ -260,6 +260,7 @@ export async function getRequestById(
       smsConsent: serviceRequests.smsConsent,
       leadSource: serviceRequests.leadSource,
       fieldpulseMetrics: serviceRequests.fieldpulseMetrics,
+      fieldpulseData: serviceRequests.fieldpulseData,
     })
     .from(serviceRequests)
     .leftJoin(users, eq(serviceRequests.assignedTo, users.id))
@@ -387,6 +388,7 @@ export async function getRequestById(
       leadSource: row.leadSource,
     },
     fieldpulseMetrics: (row.fieldpulseMetrics as FieldpulseJobMetrics | null) ?? null,
+    fieldpulseData: (row.fieldpulseData as Record<string, unknown> | null) ?? null,
   };
 }
 

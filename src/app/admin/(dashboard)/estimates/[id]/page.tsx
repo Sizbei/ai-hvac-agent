@@ -11,6 +11,7 @@ import { EstimateStatusBadge } from '@/components/admin/estimates/estimate-statu
 import { FinancingPanel } from '@/components/admin/financing/financing-panel';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { rollUpMargin } from '@/lib/admin/margin';
+import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
 
 interface LineItem {
   readonly id: string;
@@ -42,6 +43,8 @@ interface EstimateDetail {
   readonly options: Option[];
   readonly syncedSource: 'fieldpulse' | null;
   readonly fieldpulseStatusName: string | null;
+  readonly title: string | null;
+  readonly fieldpulseData: Record<string, unknown> | null;
 }
 
 export default function EstimateDetailPage({
@@ -168,7 +171,9 @@ export default function EstimateDetailPage({
           </Button>
         </Link>
         <div className="flex-1">
-          <h1 className="text-2xl font-bold tracking-tight">Estimate</h1>
+          <h1 className="text-2xl font-bold tracking-tight">
+            {estimate.title ?? 'Estimate'}
+          </h1>
           <p className="text-sm text-muted-foreground">
             Created {new Date(estimate.createdAt).toLocaleDateString()}
           </p>
@@ -378,6 +383,9 @@ export default function EstimateDetailPage({
           </CardContent>
         </Card>
       )}
+
+      {/* FieldPulse spillover details — collapsed by default; hidden when null */}
+      <FieldpulseDetails data={estimate.fieldpulseData} />
     </div>
   );
 }

@@ -24,6 +24,7 @@ import {
   parseDollarsToCents,
 } from '@/lib/admin/money-format';
 import type { PricebookItem } from '@/hooks/use-pricebook';
+import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
 
 interface PricebookFormDialogProps {
   readonly open: boolean;
@@ -191,6 +192,8 @@ export function PricebookFormDialog({
             nightly from FieldPulse and will overwrite any edits made here.
           </p>
         )}
+
+        <FieldpulseDetails data={editing?.fieldpulseData ?? null} />
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">

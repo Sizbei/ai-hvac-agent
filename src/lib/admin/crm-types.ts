@@ -44,6 +44,13 @@ export interface CustomerDetail extends CustomerRecord {
   readonly serviceHistory: readonly ServiceHistoryRecord[];
   readonly customerNotes: readonly NoteRecord[];
   readonly followUps: readonly FollowUpRecord[];
+  /** Whether this customer is tax-exempt (from FP is_tax_exempt). Null for native rows. */
+  readonly isTaxExempt: boolean | null;
+  /** Decrypted billing address (from FP billing_address_encrypted), when it differs
+   * from the service address. Null for native rows or when not present. */
+  readonly billingAddress: string | null;
+  /** FieldPulse spillover data for the detail panel; null when not a FP customer or empty. */
+  readonly fieldpulseData: Record<string, unknown> | null;
 }
 
 export interface EquipmentRecord {

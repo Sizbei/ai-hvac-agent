@@ -917,6 +917,8 @@ export interface InvoiceDetailView {
   readonly dueDate: Date | null;
   /** Which FSM this read-only invoice is mirrored from, or null when native. */
   readonly syncedSource: "fieldpulse" | "housecall" | null;
+  /** FieldPulse spillover data for the detail panel; null when not a FP invoice or empty. */
+  readonly fieldpulseData: Record<string, unknown> | null;
   readonly lineItems: InvoiceLineItemView[];
   readonly payments: PaymentView[];
   /**
@@ -965,6 +967,7 @@ export async function getInvoiceDetailById(
       dueDate: invoices.dueDate,
       fieldpulseInvoiceId: invoices.fieldpulseInvoiceId,
       hcpInvoiceId: invoices.hcpInvoiceId,
+      fieldpulseData: invoices.fieldpulseData,
       nameEncrypted: customers.nameEncrypted,
       addressEncrypted: customers.addressEncrypted,
       phoneEncrypted: customers.phoneEncrypted,
@@ -1098,6 +1101,7 @@ export async function getInvoiceDetailById(
   const {
     fieldpulseInvoiceId,
     hcpInvoiceId,
+    fieldpulseData,
     nameEncrypted,
     addressEncrypted,
     phoneEncrypted,
@@ -1106,6 +1110,7 @@ export async function getInvoiceDetailById(
   return {
     ...invRest,
     syncedSource: deriveSyncedSource(fieldpulseInvoiceId, hcpInvoiceId),
+    fieldpulseData: (fieldpulseData as Record<string, unknown> | null) ?? null,
     customerName: safeDecryptName(nameEncrypted),
     customerAddress: safeDecryptName(addressEncrypted),
     customerPhone: safeDecryptName(phoneEncrypted),

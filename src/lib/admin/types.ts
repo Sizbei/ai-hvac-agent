@@ -44,6 +44,8 @@ export interface AdminRequestDetail extends AdminRequest {
   // FieldPulse per-job operational metrics; null unless this is an FP-imported
   // job the job-metrics phase has enriched.
   readonly fieldpulseMetrics: FieldpulseJobMetrics | null;
+  /** FieldPulse spillover data for the detail panel; null when not a FP job or empty. */
+  readonly fieldpulseData: Record<string, unknown> | null;
 }
 
 /**

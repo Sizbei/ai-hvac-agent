@@ -85,6 +85,7 @@ describe("addJobMaterial — catalog line", () => {
       active: true,
       isLaborItem: false,
       fieldpulseItemId: null,
+      fieldpulseData: null,
     });
 
     const valuesSpy = vi.fn(() => ({
@@ -134,6 +135,7 @@ describe("addJobMaterial — catalog line", () => {
       active: true,
       isLaborItem: false,
       fieldpulseItemId: null,
+      fieldpulseData: null,
     });
     vi.mocked(db.insert).mockReturnValue({
       values: () => ({ returning: () => Promise.resolve([{ id: "mat-1" }]) }),

@@ -44,6 +44,7 @@ import type {
 } from '@/lib/admin/types';
 import { humanizeSeconds } from '@/lib/admin/duration-format';
 import { formatCentsExact } from '@/lib/admin/money-format';
+import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
 
 // Only manual targets can ever be a transition button — narrowing the map to
 // those keys makes any drift from the state machine a compile error rather than
@@ -659,6 +660,13 @@ export function RequestDetailSheet({
                         </p>
                       )}
                   </div>
+                </section>
+              )}
+
+              {/* FieldPulse spillover details — collapsed; hidden when null */}
+              {detail.fieldpulseData && (
+                <section>
+                  <FieldpulseDetails data={detail.fieldpulseData} />
                 </section>
               )}
 

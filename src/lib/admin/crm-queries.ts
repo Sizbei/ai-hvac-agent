@@ -227,6 +227,9 @@ export async function getCustomerById(
     // hash (token material) is never sent to the client.
     portalActive: Boolean(row.portalTokenHash),
     fieldpulseCustomFields: row.fieldpulseCustomFields ?? null,
+    isTaxExempt: row.isTaxExempt ?? null,
+    billingAddress: safeDecrypt(row.billingAddressEncrypted ?? null),
+    fieldpulseData: (row.fieldpulseData as Record<string, unknown> | null) ?? null,
     createdAt: row.createdAt.toISOString(),
     equipment: equipmentRows.map((e) => ({
       id: e.id,

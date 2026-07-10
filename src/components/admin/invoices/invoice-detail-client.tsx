@@ -16,6 +16,7 @@ import { formatCentsExact, parseDollarsToCents } from '@/lib/admin/money-format'
 import { rollUpMargin, computeMargin } from '@/lib/admin/margin';
 import { deriveInvoicePresentation } from '@/lib/admin/invoice-presentation';
 import { isCollectible, invoiceRef } from '@/lib/admin/invoice-collectible';
+import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
 import type { InvoiceDetailView, InvoiceReminderView } from '@/lib/admin/invoice-queries';
 
 // Raw API response shape — dates arrive as ISO strings in JSON.
@@ -47,6 +48,7 @@ interface ApiInvoice {
   readonly issuedAt: string | null;
   readonly dueDate: string | null;
   readonly syncedSource: 'fieldpulse' | 'housecall' | null;
+  readonly fieldpulseData: Record<string, unknown> | null;
   readonly lineItems: InvoiceDetailView['lineItems'];
   readonly payments: ApiPayment[];
   readonly actualMaterialsCostCents: number | null;
@@ -671,6 +673,9 @@ export function InvoiceDetailClient({
               )}
             </CardContent>
           </Card>
+
+          {/* FieldPulse spillover details — collapsed by default; hidden when null */}
+          <FieldpulseDetails data={invoice.fieldpulseData} />
         </div>
 
         {/* Right column: collections + activity sidebar */}

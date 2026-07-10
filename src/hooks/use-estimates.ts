@@ -13,6 +13,7 @@ export interface EstimateListItem {
   readonly signedAt: string | null;
   readonly syncedSource: 'fieldpulse' | null;
   readonly fieldpulseStatusName: string | null;
+  readonly title: string | null;
 }
 
 interface UseEstimatesResult {

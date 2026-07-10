@@ -37,6 +37,7 @@ import { ScopedEstimatesSection } from '@/components/admin/estimates/scoped-esti
 import { ScopedInvoicesSection } from '@/components/admin/invoices/scoped-invoices-section';
 import { CustomerMembershipCard } from '@/components/admin/memberships/customer-membership-card';
 import { PortalLinkCard } from '@/components/admin/portal-link-card';
+import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
 import type { EquipmentRecord } from '@/lib/admin/crm-types';
 
 const EQUIPMENT_LABELS: Record<string, string> = {
@@ -297,9 +298,25 @@ export default function CustomerDetailPage({
           </Button>
         </Link>
         <div className="flex-1">
-          <h1 className="font-heading text-2xl font-bold tracking-tight">
-            {customer.name ?? 'Unknown Customer'}
-          </h1>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="font-heading text-2xl font-bold tracking-tight">
+              {customer.name ?? 'Unknown Customer'}
+            </h1>
+            {/* Account type badge */}
+            <span className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${
+              customer.customerType === 'commercial'
+                ? 'border-blue-200 bg-blue-50 text-blue-700'
+                : 'border-muted bg-muted/50 text-muted-foreground'
+            }`}>
+              {customer.customerType === 'commercial' ? 'Commercial' : 'Residential'}
+            </span>
+            {/* Tax-exempt badge — only when true */}
+            {customer.isTaxExempt === true && (
+              <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700">
+                Tax-exempt
+              </span>
+            )}
+          </div>
           <p className="text-sm text-muted-foreground">
             Customer since {formatDate(customer.createdAt)}
           </p>
@@ -374,6 +391,16 @@ export default function CustomerDetailPage({
                 {customer.propertySqft ? ` (${customer.propertySqft} sq ft)` : ''}
               </div>
             )}
+            {/* Billing address — shown only when present and different from service address */}
+            {customer.billingAddress && customer.billingAddress !== customer.address && (
+              <div className="flex items-start gap-2 text-sm sm:col-span-2">
+                <MapPin className="size-4 shrink-0 text-muted-foreground mt-0.5" />
+                <div>
+                  <span className="text-xs text-muted-foreground">Billing address: </span>
+                  {customer.billingAddress}
+                </div>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -399,6 +426,9 @@ export default function CustomerDetailPage({
           </CardContent>
         </Card>
       )}
+
+      {/* FieldPulse spillover details — collapsed by default; hidden when null */}
+      <FieldpulseDetails data={customer.fieldpulseData} />
 
       {/* Membership */}
       <CustomerMembershipCard customerId={id} />

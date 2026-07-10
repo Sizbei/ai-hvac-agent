@@ -220,6 +220,8 @@ export interface EstimateListRow {
   readonly syncedSource: "fieldpulse" | null;
   /** Human-readable status label from FieldPulse (e.g. "Sent"). Null for native estimates. */
   readonly fieldpulseStatusName: string | null;
+  /** Human-readable estimate title from FieldPulse. Null for native estimates. */
+  readonly title: string | null;
 }
 
 /** Admin list of an org's estimates, newest first. */
@@ -238,6 +240,7 @@ export async function listEstimates(
       signedAt: estimates.signedAt,
       fieldpulseEstimateId: estimates.fieldpulseEstimateId,
       fieldpulseStatusName: estimates.fieldpulseStatusName,
+      title: estimates.title,
     })
     .from(estimates)
     .where(withTenant(estimates, organizationId))
@@ -287,6 +290,10 @@ export interface EstimateDetailView {
   readonly syncedSource: "fieldpulse" | null;
   /** Human-readable status label from FieldPulse (e.g. "Sent"). Null for native estimates. */
   readonly fieldpulseStatusName: string | null;
+  /** Human-readable estimate title from FieldPulse. Null for native estimates. */
+  readonly title: string | null;
+  /** FieldPulse spillover data for the detail panel; null when not a FP estimate or empty. */
+  readonly fieldpulseData: Record<string, unknown> | null;
 }
 
 /**
@@ -384,6 +391,8 @@ export async function getEstimateDetailById(
       createdAt: estimates.createdAt,
       fieldpulseEstimateId: estimates.fieldpulseEstimateId,
       fieldpulseStatusName: estimates.fieldpulseStatusName,
+      title: estimates.title,
+      fieldpulseData: estimates.fieldpulseData,
     })
     .from(estimates)
     .where(withTenant(estimates, organizationId, eq(estimates.id, id)))
@@ -391,7 +400,7 @@ export async function getEstimateDetailById(
 
   if (!est) return null;
 
-  const { fieldpulseEstimateId, fieldpulseStatusName, ...header } = est;
+  const { fieldpulseEstimateId, fieldpulseStatusName, fieldpulseData, ...header } = est;
   // Admin detail: include snapshotted cost so the UI can show margin.
   const options = await loadOptionsWithLineItems(organizationId, est.id, true);
   return {
@@ -399,6 +408,7 @@ export async function getEstimateDetailById(
     options,
     syncedSource: fieldpulseEstimateId != null ? "fieldpulse" : null,
     fieldpulseStatusName: fieldpulseStatusName ?? null,
+    fieldpulseData: (fieldpulseData as Record<string, unknown> | null) ?? null,
   };
 }
 

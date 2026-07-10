@@ -18,6 +18,7 @@ export interface PricebookItem {
   readonly active: boolean;
   readonly isLaborItem: boolean;
   readonly fieldpulseItemId: string | null;
+  readonly fieldpulseData: Record<string, unknown> | null;
 }
 
 export interface TaxRate {

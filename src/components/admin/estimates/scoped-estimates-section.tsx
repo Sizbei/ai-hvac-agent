@@ -58,11 +58,16 @@ export function ScopedEstimatesSection({
               href={`/admin/estimates/${est.id}`}
               className="flex items-center justify-between rounded-lg border p-3 hover:bg-muted/30"
             >
-              <div className="flex items-center gap-3">
-                <EstimateStatusBadge status={est.status} />
-                <span className="text-xs text-muted-foreground">
-                  {formatDate(est.createdAt)}
-                </span>
+              <div className="flex flex-col gap-0.5">
+                <div className="flex items-center gap-3">
+                  <EstimateStatusBadge status={est.status} />
+                  <span className="text-xs text-muted-foreground">
+                    {formatDate(est.createdAt)}
+                  </span>
+                </div>
+                {est.title && (
+                  <span className="text-xs text-muted-foreground">{est.title}</span>
+                )}
               </div>
               <span className="text-sm font-medium">
                 {formatCentsExact(est.totalCents)}
