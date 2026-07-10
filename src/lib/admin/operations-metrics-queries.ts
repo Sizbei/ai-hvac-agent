@@ -234,9 +234,9 @@ export async function getOperationsMetrics(
     // their own systems. Mirrors the timeToPaid native-only filter above.
     db
       .select({
-        b0: sql<string>`coalesce(sum(${invoices.totalCents} - ${invoices.amountPaidCents}) filter (where ${invoices.createdAt} >= ${cut30}), 0)`,
-        b30: sql<string>`coalesce(sum(${invoices.totalCents} - ${invoices.amountPaidCents}) filter (where ${invoices.createdAt} < ${cut30} and ${invoices.createdAt} >= ${cut60}), 0)`,
-        b60: sql<string>`coalesce(sum(${invoices.totalCents} - ${invoices.amountPaidCents}) filter (where ${invoices.createdAt} < ${cut60}), 0)`,
+        b0: sql<string>`coalesce(sum(${invoices.totalCents} - ${invoices.amountPaidCents}) filter (where coalesce(${invoices.issuedAt}, ${invoices.createdAt}) >= ${cut30}), 0)`,
+        b30: sql<string>`coalesce(sum(${invoices.totalCents} - ${invoices.amountPaidCents}) filter (where coalesce(${invoices.issuedAt}, ${invoices.createdAt}) < ${cut30} and coalesce(${invoices.issuedAt}, ${invoices.createdAt}) >= ${cut60}), 0)`,
+        b60: sql<string>`coalesce(sum(${invoices.totalCents} - ${invoices.amountPaidCents}) filter (where coalesce(${invoices.issuedAt}, ${invoices.createdAt}) < ${cut60}), 0)`,
       })
       .from(invoices)
       .where(

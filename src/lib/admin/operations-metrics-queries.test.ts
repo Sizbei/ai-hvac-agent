@@ -107,6 +107,7 @@ vi.mock('@/lib/db/schema', () => ({
     totalCents: 'invoices.totalCents',
     amountPaidCents: 'invoices.amountPaidCents',
     createdAt: 'invoices.createdAt',
+    issuedAt: 'invoices.issuedAt',
     organizationId: 'invoices.org',
     fieldpulseInvoiceId: 'invoices.fieldpulseInvoiceId',
     hcpInvoiceId: 'invoices.hcpInvoiceId',
@@ -321,5 +322,17 @@ describe('getOperationsMetrics', () => {
     expect(importedJobsWhere).toContain('isNotNull');
     expect(importedJobsWhere).toContain('serviceRequests.fieldpulseJobId');
     expect(importedJobsWhere).toContain('serviceRequests.hcpJobId');
+  });
+
+  it('AR aging buckets reference coalesce(issuedAt, createdAt) — not bare createdAt', async () => {
+    queueAll({});
+    await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO });
+
+    // 5th select is native AR aging. The sql`` column expressions must reference
+    // issuedAt so that native invoices without an issued date fall back to createdAt
+    // while any row with issued_at set (e.g. future migration) is bucketed correctly.
+    const agingColumns = JSON.stringify(captured[4]?.columns ?? {});
+    expect(agingColumns).toContain('invoices.issuedAt');
+    expect(agingColumns).toContain('invoices.createdAt');
   });
 });

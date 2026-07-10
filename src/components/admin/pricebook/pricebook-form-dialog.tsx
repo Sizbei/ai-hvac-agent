@@ -185,6 +185,13 @@ export function PricebookFormDialog({
           </DialogDescription>
         </DialogHeader>
 
+        {editing?.fieldpulseItemId && (
+          <p className="text-xs text-muted-foreground rounded-md border border-border bg-muted/40 px-3 py-2">
+            Synced from FieldPulse — cost, markup, and description are refreshed
+            nightly from FieldPulse and will overwrite any edits made here.
+          </p>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">

@@ -16,6 +16,8 @@ export interface PricebookItem {
   readonly hours: number | null;
   readonly warranty: string | null;
   readonly active: boolean;
+  readonly isLaborItem: boolean;
+  readonly fieldpulseItemId: string | null;
 }
 
 export interface TaxRate {

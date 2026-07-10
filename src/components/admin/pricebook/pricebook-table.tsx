@@ -82,15 +82,29 @@ export function PricebookTable({
           items.map((item) => (
             <TableRow key={item.id} className={item.active ? '' : 'opacity-60'}>
               <TableCell className="font-medium">
-                {item.name}
-                {!item.active && (
-                  <span className="ml-2 text-xs text-muted-foreground">
-                    (inactive)
-                  </span>
+                <div>
+                  {item.name}
+                  {!item.active && (
+                    <span className="ml-2 text-xs text-muted-foreground">
+                      (inactive)
+                    </span>
+                  )}
+                </div>
+                {item.description && (
+                  <div className="text-xs text-muted-foreground truncate max-w-xs">
+                    {item.description}
+                  </div>
                 )}
               </TableCell>
               <TableCell>
-                <TypeBadge type={item.type} />
+                <div className="flex flex-wrap gap-1">
+                  <TypeBadge type={item.type} />
+                  {item.isLaborItem && (
+                    <Badge variant="outline" className="text-xs">
+                      Labor
+                    </Badge>
+                  )}
+                </div>
               </TableCell>
               <TableCell className="text-muted-foreground">
                 {item.sku ?? '—'}

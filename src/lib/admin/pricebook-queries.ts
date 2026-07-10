@@ -94,6 +94,8 @@ export interface PricebookItemAdminRow {
   readonly hours: number | null;
   readonly warranty: string | null;
   readonly active: boolean;
+  readonly isLaborItem: boolean;
+  readonly fieldpulseItemId: string | null;
 }
 
 const ADMIN_ITEM_PROJECTION = {
@@ -111,6 +113,8 @@ const ADMIN_ITEM_PROJECTION = {
   hours: pricebookItems.hours,
   warranty: pricebookItems.warranty,
   active: pricebookItems.active,
+  isLaborItem: pricebookItems.isLaborItem,
+  fieldpulseItemId: pricebookItems.fieldpulseItemId,
 } as const;
 
 export async function getPricebookItemById(
