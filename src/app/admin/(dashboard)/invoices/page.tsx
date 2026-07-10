@@ -50,9 +50,9 @@ const PER_PAGE = 50;
 
 const REASON_MAP: Record<string, string> = {
   COOLDOWN: 'A reminder was already sent recently.',
-  NO_PHONE: 'No phone number on file for this customer.',
+  NO_CONTACT: 'No phone or email on file for this customer.',
   NO_TEMPLATE: 'No reminder template is configured.',
-  NO_BALANCE: 'This invoice has no balance due.',
+  NOT_COLLECTIBLE: "This invoice isn't collectible.",
   NOT_FOUND: 'Invoice not found.',
 };
 

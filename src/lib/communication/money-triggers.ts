@@ -102,6 +102,23 @@ async function findActiveSmsTemplate(
   return tpl ?? null;
 }
 
+/** Find the active email_html template for a trigger in an org, or null. */
+async function findActiveEmailTemplate(
+  organizationId: string,
+  triggerType: "invoice_overdue",
+): Promise<{ id: string } | null> {
+  const tpl = await db.query.communicationTemplates.findFirst({
+    where: and(
+      eq(communicationTemplates.organizationId, organizationId),
+      eq(communicationTemplates.triggerType, triggerType),
+      eq(communicationTemplates.templateType, "email_html"),
+      eq(communicationTemplates.isActive, true),
+    ),
+    columns: { id: true },
+  });
+  return tpl ?? null;
+}
+
 
 /**
  * Send the estimate approval LINK to the customer (SMS, falling back to email).
@@ -239,7 +256,7 @@ export async function sendInvoiceReminder(
 ): Promise<
   | { readonly ok: true }
   | { readonly ok: false; readonly reason:
-      "not_found" | "not_collectible" | "no_phone" | "no_template" | "cooldown" }
+      "not_found" | "not_collectible" | "no_contact" | "no_template" | "cooldown" }
 > {
   const [inv] = await db
     .select({
@@ -265,10 +282,18 @@ export async function sendInvoiceReminder(
   }
 
   const contact = await getCustomerContact(organizationId, inv.customerId);
-  if (!contact || !contact.phone) return { ok: false, reason: "no_phone" };
+  if (!contact || (!contact.phone && !contact.email)) {
+    return { ok: false, reason: "no_contact" };
+  }
 
-  const smsTemplate = await findActiveSmsTemplate(organizationId, "invoice_overdue");
-  if (!smsTemplate) return { ok: false, reason: "no_template" };
+  const smsTemplate = contact.phone
+    ? await findActiveSmsTemplate(organizationId, "invoice_overdue")
+    : null;
+  const emailTemplate =
+    !smsTemplate && contact.email
+      ? await findActiveEmailTemplate(organizationId, "invoice_overdue")
+      : null;
+  if (!smsTemplate && !emailTemplate) return { ok: false, reason: "no_template" };
 
   // Real pay link: mint a fresh portal token for this customer.
   const token = await generatePortalToken(organizationId, inv.customerId);
@@ -297,24 +322,26 @@ export async function sendInvoiceReminder(
     .returning({ id: invoices.id });
   if (!claimed) return { ok: false, reason: "cooldown" };
 
+  const templateVariables = {
+    customerName: contact.name ?? "",
+    amount: formatCentsExact(balanceCents),
+    invoiceNumber: invoiceRef(inv.id),
+    invoiceId: inv.id,
+    payLink,
+    companyName: brand.companyName,
+    phoneNumber: brand.phoneNumber,
+  };
+
   try {
     await queueCommunicationJob({
       organizationId,
-      templateId: smsTemplate.id,
       triggerType: "invoice_overdue",
-      channel: "sms" as never,
-      recipientPhone: contact.phone,
-      templateVariables: {
-        customerName: contact.name ?? "",
-        amount: formatCentsExact(balanceCents),
-        invoiceNumber: invoiceRef(inv.id),
-        invoiceId: inv.id,
-        payLink,
-        companyName: brand.companyName,
-        phoneNumber: brand.phoneNumber,
-      },
+      templateVariables,
       priority: 30,
       customerId: inv.customerId,
+      ...(smsTemplate
+        ? { templateId: smsTemplate.id, channel: "sms" as never, recipientPhone: contact.phone! }
+        : { templateId: emailTemplate!.id, channel: "email" as never, recipientEmail: contact.email! }),
     });
   } catch (error) {
     // Compensate: the side effect failed, so release the claim we just took by
@@ -388,6 +415,10 @@ export async function sendOverdueInvoiceReminders(
   let skipped = 0;
   const brand = await getOrgBrand(organizationId);
 
+  // Hoist both template lookups outside the per-invoice loop.
+  const sweepSmsTemplate = await findActiveSmsTemplate(organizationId, "invoice_overdue");
+  const sweepEmailTemplate = await findActiveEmailTemplate(organizationId, "invoice_overdue");
+
   for (const inv of overdue) {
     // Need a customer (consent + dedupe both key on it).
     if (!inv.customerId) {
@@ -395,8 +426,26 @@ export async function sendOverdueInvoiceReminders(
       continue;
     }
 
-    // Spam guard: at most one reminder per 7-day bucket per invoice. Bucket the
-    // ledger periodKey by week so a re-run inside the window claims nothing.
+    const contact = await getCustomerContact(organizationId, inv.customerId);
+    if (!contact || (!contact.phone && !contact.email)) {
+      skipped++;
+      continue;
+    }
+
+    // Channel ladder: SMS if phone + smsTemplate; else email if email + emailTemplate.
+    // Resolve BEFORE claiming the ledger slot so a customer with no sendable
+    // channel doesn't burn their 7-day bucket and get silently skipped.
+    const useSms = !!(contact.phone && sweepSmsTemplate);
+    const useEmail = !useSms && !!(contact.email && sweepEmailTemplate);
+    if (!useSms && !useEmail) {
+      skipped++;
+      continue;
+    }
+
+    // Spam guard: at most one reminder per 7-day bucket per invoice. Claim only
+    // after a channel is confirmed so no-contact / no-template rows don't consume
+    // the slot. Bucket the ledger periodKey by week so a re-run inside the window
+    // claims nothing.
     const bucket = Math.floor(now.getTime() / DUNNING_PERIOD_MS);
     const claimed = await claimOutboundOnce({
       organizationId,
@@ -409,40 +458,26 @@ export async function sendOverdueInvoiceReminders(
       continue;
     }
 
-    const contact = await getCustomerContact(organizationId, inv.customerId);
-    if (!contact || !contact.phone) {
-      skipped++;
-      continue;
-    }
-
-    const smsTemplate = await findActiveSmsTemplate(
-      organizationId,
-      "invoice_overdue",
-    );
-    if (!smsTemplate) {
-      skipped++;
-      continue;
-    }
-
     const balanceCents = Math.max(0, inv.totalCents - inv.amountPaidCents);
+    const templateVariables = {
+      customerName: contact.name ?? "",
+      amount: formatCentsExact(balanceCents),
+      invoiceNumber: invoiceRef(inv.id),
+      invoiceId: inv.id,
+      payLink: "",
+      companyName: brand.companyName,
+      phoneNumber: brand.phoneNumber,
+    };
     try {
       await queueCommunicationJob({
         organizationId,
-        templateId: smsTemplate.id,
         triggerType: "invoice_overdue",
-        channel: "sms" as never,
-        recipientPhone: contact.phone,
-        templateVariables: {
-          customerName: contact.name ?? "",
-          amount: formatCentsExact(balanceCents),
-          invoiceNumber: invoiceRef(inv.id),
-          invoiceId: inv.id,
-          payLink: "",
-          companyName: brand.companyName,
-          phoneNumber: brand.phoneNumber,
-        },
+        templateVariables,
         priority: 30,
         customerId: inv.customerId,
+        ...(useSms
+          ? { templateId: sweepSmsTemplate!.id, channel: "sms" as never, recipientPhone: contact.phone! }
+          : { templateId: sweepEmailTemplate!.id, channel: "email" as never, recipientEmail: contact.email! }),
       });
       enqueued++;
       // Reflect the automated send in the UI (list chip + detail Activity) just like
