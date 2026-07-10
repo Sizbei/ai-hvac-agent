@@ -9,6 +9,11 @@ entity, the surface it displays on, its mutability, and the metric semantics.
 > flushes during any run). Import runner: `npm run fp:import` (see
 > `src/lib/integrations/fieldpulse/import/run-import.ts`; `--dry-run` first).
 
+> The images below are reference renders built from the shipped component markup
+> and real run data (admin is auth-gated via Google-only login).
+
+![FieldPulse import — final state, all phases complete](images/fieldpulse/import-final.png)
+
 ## Entity map
 
 | FieldPulse | Native table (key) | Volume¹ | Displays at | Mutable? |
@@ -29,6 +34,8 @@ entity, the surface it displays on, its mutability, and the metric semantics.
 ¹ As of the 2026-07-09 backfill; the nightly sweep keeps counts current.
 ² Includes 6 archived placeholders for customers hard-deleted in FieldPulse whose
 jobs still exist ("FieldPulse customer (deleted #id)").
+
+![Pricebook — 17.5k imported items with FieldPulse provenance pills](images/fieldpulse/pricebook.png)
 
 ## Metric semantics (the money rules)
 
