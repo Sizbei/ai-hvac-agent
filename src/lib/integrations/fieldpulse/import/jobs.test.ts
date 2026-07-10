@@ -706,13 +706,7 @@ describe("importJobsFromFieldpulse", () => {
       [{ id: "tech-1-uuid", fieldpulseUserId: "40000001" }], // first tech cached
     ]);
 
-    let capturedDescription: string | undefined;
-    vi.mocked(db.batch).mockImplementation(async (ops: unknown) => {
-      // The second item in batch is the serviceRequests insert.
-      // We capture the description from the batch's query objects.
-      void ops; // we can't easily inspect the drizzle batch builders in unit tests
-      return [[], []] as never;
-    });
+    vi.mocked(db.batch).mockResolvedValue([[], []] as never);
 
     await importJobsFromFieldpulse(ORG, counts, client);
 
@@ -770,26 +764,26 @@ describe("importJobsFromFieldpulse — fieldpulseData spillover from raw payload
     ]);
 
     vi.mocked(db.batch).mockResolvedValue([[], []] as never);
+    // Capture insert values so the DB write itself can be asserted.
+    const { values } = wireInsert();
 
     await importJobsFromFieldpulse(ORG, counts, client);
     expect(counts.created).toBe(1);
 
-    // Directly verify buildFpSpillover gives the right output for this _raw.
-    // This is the integration assertion: the raw payload that _raw would contain
-    // at import time produces the expected spillover keys.
-    const { buildFpSpillover } = await import("./spillover");
-    const spillover = buildFpSpillover(fpWithRaw._raw ?? {}, "jobs");
-    expect(spillover).not.toBeNull();
-    // tags array → comma-joined string
-    expect(spillover?.tags).toBe("urgent, repeat-customer");
-    // boolean false is NOT empty
-    expect(spillover?.is_multiday_job).toBe(false);
-    expect(spillover?.tags_string).toBe("urgent, repeat-customer");
-    // Denied fields must not appear
-    expect(spillover).not.toHaveProperty("billing");
-    expect(spillover).not.toHaveProperty("some_unclassified_field");
-    expect(spillover).not.toHaveProperty("id");
-    expect(spillover).not.toHaveProperty("customer_id");
+    // Load-bearing assertion: the serviceRequests INSERT carries the spillover
+    // built from fp._raw. If jobs.ts fed buildFpSpillover {} (the original P1
+    // bug) or a camelCase struct, fieldpulseData would be null and this fails.
+    const srWrite = values.mock.calls
+      .map((c) => c[0] as Record<string, unknown>)
+      .find((v) => "fieldpulseJobId" in v);
+    expect(srWrite).toBeDefined();
+    // Exact equality: JOBS_SAFE fields only — proves denied fields (billing,
+    // some_unclassified_field, id, customer_id) never reach the write.
+    expect(srWrite?.fieldpulseData).toEqual({
+      tags: "urgent, repeat-customer",          // array → comma-joined string
+      is_multiday_job: false,                   // boolean false is NOT empty
+      tags_string: "urgent, repeat-customer",
+    });
   });
 
   it("fieldpulseData is null when fp._raw has no JOBS_SAFE fields", async () => {
@@ -809,12 +803,27 @@ describe("importJobsFromFieldpulse — fieldpulseData spillover from raw payload
     expect(spillover).toBeNull();
   });
 
-  it("fieldpulseData is null when fp._raw is absent (fallback to {})", async () => {
-    // No _raw on the object.
+  it("fieldpulseData is null in the DB write when fp._raw is absent (fallback to {})", async () => {
+    // No _raw on the object — the importer must still write, with null spillover.
     const fpNoRaw: FieldpulseJob = makeJob();
 
-    const { buildFpSpillover } = await import("./spillover");
-    const spillover = buildFpSpillover(fpNoRaw._raw ?? {}, "jobs");
-    expect(spillover).toBeNull();
+    const client = makeClient([fpNoRaw]);
+    const counts = makeCounts();
+    wireSelectSequence([
+      [], // existingFpIds → new
+      [{ id: "cust-uuid", fieldpulseCustomerId: "20000001" }],
+      [], // techByFpId
+    ]);
+    vi.mocked(db.batch).mockResolvedValue([[], []] as never);
+    const { values } = wireInsert();
+
+    await importJobsFromFieldpulse(ORG, counts, client);
+    expect(counts.created).toBe(1);
+
+    const srWrite = values.mock.calls
+      .map((c) => c[0] as Record<string, unknown>)
+      .find((v) => "fieldpulseJobId" in v);
+    expect(srWrite).toBeDefined();
+    expect(srWrite?.fieldpulseData).toBeNull();
   });
 });

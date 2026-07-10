@@ -12,7 +12,7 @@
  * (FAKE PII only — no real customer data).
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { mapFpCustomer, importCustomersFromFieldpulse, mapAccountType } from "./customers";
+import { mapFpCustomer, importCustomersFromFieldpulse, importOneFpCustomer, mapAccountType } from "./customers";
 import type { FieldpulseCustomer } from "../types";
 import type { FieldpulseClient } from "../client";
 import type { PhaseResult } from "./run-import";
@@ -705,15 +705,54 @@ describe("importCustomersFromFieldpulse", () => {
 });
 
 
-// ── Spillover integration: fp._raw keys verified via buildFpSpillover ────────────
+// ── Spillover integration: fp._raw → importOneFpCustomer → DB write ─────────────
 //
-// These tests assert that the spillover wiring is correct end-to-end:
-// a fixture raw payload → buildFpSpillover("customers") → expected keys.
-// They directly test the pure function path that importOneFpCustomer now calls
-// (buildFpSpillover(fp._raw ?? {}, "customers")), catching any regression where
-// the raw payload is discarded or the wrong keys are read.
+// The first test drives the REAL importer with _raw attached and asserts the
+// fieldpulseData that reaches the DB write — the load-bearing wiring proof.
+// (If importOneFpCustomer fed buildFpSpillover {} or a camelCase struct — the
+// original P1 bug — the write would carry null and the test fails.)
+// The remaining tests exercise buildFpSpillover("customers") edge cases directly.
 
 describe("importOneFpCustomer — fieldpulseData spillover from raw payload", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("DB write carries allowlist-only fieldpulseData — PII keys can never reach the write", async () => {
+    const fp = makeCustomer({
+      _raw: {
+        // ALLOWLIST keys — must survive into the write
+        status: "active",
+        booking_portal_consent: true,
+        account_type: "residential",
+        // PII keys — must be stripped before the write
+        first_name: "Alice",
+        last_name: "Smith",
+        email: "alice@example.invalid",
+        phone: "555-000-0001",
+        phone_e164: "+15550000001",
+        address_1: "1 Test St",
+        display_name: "Alice Smith",
+      },
+    });
+
+    // Path (a): existing fpId row → updateCustomerFields (db.update .set()).
+    wireSelect([{ id: "cust-existing" }]);
+    const { set } = wireUpdate();
+
+    const id = await importOneFpCustomer(ORG, fp);
+    expect(id).toBe("cust-existing");
+
+    expect(set).toHaveBeenCalledTimes(1);
+    const written = set.mock.calls[0][0] as Record<string, unknown>;
+    // Exact equality: the write contains ONLY the allowlisted keys — zero PII.
+    expect(written.fieldpulseData).toEqual({
+      status: "active",
+      booking_portal_consent: true,
+      account_type: "residential",
+    });
+  });
+
   it("populates fieldpulseData with allowlisted fields from fp._raw", async () => {
     // Simulate the _raw object that toCustomer() would attach from the FP API.
     const raw = {
