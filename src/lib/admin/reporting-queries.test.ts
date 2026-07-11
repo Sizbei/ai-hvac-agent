@@ -312,6 +312,35 @@ describe('getSalesReport', () => {
     ).toBe(true);
   });
 
+  it('AR where-clause includes the balance guard (amountPaidCents < totalCents)', async () => {
+    // Without the balance guard, a fully-paid-but-still-open invoice (total=paid)
+    // contributes 0 rather than being filtered out, but an over-paid invoice (total<paid)
+    // would produce a NEGATIVE balance that subtracts from the AR total — incorrect.
+    seed({
+      gross: 0,
+      refund: 0,
+      ar: '5000',
+      estimates: { created: 0, sold: 0, expired: 0, open: 0 },
+      invoices: { created: 0, paid: 0 },
+    });
+    await getSalesReport(ORG);
+
+    // 3rd select is the AR query. Its where-conditions (via withTenant) must contain
+    // a sql-tagged condition referencing both amountPaidCents and totalCents — the
+    // balance guard that filters out fully/over-paid rows.
+    const arWhere = captured[2].where;
+    expect(
+      hasTag(
+        arWhere,
+        (v) =>
+          v.kind === 'sql' &&
+          Array.isArray(v.values) &&
+          (v.values as unknown[]).includes('invoices.amountPaidCents') &&
+          (v.values as unknown[]).includes('invoices.totalCents'),
+      ),
+    ).toBe(true);
+  });
+
   it('splits AR by source and sums them into outstandingArCents (no blend/double-count)', async () => {
     seed({
       gross: 0,

@@ -69,6 +69,8 @@ export interface OperationsMetrics {
    * system — these buckets are visibility, not collections triggers.
    */
   readonly syncedArAging: SyncedArAging;
+  /** Native + synced AR combined — the headline number. Native-only lives in totalOutstandingCents. */
+  readonly totalOutstandingAllCents: number;
 
   // 3. Customer service volume.
   /**

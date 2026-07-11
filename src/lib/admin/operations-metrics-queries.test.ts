@@ -354,3 +354,21 @@ it('exposes synced AR aging buckets (due-date based) alongside the legacy total'
   expect(m.syncedArTotalCents).toBe(148000);
   expect(m.syncedArCount).toBe(133);
 });
+
+it('totalOutstandingAllCents = native (b0+b30+b60) + syncedArTotalCents', async () => {
+  // Native AR: 2000 + 500 + 300 = 2800. Synced: 15000. Combined: 17800.
+  queueAll({
+    aging: [{ b0: '2000', b30: '500', b60: '300' }],
+    syncedAging: [{ currentCents: '5000', b0: '6000', b30: '3000', b60: '1000', totalCents: '15000', count: '12' }],
+  });
+  const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO });
+  expect(m.arAging.totalOutstandingCents).toBe(2800);
+  expect(m.syncedArTotalCents).toBe(15000);
+  expect(m.totalOutstandingAllCents).toBe(17800);
+});
+
+it('totalOutstandingAllCents = 0 when both native and synced are zero', async () => {
+  queueAll({});
+  const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO });
+  expect(m.totalOutstandingAllCents).toBe(0);
+});

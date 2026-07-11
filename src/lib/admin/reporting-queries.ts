@@ -148,7 +148,7 @@ export async function getSalesReport(
         ),
       })
       .from(invoices)
-      .where(withTenant(invoices, organizationId, eq(invoices.state, "open"))),
+      .where(withTenant(invoices, organizationId, eq(invoices.state, "open"), sql`${invoices.amountPaidCents} < ${invoices.totalCents}`)),
 
     // Estimate buckets in ONE pass, created within the period. Expiry is lazy
     // (expiresAt is only enforced at approval), so an 'open' estimate whose

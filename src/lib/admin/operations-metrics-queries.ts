@@ -399,6 +399,8 @@ export async function getOperationsMetrics(
 
   const importedJobsCurrent = toNumber(importedJobsCurrentRow[0]?.value);
 
+  const totalOutstandingAllCents = (b0 + b30 + b60) + syncedArTotalCents; // native buckets + synced total
+
   return {
     rangeDays,
     responseTimeSeconds,
@@ -408,6 +410,7 @@ export async function getOperationsMetrics(
     syncedArTotalCents,
     syncedArCount,
     syncedArAging,
+    totalOutstandingAllCents,
     jobsBooked,
     importedJobsCurrent,
     firstResponseHumanSeconds,

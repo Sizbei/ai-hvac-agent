@@ -293,13 +293,19 @@ export default function OperationsPage() {
                   </span>
                 </div>
               ))}
-              <div className="mt-4 flex items-baseline justify-between border-t border-border pt-3">
-                <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Total outstanding
-                </span>
-                <span className="font-heading text-xl font-bold tabular-nums">
-                  {formatCentsExact(agingTotal)}
-                </span>
+              <div className="mt-4 border-t border-border pt-3">
+                <div className="flex items-baseline justify-between">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Total outstanding
+                  </span>
+                  <span className="font-heading text-xl font-bold tabular-nums">
+                    {formatCentsExact(metrics?.totalOutstandingAllCents ?? agingTotal)}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Native {formatCentsExact(agingTotal)} · Synced (FieldPulse/HCP){' '}
+                  {formatCentsExact(metrics?.syncedArTotalCents ?? 0)} — collected in the external system
+                </p>
               </div>
               {(metrics?.syncedArTotalCents ?? 0) > 0 && (
                 <div className="mt-4 border-t border-border pt-3">

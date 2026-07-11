@@ -36,6 +36,8 @@ export interface OperationsMetrics {
   readonly syncedArCount: number;
   /** Due-date-based aging of the synced open receivables. */
   readonly syncedArAging: SyncedArAging;
+  /** Native + synced AR combined — the headline number. Native-only lives in totalOutstandingCents. */
+  readonly totalOutstandingAllCents: number;
   readonly jobsBooked: MetricTrend;
   /** Count of FP-imported service requests in the current window. */
   readonly importedJobsCurrent: number;
