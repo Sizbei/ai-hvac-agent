@@ -59,6 +59,8 @@ import type {
   CalendarTechnicianLane,
   MonthCalendar,
   MonthCalendarDay,
+  AgendaBooking,
+  AgendaPage,
   RequestFilters,
   CreateTechnicianInput,
   UpdateTechnicianInput,
@@ -1489,6 +1491,196 @@ export async function getMonthCalendar(
   }));
 
   return { month, days };
+}
+
+/** Rows per agenda page. The first page shows the newest bookings (all upcoming
+ * are newest, so they always lead); "load older" pages by the same size. */
+const AGENDA_PAGE_SIZE = 50;
+
+/** Encode/decode the keyset cursor. bookedAt alone is NOT unique — imported
+ * batches stamp many rows at the same second — so a timestamp-only cursor with a
+ * strict `<` would silently drop every row sharing the boundary timestamp. The
+ * cursor carries (bookedAt, id) and the query uses the matching compound
+ * comparison, so ties are ordered deterministically and never skipped. */
+function encodeAgendaCursor(bookedAtIso: string, id: string): string {
+  return `${bookedAtIso}|${id}`;
+}
+function decodeAgendaCursor(
+  cursor: string,
+): { readonly ts: Date; readonly id: string } | null {
+  const sep = cursor.lastIndexOf("|");
+  if (sep < 0) return null;
+  const ts = new Date(cursor.slice(0, sep));
+  const id = cursor.slice(sep + 1);
+  if (Number.isNaN(ts.getTime()) || !id) return null;
+  return { ts, id };
+}
+
+/**
+ * Chronological booking feed (agenda view), newest first. Resolves each request
+ * to a single instant — arrival window start, or created-at when never scheduled
+ * — and groups/sorts/paginates on it. Customer name + address fall back to the
+ * linked customers row so imported jobs read correctly. `cursor` is an opaque
+ * keyset cursor from a prior page's nextCursor; null loads the first page.
+ * Keyset (not OFFSET) so "load older" is stable as new bookings arrive at the top.
+ */
+export async function getAgenda(
+  organizationId: string,
+  cursor: string | null = null,
+): Promise<AgendaPage> {
+  // One SQL expression for the sort key so WHERE / ORDER BY / the returned cursor
+  // all agree on what "when" means for a row. A raw sql() expression comes back
+  // as a Postgres timestamp STRING (not a Date — neon only maps declared
+  // timestamp columns), so callers parse it with new Date().
+  const bookedAt = sql<string>`coalesce(${serviceRequests.arrivalWindowStart}, ${serviceRequests.createdAt})`;
+
+  const decoded = cursor ? decodeAgendaCursor(cursor) : null;
+  if (cursor && !decoded) {
+    throw new Error("Invalid agenda cursor");
+  }
+
+  // Keyset predicate: rows strictly after the cursor in (bookedAt DESC, id DESC)
+  // order — older timestamp, OR same timestamp with a smaller id.
+  const keyset = decoded
+    ? or(
+        lt(bookedAt, decoded.ts),
+        and(eq(bookedAt, decoded.ts), lt(serviceRequests.id, decoded.id)),
+      )
+    : undefined;
+
+  const rows = await db
+    .select({
+      id: serviceRequests.id,
+      referenceNumber: serviceRequests.referenceNumber,
+      status: serviceRequests.status,
+      issueType: serviceRequests.issueType,
+      urgency: serviceRequests.urgency,
+      customerNameEncrypted: serviceRequests.customerNameEncrypted,
+      customerNameFromCustomer: customers.nameEncrypted,
+      addressEncrypted: serviceRequests.addressEncrypted,
+      addressFromCustomer: customers.addressEncrypted,
+      assignedToName: users.name,
+      arrivalWindowStart: serviceRequests.arrivalWindowStart,
+      fieldpulseJobId: serviceRequests.fieldpulseJobId,
+      hcpJobId: serviceRequests.hcpJobId,
+      bookedAt: bookedAt.as("booked_at"),
+    })
+    .from(serviceRequests)
+    .leftJoin(users, eq(serviceRequests.assignedTo, users.id))
+    .leftJoin(
+      customers,
+      and(
+        eq(customers.id, serviceRequests.customerId),
+        eq(customers.organizationId, organizationId),
+      ),
+    )
+    .where(withTenant(serviceRequests, organizationId, ...(keyset ? [keyset] : [])))
+    .orderBy(desc(bookedAt), desc(serviceRequests.id))
+    // +1 probes for a next page without a second COUNT query.
+    .limit(AGENDA_PAGE_SIZE + 1);
+
+  const hasMore = rows.length > AGENDA_PAGE_SIZE;
+  const pageRows = rows.slice(0, AGENDA_PAGE_SIZE);
+  const last = pageRows[pageRows.length - 1];
+  const nextCursor =
+    hasMore && last
+      ? encodeAgendaCursor(new Date(last.bookedAt).toISOString(), last.id)
+      : null;
+
+  const bookings: readonly AgendaBooking[] = pageRows.map((row) => ({
+    id: row.id,
+    referenceNumber: row.referenceNumber,
+    customerName:
+      safeDecrypt(row.customerNameEncrypted) ??
+      safeDecrypt(row.customerNameFromCustomer),
+    address:
+      safeDecrypt(row.addressEncrypted) ?? safeDecrypt(row.addressFromCustomer),
+    issueType: row.issueType,
+    urgency: row.urgency,
+    status: row.status,
+    bookedAt: new Date(row.bookedAt).toISOString(),
+    isScheduled: row.arrivalWindowStart != null,
+    assignedToName: row.assignedToName,
+    syncedSource:
+      row.fieldpulseJobId != null
+        ? "fieldpulse"
+        : row.hcpJobId != null
+          ? "housecall"
+          : null,
+  }));
+
+  return { bookings, nextCursor, hasMore };
+}
+
+/**
+ * Every booking for one customer, newest first — the drawer's booking history.
+ * Sourced from service_requests (not the service_history table, which imported
+ * jobs never populate), so imported customers show their real bookings. Name +
+ * address fall back to the linked customer. Tenant-scoped; small per customer,
+ * so no pagination.
+ */
+export async function getCustomerBookings(
+  organizationId: string,
+  customerId: string,
+): Promise<readonly AgendaBooking[]> {
+  const bookedAt = sql<string>`coalesce(${serviceRequests.arrivalWindowStart}, ${serviceRequests.createdAt})`;
+
+  const rows = await db
+    .select({
+      id: serviceRequests.id,
+      referenceNumber: serviceRequests.referenceNumber,
+      status: serviceRequests.status,
+      issueType: serviceRequests.issueType,
+      urgency: serviceRequests.urgency,
+      customerNameEncrypted: serviceRequests.customerNameEncrypted,
+      customerNameFromCustomer: customers.nameEncrypted,
+      addressEncrypted: serviceRequests.addressEncrypted,
+      addressFromCustomer: customers.addressEncrypted,
+      assignedToName: users.name,
+      arrivalWindowStart: serviceRequests.arrivalWindowStart,
+      fieldpulseJobId: serviceRequests.fieldpulseJobId,
+      hcpJobId: serviceRequests.hcpJobId,
+      bookedAt: bookedAt.as("booked_at"),
+    })
+    .from(serviceRequests)
+    .leftJoin(users, eq(serviceRequests.assignedTo, users.id))
+    .leftJoin(
+      customers,
+      and(
+        eq(customers.id, serviceRequests.customerId),
+        eq(customers.organizationId, organizationId),
+      ),
+    )
+    .where(
+      withTenant(
+        serviceRequests,
+        organizationId,
+        eq(serviceRequests.customerId, customerId),
+      ),
+    )
+    .orderBy(desc(bookedAt), desc(serviceRequests.id));
+
+  return rows.map((row) => ({
+    id: row.id,
+    referenceNumber: row.referenceNumber,
+    customerName:
+      safeDecrypt(row.customerNameEncrypted) ??
+      safeDecrypt(row.customerNameFromCustomer),
+    address:
+      safeDecrypt(row.addressEncrypted) ?? safeDecrypt(row.addressFromCustomer),
+    issueType: row.issueType,
+    urgency: row.urgency,
+    status: row.status,
+    bookedAt: new Date(row.bookedAt).toISOString(),
+    isScheduled: row.arrivalWindowStart != null,
+    assignedToName: row.assignedToName,
+    syncedSource:
+      row.fieldpulseJobId != null
+        ? "fieldpulse"
+        : row.hcpJobId != null
+          ? "housecall"
+          : null,
+  }));
 }
 
 /**

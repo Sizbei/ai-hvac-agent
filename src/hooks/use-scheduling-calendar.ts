@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { SchedulingCalendar } from '@/lib/admin/types';
 
-export type CalendarView = 'day' | 'week' | 'month';
+export type CalendarView = 'day' | 'week' | 'month' | 'agenda';
 
 interface UseSchedulingCalendarResult {
   readonly calendar: SchedulingCalendar | null;

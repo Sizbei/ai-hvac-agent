@@ -334,6 +334,42 @@ export interface MonthCalendar {
   readonly days: readonly MonthCalendarDay[];
 }
 
+// ─── Agenda (chronological booking history) ─────────────────────────────────
+
+/**
+ * One booking in the agenda feed: a service request resolved to a single
+ * chronological instant (`bookedAt` = arrival window start, or created-at when
+ * unscheduled) with the customer name + address resolved through the linked
+ * customers row (imported jobs carry no per-request PII). Read-only list row.
+ */
+export interface AgendaBooking {
+  readonly id: string;
+  readonly referenceNumber: string;
+  readonly customerName: string | null;
+  readonly address: string | null;
+  readonly issueType: string;
+  readonly status: string;
+  readonly urgency: string;
+  /** ISO instant the row is sorted/grouped by (arrival window start, else created-at). */
+  readonly bookedAt: string;
+  /** False when the job has no arrival window (bookedAt fell back to created-at). */
+  readonly isScheduled: boolean;
+  readonly assignedToName: string | null;
+  readonly syncedSource: 'fieldpulse' | 'housecall' | null;
+}
+
+/**
+ * One page of the agenda feed, newest first. The first page (no cursor) returns
+ * the newest bookings — all upcoming lead, being newest. Older bookings load on
+ * demand via `nextCursor` (an opaque keyset cursor; pass it back as the `cursor`
+ * param). `hasMore` is false once the oldest booking has been reached.
+ */
+export interface AgendaPage {
+  readonly bookings: readonly AgendaBooking[];
+  readonly nextCursor: string | null;
+  readonly hasMore: boolean;
+}
+
 // ─── Scheduling (Stage 5: customer-facing open windows) ─────────────────────
 
 /**

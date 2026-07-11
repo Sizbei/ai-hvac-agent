@@ -7,8 +7,10 @@ import {
   type CalendarView,
 } from '@/hooks/use-scheduling-calendar';
 import { useMonthCalendar } from '@/hooks/use-month-calendar';
+import { useAgenda } from '@/hooks/use-agenda';
 import { InteractiveSchedulingCalendar } from '@/components/admin/calendar/interactive-scheduling-calendar';
 import { MonthGrid } from '@/components/admin/calendar/month-grid';
+import { AgendaView } from '@/components/admin/calendar/agenda-view';
 import { RequestDetailSheet } from '@/components/admin/request-detail-sheet';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -131,13 +133,14 @@ export default function CalendarPage() {
     });
   }
 
-  // Day/week share one hook; month uses a separate (lightweight) payload. Each
-  // is enabled only for its active view so the inactive one doesn't poll.
+  // Day/week share one hook; month + agenda use their own payloads. Each hook is
+  // enabled only for its active view so the inactive ones don't fetch/poll.
   const isMonth = view === 'month';
+  const isAgenda = view === 'agenda';
   const { calendar, isLoading, error, refetch } = useSchedulingCalendar(
     date,
     view,
-    !isMonth,
+    !isMonth && !isAgenda,
     showCompleted,
   );
   const {
@@ -146,6 +149,15 @@ export default function CalendarPage() {
     error: monthError,
     refetch: refetchMonth,
   } = useMonthCalendar(date, isMonth, showCompleted);
+  const {
+    bookings,
+    isLoading: agendaLoading,
+    isLoadingMore: agendaLoadingMore,
+    hasMore: agendaHasMore,
+    error: agendaError,
+    loadOlder,
+    refetch: refetchAgenda,
+  } = useAgenda(isAgenda);
 
   const isToday = date === todayBusiness();
 
@@ -164,7 +176,7 @@ export default function CalendarPage() {
     setView('day');
   }
 
-  const activeError = isMonth ? monthError : error;
+  const activeError = isAgenda ? agendaError : isMonth ? monthError : error;
   const stepLabel = isMonth ? 'month' : view === 'week' ? 'week' : 'day';
 
   return (
@@ -210,36 +222,47 @@ export default function CalendarPage() {
             >
               Month
             </Button>
+            <Button
+              variant={view === 'agenda' ? 'secondary' : 'ghost'}
+              size="sm"
+              onClick={() => setView('agenda')}
+            >
+              Agenda
+            </Button>
           </div>
 
-          {/* Date stepper */}
-          <Button
-            variant="outline"
-            size="icon-sm"
-            onClick={() => stepDate(-1)}
-            aria-label={`Previous ${stepLabel}`}
-          >
-            <ChevronLeft className="size-4" />
-          </Button>
-          <div className="min-w-44 text-center text-sm font-medium">
-            {formatRangeLabel(date, view)}
-          </div>
-          <Button
-            variant="outline"
-            size="icon-sm"
-            onClick={() => stepDate(1)}
-            aria-label={`Next ${stepLabel}`}
-          >
-            <ChevronRight className="size-4" />
-          </Button>
-          <Button
-            variant={isToday ? 'secondary' : 'outline'}
-            size="sm"
-            onClick={() => setDate(todayBusiness())}
-            disabled={isToday}
-          >
-            Today
-          </Button>
+          {/* Date stepper — not shown for the agenda feed (a flat, paged list). */}
+          {!isAgenda && (
+            <>
+              <Button
+                variant="outline"
+                size="icon-sm"
+                onClick={() => stepDate(-1)}
+                aria-label={`Previous ${stepLabel}`}
+              >
+                <ChevronLeft className="size-4" />
+              </Button>
+              <div className="min-w-44 text-center text-sm font-medium">
+                {formatRangeLabel(date, view)}
+              </div>
+              <Button
+                variant="outline"
+                size="icon-sm"
+                onClick={() => stepDate(1)}
+                aria-label={`Next ${stepLabel}`}
+              >
+                <ChevronRight className="size-4" />
+              </Button>
+              <Button
+                variant={isToday ? 'secondary' : 'outline'}
+                size="sm"
+                onClick={() => setDate(todayBusiness())}
+                disabled={isToday}
+              >
+                Today
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -257,7 +280,17 @@ export default function CalendarPage() {
         </Alert>
       )}
 
-      {isMonth ? (
+      {isAgenda ? (
+        <AgendaView
+          bookings={bookings}
+          isLoading={agendaLoading}
+          isLoadingMore={agendaLoadingMore}
+          hasMore={agendaHasMore}
+          error={agendaError}
+          onSelect={setSelectedRequestId}
+          onLoadOlder={loadOlder}
+        />
+      ) : isMonth ? (
         <MonthGrid
           month={month}
           isLoading={monthLoading}
@@ -281,7 +314,9 @@ export default function CalendarPage() {
       <RequestDetailSheet
         requestId={selectedRequestId}
         onClose={() => setSelectedRequestId(null)}
-        onAssigned={isMonth ? refetchMonth : refetch}
+        onAssigned={
+          isAgenda ? refetchAgenda : isMonth ? refetchMonth : refetch
+        }
       />
     </div>
   );
