@@ -1060,6 +1060,15 @@ const dashboardRequestSelect = {
   id: serviceRequests.id,
   referenceNumber: serviceRequests.referenceNumber,
   customerNameEncrypted: serviceRequests.customerNameEncrypted,
+  // FP/HCP-imported jobs have a null per-request name — it lives on the linked
+  // customers row. A correlated scalar subquery resolves it without forcing a
+  // customers JOIN onto every query that spreads this select (dashboard,
+  // dispatch board, day/week/month calendar). Tenant-scoped in the subquery.
+  customerNameFromCustomer: sql<string | null>`(
+    select ${customers.nameEncrypted} from ${customers}
+    where ${customers.id} = ${serviceRequests.customerId}
+      and ${customers.organizationId} = ${serviceRequests.organizationId}
+  )`,
   issueType: serviceRequests.issueType,
   urgency: serviceRequests.urgency,
   status: serviceRequests.status,
@@ -1079,6 +1088,7 @@ type DashboardRequestRow = {
   readonly id: string;
   readonly referenceNumber: string;
   readonly customerNameEncrypted: string | null;
+  readonly customerNameFromCustomer: string | null;
   readonly issueType: string;
   readonly urgency: string;
   readonly status: string;
@@ -1098,7 +1108,11 @@ function toDashboardRequest(row: DashboardRequestRow): DashboardRequest {
   return {
     id: row.id,
     referenceNumber: row.referenceNumber,
-    customerName: safeDecrypt(row.customerNameEncrypted),
+    // Imported jobs carry no per-request name; fall back to the linked customer
+    // (correlated subquery in dashboardRequestSelect) so cards never show "Unknown".
+    customerName:
+      safeDecrypt(row.customerNameEncrypted) ??
+      safeDecrypt(row.customerNameFromCustomer),
     issueType: row.issueType,
     urgency: row.urgency,
     status: row.status,
