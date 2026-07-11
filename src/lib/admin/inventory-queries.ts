@@ -11,7 +11,7 @@
  * batched insert never needs .returning(). Every query is withTenant-scoped.
  */
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, ne, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, ne, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   inventoryItems,
@@ -35,14 +35,57 @@ export interface InventoryRow {
   readonly belowReorder: boolean;
 }
 
+export const INVENTORY_PAGE_SIZE = 50;
+
+export interface InventoryPage {
+  readonly items: readonly InventoryRow[];
+  readonly total: number;
+}
+
 /**
  * Stock list for an org joined to the pricebook material's name, flagging items
- * at or below their reorder point. Ordered by name.
+ * at or below their reorder point. Ordered by name. Server-paginated.
+ *
+ * The join is 1:1 (each inventory row maps to exactly one pricebook item), so
+ * plain LIMIT/OFFSET is correct — no fan-out risk.
  */
 export async function listInventory(
   organizationId: string,
-): Promise<readonly InventoryRow[]> {
-  const rows = await db
+  opts: {
+    readonly page?: number;
+    readonly limit?: number;
+    readonly search?: string;
+  } = {},
+): Promise<InventoryPage> {
+  const page = Math.max(1, opts.page ?? 1);
+  const limit = Math.max(1, opts.limit ?? INVENTORY_PAGE_SIZE);
+  const offset = (page - 1) * limit;
+
+  const extraConditions: SQL[] = [];
+
+  if (opts.search?.trim()) {
+    const raw = opts.search.trim();
+    // Escape SQL LIKE metacharacters in user input.
+    const escaped = raw.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+    const term = `%${escaped}%`;
+    const searchClause = or(
+      ilike(pricebookItems.name, term),
+      ilike(pricebookItems.sku, term),
+    ) as SQL;
+    extraConditions.push(searchClause);
+  }
+
+  const whereClause = withTenant(inventoryItems, organizationId, ...extraConditions);
+
+  // Count query needs to join pricebook_items so the search predicate (on
+  // pricebook name/sku) is applied consistently.
+  const countPromise = db
+    .select({ n: count() })
+    .from(inventoryItems)
+    .innerJoin(pricebookItems, eq(inventoryItems.pricebookItemId, pricebookItems.id))
+    .where(whereClause);
+
+  const rowsPromise = db
     .select({
       id: inventoryItems.id,
       pricebookItemId: inventoryItems.pricebookItemId,
@@ -57,13 +100,19 @@ export async function listInventory(
       pricebookItems,
       eq(inventoryItems.pricebookItemId, pricebookItems.id),
     )
-    .where(withTenant(inventoryItems, organizationId))
-    .orderBy(asc(pricebookItems.name));
+    .where(whereClause)
+    .orderBy(asc(pricebookItems.name))
+    .limit(limit)
+    .offset(offset);
 
-  return rows.map((r) => ({
+  const [countResult, rows] = await Promise.all([countPromise, rowsPromise]);
+
+  const items = rows.map((r) => ({
     ...r,
     belowReorder: r.reorderPoint != null && r.quantityOnHand <= r.reorderPoint,
   }));
+
+  return { items, total: countResult[0]?.n ?? 0 };
 }
 
 export interface UpsertInventoryInput {
@@ -345,24 +394,48 @@ export interface PurchaseOrderRow {
   readonly createdAt: Date;
 }
 
-/** Purchase orders for an org, newest first. */
+export const PO_PAGE_SIZE = 50;
+
+export interface PurchaseOrderPage {
+  readonly orders: readonly PurchaseOrderRow[];
+  readonly total: number;
+}
+
+/** Purchase orders for an org, newest first. Server-paginated. */
 export async function listPurchaseOrders(
   organizationId: string,
-): Promise<readonly PurchaseOrderRow[]> {
-  return db
-    .select({
-      id: purchaseOrders.id,
-      vendorName: purchaseOrders.vendorName,
-      status: purchaseOrders.status,
-      totalCents: purchaseOrders.totalCents,
-      notes: purchaseOrders.notes,
-      orderedAt: purchaseOrders.orderedAt,
-      receivedAt: purchaseOrders.receivedAt,
-      createdAt: purchaseOrders.createdAt,
-    })
-    .from(purchaseOrders)
-    .where(withTenant(purchaseOrders, organizationId))
-    .orderBy(desc(purchaseOrders.createdAt));
+  opts: {
+    readonly page?: number;
+    readonly limit?: number;
+  } = {},
+): Promise<PurchaseOrderPage> {
+  const page = Math.max(1, opts.page ?? 1);
+  const limit = Math.max(1, opts.limit ?? PO_PAGE_SIZE);
+  const offset = (page - 1) * limit;
+
+  const whereClause = withTenant(purchaseOrders, organizationId);
+
+  const [countResult, orders] = await Promise.all([
+    db.select({ n: count() }).from(purchaseOrders).where(whereClause),
+    db
+      .select({
+        id: purchaseOrders.id,
+        vendorName: purchaseOrders.vendorName,
+        status: purchaseOrders.status,
+        totalCents: purchaseOrders.totalCents,
+        notes: purchaseOrders.notes,
+        orderedAt: purchaseOrders.orderedAt,
+        receivedAt: purchaseOrders.receivedAt,
+        createdAt: purchaseOrders.createdAt,
+      })
+      .from(purchaseOrders)
+      .where(whereClause)
+      .orderBy(desc(purchaseOrders.createdAt))
+      .limit(limit)
+      .offset(offset),
+  ]);
+
+  return { orders, total: countResult[0]?.n ?? 0 };
 }
 
 export interface PurchaseOrderLineRow {

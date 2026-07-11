@@ -19,8 +19,14 @@ export interface ReviewStats {
   readonly responded: number;
 }
 
+export interface UseReviewsParams {
+  readonly page?: number;
+  readonly limit?: number;
+}
+
 interface UseReviewsResult {
   readonly reviews: ReviewRow[];
+  readonly total: number;
   readonly stats: ReviewStats | null;
   readonly isLoading: boolean;
   readonly error: string | null;
@@ -29,12 +35,14 @@ interface UseReviewsResult {
 
 /** Loads the org's review requests + aggregate stats. No polling — read at
  *  human pace. Modeled on use-reports. */
-export function useReviews(): UseReviewsResult {
+export function useReviews(params: UseReviewsParams = {}): UseReviewsResult {
   const [reviews, setReviews] = useState<ReviewRow[]>([]);
+  const [total, setTotal] = useState(0);
   const [stats, setStats] = useState<ReviewStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const isFetchingRef = useRef(false);
+  const { page = 1, limit = 50 } = params;
 
   const fetchReviews = useCallback(async (): Promise<void> => {
     if (isFetchingRef.current) return;
@@ -42,14 +50,16 @@ export function useReviews(): UseReviewsResult {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/admin/reviews');
+      const qs = new URLSearchParams({ page: String(page), limit: String(limit) });
+      const res = await fetch(`/api/admin/reviews?${qs.toString()}`);
       const body = (await res.json()) as {
         success: boolean;
-        data?: { reviews: ReviewRow[]; stats: ReviewStats };
+        data?: { reviews: ReviewRow[]; total: number; stats: ReviewStats };
         error?: { message: string };
       };
       if (res.ok && body.success && body.data) {
         setReviews(body.data.reviews);
+        setTotal(body.data.total);
         setStats(body.data.stats);
       } else {
         setError(body.error?.message ?? 'Could not load reviews.');
@@ -60,7 +70,7 @@ export function useReviews(): UseReviewsResult {
       setIsLoading(false);
       isFetchingRef.current = false;
     }
-  }, []);
+  }, [page, limit]);
 
   // Idiomatic data fetch: setState runs only AFTER the awaited fetch resolves,
   // not synchronously during the effect, so this is not a render loop.
@@ -69,5 +79,5 @@ export function useReviews(): UseReviewsResult {
     void fetchReviews();
   }, [fetchReviews]);
 
-  return { reviews, stats, isLoading, error, refetch: fetchReviews };
+  return { reviews, total, stats, isLoading, error, refetch: fetchReviews };
 }

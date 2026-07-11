@@ -1,22 +1,62 @@
 'use client';
 
-import { useState } from 'react';
-import { Plus, AlertCircle } from 'lucide-react';
-import { usePricebook } from '@/hooks/use-pricebook';
+import { useCallback, useEffect, useState } from 'react';
+import { Plus, AlertCircle, Search } from 'lucide-react';
+import { usePricebook, useTaxRates } from '@/hooks/use-pricebook';
 import { PricebookTable } from '@/components/admin/pricebook/pricebook-table';
 import { PricebookFormDialog } from '@/components/admin/pricebook/pricebook-form-dialog';
 import { TaxRatesPanel } from '@/components/admin/pricebook/tax-rates-panel';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
+import { pageLabel } from '@/lib/admin/invoice-list-helpers';
 import type { PricebookItem } from '@/hooks/use-pricebook';
 
+const ALL_TYPES = 'all';
+const PER_PAGE = 50;
+
 export default function PricebookPage() {
-  const { items, taxRates, isLoading, error, refetch } = usePricebook();
+  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [typeFilter, setTypeFilter] = useState<string>(ALL_TYPES);
+  const [page, setPage] = useState(1);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<PricebookItem | null>(null);
+
+  // Debounce the search box so browsing fires one request per pause, not per key.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const typeParam = typeFilter === ALL_TYPES ? undefined : typeFilter;
+
+  const { items, total, types, isLoading, error, refetch } = usePricebook({
+    page,
+    search: debouncedSearch,
+    type: typeParam,
+  });
+
+  const { taxRates, isLoading: taxLoading, refetch: refetchTax } = useTaxRates();
+
+  // Reset to page 1 whenever the query (search / type) changes.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, typeFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
+  const safePage = Math.min(page, totalPages);
 
   function handleAddClick(): void {
     setEditing(null);
@@ -35,6 +75,11 @@ export default function PricebookPage() {
     if (res.ok) void refetch();
   }
 
+  const handleRefetchAll = useCallback(() => {
+    void refetch();
+    void refetchTax();
+  }, [refetch, refetchTax]);
+
   return (
     <PageShell>
       <PageHeader
@@ -47,6 +92,32 @@ export default function PricebookPage() {
           </Button>
         }
       />
+
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 sm:max-w-md">
+          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            aria-label="Search pricebook"
+            placeholder="Search by name, SKU, or description..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-10"
+          />
+        </div>
+        <Select value={typeFilter} onValueChange={(v) => setTypeFilter(v ?? ALL_TYPES)}>
+          <SelectTrigger aria-label="Filter by type" className="w-[160px]">
+            <SelectValue placeholder="All types" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL_TYPES}>All types</SelectItem>
+            {types.map((t) => (
+              <SelectItem key={t} value={t} className="capitalize">
+                {t}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
 
       {error && (
         <Alert variant="destructive">
@@ -62,12 +133,59 @@ export default function PricebookPage() {
         onDeactivate={(item) => void handleDeactivate(item)}
       />
 
+      {/* pager bar — only shown when there are results */}
+      {total > 0 && (
+        <div className="flex items-center justify-between px-1 py-3 text-sm">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={safePage <= 1}
+          >
+            ← Prev
+          </Button>
+          <span className="tabular-nums text-xs text-muted-foreground">
+            {pageLabel(safePage, total, PER_PAGE)}
+          </span>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setPage(1)}
+              disabled={safePage <= 1}
+            >
+              First
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setPage(totalPages)}
+              disabled={safePage >= totalPages}
+            >
+              Last
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={safePage >= totalPages}
+            >
+              Next →
+            </Button>
+          </div>
+        </div>
+      )}
+
       <Separator />
 
       <TaxRatesPanel
         taxRates={taxRates}
-        isLoading={isLoading}
-        onChanged={() => void refetch()}
+        isLoading={taxLoading}
+        onChanged={handleRefetchAll}
       />
 
       <PricebookFormDialog

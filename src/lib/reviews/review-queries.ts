@@ -13,7 +13,7 @@
  * public page/handler. `feedback` is PRIVATE free text and is NEVER logged.
  */
 import { randomBytes, randomUUID, createHash } from "node:crypto";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, count, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { customers, reviewRequests } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
@@ -248,28 +248,45 @@ export interface ReviewRow {
   readonly createdAt: string;
 }
 
-/**
- * List an org's review requests, newest first. Tenant-scoped. Deliberately omits
- * the PRIVATE feedback and the token hash — the admin list shows rating + status
- * only (free-text feedback is never surfaced in aggregate UI).
- */
-export async function listReviews(organizationId: string): Promise<ReviewRow[]> {
-  const rows = await db
-    .select({
-      id: reviewRequests.id,
-      serviceRequestId: reviewRequests.serviceRequestId,
-      status: reviewRequests.status,
-      rating: reviewRequests.rating,
-      publicClicked: reviewRequests.publicClicked,
-      sentAt: reviewRequests.sentAt,
-      respondedAt: reviewRequests.respondedAt,
-      createdAt: reviewRequests.createdAt,
-    })
-    .from(reviewRequests)
-    .where(withTenant(reviewRequests, organizationId))
-    .orderBy(desc(reviewRequests.createdAt));
+const REVIEW_PAGE_SIZE = 50;
 
-  return rows.map((r) => ({
+/**
+ * List an org's review requests, newest first, with server-side pagination.
+ * Deliberately omits the PRIVATE feedback and the token hash — the admin list
+ * shows rating + status only (free-text feedback is never surfaced in aggregate UI).
+ */
+export async function listReviews(
+  organizationId: string,
+  opts: { readonly page?: number; readonly limit?: number } = {},
+): Promise<{ reviews: ReviewRow[]; total: number }> {
+  const page = Math.max(1, opts.page ?? 1);
+  const limit = Math.max(1, opts.limit ?? REVIEW_PAGE_SIZE);
+  const offset = (page - 1) * limit;
+
+  const whereClause = withTenant(reviewRequests, organizationId);
+
+  const [countResult, rows] = await Promise.all([
+    db.select({ n: count() }).from(reviewRequests).where(whereClause),
+    db
+      .select({
+        id: reviewRequests.id,
+        serviceRequestId: reviewRequests.serviceRequestId,
+        status: reviewRequests.status,
+        rating: reviewRequests.rating,
+        publicClicked: reviewRequests.publicClicked,
+        sentAt: reviewRequests.sentAt,
+        respondedAt: reviewRequests.respondedAt,
+        createdAt: reviewRequests.createdAt,
+      })
+      .from(reviewRequests)
+      .where(whereClause)
+      .orderBy(desc(reviewRequests.createdAt))
+      .limit(limit)
+      .offset(offset),
+  ]);
+
+  const total = countResult[0]?.n ?? 0;
+  const reviews = rows.map((r) => ({
     id: r.id,
     serviceRequestId: r.serviceRequestId,
     status: r.status,
@@ -279,6 +296,8 @@ export async function listReviews(organizationId: string): Promise<ReviewRow[]> 
     respondedAt: r.respondedAt?.toISOString() ?? null,
     createdAt: r.createdAt.toISOString(),
   }));
+
+  return { reviews, total };
 }
 
 export interface ReviewStats {

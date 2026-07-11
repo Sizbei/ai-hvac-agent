@@ -78,7 +78,7 @@ export function EstimateCreateDialog({
   customerId,
   onCreated,
 }: EstimateCreateDialogProps) {
-  const { items, isLoading: pricebookLoading } = usePricebook();
+  const { items, isLoading: pricebookLoading } = usePricebook({ limit: 20000 });
   const itemById = new Map(items.map((i) => [i.id, i]));
 
   // When the estimate is for a customer with an active membership, default the

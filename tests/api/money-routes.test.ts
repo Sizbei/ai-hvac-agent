@@ -324,7 +324,7 @@ describe("POST /api/admin/invoices/[id]/payments — admin session required", ()
 describe("/api/admin/estimates — admin session required", () => {
   it("GET returns 401 when there is no admin session", async () => {
     mockGetAdminSession.mockResolvedValue(null);
-    const res = await estimatesGET();
+    const res = await estimatesGET(new NextRequest("http://localhost:3000/api/admin/estimates"));
     expect(res.status).toBe(401);
     expect(mockListEstimates).not.toHaveBeenCalled();
   });

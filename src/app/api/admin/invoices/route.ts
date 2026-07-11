@@ -3,13 +3,20 @@ import { z } from "zod";
 import { getAdminSession } from "@/lib/auth/session";
 import {
   listInvoices,
+  getInvoiceSummaryStats,
   collectedThisMonthCents,
   createInvoiceFromSoldEstimate,
+  INVOICE_SORT_KEYS,
+  type InvoiceSortKey,
 } from "@/lib/admin/invoice-queries";
 import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
+import { invoiceStateEnum } from "@/lib/db/schema";
+
+const VALID_STATES = new Set(invoiceStateEnum.enumValues);
+const VALID_SOURCES = new Set(["native", "fieldpulse", "housecall"]);
 
 /** Postgres unique-violation SQLSTATE. */
 const PG_UNIQUE_VIOLATION = "23505";
@@ -27,7 +34,7 @@ const createSchema = z.object({
   estimateId: z.string().uuid(),
 });
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const session = await getAdminSession();
     if (!session) {
@@ -43,11 +50,45 @@ export async function GET() {
       return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
     }
 
-    const [invoices, collected] = await Promise.all([
-      listInvoices(session.organizationId),
+    const sp = request.nextUrl.searchParams;
+
+    const rawPage = Number(sp.get("page") ?? "1");
+    const page = Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
+
+    const rawLimit = Number(sp.get("limit") ?? "50");
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0
+      ? Math.min(Math.floor(rawLimit), 20000)
+      : 50;
+
+    const search = sp.get("search")?.trim() || undefined;
+
+    const rawState = sp.get("state") ?? "";
+    const state = rawState && VALID_STATES.has(rawState as never) ? rawState : undefined;
+
+    const rawSource = sp.get("source") ?? "";
+    const source = rawSource && VALID_SOURCES.has(rawSource) ? rawSource : undefined;
+
+    const customerId = sp.get("customerId") || undefined;
+    const serviceRequestId = sp.get("serviceRequestId") || undefined;
+
+    const rawSort = sp.get("sort") ?? "";
+    const sort = INVOICE_SORT_KEYS.has(rawSort as InvoiceSortKey) ? (rawSort as InvoiceSortKey) : undefined;
+
+    const overdue = sp.get("overdue") === "1";
+
+    const [listResult, stats, collected] = await Promise.all([
+      listInvoices(session.organizationId, { page, limit, search, state, overdue, source, sort, customerId, serviceRequestId }),
+      getInvoiceSummaryStats(session.organizationId),
       collectedThisMonthCents(session.organizationId),
     ]);
-    const response = successResponse({ invoices, collectedThisMonthCents: collected });
+
+    const response = successResponse({
+      invoices: listResult.invoices,
+      total: listResult.total,
+      sourceCounts: listResult.sourceCounts,
+      stats,
+      collectedThisMonthCents: collected,
+    });
     response.headers.set('Cache-Control', 'private, max-age=0, stale-while-revalidate=30');
     return response;
   } catch (error: unknown) {

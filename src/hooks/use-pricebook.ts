@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { createSwrCache } from '@/lib/admin/swr-cache';
 
 export interface PricebookItem {
   readonly id: string;
@@ -30,8 +31,113 @@ export interface TaxRate {
   readonly active: boolean;
 }
 
+interface PricebookPayload {
+  readonly items: readonly PricebookItem[];
+  readonly total: number;
+  readonly types: readonly string[];
+}
+
+const pricebookCache = createSwrCache<PricebookPayload>(60_000); // 60s TTL
+
+interface UsePricebookParams {
+  readonly page?: number;
+  readonly limit?: number;
+  readonly search?: string;
+  readonly type?: string;
+}
+
 interface UsePricebookResult {
   readonly items: readonly PricebookItem[];
+  readonly total: number;
+  readonly types: readonly string[];
+  readonly isLoading: boolean;
+  readonly error: string | null;
+  readonly refetch: () => Promise<void>;
+}
+
+/**
+ * Server-paginated pricebook items list. Refetches whenever page, search, or
+ * type filter changes. Caller is responsible for debouncing the search term.
+ * `total` drives the pager; `types` fills the type-filter dropdown.
+ */
+export function usePricebook(params: UsePricebookParams = {}): UsePricebookResult {
+  const page = params.page ?? 1;
+  const limit = params.limit ?? 50;
+  const search = params.search ?? '';
+  const type = params.type ?? '';
+
+  const key = `pricebook:${page}:${limit}:${type}:${search}`;
+
+  const [items, setItems] = useState<readonly PricebookItem[]>(
+    () => pricebookCache.get(key)?.data.items ?? [],
+  );
+  const [total, setTotal] = useState(() => pricebookCache.get(key)?.data.total ?? 0);
+  const [types, setTypes] = useState<readonly string[]>(
+    () => pricebookCache.get(key)?.data.types ?? [],
+  );
+  const [isLoading, setIsLoading] = useState(() => pricebookCache.get(key) === null);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetch_ = useCallback(
+    async ({ bust = false }: { bust?: boolean } = {}) => {
+      if (bust) pricebookCache.invalidate(key);
+
+      const cached = pricebookCache.get(key);
+      const hasCachedData = cached !== null;
+      if (hasCachedData) {
+        setItems(cached.data.items);
+        setTotal(cached.data.total);
+        setTypes(cached.data.types);
+      } else {
+        setIsLoading(true);
+      }
+
+      try {
+        const qs = new URLSearchParams();
+        if (page > 1) qs.set('page', String(page));
+        if (limit !== 50) qs.set('limit', String(limit));
+        if (search) qs.set('search', search);
+        if (type) qs.set('type', type);
+        const query = qs.toString();
+        const res = await fetch(`/api/admin/pricebook${query ? `?${query}` : ''}`);
+        const json = await res.json();
+        if (json.success) {
+          setError(null);
+          setItems(json.data.items);
+          setTotal(json.data.total);
+          setTypes(json.data.types ?? []);
+          pricebookCache.set(key, {
+            items: json.data.items,
+            total: json.data.total,
+            types: json.data.types ?? [],
+          });
+        } else if (!hasCachedData) {
+          setError(json.error?.message ?? 'Failed to load pricebook');
+        }
+      } catch {
+        if (!hasCachedData) setError('Network error');
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [key, page, limit, search, type],
+  );
+
+  // Idiomatic data fetch: setState runs only AFTER the awaited fetch resolves,
+  // not synchronously during the effect, so this is not a render loop.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => {
+    void fetch_();
+  }, [fetch_]);
+
+  const refetch = useCallback(() => fetch_({ bust: true }), [fetch_]);
+
+  return { items, total, types, isLoading, error, refetch } as const;
+}
+
+// ── Tax rates (separate small fetch, unchanged) ───────────────────────────────
+
+interface UseTaxRatesResult {
   readonly taxRates: readonly TaxRate[];
   readonly isLoading: boolean;
   readonly error: string | null;
@@ -39,55 +145,42 @@ interface UsePricebookResult {
 }
 
 /**
- * Loads the org's pricebook items + tax rates on mount, refetches after
- * mutations. No polling — the catalog changes infrequently.
+ * Loads the org's tax rates on mount. Kept separate from usePricebook so the
+ * TaxRatesPanel can refresh independently without triggering a full pricebook
+ * page refetch.
  */
-export function usePricebook(): UsePricebookResult {
-  const [items, setItems] = useState<readonly PricebookItem[]>([]);
+export function useTaxRates(): UseTaxRatesResult {
   const [taxRates, setTaxRates] = useState<readonly TaxRate[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const isFetchingRef = useRef(false);
-
   const fetchAll = useCallback(async (): Promise<void> => {
-    if (isFetchingRef.current) return;
-    isFetchingRef.current = true;
-
+    setIsLoading(true);
     try {
-      const [itemsRes, taxRes] = await Promise.all([
-        fetch('/api/admin/pricebook'),
-        fetch('/api/admin/pricebook/tax-rates'),
-      ]);
-
-      if (!itemsRes.ok || !taxRes.ok) {
-        setError('Failed to load pricebook');
+      const res = await fetch('/api/admin/pricebook/tax-rates');
+      if (!res.ok) {
+        setError('Failed to load tax rates');
         return;
       }
-
-      const itemsBody = (await itemsRes.json()) as {
-        success: boolean;
-        data: { items: PricebookItem[] };
-      };
-      const taxBody = (await taxRes.json()) as {
+      const body = (await res.json()) as {
         success: boolean;
         data: { taxRates: TaxRate[] };
       };
-
-      if (itemsBody.success) setItems(itemsBody.data.items);
-      if (taxBody.success) setTaxRates(taxBody.data.taxRates);
-      setError(null);
+      if (body.success) {
+        setTaxRates(body.data.taxRates);
+        setError(null);
+      }
     } catch {
       setError('Could not connect to server. Please try again.');
     } finally {
-      isFetchingRef.current = false;
+      setIsLoading(false);
     }
   }, []);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
-    setIsLoading(true);
-    fetchAll().finally(() => setIsLoading(false));
+    void fetchAll();
   }, [fetchAll]);
 
-  return { items, taxRates, isLoading, error, refetch: fetchAll };
+  return { taxRates, isLoading, error, refetch: fetchAll } as const;
 }

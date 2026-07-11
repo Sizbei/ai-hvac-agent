@@ -1,7 +1,7 @@
 /**
  * Stage 8 — pricebook + tax queries. Money in integer cents; tax in basis points.
  */
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { pricebookItems, taxRates } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
@@ -132,20 +132,94 @@ export async function getPricebookItemById(
   return (row as PricebookItemAdminRow | undefined) ?? null;
 }
 
-/** Full admin list (optionally including soft-deleted items). */
+const PRICEBOOK_PAGE_SIZE = 50;
+
+export interface PricebookAdminPage {
+  readonly items: readonly PricebookItemAdminRow[];
+  readonly total: number;
+  readonly types: readonly string[];
+}
+
+/** Server-paginated admin list with optional search + type filter. */
 export async function listPricebookItemsForAdmin(
   organizationId: string,
-  opts: { readonly includeInactive?: boolean } = {},
-): Promise<readonly PricebookItemAdminRow[]> {
-  const condition = opts.includeInactive
-    ? withTenant(pricebookItems, organizationId)
-    : withTenant(pricebookItems, organizationId, eq(pricebookItems.active, true));
-  // Drizzle types jsonb columns as `unknown`; we cast to our narrower type.
-  return db
+  opts: {
+    readonly includeInactive?: boolean;
+    readonly page?: number;
+    readonly limit?: number;
+    readonly search?: string;
+    readonly type?: string;
+  } = {},
+): Promise<PricebookAdminPage> {
+  const page = Math.max(1, opts.page ?? 1);
+  const limit = Math.max(1, opts.limit ?? PRICEBOOK_PAGE_SIZE);
+  const offset = (page - 1) * limit;
+
+  // Build extra WHERE conditions.
+  const extraConditions: SQL[] = [];
+
+  if (!opts.includeInactive) {
+    extraConditions.push(eq(pricebookItems.active, true));
+  }
+  if (opts.type) {
+    // Cast through sql<> to bypass the enum literal constraint — the DB will
+    // reject invalid values, and the route already gates what values arrive.
+    extraConditions.push(
+      sql`${pricebookItems.type} = ${opts.type}` as SQL,
+    );
+  }
+  if (opts.search?.trim()) {
+    const raw = opts.search.trim();
+    // Escape SQL LIKE metacharacters in user input.
+    const escaped = raw.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+    const term = `%${escaped}%`;
+    // or() can return undefined when called with 0 args; with 3 it never does.
+    const searchClause = or(
+      ilike(pricebookItems.name, term),
+      ilike(pricebookItems.sku, term),
+      ilike(pricebookItems.description, term),
+    ) as SQL;
+    extraConditions.push(searchClause);
+  }
+
+  const whereClause = withTenant(pricebookItems, organizationId, ...extraConditions);
+
+  // Distinct item types for the filter dropdown — runs in parallel.
+  const typesPromise = db
+    .selectDistinct({ type: pricebookItems.type })
+    .from(pricebookItems)
+    .where(withTenant(pricebookItems, organizationId, eq(pricebookItems.active, true)))
+    .then((rows) =>
+      rows
+        .map((r) => r.type)
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b)),
+    );
+
+  const countPromise = db
+    .select({ n: count() })
+    .from(pricebookItems)
+    .where(whereClause);
+
+  const rowsPromise = db
     .select(ADMIN_ITEM_PROJECTION)
     .from(pricebookItems)
-    .where(condition)
-    .orderBy(asc(pricebookItems.name)) as Promise<readonly PricebookItemAdminRow[]>;
+    .where(whereClause)
+    .orderBy(asc(pricebookItems.name))
+    .limit(limit)
+    .offset(offset) as Promise<PricebookItemAdminRow[]>;
+
+  const [countResult, rows, types] = await Promise.all([
+    countPromise,
+    rowsPromise,
+    typesPromise,
+  ]);
+
+  return {
+    items: rows,
+    total: countResult[0]?.n ?? 0,
+    types,
+  };
 }
 
 export type PricebookItemUpdate = Partial<PricebookItemInput>;

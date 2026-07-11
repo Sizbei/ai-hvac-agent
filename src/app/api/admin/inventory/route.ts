@@ -19,7 +19,7 @@ const upsertSchema = z.object({
   location: z.string().trim().max(255).nullable().optional(),
 });
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const session = await getAdminSession();
     if (!session) {
@@ -35,8 +35,18 @@ export async function GET() {
       return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
     }
 
-    const items = await listInventory(session.organizationId);
-    return successResponse({ items });
+    const sp = request.nextUrl.searchParams;
+
+    const rawPage = Number(sp.get("page") ?? "1");
+    const page = Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
+
+    const rawLimit = Number(sp.get("limit") ?? "50");
+    const limit = Number.isFinite(rawLimit) ? Math.min(1000, Math.max(1, Math.floor(rawLimit))) : 50;
+
+    const search = sp.get("search") ?? undefined;
+
+    const { items, total } = await listInventory(session.organizationId, { page, limit, search });
+    return successResponse({ items, total });
   } catch (error: unknown) {
     logger.error({ error }, "Failed to fetch inventory");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);

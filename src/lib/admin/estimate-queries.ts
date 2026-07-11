@@ -7,7 +7,7 @@
  * IP/timestamp capture.
  */
 import { randomBytes, randomUUID, createHash } from "node:crypto";
-import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNull, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   estimates,
@@ -222,35 +222,65 @@ export interface EstimateListRow {
   readonly fieldpulseStatusName: string | null;
   /** Human-readable estimate title from FieldPulse. Null for native estimates. */
   readonly title: string | null;
+  /** FieldPulse spillover data; null for native estimates. */
+  readonly fieldpulseData: Record<string, unknown> | null;
 }
 
-/** Admin list of an org's estimates, newest first. */
+const ESTIMATE_PAGE_SIZE = 50;
+
+/** Admin list of an org's estimates, newest first, with server-side pagination. */
 export async function listEstimates(
   organizationId: string,
-): Promise<EstimateListRow[]> {
-  const rows = await db
-    .select({
-      id: estimates.id,
-      status: estimates.status,
-      totalCents: estimates.totalCents,
-      customerId: estimates.customerId,
-      serviceRequestId: estimates.serviceRequestId,
-      createdAt: estimates.createdAt,
-      expiresAt: estimates.expiresAt,
-      signedAt: estimates.signedAt,
-      fieldpulseEstimateId: estimates.fieldpulseEstimateId,
-      fieldpulseStatusName: estimates.fieldpulseStatusName,
-      title: estimates.title,
-    })
-    .from(estimates)
-    .where(withTenant(estimates, organizationId))
-    .orderBy(desc(estimates.createdAt));
+  opts: {
+    readonly page?: number;
+    readonly limit?: number;
+    readonly customerId?: string;
+    readonly serviceRequestId?: string;
+  } = {},
+): Promise<{ estimates: EstimateListRow[]; total: number }> {
+  const page = Math.max(1, opts.page ?? 1);
+  const limit = Math.max(1, opts.limit ?? ESTIMATE_PAGE_SIZE);
+  const offset = (page - 1) * limit;
 
-  return rows.map(({ fieldpulseEstimateId, fieldpulseStatusName, ...r }) => ({
+  const extraConditions: SQL[] = [];
+  if (opts.customerId) extraConditions.push(eq(estimates.customerId, opts.customerId));
+  if (opts.serviceRequestId) extraConditions.push(eq(estimates.serviceRequestId, opts.serviceRequestId));
+
+  const whereClause = withTenant(estimates, organizationId, ...extraConditions);
+
+  const [countResult, rows] = await Promise.all([
+    db.select({ n: count() }).from(estimates).where(whereClause),
+    db
+      .select({
+        id: estimates.id,
+        status: estimates.status,
+        totalCents: estimates.totalCents,
+        customerId: estimates.customerId,
+        serviceRequestId: estimates.serviceRequestId,
+        createdAt: estimates.createdAt,
+        expiresAt: estimates.expiresAt,
+        signedAt: estimates.signedAt,
+        fieldpulseEstimateId: estimates.fieldpulseEstimateId,
+        fieldpulseStatusName: estimates.fieldpulseStatusName,
+        title: estimates.title,
+        fieldpulseData: estimates.fieldpulseData,
+      })
+      .from(estimates)
+      .where(whereClause)
+      .orderBy(desc(estimates.createdAt))
+      .limit(limit)
+      .offset(offset),
+  ]);
+
+  const total = countResult[0]?.n ?? 0;
+  const estimateRows = rows.map(({ fieldpulseEstimateId, fieldpulseStatusName, fieldpulseData, ...r }) => ({
     ...r,
     syncedSource: fieldpulseEstimateId != null ? ("fieldpulse" as const) : null,
     fieldpulseStatusName: fieldpulseStatusName ?? null,
+    fieldpulseData: (fieldpulseData as Record<string, unknown> | null) ?? null,
   }));
+
+  return { estimates: estimateRows, total };
 }
 
 export interface EstimateLineItemView {

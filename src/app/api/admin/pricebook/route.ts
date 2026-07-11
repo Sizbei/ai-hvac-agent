@@ -52,12 +52,28 @@ export async function GET(request: NextRequest) {
       return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
     }
 
-    const includeInactive =
-      request.nextUrl.searchParams.get("includeInactive") === "true";
-    const items = await listPricebookItemsForAdmin(session.organizationId, {
-      includeInactive,
-    });
-    return successResponse({ items });
+    const sp = request.nextUrl.searchParams;
+    const includeInactive = sp.get("includeInactive") === "true";
+
+    const rawPage = Number(sp.get("page") ?? "1");
+    const page = Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
+
+    const rawLimit = Number(sp.get("limit") ?? "50");
+    const limit = Number.isFinite(rawLimit) ? Math.min(20000, Math.max(1, Math.floor(rawLimit))) : 50;
+
+    const search = sp.get("search") ?? undefined;
+
+    const VALID_TYPES = ["service", "material", "equipment"] as const;
+    const rawType = sp.get("type") ?? undefined;
+    const type = rawType !== undefined && (VALID_TYPES as readonly string[]).includes(rawType)
+      ? rawType
+      : undefined;
+
+    const { items, total, types } = await listPricebookItemsForAdmin(
+      session.organizationId,
+      { includeInactive, page, limit, search, type },
+    );
+    return successResponse({ items, total, types });
   } catch (error: unknown) {
     logger.error({ error }, "Failed to fetch pricebook items");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);

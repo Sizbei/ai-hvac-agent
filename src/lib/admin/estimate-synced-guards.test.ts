@@ -20,19 +20,27 @@ vi.mock("@/lib/db", () => ({
 const mockedSelect = db.select as unknown as ReturnType<typeof vi.fn>;
 const ORG = "org-1";
 
-/** A `.from().where().limit()`-shaped result (and `.orderBy()`-able too). */
+/** A `.from().where().orderBy().limit().offset()`-shaped result. */
 function limitChain(rows: unknown[]) {
   const p = Promise.resolve(rows);
-  const chain: Record<string, unknown> = {
-    from: () => chain,
-    where: () => chain,
-    leftJoin: () => chain,
-    orderBy: () => p,
-    limit: () => Promise.resolve(rows[0] !== undefined ? rows : rows),
-    then: p.then.bind(p),
-  };
+  // Deep chain: every method returns something that can continue chaining OR be awaited.
+  const deepChain: Record<string, unknown> = {};
+  const deepPromise = Object.assign(Promise.resolve(rows), {
+    get offset() { return () => deepPromise; },
+    get limit() { return () => deepPromise; },
+    get orderBy() { return () => deepPromise; },
+    get where() { return () => deepPromise; },
+    get from() { return () => deepPromise; },
+  });
+  deepChain.from = () => deepPromise;
+  deepChain.where = () => deepPromise;
+  deepChain.leftJoin = () => deepPromise;
+  deepChain.orderBy = () => deepPromise;
+  deepChain.limit = () => deepPromise;
+  deepChain.offset = () => deepPromise;
+  deepChain.then = p.then.bind(p);
   // Make the chain itself awaitable (resolves to rows)
-  return Object.assign(Promise.resolve(rows), chain);
+  return Object.assign(Promise.resolve(rows), deepChain);
 }
 
 /** Sequence multiple selects: each call to db.select() returns the next rows. */
@@ -112,27 +120,18 @@ describe("createInvoiceFromSoldEstimate — synced guard", () => {
 // ---------------------------------------------------------------------------
 describe("listEstimates — syncedSource", () => {
   it("exposes syncedSource=fieldpulse for rows with fieldpulseEstimateId set", async () => {
-    mockedSelect.mockReturnValue(
-      Object.assign(
-        Promise.resolve([
-          { id: "est-fp", status: "sold", totalCents: 500, customerId: null, serviceRequestId: null, createdAt: new Date(), expiresAt: null, signedAt: null, fieldpulseEstimateId: "fp-1" },
-          { id: "est-nat", status: "open", totalCents: 200, customerId: null, serviceRequestId: null, createdAt: new Date(), expiresAt: null, signedAt: null, fieldpulseEstimateId: null },
-        ]),
-        {
-          from: () => ({
-            where: () => ({
-              orderBy: () => Promise.resolve([
-                { id: "est-fp", status: "sold", totalCents: 500, customerId: null, serviceRequestId: null, createdAt: new Date(), expiresAt: null, signedAt: null, fieldpulseEstimateId: "fp-1" },
-                { id: "est-nat", status: "open", totalCents: 200, customerId: null, serviceRequestId: null, createdAt: new Date(), expiresAt: null, signedAt: null, fieldpulseEstimateId: null },
-              ]),
-            }),
-          }),
-        },
-      ),
-    );
-    const rows = await listEstimates(ORG);
-    const fp = rows.find((r) => r.id === "est-fp")!;
-    const native = rows.find((r) => r.id === "est-nat")!;
+    const pageRows = [
+      { id: "est-fp", status: "sold", totalCents: 500, customerId: null, serviceRequestId: null, createdAt: new Date(), expiresAt: null, signedAt: null, fieldpulseEstimateId: "fp-1", fieldpulseStatusName: null, title: null, fieldpulseData: null },
+      { id: "est-nat", status: "open", totalCents: 200, customerId: null, serviceRequestId: null, createdAt: new Date(), expiresAt: null, signedAt: null, fieldpulseEstimateId: null, fieldpulseStatusName: null, title: null, fieldpulseData: null },
+    ];
+    // listEstimates now fires two selects: count then page rows
+    mockSelectSeq([
+      [{ n: 2 }], // count
+      pageRows,   // rows
+    ]);
+    const { estimates } = await listEstimates(ORG);
+    const fp = estimates.find((r) => r.id === "est-fp")!;
+    const native = estimates.find((r) => r.id === "est-nat")!;
     expect(fp.syncedSource).toBe("fieldpulse");
     expect(native.syncedSource).toBeNull();
   });

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, AlertTriangle, Receipt } from 'lucide-react';
-import { useInvoices } from '@/hooks/use-invoices';
+import { useInvoices, type InvoiceSortKey } from '@/hooks/use-invoices';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -13,10 +13,8 @@ import { EmptyState } from '@/components/admin/ui/empty-state';
 import { TableSkeleton, StatTileSkeleton } from '@/components/admin/skeletons';
 import { SummaryBand } from '@/components/admin/invoices/summary-band';
 import { InvoiceRow } from '@/components/admin/invoices/invoice-row';
-import { overdueByDates } from '@/components/admin/invoices/age-chip';
-import { isCollectible, invoiceRef } from '@/lib/admin/invoice-collectible';
-import { paginate, pageLabel, sortInvoices, type SortKey } from '@/lib/admin/invoice-list-helpers';
-import type { InvoiceListItem } from '@/hooks/use-invoices';
+import { pageLabel } from '@/lib/admin/invoice-list-helpers';
+import { invoiceRef } from '@/lib/admin/invoice-collectible';
 import {
   Dialog,
   DialogClose,
@@ -26,23 +24,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-
-// ── helpers ──────────────────────────────────────────────────────────────────
-
-function isOverdue(inv: InvoiceListItem): boolean {
-  return isCollectible(inv) && overdueByDates(inv);
-}
-
-// ── filter types ─────────────────────────────────────────────────────────────
-
-type Filter = 'overdue' | 'all' | 'unpaid' | 'paid';
-
-const FILTERS: ReadonlyArray<{ value: Filter; label: string }> = [
-  { value: 'overdue', label: 'Overdue' },
-  { value: 'all', label: 'All' },
-  { value: 'unpaid', label: 'Unpaid' },
-  { value: 'paid', label: 'Paid' },
-];
 
 // ── constants ─────────────────────────────────────────────────────────────────
 
@@ -63,6 +44,26 @@ const VOID_FAIL: Record<string, string> = {
   not_found: 'Invoice not found.',
 };
 
+// ── filter types ─────────────────────────────────────────────────────────────
+
+type Filter = 'overdue' | 'all' | 'unpaid' | 'paid';
+
+const FILTERS: ReadonlyArray<{ value: Filter; label: string }> = [
+  { value: 'overdue', label: 'Overdue' },
+  { value: 'all', label: 'All' },
+  { value: 'unpaid', label: 'Unpaid' },
+  { value: 'paid', label: 'Paid' },
+];
+
+// Map UI filter tabs to server-side `state` param values.
+// 'overdue' and 'unpaid' both filter to state='open' on the server;
+// the overdue distinction uses the client-side sortKey to push overdue first.
+function filterToState(filter: Filter): string | undefined {
+  if (filter === 'paid') return 'paid';
+  if (filter === 'unpaid' || filter === 'overdue') return 'open';
+  return undefined; // 'all' — no state filter
+}
+
 // ── source types ──────────────────────────────────────────────────────────────
 
 type SourceValue = 'all' | 'native' | 'fieldpulse' | 'housecall';
@@ -70,14 +71,14 @@ type SourceOption = { value: SourceValue; label: string };
 
 // ── sort options ──────────────────────────────────────────────────────────────
 
-const SORT_OPTIONS: ReadonlyArray<{ value: SortKey; label: string }> = [
+const SORT_OPTIONS: ReadonlyArray<{ value: InvoiceSortKey; label: string }> = [
   { value: 'age-oldest', label: 'Age oldest-first' },
   { value: 'newest', label: 'Newest first' },
   { value: 'oldest', label: 'Oldest first' },
   { value: 'balance-high', label: 'Balance high→low' },
 ];
 
-// ── ReconcileBanner (unchanged from original) ─────────────────────────────────
+// ── ReconcileBanner (unchanged) ───────────────────────────────────────────────
 
 interface StuckPayment {
   readonly id: string;
@@ -138,11 +139,10 @@ function ReconcileBanner() {
 // ── main page ─────────────────────────────────────────────────────────────────
 
 export default function InvoicesPage() {
-  const { invoices, collectedThisMonthCents, isLoading, error, sendReminder, voidInvoice } = useInvoices();
   const [filter, setFilter] = useState<Filter>('overdue');
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [sortKey, setSortKey] = useState<SortKey>('age-oldest');
+  const [sortKey, setSortKey] = useState<InvoiceSortKey>('age-oldest');
   const [source, setSource] = useState<SourceValue>('all');
   const [page, setPage] = useState(1);
   const [flash, setFlash] = useState<{ msg: string; ok: boolean } | null>(null);
@@ -151,6 +151,21 @@ export default function InvoicesPage() {
   const [voidBusy, setVoidBusy] = useState(false);
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Derive server params from UI state
+  const serverState = filterToState(filter);
+  const serverOverdue = filter === 'overdue';
+  const serverSource = source === 'all' ? undefined : source;
+
+  const { invoices, total, sourceCounts, stats, collectedThisMonthCents, isLoading, error, sendReminder, voidInvoice } = useInvoices({
+    page,
+    limit: PER_PAGE,
+    search: debouncedSearch || undefined,
+    state: serverState,
+    overdue: serverOverdue,
+    source: serverSource,
+    sort: sortKey,
+  });
+
   // auto-clear flash after 3s
   useEffect(() => {
     return () => {
@@ -158,11 +173,14 @@ export default function InvoicesPage() {
     };
   }, []);
 
-  // 150ms debounce on search — also resets page
+  // 300ms debounce on search — also resets page
   useEffect(() => {
-    const t = setTimeout(() => { setDebouncedSearch(search); setPage(1); }, 150);
+    const t = setTimeout(() => { setDebouncedSearch(search); setPage(1); }, 300);
     return () => clearTimeout(t);
   }, [search]);
+
+  // Reset page when filter/source change
+  useEffect(() => { setPage(1); }, [filter, source]);
 
   const showFlash = useCallback((msg: string, ok: boolean) => {
     if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
@@ -226,59 +244,26 @@ export default function InvoicesPage() {
     }
   }
 
-  // count overdue for badge — always over full list
-  const overdueCount = useMemo(
-    () => invoices.filter(isOverdue).length,
-    [invoices],
-  );
-
-  // source segmented control options — derived from full list
+  // Source segmented control options — derived from server sourceCounts.
+  // The server returns counts for the current filter (state), so we build
+  // the options from what the server reported.
   const sourceOptions = useMemo((): readonly SourceOption[] => {
-    const counts = {
-      native: invoices.filter((i) => i.syncedSource === null).length,
-      fieldpulse: invoices.filter((i) => i.syncedSource === 'fieldpulse').length,
-      housecall: invoices.filter((i) => i.syncedSource === 'housecall').length,
-    };
     const opts: SourceOption[] = [{ value: 'all', label: 'All sources' }];
-    if (counts.native > 0) opts.push({ value: 'native', label: `Native (${counts.native})` });
-    if (counts.fieldpulse > 0) opts.push({ value: 'fieldpulse', label: `FieldPulse (${counts.fieldpulse})` });
-    if (counts.housecall > 0) opts.push({ value: 'housecall', label: `Housecall (${counts.housecall})` });
+    if ((sourceCounts['native'] ?? 0) > 0) opts.push({ value: 'native', label: `Native (${sourceCounts['native']})` });
+    if ((sourceCounts['fieldpulse'] ?? 0) > 0) opts.push({ value: 'fieldpulse', label: `FieldPulse (${sourceCounts['fieldpulse']})` });
+    if ((sourceCounts['housecall'] ?? 0) > 0) opts.push({ value: 'housecall', label: `Housecall (${sourceCounts['housecall']})` });
     return opts;
-  }, [invoices]);
+  }, [sourceCounts]);
 
-  // memoized filtered + sorted array
-  const filteredSorted = useMemo(() => {
-    let rows = invoices.slice();
+  // Server now handles sort and overdue filter — displayRows is exactly what the server returned.
+  const displayRows = useMemo(() => invoices, [invoices]);
 
-    // state filter
-    if (filter === 'overdue') rows = rows.filter(isOverdue);
-    else if (filter === 'unpaid') rows = rows.filter(isCollectible);
-    else if (filter === 'paid') rows = rows.filter((i) => i.state === 'paid');
+  // Overdue count badge — derived from server stats
+  const overdueCount = stats?.overdueCount ?? 0;
 
-    // source filter
-    if (source === 'native') rows = rows.filter((i) => i.syncedSource === null);
-    else if (source === 'fieldpulse') rows = rows.filter((i) => i.syncedSource === 'fieldpulse');
-    else if (source === 'housecall') rows = rows.filter((i) => i.syncedSource === 'housecall');
-
-    // search — 150ms debounced
-    const q = debouncedSearch.trim().toLowerCase();
-    if (q) {
-      rows = rows.filter(
-        (i) =>
-          (i.customerName ?? '').toLowerCase().includes(q) ||
-          invoiceRef(i.id).toLowerCase().includes(q) ||
-          i.id.toLowerCase().includes(q),
-      );
-    }
-
-    // sort
-    return sortInvoices(rows, sortKey);
-  }, [invoices, filter, source, debouncedSearch, sortKey]);
-
-  // paginated slice for rendering — clamp page so stale state never yields blank rows
-  const totalPages = Math.max(1, Math.ceil(filteredSorted.length / PER_PAGE));
+  // Pager drives on server total (server already handles overdue filtering).
+  const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
   const safePage = Math.min(page, totalPages);
-  const pageRows = useMemo(() => paginate(filteredSorted, safePage, PER_PAGE), [filteredSorted, safePage]);
 
   return (
     <PageShell>
@@ -292,7 +277,7 @@ export default function InvoicesPage() {
       {/* Suppress the zero-data band on uncached first load — the skeleton
           stat tiles below own that state (review fix). */}
       {!isLoading && (
-        <SummaryBand invoices={invoices} collectedThisMonthCents={collectedThisMonthCents} />
+        <SummaryBand stats={stats} collectedThisMonthCents={collectedThisMonthCents} />
       )}
 
       {/* flash / error feedback */}
@@ -360,7 +345,7 @@ export default function InvoicesPage() {
           {/* sort select */}
           <select
             value={sortKey}
-            onChange={(e) => { setSortKey(e.target.value as SortKey); setPage(1); }}
+            onChange={(e) => { setSortKey(e.target.value as InvoiceSortKey); setPage(1); }}
             className="rounded-xl border bg-card px-3 py-2.5 text-sm font-semibold text-foreground shadow-sm outline-none focus:ring-1 focus:ring-ring"
           >
             {SORT_OPTIONS.map((opt) => (
@@ -394,7 +379,7 @@ export default function InvoicesPage() {
             </div>
             {debouncedSearch && (
               <span className="px-1 text-xs text-muted-foreground">
-                {filteredSorted.length} result{filteredSorted.length === 1 ? '' : 's'}
+                {total} result{total === 1 ? '' : 's'}
               </span>
             )}
           </div>
@@ -412,7 +397,7 @@ export default function InvoicesPage() {
           </div>
           <TableSkeleton rows={8} cols={5} />
         </>
-      ) : filteredSorted.length === 0 ? (
+      ) : displayRows.length === 0 ? (
         <Card className="p-5">
           <EmptyState
             icon={Receipt}
@@ -451,7 +436,7 @@ export default function InvoicesPage() {
                 ),
               )}
             </div>
-            {pageRows.map((inv) => (
+            {displayRows.map((inv) => (
               <InvoiceRow key={inv.id} invoice={inv} onRemind={handleRemind} onCopyPayLink={handleCopyPayLink} onVoid={handleVoid} pending={pendingId === inv.id} />
             ))}
           </div>
@@ -468,7 +453,7 @@ export default function InvoicesPage() {
               ← Prev
             </Button>
             <span className="tabular-nums text-xs text-muted-foreground">
-              {pageLabel(safePage, filteredSorted.length, PER_PAGE)}
+              {pageLabel(safePage, total, PER_PAGE)}
             </span>
             <div className="flex gap-2">
               <Button

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   listInventory,
+  listPurchaseOrders,
   createPurchaseOrder,
   receivePurchaseOrder,
   adjustStock,
@@ -18,27 +19,70 @@ vi.mock("@/lib/db", () => ({
 
 const ORG = "org-1";
 
+// ──────────────────────────── mock builder helpers ────────────────────────────
+
 /**
- * Sequence db.select results. Each `.from()` supports `.innerJoin()` (the
- * inventory list joins the pricebook name) and each `.where()` is awaitable,
- * `.limit()`-able, and `.orderBy()`-able.
+ * Tracks every query issued through db.select so tests can inspect LIMIT usage
+ * and tenant scoping. Each call to db.select() pops the next result from the
+ * queue and records whether .limit() was called on the chain.
  */
+interface QueryCapture {
+  hasLimit: boolean;
+  hasOffset: boolean;
+  // We record that where() was called, not the full value (drizzle column
+  // references are circular and can't be JSON.stringify'd without a mock schema).
+  whereCalled: boolean;
+}
+
+let selectQueue: unknown[][] = [];
+const captured: QueryCapture[] = [];
+
+function buildSelectChain(result: unknown[], capture: QueryCapture): unknown {
+  const p = new Proxy(() => {}, {
+    get(_t, prop) {
+      if (prop === "then") {
+        return (resolve: (v: unknown) => void) => resolve(result);
+      }
+      if (prop === "limit") {
+        return () => {
+          capture.hasLimit = true;
+          return p;
+        };
+      }
+      if (prop === "offset") {
+        return () => {
+          capture.hasOffset = true;
+          return p;
+        };
+      }
+      if (prop === "where") {
+        return () => {
+          capture.whereCalled = true;
+          return p;
+        };
+      }
+      // innerJoin, orderBy, from, select, etc. — chain through
+      return () => p;
+    },
+    apply: () => p,
+  });
+  return p;
+}
+
 function mockSelectSeq(results: unknown[][]): void {
-  let i = 0;
-  const where = () => {
-    const r = results[i++] ?? [];
-    const p = Promise.resolve(r);
-    return Object.assign(p, {
-      limit: () => Promise.resolve(r),
-      orderBy: () => Promise.resolve(r),
-    });
-  };
-  const from = () => ({ where, innerJoin: () => ({ where }) });
-  vi.mocked(db.select).mockImplementation(() => ({ from }) as never);
+  selectQueue = [...results];
+  vi.mocked(db.select).mockImplementation(() => {
+    const result = selectQueue.shift() ?? [];
+    const capture: QueryCapture = { hasLimit: false, hasOffset: false, whereCalled: false };
+    captured.push(capture);
+    return buildSelectChain(result, capture) as never;
+  });
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
+  captured.length = 0;
+  selectQueue = [];
   // insert() returns a thenable-ish builder; createPurchaseOrder batches it so
   // the return value just needs to be a stable object reference.
   vi.mocked(db.insert).mockReturnValue({
@@ -46,9 +90,41 @@ beforeEach(() => {
   } as never);
 });
 
+// ──────────────────────────── listInventory ────────────────────────────
+
 describe("listInventory", () => {
-  it("flags belowReorder when stock is at or below the reorder point and is tenant-scoped", async () => {
+  it("applies LIMIT on the page query", async () => {
+    // Queue: [countResult, pageRows]
     mockSelectSeq([
+      [{ n: 3 }],
+      [
+        {
+          id: "inv-1",
+          pricebookItemId: "pb-1",
+          itemName: "Capacitor",
+          quantityOnHand: 2,
+          reorderPoint: 5,
+          unitCostCents: 1200,
+          location: "Truck 1",
+        },
+      ],
+    ]);
+
+    await listInventory(ORG);
+    // The rows query must carry a LIMIT.
+    expect(captured.some((c) => c.hasLimit)).toBe(true);
+  });
+
+  it("applies WHERE on both count and rows queries (tenant scoping)", async () => {
+    mockSelectSeq([[{ n: 1 }], []]);
+    await listInventory(ORG, { search: "cap" });
+    // Both the count and the rows query must have had .where() called on them.
+    expect(captured.every((c) => c.whereCalled)).toBe(true);
+  });
+
+  it("flags belowReorder when stock is at or below the reorder point", async () => {
+    mockSelectSeq([
+      [{ n: 3 }],
       [
         {
           id: "inv-1",
@@ -80,10 +156,59 @@ describe("listInventory", () => {
       ],
     ]);
 
-    const rows = await listInventory(ORG);
-    expect(rows.map((r) => r.belowReorder)).toEqual([true, false, false]);
+    const { items } = await listInventory(ORG);
+    expect(items.map((r) => r.belowReorder)).toEqual([true, false, false]);
+  });
+
+  it("returns total from count result", async () => {
+    mockSelectSeq([[{ n: 42 }], []]);
+    const { total } = await listInventory(ORG);
+    expect(total).toBe(42);
+  });
+
+  it("issues two queries: one count, one page", async () => {
+    mockSelectSeq([[{ n: 0 }], []]);
+    await listInventory(ORG);
+    // Promise.all fires both, so db.select must have been called exactly twice.
+    expect(vi.mocked(db.select)).toHaveBeenCalledTimes(2);
+  });
+
+  it("applies WHERE on the page query (tenant scoping)", async () => {
+    mockSelectSeq([[{ n: 0 }], []]);
+    await listInventory(ORG);
+    expect(captured.every((c) => c.whereCalled)).toBe(true);
   });
 });
+
+// ──────────────────────────── listPurchaseOrders ────────────────────────────
+
+describe("listPurchaseOrders", () => {
+  it("applies LIMIT on the page query", async () => {
+    mockSelectSeq([[{ n: 5 }], []]);
+    await listPurchaseOrders(ORG);
+    expect(captured.some((c) => c.hasLimit)).toBe(true);
+  });
+
+  it("returns total from count result", async () => {
+    mockSelectSeq([[{ n: 7 }], []]);
+    const { total } = await listPurchaseOrders(ORG);
+    expect(total).toBe(7);
+  });
+
+  it("issues two queries: one count, one page", async () => {
+    mockSelectSeq([[{ n: 0 }], []]);
+    await listPurchaseOrders(ORG);
+    expect(vi.mocked(db.select)).toHaveBeenCalledTimes(2);
+  });
+
+  it("applies WHERE on all queries (tenant scoping)", async () => {
+    mockSelectSeq([[{ n: 0 }], []]);
+    await listPurchaseOrders(ORG);
+    expect(captured.every((c) => c.whereCalled)).toBe(true);
+  });
+});
+
+// ──────────────────────────── createPurchaseOrder ────────────────────────────
 
 describe("createPurchaseOrder", () => {
   it("batches the PO header + lines with the computed total", async () => {
@@ -119,6 +244,8 @@ describe("createPurchaseOrder", () => {
     expect(batched).toHaveLength(1);
   });
 });
+
+// ──────────────────────────── receivePurchaseOrder ────────────────────────────
 
 describe("receivePurchaseOrder", () => {
   function mockUpdate(claimRows: unknown[] = [{ id: "po-1" }]) {
@@ -178,6 +305,8 @@ describe("receivePurchaseOrder", () => {
     expect(r).toEqual({ ok: false, reason: "not_found" });
   });
 });
+
+// ──────────────────────────── adjustStock ────────────────────────────
 
 describe("adjustStock", () => {
   it("issues a GREATEST(0, ...) clamped update scoped to the org + item", async () => {

@@ -6,7 +6,7 @@
  * first-class (a half-built payments path breaks on the first chargeback).
  */
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, gte, inArray, isNull, lt, or, sql, sum } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, lt, or, sql, sum } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   communicationJobs,
@@ -808,6 +808,23 @@ export interface InvoiceListRow {
   readonly lastReminderSentAt: Date | null;
   /** Which FSM this read-only invoice is mirrored from, or null when native. */
   readonly syncedSource: "fieldpulse" | "housecall" | null;
+  /** Spillover FP data — needed by Task 11 click-to-expand. */
+  readonly fieldpulseData: Record<string, unknown> | null;
+}
+
+export interface InvoiceSummaryStats {
+  readonly outstandingCents: number;
+  readonly outstandingCount: number;
+  readonly overdueCents: number;
+  readonly overdueCount: number;
+  /** Max days-past-due across overdue open invoices; 0 when no overdue invoices. */
+  readonly oldestOverdueDays: number;
+}
+
+export interface InvoiceListPage {
+  readonly invoices: readonly InvoiceListRow[];
+  readonly total: number;
+  readonly sourceCounts: Record<string, number>;
 }
 
 /** Which FSM (if any) a row is a read-only mirror of. FieldPulse wins the rare
@@ -823,29 +840,220 @@ function deriveSyncedSource(
       : null;
 }
 
-/** Admin list of an org's invoices, newest first. */
-export async function listInvoices(
+/**
+ * Server-side summary stats for the invoices SummaryBand. Computes Outstanding
+ * and Overdue in SQL so the numbers stay correct after pagination removes the
+ * full client list. isCollectible semantics: state='open' AND total>paid.
+ * overdueByDates semantics: past dueDate (when present) OR age >= 30 days.
+ * Neon returns ::bigint columns as strings — wrapped with Number().
+ */
+export async function getInvoiceSummaryStats(
   organizationId: string,
-): Promise<InvoiceListRow[]> {
-  const rows = await db
+): Promise<InvoiceSummaryStats> {
+  const [row] = await db
     .select({
-      id: invoices.id,
-      state: invoices.state,
-      totalCents: invoices.totalCents,
-      amountPaidCents: invoices.amountPaidCents,
-      customerId: invoices.customerId,
-      serviceRequestId: invoices.serviceRequestId,
-      createdAt: invoices.createdAt,
-      issuedAt: invoices.issuedAt,
-      dueDate: invoices.dueDate,
-      lastReminderSentAt: invoices.lastReminderSentAt,
-      fieldpulseInvoiceId: invoices.fieldpulseInvoiceId,
-      hcpInvoiceId: invoices.hcpInvoiceId,
-      nameEncrypted: customers.nameEncrypted,
+      outstandingCents: sql<number>`coalesce(sum(${invoices.totalCents} - ${invoices.amountPaidCents}), 0)::bigint`,
+      outstandingCount: sql<number>`count(*)::int`,
+      overdueCents: sql<number>`coalesce(sum(${invoices.totalCents} - ${invoices.amountPaidCents}) filter (where
+        (${invoices.dueDate} is not null and ${invoices.dueDate} < now() - interval '1 day')
+        or (${invoices.dueDate} is null and coalesce(${invoices.issuedAt}, ${invoices.createdAt}) <= now() - interval '30 days')
+      ), 0)::bigint`,
+      overdueCount: sql<number>`count(*) filter (where
+        (${invoices.dueDate} is not null and ${invoices.dueDate} < now() - interval '1 day')
+        or (${invoices.dueDate} is null and coalesce(${invoices.issuedAt}, ${invoices.createdAt}) <= now() - interval '30 days')
+      )::int`,
+      oldestOverdueDays: sql<number>`coalesce(max(
+        case
+          when ${invoices.dueDate} is not null and ${invoices.dueDate} < now() - interval '1 day'
+            then extract(day from now() - ${invoices.dueDate})
+          when ${invoices.dueDate} is null and coalesce(${invoices.issuedAt}, ${invoices.createdAt}) <= now() - interval '30 days'
+            then extract(day from now() - coalesce(${invoices.issuedAt}, ${invoices.createdAt})) - 30
+          else 0
+        end
+      ) filter (where
+        (${invoices.dueDate} is not null and ${invoices.dueDate} < now() - interval '1 day')
+        or (${invoices.dueDate} is null and coalesce(${invoices.issuedAt}, ${invoices.createdAt}) <= now() - interval '30 days')
+      ), 0)::bigint`,
     })
     .from(invoices)
-    // Org-scope the join too (defense in depth): a customerId can only ever be
-    // this org's, but the predicate guarantees a cross-tenant row can't leak.
+    .where(
+      withTenant(
+        invoices,
+        organizationId,
+        eq(invoices.state, "open"),
+        sql`${invoices.totalCents} > ${invoices.amountPaidCents}`,
+      ),
+    );
+
+  return {
+    outstandingCents: Number(row?.outstandingCents ?? 0),
+    outstandingCount: Number(row?.outstandingCount ?? 0),
+    overdueCents: Number(row?.overdueCents ?? 0),
+    overdueCount: Number(row?.overdueCount ?? 0),
+    oldestOverdueDays: Number(row?.oldestOverdueDays ?? 0),
+  };
+}
+
+const INVOICES_PAGE_SIZE = 50;
+
+/** Whitelisted server-side sort keys. */
+export type InvoiceSortKey = 'newest' | 'oldest' | 'balance-high' | 'age-oldest';
+
+export const INVOICE_SORT_KEYS: ReadonlySet<InvoiceSortKey> = new Set([
+  'newest',
+  'oldest',
+  'balance-high',
+  'age-oldest',
+]);
+
+export interface ListInvoicesOptions {
+  readonly page?: number;
+  readonly limit?: number;
+  readonly search?: string;
+  /** Filter by invoice state (enum: draft|open|paid|void|refunded). */
+  readonly state?: string;
+  /** When true, further restrict state=open rows to overdue only (same predicate as getInvoiceSummaryStats). */
+  readonly overdue?: boolean;
+  /** Filter by source: 'native' (both synced ids null), 'fieldpulse', 'housecall'. */
+  readonly source?: string;
+  /** Sort order. Defaults to 'newest'. */
+  readonly sort?: InvoiceSortKey;
+  /** Scope to a single customer (used by ScopedInvoicesSection). */
+  readonly customerId?: string;
+  /** Scope to a single service request (used by ScopedInvoicesSection). */
+  readonly serviceRequestId?: string;
+}
+
+// The overdue predicate used in getInvoiceSummaryStats, reused here for server-side overdue filter.
+// Returned as a factory (not a module-level const) to avoid calling sql`` at import time,
+// which breaks tests that mock drizzle-orm without the sql export.
+function makeOverduePredicate() {
+  return sql`(
+  (${invoices.dueDate} is not null and ${invoices.dueDate} < now() - interval '1 day')
+  or (${invoices.dueDate} is null and coalesce(${invoices.issuedAt}, ${invoices.createdAt}) <= now() - interval '30 days')
+)`;
+}
+
+/** Admin list of an org's invoices, server-paginated. */
+export async function listInvoices(
+  organizationId: string,
+  opts: ListInvoicesOptions = {},
+): Promise<InvoiceListPage> {
+  const page = Math.max(1, opts.page ?? 1);
+  const limit = Math.max(1, opts.limit ?? INVOICES_PAGE_SIZE);
+  const offset = (page - 1) * limit;
+  const search = opts.search?.trim().toLowerCase() ?? "";
+
+  // Build extra WHERE conditions beyond the tenant scope.
+  // extraConditionsNoSource mirrors extraConditions but omits the source filter
+  // so the sourceCounts facet shows real per-source counts regardless of active tab.
+  const extraConditions: ReturnType<typeof eq>[] = [];
+  const extraConditionsNoSource: ReturnType<typeof eq>[] = [];
+
+  const pushCond = (c: ReturnType<typeof eq>, includeInNoSource = true) => {
+    extraConditions.push(c);
+    if (includeInNoSource) extraConditionsNoSource.push(c);
+  };
+
+  if (opts.state) {
+    pushCond(eq(invoices.state, opts.state as "draft" | "open" | "paid" | "void" | "refunded"));
+  }
+  // Overdue filter: state=open AND total>paid AND overdue predicate.
+  // Must be combined with state=open (caller is expected to set state='open').
+  if (opts.overdue) {
+    pushCond(sql`${invoices.totalCents} > ${invoices.amountPaidCents}` as ReturnType<typeof eq>);
+    pushCond(makeOverduePredicate() as ReturnType<typeof eq>);
+  }
+  if (opts.source === "native") {
+    // source predicates: included in rows/count WHERE, excluded from facet WHERE
+    pushCond(isNull(invoices.fieldpulseInvoiceId) as ReturnType<typeof eq>, false);
+    pushCond(isNull(invoices.hcpInvoiceId) as ReturnType<typeof eq>, false);
+  } else if (opts.source === "fieldpulse") {
+    pushCond(isNotNull(invoices.fieldpulseInvoiceId) as ReturnType<typeof eq>, false);
+  } else if (opts.source === "housecall") {
+    pushCond(isNotNull(invoices.hcpInvoiceId) as ReturnType<typeof eq>, false);
+  }
+  if (opts.customerId) {
+    pushCond(eq(invoices.customerId, opts.customerId));
+  }
+  if (opts.serviceRequestId) {
+    pushCond(eq(invoices.serviceRequestId, opts.serviceRequestId));
+  }
+
+  const whereClause = withTenant(invoices, organizationId, ...extraConditions);
+  // sourceCounts facet uses WHERE without the source filter so each tab shows
+  // its real count even when another source tab is active.
+  const whereClauseNoSource = withTenant(invoices, organizationId, ...extraConditionsNoSource);
+
+  // Resolve ORDER BY from sort key.
+  function resolveOrderBy(sortKey?: InvoiceSortKey) {
+    switch (sortKey) {
+      case 'oldest':
+        return asc(sql`coalesce(${invoices.issuedAt}, ${invoices.createdAt})`);
+      case 'balance-high':
+        return desc(sql`${invoices.totalCents} - ${invoices.amountPaidCents}`);
+      case 'age-oldest':
+        // Unpaid invoices ordered by age descending; paid/zero-balance invoices sorted last.
+        return desc(sql`case when ${invoices.totalCents} > ${invoices.amountPaidCents} then extract(epoch from now() - coalesce(${invoices.issuedAt}, ${invoices.createdAt})) else -1 end`);
+      case 'newest':
+      default:
+        return desc(sql`coalesce(${invoices.issuedAt}, ${invoices.createdAt})`);
+    }
+  }
+  const orderByClause = resolveOrderBy(opts.sort);
+
+  // sourceCounts facet: classify each row into native/fieldpulse/housecall.
+  // Uses whereClauseNoSource so counts are correct for all tabs simultaneously.
+  // Runs in the same Promise.all to add no serial latency.
+  const sourceExpr = sql<string>`
+    case
+      when ${invoices.fieldpulseInvoiceId} is not null then 'fieldpulse'
+      when ${invoices.hcpInvoiceId} is not null then 'housecall'
+      else 'native'
+    end
+  `;
+  const sourceCountsPromise = db
+    .select({
+      source: sourceExpr,
+      n: sql<number>`count(*)::int`,
+    })
+    .from(invoices)
+    .where(whereClauseNoSource)
+    .groupBy(sourceExpr)
+    .then((rows) => {
+      const m: Record<string, number> = {};
+      for (const r of rows) {
+        m[r.source] = Number(r.n);
+      }
+      return m;
+    });
+
+  const countPromise = db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(invoices)
+    .where(whereClause);
+
+  const rowCols = {
+    id: invoices.id,
+    state: invoices.state,
+    totalCents: invoices.totalCents,
+    amountPaidCents: invoices.amountPaidCents,
+    customerId: invoices.customerId,
+    serviceRequestId: invoices.serviceRequestId,
+    createdAt: invoices.createdAt,
+    issuedAt: invoices.issuedAt,
+    dueDate: invoices.dueDate,
+    lastReminderSentAt: invoices.lastReminderSentAt,
+    fieldpulseInvoiceId: invoices.fieldpulseInvoiceId,
+    hcpInvoiceId: invoices.hcpInvoiceId,
+    fieldpulseData: invoices.fieldpulseData,
+    nameEncrypted: customers.nameEncrypted,
+  };
+
+  const rowsPromise = db
+    .select(rowCols)
+    .from(invoices)
+    // Org-scope the join too (defense in depth).
     .leftJoin(
       customers,
       and(
@@ -853,14 +1061,90 @@ export async function listInvoices(
         eq(customers.organizationId, organizationId),
       ),
     )
-    .where(withTenant(invoices, organizationId))
-    .orderBy(desc(invoices.createdAt));
+    .where(whereClause)
+    .orderBy(orderByClause)
+    .limit(limit)
+    .offset(offset);
 
-  return rows.map(({ fieldpulseInvoiceId, hcpInvoiceId, nameEncrypted, ...r }) => ({
+  if (search) {
+    // Customer name is encrypted — decrypt every row server-side and filter.
+    // For reference/id prefix search we can also do it here after decryption.
+    // Load ALL matching rows (no pagination), decrypt, filter, then slice.
+    const allRowsPromise = db
+      .select(rowCols)
+      .from(invoices)
+      .leftJoin(
+        customers,
+        and(
+          eq(customers.id, invoices.customerId),
+          eq(customers.organizationId, organizationId),
+        ),
+      )
+      .where(whereClause)
+      .orderBy(orderByClause);
+
+    // countPromise is not needed in the search path: filtered.length is the true total.
+    // sourceCountsPromise (SQL) can't see decrypted names, so we discard it and
+    // recompute facets from the filtered JS row set so tabs match visible results.
+    const [, allRows] = await Promise.all([
+      sourceCountsPromise,
+      allRowsPromise,
+    ]);
+
+    // Decrypt and filter
+    const filtered = allRows.filter(({ nameEncrypted, id, fieldpulseInvoiceId }) => {
+      const name = safeDecryptName(nameEncrypted);
+      const ref = `#${id.slice(0, 8).toUpperCase()}`;
+      const fpId = fieldpulseInvoiceId ?? "";
+      return (
+        (name ?? "").toLowerCase().includes(search) ||
+        ref.toLowerCase().includes(search) ||
+        id.toLowerCase().includes(search) ||
+        fpId.toLowerCase().includes(search)
+      );
+    });
+
+    // Compute sourceCounts from the filtered row set (mirrors the SQL CASE in sourceCountsPromise).
+    // Non-search path keeps the SQL facet; search path uses JS so tabs match visible results.
+    const sourceCounts: Record<string, number> = {};
+    for (const { fieldpulseInvoiceId, hcpInvoiceId } of filtered) {
+      const src = fieldpulseInvoiceId != null ? 'fieldpulse' : hcpInvoiceId != null ? 'housecall' : 'native';
+      sourceCounts[src] = (sourceCounts[src] ?? 0) + 1;
+    }
+
+    const sliced = filtered.slice(offset, offset + limit);
+    const invoiceRows = sliced.map(({ fieldpulseInvoiceId, hcpInvoiceId, nameEncrypted, ...r }) => ({
+      ...r,
+      customerName: safeDecryptName(nameEncrypted),
+      syncedSource: deriveSyncedSource(fieldpulseInvoiceId, hcpInvoiceId),
+      fieldpulseData: r.fieldpulseData as Record<string, unknown> | null,
+    }));
+
+    return {
+      invoices: invoiceRows,
+      total: filtered.length,
+      sourceCounts,
+    };
+  }
+
+  const [countResult, sourceCounts, rows] = await Promise.all([
+    countPromise,
+    sourceCountsPromise,
+    rowsPromise,
+  ]);
+
+  const invoiceRows = rows.map(({ fieldpulseInvoiceId, hcpInvoiceId, nameEncrypted, ...r }) => ({
     ...r,
     customerName: safeDecryptName(nameEncrypted),
     syncedSource: deriveSyncedSource(fieldpulseInvoiceId, hcpInvoiceId),
+    fieldpulseData: r.fieldpulseData as Record<string, unknown> | null,
   }));
+
+  return {
+    invoices: invoiceRows,
+    total: Number(countResult[0]?.n ?? 0),
+    sourceCounts,
+  };
 }
 
 /** Decrypt an encrypted name for display; null on absent/garbled ciphertext. */

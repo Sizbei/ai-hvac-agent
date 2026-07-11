@@ -526,26 +526,29 @@ describe("refundPayment", () => {
 // ---------------------------------------------------------------------------
 
 /**
- * Sequence db.select results across calls. Each where() result is awaitable AND
- * supports .limit() (header reads) and .orderBy() (list reads) — both resolve to
- * the same row set for that call.
+ * Sequence db.select results across calls. Each final .where() (or .offset())
+ * call is awaitable and returns the next queued result set.
  */
 function mockReadSeq(results: unknown[][]) {
   let i = 0;
   vi.mocked(db.select).mockImplementation(
-    () =>
-      ({
-        from: () => ({
-          where: () => {
-            const r = results[i++] ?? [];
-            const p = Promise.resolve(r);
-            return Object.assign(p, {
-              limit: () => Promise.resolve(r),
-              orderBy: () => Promise.resolve(r),
-            });
-          },
-        }),
-      }) as never,
+    () => {
+      const r = results[i++] ?? [];
+      const p = Promise.resolve(r);
+      // A chainable thenable: every method returns itself so chains resolve to r.
+      const chain: unknown = Object.assign(p, {
+        from: () => chain,
+        leftJoin: () => chain,
+        innerJoin: () => chain,
+        where: () => chain,
+        orderBy: () => chain,
+        groupBy: () => chain,
+        limit: () => chain,
+        offset: () => chain,
+        then: p.then.bind(p),
+      });
+      return chain as never;
+    },
   );
 }
 
@@ -560,6 +563,13 @@ describe("listInvoices", () => {
         customerId: "cust-1",
         serviceRequestId: null,
         createdAt: new Date("2026-01-02"),
+        issuedAt: null,
+        dueDate: null,
+        lastReminderSentAt: null,
+        fieldpulseInvoiceId: null,
+        hcpInvoiceId: null,
+        fieldpulseData: null,
+        nameEncrypted: null,
       },
       {
         id: "inv-2",
@@ -569,12 +579,20 @@ describe("listInvoices", () => {
         customerId: null,
         serviceRequestId: "req-1",
         createdAt: new Date("2026-01-01"),
+        issuedAt: null,
+        dueDate: null,
+        lastReminderSentAt: null,
+        fieldpulseInvoiceId: null,
+        hcpInvoiceId: null,
+        fieldpulseData: null,
+        nameEncrypted: null,
       },
     ];
-    mockReadSeq([rows]);
+    // listInvoices now makes 3 db.select calls: sourceCounts, count, page rows
+    mockReadSeq([[], [{ n: rows.length }], rows]);
     const result = await listInvoices(ORG);
-    expect(result).toHaveLength(2);
-    expect(result[0]).toEqual(
+    expect(result.invoices).toHaveLength(2);
+    expect(result.invoices[0]).toEqual(
       expect.objectContaining({
         id: "inv-1",
         state: "open",

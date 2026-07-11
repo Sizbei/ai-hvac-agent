@@ -70,6 +70,8 @@ vi.mock('drizzle-orm', () => ({
   gte: (...a: unknown[]) => ({ kind: 'gte', args: a }),
   lt: (...a: unknown[]) => ({ kind: 'lt', args: a }),
   sum: (col: unknown) => ({ kind: 'sum', col }),
+  count: () => ({ kind: 'count' }),
+  asc: (col: unknown) => ({ kind: 'asc', col }),
   desc: (col: unknown) => ({ kind: 'desc', col }),
   sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({
     kind: 'sql',
@@ -77,6 +79,7 @@ vi.mock('drizzle-orm', () => ({
     values,
   }),
   isNull: (c: unknown) => ({ kind: 'isNull', c }),
+  isNotNull: (c: unknown) => ({ kind: 'isNotNull', c }),
   inArray: (c: unknown, arr: unknown) => ({ kind: 'inArray', c, arr }),
 }));
 
@@ -89,9 +92,12 @@ vi.mock('@/lib/db/schema', () => ({
     customerId: 'invoices.customerId',
     serviceRequestId: 'invoices.serviceRequestId',
     createdAt: 'invoices.createdAt',
+    issuedAt: 'invoices.issuedAt',
+    dueDate: 'invoices.dueDate',
     lastReminderSentAt: 'invoices.lastReminderSentAt',
     fieldpulseInvoiceId: 'invoices.fieldpulseInvoiceId',
     hcpInvoiceId: 'invoices.hcpInvoiceId',
+    fieldpulseData: 'invoices.fieldpulseData',
     organizationId: 'invoices.org',
     updatedAt: 'invoices.updatedAt',
   },
@@ -100,6 +106,7 @@ vi.mock('@/lib/db/schema', () => ({
     nameEncrypted: 'customers.nameEncrypted',
     organizationId: 'customers.org',
   },
+  invoiceStateEnum: { enumValues: ['draft', 'open', 'paid', 'void', 'refunded'] },
   payments: {
     amountCents: 'payments.amountCents',
     status: 'payments.status',
@@ -131,13 +138,18 @@ import { listInvoices, collectedThisMonthCents, voidInvoice, listInvoiceReminder
 
 describe('listInvoices', () => {
   it('returns invoices with decrypted customer name + lastReminderSentAt, org-scoped', async () => {
+    // listInvoices now makes 3 db.select calls: sourceCounts, count, rows
+    selectQueue.push([]); // sourceCounts
+    selectQueue.push([{ n: 1 }]); // count
     selectQueue.push([
       { id: 'i1', state: 'open', totalCents: 5000, amountPaidCents: 0,
         customerId: 'c1', serviceRequestId: 'sr1', createdAt: new Date('2026-06-01'),
-        fieldpulseInvoiceId: null, hcpInvoiceId: null,
+        issuedAt: null, dueDate: null,
+        fieldpulseInvoiceId: null, hcpInvoiceId: null, fieldpulseData: null,
         nameEncrypted: 'ENC', lastReminderSentAt: new Date('2026-06-20') },
-    ]);
-    const rows = await listInvoices('org-1');
+    ]); // rows
+    const result = await listInvoices('org-1');
+    const rows = result.invoices;
     expect(rows[0].customerName).toBe('dec(ENC)');
     expect(rows[0].lastReminderSentAt).toEqual(new Date('2026-06-20'));
     expect(rows[0].syncedSource).toBeNull();

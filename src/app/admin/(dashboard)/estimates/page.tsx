@@ -12,6 +12,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
+import { pageLabel } from '@/lib/admin/invoice-list-helpers';
+
+const PER_PAGE = 50;
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', {
@@ -22,8 +25,12 @@ function formatDate(iso: string): string {
 }
 
 export default function EstimatesPage() {
-  const { estimates, isLoading, error, refetch } = useEstimates();
+  const [page, setPage] = useState(1);
   const [createOpen, setCreateOpen] = useState(false);
+  const { estimates, total, isLoading, error, refetch } = useEstimates({ page });
+
+  const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
+  const safePage = Math.min(page, totalPages);
 
   return (
     <PageShell>
@@ -128,10 +135,63 @@ export default function EstimatesPage() {
         </div>
       )}
 
+      {/* pager bar — only shown when there are results */}
+      {total > 0 && (
+        <div className="flex items-center justify-between px-1 py-3 text-sm">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={safePage <= 1}
+          >
+            ← Prev
+          </Button>
+          <span className="tabular-nums text-xs text-muted-foreground">
+            {pageLabel(safePage, total, PER_PAGE)}
+          </span>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setPage(1)}
+              disabled={safePage <= 1}
+            >
+              First
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setPage(totalPages)}
+              disabled={safePage >= totalPages}
+            >
+              Last
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={safePage >= totalPages}
+            >
+              Next →
+            </Button>
+          </div>
+        </div>
+      )}
+
       <EstimateCreateDialog
         open={createOpen}
         onOpenChange={setCreateOpen}
-        onCreated={() => void refetch()}
+        onCreated={() => {
+          // Jump back to page 1 so the newly-created estimate (newest-first) is
+          // visible; the page change re-fetches, refetch() covers the already-
+          // on-page-1 case.
+          setPage(1);
+          void refetch();
+        }}
       />
     </PageShell>
   );

@@ -62,7 +62,7 @@ const createSchema = z.object({
     .max(10),
 });
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const session = await getAdminSession();
     if (!session) {
@@ -78,8 +78,16 @@ export async function GET() {
       return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
     }
 
-    const estimates = await listEstimates(session.organizationId);
-    return successResponse({ estimates });
+    const sp = request.nextUrl.searchParams;
+    const rawPage = Number(sp.get('page') ?? '1');
+    const page = Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
+    const rawLimit = Number(sp.get('limit') ?? '50');
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.floor(rawLimit), 20000) : 50;
+    const customerId = sp.get('customerId') || undefined;
+    const serviceRequestId = sp.get('serviceRequestId') || undefined;
+
+    const { estimates, total } = await listEstimates(session.organizationId, { page, limit, customerId, serviceRequestId });
+    return successResponse({ estimates, total });
   } catch (error: unknown) {
     logger.error({ error }, "Failed to list estimates");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);

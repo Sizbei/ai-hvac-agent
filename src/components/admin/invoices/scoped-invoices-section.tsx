@@ -1,10 +1,11 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Receipt } from 'lucide-react';
-import { useInvoices } from '@/hooks/use-invoices';
 import { InvoiceStateBadge } from '@/components/admin/invoices/invoice-state-badge';
 import { formatCentsExact } from '@/lib/admin/money-format';
+import type { InvoiceListItem } from '@/hooks/use-invoices';
 
 interface ScopedInvoicesSectionProps {
   /** Exactly one of these scopes the list. */
@@ -27,29 +28,62 @@ function formatDate(iso: string): string {
 
 /**
  * Thin read-only list of invoices scoped to a customer or service request.
- * Read-only (creation happens from a sold estimate). Reuses useInvoices and
- * filters client-side (invoice volume per entity is small).
+ * Fetches server-filtered pages directly instead of pulling the full list
+ * and filtering client-side.
  */
 export function ScopedInvoicesSection({
   customerId,
   serviceRequestId,
   variant = 'card',
 }: ScopedInvoicesSectionProps) {
-  const { invoices, isLoading } = useInvoices();
+  const [invoices, setInvoices] = useState<readonly InvoiceListItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const scoped = invoices.filter((i) =>
-    serviceRequestId
-      ? i.serviceRequestId === serviceRequestId
-      : i.customerId === customerId,
-  );
+  useEffect(() => {
+    const scopeId = customerId ?? serviceRequestId;
+    if (!scopeId) {
+      setIsLoading(false);
+      return;
+    }
+
+    let active = true;
+    setIsLoading(true);
+    setError(null);
+    // Clear the previous scope's rows so the header count never flashes stale
+    // while the new scope loads.
+    setInvoices([]);
+
+    const qs = new URLSearchParams({ limit: '200' });
+    if (customerId) qs.set('customerId', customerId);
+    else if (serviceRequestId) qs.set('serviceRequestId', serviceRequestId);
+
+    fetch(`/api/admin/invoices?${qs.toString()}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('load failed'))))
+      .then((body: { success: boolean; data: { invoices: InvoiceListItem[] } }) => {
+        if (active) setInvoices(body.data.invoices);
+      })
+      .catch(() => {
+        if (active) setError('Could not load invoices.');
+      })
+      .finally(() => {
+        if (active) setIsLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [customerId, serviceRequestId]);
 
   const body = isLoading ? (
     <p className="text-sm text-muted-foreground">Loading…</p>
-  ) : scoped.length === 0 ? (
+  ) : error ? (
+    <p className="text-sm text-destructive">{error}</p>
+  ) : invoices.length === 0 ? (
     <p className="text-sm text-muted-foreground">No invoices yet.</p>
   ) : (
     <div className="space-y-2">
-      {scoped.map((inv) => (
+      {invoices.map((inv) => (
         <Link
           key={inv.id}
           href={`/admin/invoices/${inv.id}`}
@@ -79,7 +113,7 @@ export function ScopedInvoicesSection({
       <div className="space-y-3">
         <h3 className="flex items-center gap-2 text-sm font-semibold">
           <Receipt className="size-4" />
-          Invoices ({scoped.length})
+          Invoices ({invoices.length})
         </h3>
         {body}
       </div>
@@ -91,7 +125,7 @@ export function ScopedInvoicesSection({
       <div className="flex items-center justify-between p-4 pb-2">
         <h3 className="flex items-center gap-2 text-base font-semibold">
           <Receipt className="size-4" />
-          Invoices ({scoped.length})
+          Invoices ({invoices.length})
         </h3>
       </div>
       <div className="p-4 pt-2">{body}</div>

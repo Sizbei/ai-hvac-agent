@@ -25,7 +25,7 @@ const createSchema = z.object({
   lines: z.array(lineSchema).min(1).max(200),
 });
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const session = await getAdminSession();
     if (!session) {
@@ -41,8 +41,16 @@ export async function GET() {
       return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
     }
 
-    const purchaseOrders = await listPurchaseOrders(session.organizationId);
-    return successResponse({ purchaseOrders });
+    const sp = request.nextUrl.searchParams;
+
+    const rawPage = Number(sp.get("page") ?? "1");
+    const page = Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
+
+    const rawLimit = Number(sp.get("limit") ?? "50");
+    const limit = Number.isFinite(rawLimit) ? Math.min(1000, Math.max(1, Math.floor(rawLimit))) : 50;
+
+    const { orders, total } = await listPurchaseOrders(session.organizationId, { page, limit });
+    return successResponse({ purchaseOrders: orders, total });
   } catch (error: unknown) {
     logger.error({ error }, "Failed to fetch purchase orders");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);

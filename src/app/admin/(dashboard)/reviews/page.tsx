@@ -1,10 +1,15 @@
 'use client';
 
+import { useState } from 'react';
 import { AlertCircle, Star, MessageSquareQuote, Send } from 'lucide-react';
 import { useReviews, type ReviewRow } from '@/hooks/use-reviews';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { pageLabel } from '@/lib/admin/invoice-list-helpers';
+
+const PER_PAGE = 50;
 
 function formatDate(iso: string | null): string {
   if (!iso) return '—';
@@ -52,12 +57,16 @@ function Stars({ rating }: { readonly rating: number | null }) {
 }
 
 export default function ReviewsPage() {
-  const { reviews, stats, isLoading, error } = useReviews();
+  const [page, setPage] = useState(1);
+  const { reviews, total, stats, isLoading, error } = useReviews({ page });
 
   const responseRate =
     stats && stats.count > 0
       ? Math.round((stats.responded / stats.count) * 100)
       : 0;
+
+  const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
+  const safePage = Math.min(page, totalPages);
 
   return (
     <div className="space-y-6 p-6">
@@ -174,6 +183,53 @@ export default function ReviewsPage() {
           </table>
         </div>
       </Card>
+
+      {/* pager bar — only shown when there are results */}
+      {total > 0 && (
+        <div className="flex items-center justify-between px-1 py-3 text-sm">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={safePage <= 1}
+          >
+            ← Prev
+          </Button>
+          <span className="tabular-nums text-xs text-muted-foreground">
+            {pageLabel(safePage, total, PER_PAGE)}
+          </span>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setPage(1)}
+              disabled={safePage <= 1}
+            >
+              First
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setPage(totalPages)}
+              disabled={safePage >= totalPages}
+            >
+              Last
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={safePage >= totalPages}
+            >
+              Next →
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
