@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { BookingHistoryList } from '@/components/admin/customers/booking-history-list';
-import { customerInitials, customerHue } from '@/lib/admin/customer-display';
+import { customerInitials } from '@/lib/admin/customer-display';
 import type { CustomerListRecord } from '@/lib/admin/crm-types';
 import type { AgendaBooking } from '@/lib/admin/types';
 
@@ -99,8 +99,7 @@ export function CustomerDrawer({ customer, onClose }: CustomerDrawerProps) {
             <SheetHeader className="space-y-0">
               <SheetTitle className="flex items-center gap-3">
                 <div
-                  className="flex size-12 shrink-0 items-center justify-center rounded-full text-base font-bold text-white"
-                  style={{ backgroundColor: customerHue(customer.id) }}
+                  className="flex size-12 shrink-0 items-center justify-center rounded-full bg-primary text-base font-bold text-primary-foreground"
                   aria-hidden
                 >
                   {customerInitials(customer.name)}

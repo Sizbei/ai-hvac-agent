@@ -4,7 +4,6 @@ import { Calendar, Wrench } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import {
   customerInitials,
-  customerHue,
   customerCity,
   lastSeenLabel,
   lastSeenTone,
@@ -26,7 +25,6 @@ function PeopleCard({
   readonly onSelect: (id: string) => void;
   readonly active: boolean;
 }) {
-  const hue = customerHue(customer.id);
   const city = customerCity(customer.address);
   const sub = city ?? customer.email ?? customer.phone ?? 'No contact on file';
 
@@ -42,8 +40,7 @@ function PeopleCard({
       {/* header: avatar + name */}
       <div className="flex items-center gap-3">
         <div
-          className="flex size-11 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white"
-          style={{ backgroundColor: hue }}
+          className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground"
           aria-hidden
         >
           {customerInitials(customer.name)}

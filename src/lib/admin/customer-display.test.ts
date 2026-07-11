@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
   customerInitials,
-  customerHue,
   customerCity,
   lastSeenLabel,
   lastSeenTone,
@@ -21,15 +20,6 @@ describe('customerInitials', () => {
     expect(customerInitials(null)).toBe('?');
     expect(customerInitials('')).toBe('?');
     expect(customerInitials('()')).toBe('?');
-  });
-});
-
-describe('customerHue', () => {
-  it('is deterministic for a given seed', () => {
-    expect(customerHue('abc')).toBe(customerHue('abc'));
-  });
-  it('always returns a palette hex', () => {
-    expect(customerHue('anything')).toMatch(/^#[0-9a-f]{6}$/);
   });
 });
 

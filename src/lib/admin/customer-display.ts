@@ -4,12 +4,6 @@
  * shared between the card grid and the drawer.
  */
 
-/** Deterministic avatar palette (hex). Warm/saturated hues that read on white. */
-const AVATAR_HUES = [
-  '#c43459', '#7a3fbf', '#266a9e', '#167530', '#8a6508',
-  '#3d7434', '#bc002d', '#a85716', '#5a3fb5', '#3a5ba0',
-] as const;
-
 /** Up to two initials from a customer name, ignoring parenthetical suffixes like
  * "(TCG)" so "Belk Morristown (TCG)" → "BM", not "B(". Falls back to the first
  * two characters, and to "?" when there's nothing usable. */
@@ -23,16 +17,6 @@ export function customerInitials(name: string | null): string {
       ? (words[0]?.[0] ?? '') + (words[1]?.[0] ?? '')
       : (words[0] ?? '').slice(0, 2);
   return initials.toUpperCase() || '?';
-}
-
-/** Stable avatar color for a seed string (customer id or name). Same seed always
- * maps to the same hue, so a customer keeps their color across renders. */
-export function customerHue(seed: string): string {
-  let h = 0;
-  for (let i = 0; i < seed.length; i += 1) {
-    h = (h * 31 + seed.charCodeAt(i)) >>> 0;
-  }
-  return AVATAR_HUES[h % AVATAR_HUES.length]!;
 }
 
 /** The city from a "street, city, ST zip" address, or null. Takes the
