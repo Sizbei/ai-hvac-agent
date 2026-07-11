@@ -148,7 +148,7 @@ function queueAll(rows: {
     rows.paid ?? [],
     rows.onSite ?? [{ avgMinutes: null }],
     rows.aging ?? [{ b0: '0', b30: '0', b60: '0' }],
-    rows.syncedAging ?? [{ totalCents: '0', count: '0' }],
+    rows.syncedAging ?? [{ currentCents: '0', b0: '0', b30: '0', b60: '0', totalCents: '0', count: '0' }],
     rows.jobsCurrent ?? [{ value: '0' }],
     rows.jobsPrevious ?? [{ value: '0' }],
     rows.importedJobsCurrent ?? [{ value: '0' }],
@@ -335,4 +335,22 @@ describe('getOperationsMetrics', () => {
     expect(agingColumns).toContain('invoices.issuedAt');
     expect(agingColumns).toContain('invoices.createdAt');
   });
+});
+
+it('exposes synced AR aging buckets (due-date based) alongside the legacy total', async () => {
+  queueAll({
+    syncedAging: [
+      { currentCents: '1000', b0: '84000', b30: '28000', b60: '35000', totalCents: '148000', count: '133' },
+    ],
+  });
+  const m = await getOperationsMetrics(ORG);
+  expect(m.syncedArAging).toEqual({
+    currentCents: 1000,
+    overdue1to30Cents: 84000,
+    overdue31to60Cents: 28000,
+    overdue60PlusCents: 35000,
+    totalOutstandingCents: 148000,
+  });
+  expect(m.syncedArTotalCents).toBe(148000);
+  expect(m.syncedArCount).toBe(133);
 });

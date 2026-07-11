@@ -8,7 +8,7 @@ import { withTenant } from "@/lib/db/tenant";
 import { canAssignRole } from "@/lib/auth/authz";
 import { getOrgEntitlements } from "@/lib/billing/entitlements";
 import type { AdminRole, AdminSessionPayload } from "@/lib/auth/types";
-import { normalizeEmail, createStaff } from "./staff-queries";
+import { normalizeEmail, createStaff, claimPasswordlessStaff } from "./staff-queries";
 
 /**
  * Team invitations — tokenized, copyable signup links (no email dependency).
@@ -109,14 +109,28 @@ export async function createInvite(
 
   const email = normalizeEmail(input.email);
 
-  // Refuse if a user with this email already exists in the org — invite is for
-  // NEW teammates; managing existing ones goes through the staff surface.
+  // An existing user normally blocks the invite (invites are for NEW
+  // teammates) — EXCEPT the credential-setup case: an ACTIVE user with NO
+  // password and exactly the invite's role (e.g. a FieldPulse-synced
+  // technician) may be invited so the accept flow can set their first
+  // password. A password-bearing, inactive, or role-mismatched user still
+  // conflicts.
   const [existingUser] = await db
-    .select({ id: users.id })
+    .select({
+      id: users.id,
+      passwordHash: users.passwordHash,
+      isActive: users.isActive,
+      role: users.role,
+    })
     .from(users)
     .where(withTenant(users, organizationId, eq(users.email, email)))
     .limit(1);
-  if (existingUser) {
+  const credentialSetup =
+    existingUser != null &&
+    existingUser.passwordHash === null &&
+    existingUser.isActive &&
+    existingUser.role === input.role;
+  if (existingUser && !credentialSetup) {
     return { ok: false, reason: "email_conflict" };
   }
 
@@ -145,16 +159,19 @@ export async function createInvite(
   // new active user, so block it when the org is already AT its plan's maxStaff.
   // Count active users only (deactivated users don't consume a seat). The free
   // tier's small cap is the floor for a NULL-plan org. This is the ONE
-  // representative entitlement enforcement in v1.
-  const { entitlements } = await getOrgEntitlements(organizationId);
-  const [seatRow] = await db
-    .select({ value: count() })
-    .from(users)
-    .where(withTenant(users, organizationId, eq(users.isActive, true)));
-  // neon-http returns count() as a string.
-  const activeStaff = Number(seatRow?.value ?? 0);
-  if (activeStaff >= entitlements.maxStaff) {
-    return { ok: false, reason: "seat_limit" };
+  // representative entitlement enforcement in v1. SKIPPED for credential-setup
+  // invites: the existing user already holds their seat.
+  if (!credentialSetup) {
+    const { entitlements } = await getOrgEntitlements(organizationId);
+    const [seatRow] = await db
+      .select({ value: count() })
+      .from(users)
+      .where(withTenant(users, organizationId, eq(users.isActive, true)));
+    // neon-http returns count() as a string.
+    const activeStaff = Number(seatRow?.value ?? 0);
+    if (activeStaff >= entitlements.maxStaff) {
+      return { ok: false, reason: "seat_limit" };
+    }
   }
 
   const { token, tokenHash } = generateInviteToken();
@@ -357,11 +374,27 @@ export async function acceptInvite(
     role: invite.role,
   });
 
-  if (!created.ok) {
-    // email_conflict: a user with this email already exists in the org (created
-    // concurrently or after the invite). The invite is left UN-claimed; there is
-    // nothing to roll back. This is terminal for the invite (the email is taken).
-    return { ok: false, reason: "email_conflict" };
+  // The accepted identity: a NEWLY created user, or — when the email already
+  // belongs to an ACTIVE PASSWORD-LESS user with the invite's role (e.g. a
+  // FieldPulse-synced technician) — that EXISTING user, whose first password
+  // this invite sets (credential-setup). The existing user keeps their own
+  // name; the form's name is ignored. Any other conflict stays terminal.
+  let staff: { id: string; email: string; name: string };
+  if (created.ok) {
+    staff = created.staff;
+  } else {
+    const claimed = await claimPasswordlessStaff(invite.organizationId, {
+      email: invite.email,
+      role: invite.role,
+      password: input.password,
+    });
+    if (!claimed.ok) {
+      // email_conflict: a user with this email already exists in the org and is
+      // not claimable (has a password / inactive / different role). The invite
+      // is left UN-claimed; there is nothing to roll back.
+      return { ok: false, reason: "email_conflict" };
+    }
+    staff = claimed.staff;
   }
 
   // User exists now — claim the invite so it can't be reused. Conditional on
@@ -406,7 +439,7 @@ export async function acceptInvite(
       .set({ role: "super_admin", updatedAt: new Date() })
       .where(
         and(
-          eq(users.id, created.staff.id),
+          eq(users.id, staff.id),
           eq(users.organizationId, invite.organizationId),
         ),
       );
@@ -428,20 +461,20 @@ export async function acceptInvite(
     effectiveRole === "technician"
       ? null
       : {
-          userId: created.staff.id,
+          userId: staff.id,
           organizationId: invite.organizationId,
-          email: created.staff.email,
-          name: created.staff.name,
+          email: staff.email,
+          name: staff.name,
           role: effectiveRole,
         };
 
   return {
     ok: true,
     accepted: {
-      userId: created.staff.id,
+      userId: staff.id,
       organizationId: invite.organizationId,
-      email: created.staff.email,
-      name: created.staff.name,
+      email: staff.email,
+      name: staff.name,
       role: effectiveRole,
       session,
     },

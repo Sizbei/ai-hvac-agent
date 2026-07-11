@@ -106,10 +106,11 @@ export async function POST(request: NextRequest) {
 
     logger.info(
       { userId: accepted.userId },
-      "Invite accepted (technician account created)",
+      "Invite accepted (technician account ready)",
     );
+    // Technicians sign in at the field-staff entry point, not the admin console.
     return successResponse({
-      redirectTo: "/admin/login",
+      redirectTo: "/tech-login",
       role: accepted.role,
     });
   } catch (error: unknown) {

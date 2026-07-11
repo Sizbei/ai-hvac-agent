@@ -29,6 +29,16 @@ export interface ArAging {
   readonly totalOutstandingCents: number;
 }
 
+/** Outstanding balance on SYNCED (FP/HCP) open invoices, bucketed by days past
+ * the source system's due date. `currentCents` = not yet due. */
+export interface SyncedArAging {
+  readonly currentCents: number;
+  readonly overdue1to30Cents: number;
+  readonly overdue31to60Cents: number;
+  readonly overdue60PlusCents: number;
+  readonly totalOutstandingCents: number;
+}
+
 export interface OperationsMetrics {
   /** The selected window, in days — echoed back for the page header/labels. */
   readonly rangeDays: number;
@@ -52,6 +62,13 @@ export interface OperationsMetrics {
   readonly syncedArTotalCents: number;
   /** Count of FP-synced open invoices in the AR summary. */
   readonly syncedArCount: number;
+  /**
+   * Point-in-time aging of SYNCED (FP/HCP) open receivables, bucketed by the
+   * source system's due date (days PAST DUE; `current` = not yet due). Rows
+   * without a due date fall back to issue age. Money stays owned by the source
+   * system — these buckets are visibility, not collections triggers.
+   */
+  readonly syncedArAging: SyncedArAging;
 
   // 3. Customer service volume.
   /**

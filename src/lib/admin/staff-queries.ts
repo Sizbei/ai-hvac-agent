@@ -27,7 +27,7 @@
  * the trigger's exception back to the same `last_admin` sentinel so the race
  * loser gets the same 409 rather than a 500.
  */
-import { eq, ne, count, asc, inArray } from "drizzle-orm";
+import { eq, ne, count, asc, inArray, isNull } from "drizzle-orm";
 import { hash } from "bcryptjs";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
@@ -392,4 +392,71 @@ export async function resetStaffPassword(
   }
 
   return { ok: true };
+}
+
+export type ClaimPasswordlessStaffResult =
+  | { ok: true; staff: { id: string; email: string; name: string } }
+  | { ok: false; reason: "not_claimable" };
+
+/**
+ * Set a first password on an EXISTING password-less user — the invite-accept
+ * path for users provisioned without credentials (FieldPulse-synced
+ * technicians, Google-only staff). Authorization comes from the invite token
+ * (created by an admin whose authority was checked at create time), so the
+ * eligibility rules ARE the security boundary:
+ *  - the user must be active,
+ *  - must have NO password (a live credential can never be overwritten), and
+ *  - must hold exactly the invite's role (a technician invite can't plant a
+ *    password on an admin).
+ * The UPDATE re-asserts password_hash IS NULL so two concurrent accepts can't
+ * both claim; the loser reports not_claimable.
+ */
+export async function claimPasswordlessStaff(
+  organizationId: string,
+  input: { email: string; role: StaffRole; password: string },
+): Promise<ClaimPasswordlessStaffResult> {
+  const email = normalizeEmail(input.email);
+  const [user] = await db
+    .select({
+      id: users.id,
+      email: users.email,
+      name: users.name,
+      role: users.role,
+      isActive: users.isActive,
+      passwordHash: users.passwordHash,
+    })
+    .from(users)
+    .where(withTenant(users, organizationId, eq(users.email, email)))
+    .limit(1);
+
+  if (
+    !user ||
+    !user.isActive ||
+    user.passwordHash !== null ||
+    user.role !== input.role
+  ) {
+    return { ok: false, reason: "not_claimable" };
+  }
+
+  const passwordHash = await hash(input.password, BCRYPT_COST);
+  const [updated] = await db
+    .update(users)
+    .set({ passwordHash, updatedAt: new Date() })
+    .where(
+      withTenant(
+        users,
+        organizationId,
+        eq(users.id, user.id),
+        isNull(users.passwordHash),
+      ),
+    )
+    .returning({ id: users.id });
+
+  if (!updated) {
+    return { ok: false, reason: "not_claimable" };
+  }
+  return {
+    ok: true,
+    staff: { id: user.id, email: user.email, name: user.name },
+  };
 }

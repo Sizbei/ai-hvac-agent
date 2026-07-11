@@ -27,6 +27,7 @@ import type {
   OperationsMetrics,
   MetricTrend,
   ArAging,
+  SyncedArAging,
 } from "./operations-metrics-types";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -250,11 +251,19 @@ export async function getOperationsMetrics(
         ),
       ),
 
-    // AR aging (SYNCED): single aggregate for the one-line summary shown
-    // below the native buckets. Covers both FP and HCP-synced open invoices —
-    // a HCP-synced invoice has hcpInvoiceId set and must not be silently excluded.
+    // AR aging (SYNCED): due-date-based buckets + the legacy total. Covers both
+    // FP and HCP-synced open invoices — a HCP-synced invoice has hcpInvoiceId
+    // set and must not be silently excluded. The bucket basis is
+    // COALESCE(due_date, issued_at, created_at): mirrored invoices carry real
+    // due dates (backfilled 2026-07-10), so "current" = not yet due and the
+    // buckets are days PAST DUE; the rare row without a due date falls back to
+    // its issue age (never "current").
     db
       .select({
+        currentCents: sql<string>`coalesce(sum(${invoices.totalCents} - ${invoices.amountPaidCents}) filter (where coalesce(${invoices.dueDate}, ${invoices.issuedAt}, ${invoices.createdAt}) >= ${now}), 0)`,
+        b0: sql<string>`coalesce(sum(${invoices.totalCents} - ${invoices.amountPaidCents}) filter (where coalesce(${invoices.dueDate}, ${invoices.issuedAt}, ${invoices.createdAt}) < ${now} and coalesce(${invoices.dueDate}, ${invoices.issuedAt}, ${invoices.createdAt}) >= ${cut30}), 0)`,
+        b30: sql<string>`coalesce(sum(${invoices.totalCents} - ${invoices.amountPaidCents}) filter (where coalesce(${invoices.dueDate}, ${invoices.issuedAt}, ${invoices.createdAt}) < ${cut30} and coalesce(${invoices.dueDate}, ${invoices.issuedAt}, ${invoices.createdAt}) >= ${cut60}), 0)`,
+        b60: sql<string>`coalesce(sum(${invoices.totalCents} - ${invoices.amountPaidCents}) filter (where coalesce(${invoices.dueDate}, ${invoices.issuedAt}, ${invoices.createdAt}) < ${cut60}), 0)`,
         totalCents: sql<string>`coalesce(sum(${invoices.totalCents} - ${invoices.amountPaidCents}), 0)`,
         count: sql<string>`count(*)`,
       })
@@ -375,6 +384,13 @@ export async function getOperationsMetrics(
 
   const syncedArTotalCents = toNumber(syncedAgingRow[0]?.totalCents);
   const syncedArCount = toNumber(syncedAgingRow[0]?.count);
+  const syncedArAging: SyncedArAging = {
+    currentCents: toNumber(syncedAgingRow[0]?.currentCents),
+    overdue1to30Cents: toNumber(syncedAgingRow[0]?.b0),
+    overdue31to60Cents: toNumber(syncedAgingRow[0]?.b30),
+    overdue60PlusCents: toNumber(syncedAgingRow[0]?.b60),
+    totalOutstandingCents: syncedArTotalCents,
+  };
 
   const jobsBooked: MetricTrend = {
     current: toNumber(jobsCurrentRow[0]?.value),
@@ -391,6 +407,7 @@ export async function getOperationsMetrics(
     arAging,
     syncedArTotalCents,
     syncedArCount,
+    syncedArAging,
     jobsBooked,
     importedJobsCurrent,
     firstResponseHumanSeconds,

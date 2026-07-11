@@ -19,9 +19,13 @@ export async function createTechSession(
   cookieStore.set(TECH_SESSION_COOKIE, token, {
     httpOnly: true,
     secure: true,
-    // "strict" blocks CSRF against the state-changing /api/tech/* endpoints
-    // (status advance, location ingest). The tech UI is same-origin.
-    sameSite: "strict",
+    // "lax", not "strict": the Google OIDC callback can mint this cookie
+    // mid-way through a navigation chain that originates on
+    // accounts.google.com, and browsers refuse to attach strict cookies to the
+    // follow-up /tech/jobs request (the same trap the admin session hit). Lax
+    // still withholds the cookie on cross-site POST/fetch, which is what
+    // protects the state-changing /api/tech/* endpoints from CSRF.
+    sameSite: "lax",
     maxAge: TECH_SESSION_MAX_AGE,
     path: "/",
   });

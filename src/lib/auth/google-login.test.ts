@@ -86,10 +86,39 @@ describe("resolveGoogleLogin — pre-provisioned only", () => {
     expect(updateCalls).toHaveLength(0); // never links/creates anything
   });
 
-  it("denies a technician (non-admin-tier role)", async () => {
-    selectQueue.push([userRow({ role: "technician" })]);
+  it("resolves an active technician to a TECH session (kind: 'tech')", async () => {
+    selectQueue.push([userRow({ role: "technician", googleId: null })]);
+    const result = await resolveGoogleLogin(identity());
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.kind).toBe("tech");
+      expect(result.session).toMatchObject({
+        userId: "user-1",
+        organizationId: "org-1",
+        role: "technician",
+      });
+    }
+    expect(updateCalls).toHaveLength(1); // links google_id on first login too
+  });
+
+  it("denies an inactive technician", async () => {
+    selectQueue.push([userRow({ role: "technician", isActive: false })]);
     const result = await resolveGoogleLogin(identity());
     expect(result).toEqual({ ok: false, reason: "no_account" });
+  });
+
+  it("rejects a technician sub mismatch (account-takeover guard applies to techs)", async () => {
+    selectQueue.push([userRow({ role: "technician", googleId: "original-sub" })]);
+    const result = await resolveGoogleLogin(identity({ sub: "attacker-sub" }));
+    expect(result).toEqual({ ok: false, reason: "sub_mismatch" });
+    expect(updateCalls).toHaveLength(0);
+  });
+
+  it("marks admin logins with kind: 'admin'", async () => {
+    selectQueue.push([userRow({ googleId: "sub-x" })]);
+    const result = await resolveGoogleLogin(identity({ sub: "sub-x" }));
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.kind).toBe("admin");
   });
 
   it("denies an inactive admin", async () => {

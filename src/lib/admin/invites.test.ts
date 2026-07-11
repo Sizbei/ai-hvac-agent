@@ -35,11 +35,14 @@ vi.mock('@/lib/db/schema', () => ({
   organizations: { id: 'o.id', ownerEmail: 'o.ownerEmail' },
 }));
 
-// staff-queries: real normalizeEmail behavior (trim+lowercase); createStaff mocked.
+// staff-queries: real normalizeEmail behavior (trim+lowercase); createStaff and
+// claimPasswordlessStaff mocked.
 const mockCreateStaff = vi.fn();
+const mockClaimPasswordlessStaff = vi.fn();
 vi.mock('./staff-queries', () => ({
   normalizeEmail: (e: string) => e.trim().toLowerCase(),
   createStaff: (...a: unknown[]) => mockCreateStaff(...a),
+  claimPasswordlessStaff: (...a: unknown[]) => mockClaimPasswordlessStaff(...a),
 }));
 
 // authz: real policy (admin ⇒ technician only; super_admin ⇒ anything).
@@ -110,6 +113,10 @@ beforeEach(() => {
   updateQueue.length = 0;
   mockMaxStaff = 1000;
   mockCreateStaff.mockReset();
+  mockClaimPasswordlessStaff.mockReset();
+  // Default: the existing user is NOT claimable, so pre-existing conflict tests
+  // keep their email_conflict outcome.
+  mockClaimPasswordlessStaff.mockResolvedValue({ ok: false, reason: 'not_claimable' });
 });
 
 describe('token generation', () => {
@@ -533,5 +540,84 @@ describe('acceptInvite', () => {
     expect(res).toEqual({ ok: false, reason: 'email_conflict' });
     // No claim UPDATE was needed (create failed before the claim step).
     expect(updateQueue.length).toBe(0);
+  });
+});
+
+describe('createInvite — credential-setup for existing password-less users', () => {
+  const passwordlessTech = {
+    id: 'u9', passwordHash: null, isActive: true, role: 'technician',
+  };
+
+  it('allows an invite for an existing ACTIVE PASSWORD-LESS user with the matching role, skipping the seat gate', async () => {
+    mockMaxStaff = 0; // seat gate would refuse anything — must be skipped
+    selectQueue.push([passwordlessTech]); // existing user (claimable)
+    selectQueue.push([]); // no live invite
+    insertQueue.push([
+      {
+        id: 'inv9', email: 'tech@x.com', role: 'technician',
+        expiresAt: new Date('2026-07-14T00:00:00Z'),
+        createdAt: new Date('2026-07-11T00:00:00Z'),
+      },
+    ]);
+    const res = await createInvite(
+      ORG, { email: 'tech@x.com', role: 'technician' }, 'admin', ACTOR,
+    );
+    expect(res.ok).toBe(true);
+  });
+
+  it('still refuses when the existing user already has a password', async () => {
+    selectQueue.push([{ ...passwordlessTech, passwordHash: 'x' }]);
+    const res = await createInvite(
+      ORG, { email: 'tech@x.com', role: 'technician' }, 'admin', ACTOR,
+    );
+    expect(res).toEqual({ ok: false, reason: 'email_conflict' });
+  });
+
+  it('still refuses on role mismatch or inactive user', async () => {
+    selectQueue.push([{ ...passwordlessTech, role: 'admin' }]);
+    expect(
+      await createInvite(ORG, { email: 't@x.com', role: 'technician' }, 'super_admin', ACTOR),
+    ).toEqual({ ok: false, reason: 'email_conflict' });
+    selectQueue.push([{ ...passwordlessTech, isActive: false }]);
+    expect(
+      await createInvite(ORG, { email: 't@x.com', role: 'technician' }, 'super_admin', ACTOR),
+    ).toEqual({ ok: false, reason: 'email_conflict' });
+  });
+});
+
+describe('acceptInvite — claims an existing password-less user', () => {
+  function liveTechRow() {
+    return {
+      id: 'inv1', organizationId: ORG, email: 'tech@x.com', role: 'technician',
+      expiresAt: new Date(Date.now() + 60_000), acceptedAt: null, revokedAt: null,
+    };
+  }
+
+  it('sets the password on the existing user when createStaff hits email_conflict', async () => {
+    selectQueue.push([liveTechRow()]); // resolve token
+    mockCreateStaff.mockResolvedValue({ ok: false, reason: 'email_conflict' });
+    mockClaimPasswordlessStaff.mockResolvedValue({
+      ok: true,
+      staff: { id: 'u9', email: 'tech@x.com', name: 'Existing Tech' },
+    });
+    selectQueue.push([{ ownerEmail: null }]); // org owner check (no promotion)
+    const res = await acceptInvite('t', { name: 'Ignored', password: 'password1' });
+    expect(mockClaimPasswordlessStaff).toHaveBeenCalledWith(ORG, {
+      email: 'tech@x.com', role: 'technician', password: 'password1',
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.accepted.userId).toBe('u9');
+      expect(res.accepted.role).toBe('technician');
+      expect(res.accepted.session).toBeNull(); // technician: no admin session
+      expect(res.accepted.name).toBe('Existing Tech'); // keeps THEIR name
+    }
+  });
+
+  it('keeps email_conflict when the existing user is not claimable', async () => {
+    selectQueue.push([liveTechRow()]);
+    mockCreateStaff.mockResolvedValue({ ok: false, reason: 'email_conflict' });
+    const res = await acceptInvite('t', { name: 'N', password: 'password1' });
+    expect(res).toEqual({ ok: false, reason: 'email_conflict' });
   });
 });

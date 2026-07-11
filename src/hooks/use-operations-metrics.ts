@@ -14,6 +14,16 @@ export interface ArAging {
   readonly totalOutstandingCents: number;
 }
 
+/** Synced (FP/HCP) open receivables bucketed by days past the source system's
+ * due date; `currentCents` = not yet due. Mirror of the server-side type. */
+export interface SyncedArAging {
+  readonly currentCents: number;
+  readonly overdue1to30Cents: number;
+  readonly overdue31to60Cents: number;
+  readonly overdue60PlusCents: number;
+  readonly totalOutstandingCents: number;
+}
+
 export interface OperationsMetrics {
   readonly rangeDays: number;
   readonly responseTimeSeconds: MetricTrend;
@@ -24,6 +34,8 @@ export interface OperationsMetrics {
   readonly syncedArTotalCents: number;
   /** Count of FP-synced open invoices contributing to syncedArTotalCents. */
   readonly syncedArCount: number;
+  /** Due-date-based aging of the synced open receivables. */
+  readonly syncedArAging: SyncedArAging;
   readonly jobsBooked: MetricTrend;
   /** Count of FP-imported service requests in the current window. */
   readonly importedJobsCurrent: number;

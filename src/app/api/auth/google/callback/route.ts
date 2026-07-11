@@ -20,6 +20,7 @@ import { errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
 import { createAdminSession } from "@/lib/auth/session";
+import { createTechSession } from "@/lib/auth/tech-session";
 import {
   getGoogleOidcConfig,
   exchangeCodeForIdToken,
@@ -106,14 +107,21 @@ export async function GET(request: NextRequest): Promise<Response> {
       return denyRedirect(request, "no_account");
     }
 
-    await createAdminSession(result.session);
+    // Role-aware session: the resolver's `kind` decides which of the two
+    // DISTINCT session cookies is minted (they never alias).
+    if (result.kind === "tech") {
+      await createTechSession(result.session);
+    } else {
+      await createAdminSession(result.session);
+    }
     logger.info(
-      { userId: result.session.userId },
-      "Admin login via Google successful",
+      { userId: result.session.userId, kind: result.kind },
+      "Login via Google successful",
     );
 
-    // Success: land in the dashboard and clear the one-shot flow cookies.
-    const res = NextResponse.redirect(new URL("/admin", request.url));
+    // Success: land in the role's home and clear the one-shot flow cookies.
+    const destination = result.kind === "tech" ? "/tech/jobs" : "/admin";
+    const res = NextResponse.redirect(new URL(destination, request.url));
     res.cookies.delete(GOOGLE_OIDC_STATE_COOKIE);
     res.cookies.delete(GOOGLE_OIDC_NONCE_COOKIE);
     return res;

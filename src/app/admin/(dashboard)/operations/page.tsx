@@ -302,15 +302,44 @@ export default function OperationsPage() {
                 </span>
               </div>
               {(metrics?.syncedArTotalCents ?? 0) > 0 && (
-                <p className="mt-2 text-xs text-muted-foreground">
-                  Synced (FieldPulse/HCP) AR:{' '}
-                  <span className="font-semibold text-foreground">
-                    {formatCentsExact(metrics!.syncedArTotalCents)}
-                  </span>{' '}
-                  across {metrics!.syncedArCount} invoice
-                  {metrics!.syncedArCount !== 1 ? 's' : ''} — managed in
-                  external systems
-                </p>
+                <div className="mt-4 border-t border-border pt-3">
+                  <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Synced (FieldPulse/HCP) — by due date
+                  </p>
+                  {[
+                    { tag: 'Current', cents: metrics!.syncedArAging.currentCents, bar: 'bg-sky-500' },
+                    { tag: '1–30 d over', cents: metrics!.syncedArAging.overdue1to30Cents, bar: 'bg-emerald-500' },
+                    { tag: '31–60 d over', cents: metrics!.syncedArAging.overdue31to60Cents, bar: 'bg-amber-500' },
+                    { tag: '60+ d over', cents: metrics!.syncedArAging.overdue60PlusCents, bar: 'bg-rose-500' },
+                  ].map((b) => (
+                    <div key={b.tag} className="mb-2 flex items-center gap-3">
+                      <span className="w-24 text-xs font-semibold text-muted-foreground">
+                        {b.tag}
+                      </span>
+                      <span className="h-2.5 flex-1 overflow-hidden rounded-full bg-muted">
+                        <span
+                          className={'block h-full rounded-full ' + b.bar}
+                          style={{
+                            width: `${
+                              metrics!.syncedArAging.totalOutstandingCents > 0
+                                ? Math.round((b.cents / metrics!.syncedArAging.totalOutstandingCents) * 100)
+                                : 0
+                            }%`,
+                          }}
+                        />
+                      </span>
+                      <span className="w-20 text-right text-sm font-semibold tabular-nums">
+                        {formatCentsExact(b.cents)}
+                      </span>
+                    </div>
+                  ))}
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {formatCentsExact(metrics!.syncedArTotalCents)} across{' '}
+                    {metrics!.syncedArCount} invoice
+                    {metrics!.syncedArCount !== 1 ? 's' : ''} — collected in the
+                    source system
+                  </p>
+                </div>
               )}
             </>
           )}
