@@ -6,6 +6,8 @@ import {
   Archive,
   Building2,
   Calendar,
+  LayoutGrid,
+  List as ListIcon,
   RefreshCw,
   Search,
   UserPlus,
@@ -28,6 +30,8 @@ import {
 } from '@/components/ui/select';
 import { useAdminCustomers } from '@/hooks/use-admin-customers';
 import { CustomerFormDialog } from '@/components/admin/customer-form-dialog';
+import { CustomerPeopleCards } from '@/components/admin/customers/customer-people-cards';
+import { CustomerDrawer } from '@/components/admin/customers/customer-drawer';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 import { EmptyState } from '@/components/admin/ui/empty-state';
@@ -101,6 +105,23 @@ export default function CustomersPage() {
   const [propertyTypeFilter, setPropertyTypeFilter] = useState<string>(ALL_PROPERTY_TYPES);
   const [showCreate, setShowCreate] = useState(false);
   const [page, setPage] = useState(1);
+  const [view, setView] = useState<'cards' | 'list'>(() => {
+    try {
+      return localStorage.getItem('customers:view') === 'list' ? 'list' : 'cards';
+    } catch {
+      return 'cards';
+    }
+  });
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
+
+  const setViewPersisted = useCallback((next: 'cards' | 'list') => {
+    setView(next);
+    try {
+      localStorage.setItem('customers:view', next);
+    } catch {
+      // ignore storage failures (private mode)
+    }
+  }, []);
 
   const propertyTypeOptions = useMemo(() => {
     const present = new Set<string>();
@@ -135,6 +156,11 @@ export default function CustomersPage() {
   const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
   const safePage = Math.min(page, totalPages);
   const pageRows = useMemo(() => paginate(filtered, safePage, PER_PAGE), [filtered, safePage]);
+
+  const selectedCustomer = useMemo(
+    () => customers.find((c) => c.id === selectedCustomerId) ?? null,
+    [customers, selectedCustomerId],
+  );
 
   const isFiltered = Boolean(search) || propertyTypeFilter !== ALL_PROPERTY_TYPES;
 
@@ -211,6 +237,26 @@ export default function CustomersPage() {
           <Archive className="mr-2 size-4" />
           {showArchived ? 'Hide Archived' : 'Show Archived'}
         </Button>
+        <div className="flex items-center rounded-lg border p-0.5">
+          <Button
+            variant={view === 'cards' ? 'secondary' : 'ghost'}
+            size="icon-sm"
+            aria-label="Card view"
+            aria-pressed={view === 'cards'}
+            onClick={() => setViewPersisted('cards')}
+          >
+            <LayoutGrid className="size-4" />
+          </Button>
+          <Button
+            variant={view === 'list' ? 'secondary' : 'ghost'}
+            size="icon-sm"
+            aria-label="List view"
+            aria-pressed={view === 'list'}
+            onClick={() => setViewPersisted('list')}
+          >
+            <ListIcon className="size-4" />
+          </Button>
+        </div>
       </div>
 
       {isLoading ? (
@@ -258,11 +304,19 @@ export default function CustomersPage() {
         </Card>
       ) : (
         <>
-          <div className="grid gap-3">
-            {pageRows.map((customer) => (
-              <CustomerRow key={customer.id} customer={customer} />
-            ))}
-          </div>
+          {view === 'cards' ? (
+            <CustomerPeopleCards
+              customers={pageRows}
+              onSelect={setSelectedCustomerId}
+              selectedId={selectedCustomerId}
+            />
+          ) : (
+            <div className="grid gap-3">
+              {pageRows.map((customer) => (
+                <CustomerRow key={customer.id} customer={customer} />
+              ))}
+            </div>
+          )}
 
           {/* pager bar */}
           <div className="flex items-center justify-between px-1 py-3 text-sm">
@@ -315,6 +369,11 @@ export default function CustomersPage() {
         open={showCreate}
         onOpenChange={handleCloseCreate}
         onSuccess={handleCreateSuccess}
+      />
+
+      <CustomerDrawer
+        customer={selectedCustomer}
+        onClose={() => setSelectedCustomerId(null)}
       />
     </PageShell>
   );
