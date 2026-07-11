@@ -102,3 +102,21 @@ names via per-id `custom_status` (Sent / Completed / Draft / Accepted / Lost…)
 **⌘K** anywhere in the admin opens global search across customers (name/phone/
 email), invoices (ref), jobs (ref/title), and estimates — org-scoped, grouped,
 keyboard-first.
+
+## Display conventions (2026-07-12 redesign)
+
+- **Provenance pills:** one shared `SyncPill` component (`src/components/admin/
+  sync-pill.tsx`, violet, `FP`/`FieldPulse` + `HCP`/`Housecall Pro`, sm/md)
+  renders on every surface — including pricebook rows.
+- **FieldPulse details panel** (`FieldpulseDetails` + `buildFieldpulseSections`):
+  spillover grouped into Money / Dates / Flags / IDs / Other; FP dollar-strings
+  formatted as currency, rates as percent, dates humanized, IDs monospace;
+  collapsed header shows a field count + preview chips; nested objects flatten
+  one level (`+N nested fields not shown` beyond). Garbage values fall back to
+  raw strings (never `$NaN` / `Invalid Date`). The customer profile's custom
+  fields render as the first section of the same panel.
+- **Click-to-expand rows** on the invoices, estimates, and pricebook lists: a
+  row click opens an inline panel (one at a time) with key facts, the FP
+  details panel, and the primary action; navigation lives inside the expansion.
+- **All admin lists are server-paginated** (50/page; invoices money tiles are
+  SQL-computed so they remain exact under pagination).
