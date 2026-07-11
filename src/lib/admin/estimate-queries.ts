@@ -285,6 +285,8 @@ export interface EstimateDetailView {
   readonly signatureName: string | null;
   readonly expiresAt: Date | null;
   readonly createdAt: Date;
+  /** FieldPulse estimate due date (from FP `due_date`); null for native estimates. */
+  readonly dueDate: Date | null;
   readonly options: EstimateOptionView[];
   /** Which FSM this estimate is a read-only mirror of, or null when native. */
   readonly syncedSource: "fieldpulse" | null;
@@ -389,6 +391,7 @@ export async function getEstimateDetailById(
       signatureName: estimates.signatureName,
       expiresAt: estimates.expiresAt,
       createdAt: estimates.createdAt,
+      dueDate: estimates.dueDate,
       fieldpulseEstimateId: estimates.fieldpulseEstimateId,
       fieldpulseStatusName: estimates.fieldpulseStatusName,
       title: estimates.title,

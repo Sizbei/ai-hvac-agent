@@ -40,6 +40,7 @@ interface EstimateDetail {
   readonly signedAt: string | null;
   readonly expiresAt: string | null;
   readonly createdAt: string;
+  readonly dueDate: string | null;
   readonly options: Option[];
   readonly syncedSource: 'fieldpulse' | null;
   readonly fieldpulseStatusName: string | null;
@@ -176,6 +177,9 @@ export default function EstimateDetailPage({
           </h1>
           <p className="text-sm text-muted-foreground">
             Created {new Date(estimate.createdAt).toLocaleDateString()}
+            {estimate.dueDate && (
+              <> · Due {new Date(estimate.dueDate).toLocaleDateString()}</>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-2">
