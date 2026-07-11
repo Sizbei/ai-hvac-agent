@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { createSwrCache } from '@/lib/admin/swr-cache';
 import type { DashboardOverview } from '@/lib/admin/types';
 
 interface UseDashboardOverviewResult {
@@ -12,14 +13,24 @@ interface UseDashboardOverviewResult {
 
 const POLL_INTERVAL_MS = 30_000;
 
+// Navigation-bounce cache: returning to the dashboard within the poll window
+// paints the last payload instantly (stale-while-revalidate) instead of a
+// skeleton + a full round trip. The 30s poll keeps it current while mounted.
+const overviewCache = createSwrCache<DashboardOverview>(POLL_INTERVAL_MS);
+const CACHE_KEY = 'dashboard-overview';
+
 /**
  * Fetches and polls the /admin overview payload (KPIs + dashboard lists).
  * Polls every 30s, skipping in-flight requests. On poll failure the previously
  * loaded data is retained so the dashboard never flashes empty.
  */
 export function useDashboardOverview(): UseDashboardOverviewResult {
-  const [overview, setOverview] = useState<DashboardOverview | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [overview, setOverview] = useState<DashboardOverview | null>(
+    () => overviewCache.get(CACHE_KEY)?.data ?? null,
+  );
+  const [isLoading, setIsLoading] = useState(
+    () => overviewCache.get(CACHE_KEY) === null,
+  );
   const [error, setError] = useState<string | null>(null);
   const isFetchingRef = useRef(false);
   // Skip any state update that resolves after the component has unmounted so we
@@ -50,6 +61,7 @@ export function useDashboardOverview(): UseDashboardOverviewResult {
 
       if (isMountedRef.current && body.success) {
         setOverview(body.data);
+        overviewCache.set(CACHE_KEY, body.data);
         setError(null);
       }
     } catch {
@@ -63,7 +75,8 @@ export function useDashboardOverview(): UseDashboardOverviewResult {
 
   useEffect(() => {
     isMountedRef.current = true;
-    setIsLoading(true);
+    // With a cached payload already painted, revalidate silently (no skeleton).
+    if (overviewCache.get(CACHE_KEY) === null) setIsLoading(true);
     void fetchOverview().finally(() => {
       if (isMountedRef.current) setIsLoading(false);
     });

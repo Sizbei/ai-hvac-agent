@@ -24,11 +24,17 @@ vi.mock("drizzle-orm", () => ({
 }));
 vi.mock("@/lib/logger", () => ({ logger: { error: vi.fn() } }));
 
-import { isSessionUserCurrent } from "./session-revocation";
+import {
+  isSessionUserCurrent,
+  clearRevocationCacheForTests,
+} from "./session-revocation";
 
 beforeEach(() => {
   dbState.rows = [];
   dbState.throwOnSelect = false;
+  // Positive results are cached module-wide (perf); clear between cases so a
+  // pass in one test can't satisfy a deny test's lookup from cache.
+  clearRevocationCacheForTests();
 });
 
 describe("isSessionUserCurrent", () => {
@@ -55,5 +61,29 @@ describe("isSessionUserCurrent", () => {
   it("fails OPEN on a DB error (honors the crypto-valid session)", async () => {
     dbState.throwOnSelect = true;
     expect(await isSessionUserCurrent("u1", "o1", "admin")).toBe(true);
+  });
+
+  it("caches a PASS: the second call within the TTL skips the DB read", async () => {
+    dbState.rows = [{ isActive: true, role: "admin" }];
+    expect(await isSessionUserCurrent("u1", "o1", "admin")).toBe(true);
+    // If the second call hit the DB it would throw → fail-open logs an error;
+    // a cache hit returns true without touching the (now-broken) DB.
+    dbState.throwOnSelect = true;
+    expect(await isSessionUserCurrent("u1", "o1", "admin")).toBe(true);
+  });
+
+  it("never caches a DENY: a deactivated user is re-checked every call", async () => {
+    dbState.rows = [{ isActive: false, role: "admin" }];
+    expect(await isSessionUserCurrent("u1", "o1", "admin")).toBe(false);
+    // Re-activate: the next call must see the fresh row, not a cached deny.
+    dbState.rows = [{ isActive: true, role: "admin" }];
+    expect(await isSessionUserCurrent("u1", "o1", "admin")).toBe(true);
+  });
+
+  it("a PASS for one identity does not satisfy a different role claim", async () => {
+    dbState.rows = [{ isActive: true, role: "admin" }];
+    expect(await isSessionUserCurrent("u1", "o1", "admin")).toBe(true);
+    // Same user, different claimed role → distinct cache key → real check → deny.
+    expect(await isSessionUserCurrent("u1", "o1", "super_admin")).toBe(false);
   });
 });

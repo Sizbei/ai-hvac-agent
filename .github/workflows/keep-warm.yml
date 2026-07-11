@@ -1,0 +1,22 @@
+# Keeps the prod serverless functions warm so interactive requests don't pay a
+# cold start (measured 300–800ms extra). Vercel Hobby crons are daily-only, so
+# this runs from GitHub Actions like the other sub-daily jobs. Two pings per
+# run: /api/health exercises the DB path; the calendar endpoint warms the
+# admin-API lambda (401 is fine — the function still boots and stays warm).
+name: keep-warm
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Ping prod
+        run: |
+          curl -s -o /dev/null -w "health: %{http_code} %{time_total}s\n" \
+            --max-time 30 https://ai-hvac-agent-lovat.vercel.app/api/health || true
+          curl -s -o /dev/null -w "admin api: %{http_code} %{time_total}s\n" \
+            --max-time 30 https://ai-hvac-agent-lovat.vercel.app/api/admin/calendar/unscheduled-count || true
