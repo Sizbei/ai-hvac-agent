@@ -36,6 +36,7 @@ import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 import { EmptyState } from '@/components/admin/ui/empty-state';
 import { pageLabel } from '@/lib/admin/invoice-list-helpers';
+import { SyncPill } from '@/components/admin/sync-pill';
 import type { CustomerListRecord } from '@/lib/admin/crm-types';
 
 const ALL_PROPERTY_TYPES = 'all';
@@ -61,9 +62,7 @@ const CustomerRow = memo(function CustomerRow({ customer }: CustomerRowProps) {
                 {customer.name ?? 'Unknown'}
               </p>
               {customer.fieldpulseCustomerId && (
-                <span className="rounded border bg-violet-50 px-1.5 py-px text-[10px] font-medium text-violet-700">
-                  FieldPulse
-                </span>
+                <SyncPill source="fieldpulse" size="md" />
               )}
               {customer.archivedAt && (
                 <Badge variant="outline" className="text-xs">

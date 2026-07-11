@@ -39,6 +39,7 @@ import { ScopedInvoicesSection } from '@/components/admin/invoices/scoped-invoic
 import { CustomerMembershipCard } from '@/components/admin/memberships/customer-membership-card';
 import { PortalLinkCard } from '@/components/admin/portal-link-card';
 import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
+import { SyncPill } from '@/components/admin/sync-pill';
 import type { EquipmentRecord } from '@/lib/admin/crm-types';
 
 const EQUIPMENT_LABELS: Record<string, string> = {
@@ -406,30 +407,11 @@ export default function CustomerDetailPage({
         </CardContent>
       </Card>
 
-      {/* FieldPulse custom fields */}
-      {customer.fieldpulseCustomFields && customer.fieldpulseCustomFields.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <span className="rounded border bg-violet-50 px-1.5 py-px text-[10px] font-medium text-violet-700">FieldPulse</span>
-              Details
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <dl className="grid gap-1 text-sm sm:grid-cols-2">
-              {customer.fieldpulseCustomFields.map((field) => (
-                <div key={field.name} className="flex gap-2">
-                  <dt className="text-muted-foreground shrink-0">{field.name}:</dt>
-                  <dd>{field.value}</dd>
-                </div>
-              ))}
-            </dl>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* FieldPulse spillover details — collapsed by default; hidden when null */}
-      <FieldpulseDetails data={customer.fieldpulseData} />
+      {/* FieldPulse details — collapsed panel (custom fields + structured data) */}
+      <FieldpulseDetails
+        data={customer.fieldpulseData}
+        customFields={customer.fieldpulseCustomFields}
+      />
 
       {/* Membership */}
       <CustomerMembershipCard customerId={id} />
@@ -471,7 +453,7 @@ export default function CustomerDetailPage({
                     <p className="flex items-center gap-1.5 font-medium text-sm">
                       {EQUIPMENT_LABELS[eq.equipmentType] ?? eq.equipmentType}
                       {eq.fieldpulseAssetId && (
-                        <span className="rounded border bg-violet-50 px-1.5 py-px text-[10px] font-medium text-violet-700">FieldPulse</span>
+                        <SyncPill source="fieldpulse" size="md" />
                       )}
                     </p>
                     <div className="flex items-center gap-1">
@@ -607,7 +589,7 @@ export default function CustomerDetailPage({
                         {n.noteType}
                       </Badge>
                       {n.fieldpulseCommentId && (
-                        <span className="rounded border bg-violet-50 px-1.5 py-px text-[10px] font-medium text-violet-700">FieldPulse</span>
+                        <SyncPill source="fieldpulse" size="md" />
                       )}
                     </div>
                     <span className="text-xs text-muted-foreground">

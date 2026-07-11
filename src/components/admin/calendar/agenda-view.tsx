@@ -10,6 +10,7 @@ import {
   formatBusinessTime,
 } from '@/lib/admin/calendar-time';
 import type { AgendaBooking } from '@/lib/admin/types';
+import { SyncPill } from '@/components/admin/sync-pill';
 
 interface AgendaViewProps {
   readonly bookings: readonly AgendaBooking[];
@@ -155,9 +156,7 @@ function AgendaRow({
         )}
         <StatusBadge status={booking.status} />
         {booking.syncedSource && (
-          <span className="rounded border bg-violet-50 px-1.5 py-px text-[9px] font-semibold text-violet-700 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-300">
-            {booking.syncedSource === 'fieldpulse' ? 'FP' : 'HCP'}
-          </span>
+          <SyncPill source={booking.syncedSource} size="sm" />
         )}
       </div>
     </button>

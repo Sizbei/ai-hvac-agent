@@ -42,9 +42,11 @@ import type {
   TechnicianRecord,
   RequestNote,
 } from '@/lib/admin/types';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import { humanizeSeconds } from '@/lib/admin/duration-format';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
+import { SyncPill } from '@/components/admin/sync-pill';
 
 // Only manual targets can ever be a transition button — narrowing the map to
 // those keys makes any drift from the state machine a compile error rather than
@@ -308,6 +310,9 @@ export function RequestDetailSheet({
   const [noteInput, setNoteInput] = useState<string>('');
   const [isAddingNote, setIsAddingNote] = useState(false);
   const [noteError, setNoteError] = useState<string | null>(null);
+
+  // Collapsible FieldPulse metrics — default open (high-value numbers).
+  const [fpMetricsOpen, setFpMetricsOpen] = useState(true);
 
   const handleAddNote = useCallback(async (): Promise<void> => {
     if (!requestId) return;
@@ -591,9 +596,7 @@ export function RequestDetailSheet({
                   </span>
                 )}
                 {detail.syncedSource && (
-                  <span className="rounded border bg-violet-50 px-1.5 py-px text-[10px] font-medium text-violet-700">
-                    {detail.syncedSource === 'fieldpulse' ? 'FieldPulse' : 'Housecall Pro'}
-                  </span>
+                  <SyncPill source={detail.syncedSource} size="md" />
                 )}
                 <InvoiceStatusBadge status={detail.invoiceStatus} />
               </SheetDescription>
@@ -629,36 +632,52 @@ export function RequestDetailSheet({
                 </div>
               </section>
 
-              {/* FieldPulse operational metrics (only for enriched FP jobs) */}
-              {detail.fieldpulseMetrics && (
+              {/* FieldPulse operational metrics (only for enriched FP jobs).
+                  Hidden entirely when all three metrics are empty. */}
+              {detail.fieldpulseMetrics &&
+                (detail.fieldpulseMetrics.totalPriceCents != null ||
+                  (detail.fieldpulseMetrics.statusLogSeconds.on_the_way ?? 0) > 0 ||
+                  (detail.fieldpulseMetrics.statusLogSeconds.in_progress ?? 0) > 0) && (
                 <section>
-                  <h3 className="text-sm font-semibold mb-2">FieldPulse metrics</h3>
-                  <div className="rounded-md border p-3 space-y-1">
-                    {detail.fieldpulseMetrics.totalPriceCents != null && (
-                      <InfoRow
-                        label="Total price"
-                        value={formatCentsExact(detail.fieldpulseMetrics.totalPriceCents)}
-                      />
-                    )}
-                    {(detail.fieldpulseMetrics.statusLogSeconds.on_the_way ?? 0) > 0 && (
-                      <InfoRow
-                        label="Time on the way"
-                        value={humanizeSeconds(detail.fieldpulseMetrics.statusLogSeconds.on_the_way)}
-                      />
-                    )}
-                    {(detail.fieldpulseMetrics.statusLogSeconds.in_progress ?? 0) > 0 && (
-                      <InfoRow
-                        label="Time in progress"
-                        value={humanizeSeconds(detail.fieldpulseMetrics.statusLogSeconds.in_progress)}
-                      />
-                    )}
-                    {detail.fieldpulseMetrics.totalPriceCents == null &&
-                      (detail.fieldpulseMetrics.statusLogSeconds.on_the_way ?? 0) <= 0 &&
-                      (detail.fieldpulseMetrics.statusLogSeconds.in_progress ?? 0) <= 0 && (
-                        <p className="text-sm text-muted-foreground italic">
-                          No metrics reported
-                        </p>
+                  <div className="rounded-md border border-violet-200 bg-violet-50/40">
+                    <button
+                      type="button"
+                      aria-expanded={fpMetricsOpen}
+                      onClick={() => setFpMetricsOpen((v) => !v)}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-violet-800 hover:bg-violet-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md"
+                    >
+                      {fpMetricsOpen ? (
+                        <ChevronDown className="size-3.5 shrink-0 text-violet-600 motion-reduce:transition-none" aria-hidden="true" />
+                      ) : (
+                        <ChevronRight className="size-3.5 shrink-0 text-violet-600 motion-reduce:transition-none" aria-hidden="true" />
                       )}
+                      <span className="rounded border border-violet-300 bg-violet-100 px-1.5 py-px text-[10px] font-medium text-violet-700">
+                        FieldPulse
+                      </span>
+                      <span>metrics</span>
+                    </button>
+                    {fpMetricsOpen && (
+                      <div className="border-t border-violet-200 px-3 pb-3 pt-2 space-y-1">
+                        {detail.fieldpulseMetrics.totalPriceCents != null && (
+                          <InfoRow
+                            label="Total price"
+                            value={formatCentsExact(detail.fieldpulseMetrics.totalPriceCents)}
+                          />
+                        )}
+                        {(detail.fieldpulseMetrics.statusLogSeconds.on_the_way ?? 0) > 0 && (
+                          <InfoRow
+                            label="Time on the way"
+                            value={humanizeSeconds(detail.fieldpulseMetrics.statusLogSeconds.on_the_way)}
+                          />
+                        )}
+                        {(detail.fieldpulseMetrics.statusLogSeconds.in_progress ?? 0) > 0 && (
+                          <InfoRow
+                            label="Time in progress"
+                            value={humanizeSeconds(detail.fieldpulseMetrics.statusLogSeconds.in_progress)}
+                          />
+                        )}
+                      </div>
+                    )}
                   </div>
                 </section>
               )}

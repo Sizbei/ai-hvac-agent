@@ -8,6 +8,7 @@ import {
 import { urgencyAccent } from '@/lib/admin/urgency-accent';
 import type { MonthCalendar, MonthCalendarDay } from '@/lib/admin/types';
 import type { DashboardRequest } from '@/lib/admin/types';
+import { SyncPill } from '@/components/admin/sync-pill';
 
 interface MonthGridProps {
   readonly month: MonthCalendar | null;
@@ -54,8 +55,10 @@ function JobChip({
       {time && <span className="shrink-0 font-medium tabular-nums">{time}</span>}
       <span className="truncate">{label}</span>
       {job.syncedSource && (
-        <span className="ml-auto shrink-0 rounded border bg-violet-50 px-1 py-px text-[9px] font-medium text-violet-700 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-300">
-          {job.syncedSource === 'fieldpulse' ? 'FP' : 'HCP'}
+        // ml-auto keeps the pill right-anchored so the truncating label gets
+        // the remaining width (pre-SyncPill layout).
+        <span className="ml-auto flex shrink-0">
+          <SyncPill source={job.syncedSource} size="sm" />
         </span>
       )}
     </button>

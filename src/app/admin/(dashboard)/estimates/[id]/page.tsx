@@ -12,6 +12,7 @@ import { FinancingPanel } from '@/components/admin/financing/financing-panel';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { rollUpMargin } from '@/lib/admin/margin';
 import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
+import { SyncPill } from '@/components/admin/sync-pill';
 
 interface LineItem {
   readonly id: string;
@@ -188,9 +189,7 @@ export default function EstimateDetailPage({
             <span className="text-[11px] text-muted-foreground ml-1">({estimate.fieldpulseStatusName})</span>
           )}
           {isSynced && (
-            <span className="rounded border bg-violet-50 px-1.5 py-px text-[10px] font-medium text-violet-700">
-              FieldPulse
-            </span>
+            <SyncPill source={estimate.syncedSource} size="md" />
           )}
         </div>
       </div>

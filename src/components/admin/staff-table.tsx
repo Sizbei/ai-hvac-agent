@@ -13,6 +13,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { KeyRound } from 'lucide-react';
+import { SyncPill } from '@/components/admin/sync-pill';
 
 interface StaffTableProps {
   readonly staff: readonly StaffRecord[];
@@ -104,7 +105,7 @@ export function StaffTable({
                       <span className="text-xs text-muted-foreground">(you)</span>
                     )}
                     {member.isFpSynced && (
-                      <span className="rounded border bg-violet-50 px-1.5 py-px text-[10px] font-medium text-violet-700">FieldPulse</span>
+                      <SyncPill source="fieldpulse" size="md" />
                     )}
                   </div>
                 </TableCell>

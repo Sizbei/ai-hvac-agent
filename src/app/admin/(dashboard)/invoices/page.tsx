@@ -149,6 +149,7 @@ export default function InvoicesPage() {
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [voidingId, setVoidingId] = useState<string | null>(null);
   const [voidBusy, setVoidBusy] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Derive server params from UI state
@@ -421,8 +422,8 @@ export default function InvoicesPage() {
         <>
           <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
             {/* header row */}
-            <div className="grid grid-cols-[minmax(200px,1fr)_90px_120px_140px_180px] items-center gap-4 bg-foreground px-6 py-2.5">
-              {(['Customer', 'Created', 'Age', 'Balance', 'Actions'] as const).map(
+            <div className="grid grid-cols-[minmax(200px,1fr)_90px_120px_140px_180px_32px] items-center gap-4 bg-foreground px-6 py-2.5">
+              {(['Customer', 'Created', 'Age', 'Balance', 'Actions', ''] as const).map(
                 (col) => (
                   <p
                     key={col}
@@ -437,7 +438,16 @@ export default function InvoicesPage() {
               )}
             </div>
             {displayRows.map((inv) => (
-              <InvoiceRow key={inv.id} invoice={inv} onRemind={handleRemind} onCopyPayLink={handleCopyPayLink} onVoid={handleVoid} pending={pendingId === inv.id} />
+              <InvoiceRow
+                key={inv.id}
+                invoice={inv}
+                onRemind={handleRemind}
+                onCopyPayLink={handleCopyPayLink}
+                onVoid={handleVoid}
+                pending={pendingId === inv.id}
+                isExpanded={expandedId === inv.id}
+                onToggle={(id) => setExpandedId((prev) => (prev === id ? null : id))}
+              />
             ))}
           </div>
 

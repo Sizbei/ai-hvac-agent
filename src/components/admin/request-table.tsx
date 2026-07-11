@@ -12,6 +12,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { UrgencyBadge } from '@/components/admin/urgency-badge';
 import { StatusBadge } from '@/components/admin/status-badge';
 import type { AdminRequest } from '@/lib/admin/types';
+import { SyncPill } from '@/components/admin/sync-pill';
 
 interface RequestTableProps {
   readonly requests: readonly AdminRequest[];
@@ -89,9 +90,7 @@ export function RequestTable({ requests, isLoading, onRowClick }: RequestTablePr
                         </span>
                       )}
                       {request.syncedSource && (
-                        <span className="rounded border bg-violet-50 px-1.5 py-px text-[10px] font-medium text-violet-700">
-                          {request.syncedSource === 'fieldpulse' ? 'FieldPulse' : 'Housecall Pro'}
-                        </span>
+                        <SyncPill source={request.syncedSource} size="md" />
                       )}
                     </span>
                   </TableCell>

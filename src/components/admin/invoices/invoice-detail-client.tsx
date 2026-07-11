@@ -17,6 +17,7 @@ import { rollUpMargin, computeMargin } from '@/lib/admin/margin';
 import { deriveInvoicePresentation } from '@/lib/admin/invoice-presentation';
 import { isCollectible, invoiceRef } from '@/lib/admin/invoice-collectible';
 import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
+import { SyncPill } from '@/components/admin/sync-pill';
 import type { InvoiceDetailView, InvoiceReminderView } from '@/lib/admin/invoice-queries';
 
 // Raw API response shape — dates arrive as ISO strings in JSON.
@@ -339,10 +340,8 @@ export function InvoiceDetailClient({
           <InvoiceStateBadge state={invoice.state} />
           <AgeChip issuedAt={invoice.issuedAt?.toISOString() ?? null} createdAt={invoice.createdAt.toISOString()} state={invoice.state} />
         </div>
-        {sourceLabel && (
-          <span className="rounded-full border bg-violet-50 px-2.5 py-0.5 text-xs font-medium text-violet-700">
-            {sourceLabel}
-          </span>
+        {invoice.syncedSource && (
+          <SyncPill source={invoice.syncedSource} size="md" />
         )}
         <div className="flex-1" />
         {/* Send reminder — only for open collectible invoices, never synced */}

@@ -9,6 +9,7 @@ import {
   lastSeenTone,
 } from '@/lib/admin/customer-display';
 import type { CustomerListRecord } from '@/lib/admin/crm-types';
+import { SyncPill } from '@/components/admin/sync-pill';
 
 interface CustomerPeopleCardsProps {
   readonly customers: readonly CustomerListRecord[];
@@ -49,9 +50,7 @@ function PeopleCard({
           <div className="flex items-center gap-1.5">
             <p className="truncate font-semibold">{customer.name ?? 'Unknown'}</p>
             {customer.fieldpulseCustomerId && (
-              <span className="shrink-0 rounded border bg-violet-50 px-1 py-px text-[9px] font-semibold text-violet-700 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-300">
-                FP
-              </span>
+              <SyncPill source="fieldpulse" size="sm" />
             )}
           </div>
           <p className="truncate text-xs text-muted-foreground">{sub}</p>

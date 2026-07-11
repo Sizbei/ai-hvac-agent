@@ -6,6 +6,7 @@ import { Receipt } from 'lucide-react';
 import { InvoiceStateBadge } from '@/components/admin/invoices/invoice-state-badge';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import type { InvoiceListItem } from '@/hooks/use-invoices';
+import { SyncPill } from '@/components/admin/sync-pill';
 
 interface ScopedInvoicesSectionProps {
   /** Exactly one of these scopes the list. */
@@ -92,9 +93,7 @@ export function ScopedInvoicesSection({
           <div className="flex items-center gap-3">
             <InvoiceStateBadge state={inv.state} />
             {inv.syncedSource && (
-              <span className="rounded-full border bg-violet-50 px-2 py-0.5 text-[10px] font-medium text-violet-700">
-                {inv.syncedSource === 'fieldpulse' ? 'FieldPulse' : 'Housecall Pro'}
-              </span>
+              <SyncPill source={inv.syncedSource} size="md" />
             )}
             <span className="text-xs text-muted-foreground">
               {formatDate(inv.issuedAt ?? inv.createdAt)}

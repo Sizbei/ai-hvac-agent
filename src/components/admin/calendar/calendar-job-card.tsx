@@ -5,6 +5,7 @@ import { StatusBadge } from '@/components/admin/status-badge';
 import { formatBusinessTime } from '@/lib/admin/calendar-time';
 import { urgencyAccent } from '@/lib/admin/urgency-accent';
 import type { DashboardRequest } from '@/lib/admin/types';
+import { SyncPill } from '@/components/admin/sync-pill';
 
 interface CalendarJobCardProps {
   readonly job: DashboardRequest;
@@ -55,8 +56,9 @@ export function CalendarJobCard({ job, onSelect, compact }: CalendarJobCardProps
           </span>
         )}
         {job.syncedSource && (
-          <span className="ml-auto shrink-0 rounded border bg-violet-50 px-1.5 py-px text-[9px] font-medium text-violet-700 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-300">
-            {job.syncedSource === 'fieldpulse' ? 'FP' : 'HCP'}
+          // ml-auto keeps the pill right-anchored in the chip row (pre-SyncPill layout).
+          <span className="ml-auto flex shrink-0">
+            <SyncPill source={job.syncedSource} size="sm" />
           </span>
         )}
       </div>

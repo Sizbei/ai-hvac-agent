@@ -9,6 +9,7 @@ import {
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import type { SearchResult } from '@/lib/admin/search-queries';
+import { SyncPill } from '@/components/admin/sync-pill';
 
 const TYPE_LABELS: Record<SearchResult['type'], string> = {
   customer: 'Customers',
@@ -31,14 +32,6 @@ function TypeIcon({ type }: { type: SearchResult['type'] }) {
     case 'estimate':
       return <FileText className={cls} />;
   }
-}
-
-function SyncPill({ source }: { source: 'fieldpulse' | 'hcp' }) {
-  return (
-    <span className="ml-auto shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-      {source === 'fieldpulse' ? 'FP' : 'HCP'}
-    </span>
-  );
 }
 
 /** Groups results by type in the canonical order. */
@@ -230,7 +223,10 @@ export function GlobalSearch() {
                       </span>
                     </span>
                     {item.syncedSource && (
-                      <SyncPill source={item.syncedSource} />
+                      <SyncPill
+                        source={item.syncedSource === 'hcp' ? 'housecall' : item.syncedSource}
+                        size="sm"
+                      />
                     )}
                   </button>
                 );
