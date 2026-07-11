@@ -33,6 +33,7 @@ import { NoteFormDialog } from '@/components/admin/note-form-dialog';
 import { FollowUpFormDialog } from '@/components/admin/follow-up-form-dialog';
 import { CustomerEditDialog } from '@/components/admin/customer-edit-dialog';
 import { ConfirmDialog } from '@/components/admin/confirm-dialog';
+import { CustomerBookingsSection } from '@/components/admin/customers/customer-bookings-section';
 import { ScopedEstimatesSection } from '@/components/admin/estimates/scoped-estimates-section';
 import { ScopedInvoicesSection } from '@/components/admin/invoices/scoped-invoices-section';
 import { CustomerMembershipCard } from '@/components/admin/memberships/customer-membership-card';
@@ -521,7 +522,10 @@ export default function CustomerDetailPage({
         </CardContent>
       </Card>
 
-      {/* Service History */}
+      {/* Bookings — real service_requests (service_history is empty for imports) */}
+      <CustomerBookingsSection customerId={id} />
+
+      {/* Service History (native manual work logs; empty until logged) */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
