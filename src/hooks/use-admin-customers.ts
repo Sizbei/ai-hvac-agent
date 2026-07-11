@@ -6,56 +6,87 @@ import { createSwrCache } from '@/lib/admin/swr-cache';
 
 interface CustomersPayload {
   readonly customers: readonly CustomerListRecord[];
+  readonly total: number;
+  readonly propertyTypes: readonly string[];
 }
 
 const customersCache = createSwrCache<CustomersPayload>(60_000); // 60s TTL
 
-export function useAdminCustomers(includeArchived?: boolean) {
-  const shouldIncludeArchived = includeArchived ?? false;
-  const [customers, setCustomers] = useState<readonly CustomerListRecord[]>([]);
-  // Start as loading only if there is no cached data to show immediately.
-  const [isLoading, setIsLoading] = useState(
-    () => customersCache.get('customers:' + String(shouldIncludeArchived)) === null,
+interface UseAdminCustomersParams {
+  readonly includeArchived?: boolean;
+  readonly page?: number;
+  readonly search?: string;
+  readonly propertyType?: string | null;
+}
+
+/**
+ * Server-paginated customers list. Refetches whenever the page, search,
+ * property-type filter, or archived toggle changes. Caller is responsible for
+ * debouncing the search term. `total` drives the pager; `propertyTypes` fills
+ * the filter dropdown (the client no longer holds every customer to derive it).
+ */
+export function useAdminCustomers(params: UseAdminCustomersParams = {}) {
+  const includeArchived = params.includeArchived ?? false;
+  const page = params.page ?? 1;
+  const search = params.search ?? '';
+  const propertyType = params.propertyType ?? null;
+
+  const key = `customers:${includeArchived}:${page}:${propertyType ?? ''}:${search}`;
+
+  const [customers, setCustomers] = useState<readonly CustomerListRecord[]>(
+    () => customersCache.get(key)?.data.customers ?? [],
   );
+  const [total, setTotal] = useState(() => customersCache.get(key)?.data.total ?? 0);
+  const [propertyTypes, setPropertyTypes] = useState<readonly string[]>(
+    () => customersCache.get(key)?.data.propertyTypes ?? [],
+  );
+  const [isLoading, setIsLoading] = useState(() => customersCache.get(key) === null);
   const [error, setError] = useState<string | null>(null);
 
-  const fetch_ = useCallback(async ({ bust = false }: { bust?: boolean } = {}) => {
-    const key = 'customers:' + String(shouldIncludeArchived);
+  const fetch_ = useCallback(
+    async ({ bust = false }: { bust?: boolean } = {}) => {
+      if (bust) customersCache.invalidate(key);
 
-    if (bust) {
-      customersCache.invalidate(key);
-    }
-
-    const cached = customersCache.get(key);
-    const hasCachedData = cached !== null;
-
-    if (hasCachedData) {
-      setCustomers(cached.data.customers);
-    }
-
-    try {
-      const url = shouldIncludeArchived
-        ? '/api/admin/customers?includeArchived=true'
-        : '/api/admin/customers';
-      const res = await fetch(url);
-      const json = await res.json();
-      if (json.success) {
-        setError(null);
-        setCustomers(json.data.customers);
-        customersCache.set(key, { customers: json.data.customers });
+      const cached = customersCache.get(key);
+      const hasCachedData = cached !== null;
+      if (hasCachedData) {
+        setCustomers(cached.data.customers);
+        setTotal(cached.data.total);
+        setPropertyTypes(cached.data.propertyTypes);
       } else {
-        if (!hasCachedData) {
+        setIsLoading(true);
+      }
+
+      try {
+        const qs = new URLSearchParams();
+        if (includeArchived) qs.set('includeArchived', 'true');
+        if (page > 1) qs.set('page', String(page));
+        if (search) qs.set('search', search);
+        if (propertyType) qs.set('propertyType', propertyType);
+        const query = qs.toString();
+        const res = await fetch(`/api/admin/customers${query ? `?${query}` : ''}`);
+        const json = await res.json();
+        if (json.success) {
+          setError(null);
+          setCustomers(json.data.customers);
+          setTotal(json.data.total);
+          setPropertyTypes(json.data.propertyTypes);
+          customersCache.set(key, {
+            customers: json.data.customers,
+            total: json.data.total,
+            propertyTypes: json.data.propertyTypes,
+          });
+        } else if (!hasCachedData) {
           setError(json.error?.message ?? 'Failed to load customers');
         }
+      } catch {
+        if (!hasCachedData) setError('Network error');
+      } finally {
+        setIsLoading(false);
       }
-    } catch {
-      if (!hasCachedData) {
-        setError('Network error');
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  }, [shouldIncludeArchived]);
+    },
+    [key, includeArchived, page, search, propertyType],
+  );
 
   // Idiomatic data fetch: setState runs only AFTER the awaited fetch resolves,
   // not synchronously during the effect, so this is not a render loop.
@@ -66,7 +97,7 @@ export function useAdminCustomers(includeArchived?: boolean) {
 
   const refetch = useCallback(() => fetch_({ bust: true }), [fetch_]);
 
-  return { customers, isLoading, error, refetch } as const;
+  return { customers, total, propertyTypes, isLoading, error, refetch } as const;
 }
 
 export function useCustomerDetail(customerId: string) {

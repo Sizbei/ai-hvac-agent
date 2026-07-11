@@ -35,7 +35,7 @@ import { CustomerDrawer } from '@/components/admin/customers/customer-drawer';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 import { EmptyState } from '@/components/admin/ui/empty-state';
-import { paginate, pageLabel } from '@/lib/admin/invoice-list-helpers';
+import { pageLabel } from '@/lib/admin/invoice-list-helpers';
 import type { CustomerListRecord } from '@/lib/admin/crm-types';
 
 const ALL_PROPERTY_TYPES = 'all';
@@ -100,8 +100,8 @@ const CustomerRow = memo(function CustomerRow({ customer }: CustomerRowProps) {
 
 export default function CustomersPage() {
   const [showArchived, setShowArchived] = useState(false);
-  const { customers, isLoading, error, refetch } = useAdminCustomers(showArchived);
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [propertyTypeFilter, setPropertyTypeFilter] = useState<string>(ALL_PROPERTY_TYPES);
   const [showCreate, setShowCreate] = useState(false);
   const [page, setPage] = useState(1);
@@ -114,6 +114,25 @@ export default function CustomersPage() {
   });
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
 
+  // Debounce the search box so browsing fires one request per pause, not per key.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const propertyType =
+    propertyTypeFilter === ALL_PROPERTY_TYPES ? null : propertyTypeFilter;
+
+  // Server-paginated: the hook returns only the current page plus the total and
+  // the distinct property types for the filter dropdown.
+  const { customers, total, propertyTypes, isLoading, error, refetch } =
+    useAdminCustomers({
+      includeArchived: showArchived,
+      page,
+      search: debouncedSearch,
+      propertyType,
+    });
+
   const setViewPersisted = useCallback((next: 'cards' | 'list') => {
     setView(next);
     try {
@@ -123,46 +142,25 @@ export default function CustomersPage() {
     }
   }, []);
 
-  const propertyTypeOptions = useMemo(() => {
-    const present = new Set<string>();
-    for (const c of customers) {
-      if (c.propertyType) present.add(c.propertyType);
-    }
-    return Array.from(present).sort((a, b) => a.localeCompare(b));
-  }, [customers]);
+  const propertyTypeOptions = propertyTypes;
 
-  const filtered = useMemo(() => {
-    return customers.filter((c) => {
-      if (propertyTypeFilter !== ALL_PROPERTY_TYPES && c.propertyType !== propertyTypeFilter) {
-        return false;
-      }
-      if (!search) return true;
-      const q = search.toLowerCase();
-      return (
-        c.name?.toLowerCase().includes(q) ||
-        c.email?.toLowerCase().includes(q) ||
-        c.phone?.includes(q) ||
-        c.address?.toLowerCase().includes(q)
-      );
-    });
-  }, [customers, search, propertyTypeFilter]);
-
-  // Reset page when filters change
+  // Reset to page 1 whenever the query (search / filter / archived) changes.
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
     setPage(1);
-  }, [search, propertyTypeFilter, showArchived]);
+  }, [debouncedSearch, propertyTypeFilter, showArchived]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
+  const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
   const safePage = Math.min(page, totalPages);
-  const pageRows = useMemo(() => paginate(filtered, safePage, PER_PAGE), [filtered, safePage]);
+  const pageRows = customers; // the server already returns just this page
 
   const selectedCustomer = useMemo(
     () => customers.find((c) => c.id === selectedCustomerId) ?? null,
     [customers, selectedCustomerId],
   );
 
-  const isFiltered = Boolean(search) || propertyTypeFilter !== ALL_PROPERTY_TYPES;
+  const isFiltered =
+    Boolean(debouncedSearch) || propertyTypeFilter !== ALL_PROPERTY_TYPES;
 
   const handleSearchChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setSearch(e.target.value);
@@ -193,7 +191,7 @@ export default function CustomersPage() {
     <PageShell>
       <PageHeader
         title="Customers"
-        subtitle={`${customers.length} customers`}
+        subtitle={`${total} customer${total === 1 ? '' : 's'}`}
         actions={
           <Button onClick={handleShowCreate}>
             <UserPlus className="mr-2 size-4" />
@@ -282,7 +280,7 @@ export default function CustomersPage() {
             </Button>
           </AlertDescription>
         </Alert>
-      ) : filtered.length === 0 ? (
+      ) : total === 0 ? (
         <Card className="p-5">
           <EmptyState
             icon={Users}
@@ -330,7 +328,7 @@ export default function CustomersPage() {
               ← Prev
             </Button>
             <span className="tabular-nums text-xs text-muted-foreground">
-              {pageLabel(safePage, filtered.length, PER_PAGE)}
+              {pageLabel(safePage, total, PER_PAGE)}
             </span>
             <div className="flex gap-2">
               <Button

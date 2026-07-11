@@ -1,4 +1,13 @@
 /** Slim record used on the customer list page — excludes heavy/unused fields. */
+/** A page of the customers list plus the total match count and the distinct
+ * property types (for the filter dropdown, which can't be derived client-side
+ * once the list is server-paginated). */
+export interface CustomerListPage {
+  readonly customers: readonly CustomerListRecord[];
+  readonly total: number;
+  readonly propertyTypes: readonly string[];
+}
+
 export interface CustomerListRecord {
   readonly id: string;
   readonly name: string | null;

@@ -34,12 +34,20 @@ export async function GET(request: NextRequest) {
       return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
     }
 
-    const includeArchived =
-      request.nextUrl.searchParams.get("includeArchived") === "true";
+    const params = request.nextUrl.searchParams;
+    const includeArchived = params.get("includeArchived") === "true";
+    const pageRaw = Number(params.get("page"));
+    const page = Number.isFinite(pageRaw) && pageRaw > 0 ? Math.floor(pageRaw) : 1;
+    const search = params.get("search") ?? "";
+    const propertyType = params.get("propertyType");
+
     const result = await getCustomers(session.organizationId, {
       includeArchived,
+      page,
+      search,
+      propertyType,
     });
-    const response = successResponse({ customers: result });
+    const response = successResponse(result);
     response.headers.set('Cache-Control', 'private, max-age=0, stale-while-revalidate=30');
     return response;
   } catch (error: unknown) {

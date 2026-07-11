@@ -38,15 +38,14 @@ const { selectQueue, captured, chain } = vi.hoisted(() => {
   return { selectQueue, captured, chain };
 });
 
-vi.mock('@/lib/db', () => ({
-  db: {
-    select: () => {
-      const capture: CapturedQuery = { where: undefined, hasLimit: false };
-      captured.push(capture);
-      return chain(selectQueue.shift() ?? [], capture);
-    },
-  },
-}));
+vi.mock('@/lib/db', () => {
+  const make = () => {
+    const capture: CapturedQuery = { where: undefined, hasLimit: false };
+    captured.push(capture);
+    return chain(selectQueue.shift() ?? [], capture);
+  };
+  return { db: { select: make, selectDistinct: make } };
+});
 
 // withTenant returns a tagged array so tests can inspect the org filter and
 // extra conditions separately.
@@ -64,6 +63,7 @@ vi.mock('drizzle-orm', () => ({
   desc: (c: unknown) => ({ kind: 'desc', col: c }),
   count: () => 'count',
   isNull: (c: unknown) => ({ kind: 'isNull', c }),
+  isNotNull: (c: unknown) => ({ kind: 'isNotNull', c }),
   sql: vi.fn((strings: TemplateStringsArray) => ({ kind: 'sql', text: strings.join('?') })),
 }));
 
@@ -128,34 +128,43 @@ const makeRow = (overrides: Record<string, unknown> = {}) => ({
 });
 
 describe('getCustomers', () => {
-  it('excludes archived rows by default (includeArchived=false): where-clause includes isNull filter', async () => {
-    selectQueue.push([makeRow()]);
+  // The paginated query issues three statements: distinct property types, a
+  // COUNT for the total, and the page itself. Queue rows in that order; assert
+  // across all captured wheres rather than a fixed index.
+  const queuePage = () => {
+    selectQueue.push([]); // distinct property types
+    selectQueue.push([{ value: 1 }]); // COUNT
+    selectQueue.push([makeRow()]); // page rows
+  };
+  // Some queries (the outer aggregate join) carry no WHERE — coalesce so
+  // JSON.stringify always yields a string.
+  const wheres = () => captured.map((c) => JSON.stringify(c.where ?? ''));
+
+  it('excludes archived rows by default: an isNull(archivedAt) predicate is applied', async () => {
+    queuePage();
     await getCustomers(ORG);
-    const where = JSON.stringify(captured[0].where);
-    // The where clause should contain the isNull predicate for archivedAt.
-    expect(where).toContain('isNull');
-    expect(where).toContain('customers.archived');
-    // Org scoping is present.
-    expect(where).toContain(ORG);
+    const all = wheres();
+    expect(
+      all.some(
+        (w) => w.includes('"kind":"isNull"') && w.includes('customers.archived'),
+      ),
+    ).toBe(true);
+    expect(all.some((w) => w.includes(ORG))).toBe(true);
   });
 
-  it('includes archived rows when includeArchived=true: where-clause omits the isNull filter', async () => {
-    selectQueue.push([makeRow(), makeRow({ id: 'c2', archivedAt: new Date() })]);
+  it('includes archived rows when includeArchived=true: no isNull(archivedAt) predicate', async () => {
+    queuePage();
     await getCustomers(ORG, { includeArchived: true });
-    const where = JSON.stringify(captured[0].where);
-    // No isNull predicate — only the tenant filter should be present.
-    expect(where).not.toContain('isNull');
-    // Org scoping is still present.
-    expect(where).toContain(ORG);
+    const all = wheres();
+    // isNotNull(propertyType) on the distinct query is fine; the archived
+    // isNull predicate must be absent.
+    expect(all.some((w) => w.includes('"kind":"isNull"'))).toBe(false);
+    expect(all.some((w) => w.includes(ORG))).toBe(true);
   });
 
-  it('applies no LIMIT clause in either path', async () => {
-    selectQueue.push([makeRow()]);
+  it('paginates: applies a LIMIT on the page query (no-search path)', async () => {
+    queuePage();
     await getCustomers(ORG);
-    expect(captured[0].hasLimit).toBe(false);
-
-    selectQueue.push([makeRow()]);
-    await getCustomers(ORG, { includeArchived: true });
-    expect(captured[1].hasLimit).toBe(false);
+    expect(captured.some((c) => c.hasLimit)).toBe(true);
   });
 });
