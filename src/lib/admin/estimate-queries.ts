@@ -7,13 +7,15 @@
  * IP/timestamp capture.
  */
 import { randomBytes, randomUUID, createHash } from "node:crypto";
-import { and, asc, count, desc, eq, inArray, isNull, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   estimates,
   estimateOptions,
   estimateLineItems,
+  customers,
 } from "@/lib/db/schema";
+import { decrypt } from "@/lib/crypto";
 import { withTenant } from "@/lib/db/tenant";
 import { computeOptionTotals, lineTotalCents } from "./money";
 
@@ -224,9 +226,111 @@ export interface EstimateListRow {
   readonly title: string | null;
   /** FieldPulse spillover data; null for native estimates. */
   readonly fieldpulseData: Record<string, unknown> | null;
+  /** Decrypted customer name from the joined customers row. Null when no customer. */
+  readonly customerName: string | null;
+  /** ISO string of the effective created-at (FieldPulse created_at if present, else native). */
+  readonly effectiveCreatedAt: string;
 }
 
 const ESTIMATE_PAGE_SIZE = 50;
+
+// ─── Bucket SQL expression ────────────────────────────────────────────────────
+// Single source of truth for bucket classification. Used in both stats and list.
+// Priority: fieldpulse_status_name (case-insensitive) → native status.
+const BUCKET_CASE_SQL = sql`
+  CASE
+    WHEN lower(${estimates.fieldpulseStatusName}) IN ('accepted','completed') OR ${estimates.status} = 'sold' THEN 'won'
+    WHEN lower(${estimates.fieldpulseStatusName}) = 'lost' OR ${estimates.status} IN ('dismissed','expired') THEN 'lost'
+    WHEN lower(${estimates.fieldpulseStatusName}) = 'draft' THEN 'draft'
+    ELSE 'open'
+  END
+`;
+
+// Effective created-at: prefer the FieldPulse created_at (stored in jsonb) over native.
+// NOTE: in practice the jsonb arm is inert — the FP import promotes created_at into the
+// native createdAt column and the spillover denylist keeps it out of fieldpulse_data,
+// so coalesce always falls through to createdAt (which holds FP's real creation time
+// for synced rows). The jsonb arm stays as spec-mandated defense should either of
+// those pipelines change.
+const EFFECTIVE_CREATED_AT_SQL = sql`
+  coalesce(
+    (${estimates.fieldpulseData}->>'created_at')::timestamp AT TIME ZONE 'UTC',
+    ${estimates.createdAt}
+  )
+`;
+
+export interface EstimatePipelineStats {
+  readonly openCents: number;
+  readonly openCount: number;
+  readonly staleCents: number;
+  readonly staleCount: number;
+  readonly wonCents: number;
+  readonly wonCount: number;
+  readonly lostCents: number;
+  readonly lostCount: number;
+  readonly draftCents: number;
+  readonly draftCount: number;
+  readonly winRatePct: number | null;
+  readonly avgOpenAgeDays: number;
+}
+
+/**
+ * Aggregate pipeline stats for the estimates board. One SQL round-trip using
+ * FILTER clauses (same pattern as getInvoiceSummaryStats in invoice-queries.ts).
+ */
+export async function getEstimatePipelineStats(
+  organizationId: string,
+): Promise<EstimatePipelineStats> {
+  const [row] = await db
+    .select({
+      openCents: sql<number>`coalesce(sum(${estimates.totalCents}) filter (where (${BUCKET_CASE_SQL}) = 'open'), 0)::bigint`,
+      openCount: sql<number>`count(*) filter (where (${BUCKET_CASE_SQL}) = 'open')::int`,
+      staleCents: sql<number>`coalesce(sum(${estimates.totalCents}) filter (where (${BUCKET_CASE_SQL}) = 'open' and (${EFFECTIVE_CREATED_AT_SQL}) < now() - interval '14 days'), 0)::bigint`,
+      staleCount: sql<number>`count(*) filter (where (${BUCKET_CASE_SQL}) = 'open' and (${EFFECTIVE_CREATED_AT_SQL}) < now() - interval '14 days')::int`,
+      wonCents: sql<number>`coalesce(sum(${estimates.totalCents}) filter (where (${BUCKET_CASE_SQL}) = 'won'), 0)::bigint`,
+      wonCount: sql<number>`count(*) filter (where (${BUCKET_CASE_SQL}) = 'won')::int`,
+      lostCents: sql<number>`coalesce(sum(${estimates.totalCents}) filter (where (${BUCKET_CASE_SQL}) = 'lost'), 0)::bigint`,
+      lostCount: sql<number>`count(*) filter (where (${BUCKET_CASE_SQL}) = 'lost')::int`,
+      draftCents: sql<number>`coalesce(sum(${estimates.totalCents}) filter (where (${BUCKET_CASE_SQL}) = 'draft'), 0)::bigint`,
+      draftCount: sql<number>`count(*) filter (where (${BUCKET_CASE_SQL}) = 'draft')::int`,
+      winRatePct: sql<number | null>`
+        case when (
+          count(*) filter (where (${BUCKET_CASE_SQL}) IN ('won','lost'))
+        ) = 0 then null
+        else round(100.0 * count(*) filter (where (${BUCKET_CASE_SQL}) = 'won') /
+          count(*) filter (where (${BUCKET_CASE_SQL}) IN ('won','lost')))
+        end
+      `,
+      avgOpenAgeDays: sql<number>`coalesce(round(avg(extract(epoch from now() - (${EFFECTIVE_CREATED_AT_SQL})) / 86400) filter (where (${BUCKET_CASE_SQL}) = 'open')), 0)::int`,
+    })
+    .from(estimates)
+    .where(withTenant(estimates, organizationId));
+
+  return {
+    openCents: Number(row?.openCents ?? 0),
+    openCount: Number(row?.openCount ?? 0),
+    staleCents: Number(row?.staleCents ?? 0),
+    staleCount: Number(row?.staleCount ?? 0),
+    wonCents: Number(row?.wonCents ?? 0),
+    wonCount: Number(row?.wonCount ?? 0),
+    lostCents: Number(row?.lostCents ?? 0),
+    lostCount: Number(row?.lostCount ?? 0),
+    draftCents: Number(row?.draftCents ?? 0),
+    draftCount: Number(row?.draftCount ?? 0),
+    winRatePct: row?.winRatePct != null ? Number(row.winRatePct) : null,
+    avgOpenAgeDays: Number(row?.avgOpenAgeDays ?? 0),
+  };
+}
+
+/** Decrypt an encrypted name for display; null on absent/garbled ciphertext. */
+function safeDecryptName(ciphertext: string | null): string | null {
+  if (!ciphertext) return null;
+  try {
+    return decrypt(ciphertext);
+  } catch {
+    return null;
+  }
+}
 
 /** Admin list of an org's estimates, newest first, with server-side pagination. */
 export async function listEstimates(
@@ -236,6 +340,7 @@ export async function listEstimates(
     readonly limit?: number;
     readonly customerId?: string;
     readonly serviceRequestId?: string;
+    readonly bucket?: 'open' | 'won' | 'lost' | 'draft';
   } = {},
 ): Promise<{ estimates: EstimateListRow[]; total: number }> {
   const page = Math.max(1, opts.page ?? 1);
@@ -245,8 +350,16 @@ export async function listEstimates(
   const extraConditions: SQL[] = [];
   if (opts.customerId) extraConditions.push(eq(estimates.customerId, opts.customerId));
   if (opts.serviceRequestId) extraConditions.push(eq(estimates.serviceRequestId, opts.serviceRequestId));
+  if (opts.bucket) {
+    extraConditions.push(sql`(${BUCKET_CASE_SQL}) = ${opts.bucket}`);
+  }
 
   const whereClause = withTenant(estimates, organizationId, ...extraConditions);
+
+  // Open bucket: show oldest first (pipeline triage order); all others newest first.
+  const orderByClause = opts.bucket === 'open'
+    ? asc(EFFECTIVE_CREATED_AT_SQL)
+    : desc(EFFECTIVE_CREATED_AT_SQL);
 
   const [countResult, rows] = await Promise.all([
     db.select({ n: count() }).from(estimates).where(whereClause),
@@ -264,20 +377,34 @@ export async function listEstimates(
         fieldpulseStatusName: estimates.fieldpulseStatusName,
         title: estimates.title,
         fieldpulseData: estimates.fieldpulseData,
+        nameEncrypted: customers.nameEncrypted,
+        effectiveCreatedAt: EFFECTIVE_CREATED_AT_SQL,
       })
       .from(estimates)
+      // Org-scope the join too (defense in depth).
+      .leftJoin(
+        customers,
+        and(
+          eq(customers.id, estimates.customerId),
+          eq(customers.organizationId, organizationId),
+        ),
+      )
       .where(whereClause)
-      .orderBy(desc(estimates.createdAt))
+      .orderBy(orderByClause)
       .limit(limit)
       .offset(offset),
   ]);
 
   const total = countResult[0]?.n ?? 0;
-  const estimateRows = rows.map(({ fieldpulseEstimateId, fieldpulseStatusName, fieldpulseData, ...r }) => ({
+  const estimateRows = rows.map(({ fieldpulseEstimateId, fieldpulseStatusName, fieldpulseData, nameEncrypted, effectiveCreatedAt, ...r }) => ({
     ...r,
     syncedSource: fieldpulseEstimateId != null ? ("fieldpulse" as const) : null,
     fieldpulseStatusName: fieldpulseStatusName ?? null,
     fieldpulseData: (fieldpulseData as Record<string, unknown> | null) ?? null,
+    customerName: safeDecryptName(nameEncrypted ?? null),
+    effectiveCreatedAt: effectiveCreatedAt instanceof Date
+      ? effectiveCreatedAt.toISOString()
+      : String(effectiveCreatedAt ?? new Date(r.createdAt).toISOString()),
   }));
 
   return { estimates: estimateRows, total };

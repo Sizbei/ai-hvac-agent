@@ -5,6 +5,7 @@ import { triggerEstimateSent } from "@/lib/communication/money-triggers";
 import {
   listEstimates,
   createEstimate,
+  getEstimatePipelineStats,
   type EstimateOptionInput,
 } from "@/lib/admin/estimate-queries";
 import {
@@ -86,8 +87,21 @@ export async function GET(request: NextRequest) {
     const customerId = sp.get('customerId') || undefined;
     const serviceRequestId = sp.get('serviceRequestId') || undefined;
 
-    const { estimates, total } = await listEstimates(session.organizationId, { page, limit, customerId, serviceRequestId });
-    return successResponse({ estimates, total });
+    // Whitelist bucket — invalid values silently drop to undefined (no 400; the
+    // scoped section passes no bucket and must continue to work).
+    const VALID_BUCKETS = new Set(['open', 'won', 'lost', 'draft'] as const);
+    type ValidBucket = 'open' | 'won' | 'lost' | 'draft';
+    const rawBucket = sp.get('bucket');
+    const bucket: ValidBucket | undefined =
+      rawBucket && VALID_BUCKETS.has(rawBucket as ValidBucket)
+        ? (rawBucket as ValidBucket)
+        : undefined;
+
+    const [{ estimates, total }, stats] = await Promise.all([
+      listEstimates(session.organizationId, { page, limit, customerId, serviceRequestId, bucket }),
+      getEstimatePipelineStats(session.organizationId),
+    ]);
+    return successResponse({ estimates, total, stats });
   } catch (error: unknown) {
     logger.error({ error }, "Failed to list estimates");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);

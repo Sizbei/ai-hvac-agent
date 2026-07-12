@@ -31,6 +31,7 @@ function limitChain(rows: unknown[]) {
     get orderBy() { return () => deepPromise; },
     get where() { return () => deepPromise; },
     get from() { return () => deepPromise; },
+    get leftJoin() { return () => deepPromise; },
   });
   deepChain.from = () => deepPromise;
   deepChain.where = () => deepPromise;

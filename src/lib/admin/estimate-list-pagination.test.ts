@@ -28,7 +28,10 @@ const { selectQueue, captured, chain } = vi.hoisted(() => {
             return p;
           };
         }
-        // offset, orderBy, from, select — all return same proxy
+        if (prop === 'leftJoin') { return () => p; }
+        if (prop === 'orderBy') { return () => p; }
+        if (prop === 'offset') { return () => p; }
+        // from, select, etc. — all return same proxy
         return () => p;
       },
       apply: () => p,
@@ -113,12 +116,21 @@ vi.mock('@/lib/db/schema', () => ({
     costCents: 'eli.costCents',
     lineTotalCents: 'eli.lineTotalCents',
   },
+  customers: {
+    id: 'customers.id',
+    organizationId: 'customers.organizationId',
+    nameEncrypted: 'customers.nameEncrypted',
+  },
 }));
 
 // Also mock the money helper that estimate-queries imports
 vi.mock('@/lib/admin/money', () => ({
   computeOptionTotals: vi.fn(() => ({ subtotalCents: 0, taxCents: 0, totalCents: 0 })),
   lineTotalCents: vi.fn(() => 0),
+}));
+
+vi.mock('@/lib/crypto', () => ({
+  decrypt: (ct: string) => ct,
 }));
 
 vi.mock('server-only', () => ({}));
@@ -128,7 +140,7 @@ beforeEach(() => {
   captured.length = 0;
 });
 
-import { listEstimates } from './estimate-queries';
+import { listEstimates, getEstimatePipelineStats } from './estimate-queries';
 
 const ORG = '00000000-0000-0000-0000-000000000001';
 
@@ -185,5 +197,106 @@ describe('listEstimates', () => {
     expect(
       wheres.some((w) => w.includes('"kind":"eq"') && w.includes('est.serviceRequestId')),
     ).toBe(true);
+  });
+
+  it('bucket=open applies LIMIT', async () => {
+    queuePage();
+    await listEstimates(ORG, { bucket: 'open' });
+    expect(captured.some((c) => c.hasLimit)).toBe(true);
+  });
+
+  it('bucket=open includes open-bucket predicate in WHERE', async () => {
+    queuePage();
+    await listEstimates(ORG, { bucket: 'open' });
+    const wheres = captured.map((c) => JSON.stringify(c.where ?? ''));
+    expect(wheres.some((w) => w.includes('open'))).toBe(true);
+  });
+
+  it('bucket=won includes won-bucket predicate in WHERE', async () => {
+    queuePage();
+    await listEstimates(ORG, { bucket: 'won' });
+    const wheres = captured.map((c) => JSON.stringify(c.where ?? ''));
+    expect(wheres.some((w) => w.includes('won'))).toBe(true);
+  });
+
+  it('count and rows queries share tenant org with bucket filter', async () => {
+    queuePage();
+    await listEstimates(ORG, { bucket: 'open' });
+    const countWhere = JSON.stringify(captured[0]?.where ?? '');
+    const rowsWhere = JSON.stringify(captured[1]?.where ?? '');
+    expect(countWhere).toBe(rowsWhere);
+  });
+});
+
+describe('getEstimatePipelineStats', () => {
+  it('is tenant-scoped', async () => {
+    selectQueue.push([{
+      openCents: 0, openCount: 0, staleCents: 0, staleCount: 0,
+      wonCents: 0, wonCount: 0, lostCents: 0, lostCount: 0,
+      draftCents: 0, draftCount: 0, winRatePct: null, avgOpenAgeDays: 0,
+    }]);
+    await getEstimatePipelineStats(ORG);
+    const whereStr = JSON.stringify(captured[0]?.where ?? '');
+    expect(whereStr).toContain(ORG);
+  });
+
+  it('returns numeric stats shape', async () => {
+    selectQueue.push([{
+      openCents: '5000', openCount: '3', staleCents: '1000', staleCount: '1',
+      wonCents: '20000', wonCount: '5', lostCents: '3000', lostCount: '2',
+      draftCents: '0', draftCount: '0', winRatePct: '71', avgOpenAgeDays: '7',
+    }]);
+    const stats = await getEstimatePipelineStats(ORG);
+    expect(typeof stats.openCents).toBe('number');
+    expect(typeof stats.wonCents).toBe('number');
+    expect(stats.winRatePct).toBe(71);
+  });
+
+  it('winRatePct is null when no won or lost estimates', async () => {
+    selectQueue.push([{
+      openCents: 0, openCount: 0, staleCents: 0, staleCount: 0,
+      wonCents: 0, wonCount: 0, lostCents: 0, lostCount: 0,
+      draftCents: 0, draftCount: 0, winRatePct: null, avgOpenAgeDays: 0,
+    }]);
+    const stats = await getEstimatePipelineStats(ORG);
+    expect(stats.winRatePct).toBeNull();
+  });
+});
+
+describe('listEstimates bucket filter', () => {
+  it('bucket=open applies limit', async () => {
+    selectQueue.push([{ n: 0 }]);
+    selectQueue.push([]);
+    await listEstimates('org-x', { bucket: 'open' });
+    const rowQuery = captured[captured.length - 1];
+    expect(rowQuery.hasLimit).toBe(true);
+  });
+
+  it('bucket=open includes open-bucket predicate in WHERE', async () => {
+    selectQueue.push([{ n: 0 }]);
+    selectQueue.push([]);
+    await listEstimates('org-x', { bucket: 'open' });
+    const rowQuery = captured[captured.length - 1];
+    const whereStr = JSON.stringify(rowQuery.where);
+    expect(whereStr).toContain('open');
+  });
+
+  it('bucket=won includes won-bucket predicate in WHERE', async () => {
+    selectQueue.push([{ n: 0 }]);
+    selectQueue.push([]);
+    await listEstimates('org-x', { bucket: 'won' });
+    const rowQuery = captured[captured.length - 1];
+    const whereStr = JSON.stringify(rowQuery.where);
+    expect(whereStr).toContain('won');
+  });
+
+  it('count and rows queries share tenant org in WHERE', async () => {
+    selectQueue.push([{ n: 0 }]);
+    selectQueue.push([]);
+    await listEstimates('org-shared', {});
+    const countQ = captured[captured.length - 2];
+    const rowQ = captured[captured.length - 1];
+    expect(JSON.stringify(countQ.where)).toContain('org-shared');
+    expect(JSON.stringify(rowQ.where)).toContain('org-shared');
   });
 });
