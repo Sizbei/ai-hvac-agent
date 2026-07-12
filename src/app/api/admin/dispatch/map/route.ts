@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNotNull, sql } from "drizzle-orm";
 import { getAdminSession } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import {
@@ -6,6 +6,8 @@ import {
   users,
   technicianLocations,
   customerLocations,
+  customers,
+  invoices,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { decrypt } from "@/lib/crypto";
@@ -38,9 +40,8 @@ function safeDecrypt(v: string | null): string | null {
  * GET /api/admin/dispatch/map — the data behind the dispatch map: active jobs
  * (coordinates from the cached customer_locations row, falling back to a live
  * Photon lookup only for jobs not yet geocoded), each technician's latest live
- * location (consent-gated capture, last 4h), and the business base. Admin
- * session only. PII-light: returns reference/status/urgency + coords, no
- * customer name or raw address.
+ * location (consent-gated capture, last 4h), the business base, and AR customers
+ * with open invoices that have a geocoded location. Admin session only.
  */
 export async function GET() {
   const session = await getAdminSession();
@@ -71,11 +72,17 @@ export async function GET() {
         addressEncrypted: serviceRequests.addressEncrypted,
         arrivalWindowStart: serviceRequests.arrivalWindowStart,
         technicianName: users.name,
+        // Customer name: prefer the name stored on the request itself (set at
+        // intake), fall back to the linked customer row.
+        customerNameEncrypted: serviceRequests.customerNameEncrypted,
+        customerNameFromCustomer: customers.nameEncrypted,
+        priceCents: sql<number | null>`(${serviceRequests.fieldpulseMetrics}->>'totalPriceCents')::int`,
         cachedLat: customerLocations.latitude,
         cachedLon: customerLocations.longitude,
       })
       .from(serviceRequests)
       .leftJoin(users, eq(serviceRequests.assignedTo, users.id))
+      .leftJoin(customers, eq(serviceRequests.customerId, customers.id))
       .leftJoin(
         customerLocations,
         and(
@@ -101,6 +108,10 @@ export async function GET() {
       issueType: r.issueType,
       technicianName: r.technicianName,
       arrivalWindowStart: r.arrivalWindowStart?.toISOString() ?? null,
+      customerName:
+        safeDecrypt(r.customerNameEncrypted) ??
+        safeDecrypt(r.customerNameFromCustomer),
+      priceCents: r.priceCents ?? null,
       latitude,
       longitude,
     });
@@ -169,10 +180,59 @@ export async function GET() {
       });
     }
 
+    // ── AR customers — open invoices with a geocoded location ──
+    // One row per customer: sum of outstanding balance, invoice count, oldest age.
+    // Only customers that have at least one geocoded customer_location are returned.
+    const effectiveAge = sql<number>`extract(epoch from now() - coalesce(${invoices.issuedAt}, ${invoices.createdAt})) / 86400`;
+
+    const arRows = await db
+      .select({
+        customerId: customers.id,
+        nameEncrypted: customers.nameEncrypted,
+        latitude: customerLocations.latitude,
+        longitude: customerLocations.longitude,
+        owingCents: sql<number>`sum(${invoices.totalCents} - coalesce(${invoices.amountPaidCents}, 0))`,
+        invoiceCount: sql<number>`count(${invoices.id})`,
+        oldestDays: sql<number>`max(${effectiveAge})`,
+      })
+      .from(invoices)
+      .innerJoin(customers, and(
+        eq(invoices.customerId, customers.id),
+        eq(customers.organizationId, session.organizationId),
+      ))
+      .innerJoin(
+        customerLocations,
+        and(
+          eq(customerLocations.customerId, customers.id),
+          eq(customerLocations.organizationId, session.organizationId),
+          isNotNull(customerLocations.latitude),
+        ),
+      )
+      .where(
+        and(
+          withTenant(invoices, session.organizationId),
+          eq(invoices.state, "open"),
+          gt(invoices.totalCents, sql`coalesce(${invoices.amountPaidCents}, 0)`),
+        ),
+      )
+      .groupBy(customers.id, customers.nameEncrypted, customerLocations.latitude, customerLocations.longitude)
+      .limit(300);
+
+    const arCustomers = arRows.map((r) => ({
+      customerId: r.customerId,
+      name: safeDecrypt(r.nameEncrypted),
+      latitude: r.latitude,
+      longitude: r.longitude,
+      owingCents: Number(r.owingCents),
+      invoiceCount: Number(r.invoiceCount),
+      oldestDays: Math.round(Number(r.oldestDays)),
+    }));
+
     return successResponse({
       base,
       jobs,
       technicians,
+      arCustomers,
       geocodeCapped: needGeocode.length > MAX_GEOCODE,
     });
   } catch (error) {
