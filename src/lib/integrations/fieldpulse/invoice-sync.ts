@@ -406,10 +406,12 @@ export async function upsertInvoiceRecord(
           subtotalCents: totalCents,
           totalCents,
           amountPaidCents,
-          // Real-world dates from FP (issuedAt = created there, not imported
-          // here). Written on UPDATE too so a re-import backfills rows that
-          // predate these columns.
-          issuedAt: parseFpDate(invoice.createdAt),
+          // Real-world issue date: FP's invoiced_date. For QB-originated
+          // invoices, created_at is the day the row was BULK-IMPORTED into FP
+          // (live-verified: fp#20824708 invoiced 2025-10-30, created
+          // 2026-07-07) — using it flattened all aging to the import day.
+          // Written on UPDATE too so re-imports backfill older rows.
+          issuedAt: parseFpDate(invoice.invoicedDate ?? invoice.createdAt),
           dueDate: parseFpDate(invoice.dueDate),
           fieldpulseData: fpSpillover,
           updatedAt: new Date(),
@@ -461,7 +463,8 @@ export async function upsertInvoiceRecord(
       taxCents: 0,
       totalCents,
       amountPaidCents,
-      issuedAt: parseFpDate(invoice.createdAt),
+      // invoiced_date, not created_at — see the upsert branch comment.
+      issuedAt: parseFpDate(invoice.invoicedDate ?? invoice.createdAt),
       dueDate: parseFpDate(invoice.dueDate),
       fieldpulseData: fpSpillover,
     })

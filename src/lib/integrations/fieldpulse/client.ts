@@ -569,6 +569,9 @@ function toInvoice(raw: unknown): FieldpulseInvoice | null {
     amountPaidCents: dollarsToCents(obj.amount_paid),
     amountUnpaidCents: dollarsToCents(obj.amount_unpaid),
     dueDate: str(obj.due_date),
+    // The REAL issue date. For QB-originated invoices created_at is only the
+    // bulk-import day (live-verified), so the mirror's issuedAt prefers this.
+    invoicedDate: str(obj.invoiced_date),
     // Real paid timestamp is last_payment_date (fallback first_payment_date).
     paidAt: str(obj.last_payment_date) ?? str(obj.first_payment_date),
     createdAt: str(obj.created_at),

@@ -184,6 +184,8 @@ export interface FieldpulseInvoice {
   readonly amountPaidCents?: number | null; // Real API exposes amount_paid
   readonly amountUnpaidCents?: number | null; // Real API exposes amount_unpaid
   readonly dueDate?: string | null;
+  /** FP invoiced_date — the REAL issue date (created_at is the QB bulk-import day). */
+  readonly invoicedDate?: string | null;
   readonly paidAt?: string | null; // From last_payment_date
   readonly createdAt?: string | null;
   readonly lineItems?: readonly FieldpulseInvoiceLineItem[];
