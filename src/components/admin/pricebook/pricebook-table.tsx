@@ -131,7 +131,7 @@ export function PricebookTable({
                     </div>
                   </TableCell>
                   <TableCell className="text-muted-foreground">
-                    {item.sku ?? '—'}
+                    {item.sku ?? ''}
                   </TableCell>
                   <TableCell className="text-right tabular-nums">
                     {formatCentsExact(item.priceCents)}

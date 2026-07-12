@@ -258,10 +258,12 @@ export default function EstimateDetailPage({
                   <span>Subtotal</span>
                   <span>{formatCentsExact(opt.subtotalCents)}</span>
                 </div>
-                <div className="flex justify-between text-muted-foreground">
-                  <span>Tax</span>
-                  <span>{formatCentsExact(opt.taxCents)}</span>
-                </div>
+                {opt.taxCents > 0 && (
+                  <div className="flex justify-between text-muted-foreground">
+                    <span>Tax</span>
+                    <span>{formatCentsExact(opt.taxCents)}</span>
+                  </div>
+                )}
               </div>
 
               {/* Internal margin readout (admin-only; subordinate styling). */}

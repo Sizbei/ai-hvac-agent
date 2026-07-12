@@ -507,20 +507,17 @@ export default function CustomerDetailPage({
       {/* Bookings — real service_requests (service_history is empty for imports) */}
       <CustomerBookingsSection customerId={id} />
 
-      {/* Service History (native manual work logs; empty until logged) */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Clock className="size-4" />
-            Service History ({customer.serviceHistory.length})
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {customer.serviceHistory.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No service history yet.
-            </p>
-          ) : (
+      {/* Service History (native manual work logs; hidden when empty — imports
+          have no native history; real history is in the Bookings card above) */}
+      {customer.serviceHistory.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Clock className="size-4" />
+              Service History ({customer.serviceHistory.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
             <div className="space-y-3">
               {customer.serviceHistory.map((h) => (
                 <div key={h.id} className="rounded-lg border p-3">
@@ -548,9 +545,9 @@ export default function CustomerDetailPage({
                 </div>
               ))}
             </div>
-          )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Estimates */}
       <ScopedEstimatesSection customerId={id} variant="card" />

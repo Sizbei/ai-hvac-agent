@@ -171,7 +171,9 @@ export function InvoiceDocument({ invoice, org }: Props) {
           {/* Totals */}
           <div className="w-56 shrink-0 space-y-0">
             <TotalsRow label="Subtotal" value={formatCentsExact(invoice.subtotalCents)} />
-            <TotalsRow label="Sales tax" value={formatCentsExact(invoice.taxCents)} />
+            {invoice.taxCents > 0 && (
+              <TotalsRow label="Sales tax" value={formatCentsExact(invoice.taxCents)} />
+            )}
             <div className="mt-1.5 flex justify-between border-t pt-3 text-sm font-bold text-foreground">
               <span>Total</span>
               <span className="tabular-nums">{formatCentsExact(invoice.totalCents)}</span>

@@ -608,9 +608,9 @@ export function RequestDetailSheet({
                 <h3 className="text-sm font-semibold mb-2">Customer Information</h3>
                 <div className="rounded-md border p-3 space-y-1">
                   <InfoRow label="Name" value={detail.customerName} />
-                  <InfoRow label="Phone" value={detail.customerPhone} />
-                  <InfoRow label="Email" value={detail.customerEmail} />
-                  <InfoRow label="Address" value={detail.address} />
+                  {detail.customerPhone && <InfoRow label="Phone" value={detail.customerPhone} />}
+                  {detail.customerEmail && <InfoRow label="Email" value={detail.customerEmail} />}
+                  {detail.address && <InfoRow label="Address" value={detail.address} />}
                 </div>
               </section>
 
