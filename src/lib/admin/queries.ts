@@ -44,7 +44,7 @@ import { releaseReservationsForRequest } from "./capacity-reservation-queries";
 export type HoldReason = (typeof holdReasonEnum.enumValues)[number];
 import { DASHBOARD_LIST_LIMIT } from "./types";
 import { getTechnicianAvailability } from "./scheduling-queries";
-import { businessIsoDate } from "./calendar-time";
+import { businessIsoDate, businessDayBounds } from "./calendar-time";
 import type {
   AdminRequest,
   AdminRequestDetail,
@@ -84,26 +84,6 @@ function startOfTodayUTC(): Date {
   return new Date(
     new Date().toISOString().split("T")[0] + "T00:00:00.000Z",
   );
-}
-
-/** UTC [start, end) day bounds for an ISO date string (YYYY-MM-DD). Returns
- * null for anything that isn't a valid calendar date so callers fail closed
- * rather than querying a garbage range. */
-function utcDayBounds(
-  isoDate: string,
-): { readonly start: Date; readonly end: Date; readonly date: string } | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) return null;
-  const start = new Date(`${isoDate}T00:00:00.000Z`);
-  if (Number.isNaN(start.getTime())) return null;
-  // Reject overflow dates (e.g. 2026-02-30 → March) by round-tripping.
-  if (start.toISOString().slice(0, 10) !== isoDate) return null;
-  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
-  return { start, end, date: isoDate };
-}
-
-/** The ISO date (YYYY-MM-DD) of the current UTC day. */
-function todayUTCDate(): string {
-  return new Date().toISOString().slice(0, 10);
 }
 
 export async function getRequests(
@@ -1222,15 +1202,21 @@ export async function getDashboardOverview(
  * an "unassigned" pile of scheduled jobs with no tech. Every technician gets a
  * column even with zero jobs so the dispatcher sees who is free.
  *
- * `isoDate` defaults to the current UTC day; an invalid date falls back to
- * today rather than querying a garbage range. Tenant-scoped; decrypted customer
+ * `isoDate` names a BUSINESS-timezone day and defaults to the current business
+ * day (after 8pm ET the UTC date has already rolled over — anchoring on UTC
+ * put the evening board on tomorrow). An invalid date falls back to today
+ * rather than querying a garbage range. Tenant-scoped; decrypted customer
  * NAMES only.
  */
 export async function getDispatchBoard(
   organizationId: string,
   isoDate?: string,
 ): Promise<DispatchBoard> {
-  const bounds = (isoDate && utcDayBounds(isoDate)) || utcDayBounds(todayUTCDate())!;
+  const date =
+    isoDate && businessDayBounds(isoDate)
+      ? isoDate
+      : businessIsoDate(new Date());
+  const bounds = businessDayBounds(date)!;
 
   // The board's job-card select mirrors dashboardRequestSelect but also carries
   // the raw assignedTo id so we can bucket jobs into technician columns.
@@ -1285,7 +1271,7 @@ export async function getDispatchBoard(
   }));
 
   return {
-    date: bounds.date,
+    date,
     columns,
     unassigned,
   };

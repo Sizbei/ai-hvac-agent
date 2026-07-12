@@ -6,10 +6,10 @@ import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
 
 /**
- * GET /api/admin/dispatch?date=YYYY-MM-DD — the dispatch board for a single UTC
- * day: a column per active technician plus the unassigned pile. The date param
- * is optional (defaults to today) and validated downstream in getDispatchBoard,
- * which falls back to today for anything malformed.
+ * GET /api/admin/dispatch?date=YYYY-MM-DD — the dispatch board for a single
+ * BUSINESS-timezone day: a column per active technician plus the unassigned
+ * pile. The date param is optional (defaults to today) and validated downstream
+ * in getDispatchBoard, which falls back to today for anything malformed.
  */
 export async function GET(request: NextRequest) {
   try {

@@ -8,11 +8,13 @@ import { RequestDetailSheet } from '@/components/admin/request-detail-sheet';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { businessIsoDate } from '@/lib/admin/calendar-time';
 
-/** Current UTC day as YYYY-MM-DD. The board is UTC-anchored end to end (arrival
- * windows are stored at UTC offsets), so the picker works in UTC too. */
-function todayUTC(): string {
-  return new Date().toISOString().slice(0, 10);
+/** Current BUSINESS day as YYYY-MM-DD. Anchoring on the UTC day put the board
+ * on tomorrow every evening after 8pm ET; the server buckets jobs by business
+ * day too (getDispatchBoard), so picker and query agree. */
+function todayBusiness(): string {
+  return businessIsoDate(new Date());
 }
 
 /** Shift an ISO date (YYYY-MM-DD) by whole days, staying in UTC. */
@@ -35,12 +37,12 @@ function formatDayLabel(isoDate: string): string {
 }
 
 export default function DispatchPage() {
-  const [date, setDate] = useState<string>(todayUTC);
+  const [date, setDate] = useState<string>(todayBusiness);
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
 
   const { board, isLoading, error, refetch } = useDispatchBoard(date);
 
-  const isToday = date === todayUTC();
+  const isToday = date === todayBusiness();
 
   return (
     <div className="space-y-6 p-6">
@@ -75,7 +77,7 @@ export default function DispatchPage() {
           <Button
             variant={isToday ? 'secondary' : 'outline'}
             size="sm"
-            onClick={() => setDate(todayUTC())}
+            onClick={() => setDate(todayBusiness())}
             disabled={isToday}
           >
             Today

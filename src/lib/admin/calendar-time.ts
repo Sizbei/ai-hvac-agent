@@ -161,6 +161,27 @@ export function businessIsoDate(instant: Date): string {
 }
 
 /**
+ * UTC [start, end) bounds of a BUSINESS-timezone calendar day. Both edges are
+ * business-midnight converted to UTC instants, so the span is 23/24/25 real
+ * hours across DST transitions — never a fixed 24. Returns null for anything
+ * that isn't a real YYYY-MM-DD date (fail closed, same contract as
+ * isRealIsoDate).
+ */
+export function businessDayBounds(
+  isoDate: string,
+): { readonly start: Date; readonly end: Date } | null {
+  if (!isRealIsoDate(isoDate)) return null;
+  const start = businessWallClockToUtc(isoDate, 0, 0);
+  const nextDay = new Date(
+    new Date(`${isoDate}T00:00:00.000Z`).getTime() + 24 * 60 * 60 * 1000,
+  )
+    .toISOString()
+    .slice(0, 10);
+  const end = businessWallClockToUtc(nextDay, 0, 0);
+  return { start, end };
+}
+
+/**
  * Vertical placement of a job in a day column, as a fraction of the visible
  * grid. The grid spans [gridStartHour, gridEndHour) wall-clock hours; a job's
  * `top`/`height` are fractions in [0, 1] of that span, clamped so a window that

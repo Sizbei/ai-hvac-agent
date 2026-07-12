@@ -15,6 +15,7 @@ import {
   windowBandPlacement,
   windowRowOfInstant,
   isRealIsoDate,
+  businessDayBounds,
   CALENDAR_START_HOUR,
   CALENDAR_END_HOUR,
 } from "./calendar-time";
@@ -291,5 +292,40 @@ describe("isRealIsoDate", () => {
     expect(isRealIsoDate("2026-06-09T00:00:00Z")).toBe(false);
     expect(isRealIsoDate("not-a-date")).toBe(false);
     expect(isRealIsoDate("")).toBe(false);
+  });
+});
+
+describe("businessDayBounds", () => {
+  it("returns UTC bounds of the BUSINESS day, not the UTC day (summer, UTC-4)", () => {
+    const bounds = businessDayBounds("2026-07-12");
+    expect(bounds).not.toBeNull();
+    expect(bounds!.start.toISOString()).toBe("2026-07-12T04:00:00.000Z");
+    expect(bounds!.end.toISOString()).toBe("2026-07-13T04:00:00.000Z");
+  });
+
+  it("uses the winter offset in winter (UTC-5)", () => {
+    const bounds = businessDayBounds("2026-01-15");
+    expect(bounds!.start.toISOString()).toBe("2026-01-15T05:00:00.000Z");
+    expect(bounds!.end.toISOString()).toBe("2026-01-16T05:00:00.000Z");
+  });
+
+  it("spans 25 hours across the fall-back day (2026-11-01)", () => {
+    const bounds = businessDayBounds("2026-11-01");
+    const hours =
+      (bounds!.end.getTime() - bounds!.start.getTime()) / (60 * 60 * 1000);
+    expect(hours).toBe(25);
+  });
+
+  it("spans 23 hours across the spring-forward day (2026-03-08)", () => {
+    const bounds = businessDayBounds("2026-03-08");
+    const hours =
+      (bounds!.end.getTime() - bounds!.start.getTime()) / (60 * 60 * 1000);
+    expect(hours).toBe(23);
+  });
+
+  it("returns null for invalid or impossible dates", () => {
+    expect(businessDayBounds("2026-02-31")).toBeNull();
+    expect(businessDayBounds("garbage")).toBeNull();
+    expect(businessDayBounds("")).toBeNull();
   });
 });
