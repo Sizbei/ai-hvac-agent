@@ -346,6 +346,15 @@ export async function upsertInvoiceRecord(
   invoice: FieldpulseInvoice,
 ): Promise<InvoicePullOutcome> {
   const totalCents = invoice.totalCents ?? 0;
+  // FP sends real subtotal + tax; fall back to total/0 only if absent so the
+  // invoice document shows the true tax line (tax > 0 on ~56% of invoices),
+  // not a fabricated $0.00. subtotal defaults to total (pre-tax == total when
+  // untaxed).
+  const taxCents = invoice.taxCents ?? 0;
+  // subtotal = total - tax, NOT FP's raw `subtotal` (that is PRE-discount and
+  // won't reconcile — verified: FP subtotal_discounted + tax == total). This
+  // form always ties out on the invoice document.
+  const subtotalCents = totalCents - taxCents;
   // Real API exposes accurate paid/unpaid amounts — use them (no longer binary).
   const amountPaidCents = invoice.amountPaidCents ?? 0;
   const state = deriveInvoiceState(invoice, totalCents, amountPaidCents);
@@ -403,7 +412,8 @@ export async function upsertInvoiceRecord(
         .update(invoices)
         .set({
           state,
-          subtotalCents: totalCents,
+          subtotalCents,
+          taxCents,
           totalCents,
           amountPaidCents,
           // Real-world issue date: FP's invoiced_date. For QB-originated
@@ -459,8 +469,8 @@ export async function upsertInvoiceRecord(
       serviceRequestId,
       customerId,
       state,
-      subtotalCents: totalCents,
-      taxCents: 0,
+      subtotalCents,
+      taxCents,
       totalCents,
       amountPaidCents,
       // invoiced_date, not created_at — see the upsert branch comment.

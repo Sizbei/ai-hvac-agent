@@ -565,6 +565,10 @@ function toInvoice(raw: unknown): FieldpulseInvoice | null {
     // Real status is an int (e.g. 3) — preserve as a string for reference; the
     // mirror derives paid/open/void from the amounts below, not this code.
     status: obj.status != null ? String(obj.status) : null,
+    // FP sends real tax as a dollar string; the mirror hardcoded 0, so every
+    // invoice document showed a fake $0.00 tax. (subtotal is derived total-tax
+    // in the sync — FP's raw subtotal is pre-discount and doesn't reconcile.)
+    taxCents: dollarsToCents(obj.tax),
     totalCents: dollarsToCents(obj.total),
     amountPaidCents: dollarsToCents(obj.amount_paid),
     amountUnpaidCents: dollarsToCents(obj.amount_unpaid),
