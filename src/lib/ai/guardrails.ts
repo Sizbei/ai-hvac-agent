@@ -65,6 +65,13 @@ export function sanitizeInput(input: string): GuardrailResult {
   let sanitized = input.trim();
   let hardFlagged = false;
 
+  // Strip control characters (keep newlines and tabs for formatting) BEFORE the
+  // injection scan. Otherwise a control char embedded mid-keyword ("ig\x00nore
+  // previous instructions") slips past every regex, then gets cleaned into a
+  // valid injection that reaches the LLM unflagged — the scan must see exactly
+  // the text the model will.
+  sanitized = sanitized.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+
   // Check for injection patterns, tracking whether any HARD pattern matched.
   for (const pattern of HARD_INJECTION_PATTERNS) {
     if (pattern.test(sanitized)) {
@@ -77,9 +84,6 @@ export function sanitizeInput(input: string): GuardrailResult {
       flagged.push(pattern.source);
     }
   }
-
-  // Strip control characters (keep newlines and tabs for formatting)
-  sanitized = sanitized.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
 
   // Limit length to prevent context stuffing (max 2000 chars per message).
   // This is NOT a safety flag — a long message is truncated and still processed,

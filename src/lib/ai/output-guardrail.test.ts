@@ -60,6 +60,39 @@ describe("screenAssistantReply", () => {
     expect(r.reply).not.toMatch(FALSE_BOOKING_REGEX);
   });
 
+  // REVIEW (M-false-booking): the most NATURAL LLM confirmations are perfect /
+  // passive tense, which the present-tense regex missed entirely.
+  it.each([
+    "I've booked you for Tuesday at 9am.",
+    "I have scheduled you for tomorrow morning.",
+    "We've got you scheduled for Wednesday.",
+    "I've reserved your spot for tomorrow.",
+    "You've been booked for Wednesday afternoon.",
+    "You have been scheduled for a 9am visit.",
+    "Your appointment has been confirmed.",
+    "Your appointment has been booked for Tuesday.",
+    "Your visit has been scheduled.",
+    "Your visit is confirmed.",
+  ])("catches perfect/passive false-booking claims: %s", (text) => {
+    const r = screenAssistantReply(text);
+    expect(r.safe).toBe(false);
+    expect(r.violations).toContain("false-booking");
+    expect(r.reply).not.toMatch(FALSE_BOOKING_REGEX);
+  });
+
+  // These OFFER / negation / future forms must NOT trip the widened regex.
+  it.each([
+    "I can get you booked once I have your details.",
+    "Would you like me to book you in for Tuesday?",
+    "Once you confirm, our team will schedule the visit.",
+    "I haven't reserved a time slot yet.",
+    "I'll have our team confirm your appointment with you.",
+  ])("does NOT flag offer/negation/future booking language: %s", (text) => {
+    const r = screenAssistantReply(text);
+    expect(r.safe).toBe(true);
+    expect(r.reply).toBe(text);
+  });
+
   it("reports BOTH violations and uses the combined safe reply", () => {
     const r = screenAssistantReply(
       "You're scheduled for tomorrow and it'll be $99.",

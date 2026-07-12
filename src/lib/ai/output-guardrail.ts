@@ -35,9 +35,17 @@ export const PRICE_WORD_REGEX =
 /**
  * A false-booking claim — language that asserts a confirmed appointment. The bot
  * offers windows and collects details; it never confirms a booking itself.
+ *
+ * Covers three tenses so the most NATURAL LLM confirmations don't slip through
+ * (review — the present-tense-only regex missed all of these):
+ *  - present:  "you're booked", "your appointment is confirmed"
+ *  - active perfect: "I've booked you", "we've got you scheduled"
+ *  - passive perfect: "you've been booked", "your appointment has been confirmed"
+ * Anchored so OFFERS/negations/future forms ("I can get you booked", "I'll have
+ * our team confirm", "I haven't reserved a slot yet") do NOT match.
  */
 export const FALSE_BOOKING_REGEX =
-  /\b(you(?:'?re| are)\s+(?:all\s+)?(?:booked|scheduled)|is (?:booked|scheduled)|confirmed for|appointment is (set|booked|scheduled|confirmed)|booking is confirmed)\b/i;
+  /\b(you(?:'?re| are)\s+(?:all\s+)?(?:booked|scheduled)|is (?:booked|scheduled)|confirmed for|appointment is (set|booked|scheduled|confirmed)|booking is confirmed|(?:I|we)(?:'?ve| have)\s+(?:(?:booked|scheduled|reserved)\s+(?:you|your)|got\s+you\s+(?:booked|scheduled))|you(?:'?ve| have)\s+been\s+(?:booked|scheduled|reserved)|your\s+(?:appointment|visit|service|booking|slot|spot)\s+has\s+been\s+(?:booked|scheduled|confirmed|reserved)|your\s+(?:appointment|visit|service|booking)\s+is\s+(?:all\s+)?(?:set|booked|scheduled|confirmed))\b/i;
 
 /**
  * Dangerous-DIY instruction detector — anchored on IMPERATIVE / HOW-TO phrasing

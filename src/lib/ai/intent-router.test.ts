@@ -40,6 +40,17 @@ describe("emergency short-circuit", () => {
     expect(v.escalate).toBe(true);
   });
 
+  it("escalates an emoji-heavy emergency despite a low latin-alpha ratio", () => {
+    // Emoji + punctuation drag the raw latin-alpha ratio below the 0.5
+    // non-Latin fallback gate, but the message normalizes to real emergency
+    // keywords. Safety escalation must win over the "let the LLM handle
+    // non-Latin input" heuristic.
+    const v = routeMessage("🚨🚨🚨🚨🚨 I smell gas 🚨🚨🚨🚨🚨");
+    expect(v.action).toBe("ESCALATE");
+    expect(v.escalate).toBe(true);
+    expect(v.intentId).toBe("emergency-gas-smell");
+  });
+
   it("ignores the 'emergency heat' heat-pump mode (whitelist)", () => {
     const v = routeMessage("how do I turn on emergency heat on my heat pump");
     expect(v.escalate).toBe(false);

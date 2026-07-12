@@ -390,12 +390,6 @@ export function routeMessage(
 
   if (text.length === 0) return FALLBACK;
 
-  // Non-Latin / very low alpha-ratio input → let the LLM handle it (review M4),
-  // but only when it isn't recognizable gibberish noise.
-  if (latinAlphaRatio(rawMessage) < 0.5 && !isGibberish(text)) {
-    return FALLBACK;
-  }
-
   // Score every entry.
   const scored: Scored[] = KNOWLEDGE_BASE.map((entry) => ({
     entry,
@@ -403,7 +397,10 @@ export function routeMessage(
   })).filter((s) => s.score > 0);
 
   // 1) EMERGENCY short-circuit — safety beats everything (plan §4 / review H4).
-  // Runs BEFORE any org config so no per-org setting can suppress an escalation.
+  // Runs BEFORE any org config so no per-org setting can suppress an escalation,
+  // and BEFORE the non-Latin fallback below: an emoji/digit-heavy message (e.g.
+  // "🚨🚨 I smell gas 🚨🚨") has a low latin-alpha ratio but normalizes to real
+  // emergency keywords, and must escalate deterministically rather than punt.
   const emergencies = scored
     .filter((s) => s.entry.category === "emergency")
     .sort((a, b) => b.score - a.score);
@@ -421,6 +418,14 @@ export function routeMessage(
         escalate: true,
       };
     }
+  }
+
+  // Non-Latin / very low alpha-ratio input → let the LLM handle it (review M4),
+  // but only when it isn't recognizable gibberish noise. Placed AFTER the
+  // emergency short-circuit so a low-alpha message carrying an emergency still
+  // escalates deterministically (safety) rather than falling through to the LLM.
+  if (latinAlphaRatio(rawMessage) < 0.5 && !isGibberish(text)) {
+    return FALLBACK;
   }
 
   // 1b) Custom FAQ — admin-authored answers take precedence over the built-in
