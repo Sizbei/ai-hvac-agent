@@ -30,6 +30,42 @@ describe("nameFromDirectAnswer (answer to the NAME step)", () => {
       nameFromDirectAnswer("well it is a bit complicated but you can call me"),
     ).toBeNull();
   });
+  it("rejects refusals and skips (not a name)", () => {
+    for (const reply of [
+      "skip",
+      "pass",
+      "none",
+      "no",
+      "nope",
+      "no thanks",
+      "no thank you",
+      "rather not",
+      "prefer not",
+      "maybe later",
+    ]) {
+      expect(nameFromDirectAnswer(reply)).toBeNull();
+    }
+  });
+  it("rejects questions and commands asked at the name step", () => {
+    for (const reply of [
+      "what are your hours",
+      "what are your hours?",
+      "who is this?",
+      "how much does it cost",
+      "tell me your prices",
+      "help me",
+      "cancel",
+    ]) {
+      expect(nameFromDirectAnswer(reply)).toBeNull();
+    }
+  });
+  it("still accepts real names that resemble common words", () => {
+    // Guard against over-rejection: these are legitimate first names.
+    expect(nameFromDirectAnswer("Will")).toBe("Will");
+    expect(nameFromDirectAnswer("Grace")).toBe("Grace");
+    expect(nameFromDirectAnswer("Hope")).toBe("Hope");
+    expect(nameFromDirectAnswer("May")).toBe("May");
+  });
 });
 
 describe("extractNameFromCue (explicit name correction)", () => {

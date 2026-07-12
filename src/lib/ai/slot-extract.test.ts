@@ -181,6 +181,31 @@ describe('extractAddressAtAddressStep', () => {
   it('rejects a one-word non-address reply', () => {
     expect(extractAddressAtAddressStep('hello')).toBeNull();
   });
+
+  it('rejects conversational 3+-word prose that is not an address', () => {
+    // The 3+-word verbatim path used to store ANY multi-word reply. A refusal,
+    // uncertainty, or redirect sentence (no digit, no comma) must not become the
+    // service address (review).
+    for (const reply of [
+      "i don't know the address yet",
+      'let me check with my wife',
+      'it is a rental property',
+      'can you look it up for me',
+    ]) {
+      expect(extractAddressAtAddressStep(reply)).toBeNull();
+    }
+  });
+
+  it('still accepts a comma/number-less international address (no false reject)', () => {
+    // No pronoun/verb prose markers → trusted verbatim, preserving the
+    // suffix-less international-address fix.
+    expect(extractAddressAtAddressStep('Kings Highway Brooklyn')).toBe(
+      'Kings Highway Brooklyn',
+    );
+    expect(extractAddressAtAddressStep('Rue de la Paix Paris')).toBe(
+      'Rue de la Paix Paris',
+    );
+  });
 });
 
 describe('extractSlots', () => {

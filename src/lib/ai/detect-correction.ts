@@ -136,14 +136,41 @@ export function extractNameFromCue(message: string): string | null {
   return candidate.length > 0 ? candidate : null;
 }
 
+// Whole-message replies that are NOT a name even though they're short and
+// alphabetic — a customer declining or asking a question at the name prompt.
+// Without this guard "skip" / "no thanks" / "what are your hours" were stored
+// verbatim as the customer's name (review).
+const NON_NAME_TOKENS: ReadonlySet<string> = new Set([
+  "skip", "pass", "none", "na", "no", "nope", "nah", "decline", "later",
+  "help", "stop", "cancel", "menu", "hours", "pricing", "price", "cost", "quote",
+]);
+const NON_NAME_REFUSAL =
+  /^(?:no\s+(?:thanks?|thank\s+you)|not?\s+now|rather\s+not|prefer\s+not|i'?d\s+rather\s+not|maybe\s+later)$/i;
+// Strong interrogative / command leads that never begin a real first name
+// (deliberately EXCLUDES ambiguous aux verbs like will/is/can/do so legit names
+// "Will", "May", "Grace" still pass).
+const NON_NAME_LEAD =
+  /^(?:what|whats|who|whom|whose|why|how|when|where|which|tell\s+me|show\s+me|help\s+me|i\s+need\s+help|i\s+want)\b/i;
+
+/** True when a name-step reply is a refusal, command, or question — not a name. */
+function isNonNameReply(rawMessage: string): boolean {
+  const raw = rawMessage.trim();
+  if (raw.endsWith("?")) return true; // a name never ends in a question mark
+  const t = raw.toLowerCase().replace(/[.!?,]+$/, "").trim();
+  if (t.length === 0) return false;
+  return NON_NAME_TOKENS.has(t) || NON_NAME_REFUSAL.test(t) || NON_NAME_LEAD.test(t);
+}
+
 /**
  * The whole message, treated as a name (used when we KNOW we just asked the
  * name). Strips a leading polite preamble ("it's", "my name is", "this is")
  * and caps length/word-count. Returns null if it doesn't look like a name
  * (empty, too long, contains digits — a phone/address typed at the name prompt
- * is handled by the normal extractors instead).
+ * is handled by the normal extractors instead — or a refusal/command/question).
  */
 export function nameFromDirectAnswer(message: string): string | null {
+  if (isNonNameReply(message)) return null;
+
   let m = message
     .trim()
     .replace(/^(?:it'?s|this is|my name(?:'s| is)?|i'?m|i am)\s+/i, "")

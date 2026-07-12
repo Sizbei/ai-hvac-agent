@@ -216,8 +216,24 @@ export function extractAddressAtAddressStep(message: string): string | null {
 
   const hasComma = cleaned.includes(',');
   const hasZip = /\b\d{5}(?:-\d{4})?\b/.test(cleaned);
+  // A comma or ZIP is a strong address signal — trust the reply verbatim
+  // (preserves the suffix-less / international-address fix).
+  if (hasComma || hasZip) {
+    return cleaned;
+  }
+
   const wordCount = cleaned.split(/\s+/).length;
-  if (hasComma || hasZip || wordCount >= 3) {
+  if (wordCount >= 3) {
+    // 3+ words with no comma/ZIP: accept verbatim UNLESS it reads as
+    // conversational prose. A refusal/uncertainty/redirect sentence ("I don't
+    // know the address yet", "it is a rental property") has pronoun/verb markers
+    // that never appear in a real street/place address, so reject those instead
+    // of storing the sentence as the service address (review).
+    const looksConversational =
+      /\b(?:i|i'?m|im|we|you|my|me|it|don'?t|dont|can'?t|cant|won'?t|isn'?t|let|please|maybe)\b/i.test(
+        cleaned,
+      );
+    if (!/\d/.test(cleaned) && looksConversational) return null;
     return cleaned;
   }
 
