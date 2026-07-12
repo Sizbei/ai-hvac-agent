@@ -160,7 +160,9 @@ export default function EstimatesPage() {
                       </td>
                     </tr>
                     {isExpanded && (
-                      <tr key={`${est.id}-expand`} className="border-t">
+                      /* No border-t: the panel reads as one unit with its row;
+                         the NEXT row's border-t separates it from what follows. */
+                      <tr key={`${est.id}-expand`}>
                         <td colSpan={5} className="bg-muted/30 px-6 py-4 animate-in fade-in-0 slide-in-from-top-1 duration-100">
                           <div className="flex flex-wrap gap-6">
                             {/* Key facts */}

@@ -97,7 +97,9 @@ export function PricebookTable({
               // list-key warning.
               <Fragment key={item.id}>
                 <TableRow
-                  className={`cursor-pointer ${item.active ? '' : 'opacity-60'}`}
+                  // border-b-0 while expanded: the row + its panel read as one
+                  // unit (the panel row's own border-b separates from the next).
+                  className={`cursor-pointer ${item.active ? '' : 'opacity-60'} ${isExpanded ? 'border-b-0' : ''}`}
                   onClick={() => setExpandedId((prev) => (prev === item.id ? null : item.id))}
                 >
                   <TableCell className="font-medium">
