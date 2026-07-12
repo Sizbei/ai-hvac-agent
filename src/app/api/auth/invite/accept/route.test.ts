@@ -108,7 +108,7 @@ it("mints an admin session and redirects to /admin for an admin invite", async (
   expect(auditArg.details).toBe(JSON.stringify({ role: "admin" }));
 });
 
-it("does NOT mint a session for a technician invite; routes to login", async () => {
+it("does NOT mint a session for a technician invite; routes to the tech login", async () => {
   acceptInvite.mockResolvedValue({
     ok: true,
     accepted: {
@@ -124,7 +124,7 @@ it("does NOT mint a session for a technician invite; routes to login", async () 
   expect(res.status).toBe(200);
   expect(createAdminSession).not.toHaveBeenCalled();
   const json = await res.json();
-  expect(json.data.redirectTo).toBe("/admin/login");
+  expect(json.data.redirectTo).toBe("/tech-login");
 });
 
 it("collapses every accept failure to one generic 400 (no enumeration)", async () => {
