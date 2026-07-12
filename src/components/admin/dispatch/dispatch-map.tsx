@@ -160,21 +160,33 @@ function baseMarkerEl(): HTMLElement {
   return el;
 }
 
+/** Escape user/FieldPulse-controlled text before it goes into a popup's
+ * setHTML — a customer named `<img onerror>` would otherwise execute. */
+function esc(s: string): string {
+  return s.replace(
+    /[&<>"']/g,
+    (c) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[
+        c
+      ] as string,
+  );
+}
+
 function jobPopupHTML(job: Job): string {
   const win = formatWindow(job.arrivalWindowStart);
   const techLabel = job.technicianName
-    ? `<span style="color:#0f172a">${job.technicianName}</span>`
+    ? `<span style="color:#0f172a">${esc(job.technicianName)}</span>`
     : `<span style="color:#d97706;font-weight:600">Unassigned</span>`;
   const priceRow = job.priceCents != null
     ? `<div style="margin-top:5px;padding-top:5px;border-top:1px solid #e2e8f0;font-weight:600;color:#0f172a">${formatCents(job.priceCents)}</div>`
     : '';
   return `<div style="font:13px/1.45 system-ui,-apple-system;min-width:180px;max-width:240px">
-  <div style="font-weight:700;font-size:14px;color:#0f172a">${job.customerName ?? job.referenceNumber}</div>
-  <div style="font-family:ui-monospace,monospace;font-size:11px;color:#64748b;margin-top:1px">${job.referenceNumber}</div>
-  <div style="margin-top:6px;color:#334155">${humanize(job.issueType)}</div>
+  <div style="font-weight:700;font-size:14px;color:#0f172a">${esc(job.customerName ?? job.referenceNumber)}</div>
+  <div style="font-family:ui-monospace,monospace;font-size:11px;color:#64748b;margin-top:1px">${esc(job.referenceNumber)}</div>
+  <div style="margin-top:6px;color:#334155">${esc(humanize(job.issueType))}</div>
   <div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap">
-    <span style="background:${jobColor(job.urgency)}1a;color:${jobColor(job.urgency)};border:1px solid ${jobColor(job.urgency)}40;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:600">${humanize(job.urgency)}</span>
-    <span style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:4px;padding:1px 6px;font-size:11px">${humanize(job.status)}</span>
+    <span style="background:${jobColor(job.urgency)}1a;color:${jobColor(job.urgency)};border:1px solid ${jobColor(job.urgency)}40;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:600">${esc(humanize(job.urgency))}</span>
+    <span style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:4px;padding:1px 6px;font-size:11px">${esc(humanize(job.status))}</span>
   </div>
   <div style="margin-top:6px;color:#475569;font-size:12px">${win}</div>
   <div style="margin-top:2px;font-size:12px">${techLabel}</div>
@@ -186,7 +198,7 @@ function arPopupHTML(ar: ArCustomer): string {
   const { ring } = arColor(ar.oldestDays);
   const ageLabel = ar.oldestDays < 30 ? `${ar.oldestDays}d` : ar.oldestDays < 90 ? `${ar.oldestDays}d` : `${ar.oldestDays}d — overdue`;
   return `<div style="font:13px/1.45 system-ui,-apple-system;min-width:160px;max-width:220px">
-  <div style="font-weight:700;font-size:14px;color:#0f172a">${ar.name ?? 'Unknown customer'}</div>
+  <div style="font-weight:700;font-size:14px;color:#0f172a">${esc(ar.name ?? 'Unknown customer')}</div>
   <div style="margin-top:6px;font-size:20px;font-weight:700;color:${ring}">${formatCents(ar.owingCents)}</div>
   <div style="color:#64748b;font-size:12px;margin-top:2px">${ar.invoiceCount} invoice${ar.invoiceCount !== 1 ? 's' : ''} · oldest ${ageLabel}</div>
 </div>`;
@@ -280,7 +292,7 @@ export function DispatchMap() {
       // Base marker — always shown.
       const base = new maplibregl.Marker({ element: baseMarkerEl() })
         .setLngLat([data.base.longitude, data.base.latitude])
-        .setPopup(new maplibregl.Popup({ offset: 18 }).setHTML(`<strong>${data.base.name}</strong><br/>Base`))
+        .setPopup(new maplibregl.Popup({ offset: 18 }).setHTML(`<strong>${esc(data.base.name)}</strong><br/>Base`))
         .addTo(map);
       markersRef.current.push(base);
 
@@ -300,7 +312,7 @@ export function DispatchMap() {
       // Technician pings — always shown.
       for (const tech of data.technicians) {
         const popup = new maplibregl.Popup({ offset: 14 }).setHTML(
-          `<div style="font:13px system-ui"><strong>${tech.name}</strong><br/><span style="color:#64748b">Updated ${timeAgo(tech.capturedAt)}</span></div>`,
+          `<div style="font:13px system-ui"><strong>${esc(tech.name)}</strong><br/><span style="color:#64748b">Updated ${timeAgo(tech.capturedAt)}</span></div>`,
         );
         markersRef.current.push(
           new maplibregl.Marker({ element: techMarkerEl(prefersReducedMotion) })

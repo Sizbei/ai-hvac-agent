@@ -82,7 +82,13 @@ export async function GET() {
       })
       .from(serviceRequests)
       .leftJoin(users, eq(serviceRequests.assignedTo, users.id))
-      .leftJoin(customers, eq(serviceRequests.customerId, customers.id))
+      .leftJoin(
+        customers,
+        and(
+          eq(serviceRequests.customerId, customers.id),
+          eq(customers.organizationId, session.organizationId),
+        ),
+      )
       .leftJoin(
         customerLocations,
         and(
