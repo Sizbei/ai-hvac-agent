@@ -175,7 +175,9 @@ function emptyMessage(bucket: Bucket | null): string {
 // ── page ──────────────────────────────────────────────────────────────────────
 
 export default function EstimatesPage() {
-  const [activeBucket, setActiveBucket] = useState<Bucket | null>(null);
+  // Default to Open — the actionable tab (the follow-up list), per the
+  // approved mockup; All is one click away.
+  const [activeBucket, setActiveBucket] = useState<Bucket | null>('open');
   const [page, setPage] = useState(1);
   const [createOpen, setCreateOpen] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
