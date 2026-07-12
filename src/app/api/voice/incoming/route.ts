@@ -125,7 +125,6 @@ export async function POST(request: NextRequest) {
       gatherTwiML({
         say: GREETING,
         action: "/api/voice/gather",
-        reprompt: "Sorry, I did not catch that. Please tell me what is going on with your heating or cooling.",
         voice,
       }),
       { headers: TWIML_HEADERS },

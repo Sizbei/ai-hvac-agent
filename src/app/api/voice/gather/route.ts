@@ -135,11 +135,28 @@ export async function POST(request: NextRequest) {
     }
 
     // No recognized speech or digits — re-prompt without consuming a turn.
+    // actionOnEmptyResult submits silence here (instead of Twilio hanging up
+    // mid-intake), so BOUND the re-prompts: consecutive silences ride a query
+    // counter (Twilio signs the full action URL, same pattern as dial-status),
+    // and after two unanswered re-prompts the caller gets a goodbye, not an
+    // endless loop on an abandoned call. Any real input resets the counter by
+    // taking the normal path below (plain /api/voice/gather action).
     if (speech.length === 0 && digits.length === 0) {
+      const silences =
+        Number(request.nextUrl.searchParams.get("silence") ?? "0") || 0;
+      if (silences >= 2) {
+        return new Response(
+          sayThenHangupTwiML(
+            "I still can't hear you — sorry about that. Please call us back anytime. Goodbye.",
+            voice,
+          ),
+          { headers: TWIML_HEADERS },
+        );
+      }
       return new Response(
         gatherTwiML({
           say: "I'm sorry, I didn't hear anything. Could you tell me what's going on?",
-          action: "/api/voice/gather",
+          action: `/api/voice/gather?silence=${silences + 1}`,
           voice,
         }),
         { headers: TWIML_HEADERS },

@@ -44,15 +44,15 @@ describe("ElevenLabs <Play> mode", () => {
     expect(xml).not.toContain("<Say");
   });
 
-  it("plays the prompt and the reprompt (both <Play>, no <Say>)", () => {
+  it("emits nothing after the <Gather> (silence submits to the action instead)", () => {
     const xml = gatherTwiML({
       say: "Go ahead.",
       action: "/x",
-      reprompt: "Still there?",
       voice: ELEVEN_VOICE,
     });
-    expect((xml.match(/<Play>/g) ?? []).length).toBe(2);
+    expect((xml.match(/<Play>/g) ?? []).length).toBe(1);
     expect(xml).not.toContain("<Say");
+    expect(xml.trim()).toMatch(/<\/Gather>\s*<\/Response>$/);
   });
 
   it("plays the final line then hangs up (no duplicate <Say>)", () => {
@@ -90,14 +90,6 @@ describe("neural voice", () => {
     );
   });
 
-  it("applies the voice to the reprompt line too", () => {
-    const xml = gatherTwiML({
-      say: "Go ahead.",
-      action: "/x",
-      reprompt: "Still there?",
-    });
-    expect(xml).toContain(`<Say voice="${DEFAULT_VOICE}">Still there?</Say>`);
-  });
 });
 
 describe("gatherTwiML", () => {
@@ -140,16 +132,15 @@ describe("gatherTwiML", () => {
     expect(xml).not.toContain("<fixed>");
   });
 
-  it("re-prompts with a fallback <Say> if the caller says nothing", () => {
+  it("submits to the action even when the caller stays silent (actionOnEmptyResult)", () => {
+    // Without this attribute Twilio falls through the <Gather> on silence and,
+    // with nothing after it, hangs up on the caller mid-intake. With it, the
+    // gather route receives an empty SpeechResult and can re-prompt gracefully.
     const xml = gatherTwiML({
       say: "Go ahead.",
       action: "/api/voice/gather",
-      reprompt: "Sorry, I did not catch that. Please tell me what is wrong.",
     });
-    // The reprompt sits AFTER the Gather (Twilio falls through if no speech).
-    const gatherIdx = xml.indexOf("<Gather");
-    const repromptIdx = xml.indexOf("did not catch that");
-    expect(repromptIdx).toBeGreaterThan(gatherIdx);
+    expect(xml).toContain('actionOnEmptyResult="true"');
   });
 });
 

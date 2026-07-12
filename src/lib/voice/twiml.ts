@@ -91,8 +91,11 @@ function speak(text: string, voice: VoiceMode): string {
 
 /**
  * A <Gather> that collects the caller's speech (and optionally DTMF) and POSTs
- * the result to `action`. Speaks `say` first; if a `reprompt` is given it
- * follows the Gather so Twilio reads it when the caller stays silent.
+ * the result to `action`. Speaks `say` first. `actionOnEmptyResult` makes
+ * Twilio submit to `action` (with an empty SpeechResult) even when the caller
+ * stays silent — without it Twilio falls through the <Gather> and, reaching the
+ * end of the document, hangs up on a silent caller mid-intake. The gather
+ * route owns the re-prompt/goodbye policy for empty turns.
  *
  * When `input` is "dtmf speech" (ZIP verify), the <Gather> accepts keypad digits
  * as well as speech and returns the digits in the `Digits` field. `numDigits`
@@ -103,14 +106,12 @@ function speak(text: string, voice: VoiceMode): string {
 export function gatherTwiML(params: {
   readonly say: string;
   readonly action: string;
-  readonly reprompt?: string;
   readonly voice?: VoiceMode;
   readonly input?: "speech" | "dtmf speech";
   readonly numDigits?: number;
   readonly finishOnKey?: string;
 }): string {
-  const { say, action, reprompt, voice = POLLY_VOICE, input = "speech", numDigits, finishOnKey } = params;
-  const repromptLine = reprompt ? `\n  ${speak(reprompt, voice)}` : "";
+  const { say, action, voice = POLLY_VOICE, input = "speech", numDigits, finishOnKey } = params;
   const numDigitsAttr = numDigits !== undefined ? ` numDigits="${numDigits}"` : "";
   const finishOnKeyAttr =
     input === "dtmf speech" && numDigits === undefined
@@ -118,9 +119,9 @@ export function gatherTwiML(params: {
       : "";
   return `${XML_DECL}
 <Response>
-  <Gather input="${input}" action="${escapeXml(action)}" method="POST" speechTimeout="${resolveSpeechTimeout()}"${numDigitsAttr}${finishOnKeyAttr}>
+  <Gather input="${input}" action="${escapeXml(action)}" method="POST" speechTimeout="${resolveSpeechTimeout()}" actionOnEmptyResult="true"${numDigitsAttr}${finishOnKeyAttr}>
     ${speak(say, voice)}
-  </Gather>${repromptLine}
+  </Gather>
 </Response>`;
 }
 

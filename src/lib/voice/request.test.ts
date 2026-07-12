@@ -43,3 +43,26 @@ describe("resolveVoiceMode", () => {
     expect(resolveVoiceMode(req(), 1000).kind).toBe("polly");
   });
 });
+
+describe("reconstructWebhookUrl", () => {
+  it("preserves the query string — Twilio signs the FULL URL it posted to", async () => {
+    const { reconstructWebhookUrl } = await import("./config");
+    const req = new Request(
+      "http://localhost:3000/api/voice/gather?silence=1",
+      { method: "POST" },
+    );
+    expect(
+      reconstructWebhookUrl(req, "https", "app.example.com"),
+    ).toBe("https://app.example.com/api/voice/gather?silence=1");
+  });
+
+  it("leaves query-less URLs unchanged", async () => {
+    const { reconstructWebhookUrl } = await import("./config");
+    const req = new Request("http://localhost:3000/api/voice/incoming", {
+      method: "POST",
+    });
+    expect(reconstructWebhookUrl(req, "https", "app.example.com")).toBe(
+      "https://app.example.com/api/voice/incoming",
+    );
+  });
+});

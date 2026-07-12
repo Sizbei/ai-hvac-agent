@@ -31,5 +31,8 @@ export function reconstructWebhookUrl(
   const url = new URL(request.url);
   const proto = forwardedProto ?? url.protocol.replace(":", "");
   const host = forwardedHost ?? url.host;
-  return `${proto}://${host}${url.pathname}`;
+  // Twilio signs the FULL URL it posted to, query string included. Dropping
+  // url.search made every webhook with an action query param (dial-status
+  // ?fallback=, gather ?silence=) fail signature validation with a 403.
+  return `${proto}://${host}${url.pathname}${url.search}`;
 }
