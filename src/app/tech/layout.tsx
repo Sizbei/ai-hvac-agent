@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { getTechSession } from '@/lib/auth/tech-session';
 import { TechLocationTracker } from '@/components/tech/tech-location-tracker';
+import { TechSignOutButton } from '@/components/tech/tech-sign-out-button';
 
 /**
  * Technician field view shell. Gated on the dedicated technician session (NOT the
@@ -18,9 +19,12 @@ export default async function TechLayout({
 
   return (
     <div className="mx-auto min-h-dvh max-w-md bg-background">
-      <header className="sticky top-0 z-10 border-b bg-background/95 px-4 py-3 backdrop-blur">
-        <h1 className="text-base font-semibold tracking-tight">Field</h1>
-        <p className="text-xs text-muted-foreground">{session.name}</p>
+      <header className="sticky top-0 z-10 flex items-center justify-between border-b bg-background/95 px-4 py-3 backdrop-blur">
+        <div>
+          <h1 className="text-base font-semibold tracking-tight">Field</h1>
+          <p className="text-xs text-muted-foreground">{session.name}</p>
+        </div>
+        <TechSignOutButton />
       </header>
       <main className="space-y-4 px-4 py-4">
         <TechLocationTracker />
