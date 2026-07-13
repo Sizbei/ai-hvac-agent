@@ -5,8 +5,11 @@
  * Useful for testing and one-off notifications.
  */
 
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { queueCommunicationJob } from "@/lib/communication/job-queue";
 import { getAdminSession } from "@/lib/auth/session";
+import { db } from "@/lib/db";
+import { communicationTemplates } from "@/lib/db/schema";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
@@ -69,9 +72,33 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const validated = sendCommunicationSchema.parse(body);
 
-    // For Phase 1, we'll use a default template ID
-    // In Phase 2, this will look up the org's active template for the trigger type
-    const templateId = "default-template-id"; // TODO: Look up from org's templates
+    // Resolve the org's active template for this trigger + channel. SMS maps to
+    // the 'sms' template type; email maps to either html or text (pick by
+    // priority, lowest number first). Without this, we'd enqueue a job that
+    // always fails deep in the queue with "Template not found".
+    const templateTypes =
+      validated.channel === "sms"
+        ? (["sms"] as const)
+        : (["email_html", "email_text"] as const);
+    const template = await db.query.communicationTemplates.findFirst({
+      where: and(
+        eq(communicationTemplates.organizationId, session.organizationId),
+        eq(communicationTemplates.triggerType, validated.triggerType),
+        inArray(communicationTemplates.templateType, [...templateTypes]),
+        eq(communicationTemplates.isActive, true),
+      ),
+      orderBy: [asc(communicationTemplates.priority)],
+    });
+    if (!template) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `No active ${validated.channel} template configured for "${validated.triggerType}"`,
+        },
+        { status: 400 },
+      );
+    }
+    const templateId = template.id;
 
     // Queue the job
     const jobId = await queueCommunicationJob({

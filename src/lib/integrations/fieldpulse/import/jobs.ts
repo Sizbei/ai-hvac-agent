@@ -40,6 +40,8 @@ import type { RequestStatus } from "@/lib/admin/request-status";
 import { generateReferenceNumber } from "@/lib/requests/submit-session-request";
 import { importOneFpCustomer, createDeletedPlaceholderCustomer } from "./customers";
 import { buildFpSpillover } from "./spillover";
+import { getOrgConfig } from "@/lib/admin/org-config-queries";
+import { isAfterHours } from "@/lib/admin/after-hours";
 
 // ── Status map (pluggable) ─────────────────────────────────────────────────────
 // Edit this one object to expand the vocabulary when the user names their workflow.
@@ -327,6 +329,11 @@ export async function importJobsFromFieldpulse(
     techRows.map((r) => [r.fieldpulseUserId as string, r.id]),
   );
 
+  // Org after-hours config (fetched once) — imported jobs get an accurate
+  // after-hours flag computed from their REAL created_at (see below), not a
+  // blanket false. A job called in at 11pm should read as after-hours.
+  const afterHoursCfg = (await getOrgConfig(orgId)).afterHoursConfig;
+
   // Founder self-heal: lazy-loaded FP user cache (one listUsers() call per run).
   let fpUserCache: Map<string, FieldpulseUser> | null = null;
   async function resolveFpUserCache(): Promise<Map<string, FieldpulseUser>> {
@@ -500,7 +507,10 @@ export async function importJobsFromFieldpulse(
             completedAt: job.completedAt,
             referenceNumber,
             fieldpulseJobId: job.fpId,
-            isAfterHours: false,
+            // Compute from the real booking time when known (not a blanket false).
+            isAfterHours: job.createdAt
+              ? isAfterHours(job.createdAt, afterHoursCfg)
+              : false,
             // Reflect when the job was actually booked in FP, not the import run.
             createdAt: job.createdAt ?? new Date(),
             fieldpulseData: fpJobSpillover,
