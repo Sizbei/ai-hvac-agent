@@ -40,6 +40,8 @@ import { SyncPill } from '@/components/admin/sync-pill';
 import type { CustomerListRecord } from '@/lib/admin/crm-types';
 
 const ALL_PROPERTY_TYPES = 'all';
+const ALL_CUSTOMER_TYPES = 'all';
+const ALL_MEMBERSHIP_STATUSES = 'all';
 const PER_PAGE = 50;
 
 // ── CustomerRow ────────────────────────────────────────────────────────────────
@@ -102,6 +104,9 @@ export default function CustomersPage() {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [propertyTypeFilter, setPropertyTypeFilter] = useState<string>(ALL_PROPERTY_TYPES);
+  const [customerTypeFilter, setCustomerTypeFilter] = useState<string>(ALL_CUSTOMER_TYPES);
+  const [membershipStatusFilter, setMembershipStatusFilter] = useState<string>(ALL_MEMBERSHIP_STATUSES);
+  const [fieldpulseSyncedFilter, setFieldpulseSyncedFilter] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [page, setPage] = useState(1);
   const [view, setView] = useState<'cards' | 'list'>(() => {
@@ -121,6 +126,10 @@ export default function CustomersPage() {
 
   const propertyType =
     propertyTypeFilter === ALL_PROPERTY_TYPES ? null : propertyTypeFilter;
+  const customerType =
+    customerTypeFilter === ALL_CUSTOMER_TYPES ? null : customerTypeFilter;
+  const membershipStatus =
+    membershipStatusFilter === ALL_MEMBERSHIP_STATUSES ? null : membershipStatusFilter;
 
   // Server-paginated: the hook returns only the current page plus the total and
   // the distinct property types for the filter dropdown.
@@ -130,6 +139,9 @@ export default function CustomersPage() {
       page,
       search: debouncedSearch,
       propertyType,
+      customerType,
+      membershipStatus,
+      fieldpulseSynced: fieldpulseSyncedFilter,
     });
 
   const setViewPersisted = useCallback((next: 'cards' | 'list') => {
@@ -147,7 +159,7 @@ export default function CustomersPage() {
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, propertyTypeFilter, showArchived]);
+  }, [debouncedSearch, propertyTypeFilter, customerTypeFilter, membershipStatusFilter, fieldpulseSyncedFilter, showArchived]);
 
   const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
   const safePage = Math.min(page, totalPages);
@@ -159,7 +171,11 @@ export default function CustomersPage() {
   );
 
   const isFiltered =
-    Boolean(debouncedSearch) || propertyTypeFilter !== ALL_PROPERTY_TYPES;
+    Boolean(debouncedSearch) ||
+    propertyTypeFilter !== ALL_PROPERTY_TYPES ||
+    customerTypeFilter !== ALL_CUSTOMER_TYPES ||
+    membershipStatusFilter !== ALL_MEMBERSHIP_STATUSES ||
+    fieldpulseSyncedFilter;
 
   const handleSearchChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setSearch(e.target.value);
@@ -167,6 +183,18 @@ export default function CustomersPage() {
 
   const handlePropertyTypeChange = useCallback((value: string | null) => {
     setPropertyTypeFilter(value ?? ALL_PROPERTY_TYPES);
+  }, []);
+
+  const handleCustomerTypeChange = useCallback((value: string | null) => {
+    setCustomerTypeFilter(value ?? ALL_CUSTOMER_TYPES);
+  }, []);
+
+  const handleMembershipStatusChange = useCallback((value: string | null) => {
+    setMembershipStatusFilter(value ?? ALL_MEMBERSHIP_STATUSES);
+  }, []);
+
+  const handleToggleFieldpulseSynced = useCallback(() => {
+    setFieldpulseSyncedFilter((prev) => !prev);
   }, []);
 
   const handleToggleArchived = useCallback(() => {
@@ -226,6 +254,43 @@ export default function CustomersPage() {
             ))}
           </SelectContent>
         </Select>
+        <Select
+          value={customerTypeFilter}
+          onValueChange={handleCustomerTypeChange}
+        >
+          <SelectTrigger aria-label="Filter by customer type" className="w-[160px]">
+            <SelectValue placeholder="Customer type" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL_CUSTOMER_TYPES}>All customer types</SelectItem>
+            <SelectItem value="residential">Residential</SelectItem>
+            <SelectItem value="commercial">Commercial</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select
+          value={membershipStatusFilter}
+          onValueChange={handleMembershipStatusChange}
+        >
+          <SelectTrigger aria-label="Filter by membership status" className="w-[180px]">
+            <SelectValue placeholder="Membership status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL_MEMBERSHIP_STATUSES}>All memberships</SelectItem>
+            <SelectItem value="none">None</SelectItem>
+            <SelectItem value="active">Active</SelectItem>
+            <SelectItem value="suspended">Suspended</SelectItem>
+            <SelectItem value="expired">Expired</SelectItem>
+            <SelectItem value="cancelled">Cancelled</SelectItem>
+          </SelectContent>
+        </Select>
+        <Button
+          variant={fieldpulseSyncedFilter ? 'default' : 'outline'}
+          size="sm"
+          onClick={handleToggleFieldpulseSynced}
+          aria-pressed={fieldpulseSyncedFilter}
+        >
+          FP synced only
+        </Button>
         <Button
           variant={showArchived ? 'default' : 'outline'}
           size="sm"

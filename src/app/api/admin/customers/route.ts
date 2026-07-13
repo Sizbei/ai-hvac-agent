@@ -40,12 +40,18 @@ export async function GET(request: NextRequest) {
     const page = Number.isFinite(pageRaw) && pageRaw > 0 ? Math.floor(pageRaw) : 1;
     const search = params.get("search") ?? "";
     const propertyType = params.get("propertyType");
+    const customerType = params.get("customerType");
+    const membershipStatus = params.get("membershipStatus");
+    const fieldpulseSynced = params.get("fieldpulseSynced") === "true";
 
     const result = await getCustomers(session.organizationId, {
       includeArchived,
       page,
       search,
       propertyType,
+      customerType,
+      membershipStatus,
+      fieldpulseSynced,
     });
     const response = successResponse(result);
     response.headers.set('Cache-Control', 'private, max-age=0, stale-while-revalidate=30');

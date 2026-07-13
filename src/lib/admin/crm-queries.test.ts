@@ -28,6 +28,7 @@ const { selectQueue, updateQueue, deleteQueue, insertMock, logAuditMock, batchMo
 vi.mock('@/lib/db', () => ({
   db: {
     select: () => chain(selectQueue.shift() ?? []),
+    selectDistinct: () => chain(selectQueue.shift() ?? []),
     delete: () => chain(deleteQueue.shift() ?? []),
     insert: () => {
       insertMock();
@@ -65,6 +66,7 @@ vi.mock('drizzle-orm', () => ({
   sql: vi.fn(),
   inArray: (...a: unknown[]) => a,
   isNull: (c: unknown) => c,
+  isNotNull: (c: unknown) => c,
 }));
 
 vi.mock('@/lib/db/schema', () => ({
@@ -83,7 +85,12 @@ vi.mock('@/lib/db/schema', () => ({
     createdAt: 'customers.created',
     updatedAt: 'customers.updated',
     archivedAt: 'customers.archived',
+    customerType: 'customers.customerType',
+    membershipStatus: 'customers.membershipStatus',
+    fieldpulseCustomerId: 'customers.fpId',
   },
+  customerTypeEnum: { enumValues: ['residential', 'commercial'] },
+  membershipStatusEnum: { enumValues: ['none', 'active', 'suspended', 'expired', 'cancelled'] },
   customerEquipment: {
     id: 'equip.id',
     customerId: 'equip.cid',
@@ -106,6 +113,7 @@ vi.mock('@/lib/db/schema', () => ({
 }));
 
 import {
+  getCustomers,
   findCustomerIdByContact,
   deleteCustomer,
   archiveCustomer,
@@ -357,5 +365,115 @@ describe('deleteEquipment', () => {
     deleteQueue.push([{ id: EQUIP }]);
     const result = await deleteEquipment(ORG, CUST, EQUIP);
     expect(result).toBe(true);
+  });
+});
+
+// ── getCustomers segmentation filters ─────────────────────────────────────────
+// Queue consumption order (no-search fast path):
+//   [0] selectDistinct → typesPromise (resolved synchronously via chain.then)
+//   [1] select → pageSub builder (not awaited, used as table ref)
+//   [2] select → pagePromise rows
+//   [3] select → countPromise [{n}]
+
+function pushFastPathQueue(pageRows: unknown[] = [], n = 0) {
+  selectQueue.push([]); // [0] typesPromise → []
+  selectQueue.push([]); // [1] pageSub placeholder
+  selectQueue.push(pageRows); // [2] page rows
+  selectQueue.push([{ n }]); // [3] count
+}
+
+describe('getCustomers — customerType filter', () => {
+  it('returns customers when a valid customerType is applied', async () => {
+    const fakeRow = {
+      id: 'c1',
+      nameEncrypted: 'enc:Alice',
+      phoneEncrypted: null,
+      emailEncrypted: null,
+      addressEncrypted: null,
+      propertyType: null,
+      createdAt: new Date(),
+      customerType: 'residential',
+      membershipStatus: 'none',
+      fieldpulseCustomerId: null,
+      archivedAt: null,
+      equipmentCount: 0,
+      requestCount: 0,
+      lastServiceDate: null,
+    };
+    pushFastPathQueue([fakeRow], 1);
+    const result = await getCustomers(ORG, { customerType: 'residential' });
+    expect(result.total).toBe(1);
+    expect(result.customers[0].customerType).toBe('residential');
+  });
+
+  it('ignores an invalid customerType (no crash, guard skips the condition)', async () => {
+    pushFastPathQueue([], 0);
+    // 'enterprise' is not in customerTypeEnum.enumValues — guard skips the condition
+    const result = await getCustomers(ORG, { customerType: 'enterprise' });
+    expect(result.customers).toHaveLength(0);
+  });
+});
+
+describe('getCustomers — membershipStatus filter', () => {
+  it('returns customers when a valid membershipStatus is applied', async () => {
+    const fakeRow = {
+      id: 'c3',
+      nameEncrypted: 'enc:Carol',
+      phoneEncrypted: null,
+      emailEncrypted: null,
+      addressEncrypted: null,
+      propertyType: null,
+      createdAt: new Date(),
+      customerType: 'residential',
+      membershipStatus: 'active',
+      fieldpulseCustomerId: null,
+      archivedAt: null,
+      equipmentCount: 0,
+      requestCount: 0,
+      lastServiceDate: null,
+    };
+    pushFastPathQueue([fakeRow], 1);
+    const result = await getCustomers(ORG, { membershipStatus: 'active' });
+    expect(result.total).toBe(1);
+    expect(result.customers[0].membershipStatus).toBe('active');
+  });
+
+  it('ignores an invalid membershipStatus (no crash, guard skips the condition)', async () => {
+    pushFastPathQueue([], 0);
+    // 'pending' is NOT in membershipStatusEnum.enumValues — guard skips the condition
+    const result = await getCustomers(ORG, { membershipStatus: 'pending' });
+    expect(result.customers).toHaveLength(0);
+  });
+});
+
+describe('getCustomers — fieldpulseSynced filter', () => {
+  it('returns customers when fieldpulseSynced is true', async () => {
+    const fakeRow = {
+      id: 'c4',
+      nameEncrypted: 'enc:Dave',
+      phoneEncrypted: null,
+      emailEncrypted: null,
+      addressEncrypted: null,
+      propertyType: null,
+      createdAt: new Date(),
+      customerType: 'residential',
+      membershipStatus: 'none',
+      fieldpulseCustomerId: 'fp-abc',
+      archivedAt: null,
+      equipmentCount: 0,
+      requestCount: 0,
+      lastServiceDate: null,
+    };
+    pushFastPathQueue([fakeRow], 1);
+    const result = await getCustomers(ORG, { fieldpulseSynced: true });
+    expect(result.total).toBe(1);
+    expect(result.customers[0].fieldpulseCustomerId).toBe('fp-abc');
+  });
+
+  it('applies no isNotNull condition when fieldpulseSynced is false (default)', async () => {
+    pushFastPathQueue([], 0);
+    // No crash; guard skips the isNotNull condition
+    const result = await getCustomers(ORG, { fieldpulseSynced: false });
+    expect(result.customers).toHaveLength(0);
   });
 });

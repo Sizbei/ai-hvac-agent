@@ -17,6 +17,9 @@ interface UseAdminCustomersParams {
   readonly page?: number;
   readonly search?: string;
   readonly propertyType?: string | null;
+  readonly customerType?: string | null;
+  readonly membershipStatus?: string | null;
+  readonly fieldpulseSynced?: boolean;
 }
 
 /**
@@ -30,8 +33,11 @@ export function useAdminCustomers(params: UseAdminCustomersParams = {}) {
   const page = params.page ?? 1;
   const search = params.search ?? '';
   const propertyType = params.propertyType ?? null;
+  const customerType = params.customerType ?? null;
+  const membershipStatus = params.membershipStatus ?? null;
+  const fieldpulseSynced = params.fieldpulseSynced ?? false;
 
-  const key = `customers:${includeArchived}:${page}:${propertyType ?? ''}:${search}`;
+  const key = `customers:${includeArchived}:${page}:${propertyType ?? ''}:${customerType ?? ''}:${membershipStatus ?? ''}:${fieldpulseSynced}:${search}`;
 
   const [customers, setCustomers] = useState<readonly CustomerListRecord[]>(
     () => customersCache.get(key)?.data.customers ?? [],
@@ -63,6 +69,9 @@ export function useAdminCustomers(params: UseAdminCustomersParams = {}) {
         if (page > 1) qs.set('page', String(page));
         if (search) qs.set('search', search);
         if (propertyType) qs.set('propertyType', propertyType);
+        if (customerType) qs.set('customerType', customerType);
+        if (membershipStatus) qs.set('membershipStatus', membershipStatus);
+        if (fieldpulseSynced) qs.set('fieldpulseSynced', 'true');
         const query = qs.toString();
         const res = await fetch(`/api/admin/customers${query ? `?${query}` : ''}`);
         const json = await res.json();
@@ -85,7 +94,7 @@ export function useAdminCustomers(params: UseAdminCustomersParams = {}) {
         setIsLoading(false);
       }
     },
-    [key, includeArchived, page, search, propertyType],
+    [key, includeArchived, page, search, propertyType, customerType, membershipStatus, fieldpulseSynced],
   );
 
   // Idiomatic data fetch: setState runs only AFTER the awaited fetch resolves,

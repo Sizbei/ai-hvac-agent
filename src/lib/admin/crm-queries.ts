@@ -19,6 +19,8 @@ import {
   serviceRequests,
   users,
   auditLog,
+  customerTypeEnum,
+  membershipStatusEnum,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { logAudit } from "@/lib/admin/audit";
@@ -72,6 +74,9 @@ export async function getCustomers(
     readonly limit?: number;
     readonly search?: string;
     readonly propertyType?: string | null;
+    readonly customerType?: string | null;
+    readonly membershipStatus?: string | null;
+    readonly fieldpulseSynced?: boolean;
   },
 ): Promise<CustomerListPage> {
   const includeArchived = options?.includeArchived ?? false;
@@ -80,9 +85,28 @@ export async function getCustomers(
   const search = options?.search?.trim().toLowerCase() ?? "";
   const propertyType = options?.propertyType?.trim() || null;
 
+  type CustomerType = (typeof customerTypeEnum.enumValues)[number];
+  const validCustomerTypes: readonly string[] = customerTypeEnum.enumValues;
+  const customerType =
+    options?.customerType && validCustomerTypes.includes(options.customerType)
+      ? (options.customerType as CustomerType)
+      : null;
+
+  type MembershipStatus = (typeof membershipStatusEnum.enumValues)[number];
+  const validMembershipStatuses: readonly string[] = membershipStatusEnum.enumValues;
+  const membershipStatus =
+    options?.membershipStatus && validMembershipStatuses.includes(options.membershipStatus)
+      ? (options.membershipStatus as MembershipStatus)
+      : null;
+
+  const fieldpulseSynced = options?.fieldpulseSynced ?? false;
+
   const conditions: SQL[] = [];
   if (!includeArchived) conditions.push(isNull(customers.archivedAt));
   if (propertyType) conditions.push(eq(customers.propertyType, propertyType));
+  if (customerType) conditions.push(eq(customers.customerType, customerType));
+  if (membershipStatus) conditions.push(eq(customers.membershipStatus, membershipStatus));
+  if (fieldpulseSynced) conditions.push(isNotNull(customers.fieldpulseCustomerId));
   const whereClause = withTenant(customers, organizationId, ...conditions);
 
   // Distinct property types for the filter dropdown — cheap; runs in parallel
