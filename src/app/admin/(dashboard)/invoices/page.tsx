@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, AlertTriangle, Receipt } from 'lucide-react';
 import { useInvoices, type InvoiceSortKey } from '@/hooks/use-invoices';
+import { useUrlFilterSync } from '@/hooks/use-url-filter-sync';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -154,6 +155,33 @@ export default function InvoicesPage() {
   const [voidBusy, setVoidBusy] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Persist filters to the URL (shareable links + survives refresh). Page is
+  // intentionally NOT persisted — a restored filtered view starts at page 1,
+  // which also sidesteps the search-debounce page-reset. Defaults map to '' so
+  // they're dropped from the URL.
+  const urlFilterState = {
+    filter: filter === 'overdue' ? '' : filter,
+    q: search,
+    sort: sortKey === 'age-oldest' ? '' : sortKey,
+    source: source === 'all' ? '' : source,
+    unreminded: unreminded ? '1' : '',
+    min: minDollars,
+    max: maxDollars,
+  };
+  const restoreFiltersFromUrl = useCallback((p: Record<string, string>) => {
+    const filters: readonly string[] = ['overdue', 'all', 'unpaid', 'paid'];
+    const sources: readonly string[] = ['all', 'native', 'fieldpulse', 'housecall'];
+    const sorts: readonly string[] = ['newest', 'oldest', 'balance-high', 'age-oldest'];
+    if (p.filter && filters.includes(p.filter)) setFilter(p.filter as Filter);
+    if (p.q) { setSearch(p.q); setDebouncedSearch(p.q); }
+    if (p.sort && sorts.includes(p.sort)) setSortKey(p.sort as InvoiceSortKey);
+    if (p.source && sources.includes(p.source)) setSource(p.source as SourceValue);
+    if (p.unreminded === '1') setUnreminded(true);
+    if (p.min) setMinDollars(p.min);
+    if (p.max) setMaxDollars(p.max);
+  }, []);
+  useUrlFilterSync(urlFilterState, restoreFiltersFromUrl);
 
   // Derive server params from UI state
   const serverState = filterToState(filter);
