@@ -1,12 +1,12 @@
-import { and, desc, ilike, or } from "drizzle-orm";
+import { and, desc, eq, ilike, or } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { customers, serviceRequests, estimates, invoices } from "@/lib/db/schema";
+import { customers, serviceRequests, estimates, invoices, pricebookItems } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { decrypt } from "@/lib/crypto";
 import { invoiceRef } from "@/lib/admin/invoice-collectible";
 
 export type SearchResult = {
-  readonly type: "customer" | "invoice" | "job" | "estimate";
+  readonly type: "customer" | "invoice" | "job" | "estimate" | "pricebook";
   readonly id: string;
   readonly title: string;
   readonly subtitle: string;
@@ -200,16 +200,58 @@ export async function searchEstimates(
  * Runs 4 org-scoped entity searches in parallel and returns all results.
  * Callers must ensure q.length >= 2 before calling this function.
  */
+/**
+ * Pricebook items by name or SKU. Both are plaintext, so we ILIKE in SQL (no
+ * decrypt-scan) and cap at RESULTS_PER_TYPE. Active items only. Results deep-link
+ * to the pricebook list filtered to the item's name (leveraging URL-persist), as
+ * the pricebook has no per-item detail route.
+ */
+export async function searchPricebook(
+  organizationId: string,
+  q: string,
+): Promise<SearchResult[]> {
+  const like = `%${q}%`;
+  const rows = await db
+    .select({
+      id: pricebookItems.id,
+      name: pricebookItems.name,
+      sku: pricebookItems.sku,
+      priceCents: pricebookItems.priceCents,
+      type: pricebookItems.type,
+      fieldpulseItemId: pricebookItems.fieldpulseItemId,
+    })
+    .from(pricebookItems)
+    .where(
+      and(
+        withTenant(pricebookItems, organizationId),
+        eq(pricebookItems.active, true),
+        or(ilike(pricebookItems.name, like), ilike(pricebookItems.sku, like)),
+      ),
+    )
+    .orderBy(desc(pricebookItems.createdAt))
+    .limit(RESULTS_PER_TYPE);
+
+  return rows.map((row) => ({
+    type: "pricebook" as const,
+    id: row.id,
+    title: row.name,
+    subtitle: `${row.type} · ${formatCents(row.priceCents)}${row.sku ? ` · ${row.sku}` : ""}`,
+    href: `/admin/pricebook?q=${encodeURIComponent(row.name)}`,
+    syncedSource: row.fieldpulseItemId ? "fieldpulse" : null,
+  }));
+}
+
 export async function searchAllEntities(
   organizationId: string,
   q: string,
 ): Promise<SearchResult[]> {
-  const [customerResults, invoiceResults, jobResults, estimateResults] =
+  const [customerResults, invoiceResults, jobResults, estimateResults, pricebookResults] =
     await Promise.all([
       searchCustomers(organizationId, q),
       searchInvoices(organizationId, q),
       searchJobs(organizationId, q),
       searchEstimates(organizationId, q),
+      searchPricebook(organizationId, q),
     ]);
 
   return [
@@ -217,5 +259,6 @@ export async function searchAllEntities(
     ...invoiceResults,
     ...jobResults,
     ...estimateResults,
+    ...pricebookResults,
   ];
 }

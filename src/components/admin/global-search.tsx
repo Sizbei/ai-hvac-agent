@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, Loader2, Users, Receipt, ClipboardList, FileText, CornerDownLeft } from 'lucide-react';
+import { Search, Loader2, Users, Receipt, ClipboardList, FileText, Tags, CornerDownLeft } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -23,9 +23,10 @@ const TYPE_LABELS: Record<SearchResult['type'], string> = {
   invoice: 'Invoices',
   job: 'Jobs',
   estimate: 'Estimates',
+  pricebook: 'Pricebook',
 };
 
-const TYPE_ORDER: SearchResult['type'][] = ['customer', 'invoice', 'job', 'estimate'];
+const TYPE_ORDER: SearchResult['type'][] = ['customer', 'invoice', 'job', 'estimate', 'pricebook'];
 
 function TypeIcon({ type }: { type: SearchResult['type'] }) {
   const cls = 'size-4 shrink-0 text-muted-foreground';
@@ -38,6 +39,8 @@ function TypeIcon({ type }: { type: SearchResult['type'] }) {
       return <ClipboardList className={cls} />;
     case 'estimate':
       return <FileText className={cls} />;
+    case 'pricebook':
+      return <Tags className={cls} />;
   }
 }
 

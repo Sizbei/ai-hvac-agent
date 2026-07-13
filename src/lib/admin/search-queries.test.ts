@@ -37,6 +37,7 @@ import {
   searchInvoices,
   searchJobs,
   searchEstimates,
+  searchPricebook,
   searchAllEntities,
   type SearchResult,
 } from "./search-queries";
@@ -423,5 +424,49 @@ describe("searchAllEntities", () => {
     mockSelect.mockReturnValue(makeChain([]));
     const results: SearchResult[] = await searchAllEntities(ORG, "test");
     expect(results).toEqual([]);
+  });
+});
+
+// ── searchPricebook ──────────────────────────────────────────────────────────
+describe("searchPricebook", () => {
+  it("maps active items and deep-links to the filtered pricebook", async () => {
+    mockSelect.mockReturnValueOnce(
+      makeChain([
+        {
+          id: "pb-1",
+          name: "24 SEER Condenser",
+          sku: "CND-24",
+          priceCents: 420000,
+          type: "equipment",
+          fieldpulseItemId: null,
+        },
+      ]),
+    );
+    const results = await searchPricebook(ORG, "condenser");
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      type: "pricebook",
+      id: "pb-1",
+      title: "24 SEER Condenser",
+      subtitle: "equipment · $4200.00 · CND-24",
+      href: "/admin/pricebook?q=24%20SEER%20Condenser",
+      syncedSource: null,
+    });
+  });
+
+  it("omits SKU from the subtitle when absent and marks FP-synced", async () => {
+    mockSelect.mockReturnValueOnce(
+      makeChain([
+        { id: "pb-2", name: "Diagnostic Fee", sku: null, priceCents: 8900, type: "service", fieldpulseItemId: "fp-9" },
+      ]),
+    );
+    const results = await searchPricebook(ORG, "diag");
+    expect(results[0].subtitle).toBe("service · $89.00");
+    expect(results[0].syncedSource).toBe("fieldpulse");
+  });
+
+  it("returns [] when nothing matches", async () => {
+    mockSelect.mockReturnValueOnce(makeChain([]));
+    expect(await searchPricebook(ORG, "zzz")).toEqual([]);
   });
 });
