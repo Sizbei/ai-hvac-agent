@@ -41,6 +41,7 @@ export interface UseEstimatesParams {
   readonly bucket?: 'open' | 'won' | 'lost' | 'draft';
   readonly customerId?: string;
   readonly serviceRequestId?: string;
+  readonly search?: string;
 }
 
 interface EstimatesPayload {
@@ -67,7 +68,8 @@ function makeKey(params: UseEstimatesParams): string {
   const b = params.bucket ?? '';
   const c = params.customerId ?? '';
   const r = params.serviceRequestId ?? '';
-  return `estimates:${p}:${l}:${b}:${c}:${r}`;
+  const s = params.search ?? '';
+  return `estimates:${p}:${l}:${b}:${c}:${r}:${s}`;
 }
 
 function buildQuery(params: UseEstimatesParams): string {
@@ -77,6 +79,7 @@ function buildQuery(params: UseEstimatesParams): string {
   if (params.bucket) qs.set('bucket', params.bucket);
   if (params.customerId) qs.set('customerId', params.customerId);
   if (params.serviceRequestId) qs.set('serviceRequestId', params.serviceRequestId);
+  if (params.search) qs.set('search', params.search);
   const q = qs.toString();
   return q ? `?${q}` : '';
 }

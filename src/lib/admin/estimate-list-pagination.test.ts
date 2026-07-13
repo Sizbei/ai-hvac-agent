@@ -263,6 +263,68 @@ describe('getEstimatePipelineStats', () => {
   });
 });
 
+describe('listEstimates search filter', () => {
+  const makeRow = (overrides: Record<string, unknown> = {}) => ({
+    id: 'est-1',
+    status: 'open',
+    totalCents: 5000,
+    customerId: 'cust-1',
+    serviceRequestId: null,
+    createdAt: new Date('2024-01-01'),
+    expiresAt: null,
+    signedAt: null,
+    fieldpulseEstimateId: null,
+    fieldpulseStatusName: null,
+    title: null,
+    fieldpulseData: null,
+    nameEncrypted: null,
+    effectiveCreatedAt: new Date('2024-01-01'),
+    ...overrides,
+  });
+
+  it('matches by customer name (decrypt-scan)', async () => {
+    // decrypt is identity mock, so nameEncrypted == plaintext name
+    selectQueue.push([
+      makeRow({ nameEncrypted: 'John Smith', title: null }),
+      makeRow({ id: 'est-2', nameEncrypted: 'Jane Doe', title: null }),
+    ]);
+    const result = await listEstimates(ORG, { search: 'john' });
+    expect(result.estimates).toHaveLength(1);
+    expect(result.estimates[0]!.id).toBe('est-1');
+    expect(result.total).toBe(1);
+  });
+
+  it('matches by estimate title (case-insensitive)', async () => {
+    selectQueue.push([
+      makeRow({ nameEncrypted: null, title: 'AC Tune-Up Package' }),
+      makeRow({ id: 'est-2', nameEncrypted: null, title: 'Heating Repair' }),
+    ]);
+    const result = await listEstimates(ORG, { search: 'tune-up' });
+    expect(result.estimates).toHaveLength(1);
+    expect(result.estimates[0]!.id).toBe('est-1');
+    expect(result.total).toBe(1);
+  });
+
+  it('returns empty when no rows match', async () => {
+    selectQueue.push([
+      makeRow({ nameEncrypted: 'Alice', title: 'AC repair' }),
+    ]);
+    const result = await listEstimates(ORG, { search: 'nonexistent' });
+    expect(result.estimates).toHaveLength(0);
+    expect(result.total).toBe(0);
+  });
+
+  it('returns all rows when every row matches', async () => {
+    selectQueue.push([
+      makeRow({ nameEncrypted: 'Smith HVAC', title: null }),
+      makeRow({ id: 'est-2', nameEncrypted: 'Smith Cooling', title: null }),
+    ]);
+    const result = await listEstimates(ORG, { search: 'smith' });
+    expect(result.estimates).toHaveLength(2);
+    expect(result.total).toBe(2);
+  });
+});
+
 describe('listEstimates bucket filter', () => {
   it('bucket=open applies limit', async () => {
     selectQueue.push([{ n: 0 }]);

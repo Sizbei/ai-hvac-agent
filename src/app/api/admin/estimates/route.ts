@@ -86,6 +86,7 @@ export async function GET(request: NextRequest) {
     const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.floor(rawLimit), 20000) : 50;
     const customerId = sp.get('customerId') || undefined;
     const serviceRequestId = sp.get('serviceRequestId') || undefined;
+    const search = sp.get('search') || undefined;
 
     // Whitelist bucket — invalid values silently drop to undefined (no 400; the
     // scoped section passes no bucket and must continue to work).
@@ -98,7 +99,7 @@ export async function GET(request: NextRequest) {
         : undefined;
 
     const [{ estimates, total }, stats] = await Promise.all([
-      listEstimates(session.organizationId, { page, limit, customerId, serviceRequestId, bucket }),
+      listEstimates(session.organizationId, { page, limit, customerId, serviceRequestId, bucket, search }),
       getEstimatePipelineStats(session.organizationId),
     ]);
     return successResponse({ estimates, total, stats });

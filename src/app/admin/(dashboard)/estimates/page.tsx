@@ -1,12 +1,13 @@
 'use client';
 
-import { Fragment, useState } from 'react';
+import { Fragment, useState, useEffect } from 'react';
 import Link from 'next/link';
-import { ChevronDown, ChevronRight, Plus, AlertCircle, FileText } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, AlertCircle, FileText, Search } from 'lucide-react';
 import { useEstimates, type EstimatePipelineStats } from '@/hooks/use-estimates';
 import { EstimateCreateDialog } from '@/components/admin/estimates/estimate-create-dialog';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatCentsExact } from '@/lib/admin/money-format';
@@ -181,10 +182,25 @@ export default function EstimatesPage() {
   const [page, setPage] = useState(1);
   const [createOpen, setCreateOpen] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  // Debounce the search box so browsing fires one request per pause, not per key.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  // Reset to page 1 whenever search changes.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch]);
 
   const { estimates, total, stats, isLoading, error, refetch } = useEstimates({
     page,
     bucket: activeBucket ?? undefined,
+    search: debouncedSearch || undefined,
   });
 
   const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
@@ -225,6 +241,18 @@ export default function EstimatesPage() {
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
+
+      {/* Search + status tabs toolbar */}
+      <div className="relative sm:max-w-sm">
+        <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          aria-label="Search estimates"
+          placeholder="Search by customer name or title..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="pl-10"
+        />
+      </div>
 
       {/* Status tabs */}
       <div className="flex gap-1 overflow-x-auto border-b">

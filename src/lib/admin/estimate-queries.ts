@@ -341,11 +341,13 @@ export async function listEstimates(
     readonly customerId?: string;
     readonly serviceRequestId?: string;
     readonly bucket?: 'open' | 'won' | 'lost' | 'draft';
+    readonly search?: string;
   } = {},
 ): Promise<{ estimates: EstimateListRow[]; total: number }> {
   const page = Math.max(1, opts.page ?? 1);
   const limit = Math.max(1, opts.limit ?? ESTIMATE_PAGE_SIZE);
   const offset = (page - 1) * limit;
+  const search = opts.search?.trim().toLowerCase() ?? "";
 
   const extraConditions: SQL[] = [];
   if (opts.customerId) extraConditions.push(eq(estimates.customerId, opts.customerId));
@@ -361,25 +363,67 @@ export async function listEstimates(
     ? asc(EFFECTIVE_CREATED_AT_SQL)
     : desc(EFFECTIVE_CREATED_AT_SQL);
 
+  const rowCols = {
+    id: estimates.id,
+    status: estimates.status,
+    totalCents: estimates.totalCents,
+    customerId: estimates.customerId,
+    serviceRequestId: estimates.serviceRequestId,
+    createdAt: estimates.createdAt,
+    expiresAt: estimates.expiresAt,
+    signedAt: estimates.signedAt,
+    fieldpulseEstimateId: estimates.fieldpulseEstimateId,
+    fieldpulseStatusName: estimates.fieldpulseStatusName,
+    title: estimates.title,
+    fieldpulseData: estimates.fieldpulseData,
+    nameEncrypted: customers.nameEncrypted,
+    effectiveCreatedAt: EFFECTIVE_CREATED_AT_SQL,
+  };
+
+  if (search) {
+    // Customer name is encrypted — decrypt every row server-side and filter.
+    // Title is plaintext so we match it in JS after the full-table fetch.
+    // Load ALL matching rows (no pagination), decrypt, filter, then slice.
+    const allRows = await db
+      .select(rowCols)
+      .from(estimates)
+      .leftJoin(
+        customers,
+        and(
+          eq(customers.id, estimates.customerId),
+          eq(customers.organizationId, organizationId),
+        ),
+      )
+      .where(whereClause)
+      .orderBy(orderByClause);
+
+    const filtered = allRows.filter(({ nameEncrypted, title }) => {
+      const name = safeDecryptName(nameEncrypted ?? null);
+      return (
+        (name ?? "").toLowerCase().includes(search) ||
+        (title ?? "").toLowerCase().includes(search)
+      );
+    });
+
+    const sliced = filtered.slice(offset, offset + limit);
+    const estimateRows = sliced.map(({ fieldpulseEstimateId, fieldpulseStatusName, fieldpulseData, nameEncrypted, effectiveCreatedAt, ...r }) => ({
+      ...r,
+      syncedSource: fieldpulseEstimateId != null ? ("fieldpulse" as const) : null,
+      fieldpulseStatusName: fieldpulseStatusName ?? null,
+      fieldpulseData: (fieldpulseData as Record<string, unknown> | null) ?? null,
+      customerName: safeDecryptName(nameEncrypted ?? null),
+      effectiveCreatedAt: effectiveCreatedAt instanceof Date
+        ? effectiveCreatedAt.toISOString()
+        : String(effectiveCreatedAt ?? new Date(r.createdAt).toISOString()),
+    }));
+
+    return { estimates: estimateRows, total: filtered.length };
+  }
+
   const [countResult, rows] = await Promise.all([
     db.select({ n: count() }).from(estimates).where(whereClause),
     db
-      .select({
-        id: estimates.id,
-        status: estimates.status,
-        totalCents: estimates.totalCents,
-        customerId: estimates.customerId,
-        serviceRequestId: estimates.serviceRequestId,
-        createdAt: estimates.createdAt,
-        expiresAt: estimates.expiresAt,
-        signedAt: estimates.signedAt,
-        fieldpulseEstimateId: estimates.fieldpulseEstimateId,
-        fieldpulseStatusName: estimates.fieldpulseStatusName,
-        title: estimates.title,
-        fieldpulseData: estimates.fieldpulseData,
-        nameEncrypted: customers.nameEncrypted,
-        effectiveCreatedAt: EFFECTIVE_CREATED_AT_SQL,
-      })
+      .select(rowCols)
       .from(estimates)
       // Org-scope the join too (defense in depth).
       .leftJoin(
