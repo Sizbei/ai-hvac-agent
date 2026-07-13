@@ -13,7 +13,9 @@ server + session harness (see [[playwright-visual-verification]]) is the verifie
 
 ---
 
-## P0 — CRITICAL (verified-live 500s / data integrity). Fix first.
+## P0 — CRITICAL (verified-live 500s / data integrity). ✅ ALL FIXED + DEPLOYED (2026-07-14)
+> P0-1 `a6bcb5f` (isUuid guard, 25 handlers / 17 routes), P0-2+P0-3 `a9ed647`.
+> Verified live: non-UUID → 404/400; reports & insights render real data; amount-filter overflow → 200.
 
 ### P0-1 · Systemic: non-UUID path param → unhandled 500 (many routes)
 A malformed id in any un-guarded `[id]` route reaches Postgres as a bad `uuid` cast and
