@@ -67,11 +67,20 @@ function InvoiceRowInner({ invoice, onRemind, onCopyPayLink, onVoid, pending = f
   return (
     <>
       {/* Row toggle — the entire row is clickable, but dropdown/buttons stop propagation */}
-      <button
-        type="button"
+      {/* role="button" (not <button>): the action rail below contains real
+          <button>s, and a button-in-button is invalid HTML + a hydration error. */}
+      <div
+        role="button"
+        tabIndex={0}
         aria-expanded={isExpanded}
         onClick={() => onToggle(invoice.id)}
-        className="grid grid-cols-[minmax(200px,1fr)_90px_120px_140px_180px_32px] items-center gap-4 border-t px-6 py-4 transition-colors hover:bg-muted/30 first:border-t-0 w-full text-left"
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onToggle(invoice.id);
+          }
+        }}
+        className="grid grid-cols-[minmax(200px,1fr)_90px_120px_140px_180px_32px] items-center gap-4 border-t px-6 py-4 transition-colors hover:bg-muted/30 first:border-t-0 w-full text-left cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
       >
         {/* Customer */}
         <div className="flex min-w-0 items-center gap-3">
@@ -181,7 +190,7 @@ function InvoiceRowInner({ invoice, onRemind, onCopyPayLink, onVoid, pending = f
             : <ChevronRight className="size-4" />
           }
         </div>
-      </button>
+      </div>
 
       {/* Expansion panel — no border-t so it reads as one unit with its row;
           the NEXT row's border-t separates it from what follows. */}
