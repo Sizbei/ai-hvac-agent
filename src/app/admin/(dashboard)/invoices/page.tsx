@@ -145,6 +145,9 @@ export default function InvoicesPage() {
   const [sortKey, setSortKey] = useState<InvoiceSortKey>('age-oldest');
   const [source, setSource] = useState<SourceValue>('all');
   const [page, setPage] = useState(1);
+  const [unreminded, setUnreminded] = useState(false);
+  const [minDollars, setMinDollars] = useState('');
+  const [maxDollars, setMaxDollars] = useState('');
   const [flash, setFlash] = useState<{ msg: string; ok: boolean } | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [voidingId, setVoidingId] = useState<string | null>(null);
@@ -157,6 +160,16 @@ export default function InvoicesPage() {
   const serverOverdue = filter === 'overdue';
   const serverSource = source === 'all' ? undefined : source;
 
+  // Convert dollar inputs to integer cents — only when the value is a valid non-negative number.
+  const parsedMinCents = useMemo(() => {
+    const d = parseFloat(minDollars);
+    return Number.isFinite(d) && d >= 0 ? Math.round(d * 100) : undefined;
+  }, [minDollars]);
+  const parsedMaxCents = useMemo(() => {
+    const d = parseFloat(maxDollars);
+    return Number.isFinite(d) && d >= 0 ? Math.round(d * 100) : undefined;
+  }, [maxDollars]);
+
   const { invoices, total, sourceCounts, stats, collectedThisMonthCents, isLoading, error, sendReminder, voidInvoice } = useInvoices({
     page,
     limit: PER_PAGE,
@@ -165,6 +178,9 @@ export default function InvoicesPage() {
     overdue: serverOverdue,
     source: serverSource,
     sort: sortKey,
+    unreminded: unreminded || undefined,
+    minCents: parsedMinCents,
+    maxCents: parsedMaxCents,
   });
 
   // auto-clear flash after 3s
@@ -180,8 +196,8 @@ export default function InvoicesPage() {
     return () => clearTimeout(t);
   }, [search]);
 
-  // Reset page when filter/source change
-  useEffect(() => { setPage(1); }, [filter, source]);
+  // Reset page when filter/source/collection-filters change
+  useEffect(() => { setPage(1); }, [filter, source, unreminded, parsedMinCents, parsedMaxCents]);
 
   const showFlash = useCallback((msg: string, ok: boolean) => {
     if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
@@ -353,6 +369,51 @@ export default function InvoicesPage() {
               <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
           </select>
+
+          {/* Never-reminded toggle */}
+          <button
+            type="button"
+            onClick={() => setUnreminded((v) => !v)}
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-xl border px-3 py-2.5 text-sm font-semibold shadow-sm transition-colors',
+              unreminded
+                ? 'bg-foreground text-background'
+                : 'bg-card text-muted-foreground hover:text-foreground',
+            )}
+          >
+            Never reminded
+          </button>
+
+          {/* Balance range inputs (dollars in UI, converted to cents) */}
+          <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1 rounded-xl border bg-card px-3 shadow-sm focus-within:ring-1 focus-within:ring-ring">
+              <span className="shrink-0 text-xs text-muted-foreground">$</span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="Min"
+                value={minDollars}
+                onChange={(e) => setMinDollars(e.target.value)}
+                className="w-20 bg-transparent py-2.5 text-sm outline-none placeholder:text-muted-foreground"
+                aria-label="Minimum balance in dollars"
+              />
+            </div>
+            <span className="text-xs text-muted-foreground">–</span>
+            <div className="flex items-center gap-1 rounded-xl border bg-card px-3 shadow-sm focus-within:ring-1 focus-within:ring-ring">
+              <span className="shrink-0 text-xs text-muted-foreground">$</span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="Max"
+                value={maxDollars}
+                onChange={(e) => setMaxDollars(e.target.value)}
+                className="w-20 bg-transparent py-2.5 text-sm outline-none placeholder:text-muted-foreground"
+                aria-label="Maximum balance in dollars"
+              />
+            </div>
+          </div>
 
           {/* search */}
           <div className="flex flex-col gap-1">

@@ -68,7 +68,9 @@ vi.mock('drizzle-orm', () => ({
   and: (...a: unknown[]) => ({ kind: 'and', args: a }),
   or: (...a: unknown[]) => ({ kind: 'or', args: a }),
   gte: (...a: unknown[]) => ({ kind: 'gte', args: a }),
+  gt: (...a: unknown[]) => ({ kind: 'gt', args: a }),
   lt: (...a: unknown[]) => ({ kind: 'lt', args: a }),
+  lte: (...a: unknown[]) => ({ kind: 'lte', args: a }),
   sum: (col: unknown) => ({ kind: 'sum', col }),
   count: () => ({ kind: 'count' }),
   asc: (col: unknown) => ({ kind: 'asc', col }),
@@ -252,5 +254,83 @@ describe('listInvoiceReminders', () => {
     // A regression that drops the per-invoice filter (returning every org
     // reminder) must fail here, not just the mapping tests.
     expect(where).toContain('inv-abc');
+  });
+});
+
+describe('listInvoices — unreminded filter', () => {
+  it('adds isNull(lastReminderSentAt) condition when unreminded=true', async () => {
+    selectQueue.push([]); // sourceCounts
+    selectQueue.push([{ n: 0 }]); // count
+    selectQueue.push([]); // rows
+    await listInvoices('org-1', { unreminded: true });
+    // Find the count query's WHERE (captured[1]) — all extra conditions are present there too
+    const where = JSON.stringify(captured[1].where);
+    expect(where).toContain('isNull');
+    expect(where).toContain('lastReminderSentAt');
+  });
+
+  it('does NOT add an isNull condition when unreminded is false or absent', async () => {
+    selectQueue.push([]);
+    selectQueue.push([{ n: 0 }]);
+    selectQueue.push([]);
+    await listInvoices('org-1', { unreminded: false });
+    const where = JSON.stringify(captured[1].where);
+    // The only isNull present should be from the source filter (which isn't active here),
+    // so there should be no isNull for lastReminderSentAt
+    expect(where).not.toContain('lastReminderSentAt');
+  });
+});
+
+describe('listInvoices — balance range filters', () => {
+  it('adds gte condition when minCents is a valid non-negative integer', async () => {
+    selectQueue.push([]);
+    selectQueue.push([{ n: 0 }]);
+    selectQueue.push([]);
+    await listInvoices('org-1', { minCents: 5000 });
+    const where = JSON.stringify(captured[1].where);
+    expect(where).toContain('"gte"');
+    expect(where).toContain('5000');
+  });
+
+  it('adds lte condition when maxCents is a valid non-negative integer', async () => {
+    selectQueue.push([]);
+    selectQueue.push([{ n: 0 }]);
+    selectQueue.push([]);
+    await listInvoices('org-1', { maxCents: 20000 });
+    const where = JSON.stringify(captured[1].where);
+    expect(where).toContain('"lte"');
+    expect(where).toContain('20000');
+  });
+
+  it('adds both gte and lte when both bounds are provided', async () => {
+    selectQueue.push([]);
+    selectQueue.push([{ n: 0 }]);
+    selectQueue.push([]);
+    await listInvoices('org-1', { minCents: 1000, maxCents: 50000 });
+    const where = JSON.stringify(captured[1].where);
+    expect(where).toContain('"gte"');
+    expect(where).toContain('"lte"');
+    expect(where).toContain('1000');
+    expect(where).toContain('50000');
+  });
+
+  it('ignores minCents when NaN or negative', async () => {
+    selectQueue.push([]);
+    selectQueue.push([{ n: 0 }]);
+    selectQueue.push([]);
+    // NaN comes in as undefined from the API layer guard, but test the query layer with -1
+    await listInvoices('org-1', { minCents: -1 });
+    const where = JSON.stringify(captured[1].where);
+    // Only the tenant condition should be present, no gte
+    expect(where).not.toContain('"gte"');
+  });
+
+  it('ignores maxCents when NaN or negative', async () => {
+    selectQueue.push([]);
+    selectQueue.push([{ n: 0 }]);
+    selectQueue.push([]);
+    await listInvoices('org-1', { maxCents: -500 });
+    const where = JSON.stringify(captured[1].where);
+    expect(where).not.toContain('"lte"');
   });
 });

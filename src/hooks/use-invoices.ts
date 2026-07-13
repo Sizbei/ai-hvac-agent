@@ -47,6 +47,12 @@ export interface UseInvoicesParams {
   readonly sort?: InvoiceSortKey;
   readonly customerId?: string;
   readonly serviceRequestId?: string;
+  /** When true, filter to invoices that have never received a reminder. */
+  readonly unreminded?: boolean;
+  /** Minimum outstanding balance in cents (inclusive). */
+  readonly minCents?: number;
+  /** Maximum outstanding balance in cents (inclusive). */
+  readonly maxCents?: number;
 }
 
 interface InvoicesPayload {
@@ -82,7 +88,10 @@ function makeKey(params: UseInvoicesParams): string {
   const sk = params.sort ?? '';
   const c = params.customerId ?? '';
   const r = params.serviceRequestId ?? '';
-  return `invoices:${p}:${l}:${s}:${st}:${ov}:${so}:${sk}:${c}:${r}`;
+  const ur = params.unreminded ? '1' : '0';
+  const mn = params.minCents ?? '';
+  const mx = params.maxCents ?? '';
+  return `invoices:${p}:${l}:${s}:${st}:${ov}:${so}:${sk}:${c}:${r}:${ur}:${mn}:${mx}`;
 }
 
 function buildQuery(params: UseInvoicesParams): string {
@@ -96,6 +105,9 @@ function buildQuery(params: UseInvoicesParams): string {
   if (params.sort) qs.set('sort', params.sort);
   if (params.customerId) qs.set('customerId', params.customerId);
   if (params.serviceRequestId) qs.set('serviceRequestId', params.serviceRequestId);
+  if (params.unreminded) qs.set('unreminded', '1');
+  if (params.minCents !== undefined) qs.set('minCents', String(params.minCents));
+  if (params.maxCents !== undefined) qs.set('maxCents', String(params.maxCents));
   const q = qs.toString();
   return q ? `?${q}` : '';
 }

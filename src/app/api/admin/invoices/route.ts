@@ -75,9 +75,16 @@ export async function GET(request: NextRequest) {
     const sort = INVOICE_SORT_KEYS.has(rawSort as InvoiceSortKey) ? (rawSort as InvoiceSortKey) : undefined;
 
     const overdue = sp.get("overdue") === "1";
+    const unreminded = sp.get("unreminded") === "1";
+
+    const rawMinCents = parseInt(sp.get("minCents") ?? "", 10);
+    const minCents = Number.isFinite(rawMinCents) && rawMinCents >= 0 ? rawMinCents : undefined;
+
+    const rawMaxCents = parseInt(sp.get("maxCents") ?? "", 10);
+    const maxCents = Number.isFinite(rawMaxCents) && rawMaxCents >= 0 ? rawMaxCents : undefined;
 
     const [listResult, stats, collected] = await Promise.all([
-      listInvoices(session.organizationId, { page, limit, search, state, overdue, source, sort, customerId, serviceRequestId }),
+      listInvoices(session.organizationId, { page, limit, search, state, overdue, source, sort, customerId, serviceRequestId, unreminded, minCents, maxCents }),
       getInvoiceSummaryStats(session.organizationId),
       collectedThisMonthCents(session.organizationId),
     ]);

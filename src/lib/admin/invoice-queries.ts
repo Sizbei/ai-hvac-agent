@@ -6,7 +6,7 @@
  * first-class (a half-built payments path breaks on the first chargeback).
  */
 import { randomUUID } from "node:crypto";
-import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, lt, or, sql, sum } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, or, sql, sum } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   communicationJobs,
@@ -918,6 +918,12 @@ export interface ListInvoicesOptions {
   readonly source?: string;
   /** Sort order. Defaults to 'newest'. */
   readonly sort?: InvoiceSortKey;
+  /** When true, filter to invoices that have never had a reminder sent. */
+  readonly unreminded?: boolean;
+  /** Minimum outstanding balance in cents (inclusive). Outstanding = totalCents - coalesce(amountPaidCents, 0). */
+  readonly minCents?: number;
+  /** Maximum outstanding balance in cents (inclusive). Outstanding = totalCents - coalesce(amountPaidCents, 0). */
+  readonly maxCents?: number;
   /** Scope to a single customer (used by ScopedInvoicesSection). */
   readonly customerId?: string;
   /** Scope to a single service request (used by ScopedInvoicesSection). */
@@ -972,6 +978,18 @@ export async function listInvoices(
     pushCond(isNotNull(invoices.fieldpulseInvoiceId) as ReturnType<typeof eq>, false);
   } else if (opts.source === "housecall") {
     pushCond(isNotNull(invoices.hcpInvoiceId) as ReturnType<typeof eq>, false);
+  }
+  if (opts.unreminded) {
+    pushCond(isNull(invoices.lastReminderSentAt) as ReturnType<typeof eq>);
+  }
+  // Balance range filters — reuse the same SQL expression as the 'balance-high' sort key
+  // so the two never drift: totalCents - amountPaidCents.
+  const balanceExpr = sql`${invoices.totalCents} - ${invoices.amountPaidCents}`;
+  if (opts.minCents !== undefined && Number.isFinite(opts.minCents) && opts.minCents >= 0) {
+    pushCond(gte(balanceExpr, opts.minCents) as ReturnType<typeof eq>);
+  }
+  if (opts.maxCents !== undefined && Number.isFinite(opts.maxCents) && opts.maxCents >= 0) {
+    pushCond(lte(balanceExpr, opts.maxCents) as ReturnType<typeof eq>);
   }
   if (opts.customerId) {
     pushCond(eq(invoices.customerId, opts.customerId));
