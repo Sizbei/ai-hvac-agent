@@ -77,11 +77,16 @@ export async function GET(request: NextRequest) {
     const overdue = sp.get("overdue") === "1";
     const unreminded = sp.get("unreminded") === "1";
 
+    // Clamp to a signed-int32 range: totalCents is a Postgres `integer`, so a
+    // value past INT32_MAX (e.g. a user typing "$21,474,836.48+") overflows and
+    // 500s. Out-of-range → drop the bound rather than error.
+    const INT32_MAX = 2_147_483_647;
+    const inCentsRange = (n: number) => Number.isFinite(n) && n >= 0 && n <= INT32_MAX;
     const rawMinCents = parseInt(sp.get("minCents") ?? "", 10);
-    const minCents = Number.isFinite(rawMinCents) && rawMinCents >= 0 ? rawMinCents : undefined;
+    const minCents = inCentsRange(rawMinCents) ? rawMinCents : undefined;
 
     const rawMaxCents = parseInt(sp.get("maxCents") ?? "", 10);
-    const maxCents = Number.isFinite(rawMaxCents) && rawMaxCents >= 0 ? rawMaxCents : undefined;
+    const maxCents = inCentsRange(rawMaxCents) ? rawMaxCents : undefined;
 
     const [listResult, stats, collected] = await Promise.all([
       listInvoices(session.organizationId, { page, limit, search, state, overdue, source, sort, customerId, serviceRequestId, unreminded, minCents, maxCents }),

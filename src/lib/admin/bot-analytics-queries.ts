@@ -147,7 +147,10 @@ export async function getBotAnalytics(
     // -> "unclassified" so still-open / never-summarized sessions reconcile.
     db
       .select({
-        outcome: sql<string>`coalesce(${customerSessions.outcome}, ${UNCLASSIFIED_OUTCOME})`,
+        // Select the RAW column (coalesce the NULL→label in JS below). A
+        // coalesce(col, $param) in SELECT trips Postgres' ungrouped-column check
+        // even with GROUP BY col, because Drizzle parameterizes the literal.
+        outcome: customerSessions.outcome,
         value: count(),
       })
       .from(customerSessions)
@@ -159,7 +162,11 @@ export async function getBotAnalytics(
           lte(customerSessions.createdAt, toDate),
         ),
       )
-      .groupBy(sql`coalesce(${customerSessions.outcome}, ${UNCLASSIFIED_OUTCOME})`),
+      // GROUP BY the raw column (NOT the coalesce expr): Drizzle parameterizes
+      // the literal at a different $N in SELECT vs GROUP BY, so grouping on the
+      // expression trips Postgres' check_ungrouped_columns_walker. coalesce over
+      // a grouped column is still valid in SELECT.
+      .groupBy(customerSessions.outcome),
   ]);
 
   const totals = totalsRow[0];
@@ -180,7 +187,7 @@ export async function getBotAnalytics(
   }));
 
   const outcomeDistribution: OutcomeDistributionRow[] = outcomeRows
-    .map((r) => ({ outcome: r.outcome, count: toNumber(r.value) }))
+    .map((r) => ({ outcome: r.outcome ?? UNCLASSIFIED_OUTCOME, count: toNumber(r.value) }))
     .sort((a, b) => b.count - a.count);
 
   // Abandon rate is over sessions that reached SOME classified outcome (a fair

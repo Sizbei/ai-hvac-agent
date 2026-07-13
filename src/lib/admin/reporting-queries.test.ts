@@ -506,7 +506,10 @@ describe('getLeadSourceBreakdown', () => {
     expect(unknown!.leads).toBe(7);
     expect(unknown!.booked).toBe(2);
 
-    // The leads select (1st of this group) groups on a coalesce of leadSource.
+    // The leads select (1st of this group) buckets NULL via
+    // coalesce(cast(leadSource as text), 'unknown'). The 'unknown' literal is
+    // inline (NOT interpolated) so SELECT and GROUP BY emit identical SQL; the
+    // column is cast to text so the enum doesn't reject the literal fallback.
     const leadsCols = captured[0].columns as Record<string, unknown>;
     expect(
       hasTag(
@@ -515,7 +518,9 @@ describe('getLeadSourceBreakdown', () => {
           v.kind === 'sql' &&
           Array.isArray(v.values) &&
           (v.values as unknown[]).includes('serviceRequests.leadSource') &&
-          (v.values as unknown[]).includes('unknown'),
+          typeof v.text === 'string' &&
+          v.text.includes('coalesce') &&
+          v.text.includes("'unknown'"),
       ),
     ).toBe(true);
   });

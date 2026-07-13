@@ -305,7 +305,13 @@ export async function getLeadSourceBreakdown(
 
   // NULL leadSource -> 'unknown' so historical rows (column added later) still
   // reconcile into the totals instead of being dropped.
-  const sourceKey = sql<string>`coalesce(${serviceRequests.leadSource}, ${UNKNOWN_SOURCE})`;
+  // Inline the literal (NOT ${UNKNOWN_SOURCE}, which Drizzle parameterizes at a
+  // different $N in SELECT vs GROUP BY → Postgres ungrouped-column error). Keep
+  // this literal in sync with UNKNOWN_SOURCE above. cast(...as text) first:
+  // lead_source is an enum, so a bare 'unknown' literal would be typed as the
+  // enum and rejected (enum_in) — casting to text makes 'unknown' a valid text
+  // fallback (same reason the location key below casts).
+  const sourceKey = sql<string>`coalesce(cast(${serviceRequests.leadSource} as text), 'unknown')`;
 
   const [leadRows, bookedRows, grossRows, refundRows] = await Promise.all([
     // 1. Leads: service requests by source, created in the period.
@@ -472,7 +478,8 @@ export async function getLocationBreakdown(
   const fromDate = period.fromDate ?? new Date(toDate.getTime() - THIRTY_DAYS_MS);
 
   // NULL locationId -> 'unassigned' so requests without a site still reconcile.
-  const locationKey = sql<string>`coalesce(cast(${serviceRequests.locationId} as text), ${UNASSIGNED_LOCATION})`;
+  // Inline literal (see sourceKey note). Keep in sync with UNASSIGNED_LOCATION.
+  const locationKey = sql<string>`coalesce(cast(${serviceRequests.locationId} as text), 'unassigned')`;
 
   const [jobRows, revenueRows, ratingRows, labelRows] = await Promise.all([
     // 1. Jobs: service requests per location bucket, created in the period.
