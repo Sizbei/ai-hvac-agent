@@ -1,13 +1,27 @@
 'use client';
 
 import { Button } from '@/components/ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { useAdminTechnicians } from '@/hooks/use-admin-technicians';
 
 interface RequestFiltersProps {
   readonly currentStatus: string;
   readonly onStatusChange: (status: string) => void;
+  readonly currentUrgency: string;
+  readonly onUrgencyChange: (urgency: string) => void;
+  readonly currentAssignedTo: string;
+  readonly onAssignedToChange: (techId: string) => void;
+  readonly isAfterHours: boolean;
+  readonly onAfterHoursChange: (value: boolean) => void;
 }
 
-const FILTER_OPTIONS: readonly { readonly label: string; readonly value: string }[] = [
+const STATUS_OPTIONS: readonly { readonly label: string; readonly value: string }[] = [
   { label: 'All', value: '' },
   { label: 'Pending', value: 'pending' },
   { label: 'Scheduled', value: 'scheduled' },
@@ -18,10 +32,30 @@ const FILTER_OPTIONS: readonly { readonly label: string; readonly value: string 
   { label: 'Cancelled', value: 'cancelled' },
 ];
 
-export function RequestFilters({ currentStatus, onStatusChange }: RequestFiltersProps) {
+const URGENCY_OPTIONS: readonly { readonly label: string; readonly value: string }[] = [
+  { label: 'All urgencies', value: '' },
+  { label: 'Low', value: 'low' },
+  { label: 'Medium', value: 'medium' },
+  { label: 'High', value: 'high' },
+  { label: 'Emergency', value: 'emergency' },
+];
+
+export function RequestFilters({
+  currentStatus,
+  onStatusChange,
+  currentUrgency,
+  onUrgencyChange,
+  currentAssignedTo,
+  onAssignedToChange,
+  isAfterHours,
+  onAfterHoursChange,
+}: RequestFiltersProps) {
+  const { technicians } = useAdminTechnicians();
+
   return (
-    <div className="flex flex-wrap gap-2">
-      {FILTER_OPTIONS.map((option) => {
+    <div className="flex flex-wrap items-center gap-2">
+      {/* Status chips */}
+      {STATUS_OPTIONS.map((option) => {
         const isActive = currentStatus === option.value;
         return (
           <Button
@@ -34,6 +68,50 @@ export function RequestFilters({ currentStatus, onStatusChange }: RequestFilters
           </Button>
         );
       })}
+
+      {/* Urgency selector */}
+      <Select
+        value={currentUrgency}
+        onValueChange={(v) => onUrgencyChange(v ?? '')}
+      >
+        <SelectTrigger aria-label="Filter by urgency" className="w-[150px]">
+          <SelectValue placeholder="All urgencies" />
+        </SelectTrigger>
+        <SelectContent>
+          {URGENCY_OPTIONS.map((opt) => (
+            <SelectItem key={opt.value} value={opt.value}>
+              {opt.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
+      {/* Technician dropdown */}
+      <Select
+        value={currentAssignedTo}
+        onValueChange={(v) => onAssignedToChange(v ?? '')}
+      >
+        <SelectTrigger aria-label="Filter by technician" className="w-[180px]">
+          <SelectValue placeholder="All technicians" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="">All technicians</SelectItem>
+          {technicians.map((tech) => (
+            <SelectItem key={tech.id} value={tech.id}>
+              {tech.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
+      {/* After-hours toggle */}
+      <Button
+        variant={isAfterHours ? 'default' : 'outline'}
+        size="sm"
+        onClick={() => onAfterHoursChange(!isAfterHours)}
+      >
+        After Hours
+      </Button>
     </div>
   );
 }

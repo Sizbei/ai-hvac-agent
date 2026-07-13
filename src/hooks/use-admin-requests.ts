@@ -9,6 +9,9 @@ interface UseAdminRequestsOptions {
   readonly search?: string;
   readonly page?: number;
   readonly limit?: number;
+  readonly urgency?: string;
+  readonly assignedTo?: string;
+  readonly isAfterHours?: boolean;
 }
 
 interface UseAdminRequestsResult {
@@ -26,7 +29,7 @@ interface UseAdminRequestsResult {
 export function useAdminRequests(
   options: UseAdminRequestsOptions = {},
 ): UseAdminRequestsResult {
-  const { status, search, page = 1, limit = 20 } = options;
+  const { status, search, page = 1, limit = 50, urgency, assignedTo, isAfterHours } = options;
 
   const [requests, setRequests] = useState<readonly AdminRequest[]>([]);
   const [total, setTotal] = useState(0);
@@ -45,6 +48,9 @@ export function useAdminRequests(
       if (search) params.set('search', search);
       params.set('page', String(page));
       params.set('limit', String(limit));
+      if (urgency) params.set('urgency', urgency);
+      if (assignedTo) params.set('assignedTo', assignedTo);
+      if (isAfterHours) params.set('isAfterHours', 'true');
 
       const url = `/api/admin/requests?${params.toString()}`;
       const res = await fetch(url);
@@ -77,7 +83,7 @@ export function useAdminRequests(
     } finally {
       isFetchingRef.current = false;
     }
-  }, [status, search, page, limit]);
+  }, [status, search, page, limit, urgency, assignedTo, isAfterHours]);
 
   // Fetch on mount and when options change
   useEffect(() => {

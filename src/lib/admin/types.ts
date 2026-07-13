@@ -437,6 +437,12 @@ export interface RequestFilters {
   readonly search?: string;
   readonly page?: number;
   readonly limit?: number;
+  /** Filter by urgency level (low/medium/high/emergency). */
+  readonly urgency?: string;
+  /** Filter by assigned technician user ID. */
+  readonly assignedTo?: string;
+  /** When true, return only after-hours requests. */
+  readonly isAfterHours?: boolean;
 }
 
 export interface CreateTechnicianInput {

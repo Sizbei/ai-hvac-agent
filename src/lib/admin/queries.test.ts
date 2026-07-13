@@ -163,6 +163,9 @@ vi.mock('@/lib/db/schema', () => ({
       'cancelled',
     ],
   },
+  urgencyEnum: {
+    enumValues: ['low', 'medium', 'high', 'emergency'],
+  },
   holdReasonEnum: {
     enumValues: [
       'awaiting_parts',
@@ -387,6 +390,83 @@ describe('getRequests', () => {
 
     const result = await getRequests(ORG_ID, {});
     expect(result.requests[0].syncedSource).toBe('housecall');
+  });
+
+  it('applies urgency filter when a valid urgency value is provided', async () => {
+    const { eq } = await import('drizzle-orm');
+    vi.mocked(eq).mockClear();
+    selectResolutions = [[{ value: 0 }], []];
+
+    await getRequests(ORG_ID, { urgency: 'emergency' });
+
+    // eq must have been called with the urgency column and 'emergency'
+    expect(eq).toHaveBeenCalledWith('sr.urgency', 'emergency');
+  });
+
+  it('ignores urgency filter when an invalid value is provided', async () => {
+    const { eq } = await import('drizzle-orm');
+    vi.mocked(eq).mockClear();
+    selectResolutions = [[{ value: 0 }], []];
+
+    await getRequests(ORG_ID, { urgency: 'critical' }); // not in enum
+
+    // eq should NOT be called with the urgency column
+    const urgencyCalls = vi.mocked(eq).mock.calls.filter(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ([col]) => (col as any) === 'sr.urgency',
+    );
+    expect(urgencyCalls).toHaveLength(0);
+  });
+
+  it('applies assignedTo filter when a valid technician UUID is provided', async () => {
+    const { eq } = await import('drizzle-orm');
+    vi.mocked(eq).mockClear();
+    selectResolutions = [[{ value: 0 }], []];
+
+    const techId = '11111111-2222-3333-4444-555555555555';
+    await getRequests(ORG_ID, { assignedTo: techId });
+
+    expect(eq).toHaveBeenCalledWith('sr.assignedTo', techId);
+  });
+
+  it('ignores assignedTo filter when the value is not a valid UUID', async () => {
+    const { eq } = await import('drizzle-orm');
+    vi.mocked(eq).mockClear();
+    selectResolutions = [[{ value: 0 }], []];
+
+    await getRequests(ORG_ID, { assignedTo: 'tech-uuid-123' }); // malformed
+
+    // The join always calls eq('sr.assignedTo', 'u.id'); assert the malformed
+    // VALUE was never used as a filter condition.
+    const assignedFilterCalls = vi.mocked(eq).mock.calls.filter(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ([, val]) => (val as any) === 'tech-uuid-123',
+    );
+    expect(assignedFilterCalls).toHaveLength(0);
+  });
+
+  it('applies isAfterHours=true filter when flag is set', async () => {
+    const { eq } = await import('drizzle-orm');
+    vi.mocked(eq).mockClear();
+    selectResolutions = [[{ value: 0 }], []];
+
+    await getRequests(ORG_ID, { isAfterHours: true });
+
+    expect(eq).toHaveBeenCalledWith('sr.isAfterHours', true);
+  });
+
+  it('does not apply isAfterHours filter when flag is false', async () => {
+    const { eq } = await import('drizzle-orm');
+    vi.mocked(eq).mockClear();
+    selectResolutions = [[{ value: 0 }], []];
+
+    await getRequests(ORG_ID, { isAfterHours: false });
+
+    const afterHoursCalls = vi.mocked(eq).mock.calls.filter(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ([col]) => (col as any) === 'sr.isAfterHours',
+    );
+    expect(afterHoursCalls).toHaveLength(0);
   });
 });
 

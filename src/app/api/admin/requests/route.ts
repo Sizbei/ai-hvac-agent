@@ -26,21 +26,28 @@ export async function GET(request: NextRequest) {
     const searchParam = url.searchParams.get("search") ?? undefined;
     const pageParam = url.searchParams.get("page");
     const limitParam = url.searchParams.get("limit");
+    const urgency = url.searchParams.get("urgency") ?? undefined;
+    const assignedTo = url.searchParams.get("assignedTo") ?? undefined;
+    const isAfterHoursParam = url.searchParams.get("isAfterHours");
 
     const page = pageParam ? Math.max(1, parseInt(pageParam, 10) || 1) : 1;
     const limit = limitParam
-      ? Math.min(100, Math.max(1, parseInt(limitParam, 10) || 20))
-      : 20;
+      ? Math.min(100, Math.max(1, parseInt(limitParam, 10) || 50))
+      : 50;
 
     // Cap the search term defensively; it can't usefully exceed a 20-char
     // reference number anyway.
     const search = searchParam ? searchParam.slice(0, 64) : undefined;
+    const isAfterHours = isAfterHoursParam === "true" ? true : undefined;
 
     const result = await getRequests(session.organizationId, {
       status,
       search,
       page,
       limit,
+      urgency,
+      assignedTo,
+      isAfterHours,
     });
 
     return successResponse({

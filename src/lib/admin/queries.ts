@@ -30,6 +30,7 @@ import {
   customers,
   requestStatusEnum,
   holdReasonEnum,
+  urgencyEnum,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { normalizeEmail } from "./staff-queries";
@@ -86,6 +87,9 @@ function startOfTodayUTC(): Date {
   );
 }
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function getRequests(
   organizationId: string,
   filters: RequestFilters,
@@ -113,6 +117,22 @@ export async function getRequests(
     extraConditions.push(
       ilike(serviceRequests.referenceNumber, `${escaped}%`),
     );
+  }
+
+  type UrgencyLevel = (typeof urgencyEnum.enumValues)[number];
+  const validUrgencies: readonly string[] = urgencyEnum.enumValues;
+  if (filters.urgency && validUrgencies.includes(filters.urgency)) {
+    extraConditions.push(
+      eq(serviceRequests.urgency, filters.urgency as UrgencyLevel),
+    );
+  }
+  // assignedTo is a UUID column — guard the format so a malformed query param
+  // yields no results rather than a Postgres "invalid input syntax for uuid" 500.
+  if (filters.assignedTo && UUID_RE.test(filters.assignedTo)) {
+    extraConditions.push(eq(serviceRequests.assignedTo, filters.assignedTo));
+  }
+  if (filters.isAfterHours === true) {
+    extraConditions.push(eq(serviceRequests.isAfterHours, true));
   }
 
   const baseConditions = withTenant(
