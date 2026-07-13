@@ -1,9 +1,10 @@
 'use client';
 
-import { Fragment, useState, useEffect } from 'react';
+import { Fragment, useCallback, useState, useEffect } from 'react';
 import Link from 'next/link';
 import { ChevronDown, ChevronRight, Plus, AlertCircle, FileText, Search } from 'lucide-react';
 import { useEstimates, type EstimatePipelineStats } from '@/hooks/use-estimates';
+import { useUrlFilterSync } from '@/hooks/use-url-filter-sync';
 import { EstimateCreateDialog } from '@/components/admin/estimates/estimate-create-dialog';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -184,6 +185,28 @@ export default function EstimatesPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  // Persist filters to the URL (shareable links + survives refresh). Page is
+  // intentionally NOT persisted. Default 'open' maps to '' (dropped from URL);
+  // null (All) serialises as 'all'.
+  function bucketToParam(b: Bucket | null): string {
+    if (b === 'open') return '';
+    if (b === null) return 'all';
+    return b;
+  }
+  const urlFilterState = {
+    bucket: bucketToParam(activeBucket),
+    q: search,
+  };
+  const restoreFiltersFromUrl = useCallback((p: Record<string, string>) => {
+    const buckets: readonly string[] = ['open', 'won', 'lost', 'draft'];
+    if (p.bucket) {
+      if (buckets.includes(p.bucket)) setActiveBucket(p.bucket as Bucket);
+      else if (p.bucket === 'all') setActiveBucket(null);
+    }
+    if (p.q) { setSearch(p.q); setDebouncedSearch(p.q); }
+  }, []);
+  useUrlFilterSync(urlFilterState, restoreFiltersFromUrl);
 
   // Debounce the search box so browsing fires one request per pause, not per key.
   useEffect(() => {

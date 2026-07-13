@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { useUrlFilterSync } from '@/hooks/use-url-filter-sync';
 import { AlertCircle, Search } from 'lucide-react';
 import { useAdminRequests } from '@/hooks/use-admin-requests';
 import { StatsCards } from '@/components/admin/stats-cards';
@@ -27,6 +28,31 @@ export default function AdminRequestsPage() {
   const [debouncedSearch, setDebouncedSearch] = useState<string>('');
   const [page, setPage] = useState<number>(1);
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
+
+  // Persist filters to the URL (shareable links + survives refresh). Page and
+  // the detail sheet selection are intentionally NOT persisted. Defaults map to
+  // '' so they're dropped from the URL.
+  const urlFilterState = {
+    status: statusFilter,
+    urgency: urgencyFilter,
+    assignedTo: assignedToFilter,
+    afterHours: isAfterHoursFilter ? '1' : '',
+    sort: sortKey === 'newest' ? '' : sortKey,
+    q: searchInput,
+  };
+  const restoreFiltersFromUrl = useCallback((p: Record<string, string>) => {
+    const statuses: readonly string[] = ['pending', 'scheduled', 'assigned', 'in_progress', 'on_hold', 'completed', 'cancelled'];
+    const urgencies: readonly string[] = ['low', 'medium', 'high', 'emergency'];
+    const sorts: readonly string[] = ['newest', 'oldest', 'urgency'];
+    if (p.status && statuses.includes(p.status)) setStatusFilter(p.status);
+    if (p.urgency && urgencies.includes(p.urgency)) setUrgencyFilter(p.urgency);
+    // assignedTo is a free UUID — persist as-is (server already UUID-guards it)
+    if (p.assignedTo) setAssignedToFilter(p.assignedTo);
+    if (p.afterHours === '1') setIsAfterHoursFilter(true);
+    if (p.sort && sorts.includes(p.sort)) setSortKey(p.sort as RequestSortKey);
+    if (p.q) { setSearchInput(p.q); setDebouncedSearch(p.q); }
+  }, []);
+  useUrlFilterSync(urlFilterState, restoreFiltersFromUrl);
 
   // Debounce the search box so we don't refetch on every keystroke.
   useEffect(() => {

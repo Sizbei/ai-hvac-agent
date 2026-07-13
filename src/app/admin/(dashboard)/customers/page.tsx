@@ -1,6 +1,7 @@
 'use client';
 
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { useUrlFilterSync } from '@/hooks/use-url-filter-sync';
 import Link from 'next/link';
 import {
   Archive,
@@ -117,6 +118,30 @@ export default function CustomersPage() {
     }
   });
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
+
+  // Persist filters to the URL (shareable links + survives refresh). Page, view
+  // mode, and ephemeral UI (drawer selection) are intentionally NOT persisted.
+  // Defaults map to '' so they're dropped from the URL.
+  const urlFilterState = {
+    q: search,
+    propertyType: propertyTypeFilter === ALL_PROPERTY_TYPES ? '' : propertyTypeFilter,
+    customerType: customerTypeFilter === ALL_CUSTOMER_TYPES ? '' : customerTypeFilter,
+    membership: membershipStatusFilter === ALL_MEMBERSHIP_STATUSES ? '' : membershipStatusFilter,
+    fpSynced: fieldpulseSyncedFilter ? '1' : '',
+    archived: showArchived ? '1' : '',
+  };
+  const restoreFiltersFromUrl = useCallback((p: Record<string, string>) => {
+    const customerTypes: readonly string[] = ['residential', 'commercial'];
+    const membershipStatuses: readonly string[] = ['none', 'active', 'suspended', 'expired', 'cancelled'];
+    if (p.q) { setSearch(p.q); setDebouncedSearch(p.q); }
+    // propertyType is a free string from the DB — persist as-is (no finite enum)
+    if (p.propertyType) setPropertyTypeFilter(p.propertyType);
+    if (p.customerType && customerTypes.includes(p.customerType)) setCustomerTypeFilter(p.customerType);
+    if (p.membership && membershipStatuses.includes(p.membership)) setMembershipStatusFilter(p.membership);
+    if (p.fpSynced === '1') setFieldpulseSyncedFilter(true);
+    if (p.archived === '1') setShowArchived(true);
+  }, []);
+  useUrlFilterSync(urlFilterState, restoreFiltersFromUrl);
 
   // Debounce the search box so browsing fires one request per pause, not per key.
   useEffect(() => {

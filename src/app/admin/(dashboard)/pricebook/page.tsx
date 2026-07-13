@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Plus, AlertCircle, Search } from 'lucide-react';
 import { usePricebook, useTaxRates, type PricebookSortKey } from '@/hooks/use-pricebook';
+import { useUrlFilterSync } from '@/hooks/use-url-filter-sync';
 import { PricebookTable } from '@/components/admin/pricebook/pricebook-table';
 import { PricebookFormDialog } from '@/components/admin/pricebook/pricebook-form-dialog';
 import { TaxRatesPanel } from '@/components/admin/pricebook/tax-rates-panel';
@@ -41,6 +42,26 @@ export default function PricebookPage() {
   const [page, setPage] = useState(1);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<PricebookItem | null>(null);
+
+  // Persist filters to the URL (shareable links + survives refresh). Page is
+  // intentionally NOT persisted. Defaults map to '' so they're dropped from the URL.
+  const urlFilterState = {
+    q: search,
+    type: typeFilter === ALL_TYPES ? '' : typeFilter,
+    sort: sortKey === 'name' ? '' : sortKey,
+    inactive: includeInactive ? '1' : '',
+    labor: laborOnly ? '1' : '',
+  };
+  const restoreFiltersFromUrl = useCallback((p: Record<string, string>) => {
+    const sorts: readonly string[] = ['name', 'price_asc', 'price_desc'];
+    const validTypes: readonly string[] = ['service', 'material', 'equipment'];
+    if (p.q) { setSearch(p.q); setDebouncedSearch(p.q); }
+    if (p.type && validTypes.includes(p.type)) setTypeFilter(p.type);
+    if (p.sort && sorts.includes(p.sort)) setSortKey(p.sort as PricebookSortKey);
+    if (p.inactive === '1') setIncludeInactive(true);
+    if (p.labor === '1') setLaborOnly(true);
+  }, []);
+  useUrlFilterSync(urlFilterState, restoreFiltersFromUrl);
 
   // Debounce the search box so browsing fires one request per pause, not per key.
   useEffect(() => {

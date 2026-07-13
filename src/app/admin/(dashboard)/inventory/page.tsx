@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Plus, AlertCircle, Search } from 'lucide-react';
 import { useInventory, type InventorySortKey } from '@/hooks/use-inventory';
+import { useUrlFilterSync } from '@/hooks/use-url-filter-sync';
 import { usePricebook } from '@/hooks/use-pricebook';
 import { InventoryTable } from '@/components/admin/inventory/inventory-table';
 import { InventoryFormDialog } from '@/components/admin/inventory/inventory-form-dialog';
@@ -32,6 +33,21 @@ export default function InventoryPage() {
   const [page, setPage] = useState(1);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<InventoryItem | null>(null);
+
+  // Persist filters to the URL (shareable links + survives refresh). Page is
+  // intentionally NOT persisted. Defaults map to '' so they're dropped from the URL.
+  const urlFilterState = {
+    q: search,
+    sort: sortKey === 'name' ? '' : sortKey,
+    belowReorder: belowReorderOnly ? '1' : '',
+  };
+  const restoreFiltersFromUrl = useCallback((p: Record<string, string>) => {
+    const sorts: readonly string[] = ['name', 'qty_asc', 'qty_desc'];
+    if (p.q) { setSearch(p.q); setDebouncedSearch(p.q); }
+    if (p.sort && sorts.includes(p.sort)) setSortKey(p.sort as InventorySortKey);
+    if (p.belowReorder === '1') setBelowReorderOnly(true);
+  }, []);
+  useUrlFilterSync(urlFilterState, restoreFiltersFromUrl);
 
   // Debounce the search box so browsing fires one request per pause, not per key.
   useEffect(() => {
