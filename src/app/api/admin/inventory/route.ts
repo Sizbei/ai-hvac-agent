@@ -4,6 +4,7 @@ import { getAdminSession } from "@/lib/auth/session";
 import {
   listInventory,
   upsertInventoryItem,
+  type InventorySortKey,
 } from "@/lib/admin/inventory-queries";
 import { getPricebookItemById } from "@/lib/admin/pricebook-queries";
 import { logAudit } from "@/lib/admin/audit";
@@ -46,7 +47,13 @@ export async function GET(request: NextRequest) {
     const search = sp.get("search") ?? undefined;
     const belowReorder = sp.get("belowReorder") === "true";
 
-    const { items, total } = await listInventory(session.organizationId, { page, limit, search, belowReorder });
+    const VALID_SORT_KEYS: ReadonlyArray<InventorySortKey> = ['name', 'qty_asc', 'qty_desc'];
+    const rawSort = sp.get("sort") ?? undefined;
+    const sort = rawSort !== undefined && (VALID_SORT_KEYS as readonly string[]).includes(rawSort)
+      ? (rawSort as InventorySortKey)
+      : undefined;
+
+    const { items, total } = await listInventory(session.organizationId, { page, limit, search, belowReorder, sort });
     return successResponse({ items, total });
   } catch (error: unknown) {
     logger.error({ error }, "Failed to fetch inventory");

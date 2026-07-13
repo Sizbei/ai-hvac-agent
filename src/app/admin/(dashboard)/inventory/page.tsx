@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Plus, AlertCircle, Search } from 'lucide-react';
-import { useInventory } from '@/hooks/use-inventory';
+import { useInventory, type InventorySortKey } from '@/hooks/use-inventory';
 import { usePricebook } from '@/hooks/use-pricebook';
 import { InventoryTable } from '@/components/admin/inventory/inventory-table';
 import { InventoryFormDialog } from '@/components/admin/inventory/inventory-form-dialog';
@@ -18,10 +18,17 @@ import type { InventoryItem } from '@/hooks/use-inventory';
 
 const PER_PAGE = 50;
 
+const INVENTORY_SORT_OPTIONS: ReadonlyArray<{ value: InventorySortKey; label: string }> = [
+  { value: 'name', label: 'Name (A–Z)' },
+  { value: 'qty_asc', label: 'Qty (low–high)' },
+  { value: 'qty_desc', label: 'Qty (high–low)' },
+];
+
 export default function InventoryPage() {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [belowReorderOnly, setBelowReorderOnly] = useState(false);
+  const [sortKey, setSortKey] = useState<InventorySortKey>('name');
   const [page, setPage] = useState(1);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<InventoryItem | null>(null);
@@ -32,11 +39,11 @@ export default function InventoryPage() {
     return () => clearTimeout(t);
   }, [search]);
 
-  // Reset to page 1 whenever the search query or toggles change.
+  // Reset to page 1 whenever the search query, sort, or toggles change.
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, belowReorderOnly]);
+  }, [debouncedSearch, belowReorderOnly, sortKey]);
 
   const {
     inventory,
@@ -45,7 +52,7 @@ export default function InventoryPage() {
     isLoading,
     error,
     refetch,
-  } = useInventory({ page, search: debouncedSearch, belowReorder: belowReorderOnly });
+  } = useInventory({ page, search: debouncedSearch, belowReorder: belowReorderOnly, sort: sortKey });
 
   // usePricebook with limit:20000 for the material-picker dropdown — leave as-is.
   const { items: pricebookItems } = usePricebook({ limit: 20000 });
@@ -99,6 +106,15 @@ export default function InventoryPage() {
             className="pl-10"
           />
         </div>
+        <select
+          value={sortKey}
+          onChange={(e) => { setSortKey(e.target.value as InventorySortKey); setPage(1); }}
+          className="rounded-xl border bg-card px-3 py-2.5 text-sm font-semibold text-foreground shadow-sm outline-none focus:ring-1 focus:ring-ring"
+        >
+          {INVENTORY_SORT_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
+        </select>
         <Button
           type="button"
           variant={belowReorderOnly ? 'secondary' : 'outline'}

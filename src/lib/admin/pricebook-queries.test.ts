@@ -169,6 +169,37 @@ describe("listPricebookItemsForAdmin — new filters", () => {
   });
 });
 
+describe("listPricebookItemsForAdmin — sort options", () => {
+  beforeEach(() => {
+    vi.mocked(db.select).mockReset();
+    vi.mocked(db.selectDistinct).mockReset();
+  });
+
+  it("accepts sort=name without error (default)", async () => {
+    mockSelectQueue([[{ n: 2 }], []]);
+    const result = await listPricebookItemsForAdmin(ORG, { sort: 'name' });
+    expect(result.total).toBe(2);
+  });
+
+  it("accepts sort=price_asc without error", async () => {
+    mockSelectQueue([[{ n: 3 }], []]);
+    const result = await listPricebookItemsForAdmin(ORG, { sort: 'price_asc' });
+    expect(result.total).toBe(3);
+  });
+
+  it("accepts sort=price_desc without error", async () => {
+    mockSelectQueue([[{ n: 4 }], []]);
+    const result = await listPricebookItemsForAdmin(ORG, { sort: 'price_desc' });
+    expect(result.total).toBe(4);
+  });
+
+  it("falls back to name sort when sort is undefined", async () => {
+    mockSelectQueue([[{ n: 1 }], []]);
+    const result = await listPricebookItemsForAdmin(ORG, {});
+    expect(result.total).toBe(1);
+  });
+});
+
 describe("soft-delete", () => {
   it("deactivatePricebookItem sets active=false (never hard delete)", async () => {
     let captured: Record<string, unknown> | null = null;

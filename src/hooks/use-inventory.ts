@@ -38,11 +38,14 @@ interface PurchaseOrderPayload {
 const inventoryCache = createSwrCache<InventoryPayload>(60_000); // 60s TTL
 const poCache = createSwrCache<PurchaseOrderPayload>(60_000);
 
+export type InventorySortKey = 'name' | 'qty_asc' | 'qty_desc';
+
 interface UseInventoryParams {
   readonly page?: number;
   readonly limit?: number;
   readonly search?: string;
   readonly belowReorder?: boolean;
+  readonly sort?: InventorySortKey;
 }
 
 interface UseInventoryResult {
@@ -65,8 +68,9 @@ export function useInventory(params: UseInventoryParams = {}): UseInventoryResul
   const limit = params.limit ?? 50;
   const search = params.search ?? '';
   const belowReorder = params.belowReorder ?? false;
+  const sort = params.sort ?? '';
 
-  const invKey = `inventory:${page}:${limit}:${search}:${belowReorder}`;
+  const invKey = `inventory:${page}:${limit}:${search}:${belowReorder}:${sort}`;
   // PO panel has no pager of its own — always fetch page 1 regardless of where
   // the inventory table is, so navigating to inventory page 2 doesn't silently
   // show POs 51-100 in the panel below.
@@ -120,6 +124,7 @@ export function useInventory(params: UseInventoryParams = {}): UseInventoryResul
         if (limit !== 50) invQs.set('limit', String(limit));
         if (search) invQs.set('search', search);
         if (belowReorder) invQs.set('belowReorder', 'true');
+        if (sort) invQs.set('sort', sort);
 
         const poQs = new URLSearchParams();
         // No page param — PO panel always shows page 1 (no pager of its own).
@@ -180,7 +185,7 @@ export function useInventory(params: UseInventoryParams = {}): UseInventoryResul
         }
       }
     },
-    [invKey, poKey, page, limit, search, belowReorder],
+    [invKey, poKey, page, limit, search, belowReorder, sort],
   );
 
   // Idiomatic data fetch: setState runs only AFTER the awaited fetch resolves,

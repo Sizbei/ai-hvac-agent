@@ -140,6 +140,8 @@ export interface PricebookAdminPage {
   readonly types: readonly string[];
 }
 
+export type PricebookSortKey = 'name' | 'price_asc' | 'price_desc';
+
 /** Server-paginated admin list with optional search + type filter. */
 export async function listPricebookItemsForAdmin(
   organizationId: string,
@@ -150,6 +152,7 @@ export async function listPricebookItemsForAdmin(
     readonly limit?: number;
     readonly search?: string;
     readonly type?: string;
+    readonly sort?: PricebookSortKey;
   } = {},
 ): Promise<PricebookAdminPage> {
   const page = Math.max(1, opts.page ?? 1);
@@ -205,11 +208,25 @@ export async function listPricebookItemsForAdmin(
     .from(pricebookItems)
     .where(whereClause);
 
+  // Resolve ORDER BY from sort key. Validate to prevent unexpected fallthrough.
+  const validSortKeys: ReadonlyArray<PricebookSortKey> = ['name', 'price_asc', 'price_desc'];
+  const sortKey: PricebookSortKey =
+    opts.sort !== undefined && (validSortKeys as readonly string[]).includes(opts.sort)
+      ? opts.sort
+      : 'name';
+  function resolveOrderBy(key: PricebookSortKey) {
+    switch (key) {
+      case 'price_asc': return asc(pricebookItems.priceCents);
+      case 'price_desc': return desc(pricebookItems.priceCents);
+      default: return asc(pricebookItems.name);
+    }
+  }
+
   const rowsPromise = db
     .select(ADMIN_ITEM_PROJECTION)
     .from(pricebookItems)
     .where(whereClause)
-    .orderBy(asc(pricebookItems.name))
+    .orderBy(resolveOrderBy(sortKey))
     .limit(limit)
     .offset(offset) as Promise<PricebookItemAdminRow[]>;
 

@@ -4,6 +4,7 @@ import { getAdminSession } from "@/lib/auth/session";
 import {
   listPricebookItemsForAdmin,
   createPricebookItem,
+  type PricebookSortKey,
 } from "@/lib/admin/pricebook-queries";
 import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
@@ -70,9 +71,15 @@ export async function GET(request: NextRequest) {
       ? rawType
       : undefined;
 
+    const VALID_SORT_KEYS: ReadonlyArray<PricebookSortKey> = ['name', 'price_asc', 'price_desc'];
+    const rawSort = sp.get("sort") ?? undefined;
+    const sort = rawSort !== undefined && (VALID_SORT_KEYS as readonly string[]).includes(rawSort)
+      ? (rawSort as PricebookSortKey)
+      : undefined;
+
     const { items, total, types } = await listPricebookItemsForAdmin(
       session.organizationId,
-      { includeInactive, isLaborItem, page, limit, search, type },
+      { includeInactive, isLaborItem, page, limit, search, type, sort },
     );
     return successResponse({ items, total, types });
   } catch (error: unknown) {

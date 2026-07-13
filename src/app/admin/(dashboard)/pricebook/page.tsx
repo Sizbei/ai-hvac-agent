@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Plus, AlertCircle, Search } from 'lucide-react';
-import { usePricebook, useTaxRates } from '@/hooks/use-pricebook';
+import { usePricebook, useTaxRates, type PricebookSortKey } from '@/hooks/use-pricebook';
 import { PricebookTable } from '@/components/admin/pricebook/pricebook-table';
 import { PricebookFormDialog } from '@/components/admin/pricebook/pricebook-form-dialog';
 import { TaxRatesPanel } from '@/components/admin/pricebook/tax-rates-panel';
@@ -25,10 +25,17 @@ import type { PricebookItem } from '@/hooks/use-pricebook';
 const ALL_TYPES = 'all';
 const PER_PAGE = 50;
 
+const PRICEBOOK_SORT_OPTIONS: ReadonlyArray<{ value: PricebookSortKey; label: string }> = [
+  { value: 'name', label: 'Name (A–Z)' },
+  { value: 'price_asc', label: 'Price (low–high)' },
+  { value: 'price_desc', label: 'Price (high–low)' },
+];
+
 export default function PricebookPage() {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>(ALL_TYPES);
+  const [sortKey, setSortKey] = useState<PricebookSortKey>('name');
   const [includeInactive, setIncludeInactive] = useState(false);
   const [laborOnly, setLaborOnly] = useState(false);
   const [page, setPage] = useState(1);
@@ -49,15 +56,16 @@ export default function PricebookPage() {
     type: typeParam,
     includeInactive,
     isLaborItem: laborOnly,
+    sort: sortKey,
   });
 
   const { taxRates, isLoading: taxLoading, refetch: refetchTax } = useTaxRates();
 
-  // Reset to page 1 whenever the query (search / type / toggles) changes.
+  // Reset to page 1 whenever the query (search / type / sort / toggles) changes.
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, typeFilter, includeInactive, laborOnly]);
+  }, [debouncedSearch, typeFilter, sortKey, includeInactive, laborOnly]);
 
   const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
   const safePage = Math.min(page, totalPages);
@@ -121,6 +129,15 @@ export default function PricebookPage() {
             ))}
           </SelectContent>
         </Select>
+        <select
+          value={sortKey}
+          onChange={(e) => { setSortKey(e.target.value as PricebookSortKey); setPage(1); }}
+          className="rounded-xl border bg-card px-3 py-2.5 text-sm font-semibold text-foreground shadow-sm outline-none focus:ring-1 focus:ring-ring"
+        >
+          {PRICEBOOK_SORT_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
+        </select>
         <Button
           type="button"
           variant={includeInactive ? 'secondary' : 'outline'}

@@ -42,6 +42,8 @@ export interface InventoryPage {
   readonly total: number;
 }
 
+export type InventorySortKey = 'name' | 'qty_asc' | 'qty_desc';
+
 /**
  * Stock list for an org joined to the pricebook material's name, flagging items
  * at or below their reorder point. Ordered by name. Server-paginated.
@@ -56,6 +58,7 @@ export async function listInventory(
     readonly limit?: number;
     readonly search?: string;
     readonly belowReorder?: boolean;
+    readonly sort?: InventorySortKey;
   } = {},
 ): Promise<InventoryPage> {
   const page = Math.max(1, opts.page ?? 1);
@@ -96,6 +99,20 @@ export async function listInventory(
     .innerJoin(pricebookItems, eq(inventoryItems.pricebookItemId, pricebookItems.id))
     .where(whereClause);
 
+  // Resolve ORDER BY from sort key. Validate to prevent unexpected fallthrough.
+  const validSortKeys: ReadonlyArray<InventorySortKey> = ['name', 'qty_asc', 'qty_desc'];
+  const sortKey: InventorySortKey =
+    opts.sort !== undefined && (validSortKeys as readonly string[]).includes(opts.sort)
+      ? opts.sort
+      : 'name';
+  function resolveOrderBy(key: InventorySortKey) {
+    switch (key) {
+      case 'qty_asc': return asc(inventoryItems.quantityOnHand);
+      case 'qty_desc': return desc(inventoryItems.quantityOnHand);
+      default: return asc(pricebookItems.name);
+    }
+  }
+
   const rowsPromise = db
     .select({
       id: inventoryItems.id,
@@ -112,7 +129,7 @@ export async function listInventory(
       eq(inventoryItems.pricebookItemId, pricebookItems.id),
     )
     .where(whereClause)
-    .orderBy(asc(pricebookItems.name))
+    .orderBy(resolveOrderBy(sortKey))
     .limit(limit)
     .offset(offset);
 

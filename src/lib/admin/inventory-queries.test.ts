@@ -190,6 +190,30 @@ describe("listInventory", () => {
     await listInventory(ORG, { belowReorder: false });
     expect(vi.mocked(db.select)).toHaveBeenCalledTimes(2);
   });
+
+  it("accepts sort=name without error (default)", async () => {
+    mockSelectSeq([[{ n: 2 }], []]);
+    const { total } = await listInventory(ORG, { sort: 'name' });
+    expect(total).toBe(2);
+  });
+
+  it("accepts sort=qty_asc without error", async () => {
+    mockSelectSeq([[{ n: 3 }], []]);
+    const { total } = await listInventory(ORG, { sort: 'qty_asc' });
+    expect(total).toBe(3);
+  });
+
+  it("accepts sort=qty_desc without error", async () => {
+    mockSelectSeq([[{ n: 4 }], []]);
+    const { total } = await listInventory(ORG, { sort: 'qty_desc' });
+    expect(total).toBe(4);
+  });
+
+  it("falls back to name sort when sort is undefined", async () => {
+    mockSelectSeq([[{ n: 1 }], []]);
+    const { total } = await listInventory(ORG, {});
+    expect(total).toBe(1);
+  });
 });
 
 // ──────────────────────────── listPurchaseOrders ────────────────────────────

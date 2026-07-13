@@ -39,6 +39,8 @@ interface PricebookPayload {
 
 const pricebookCache = createSwrCache<PricebookPayload>(60_000); // 60s TTL
 
+export type PricebookSortKey = 'name' | 'price_asc' | 'price_desc';
+
 interface UsePricebookParams {
   readonly page?: number;
   readonly limit?: number;
@@ -46,6 +48,7 @@ interface UsePricebookParams {
   readonly type?: string;
   readonly includeInactive?: boolean;
   readonly isLaborItem?: boolean;
+  readonly sort?: PricebookSortKey;
 }
 
 interface UsePricebookResult {
@@ -69,8 +72,9 @@ export function usePricebook(params: UsePricebookParams = {}): UsePricebookResul
   const type = params.type ?? '';
   const includeInactive = params.includeInactive ?? false;
   const isLaborItem = params.isLaborItem ?? false;
+  const sort = params.sort ?? '';
 
-  const key = `pricebook:${page}:${limit}:${type}:${search}:${includeInactive}:${isLaborItem}`;
+  const key = `pricebook:${page}:${limit}:${type}:${search}:${includeInactive}:${isLaborItem}:${sort}`;
 
   const [items, setItems] = useState<readonly PricebookItem[]>(
     () => pricebookCache.get(key)?.data.items ?? [],
@@ -104,6 +108,7 @@ export function usePricebook(params: UsePricebookParams = {}): UsePricebookResul
         if (type) qs.set('type', type);
         if (includeInactive) qs.set('includeInactive', 'true');
         if (isLaborItem) qs.set('isLaborItem', 'true');
+        if (sort) qs.set('sort', sort);
         const query = qs.toString();
         const res = await fetch(`/api/admin/pricebook${query ? `?${query}` : ''}`);
         const json = await res.json();
@@ -126,7 +131,7 @@ export function usePricebook(params: UsePricebookParams = {}): UsePricebookResul
         setIsLoading(false);
       }
     },
-    [key, page, limit, search, type, includeInactive, isLaborItem],
+    [key, page, limit, search, type, includeInactive, isLaborItem, sort],
   );
 
   // Idiomatic data fetch: setState runs only AFTER the awaited fetch resolves,
