@@ -176,6 +176,14 @@ describe("mapFpJob", () => {
     expect(tally.size).toBe(0);
   });
 
+  it("carries FP created_at through so the request isn't stamped with the import date", () => {
+    const tally: UnknownStatusTally = new Map();
+    const result = mapFpJob(makeJob({ createdAt: "2026-05-30 09:15:00" }), tally);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.job.createdAt).toEqual(parseFpDate("2026-05-30 09:15:00"));
+  });
+
   it("maps statusInt 3 → in_progress", () => {
     const tally: UnknownStatusTally = new Map();
     const result = mapFpJob(makeJob({ statusInt: 3, workStatus: '3', completedAt: null }), tally);

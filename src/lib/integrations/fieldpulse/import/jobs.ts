@@ -103,6 +103,9 @@ export interface MappedFpJob {
   readonly arrivalWindowEnd: Date | null;
   readonly completedAt: Date | null;
   readonly scheduledDate: Date | null;
+  /** FP's real job-created timestamp; used as the request's createdAt so the
+   *  row reflects when the job was booked, not the bulk-import date. */
+  readonly createdAt: Date | null;
   /** First assignment's user_id (primary assignee). */
   readonly assignedFpUserId: string | null;
   /** Additional assignment user_ids beyond the first (for description annotation). */
@@ -169,6 +172,9 @@ export function mapFpJob(
   const arrivalWindowStart = parseFpDate(fp.arrivalWindowStart) ?? scheduleStart;
   const arrivalWindowEnd = parseFpDate(fp.arrivalWindowEnd) ?? scheduleEnd;
 
+  // FP's real created timestamp — so the request isn't stamped with the import day.
+  const createdAt = parseFpDate(fp.createdAt);
+
   // First assignment's user id (primary assignee); additional ones are tallied.
   const assignedFpUserId = fp.assignments?.[0]?.userId ?? null;
   const additionalFpUserIds =
@@ -190,6 +196,7 @@ export function mapFpJob(
       arrivalWindowEnd,
       completedAt,
       scheduledDate,
+      createdAt,
       assignedFpUserId,
       additionalFpUserIds,
     },
@@ -494,6 +501,8 @@ export async function importJobsFromFieldpulse(
             referenceNumber,
             fieldpulseJobId: job.fpId,
             isAfterHours: false,
+            // Reflect when the job was actually booked in FP, not the import run.
+            createdAt: job.createdAt ?? new Date(),
             fieldpulseData: fpJobSpillover,
           }),
         ]);
