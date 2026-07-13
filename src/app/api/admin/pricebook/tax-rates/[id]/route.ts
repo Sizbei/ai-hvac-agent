@@ -10,6 +10,7 @@ import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
+import { isUuid } from "@/lib/validation/uuid";
 
 /** Postgres unique-violation SQLSTATE. */
 const PG_UNIQUE_VIOLATION = "23505";
@@ -50,6 +51,9 @@ export async function PATCH(
     }
 
     const { id } = await context.params;
+    if (!isUuid(id)) {
+      return errorResponse("Invalid ID", "VALIDATION_ERROR", 400);
+    }
     const existing = await getTaxRateById(session.organizationId, id);
     if (!existing) {
       return errorResponse("Tax rate not found", "NOT_FOUND", 404);
@@ -113,6 +117,9 @@ export async function DELETE(
     }
 
     const { id } = await context.params;
+    if (!isUuid(id)) {
+      return errorResponse("Invalid ID", "VALIDATION_ERROR", 400);
+    }
     const existing = await getTaxRateById(session.organizationId, id);
     if (!existing) {
       return errorResponse("Tax rate not found", "NOT_FOUND", 404);

@@ -4,6 +4,7 @@ import { getInvoiceDetailById, getInvoiceOrgIdentity, listInvoiceReminders } fro
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
+import { isUuid } from "@/lib/validation/uuid";
 
 export async function GET(
   _request: NextRequest,
@@ -25,6 +26,9 @@ export async function GET(
     }
 
     const { id } = await context.params;
+    if (!isUuid(id)) {
+      return errorResponse("Not found", "NOT_FOUND", 404);
+    }
     const [invoice, org, reminders] = await Promise.all([
       getInvoiceDetailById(session.organizationId, id),
       getInvoiceOrgIdentity(session.organizationId),

@@ -15,6 +15,7 @@ import { successResponse, errorResponse } from "@/lib/api-response";
 import { logAudit } from "@/lib/admin/audit";
 import { logger } from "@/lib/logger";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
+import { isUuid } from "@/lib/validation/uuid";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +47,9 @@ export async function POST(
     }
 
     const { id: serviceRequestId } = await params;
+    if (!isUuid(serviceRequestId)) {
+      return errorResponse("Invalid ID", "VALIDATION_ERROR", 400);
+    }
 
     // Parse + validate request body
     const body = await request.json();

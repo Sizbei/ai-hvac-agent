@@ -7,6 +7,7 @@ import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
+import { isUuid } from "@/lib/validation/uuid";
 
 // Structured reason (a fixed enum) — NOT free text — so no unencrypted PII can
 // land in the refunds table or the audit log.
@@ -41,6 +42,9 @@ export async function POST(
     }
 
     const { id } = await context.params;
+    if (!isUuid(id)) {
+      return errorResponse("Invalid ID", "VALIDATION_ERROR", 400);
+    }
     const parsed = refundSchema.safeParse(await request.json());
     if (!parsed.success) {
       return errorResponse("Invalid refund", "VALIDATION_ERROR", 400);

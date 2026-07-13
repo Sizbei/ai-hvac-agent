@@ -12,6 +12,7 @@ import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
+import { isUuid } from "@/lib/validation/uuid";
 
 const takePaymentSchema = z.object({
   amountCents: z.number().int().min(1),
@@ -38,6 +39,9 @@ export async function POST(
     }
 
     const { id } = await context.params;
+    if (!isUuid(id)) {
+      return errorResponse("Invalid ID", "VALIDATION_ERROR", 400);
+    }
     const parsed = takePaymentSchema.safeParse(await request.json());
     if (!parsed.success) {
       return errorResponse("Invalid payment", "VALIDATION_ERROR", 400);

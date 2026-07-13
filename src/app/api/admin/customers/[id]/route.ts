@@ -10,6 +10,7 @@ import {
   deleteCustomer,
   archiveCustomer,
 } from "@/lib/admin/crm-queries";
+import { isUuid } from "@/lib/validation/uuid";
 import {
   updateEquipment,
   deleteEquipment,
@@ -35,6 +36,9 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
     }
 
     const { id } = await params;
+    if (!isUuid(id)) {
+      return errorResponse("Not found", "NOT_FOUND", 404);
+    }
     const customer = await getCustomerById(session.organizationId, id);
 
     if (!customer) {

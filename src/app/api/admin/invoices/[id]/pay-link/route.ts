@@ -5,6 +5,7 @@ import { generatePortalToken } from "@/lib/portal/portal-queries";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
+import { isUuid } from "@/lib/validation/uuid";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +27,9 @@ export async function POST(
     }
 
     const { id } = await params;
+    if (!isUuid(id)) {
+      return errorResponse("Invalid ID", "VALIDATION_ERROR", 400);
+    }
     const invoiceInfo = await getInvoiceCustomerId(session.organizationId, id);
     if (!invoiceInfo || !invoiceInfo.customerId) {
       return errorResponse("Invoice not found", "NOT_FOUND", 404);

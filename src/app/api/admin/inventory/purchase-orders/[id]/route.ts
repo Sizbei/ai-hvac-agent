@@ -11,6 +11,7 @@ import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
+import { isUuid } from "@/lib/validation/uuid";
 
 const actionSchema = z.object({
   action: z.enum(["order", "receive"]),
@@ -36,6 +37,9 @@ export async function GET(
     }
 
     const { id } = await context.params;
+    if (!isUuid(id)) {
+      return errorResponse("Not found", "NOT_FOUND", 404);
+    }
     const purchaseOrder = await getPurchaseOrder(session.organizationId, id);
     if (!purchaseOrder) {
       return errorResponse("Purchase order not found", "NOT_FOUND", 404);
@@ -67,6 +71,9 @@ export async function PATCH(
     }
 
     const { id } = await context.params;
+    if (!isUuid(id)) {
+      return errorResponse("Invalid ID", "VALIDATION_ERROR", 400);
+    }
     const parsed = actionSchema.safeParse(await request.json());
     if (!parsed.success) {
       return errorResponse("Invalid action", "VALIDATION_ERROR", 400);

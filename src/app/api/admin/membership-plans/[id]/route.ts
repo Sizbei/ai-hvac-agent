@@ -10,6 +10,7 @@ import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
+import { isUuid } from "@/lib/validation/uuid";
 
 const updateSchema = z.object({
   name: z.string().trim().min(1).max(255).optional(),
@@ -39,6 +40,9 @@ export async function PATCH(
     }
 
     const { id } = await context.params;
+    if (!isUuid(id)) {
+      return errorResponse("Invalid ID", "VALIDATION_ERROR", 400);
+    }
     const existing = await getMembershipPlanById(session.organizationId, id);
     if (!existing) {
       return errorResponse("Plan not found", "NOT_FOUND", 404);
@@ -95,6 +99,9 @@ export async function DELETE(
     }
 
     const { id } = await context.params;
+    if (!isUuid(id)) {
+      return errorResponse("Invalid ID", "VALIDATION_ERROR", 400);
+    }
     const existing = await getMembershipPlanById(session.organizationId, id);
     if (!existing) {
       return errorResponse("Plan not found", "NOT_FOUND", 404);

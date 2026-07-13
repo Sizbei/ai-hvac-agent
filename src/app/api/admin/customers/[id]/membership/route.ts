@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { getAdminSession } from "@/lib/auth/session";
 import { getCustomerById } from "@/lib/admin/crm-queries";
+import { isUuid } from "@/lib/validation/uuid";
 import {
   enrollCustomer,
   cancelMembership,
@@ -38,6 +39,9 @@ export async function GET(
     }
 
     const { id } = await context.params;
+    if (!isUuid(id)) {
+      return errorResponse("Not found", "NOT_FOUND", 404);
+    }
     const customer = await getCustomerById(session.organizationId, id);
     if (!customer) {
       return errorResponse("Customer not found", "NOT_FOUND", 404);
@@ -76,6 +80,9 @@ export async function POST(
     }
 
     const { id } = await context.params;
+    if (!isUuid(id)) {
+      return errorResponse("Invalid ID", "VALIDATION_ERROR", 400);
+    }
     const customer = await getCustomerById(session.organizationId, id);
     if (!customer) {
       return errorResponse("Customer not found", "NOT_FOUND", 404);
@@ -148,6 +155,9 @@ export async function DELETE(
     }
 
     const { id } = await context.params;
+    if (!isUuid(id)) {
+      return errorResponse("Invalid ID", "VALIDATION_ERROR", 400);
+    }
     const customer = await getCustomerById(session.organizationId, id);
     if (!customer) {
       return errorResponse("Customer not found", "NOT_FOUND", 404);

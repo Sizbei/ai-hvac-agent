@@ -4,6 +4,7 @@ import { getCustomerBookings } from "@/lib/admin/queries";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
+import { isUuid } from "@/lib/validation/uuid";
 
 /**
  * GET /api/admin/customers/[id]/bookings — every booking for one customer,
@@ -31,6 +32,9 @@ export async function GET(
     }
 
     const { id } = await params;
+    if (!isUuid(id)) {
+      return errorResponse("Not found", "NOT_FOUND", 404);
+    }
     const bookings = await getCustomerBookings(session.organizationId, id);
     return successResponse({ bookings });
   } catch (error: unknown) {

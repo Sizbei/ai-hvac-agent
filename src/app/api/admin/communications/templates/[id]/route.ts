@@ -15,6 +15,7 @@ import { logAudit } from "@/lib/admin/audit";
 import { logger } from "@/lib/logger";
 import { validateSmsTemplate } from "@/lib/communication/sms-templates";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
+import { isUuid } from "@/lib/validation/uuid";
 
 export const dynamic = "force-dynamic";
 
@@ -68,6 +69,9 @@ export async function PATCH(
     }
 
     const { id: templateId } = await params;
+    if (!isUuid(templateId)) {
+      return errorResponse("Invalid ID", "VALIDATION_ERROR", 400);
+    }
 
     // Verify template belongs to organization
     const existing = await db.query.communicationTemplates.findFirst({
@@ -173,6 +177,9 @@ export async function DELETE(
     }
 
     const { id: templateId } = await params;
+    if (!isUuid(templateId)) {
+      return errorResponse("Invalid ID", "VALIDATION_ERROR", 400);
+    }
 
     // Verify template belongs to organization
     const existing = await db.query.communicationTemplates.findFirst({

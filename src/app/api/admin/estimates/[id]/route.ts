@@ -9,6 +9,7 @@ import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
+import { isUuid } from "@/lib/validation/uuid";
 
 const patchSchema = z.object({
   optionId: z.string().uuid(),
@@ -34,6 +35,9 @@ export async function GET(
     }
 
     const { id } = await context.params;
+    if (!isUuid(id)) {
+      return errorResponse("Not found", "NOT_FOUND", 404);
+    }
     const estimate = await getEstimateDetailById(session.organizationId, id);
     if (!estimate) {
       return errorResponse("Estimate not found", "NOT_FOUND", 404);
@@ -65,6 +69,9 @@ export async function PATCH(
     }
 
     const { id } = await context.params;
+    if (!isUuid(id)) {
+      return errorResponse("Invalid ID", "VALIDATION_ERROR", 400);
+    }
     const parsed = patchSchema.safeParse(await request.json());
     if (!parsed.success) {
       return errorResponse("Invalid request", "VALIDATION_ERROR", 400);

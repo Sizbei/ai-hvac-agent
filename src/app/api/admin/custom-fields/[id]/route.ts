@@ -16,6 +16,7 @@ import {
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
+import { isUuid } from "@/lib/validation/uuid";
 
 // Schema for updating a field definition
 const updateFieldSchema = z.object({
@@ -53,6 +54,9 @@ export async function PATCH(
     }
 
     const params = await context.params;
+    if (!isUuid(params.id)) {
+      return errorResponse("Invalid ID", "VALIDATION_ERROR", 400);
+    }
 
     // Verify the field belongs to the session's organization
     const existing = await getFieldDefinitionById(params.id);
@@ -103,6 +107,9 @@ export async function DELETE(
     }
 
     const params = await context.params;
+    if (!isUuid(params.id)) {
+      return errorResponse("Invalid ID", "VALIDATION_ERROR", 400);
+    }
 
     // Verify the field belongs to the session's organization
     const existing = await getFieldDefinitionById(params.id);
