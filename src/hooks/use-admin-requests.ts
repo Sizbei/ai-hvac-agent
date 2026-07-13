@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { AdminRequest } from '@/lib/admin/types';
+import type { AdminRequest, RequestSortKey } from '@/lib/admin/types';
 
 interface UseAdminRequestsOptions {
   readonly status?: string;
@@ -12,6 +12,8 @@ interface UseAdminRequestsOptions {
   readonly urgency?: string;
   readonly assignedTo?: string;
   readonly isAfterHours?: boolean;
+  /** Server-side sort order. */
+  readonly sort?: RequestSortKey;
 }
 
 interface UseAdminRequestsResult {
@@ -29,7 +31,7 @@ interface UseAdminRequestsResult {
 export function useAdminRequests(
   options: UseAdminRequestsOptions = {},
 ): UseAdminRequestsResult {
-  const { status, search, page = 1, limit = 50, urgency, assignedTo, isAfterHours } = options;
+  const { status, search, page = 1, limit = 50, urgency, assignedTo, isAfterHours, sort } = options;
 
   const [requests, setRequests] = useState<readonly AdminRequest[]>([]);
   const [total, setTotal] = useState(0);
@@ -51,6 +53,7 @@ export function useAdminRequests(
       if (urgency) params.set('urgency', urgency);
       if (assignedTo) params.set('assignedTo', assignedTo);
       if (isAfterHours) params.set('isAfterHours', 'true');
+      if (sort) params.set('sort', sort);
 
       const url = `/api/admin/requests?${params.toString()}`;
       const res = await fetch(url);
@@ -83,7 +86,7 @@ export function useAdminRequests(
     } finally {
       isFetchingRef.current = false;
     }
-  }, [status, search, page, limit, urgency, assignedTo, isAfterHours]);
+  }, [status, search, page, limit, urgency, assignedTo, isAfterHours, sort]);
 
   // Fetch on mount and when options change
   useEffect(() => {

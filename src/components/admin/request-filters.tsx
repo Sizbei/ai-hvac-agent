@@ -9,6 +9,13 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useAdminTechnicians } from '@/hooks/use-admin-technicians';
+import type { RequestSortKey } from '@/lib/admin/types';
+
+const SORT_OPTIONS: ReadonlyArray<{ readonly value: RequestSortKey; readonly label: string }> = [
+  { value: 'newest', label: 'Newest first' },
+  { value: 'oldest', label: 'Oldest first' },
+  { value: 'urgency', label: 'Urgency' },
+];
 
 interface RequestFiltersProps {
   readonly currentStatus: string;
@@ -19,6 +26,8 @@ interface RequestFiltersProps {
   readonly onAssignedToChange: (techId: string) => void;
   readonly isAfterHours: boolean;
   readonly onAfterHoursChange: (value: boolean) => void;
+  readonly currentSort: RequestSortKey;
+  readonly onSortChange: (sort: RequestSortKey) => void;
 }
 
 const STATUS_OPTIONS: readonly { readonly label: string; readonly value: string }[] = [
@@ -49,6 +58,8 @@ export function RequestFilters({
   onAssignedToChange,
   isAfterHours,
   onAfterHoursChange,
+  currentSort,
+  onSortChange,
 }: RequestFiltersProps) {
   const { technicians } = useAdminTechnicians();
 
@@ -99,6 +110,23 @@ export function RequestFilters({
           {technicians.map((tech) => (
             <SelectItem key={tech.id} value={tech.id}>
               {tech.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
+      {/* Sort selector */}
+      <Select
+        value={currentSort}
+        onValueChange={(v) => onSortChange(v as RequestSortKey)}
+      >
+        <SelectTrigger aria-label="Sort requests" className="w-[150px]">
+          <SelectValue placeholder="Newest first" />
+        </SelectTrigger>
+        <SelectContent>
+          {SORT_OPTIONS.map((opt) => (
+            <SelectItem key={opt.value} value={opt.value}>
+              {opt.label}
             </SelectItem>
           ))}
         </SelectContent>

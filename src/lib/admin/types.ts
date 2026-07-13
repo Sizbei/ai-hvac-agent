@@ -429,6 +429,8 @@ export interface OpenAvailability {
   readonly windows: readonly OpenWindow[];
 }
 
+export type RequestSortKey = 'newest' | 'oldest' | 'urgency';
+
 export interface RequestFilters {
   readonly status?: string;
   /** Case-insensitive reference-number search (prefix match). Customer names
@@ -443,6 +445,8 @@ export interface RequestFilters {
   readonly assignedTo?: string;
   /** When true, return only after-hours requests. */
   readonly isAfterHours?: boolean;
+  /** Server-side sort order. Defaults to 'newest'. */
+  readonly sort?: RequestSortKey;
 }
 
 export interface CreateTechnicianInput {

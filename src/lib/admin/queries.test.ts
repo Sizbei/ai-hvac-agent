@@ -468,6 +468,64 @@ describe('getRequests', () => {
     );
     expect(afterHoursCalls).toHaveLength(0);
   });
+
+  it('uses desc(createdAt) by default (no sort specified)', async () => {
+    const { desc } = await import('drizzle-orm');
+    vi.mocked(desc).mockClear();
+    selectResolutions = [[{ value: 0 }], []];
+
+    await getRequests(ORG_ID, {});
+
+    expect(desc).toHaveBeenCalledWith('sr.createdAt');
+  });
+
+  it('uses desc(createdAt) when sort=newest', async () => {
+    const { desc } = await import('drizzle-orm');
+    vi.mocked(desc).mockClear();
+    selectResolutions = [[{ value: 0 }], []];
+
+    await getRequests(ORG_ID, { sort: 'newest' });
+
+    expect(desc).toHaveBeenCalledWith('sr.createdAt');
+  });
+
+  it('uses asc(createdAt) when sort=oldest', async () => {
+    const { asc } = await import('drizzle-orm');
+    vi.mocked(asc).mockClear();
+    selectResolutions = [[{ value: 0 }], []];
+
+    await getRequests(ORG_ID, { sort: 'oldest' });
+
+    expect(asc).toHaveBeenCalledWith('sr.createdAt');
+  });
+
+  it('uses CASE sql expression + desc(createdAt) tiebreaker when sort=urgency', async () => {
+    const { sql, asc, desc } = await import('drizzle-orm');
+    vi.mocked(sql).mockClear();
+    vi.mocked(asc).mockClear();
+    vi.mocked(desc).mockClear();
+    selectResolutions = [[{ value: 0 }], []];
+
+    await getRequests(ORG_ID, { sort: 'urgency' });
+
+    // The CASE expression must be built via sql`...`
+    expect(sql).toHaveBeenCalled();
+    // asc() wraps the CASE expression; desc() is the createdAt tiebreaker
+    expect(asc).toHaveBeenCalled();
+    expect(desc).toHaveBeenCalledWith('sr.createdAt');
+  });
+
+  it('falls back to desc(createdAt) when sort is an unrecognised value', async () => {
+    const { desc } = await import('drizzle-orm');
+    vi.mocked(desc).mockClear();
+    selectResolutions = [[{ value: 0 }], []];
+
+    // Cast to bypass TS — simulates a bad query param reaching the helper
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await getRequests(ORG_ID, { sort: 'invalid' as any });
+
+    expect(desc).toHaveBeenCalledWith('sr.createdAt');
+  });
 });
 
 describe('getRequestById', () => {

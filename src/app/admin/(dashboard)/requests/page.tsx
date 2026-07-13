@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 import { pageLabel } from '@/lib/admin/invoice-list-helpers';
+import type { RequestSortKey } from '@/lib/admin/types';
 
 const PER_PAGE = 50;
 
@@ -21,6 +22,7 @@ export default function AdminRequestsPage() {
   const [urgencyFilter, setUrgencyFilter] = useState<string>('');
   const [assignedToFilter, setAssignedToFilter] = useState<string>('');
   const [isAfterHoursFilter, setIsAfterHoursFilter] = useState<boolean>(false);
+  const [sortKey, setSortKey] = useState<RequestSortKey>('newest');
   const [searchInput, setSearchInput] = useState<string>('');
   const [debouncedSearch, setDebouncedSearch] = useState<string>('');
   const [page, setPage] = useState<number>(1);
@@ -32,10 +34,10 @@ export default function AdminRequestsPage() {
     return () => clearTimeout(handle);
   }, [searchInput]);
 
-  // Reset to page 1 whenever filters or search change.
+  // Reset to page 1 whenever filters, sort, or search change.
   useEffect(() => {
     setPage(1);
-  }, [statusFilter, urgencyFilter, assignedToFilter, isAfterHoursFilter, debouncedSearch]);
+  }, [statusFilter, urgencyFilter, assignedToFilter, isAfterHoursFilter, debouncedSearch, sortKey]);
 
   const { requests, total, isLoading, error, refetch } = useAdminRequests({
     status: statusFilter || undefined,
@@ -43,6 +45,7 @@ export default function AdminRequestsPage() {
     urgency: urgencyFilter || undefined,
     assignedTo: assignedToFilter || undefined,
     isAfterHours: isAfterHoursFilter || undefined,
+    sort: sortKey,
     page,
     limit: PER_PAGE,
   });
@@ -76,6 +79,8 @@ export default function AdminRequestsPage() {
           onAssignedToChange={setAssignedToFilter}
           isAfterHours={isAfterHoursFilter}
           onAfterHoursChange={setIsAfterHoursFilter}
+          currentSort={sortKey}
+          onSortChange={setSortKey}
         />
         <div className="relative w-full sm:max-w-xs">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />

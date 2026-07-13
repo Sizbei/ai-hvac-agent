@@ -63,6 +63,7 @@ import type {
   AgendaBooking,
   AgendaPage,
   RequestFilters,
+  RequestSortKey,
   CreateTechnicianInput,
   UpdateTechnicianInput,
   TranscriptMessage,
@@ -89,6 +90,32 @@ function startOfTodayUTC(): Date {
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const VALID_REQUEST_SORTS: readonly RequestSortKey[] = ['newest', 'oldest', 'urgency'];
+
+/**
+ * Build the ORDER BY clause for getRequests.
+ * - newest: desc(createdAt) — default
+ * - oldest: asc(createdAt)
+ * - urgency: emergency→high→medium→low (CASE 0-3, else 4), then desc(createdAt) tiebreaker
+ */
+function resolveRequestOrderBy(sort?: RequestSortKey) {
+  const key: RequestSortKey =
+    sort !== undefined && VALID_REQUEST_SORTS.includes(sort) ? sort : 'newest';
+  if (key === 'oldest') {
+    return [asc(serviceRequests.createdAt)] as const;
+  }
+  if (key === 'urgency') {
+    return [
+      asc(
+        sql`CASE ${serviceRequests.urgency} WHEN 'emergency' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END`,
+      ),
+      desc(serviceRequests.createdAt),
+    ] as const;
+  }
+  // 'newest' (default)
+  return [desc(serviceRequests.createdAt)] as const;
+}
 
 export async function getRequests(
   organizationId: string,
@@ -181,7 +208,7 @@ export async function getRequests(
       ),
     )
     .where(baseConditions)
-    .orderBy(desc(serviceRequests.createdAt))
+    .orderBy(...resolveRequestOrderBy(filters.sort))
     .limit(limit)
     .offset(offset);
 

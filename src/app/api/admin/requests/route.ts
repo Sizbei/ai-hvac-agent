@@ -4,6 +4,7 @@ import { getRequests } from "@/lib/admin/queries";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
+import type { RequestSortKey } from "@/lib/admin/types";
 
 export async function GET(request: NextRequest) {
   try {
@@ -29,6 +30,7 @@ export async function GET(request: NextRequest) {
     const urgency = url.searchParams.get("urgency") ?? undefined;
     const assignedTo = url.searchParams.get("assignedTo") ?? undefined;
     const isAfterHoursParam = url.searchParams.get("isAfterHours");
+    const sortParam = url.searchParams.get("sort") ?? undefined;
 
     const page = pageParam ? Math.max(1, parseInt(pageParam, 10) || 1) : 1;
     const limit = limitParam
@@ -39,6 +41,10 @@ export async function GET(request: NextRequest) {
     // reference number anyway.
     const search = searchParam ? searchParam.slice(0, 64) : undefined;
     const isAfterHours = isAfterHoursParam === "true" ? true : undefined;
+    const VALID_SORTS: readonly string[] = ['newest', 'oldest', 'urgency'];
+    const sort = (sortParam !== undefined && VALID_SORTS.includes(sortParam)
+      ? sortParam
+      : undefined) as RequestSortKey | undefined;
 
     const result = await getRequests(session.organizationId, {
       status,
@@ -48,6 +54,7 @@ export async function GET(request: NextRequest) {
       urgency,
       assignedTo,
       isAfterHours,
+      sort,
     });
 
     return successResponse({
