@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, Loader2, Users, Receipt, ClipboardList, FileText } from 'lucide-react';
+import { Search, Loader2, Users, Receipt, ClipboardList, FileText, CornerDownLeft } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -10,6 +10,13 @@ import {
 import { cn } from '@/lib/utils';
 import type { SearchResult } from '@/lib/admin/search-queries';
 import { SyncPill } from '@/components/admin/sync-pill';
+import { NAV_GROUPS } from '@/components/admin/nav-items';
+import { filterCommands, type CommandItem } from '@/lib/admin/nav-search';
+
+/** Every admin destination, flattened — the ⌘K search matches these as "Pages". */
+const NAV_ITEMS: CommandItem[] = NAV_GROUPS.flatMap((g) =>
+  g.items.map((it) => ({ label: it.label, href: it.href, group: g.heading })),
+);
 
 const TYPE_LABELS: Record<SearchResult['type'], string> = {
   customer: 'Customers',
@@ -126,26 +133,41 @@ export function GlobalSearch() {
     };
   }, [query]);
 
+  // Page-navigation matches (instant, client-side) come first, then record
+  // results from the API. Both share one keyboard-navigable index.
+  const navItems = query.trim() ? filterCommands(query, NAV_ITEMS) : [];
+  const navCount = navItems.length;
   const grouped = groupResults(results);
-  const flat = grouped.flatMap((g) => g.items);
+  const recordFlat = grouped.flatMap((g) => g.items);
+  const totalCount = navCount + recordFlat.length;
+
+  function navigateTo(href: string) {
+    router.push(href);
+    closeAndReset();
+  }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setActiveIndex((i) => Math.min(i + 1, flat.length - 1));
+      setActiveIndex((i) => Math.min(i + 1, totalCount - 1));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setActiveIndex((i) => Math.max(i - 1, 0));
-    } else if (e.key === 'Enter' && flat[activeIndex]) {
-      router.push(flat[activeIndex].href);
-      closeAndReset();
+    } else if (e.key === 'Enter') {
+      if (activeIndex < navCount) {
+        const p = navItems[activeIndex];
+        if (p) navigateTo(p.href);
+      } else {
+        const r = recordFlat[activeIndex - navCount];
+        if (r) navigateTo(r.href);
+      }
     } else if (e.key === 'Escape') {
       closeAndReset();
     }
   }
 
-  // Pre-compute flat indices so render stays pure (no mutable counter).
-  const flatIndexMap = new Map(flat.map((item, i) => [item.id, i]));
+  // Record global indices sit AFTER the page items (offset by navCount).
+  const recordIndexMap = new Map(recordFlat.map((item, i) => [item.id, i]));
 
   return (
     <Dialog
@@ -171,7 +193,7 @@ export function GlobalSearch() {
               setActiveIndex(0);
             }}
             onKeyDown={handleKeyDown}
-            placeholder="Search customers, invoices, jobs, estimates…"
+            placeholder="Search pages, customers, invoices, jobs…"
             className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           />
           {loading && (
@@ -181,12 +203,42 @@ export function GlobalSearch() {
 
         {/* Results */}
         <div className="max-h-[360px] overflow-y-auto py-2">
-          {!loading && query.length >= 2 && results.length === 0 && (
+          {/* Pages — instant client-side navigation matches */}
+          {navItems.length > 0 && (
+            <div>
+              <p className="px-4 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                Pages
+              </p>
+              {navItems.map((item, i) => {
+                const isActive = i === activeIndex;
+                return (
+                  <button
+                    key={item.href}
+                    type="button"
+                    onClick={() => navigateTo(item.href)}
+                    onMouseEnter={() => setActiveIndex(i)}
+                    className={cn(
+                      'flex w-full items-center gap-3 px-4 py-2 text-left text-sm',
+                      'transition-colors duration-150 ease-[cubic-bezier(.23,1,.32,1)] motion-reduce:transition-none',
+                      isActive ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50',
+                    )}
+                  >
+                    <CornerDownLeft className="size-4 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1 truncate font-medium">{item.label}</span>
+                    <span className="shrink-0 text-xs text-muted-foreground">{item.group}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Record placeholders — suppressed when Pages already fill the list */}
+          {navCount === 0 && !loading && query.length >= 2 && results.length === 0 && (
             <p className="px-4 py-6 text-center text-sm text-muted-foreground">
               No results for &ldquo;{query}&rdquo;
             </p>
           )}
-          {query.length < 2 && (
+          {navCount === 0 && query.length < 2 && (
             <p className="px-4 py-6 text-center text-sm text-muted-foreground">
               Type at least 2 characters to search
             </p>
@@ -198,7 +250,7 @@ export function GlobalSearch() {
                 {TYPE_LABELS[group.type]}
               </p>
               {group.items.map((item) => {
-                const currentIdx = flatIndexMap.get(item.id) ?? 0;
+                const currentIdx = navCount + (recordIndexMap.get(item.id) ?? 0);
                 const isActive = currentIdx === activeIndex;
                 return (
                   <button

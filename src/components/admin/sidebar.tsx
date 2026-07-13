@@ -4,33 +4,10 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
-  LayoutDashboard,
-  CalendarRange,
-  CalendarClock,
-  Map,
-  ClipboardList,
-  MessagesSquare,
-  BarChart3,
-  UsersRound,
-  Building2,
-  Settings,
-  ScrollText,
-  Tags,
   ChevronLeft,
   ChevronRight,
   LogOut,
   X,
-  MessageSquare,
-  Plug,
-  FileText,
-  Receipt,
-  TrendingUp,
-  BadgeCheck,
-  Star,
-  Boxes,
-  Calculator,
-  Gauge,
-  Download,
   Search,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -42,73 +19,15 @@ import {
 } from '@/components/ui/tooltip';
 import { BrandMark } from '@/components/admin/brand-mark';
 import { EnvBadge } from '@/components/admin/env-badge';
+// NAV_GROUPS lives in a shared module so the ⌘K search can offer page-navigation
+// from the same source of truth (no drift with the sidebar).
+import { NAV_GROUPS, type NavItem } from './nav-items';
 import { useUnscheduledCount } from '@/hooks/use-unscheduled-count';
 import { unscheduledBadge } from '@/lib/admin/unscheduled-badge';
 import { envName, parseEnvLinks } from '@/lib/admin/environment';
 import type { AdminRole } from '@/lib/auth/types';
 import { cn } from '@/lib/utils';
 
-interface NavItem {
-  readonly label: string;
-  readonly href: string;
-  readonly icon: typeof ClipboardList;
-  /** Match the active state on the exact path only (for the index route, whose
-   * href is a prefix of every other admin route). */
-  readonly exact?: boolean;
-  /** When 'unscheduled', the item shows the unscheduled-jobs notification badge. */
-  readonly badge?: 'unscheduled';
-}
-
-interface NavGroup {
-  readonly heading: string;
-  readonly items: readonly NavItem[];
-}
-
-const NAV_GROUPS: readonly NavGroup[] = [
-  {
-    heading: 'Operations',
-    items: [
-      { label: 'Dashboard', href: '/admin/', icon: LayoutDashboard, exact: true },
-      { label: 'Calendar', href: '/admin/calendar', icon: CalendarClock, badge: 'unscheduled' },
-      { label: 'Dispatch', href: '/admin/dispatch', icon: CalendarRange },
-      { label: 'Map', href: '/admin/map', icon: Map },
-      { label: 'Requests', href: '/admin/requests', icon: ClipboardList },
-    ],
-  },
-  {
-    heading: 'Customers',
-    items: [
-      { label: 'Conversations', href: '/admin/conversations', icon: MessagesSquare },
-      { label: 'AI Insights', href: '/admin/insights', icon: BarChart3 },
-      { label: 'Customers', href: '/admin/customers', icon: Building2 },
-    ],
-  },
-  {
-    heading: 'Workspace',
-    items: [
-      { label: 'Staff', href: '/admin/staff', icon: UsersRound },
-      { label: 'Pricebook', href: '/admin/pricebook', icon: Tags },
-      { label: 'Inventory', href: '/admin/inventory', icon: Boxes },
-      { label: 'Membership Plans', href: '/admin/membership-plans', icon: BadgeCheck },
-      { label: 'Estimates', href: '/admin/estimates', icon: FileText },
-      { label: 'Invoices', href: '/admin/invoices', icon: Receipt },
-      { label: 'Operations', href: '/admin/operations', icon: Gauge },
-      { label: 'Reports', href: '/admin/reports', icon: TrendingUp },
-      { label: 'Accounting', href: '/admin/accounting', icon: Calculator },
-      { label: 'Reviews', href: '/admin/reviews', icon: Star },
-      { label: 'Chatbot Settings', href: '/admin/settings', icon: Settings },
-      { label: 'Communications', href: '/admin/communications/templates', icon: MessageSquare },
-      { label: 'Audit Log', href: '/admin/audit-log', icon: ScrollText },
-    ],
-  },
-  {
-    heading: 'Integrations',
-    items: [
-      { label: 'Integrations', href: '/admin/integrations', icon: Plug },
-      { label: 'FP Import', href: '/admin/fieldpulse-import', icon: Download },
-    ],
-  },
-] as const;
 
 interface SidebarProps {
   readonly adminName: string;
