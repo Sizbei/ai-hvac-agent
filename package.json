@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:test": "dotenvx run -f .env.test -- next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -16,6 +17,9 @@
     "db:seed:super-admin": "npx tsx src/lib/db/seed-super-admin.ts",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
+    "db:migrate:test": "dotenvx run -f .env.test -- npx tsx src/lib/db/migrate.ts",
+    "db:push:test": "dotenvx run -f .env.test -- drizzle-kit push",
+    "db:studio:test": "dotenvx run -f .env.test -- drizzle-kit studio",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "test": "vitest run",

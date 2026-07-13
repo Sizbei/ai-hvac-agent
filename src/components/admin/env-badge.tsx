@@ -10,9 +10,15 @@ const TONE_CLASSES: Record<string, string> = {
   positive: 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/30',
 };
 
-/** Small uppercase environment chip. Reads NEXT_PUBLIC_ENV_NAME at render time. */
+/**
+ * Small uppercase environment chip. Reads NEXT_PUBLIC_ENV_NAME at render time.
+ * Production is the default/expected state — no chip there (a red "PRODUCTION"
+ * sign on every page is just noise). We only surface a sign for non-prod
+ * environments (test / staging / dev), where knowing you're off-prod matters.
+ */
 export function EnvBadge({ className }: { className?: string }) {
   const name = envName();
+  if (name === 'production') return null;
   const tone = envTone(name);
   return (
     <span
