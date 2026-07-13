@@ -145,6 +145,7 @@ export async function listPricebookItemsForAdmin(
   organizationId: string,
   opts: {
     readonly includeInactive?: boolean;
+    readonly isLaborItem?: boolean;
     readonly page?: number;
     readonly limit?: number;
     readonly search?: string;
@@ -160,6 +161,9 @@ export async function listPricebookItemsForAdmin(
 
   if (!opts.includeInactive) {
     extraConditions.push(eq(pricebookItems.active, true));
+  }
+  if (opts.isLaborItem) {
+    extraConditions.push(eq(pricebookItems.isLaborItem, true));
   }
   if (opts.type) {
     // Cast through sql<> to bypass the enum literal constraint — the DB will

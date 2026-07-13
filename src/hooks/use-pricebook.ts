@@ -44,6 +44,8 @@ interface UsePricebookParams {
   readonly limit?: number;
   readonly search?: string;
   readonly type?: string;
+  readonly includeInactive?: boolean;
+  readonly isLaborItem?: boolean;
 }
 
 interface UsePricebookResult {
@@ -65,8 +67,10 @@ export function usePricebook(params: UsePricebookParams = {}): UsePricebookResul
   const limit = params.limit ?? 50;
   const search = params.search ?? '';
   const type = params.type ?? '';
+  const includeInactive = params.includeInactive ?? false;
+  const isLaborItem = params.isLaborItem ?? false;
 
-  const key = `pricebook:${page}:${limit}:${type}:${search}`;
+  const key = `pricebook:${page}:${limit}:${type}:${search}:${includeInactive}:${isLaborItem}`;
 
   const [items, setItems] = useState<readonly PricebookItem[]>(
     () => pricebookCache.get(key)?.data.items ?? [],
@@ -98,6 +102,8 @@ export function usePricebook(params: UsePricebookParams = {}): UsePricebookResul
         if (limit !== 50) qs.set('limit', String(limit));
         if (search) qs.set('search', search);
         if (type) qs.set('type', type);
+        if (includeInactive) qs.set('includeInactive', 'true');
+        if (isLaborItem) qs.set('isLaborItem', 'true');
         const query = qs.toString();
         const res = await fetch(`/api/admin/pricebook${query ? `?${query}` : ''}`);
         const json = await res.json();
@@ -120,7 +126,7 @@ export function usePricebook(params: UsePricebookParams = {}): UsePricebookResul
         setIsLoading(false);
       }
     },
-    [key, page, limit, search, type],
+    [key, page, limit, search, type, includeInactive, isLaborItem],
   );
 
   // Idiomatic data fetch: setState runs only AFTER the awaited fetch resolves,

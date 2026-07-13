@@ -29,6 +29,8 @@ export default function PricebookPage() {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>(ALL_TYPES);
+  const [includeInactive, setIncludeInactive] = useState(false);
+  const [laborOnly, setLaborOnly] = useState(false);
   const [page, setPage] = useState(1);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<PricebookItem | null>(null);
@@ -45,15 +47,17 @@ export default function PricebookPage() {
     page,
     search: debouncedSearch,
     type: typeParam,
+    includeInactive,
+    isLaborItem: laborOnly,
   });
 
   const { taxRates, isLoading: taxLoading, refetch: refetchTax } = useTaxRates();
 
-  // Reset to page 1 whenever the query (search / type) changes.
+  // Reset to page 1 whenever the query (search / type / toggles) changes.
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, typeFilter]);
+  }, [debouncedSearch, typeFilter, includeInactive, laborOnly]);
 
   const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
   const safePage = Math.min(page, totalPages);
@@ -117,6 +121,24 @@ export default function PricebookPage() {
             ))}
           </SelectContent>
         </Select>
+        <Button
+          type="button"
+          variant={includeInactive ? 'secondary' : 'outline'}
+          size="sm"
+          onClick={() => setIncludeInactive((v) => !v)}
+          aria-pressed={includeInactive}
+        >
+          Show inactive
+        </Button>
+        <Button
+          type="button"
+          variant={laborOnly ? 'secondary' : 'outline'}
+          size="sm"
+          onClick={() => setLaborOnly((v) => !v)}
+          aria-pressed={laborOnly}
+        >
+          Labor only
+        </Button>
       </div>
 
       {error && (

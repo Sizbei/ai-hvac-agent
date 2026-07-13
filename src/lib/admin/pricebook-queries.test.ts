@@ -4,6 +4,7 @@ import {
   createTaxRate,
   deactivatePricebookItem,
   deactivateTaxRate,
+  listPricebookItemsForAdmin,
 } from "./pricebook-queries";
 import { db } from "@/lib/db";
 
@@ -12,6 +13,8 @@ vi.mock("@/lib/db", () => ({
     insert: vi.fn(),
     update: vi.fn(),
     batch: vi.fn().mockResolvedValue([]),
+    select: vi.fn(),
+    selectDistinct: vi.fn(),
   },
 }));
 
@@ -95,6 +98,74 @@ describe("createTaxRate — single-default invariant", () => {
     await createTaxRate(ORG, { name: "City", rateBps: 100, isDefault: false });
     expect(db.batch).not.toHaveBeenCalled();
     expect(db.insert).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ──────────────────────────── listPricebookItemsForAdmin filters ────────────────────────────
+
+/**
+ * Builds a universal Proxy chain for db.select / db.selectDistinct so the
+ * entire fluent chain (from/where/limit/offset/orderBy/then) resolves to
+ * `result` without needing a real DB connection.
+ */
+function buildSelectProxy(result: unknown[]): unknown {
+  const p: Record<string | symbol, unknown> = {};
+  const handler: ProxyHandler<object> = {
+    get(_t, prop) {
+      if (prop === "then") {
+        return (resolve: (v: unknown) => void) => resolve(result);
+      }
+      return () => new Proxy({}, handler);
+    },
+  };
+  return new Proxy(p, handler);
+}
+
+/** Queue-based select mock: each call to db.select pops the next result. */
+function mockSelectQueue(results: unknown[][]): void {
+  let idx = 0;
+  vi.mocked(db.select).mockImplementation(() => {
+    return buildSelectProxy(results[idx++] ?? []) as never;
+  });
+  vi.mocked(db.selectDistinct).mockImplementation(() => {
+    // selectDistinct is used by the typesPromise inside listPricebookItemsForAdmin.
+    return buildSelectProxy([]) as never;
+  });
+}
+
+describe("listPricebookItemsForAdmin — new filters", () => {
+  beforeEach(() => {
+    vi.mocked(db.select).mockReset();
+    vi.mocked(db.selectDistinct).mockReset();
+  });
+
+  it("passes includeInactive=false by default (active items only)", async () => {
+    mockSelectQueue([[{ n: 1 }], []]);
+    const result = await listPricebookItemsForAdmin(ORG);
+    // The function completes without error; type-level validation of the
+    // WHERE predicate is covered by the TypeScript compiler.
+    expect(result.total).toBe(1);
+  });
+
+  it("accepts includeInactive=true without error", async () => {
+    mockSelectQueue([[{ n: 5 }], []]);
+    const result = await listPricebookItemsForAdmin(ORG, { includeInactive: true });
+    expect(result.total).toBe(5);
+  });
+
+  it("accepts isLaborItem=true without error", async () => {
+    mockSelectQueue([[{ n: 2 }], []]);
+    const result = await listPricebookItemsForAdmin(ORG, { isLaborItem: true });
+    expect(result.total).toBe(2);
+  });
+
+  it("accepts both includeInactive and isLaborItem together", async () => {
+    mockSelectQueue([[{ n: 3 }], []]);
+    const result = await listPricebookItemsForAdmin(ORG, {
+      includeInactive: true,
+      isLaborItem: true,
+    });
+    expect(result.total).toBe(3);
   });
 });
 

@@ -21,6 +21,7 @@ const PER_PAGE = 50;
 export default function InventoryPage() {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [belowReorderOnly, setBelowReorderOnly] = useState(false);
   const [page, setPage] = useState(1);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<InventoryItem | null>(null);
@@ -31,11 +32,11 @@ export default function InventoryPage() {
     return () => clearTimeout(t);
   }, [search]);
 
-  // Reset to page 1 whenever the search query changes.
+  // Reset to page 1 whenever the search query or toggles change.
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch]);
+  }, [debouncedSearch, belowReorderOnly]);
 
   const {
     inventory,
@@ -44,7 +45,7 @@ export default function InventoryPage() {
     isLoading,
     error,
     refetch,
-  } = useInventory({ page, search: debouncedSearch });
+  } = useInventory({ page, search: debouncedSearch, belowReorder: belowReorderOnly });
 
   // usePricebook with limit:20000 for the material-picker dropdown — leave as-is.
   const { items: pricebookItems } = usePricebook({ limit: 20000 });
@@ -87,15 +88,26 @@ export default function InventoryPage() {
         }
       />
 
-      <div className="relative max-w-md">
-        <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          aria-label="Search inventory"
-          placeholder="Search by name or SKU..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="pl-10"
-        />
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 sm:max-w-md">
+          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            aria-label="Search inventory"
+            placeholder="Search by name or SKU..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-10"
+          />
+        </div>
+        <Button
+          type="button"
+          variant={belowReorderOnly ? 'secondary' : 'outline'}
+          size="sm"
+          onClick={() => setBelowReorderOnly((v) => !v)}
+          aria-pressed={belowReorderOnly}
+        >
+          Below reorder only
+        </Button>
       </div>
 
       {error && (

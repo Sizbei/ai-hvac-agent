@@ -11,7 +11,7 @@
  * batched insert never needs .returning(). Every query is withTenant-scoped.
  */
 import { randomUUID } from "node:crypto";
-import { and, asc, count, desc, eq, ilike, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, isNotNull, lte, ne, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   inventoryItems,
@@ -55,6 +55,7 @@ export async function listInventory(
     readonly page?: number;
     readonly limit?: number;
     readonly search?: string;
+    readonly belowReorder?: boolean;
   } = {},
 ): Promise<InventoryPage> {
   const page = Math.max(1, opts.page ?? 1);
@@ -73,6 +74,16 @@ export async function listInventory(
       ilike(pricebookItems.sku, term),
     ) as SQL;
     extraConditions.push(searchClause);
+  }
+  if (opts.belowReorder) {
+    // Mirror the row-level belowReorder computation exactly:
+    //   reorderPoint IS NOT NULL AND quantityOnHand <= reorderPoint
+    extraConditions.push(
+      and(
+        isNotNull(inventoryItems.reorderPoint),
+        lte(inventoryItems.quantityOnHand, inventoryItems.reorderPoint!),
+      ) as SQL,
+    );
   }
 
   const whereClause = withTenant(inventoryItems, organizationId, ...extraConditions);

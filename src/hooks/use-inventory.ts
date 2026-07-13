@@ -42,6 +42,7 @@ interface UseInventoryParams {
   readonly page?: number;
   readonly limit?: number;
   readonly search?: string;
+  readonly belowReorder?: boolean;
 }
 
 interface UseInventoryResult {
@@ -63,8 +64,9 @@ export function useInventory(params: UseInventoryParams = {}): UseInventoryResul
   const page = params.page ?? 1;
   const limit = params.limit ?? 50;
   const search = params.search ?? '';
+  const belowReorder = params.belowReorder ?? false;
 
-  const invKey = `inventory:${page}:${limit}:${search}`;
+  const invKey = `inventory:${page}:${limit}:${search}:${belowReorder}`;
   // PO panel has no pager of its own — always fetch page 1 regardless of where
   // the inventory table is, so navigating to inventory page 2 doesn't silently
   // show POs 51-100 in the panel below.
@@ -117,6 +119,7 @@ export function useInventory(params: UseInventoryParams = {}): UseInventoryResul
         if (page > 1) invQs.set('page', String(page));
         if (limit !== 50) invQs.set('limit', String(limit));
         if (search) invQs.set('search', search);
+        if (belowReorder) invQs.set('belowReorder', 'true');
 
         const poQs = new URLSearchParams();
         // No page param — PO panel always shows page 1 (no pager of its own).
@@ -177,7 +180,7 @@ export function useInventory(params: UseInventoryParams = {}): UseInventoryResul
         }
       }
     },
-    [invKey, poKey, page, limit, search],
+    [invKey, poKey, page, limit, search, belowReorder],
   );
 
   // Idiomatic data fetch: setState runs only AFTER the awaited fetch resolves,

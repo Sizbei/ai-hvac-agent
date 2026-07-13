@@ -178,6 +178,18 @@ describe("listInventory", () => {
     await listInventory(ORG);
     expect(captured.every((c) => c.whereCalled)).toBe(true);
   });
+
+  it("accepts belowReorder=true without error", async () => {
+    mockSelectSeq([[{ n: 2 }], []]);
+    const { total } = await listInventory(ORG, { belowReorder: true });
+    expect(total).toBe(2);
+  });
+
+  it("belowReorder=false (default) does not change query count", async () => {
+    mockSelectSeq([[{ n: 1 }], []]);
+    await listInventory(ORG, { belowReorder: false });
+    expect(vi.mocked(db.select)).toHaveBeenCalledTimes(2);
+  });
 });
 
 // ──────────────────────────── listPurchaseOrders ────────────────────────────

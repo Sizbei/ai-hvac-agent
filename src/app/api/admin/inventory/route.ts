@@ -44,8 +44,9 @@ export async function GET(request: NextRequest) {
     const limit = Number.isFinite(rawLimit) ? Math.min(1000, Math.max(1, Math.floor(rawLimit))) : 50;
 
     const search = sp.get("search") ?? undefined;
+    const belowReorder = sp.get("belowReorder") === "true";
 
-    const { items, total } = await listInventory(session.organizationId, { page, limit, search });
+    const { items, total } = await listInventory(session.organizationId, { page, limit, search, belowReorder });
     return successResponse({ items, total });
   } catch (error: unknown) {
     logger.error({ error }, "Failed to fetch inventory");

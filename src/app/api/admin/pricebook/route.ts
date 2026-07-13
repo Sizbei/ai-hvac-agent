@@ -54,6 +54,7 @@ export async function GET(request: NextRequest) {
 
     const sp = request.nextUrl.searchParams;
     const includeInactive = sp.get("includeInactive") === "true";
+    const isLaborItem = sp.get("isLaborItem") === "true";
 
     const rawPage = Number(sp.get("page") ?? "1");
     const page = Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
@@ -71,7 +72,7 @@ export async function GET(request: NextRequest) {
 
     const { items, total, types } = await listPricebookItemsForAdmin(
       session.organizationId,
-      { includeInactive, page, limit, search, type },
+      { includeInactive, isLaborItem, page, limit, search, type },
     );
     return successResponse({ items, total, types });
   } catch (error: unknown) {
