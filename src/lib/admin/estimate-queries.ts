@@ -384,6 +384,9 @@ export async function listEstimates(
     // Customer name is encrypted — decrypt every row server-side and filter.
     // Title is plaintext so we match it in JS after the full-table fetch.
     // Load ALL matching rows (no pagination), decrypt, filter, then slice.
+    // Cap the decrypt-scan to the most recent 5 000 rows (newest-first ordering
+    // is already applied) — mirrors the SCAN_LIMIT_ESTIMATES cap in search-queries.ts.
+    // Without this the query fetches ALL org rows on every keystroke.
     const allRows = await db
       .select(rowCols)
       .from(estimates)
@@ -395,7 +398,8 @@ export async function listEstimates(
         ),
       )
       .where(whereClause)
-      .orderBy(orderByClause);
+      .orderBy(orderByClause)
+      .limit(5000);
 
     const filtered = allRows.filter(({ nameEncrypted, title }) => {
       const name = safeDecryptName(nameEncrypted ?? null);

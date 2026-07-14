@@ -1088,6 +1088,9 @@ export async function listInvoices(
     // Customer name is encrypted — decrypt every row server-side and filter.
     // For reference/id prefix search we can also do it here after decryption.
     // Load ALL matching rows (no pagination), decrypt, filter, then slice.
+    // Cap the decrypt-scan to the most recent 5 000 rows (newest-first ordering
+    // is already applied) — mirrors the SCAN_LIMIT_INVOICES cap in search-queries.ts.
+    // Without this the query fetches ALL org rows on every keystroke.
     const allRowsPromise = db
       .select(rowCols)
       .from(invoices)
@@ -1099,7 +1102,8 @@ export async function listInvoices(
         ),
       )
       .where(whereClause)
-      .orderBy(orderByClause);
+      .orderBy(orderByClause)
+      .limit(5000);
 
     // countPromise is not needed in the search path: filtered.length is the true total.
     // sourceCountsPromise (SQL) can't see decrypted names, so we discard it and

@@ -245,6 +245,9 @@ export async function getCustomers(
   // Search path: encrypted columns aren't SQL-searchable, so aggregate over ALL
   // matching customers, then decrypt + filter + paginate the matches. Runs the
   // scan and the types lookup together.
+  // Cap to the most recent 5 000 rows (newest-first ordering already applied) —
+  // mirrors the SCAN_LIMIT_CUSTOMERS cap in search-queries.ts. Without this the
+  // query fetches ALL org customer rows on every keystroke.
   const allPromise = db
     .select({ ...customerCols, ...aggCols })
     .from(customers)
@@ -252,7 +255,8 @@ export async function getCustomers(
     .leftJoin(serviceRequests, eq(serviceRequests.customerId, customers.id))
     .where(whereClause)
     .groupBy(customers.id)
-    .orderBy(desc(customers.createdAt));
+    .orderBy(desc(customers.createdAt))
+    .limit(5000);
 
   const [allRows, propertyTypes] = await Promise.all([allPromise, typesPromise]);
   const matched = allRows

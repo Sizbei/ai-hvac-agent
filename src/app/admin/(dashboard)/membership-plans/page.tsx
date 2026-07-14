@@ -12,6 +12,7 @@ export default function MembershipPlansPage() {
   const { plans, isLoading, error, refetch } = useMembershipPlans();
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<MembershipPlan | null>(null);
+  const [deactivateError, setDeactivateError] = useState<string | null>(null);
 
   function handleAddClick(): void {
     setEditing(null);
@@ -24,10 +25,17 @@ export default function MembershipPlansPage() {
   }
 
   async function handleDeactivate(plan: MembershipPlan): Promise<void> {
+    if (!window.confirm(`Deactivate "${plan.name}"?`)) return;
+    setDeactivateError(null);
     const res = await fetch(`/api/admin/membership-plans/${plan.id}`, {
       method: 'DELETE',
     });
-    if (res.ok) void refetch();
+    if (res.ok) {
+      void refetch();
+    } else {
+      const body = await res.json().catch(() => ({}));
+      setDeactivateError((body as { error?: string }).error ?? 'Failed to deactivate plan.');
+    }
   }
 
   return (
@@ -46,10 +54,10 @@ export default function MembershipPlansPage() {
         </Button>
       </div>
 
-      {error && (
+      {(error ?? deactivateError) && (
         <Alert variant="destructive">
           <AlertCircle className="size-4" />
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{error ?? deactivateError}</AlertDescription>
         </Alert>
       )}
 

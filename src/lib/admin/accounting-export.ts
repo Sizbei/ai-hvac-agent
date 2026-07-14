@@ -16,7 +16,7 @@
  * ids) — never customer names, emails, addresses, or free-text. The exported
  * FILE does contain amounts, so the route that serves it is super_admin-gated.
  */
-import { eq, gte, lte, isNotNull, isNull } from "drizzle-orm";
+import { and, or, eq, gte, lte, isNotNull, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   invoices,
@@ -124,7 +124,7 @@ export async function getAccountingExport(
         ),
       ),
 
-    // Synced invoices (FP-mirrored) — listed separately, NOT imported to ledger.
+    // Synced invoices (FP- or HCP-mirrored) — listed separately, NOT imported to ledger.
     db
       .select({
         id: invoices.id,
@@ -137,7 +137,7 @@ export async function getAccountingExport(
         withTenant(
           invoices,
           organizationId,
-          isNotNull(invoices.fieldpulseInvoiceId),
+          or(isNotNull(invoices.fieldpulseInvoiceId), isNotNull(invoices.hcpInvoiceId))!,
           gte(invoices.createdAt, fromDate),
           lte(invoices.createdAt, toDate),
         ),
@@ -346,9 +346,9 @@ export function buildCsv(result: AccountingExportResult): string {
       csvField("Native subtotal"),
       csvField(nativeTotal.toFixed(2)),
     ].join(","),
-    // ── Section 2: FieldPulse-synced rows (reconciliation only) ─────────────
+    // ── Section 2: externally-synced rows (reconciliation only) ─────────────
     csvField(
-      "# SYNCED FROM FIELDPULSE (already booked in FieldPulse — not native revenue — do NOT import)",
+      "# SYNCED FROM EXTERNAL SOURCE (already booked in FieldPulse/HCP — not native revenue — do NOT import)",
     ),
     ...csvRows(result.synced),
     [

@@ -107,7 +107,6 @@ export async function POST(
         entity: "invoice",
         entityId: parsed.data.invoiceId,
         details: JSON.stringify({
-          amountCents: parsed.data.amountCents,
           customerId: identity.customerId,
         }),
         ipAddress: ip,

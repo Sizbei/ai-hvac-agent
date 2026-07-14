@@ -86,8 +86,9 @@ function formatWindow(iso: string | null): string {
   if (!iso) return 'Unscheduled';
   const d = new Date(iso);
   if (isNaN(d.getTime())) return 'Unscheduled';
-  const day = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-  const startH = d.getHours();
+  const tz = 'America/New_York';
+  const day = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: tz });
+  const startH = Number(d.toLocaleTimeString('en-US', { hour: 'numeric', hourCycle: 'h23', timeZone: tz }));
   const endH = startH + 2;
   const fmt = (h: number) => {
     const suffix = h >= 12 ? 'pm' : 'am';

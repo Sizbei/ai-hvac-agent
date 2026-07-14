@@ -84,6 +84,15 @@ export async function GET(
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
 
+    const rateCheck = slidingWindow(
+      `admin:request-get:${session.userId}`,
+      RATE_LIMITS.adminRead.maxRequests,
+      RATE_LIMITS.adminRead.windowMs,
+    );
+    if (!rateCheck.allowed) {
+      return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
+    }
+
     const { id } = await params;
 
     if (!UUID_REGEX.test(id)) {
@@ -256,9 +265,8 @@ export async function PATCH(
         entity: "service_request",
         entityId: id,
         details: JSON.stringify({
-          scheduledDate: result.scheduledDate,
-          arrivalWindowStart: result.arrivalWindowStart,
-          arrivalWindowEnd: result.arrivalWindowEnd,
+          scheduledCleared: result.scheduledDate === null,
+          hasArrivalWindow: result.arrivalWindowStart !== null,
         }),
       });
       calendarScheduleChanged = true;

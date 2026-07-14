@@ -42,6 +42,7 @@ export default function PricebookPage() {
   const [page, setPage] = useState(1);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<PricebookItem | null>(null);
+  const [deactivateError, setDeactivateError] = useState<string | null>(null);
 
   // Persist filters to the URL (shareable links + survives refresh). Page is
   // intentionally NOT persisted. Defaults map to '' so they're dropped from the URL.
@@ -102,10 +103,17 @@ export default function PricebookPage() {
   }
 
   async function handleDeactivate(item: PricebookItem): Promise<void> {
+    if (!window.confirm(`Deactivate "${item.name}"?`)) return;
+    setDeactivateError(null);
     const res = await fetch(`/api/admin/pricebook/${item.id}`, {
       method: 'DELETE',
     });
-    if (res.ok) void refetch();
+    if (res.ok) {
+      void refetch();
+    } else {
+      const body = await res.json().catch(() => ({}));
+      setDeactivateError((body as { error?: string }).error ?? 'Failed to deactivate item.');
+    }
   }
 
   const handleRefetchAll = useCallback(() => {
@@ -179,10 +187,10 @@ export default function PricebookPage() {
         </Button>
       </div>
 
-      {error && (
+      {(error ?? deactivateError) && (
         <Alert variant="destructive">
           <AlertCircle className="size-4" />
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{error ?? deactivateError}</AlertDescription>
         </Alert>
       )}
 

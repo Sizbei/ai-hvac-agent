@@ -82,12 +82,6 @@ function safeDecrypt(ciphertext: string | null): string | null {
   }
 }
 
-function startOfTodayUTC(): Date {
-  return new Date(
-    new Date().toISOString().split("T")[0] + "T00:00:00.000Z",
-  );
-}
-
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -1029,7 +1023,8 @@ export async function updateTechnician(
 export async function getDashboardStats(
   organizationId: string,
 ): Promise<DashboardStats> {
-  const todayStart = startOfTodayUTC();
+  const todayBounds = businessDayBounds(businessIsoDate(new Date()))!;
+  const todayStart = todayBounds.start;
 
   // Use a single aggregate query with CASE statements for all counts.
   // This is much faster than 7 separate count queries (1 DB round-trip vs 7).
@@ -1166,8 +1161,9 @@ function toDashboardRequest(row: DashboardRequestRow): DashboardRequest {
 export async function getDashboardOverview(
   organizationId: string,
 ): Promise<DashboardOverview> {
-  const todayStart = startOfTodayUTC();
-  const tomorrowStart = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
+  const todayBounds = businessDayBounds(businessIsoDate(new Date()))!;
+  const todayStart = todayBounds.start;
+  const tomorrowStart = todayBounds.end;
 
   // Run all queries in parallel to reduce latency (1 DB round-trip vs 4 sequential).
   // Neon's pgwire protocol supports multiple concurrent queries per connection.

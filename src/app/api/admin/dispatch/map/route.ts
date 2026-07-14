@@ -1,5 +1,6 @@
 import { and, desc, eq, gt, inArray, isNotNull, sql } from "drizzle-orm";
 import { getAdminSession } from "@/lib/auth/session";
+import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { db } from "@/lib/db";
 import {
   serviceRequests,
@@ -47,6 +48,18 @@ export async function GET() {
   const session = await getAdminSession();
   if (!session) {
     return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
+  }
+
+  // Rate-limit per user: same pattern as sibling dispatch/route.ts.
+  // The map fires up to 25 live geocodes + decrypts 200+ jobs / 300 AR rows —
+  // cap it the same as other polled admin read surfaces (60 req/min/user).
+  const rateCheck = slidingWindow(
+    `admin:dispatch:map:${session.userId}`,
+    RATE_LIMITS.adminRead.maxRequests,
+    RATE_LIMITS.adminRead.windowMs,
+  );
+  if (!rateCheck.allowed) {
+    return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
   }
 
   try {

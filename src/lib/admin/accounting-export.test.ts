@@ -86,6 +86,8 @@ vi.mock('drizzle-orm', () => ({
   eq: () => 'eq',
   gte: () => 'gte',
   lte: () => 'lte',
+  and: (...conds: unknown[]) => ({ kind: 'and', conds }),
+  or: (...conds: unknown[]) => ({ kind: 'or', conds }),
   isNull: (col: unknown) => ({ kind: 'isNull', col }),
   isNotNull: (col: unknown) => ({ kind: 'isNotNull', col }),
 }));
@@ -266,10 +268,11 @@ describe('getAccountingExport', () => {
     expect(nativeInvWhere).toContain('invoices.fieldpulseInvoiceId');
     expect(nativeInvWhere).toContain('invoices.hcpInvoiceId');
 
-    // 2nd captured = synced invoices query
+    // 2nd captured = synced invoices query (OR of fp + hcp)
     const syncedInvWhere = JSON.stringify(captured[1]?.where ?? []);
     expect(syncedInvWhere).toContain('isNotNull');
     expect(syncedInvWhere).toContain('invoices.fieldpulseInvoiceId');
+    expect(syncedInvWhere).toContain('invoices.hcpInvoiceId');
 
     // 3rd captured = native payments query
     const nativePayWhere = JSON.stringify(captured[2]?.where ?? []);
@@ -310,7 +313,7 @@ describe('buildCsv', () => {
     expect(csv).toContain('Native subtotal');
     expect(csv).toContain('108.25');
     // Synced section marker
-    expect(csv).toContain('# SYNCED FROM FIELDPULSE');
+    expect(csv).toContain('# SYNCED FROM EXTERNAL SOURCE');
     expect(csv).toContain('Invoice fp-1');
     expect(csv).toContain('FieldPulse synced subtotal');
     expect(csv).toContain('200.00');

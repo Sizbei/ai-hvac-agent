@@ -162,7 +162,6 @@ async function upsertHcpInvoiceRecord(
           to: state,
           source: "housecall_invoice_pull",
           hcpInvoiceId: invoice.id,
-          totalCents,
         }),
         ipAddress: null,
       }),
@@ -200,7 +199,6 @@ async function upsertHcpInvoiceRecord(
         to: state,
         source: "housecall_invoice_pull",
         hcpInvoiceId: invoice.id,
-        totalCents,
       }),
       ipAddress: null,
     });
