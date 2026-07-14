@@ -111,7 +111,13 @@ decrypts full PII. Sibling mutating routes are limited; these reads are not.
 
 ---
 
-## P2 — MEDIUM (correctness / UX / a11y). Batch after P0/P1.
+## P2 — MEDIUM (correctness / UX / a11y). ✅ NO-DECISION ITEMS FIXED + DEPLOYED (2026-07-14)
+> Fixed: RoleBadge super_admin · getRequests 20→50 · getCustomerById lastServiceDate ·
+> getReviewStats Number() · conversations pagination + no error-flicker + aria-label ·
+> reports KpiCard '—' + latest-wins fetch · bot-analytics retry · request-row keyboard ·
+> calendar KeyboardSensor + nested-role fix · inventory/job-card aria-labels · calendar
+> localStorage→useEffect. Verified: typecheck, 104 tests, 0 lint errors, pages render.
+> **STILL OPEN (need your decision, below):** the two DECISION items.
 
 - **Dispatch "suggested technicians" returns 0 for every request** (skill-gate drops all
   techs w/o prior matching-category jobs; null jobType on FP jobs). Dead feature — needs a
