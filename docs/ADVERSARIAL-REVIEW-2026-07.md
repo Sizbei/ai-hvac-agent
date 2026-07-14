@@ -52,7 +52,11 @@ column with no upper bound. **Verified live:** `?minCents=2147483648` → 500 (`
 
 ---
 
-## P1 — HIGH (money correctness / convention / safety)
+## P1 — HIGH (money correctness / convention / safety). ✅ ALL FIXED + DEPLOYED (2026-07-14)
+> Commit `3d01845`. Verified: typecheck clean, 121 tests pass, 0 lint errors, live APIs 200,
+> dashboard renders. P1-1 accounting HCP-synced fix · P1-2 audit-log values removed · P1-3
+> dashboard Eastern day · P1-4 map ET times · P1-5 Deactivate confirm+errors · P1-6 search
+> 5000-cap · P1-7 rate-limit map + requests/[id].
 
 ### P1-1 · Accounting export misfiles HCP-synced invoices as "native" → money double-count
 Native query correctly excludes both `fieldpulseInvoiceId` and `hcpInvoiceId`, but the
