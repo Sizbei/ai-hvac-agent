@@ -6,10 +6,12 @@ import {
   ClipboardCheck,
   Timer,
   Lightbulb,
+  RefreshCw,
 } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
 import { useBotAnalytics } from '@/hooks/use-bot-analytics';
 import type {
   IntentDistributionRow,
@@ -108,7 +110,7 @@ function BarList({
 }
 
 export function BotAnalyticsSection() {
-  const { data, isLoading, error } = useBotAnalytics();
+  const { data, isLoading, error, refetch } = useBotAnalytics();
 
   const intentRows = (data?.intentDistribution ?? []).map(
     (r: IntentDistributionRow) => ({ key: r.intentId, count: r.count }),
@@ -128,7 +130,17 @@ export function BotAnalyticsSection() {
 
       {error && (
         <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription className="flex flex-col items-start gap-2">
+            <span>{error}</span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void refetch()}
+            >
+              <RefreshCw className="mr-2 size-4" />
+              Retry
+            </Button>
+          </AlertDescription>
         </Alert>
       )}
 

@@ -123,6 +123,7 @@ export default function InventoryPage() {
           />
         </div>
         <select
+          aria-label="Sort order"
           value={sortKey}
           onChange={(e) => { setSortKey(e.target.value as InventorySortKey); setPage(1); }}
           className="rounded-xl border bg-card px-3 py-2.5 text-sm font-semibold text-foreground shadow-sm outline-none focus:ring-1 focus:ring-ring"

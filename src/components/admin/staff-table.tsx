@@ -32,6 +32,13 @@ function formatDate(dateString: string): string {
 }
 
 function RoleBadge({ role }: { role: StaffRecord['role'] }) {
+  if (role === 'super_admin') {
+    return (
+      <Badge className="bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300">
+        Super Admin
+      </Badge>
+    );
+  }
   if (role === 'admin') {
     return (
       <Badge className="bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400">

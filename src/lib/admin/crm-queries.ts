@@ -289,7 +289,7 @@ export async function getCustomerById(
 
   if (!row) return null;
 
-  const [equipmentRows, noteRows, followUpRows, historyRows, requestCountRows] =
+  const [equipmentRows, noteRows, followUpRows, historyRows, requestCountRows, lastServiceRows] =
     await Promise.all([
       db
         .select()
@@ -383,6 +383,18 @@ export async function getCustomerById(
             eq(serviceRequests.customerId, customerId),
           ),
         ),
+
+      // lastServiceDate — mirrors the list query's max(created_at)::text aggregate.
+      db
+        .select({ value: sql<string | null>`max(${serviceRequests.createdAt})::text` })
+        .from(serviceRequests)
+        .where(
+          withTenant(
+            serviceRequests,
+            organizationId,
+            eq(serviceRequests.customerId, customerId),
+          ),
+        ),
     ]);
 
   return {
@@ -396,7 +408,7 @@ export async function getCustomerById(
     notes: row.notes,
     equipmentCount: equipmentRows.length,
     requestCount: requestCountRows[0]?.value ?? 0,
-    lastServiceDate: null,
+    lastServiceDate: lastServiceRows[0]?.value ?? null,
     customerType: row.customerType,
     membershipStatus: row.membershipStatus,
     fieldpulseCustomerId: row.fieldpulseCustomerId,

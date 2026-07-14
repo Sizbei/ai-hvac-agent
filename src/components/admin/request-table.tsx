@@ -71,7 +71,15 @@ export function RequestTable({ requests, isLoading, onRowClick }: RequestTablePr
                 <TableRow
                   key={request.id}
                   className="cursor-pointer"
+                  tabIndex={0}
+                  role="button"
                   onClick={() => onRowClick(request)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onRowClick(request);
+                    }
+                  }}
                 >
                   <TableCell className="font-mono text-xs">
                     {request.referenceNumber}

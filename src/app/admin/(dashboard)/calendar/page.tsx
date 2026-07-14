@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 import {
   useSchedulingCalendar,
@@ -121,9 +121,16 @@ export default function CalendarPage() {
   const [view, setView] = useState<CalendarView>('day');
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [status, setStatus] = useState<CalendarStatus | null>(null);
-  const [showCompleted, setShowCompleted] = useState<boolean>(() => {
-    try { return localStorage.getItem('calendar:showCompleted') === 'true'; } catch { return false; }
-  });
+  // Initialize to false (SSR-safe default); sync from localStorage after mount
+  // to avoid a hydration mismatch (SSR has no localStorage).
+  const [showCompleted, setShowCompleted] = useState<boolean>(false);
+  useEffect(() => {
+    try {
+      if (localStorage.getItem('calendar:showCompleted') === 'true') {
+        setShowCompleted(true);
+      }
+    } catch {}
+  }, []);
 
   function toggleShowCompleted(): void {
     setShowCompleted((prev) => {

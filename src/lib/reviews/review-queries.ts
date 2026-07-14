@@ -315,15 +315,16 @@ export async function getReviewStats(
 ): Promise<ReviewStats> {
   const [row] = await db
     .select({
-      count: sql<number>`count(*)::int`,
-      responded: sql<number>`count(*) FILTER (WHERE ${reviewRequests.status} = 'responded')::int`,
+      // FILTER(WHERE) makes Drizzle count() awkward; keep sql but coerce on read.
+      count: sql<number>`count(*)`,
+      responded: sql<number>`count(*) FILTER (WHERE ${reviewRequests.status} = 'responded')`,
       avgRating: sql<number | null>`avg(${reviewRequests.rating})`,
     })
     .from(reviewRequests)
     .where(withTenant(reviewRequests, organizationId));
 
-  const count = row?.count ?? 0;
-  const responded = row?.responded ?? 0;
+  const count = Number(row?.count ?? 0);
+  const responded = Number(row?.responded ?? 0);
   const avgRating =
     row?.avgRating === null || row?.avgRating === undefined
       ? null

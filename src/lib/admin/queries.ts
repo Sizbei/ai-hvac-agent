@@ -116,7 +116,7 @@ export async function getRequests(
   filters: RequestFilters,
 ): Promise<{ readonly requests: readonly AdminRequest[]; readonly total: number }> {
   const page = filters.page ?? 1;
-  const limit = filters.limit ?? 20;
+  const limit = filters.limit ?? 50;
   const offset = (page - 1) * limit;
 
   type RequestStatus = (typeof requestStatusEnum.enumValues)[number];

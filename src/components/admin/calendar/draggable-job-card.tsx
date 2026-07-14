@@ -45,6 +45,10 @@ export function DraggableJobCard({
       ref={setNodeRef}
       {...listeners}
       {...attributes}
+      // The inner CalendarJobCard renders a <button>, so we clear the
+      // role="button" that dnd-kit spreads via attributes to avoid a nested
+      // interactive-role violation. The drag listeners stay on this wrapper.
+      role={undefined}
       className={`h-full w-full touch-none ${isDragging ? 'opacity-40' : ''} ${
         disabled ? 'cursor-progress' : 'cursor-grab active:cursor-grabbing'
       }`}

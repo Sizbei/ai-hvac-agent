@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 export interface SalesReport {
   readonly fromDate: string;
@@ -75,52 +75,59 @@ export function useReports(range: ReportRange = {}): UseReportsResult {
   const [technicianScorecards, setTechnicianScorecards] = useState<TechnicianScorecardRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  const isFetchingRef = useRef(false);
+  const [reloadNonce, setReloadNonce] = useState(0);
 
   const { from, to } = range;
 
-  const fetchReport = useCallback(async (): Promise<void> => {
-    if (isFetchingRef.current) return;
-    isFetchingRef.current = true;
+  const refetch = useCallback(async (): Promise<void> => {
+    setReloadNonce((n) => n + 1);
+  }, []);
 
-    try {
-      const params = new URLSearchParams();
-      if (from) params.set('from', from);
-      if (to) params.set('to', to);
-      const qs = params.toString();
-      const res = await fetch(`/api/admin/reports${qs ? `?${qs}` : ''}`);
-      if (!res.ok) {
-        setError('Failed to load report');
-        return;
-      }
-      const body = (await res.json()) as {
-        success: boolean;
-        data: {
-          report: SalesReport;
-          leadSourceBreakdown?: LeadSourceRow[];
-          locationBreakdown?: LocationBreakdownRow[];
-          technicianScorecards?: TechnicianScorecardRow[];
-        };
-      };
-      if (body.success) {
-        setReport(body.data.report);
-        setLeadSourceBreakdown(body.data.leadSourceBreakdown ?? []);
-        setLocationBreakdown(body.data.locationBreakdown ?? []);
-        setTechnicianScorecards(body.data.technicianScorecards ?? []);
-      }
-      setError(null);
-    } catch {
-      setError('Could not connect to server. Please try again.');
-    } finally {
-      isFetchingRef.current = false;
-    }
-  }, [from, to]);
-
+  // Latest-wins: each range change marks any prior in-flight request stale via
+  // the `active` cleanup flag, so a slow earlier fetch can never overwrite the
+  // newer range's data (porting the pattern from use-operations-metrics.ts).
   useEffect(() => {
+    let active = true;
     setIsLoading(true);
-    fetchReport().finally(() => setIsLoading(false));
-  }, [fetchReport]);
+    (async () => {
+      try {
+        const params = new URLSearchParams();
+        if (from) params.set('from', from);
+        if (to) params.set('to', to);
+        const qs = params.toString();
+        const res = await fetch(`/api/admin/reports${qs ? `?${qs}` : ''}`);
+        if (!active) return;
+        if (!res.ok) {
+          setError('Failed to load report');
+          return;
+        }
+        const body = (await res.json()) as {
+          success: boolean;
+          data: {
+            report: SalesReport;
+            leadSourceBreakdown?: LeadSourceRow[];
+            locationBreakdown?: LocationBreakdownRow[];
+            technicianScorecards?: TechnicianScorecardRow[];
+          };
+        };
+        if (!active) return;
+        if (body.success) {
+          setReport(body.data.report);
+          setLeadSourceBreakdown(body.data.leadSourceBreakdown ?? []);
+          setLocationBreakdown(body.data.locationBreakdown ?? []);
+          setTechnicianScorecards(body.data.technicianScorecards ?? []);
+        }
+        setError(null);
+      } catch {
+        if (active) setError('Could not connect to server. Please try again.');
+      } finally {
+        if (active) setIsLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [from, to, reloadNonce]);
 
   return {
     report,
@@ -129,6 +136,6 @@ export function useReports(range: ReportRange = {}): UseReportsResult {
     technicianScorecards,
     isLoading,
     error,
-    refetch: fetchReport,
+    refetch,
   };
 }

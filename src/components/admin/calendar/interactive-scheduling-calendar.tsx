@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from 'react';
 import {
   DndContext,
   DragOverlay,
+  KeyboardSensor,
   PointerSensor,
   TouchSensor,
   useSensor,
@@ -12,6 +13,7 @@ import {
   type DragStartEvent,
   type DragEndEvent,
 } from '@dnd-kit/core';
+import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import { restrictToWindowEdges } from '@dnd-kit/modifiers';
 import { User, Inbox } from 'lucide-react';
 import { CalendarJobCard } from '@/components/admin/calendar/calendar-job-card';
@@ -447,12 +449,16 @@ export function InteractiveSchedulingCalendar({
 
   // PointerSensor needs a small drag distance and TouchSensor a short press so a
   // TAP (open detail) isn't hijacked into a drag. Matches the S2 comment.
+  // KeyboardSensor enables arrow-key rescheduling for keyboard users.
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 6 },
     }),
     useSensor(TouchSensor, {
       activationConstraint: { delay: 180, tolerance: 8 },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
     }),
   );
 

@@ -42,6 +42,7 @@ function JobCard({
   return (
     <button
       type="button"
+      aria-label={`${job.customerName ?? 'Unknown'} · ${job.referenceNumber}`}
       onClick={() => onSelect(job.id)}
       className="w-full rounded-lg border bg-card px-3 py-2 text-left transition-colors hover:bg-muted"
     >

@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { AlertCircle, Search, Inbox, MessagesSquare } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { pageLabel } from '@/lib/admin/invoice-list-helpers';
 import { useAdminConversations } from '@/hooks/use-admin-conversations';
 import { ConversationDetailContent } from '@/components/admin/conversations/conversation-detail-content';
 import { ConversationDetailSheet } from '@/components/admin/conversation-detail-sheet';
@@ -24,6 +26,7 @@ import type { ConversationSummary } from '@/lib/admin/conversation-types';
 const ALL_STATUSES = 'all';
 const ALL_CHANNELS = 'all';
 const SEARCH_DEBOUNCE_MS = 300;
+const PER_PAGE = 50;
 
 const STATUS_OPTIONS: readonly { readonly label: string; readonly value: string }[] = [
   { label: 'All statuses', value: ALL_STATUSES },
@@ -106,6 +109,7 @@ export function ConversationInbox() {
   const [channelFilter, setChannelFilter] = useState<string>(ALL_CHANNELS);
   const [searchInput, setSearchInput] = useState<string>('');
   const [debouncedSearch, setDebouncedSearch] = useState<string>('');
+  const [page, setPage] = useState<number>(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Drives the mobile (<lg) slide-over; desktop renders the pane inline.
   const [mobileOpenId, setMobileOpenId] = useState<string | null>(null);
@@ -117,11 +121,22 @@ export function ConversationInbox() {
     return () => clearTimeout(handler);
   }, [searchInput]);
 
+  // Reset to page 1 whenever filters/search/channel change.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => {
+    setPage(1);
+  }, [statusFilter, channelFilter, debouncedSearch]);
+
   const { conversations, total, isLoading, error, refetch } = useAdminConversations({
     status: statusFilter === ALL_STATUSES ? undefined : statusFilter,
     channel: channelFilter === ALL_CHANNELS ? undefined : channelFilter,
     search: debouncedSearch || undefined,
+    page,
+    limit: PER_PAGE,
   });
+
+  const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
+  const safePage = Math.min(page, totalPages);
 
   const selected =
     conversations.find((c) => c.id === selectedId) ?? null;
@@ -190,7 +205,7 @@ export function ConversationInbox() {
                 value={statusFilter}
                 onValueChange={(value) => setStatusFilter(value ?? ALL_STATUSES)}
               >
-                <SelectTrigger className="mb-1.5 h-8 w-[150px]">
+                <SelectTrigger aria-label="Filter by status" className="mb-1.5 h-8 w-[150px]">
                   <SelectValue placeholder="Status" />
                 </SelectTrigger>
                 <SelectContent>
@@ -247,8 +262,52 @@ export function ConversationInbox() {
             )}
           </div>
 
-          <div className="shrink-0 border-t border-border px-4 py-2.5 text-xs text-muted-foreground">
-            {total} total
+          <div className="shrink-0 border-t border-border px-4 py-2 flex items-center justify-between gap-2">
+            <span className="tabular-nums text-xs text-muted-foreground">
+              {pageLabel(safePage, total, PER_PAGE)}
+            </span>
+            <div className="flex items-center gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={() => setPage(1)}
+                disabled={safePage <= 1}
+              >
+                First
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={safePage <= 1}
+              >
+                ← Prev
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={safePage >= totalPages}
+              >
+                Next →
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={() => setPage(totalPages)}
+                disabled={safePage >= totalPages}
+              >
+                Last
+              </Button>
+            </div>
           </div>
         </div>
 

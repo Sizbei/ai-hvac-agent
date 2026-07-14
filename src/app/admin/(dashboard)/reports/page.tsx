@@ -450,8 +450,12 @@ function KpiCard({
           <p className="truncate text-xs font-medium uppercase tracking-wide text-muted-foreground">
             {label}
           </p>
-          {isLoading || value === null ? (
+          {isLoading ? (
             <Skeleton className="mt-2 h-9 w-24" />
+          ) : value === null ? (
+            <p className="mt-1 font-heading text-3xl font-bold tracking-tight tabular-nums text-muted-foreground">
+              —
+            </p>
           ) : (
             <p className="mt-1 font-heading text-3xl font-bold tracking-tight tabular-nums">
               {value}

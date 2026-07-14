@@ -40,6 +40,7 @@ export function CalendarJobCard({ job, onSelect, compact }: CalendarJobCardProps
   return (
     <button
       type="button"
+      aria-label={`${job.customerName ?? 'Unknown'} · ${job.referenceNumber}`}
       onClick={() => onSelect(job.id)}
       // Sky body + an urgency-colored left rail (border-l-4) so a glance reads
       // priority by color — consistent with the urgency badges.
