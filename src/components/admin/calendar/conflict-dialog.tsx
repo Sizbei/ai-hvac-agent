@@ -93,8 +93,8 @@ export function ConflictDialog({
                 <ConflictRow
                   key={job.id}
                   referenceNumber={job.referenceNumber}
-                  arrivalWindowStart={job.arrivalWindowStart}
-                  arrivalWindowEnd={job.arrivalWindowEnd}
+                  arrivalWindowStart={job.arrivalWindowStart ?? ""}
+                  arrivalWindowEnd={job.arrivalWindowEnd ?? ""}
                 />
               ))}
             </ul>

@@ -28,14 +28,18 @@ export default function MembershipPlansPage() {
   async function handleDeactivate(plan: MembershipPlan): Promise<void> {
     if (!window.confirm(`Deactivate "${plan.name}"?`)) return;
     setDeactivateError(null);
-    const res = await fetch(`/api/admin/membership-plans/${plan.id}`, {
-      method: 'DELETE',
-    });
-    if (res.ok) {
-      void refetch();
-    } else {
-      const body = await res.json().catch(() => ({}));
-      setDeactivateError((body as { error?: string }).error ?? 'Failed to deactivate plan.');
+    try {
+      const res = await fetch(`/api/admin/membership-plans/${plan.id}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        void refetch();
+      } else {
+        const body = await res.json().catch(() => ({}));
+        setDeactivateError((body as { error?: string }).error ?? 'Failed to deactivate plan.');
+      }
+    } catch {
+      setDeactivateError('Network error — could not deactivate plan.');
     }
   }
 

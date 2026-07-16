@@ -9,10 +9,12 @@ import {
   Users,
   DollarSign,
   Sunrise,
+  RefreshCw,
 } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
 import type { OpsInsights } from '@/lib/admin/ops-insights-types';
 import { formatCents, hourLabel } from '@/lib/admin/ops-insights-format';
 
@@ -183,6 +185,7 @@ export function OpsInsightsSection() {
   const fetchOps = useCallback(async (): Promise<void> => {
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
+    setError(null);
     try {
       const res = await fetch('/api/admin/ops-insights');
       if (!res.ok) {
@@ -214,7 +217,17 @@ export function OpsInsightsSection() {
 
       {error && (
         <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription className="flex flex-col items-start gap-2">
+            <span>{error}</span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => { setError(null); void fetchOps(); }}
+            >
+              <RefreshCw className="mr-2 size-4" />
+              Retry
+            </Button>
+          </AlertDescription>
         </Alert>
       )}
 

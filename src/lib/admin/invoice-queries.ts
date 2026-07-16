@@ -6,7 +6,7 @@
  * first-class (a half-built payments path breaks on the first chargeback).
  */
 import { randomUUID } from "node:crypto";
-import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, or, sql, sum } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, or, sql, sum, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   communicationJobs,
@@ -33,6 +33,20 @@ import {
 import { getPaymentProvider, type PaymentProvider } from "@/lib/payments/provider";
 import { businessInfoSchema } from "@/lib/admin/org-config-types";
 import { invoiceRef } from "@/lib/admin/invoice-collectible";
+
+/**
+ * Canonical SQL overdue predicate for a single open invoice row.
+ * Canonical definition (SummaryBand / collections workspace):
+ *   - Has a due date  → overdue when past due by more than 1 day (grace period).
+ *   - No due date     → overdue when issued/created >= 30 days ago.
+ * Use this in all AR surfaces so "overdue" means the same thing everywhere.
+ */
+export function overdueWhere(tbl: typeof invoices): SQL<unknown> {
+  return sql`(
+    (${tbl.dueDate} is not null and ${tbl.dueDate} < now() - interval '1 day')
+    or (${tbl.dueDate} is null and coalesce(${tbl.issuedAt}, ${tbl.createdAt}) <= now() - interval '30 days')
+  )`;
+}
 
 export type CreateInvoiceResult =
   | { readonly ok: true; readonly invoiceId: string }
@@ -854,14 +868,8 @@ export async function getInvoiceSummaryStats(
     .select({
       outstandingCents: sql<number>`coalesce(sum(${invoices.totalCents} - ${invoices.amountPaidCents}), 0)::bigint`,
       outstandingCount: sql<number>`count(*)::int`,
-      overdueCents: sql<number>`coalesce(sum(${invoices.totalCents} - ${invoices.amountPaidCents}) filter (where
-        (${invoices.dueDate} is not null and ${invoices.dueDate} < now() - interval '1 day')
-        or (${invoices.dueDate} is null and coalesce(${invoices.issuedAt}, ${invoices.createdAt}) <= now() - interval '30 days')
-      ), 0)::bigint`,
-      overdueCount: sql<number>`count(*) filter (where
-        (${invoices.dueDate} is not null and ${invoices.dueDate} < now() - interval '1 day')
-        or (${invoices.dueDate} is null and coalesce(${invoices.issuedAt}, ${invoices.createdAt}) <= now() - interval '30 days')
-      )::int`,
+      overdueCents: sql<number>`coalesce(sum(${invoices.totalCents} - ${invoices.amountPaidCents}) filter (where ${overdueWhere(invoices)}), 0)::bigint`,
+      overdueCount: sql<number>`count(*) filter (where ${overdueWhere(invoices)})::int`,
       oldestOverdueDays: sql<number>`coalesce(max(
         case
           when ${invoices.dueDate} is not null and ${invoices.dueDate} < now() - interval '1 day'
@@ -870,10 +878,7 @@ export async function getInvoiceSummaryStats(
             then extract(day from now() - coalesce(${invoices.issuedAt}, ${invoices.createdAt})) - 30
           else 0
         end
-      ) filter (where
-        (${invoices.dueDate} is not null and ${invoices.dueDate} < now() - interval '1 day')
-        or (${invoices.dueDate} is null and coalesce(${invoices.issuedAt}, ${invoices.createdAt}) <= now() - interval '30 days')
-      ), 0)::bigint`,
+      ) filter (where ${overdueWhere(invoices)}), 0)::bigint`,
     })
     .from(invoices)
     .where(

@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
 import { getCustomers, createCustomer } from "@/lib/admin/crm-queries";
 import { logAudit } from "@/lib/admin/audit";
-import { successResponse, errorResponse } from "@/lib/api-response";
+import { successResponse, errorResponse, readJsonBody } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
 
@@ -78,12 +78,28 @@ export async function POST(request: NextRequest) {
       return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
     }
 
-    const body = (await request.json()) as Record<string, unknown>;
+    const bodyResult = await readJsonBody(request);
+    if (!bodyResult.ok) {
+      return errorResponse("Invalid JSON body", "VALIDATION_ERROR", 400);
+    }
+    const body = bodyResult.data as Record<string, unknown>;
     const name = typeof body.name === "string" ? body.name.trim() : "";
 
     if (!name) {
       return errorResponse("Name is required", "VALIDATION_ERROR", 400);
     }
+    if (name.length > 200) {
+      return errorResponse("Name must be 200 characters or fewer", "VALIDATION_ERROR", 400);
+    }
+
+    const rawSqft = body.propertySqft;
+    const propertySqft =
+      typeof rawSqft === "number" &&
+      Number.isFinite(rawSqft) &&
+      rawSqft >= 0 &&
+      rawSqft <= 100_000_000
+        ? Math.floor(rawSqft)
+        : undefined;
 
     const customer = await createCustomer(session.organizationId, {
       name,
@@ -92,8 +108,7 @@ export async function POST(request: NextRequest) {
       address: typeof body.address === "string" ? body.address : undefined,
       propertyType:
         typeof body.propertyType === "string" ? body.propertyType : undefined,
-      propertySqft:
-        typeof body.propertySqft === "number" ? body.propertySqft : undefined,
+      propertySqft,
       notes: typeof body.notes === "string" ? body.notes : undefined,
     });
 

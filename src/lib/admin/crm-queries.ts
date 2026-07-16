@@ -128,7 +128,7 @@ export async function getCustomers(
   const aggCols = {
     equipmentCount: sql<number>`count(distinct ${customerEquipment.id})::int`,
     requestCount: sql<number>`count(distinct ${serviceRequests.id})::int`,
-    lastServiceDate: sql<string | null>`max(${serviceRequests.createdAt})::text`,
+    lastServiceDate: sql<string | null>`max(${serviceRequests.completedAt}) filter (where ${serviceRequests.completedAt} is not null)::text`,
   };
 
   type ListRow = {
@@ -384,9 +384,9 @@ export async function getCustomerById(
           ),
         ),
 
-      // lastServiceDate — mirrors the list query's max(created_at)::text aggregate.
+      // lastServiceDate — the last completed service, matching the list aggregate.
       db
-        .select({ value: sql<string | null>`max(${serviceRequests.createdAt})::text` })
+        .select({ value: sql<string | null>`max(${serviceRequests.completedAt}) filter (where ${serviceRequests.completedAt} is not null)::text` })
         .from(serviceRequests)
         .where(
           withTenant(

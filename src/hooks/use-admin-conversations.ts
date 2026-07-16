@@ -21,7 +21,9 @@ interface UseAdminConversationsResult {
 
 /**
  * Custom hook for fetching and polling the admin conversation list.
- * Polls every 10 seconds, skipping in-flight requests.
+ * Polls every 10 seconds. Uses latest-wins (monotonic run counter) so a filter
+ * change mid-flight supersedes the in-flight poll — the stale response is
+ * discarded, not rendered. "Clear error only on success" is preserved.
  */
 export function useAdminConversations(
   options: UseAdminConversationsOptions = {},
@@ -33,12 +35,14 @@ export function useAdminConversations(
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const isFetchingRef = useRef(false);
+  // Latest-wins: each call increments this counter; a response only applies if
+  // its captured run id still matches the current value when it resolves.
+  const runRef = useRef(0);
+  const isMountedRef = useRef(true);
 
   const fetchConversations = useCallback(async (): Promise<void> => {
-    if (isFetchingRef.current) return;
-    isFetchingRef.current = true;
-    setIsLoading(true);
+    const run = ++runRef.current;
+    if (isMountedRef.current) setIsLoading(true);
 
     try {
       const params = new URLSearchParams();
@@ -51,11 +55,14 @@ export function useAdminConversations(
       const url = `/api/admin/conversations?${params.toString()}`;
       const res = await fetch(url);
 
+      if (!isMountedRef.current || run !== runRef.current) return;
       if (!res.ok) {
         const body = await res.json().catch(() => ({
           error: { message: 'Failed to fetch conversations' },
         }));
-        setError(body?.error?.message ?? 'Failed to fetch conversations');
+        if (isMountedRef.current && run === runRef.current) {
+          setError(body?.error?.message ?? 'Failed to fetch conversations');
+        }
         return;
       }
 
@@ -69,22 +76,27 @@ export function useAdminConversations(
         };
       };
 
-      if (body.success) {
+      if (isMountedRef.current && run === runRef.current && body.success) {
         setConversations(body.data.conversations);
         setTotal(body.data.total);
         setError(null);
       }
     } catch {
-      setError('Could not connect to server. Please try again.');
+      if (isMountedRef.current && run === runRef.current) {
+        setError('Could not connect to server. Please try again.');
+      }
     } finally {
-      isFetchingRef.current = false;
-      setIsLoading(false);
+      if (isMountedRef.current && run === runRef.current) setIsLoading(false);
     }
   }, [status, channel, search, page, limit]);
 
   // Fetch on mount and when options change
   useEffect(() => {
+    isMountedRef.current = true;
     void fetchConversations();
+    return () => {
+      isMountedRef.current = false;
+    };
   }, [fetchConversations]);
 
   // Poll every 10 seconds

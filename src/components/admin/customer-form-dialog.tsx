@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -25,6 +25,7 @@ export function CustomerFormDialog({
   const [propertyType, setPropertyType] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const submittingRef = useRef(false);
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
@@ -33,6 +34,8 @@ export function CustomerFormDialog({
         setError('Name is required');
         return;
       }
+      if (submittingRef.current) return;
+      submittingRef.current = true;
 
       setIsSubmitting(true);
       setError(null);
@@ -65,13 +68,14 @@ export function CustomerFormDialog({
         setError('Network error');
       } finally {
         setIsSubmitting(false);
+        submittingRef.current = false;
       }
     },
     [name, phone, email, address, propertyType, onSuccess],
   );
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(o) => { if (!o && submittingRef.current) return; onOpenChange(o); }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>Add Customer</DialogTitle>

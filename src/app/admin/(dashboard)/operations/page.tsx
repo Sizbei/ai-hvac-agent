@@ -150,7 +150,7 @@ export default function OperationsPage() {
 
   const { metrics, isLoading, error } = useOperationsMetrics(range);
   const aging = metrics?.arAging;
-  const agingTotal = aging?.totalOutstandingCents ?? 0;
+  const agingTotal = aging?.nativeOutstandingCents ?? 0;
   const agingPct = (cents: number) =>
     agingTotal > 0 ? Math.round((cents / agingTotal) * 100) : 0;
 

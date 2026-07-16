@@ -10,7 +10,7 @@ import {
   type InvoiceSortKey,
 } from "@/lib/admin/invoice-queries";
 import { logAudit } from "@/lib/admin/audit";
-import { successResponse, errorResponse } from "@/lib/api-response";
+import { successResponse, errorResponse, readJsonBody } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
 import { invoiceStateEnum } from "@/lib/db/schema";
@@ -77,16 +77,30 @@ export async function GET(request: NextRequest) {
     const overdue = sp.get("overdue") === "1";
     const unreminded = sp.get("unreminded") === "1";
 
-    // Clamp to a signed-int32 range: totalCents is a Postgres `integer`, so a
-    // value past INT32_MAX (e.g. a user typing "$21,474,836.48+") overflows and
-    // 500s. Out-of-range → drop the bound rather than error.
+    // Reject out-of-range amount filters with a 400: silently dropping them
+    // would make the UI show all invoices as if no filter were applied,
+    // which is confusing and potentially misleading.
     const INT32_MAX = 2_147_483_647;
     const inCentsRange = (n: number) => Number.isFinite(n) && n >= 0 && n <= INT32_MAX;
-    const rawMinCents = parseInt(sp.get("minCents") ?? "", 10);
-    const minCents = inCentsRange(rawMinCents) ? rawMinCents : undefined;
 
-    const rawMaxCents = parseInt(sp.get("maxCents") ?? "", 10);
-    const maxCents = inCentsRange(rawMaxCents) ? rawMaxCents : undefined;
+    const rawMinStr = sp.get("minCents");
+    const rawMaxStr = sp.get("maxCents");
+    const rawMinCents = rawMinStr !== null ? parseInt(rawMinStr, 10) : NaN;
+    const rawMaxCents = rawMaxStr !== null ? parseInt(rawMaxStr, 10) : NaN;
+
+    if (rawMinStr !== null && !inCentsRange(rawMinCents)) {
+      return errorResponse("Amount filter out of range", "VALIDATION_ERROR", 400);
+    }
+    if (rawMaxStr !== null && !inCentsRange(rawMaxCents)) {
+      return errorResponse("Amount filter out of range", "VALIDATION_ERROR", 400);
+    }
+
+    const minCents = rawMinStr !== null ? rawMinCents : undefined;
+    const maxCents = rawMaxStr !== null ? rawMaxCents : undefined;
+
+    if (minCents !== undefined && maxCents !== undefined && minCents > maxCents) {
+      return errorResponse("minCents must be ≤ maxCents", "VALIDATION_ERROR", 400);
+    }
 
     const [listResult, stats, collected] = await Promise.all([
       listInvoices(session.organizationId, { page, limit, search, state, overdue, source, sort, customerId, serviceRequestId, unreminded, minCents, maxCents }),
@@ -125,7 +139,11 @@ export async function POST(request: NextRequest) {
       return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
     }
 
-    const parsed = createSchema.safeParse(await request.json());
+    const bodyResult = await readJsonBody(request);
+    if (!bodyResult.ok) {
+      return errorResponse("Invalid JSON body", "VALIDATION_ERROR", 400);
+    }
+    const parsed = createSchema.safeParse(bodyResult.data);
     if (!parsed.success) {
       return errorResponse("Invalid request", "VALIDATION_ERROR", 400);
     }

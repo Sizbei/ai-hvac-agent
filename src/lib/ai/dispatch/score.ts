@@ -88,7 +88,7 @@ export function scoreTechnician(
   const skillMatched = tech.skillJobsCompleted > 0;
 
   const skillDepth = Math.min(tech.skillJobsCompleted, SKILL_DEPTH_CAP) / SKILL_DEPTH_CAP;
-  const quality = (tech.avgRating ?? DEFAULT_RATING) / 5;
+  const quality = Math.min((tech.avgRating ?? DEFAULT_RATING) / 5, 1);
   const conversion = Math.min(Math.max(tech.conversionRate, 0), 1);
   const load = 1 - Math.min(tech.sameDayJobCount, LOAD_CAP) / LOAD_CAP;
   const value =
@@ -160,12 +160,16 @@ export function scoreTechnician(
  * Score every candidate, drop the non-skill-matched, and sort by score desc.
  * Ties break by technicianId (ascending) so the ordering is fully deterministic.
  *
- * Fallback: when NO candidate has matching-category history (eligible is empty),
- * fall back to ranking ALL candidates rather than returning an empty list. The
- * reasons on each tech will include "no matching-category history" to be honest
- * about the absence of category-specific signal.
+ * Fallback (SUGGEST panel only): when `fallback` is true and NO candidate has
+ * matching-category history (eligible is empty), rank ALL candidates rather than
+ * returning an empty list, tagged "no matching-category history". Auto-assign
+ * passes `fallback = false` so a classified job with no skill-matched tech returns
+ * [] — the hard gate leaves it for a dispatcher (never auto-commit on no signal).
  */
-export function rankTechnicians(candidates: readonly DispatchSignals[]): RankedTech[] {
+export function rankTechnicians(
+  candidates: readonly DispatchSignals[],
+  fallback = true,
+): RankedTech[] {
   // Only skill-matched candidates survive the ranking, so the travel regime must
   // be decided over THOSE — matching scoreTechnician's `skillMatched =
   // skillJobsCompleted > 0`. A candidate that gets filtered out must NOT activate
@@ -178,8 +182,10 @@ export function rankTechnicians(candidates: readonly DispatchSignals[]): RankedT
   // is zero for all, so quality/availability/travel still produce a meaningful
   // ordering. We tag the results so dispatchers know there's no prior-history
   // signal behind the ranking.
-  const pool = eligible.length > 0 ? eligible : candidates;
-  const isFallback = eligible.length === 0 && candidates.length > 0;
+  // No skill-matched tech: suggest ranks everyone (fallback); auto-assign gets []
+  // (pool stays empty) so the hard gate leaves the job for a human.
+  const pool = eligible.length > 0 ? eligible : fallback ? candidates : [];
+  const isFallback = eligible.length === 0 && candidates.length > 0 && fallback;
 
   // Single travel regime per ranking: if ANY pooled candidate has a location
   // signal, score the location-less ones with a neutral travel term so they can't

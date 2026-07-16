@@ -62,9 +62,11 @@ function bookedBandsForJob(
   job: ScheduledJob,
   isoDay: string,
 ): ReadonlySet<RescheduleWindowRow> {
+  // A null window means the job has no placement yet — it contributes no bands.
+  if (!job.arrivalWindowStart || !job.arrivalWindowEnd) return new Set();
   const start = new Date(job.arrivalWindowStart);
   const end = new Date(job.arrivalWindowEnd);
-  // Defensive: a malformed/empty window books nothing rather than throwing.
+  // Defensive: a malformed window books nothing rather than throwing.
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
     return new Set();
   }

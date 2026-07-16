@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { StaffRecord, StaffRole } from '@/lib/admin/types';
 import {
   Dialog,
@@ -85,6 +85,7 @@ export function StaffFormDialog({
   const [form, setForm] = useState<FormState>(INITIAL_FORM_STATE);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const submittingRef = useRef(false);
 
   useEffect(() => {
     if (open) {
@@ -129,6 +130,29 @@ export function StaffFormDialog({
       return;
     }
 
+    // On edit, check for no-op before acquiring the submit lock so the
+    // button doesn't stay stuck if we return early.
+    if (isEditMode && staff) {
+      const trimmedName = form.name.trim();
+      const trimmedRate = form.laborRate.trim();
+      const nextRateCents =
+        trimmedRate === '' ? null : Math.round(Number(trimmedRate) * 100);
+      const nothingChanged =
+        trimmedName === staff.name &&
+        form.role === staff.role &&
+        form.isActive === staff.isActive &&
+        nextRateCents === staff.laborRateCents;
+      if (nothingChanged) {
+        // Nothing changed — close without a no-op request.
+        onSuccess();
+        onClose();
+        return;
+      }
+    }
+
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+
     setIsSubmitting(true);
     setError(null);
 
@@ -160,12 +184,6 @@ export function StaffFormDialog({
           patch.laborRateCents = nextRateCents;
         }
 
-        if (Object.keys(patch).length === 0) {
-          // Nothing changed — close without a no-op request.
-          onSuccess();
-          onClose();
-          return;
-        }
         body = patch;
       } else {
         body = {
@@ -196,11 +214,12 @@ export function StaffFormDialog({
       setError('Could not connect to server. Please try again.');
     } finally {
       setIsSubmitting(false);
+      submittingRef.current = false;
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) onClose(); }}>
+    <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen && submittingRef.current) return; if (!isOpen) onClose(); }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>
@@ -267,7 +286,8 @@ export function StaffFormDialog({
                 <SelectValue placeholder="Select a role" />
               </SelectTrigger>
               <SelectContent>
-                {canManageAdmins && (
+                {/* super_admin is DB/edit-only — POST route rejects it; hide from create form */}
+                {canManageAdmins && isEditMode && (
                   <SelectItem value="super_admin">Super Admin</SelectItem>
                 )}
                 {canManageAdmins && (

@@ -85,14 +85,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Audit: ids/enums/cents only — no PII, no APR.
+    // Audit: ids/enums only — no money values, no PII, no APR.
     await logAudit({
       organizationId: session.organizationId,
       userId: session.userId,
       action: "offer_financing",
       entity: "financing_application",
       entityId: result.application.id,
-      details: `status=${result.application.status};amountCents=${result.application.requestedAmountCents}`,
+      details: `status=${result.application.status}`,
     }).catch((auditError: unknown) => {
       logger.error(
         { error: auditError, applicationId: result.application.id },

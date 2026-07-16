@@ -75,14 +75,14 @@ export async function POST(
       }
     }
 
-    // cents + status enum only — no card data, no customer PII.
+    // ids/enums only — no money values in audit details.
     await logAudit({
       organizationId: session.organizationId,
       userId: session.userId,
       action: "payment_taken",
       entity: "invoice",
       entityId: id,
-      details: `paymentId:${result.paymentId} amountCents:${parsed.data.amountCents} invoiceState:${result.invoiceState}`,
+      details: `paymentId:${result.paymentId} invoiceState:${result.invoiceState}`,
     }).catch((auditError: unknown) => {
       logger.error(
         { error: auditError, invoiceId: id },

@@ -72,9 +72,17 @@ const ACTIVE_BOOKING_STATUSES = [
   "on_hold",
 ] as const;
 
-/** Statuses an "unscheduled" request can sit in: still open intake (pending) or
- * booked-as-a-status (scheduled) but missing a tech and/or an arrival window. */
-const UNSCHEDULED_STATUSES = ["pending", "scheduled"] as const;
+/** Statuses an "unscheduled" request can sit in: still open intake (pending),
+ * booked-as-a-status (scheduled), OR already assigned/in-progress but missing an
+ * arrival window (needs-scheduling). The query additionally filters on
+ * arrivalWindowStart IS NULL so assigned/in_progress jobs that already have a
+ * window don't appear in the unscheduled sidebar. */
+const UNSCHEDULED_STATUSES = [
+  "pending",
+  "scheduled",
+  "assigned",
+  "in_progress",
+] as const;
 
 /** Minutes in a day. A slot's [start, end) span lives in [0, 1440] (1440 =
  * end-of-day midnight), measured in business-tz wall clock. */
@@ -318,8 +326,10 @@ export async function getScheduledJobsForRange(
 
 /**
  * Open requests that still need to be PLACED on the calendar: status
- * pending/scheduled and either unassigned (no technician) OR missing an arrival
- * window. Backs the "unscheduled jobs" view in S2. Oldest first so the
+ * pending/scheduled/assigned/in_progress and either unassigned (no technician)
+ * OR missing an arrival window. Assigned/in-progress jobs that already have a
+ * window are excluded by the OR condition (both isNull branches fail).
+ * Backs the "unscheduled jobs" view in S2. Oldest first so the
  * longest-waiting request floats to the top. Tenant-scoped.
  */
 export async function listUnscheduledRequests(
@@ -1103,17 +1113,22 @@ async function rankedTechnicianOrder(
   requestId: string,
   technicianIds: readonly string[],
   isoDay: string,
+  // Suggest panel passes true → an unclassified job is ranked skill-neutrally so
+  // a dispatcher still sees a shortlist. Auto-assign keeps the default false → an
+  // unclassified job returns null so the caller FIRST-FITS, preserving the
+  // invariant that an opted-in org never auto-assigns LESS than an opted-out one.
+  fallbackUnclassified = false,
 ): Promise<{
   readonly ranked: RankedTech[] | null;
   readonly job: DispatchSignals["job"] | null;
 }> {
   const job = await loadJobClassification(organizationId, requestId);
-  // If the request is missing entirely (deleted/wrong org) → signal the caller
-  // to first-fit so the job is never silently stranded.
-  // When the request EXISTS but has no jobType/systemType, proceed with
-  // skill-neutral ranking (skillJobsCompleted will be 0 for everyone, so the
-  // fallback in rankTechnicians ranks on availability/travel/quality instead).
+  // Request missing entirely (deleted/wrong org) → first-fit, never strand it.
   if (!job) return { ranked: null, job };
+  // Request exists but has no jobType/systemType: only the suggest path scores it
+  // (skill-neutral); auto-assign keeps first-fit to hold the no-regression invariant.
+  if (job.jobType === null && job.systemType === null && !fallbackUnclassified)
+    return { ranked: null, job };
   const signalsByTech = await loadDispatchSignals(
     organizationId,
     technicianIds,
@@ -1141,7 +1156,9 @@ async function rankedTechnicianOrder(
       },
     };
   });
-  return { ranked: rankTechnicians(candidates), job };
+  // Pass the same flag: suggest wants a fallback ranking when no tech is
+  // skill-matched; auto-assign wants [] (leave for a human).
+  return { ranked: rankTechnicians(candidates, fallbackUnclassified), job };
 }
 
 /**
@@ -1182,6 +1199,7 @@ export async function suggestTechnicians(
     requestId,
     techs.map((t) => t.id),
     isoDay,
+    true, // suggest panel: skill-neutral fallback for unclassified jobs
   );
   return (ranked ?? []).slice(0, limit);
 }
@@ -1383,7 +1401,7 @@ function toScheduledJob(row: {
     referenceNumber: row.referenceNumber,
     status: row.status,
     assignedTo: row.assignedTo,
-    arrivalWindowStart: row.arrivalWindowStart?.toISOString() ?? "",
-    arrivalWindowEnd: row.arrivalWindowEnd?.toISOString() ?? "",
+    arrivalWindowStart: row.arrivalWindowStart?.toISOString() ?? null,
+    arrivalWindowEnd: row.arrivalWindowEnd?.toISOString() ?? null,
   };
 }

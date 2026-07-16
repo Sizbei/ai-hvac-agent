@@ -16,13 +16,19 @@ export function formatCentsExact(cents: number): string {
   return USD.format(cents / 100);
 }
 
+/** Business cap: $999,999.99 = 99,999,999 cents. */
+export const MAX_PRICE_CENTS = 99_999_999;
+
 /**
  * Dollar input (string from a form field, or number) -> integer cents.
- * Returns 0 for blank/unparseable input. Math.round avoids float drift
- * (e.g. 19.99 * 100 = 1998.9999...).
+ * Returns 0 for blank/unparseable input or values that exceed the business
+ * cap ($999,999.99), including scientific-notation inputs like "1e15".
+ * Math.round avoids float drift (e.g. 19.99 * 100 = 1998.9999...).
  */
 export function parseDollarsToCents(input: string | number): number {
   const dollars = typeof input === "number" ? input : parseFloat(input);
   if (!Number.isFinite(dollars)) return 0;
-  return Math.round(dollars * 100);
+  const cents = Math.round(dollars * 100);
+  if (cents > MAX_PRICE_CENTS || cents < 0) return 0;
+  return cents;
 }

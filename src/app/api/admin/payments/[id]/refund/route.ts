@@ -82,14 +82,14 @@ export async function POST(
       }
     }
 
-    // cents + reason ENUM only — the enum carries no PII.
+    // ids/enums only — no money values in audit details.
     await logAudit({
       organizationId: session.organizationId,
       userId: session.userId,
       action: "payment_refunded",
       entity: "payment",
       entityId: id,
-      details: `refundId:${result.refundId} amountCents:${parsed.data.amountCents} reason:${parsed.data.reason}`,
+      details: `refundId:${result.refundId} reason:${parsed.data.reason}`,
     }).catch((auditError: unknown) => {
       logger.error(
         { error: auditError, paymentId: id },

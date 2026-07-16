@@ -116,6 +116,9 @@ export async function getOperationsMetrics(
 
   const cut30 = new Date(now.getTime() - 30 * DAY_MS);
   const cut60 = new Date(now.getTime() - 60 * DAY_MS);
+  // 1-day grace: align synced AR "current" boundary with the SummaryBand
+  // overdue definition (dueDate < now - 1 day is overdue; not < now).
+  const cut1day = new Date(now.getTime() - DAY_MS);
 
   const [
     inProgressRows,
@@ -260,8 +263,8 @@ export async function getOperationsMetrics(
     // its issue age (never "current").
     db
       .select({
-        currentCents: sql<string>`coalesce(sum(${invoices.totalCents} - ${invoices.amountPaidCents}) filter (where coalesce(${invoices.dueDate}, ${invoices.issuedAt}, ${invoices.createdAt}) >= ${now}), 0)`,
-        b0: sql<string>`coalesce(sum(${invoices.totalCents} - ${invoices.amountPaidCents}) filter (where coalesce(${invoices.dueDate}, ${invoices.issuedAt}, ${invoices.createdAt}) < ${now} and coalesce(${invoices.dueDate}, ${invoices.issuedAt}, ${invoices.createdAt}) >= ${cut30}), 0)`,
+        currentCents: sql<string>`coalesce(sum(${invoices.totalCents} - ${invoices.amountPaidCents}) filter (where coalesce(${invoices.dueDate}, ${invoices.issuedAt}, ${invoices.createdAt}) >= ${cut1day}), 0)`,
+        b0: sql<string>`coalesce(sum(${invoices.totalCents} - ${invoices.amountPaidCents}) filter (where coalesce(${invoices.dueDate}, ${invoices.issuedAt}, ${invoices.createdAt}) < ${cut1day} and coalesce(${invoices.dueDate}, ${invoices.issuedAt}, ${invoices.createdAt}) >= ${cut30}), 0)`,
         b30: sql<string>`coalesce(sum(${invoices.totalCents} - ${invoices.amountPaidCents}) filter (where coalesce(${invoices.dueDate}, ${invoices.issuedAt}, ${invoices.createdAt}) < ${cut30} and coalesce(${invoices.dueDate}, ${invoices.issuedAt}, ${invoices.createdAt}) >= ${cut60}), 0)`,
         b60: sql<string>`coalesce(sum(${invoices.totalCents} - ${invoices.amountPaidCents}) filter (where coalesce(${invoices.dueDate}, ${invoices.issuedAt}, ${invoices.createdAt}) < ${cut60}), 0)`,
         totalCents: sql<string>`coalesce(sum(${invoices.totalCents} - ${invoices.amountPaidCents}), 0)`,
@@ -379,7 +382,7 @@ export async function getOperationsMetrics(
     bucket0to30Cents: b0,
     bucket31to60Cents: b30,
     bucket60PlusCents: b60,
-    totalOutstandingCents: b0 + b30 + b60,
+    nativeOutstandingCents: b0 + b30 + b60,
   };
 
   const syncedArTotalCents = toNumber(syncedAgingRow[0]?.totalCents);

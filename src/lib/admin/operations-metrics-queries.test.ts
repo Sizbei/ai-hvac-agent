@@ -199,7 +199,7 @@ describe('getOperationsMetrics', () => {
       bucket0to30Cents: 4200,
       bucket31to60Cents: 1100,
       bucket60PlusCents: 600,
-      totalOutstandingCents: 5900,
+      nativeOutstandingCents: 5900,
     });
     // Jobs booked.
     expect(m.jobsBooked).toEqual({ current: 142, previous: 127 });
@@ -255,7 +255,7 @@ describe('getOperationsMetrics', () => {
     expect(m.onSiteSeconds).toBeNull();
     // Counts and cents are real zeros, not null.
     expect(m.jobsBooked).toEqual({ current: 0, previous: 0 });
-    expect(m.arAging.totalOutstandingCents).toBe(0);
+    expect(m.arAging.nativeOutstandingCents).toBe(0);
   });
 
   it('drops negative-duration rows (clock skew / bad data)', async () => {
@@ -362,7 +362,7 @@ it('totalOutstandingAllCents = native (b0+b30+b60) + syncedArTotalCents', async 
     syncedAging: [{ currentCents: '5000', b0: '6000', b30: '3000', b60: '1000', totalCents: '15000', count: '12' }],
   });
   const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO });
-  expect(m.arAging.totalOutstandingCents).toBe(2800);
+  expect(m.arAging.nativeOutstandingCents).toBe(2800);
   expect(m.syncedArTotalCents).toBe(15000);
   expect(m.totalOutstandingAllCents).toBe(17800);
 });

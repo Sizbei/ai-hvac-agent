@@ -11,7 +11,8 @@ export interface ArAging {
   readonly bucket0to30Cents: number;
   readonly bucket31to60Cents: number;
   readonly bucket60PlusCents: number;
-  readonly totalOutstandingCents: number;
+  /** Native-only outstanding total (excludes synced FP/HCP). See totalOutstandingAllCents for the combined headline. */
+  readonly nativeOutstandingCents: number;
 }
 
 /** Synced (FP/HCP) open receivables bucketed by days past the source system's
@@ -36,7 +37,7 @@ export interface OperationsMetrics {
   readonly syncedArCount: number;
   /** Due-date-based aging of the synced open receivables. */
   readonly syncedArAging: SyncedArAging;
-  /** Native + synced AR combined — the headline number. Native-only lives in totalOutstandingCents. */
+  /** Native + synced AR combined — the headline number. Native-only lives in arAging.nativeOutstandingCents. */
   readonly totalOutstandingAllCents: number;
   readonly jobsBooked: MetricTrend;
   /** Count of FP-imported service requests in the current window. */

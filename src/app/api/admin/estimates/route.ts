@@ -13,7 +13,7 @@ import {
   getPricebookItemById,
 } from "@/lib/admin/pricebook-queries";
 import { logAudit } from "@/lib/admin/audit";
-import { successResponse, errorResponse } from "@/lib/api-response";
+import { successResponse, errorResponse, readJsonBody } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
 
@@ -125,7 +125,11 @@ export async function POST(request: NextRequest) {
       return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
     }
 
-    const parsed = createSchema.safeParse(await request.json());
+    const bodyResult = await readJsonBody(request);
+    if (!bodyResult.ok) {
+      return errorResponse("Invalid JSON body", "VALIDATION_ERROR", 400);
+    }
+    const parsed = createSchema.safeParse(bodyResult.data);
     if (!parsed.success) {
       return errorResponse("Invalid estimate", "VALIDATION_ERROR", 400);
     }

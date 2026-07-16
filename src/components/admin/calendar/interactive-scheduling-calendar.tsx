@@ -494,6 +494,7 @@ export function InteractiveSchedulingCalendar({
       if (result.status === 'error') {
         setBoard(prev);
         onStatus(result.message, 'error');
+        return;
       }
       onRefetch();
       return;

@@ -14,28 +14,30 @@ const POLL_INTERVAL_MS = 30_000;
 
 /**
  * Fetches and polls the dispatch board for a given UTC day (ISO YYYY-MM-DD).
- * Refetches when `date` changes; polls every 30s otherwise. Skips in-flight
- * requests and ignores responses that resolve after unmount.
+ * Refetches when `date` changes; polls every 30s otherwise. Uses latest-wins
+ * (monotonic run counter) so a date change mid-flight supersedes the in-flight
+ * poll — the stale response is discarded, not rendered.
  */
 export function useDispatchBoard(date: string): UseDispatchBoardResult {
   const [board, setBoard] = useState<DispatchBoard | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const isFetchingRef = useRef(false);
+  // Latest-wins: each call increments this counter; a response only applies if
+  // its captured run id still matches the current value when it resolves.
+  const runRef = useRef(0);
   const isMountedRef = useRef(true);
 
   const fetchBoard = useCallback(async (): Promise<void> => {
-    if (isFetchingRef.current) return;
-    isFetchingRef.current = true;
+    const run = ++runRef.current;
 
     try {
       const res = await fetch(`/api/admin/dispatch?date=${encodeURIComponent(date)}`);
-      if (!isMountedRef.current) return;
+      if (!isMountedRef.current || run !== runRef.current) return;
       if (!res.ok) {
         const body = await res.json().catch(() => ({
           error: { message: 'Failed to load dispatch board' },
         }));
-        if (isMountedRef.current) {
+        if (isMountedRef.current && run === runRef.current) {
           setError(body?.error?.message ?? 'Failed to load dispatch board');
         }
         return;
@@ -46,16 +48,14 @@ export function useDispatchBoard(date: string): UseDispatchBoardResult {
         data: DispatchBoard;
       };
 
-      if (isMountedRef.current && body.success) {
+      if (isMountedRef.current && run === runRef.current && body.success) {
         setBoard(body.data);
         setError(null);
       }
     } catch {
-      if (isMountedRef.current) {
+      if (isMountedRef.current && run === runRef.current) {
         setError('Could not connect to server. Please try again.');
       }
-    } finally {
-      isFetchingRef.current = false;
     }
   }, [date]);
 

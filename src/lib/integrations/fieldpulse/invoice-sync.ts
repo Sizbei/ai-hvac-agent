@@ -356,8 +356,13 @@ export async function upsertInvoiceRecord(
   // form always ties out on the invoice document.
   const subtotalCents = totalCents - taxCents;
   // Real API exposes accurate paid/unpaid amounts — use them (no longer binary).
-  const amountPaidCents = invoice.amountPaidCents ?? 0;
-  const state = deriveInvoiceState(invoice, totalCents, amountPaidCents);
+  const rawAmountPaidCents = invoice.amountPaidCents ?? 0;
+  const state = deriveInvoiceState(invoice, totalCents, rawAmountPaidCents);
+  // H2 guard: a paid invoice has zero balance by definition. If FP sends state
+  // 'paid' but amount_paid=0 (absent or zeroed-out in the payload), correct the
+  // paid amount to totalCents so the invoice never shows as outstanding.
+  const amountPaidCents =
+    state === "paid" && rawAmountPaidCents === 0 ? totalCents : rawAmountPaidCents;
 
   // Resolve links — both optional, both ORG-SCOPED compound keys so a
   // cross-tenant Fieldpulse-id collision can't attach to the wrong tenant.

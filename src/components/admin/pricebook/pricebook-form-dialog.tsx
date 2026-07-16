@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -95,6 +95,7 @@ export function PricebookFormDialog({
   const [form, setForm] = useState<FormState>(INITIAL_FORM);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const submittingRef = useRef(false);
 
   useEffect(() => {
     if (open) {
@@ -125,6 +126,8 @@ export function PricebookFormDialog({
       setError(validationError);
       return;
     }
+    if (submittingRef.current) return;
+    submittingRef.current = true;
 
     setIsSubmitting(true);
     setError(null);
@@ -171,11 +174,12 @@ export function PricebookFormDialog({
       setError('Could not connect to server. Please try again.');
     } finally {
       setIsSubmitting(false);
+      submittingRef.current = false;
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) onClose(); }}>
+    <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen && submittingRef.current) return; if (!isOpen) onClose(); }}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{isEditMode ? 'Edit Item' : 'Add Item'}</DialogTitle>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -71,6 +71,7 @@ export function MembershipPlanFormDialog({
   const [form, setForm] = useState<FormState>(INITIAL_FORM);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const submittingRef = useRef(false);
 
   useEffect(() => {
     if (open) {
@@ -96,6 +97,8 @@ export function MembershipPlanFormDialog({
       setError('A valid price is required');
       return;
     }
+    if (submittingRef.current) return;
+    submittingRef.current = true;
 
     setIsSubmitting(true);
     setError(null);
@@ -131,11 +134,12 @@ export function MembershipPlanFormDialog({
       setError('Could not connect to server. Please try again.');
     } finally {
       setIsSubmitting(false);
+      submittingRef.current = false;
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) onClose(); }}>
+    <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen && submittingRef.current) return; if (!isOpen) onClose(); }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{isEditMode ? 'Edit Plan' : 'Add Plan'}</DialogTitle>

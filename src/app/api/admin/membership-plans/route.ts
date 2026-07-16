@@ -6,14 +6,17 @@ import {
   createMembershipPlan,
 } from "@/lib/admin/membership-queries";
 import { logAudit } from "@/lib/admin/audit";
-import { successResponse, errorResponse } from "@/lib/api-response";
+import { successResponse, errorResponse, readJsonBody } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
+
+/** Business cap: $999,999.99 = 99,999,999 cents. */
+const MAX_PRICE_CENTS = 99_999_999;
 
 const planSchema = z.object({
   name: z.string().trim().min(1).max(255),
   description: z.string().trim().max(2000).nullable().optional(),
-  priceCents: z.number().int().min(0),
+  priceCents: z.number().int().min(0).max(MAX_PRICE_CENTS),
   billingPeriod: z.enum(["monthly", "annual"]),
   visitsPerYear: z.number().int().min(0).max(12).optional(),
 });
@@ -62,20 +65,25 @@ export async function POST(request: NextRequest) {
       return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
     }
 
-    const parsed = planSchema.safeParse(await request.json());
+    const bodyResult = await readJsonBody(request);
+    if (!bodyResult.ok) {
+      return errorResponse("Invalid JSON body", "VALIDATION_ERROR", 400);
+    }
+    const parsed = planSchema.safeParse(bodyResult.data);
     if (!parsed.success) {
       return errorResponse("Invalid membership plan", "VALIDATION_ERROR", 400);
     }
 
     const id = await createMembershipPlan(session.organizationId, parsed.data);
 
+    // H1: strip money values from audit details — log name/billingPeriod only.
     await logAudit({
       organizationId: session.organizationId,
       userId: session.userId,
       action: "create_membership_plan",
       entity: "membership_plan",
       entityId: id,
-      details: `billingPeriod=${parsed.data.billingPeriod};priceCents=${parsed.data.priceCents}`,
+      details: `billingPeriod=${parsed.data.billingPeriod};name=${parsed.data.name}`,
     }).catch((auditError: unknown) => {
       logger.error(
         { error: auditError, planId: id },

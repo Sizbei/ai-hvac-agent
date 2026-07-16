@@ -429,7 +429,7 @@ describe("getScheduledJobsForRange", () => {
 });
 
 describe("listUnscheduledRequests", () => {
-  it("scopes to open statuses and surfaces a null window as empty string", async () => {
+  it("scopes to unscheduled statuses and surfaces a null window as null", async () => {
     selectQueue.push([
       {
         id: "u1",
@@ -447,15 +447,16 @@ describe("listUnscheduledRequests", () => {
         referenceNumber: "REF-3",
         status: "pending",
         assignedTo: null,
-        arrivalWindowStart: "",
-        arrivalWindowEnd: "",
+        arrivalWindowStart: null,
+        arrivalWindowEnd: null,
       },
     ]);
     const conds = (whereCalls[0][0] as { conditions: unknown[] }).conditions;
     const statusCond = conds.find(
       (c) => Array.isArray(c) && c[0] === "inArray" && c[1] === "sr.status",
     ) as unknown[];
-    expect(statusCond[2]).toEqual(["pending", "scheduled"]);
+    // assigned/in_progress jobs with a null window are now surfaced too.
+    expect(statusCond[2]).toEqual(["pending", "scheduled", "assigned", "in_progress"]);
     // "Unscheduled" = unassigned OR no window — an OR over the two null checks.
     expect(conds.some((c) => Array.isArray(c) && c[0] === "or")).toBe(true);
   });

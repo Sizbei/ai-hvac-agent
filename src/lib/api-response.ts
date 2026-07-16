@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 export interface ApiSuccess<T> {
   success: true;
@@ -18,6 +18,23 @@ export interface ApiError {
 }
 
 export type ApiResponse<T> = ApiSuccess<T> | ApiError;
+
+/**
+ * Parse the JSON body of a NextRequest. Returns `{ ok: true, data }` on
+ * success and `{ ok: false }` when the body is not valid JSON (caller should
+ * return a 400). Using this instead of bare `request.json()` prevents a
+ * SyntaxError from bubbling up as a 500.
+ */
+export async function readJsonBody(
+  request: NextRequest,
+): Promise<{ ok: true; data: unknown } | { ok: false }> {
+  try {
+    const data = await request.json();
+    return { ok: true, data };
+  } catch {
+    return { ok: false };
+  }
+}
 
 export function successResponse<T>(
   data: T,

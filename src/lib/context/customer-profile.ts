@@ -168,7 +168,7 @@ export async function loadCustomerProfile(
     // issued yet; paid/void/refunded owe nothing. The remainder is total − paid.
     db
       .select({
-        balanceDueCents: sql<number>`COALESCE(SUM(${invoices.totalCents} - ${invoices.amountPaidCents}), 0)::int`,
+        balanceDueCents: sql<number>`COALESCE(SUM(GREATEST(${invoices.totalCents} - ${invoices.amountPaidCents}, 0)), 0)::int`,
         openInvoiceCount: sql<number>`COUNT(*)::int`,
       })
       .from(invoices)

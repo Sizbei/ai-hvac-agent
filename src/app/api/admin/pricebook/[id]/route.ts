@@ -7,7 +7,7 @@ import {
   deactivatePricebookItem,
 } from "@/lib/admin/pricebook-queries";
 import { logAudit } from "@/lib/admin/audit";
-import { successResponse, errorResponse } from "@/lib/api-response";
+import { successResponse, errorResponse, readJsonBody } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
 import { isUuid } from "@/lib/validation/uuid";
@@ -15,28 +15,41 @@ import { isUuid } from "@/lib/validation/uuid";
 /** Postgres unique-violation SQLSTATE. */
 const PG_UNIQUE_VIOLATION = "23505";
 
+/** The partial unique index name for org+SKU combos. */
+const SKU_CONSTRAINT = "pricebook_items_org_sku_unique";
+
 function isUniqueViolation(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: unknown }).code === PG_UNIQUE_VIOLATION
-  );
+  if (typeof error !== "object" || error === null) return false;
+  const e = error as { code?: unknown; message?: unknown };
+  if (e.code === PG_UNIQUE_VIOLATION) return true;
+  return typeof e.message === "string" && e.message.includes(SKU_CONSTRAINT);
 }
 
-const updateSchema = z.object({
-  categoryId: z.string().uuid().nullable().optional(),
-  type: z.enum(["service", "material", "equipment"]).optional(),
-  name: z.string().trim().min(1).max(255).optional(),
-  description: z.string().nullable().optional(),
-  sku: z.string().nullable().optional(),
-  costCents: z.number().int().min(0).optional(),
-  markupPct: z.number().int().min(0).optional(),
-  priceCents: z.number().int().min(0).optional(),
-  memberPriceCents: z.number().int().min(0).nullable().optional(),
-  hours: z.number().int().min(0).nullable().optional(),
-  warranty: z.string().nullable().optional(),
-});
+/** Business cap: $999,999.99 = 99,999,999 cents. */
+const MAX_PRICE_CENTS = 99_999_999;
+
+const updateSchema = z
+  .object({
+    categoryId: z.string().uuid().nullable().optional(),
+    type: z.enum(["service", "material", "equipment"]).optional(),
+    name: z.string().trim().min(1).max(255).optional(),
+    description: z.string().nullable().optional(),
+    sku: z.string().nullable().optional(),
+    costCents: z.number().int().min(0).max(MAX_PRICE_CENTS).optional(),
+    markupPct: z.number().int().min(0).max(1000).optional(),
+    priceCents: z.number().int().min(0).max(MAX_PRICE_CENTS).optional(),
+    memberPriceCents: z.number().int().min(0).max(MAX_PRICE_CENTS).nullable().optional(),
+    hours: z.number().int().min(0).nullable().optional(),
+    warranty: z.string().nullable().optional(),
+  })
+  .refine(
+    (v) => {
+      // Only enforce when BOTH fields are present in this PATCH payload.
+      if (v.memberPriceCents == null || v.priceCents == null) return true;
+      return v.memberPriceCents <= v.priceCents;
+    },
+    { message: "Member price must be ≤ standard price" },
+  );
 
 export async function PATCH(
   request: NextRequest,
@@ -66,7 +79,11 @@ export async function PATCH(
       return errorResponse("Item not found", "NOT_FOUND", 404);
     }
 
-    const parsed = updateSchema.safeParse(await request.json());
+    const bodyResult = await readJsonBody(request);
+    if (!bodyResult.ok) {
+      return errorResponse("Invalid JSON body", "VALIDATION_ERROR", 400);
+    }
+    const parsed = updateSchema.safeParse(bodyResult.data);
     if (!parsed.success) {
       return errorResponse("Invalid pricebook item", "VALIDATION_ERROR", 400);
     }

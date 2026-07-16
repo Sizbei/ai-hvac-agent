@@ -264,8 +264,8 @@ export interface ScheduledJob {
   readonly referenceNumber: string;
   readonly status: string;
   readonly assignedTo: string | null;
-  readonly arrivalWindowStart: string;
-  readonly arrivalWindowEnd: string;
+  readonly arrivalWindowStart: string | null;
+  readonly arrivalWindowEnd: string | null;
 }
 
 // ─── Scheduling calendar (Stage 2: read-only calendar + unscheduled view) ────

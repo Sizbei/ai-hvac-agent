@@ -106,14 +106,18 @@ export default function PricebookPage() {
   async function handleDeactivate(item: PricebookItem): Promise<void> {
     if (!window.confirm(`Deactivate "${item.name}"?`)) return;
     setDeactivateError(null);
-    const res = await fetch(`/api/admin/pricebook/${item.id}`, {
-      method: 'DELETE',
-    });
-    if (res.ok) {
-      void refetch();
-    } else {
-      const body = await res.json().catch(() => ({}));
-      setDeactivateError((body as { error?: string }).error ?? 'Failed to deactivate item.');
+    try {
+      const res = await fetch(`/api/admin/pricebook/${item.id}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        void refetch();
+      } else {
+        const body = await res.json().catch(() => ({}));
+        setDeactivateError((body as { error?: string }).error ?? 'Failed to deactivate item.');
+      }
+    } catch {
+      setDeactivateError('Network error — could not deactivate item.');
     }
   }
 

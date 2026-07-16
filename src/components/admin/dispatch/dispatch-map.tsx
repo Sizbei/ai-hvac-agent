@@ -89,13 +89,15 @@ function formatWindow(iso: string | null): string {
   const tz = 'America/New_York';
   const day = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: tz });
   const startH = Number(d.toLocaleTimeString('en-US', { hour: 'numeric', hourCycle: 'h23', timeZone: tz }));
-  const endH = startH + 2;
+  const endH = (startH + 2) % 24;
   const fmt = (h: number) => {
-    const suffix = h >= 12 ? 'pm' : 'am';
-    const display = h > 12 ? h - 12 : h === 0 ? 12 : h;
+    const h24 = ((h % 24) + 24) % 24;
+    const suffix = h24 >= 12 ? 'pm' : 'am';
+    const display = h24 > 12 ? h24 - 12 : h24 === 0 ? 12 : h24;
     return `${display}${suffix}`;
   };
-  return `${day} ${fmt(startH)}–${fmt(endH)}`;
+  const crossMidnight = endH < startH;
+  return `${day} ${fmt(startH)}–${fmt(endH)}${crossMidnight ? ' (+1d)' : ''}`;
 }
 
 /** Integer cents → "$1,234.56" */
@@ -445,18 +447,19 @@ export function DispatchMap() {
         </div>
       )}
 
-      {data?.geocodeCapped && (
-        <div className="absolute bottom-4 right-4 z-10 rounded-md border bg-background/90 px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm backdrop-blur">
-          Showing first 25 geocoded jobs
-        </div>
-      )}
-
-      {/* AR info chip when AR layer visible but 0 customers on map */}
-      {data && showArLayer(layerMode) && arOnMap === 0 && data.arCustomers.length === 0 && (
-        <div className="absolute bottom-4 right-4 z-10 rounded-md border bg-background/90 px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm backdrop-blur">
-          No geocoded AR customers
-        </div>
-      )}
+      {/* Status chips — stacked so they never overlap each other */}
+      <div className="pointer-events-none absolute bottom-4 right-4 z-10 flex flex-col items-end gap-1.5">
+        {data?.geocodeCapped && (
+          <div className="rounded-md border bg-background/90 px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm backdrop-blur">
+            Showing first 25 geocoded jobs
+          </div>
+        )}
+        {data && showArLayer(layerMode) && arOnMap === 0 && data.arCustomers.length === 0 && (
+          <div className="rounded-md border bg-background/90 px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm backdrop-blur">
+            No geocoded AR customers
+          </div>
+        )}
+      </div>
     </div>
   );
 }

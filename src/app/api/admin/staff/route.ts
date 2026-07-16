@@ -14,6 +14,15 @@ export async function GET() {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
 
+    const rateCheck = slidingWindow(
+      `admin:staff-list:${session.userId}`,
+      RATE_LIMITS.adminRead.maxRequests,
+      RATE_LIMITS.adminRead.windowMs,
+    );
+    if (!rateCheck.allowed) {
+      return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
+    }
+
     const staff = await listStaff(session.organizationId);
     // Echo the caller's own id so the UI can disable self-demote/self-deactivate
     // without a second round-trip. (The server enforces this regardless.)

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Plus, Trash2, Copy, Check, Sparkles, BadgeCheck } from 'lucide-react';
 import {
   Dialog,
@@ -91,6 +91,7 @@ export function EstimateCreateDialog({
   const [sendToCustomer, setSendToCustomer] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const submittingRef = useRef(false);
   const [approvalUrl, setApprovalUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [isSuggesting, setIsSuggesting] = useState(false);
@@ -259,6 +260,16 @@ export function EstimateCreateDialog({
 
   async function handleSubmit(): Promise<void> {
     setError(null);
+
+    // MAJOR-7: validate expiresInDays before submit (empty = no expiry is fine).
+    if (expiresInDays !== '') {
+      const days = parseInt(expiresInDays, 10);
+      if (!Number.isInteger(days) || days < 1 || days > 365) {
+        setError('Expiry must be a whole number between 1 and 365 days.');
+        return;
+      }
+    }
+
     // Build the payload. Catalog lines submit only pricebookItemId (+ qty +
     // member-price toggle) — the SERVER re-snapshots name/price/cost. Manual lines
     // submit name + price.
@@ -286,6 +297,9 @@ export function EstimateCreateDialog({
       return;
     }
 
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+
     setIsSubmitting(true);
     try {
       const res = await fetch('/api/admin/estimates', {
@@ -310,6 +324,7 @@ export function EstimateCreateDialog({
       setError('Could not connect to the server.');
     } finally {
       setIsSubmitting(false);
+      submittingRef.current = false;
     }
   }
 
@@ -328,6 +343,7 @@ export function EstimateCreateDialog({
     <Dialog
       open={open}
       onOpenChange={(o) => {
+        if (!o && submittingRef.current) return;
         onOpenChange(o);
         if (!o) reset();
       }}
@@ -355,6 +371,7 @@ export function EstimateCreateDialog({
           </div>
         ) : (
           <div className="space-y-4">
+            {error && <p className="text-sm text-destructive">{error}</p>}
             {isMember && (
               <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800">
                 <BadgeCheck className="size-4 shrink-0" />
@@ -561,7 +578,6 @@ export function EstimateCreateDialog({
               </label>
             )}
 
-            {error && <p className="text-sm text-destructive">{error}</p>}
           </div>
         )}
 

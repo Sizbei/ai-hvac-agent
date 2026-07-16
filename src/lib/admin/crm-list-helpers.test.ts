@@ -89,9 +89,11 @@ vi.mock('@/lib/db/schema', () => ({
   customerNotes: { id: 'notes.id', customerId: 'notes.cid' },
   followUps: { id: 'fu.id', customerId: 'fu.cid', status: 'fu.status' },
   serviceHistory: { id: 'sh.id', customerId: 'sh.cid', serviceRequestId: 'sh.srid' },
-  serviceRequests: { customerId: 'sr.cid', id: 'sr.id', sessionId: 'sr.sid' },
+  serviceRequests: { customerId: 'sr.cid', id: 'sr.id', sessionId: 'sr.sid', completedAt: 'sr.completedAt', createdAt: 'sr.createdAt', status: 'sr.status' },
   users: { id: 'users.id', name: 'users.name' },
   auditLog: {},
+  customerTypeEnum: { enumValues: ['residential', 'commercial'] },
+  membershipStatusEnum: { enumValues: ['none', 'active', 'suspended', 'expired', 'cancelled'] },
 }));
 
 vi.mock('@/lib/crypto', () => ({

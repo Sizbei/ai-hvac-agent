@@ -17,7 +17,7 @@ import {
   isEquipmentType,
 } from "@/lib/admin/crm-equipment-queries";
 import { logAudit } from "@/lib/admin/audit";
-import { successResponse, errorResponse } from "@/lib/api-response";
+import { successResponse, errorResponse, readJsonBody } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
 
@@ -87,7 +87,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return errorResponse("Customer not found", "NOT_FOUND", 404);
     }
 
-    const body = (await request.json()) as Record<string, unknown>;
+    const bodyResult = await readJsonBody(request);
+    if (!bodyResult.ok) {
+      return errorResponse("Invalid JSON body", "VALIDATION_ERROR", 400);
+    }
+    const body = bodyResult.data as Record<string, unknown>;
     const action = typeof body.action === "string" ? body.action : "";
 
     switch (action) {
@@ -319,8 +323,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           notes?: string | null;
         } = {};
 
-        if (typeof body.name === "string" && body.name.trim().length > 0) {
-          patch.name = body.name.trim();
+        if ("name" in body) {
+          const trimmed = typeof body.name === "string" ? body.name.trim() : "";
+          if (!trimmed) {
+            return errorResponse("Name is required", "VALIDATION_ERROR", 400);
+          }
+          patch.name = trimmed;
         }
         if ("phone" in body) {
           patch.phone =

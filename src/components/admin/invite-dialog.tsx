@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Copy, Check } from 'lucide-react';
 import {
   Dialog,
@@ -42,6 +42,7 @@ export function InviteDialog({
   const [role, setRole] = useState<InviteRole>('technician');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const submittingRef = useRef(false);
   // The one-time accept link, shown after a successful create.
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -62,6 +63,8 @@ export function InviteDialog({
       setError('Please enter a valid email address.');
       return;
     }
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setIsSubmitting(true);
     setError(null);
     try {
@@ -81,6 +84,7 @@ export function InviteDialog({
       setError('Could not connect to server. Please try again.');
     } finally {
       setIsSubmitting(false);
+      submittingRef.current = false;
     }
   }
 
@@ -97,7 +101,7 @@ export function InviteDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+    <Dialog open={open} onOpenChange={(o) => { if (!o && submittingRef.current) return; if (!o) onClose(); }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Invite a teammate</DialogTitle>

@@ -21,12 +21,13 @@ export interface MetricTrend {
   readonly previous: number | null;
 }
 
-/** Outstanding balance on open (sent, unpaid) invoices, bucketed by invoice age. */
+/** Outstanding balance on NATIVE open (sent, unpaid) invoices, bucketed by invoice age. */
 export interface ArAging {
   readonly bucket0to30Cents: number;
   readonly bucket31to60Cents: number;
   readonly bucket60PlusCents: number;
-  readonly totalOutstandingCents: number;
+  /** Native-only outstanding total (excludes synced FP/HCP). See totalOutstandingAllCents for the combined headline. */
+  readonly nativeOutstandingCents: number;
 }
 
 /** Outstanding balance on SYNCED (FP/HCP) open invoices, bucketed by days past
@@ -69,7 +70,7 @@ export interface OperationsMetrics {
    * system — these buckets are visibility, not collections triggers.
    */
   readonly syncedArAging: SyncedArAging;
-  /** Native + synced AR combined — the headline number. Native-only lives in totalOutstandingCents. */
+  /** Native + synced AR combined — the headline number. Native-only lives in arAging.nativeOutstandingCents. */
   readonly totalOutstandingAllCents: number;
 
   // 3. Customer service volume.
