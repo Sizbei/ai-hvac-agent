@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNotNull, sql, asc } from "drizzle-orm";
 import { getAdminSession } from "@/lib/auth/session";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { db } from "@/lib/db";
@@ -70,53 +70,117 @@ export async function GET() {
       serviceRadiusKm: BUSINESS_BASE_LOCATION.serviceRadiusKm,
     };
 
-    // ── Jobs ──
-    // Prefer the cached coordinates from geocode-at-intake (customer_locations),
-    // joined via the request's location_id. Only jobs still missing coords hit
-    // Photon below — so a normal map load makes zero external calls and never
-    // ships a decrypted address anywhere.
-    const jobRows = await db
-      .select({
-        id: serviceRequests.id,
-        referenceNumber: serviceRequests.referenceNumber,
-        status: serviceRequests.status,
-        urgency: serviceRequests.urgency,
-        issueType: serviceRequests.issueType,
-        addressEncrypted: serviceRequests.addressEncrypted,
-        arrivalWindowStart: serviceRequests.arrivalWindowStart,
-        technicianName: users.name,
-        // Customer name: prefer the name stored on the request itself (set at
-        // intake), fall back to the linked customer row.
-        customerNameEncrypted: serviceRequests.customerNameEncrypted,
-        customerNameFromCustomer: customers.nameEncrypted,
-        priceCents: sql<number | null>`(${serviceRequests.fieldpulseMetrics}->>'totalPriceCents')::int`,
-        cachedLat: customerLocations.latitude,
-        cachedLon: customerLocations.longitude,
-      })
-      .from(serviceRequests)
-      .leftJoin(users, eq(serviceRequests.assignedTo, users.id))
-      .leftJoin(
-        customers,
-        and(
-          eq(serviceRequests.customerId, customers.id),
+    // ── Run all 3 independent queries in parallel ──
+    const effectiveAge = sql<number>`extract(epoch from now() - coalesce(${invoices.issuedAt}, ${invoices.createdAt})) / 86400`;
+    const cutoff = new Date(Date.now() - TECH_FRESH_MS);
+
+    const [jobRows, locRows, arRows] = await Promise.all([
+      // Jobs ──
+      // Prefer the cached coordinates from geocode-at-intake (customer_locations),
+      // joined via the request's location_id. Only jobs still missing coords hit
+      // Photon below — so a normal map load makes zero external calls and never
+      // ships a decrypted address anywhere.
+      db
+        .select({
+          id: serviceRequests.id,
+          referenceNumber: serviceRequests.referenceNumber,
+          status: serviceRequests.status,
+          urgency: serviceRequests.urgency,
+          issueType: serviceRequests.issueType,
+          addressEncrypted: serviceRequests.addressEncrypted,
+          arrivalWindowStart: serviceRequests.arrivalWindowStart,
+          technicianName: users.name,
+          // Customer name: prefer the name stored on the request itself (set at
+          // intake), fall back to the linked customer row.
+          customerNameEncrypted: serviceRequests.customerNameEncrypted,
+          customerNameFromCustomer: customers.nameEncrypted,
+          priceCents: sql<number | null>`(${serviceRequests.fieldpulseMetrics}->>'totalPriceCents')::int`,
+          cachedLat: customerLocations.latitude,
+          cachedLon: customerLocations.longitude,
+        })
+        .from(serviceRequests)
+        .leftJoin(users, eq(serviceRequests.assignedTo, users.id))
+        .leftJoin(
+          customers,
+          and(
+            eq(serviceRequests.customerId, customers.id),
+            eq(customers.organizationId, session.organizationId),
+          ),
+        )
+        .leftJoin(
+          customerLocations,
+          and(
+            eq(customerLocations.id, serviceRequests.locationId),
+            eq(customerLocations.organizationId, session.organizationId),
+          ),
+        )
+        .where(
+          withTenant(
+            serviceRequests,
+            session.organizationId,
+            inArray(serviceRequests.status, [...ACTIVE_STATUSES]),
+          ),
+        )
+        .limit(200),
+
+      // Technicians — DISTINCT ON (technician_id) returns one row per tech
+      // (the latest fix) entirely in SQL; avoids fetching up to 500 rows
+      // and deduplicating in JS. Stale-fix filter (> 4h) applied in JS below
+      // (cutoff depends on request time, not a stored column).
+      db
+        .selectDistinctOn([technicianLocations.technicianId], {
+          technicianId: technicianLocations.technicianId,
+          name: users.name,
+          latitude: technicianLocations.latitude,
+          longitude: technicianLocations.longitude,
+          capturedAt: technicianLocations.capturedAt,
+        })
+        .from(technicianLocations)
+        .innerJoin(users, eq(technicianLocations.technicianId, users.id))
+        .where(withTenant(technicianLocations, session.organizationId))
+        // DISTINCT ON requires ORDER BY to lead with the distinct column;
+        // capturedAt DESC tiebreak keeps the most-recent fix per tech.
+        .orderBy(
+          asc(technicianLocations.technicianId),
+          desc(technicianLocations.capturedAt),
+        ),
+
+      // AR customers — open invoices with a geocoded location.
+      // One row per customer: sum of outstanding balance, invoice count, oldest age.
+      // Only customers that have at least one geocoded customer_location are returned.
+      db
+        .select({
+          customerId: customers.id,
+          nameEncrypted: customers.nameEncrypted,
+          latitude: customerLocations.latitude,
+          longitude: customerLocations.longitude,
+          owingCents: sql<number>`sum(${invoices.totalCents} - coalesce(${invoices.amountPaidCents}, 0))`,
+          invoiceCount: sql<number>`count(${invoices.id})`,
+          oldestDays: sql<number>`max(${effectiveAge})`,
+        })
+        .from(invoices)
+        .innerJoin(customers, and(
+          eq(invoices.customerId, customers.id),
           eq(customers.organizationId, session.organizationId),
-        ),
-      )
-      .leftJoin(
-        customerLocations,
-        and(
-          eq(customerLocations.id, serviceRequests.locationId),
-          eq(customerLocations.organizationId, session.organizationId),
-        ),
-      )
-      .where(
-        withTenant(
-          serviceRequests,
-          session.organizationId,
-          inArray(serviceRequests.status, [...ACTIVE_STATUSES]),
-        ),
-      )
-      .limit(200);
+        ))
+        .innerJoin(
+          customerLocations,
+          and(
+            eq(customerLocations.customerId, customers.id),
+            eq(customerLocations.organizationId, session.organizationId),
+            isNotNull(customerLocations.latitude),
+          ),
+        )
+        .where(
+          and(
+            withTenant(invoices, session.organizationId),
+            eq(invoices.state, "open"),
+            gt(invoices.totalCents, sql`coalesce(${invoices.amountPaidCents}, 0)`),
+          ),
+        )
+        .groupBy(customers.id, customers.nameEncrypted, customerLocations.latitude, customerLocations.longitude)
+        .limit(300),
+    ]);
 
     type JobRow = (typeof jobRows)[number];
     const project = (r: JobRow, latitude: number, longitude: number) => ({
@@ -162,23 +226,7 @@ export async function GET() {
       ...geocoded.filter((j): j is NonNullable<typeof j> => j !== null),
     ];
 
-    // ── Technicians (latest fresh fix per tech) ──
-    const locRows = await db
-      .select({
-        technicianId: technicianLocations.technicianId,
-        name: users.name,
-        latitude: technicianLocations.latitude,
-        longitude: technicianLocations.longitude,
-        capturedAt: technicianLocations.capturedAt,
-      })
-      .from(technicianLocations)
-      .innerJoin(users, eq(technicianLocations.technicianId, users.id))
-      .where(withTenant(technicianLocations, session.organizationId))
-      .orderBy(desc(technicianLocations.capturedAt))
-      .limit(500);
-
-    const cutoff = Date.now() - TECH_FRESH_MS;
-    const seen = new Set<string>();
+    // Filter stale tech fixes in JS (cutoff depends on request time).
     const technicians: Array<{
       technicianId: string;
       name: string;
@@ -187,9 +235,7 @@ export async function GET() {
       capturedAt: string;
     }> = [];
     for (const l of locRows) {
-      if (seen.has(l.technicianId)) continue; // rows are desc → first is latest
-      seen.add(l.technicianId);
-      if (l.capturedAt.getTime() < cutoff) continue; // stale
+      if (l.capturedAt < cutoff) continue; // stale
       technicians.push({
         technicianId: l.technicianId,
         name: l.name,
@@ -198,44 +244,6 @@ export async function GET() {
         capturedAt: l.capturedAt.toISOString(),
       });
     }
-
-    // ── AR customers — open invoices with a geocoded location ──
-    // One row per customer: sum of outstanding balance, invoice count, oldest age.
-    // Only customers that have at least one geocoded customer_location are returned.
-    const effectiveAge = sql<number>`extract(epoch from now() - coalesce(${invoices.issuedAt}, ${invoices.createdAt})) / 86400`;
-
-    const arRows = await db
-      .select({
-        customerId: customers.id,
-        nameEncrypted: customers.nameEncrypted,
-        latitude: customerLocations.latitude,
-        longitude: customerLocations.longitude,
-        owingCents: sql<number>`sum(${invoices.totalCents} - coalesce(${invoices.amountPaidCents}, 0))`,
-        invoiceCount: sql<number>`count(${invoices.id})`,
-        oldestDays: sql<number>`max(${effectiveAge})`,
-      })
-      .from(invoices)
-      .innerJoin(customers, and(
-        eq(invoices.customerId, customers.id),
-        eq(customers.organizationId, session.organizationId),
-      ))
-      .innerJoin(
-        customerLocations,
-        and(
-          eq(customerLocations.customerId, customers.id),
-          eq(customerLocations.organizationId, session.organizationId),
-          isNotNull(customerLocations.latitude),
-        ),
-      )
-      .where(
-        and(
-          withTenant(invoices, session.organizationId),
-          eq(invoices.state, "open"),
-          gt(invoices.totalCents, sql`coalesce(${invoices.amountPaidCents}, 0)`),
-        ),
-      )
-      .groupBy(customers.id, customers.nameEncrypted, customerLocations.latitude, customerLocations.longitude)
-      .limit(300);
 
     const arCustomers = arRows.map((r) => ({
       customerId: r.customerId,

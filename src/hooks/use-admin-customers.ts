@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { CustomerListRecord, CustomerDetail } from '@/lib/admin/crm-types';
 import { createSwrCache } from '@/lib/admin/swr-cache';
+import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 
 interface CustomersPayload {
   readonly customers: readonly CustomerListRecord[];
@@ -73,7 +74,7 @@ export function useAdminCustomers(params: UseAdminCustomersParams = {}) {
         if (membershipStatus) qs.set('membershipStatus', membershipStatus);
         if (fieldpulseSynced) qs.set('fieldpulseSynced', 'true');
         const query = qs.toString();
-        const res = await fetch(`/api/admin/customers${query ? `?${query}` : ''}`);
+        const res = await adminFetch(`/api/admin/customers${query ? `?${query}` : ''}`);
         const json = await res.json();
         if (json.success) {
           setError(null);
@@ -88,7 +89,8 @@ export function useAdminCustomers(params: UseAdminCustomersParams = {}) {
         } else if (!hasCachedData) {
           setError(json.error?.message ?? 'Failed to load customers');
         }
-      } catch {
+      } catch (err) {
+        if (err instanceof AdminAuthRedirectError) return;
         if (!hasCachedData) setError('Network error');
       } finally {
         setIsLoading(false);
@@ -117,7 +119,7 @@ export function useCustomerDetail(customerId: string) {
   const fetch_ = useCallback(async () => {
     setIsLoading(true);
     try {
-      const res = await fetch(`/api/admin/customers/${customerId}`);
+      const res = await adminFetch(`/api/admin/customers/${customerId}`);
       const json = await res.json();
       if (json.success) {
         setCustomer(json.data);
@@ -125,7 +127,8 @@ export function useCustomerDetail(customerId: string) {
       } else {
         setError(json.error?.message ?? 'Customer not found');
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof AdminAuthRedirectError) return;
       setError('Network error');
     } finally {
       setIsLoading(false);

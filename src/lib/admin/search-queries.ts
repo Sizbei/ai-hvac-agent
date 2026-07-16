@@ -19,15 +19,15 @@ const RESULTS_PER_TYPE = 8;
 
 /**
  * Safety cap for entities that need app-side decrypt-and-filter (encrypted
- * columns can't be ILIKE'd in Postgres). Sized to cover the full org dataset
- * (~2.2k customers / ~2.9k invoices at audit time) so search sees everything;
- * the 300ms client debounce + 2-char minimum bound the scan frequency. Scans
- * are ordered newest-first, so if an org ever exceeds the cap, the most
- * recent records are the ones searched.
+ * columns can't be ILIKE'd in Postgres). Reduced from 5000 → 1500 to bound
+ * per-keystroke decrypt cost; the 300ms client debounce + 2-char minimum
+ * already gate frequency. Scans are ordered newest-first, so the most-recent
+ * 1500 records are always searched (tradeoff: very old records in large orgs
+ * may be missed; acceptable given the debounce/min-char guards).
  */
-const SCAN_LIMIT_CUSTOMERS = 5000;
-const SCAN_LIMIT_INVOICES = 5000;
-const SCAN_LIMIT_ESTIMATES = 5000;
+const SCAN_LIMIT_CUSTOMERS = 1500;
+const SCAN_LIMIT_INVOICES = 1500;
+const SCAN_LIMIT_ESTIMATES = 1500;
 
 function safeDecrypt(value: string | null | undefined): string | null {
   if (!value) return null;

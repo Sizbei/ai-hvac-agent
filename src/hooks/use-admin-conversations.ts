@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { ConversationSummary } from '@/lib/admin/conversation-types';
+import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 
 interface UseAdminConversationsOptions {
   readonly status?: string;
@@ -53,7 +54,7 @@ export function useAdminConversations(
       params.set('limit', String(limit));
 
       const url = `/api/admin/conversations?${params.toString()}`;
-      const res = await fetch(url);
+      const res = await adminFetch(url);
 
       if (!isMountedRef.current || run !== runRef.current) return;
       if (!res.ok) {
@@ -81,7 +82,8 @@ export function useAdminConversations(
         setTotal(body.data.total);
         setError(null);
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof AdminAuthRedirectError) return;
       if (isMountedRef.current && run === runRef.current) {
         setError('Could not connect to server. Please try again.');
       }

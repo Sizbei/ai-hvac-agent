@@ -37,97 +37,111 @@ function asPercent(numerator: number, denominator: number): number {
 export async function getAiInsights(
   organizationId: string,
 ): Promise<AiInsights> {
-  // Session counts (total + per-status).
-  const [totalSessionsRow] = await db
-    .select({ value: count() })
-    .from(customerSessions)
-    .where(withTenant(customerSessions, organizationId));
+  // All 9 queries are independent — run them in parallel to cut 9 serial
+  // round-trips down to 1 concurrent batch.
+  const [
+    [totalSessionsRow],
+    [escalatedRow],
+    [abandonedRow],
+    [submittedRow],
+    [deterministicRow],
+    [llmRow],
+    [tokensRow],
+    [feedbackUpRow],
+    [feedbackDownRow],
+  ] = await Promise.all([
+    // Session counts (total + per-status).
+    db
+      .select({ value: count() })
+      .from(customerSessions)
+      .where(withTenant(customerSessions, organizationId)),
 
-  const [escalatedRow] = await db
-    .select({ value: count() })
-    .from(customerSessions)
-    .where(
-      withTenant(
-        customerSessions,
-        organizationId,
-        eq(customerSessions.status, "escalated"),
+    db
+      .select({ value: count() })
+      .from(customerSessions)
+      .where(
+        withTenant(
+          customerSessions,
+          organizationId,
+          eq(customerSessions.status, "escalated"),
+        ),
       ),
-    );
 
-  const [abandonedRow] = await db
-    .select({ value: count() })
-    .from(customerSessions)
-    .where(
-      withTenant(
-        customerSessions,
-        organizationId,
-        eq(customerSessions.status, "abandoned"),
+    db
+      .select({ value: count() })
+      .from(customerSessions)
+      .where(
+        withTenant(
+          customerSessions,
+          organizationId,
+          eq(customerSessions.status, "abandoned"),
+        ),
       ),
-    );
 
-  // Submitted service requests.
-  const [submittedRow] = await db
-    .select({ value: count() })
-    .from(serviceRequests)
-    .where(withTenant(serviceRequests, organizationId));
+    // Submitted service requests.
+    db
+      .select({ value: count() })
+      .from(serviceRequests)
+      .where(withTenant(serviceRequests, organizationId)),
 
-  // Assistant reply breakdown: 0-token (deterministic router) vs LLM (>0).
-  const [deterministicRow] = await db
-    .select({ value: count() })
-    .from(messages)
-    .where(
-      withTenant(
-        messages,
-        organizationId,
-        eq(messages.role, "assistant"),
-        eq(messages.tokensUsed, 0),
+    // Assistant reply breakdown: 0-token (deterministic router) vs LLM (>0).
+    db
+      .select({ value: count() })
+      .from(messages)
+      .where(
+        withTenant(
+          messages,
+          organizationId,
+          eq(messages.role, "assistant"),
+          eq(messages.tokensUsed, 0),
+        ),
       ),
-    );
 
-  const [llmRow] = await db
-    .select({ value: count() })
-    .from(messages)
-    .where(
-      withTenant(
-        messages,
-        organizationId,
-        eq(messages.role, "assistant"),
-        gt(messages.tokensUsed, 0),
+    db
+      .select({ value: count() })
+      .from(messages)
+      .where(
+        withTenant(
+          messages,
+          organizationId,
+          eq(messages.role, "assistant"),
+          gt(messages.tokensUsed, 0),
+        ),
       ),
-    );
 
-  // Total tokens consumed across all messages (null → 0).
-  const [tokensRow] = await db
-    .select({
-      value: sql<number | string>`coalesce(sum(${messages.tokensUsed}), 0)`,
-    })
-    .from(messages)
-    .where(withTenant(messages, organizationId));
+    // Total tokens consumed across all messages (null → 0).
+    db
+      .select({
+        value: sql<number | string>`coalesce(sum(${messages.tokensUsed}), 0)`,
+      })
+      .from(messages)
+      .where(withTenant(messages, organizationId)),
 
-  // Message feedback votes from the audit log (details is a JSON TEXT column).
-  const [feedbackUpRow] = await db
-    .select({ value: count() })
-    .from(auditLog)
-    .where(
-      withTenant(
-        auditLog,
-        organizationId,
-        eq(auditLog.action, "message_feedback"),
-        sql`${auditLog.details} LIKE ${'%"vote":"up"%'}`,
+    // Message feedback votes from the audit log (details is a JSON TEXT column).
+    db
+      .select({ value: count() })
+      .from(auditLog)
+      .where(
+        withTenant(
+          auditLog,
+          organizationId,
+          eq(auditLog.action, "message_feedback"),
+          sql`${auditLog.details} LIKE ${'%"vote":"up"%'}`,
+        ),
       ),
-    );
 
-  const [feedbackDownRow] = await db
-    .select({ value: count() })
-    .from(auditLog)
-    .where(
-      withTenant(
-        auditLog,
-        organizationId,
-        eq(auditLog.action, "message_feedback"),
-        sql`${auditLog.details} LIKE ${'%"vote":"down"%'}`,
+    db
+      .select({ value: count() })
+      .from(auditLog)
+      .where(
+        withTenant(
+          auditLog,
+          organizationId,
+          eq(auditLog.action, "message_feedback"),
+          sql`${auditLog.details} LIKE ${'%"vote":"down"%'}`,
+        ),
       ),
-    );
+  ]);
 
   const totalSessions = toNumber(totalSessionsRow?.value);
   const submittedRequests = toNumber(submittedRow?.value);

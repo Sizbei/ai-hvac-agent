@@ -20,6 +20,7 @@ import { timingSafeEqual } from "node:crypto";
 import { errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
+import { clientIp } from "@/lib/http/client-ip";
 import { createAdminSession } from "@/lib/auth/session";
 import {
   getGoogleOidcConfig,
@@ -84,7 +85,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       return errorResponse("Not found", "NOT_FOUND", 404);
     }
 
-    const ip = request.headers.get("x-forwarded-for") ?? "unknown";
+    const ip = clientIp(request);
     const rateCheck = slidingWindow(
       `auth:signup-callback:${ip}`,
       RATE_LIMITS.sessionCreate.maxRequests,
@@ -157,7 +158,7 @@ export async function GET(request: NextRequest): Promise<Response> {
         // entry). Details carry ids ONLY — never ownerEmail/businessName (PII).
         // The owner is both the actor and createdBy on this path. Best-effort: an
         // audit-write failure must not abort a successful provision.
-        const ipAddress = request.headers.get("x-forwarded-for") ?? "unknown";
+        const ipAddress = clientIp(request);
         await logAudit({
           organizationId: result.organizationId,
           userId: result.ownerUserId,

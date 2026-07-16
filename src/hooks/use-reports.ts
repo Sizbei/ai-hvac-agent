@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 
 export interface SalesReport {
   readonly fromDate: string;
@@ -95,7 +96,7 @@ export function useReports(range: ReportRange = {}): UseReportsResult {
         if (from) params.set('from', from);
         if (to) params.set('to', to);
         const qs = params.toString();
-        const res = await fetch(`/api/admin/reports${qs ? `?${qs}` : ''}`);
+        const res = await adminFetch(`/api/admin/reports${qs ? `?${qs}` : ''}`);
         if (!active) return;
         if (!res.ok) {
           setError('Failed to load report');
@@ -118,7 +119,8 @@ export function useReports(range: ReportRange = {}): UseReportsResult {
           setTechnicianScorecards(body.data.technicianScorecards ?? []);
         }
         setError(null);
-      } catch {
+      } catch (err) {
+        if (err instanceof AdminAuthRedirectError) return;
         if (active) setError('Could not connect to server. Please try again.');
       } finally {
         if (active) setIsLoading(false);

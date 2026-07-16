@@ -789,6 +789,8 @@ export const customers = pgTable(
   },
   (table) => [
     index("customers_org_id_idx").on(table.organizationId),
+    // Composite index for the list-page query: WHERE org=$1 ORDER BY created_at DESC LIMIT.
+    index("customers_org_created_idx").on(table.organizationId, table.createdAt),
     // Unique per org: one customer row per email / per phone within a tenant.
     // Partial (WHERE ... IS NOT NULL) so the many rows lacking an email or
     // phone don't all collide on NULL.
@@ -1000,6 +1002,8 @@ export const auditLog = pgTable(
     index("audit_org_id_idx").on(table.organizationId),
     index("audit_action_idx").on(table.action),
     index("audit_created_idx").on(table.createdAt),
+    // Composite index for the list-page query: WHERE org=$1 ORDER BY created_at DESC LIMIT.
+    index("audit_log_org_created_idx").on(table.organizationId, table.createdAt),
   ],
 );
 

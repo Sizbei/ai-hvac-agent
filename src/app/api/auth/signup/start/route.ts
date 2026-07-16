@@ -16,6 +16,7 @@ import { randomBytes } from "node:crypto";
 import { errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
+import { clientIp } from "@/lib/http/client-ip";
 import {
   getGoogleOidcConfig,
   buildOidcConsentUrl,
@@ -56,7 +57,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       return errorResponse("Not found", "NOT_FOUND", 404);
     }
 
-    const ip = request.headers.get("x-forwarded-for") ?? "unknown";
+    const ip = clientIp(request);
     const rateCheck = slidingWindow(
       `auth:signup-start:${ip}`,
       RATE_LIMITS.sessionCreate.maxRequests,

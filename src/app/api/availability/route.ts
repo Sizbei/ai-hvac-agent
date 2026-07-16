@@ -15,6 +15,7 @@ import {
 } from "@/lib/admin/availability-queries";
 import { isRealIsoDate } from "@/lib/admin/calendar-time";
 import { logger } from "@/lib/logger";
+import { clientIp } from "@/lib/http/client-ip";
 
 /**
  * GET /api/availability — PUBLIC-ish customer-facing open-window read.
@@ -67,7 +68,7 @@ const querySchema = z
   .strict();
 
 export async function GET(request: NextRequest) {
-  const ip = request.headers.get("x-forwarded-for") ?? "unknown";
+  const ip = clientIp(request);
   const rateCheck = slidingWindow(
     `availability:${ip}`,
     RATE_LIMITS.sessionAction.maxRequests,

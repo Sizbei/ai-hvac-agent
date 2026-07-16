@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createSwrCache } from '@/lib/admin/swr-cache';
+import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 
 export interface EstimateListItem {
   readonly id: string;
@@ -124,7 +125,7 @@ export function useEstimates(params: UseEstimatesParams = {}): UseEstimatesResul
       isFetchingRef.current = true;
       setIsLoading(true);
       try {
-        const res = await fetch(`/api/admin/estimates${buildQuery(params)}`);
+        const res = await adminFetch(`/api/admin/estimates${buildQuery(params)}`);
         if (!res.ok) {
           setError('Failed to load estimates');
           return;
@@ -140,7 +141,8 @@ export function useEstimates(params: UseEstimatesParams = {}): UseEstimatesResul
           setStats(body.data.stats ?? null);
           setError(null);
         }
-      } catch {
+      } catch (err) {
+        if (err instanceof AdminAuthRedirectError) return;
         setError('Could not connect to server. Please try again.');
       } finally {
         isFetchingRef.current = false;

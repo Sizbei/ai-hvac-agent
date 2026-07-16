@@ -4,6 +4,7 @@ import { approveEstimate } from "@/lib/admin/estimate-queries";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
+import { clientIp } from "@/lib/http/client-ip";
 
 // PUBLIC endpoint — authorized by the approval token, NOT an admin session.
 // (proxy.ts only session-gates /api/admin/*, so this passes through.)
@@ -17,8 +18,7 @@ export async function POST(request: NextRequest) {
   try {
     // IP is captured server-side (never trusted from the body) for the e-sign
     // record and to rate-limit by approver.
-    const ip =
-      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+    const ip = clientIp(request);
 
     const rateCheck = slidingWindow(`estimate-approve:${ip}`, 10, 60_000);
     if (!rateCheck.allowed) {

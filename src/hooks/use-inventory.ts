@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createSwrCache } from '@/lib/admin/swr-cache';
+import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 
 export interface InventoryItem {
   readonly id: string;
@@ -134,8 +135,8 @@ export function useInventory(params: UseInventoryParams = {}): UseInventoryResul
         const poQuery = poQs.toString();
 
         const [invRes, poRes] = await Promise.all([
-          fetch(`/api/admin/inventory${invQuery ? `?${invQuery}` : ''}`),
-          fetch(`/api/admin/inventory/purchase-orders${poQuery ? `?${poQuery}` : ''}`),
+          adminFetch(`/api/admin/inventory${invQuery ? `?${invQuery}` : ''}`),
+          adminFetch(`/api/admin/inventory/purchase-orders${poQuery ? `?${poQuery}` : ''}`),
         ]);
 
         // Discard if a newer fetch has already started (rapid page clicks).
@@ -175,7 +176,8 @@ export function useInventory(params: UseInventoryParams = {}): UseInventoryResul
           });
         }
         setError(null);
-      } catch {
+      } catch (err) {
+        if (err instanceof AdminAuthRedirectError) return;
         if (seq === fetchSeqRef.current) {
           setError('Could not connect to server. Please try again.');
         }

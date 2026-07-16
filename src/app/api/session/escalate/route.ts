@@ -8,9 +8,10 @@ import { isSameOriginRequest } from "@/lib/session-csrf";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { escalateSession } from "@/lib/ai/escalate-service";
 import { logger } from "@/lib/logger";
+import { clientIp } from "@/lib/http/client-ip";
 
 export async function POST(request: NextRequest) {
-  const ip = request.headers.get("x-forwarded-for") ?? "unknown";
+  const ip = clientIp(request);
   const rateCheck = slidingWindow(
     `session:action:${ip}`,
     RATE_LIMITS.sessionAction.maxRequests,

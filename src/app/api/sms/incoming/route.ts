@@ -22,6 +22,7 @@ import {
   setDoNotContactByPhone,
 } from "@/lib/communication/consent";
 import { logger } from "@/lib/logger";
+import { clientIp } from "@/lib/http/client-ip";
 
 // CTIA-compliant replies for the carrier opt-out keywords.
 const STOP_REPLY =
@@ -50,7 +51,7 @@ const ERROR_REPLY =
  * must not insert them again.
  */
 export async function POST(request: NextRequest) {
-  const ip = request.headers.get("x-forwarded-for") ?? "unknown";
+  const ip = clientIp(request);
 
   // Verify the Twilio signature FIRST so compliance keywords (STOP) are honored
   // even under load — a STOP must never be dropped by the rate limiter.

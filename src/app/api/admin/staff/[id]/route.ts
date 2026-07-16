@@ -6,6 +6,7 @@ import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
+import { clientIp } from "@/lib/http/client-ip";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -117,7 +118,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       }
     }
 
-    const ipAddress = request.headers.get("x-forwarded-for") ?? "unknown";
+    const ipAddress = clientIp(request);
     await logAudit({
       organizationId: session.organizationId,
       userId: session.userId,

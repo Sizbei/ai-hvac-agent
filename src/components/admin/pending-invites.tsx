@@ -73,7 +73,7 @@ export function PendingInvites({
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-2">
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         {isLoading ? (
           <p className="text-sm text-muted-foreground">Loading...</p>
         ) : (

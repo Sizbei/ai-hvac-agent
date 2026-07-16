@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { SchedulingCalendar } from '@/lib/admin/types';
+import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 
 export type CalendarView = 'day' | 'week' | 'month' | 'agenda';
 
@@ -51,7 +52,7 @@ export function useSchedulingCalendar(
         `/api/admin/calendar?date=${encodeURIComponent(date)}` +
         `&view=${encodeURIComponent(view)}` +
         (includeCompleted ? '&includeCompleted=true' : '');
-      const res = await fetch(url);
+      const res = await adminFetch(url);
       if (!isMountedRef.current || run !== runRef.current) return;
       if (!res.ok) {
         const body = await res.json().catch(() => ({
@@ -72,7 +73,8 @@ export function useSchedulingCalendar(
         setCalendar(body.data);
         setError(null);
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof AdminAuthRedirectError) return;
       if (isMountedRef.current && run === runRef.current) {
         setError('Could not connect to server. Please try again.');
       }

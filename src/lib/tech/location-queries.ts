@@ -8,7 +8,7 @@
  * position isn't the same PII shape as an encrypted address). Every read/write is
  * org + technician scoped.
  */
-import { desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   technicianLocations,
@@ -66,8 +66,9 @@ export async function recordTechnicianLocation(
   }
 
   // The serviceRequestId is client-supplied. Only link it if it's a real request
-  // in THIS org — otherwise a cross-org id would be stored, and an unknown id
-  // would violate the FK and 500. Fall back to null (an unlinked fix is fine).
+  // in THIS org AND assigned to THIS tech — otherwise a cross-org or cross-tech
+  // id would corrupt dispatch ETA/travel signals for another technician.
+  // Fall back to null (an unlinked fix is fine; no error returned to client).
   let linkedRequestId: string | null = null;
   if (input.serviceRequestId) {
     const [req] = await db
@@ -77,7 +78,10 @@ export async function recordTechnicianLocation(
         withTenant(
           serviceRequests,
           organizationId,
-          eq(serviceRequests.id, input.serviceRequestId),
+          and(
+            eq(serviceRequests.id, input.serviceRequestId),
+            eq(serviceRequests.assignedTo, technicianId),
+          )!,
         ),
       )
       .limit(1);

@@ -486,7 +486,7 @@ export default function InvoicesPage() {
             <StatTileSkeleton />
             <StatTileSkeleton />
           </div>
-          <TableSkeleton rows={8} cols={5} />
+          <TableSkeleton rows={8} cols={6} />
         </>
       ) : displayRows.length === 0 ? (
         <Card className="p-5">
@@ -510,7 +510,7 @@ export default function InvoicesPage() {
         </Card>
       ) : (
         <>
-          <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
+          <div className="overflow-x-auto rounded-xl border bg-card shadow-sm">
             {/* header row */}
             <div className="grid grid-cols-[minmax(200px,1fr)_90px_120px_140px_180px_32px] items-center gap-4 bg-foreground px-6 py-2.5">
               {(['Customer', 'Created', 'Age', 'Balance', 'Actions', ''] as const).map(

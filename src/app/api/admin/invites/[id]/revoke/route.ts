@@ -5,6 +5,7 @@ import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
+import { clientIp } from "@/lib/http/client-ip";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -51,7 +52,7 @@ export async function POST(_request: NextRequest, { params }: RouteParams) {
       return errorResponse("Invite not found", "NOT_FOUND", 404);
     }
 
-    const ipAddress = _request.headers.get("x-forwarded-for") ?? "unknown";
+    const ipAddress = clientIp(_request);
     await logAudit({
       organizationId: session.organizationId,
       userId: session.userId,

@@ -16,9 +16,10 @@ import { z } from "zod";
 import { acceptInvite } from "@/lib/admin/invites";
 import { createAdminSession } from "@/lib/auth/session";
 import { logAudit } from "@/lib/admin/audit";
-import { successResponse, errorResponse } from "@/lib/api-response";
+import { successResponse, errorResponse, readJsonBody } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
+import { clientIp } from "@/lib/http/client-ip";
 
 const acceptSchema = z.object({
   // 64 hex chars (randomBytes(32)). Constrain shape so junk is rejected cheaply.
@@ -26,14 +27,6 @@ const acceptSchema = z.object({
   name: z.string().min(1).max(200),
   password: z.string().min(8).max(200),
 });
-
-/** Best-effort client IP. x-forwarded-for is client-controllable, so we take
- * only the LEFTMOST address (the real client at the edge; appended hops can't
- * shift the rate-limit bucket) and cap the length (45 = longest IPv6). */
-function clientIp(request: NextRequest): string {
-  const raw = request.headers.get("x-forwarded-for");
-  return raw?.split(",")[0]?.trim().slice(0, 45) || "unknown";
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -51,8 +44,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const body: unknown = await request.json();
-    const parsed = acceptSchema.safeParse(body);
+    const bodyResult = await readJsonBody(request);
+    if (!bodyResult.ok) {
+      return errorResponse(
+        "This invitation is no longer valid, or the form was incomplete.",
+        "INVALID_INVITE",
+        400,
+      );
+    }
+    const parsed = acceptSchema.safeParse(bodyResult.data);
     if (!parsed.success) {
       // Generic: don't reveal whether it was the token shape or the fields.
       return errorResponse(

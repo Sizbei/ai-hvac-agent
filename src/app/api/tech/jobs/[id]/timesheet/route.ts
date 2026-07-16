@@ -131,10 +131,10 @@ export async function POST(
       },
       "Technician clocked out",
     );
+    // Strip laborCostCents — payroll data — consistent with GET stripping it.
     return successResponse({
       id: result.id,
       minutes: result.minutes,
-      laborCostCents: result.laborCostCents,
     });
   } catch (error) {
     logger.error({ error }, "Failed to record time entry");

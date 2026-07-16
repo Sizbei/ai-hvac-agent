@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { DispatchBoard } from '@/lib/admin/types';
+import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 
 interface UseDispatchBoardResult {
   readonly board: DispatchBoard | null;
@@ -31,7 +32,7 @@ export function useDispatchBoard(date: string): UseDispatchBoardResult {
     const run = ++runRef.current;
 
     try {
-      const res = await fetch(`/api/admin/dispatch?date=${encodeURIComponent(date)}`);
+      const res = await adminFetch(`/api/admin/dispatch?date=${encodeURIComponent(date)}`);
       if (!isMountedRef.current || run !== runRef.current) return;
       if (!res.ok) {
         const body = await res.json().catch(() => ({
@@ -52,7 +53,8 @@ export function useDispatchBoard(date: string): UseDispatchBoardResult {
         setBoard(body.data);
         setError(null);
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof AdminAuthRedirectError) return;
       if (isMountedRef.current && run === runRef.current) {
         setError('Could not connect to server. Please try again.');
       }

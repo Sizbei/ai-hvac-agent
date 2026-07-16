@@ -27,9 +27,10 @@ import {
 } from "@/lib/ai/system-prompt";
 import { getRouterConfig } from "@/lib/admin/org-config-queries";
 import { logger } from "@/lib/logger";
+import { clientIp } from "@/lib/http/client-ip";
 
 export async function POST(request: NextRequest) {
-  const ip = request.headers.get("x-forwarded-for") ?? "unknown";
+  const ip = clientIp(request);
   const rateCheck = slidingWindow(
     `session:create:${ip}`,
     RATE_LIMITS.sessionCreate.maxRequests,

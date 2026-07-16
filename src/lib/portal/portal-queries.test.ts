@@ -195,7 +195,9 @@ describe("payPortalInvoice (cross-tenant / cross-customer guard)", () => {
   });
 
   it("charges via takePayment ONLY after the ownership check passes", async () => {
-    mockSelectSeq([[{ id: "inv-1" }]]); // invoice belongs to (org, customer)
+    // Invoice has totalCents=10000, amountPaidCents=0 → balance=10000.
+    // Payment amount must exactly equal the balance (full-payment enforcement).
+    mockSelectSeq([[{ id: "inv-1", totalCents: 10000, amountPaidCents: 0 }]]);
     vi.mocked(takePayment).mockResolvedValue({
       ok: true,
       paymentId: "pay-1",
@@ -208,8 +210,17 @@ describe("payPortalInvoice (cross-tenant / cross-customer guard)", () => {
     });
   });
 
+  it("rejects a partial payment (amount_mismatch)", async () => {
+    // Balance is 10000 but caller sends only 1 cent — portal disallows partials.
+    mockSelectSeq([[{ id: "inv-1", totalCents: 10000, amountPaidCents: 0 }]]);
+    const result = await payPortalInvoice(ORG, CUSTOMER, "inv-1", 1);
+    expect(result).toEqual({ ok: false, reason: "amount_mismatch" });
+    expect(takePayment).not.toHaveBeenCalled();
+  });
+
   it("maps a takePayment failure reason through unchanged", async () => {
-    mockSelectSeq([[{ id: "inv-1" }]]);
+    // totalCents=10000, amountPaidCents=0 → balance=10000; send exact amount.
+    mockSelectSeq([[{ id: "inv-1", totalCents: 10000, amountPaidCents: 0 }]]);
     vi.mocked(takePayment).mockResolvedValue({
       ok: false,
       reason: "invoice_not_chargeable",

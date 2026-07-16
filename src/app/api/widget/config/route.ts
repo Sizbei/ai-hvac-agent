@@ -5,6 +5,7 @@ import { corsHeaders } from "@/lib/widget/cors";
 import { isOriginAllowed } from "@/lib/widget/origin";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
+import { clientIp } from "@/lib/http/client-ip";
 
 /**
  * Public, CORS-enabled config endpoint for the embed loader. Given a publishable
@@ -25,7 +26,7 @@ export async function OPTIONS(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   const origin = request.headers.get("origin");
-  const ip = request.headers.get("x-forwarded-for") ?? "unknown";
+  const ip = clientIp(request);
 
   const rate = slidingWindow(
     `widget:config:${ip}`,

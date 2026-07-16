@@ -41,6 +41,7 @@ import { PortalLinkCard } from '@/components/admin/portal-link-card';
 import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
 import { SyncPill } from '@/components/admin/sync-pill';
 import type { EquipmentRecord } from '@/lib/admin/crm-types';
+import { formatCentsExact } from '@/lib/admin/money-format';
 
 const EQUIPMENT_LABELS: Record<string, string> = {
   ac: 'Air Conditioner',
@@ -539,7 +540,7 @@ export default function CustomerDetailPage({
                   )}
                   {h.cost !== null && h.cost !== undefined && (
                     <p className="text-sm font-medium mt-1">
-                      ${(h.cost / 100).toFixed(2)}
+                      {formatCentsExact(h.cost)}
                     </p>
                   )}
                 </div>

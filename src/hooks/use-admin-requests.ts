@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { AdminRequest, RequestSortKey } from '@/lib/admin/types';
+import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 
 interface UseAdminRequestsOptions {
   readonly status?: string;
@@ -56,7 +57,7 @@ export function useAdminRequests(
       if (sort) params.set('sort', sort);
 
       const url = `/api/admin/requests?${params.toString()}`;
-      const res = await fetch(url);
+      const res = await adminFetch(url);
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({
@@ -81,7 +82,8 @@ export function useAdminRequests(
         setTotal(body.data.total);
         setError(null);
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof AdminAuthRedirectError) return;
       setError('Could not connect to server. Please try again.');
     } finally {
       isFetchingRef.current = false;

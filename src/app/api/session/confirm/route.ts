@@ -24,8 +24,9 @@ import { submitSessionServiceRequest } from "@/lib/requests/submit-session-reque
 import { formatArrivalWindow } from "@/lib/admin/arrival-window";
 import { BUSINESS_TIME_ZONE } from "@/lib/admin/calendar-time";
 import { logger } from "@/lib/logger";
+import { clientIp } from "@/lib/http/client-ip";
 export async function POST(request: NextRequest) {
-  const ip = request.headers.get("x-forwarded-for") ?? "unknown";
+  const ip = clientIp(request);
   const rateCheck = slidingWindow(
     `session:action:${ip}`,
     RATE_LIMITS.sessionAction.maxRequests,

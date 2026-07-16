@@ -22,12 +22,19 @@ const alertVariants = cva(
 function Alert({
   className,
   variant,
+  live,
   ...props
-}: React.ComponentProps<"div"> & VariantProps<typeof alertVariants>) {
+}: React.ComponentProps<"div"> & VariantProps<typeof alertVariants> & {
+  /** Controls the live-region politeness level.
+   *  Defaults to "assertive" for destructive, "polite" for all other variants. */
+  live?: "polite" | "assertive";
+}) {
+  const isAssertive = live !== undefined ? live === "assertive" : variant === "destructive";
   return (
     <div
       data-slot="alert"
-      role="alert"
+      role={isAssertive ? "alert" : "status"}
+      aria-live={isAssertive ? "assertive" : "polite"}
       className={cn(alertVariants({ variant }), className)}
       {...props}
     />

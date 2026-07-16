@@ -30,6 +30,7 @@ import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
+import { clientIp } from "@/lib/http/client-ip";
 import type { AdminSessionPayload } from "@/lib/auth/types";
 
 /** True when the session may view/manage billing for its own org. */
@@ -146,7 +147,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         entityId: session.organizationId,
         // Enum/id only — provider name + target plan id, no URLs/PII.
         details: JSON.stringify({ provider: provider.name, planId: parsed.data.planId }),
-        ipAddress: request.headers.get("x-forwarded-for") ?? "unknown",
+        ipAddress: clientIp(request),
       });
 
       return successResponse({ url });
@@ -165,7 +166,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       entity: "organization",
       entityId: session.organizationId,
       details: JSON.stringify({ provider: provider.name }),
-      ipAddress: request.headers.get("x-forwarded-for") ?? "unknown",
+      ipAddress: clientIp(request),
     });
 
     return successResponse({ url });

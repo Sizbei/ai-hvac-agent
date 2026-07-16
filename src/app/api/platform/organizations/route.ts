@@ -24,6 +24,7 @@ import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
+import { clientIp } from "@/lib/http/client-ip";
 
 export async function GET(): Promise<Response> {
   try {
@@ -149,7 +150,7 @@ export async function POST(request: NextRequest): Promise<Response> {
 
     // Audit in the NEW org. Details carry ids/enums ONLY — never ownerEmail
     // (PII). The platform admin who created it is the actor.
-    const ipAddress = request.headers.get("x-forwarded-for") ?? "unknown";
+    const ipAddress = clientIp(request);
     await logAudit({
       organizationId: provisioned.organizationId,
       userId: session.userId,

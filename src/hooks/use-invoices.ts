@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { createSwrCache } from '@/lib/admin/swr-cache';
+import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 
 export interface InvoiceListItem {
   readonly id: string;
@@ -154,7 +155,7 @@ export function useInvoices(params: UseInvoicesParams = {}): UseInvoicesResult {
       }
 
       try {
-        const res = await fetch(`/api/admin/invoices${buildQuery(params)}`);
+        const res = await adminFetch(`/api/admin/invoices${buildQuery(params)}`);
         if (!res.ok) {
           if (!hasCachedData) setError('Failed to load invoices');
           return;
@@ -185,7 +186,8 @@ export function useInvoices(params: UseInvoicesParams = {}): UseInvoicesResult {
           invoicesCache.set(key, fresh);
           setError(null);
         }
-      } catch {
+      } catch (err) {
+        if (err instanceof AdminAuthRedirectError) return;
         if (!hasCachedData) setError('Could not connect to server. Please try again.');
       } finally {
         setIsLoading(false);

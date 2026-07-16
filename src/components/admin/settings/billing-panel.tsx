@@ -14,6 +14,7 @@ import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ALL_PLANS } from '@/lib/billing/plans';
+import { formatCentsExact } from '@/lib/admin/money-format';
 
 interface BillingState {
   readonly plan: { id: string; label: string; priceCents: number; interval: string };
@@ -29,7 +30,7 @@ interface BillingState {
 
 function formatPrice(cents: number): string {
   if (cents === 0) return 'Free';
-  return `$${(cents / 100).toFixed(cents % 100 === 0 ? 0 : 2)}`;
+  return formatCentsExact(cents);
 }
 
 /**

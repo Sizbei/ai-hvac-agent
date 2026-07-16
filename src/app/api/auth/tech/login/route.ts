@@ -5,10 +5,11 @@ import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { normalizeEmail } from "@/lib/admin/staff-queries";
-import { successResponse, errorResponse } from "@/lib/api-response";
+import { successResponse, errorResponse, readJsonBody } from "@/lib/api-response";
 import { createTechSession } from "@/lib/auth/tech-session";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
+import { clientIp } from "@/lib/http/client-ip";
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -31,7 +32,7 @@ const DUMMY_HASH = "$2a$12$C6UzMDM.H6dfI/f/IKcEeO3.q3O0Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Zu"
  */
 export async function POST(request: NextRequest) {
   try {
-    const ip = request.headers.get("x-forwarded-for") ?? "unknown";
+    const ip = clientIp(request);
     const rateCheck = slidingWindow(
       `auth:tech-login:${ip}`,
       RATE_LIMITS.sessionCreate.maxRequests,
@@ -45,8 +46,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const body: unknown = await request.json();
-    const parsed = loginSchema.safeParse(body);
+    const bodyResult = await readJsonBody(request);
+    if (!bodyResult.ok) {
+      return errorResponse("Invalid JSON body", "BAD_REQUEST", 400);
+    }
+    const parsed = loginSchema.safeParse(bodyResult.data);
     if (!parsed.success) {
       return errorResponse("Invalid request body", "VALIDATION_ERROR", 400);
     }

@@ -209,7 +209,7 @@ export function Sidebar({
             <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-3">
               {NAV_GROUPS.map((group) => (
                 <div key={group.heading} className="space-y-1">
-                  <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">
+                  <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/70">
                     {group.heading}
                   </p>
                   {group.items.map((item) => (
@@ -222,7 +222,7 @@ export function Sidebar({
             <div className="border-t border-white/10 px-3 py-3">
               {envLinks.length > 0 && (
                 <div className="mb-3 space-y-1">
-                  <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">
+                  <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/70">
                     Environments
                   </p>
                   {envLinks.map((link) => (
@@ -242,7 +242,7 @@ export function Sidebar({
                 </span>
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-white">{adminName}</p>
-                  <p className="truncate text-xs text-white/50">{adminEmail}</p>
+                  <p className="truncate text-xs text-white/70">{adminEmail}</p>
                 </div>
               </div>
               <Button
@@ -329,7 +329,7 @@ export function Sidebar({
             {NAV_GROUPS.map((group, groupIndex) => (
               <div key={group.heading} className="space-y-1">
                 {!isCollapsed && (
-                  <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">
+                  <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/70">
                     {group.heading}
                   </p>
                 )}
@@ -360,7 +360,7 @@ export function Sidebar({
           {/* Env switcher (super_admin only, expanded only) */}
           {!isCollapsed && envLinks.length > 0 && (
             <div className="mb-3 space-y-1">
-              <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">
+              <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/70">
                 Environments
               </p>
               {envLinks.map((link) => (
@@ -383,7 +383,7 @@ export function Sidebar({
               </span>
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium text-white">{adminName}</p>
-                <p className="truncate text-xs text-white/50">{adminEmail}</p>
+                <p className="truncate text-xs text-white/70">{adminEmail}</p>
               </div>
             </div>
           )}

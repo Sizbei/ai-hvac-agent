@@ -22,6 +22,7 @@ import { NextRequest } from "next/server";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
+import { clientIp } from "@/lib/http/client-ip";
 import {
   SAAS_BILLING_SIGNATURE_HEADER,
   verifyBillingSignature,
@@ -29,7 +30,7 @@ import {
 import { parseBillingEvent, applyBillingEvent } from "@/lib/billing/webhook-sync";
 
 export async function POST(request: NextRequest): Promise<Response> {
-  const ip = request.headers.get("x-forwarded-for") ?? "unknown";
+  const ip = clientIp(request);
   const rate = slidingWindow(
     `webhook:saas-billing:${ip}`,
     RATE_LIMITS.webhook.maxRequests,

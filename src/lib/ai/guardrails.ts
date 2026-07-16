@@ -36,6 +36,9 @@ const SOFT_INJECTION_PATTERNS = [
   /act\s+as\s+(if\s+you\s+are\s+)?a\s+different/i,
   // "what is your prompt" without "system" is often an innocent question.
   /what\s+(are|is)\s+your\s+(system\s+)?prompt/i,
+  // Bare <system> / </system> XML tags — used in some model prompt formats to
+  // inject a fake system turn. Legitimate HVAC messages never contain these.
+  /<\/?system[\s>]/i,
 ];
 
 // Combined list — used by validateExtractionOutput, which rejects ANY injection

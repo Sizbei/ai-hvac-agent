@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 
 export interface MetricTrend {
   readonly current: number | null;
@@ -91,7 +92,7 @@ export function useOperationsMetrics(
         if (from) params.set('from', from);
         if (to) params.set('to', to);
         const qs = params.toString();
-        const res = await fetch(
+        const res = await adminFetch(
           `/api/admin/operations-metrics${qs ? `?${qs}` : ''}`,
         );
         if (!active) return;
@@ -106,7 +107,8 @@ export function useOperationsMetrics(
         if (!active) return;
         if (body.success) setMetrics(body.data);
         setError(null);
-      } catch {
+      } catch (err) {
+        if (err instanceof AdminAuthRedirectError) return;
         if (active) setError('Could not connect to server. Please try again.');
       } finally {
         if (active) setIsLoading(false);

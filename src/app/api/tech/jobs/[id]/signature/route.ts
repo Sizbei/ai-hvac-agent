@@ -12,7 +12,7 @@
  */
 import { NextRequest } from "next/server";
 import { getTechSession } from "@/lib/auth/tech-session";
-import { recordSignature } from "@/lib/tech/field-queries";
+import { isJobOwnedByTech, recordSignature } from "@/lib/tech/field-queries";
 import {
   getStorageClient,
   generateStorageKey,
@@ -67,7 +67,14 @@ export async function POST(
     }
 
     // Verify ownership BEFORE uploading so a non-assignee can't write to storage.
-    // recordSignature re-checks under tenant scope; this is the pre-upload gate.
+    if (!(await isJobOwnedByTech(session.organizationId, session.userId, id))) {
+      return errorResponse(
+        "Job not found or not assigned to you",
+        "NOT_FOUND",
+        404,
+      );
+    }
+
     const storageKey = generateStorageKey(session.organizationId, id, file.name);
     const uploadResult = await storageClient.uploadFile(
       file,
@@ -82,9 +89,8 @@ export async function POST(
       { signatureUrl: uploadResult.url, signatureName },
     );
     if (!result.ok) {
-      // Not assigned to this tech: clean up the orphaned upload, then 404. We do
-      // not pre-check ownership against a separate read to keep the guard in one
-      // authoritative place (recordSignature).
+      // Race: job was reassigned between the ownership check and the write.
+      // Clean up the orphaned upload, then 404.
       await storageClient.deleteFile(storageKey).catch(() => {});
       return errorResponse(
         "Job not found or not assigned to you",

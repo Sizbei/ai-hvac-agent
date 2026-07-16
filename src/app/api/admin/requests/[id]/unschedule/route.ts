@@ -7,14 +7,10 @@ import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
+import { clientIp } from "@/lib/http/client-ip";
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function clientIp(request: NextRequest): string {
-  const raw = request.headers.get("x-forwarded-for");
-  return raw?.split(",")[0]?.trim().slice(0, 45) || "unknown";
-}
 
 /**
  * POST /api/admin/requests/[id]/unschedule — drag-back-to-Unscheduled: clear the

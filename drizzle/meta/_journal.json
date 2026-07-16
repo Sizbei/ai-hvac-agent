@@ -281,6 +281,13 @@
       "when": 1783715603860,
       "tag": "0039_fp_field_parity_p1",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1784175344396,
+      "tag": "0040_faulty_manta",
+      "breakpoints": true
     }
   ]
 }

@@ -8,6 +8,7 @@ import { getSessionToken } from "@/lib/session";
 import { isSameOriginRequest, hasJsonContentType } from "@/lib/session-csrf";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
+import { clientIp } from "@/lib/http/client-ip";
 
 const feedbackSchema = z.object({
   vote: z.enum(["up", "down"]),
@@ -21,7 +22,7 @@ const feedbackSchema = z.object({
  * in the admin AI Insights view.
  */
 export async function POST(request: NextRequest) {
-  const ip = request.headers.get("x-forwarded-for") ?? "unknown";
+  const ip = clientIp(request);
   // Own bucket so feedback votes can't exhaust the escalation budget (a
   // customer who taps 👍/👎 a few times must still be able to reach a human).
   const rateCheck = slidingWindow(

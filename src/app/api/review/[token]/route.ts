@@ -14,6 +14,7 @@ import { getReviewProvider } from "@/lib/reviews/review-provider";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
+import { clientIp } from "@/lib/http/client-ip";
 
 const bodySchema = z.object({
   rating: z.number().int().min(1).max(5),
@@ -27,8 +28,7 @@ export async function POST(
   { params }: { params: Promise<{ token: string }> },
 ) {
   try {
-    const ip =
-      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+    const ip = clientIp(request);
     const rate = slidingWindow(`review-respond:${ip}`, 10, 60_000);
     if (!rate.allowed) {
       return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);

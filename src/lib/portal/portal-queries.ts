@@ -329,7 +329,9 @@ export type PortalPayResult =
         | "exceeds_balance"
         | "charge_failed"
         // A Fieldpulse-synced invoice is billed in Fieldpulse — never payable here.
-        | "synced_read_only";
+        | "synced_read_only"
+        // Portal enforces full-balance payment only (no trickle payments).
+        | "amount_mismatch";
     };
 
 /**
@@ -345,9 +347,14 @@ export async function payPortalInvoice(
   invoiceId: string,
   amountCents: number,
 ): Promise<PortalPayResult> {
-  // Ownership gate: org + invoice id + customer id must ALL match.
+  // Ownership gate: org + invoice id + customer id must ALL match. Also fetch
+  // totals so we can enforce full-balance payment before delegating.
   const [inv] = await db
-    .select({ id: invoices.id })
+    .select({
+      id: invoices.id,
+      totalCents: invoices.totalCents,
+      amountPaidCents: invoices.amountPaidCents,
+    })
     .from(invoices)
     .where(
       withTenant(
@@ -359,6 +366,14 @@ export async function payPortalInvoice(
     )
     .limit(1);
   if (!inv) return { ok: false, reason: "invoice_not_found" };
+
+  // Portal enforces exact full-balance payment — no trickle/partial payments.
+  // The UI always sends the full outstanding balance; any other amount is
+  // rejected to prevent the "pay $0.01 and call it settled" exploit.
+  const balanceCents = Math.max(0, inv.totalCents - inv.amountPaidCents);
+  if (amountCents !== balanceCents) {
+    return { ok: false, reason: "amount_mismatch" };
+  }
 
   const result: TakePaymentResult = await takePayment(organizationId, invoiceId, {
     amountCents,

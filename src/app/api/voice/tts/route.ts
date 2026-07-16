@@ -3,6 +3,7 @@ import { verifyTtsToken } from "@/lib/voice/tts-token";
 import { synthesizeSpeech, isElevenLabsEnabled } from "@/lib/voice/elevenlabs";
 import { slidingWindow } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
+import { clientIp } from "@/lib/http/client-ip";
 
 /**
  * Public TTS endpoint that Twilio's media servers fetch (via a <Play> URL the
@@ -25,7 +26,7 @@ export async function GET(request: NextRequest) {
 
   // A valid token is replayable until it expires; cap burst synthesis per IP so
   // a leaked URL can't be hammered to run up ElevenLabs cost within the window.
-  const ip = request.headers.get("x-forwarded-for") ?? "unknown";
+  const ip = clientIp(request);
   const rate = slidingWindow(`tts:${ip}`, 30, 60_000);
   if (!rate.allowed) {
     return new Response("Too Many Requests", { status: 429 });

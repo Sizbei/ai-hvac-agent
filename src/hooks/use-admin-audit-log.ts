@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { AuditLogEntry } from '@/lib/admin/audit-types';
+import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 
 interface UseAdminAuditLogOptions {
   readonly action?: string;
@@ -49,7 +50,7 @@ export function useAdminAuditLog(
       params.set('page', String(page));
       params.set('limit', String(limit));
 
-      const res = await fetch(`/api/admin/audit-log?${params.toString()}`);
+      const res = await adminFetch(`/api/admin/audit-log?${params.toString()}`);
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({
@@ -76,7 +77,8 @@ export function useAdminAuditLog(
         setActions(body.data.actions);
         setError(null);
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof AdminAuthRedirectError) return;
       setError('Could not connect to server. Please try again.');
     } finally {
       isFetchingRef.current = false;

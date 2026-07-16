@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 
 export interface ReviewRow {
   readonly id: string;
@@ -51,7 +52,7 @@ export function useReviews(params: UseReviewsParams = {}): UseReviewsResult {
     setError(null);
     try {
       const qs = new URLSearchParams({ page: String(page), limit: String(limit) });
-      const res = await fetch(`/api/admin/reviews?${qs.toString()}`);
+      const res = await adminFetch(`/api/admin/reviews?${qs.toString()}`);
       const body = (await res.json()) as {
         success: boolean;
         data?: { reviews: ReviewRow[]; total: number; stats: ReviewStats };
@@ -64,7 +65,8 @@ export function useReviews(params: UseReviewsParams = {}): UseReviewsResult {
       } else {
         setError(body.error?.message ?? 'Could not load reviews.');
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof AdminAuthRedirectError) return; // redirecting to login
       setError('Could not connect to the server.');
     } finally {
       setIsLoading(false);

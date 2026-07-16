@@ -19,6 +19,7 @@ import { timingSafeEqual } from "node:crypto";
 import { errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
+import { clientIp } from "@/lib/http/client-ip";
 import { createAdminSession } from "@/lib/auth/session";
 import { createTechSession } from "@/lib/auth/tech-session";
 import {
@@ -56,7 +57,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       return errorResponse("Not found", "NOT_FOUND", 404);
     }
 
-    const ip = request.headers.get("x-forwarded-for") ?? "unknown";
+    const ip = clientIp(request);
     const rateCheck = slidingWindow(
       `auth:google-callback:${ip}`,
       RATE_LIMITS.sessionCreate.maxRequests,

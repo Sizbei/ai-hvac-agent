@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createSwrCache } from '@/lib/admin/swr-cache';
 import type { DashboardOverview } from '@/lib/admin/types';
+import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 
 interface UseDashboardOverviewResult {
   readonly overview: DashboardOverview | null;
@@ -42,7 +43,7 @@ export function useDashboardOverview(): UseDashboardOverviewResult {
     isFetchingRef.current = true;
 
     try {
-      const res = await fetch('/api/admin/overview');
+      const res = await adminFetch('/api/admin/overview');
       if (!isMountedRef.current) return;
       if (!res.ok) {
         const body = await res.json().catch(() => ({
@@ -64,7 +65,8 @@ export function useDashboardOverview(): UseDashboardOverviewResult {
         overviewCache.set(CACHE_KEY, body.data);
         setError(null);
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof AdminAuthRedirectError) return;
       if (isMountedRef.current) {
         setError('Could not connect to server. Please try again.');
       }

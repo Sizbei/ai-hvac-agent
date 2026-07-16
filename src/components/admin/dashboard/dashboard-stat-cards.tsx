@@ -102,8 +102,12 @@ export function DashboardStatCards({ stats, isLoading }: DashboardStatCardsProps
                 <Icon className={`h-4 w-4 ${config.iconColor}`} />
               </span>
             </div>
-            {isLoading || !stats ? (
+            {isLoading ? (
               <Skeleton className="h-9 w-14" />
+            ) : !stats ? (
+              <p className="font-heading text-3xl font-bold leading-none tracking-tight tabular-nums text-muted-foreground">
+                —
+              </p>
             ) : (
               <p className="font-heading text-3xl font-bold leading-none tracking-tight tabular-nums">
                 {formatValue(stats[config.key], config.isCurrency)}

@@ -5,11 +5,12 @@ import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { normalizeEmail } from "@/lib/admin/staff-queries";
-import { successResponse, errorResponse } from "@/lib/api-response";
+import { successResponse, errorResponse, readJsonBody } from "@/lib/api-response";
 import { createAdminSession } from "@/lib/auth/session";
 import type { AdminRole } from "@/lib/auth/types";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
+import { clientIp } from "@/lib/http/client-ip";
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -26,7 +27,7 @@ export async function POST(request: NextRequest) {
   try {
     // Throttle login attempts per-IP to blunt credential brute-forcing. Reuse
     // the strict session-create budget (5/min) — admin login should be rare.
-    const ip = request.headers.get("x-forwarded-for") ?? "unknown";
+    const ip = clientIp(request);
     const rateCheck = slidingWindow(
       `auth:login:${ip}`,
       RATE_LIMITS.sessionCreate.maxRequests,
@@ -40,8 +41,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const body: unknown = await request.json();
-    const parsed = loginSchema.safeParse(body);
+    const bodyResult = await readJsonBody(request);
+    if (!bodyResult.ok) {
+      return errorResponse("Invalid JSON body", "BAD_REQUEST", 400);
+    }
+    const parsed = loginSchema.safeParse(bodyResult.data);
 
     if (!parsed.success) {
       return errorResponse("Invalid request body", "VALIDATION_ERROR", 400);

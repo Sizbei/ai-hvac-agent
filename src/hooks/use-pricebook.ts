@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { createSwrCache } from '@/lib/admin/swr-cache';
+import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 
 export interface PricebookItem {
   readonly id: string;
@@ -110,7 +111,7 @@ export function usePricebook(params: UsePricebookParams = {}): UsePricebookResul
         if (isLaborItem) qs.set('isLaborItem', 'true');
         if (sort) qs.set('sort', sort);
         const query = qs.toString();
-        const res = await fetch(`/api/admin/pricebook${query ? `?${query}` : ''}`);
+        const res = await adminFetch(`/api/admin/pricebook${query ? `?${query}` : ''}`);
         const json = await res.json();
         if (json.success) {
           setError(null);
@@ -125,7 +126,8 @@ export function usePricebook(params: UsePricebookParams = {}): UsePricebookResul
         } else if (!hasCachedData) {
           setError(json.error?.message ?? 'Failed to load pricebook');
         }
-      } catch {
+      } catch (err) {
+        if (err instanceof AdminAuthRedirectError) return;
         if (!hasCachedData) setError('Network error');
       } finally {
         setIsLoading(false);
@@ -168,7 +170,7 @@ export function useTaxRates(): UseTaxRatesResult {
   const fetchAll = useCallback(async (): Promise<void> => {
     setIsLoading(true);
     try {
-      const res = await fetch('/api/admin/pricebook/tax-rates');
+      const res = await adminFetch('/api/admin/pricebook/tax-rates');
       if (!res.ok) {
         setError('Failed to load tax rates');
         return;
@@ -181,7 +183,8 @@ export function useTaxRates(): UseTaxRatesResult {
         setTaxRates(body.data.taxRates);
         setError(null);
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof AdminAuthRedirectError) return;
       setError('Could not connect to server. Please try again.');
     } finally {
       setIsLoading(false);

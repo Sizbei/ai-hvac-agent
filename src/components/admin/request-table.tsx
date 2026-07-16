@@ -72,7 +72,6 @@ export function RequestTable({ requests, isLoading, onRowClick }: RequestTablePr
                   key={request.id}
                   className="cursor-pointer"
                   tabIndex={0}
-                  role="button"
                   onClick={() => onRowClick(request)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {

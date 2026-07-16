@@ -7,6 +7,7 @@ import {
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
+import { clientIp } from "@/lib/http/client-ip";
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -49,7 +50,7 @@ export async function DELETE(
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
 
-    const ipAddress = request.headers.get("x-forwarded-for") ?? "unknown";
+    const ipAddress = clientIp(request);
     const rateCheck = slidingWindow(
       `admin:delete:${session.userId}`,
       RATE_LIMITS.adminMutation.maxRequests,

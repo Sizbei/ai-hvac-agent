@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { BotAnalytics } from '@/lib/admin/bot-analytics-queries';
+import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 
 interface UseBotAnalyticsResult {
   readonly data: BotAnalytics | null;
@@ -26,7 +27,7 @@ export function useBotAnalytics(): UseBotAnalyticsResult {
     isFetchingRef.current = true;
 
     try {
-      const res = await fetch('/api/admin/bot-analytics');
+      const res = await adminFetch('/api/admin/bot-analytics');
       if (!isMountedRef.current) return;
       if (!res.ok) {
         const body = await res.json().catch(() => ({
@@ -47,7 +48,8 @@ export function useBotAnalytics(): UseBotAnalyticsResult {
         setData(body.data);
         setError(null);
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof AdminAuthRedirectError) return;
       if (isMountedRef.current) {
         setError('Could not connect to server. Please try again.');
       }

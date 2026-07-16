@@ -579,7 +579,7 @@ export function RequestDetailSheet({
           </div>
         ) : detailError ? (
           <div className="p-4">
-            <p className="text-sm text-destructive">{detailError}</p>
+            <p role="alert" className="text-sm text-destructive">{detailError}</p>
           </div>
         ) : detail ? (
           <>
@@ -884,7 +884,7 @@ export function RequestDetailSheet({
                     </Button>
                   </div>
                   {assignError && (
-                    <p className="text-xs text-destructive">{assignError}</p>
+                    <p role="alert" className="text-xs text-destructive">{assignError}</p>
                   )}
                 </div>
               </section>
@@ -1002,6 +1002,7 @@ export function RequestDetailSheet({
                     <div className="flex flex-wrap items-center gap-2">
                       <input
                         type="date"
+                        aria-label="Scheduled service date"
                         value={scheduledInput}
                         onChange={(e) => setScheduledInput(e.target.value)}
                         className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -1068,7 +1069,7 @@ export function RequestDetailSheet({
                   </div>
 
                   {workflowError && (
-                    <p className="text-xs text-destructive">{workflowError}</p>
+                    <p role="alert" className="text-xs text-destructive">{workflowError}</p>
                   )}
                 </div>
               </section>
@@ -1081,6 +1082,7 @@ export function RequestDetailSheet({
                 <div className="space-y-3">
                   <div className="space-y-2">
                     <textarea
+                      aria-label="Internal note"
                       value={noteInput}
                       onChange={(e) => setNoteInput(e.target.value)}
                       placeholder="Add an internal note (not visible to the customer)..."
@@ -1090,7 +1092,7 @@ export function RequestDetailSheet({
                     />
                     <div className="flex items-center justify-between">
                       {noteError ? (
-                        <p className="text-xs text-destructive">{noteError}</p>
+                        <p role="alert" className="text-xs text-destructive">{noteError}</p>
                       ) : (
                         <span />
                       )}

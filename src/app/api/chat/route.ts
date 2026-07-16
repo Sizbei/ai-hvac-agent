@@ -111,6 +111,7 @@ import {
 } from "@/lib/ai/account-verify";
 import { loadOnFileZips } from "@/lib/ai/account-zips";
 import { logger } from "@/lib/logger";
+import { clientIp } from "@/lib/http/client-ip";
 // The deterministic router is on by default; set ROUTER_ENABLED=false to disable
 // it (kill-switch) and route every turn through the LLM.
 const ROUTER_ENABLED = process.env.ROUTER_ENABLED !== "false";
@@ -330,7 +331,7 @@ async function fetchWindowPrompt(
 export async function POST(request: NextRequest) {
   // Turn-start marker for bot-telemetry latency (Step 10). Cheap and PII-free.
   const turnStart = performance.now();
-  const ip = request.headers.get("x-forwarded-for") ?? "unknown";
+  const ip = clientIp(request);
   const rateCheck = slidingWindow(
     `chat:${ip}`,
     RATE_LIMITS.chat.maxRequests,

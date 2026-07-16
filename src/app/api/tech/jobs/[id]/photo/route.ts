@@ -66,6 +66,15 @@ export async function POST(
       );
     }
 
+    // Verify ownership BEFORE uploading so a non-assignee can't write to storage.
+    if (!(await isJobOwnedByTech(session.organizationId, session.userId, id))) {
+      return errorResponse(
+        "Job not found or not assigned to you",
+        "NOT_FOUND",
+        404,
+      );
+    }
+
     const storageKey = generateStorageKey(session.organizationId, id, file.name);
     await storageClient.uploadFile(file, storageKey, validatedMime);
 
@@ -76,7 +85,8 @@ export async function POST(
       storageKey,
     });
     if (!result.ok) {
-      // Not assigned to this tech — clean up the orphaned upload, then 404.
+      // Race: job was reassigned between the ownership check and the write.
+      // Clean up the orphaned upload, then 404.
       await storageClient.deleteFile(storageKey).catch(() => {});
       return errorResponse(
         "Job not found or not assigned to you",

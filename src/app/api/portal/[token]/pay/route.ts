@@ -5,6 +5,7 @@ import {
   payPortalInvoice,
 } from "@/lib/portal/portal-queries";
 import { successResponse, errorResponse } from "@/lib/api-response";
+import { clientIp } from "@/lib/http/client-ip";
 import { slidingWindow } from "@/lib/rate-limit";
 import { db } from "@/lib/db";
 import { auditLog } from "@/lib/db/schema";
@@ -27,9 +28,7 @@ export async function POST(
   { params }: { params: Promise<{ token: string }> },
 ) {
   try {
-    const ip =
-      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-      "unknown";
+    const ip = clientIp(request);
 
     const rateCheck = slidingWindow(`portal-pay:${ip}`, 10, 60_000);
     if (!rateCheck.allowed) {
@@ -75,6 +74,12 @@ export async function POST(
             "That amount is more than the invoice balance",
             "EXCEEDS_BALANCE",
             422,
+          );
+        case "amount_mismatch":
+          return errorResponse(
+            "Payment must equal the full outstanding balance",
+            "AMOUNT_MISMATCH",
+            400,
           );
         case "charge_failed":
           return errorResponse(

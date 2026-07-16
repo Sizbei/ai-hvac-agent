@@ -49,6 +49,21 @@ vi.mock("@/lib/requests/submit-session-request", () => ({
   generateReferenceNumber: vi.fn(() => "HVAC-TESTREF"),
 }));
 
+// The importer fetches the org's after-hours config once (to compute
+// isAfterHours from each job's real created_at). Mock it so it doesn't hit the
+// chainable db mock (which has no .limit()).
+vi.mock("@/lib/admin/org-config-queries", () => ({
+  getOrgConfig: vi.fn().mockResolvedValue({
+    afterHoursConfig: {
+      enabled: true,
+      startHour: 18,
+      endHour: 8,
+      weekendsAreAfterHours: true,
+      timezone: "America/New_York",
+    },
+  }),
+}));
+
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { importOneFpCustomer, createDeletedPlaceholderCustomer } from "./customers";

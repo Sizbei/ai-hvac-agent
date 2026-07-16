@@ -5,6 +5,7 @@ import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
+import { clientIp } from "@/lib/http/client-ip";
 import { z } from "zod";
 
 const UUID_REGEX =
@@ -13,14 +14,6 @@ const UUID_REGEX =
 const assignSchema = z.object({
   technicianId: z.string().uuid(),
 });
-
-/** Best-effort client IP for the audit trail. x-forwarded-for is client-
- * controllable, so we take only the leftmost address and cap the length (45 =
- * longest IPv6) — stored via a parameterized insert, never trusted. */
-function clientIp(request: NextRequest): string {
-  const raw = request.headers.get("x-forwarded-for");
-  return raw?.split(",")[0]?.trim().slice(0, 45) || "unknown";
-}
 
 export async function POST(
   request: NextRequest,

@@ -28,6 +28,7 @@ import { NextRequest } from "next/server";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
+import { clientIp } from "@/lib/http/client-ip";
 import { DEMO_ORG_ID } from "@/lib/tenancy/organization";
 import {
   HCP_SIGNATURE_HEADER,
@@ -38,7 +39,7 @@ import { parseWebhookEvent } from "@/lib/integrations/housecall-pro/webhook-even
 import { applyWebhookEvent } from "@/lib/integrations/housecall-pro/webhook-sync";
 
 export async function POST(request: NextRequest): Promise<Response> {
-  const ip = request.headers.get("x-forwarded-for") ?? "unknown";
+  const ip = clientIp(request);
   const rate = slidingWindow(
     `webhook:hcp:${ip}`,
     RATE_LIMITS.chat.maxRequests,

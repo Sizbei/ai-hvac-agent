@@ -17,6 +17,7 @@ import {
   TWIML_HEADERS,
 } from "@/lib/voice/twiml";
 import { logger } from "@/lib/logger";
+import { clientIp } from "@/lib/http/client-ip";
 import { extractServiceRequest } from "@/lib/ai/extract";
 import {
   parseKnownSlots,
@@ -34,7 +35,7 @@ import { preserveVerifyKey } from "@/lib/ai/account-verify";
  * terminal/confirmed state, speaks a closing line and hangs up.
  */
 export async function POST(request: NextRequest) {
-  const ip = request.headers.get("x-forwarded-for") ?? "unknown";
+  const ip = clientIp(request);
   const voice = resolveVoiceMode(request, Date.now());
 
   const { params, valid } = await parseAndVerifyTwilioRequest(request);

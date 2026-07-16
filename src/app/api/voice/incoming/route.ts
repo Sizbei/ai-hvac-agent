@@ -14,6 +14,7 @@ import {
   TWIML_HEADERS,
 } from "@/lib/voice/twiml";
 import { logger } from "@/lib/logger";
+import { clientIp } from "@/lib/http/client-ip";
 import { resolveVoiceIdentity } from "@/lib/voice/resolve-voice-identity";
 
 const GREETING =
@@ -26,7 +27,7 @@ const GREETING =
  * spoken response.
  */
 export async function POST(request: NextRequest) {
-  const ip = request.headers.get("x-forwarded-for") ?? "unknown";
+  const ip = clientIp(request);
   const rate = slidingWindow(
     `voice:incoming:${ip}`,
     RATE_LIMITS.sessionCreate.maxRequests,

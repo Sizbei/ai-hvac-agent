@@ -150,30 +150,31 @@ export async function getConversations(
     ...conditions,
   );
 
-  // Total count of matching sessions.
-  const [countResult] = await db
-    .select({ value: count() })
-    .from(customerSessions)
-    .where(whereClause);
+  // Stage 1: count + page can run concurrently (both hit the same where clause,
+  // neither depends on the other).
+  const [[countResult], sessionRows] = await Promise.all([
+    db
+      .select({ value: count() })
+      .from(customerSessions)
+      .where(whereClause),
+    db
+      .select({
+        id: customerSessions.id,
+        status: customerSessions.status,
+        channel: customerSessions.channel,
+        turnCount: customerSessions.turnCount,
+        tokensUsed: customerSessions.tokensUsed,
+        createdAt: customerSessions.createdAt,
+        updatedAt: customerSessions.updatedAt,
+      })
+      .from(customerSessions)
+      .where(whereClause)
+      .orderBy(desc(customerSessions.createdAt))
+      .limit(limit)
+      .offset(offset),
+  ]);
 
   const total = countResult?.value ?? 0;
-
-  // Page of sessions ordered by recency.
-  const sessionRows = await db
-    .select({
-      id: customerSessions.id,
-      status: customerSessions.status,
-      channel: customerSessions.channel,
-      turnCount: customerSessions.turnCount,
-      tokensUsed: customerSessions.tokensUsed,
-      createdAt: customerSessions.createdAt,
-      updatedAt: customerSessions.updatedAt,
-    })
-    .from(customerSessions)
-    .where(whereClause)
-    .orderBy(desc(customerSessions.createdAt))
-    .limit(limit)
-    .offset(offset);
 
   if (sessionRows.length === 0) {
     return { conversations: [], total };
@@ -181,22 +182,60 @@ export async function getConversations(
 
   const sessionIds = sessionRows.map((row) => row.id);
 
-  // Aggregate per-session message stats in a single grouped query.
-  const aggregateRows = await db
-    .select({
-      sessionId: messages.sessionId,
-      messageCount: count(),
-      lastMessageAt: sql<Date | string | null>`max(${messages.createdAt})`,
-    })
-    .from(messages)
-    .where(
-      withTenant(
-        messages,
-        organizationId,
-        inArray(messages.sessionId, sessionIds),
+  // Stage 2: aggregate stats, first-message previews, and service-request refs
+  // are all keyed on sessionIds — run them in parallel.
+  const [aggregateRows, userMessageRows, requestRows] = await Promise.all([
+    // Aggregate per-session message stats in a single grouped query.
+    db
+      .select({
+        sessionId: messages.sessionId,
+        messageCount: count(),
+        lastMessageAt: sql<Date | string | null>`max(${messages.createdAt})`,
+      })
+      .from(messages)
+      .where(
+        withTenant(
+          messages,
+          organizationId,
+          inArray(messages.sessionId, sessionIds),
+        ),
+      )
+      .groupBy(messages.sessionId),
+
+    // First user message per session for the preview. Fetch ordered ascending
+    // and keep the earliest user message encountered per session.
+    db
+      .select({
+        sessionId: messages.sessionId,
+        content: messages.content,
+        createdAt: messages.createdAt,
+      })
+      .from(messages)
+      .where(
+        withTenant(
+          messages,
+          organizationId,
+          inArray(messages.sessionId, sessionIds),
+          eq(messages.role, "user"),
+        ),
+      )
+      .orderBy(asc(messages.createdAt)),
+
+    // Service request lookup (optional) per session.
+    db
+      .select({
+        sessionId: serviceRequests.sessionId,
+        referenceNumber: serviceRequests.referenceNumber,
+      })
+      .from(serviceRequests)
+      .where(
+        withTenant(
+          serviceRequests,
+          organizationId,
+          inArray(serviceRequests.sessionId, sessionIds),
+        ),
       ),
-    )
-    .groupBy(messages.sessionId);
+  ]);
 
   const aggregateBySession = new Map<
     string,
@@ -209,46 +248,12 @@ export async function getConversations(
     });
   }
 
-  // First user message per session for the preview. Fetch ordered ascending and
-  // keep the earliest user message encountered per session.
-  const userMessageRows = await db
-    .select({
-      sessionId: messages.sessionId,
-      content: messages.content,
-      createdAt: messages.createdAt,
-    })
-    .from(messages)
-    .where(
-      withTenant(
-        messages,
-        organizationId,
-        inArray(messages.sessionId, sessionIds),
-        eq(messages.role, "user"),
-      ),
-    )
-    .orderBy(asc(messages.createdAt));
-
   const previewBySession = new Map<string, string | null>();
   for (const row of userMessageRows) {
     if (!previewBySession.has(row.sessionId)) {
       previewBySession.set(row.sessionId, buildPreview(row.content));
     }
   }
-
-  // Service request lookup (optional) per session.
-  const requestRows = await db
-    .select({
-      sessionId: serviceRequests.sessionId,
-      referenceNumber: serviceRequests.referenceNumber,
-    })
-    .from(serviceRequests)
-    .where(
-      withTenant(
-        serviceRequests,
-        organizationId,
-        inArray(serviceRequests.sessionId, sessionIds),
-      ),
-    );
 
   const referenceBySession = new Map<string, string>();
   for (const row of requestRows) {
