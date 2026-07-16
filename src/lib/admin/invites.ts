@@ -230,6 +230,19 @@ export async function listInvites(
   return rows.map(toInviteRecord);
 }
 
+/** Return the role of a pending invite for authz checks, or null if not found. */
+export async function getInviteRole(
+  organizationId: string,
+  inviteId: string,
+): Promise<InvitableRole | null> {
+  const [row] = await db
+    .select({ role: staffInvites.role })
+    .from(staffInvites)
+    .where(withTenant(staffInvites, organizationId, eq(staffInvites.id, inviteId)))
+    .limit(1);
+  return row?.role ?? null;
+}
+
 export type RevokeInviteResult =
   | { ok: true }
   | { ok: false; reason: "not_found" };

@@ -1,4 +1,7 @@
+import type { Metadata } from 'next';
 import { AccountingExportPanel } from '@/components/admin/accounting/accounting-export-panel';
+
+export const metadata: Metadata = { title: 'Accounting · Spears Admin' };
 
 /**
  * Accounting export page. The page renders for any admin (the dashboard layout

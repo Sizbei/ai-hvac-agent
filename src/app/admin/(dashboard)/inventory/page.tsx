@@ -26,6 +26,7 @@ const INVENTORY_SORT_OPTIONS: ReadonlyArray<{ value: InventorySortKey; label: st
 ];
 
 export default function InventoryPage() {
+  useEffect(() => { document.title = 'Inventory · Spears Admin'; }, []);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [belowReorderOnly, setBelowReorderOnly] = useState(false);

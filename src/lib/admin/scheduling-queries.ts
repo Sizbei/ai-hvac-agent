@@ -1108,11 +1108,12 @@ async function rankedTechnicianOrder(
   readonly job: DispatchSignals["job"] | null;
 }> {
   const job = await loadJobClassification(organizationId, requestId);
-  // Nothing to score on (request missing, or no skill classification captured)
-  // → signal the caller to first-fit rather than stranding the job. Return the
-  // loaded classification too, so the confidence gate reuses it (no 2nd read).
-  if (!job || (job.jobType === null && job.systemType === null))
-    return { ranked: null, job };
+  // If the request is missing entirely (deleted/wrong org) → signal the caller
+  // to first-fit so the job is never silently stranded.
+  // When the request EXISTS but has no jobType/systemType, proceed with
+  // skill-neutral ranking (skillJobsCompleted will be 0 for everyone, so the
+  // fallback in rankTechnicians ranks on availability/travel/quality instead).
+  if (!job) return { ranked: null, job };
   const signalsByTech = await loadDispatchSignals(
     organizationId,
     technicianIds,

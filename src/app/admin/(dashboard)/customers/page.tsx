@@ -101,6 +101,7 @@ const CustomerRow = memo(function CustomerRow({ customer }: CustomerRowProps) {
 // ── Page ───────────────────────────────────────────────────────────────────────
 
 export default function CustomersPage() {
+  useEffect(() => { document.title = 'Customers · Spears Admin'; }, []);
   const [showArchived, setShowArchived] = useState(false);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');

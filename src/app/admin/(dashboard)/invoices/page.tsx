@@ -140,6 +140,7 @@ function ReconcileBanner() {
 // ── main page ─────────────────────────────────────────────────────────────────
 
 export default function InvoicesPage() {
+  useEffect(() => { document.title = 'Invoices · Spears Admin'; }, []);
   const [filter, setFilter] = useState<Filter>('overdue');
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');

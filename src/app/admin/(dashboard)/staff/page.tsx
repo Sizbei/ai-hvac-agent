@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { UserPlus, Mail, AlertCircle } from 'lucide-react';
 import { useAdminStaff } from '@/hooks/use-admin-staff';
 import { useAdminInvites } from '@/hooks/use-admin-invites';
@@ -14,6 +14,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import type { StaffRecord } from '@/lib/admin/types';
 
 export default function StaffPage() {
+  useEffect(() => { document.title = 'Staff · Spears Admin'; }, []);
   const { staff, currentUserId, isLoading, error, refetch } = useAdminStaff();
   // The current user appears in their own staff list; derive whether they're a
   // super_admin so the UI only offers admin-tier role options to those allowed

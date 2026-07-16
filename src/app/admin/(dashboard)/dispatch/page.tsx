@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AlertCircle, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
 import { useDispatchBoard } from '@/hooks/use-dispatch-board';
 import { DispatchColumn } from '@/components/admin/dispatch/dispatch-column';
@@ -37,6 +37,7 @@ function formatDayLabel(isoDate: string): string {
 }
 
 export default function DispatchPage() {
+  useEffect(() => { document.title = 'Dispatch · Spears Admin'; }, []);
   const [date, setDate] = useState<string>(todayBusiness);
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
 

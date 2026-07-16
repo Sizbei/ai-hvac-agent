@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Plus, AlertCircle } from 'lucide-react';
 import { useMembershipPlans, type MembershipPlan } from '@/hooks/use-membership-plans';
 import { MembershipPlansTable } from '@/components/admin/memberships/membership-plans-table';
@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
 export default function MembershipPlansPage() {
+  useEffect(() => { document.title = 'Membership Plans · Spears Admin'; }, []);
   const { plans, isLoading, error, refetch } = useMembershipPlans();
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<MembershipPlan | null>(null);

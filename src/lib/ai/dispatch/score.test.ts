@@ -107,12 +107,29 @@ describe('rankTechnicians', () => {
     expect(ranked.map((r) => r.technicianId)).toEqual(['best', 'ok']);
   });
 
-  it('returns an empty array when no tech is skill-matched', () => {
+  it('falls back to ranking ALL candidates when none has same-category history', () => {
+    // When every tech has skillJobsCompleted === 0 (no category match), we must
+    // still return suggestions ranked on availability/travel/quality rather than
+    // an empty list that makes the suggestions panel show zero results.
     const ranked = rankTechnicians([
-      signals('a', { skillJobsCompleted: 0 }),
-      signals('b', { skillJobsCompleted: 0 }),
+      signals('a', { skillJobsCompleted: 0, avgRating: 5, sameDayJobCount: 0 }),
+      signals('b', { skillJobsCompleted: 0, avgRating: 3, sameDayJobCount: 3 }),
     ]);
-    expect(ranked).toEqual([]);
+    // Both techs are returned (fallback, not filtered out).
+    expect(ranked.map((r) => r.technicianId)).toEqual(['a', 'b']);
+    // Each result carries an honest disclaimer in reasons.
+    expect(ranked[0].reasons.some((r) => r.includes('no matching-category history'))).toBe(true);
+    // skillMatched is false for all (the score function never changes that flag).
+    expect(ranked.every((r) => !r.skillMatched)).toBe(true);
+  });
+
+  it('does NOT fall back when at least one tech has category history', () => {
+    // The unqualified tech must still be dropped when a skilled tech exists.
+    const ranked = rankTechnicians([
+      signals('unqualified', { skillJobsCompleted: 0, avgRating: 5 }),
+      signals('qualified', { skillJobsCompleted: 3, avgRating: 4 }),
+    ]);
+    expect(ranked.map((r) => r.technicianId)).toEqual(['qualified']);
   });
 
   it('a filtered-out (non-skill-matched) located tech does NOT activate the travel regime (audit #12)', () => {

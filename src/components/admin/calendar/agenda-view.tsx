@@ -229,8 +229,9 @@ export function AgendaView({
               </div>
             );
           }
+          if (!row.booking) return null;
           return (
-            <AgendaRow key={row.key} booking={row.booking!} onSelect={onSelect} />
+            <AgendaRow key={row.key} booking={row.booking} onSelect={onSelect} />
           );
         })}
       </div>

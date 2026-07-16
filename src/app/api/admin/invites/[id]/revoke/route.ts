@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
-import { revokeInvite } from "@/lib/admin/invites";
+import { revokeInvite, getInviteRole } from "@/lib/admin/invites";
 import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
@@ -32,6 +32,18 @@ export async function POST(_request: NextRequest, { params }: RouteParams) {
     );
     if (!rateCheck.allowed) {
       return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
+    }
+
+    // Admin-tier invites may only be revoked by a super_admin — a regular admin
+    // revoking a colleague's invite is an intra-org sabotage vector.
+    // Technician-tier invites remain revocable by any admin.
+    const inviteRole = await getInviteRole(session.organizationId, id);
+    if (inviteRole === "admin" && session.role !== "super_admin") {
+      return errorResponse(
+        "Only a super admin can revoke admin invites",
+        "FORBIDDEN",
+        403,
+      );
     }
 
     const result = await revokeInvite(session.organizationId, id);

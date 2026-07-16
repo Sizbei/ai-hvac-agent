@@ -29,6 +29,8 @@ export default function AdminRequestsPage() {
   const [page, setPage] = useState<number>(1);
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
 
+  useEffect(() => { document.title = 'Requests · Spears Admin'; }, []);
+
   // Persist filters to the URL (shareable links + survives refresh). Page and
   // the detail sheet selection are intentionally NOT persisted. Defaults map to
   // '' so they're dropped from the URL.

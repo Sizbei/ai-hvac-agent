@@ -177,6 +177,7 @@ function emptyMessage(bucket: Bucket | null): string {
 // ── page ──────────────────────────────────────────────────────────────────────
 
 export default function EstimatesPage() {
+  useEffect(() => { document.title = 'Estimates · Spears Admin'; }, []);
   // Default to Open — the actionable tab (the follow-up list), per the
   // approved mockup; All is one click away.
   const [activeBucket, setActiveBucket] = useState<Bucket | null>('open');

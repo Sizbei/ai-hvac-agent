@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
   Clock,
@@ -139,6 +139,7 @@ function KpiCard({
 }
 
 export default function OperationsPage() {
+  useEffect(() => { document.title = 'Operations · Spears Admin'; }, []);
   const [days, setDays] = useState<number>(30);
 
   const range = useMemo(() => {

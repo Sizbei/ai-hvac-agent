@@ -33,6 +33,7 @@ const PRICEBOOK_SORT_OPTIONS: ReadonlyArray<{ value: PricebookSortKey; label: st
 ];
 
 export default function PricebookPage() {
+  useEffect(() => { document.title = 'Pricebook · Spears Admin'; }, []);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>(ALL_TYPES);

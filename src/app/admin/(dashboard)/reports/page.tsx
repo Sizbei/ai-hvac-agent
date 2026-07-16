@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
   DollarSign,
@@ -29,6 +29,7 @@ const PRESETS = [
 ] as const;
 
 export default function ReportsPage() {
+  useEffect(() => { document.title = 'Reports · Spears Admin'; }, []);
   const [days, setDays] = useState<number>(30);
 
   // Recompute the range only when the preset changes (a fresh Date each render

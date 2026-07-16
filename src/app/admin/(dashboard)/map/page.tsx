@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import dynamic from 'next/dynamic';
 
 // MapLibre needs `window`, so never render it on the server.
@@ -16,6 +17,7 @@ const DispatchMap = dynamic(
 );
 
 export default function DispatchMapPage() {
+  useEffect(() => { document.title = 'Map · Spears Admin'; }, []);
   return (
     <div className="flex h-[calc(100vh-6rem)] flex-col gap-4">
       <div>

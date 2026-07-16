@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AlertCircle, Star, MessageSquareQuote, Send } from 'lucide-react';
 import { useReviews, type ReviewRow } from '@/hooks/use-reviews';
 import { Card } from '@/components/ui/card';
@@ -57,6 +57,7 @@ function Stars({ rating }: { readonly rating: number | null }) {
 }
 
 export default function ReviewsPage() {
+  useEffect(() => { document.title = 'Reviews · Spears Admin'; }, []);
   const [page, setPage] = useState(1);
   const { reviews, total, stats, isLoading, error } = useReviews({ page });
 

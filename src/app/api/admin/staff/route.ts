@@ -28,7 +28,7 @@ const createStaffSchema = z.object({
   name: z.string().min(1).max(200),
   email: z.string().email().max(320),
   password: z.string().min(8).max(200),
-  role: z.enum(["super_admin", "admin", "technician"]),
+  role: z.enum(["admin", "technician"]),
 });
 
 export async function POST(request: NextRequest) {

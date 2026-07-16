@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
     const rawPage = Number(sp.get('page') ?? '1');
     const page = Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
     const rawLimit = Number(sp.get('limit') ?? '50');
-    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.floor(rawLimit), 20000) : 50;
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.floor(rawLimit), 200) : 50;
 
     const [{ reviews, total }, stats] = await Promise.all([
       listReviews(session.organizationId, { page, limit }),

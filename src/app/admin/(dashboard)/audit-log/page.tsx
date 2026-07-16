@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AlertCircle, ScrollText } from 'lucide-react';
 import { useAdminAuditLog } from '@/hooks/use-admin-audit-log';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -16,7 +16,33 @@ import {
 } from '@/components/ui/select';
 
 const ALL_ACTIONS = 'all';
+const ALL_ENTITIES = 'all';
 const PAGE_LIMIT = 50;
+
+// Enumerated entity values from logAudit call sites across the codebase.
+const KNOWN_ENTITIES = [
+  'accounting_export',
+  'custom_faqs',
+  'customer',
+  'customer_equipment',
+  'customer_membership',
+  'customer_sessions',
+  'customers',
+  'estimate',
+  'financing_application',
+  'follow_ups',
+  'invoice',
+  'invoices',
+  'membership_plan',
+  'message',
+  'organization',
+  'organization_settings',
+  'payment',
+  'service_request',
+  'service_requests',
+  'staff_invite',
+  'user',
+] as const;
 
 // Pretty-print a snake_case action/entity ("customer_updated" → "Customer Updated").
 function humanize(value: string): string {
@@ -56,11 +82,14 @@ function formatTimestamp(iso: string): string {
 }
 
 export default function AdminAuditLogPage() {
+  useEffect(() => { document.title = 'Audit Log · Spears Admin'; }, []);
   const [actionFilter, setActionFilter] = useState<string>(ALL_ACTIONS);
+  const [entityFilter, setEntityFilter] = useState<string>(ALL_ENTITIES);
   const [page, setPage] = useState(1);
 
   const { entries, total, actions, isLoading, error } = useAdminAuditLog({
     action: actionFilter === ALL_ACTIONS ? undefined : actionFilter,
+    entity: entityFilter === ALL_ENTITIES ? undefined : entityFilter,
     page,
     limit: PAGE_LIMIT,
   });
@@ -110,6 +139,26 @@ export default function AdminAuditLogPage() {
             ))}
           </SelectContent>
         </Select>
+
+        <Select
+          value={entityFilter}
+          onValueChange={(value) => {
+            setEntityFilter(value ?? ALL_ENTITIES);
+            setPage(1);
+          }}
+        >
+          <SelectTrigger className="w-[220px]">
+            <SelectValue placeholder="Filter by entity" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL_ENTITIES}>All entities</SelectItem>
+            {KNOWN_ENTITIES.map((e) => (
+              <SelectItem key={e} value={e}>
+                {humanize(e)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       <div className="rounded-md border">
@@ -127,7 +176,7 @@ export default function AdminAuditLogPage() {
           </div>
         ) : entries.length === 0 ? (
           <p className="px-4 py-12 text-center text-sm text-muted-foreground">
-            No audit entries{actionFilter !== ALL_ACTIONS ? ' for this action' : ''} yet.
+            No audit entries{actionFilter !== ALL_ACTIONS || entityFilter !== ALL_ENTITIES ? ' matching these filters' : ''} yet.
           </p>
         ) : (
           <div className="divide-y">

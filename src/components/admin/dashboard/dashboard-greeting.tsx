@@ -16,7 +16,7 @@ function greetingForHour(hour: number): string {
  * viewer's local time) + today's date, with a single cyan quick-action into the
  * requests surface. No fabricated stats here.
  */
-export function DashboardGreeting({ name }: { readonly name?: string }) {
+export function DashboardGreeting() {
   // Render a stable placeholder on the server, then fill in local time after
   // mount to avoid hydration mismatch on the time-dependent greeting/date.
   const [now, setNow] = useState<Date | null>(null);
@@ -25,7 +25,6 @@ export function DashboardGreeting({ name }: { readonly name?: string }) {
   }, []);
 
   const greeting = now ? greetingForHour(now.getHours()) : 'Welcome';
-  const firstName = name?.trim().split(/\s+/)[0];
   const dateLabel = now
     ? now.toLocaleDateString(undefined, {
         weekday: 'long',
@@ -39,7 +38,6 @@ export function DashboardGreeting({ name }: { readonly name?: string }) {
       <div>
         <h1 className="font-heading text-2xl font-bold leading-tight tracking-tight sm:text-[28px]">
           {greeting}
-          {firstName ? `, ${firstName}` : ''}
         </h1>
         <p className="mt-1 flex min-h-5 items-center gap-1.5 text-sm text-muted-foreground">
           {dateLabel && (

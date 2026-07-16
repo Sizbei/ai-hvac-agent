@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import {
   AlertCircle,
   Palette,
@@ -32,6 +33,7 @@ import { PlatformLinkPanel } from '@/components/admin/settings/platform-link-pan
 import { BillingLinkPanel } from '@/components/admin/settings/billing-link-panel';
 
 export default function SettingsPage() {
+  useEffect(() => { document.title = 'Settings · Spears Admin'; }, []);
   const settings = useOrgSettings();
 
   return (

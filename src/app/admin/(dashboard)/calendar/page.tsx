@@ -117,6 +117,7 @@ function UrgencyLegend() {
 }
 
 export default function CalendarPage() {
+  useEffect(() => { document.title = 'Calendar · Spears Admin'; }, []);
   const [date, setDate] = useState<string>(todayBusiness);
   const [view, setView] = useState<CalendarView>('day');
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);

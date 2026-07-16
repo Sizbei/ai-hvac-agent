@@ -5,6 +5,7 @@ import type { AuditLogEntry } from '@/lib/admin/audit-types';
 
 interface UseAdminAuditLogOptions {
   readonly action?: string;
+  readonly entity?: string;
   readonly page?: number;
   readonly limit?: number;
 }
@@ -26,7 +27,7 @@ interface UseAdminAuditLogResult {
 export function useAdminAuditLog(
   options: UseAdminAuditLogOptions = {},
 ): UseAdminAuditLogResult {
-  const { action, page = 1, limit = 50 } = options;
+  const { action, entity, page = 1, limit = 50 } = options;
 
   const [entries, setEntries] = useState<readonly AuditLogEntry[]>([]);
   const [total, setTotal] = useState(0);
@@ -44,6 +45,7 @@ export function useAdminAuditLog(
     try {
       const params = new URLSearchParams();
       if (action) params.set('action', action);
+      if (entity) params.set('entity', entity);
       params.set('page', String(page));
       params.set('limit', String(limit));
 
@@ -80,7 +82,7 @@ export function useAdminAuditLog(
       isFetchingRef.current = false;
       setIsLoading(false);
     }
-  }, [action, page, limit]);
+  }, [action, entity, page, limit]);
 
   useEffect(() => {
     void fetchAuditLog();

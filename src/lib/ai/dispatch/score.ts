@@ -159,6 +159,11 @@ export function scoreTechnician(
 /**
  * Score every candidate, drop the non-skill-matched, and sort by score desc.
  * Ties break by technicianId (ascending) so the ordering is fully deterministic.
+ *
+ * Fallback: when NO candidate has matching-category history (eligible is empty),
+ * fall back to ranking ALL candidates rather than returning an empty list. The
+ * reasons on each tech will include "no matching-category history" to be honest
+ * about the absence of category-specific signal.
  */
 export function rankTechnicians(candidates: readonly DispatchSignals[]): RankedTech[] {
   // Only skill-matched candidates survive the ranking, so the travel regime must
@@ -168,16 +173,38 @@ export function rankTechnicians(candidates: readonly DispatchSignals[]): RankedT
   // every other signal) to the survivors and shrank the top-vs-second gap below
   // the auto-commit threshold — flipping a clear winner to queued_ambiguous.
   const eligible = candidates.filter((c) => c.tech.skillJobsCompleted > 0);
-  // Single travel regime per ranking: if ANY eligible candidate has a location
+
+  // Fallback: if no tech has same-category history, rank everyone. The skill term
+  // is zero for all, so quality/availability/travel still produce a meaningful
+  // ordering. We tag the results so dispatchers know there's no prior-history
+  // signal behind the ranking.
+  const pool = eligible.length > 0 ? eligible : candidates;
+  const isFallback = eligible.length === 0 && candidates.length > 0;
+
+  // Single travel regime per ranking: if ANY pooled candidate has a location
   // signal, score the location-less ones with a neutral travel term so they can't
   // win just by escaping the travel blend the located candidates pay.
-  const travelRegimeActive = eligible.some(
+  const travelRegimeActive = pool.some(
     (c) =>
       (c.tech.travelMinutes != null && Number.isFinite(c.tech.travelMinutes)) ||
       (c.tech.travelKm != null && Number.isFinite(c.tech.travelKm)),
   );
-  return eligible
-    .map((c) => scoreTechnician(c, { travelRegimeActive }))
+  return pool
+    .map((c) => {
+      const ranked = scoreTechnician(c, { travelRegimeActive });
+      if (isFallback) {
+        // Prepend an honest label so the panel makes clear this is a fallback
+        // ranking (no same-category jobs to go on).
+        return {
+          ...ranked,
+          reasons: [
+            `no matching-category history — ranked on availability/travel`,
+            ...ranked.reasons,
+          ],
+        };
+      }
+      return ranked;
+    })
     .sort((a, b) =>
       b.score !== a.score
         ? b.score - a.score
