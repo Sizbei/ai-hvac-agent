@@ -9,20 +9,9 @@ import {
 import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
+import { isUniqueViolation } from "@/lib/db/unique-violation";
 import { logger } from "@/lib/logger";
 import { isUuid } from "@/lib/validation/uuid";
-
-/** Postgres unique-violation SQLSTATE. */
-const PG_UNIQUE_VIOLATION = "23505";
-
-function isUniqueViolation(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: unknown }).code === PG_UNIQUE_VIOLATION
-  );
-}
 
 const updateSchema = z.object({
   name: z.string().trim().min(1).max(255).optional(),

@@ -42,12 +42,13 @@ export function useReviews(params: UseReviewsParams = {}): UseReviewsResult {
   const [stats, setStats] = useState<ReviewStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const isFetchingRef = useRef(false);
+  // Monotonic run counter (latest-wins): a rapid page/param change supersedes an
+  // in-flight fetch instead of being dropped, and a stale response is discarded.
+  const runRef = useRef(0);
   const { page = 1, limit = 50 } = params;
 
   const fetchReviews = useCallback(async (): Promise<void> => {
-    if (isFetchingRef.current) return;
-    isFetchingRef.current = true;
+    const run = ++runRef.current;
     setIsLoading(true);
     setError(null);
     try {
@@ -58,6 +59,7 @@ export function useReviews(params: UseReviewsParams = {}): UseReviewsResult {
         data?: { reviews: ReviewRow[]; total: number; stats: ReviewStats };
         error?: { message: string };
       };
+      if (run !== runRef.current) return; // superseded by a newer fetch
       if (res.ok && body.success && body.data) {
         setReviews(body.data.reviews);
         setTotal(body.data.total);
@@ -67,10 +69,9 @@ export function useReviews(params: UseReviewsParams = {}): UseReviewsResult {
       }
     } catch (err) {
       if (err instanceof AdminAuthRedirectError) return; // redirecting to login
-      setError('Could not connect to the server.');
+      if (run === runRef.current) setError('Could not connect to the server.');
     } finally {
-      setIsLoading(false);
-      isFetchingRef.current = false;
+      if (run === runRef.current) setIsLoading(false);
     }
   }, [page, limit]);
 

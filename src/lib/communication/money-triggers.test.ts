@@ -18,6 +18,13 @@ import { claimOutboundOnce } from "./outbound-ledger";
 import { TRIGGER_RULES } from "./consent";
 
 // ── Mocks ──────────────────────────────────────────────────────────────────
+// server-only throws at import in a non-server env (vitest is not a React
+// Server Component host). Stub it so the transitive import from portal-queries
+// doesn't abort the entire test suite before any mocks apply.
+vi.mock("server-only", () => ({}));
+vi.mock("@/lib/portal/portal-queries", () => ({
+  generatePortalToken: vi.fn().mockResolvedValue("tok-portal"),
+}));
 vi.mock("./job-queue", () => ({ queueCommunicationJob: vi.fn().mockResolvedValue("job-1") }));
 vi.mock("./outbound-ledger", () => ({ claimOutboundOnce: vi.fn().mockResolvedValue(true) }));
 vi.mock("@/lib/admin/org-config-queries", () => ({

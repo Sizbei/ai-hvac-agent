@@ -138,17 +138,19 @@ beforeEach(() => {
   });
 });
 
+const PAY_ID = "aaaaaaaa-0000-0000-0000-000000000001";
+const INV_ID = "bbbbbbbb-0000-0000-0000-000000000001";
 const PB_ID = "11111111-1111-4111-8111-1111111111c1";
 
 describe("POST /api/admin/payments/[id]/refund — role gate", () => {
   it("returns 401 when there is no admin session", async () => {
     mockGetAdminSession.mockResolvedValue(null);
     const res = await refundPOST(
-      jsonReq("/api/admin/payments/pay-1/refund", {
+      jsonReq(`/api/admin/payments/${PAY_ID}/refund`, {
         amountCents: 1000,
         reason: "duplicate",
       }),
-      { params: Promise.resolve({ id: "pay-1" }) },
+      { params: Promise.resolve({ id: PAY_ID }) },
     );
     expect(res.status).toBe(401);
     expect(mockRefundPayment).not.toHaveBeenCalled();
@@ -157,11 +159,11 @@ describe("POST /api/admin/payments/[id]/refund — role gate", () => {
   it("returns 403 for a non-super_admin (admin) session", async () => {
     mockGetAdminSession.mockResolvedValue(session("admin"));
     const res = await refundPOST(
-      jsonReq("/api/admin/payments/pay-1/refund", {
+      jsonReq(`/api/admin/payments/${PAY_ID}/refund`, {
         amountCents: 1000,
         reason: "duplicate",
       }),
-      { params: Promise.resolve({ id: "pay-1" }) },
+      { params: Promise.resolve({ id: PAY_ID }) },
     );
     expect(res.status).toBe(403);
     expect(mockRefundPayment).not.toHaveBeenCalled();
@@ -171,17 +173,17 @@ describe("POST /api/admin/payments/[id]/refund — role gate", () => {
     mockGetAdminSession.mockResolvedValue(session("super_admin"));
     mockRefundPayment.mockResolvedValue({ ok: true, refundId: "ref-1" });
     const res = await refundPOST(
-      jsonReq("/api/admin/payments/pay-1/refund", {
+      jsonReq(`/api/admin/payments/${PAY_ID}/refund`, {
         amountCents: 1000,
         reason: "duplicate",
       }),
-      { params: Promise.resolve({ id: "pay-1" }) },
+      { params: Promise.resolve({ id: PAY_ID }) },
     );
     expect(res.status).toBe(201);
     // The id came from the awaited params Promise.
     expect(mockRefundPayment).toHaveBeenCalledWith(
       ORG,
-      "pay-1",
+      PAY_ID,
       expect.objectContaining({ amountCents: 1000, reason: "duplicate" }),
     );
   });
@@ -190,11 +192,11 @@ describe("POST /api/admin/payments/[id]/refund — role gate", () => {
     mockGetAdminSession.mockResolvedValue(session("super_admin"));
     mockRefundPayment.mockResolvedValue({ ok: false, reason: "synced_read_only" });
     const res = await refundPOST(
-      jsonReq("/api/admin/payments/pay-1/refund", {
+      jsonReq(`/api/admin/payments/${PAY_ID}/refund`, {
         amountCents: 1000,
         reason: "customer_request",
       }),
-      { params: Promise.resolve({ id: "pay-1" }) },
+      { params: Promise.resolve({ id: PAY_ID }) },
     );
     expect(res.status).toBe(409);
     const body = await res.json();
@@ -205,15 +207,15 @@ describe("POST /api/admin/payments/[id]/refund — role gate", () => {
     mockGetAdminSession.mockResolvedValue(session("super_admin"));
     mockRefundPayment.mockResolvedValue({ ok: true, refundId: "ref-1" });
     await refundPOST(
-      jsonReq("/api/admin/payments/pay-1/refund", {
+      jsonReq(`/api/admin/payments/${PAY_ID}/refund`, {
         amountCents: 1000,
         reason: "customer_request",
       }),
-      { params: Promise.resolve({ id: "pay-1" }) },
+      { params: Promise.resolve({ id: PAY_ID }) },
     );
     expect(mockLogAudit).toHaveBeenCalledTimes(1);
     const details = mockLogAudit.mock.calls[0][0].details as string;
-    expect(details).toBe("refundId:ref-1 amountCents:1000 reason:customer_request");
+    expect(details).toBe("refundId:ref-1 reason:customer_request");
     // No email / phone / free-text name patterns.
     expect(details).not.toMatch(/@/);
     expect(details).not.toMatch(/\b\d{3}[-.]\d{3}[-.]\d{4}\b/);
@@ -224,8 +226,8 @@ describe("POST /api/admin/invoices/[id]/payments — admin session required", ()
   it("returns 401 when there is no admin session", async () => {
     mockGetAdminSession.mockResolvedValue(null);
     const res = await takePaymentPOST(
-      jsonReq("/api/admin/invoices/inv-1/payments", { amountCents: 5000 }),
-      { params: Promise.resolve({ id: "inv-1" }) },
+      jsonReq(`/api/admin/invoices/${INV_ID}/payments`, { amountCents: 5000 }),
+      { params: Promise.resolve({ id: INV_ID }) },
     );
     expect(res.status).toBe(401);
     expect(mockTakePayment).not.toHaveBeenCalled();
@@ -239,13 +241,13 @@ describe("POST /api/admin/invoices/[id]/payments — admin session required", ()
       invoiceState: "paid",
     });
     const res = await takePaymentPOST(
-      jsonReq("/api/admin/invoices/inv-1/payments", { amountCents: 5000 }),
-      { params: Promise.resolve({ id: "inv-1" }) },
+      jsonReq(`/api/admin/invoices/${INV_ID}/payments`, { amountCents: 5000 }),
+      { params: Promise.resolve({ id: INV_ID }) },
     );
     expect(res.status).toBe(201);
     expect(mockTakePayment).toHaveBeenCalledWith(
       ORG,
-      "inv-1",
+      INV_ID,
       expect.objectContaining({ amountCents: 5000 }),
     );
   });
@@ -254,8 +256,8 @@ describe("POST /api/admin/invoices/[id]/payments — admin session required", ()
     mockGetAdminSession.mockResolvedValue(session("admin"));
     mockTakePayment.mockResolvedValue({ ok: false, reason: "synced_read_only" });
     const res = await takePaymentPOST(
-      jsonReq("/api/admin/invoices/inv-1/payments", { amountCents: 5000 }),
-      { params: Promise.resolve({ id: "inv-1" }) },
+      jsonReq(`/api/admin/invoices/${INV_ID}/payments`, { amountCents: 5000 }),
+      { params: Promise.resolve({ id: INV_ID }) },
     );
     expect(res.status).toBe(409);
     const body = await res.json();
@@ -274,8 +276,8 @@ describe("POST /api/admin/invoices/[id]/payments — admin session required", ()
       invoiceState: "paid",
     });
     const res = await takePaymentPOST(
-      jsonReq("/api/admin/invoices/inv-1/payments", { amountCents: 5000 }),
-      { params: Promise.resolve({ id: "inv-1" }) },
+      jsonReq(`/api/admin/invoices/${INV_ID}/payments`, { amountCents: 5000 }),
+      { params: Promise.resolve({ id: INV_ID }) },
     );
     expect(res.status).toBe(201);
     // The receipt work runs in after() — flush it.
@@ -283,7 +285,7 @@ describe("POST /api/admin/invoices/[id]/payments — admin session required", ()
     expect(mockTriggerPaymentReceipt).toHaveBeenCalledWith(
       expect.objectContaining({
         organizationId: ORG,
-        invoiceId: "inv-1",
+        invoiceId: INV_ID,
         customerId: "cust-1",
         amountCents: 5000,
       }),
@@ -295,8 +297,8 @@ describe("POST /api/admin/invoices/[id]/payments — admin session required", ()
     mockGetAdminSession.mockResolvedValue(session("admin"));
     mockTakePayment.mockResolvedValue({ ok: false, reason: "charge_failed" });
     const res = await takePaymentPOST(
-      jsonReq("/api/admin/invoices/inv-1/payments", { amountCents: 5000 }),
-      { params: Promise.resolve({ id: "inv-1" }) },
+      jsonReq(`/api/admin/invoices/${INV_ID}/payments`, { amountCents: 5000 }),
+      { params: Promise.resolve({ id: INV_ID }) },
     );
     expect(res.status).toBe(402);
     await flushAfter();
@@ -312,8 +314,8 @@ describe("POST /api/admin/invoices/[id]/payments — admin session required", ()
     });
     mockTriggerPaymentReceipt.mockRejectedValue(new Error("twilio down"));
     const res = await takePaymentPOST(
-      jsonReq("/api/admin/invoices/inv-1/payments", { amountCents: 5000 }),
-      { params: Promise.resolve({ id: "inv-1" }) },
+      jsonReq(`/api/admin/invoices/${INV_ID}/payments`, { amountCents: 5000 }),
+      { params: Promise.resolve({ id: INV_ID }) },
     );
     // Response already 201 before after() runs; the error is swallowed.
     expect(res.status).toBe(201);

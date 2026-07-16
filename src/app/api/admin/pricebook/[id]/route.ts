@@ -9,21 +9,12 @@ import {
 import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse, readJsonBody } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
+import { isUniqueViolation } from "@/lib/db/unique-violation";
 import { logger } from "@/lib/logger";
 import { isUuid } from "@/lib/validation/uuid";
 
-/** Postgres unique-violation SQLSTATE. */
-const PG_UNIQUE_VIOLATION = "23505";
-
 /** The partial unique index name for org+SKU combos. */
 const SKU_CONSTRAINT = "pricebook_items_org_sku_unique";
-
-function isUniqueViolation(error: unknown): boolean {
-  if (typeof error !== "object" || error === null) return false;
-  const e = error as { code?: unknown; message?: unknown };
-  if (e.code === PG_UNIQUE_VIOLATION) return true;
-  return typeof e.message === "string" && e.message.includes(SKU_CONSTRAINT);
-}
 
 /** Business cap: $999,999.99 = 99,999,999 cents. */
 const MAX_PRICE_CENTS = 99_999_999;
@@ -109,7 +100,7 @@ export async function PATCH(
 
     return successResponse({ id });
   } catch (error: unknown) {
-    if (isUniqueViolation(error)) {
+    if (isUniqueViolation(error, SKU_CONSTRAINT)) {
       return errorResponse(
         "An item with this SKU already exists",
         "ITEM_ALREADY_EXISTS",

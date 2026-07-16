@@ -39,11 +39,12 @@ export function useAdminRequests(
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const isFetchingRef = useRef(false);
+  // Latest-wins run counter: a filter change mid-poll supersedes the in-flight
+  // fetch instead of being dropped (the old isFetchingRef drop-guard stranded it).
+  const runRef = useRef(0);
 
   const fetchRequests = useCallback(async (): Promise<void> => {
-    if (isFetchingRef.current) return;
-    isFetchingRef.current = true;
+    const run = ++runRef.current;
 
     try {
       const params = new URLSearchParams();
@@ -58,12 +59,13 @@ export function useAdminRequests(
 
       const url = `/api/admin/requests?${params.toString()}`;
       const res = await adminFetch(url);
+      if (run !== runRef.current) return; // superseded by a newer fetch
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({
           error: { message: 'Failed to fetch requests' },
         }));
-        setError(body?.error?.message ?? 'Failed to fetch requests');
+        if (run === runRef.current) setError(body?.error?.message ?? 'Failed to fetch requests');
         return;
       }
 
@@ -77,6 +79,7 @@ export function useAdminRequests(
         };
       };
 
+      if (run !== runRef.current) return;
       if (body.success) {
         setRequests(body.data.requests);
         setTotal(body.data.total);
@@ -84,9 +87,7 @@ export function useAdminRequests(
       }
     } catch (err) {
       if (err instanceof AdminAuthRedirectError) return;
-      setError('Could not connect to server. Please try again.');
-    } finally {
-      isFetchingRef.current = false;
+      if (run === runRef.current) setError('Could not connect to server. Please try again.');
     }
   }, [status, search, page, limit, urgency, assignedTo, isAfterHours, sort]);
 

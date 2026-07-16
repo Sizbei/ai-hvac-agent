@@ -12,23 +12,12 @@ import {
 import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse, readJsonBody } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
+import { isUniqueViolation } from "@/lib/db/unique-violation";
 import { logger } from "@/lib/logger";
 import { invoiceStateEnum } from "@/lib/db/schema";
 
 const VALID_STATES = new Set(invoiceStateEnum.enumValues);
 const VALID_SOURCES = new Set(["native", "fieldpulse", "housecall"]);
-
-/** Postgres unique-violation SQLSTATE. */
-const PG_UNIQUE_VIOLATION = "23505";
-
-function isUniqueViolation(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: unknown }).code === PG_UNIQUE_VIOLATION
-  );
-}
 
 const createSchema = z.object({
   estimateId: z.string().uuid(),

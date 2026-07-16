@@ -47,12 +47,14 @@ const mockSession = {
   role: 'admin' as const,
 };
 
+const INVOICE_ID = '00000000-0000-0000-0000-000000000001';
+
 function req() {
-  return new NextRequest('http://t/api/admin/invoices/i1/pay-link', { method: 'POST' });
+  return new NextRequest(`http://t/api/admin/invoices/${INVOICE_ID}/pay-link`, { method: 'POST' });
 }
 
 function ctx() {
-  return { params: Promise.resolve({ id: 'i1' }) } as any;
+  return { params: Promise.resolve({ id: INVOICE_ID }) };
 }
 
 beforeEach(() => {

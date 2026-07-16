@@ -41,11 +41,13 @@ const mockSession = {
   role: 'admin' as const,
 };
 
+const INVOICE_ID = '00000000-0000-0000-0000-000000000001';
+
 function req() {
-  return new NextRequest('http://t/api/admin/invoices/i1/send-reminder', { method: 'POST' });
+  return new NextRequest(`http://t/api/admin/invoices/${INVOICE_ID}/send-reminder`, { method: 'POST' });
 }
 
-const ctx = { params: Promise.resolve({ id: 'i1' }) };
+const ctx = { params: Promise.resolve({ id: INVOICE_ID }) };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -65,7 +67,7 @@ describe('POST /api/admin/invoices/[id]/send-reminder', () => {
     mockSendInvoiceReminder.mockResolvedValueOnce({ ok: true });
     const res = await POST(req(), ctx);
     expect(res.status).toBe(200);
-    expect(mockSendInvoiceReminder).toHaveBeenCalledWith('org-1', 'i1');
+    expect(mockSendInvoiceReminder).toHaveBeenCalledWith('org-1', INVOICE_ID);
     const body = await res.json();
     expect(body.data.ok).toBe(true);
   });
