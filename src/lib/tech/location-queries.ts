@@ -8,7 +8,7 @@
  * position isn't the same PII shape as an encrypted address). Every read/write is
  * org + technician scoped.
  */
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, gte, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   technicianLocations,
@@ -170,25 +170,40 @@ export async function getLatestTechnicianLocation(
 }
 
 /**
+ * How recent a GPS fix must be to count as a tech's LIVE location for dispatch
+ * routing. Fixes are retained ~30 days, but an old fix is NOT where the tech is
+ * now — using it would mis-price the dominant travel term off yesterday's
+ * coordinates. Beyond this window the fix is dropped and the caller falls back
+ * to the tech's home base, a more honest anchor for someone who isn't actively
+ * reporting position.
+ */
+export const LIVE_FIX_MAX_AGE_MS = 4 * 60 * 60 * 1000; // 4 hours
+
+/**
  * Latest fix per technician for a set of techs, in ONE query (avoids the N+1 of
  * calling getLatestTechnicianLocation per tech from the dispatch scorer).
  * DISTINCT ON (technician_id) bounds the result to one row per tech at the
  * database — the row transfer stays O(techs) no matter how much GPS history the
  * table holds (history itself is trimmed by the cleanup cron's retention sweep).
- * Techs with no fix are absent from the map. Org + technician scoped.
+ * A tech is absent from the map when they have NO fix OR their latest fix is
+ * older than {@link LIVE_FIX_MAX_AGE_MS}. Org + technician scoped. `now` is
+ * injectable for deterministic tests.
  */
 export async function getLatestTechnicianLocations(
   organizationId: string,
   technicianIds: readonly string[],
+  now: Date = new Date(),
 ): Promise<Map<string, { readonly latitude: number; readonly longitude: number }>> {
   const out = new Map<string, { latitude: number; longitude: number }>();
   if (technicianIds.length === 0) return out;
 
+  const cutoff = new Date(now.getTime() - LIVE_FIX_MAX_AGE_MS);
   const rows = await db
     .selectDistinctOn([technicianLocations.technicianId], {
       technicianId: technicianLocations.technicianId,
       latitude: technicianLocations.latitude,
       longitude: technicianLocations.longitude,
+      capturedAt: technicianLocations.capturedAt,
     })
     .from(technicianLocations)
     .where(
@@ -196,14 +211,20 @@ export async function getLatestTechnicianLocations(
         technicianLocations,
         organizationId,
         inArray(technicianLocations.technicianId, [...technicianIds]),
+        // Only fixes within the freshness window — a stale fix is not a live
+        // location. (JS-side guard below is defense-in-depth for any caller/
+        // mock that bypasses this predicate.)
+        gte(technicianLocations.capturedAt, cutoff),
       ),
     )
     // DISTINCT ON requires ORDER BY to lead with the distinct column; the
     // capturedAt desc tiebreak makes the one kept row the LATEST fix.
     .orderBy(technicianLocations.technicianId, desc(technicianLocations.capturedAt));
 
+  const cutoffMs = cutoff.getTime();
   for (const r of rows) {
     if (out.has(r.technicianId)) continue; // defense-in-depth; rows are unique per tech
+    if (r.capturedAt == null || r.capturedAt.getTime() < cutoffMs) continue; // stale → skip
     out.set(r.technicianId, { latitude: r.latitude, longitude: r.longitude });
   }
   return out;
