@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI HVAC Agent — Database Schema</title>
+<style>
+  :root{
+    --bg:#0e1420; --bg2:#131b2b; --panel:#16203200; --card:#1a2436; --card2:#1e293d;
+    --line:#2a3854; --line2:#344563; --ink:#e7edf7; --muted:#93a1bd; --faint:#63728f;
+    --accent:#e0913a; --accent2:#f0b968; --pk:#5cc8b0; --fk:#7aa2e3;
+    --mono:ui-monospace,"SF Mono",Menlo,"Cascadia Code",monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:
+      radial-gradient(1200px 600px at 15% -5%,#182236 0,transparent 60%),
+      radial-gradient(1000px 500px at 100% 0,#1a1c2e 0,transparent 55%),
+      var(--bg);
+    color:var(--ink);font-family:var(--sans);line-height:1.5;
+    -webkit-font-smoothing:antialiased;padding-bottom:5rem}
+  a{color:var(--accent2)}
+  .wrap{max-width:1360px;margin:0 auto;padding:0 clamp(1rem,3vw,2.5rem)}
+
+  header.top{padding:clamp(2rem,5vw,3.5rem) 0 1.5rem}
+  .eyebrow{font-family:var(--mono);font-size:.72rem;letter-spacing:.22em;text-transform:uppercase;color:var(--accent);margin:0 0 .6rem}
+  h1{font-size:clamp(1.7rem,4vw,2.6rem);margin:0;letter-spacing:-.02em;text-wrap:balance;font-weight:650}
+  .sub{color:var(--muted);margin:.6rem 0 0;max-width:60ch}
+
+  .stats{display:flex;flex-wrap:wrap;gap:.8rem;margin:1.6rem 0 .4rem}
+  .stat{background:linear-gradient(180deg,var(--card2),var(--card));border:1px solid var(--line);
+    border-radius:12px;padding:.7rem 1.05rem;min-width:104px}
+  .stat b{display:block;font-size:1.5rem;font-family:var(--mono);letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+  .stat span{font-size:.72rem;color:var(--faint);text-transform:uppercase;letter-spacing:.08em}
+
+  .legend{display:flex;flex-wrap:wrap;gap:.45rem .9rem;margin:1.3rem 0 .3rem;padding:.9rem 1rem;
+    background:#111a2a80;border:1px solid var(--line);border-radius:12px}
+  .lg{display:inline-flex;align-items:center;gap:.4rem;font-size:.76rem;color:var(--muted)}
+  .lg .swatch,.domain-h .swatch{width:11px;height:11px;border-radius:3px;flex:none;
+    background:hsl(var(--hue) 62% 58%);box-shadow:0 0 0 1px hsl(var(--hue) 60% 30%) inset}
+  .hint{margin:.6rem 2px 0;font-size:.76rem;color:var(--faint)}
+  .hint kbd{font-family:var(--mono);background:var(--card);border:1px solid var(--line2);border-bottom-width:2px;
+    border-radius:5px;padding:.02em .4em;font-size:.9em;color:var(--ink)}
+
+  .domain{margin:2.4rem 0}
+  .domain-h{display:flex;align-items:center;gap:.6rem;padding-bottom:.7rem;margin-bottom:1rem;
+    border-bottom:1px solid var(--line)}
+  .domain-h h2{font-size:1.02rem;margin:0;font-weight:600;letter-spacing:-.01em}
+  .domain-h .swatch{width:13px;height:13px}
+  .dcount{margin-left:auto;font-family:var(--mono);font-size:.72rem;color:var(--faint)}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(228px,1fr));gap:.85rem;align-items:start}
+
+  .card{background:linear-gradient(180deg,var(--card2),var(--card));
+    border:1px solid var(--line);border-left:3px solid hsl(var(--hue) 60% 55%);
+    border-radius:11px;padding:.7rem .8rem .55rem;transition:transform .16s cubic-bezier(.23,1,.32,1),box-shadow .16s,border-color .16s,opacity .16s;
+    outline:none}
+  .domain .card{--hue:inherit}
+  .card:hover,.card:focus-visible{transform:translateY(-2px);box-shadow:0 10px 26px -12px #000a,0 0 0 1px hsl(var(--hue) 60% 55% / .5);border-color:hsl(var(--hue) 60% 55%)}
+  .card-h{display:flex;align-items:baseline;gap:.5rem;margin-bottom:.5rem}
+  .card-h h3{font-family:var(--mono);font-size:.83rem;margin:0;font-weight:600;letter-spacing:-.01em;
+    word-break:break-word;display:flex;align-items:center;gap:.3rem}
+  .hub-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent)}
+  .card.hub{border-left-color:var(--accent)}
+  .card.hub .card-h h3{color:var(--accent2)}
+  .rows{margin-left:auto;font-family:var(--mono);font-size:.68rem;padding:.1em .5em;border-radius:6px;
+    background:hsl(var(--hue) 55% 55% / .16);color:hsl(var(--hue) 55% 78%);white-space:nowrap;font-variant-numeric:tabular-nums}
+  .rows.z{background:#ffffff0a;color:var(--faint)}
+
+  .cols{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:1px}
+  .col{display:flex;align-items:baseline;gap:.4rem;font-family:var(--mono);font-size:.72rem;
+    padding:.12rem .1rem;border-radius:4px}
+  .col .cn{color:var(--muted)}
+  .col.pk .cn{color:var(--pk);font-weight:600}
+  .col.pk::before{content:"PK";font-size:.6rem;color:var(--pk);opacity:.8;margin-right:.1rem}
+  .col.fk .cn{color:var(--fk)}
+  .col.fk .ref{margin-left:auto;color:var(--faint);font-size:.66rem;white-space:nowrap}
+  .col.more{color:var(--faint);font-style:italic;font-size:.68rem;opacity:.7}
+  .in{margin-top:.5rem;font-size:.64rem;color:var(--faint);border-top:1px dashed var(--line);padding-top:.35rem}
+
+  .card.empty{opacity:.62}
+  .card.empty .card-h h3{color:var(--faint)}
+
+  /* relationship highlight */
+  body.focusing .card{opacity:.28;filter:saturate(.5)}
+  body.focusing .card.rel-on{opacity:1;filter:none;transform:translateY(-2px);
+    box-shadow:0 10px 26px -12px #000a,0 0 0 1.5px var(--accent)}
+  body.focusing .card.rel-src{opacity:1;filter:none;box-shadow:0 0 0 2px var(--accent2),0 12px 30px -10px #000c}
+
+  footer.pg{margin-top:3rem;padding-top:1.3rem;border-top:1px solid var(--line);
+    color:var(--faint);font-size:.78rem;display:flex;flex-wrap:wrap;gap:.4rem 1rem;justify-content:space-between}
+  code{font-family:var(--mono)}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <p class="eyebrow">Data Model · PostgreSQL (Neon)</p>
+    <h1>AI HVAC Agent — Database Schema</h1>
+    <p class="sub">A multi-tenant HVAC operations platform. Every table is scoped by <code>organization_id</code>;
+      <b>organizations</b>, <b>customers</b>, and <b>service_requests</b> are the hubs the rest hang off. Row counts are from the development branch.</p>
+    <div class="stats">
+      <div class="stat"><b>65</b><span>Tables</span></div>
+      <div class="stat"><b>30</b><span>With data</span></div>
+      <div class="stat"><b>115</b><span>Foreign keys</span></div>
+      <div class="stat"><b>26k</b><span>Rows (dev)</span></div>
+      <div class="stat"><b>12</b><span>Domains</span></div>
+    </div>
+    <div class="legend"><span class="lg" style="--hue:210"><span class="swatch"></span>Tenancy &amp; Access</span><span class="lg" style="--hue:265"><span class="swatch"></span>AI Intake &amp; Conversations</span><span class="lg" style="--hue:22"><span class="swatch"></span>Requests &amp; Dispatch</span><span class="lg" style="--hue:158"><span class="swatch"></span>Customers &amp; CRM</span><span class="lg" style="--hue:45"><span class="swatch"></span>Estimates, Invoices &amp; Payments</span><span class="lg" style="--hue:190"><span class="swatch"></span>Pricebook &amp; Inventory</span><span class="lg" style="--hue:320"><span class="swatch"></span>Memberships</span><span class="lg" style="--hue:340"><span class="swatch"></span>Communications</span><span class="lg" style="--hue:95"><span class="swatch"></span>Custom Fields</span><span class="lg" style="--hue:235"><span class="swatch"></span>Integrations &amp; Webhooks</span><span class="lg" style="--hue:12"><span class="swatch"></span>Attachments</span><span class="lg" style="--hue:175"><span class="swatch"></span>Analytics &amp; Forecasting</span></div>
+    <p class="hint">Hover or focus a table to light up what it references. <span class="hub-dot" style="display:inline-block;vertical-align:middle"></span> = hub · faded card = empty on dev · <kbd>PK</kbd>/<span style="color:var(--fk)">blue</span> columns are keys.</p>
+  </header>
+
+  <section class="domain" data-hue="210" style="--hue:210">
+    <div class="domain-h">
+      <span class="swatch"></span>
+      <h2>Tenancy &amp; Access</h2>
+      <span class="dcount">8 tables · 4 live</span>
+    </div>
+    <div class="grid"><article class="card hub" id="t-organizations" data-table="organizations" data-refs="" tabindex="0">
+    <header class="card-h">
+      <h3>organizations<span class="hub-dot" title="hub table"></span></h3>
+      <span class="rows " title="1 rows (dev)">1</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li></ul>
+    <footer class="in">63 tables reference this</footer>
+  </article>
+<article class="card" id="t-users" data-table="users" data-refs="organizations" tabindex="0">
+    <header class="card-h">
+      <h3>users</h3>
+      <span class="rows " title="13 rows (dev)">13</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col"><span class="cn">email</span></li><li class="col"><span class="cn">name</span></li><li class="col"><span class="cn">passwordHash</span></li><li class="col"><span class="cn">googleId</span></li><li class="col"><span class="cn">fieldpulseUserId</span></li><li class="col more">+10 more</li></ul>
+    <footer class="in">11 tables reference this</footer>
+  </article>
+<article class="card empty" id="t-staff_invites" data-table="staff_invites" data-refs="organizations users" tabindex="0">
+    <header class="card-h">
+      <h3>staff_invites</h3>
+      <span class="rows z" title="0 rows (dev)">empty</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col fk"><span class="cn">invitedByUserId</span><span class="ref">→ users</span></li><li class="col"><span class="cn">email</span></li><li class="col"><span class="cn">role</span></li><li class="col"><span class="cn">tokenHash</span></li><li class="col"><span class="cn">expiresAt</span></li><li class="col"><span class="cn">acceptedAt</span></li><li class="col more">+2 more</li></ul>
+    
+  </article>
+<article class="card" id="t-organization_settings" data-table="organization_settings" data-refs="organizations" tabindex="0">
+    <header class="card-h">
+      <h3>organization_settings</h3>
+      <span class="rows " title="1 rows (dev)">1</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">createdAt</span><span class="ref">→ organizations</span></li></ul>
+    
+  </article>
+<article class="card empty" id="t-widget_keys" data-table="widget_keys" data-refs="organizations" tabindex="0">
+    <header class="card-h">
+      <h3>widget_keys</h3>
+      <span class="rows z" title="0 rows (dev)">empty</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col"><span class="cn">keyHash</span></li><li class="col"><span class="cn">keyPrefix</span></li><li class="col"><span class="cn">keyType</span></li><li class="col"><span class="cn">scopes</span></li><li class="col"><span class="cn">label</span></li><li class="col more">+4 more</li></ul>
+    
+  </article>
+<article class="card empty" id="t-platform_audit_log" data-table="platform_audit_log" data-refs="" tabindex="0">
+    <header class="card-h">
+      <h3>platform_audit_log</h3>
+      <span class="rows z" title="0 rows (dev)">empty</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col"><span class="cn">action</span></li><li class="col"><span class="cn">actorUserId</span></li><li class="col"><span class="cn">actorEmail</span></li><li class="col"><span class="cn">targetOrgId</span></li><li class="col"><span class="cn">details</span></li><li class="col more">+1 more</li></ul>
+    
+  </article>
+<article class="card" id="t-audit_log" data-table="audit_log" data-refs="organizations users customer_sessions" tabindex="0">
+    <header class="card-h">
+      <h3>audit_log</h3>
+      <span class="rows " title="6,228 rows (dev)">6.2k</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col fk"><span class="cn">userId</span><span class="ref">→ users</span></li><li class="col fk"><span class="cn">sessionId</span><span class="ref">→ customer_sessions</span></li><li class="col"><span class="cn">actorType</span></li><li class="col"><span class="cn">action</span></li><li class="col"><span class="cn">entity</span></li><li class="col"><span class="cn">entityId</span></li><li class="col"><span class="cn">details</span></li><li class="col more">+2 more</li></ul>
+    
+  </article>
+<article class="card empty" id="t-saas_billing_events" data-table="saas_billing_events" data-refs="organizations" tabindex="0">
+    <header class="card-h">
+      <h3>saas_billing_events</h3>
+      <span class="rows z" title="0 rows (dev)">empty</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col"><span class="cn">eventId</span></li><li class="col"><span class="cn">eventType</span></li><li class="col"><span class="cn">createdAt</span></li></ul>
+    
+  </article></div>
+  </section>
+<section class="domain" data-hue="265" style="--hue:265">
+    <div class="domain-h">
+      <span class="swatch"></span>
+      <h2>AI Intake &amp; Conversations</h2>
+      <span class="dcount">4 tables · 3 live</span>
+    </div>
+    <div class="grid"><article class="card hub" id="t-customer_sessions" data-table="customer_sessions" data-refs="organizations customers" tabindex="0">
+    <header class="card-h">
+      <h3>customer_sessions<span class="hub-dot" title="hub table"></span></h3>
+      <span class="rows " title="131 rows (dev)">131</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col fk"><span class="cn">customerId</span><span class="ref">→ customers</span></li><li class="col"><span class="cn">token</span></li><li class="col"><span class="cn">status</span></li><li class="col"><span class="cn">tokensUsed</span></li><li class="col"><span class="cn">tokenBudget</span></li><li class="col"><span class="cn">turnCount</span></li><li class="col more">+11 more</li></ul>
+    <footer class="in">4 tables reference this</footer>
+  </article>
+<article class="card" id="t-messages" data-table="messages" data-refs="organizations customer_sessions" tabindex="0">
+    <header class="card-h">
+      <h3>messages</h3>
+      <span class="rows " title="543 rows (dev)">543</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col fk"><span class="cn">sessionId</span><span class="ref">→ customer_sessions</span></li><li class="col"><span class="cn">role</span></li><li class="col"><span class="cn">content</span></li><li class="col"><span class="cn">tokensUsed</span></li><li class="col"><span class="cn">createdAt</span></li></ul>
+    <footer class="in">1 table reference this</footer>
+  </article>
+<article class="card" id="t-bot_events" data-table="bot_events" data-refs="organizations" tabindex="0">
+    <header class="card-h">
+      <h3>bot_events</h3>
+      <span class="rows " title="58 rows (dev)">58</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col"><span class="cn">sessionId</span></li><li class="col"><span class="cn">turn</span></li><li class="col"><span class="cn">channel</span></li><li class="col"><span class="cn">routed</span></li><li class="col"><span class="cn">intentId</span></li><li class="col more">+7 more</li></ul>
+    
+  </article>
+<article class="card empty" id="t-custom_faqs" data-table="custom_faqs" data-refs="organizations" tabindex="0">
+    <header class="card-h">
+      <h3>custom_faqs</h3>
+      <span class="rows z" title="0 rows (dev)">empty</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col"><span class="cn">question</span></li><li class="col"><span class="cn">answer</span></li><li class="col"><span class="cn">triggers</span></li><li class="col"><span class="cn">isActive</span></li><li class="col"><span class="cn">createdAt</span></li><li class="col more">+1 more</li></ul>
+    
+  </article></div>
+  </section>
+<section class="domain" data-hue="22" style="--hue:22">
+    <div class="domain-h">
+      <span class="swatch"></span>
+      <h2>Requests &amp; Dispatch</h2>
+      <span class="dcount">9 tables · 3 live</span>
+    </div>
+    <div class="grid"><article class="card hub" id="t-service_requests" data-table="service_requests" data-refs="organizations customer_sessions customers users" tabindex="0">
+    <header class="card-h">
+      <h3>service_requests<span class="hub-dot" title="hub table"></span></h3>
+      <span class="rows " title="65 rows (dev)">65</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col fk"><span class="cn">sessionId</span><span class="ref">→ customer_sessions</span></li><li class="col fk"><span class="cn">customerId</span><span class="ref">→ customers</span></li><li class="col fk"><span class="cn">assignedTo</span><span class="ref">→ users</span></li><li class="col"><span class="cn">locationId</span></li><li class="col"><span class="cn">status</span></li><li class="col"><span class="cn">autoAssigned</span></li><li class="col"><span class="cn">issueType</span></li><li class="col"><span class="cn">urgency</span></li><li class="col more">+41 more</li></ul>
+    <footer class="in">6 tables reference this</footer>
+  </article>
+<article class="card empty" id="t-request_notes" data-table="request_notes" data-refs="service_requests organizations users" tabindex="0">
+    <header class="card-h">
+      <h3>request_notes</h3>
+      <span class="rows z" title="0 rows (dev)">empty</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">requestId</span><span class="ref">→ service_requests</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col fk"><span class="cn">authorId</span><span class="ref">→ users</span></li><li class="col"><span class="cn">content</span></li><li class="col"><span class="cn">createdAt</span></li></ul>
+    
+  </article>
+<article class="card" id="t-request_status_events" data-table="request_status_events" data-refs="organizations service_requests" tabindex="0">
+    <header class="card-h">
+      <h3>request_status_events</h3>
+      <span class="rows " title="4 rows (dev)">4</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col fk"><span class="cn">serviceRequestId</span><span class="ref">→ service_requests</span></li><li class="col"><span class="cn">fromStatus</span></li><li class="col"><span class="cn">toStatus</span></li><li class="col"><span class="cn">actorType</span></li><li class="col"><span class="cn">actorId</span></li><li class="col"><span class="cn">at</span></li></ul>
+    
+  </article>
+<article class="card empty" id="t-dispatch_decisions" data-table="dispatch_decisions" data-refs="organizations service_requests users" tabindex="0">
+    <header class="card-h">
+      <h3>dispatch_decisions</h3>
+      <span class="rows z" title="0 rows (dev)">empty</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col fk"><span class="cn">serviceRequestId</span><span class="ref">→ service_requests</span></li><li class="col fk"><span class="cn">chosenTechnicianId</span><span class="ref">→ users</span></li><li class="col"><span class="cn">outcome</span></li><li class="col"><span class="cn">topScore</span></li><li class="col"><span class="cn">confidenceGap</span></li><li class="col"><span class="cn">candidates</span></li><li class="col"><span class="cn">createdAt</span></li></ul>
+    
+  </article>
+<article class="card" id="t-job_materials" data-table="job_materials" data-refs="organizations service_requests users" tabindex="0">
+    <header class="card-h">
+      <h3>job_materials</h3>
+      <span class="rows " title="2 rows (dev)">2</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col fk"><span class="cn">serviceRequestId</span><span class="ref">→ service_requests</span></li><li class="col fk"><span class="cn">createdBy</span><span class="ref">→ users</span></li><li class="col"><span class="cn">pricebookItemId</span></li><li class="col"><span class="cn">description</span></li><li class="col"><span class="cn">quantity</span></li><li class="col"><span class="cn">unitCostCents</span></li><li class="col"><span class="cn">unitPriceCents</span></li><li class="col more">+1 more</li></ul>
+    
+  </article>
+<article class="card empty" id="t-technician_time_entries" data-table="technician_time_entries" data-refs="organizations service_requests users" tabindex="0">
+    <header class="card-h">
+      <h3>technician_time_entries</h3>
+      <span class="rows z" title="0 rows (dev)">empty</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col fk"><span class="cn">serviceRequestId</span><span class="ref">→ service_requests</span></li><li class="col fk"><span class="cn">technicianId</span><span class="ref">→ users</span></li><li class="col"><span class="cn">clockInAt</span></li><li class="col"><span class="cn">clockOutAt</span></li><li class="col"><span class="cn">minutes</span></li><li class="col"><span class="cn">laborRateCents</span></li><li class="col"><span class="cn">laborCostCents</span></li><li class="col more">+3 more</li></ul>
+    
+  </article>
+<article class="card empty" id="t-technician_locations" data-table="technician_locations" data-refs="organizations users" tabindex="0">
+    <header class="card-h">
+      <h3>technician_locations</h3>
+      <span class="rows z" title="0 rows (dev)">empty</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col fk"><span class="cn">technicianId</span><span class="ref">→ users</span></li><li class="col"><span class="cn">serviceRequestId</span></li><li class="col"><span class="cn">latitude</span></li><li class="col"><span class="cn">longitude</span></li><li class="col"><span class="cn">accuracyM</span></li><li class="col"><span class="cn">heading</span></li><li class="col more">+2 more</li></ul>
+    
+  </article>
+<article class="card empty" id="t-technician_availability" data-table="technician_availability" data-refs="organizations users" tabindex="0">
+    <header class="card-h">
+      <h3>technician_availability</h3>
+      <span class="rows z" title="0 rows (dev)">empty</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col fk"><span class="cn">technicianId</span><span class="ref">→ users</span></li><li class="col"><span class="cn">dayOfWeek</span></li><li class="col"><span class="cn">startMinute</span></li><li class="col"><span class="cn">endMinute</span></li><li class="col"><span class="cn">createdAt</span></li><li class="col"><span class="cn">updatedAt</span></li></ul>
+    
+  </article>
+<article class="card empty" id="t-capacity_reservations" data-table="capacity_reservations" data-refs="organizations" tabindex="0">
+    <header class="card-h">
+      <h3>capacity_reservations</h3>
+      <span class="rows z" title="0 rows (dev)">empty</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col"><span class="cn">day</span></li><li class="col"><span class="cn">window</span></li><li class="col"><span class="cn">slotOrdinal</span></li><li class="col"><span class="cn">serviceRequestId</span></li><li class="col"><span class="cn">createdAt</span></li></ul>
+    
+  </article></div>
+  </section>
+<section class="domain" data-hue="158" style="--hue:158">
+    <div class="domain-h">
+      <span class="swatch"></span>
+      <h2>Customers &amp; CRM</h2>
+      <span class="dcount">9 tables · 4 live</span>
+    </div>
+    <div class="grid"><article class="card hub" id="t-customers" data-table="customers" data-refs="organizations" tabindex="0">
+    <header class="card-h">
+      <h3>customers<span class="hub-dot" title="hub table"></span></h3>
+      <span class="rows " title="2,241 rows (dev)">2.2k</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col"><span class="cn">nameEncrypted</span></li><li class="col"><span class="cn">phoneEncrypted</span></li><li class="col"><span class="cn">emailEncrypted</span></li><li class="col"><span class="cn">addressEncrypted</span></li><li class="col"><span class="cn">emailHash</span></li><li class="col more">+19 more</li></ul>
+    <footer class="in">14 tables reference this</footer>
+  </article>
+<article class="card" id="t-customer_equipment" data-table="customer_equipment" data-refs="customers organizations" tabindex="0">
+    <header class="card-h">
+      <h3>customer_equipment</h3>
+      <span class="rows " title="4 rows (dev)">4</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">customerId</span><span class="ref">→ customers</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col"><span class="cn">equipmentType</span></li><li class="col"><span class="cn">make</span></li><li class="col"><span class="cn">model</span></li><li class="col"><span class="cn">serialNumber</span></li><li class="col"><span class="cn">installDate</span></li><li class="col more">+13 more</li></ul>
+    <footer class="in">2 tables reference this</footer>
+  </article>
+<article class="card" id="t-customer_notes" data-table="customer_notes" data-refs="customers organizations users" tabindex="0">
+    <header class="card-h">
+      <h3>customer_notes</h3>
+      <span class="rows " title="8 rows (dev)">8</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">customerId</span><span class="ref">→ customers</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col fk"><span class="cn">authorId</span><span class="ref">→ users</span></li><li class="col"><span class="cn">content</span></li><li class="col"><span class="cn">noteType</span></li><li class="col"><span class="cn">createdAt</span></li><li class="col"><span class="cn">fieldpulseCommentId</span></li></ul>
+    
+  </article>
+<article class="card empty" id="t-follow_ups" data-table="follow_ups" data-refs="customers organizations users" tabindex="0">
+    <header class="card-h">
+      <h3>follow_ups</h3>
+      <span class="rows z" title="0 rows (dev)">empty</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">customerId</span><span class="ref">→ customers</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col fk"><span class="cn">assignedTo</span><span class="ref">→ users</span></li><li class="col"><span class="cn">reason</span></li><li class="col"><span class="cn">dueDate</span></li><li class="col"><span class="cn">completedAt</span></li><li class="col"><span class="cn">status</span></li><li class="col"><span class="cn">createdAt</span></li></ul>
+    
+  </article>
+<article class="card empty" id="t-service_history" data-table="service_history" data-refs="customers organizations customer_equipment" tabindex="0">
+    <header class="card-h">
+      <h3>service_history</h3>
+      <span class="rows z" title="0 rows (dev)">empty</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">customerId</span><span class="ref">→ customers</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col fk"><span class="cn">equipmentId</span><span class="ref">→ customer_equipment</span></li><li class="col"><span class="cn">serviceRequestId</span></li><li class="col"><span class="cn">workPerformed</span></li><li class="col"><span class="cn">partsUsed</span></li><li class="col"><span class="cn">cost</span></li><li class="col"><span class="cn">technicianNotes</span></li><li class="col more">+3 more</li></ul>
+    
+  </article>
+<article class="card empty" id="t-customer_locations" data-table="customer_locations" data-refs="organizations customers" tabindex="0">
+    <header class="card-h">
+      <h3>customer_locations</h3>
+      <span class="rows z" title="0 rows (dev)">empty</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col fk"><span class="cn">customerId</span><span class="ref">→ customers</span></li><li class="col"><span class="cn">addressEncrypted</span></li><li class="col"><span class="cn">addressHash</span></li><li class="col"><span class="cn">label</span></li><li class="col"><span class="cn">zone</span></li><li class="col"><span class="cn">propertyType</span></li><li class="col more">+5 more</li></ul>
+    
+  </article>
+<article class="card empty" id="t-customer_threads" data-table="customer_threads" data-refs="organizations customers" tabindex="0">
+    <header class="card-h">
+      <h3>customer_threads</h3>
+      <span class="rows z" title="0 rows (dev)">empty</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col fk"><span class="cn">customerId</span><span class="ref">→ customers</span></li><li class="col"><span class="cn">lastChannel</span></li><li class="col"><span class="cn">lastEventAt</span></li><li class="col"><span class="cn">openEstimateCount</span></li><li class="col"><span class="cn">status</span></li><li class="col"><span class="cn">createdAt</span></li><li class="col more">+1 more</li></ul>
+    <footer class="in">1 table reference this</footer>
+  </article>
+<article class="card empty" id="t-customer_events" data-table="customer_events" data-refs="organizations customers customer_threads" tabindex="0">
+    <header class="card-h">
+      <h3>customer_events</h3>
+      <span class="rows z" title="0 rows (dev)">empty</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col fk"><span class="cn">customerId</span><span class="ref">→ customers</span></li><li class="col fk"><span class="cn">threadId</span><span class="ref">→ customer_threads</span></li><li class="col"><span class="cn">kind</span></li><li class="col"><span class="cn">refId</span></li><li class="col"><span class="cn">jobType</span></li><li class="col"><span class="cn">window</span></li><li class="col"><span class="cn">labelKey</span></li><li class="col more">+1 more</li></ul>
+    
+  </article>
+<article class="card" id="t-outbound_message_ledger" data-table="outbound_message_ledger" data-refs="organizations customers" tabindex="0">
+    <header class="card-h">
+      <h3>outbound_message_ledger</h3>
+      <span class="rows " title="8 rows (dev)">8</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col fk"><span class="cn">customerId</span><span class="ref">→ customers</span></li><li class="col"><span class="cn">triggerType</span></li><li class="col"><span class="cn">periodKey</span></li><li class="col"><span class="cn">createdAt</span></li></ul>
+    
+  </article></div>
+  </section>
+<section class="domain" data-hue="45" style="--hue:45">
+    <div class="domain-h">
+      <span class="swatch"></span>
+      <h2>Estimates, Invoices &amp; Payments</h2>
+      <span class="dcount">9 tables · 8 live</span>
+    </div>
+    <div class="grid"><article class="card" id="t-estimates" data-table="estimates" data-refs="organizations" tabindex="0">
+    <header class="card-h">
+      <h3>estimates</h3>
+      <span class="rows " title="49 rows (dev)">49</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col"><span class="cn">serviceRequestId</span></li><li class="col"><span class="cn">customerId</span></li><li class="col"><span class="cn">status</span></li><li class="col"><span class="cn">totalCents</span></li><li class="col"><span class="cn">approvalTokenHash</span></li><li class="col more">+12 more</li></ul>
+    <footer class="in">1 table reference this</footer>
+  </article>
+<article class="card" id="t-estimate_options" data-table="estimate_options" data-refs="organizations estimates" tabindex="0">
+    <header class="card-h">
+      <h3>estimate_options</h3>
+      <span class="rows " title="53 rows (dev)">53</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col fk"><span class="cn">estimateId</span><span class="ref">→ estimates</span></li><li class="col"><span class="cn">name</span></li><li class="col"><span class="cn">sortOrder</span></li><li class="col"><span class="cn">subtotalCents</span></li><li class="col"><span class="cn">taxCents</span></li><li class="col"><span class="cn">totalCents</span></li></ul>
+    <footer class="in">1 table reference this</footer>
+  </article>
+<article class="card" id="t-estimate_line_items" data-table="estimate_line_items" data-refs="organizations estimate_options" tabindex="0">
+    <header class="card-h">
+      <h3>estimate_line_items</h3>
+      <span class="rows " title="212 rows (dev)">212</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col fk"><span class="cn">optionId</span><span class="ref">→ estimate_options</span></li><li class="col"><span class="cn">pricebookItemId</span></li><li class="col"><span class="cn">name</span></li><li class="col"><span class="cn">quantity</span></li><li class="col"><span class="cn">unitPriceCents</span></li><li class="col"><span class="cn">costCents</span></li><li class="col more">+1 more</li></ul>
+    
+  </article>
+<article class="card hub" id="t-invoices" data-table="invoices" data-refs="organizations" tabindex="0">
+    <header class="card-h">
+      <h3>invoices<span class="hub-dot" title="hub table"></span></h3>
+      <span class="rows " title="2,853 rows (dev)">2.9k</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col"><span class="cn">serviceRequestId</span></li><li class="col"><span class="cn">customerId</span></li><li class="col"><span class="cn">estimateId</span></li><li class="col"><span class="cn">state</span></li><li class="col"><span class="cn">subtotalCents</span></li><li class="col more">+11 more</li></ul>
+    <footer class="in">2 tables reference this</footer>
+  </article>
+<article class="card" id="t-invoice_line_items" data-table="invoice_line_items" data-refs="organizations invoices" tabindex="0">
+    <header class="card-h">
+      <h3>invoice_line_items</h3>
+      <span class="rows " title="10,831 rows (dev)">11k</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col fk"><span class="cn">invoiceId</span><span class="ref">→ invoices</span></li><li class="col"><span class="cn">name</span></li><li class="col"><span class="cn">quantity</span></li><li class="col"><span class="cn">unitPriceCents</span></li><li class="col"><span class="cn">costCents</span></li><li class="col"><span class="cn">lineTotalCents</span></li></ul>
+    
+  </article>
+<article class="card" id="t-payments" data-table="payments" data-refs="organizations invoices" tabindex="0">
+    <header class="card-h">
+      <h3>payments</h3>
+      <span class="rows " title="2,366 rows (dev)">2.4k</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col fk"><span class="cn">invoiceId</span><span class="ref">→ invoices</span></li><li class="col"><span class="cn">provider</span></li><li class="col"><span class="cn">providerPaymentId</span></li><li class="col"><span class="cn">amountCents</span></li><li class="col"><span class="cn">amountRefundedCents</span></li><li class="col"><span class="cn">status</span></li><li class="col more">+4 more</li></ul>
+    <footer class="in">1 table reference this</footer>
+  </article>
+<article class="card" id="t-refunds" data-table="refunds" data-refs="organizations payments" tabindex="0">
+    <header class="card-h">
+      <h3>refunds</h3>
+      <span class="rows " title="1 rows (dev)">1</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col fk"><span class="cn">paymentId</span><span class="ref">→ payments</span></li><li class="col"><span class="cn">amountCents</span></li><li class="col"><span class="cn">reason</span></li><li class="col"><span class="cn">providerRefundId</span></li><li class="col"><span class="cn">createdAt</span></li></ul>
+    
+  </article>
+<article class="card empty" id="t-financing_applications" data-table="financing_applications" data-refs="organizations" tabindex="0">
+    <header class="card-h">
+      <h3>financing_applications</h3>
+      <span class="rows z" title="0 rows (dev)">empty</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col"><span class="cn">customerId</span></li><li class="col"><span class="cn">estimateId</span></li><li class="col"><span class="cn">provider</span></li><li class="col"><span class="cn">providerAppId</span></li><li class="col"><span class="cn">status</span></li><li class="col more">+4 more</li></ul>
+    
+  </article>
+<article class="card" id="t-tax_rates" data-table="tax_rates" data-refs="organizations" tabindex="0">
+    <header class="card-h">
+      <h3>tax_rates</h3>
+      <span class="rows " title="1 rows (dev)">1</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col"><span class="cn">name</span></li><li class="col"><span class="cn">jurisdiction</span></li><li class="col"><span class="cn">rateBps</span></li><li class="col"><span class="cn">isDefault</span></li><li class="col"><span class="cn">active</span></li><li class="col more">+1 more</li></ul>
+    
+  </article></div>
+  </section>
+<section class="domain" data-hue="190" style="--hue:190">
+    <div class="domain-h">
+      <span class="swatch"></span>
+      <h2>Pricebook &amp; Inventory</h2>
+      <span class="dcount">6 tables · 1 live</span>
+    </div>
+    <div class="grid"><article class="card empty" id="t-pricebook_categories" data-table="pricebook_categories" data-refs="organizations" tabindex="0">
+    <header class="card-h">
+      <h3>pricebook_categories</h3>
+      <span class="rows z" title="0 rows (dev)">empty</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col"><span class="cn">parentId</span></li><li class="col"><span class="cn">name</span></li><li class="col"><span class="cn">sortOrder</span></li><li class="col"><span class="cn">active</span></li><li class="col"><span class="cn">createdAt</span></li></ul>
+    
+  </article>
+<article class="card" id="t-pricebook_items" data-table="pricebook_items" data-refs="organizations" tabindex="0">
+    <header class="card-h">
+      <h3>pricebook_items</h3>
+      <span class="rows " title="18 rows (dev)">18</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col"><span class="cn">categoryId</span></li><li class="col"><span class="cn">type</span></li><li class="col"><span class="cn">name</span></li><li class="col"><span class="cn">description</span></li><li class="col"><span class="cn">sku</span></li><li class="col more">+14 more</li></ul>
+    <footer class="in">3 tables reference this</footer>
+  </article>
+<article class="card empty" id="t-pricebook_item_materials" data-table="pricebook_item_materials" data-refs="organizations pricebook_items" tabindex="0">
+    <header class="card-h">
+      <h3>pricebook_item_materials</h3>
+      <span class="rows z" title="0 rows (dev)">empty</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col fk"><span class="cn">itemId</span><span class="ref">→ pricebook_items</span></li><li class="col fk"><span class="cn">materialItemId</span><span class="ref">→ pricebook_items</span></li><li class="col"><span class="cn">quantity</span></li></ul>
+    
+  </article>
+<article class="card empty" id="t-inventory_items" data-table="inventory_items" data-refs="organizations pricebook_items" tabindex="0">
+    <header class="card-h">
+      <h3>inventory_items</h3>
+      <span class="rows z" title="0 rows (dev)">empty</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col fk"><span class="cn">pricebookItemId</span><span class="ref">→ pricebook_items</span></li><li class="col"><span class="cn">quantityOnHand</span></li><li class="col"><span class="cn">reorderPoint</span></li><li class="col"><span class="cn">unitCostCents</span></li><li class="col"><span class="cn">location</span></li><li class="col"><span class="cn">createdAt</span></li><li class="col more">+1 more</li></ul>
+    
+  </article>
+<article class="card empty" id="t-purchase_orders" data-table="purchase_orders" data-refs="organizations" tabindex="0">
+    <header class="card-h">
+      <h3>purchase_orders</h3>
+      <span class="rows z" title="0 rows (dev)">empty</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col"><span class="cn">vendorName</span></li><li class="col"><span class="cn">status</span></li><li class="col"><span class="cn">totalCents</span></li><li class="col"><span class="cn">notes</span></li><li class="col"><span class="cn">orderedAt</span></li><li class="col more">+3 more</li></ul>
+    <footer class="in">1 table reference this</footer>
+  </article>
+<article class="card empty" id="t-po_line_items" data-table="po_line_items" data-refs="organizations purchase_orders" tabindex="0">
+    <header class="card-h">
+      <h3>po_line_items</h3>
+      <span class="rows z" title="0 rows (dev)">empty</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col fk"><span class="cn">purchaseOrderId</span><span class="ref">→ purchase_orders</span></li><li class="col"><span class="cn">pricebookItemId</span></li><li class="col"><span class="cn">description</span></li><li class="col"><span class="cn">quantity</span></li><li class="col"><span class="cn">unitCostCents</span></li><li class="col"><span class="cn">lineTotalCents</span></li></ul>
+    
+  </article></div>
+  </section>
+<section class="domain" data-hue="320" style="--hue:320">
+    <div class="domain-h">
+      <span class="swatch"></span>
+      <h2>Memberships</h2>
+      <span class="dcount">3 tables · 3 live</span>
+    </div>
+    <div class="grid"><article class="card" id="t-membership_plans" data-table="membership_plans" data-refs="organizations" tabindex="0">
+    <header class="card-h">
+      <h3>membership_plans</h3>
+      <span class="rows " title="1 rows (dev)">1</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col"><span class="cn">name</span></li><li class="col"><span class="cn">description</span></li><li class="col"><span class="cn">priceCents</span></li><li class="col"><span class="cn">billingPeriod</span></li><li class="col"><span class="cn">visitsPerYear</span></li><li class="col more">+4 more</li></ul>
+    <footer class="in">1 table reference this</footer>
+  </article>
+<article class="card" id="t-customer_memberships" data-table="customer_memberships" data-refs="organizations customers membership_plans" tabindex="0">
+    <header class="card-h">
+      <h3>customer_memberships</h3>
+      <span class="rows " title="1 rows (dev)">1</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col fk"><span class="cn">customerId</span><span class="ref">→ customers</span></li><li class="col fk"><span class="cn">planId</span><span class="ref">→ membership_plans</span></li><li class="col"><span class="cn">status</span></li><li class="col"><span class="cn">startedAt</span></li><li class="col"><span class="cn">currentPeriodEnd</span></li><li class="col"><span class="cn">cancelledAt</span></li><li class="col"><span class="cn">providerSubscriptionId</span></li><li class="col more">+2 more</li></ul>
+    <footer class="in">1 table reference this</footer>
+  </article>
+<article class="card" id="t-membership_visits" data-table="membership_visits" data-refs="organizations customer_memberships" tabindex="0">
+    <header class="card-h">
+      <h3>membership_visits</h3>
+      <span class="rows " title="1 rows (dev)">1</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col fk"><span class="cn">customerMembershipId</span><span class="ref">→ customer_memberships</span></li><li class="col"><span class="cn">dueDate</span></li><li class="col"><span class="cn">periodKey</span></li><li class="col"><span class="cn">status</span></li><li class="col"><span class="cn">generatedServiceRequestId</span></li><li class="col"><span class="cn">createdAt</span></li><li class="col more">+1 more</li></ul>
+    
+  </article></div>
+  </section>
+<section class="domain" data-hue="340" style="--hue:340">
+    <div class="domain-h">
+      <span class="swatch"></span>
+      <h2>Communications</h2>
+      <span class="dcount">4 tables · 2 live</span>
+    </div>
+    <div class="grid"><article class="card" id="t-communication_templates" data-table="communication_templates" data-refs="organizations" tabindex="0">
+    <header class="card-h">
+      <h3>communication_templates</h3>
+      <span class="rows " title="13 rows (dev)">13</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col"><span class="cn">description</span></li><li class="col"><span class="cn">triggerType</span></li><li class="col"><span class="cn">templateType</span></li><li class="col"><span class="cn">subjectTemplate</span></li><li class="col"><span class="cn">bodyTemplate</span></li><li class="col more">+5 more</li></ul>
+    <footer class="in">1 table reference this</footer>
+  </article>
+<article class="card" id="t-communication_jobs" data-table="communication_jobs" data-refs="organizations communication_templates customers" tabindex="0">
+    <header class="card-h">
+      <h3>communication_jobs</h3>
+      <span class="rows " title="4 rows (dev)">4</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col fk"><span class="cn">templateId</span><span class="ref">→ communication_templates</span></li><li class="col fk"><span class="cn">customerId</span><span class="ref">→ customers</span></li><li class="col"><span class="cn">triggerType</span></li><li class="col"><span class="cn">channel</span></li><li class="col"><span class="cn">status</span></li><li class="col"><span class="cn">priority</span></li><li class="col"><span class="cn">recipientPhoneEncrypted</span></li><li class="col more">+11 more</li></ul>
+    
+  </article>
+<article class="card empty" id="t-communication_preferences" data-table="communication_preferences" data-refs="organizations" tabindex="0">
+    <header class="card-h">
+      <h3>communication_preferences</h3>
+      <span class="rows z" title="0 rows (dev)">empty</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col"><span class="cn">customerId</span></li><li class="col"><span class="cn">smsEnabled</span></li><li class="col"><span class="cn">emailEnabled</span></li><li class="col"><span class="cn">voiceEnabled</span></li><li class="col"><span class="cn">appointmentReminders</span></li><li class="col more">+6 more</li></ul>
+    
+  </article>
+<article class="card empty" id="t-review_requests" data-table="review_requests" data-refs="organizations service_requests customers" tabindex="0">
+    <header class="card-h">
+      <h3>review_requests</h3>
+      <span class="rows z" title="0 rows (dev)">empty</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col fk"><span class="cn">serviceRequestId</span><span class="ref">→ service_requests</span></li><li class="col fk"><span class="cn">customerId</span><span class="ref">→ customers</span></li><li class="col"><span class="cn">status</span></li><li class="col"><span class="cn">reviewTokenHash</span></li><li class="col"><span class="cn">rating</span></li><li class="col"><span class="cn">feedback</span></li><li class="col"><span class="cn">publicClicked</span></li><li class="col more">+3 more</li></ul>
+    
+  </article></div>
+  </section>
+<section class="domain" data-hue="95" style="--hue:95">
+    <div class="domain-h">
+      <span class="swatch"></span>
+      <h2>Custom Fields</h2>
+      <span class="dcount">2 tables · 0 live</span>
+    </div>
+    <div class="grid"><article class="card empty" id="t-custom_field_definitions" data-table="custom_field_definitions" data-refs="organizations" tabindex="0">
+    <header class="card-h">
+      <h3>custom_field_definitions</h3>
+      <span class="rows z" title="0 rows (dev)">empty</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col"><span class="cn">description</span></li><li class="col"><span class="cn">entityType</span></li><li class="col"><span class="cn">fieldType</span></li><li class="col"><span class="cn">options</span></li><li class="col"><span class="cn">required</span></li><li class="col more">+7 more</li></ul>
+    <footer class="in">1 table reference this</footer>
+  </article>
+<article class="card empty" id="t-custom_field_values" data-table="custom_field_values" data-refs="organizations custom_field_definitions" tabindex="0">
+    <header class="card-h">
+      <h3>custom_field_values</h3>
+      <span class="rows z" title="0 rows (dev)">empty</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col fk"><span class="cn">fieldDefinitionId</span><span class="ref">→ custom_field_definitions</span></li><li class="col"><span class="cn">entityType</span></li><li class="col"><span class="cn">entityId</span></li><li class="col"><span class="cn">value</span></li><li class="col"><span class="cn">createdAt</span></li><li class="col"><span class="cn">updatedAt</span></li></ul>
+    
+  </article></div>
+  </section>
+<section class="domain" data-hue="235" style="--hue:235">
+    <div class="domain-h">
+      <span class="swatch"></span>
+      <h2>Integrations &amp; Webhooks</h2>
+      <span class="dcount">6 tables · 2 live</span>
+    </div>
+    <div class="grid"><article class="card empty" id="t-google_calendar_connections" data-table="google_calendar_connections" data-refs="organizations" tabindex="0">
+    <header class="card-h">
+      <h3>google_calendar_connections</h3>
+      <span class="rows z" title="0 rows (dev)">empty</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col"><span class="cn">calendarId</span></li><li class="col"><span class="cn">refreshTokenEncrypted</span></li><li class="col"><span class="cn">accessToken</span></li><li class="col"><span class="cn">accessTokenExpiresAt</span></li><li class="col"><span class="cn">connected</span></li><li class="col more">+2 more</li></ul>
+    
+  </article>
+<article class="card empty" id="t-housecall_pro_connections" data-table="housecall_pro_connections" data-refs="organizations" tabindex="0">
+    <header class="card-h">
+      <h3>housecall_pro_connections</h3>
+      <span class="rows z" title="0 rows (dev)">empty</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col"><span class="cn">apiKeyEncrypted</span></li><li class="col"><span class="cn">webhookSecretEncrypted</span></li><li class="col"><span class="cn">accountInfo</span></li><li class="col"><span class="cn">connected</span></li><li class="col"><span class="cn">createdAt</span></li><li class="col more">+1 more</li></ul>
+    
+  </article>
+<article class="card" id="t-fieldpulse_connections" data-table="fieldpulse_connections" data-refs="organizations" tabindex="0">
+    <header class="card-h">
+      <h3>fieldpulse_connections</h3>
+      <span class="rows " title="1 rows (dev)">1</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col"><span class="cn">apiKeyEncrypted</span></li><li class="col"><span class="cn">webhookSecretEncrypted</span></li><li class="col"><span class="cn">accountInfo</span></li><li class="col"><span class="cn">connected</span></li><li class="col"><span class="cn">lastAvailabilitySyncAt</span></li><li class="col more">+4 more</li></ul>
+    
+  </article>
+<article class="card empty" id="t-fieldpulse_webhook_events" data-table="fieldpulse_webhook_events" data-refs="organizations" tabindex="0">
+    <header class="card-h">
+      <h3>fieldpulse_webhook_events</h3>
+      <span class="rows z" title="0 rows (dev)">empty</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col"><span class="cn">eventId</span></li><li class="col"><span class="cn">eventType</span></li><li class="col"><span class="cn">fieldpulseJobId</span></li><li class="col"><span class="cn">createdAt</span></li></ul>
+    
+  </article>
+<article class="card empty" id="t-hcp_webhook_events" data-table="hcp_webhook_events" data-refs="organizations" tabindex="0">
+    <header class="card-h">
+      <h3>hcp_webhook_events</h3>
+      <span class="rows z" title="0 rows (dev)">empty</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col"><span class="cn">eventId</span></li><li class="col"><span class="cn">eventType</span></li><li class="col"><span class="cn">hcpJobId</span></li><li class="col"><span class="cn">createdAt</span></li></ul>
+    
+  </article>
+<article class="card" id="t-fp_import_runs" data-table="fp_import_runs" data-refs="organizations" tabindex="0">
+    <header class="card-h">
+      <h3>fp_import_runs</h3>
+      <span class="rows " title="33 rows (dev)">33</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col"><span class="cn">phase</span></li><li class="col"><span class="cn">status</span></li><li class="col"><span class="cn">counts</span></li><li class="col"><span class="cn">error</span></li><li class="col"><span class="cn">startedAt</span></li><li class="col more">+1 more</li></ul>
+    
+  </article></div>
+  </section>
+<section class="domain" data-hue="12" style="--hue:12">
+    <div class="domain-h">
+      <span class="swatch"></span>
+      <h2>Attachments</h2>
+      <span class="dcount">1 tables · 0 live</span>
+    </div>
+    <div class="grid"><article class="card empty" id="t-attachments" data-table="attachments" data-refs="organizations customer_sessions messages customer_equipment customers" tabindex="0">
+    <header class="card-h">
+      <h3>attachments</h3>
+      <span class="rows z" title="0 rows (dev)">empty</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col fk"><span class="cn">sessionId</span><span class="ref">→ customer_sessions</span></li><li class="col fk"><span class="cn">messageId</span><span class="ref">→ messages</span></li><li class="col fk"><span class="cn">equipmentId</span><span class="ref">→ customer_equipment</span></li><li class="col fk"><span class="cn">customerId</span><span class="ref">→ customers</span></li><li class="col"><span class="cn">serviceRequestId</span></li><li class="col"><span class="cn">filename</span></li><li class="col"><span class="cn">mimeType</span></li><li class="col"><span class="cn">size</span></li><li class="col"><span class="cn">storageKey</span></li><li class="col more">+1 more</li></ul>
+    
+  </article></div>
+  </section>
+<section class="domain" data-hue="175" style="--hue:175">
+    <div class="domain-h">
+      <span class="swatch"></span>
+      <h2>Analytics &amp; Forecasting</h2>
+      <span class="dcount">4 tables · 0 live</span>
+    </div>
+    <div class="grid"><article class="card empty" id="t-demand_daily" data-table="demand_daily" data-refs="organizations" tabindex="0">
+    <header class="card-h">
+      <h3>demand_daily</h3>
+      <span class="rows z" title="0 rows (dev)">empty</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col"><span class="cn">day</span></li><li class="col"><span class="cn">jobType</span></li><li class="col"><span class="cn">bookings</span></li><li class="col"><span class="cn">sessions</span></li><li class="col"><span class="cn">booked</span></li></ul>
+    
+  </article>
+<article class="card empty" id="t-revenue_daily" data-table="revenue_daily" data-refs="organizations" tabindex="0">
+    <header class="card-h">
+      <h3>revenue_daily</h3>
+      <span class="rows z" title="0 rows (dev)">empty</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col"><span class="cn">day</span></li><li class="col"><span class="cn">basis</span></li><li class="col"><span class="cn">collectedCents</span></li><li class="col"><span class="cn">invoicedCents</span></li><li class="col"><span class="cn">refundedCents</span></li></ul>
+    
+  </article>
+<article class="card empty" id="t-forecast_snapshots" data-table="forecast_snapshots" data-refs="organizations" tabindex="0">
+    <header class="card-h">
+      <h3>forecast_snapshots</h3>
+      <span class="rows z" title="0 rows (dev)">empty</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col"><span class="cn">kind</span></li><li class="col"><span class="cn">model</span></li><li class="col"><span class="cn">horizonDays</span></li><li class="col"><span class="cn">segment</span></li><li class="col"><span class="cn">generatedAt</span></li><li class="col more">+1 more</li></ul>
+    
+  </article>
+<article class="card empty" id="t-forecast_accuracy" data-table="forecast_accuracy" data-refs="organizations" tabindex="0">
+    <header class="card-h">
+      <h3>forecast_accuracy</h3>
+      <span class="rows z" title="0 rows (dev)">empty</span>
+    </header>
+    <ul class="cols"><li class="col pk"><span class="cn">id</span><span class="ct">uuid</span></li><li class="col fk"><span class="cn">organizationId</span><span class="ref">→ organizations</span></li><li class="col"><span class="cn">kind</span></li><li class="col"><span class="cn">model</span></li><li class="col"><span class="cn">segment</span></li><li class="col"><span class="cn">horizonDays</span></li><li class="col"><span class="cn">forDay</span></li><li class="col more">+3 more</li></ul>
+    
+  </article></div>
+  </section>
+
+  <footer class="pg">
+    <span>Generated from <code>src/lib/db/schema.ts</code> · 65 tables, 115 FKs</span>
+    <span>AI HVAC Agent · <a href="/docs.html">Documentation</a> · <a href="https://github.com/Sizbei/ai-hvac-agent">GitHub</a></span>
+  </footer>
+</div>
+<script>
+(function(){
+  var body=document.body, cards=[].slice.call(document.querySelectorAll('.card'));
+  var byName={}; cards.forEach(function(c){byName[c.dataset.table]=c;});
+  function focus(card){
+    body.classList.add('focusing');
+    card.classList.add('rel-on','rel-src');
+    (card.dataset.refs||'').split(/\s+/).filter(Boolean).forEach(function(r){ if(byName[r]) byName[r].classList.add('rel-on'); });
+    // also light tables that reference this one
+    cards.forEach(function(c){ if((' '+c.dataset.refs+' ').indexOf(' '+card.dataset.table+' ')>=0) c.classList.add('rel-on'); });
+  }
+  function clear(){ body.classList.remove('focusing'); cards.forEach(function(c){c.classList.remove('rel-on','rel-src');}); }
+  cards.forEach(function(c){
+    c.addEventListener('mouseenter',function(){focus(c);});
+    c.addEventListener('mouseleave',clear);
+    c.addEventListener('focus',function(){focus(c);});
+    c.addEventListener('blur',clear);
+  });
+})();
+</script>
+</body>
+</html>

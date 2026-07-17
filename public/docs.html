@@ -741,7 +741,7 @@ npm run dev           # start at http://localhost:3000</code></pre>
     └── admin/                    # CRM queries & types</code></pre>
 
       <h3 id="data-model">Data model</h3>
-      <p>Defined with Drizzle in <code>src/lib/db/schema.ts</code>. Every table carries an <code>organization_id</code> for multi-tenancy.</p>
+      <p>Defined with Drizzle in <code>src/lib/db/schema.ts</code>. Every table carries an <code>organization_id</code> for multi-tenancy. The <strong>core</strong> tables are summarised below; for the full picture — all 65 tables grouped by domain, with foreign keys and live row counts — see the interactive <a href="/schema.html">database schema diagram</a>.</p>
       <table>
         <thead><tr><th>Table</th><th>Purpose</th></tr></thead>
         <tbody>
