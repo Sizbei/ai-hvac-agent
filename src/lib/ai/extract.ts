@@ -324,13 +324,46 @@ export async function extractServiceRequest(
     }
   }
 
-  // Step 4: Validate extraction output per SC-06
+  // Step 4: Validate extraction output per SC-06, and ENFORCE the verdict.
+  // Before this, validOutput was computed but every caller merged the extracted
+  // fields into session metadata regardless — so an injection smuggled into a
+  // free-text field (name/address/description/notes) persisted and re-entered the
+  // system prompt on later turns. Neutralize the free-text fields when the output
+  // is flagged; the enum classification (issueType/urgency) can't carry injection
+  // and is kept.
   const validOutput = validateExtractionOutput(extraction);
+  const safeExtraction = neutralizeUnsafeExtraction(extraction, validOutput);
 
   return {
-    extraction,
+    extraction: safeExtraction,
     tokensUsed,
     guardrailResult,
     validOutput,
+  };
+}
+
+/**
+ * Drop the FREE-TEXT fields of an extraction when the injection-scan verdict is
+ * unsafe, so poisoned values never leave the extractor and reach session
+ * metadata / the prompt. Enum + boolean fields (issueType, urgency,
+ * isHvacRelated, and the enum intake fields) can't carry injection and are
+ * preserved so classification still works. Pure — returns the same object
+ * unchanged when `validOutput` is true.
+ */
+export function neutralizeUnsafeExtraction(
+  extraction: ExtractionResult,
+  validOutput: boolean,
+): ExtractionResult {
+  if (validOutput) return extraction;
+  return {
+    ...extraction,
+    address: null,
+    customerName: null,
+    customerPhone: null,
+    customerEmail: null,
+    description: '',
+    equipmentBrand: null,
+    accessNotes: null,
+    problemDuration: null,
   };
 }
