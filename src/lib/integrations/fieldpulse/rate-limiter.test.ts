@@ -366,6 +366,25 @@ describe("waitForRateLimit — Stage 4 robustness", () => {
     expect(delay).toBeGreaterThan(0);
   });
 
+  it("ACQUIRES a token before returning when initially blocked (no stampede)", async () => {
+    const limiter = new RateLimiter();
+    // Drain the bucket so the first checkLimit inside waitForRateLimit blocks.
+    for (let i = 0; i < 10; i++) {
+      limiter.checkLimit("stampede-client");
+    }
+    const spy = vi.spyOn(limiter, "checkLimit");
+    const promise = waitForRateLimit("stampede-client", limiter);
+    await vi.runAllTimersAsync();
+    await promise;
+    // Old behavior checked once (blocked), slept, and returned WITHOUT
+    // consuming a token — so a burst of blocked workers all woke and stampeded
+    // past the limit. The wait must loop until it actually acquires a token, so
+    // the LAST checkLimit it made must be allowed.
+    const results = spy.mock.results.map((r) => r.value as { allowed: boolean });
+    expect(results.length).toBeGreaterThanOrEqual(2);
+    expect(results[results.length - 1].allowed).toBe(true);
+  });
+
   it("evicts idle buckets on the hot path (bounded memory)", async () => {
     const limiter = new RateLimiter();
     limiter.checkLimit("idle-1");

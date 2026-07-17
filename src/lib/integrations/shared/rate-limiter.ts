@@ -240,9 +240,23 @@ export const fieldpulseRateLimiter = new RateLimiter();
  */
 export const housecallRateLimiter = new RateLimiter();
 
+// Backstop against an unbounded wait loop. Refill is always positive
+// (sustainedRps > 0, rateModifier floor 0.25), so a blocked caller acquires a
+// token within a couple of iterations in practice; this cap only guards a
+// pathological clock/config from hanging the loop forever.
+const MAX_WAIT_ATTEMPTS = 64;
+
 /**
- * Wait function that respects rate limiter suggestions.
- * Returns the actual delay applied.
+ * Wait until the caller may proceed, CONSUMING one token before returning.
+ * Returns the total delay applied.
+ *
+ * checkLimit only decrements a token when it returns `allowed`. The old code
+ * checked ONCE and, when blocked, merely slept and returned — without ever
+ * acquiring a token. A burst of blocked workers therefore all slept for the
+ * same refill window, woke together, and stampeded past the limit (each made
+ * its request having consumed nothing). Looping until `allowed` fixes that:
+ * exactly one token is consumed per call, so concurrent blocked callers
+ * serialize as tokens refill.
  */
 export async function waitForRateLimit(
   clientId: string,
@@ -253,23 +267,32 @@ export async function waitForRateLimit(
   // called). Cheap: bucket count ~= number of active orgs.
   limiter.cleanup();
 
-  const info = limiter.checkLimit(clientId);
+  let totalDelay = 0;
+  for (let attempt = 0; attempt < MAX_WAIT_ATTEMPTS; attempt++) {
+    const info = limiter.checkLimit(clientId);
 
-  // Only wait when actually constrained. In the "ok" state we do NOT impose the
-  // nominal 1000/rps spacing (which was ~500ms/request at defaults and made
-  // bulk operations dozens of times slower than intended). The token bucket
-  // already enforces the sustained rate by transitioning to blocked/throttled.
-  let delay = 0;
-  if (info.state === "blocked") {
-    delay = info.resetMs + 100; // buffer past the refill
-  } else if (info.state === "throttled") {
-    delay = info.suggestedDelayMs;
-  }
+    if (info.allowed) {
+      // Token acquired. In the "ok" state we do NOT impose the nominal 1000/rps
+      // spacing (which was ~500ms/request at defaults and made bulk operations
+      // dozens of times slower than intended) — the bucket already enforces the
+      // sustained rate. In the "throttled" state (after a 429 backoff) honor the
+      // suggested spacing so we ease off the upstream.
+      if (info.state === "throttled" && info.suggestedDelayMs > 0) {
+        await sleep(info.suggestedDelayMs);
+        totalDelay += info.suggestedDelayMs;
+      }
+      return totalDelay;
+    }
 
-  if (delay > 0) {
+    // Blocked: no token was consumed. Wait for a refill, then re-check and try
+    // to acquire again rather than proceeding token-less.
+    const delay = info.resetMs + 100; // buffer past the refill
     await sleep(delay);
+    totalDelay += delay;
   }
-  return delay;
+
+  // Backstop hit (should be unreachable): proceed rather than hang.
+  return totalDelay;
 }
 
 /**
