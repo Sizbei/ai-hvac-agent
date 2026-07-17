@@ -22,6 +22,18 @@ Requires valid organization API key via `?key=` parameter.
 
 ---
 
+## Conventions
+
+These behaviors are standardized across endpoints (individual endpoints list the codes they actually return):
+
+- **Request bodies** — mutation endpoints parse the body via a shared helper that returns `400` on malformed JSON before any handler logic runs.
+- **Path ids** — `[id]` route params are validated as UUIDs; a non-UUID id returns `404`/`400` rather than reaching the database.
+- **Duplicate unique keys** — writes that violate a unique constraint return `409` (not `500`).
+- **Rate limiting** — `429` once the per-IP sliding window is exceeded. The throttle key is derived from `clientIp()`, which prefers the platform-set `x-real-ip` over the spoofable `x-forwarded-for`.
+- **Admin auth** — a missing/expired admin session returns `401`; browser clients are redirected to `/admin/login`.
+
+---
+
 ## Chat Endpoints
 
 ### POST /api/chat
