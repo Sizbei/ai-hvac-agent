@@ -82,7 +82,13 @@ export function LoginForm({ mode, googleEnabled }: LoginFormProps) {
           <>
             <GoogleSignInButton prominent />
             <p className="text-center text-xs text-muted-foreground">
-              Use the Google account your administrator invited.
+              Use the Google account your administrator invited.{' '}
+              <Link
+                href="/admin/forgot-password"
+                className="font-medium text-foreground underline underline-offset-4 hover:no-underline"
+              >
+                Trouble signing in?
+              </Link>
             </p>
           </>
         ) : (
