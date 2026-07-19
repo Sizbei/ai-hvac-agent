@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { ConversationSummary } from '@/lib/admin/conversation-types';
+import { createSwrCache } from '@/lib/admin/swr-cache';
 import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 
 interface UseAdminConversationsOptions {
@@ -20,30 +21,53 @@ interface UseAdminConversationsResult {
   readonly refetch: () => Promise<void>;
 }
 
+interface ConversationsPayload {
+  readonly conversations: readonly ConversationSummary[];
+  readonly total: number;
+}
+
+const conversationsCache = createSwrCache<ConversationsPayload>(30_000); // 30s TTL
+
 /**
  * Custom hook for fetching and polling the admin conversation list.
  * Polls every 10 seconds. Uses latest-wins (monotonic run counter) so a filter
  * change mid-flight supersedes the in-flight poll — the stale response is
- * discarded, not rendered. "Clear error only on success" is preserved.
+ * discarded, not rendered.
+ * Uses a module-level SWR cache: isLoading is only true when no data exists yet,
+ * so background polls and filter-refetches keep existing rows visible (dimmed).
  */
 export function useAdminConversations(
   options: UseAdminConversationsOptions = {},
 ): UseAdminConversationsResult {
   const { status, channel, search, page = 1, limit = 20 } = options;
 
-  const [conversations, setConversations] = useState<readonly ConversationSummary[]>([]);
-  const [total, setTotal] = useState(0);
-  const [isLoading, setIsLoading] = useState(true);
+  const key = `conversations:${status ?? ''}:${channel ?? ''}:${search ?? ''}:${page}:${limit}`;
+
+  const [conversations, setConversations] = useState<readonly ConversationSummary[]>(
+    () => conversationsCache.get(key)?.data.conversations ?? [],
+  );
+  const [total, setTotal] = useState(() => conversationsCache.get(key)?.data.total ?? 0);
+  const [isLoading, setIsLoading] = useState(() => conversationsCache.get(key) === null);
   const [error, setError] = useState<string | null>(null);
 
   // Latest-wins: each call increments this counter; a response only applies if
   // its captured run id still matches the current value when it resolves.
   const runRef = useRef(0);
-  const isMountedRef = useRef(true);
 
-  const fetchConversations = useCallback(async (): Promise<void> => {
+  const fetchConversations = useCallback(async ({ bust = false }: { bust?: boolean } = {}): Promise<void> => {
+    if (bust) conversationsCache.invalidate(key);
+
     const run = ++runRef.current;
-    if (isMountedRef.current) setIsLoading(true);
+
+    const cached = conversationsCache.get(key);
+    const hasCachedData = cached !== null;
+    if (hasCachedData) {
+      setConversations(cached.data.conversations);
+      setTotal(cached.data.total);
+    } else {
+      // Only show the loading skeleton when there's nothing to display yet
+      setIsLoading(true);
+    }
 
     try {
       const params = new URLSearchParams();
@@ -56,12 +80,12 @@ export function useAdminConversations(
       const url = `/api/admin/conversations?${params.toString()}`;
       const res = await adminFetch(url);
 
-      if (!isMountedRef.current || run !== runRef.current) return;
+      if (run !== runRef.current) return;
       if (!res.ok) {
         const body = await res.json().catch(() => ({
           error: { message: 'Failed to fetch conversations' },
         }));
-        if (isMountedRef.current && run === runRef.current) {
+        if (run === runRef.current && !hasCachedData) {
           setError(body?.error?.message ?? 'Failed to fetch conversations');
         }
         return;
@@ -77,31 +101,33 @@ export function useAdminConversations(
         };
       };
 
-      if (isMountedRef.current && run === runRef.current && body.success) {
+      if (run === runRef.current && body.success) {
         setConversations(body.data.conversations);
         setTotal(body.data.total);
         setError(null);
+        conversationsCache.set(key, {
+          conversations: body.data.conversations,
+          total: body.data.total,
+        });
       }
     } catch (err) {
       if (err instanceof AdminAuthRedirectError) return;
-      if (isMountedRef.current && run === runRef.current) {
+      if (run === runRef.current && !hasCachedData) {
         setError('Could not connect to server. Please try again.');
       }
     } finally {
-      if (isMountedRef.current && run === runRef.current) setIsLoading(false);
+      if (run === runRef.current) setIsLoading(false);
     }
-  }, [status, channel, search, page, limit]);
+  }, [key, status, channel, search, page, limit]);
 
-  // Fetch on mount and when options change
+  // Idiomatic data fetch: setState runs only AFTER the awaited fetch resolves,
+  // not synchronously during the effect, so this is not a render loop.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
-    isMountedRef.current = true;
     void fetchConversations();
-    return () => {
-      isMountedRef.current = false;
-    };
   }, [fetchConversations]);
 
-  // Poll every 10 seconds
+  // Poll every 10 seconds (background refresh — never shows skeleton when data exists)
   useEffect(() => {
     const intervalId = setInterval(() => {
       void fetchConversations();
@@ -110,5 +136,7 @@ export function useAdminConversations(
     return () => clearInterval(intervalId);
   }, [fetchConversations]);
 
-  return { conversations, total, isLoading, error, refetch: fetchConversations };
+  const refetch = useCallback(() => fetchConversations({ bust: true }), [fetchConversations]);
+
+  return { conversations, total, isLoading, error, refetch };
 }

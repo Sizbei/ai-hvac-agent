@@ -13,6 +13,7 @@ import { UrgencyBadge } from '@/components/admin/urgency-badge';
 import { StatusBadge } from '@/components/admin/status-badge';
 import type { AdminRequest } from '@/lib/admin/types';
 import { SyncPill } from '@/components/admin/sync-pill';
+import { cn } from '@/lib/utils';
 
 interface RequestTableProps {
   readonly requests: readonly AdminRequest[];
@@ -35,82 +36,94 @@ const SKELETON_ROWS = 5;
 const COLUMN_COUNT = 7;
 
 export function RequestTable({ requests, isLoading, onRowClick }: RequestTableProps) {
+  // When we have rows but are revalidating, dim existing rows instead of
+  // flashing a skeleton — this is the stale-while-revalidate pattern.
+  const showSkeleton = isLoading && requests.length === 0;
+  const showDimmed = isLoading && requests.length > 0;
+
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Reference #</TableHead>
-          <TableHead>Customer</TableHead>
-          <TableHead>Issue</TableHead>
-          <TableHead>Urgency</TableHead>
-          <TableHead>Status</TableHead>
-          <TableHead>Date</TableHead>
-          <TableHead>Assigned To</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {isLoading
-          ? Array.from({ length: SKELETON_ROWS }, (_, i) => (
-              <TableRow key={`skeleton-${i}`}>
-                {Array.from({ length: COLUMN_COUNT }, (__, j) => (
-                  <TableCell key={`skeleton-cell-${i}-${j}`}>
-                    <Skeleton className="h-4 w-full" />
-                  </TableCell>
+    <div
+      className={cn(
+        'transition-opacity duration-150',
+        showDimmed && 'opacity-50 pointer-events-none',
+      )}
+    >
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Reference #</TableHead>
+            <TableHead>Customer</TableHead>
+            <TableHead>Issue</TableHead>
+            <TableHead>Urgency</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead>Date</TableHead>
+            <TableHead>Assigned To</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {showSkeleton
+            ? Array.from({ length: SKELETON_ROWS }, (_, i) => (
+                <TableRow key={`skeleton-${i}`}>
+                  {Array.from({ length: COLUMN_COUNT }, (__, j) => (
+                    <TableCell key={`skeleton-cell-${i}-${j}`}>
+                      <Skeleton className="h-4 w-full" />
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))
+            : requests.length === 0
+              ? (
+                  <TableRow>
+                    <TableCell colSpan={COLUMN_COUNT} className="text-center py-8 text-muted-foreground">
+                      No requests found
+                    </TableCell>
+                  </TableRow>
+                )
+              : requests.map((request) => (
+                  <TableRow
+                    key={request.id}
+                    className="cursor-pointer"
+                    tabIndex={0}
+                    onClick={() => onRowClick(request)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        onRowClick(request);
+                      }
+                    }}
+                  >
+                    <TableCell className="font-mono text-xs">
+                      {request.referenceNumber}
+                    </TableCell>
+                    <TableCell>{request.customerName ?? 'Unknown'}</TableCell>
+                    <TableCell>{formatIssueType(request.issueType)}</TableCell>
+                    <TableCell>
+                      <span className="inline-flex flex-wrap items-center gap-1">
+                        <UrgencyBadge urgency={request.urgency} />
+                        {request.isAfterHours && (
+                          <span
+                            title="Arrived after hours"
+                            className="inline-flex items-center rounded-full border border-amber-300 bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800"
+                          >
+                            After-hrs
+                          </span>
+                        )}
+                        {request.syncedSource && (
+                          <SyncPill source={request.syncedSource} size="md" />
+                        )}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <StatusBadge status={request.status} />
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {formatDate(request.createdAt)}
+                    </TableCell>
+                    <TableCell>{request.assignedToName ?? '—'}</TableCell>
+                  </TableRow>
                 ))}
-              </TableRow>
-            ))
-          : requests.length === 0
-            ? (
-                <TableRow>
-                  <TableCell colSpan={COLUMN_COUNT} className="text-center py-8 text-muted-foreground">
-                    No requests found
-                  </TableCell>
-                </TableRow>
-              )
-            : requests.map((request) => (
-                <TableRow
-                  key={request.id}
-                  className="cursor-pointer"
-                  tabIndex={0}
-                  onClick={() => onRowClick(request)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      onRowClick(request);
-                    }
-                  }}
-                >
-                  <TableCell className="font-mono text-xs">
-                    {request.referenceNumber}
-                  </TableCell>
-                  <TableCell>{request.customerName ?? 'Unknown'}</TableCell>
-                  <TableCell>{formatIssueType(request.issueType)}</TableCell>
-                  <TableCell>
-                    <span className="inline-flex flex-wrap items-center gap-1">
-                      <UrgencyBadge urgency={request.urgency} />
-                      {request.isAfterHours && (
-                        <span
-                          title="Arrived after hours"
-                          className="inline-flex items-center rounded-full border border-amber-300 bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800"
-                        >
-                          After-hrs
-                        </span>
-                      )}
-                      {request.syncedSource && (
-                        <SyncPill source={request.syncedSource} size="md" />
-                      )}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <StatusBadge status={request.status} />
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {formatDate(request.createdAt)}
-                  </TableCell>
-                  <TableCell>{request.assignedToName ?? '—'}</TableCell>
-                </TableRow>
-              ))}
-      </TableBody>
-    </Table>
+        </TableBody>
+      </Table>
+    </div>
   );
 }

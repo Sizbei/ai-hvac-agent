@@ -220,7 +220,12 @@ export function ConversationInbox() {
           </div>
 
           {/* Rows */}
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <div
+            className={cn(
+              'min-h-0 flex-1 overflow-y-auto transition-opacity duration-150',
+              isLoading && conversations.length > 0 && 'opacity-50 pointer-events-none',
+            )}
+          >
             {isLoading && conversations.length === 0 ? (
               <div className="space-y-px">
                 {Array.from({ length: 6 }, (_, i) => (
