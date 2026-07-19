@@ -112,7 +112,7 @@ function EditableFieldRow({ label, value, onSave }: EditableFieldRowProps) {
           <button
             type="button"
             onClick={startEdit}
-            className="p-0.5 rounded-sm text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity hover:bg-muted"
+            className="p-0.5 rounded-sm text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity hover:bg-muted"
             aria-label={`Edit ${label}`}
           >
             <Pencil className="size-3" />
