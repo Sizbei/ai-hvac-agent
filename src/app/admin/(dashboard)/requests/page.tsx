@@ -127,7 +127,7 @@ export default function AdminRequestsPage() {
         isLoading={isLoading}
         onRowClick={(req) => setSelectedRequestId(req.id)}
         hasActiveFilters={
-          !!statusFilter || !!urgencyFilter || !!assignedToFilter || !!debouncedSearch
+          !!statusFilter || !!urgencyFilter || !!assignedToFilter || !!debouncedSearch || isAfterHoursFilter
         }
         onClearFilters={() => {
           setStatusFilter('');
