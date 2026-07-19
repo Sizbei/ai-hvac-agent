@@ -310,9 +310,7 @@ export default function EstimatesPage() {
 
       {/* List */}
       {isLoading ? (
-        <div className="overflow-hidden rounded-lg border">
-          <TableSkeleton rows={8} cols={6} />
-        </div>
+        <TableSkeleton rows={8} cols={6} />
       ) : estimates.length === 0 ? (
         <div className="rounded-lg border border-dashed py-16 text-center">
           <FileText className="mx-auto size-8 text-muted-foreground" />
