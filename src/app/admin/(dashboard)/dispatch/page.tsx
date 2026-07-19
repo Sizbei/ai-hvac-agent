@@ -8,6 +8,7 @@ import { RequestDetailSheet } from '@/components/admin/request-detail-sheet';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Card } from '@/components/ui/card';
 import { businessIsoDate } from '@/lib/admin/calendar-time';
 
 /** Current BUSINESS day as YYYY-MM-DD. Anchoring on the UTC day put the board
@@ -107,7 +108,31 @@ export default function DispatchPage() {
       {isLoading && !board ? (
         <div className="flex gap-4 overflow-x-auto pb-2">
           {Array.from({ length: 4 }, (_, i) => (
-            <Skeleton key={`col-skeleton-${i}`} className="h-64 w-72 shrink-0" />
+            <Card key={`col-skeleton-${i}`} className="flex w-72 shrink-0 flex-col p-3">
+              {/* Column header bar */}
+              <div className="mb-3 flex items-center gap-2">
+                <Skeleton className="size-4 shrink-0 rounded-full" />
+                <Skeleton className="h-3.5 w-28" />
+                <Skeleton className="ml-auto h-3 w-4" />
+              </div>
+              {/* Stacked job-card bars */}
+              <div className="space-y-2">
+                {Array.from({ length: 3 }, (__, j) => (
+                  <div key={j} className="rounded-lg border bg-card px-3 py-2 space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <Skeleton className="h-3 w-10" />
+                      <Skeleton className="h-3 w-8" />
+                    </div>
+                    <Skeleton className="h-3.5 w-32" />
+                    <Skeleton className="h-3 w-44" />
+                    <div className="flex gap-1.5 pt-0.5">
+                      <Skeleton className="h-4 w-12 rounded-full" />
+                      <Skeleton className="h-4 w-14 rounded-full" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
           ))}
         </div>
       ) : (

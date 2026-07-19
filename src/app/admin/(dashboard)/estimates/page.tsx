@@ -11,6 +11,7 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
+import { TableSkeleton } from '@/components/admin/skeletons';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
@@ -309,10 +310,8 @@ export default function EstimatesPage() {
 
       {/* List */}
       {isLoading ? (
-        <div className="space-y-3">
-          <Skeleton className="h-14 w-full" />
-          <Skeleton className="h-14 w-full" />
-          <Skeleton className="h-14 w-full" />
+        <div className="overflow-hidden rounded-lg border">
+          <TableSkeleton rows={8} cols={6} />
         </div>
       ) : estimates.length === 0 ? (
         <div className="rounded-lg border border-dashed py-16 text-center">

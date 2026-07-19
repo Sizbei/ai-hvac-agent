@@ -5,6 +5,25 @@ import Link from 'next/link';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 
+/** Card-shaped skeleton matching the 3-line job card anatomy. */
+function JobCardSkeleton() {
+  return (
+    <Card>
+      <CardContent className="p-4">
+        {/* Header row: reference number + status badge */}
+        <div className="flex items-center justify-between">
+          <Skeleton className="h-3.5 w-20" />
+          <Skeleton className="h-5 w-16 rounded-full" />
+        </div>
+        {/* Issue type line */}
+        <Skeleton className="mt-2 h-3.5 w-40" />
+        {/* Address / time line */}
+        <Skeleton className="mt-1.5 h-3 w-56" />
+      </CardContent>
+    </Card>
+  );
+}
+
 interface Job {
   readonly id: string;
   readonly referenceNumber: string;
@@ -43,10 +62,13 @@ export function TechJobsListClient() {
 
   if (isLoading) {
     return (
-      <div className="space-y-3">
-        <Skeleton className="h-20 w-full" />
-        <Skeleton className="h-20 w-full" />
-      </div>
+      <ul className="space-y-3">
+        {Array.from({ length: 3 }, (_, i) => (
+          <li key={i}>
+            <JobCardSkeleton />
+          </li>
+        ))}
+      </ul>
     );
   }
 
