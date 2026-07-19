@@ -21,6 +21,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { OpsInsightsSection } from '@/components/admin/insights/ops-insights-section';
 import { BotAnalyticsSection } from '@/components/admin/insights/bot-analytics-section';
+import { PageShell } from '@/components/admin/ui/page-shell';
+import { PageHeader } from '@/components/admin/ui/page-header';
 
 interface InsightCard {
   readonly label: string;
@@ -127,19 +129,22 @@ export default function AiInsightsPage() {
   }, [fetchInsights]);
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">AI Insights</h1>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleRefresh}
-          disabled={isLoading}
-        >
-          <RefreshCw className={`size-4 ${isLoading ? 'animate-spin' : ''}`} />
-          <span>Refresh</span>
-        </Button>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="AI insights"
+        subtitle="Deflection rate, session outcomes, and token usage for the AI assistant."
+        actions={
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRefresh}
+            disabled={isLoading}
+          >
+            <RefreshCw className={`size-4 ${isLoading ? 'animate-spin' : ''}`} />
+            <span>Refresh</span>
+          </Button>
+        }
+      />
 
       {error && (
         <Alert variant="destructive">
@@ -232,6 +237,6 @@ export default function AiInsightsPage() {
       <BotAnalyticsSection />
 
       <OpsInsightsSection />
-    </div>
+    </PageShell>
   );
 }

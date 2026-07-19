@@ -22,6 +22,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { formatCentsExact } from '@/lib/admin/money-format';
+import { PageShell } from '@/components/admin/ui/page-shell';
+import { PageHeader } from '@/components/admin/ui/page-header';
 
 const PRESETS = [
   { label: 'Last 30 days', days: 30 },
@@ -52,30 +54,28 @@ export default function ReportsPage() {
   } = useReports(range);
 
   return (
-    <div className="space-y-6 p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="font-heading text-2xl font-bold tracking-tight">Reports</h1>
-          <p className="text-sm text-muted-foreground">
-            Revenue collected, outstanding balances, and estimate close rate.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          {PRESETS.map((preset) => (
-            <Button
-              key={preset.days}
-              variant={days === preset.days ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setDays(preset.days)}
-            >
-              {days === preset.days && isRevalidating && (
-                <Loader2 className="mr-1.5 size-3 animate-spin" aria-hidden="true" />
-              )}
-              {preset.label}
-            </Button>
-          ))}
-        </div>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Reports"
+        subtitle="Revenue collected, outstanding balances, and estimate close rate."
+        actions={
+          <div className="flex gap-2">
+            {PRESETS.map((preset) => (
+              <Button
+                key={preset.days}
+                variant={days === preset.days ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setDays(preset.days)}
+              >
+                {days === preset.days && isRevalidating && (
+                  <Loader2 className="mr-1.5 size-3 animate-spin" aria-hidden="true" />
+                )}
+                {preset.label}
+              </Button>
+            ))}
+          </div>
+        }
+      />
 
       {error && (
         <Alert variant="destructive">
@@ -183,7 +183,7 @@ export default function ReportsPage() {
 
       {/* Technician scorecards */}
       <TechnicianTable rows={technicianScorecards} isLoading={isLoading} />
-    </div>
+    </PageShell>
   );
 }
 

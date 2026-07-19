@@ -12,6 +12,8 @@ import { PendingInvites } from '@/components/admin/pending-invites';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import type { StaffRecord } from '@/lib/admin/types';
+import { PageShell } from '@/components/admin/ui/page-shell';
+import { PageHeader } from '@/components/admin/ui/page-header';
 
 export default function StaffPage() {
   useEffect(() => { document.title = 'Staff · Spears Admin'; }, []);
@@ -52,25 +54,23 @@ export default function StaffPage() {
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Staff</h1>
-          <p className="text-sm text-muted-foreground">
-            Manage admins and technicians, roles, and passwords.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => setInviteOpen(true)}>
-            <Mail className="mr-2 h-4 w-4" />
-            Invite
-          </Button>
-          <Button onClick={handleAddClick}>
-            <UserPlus className="mr-2 h-4 w-4" />
-            Add Staff
-          </Button>
-        </div>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Staff"
+        subtitle="Manage admins and technicians, roles, and passwords."
+        actions={
+          <>
+            <Button variant="outline" onClick={() => setInviteOpen(true)}>
+              <Mail className="mr-2 h-4 w-4" />
+              Invite
+            </Button>
+            <Button onClick={handleAddClick}>
+              <UserPlus className="mr-2 h-4 w-4" />
+              Add staff
+            </Button>
+          </>
+        }
+      />
 
       {error && (
         <Alert variant="destructive">
@@ -115,6 +115,6 @@ export default function StaffPage() {
         onSuccess={handleSuccess}
         staff={resetTarget}
       />
-    </div>
+    </PageShell>
   );
 }

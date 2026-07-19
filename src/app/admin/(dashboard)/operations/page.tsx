@@ -20,6 +20,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { formatCentsExact } from '@/lib/admin/money-format';
+import { PageShell } from '@/components/admin/ui/page-shell';
+import { PageHeader } from '@/components/admin/ui/page-header';
 
 const PRESETS = [
   { label: 'Last 30 days', days: 30 },
@@ -156,33 +158,28 @@ export default function OperationsPage() {
     agingTotal > 0 ? Math.round((cents / agingTotal) * 100) : 0;
 
   return (
-    <div className="space-y-6 p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="font-heading text-2xl font-bold tracking-tight">
-            Operations
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            How fast you reach customers, how long jobs take, and how quickly you
-            get paid.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          {PRESETS.map((preset) => (
-            <Button
-              key={preset.days}
-              variant={days === preset.days ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setDays(preset.days)}
-            >
-              {days === preset.days && isRevalidating && (
-                <Loader2 className="mr-1.5 size-3 animate-spin" aria-hidden="true" />
-              )}
-              {preset.label}
-            </Button>
-          ))}
-        </div>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Operations"
+        subtitle="How fast you reach customers, how long jobs take, and how quickly you get paid."
+        actions={
+          <div className="flex gap-2">
+            {PRESETS.map((preset) => (
+              <Button
+                key={preset.days}
+                variant={days === preset.days ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setDays(preset.days)}
+              >
+                {days === preset.days && isRevalidating && (
+                  <Loader2 className="mr-1.5 size-3 animate-spin" aria-hidden="true" />
+                )}
+                {preset.label}
+              </Button>
+            ))}
+          </div>
+        }
+      />
 
       {error && (
         <Alert variant="destructive">
@@ -359,9 +356,9 @@ export default function OperationsPage() {
 
       <p className="max-w-2xl text-xs text-muted-foreground">
         Trend arrows compare the selected window against the immediately preceding
-        window of equal length. Metrics with no data show “—”, never a misleading
+        window of equal length. Metrics with no data show &ldquo;&mdash;&rdquo;, never a misleading
         zero.
       </p>
-    </div>
+    </PageShell>
   );
 }
