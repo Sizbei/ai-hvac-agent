@@ -89,9 +89,12 @@ describe('GET /api/admin/accounting/export', () => {
 
   it('returns a downloadable CSV + audits (period/count only) for a super_admin', async () => {
     getAdminSession.mockResolvedValue(SUPER);
-    getAccountingExport.mockResolvedValue([
-      { date: '2026-01-05', type: 'invoice', account: 'Sales Revenue', memo: 'Invoice x', amountDollars: 1 },
-    ]);
+    getAccountingExport.mockResolvedValue({
+      native: [
+        { date: '2026-01-05', type: 'invoice', account: 'Sales Revenue', memo: 'Invoice x', amountDollars: 1 },
+      ],
+      synced: [],
+    });
 
     const res = await GET(req('?from=2026-01-01&to=2026-01-31&format=csv'));
     expect(res.status).toBe(200);
@@ -105,7 +108,7 @@ describe('GET /api/admin/accounting/export', () => {
     );
     const auditArg = logAudit.mock.calls[0][0] as { details: string };
     const details = JSON.parse(auditArg.details);
-    expect(details).toMatchObject({ rowCount: 1, provider: 'mock' });
+    expect(details).toMatchObject({ nativeRowCount: 1, syncedRowCount: 0, provider: 'mock' });
     expect(details.from).toBeTypeOf('string');
     expect(JSON.stringify(details)).not.toContain('amountDollars');
   });

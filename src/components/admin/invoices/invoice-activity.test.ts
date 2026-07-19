@@ -2,14 +2,15 @@ import { it, expect, vi } from 'vitest';
 // invoice-activity imports daysBetween from age-chip which is 'use client'.
 // If any import chain pulls in server-only, stub it here.
 vi.mock('server-only', () => ({}));
+import type { InvoiceDetailView } from '@/lib/admin/invoice-queries';
 import { collectionsStats, buildActivity } from './invoice-activity';
 
 const now = new Date('2026-07-06T12:00:00Z');
 const created = new Date(now.getTime() - 40 * 24 * 3600 * 1000);
-const inv = {
+const inv: Pick<InvoiceDetailView, 'createdAt' | 'state' | 'totalCents' | 'amountPaidCents' | 'lastReminderSentAt' | 'payments'> = {
   createdAt: created, state: 'open', totalCents: 5000, amountPaidCents: 0,
   lastReminderSentAt: new Date(now.getTime() - 3 * 24 * 3600 * 1000), payments: [],
-} as any;
+};
 
 it('reports days overdue for an open, aged, unpaid invoice', () => {
   expect(collectionsStats(inv, now).daysOverdue).toBe(40);
