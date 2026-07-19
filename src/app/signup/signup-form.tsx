@@ -1,26 +1,19 @@
 'use client';
 
 import { useState } from 'react';
-import { Wind, AlertCircle } from 'lucide-react';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
+import Link from 'next/link';
+import { AlertCircle } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { AuthShell } from '@/components/auth/auth-shell';
 
 /** Friendly, typed messages for the ?error= codes the signup flow redirects
  * with. Each maps to a human, non-technical line. */
 const SIGNUP_ERROR_MESSAGES: Record<string, string> = {
   invalid_name: 'Please enter a business name (1–100 characters).',
-  verification:
-    'We could not verify your Google account. Please try again.',
-  signups_paused:
-    'New signups are paused right now. Please check back soon.',
+  verification: 'We could not verify your Google account. Please try again.',
+  signups_paused: 'New signups are paused right now. Please check back soon.',
   try_again: 'Something went wrong creating your account. Please try again.',
   rate_limited:
     'Too many attempts. Please wait a minute and try signing up again.',
@@ -44,90 +37,80 @@ export function SignupForm({ signupEnabled }: SignupFormProps) {
   const [error] = useState(() => initialError());
 
   return (
-    <div className="relative flex min-h-dvh items-center justify-center overflow-hidden bg-gradient-to-br from-[oklch(0.22_0.05_258)] to-[oklch(0.16_0.05_260)] px-4">
-      {/* Cyan brand glow (mirrors the login page) */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute -top-32 right-[-10%] size-[34rem] rounded-full bg-[radial-gradient(circle_at_center,oklch(0.72_0.13_220/0.3),transparent_70%)] blur-3xl"
-      />
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute bottom-[-12rem] left-[-8%] size-[28rem] rounded-full bg-[radial-gradient(circle_at_center,oklch(0.4_0.1_250/0.25),transparent_70%)] blur-3xl"
-      />
-      <Card className="relative z-10 w-full max-w-sm shadow-2xl">
-        <CardHeader className="text-center">
-          <div className="mx-auto mb-3 flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-[oklch(0.62_0.13_222)] text-primary-foreground shadow-lg">
-            <Wind className="size-7" />
-          </div>
-          <CardTitle className="font-heading text-xl">
-            Start your account
-          </CardTitle>
-          <CardDescription>
-            Create your service console in a minute
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {error && (
-            <Alert variant="destructive" className="mb-4">
-              <AlertCircle className="size-4" />
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
+    <AuthShell
+      title="Start your account"
+      subtitle="Stand up a service console in about a minute."
+      footer={
+        <p>
+          Already have an account?{' '}
+          <Link
+            href="/admin/login"
+            className="font-medium text-foreground underline underline-offset-4 hover:no-underline"
+          >
+            Sign in
+          </Link>
+        </p>
+      }
+    >
+      <div className="flex flex-col gap-4">
+        {error && (
+          <Alert variant="destructive">
+            <AlertCircle className="size-4" />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
 
-          {signupEnabled ? (
-            // A full-page POST (not fetch): the start route redirects to Google
-            // and back, so it must be a top-level navigation.
-            <form
-              method="POST"
-              action="/api/auth/signup/start"
-              className="flex flex-col gap-4"
+        {signupEnabled ? (
+          // A full-page POST (not fetch): the start route redirects to Google
+          // and back, so it must be a top-level navigation.
+          <form
+            method="POST"
+            action="/api/auth/signup/start"
+            className="flex flex-col gap-4"
+          >
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="businessName">Business name</Label>
+              <Input
+                id="businessName"
+                name="businessName"
+                type="text"
+                placeholder="Acme Heating &amp; Air"
+                value={businessName}
+                onChange={(e) => setBusinessName(e.target.value)}
+                required
+                maxLength={100}
+                autoFocus
+              />
+              <p className="text-xs text-muted-foreground">
+                You can rename it later in settings.
+              </p>
+            </div>
+
+            <button
+              type="submit"
+              disabled={businessName.trim().length === 0}
+              className="inline-flex h-11 w-full items-center justify-center gap-2.5 rounded-lg border border-input bg-background px-4 text-sm font-medium shadow-xs transition-all duration-200 ease-out hover:bg-accent hover:text-accent-foreground hover:shadow-md focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50"
             >
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="businessName">Business name</Label>
-                <Input
-                  id="businessName"
-                  name="businessName"
-                  type="text"
-                  placeholder="Acme Heating &amp; Air"
-                  value={businessName}
-                  onChange={(e) => setBusinessName(e.target.value)}
-                  required
-                  maxLength={100}
-                  autoFocus
-                />
-              </div>
+              <GoogleGlyph />
+              Sign up with Google
+            </button>
 
-              <button
-                type="submit"
-                disabled={businessName.trim().length === 0}
-                className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-input bg-background px-4 text-sm font-medium shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50"
-              >
-                <GoogleGlyph />
-                Sign up with Google
-              </button>
-            </form>
-          ) : (
-            <Alert>
-              <AlertCircle className="size-4" />
-              <AlertDescription>
-                Signup is not available right now. Please contact us to get
-                started.
-              </AlertDescription>
-            </Alert>
-          )}
-
-          <p className="mt-4 text-center text-xs text-muted-foreground">
-            Already have an account?{' '}
-            <a
-              href="/admin/login"
-              className="font-medium text-foreground underline underline-offset-2 hover:no-underline"
-            >
-              Sign in
-            </a>
-          </p>
-        </CardContent>
-      </Card>
-    </div>
+            <p className="text-center text-xs text-muted-foreground">
+              We only use Google to verify who you are — nothing is posted on
+              your behalf.
+            </p>
+          </form>
+        ) : (
+          <Alert>
+            <AlertCircle className="size-4" />
+            <AlertDescription>
+              Signups are invite-only right now. Ask your administrator for an
+              invite, or reach out and we&apos;ll get you set up.
+            </AlertDescription>
+          </Alert>
+        )}
+      </div>
+    </AuthShell>
   );
 }
 

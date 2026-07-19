@@ -123,10 +123,10 @@ export default function Home() {
               <Wind className="size-5" strokeWidth={2.25} />
             </span>
             <span className="flex flex-col leading-none">
-              <span className="font-[family-name:var(--font-display)] text-lg font-bold uppercase tracking-tight">
+              <span className="font-[family-name:var(--font-display)] text-lg font-bold tracking-tight">
                 Spears&nbsp;Services
               </span>
-              <span className="text-[0.65rem] font-medium uppercase tracking-widest text-muted-foreground">
+              <span className="text-xs font-medium text-muted-foreground">
                 AI intake demo
               </span>
             </span>
@@ -373,7 +373,7 @@ export default function Home() {
         <div className="mx-auto max-w-6xl px-5 py-10">
           <div className="flex flex-col gap-8 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <span className="font-[family-name:var(--font-display)] text-lg font-bold uppercase tracking-tight">
+              <span className="font-[family-name:var(--font-display)] text-lg font-bold tracking-tight">
                 Spears&nbsp;Services
               </span>
               <p className="mt-1 text-sm text-muted-foreground">AI intake demo</p>
@@ -384,7 +384,7 @@ export default function Home() {
 
             <dl className="grid gap-3 text-sm sm:text-right">
               <div className="flex flex-col gap-0.5 sm:items-end">
-                <dt className="text-xs uppercase tracking-widest text-muted-foreground">Phone</dt>
+                <dt className="text-xs font-medium text-muted-foreground">Phone</dt>
                 <dd>
                   <a
                     href={`tel:${SPEARS.phoneTel}`}
@@ -395,7 +395,7 @@ export default function Home() {
                 </dd>
               </div>
               <div className="flex flex-col gap-0.5 sm:items-end">
-                <dt className="text-xs uppercase tracking-widest text-muted-foreground">Email</dt>
+                <dt className="text-xs font-medium text-muted-foreground">Email</dt>
                 <dd>
                   <a
                     href={`mailto:${SPEARS.email}`}
@@ -406,7 +406,7 @@ export default function Home() {
                 </dd>
               </div>
               <div className="flex flex-col gap-0.5 sm:items-end">
-                <dt className="text-xs uppercase tracking-widest text-muted-foreground">AI voice demo</dt>
+                <dt className="text-xs font-medium text-muted-foreground">AI voice demo</dt>
                 <dd>
                   <a
                     href={`tel:${DEMO_PHONE.tel}`}
@@ -439,13 +439,14 @@ interface SectionHeadingProps {
 function SectionHeading({ eyebrow, title, subtitle }: SectionHeadingProps) {
   return (
     <div className="mx-auto max-w-2xl text-center">
-      <span className="text-sm font-semibold uppercase tracking-widest text-primary">
+      <span className="inline-flex items-center gap-2 text-sm font-semibold text-primary">
+        <span className="h-px w-5 bg-primary/50" aria-hidden />
         {eyebrow}
       </span>
-      <h2 className="mt-3 font-[family-name:var(--font-display)] text-3xl font-bold tracking-tight md:text-4xl">
+      <h2 className="mt-3 font-[family-name:var(--font-display)] text-3xl font-bold tracking-tight text-balance md:text-[2.6rem] md:leading-[1.1]">
         {title}
       </h2>
-      <p className="mt-3 text-muted-foreground">{subtitle}</p>
+      <p className="mt-4 text-lg text-muted-foreground">{subtitle}</p>
     </div>
   );
 }

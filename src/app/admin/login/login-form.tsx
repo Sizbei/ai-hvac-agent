@@ -1,19 +1,13 @@
 'use client';
 
 import { useState } from 'react';
-import { Wind, Loader2, AlertCircle } from 'lucide-react';
+import Link from 'next/link';
+import { Loader2, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { EnvBadge } from '@/components/admin/env-badge';
+import { AuthShell } from '@/components/auth/auth-shell';
 import type { LoginMode } from '@/lib/auth/login-mode';
 
 /** Generic, non-enumerating messages for the ?error= codes the OIDC callback
@@ -55,66 +49,59 @@ export function LoginForm({ mode, googleEnabled }: LoginFormProps) {
   const [notice] = useState(() => initialNotice());
 
   return (
-    <div className="relative flex min-h-dvh items-center justify-center overflow-hidden bg-gradient-to-br from-[oklch(0.22_0.05_258)] to-[oklch(0.16_0.05_260)] px-4">
-      {/* Cyan brand glow */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute -top-32 right-[-10%] size-[34rem] rounded-full bg-[radial-gradient(circle_at_center,oklch(0.72_0.13_220/0.3),transparent_70%)] blur-3xl"
-      />
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute bottom-[-12rem] left-[-8%] size-[28rem] rounded-full bg-[radial-gradient(circle_at_center,oklch(0.4_0.1_250/0.25),transparent_70%)] blur-3xl"
-      />
-      <Card className="relative z-10 w-full max-w-sm shadow-2xl">
-        <CardHeader className="text-center">
-          <div className="mx-auto mb-3 flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-[oklch(0.62_0.13_222)] text-primary-foreground shadow-lg">
-            <Wind className="size-7" />
-          </div>
-          <CardTitle className="font-heading text-xl">Spears Services</CardTitle>
-          <CardDescription>Sign in to the service console</CardDescription>
-          <div className="mt-1 flex justify-center">
-            <EnvBadge />
-          </div>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          {notice && !error && (
-            <Alert>
-              <AlertCircle className="size-4" />
-              <AlertDescription>{notice}</AlertDescription>
-            </Alert>
-          )}
-          {error && (
-            <Alert variant="destructive">
-              <AlertCircle className="size-4" />
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
+    <AuthShell
+      title="Welcome back"
+      subtitle="Sign in to the service console."
+      footer={
+        <p>
+          New to Spears?{' '}
+          <Link
+            href="/signup"
+            className="font-medium text-foreground underline underline-offset-4 hover:no-underline"
+          >
+            Create an account
+          </Link>
+        </p>
+      }
+    >
+      <div className="flex flex-col gap-4">
+        {notice && !error && (
+          <Alert>
+            <AlertCircle className="size-4" />
+            <AlertDescription>{notice}</AlertDescription>
+          </Alert>
+        )}
+        {error && (
+          <Alert variant="destructive">
+            <AlertCircle className="size-4" />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
 
-          {mode === 'google' ? (
-            <>
-              <GoogleSignInButton prominent />
-              <p className="text-center text-xs text-muted-foreground">
-                Use the Google account your administrator invited.
-              </p>
-            </>
-          ) : (
-            <>
-              <PasswordForm onError={setError} />
-              {googleEnabled && (
-                <>
-                  <div className="flex items-center gap-3">
-                    <span className="h-px flex-1 bg-border" />
-                    <span className="text-xs text-muted-foreground">or</span>
-                    <span className="h-px flex-1 bg-border" />
-                  </div>
-                  <GoogleSignInButton />
-                </>
-              )}
-            </>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+        {mode === 'google' ? (
+          <>
+            <GoogleSignInButton prominent />
+            <p className="text-center text-xs text-muted-foreground">
+              Use the Google account your administrator invited.
+            </p>
+          </>
+        ) : (
+          <>
+            <PasswordForm onError={setError} />
+            {googleEnabled && (
+              <>
+                <div className="flex items-center gap-3">
+                  <span className="h-px flex-1 bg-border" />
+                  <span className="text-xs text-muted-foreground">or</span>
+                  <span className="h-px flex-1 bg-border" />
+                </div>
+                <GoogleSignInButton />
+              </>
+            )}
+          </>
+        )}
+      </div>
+    </AuthShell>
   );
 }
 
@@ -169,7 +156,15 @@ function PasswordForm({ onError }: { readonly onError: (msg: string) => void }) 
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="password">Password</Label>
+        <div className="flex items-baseline justify-between">
+          <Label htmlFor="password">Password</Label>
+          <Link
+            href="/admin/forgot-password"
+            className="text-xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+          >
+            Forgot password?
+          </Link>
+        </div>
         <Input
           id="password"
           type="password"
@@ -184,10 +179,10 @@ function PasswordForm({ onError }: { readonly onError: (msg: string) => void }) 
         {isLoading ? (
           <>
             <Loader2 className="size-4 animate-spin" />
-            Signing in...
+            Signing in…
           </>
         ) : (
-          'Sign In'
+          'Sign in'
         )}
       </Button>
     </form>
@@ -203,8 +198,8 @@ function GoogleSignInButton({ prominent = false }: { readonly prominent?: boolea
       href="/api/auth/google/start"
       className={
         prominent
-          ? 'inline-flex h-11 w-full items-center justify-center gap-2.5 rounded-md border border-input bg-background px-4 text-sm font-medium shadow-xs transition-all duration-200 ease-out hover:bg-accent hover:text-accent-foreground hover:shadow-md focus-visible:ring-[3px] focus-visible:ring-ring/50'
-          : 'inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-input bg-background px-4 text-sm font-medium shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50'
+          ? 'inline-flex h-11 w-full items-center justify-center gap-2.5 rounded-lg border border-input bg-background px-4 text-sm font-medium shadow-xs transition-all duration-200 ease-out hover:bg-accent hover:text-accent-foreground hover:shadow-md focus-visible:ring-3 focus-visible:ring-ring/50'
+          : 'inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg border border-input bg-background px-4 text-sm font-medium shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-3 focus-visible:ring-ring/50'
       }
     >
       <GoogleGlyph />

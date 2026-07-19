@@ -60,12 +60,17 @@ export async function proxy(request: NextRequest) {
       return NextResponse.redirect(new URL("/admin/requests", request.url));
     }
 
-    // Allow /admin/login and the public invite-accept page without auth. The
-    // invite page is pre-authentication by design: a new teammate opens a
-    // tokenized link to set their password before any account/session exists.
-    // It is fully token-gated server-side (resolveInviteByToken); the token is
-    // the bearer of authority, not a session.
-    if (pathname === "/admin/login" || pathname.startsWith("/admin/invite/")) {
+    // Allow /admin/login, the password-recovery page, and the public
+    // invite-accept page without auth. All three are pre-authentication by
+    // design: forgot-password is a recovery guide with no session, and the
+    // invite page opens a tokenized link to set a password before any
+    // account/session exists. The invite page is fully token-gated server-side
+    // (resolveInviteByToken); the token is the bearer of authority, not a session.
+    if (
+      pathname === "/admin/login" ||
+      pathname === "/admin/forgot-password" ||
+      pathname.startsWith("/admin/invite/")
+    ) {
       const response = NextResponse.next();
       const requestId =
         request.headers.get("x-request-id") ?? crypto.randomUUID();
