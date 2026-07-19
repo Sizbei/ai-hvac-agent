@@ -32,7 +32,7 @@ const display = Bricolage_Grotesque({
 /** Verified Spears Services contact facts (spearsservices.com). */
 const SPEARS = {
   name: 'Spears Services',
-  positioning: 'Commercial Repair Experts in TN, VA, NC',
+  positioning: 'Commercial repair experts in TN, VA, NC',
   phoneDisplay: '423-854-9505',
   phoneTel: '+14238549505',
   email: 'office@spearsservices.com',
@@ -51,38 +51,38 @@ const NAV = [
 const SERVICES = [
   {
     icon: Wind,
-    title: 'HVAC Services',
+    title: 'HVAC services',
     body: 'Heating and cooling repair for commercial and residential systems, with most jobs finished in a single trip.',
   },
   {
     icon: Refrigerator,
-    title: 'Refrigeration Services',
+    title: 'Refrigeration services',
     body: 'Walk-in coolers, reach-in freezers, display cases, beverage coolers, and ice makers kept running.',
   },
   {
     icon: Snowflake,
-    title: 'Ice Machine Repair & Service',
+    title: 'Ice machine repair & service',
     body: 'Commercial ice machine repair and preventive maintenance contracts so you never run dry.',
   },
   {
     icon: Flame,
-    title: 'Boiler Repair & Service',
+    title: 'Boiler repair & service',
     body: 'Gas, electric, and oil boiler repair plus preventive maintenance plans for steady, safe heat.',
   },
   {
     icon: Wrench,
-    title: 'Commercial Appliance Repair',
+    title: 'Commercial appliance repair',
     body: 'Ranges, ovens, fryers, and the rest of your kitchen line serviced by full-time technicians.',
   },
 ];
 
 const WHY_CHOOSE = [
-  { icon: Clock, title: '24/7 Emergency Service', body: 'A real person answers when your equipment goes down, day or night.' },
-  { icon: Award, title: '50+ Years of Experience', body: 'Decades of commercial repair across the Tri-Cities region.' },
-  { icon: CheckCircle2, title: 'Most Jobs in One Trip', body: 'We come prepared to diagnose and fix on the first visit.' },
-  { icon: BadgeCheck, title: 'Licensed Professional Engineer', body: 'A licensed PE on staff and multiple service licenses.' },
-  { icon: Users, title: 'Full-Time Technicians', body: 'No rotating subcontractors. Our own trained crew.' },
-  { icon: ShieldAlert, title: 'Pricing Estimates', body: 'Clear estimates before the work, no surprises after.' },
+  { icon: Clock, title: '24/7 emergency service', body: 'A real person answers when your equipment goes down, day or night.' },
+  { icon: Award, title: '50+ years of experience', body: 'Decades of commercial repair across the Tri-Cities region.' },
+  { icon: CheckCircle2, title: 'Most jobs in one trip', body: 'We come prepared to diagnose and fix on the first visit.' },
+  { icon: BadgeCheck, title: 'Licensed professional engineer', body: 'A licensed PE on staff and multiple service licenses.' },
+  { icon: Users, title: 'Full-time technicians', body: 'No rotating subcontractors. Our own trained crew.' },
+  { icon: ShieldAlert, title: 'Pricing estimates', body: 'Clear estimates before the work, no surprises after.' },
 ];
 
 /** Animation delay helper, keeps staggered reveals declarative. */
@@ -103,7 +103,7 @@ export default function Home() {
         <div className="mx-auto flex h-9 max-w-6xl items-center justify-between px-5 text-xs">
           <span className="flex items-center gap-1.5 font-medium">
             <Clock className="size-3.5" />
-            24/7 Emergency Service
+            24/7 emergency service
           </span>
           <a
             href={`tel:${SPEARS.phoneTel}`}
@@ -149,7 +149,7 @@ export default function Home() {
             className="bg-primary text-primary-foreground hover:bg-primary/90"
             render={<Link href="/chat" />}
           >
-            Get Service Now
+            Get service now
             <ArrowRight className="size-4" data-icon="inline-end" />
           </Button>
         </nav>
@@ -351,7 +351,7 @@ export default function Home() {
                 className="h-11 bg-primary px-5 text-base text-primary-foreground shadow-lg shadow-primary/20 hover:bg-primary/90"
                 render={<Link href="/chat" />}
               >
-                Get Service Now
+                Get service now
                 <ArrowRight className="size-4" data-icon="inline-end" />
               </Button>
               <Button
