@@ -173,18 +173,14 @@ export function ConversationInbox() {
     if (conversations.length === 0) return;
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setFocusedIndex((i) => {
-        const next = Math.min(i + 1, conversations.length - 1);
-        rowRefs.current[next]?.focus();
-        return next;
-      });
+      const next = Math.min(focusedIndex + 1, conversations.length - 1);
+      setFocusedIndex(next);
+      rowRefs.current[next]?.focus();
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
-      setFocusedIndex((i) => {
-        const prev = Math.max(i - 1, 0);
-        rowRefs.current[prev]?.focus();
-        return prev;
-      });
+      const prev = Math.max(focusedIndex - 1, 0);
+      setFocusedIndex(prev);
+      rowRefs.current[prev]?.focus();
     } else if (e.key === 'Enter' && focusedIndex >= 0) {
       const conv = conversations[focusedIndex];
       if (conv) handleSelect(conv.id);
@@ -261,7 +257,6 @@ export function ConversationInbox() {
 
           {/* Rows */}
           <div
-            role="listbox"
             aria-label="Conversations"
             onKeyDown={handleListKeyDown}
             className={cn(
