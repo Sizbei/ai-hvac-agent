@@ -66,6 +66,8 @@ export function ChatExperience({
 
   const [showEscalation, setShowEscalation] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
+  // Holds inline edits from ExtractionCard so they carry into ConfirmationDialog.
+  const [cardEditedExtraction, setCardEditedExtraction] = useState<import('@/lib/ai/extraction-schema').ExtractionResult | null>(null);
   const [isEscalating, setIsEscalating] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
@@ -216,7 +218,10 @@ export function ChatExperience({
         <div className="px-4 pb-2">
           <ExtractionCard
             extraction={extraction}
-            onConfirm={() => setShowConfirmation(true)}
+            onConfirm={(edited) => {
+              setCardEditedExtraction(edited);
+              setShowConfirmation(true);
+            }}
           />
         </div>
       )}
@@ -307,7 +312,7 @@ export function ChatExperience({
         <ConfirmationDialog
           open={showConfirmation}
           onOpenChange={setShowConfirmation}
-          extraction={extraction}
+          extraction={cardEditedExtraction ?? extraction}
           onConfirm={handleConfirm}
           isLoading={isConfirming}
         />

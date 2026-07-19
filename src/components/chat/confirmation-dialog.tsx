@@ -196,12 +196,10 @@ export function ConfirmationDialog({
 
         <div className="grid gap-3 py-2">
           {issueType && (
-            <EditableRow
-              label="Issue type"
-              value={formatSnakeCase(issueType)}
-              onSave={save('issueType')}
-              disabled={isLoading}
-            />
+            <div className="flex flex-col gap-0.5">
+              <span className="text-xs font-medium text-muted-foreground">Issue type</span>
+              <span className="text-sm">{formatSnakeCase(issueType)}</span>
+            </div>
           )}
           {urgency && (
             <div className="flex flex-col gap-0.5">

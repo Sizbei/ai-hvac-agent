@@ -19,7 +19,8 @@ import type { ExtractionResult } from '@/lib/ai/extraction-schema';
 
 interface ExtractionCardProps {
   readonly extraction: ExtractionResult;
-  readonly onConfirm: () => void;
+  /** Called with the (possibly inline-edited) extraction data to open the dialog. */
+  readonly onConfirm: (edited: ExtractionResult) => void;
 }
 
 function formatSnakeCase(value: string): string {
@@ -175,11 +176,9 @@ export function ExtractionCard({ extraction, onConfirm }: ExtractionCardProps) {
         </CardHeader>
         <CardContent className="grid gap-3">
           {issueType && (
-            <EditableFieldRow
-              label="Issue type"
-              value={formatSnakeCase(issueType)}
-              onSave={save('issueType')}
-            />
+            <FieldRow label="Issue type">
+              {formatSnakeCase(issueType)}
+            </FieldRow>
           )}
           {urgency && (
             <FieldRow label="Urgency">
@@ -230,7 +229,7 @@ export function ExtractionCard({ extraction, onConfirm }: ExtractionCardProps) {
           )}
         </CardContent>
         <CardFooter>
-          <Button onClick={onConfirm} className="w-full">
+          <Button onClick={() => onConfirm({ ...extraction, ...edits })} className="w-full">
             Confirm &amp; Submit
           </Button>
         </CardFooter>
