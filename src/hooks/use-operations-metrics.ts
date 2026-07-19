@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { createSwrCache } from '@/lib/admin/swr-cache';
 import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 
 export interface MetricTrend {
@@ -55,37 +56,77 @@ export interface MetricsRange {
 
 interface UseOperationsMetricsResult {
   readonly metrics: OperationsMetrics | null;
+  /** True only when there is no cached data for this range (first load). Cards show skeletons. */
   readonly isLoading: boolean;
+  /** True while a background fetch is in flight with stale data already painted. */
+  readonly isRevalidating: boolean;
   readonly error: string | null;
   readonly refetch: () => Promise<void>;
 }
 
+const operationsCache = createSwrCache<OperationsMetrics>(60_000); // 60s TTL
+
+/**
+ * Cache key uses minute-truncated ISO strings so that switching back to a
+ * previously-loaded preset within the same minute reuses the cached entry.
+ * (The page derives `from`/`to` via `new Date()` — a fresh object each time
+ * `days` changes — so raw ISO strings would differ by seconds and always miss.)
+ */
+function makeCacheKey(from: string | undefined, to: string | undefined): string {
+  const truncMin = (iso: string) => iso.slice(0, 16); // 'YYYY-MM-DDTHH:MM'
+  return `operations:${from ? truncMin(from) : ''}:${to ? truncMin(to) : ''}`;
+}
+
 /**
  * Loads the org's operations scorecard for the given range, refetching when the
- * range changes. No polling — an owner reads this at human pace. Modeled on
- * useReports.
+ * range changes. No polling — an owner reads this at human pace.
+ *
+ * SWR behaviour: seeds state from the module-level cache so that switching
+ * date presets keeps the previous KPI numbers painted (isLoading stays false)
+ * while the fresh fetch runs in the background (isRevalidating=true).
  */
 export function useOperationsMetrics(
   range: MetricsRange = {},
 ): UseOperationsMetricsResult {
-  const [metrics, setMetrics] = useState<OperationsMetrics | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const { from, to } = range;
+  const cacheKey = makeCacheKey(from, to);
+
+  const [metrics, setMetrics] = useState<OperationsMetrics | null>(
+    () => operationsCache.get(cacheKey)?.data ?? null,
+  );
+  // isLoading is only true when the cache is empty (no prior data to show).
+  const [isLoading, setIsLoading] = useState(() => operationsCache.get(cacheKey) === null);
+  // isRevalidating is true whenever a fetch is in flight, even with stale data painted.
+  const [isRevalidating, setIsRevalidating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reloadNonce, setReloadNonce] = useState(0);
-
-  const { from, to } = range;
+  const isFetchingRef = useRef(false);
 
   const refetch = useCallback(async (): Promise<void> => {
+    operationsCache.invalidate(cacheKey);
     setReloadNonce((n) => n + 1);
-  }, []);
+  }, [cacheKey]);
 
-  // Latest-wins: each range change starts its own request and marks any prior
-  // in-flight request stale via the cleanup flag, so a slow earlier fetch can
-  // never overwrite the newer range's data (a plain in-flight guard would drop
-  // the NEWER request and strand the UI on stale numbers).
   useEffect(() => {
+    // Seed state from cache on key change (e.g. preset switch). The setState
+    // calls here are synchronous reads from an in-memory cache — not a render
+    // loop. The set-state-in-effect warnings below are expected/intentional.
+    const cached = operationsCache.get(cacheKey);
+    if (cached) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setMetrics(cached.data);
+      setIsLoading(false);
+    } else {
+      // No cached data: blank the cards and show full skeleton.
+      setMetrics(null);
+      setIsLoading(true);
+    }
+
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
+    setIsRevalidating(true);
+
     let active = true;
-    setIsLoading(true);
     (async () => {
       try {
         const params = new URLSearchParams();
@@ -105,19 +146,28 @@ export function useOperationsMetrics(
           data: OperationsMetrics;
         };
         if (!active) return;
-        if (body.success) setMetrics(body.data);
-        setError(null);
+        if (body.success) {
+          operationsCache.set(cacheKey, body.data);
+          setMetrics(body.data);
+          setError(null);
+        }
       } catch (err) {
         if (err instanceof AdminAuthRedirectError) return;
         if (active) setError('Could not connect to server. Please try again.');
       } finally {
-        if (active) setIsLoading(false);
+        if (active) {
+          setIsLoading(false);
+          setIsRevalidating(false);
+          isFetchingRef.current = false;
+        }
       }
     })();
     return () => {
       active = false;
+      isFetchingRef.current = false;
     };
-  }, [from, to, reloadNonce]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cacheKey, reloadNonce]);
 
-  return { metrics, isLoading, error, refetch };
+  return { metrics, isLoading, isRevalidating, error, refetch };
 }

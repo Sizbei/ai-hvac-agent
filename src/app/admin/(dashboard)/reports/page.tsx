@@ -9,6 +9,7 @@ import {
   FileText,
   Receipt,
   Undo2,
+  Loader2,
 } from 'lucide-react';
 import {
   useReports,
@@ -46,6 +47,7 @@ export default function ReportsPage() {
     locationBreakdown,
     technicianScorecards,
     isLoading,
+    isRevalidating,
     error,
   } = useReports(range);
 
@@ -66,6 +68,9 @@ export default function ReportsPage() {
               size="sm"
               onClick={() => setDays(preset.days)}
             >
+              {days === preset.days && isRevalidating && (
+                <Loader2 className="mr-1.5 size-3 animate-spin" aria-hidden="true" />
+              )}
               {preset.label}
             </Button>
           ))}

@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { createSwrCache } from '@/lib/admin/swr-cache';
 import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 
 export interface SalesReport {
@@ -54,42 +55,102 @@ export interface ReportRange {
   readonly to?: string;
 }
 
+interface ReportsPayload {
+  readonly report: SalesReport;
+  readonly leadSourceBreakdown: LeadSourceRow[];
+  readonly locationBreakdown: LocationBreakdownRow[];
+  readonly technicianScorecards: TechnicianScorecardRow[];
+}
+
 interface UseReportsResult {
   readonly report: SalesReport | null;
   readonly leadSourceBreakdown: LeadSourceRow[];
   readonly locationBreakdown: LocationBreakdownRow[];
   readonly technicianScorecards: TechnicianScorecardRow[];
+  /** True only when there is no cached data for this range (first load). Cards show skeletons. */
   readonly isLoading: boolean;
+  /** True while a background fetch is in flight with stale data already painted. */
+  readonly isRevalidating: boolean;
   readonly error: string | null;
   readonly refetch: () => Promise<void>;
 }
 
+const reportsCache = createSwrCache<ReportsPayload>(60_000); // 60s TTL
+
+/**
+ * Cache key uses minute-truncated ISO strings so that switching back to a
+ * previously-loaded preset within the same minute reuses the cached entry.
+ * (The page derives `from`/`to` via `new Date()` — a fresh object each time
+ * `days` changes — so raw ISO strings would differ by seconds and always miss.)
+ */
+function makeCacheKey(from: string | undefined, to: string | undefined): string {
+  const truncMin = (iso: string) => iso.slice(0, 16); // 'YYYY-MM-DDTHH:MM'
+  return `reports:${from ? truncMin(from) : ''}:${to ? truncMin(to) : ''}`;
+}
+
 /**
  * Loads the org's sales report for the given range, refetching when the range
- * changes. No polling — financial reports are read at human pace. Modeled on
- * use-pricebook.
+ * changes. No polling — financial reports are read at human pace.
+ *
+ * SWR behaviour: seeds state from the module-level cache so that switching
+ * date presets keeps the previous KPI numbers painted (isLoading stays false)
+ * while the fresh fetch runs in the background (isRevalidating=true).
  */
 export function useReports(range: ReportRange = {}): UseReportsResult {
-  const [report, setReport] = useState<SalesReport | null>(null);
-  const [leadSourceBreakdown, setLeadSourceBreakdown] = useState<LeadSourceRow[]>([]);
-  const [locationBreakdown, setLocationBreakdown] = useState<LocationBreakdownRow[]>([]);
-  const [technicianScorecards, setTechnicianScorecards] = useState<TechnicianScorecardRow[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const { from, to } = range;
+  const cacheKey = makeCacheKey(from, to);
+
+  const [report, setReport] = useState<SalesReport | null>(
+    () => reportsCache.get(cacheKey)?.data.report ?? null,
+  );
+  const [leadSourceBreakdown, setLeadSourceBreakdown] = useState<LeadSourceRow[]>(
+    () => reportsCache.get(cacheKey)?.data.leadSourceBreakdown ?? [],
+  );
+  const [locationBreakdown, setLocationBreakdown] = useState<LocationBreakdownRow[]>(
+    () => reportsCache.get(cacheKey)?.data.locationBreakdown ?? [],
+  );
+  const [technicianScorecards, setTechnicianScorecards] = useState<TechnicianScorecardRow[]>(
+    () => reportsCache.get(cacheKey)?.data.technicianScorecards ?? [],
+  );
+  // isLoading is only true when the cache is empty (no prior data to show).
+  const [isLoading, setIsLoading] = useState(() => reportsCache.get(cacheKey) === null);
+  // isRevalidating is true whenever a fetch is in flight, even with stale data painted.
+  const [isRevalidating, setIsRevalidating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reloadNonce, setReloadNonce] = useState(0);
-
-  const { from, to } = range;
+  const isFetchingRef = useRef(false);
 
   const refetch = useCallback(async (): Promise<void> => {
+    reportsCache.invalidate(cacheKey);
     setReloadNonce((n) => n + 1);
-  }, []);
+  }, [cacheKey]);
 
-  // Latest-wins: each range change marks any prior in-flight request stale via
-  // the `active` cleanup flag, so a slow earlier fetch can never overwrite the
-  // newer range's data (porting the pattern from use-operations-metrics.ts).
   useEffect(() => {
+    // Seed state from cache on key change (e.g. preset switch). The setState
+    // calls here are synchronous reads from an in-memory cache — not a render
+    // loop. The set-state-in-effect warnings below are expected/intentional.
+    const cached = reportsCache.get(cacheKey);
+    if (cached) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setReport(cached.data.report);
+      setLeadSourceBreakdown(cached.data.leadSourceBreakdown);
+      setLocationBreakdown(cached.data.locationBreakdown);
+      setTechnicianScorecards(cached.data.technicianScorecards);
+      setIsLoading(false);
+    } else {
+      // No cached data: blank the cards and show full skeleton.
+      setReport(null);
+      setLeadSourceBreakdown([]);
+      setLocationBreakdown([]);
+      setTechnicianScorecards([]);
+      setIsLoading(true);
+    }
+
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
+    setIsRevalidating(true);
+
     let active = true;
-    setIsLoading(true);
     (async () => {
       try {
         const params = new URLSearchParams();
@@ -113,23 +174,36 @@ export function useReports(range: ReportRange = {}): UseReportsResult {
         };
         if (!active) return;
         if (body.success) {
-          setReport(body.data.report);
-          setLeadSourceBreakdown(body.data.leadSourceBreakdown ?? []);
-          setLocationBreakdown(body.data.locationBreakdown ?? []);
-          setTechnicianScorecards(body.data.technicianScorecards ?? []);
+          const payload: ReportsPayload = {
+            report: body.data.report,
+            leadSourceBreakdown: body.data.leadSourceBreakdown ?? [],
+            locationBreakdown: body.data.locationBreakdown ?? [],
+            technicianScorecards: body.data.technicianScorecards ?? [],
+          };
+          reportsCache.set(cacheKey, payload);
+          setReport(payload.report);
+          setLeadSourceBreakdown(payload.leadSourceBreakdown);
+          setLocationBreakdown(payload.locationBreakdown);
+          setTechnicianScorecards(payload.technicianScorecards);
+          setError(null);
         }
-        setError(null);
       } catch (err) {
         if (err instanceof AdminAuthRedirectError) return;
         if (active) setError('Could not connect to server. Please try again.');
       } finally {
-        if (active) setIsLoading(false);
+        if (active) {
+          setIsLoading(false);
+          setIsRevalidating(false);
+          isFetchingRef.current = false;
+        }
       }
     })();
     return () => {
       active = false;
+      isFetchingRef.current = false;
     };
-  }, [from, to, reloadNonce]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cacheKey, reloadNonce]);
 
   return {
     report,
@@ -137,6 +211,7 @@ export function useReports(range: ReportRange = {}): UseReportsResult {
     locationBreakdown,
     technicianScorecards,
     isLoading,
+    isRevalidating,
     error,
     refetch,
   };

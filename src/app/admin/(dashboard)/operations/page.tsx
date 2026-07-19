@@ -9,6 +9,7 @@ import {
   UserCheck,
   ArrowDown,
   ArrowUp,
+  Loader2,
 } from 'lucide-react';
 import {
   useOperationsMetrics,
@@ -148,7 +149,7 @@ export default function OperationsPage() {
     return { from: from.toISOString(), to: to.toISOString() };
   }, [days]);
 
-  const { metrics, isLoading, error } = useOperationsMetrics(range);
+  const { metrics, isLoading, isRevalidating, error } = useOperationsMetrics(range);
   const aging = metrics?.arAging;
   const agingTotal = aging?.nativeOutstandingCents ?? 0;
   const agingPct = (cents: number) =>
@@ -174,6 +175,9 @@ export default function OperationsPage() {
               size="sm"
               onClick={() => setDays(preset.days)}
             >
+              {days === preset.days && isRevalidating && (
+                <Loader2 className="mr-1.5 size-3 animate-spin" aria-hidden="true" />
+              )}
               {preset.label}
             </Button>
           ))}
