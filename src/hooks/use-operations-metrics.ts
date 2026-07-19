@@ -101,6 +101,9 @@ export function useOperationsMetrics(
   const [error, setError] = useState<string | null>(null);
   const [reloadNonce, setReloadNonce] = useState(0);
   const isFetchingRef = useRef(false);
+  // True once any successful fetch has completed — used to suppress the spinner
+  // on absolute first load (skeletons are the loading signal then).
+  const hasLoadedRef = useRef(operationsCache.get(cacheKey) !== null);
 
   const refetch = useCallback(async (): Promise<void> => {
     operationsCache.invalidate(cacheKey);
@@ -116,15 +119,18 @@ export function useOperationsMetrics(
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setMetrics(cached.data);
       setIsLoading(false);
-    } else {
-      // No cached data: blank the cards and show full skeleton.
-      setMetrics(null);
-      setIsLoading(true);
     }
+    // When there is no cache for the new range, keep whatever is currently
+    // painted — do NOT clear state or set isLoading. The previous numbers
+    // remain visible while the fresh fetch runs, which is the SWR contract.
+    // isLoading is only ever true on first mount (set by the lazy initialiser).
 
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
-    setIsRevalidating(true);
+    // Only show the spinner overlay when KPI cards are already painted with data.
+    // On absolute first load (hasLoadedRef=false) the skeleton cards are the
+    // loading signal — a spinner alongside them is redundant noise.
+    if (hasLoadedRef.current) setIsRevalidating(true);
 
     let active = true;
     (async () => {
@@ -148,6 +154,7 @@ export function useOperationsMetrics(
         if (!active) return;
         if (body.success) {
           operationsCache.set(cacheKey, body.data);
+          hasLoadedRef.current = true;
           setMetrics(body.data);
           setError(null);
         }
