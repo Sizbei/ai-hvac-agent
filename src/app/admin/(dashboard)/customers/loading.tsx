@@ -13,8 +13,8 @@ export default function CustomersLoading() {
         <div className="h-9 w-64 animate-pulse rounded-md bg-muted motion-reduce:animate-none" />
         <div className="h-9 w-36 animate-pulse rounded-md bg-muted motion-reduce:animate-none" />
       </div>
-      {/* customer cards */}
-      <div className="grid gap-3">
+      {/* customer cards — 3-column grid matching CustomerPeopleCards (sm:grid-cols-2 lg:grid-cols-3) */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {Array.from({ length: 6 }, (_, i) => (
           <CardSkeleton key={i} />
         ))}
