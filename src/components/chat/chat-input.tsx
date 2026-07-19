@@ -1,8 +1,7 @@
 'use client';
 
-import { useState, useRef, useEffect, type FormEvent } from 'react';
+import { useState, useRef, useEffect, useCallback, type FormEvent } from 'react';
 import { SendHorizontal, Paperclip, X, Image as ImageIcon } from 'lucide-react';
-import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import type { PendingAttachment, UploadedAttachment } from '@/lib/types/chat';
 
@@ -24,15 +23,30 @@ export function ChatInput({
   const [value, setValue] = useState('');
   const [attachments, setAttachments] = useState<readonly PendingAttachment[]>([]);
   const [isUploading, setIsUploading] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-resize the textarea: clamp between 1 and 5 rows.
+  const autoResize = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    const lineHeight = parseInt(getComputedStyle(el).lineHeight, 10) || 20;
+    const maxHeight = lineHeight * 5 + 16; // 5 rows + vertical padding
+    el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`;
+  }, []);
 
   // Keep focus in the textbox across turns
   useEffect(() => {
     if (!disabled) {
-      inputRef.current?.focus();
+      textareaRef.current?.focus();
     }
   }, [disabled]);
+
+  // Re-run resize whenever value changes
+  useEffect(() => {
+    autoResize();
+  }, [value, autoResize]);
 
   // Clean up preview URLs when attachments change
   useEffect(() => {
@@ -92,8 +106,8 @@ export function ChatInput({
     });
   }
 
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
+  async function handleSubmit(e?: FormEvent<HTMLFormElement>) {
+    e?.preventDefault();
     const trimmed = value.trim();
     if ((trimmed.length === 0 && attachments.length === 0) || disabled || isUploading) return;
 
@@ -128,12 +142,23 @@ export function ChatInput({
 
       setValue('');
       setAttachments([]);
-      inputRef.current?.focus();
+      // Reset textarea height after clearing
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+      }
+      textareaRef.current?.focus();
     } catch (error) {
       console.error('Failed to upload attachments:', error);
       alert('Failed to upload one or more attachments. Please try again.');
     } finally {
       setIsUploading(false);
+    }
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      void handleSubmit();
     }
   }
 
@@ -166,7 +191,7 @@ export function ChatInput({
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="flex items-center gap-2 p-3">
+      <form onSubmit={handleSubmit} className="flex items-end gap-2 p-3">
         <input
           ref={fileInputRef}
           type="file"
@@ -183,6 +208,7 @@ export function ChatInput({
           disabled={disabled || isUploading || attachments.length >= MAX_ATTACHMENTS}
           onClick={() => fileInputRef.current?.click()}
           aria-label="Attach image"
+          className="flex-shrink-0 self-end mb-0.5"
         >
           {attachments.length > 0 ? (
             <ImageIcon className="size-4" />
@@ -191,21 +217,26 @@ export function ChatInput({
           )}
         </Button>
 
-        <Input
-          ref={inputRef}
+        <textarea
+          ref={textareaRef}
           value={value}
           onChange={(e) => setValue(e.target.value.slice(0, MAX_LENGTH))}
+          onKeyDown={handleKeyDown}
           placeholder={placeholder}
           disabled={disabled || isUploading}
           autoFocus
-          className="flex-1"
+          rows={1}
           aria-label="Chat message input"
+          className="flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 overflow-y-auto"
+          style={{ lineHeight: '1.5rem', minHeight: '2.25rem' }}
         />
+
         <Button
           type="submit"
           size="icon"
           disabled={(value.trim().length === 0 && attachments.length === 0) || disabled || isUploading}
           aria-label="Send message"
+          className="flex-shrink-0 self-end mb-0.5"
         >
           {isUploading ? (
             <span className="size-4 animate-pulse">...</span>

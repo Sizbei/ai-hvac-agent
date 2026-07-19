@@ -1,8 +1,10 @@
 'use client';
 
-import { Loader2 } from 'lucide-react';
+import { useState } from 'react';
+import { Loader2, Pencil, Check, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import {
   Dialog,
   DialogContent,
@@ -18,7 +20,8 @@ interface ConfirmationDialogProps {
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
   readonly extraction: ExtractionResult;
-  readonly onConfirm: () => void;
+  /** Called with the (possibly edited) extraction data on confirm. */
+  readonly onConfirm: (edited: ExtractionResult) => void;
   readonly isLoading?: boolean;
 }
 
@@ -45,16 +48,100 @@ function getUrgencyVariant(
   }
 }
 
-interface DetailRowProps {
+/** A single editable field row in the confirmation dialog. */
+interface EditableRowProps {
   readonly label: string;
-  readonly children: React.ReactNode;
+  readonly value: string;
+  readonly onSave: (next: string) => void;
+  readonly disabled?: boolean;
+  /** When true the field is rendered as a non-editable badge (urgency). */
+  readonly badge?: boolean;
 }
 
-function DetailRow({ label, children }: DetailRowProps) {
+function EditableRow({ label, value, onSave, disabled, badge }: EditableRowProps) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+
+  function startEdit() {
+    setDraft(value);
+    setEditing(true);
+  }
+
+  function commitEdit() {
+    const trimmed = draft.trim();
+    if (trimmed) onSave(trimmed);
+    setEditing(false);
+  }
+
+  function cancelEdit() {
+    setDraft(value);
+    setEditing(false);
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Enter') { e.preventDefault(); commitEdit(); }
+    if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
+  }
+
+  if (badge) {
+    return (
+      <div className="flex flex-col gap-0.5">
+        <span className="text-xs font-medium text-muted-foreground">{label}</span>
+        <span className="text-sm">
+          <Badge variant={getUrgencyVariant(value)}>
+            {value.charAt(0).toUpperCase() + value.slice(1)}
+          </Badge>
+        </span>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-0.5">
       <span className="text-xs font-medium text-muted-foreground">{label}</span>
-      <span className="text-sm">{children}</span>
+      {editing ? (
+        <div className="flex items-center gap-1">
+          <Input
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={handleKeyDown}
+            className="h-7 text-sm py-0 flex-1"
+            disabled={disabled}
+          />
+          <button
+            type="button"
+            onClick={commitEdit}
+            className="p-1 rounded-sm text-green-600 hover:bg-green-50"
+            aria-label={`Save ${label}`}
+            disabled={disabled}
+          >
+            <Check className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={cancelEdit}
+            className="p-1 rounded-sm text-muted-foreground hover:bg-muted"
+            aria-label={`Cancel editing ${label}`}
+            disabled={disabled}
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-1.5 group">
+          <span className="text-sm">{value}</span>
+          <button
+            type="button"
+            onClick={startEdit}
+            className="p-0.5 rounded-sm text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity hover:bg-muted"
+            aria-label={`Edit ${label}`}
+            disabled={disabled}
+          >
+            <Pencil className="size-3" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -66,52 +153,109 @@ export function ConfirmationDialog({
   onConfirm,
   isLoading = false,
 }: ConfirmationDialogProps) {
+  // Local editable copy so corrections don't affect hook state until confirmed.
+  const [edits, setEdits] = useState<Partial<ExtractionResult>>({});
+
+  // Reset edits when the dialog opens with fresh extraction data.
+  const [lastExtraction, setLastExtraction] = useState(extraction);
+  if (extraction !== lastExtraction) {
+    setLastExtraction(extraction);
+    setEdits({});
+  }
+
+  function field<K extends keyof ExtractionResult>(key: K): ExtractionResult[K] {
+    return (key in edits ? edits[key] : extraction[key]) as ExtractionResult[K];
+  }
+
+  function save<K extends keyof ExtractionResult>(key: K) {
+    return (val: string) => setEdits((prev) => ({ ...prev, [key]: val }));
+  }
+
+  function handleConfirm() {
+    // Merge edits on top of original extraction before submitting.
+    onConfirm({ ...extraction, ...edits });
+  }
+
+  const issueType = field('issueType');
+  const urgency = field('urgency');
+  const address = field('address');
+  const customerName = field('customerName');
+  const customerPhone = field('customerPhone');
+  const customerEmail = field('customerEmail');
+  const description = field('description');
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Confirm Your Service Request</DialogTitle>
+          <DialogTitle>Confirm your service request</DialogTitle>
           <DialogDescription>
-            Please review the details below before submitting.
+            Review your details below. Tap the pencil icon to correct anything before submitting.
           </DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-3 py-2">
-          {extraction.issueType && (
-            <DetailRow label="Issue Type">
-              {formatSnakeCase(extraction.issueType)}
-            </DetailRow>
+          {issueType && (
+            <EditableRow
+              label="Issue type"
+              value={formatSnakeCase(issueType)}
+              onSave={save('issueType')}
+              disabled={isLoading}
+            />
           )}
-          {extraction.urgency && (
-            <DetailRow label="Urgency">
-              <Badge variant={getUrgencyVariant(extraction.urgency)}>
-                {extraction.urgency.charAt(0).toUpperCase() +
-                  extraction.urgency.slice(1)}
+          {urgency && (
+            <div className="flex flex-col gap-0.5">
+              <span className="text-xs font-medium text-muted-foreground">Urgency</span>
+              <Badge variant={getUrgencyVariant(urgency)} className="w-fit">
+                {urgency.charAt(0).toUpperCase() + urgency.slice(1)}
               </Badge>
-            </DetailRow>
+            </div>
           )}
-          {extraction.address && (
-            <DetailRow label="Address">{extraction.address}</DetailRow>
+          {address && (
+            <EditableRow
+              label="Address"
+              value={address}
+              onSave={save('address')}
+              disabled={isLoading}
+            />
           )}
-          {extraction.customerName && (
-            <DetailRow label="Name">{extraction.customerName}</DetailRow>
+          {customerName && (
+            <EditableRow
+              label="Name"
+              value={customerName}
+              onSave={save('customerName')}
+              disabled={isLoading}
+            />
           )}
-          {extraction.customerPhone && (
-            <DetailRow label="Phone">{extraction.customerPhone}</DetailRow>
+          {customerPhone && (
+            <EditableRow
+              label="Phone"
+              value={customerPhone}
+              onSave={save('customerPhone')}
+              disabled={isLoading}
+            />
           )}
-          {extraction.customerEmail && (
-            <DetailRow label="Email">
-              {extraction.customerEmail === SKIP_SENTINEL ? (
-                <span className="text-muted-foreground">Not provided</span>
-              ) : (
-                extraction.customerEmail
-              )}
-            </DetailRow>
+          {customerEmail && customerEmail !== SKIP_SENTINEL && (
+            <EditableRow
+              label="Email"
+              value={customerEmail}
+              onSave={save('customerEmail')}
+              disabled={isLoading}
+            />
           )}
-          {extraction.description && (
-            <DetailRow label="Description">
-              {extraction.description}
-            </DetailRow>
+          {customerEmail === SKIP_SENTINEL && (
+            <div className="flex flex-col gap-0.5">
+              <span className="text-xs font-medium text-muted-foreground">Email</span>
+              <span className="text-sm text-muted-foreground">Not provided</span>
+            </div>
+          )}
+          {description && (
+            <EditableRow
+              label="Description"
+              value={description}
+              onSave={save('description')}
+              disabled={isLoading}
+            />
           )}
         </div>
 
@@ -126,9 +270,9 @@ export function ConfirmationDialog({
             onClick={() => onOpenChange(false)}
             disabled={isLoading}
           >
-            Go Back
+            Go back
           </Button>
-          <Button onClick={onConfirm} disabled={isLoading}>
+          <Button onClick={handleConfirm} disabled={isLoading}>
             {isLoading && <Loader2 className="size-4 animate-spin" />}
             Confirm &amp; Submit
           </Button>

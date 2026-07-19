@@ -151,12 +151,11 @@ export function ChatExperience({
     }
   }, [escalate]);
 
-  const handleConfirm = useCallback(async () => {
-    if (!extraction) return;
+  const handleConfirm = useCallback(async (edited: import('@/lib/ai/extraction-schema').ExtractionResult) => {
     setIsConfirming(true);
     setConfirmError(null);
     try {
-      const { referenceNumber, arrivalWindowLabel } = await confirm(extraction);
+      const { referenceNumber, arrivalWindowLabel } = await confirm(edited);
       setShowConfirmation(false);
       onSubmitted?.({ referenceNumber, arrivalWindowLabel });
     } catch (err) {
@@ -166,7 +165,7 @@ export function ChatExperience({
     } finally {
       setIsConfirming(false);
     }
-  }, [extraction, confirm, onSubmitted]);
+  }, [confirm, onSubmitted]);
 
   if (isLoading) {
     return (
