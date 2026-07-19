@@ -143,15 +143,15 @@ export default function Home() {
           </div>
 
           <div className="flex items-center gap-2">
-            <MobileNav />
             <Button
               size="lg"
-              className="bg-primary text-primary-foreground hover:bg-primary/90"
+              className="hidden bg-primary text-primary-foreground hover:bg-primary/90 md:inline-flex"
               render={<Link href="/chat" />}
             >
               Get service now
               <ArrowRight className="size-4" data-icon="inline-end" />
             </Button>
+            <MobileNav />
           </div>
         </nav>
       </header>

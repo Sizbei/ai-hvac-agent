@@ -134,7 +134,7 @@
   --success-foreground: oklch(0.16 0.04 150);
   --success-light: oklch(0.3 0.07 150);
   --warning: oklch(0.78 0.15 80);
-  --warning-foreground: oklch(0.18 0.04 80);
+  --warning-foreground: oklch(0.92 0.12 80);
   --warning-light: oklch(0.32 0.07 80);
   --danger: oklch(0.704 0.191 22.216);
   --danger-foreground: oklch(0.16 0.04 25);
