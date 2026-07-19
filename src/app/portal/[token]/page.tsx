@@ -55,9 +55,9 @@ function MessageState({
 }) {
   return (
     <main className="mx-auto flex min-h-screen max-w-lg items-center justify-center p-6">
-      <div className="w-full rounded-xl border border-gray-200 bg-white p-8 text-center shadow-sm">
-        <h1 className="text-xl font-semibold text-gray-900">{title}</h1>
-        <p className="mt-2 text-sm text-gray-600">{body}</p>
+      <div className="w-full rounded-xl border border-border bg-card p-8 text-center shadow-sm">
+        <h1 className="text-xl font-semibold text-foreground">{title}</h1>
+        <p className="mt-2 text-sm text-muted-foreground">{body}</p>
       </div>
     </main>
   );
@@ -71,8 +71,8 @@ function Section({
   readonly children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
-      <h2 className="mb-4 text-base font-semibold text-gray-900">{title}</h2>
+    <section className="rounded-xl border border-border bg-card p-5 shadow-sm sm:p-6">
+      <h2 className="mb-4 text-base font-semibold text-foreground">{title}</h2>
       {children}
     </section>
   );
@@ -80,16 +80,16 @@ function Section({
 
 function InvoiceStateBadge({ state }: { readonly state: string }) {
   const colors: Record<string, string> = {
-    paid: "bg-green-100 text-green-800",
-    open: "bg-amber-100 text-amber-800",
-    draft: "bg-gray-100 text-gray-700",
-    void: "bg-gray-100 text-gray-500",
-    refunded: "bg-gray-100 text-gray-700",
+    paid: "bg-success-light text-success",
+    open: "bg-warning-light text-warning-foreground",
+    draft: "bg-muted text-muted-foreground",
+    void: "bg-muted text-muted-foreground",
+    refunded: "bg-muted text-muted-foreground",
   };
   return (
     <span
       className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-        colors[state] ?? "bg-gray-100 text-gray-700"
+        colors[state] ?? "bg-muted text-muted-foreground"
       }`}
     >
       {humanize(state)}
@@ -107,9 +107,9 @@ function InvoicesSection({
   return (
     <Section title="Invoices">
       {invoices.length === 0 ? (
-        <p className="text-sm text-gray-500">No invoices yet.</p>
+        <p className="text-sm text-muted-foreground">No invoices yet.</p>
       ) : (
-        <ul className="divide-y divide-gray-100">
+        <ul className="divide-y divide-border">
           {invoices.map((inv) => {
             const payable = inv.state === "open" && inv.balanceCents > 0;
             return (
@@ -119,12 +119,12 @@ function InvoicesSection({
               >
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="font-medium text-gray-900">
+                    <span className="font-medium text-foreground">
                       {formatCentsExact(inv.totalCents)}
                     </span>
                     <InvoiceStateBadge state={inv.state} />
                   </div>
-                  <p className="mt-0.5 text-xs text-gray-500">
+                  <p className="mt-0.5 text-xs text-muted-foreground">
                     {formatDate(inv.createdAt)}
                     {inv.amountPaidCents > 0 &&
                       ` · ${formatCentsExact(inv.amountPaidCents)} paid`}
@@ -156,19 +156,19 @@ function EstimatesSection({
   return (
     <Section title="Estimates">
       {estimates.length === 0 ? (
-        <p className="text-sm text-gray-500">No estimates yet.</p>
+        <p className="text-sm text-muted-foreground">No estimates yet.</p>
       ) : (
-        <ul className="divide-y divide-gray-100">
+        <ul className="divide-y divide-border">
           {estimates.map((est) => (
             <li
               key={est.id}
               className="flex flex-wrap items-center justify-between gap-3 py-3"
             >
               <div>
-                <span className="font-medium text-gray-900">
+                <span className="font-medium text-foreground">
                   {formatCentsExact(est.totalCents)}
                 </span>
-                <p className="mt-0.5 text-xs text-gray-500">
+                <p className="mt-0.5 text-xs text-muted-foreground">
                   {est.awaitingApproval
                     ? "Awaiting your approval"
                     : humanize(est.status)}
@@ -189,9 +189,9 @@ function JobsSection({ jobs }: { readonly jobs: PortalData["jobs"] }) {
   return (
     <Section title="Upcoming service">
       {jobs.length === 0 ? (
-        <p className="text-sm text-gray-500">No upcoming visits scheduled.</p>
+        <p className="text-sm text-muted-foreground">No upcoming visits scheduled.</p>
       ) : (
-        <ul className="divide-y divide-gray-100">
+        <ul className="divide-y divide-border">
           {jobs.map((job) => {
             const window = formatWindow(
               job.arrivalWindowStart,
@@ -200,14 +200,14 @@ function JobsSection({ jobs }: { readonly jobs: PortalData["jobs"] }) {
             return (
               <li key={job.id} className="py-3">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-medium text-gray-900">
+                  <span className="font-medium text-foreground">
                     {humanize(job.issueType)}
                   </span>
-                  <span className="text-xs font-medium text-gray-600">
+                  <span className="text-xs font-medium text-muted-foreground">
                     {humanize(job.status)}
                   </span>
                 </div>
-                <p className="mt-0.5 text-xs text-gray-500">
+                <p className="mt-0.5 text-xs text-muted-foreground">
                   {window ??
                     (job.scheduledDate
                       ? formatDate(job.scheduledDate)
@@ -230,15 +230,15 @@ function HistorySection({
   return (
     <Section title="Service history">
       {history.length === 0 ? (
-        <p className="text-sm text-gray-500">No past service on record.</p>
+        <p className="text-sm text-muted-foreground">No past service on record.</p>
       ) : (
-        <ul className="divide-y divide-gray-100">
+        <ul className="divide-y divide-border">
           {history.map((h) => (
             <li key={h.id} className="py-3">
-              <p className="text-sm text-gray-900">
+              <p className="text-sm text-foreground">
                 {h.workPerformed ?? "Service visit"}
               </p>
-              <p className="mt-0.5 text-xs text-gray-500">
+              <p className="mt-0.5 text-xs text-muted-foreground">
                 {formatDate(h.createdAt)}
               </p>
             </li>
@@ -274,12 +274,12 @@ export default async function CustomerPortalPage({
   return (
     <main className="mx-auto max-w-2xl space-y-5 p-4 sm:p-6">
       <header className="pt-2">
-        <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+        <h1 className="text-2xl font-bold tracking-tight text-foreground">
           {data.customerName
             ? `Welcome back, ${data.customerName}`
             : "Your account"}
         </h1>
-        <p className="mt-1 text-sm text-gray-600">
+        <p className="mt-1 text-sm text-muted-foreground">
           View your estimates and invoices, pay a balance, and track upcoming
           service.
         </p>
@@ -290,7 +290,7 @@ export default async function CustomerPortalPage({
       <JobsSection jobs={data.jobs} />
       <HistorySection history={data.history} />
 
-      <p className="pb-4 text-center text-xs text-gray-400">
+      <p className="pb-4 text-center text-xs text-muted-foreground">
         Questions? Reply to your confirmation message or give us a call.
       </p>
     </main>

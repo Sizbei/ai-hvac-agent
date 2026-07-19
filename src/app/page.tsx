@@ -1,8 +1,6 @@
 import Link from 'next/link';
 import { Bricolage_Grotesque } from 'next/font/google';
-
-export const dynamic = 'force-dynamic';
-
+import { MobileNav } from './_components/mobile-nav';
 import {
   ArrowRight,
   Wind,
@@ -144,14 +142,17 @@ export default function Home() {
             ))}
           </div>
 
-          <Button
-            size="lg"
-            className="bg-primary text-primary-foreground hover:bg-primary/90"
-            render={<Link href="/chat" />}
-          >
-            Get service now
-            <ArrowRight className="size-4" data-icon="inline-end" />
-          </Button>
+          <div className="flex items-center gap-2">
+            <MobileNav />
+            <Button
+              size="lg"
+              className="bg-primary text-primary-foreground hover:bg-primary/90"
+              render={<Link href="/chat" />}
+            >
+              Get service now
+              <ArrowRight className="size-4" data-icon="inline-end" />
+            </Button>
+          </div>
         </nav>
       </header>
 
