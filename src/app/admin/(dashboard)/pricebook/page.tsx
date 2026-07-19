@@ -7,6 +7,7 @@ import { useUrlFilterSync } from '@/hooks/use-url-filter-sync';
 import { PricebookTable } from '@/components/admin/pricebook/pricebook-table';
 import { PricebookFormDialog } from '@/components/admin/pricebook/pricebook-form-dialog';
 import { TaxRatesPanel } from '@/components/admin/pricebook/tax-rates-panel';
+import { ConfirmDialog } from '@/components/admin/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -45,6 +46,8 @@ export default function PricebookPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<PricebookItem | null>(null);
   const [deactivateError, setDeactivateError] = useState<string | null>(null);
+  const [pendingDeactivate, setPendingDeactivate] = useState<PricebookItem | null>(null);
+  const [isConfirming, setIsConfirming] = useState(false);
 
   // Persist filters to the URL (shareable links + survives refresh). Page is
   // intentionally NOT persisted. Defaults map to '' so they're dropped from the URL.
@@ -118,14 +121,16 @@ export default function PricebookPage() {
     setFormOpen(true);
   }
 
-  async function handleDeactivate(item: PricebookItem): Promise<void> {
-    if (!window.confirm(`Deactivate "${item.name}"?`)) return;
+  async function handleDeactivateConfirm(): Promise<void> {
+    if (!pendingDeactivate) return;
+    setIsConfirming(true);
     setDeactivateError(null);
     try {
-      const res = await fetch(`/api/admin/pricebook/${item.id}`, {
+      const res = await fetch(`/api/admin/pricebook/${pendingDeactivate.id}`, {
         method: 'DELETE',
       });
       if (res.ok) {
+        setPendingDeactivate(null);
         void refetch();
       } else {
         const body = await res.json().catch(() => ({}));
@@ -133,6 +138,8 @@ export default function PricebookPage() {
       }
     } catch {
       setDeactivateError('Network error — could not deactivate item.');
+    } finally {
+      setIsConfirming(false);
     }
   }
 
@@ -208,10 +215,10 @@ export default function PricebookPage() {
         </Button>
       </div>
 
-      {(error ?? deactivateError) && (
+      {error && (
         <Alert variant="destructive">
           <AlertCircle className="size-4" />
-          <AlertDescription>{error ?? deactivateError}</AlertDescription>
+          <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
 
@@ -219,7 +226,7 @@ export default function PricebookPage() {
         items={items}
         isLoading={isLoading}
         onEdit={handleEditClick}
-        onDeactivate={(item) => void handleDeactivate(item)}
+        onDeactivate={(item) => { setDeactivateError(null); setPendingDeactivate(item); }}
       />
 
       {/* pager bar — only shown when there are results */}
@@ -282,6 +289,18 @@ export default function PricebookPage() {
         onClose={() => setFormOpen(false)}
         onSuccess={() => void refetch()}
         editing={editing}
+      />
+
+      <ConfirmDialog
+        open={pendingDeactivate !== null}
+        onOpenChange={(open) => { if (!open) { setPendingDeactivate(null); setDeactivateError(null); } }}
+        title="Deactivate item?"
+        description={pendingDeactivate ? `"${pendingDeactivate.name}" will be marked inactive and hidden from new jobs. You can re-activate it later.` : ''}
+        confirmLabel="Deactivate"
+        confirmingLabel="Deactivating…"
+        isConfirming={isConfirming}
+        error={deactivateError}
+        onConfirm={() => { void handleDeactivateConfirm(); }}
       />
     </PageShell>
   );

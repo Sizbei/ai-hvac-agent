@@ -126,6 +126,17 @@ export default function AdminRequestsPage() {
         requests={requests}
         isLoading={isLoading}
         onRowClick={(req) => setSelectedRequestId(req.id)}
+        hasActiveFilters={
+          !!statusFilter || !!urgencyFilter || !!assignedToFilter || !!debouncedSearch
+        }
+        onClearFilters={() => {
+          setStatusFilter('');
+          setUrgencyFilter('');
+          setAssignedToFilter('');
+          setIsAfterHoursFilter(false);
+          setSearchInput('');
+          setDebouncedSearch('');
+        }}
       />
 
       {/* Pager bar */}

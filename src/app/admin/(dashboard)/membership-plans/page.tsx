@@ -5,8 +5,11 @@ import { Plus, AlertCircle } from 'lucide-react';
 import { useMembershipPlans, type MembershipPlan } from '@/hooks/use-membership-plans';
 import { MembershipPlansTable } from '@/components/admin/memberships/membership-plans-table';
 import { MembershipPlanFormDialog } from '@/components/admin/memberships/membership-plan-form-dialog';
+import { ConfirmDialog } from '@/components/admin/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { PageShell } from '@/components/admin/ui/page-shell';
+import { PageHeader } from '@/components/admin/ui/page-header';
 
 export default function MembershipPlansPage() {
   useEffect(() => { document.title = 'Membership Plans · Spears Admin'; }, []);
@@ -14,6 +17,8 @@ export default function MembershipPlansPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<MembershipPlan | null>(null);
   const [deactivateError, setDeactivateError] = useState<string | null>(null);
+  const [pendingDeactivate, setPendingDeactivate] = useState<MembershipPlan | null>(null);
+  const [isConfirming, setIsConfirming] = useState(false);
 
   function handleAddClick(): void {
     setEditing(null);
@@ -25,14 +30,16 @@ export default function MembershipPlansPage() {
     setFormOpen(true);
   }
 
-  async function handleDeactivate(plan: MembershipPlan): Promise<void> {
-    if (!window.confirm(`Deactivate "${plan.name}"?`)) return;
+  async function handleDeactivateConfirm(): Promise<void> {
+    if (!pendingDeactivate) return;
+    setIsConfirming(true);
     setDeactivateError(null);
     try {
-      const res = await fetch(`/api/admin/membership-plans/${plan.id}`, {
+      const res = await fetch(`/api/admin/membership-plans/${pendingDeactivate.id}`, {
         method: 'DELETE',
       });
       if (res.ok) {
+        setPendingDeactivate(null);
         void refetch();
       } else {
         const body = await res.json().catch(() => ({}));
@@ -40,29 +47,28 @@ export default function MembershipPlansPage() {
       }
     } catch {
       setDeactivateError('Network error — could not deactivate plan.');
+    } finally {
+      setIsConfirming(false);
     }
   }
 
   return (
-    <div className="p-6 space-y-8">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Membership Plans</h1>
-          <p className="text-sm text-muted-foreground">
-            Recurring service-agreement plans customers can enroll in for member
-            pricing.
-          </p>
-        </div>
-        <Button onClick={handleAddClick}>
-          <Plus className="mr-2 h-4 w-4" />
-          Add Plan
-        </Button>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Membership Plans"
+        subtitle="Recurring service-agreement plans customers can enroll in for member pricing."
+        actions={
+          <Button onClick={handleAddClick}>
+            <Plus className="mr-2 h-4 w-4" />
+            Add Plan
+          </Button>
+        }
+      />
 
-      {(error ?? deactivateError) && (
+      {error && (
         <Alert variant="destructive">
           <AlertCircle className="size-4" />
-          <AlertDescription>{error ?? deactivateError}</AlertDescription>
+          <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
 
@@ -70,7 +76,7 @@ export default function MembershipPlansPage() {
         plans={plans}
         isLoading={isLoading}
         onEdit={handleEditClick}
-        onDeactivate={(plan) => void handleDeactivate(plan)}
+        onDeactivate={(plan) => { setDeactivateError(null); setPendingDeactivate(plan); }}
       />
 
       <MembershipPlanFormDialog
@@ -79,6 +85,18 @@ export default function MembershipPlansPage() {
         onSuccess={() => void refetch()}
         editing={editing}
       />
-    </div>
+
+      <ConfirmDialog
+        open={pendingDeactivate !== null}
+        onOpenChange={(open) => { if (!open) { setPendingDeactivate(null); setDeactivateError(null); } }}
+        title="Deactivate plan?"
+        description={pendingDeactivate ? `"${pendingDeactivate.name}" will be marked inactive and unavailable for new enrollments. You can re-activate it later.` : ''}
+        confirmLabel="Deactivate"
+        confirmingLabel="Deactivating…"
+        isConfirming={isConfirming}
+        error={deactivateError}
+        onConfirm={() => { void handleDeactivateConfirm(); }}
+      />
+    </PageShell>
   );
 }

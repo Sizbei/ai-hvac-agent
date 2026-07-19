@@ -11,14 +11,21 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { UrgencyBadge } from '@/components/admin/urgency-badge';
 import { StatusBadge } from '@/components/admin/status-badge';
+import { EmptyState } from '@/components/admin/ui/empty-state';
+import { Button } from '@/components/ui/button';
 import type { AdminRequest } from '@/lib/admin/types';
 import { SyncPill } from '@/components/admin/sync-pill';
 import { cn } from '@/lib/utils';
+import { ClipboardList } from 'lucide-react';
 
 interface RequestTableProps {
   readonly requests: readonly AdminRequest[];
   readonly isLoading: boolean;
   readonly onRowClick: (request: AdminRequest) => void;
+  /** True when any filter (status/urgency/search/assignedTo) is active. */
+  readonly hasActiveFilters?: boolean;
+  /** Called when the user clicks "Clear filters" in the empty state. */
+  readonly onClearFilters?: () => void;
 }
 
 function formatIssueType(issueType: string): string {
@@ -35,7 +42,13 @@ function formatDate(dateString: string): string {
 const SKELETON_ROWS = 5;
 const COLUMN_COUNT = 7;
 
-export function RequestTable({ requests, isLoading, onRowClick }: RequestTableProps) {
+export function RequestTable({
+  requests,
+  isLoading,
+  onRowClick,
+  hasActiveFilters = false,
+  onClearFilters,
+}: RequestTableProps) {
   // When we have rows but are revalidating, dim existing rows instead of
   // flashing a skeleton — this is the stale-while-revalidate pattern.
   const showSkeleton = isLoading && requests.length === 0;
@@ -74,8 +87,23 @@ export function RequestTable({ requests, isLoading, onRowClick }: RequestTablePr
             : requests.length === 0
               ? (
                   <TableRow>
-                    <TableCell colSpan={COLUMN_COUNT} className="text-center py-8 text-muted-foreground">
-                      No requests found
+                    <TableCell colSpan={COLUMN_COUNT} className="p-0">
+                      <EmptyState
+                        icon={ClipboardList}
+                        title={hasActiveFilters ? 'No requests match' : 'No requests yet'}
+                        description={
+                          hasActiveFilters
+                            ? 'Try adjusting the filters or search to see results.'
+                            : 'Service requests submitted by customers will appear here.'
+                        }
+                        action={
+                          hasActiveFilters && onClearFilters ? (
+                            <Button variant="outline" size="sm" onClick={onClearFilters}>
+                              Clear filters
+                            </Button>
+                          ) : undefined
+                        }
+                      />
                     </TableCell>
                   </TableRow>
                 )

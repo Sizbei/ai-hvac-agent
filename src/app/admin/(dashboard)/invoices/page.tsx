@@ -326,13 +326,7 @@ export default function InvoicesPage() {
         <SummaryBand stats={stats} collectedThisMonthCents={collectedThisMonthCents} />
       )}
 
-      {/* flash / error feedback */}
-      {flash && (
-        <Alert variant={flash.ok ? 'default' : 'destructive'}>
-          <AlertCircle className="size-4" />
-          <AlertDescription>{flash.msg}</AlertDescription>
-        </Alert>
-      )}
+      {/* error feedback (in-flow) */}
       {error && (
         <Alert variant="destructive">
           <AlertCircle className="size-4" />
@@ -603,6 +597,25 @@ export default function InvoicesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Fixed-position toast — renders outside the page flow so it never
+          causes the SummaryBand or invoice list to shift position. */}
+      {flash && (
+        <div
+          role="status"
+          aria-live="polite"
+          className={cn(
+            'fixed bottom-6 right-6 z-50 flex items-center gap-2.5 rounded-xl border px-4 py-3 text-sm font-medium shadow-lg',
+            'animate-in fade-in slide-in-from-bottom-2 duration-200 ease-out motion-reduce:animate-none',
+            flash.ok
+              ? 'border-border bg-card text-foreground'
+              : 'border-destructive/30 bg-destructive text-destructive-foreground',
+          )}
+        >
+          <AlertCircle className="size-4 shrink-0" />
+          {flash.msg}
+        </div>
+      )}
     </PageShell>
   );
 }
