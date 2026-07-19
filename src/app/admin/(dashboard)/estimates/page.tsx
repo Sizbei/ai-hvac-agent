@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useCallback, useState, useEffect } from 'react';
+import { Fragment, useCallback, useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { ChevronDown, ChevronRight, Plus, AlertCircle, FileText, Search } from 'lucide-react';
 import { useEstimates, type EstimatePipelineStats } from '@/hooks/use-estimates';
@@ -179,6 +179,7 @@ function emptyMessage(bucket: Bucket | null): string {
 
 export default function EstimatesPage() {
   useEffect(() => { document.title = 'Estimates · Spears Admin'; }, []);
+  const searchRef = useRef<HTMLInputElement>(null);
   // Default to Open — the actionable tab (the follow-up list), per the
   // approved mockup; All is one click away.
   const [activeBucket, setActiveBucket] = useState<Bucket | null>('open');
@@ -221,6 +222,20 @@ export default function EstimatesPage() {
   useEffect(() => {
     setPage(1);
   }, [debouncedSearch]);
+
+  // `/` shortcut: focus the search input (when not already in a text field).
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== '/') return;
+      const target = e.target as HTMLElement;
+      const tag = target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable) return;
+      e.preventDefault();
+      searchRef.current?.focus();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   const { estimates, total, stats, isLoading, error, refetch } = useEstimates({
     page,
@@ -271,6 +286,7 @@ export default function EstimatesPage() {
       <div className="relative sm:max-w-sm">
         <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input
+          ref={searchRef}
           aria-label="Search estimates"
           placeholder="Search by customer name or title..."
           value={search}

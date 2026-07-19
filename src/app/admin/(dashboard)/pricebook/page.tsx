@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Plus, AlertCircle, Search } from 'lucide-react';
 import { usePricebook, useTaxRates, type PricebookSortKey } from '@/hooks/use-pricebook';
 import { useUrlFilterSync } from '@/hooks/use-url-filter-sync';
@@ -34,6 +34,7 @@ const PRICEBOOK_SORT_OPTIONS: ReadonlyArray<{ value: PricebookSortKey; label: st
 
 export default function PricebookPage() {
   useEffect(() => { document.title = 'Pricebook · Spears Admin'; }, []);
+  const searchRef = useRef<HTMLInputElement>(null);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>(ALL_TYPES);
@@ -70,6 +71,20 @@ export default function PricebookPage() {
     const t = setTimeout(() => setDebouncedSearch(search), 300);
     return () => clearTimeout(t);
   }, [search]);
+
+  // `/` shortcut: focus the search input (when not already in a text field).
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== '/') return;
+      const target = e.target as HTMLElement;
+      const tag = target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable) return;
+      e.preventDefault();
+      searchRef.current?.focus();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   const typeParam = typeFilter === ALL_TYPES ? undefined : typeFilter;
 
@@ -143,6 +158,7 @@ export default function PricebookPage() {
         <div className="relative flex-1 sm:max-w-md">
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
+            ref={searchRef}
             aria-label="Search pricebook"
             placeholder="Search by name, SKU, or description..."
             value={search}

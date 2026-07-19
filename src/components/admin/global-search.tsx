@@ -138,7 +138,9 @@ export function GlobalSearch() {
 
   // Page-navigation matches (instant, client-side) come first, then record
   // results from the API. Both share one keyboard-navigable index.
-  const navItems = query.trim() ? filterCommands(query, NAV_ITEMS) : [];
+  // When the query is empty, show up to 8 nav items as "Quick navigation".
+  const isEmptyQuery = !query.trim();
+  const navItems = isEmptyQuery ? NAV_ITEMS.slice(0, 8) : filterCommands(query, NAV_ITEMS);
   const navCount = navItems.length;
   const grouped = groupResults(results);
   const recordFlat = grouped.flatMap((g) => g.items);
@@ -206,11 +208,11 @@ export function GlobalSearch() {
 
         {/* Results */}
         <div className="max-h-[360px] overflow-y-auto py-2">
-          {/* Pages — instant client-side navigation matches */}
+          {/* Pages / Quick navigation — instant client-side navigation matches */}
           {navItems.length > 0 && (
             <div>
               <p className="px-4 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                Pages
+                {isEmptyQuery ? 'Quick navigation' : 'Pages'}
               </p>
               {navItems.map((item, i) => {
                 const isActive = i === activeIndex;
@@ -235,15 +237,10 @@ export function GlobalSearch() {
             </div>
           )}
 
-          {/* Record placeholders — suppressed when Pages already fill the list */}
+          {/* Record placeholders — suppressed when nav items fill the list */}
           {navCount === 0 && !loading && query.length >= 2 && results.length === 0 && (
             <p className="px-4 py-6 text-center text-sm text-muted-foreground">
               No results for &ldquo;{query}&rdquo;
-            </p>
-          )}
-          {navCount === 0 && query.length < 2 && (
-            <p className="px-4 py-6 text-center text-sm text-muted-foreground">
-              Type at least 2 characters to search
             </p>
           )}
 

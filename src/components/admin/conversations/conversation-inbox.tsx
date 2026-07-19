@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { AlertCircle, Search, Inbox, MessagesSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { pageLabel } from '@/lib/admin/invoice-list-helpers';
@@ -59,21 +59,29 @@ function needsAction(status: string): boolean {
 function ConversationRow({
   conversation,
   isSelected,
+  isFocused,
+  tabIndex,
+  onRef,
   onSelect,
 }: {
   readonly conversation: ConversationSummary;
   readonly isSelected: boolean;
+  readonly isFocused: boolean;
+  readonly tabIndex: number;
+  readonly onRef: (el: HTMLButtonElement | null) => void;
   readonly onSelect: () => void;
 }) {
   return (
     <button
+      ref={onRef}
       type="button"
+      tabIndex={tabIndex}
       onClick={onSelect}
       aria-label={`Open conversation ${conversation.referenceNumber ?? conversation.id.slice(0, 8)}`}
       aria-current={isSelected}
       className={cn(
         'relative flex w-full items-start gap-3 border-b border-border/60 px-4 py-3.5 text-left transition-colors',
-        isSelected ? 'bg-primary/[0.06]' : 'hover:bg-muted/50',
+        isSelected ? 'bg-primary/[0.06]' : isFocused ? 'bg-muted/70' : 'hover:bg-muted/50',
       )}
     >
       {isSelected && <span className="absolute inset-y-0 left-0 w-0.5 bg-primary" />}
@@ -113,6 +121,9 @@ export function ConversationInbox() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Drives the mobile (<lg) slide-over; desktop renders the pane inline.
   const [mobileOpenId, setMobileOpenId] = useState<string | null>(null);
+  // Keyboard navigation: focusedIndex tracks the arrow-key cursor in the list.
+  const [focusedIndex, setFocusedIndex] = useState<number>(-1);
+  const rowRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -146,10 +157,39 @@ export function ConversationInbox() {
     channelFilter !== ALL_CHANNELS ||
     debouncedSearch.length > 0;
 
-  const handleSelect = (id: string) => {
+  // Reset focusedIndex when the list changes so stale arrow positions don't persist.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setFocusedIndex(-1);
+  }, [conversations]);
+
+  const handleSelect = useCallback((id: string) => {
     setSelectedId(id);
     setMobileOpenId(id);
-  };
+  }, []);
+
+  // Arrow key / Enter navigation on the list pane (keyboard-first requirement).
+  const handleListKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (conversations.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setFocusedIndex((i) => {
+        const next = Math.min(i + 1, conversations.length - 1);
+        rowRefs.current[next]?.focus();
+        return next;
+      });
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setFocusedIndex((i) => {
+        const prev = Math.max(i - 1, 0);
+        rowRefs.current[prev]?.focus();
+        return prev;
+      });
+    } else if (e.key === 'Enter' && focusedIndex >= 0) {
+      const conv = conversations[focusedIndex];
+      if (conv) handleSelect(conv.id);
+    }
+  }, [conversations, focusedIndex, handleSelect]);
 
   return (
     <div className="flex h-full flex-col">
@@ -221,6 +261,9 @@ export function ConversationInbox() {
 
           {/* Rows */}
           <div
+            role="listbox"
+            aria-label="Conversations"
+            onKeyDown={handleListKeyDown}
             className={cn(
               'min-h-0 flex-1 overflow-y-auto transition-opacity duration-150',
               isLoading && conversations.length > 0 && 'opacity-50 pointer-events-none',
@@ -256,11 +299,14 @@ export function ConversationInbox() {
                 </p>
               </div>
             ) : (
-              conversations.map((conversation) => (
+              conversations.map((conversation, idx) => (
                 <ConversationRow
                   key={conversation.id}
                   conversation={conversation}
                   isSelected={conversation.id === selectedId}
+                  isFocused={idx === focusedIndex}
+                  tabIndex={focusedIndex < 0 ? (idx === 0 ? 0 : -1) : idx === focusedIndex ? 0 : -1}
+                  onRef={(el) => { rowRefs.current[idx] = el; }}
                   onSelect={() => handleSelect(conversation.id)}
                 />
               ))
