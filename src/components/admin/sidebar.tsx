@@ -169,7 +169,7 @@ export function Sidebar({
 
         <aside
           className={cn(
-            'fixed inset-y-0 left-0 z-50 w-64 transition-transform duration-200',
+            'fixed inset-y-0 left-0 z-50 w-64 transition-transform duration-200 motion-reduce:transition-none',
             surfaceClass,
             isMobileOpen ? 'translate-x-0' : '-translate-x-full',
           )}
@@ -265,7 +265,7 @@ export function Sidebar({
   return (
     <aside
       className={cn(
-        'shrink-0 transition-all duration-200',
+        'shrink-0 transition-[width] duration-200 motion-reduce:transition-none',
         surfaceClass,
         isCollapsed ? 'w-16' : 'w-64',
       )}

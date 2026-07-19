@@ -400,7 +400,7 @@ export default function EstimatesPage() {
                     {isExpanded && (
                       /* No border-t: panel reads as one unit with its row */
                       <tr key={`${est.id}-expand`}>
-                        <td colSpan={6} className="bg-muted/30 px-6 py-4 animate-in fade-in-0 slide-in-from-top-1 duration-100">
+                        <td colSpan={6} className="bg-muted/30 px-6 py-4 animate-in fade-in-0 slide-in-from-top-1 duration-100 motion-reduce:animate-none">
                           <div className="flex flex-wrap gap-6">
                             {/* Key facts */}
                             <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">

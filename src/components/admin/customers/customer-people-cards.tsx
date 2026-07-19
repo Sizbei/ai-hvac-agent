@@ -34,7 +34,7 @@ function PeopleCard({
       type="button"
       onClick={() => onSelect(customer.id)}
       aria-pressed={active}
-      className={`flex flex-col gap-3 rounded-xl border bg-card p-4 text-left transition-all hover:-translate-y-0.5 hover:border-muted-foreground/40 hover:shadow-md ${
+      className={`flex flex-col gap-3 rounded-xl border bg-card p-4 text-left transition-[transform,box-shadow,border-color] duration-150 ease-out motion-reduce:transition-none hover:-translate-y-0.5 hover:border-muted-foreground/40 hover:shadow-md ${
         active ? 'border-primary ring-1 ring-primary' : ''
       }`}
     >
