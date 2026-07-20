@@ -224,7 +224,14 @@ export default function Home() {
             </p>
 
             <p className="lp-rise mt-3 text-sm text-muted-foreground" style={delay(300)}>
-              Staff demo login{' '}
+              {/* ?password=1 is required: the admin login defaults to Google-only
+                  mode, so a plain /admin/login link would dead-end these creds. */}
+              <Link
+                href="/admin/login?password=1"
+                className="font-medium text-foreground underline underline-offset-4 hover:no-underline"
+              >
+                Staff demo login
+              </Link>{' '}
               <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground">
                 admin@demo-hvac.com
               </code>{' '}
