@@ -1,11 +1,12 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Card } from '@/components/ui/card';
+import { AuthShell } from '@/components/auth/auth-shell';
 
 /**
  * Technician login form (mobile-first). Password posts to /api/auth/tech/login,
@@ -44,31 +45,41 @@ export function TechLoginForm({ googleEnabled }: { readonly googleEnabled: boole
   }
 
   return (
-    <div className="mx-auto flex min-h-dvh max-w-md flex-col justify-center bg-background px-4">
-      <Card className="p-6">
-        <h1 className="text-lg font-semibold tracking-tight">Field sign in</h1>
-        <p className="mb-5 mt-1 text-sm text-muted-foreground">
-          Technician access to your assigned jobs.
+    <AuthShell
+      title="Field sign in"
+      subtitle="Technician access to your assigned jobs."
+      footer={
+        <p>
+          Office staff?{' '}
+          <Link
+            href="/admin/login"
+            className="font-medium text-foreground underline underline-offset-4 hover:no-underline"
+          >
+            Sign in to the console
+          </Link>
         </p>
+      }
+    >
+      <div className="flex flex-col gap-4">
         {googleEnabled && (
           <>
             {/* Plain anchor, not fetch — the OAuth flow is a full-page redirect. */}
             <a
               href="/api/auth/google/start"
-              className="inline-flex h-11 w-full items-center justify-center gap-2.5 rounded-md border border-input bg-background px-4 text-sm font-medium shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              className="inline-flex h-11 w-full items-center justify-center gap-2.5 rounded-lg border border-input bg-background px-4 text-sm font-medium shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
             >
               <GoogleGlyph />
               Continue with Google
             </a>
-            <div className="my-4 flex items-center gap-3">
+            <div className="flex items-center gap-3">
               <span className="h-px flex-1 bg-border" />
               <span className="text-xs text-muted-foreground">or use your password</span>
               <span className="h-px flex-1 bg-border" />
             </div>
           </>
         )}
-        <form onSubmit={onSubmit} className="space-y-4">
-          <div className="space-y-1.5">
+        <form onSubmit={onSubmit} className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1.5">
             <Label htmlFor="email">Email</Label>
             <Input
               id="email"
@@ -80,8 +91,16 @@ export function TechLoginForm({ googleEnabled }: { readonly googleEnabled: boole
               onChange={(e) => setEmail(e.target.value)}
             />
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="password">Password</Label>
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-baseline justify-between">
+              <Label htmlFor="password">Password</Label>
+              <Link
+                href="/admin/forgot-password"
+                className="text-xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+              >
+                Forgot password?
+              </Link>
+            </div>
             <Input
               id="password"
               type="password"
@@ -100,8 +119,8 @@ export function TechLoginForm({ googleEnabled }: { readonly googleEnabled: boole
             {submitting ? 'Signing in…' : 'Sign in'}
           </Button>
         </form>
-      </Card>
-    </div>
+      </div>
+    </AuthShell>
   );
 }
 
