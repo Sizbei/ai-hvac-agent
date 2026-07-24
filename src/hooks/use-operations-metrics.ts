@@ -27,6 +27,22 @@ export interface SyncedArAging {
   readonly totalOutstandingCents: number;
 }
 
+export interface DispatchOutcomeCounts {
+  readonly committed: number;
+  readonly queuedAmbiguous: number;
+  readonly queuedNoFit: number;
+  readonly queuedNeedsReview: number;
+  readonly total: number;
+}
+
+export interface DispatchOutcomeRollup {
+  readonly days: number;
+  readonly real: DispatchOutcomeCounts;
+  readonly shadow: DispatchOutcomeCounts;
+  readonly overrides: number;
+  readonly commitRate: number | null;
+}
+
 export interface OperationsMetrics {
   readonly rangeDays: number;
   readonly responseTimeSeconds: MetricTrend;
@@ -46,6 +62,7 @@ export interface OperationsMetrics {
   readonly importedJobsCurrent: number;
   readonly firstResponseHumanSeconds: MetricTrend;
   readonly firstResponseSystemSeconds: number | null;
+  readonly dispatchHealth: DispatchOutcomeRollup;
 }
 
 export interface MetricsRange {

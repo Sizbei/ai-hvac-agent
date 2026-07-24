@@ -10,6 +10,7 @@ import {
   ArrowDown,
   ArrowUp,
   Loader2,
+  Zap,
 } from 'lucide-react';
 import {
   useOperationsMetrics,
@@ -257,6 +258,38 @@ export default function OperationsPage() {
                 {formatDuration(metrics?.firstResponseSystemSeconds ?? null)}
               </span>
             </>
+          }
+        />
+
+        <KpiCard
+          label="Dispatch health"
+          icon={Zap}
+          value={
+            metrics && metrics.dispatchHealth.commitRate !== null
+              ? `${Math.round(metrics.dispatchHealth.commitRate * 100)}%`
+              : null
+          }
+          delta={null}
+          rangeDays={metrics?.dispatchHealth.days ?? 7}
+          isLoading={isLoading}
+          foot={
+            metrics ? (
+              <>
+                Commit rate (7d, real + preview) ·{' '}
+                <span className="font-semibold text-foreground">
+                  {metrics.dispatchHealth.real.total}
+                </span>{' '}
+                real ·{' '}
+                <span className="font-semibold text-foreground">
+                  {metrics.dispatchHealth.shadow.total}
+                </span>{' '}
+                preview ·{' '}
+                <span className="font-semibold text-foreground">
+                  {metrics.dispatchHealth.overrides}
+                </span>{' '}
+                overrides
+              </>
+            ) : undefined
           }
         />
 

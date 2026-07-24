@@ -1,5 +1,17 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
+// Isolate the operations test from the rollup's query shape — the rollup is
+// tested independently in dispatch-rollup.test.ts.
+vi.mock('./dispatch-rollup', () => ({
+  getDispatchOutcomeRollup: vi.fn(async () => ({
+    days: 7,
+    real: { committed: 0, queuedAmbiguous: 0, queuedNoFit: 0, queuedNeedsReview: 0, total: 0 },
+    shadow: { committed: 0, queuedAmbiguous: 0, queuedNoFit: 0, queuedNeedsReview: 0, total: 0 },
+    overrides: 0,
+    commitRate: null,
+  })),
+}));
+
 /**
  * getOperationsMetrics fetches small per-row sets from neon-http and reduces
  * them (median / avg / window-bucketing) in JS. The DB mock returns those rows

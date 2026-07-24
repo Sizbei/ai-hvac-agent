@@ -1,3 +1,5 @@
+import type { DispatchOutcomeRollup } from "./dispatch-rollup";
+
 /**
  * Operations metrics — the owner's daily-glance operational scorecard.
  *
@@ -90,4 +92,7 @@ export interface OperationsMetrics {
   readonly firstResponseHumanSeconds: MetricTrend;
   /** Avg seconds created → auto-dispatch assigns. Muted secondary; current window. */
   readonly firstResponseSystemSeconds: number | null;
+
+  // 5. Dispatch health (7-day rollup: real vs shadow outcomes + commit rate).
+  readonly dispatchHealth: DispatchOutcomeRollup;
 }

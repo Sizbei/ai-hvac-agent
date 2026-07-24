@@ -29,6 +29,7 @@ import type {
   ArAging,
   SyncedArAging,
 } from "./operations-metrics-types";
+import { getDispatchOutcomeRollup } from "./dispatch-rollup";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const THIRTY_DAYS_MS = 30 * DAY_MS;
@@ -130,6 +131,7 @@ export async function getOperationsMetrics(
     jobsCurrentRow,
     jobsPreviousRow,
     importedJobsCurrentRow,
+    dispatchHealth,
   ] = await Promise.all([
     // Response time: first in_progress event per request across the two windows.
     db
@@ -325,6 +327,9 @@ export async function getOperationsMetrics(
           lt(serviceRequests.createdAt, toDate_),
         ),
       ),
+
+    // Dispatch health: 7-day rollup (always fixed window — not the selected range).
+    getDispatchOutcomeRollup(organizationId, 7),
   ]);
 
   // ── Reduce fetched rows into the headline trends ──
@@ -418,5 +423,6 @@ export async function getOperationsMetrics(
     importedJobsCurrent,
     firstResponseHumanSeconds,
     firstResponseSystemSeconds,
+    dispatchHealth,
   };
 }
