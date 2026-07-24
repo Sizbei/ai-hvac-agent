@@ -197,6 +197,31 @@ interface DispatchSuggestion {
   readonly score: number;
   readonly reasons: readonly string[];
   readonly skillMatched: boolean;
+  readonly travelKm: number | null;
+  readonly travelMinutes: number | null;
+}
+
+interface DispatchDecisionCandidateView {
+  readonly technicianId: string;
+  readonly name: string | null;
+  readonly score: number;
+  readonly reasons: readonly string[];
+  readonly travelKm: number | null;
+  readonly travelMinutes: number | null;
+  // null = unknown (legacy row without the stored flag) → render no indicator.
+  readonly skillMatched: boolean | null;
+}
+interface DispatchDecisionView {
+  readonly outcome: string;
+  readonly isShadow: boolean;
+  readonly chosenTechnicianId: string | null;
+  readonly topScore: number | null;
+  readonly confidenceGap: number | null;
+  readonly createdAt: string;
+  readonly overriddenTechnicianId: string | null;
+  readonly overriddenByUserId: string | null;
+  readonly overriddenAt: string | null;
+  readonly candidates: readonly DispatchDecisionCandidateView[];
 }
 
 // Invoice/payment status synced from Housecall Pro invoice.* webhooks. Hidden
@@ -313,6 +338,10 @@ export function RequestDetailSheet({
 
   // Collapsible FieldPulse metrics — default open (high-value numbers).
   const [fpMetricsOpen, setFpMetricsOpen] = useState(true);
+
+  // Recorded dispatch decision ("why this tech?") — null until fetched.
+  const [decision, setDecision] = useState<DispatchDecisionView | null>(null);
+  const [decisionOpen, setDecisionOpen] = useState(false);
 
   const handleAddNote = useCallback(async (): Promise<void> => {
     if (!requestId) return;
@@ -494,6 +523,37 @@ export function RequestDetailSheet({
     }
     setSuggestions([]);
     loadSuggestions();
+    return () => {
+      cancelled = true;
+    };
+  }, [requestId]);
+
+  // Fetch the recorded dispatch decision ("why this tech?") when the request
+  // changes. Fail-open: any error or 404 leaves decision null (section hidden).
+  useEffect(() => {
+    if (!requestId) {
+      setDecision(null);
+      return;
+    }
+    let cancelled = false;
+    async function loadDecision(): Promise<void> {
+      try {
+        const res = await fetch(`/api/admin/requests/${requestId}/decision`);
+        if (!res.ok) {
+          if (!cancelled) setDecision(null);
+          return;
+        }
+        const body = (await res.json()) as {
+          success: boolean;
+          data: DispatchDecisionView;
+        };
+        if (!cancelled && body.success) setDecision(body.data);
+      } catch {
+        // Non-fatal: no decision section.
+      }
+    }
+    setDecision(null);
+    void loadDecision();
     return () => {
       cancelled = true;
     };
@@ -888,6 +948,67 @@ export function RequestDetailSheet({
                   )}
                 </div>
               </section>
+              )}
+
+              {/* Dispatch decision — collapsible "why this tech?" panel.
+                  Hidden when no decision row has been recorded yet. */}
+              {decision && (
+                <section>
+                  <div className="rounded-md border border-sky-200 bg-sky-50/40">
+                    <button
+                      type="button"
+                      aria-expanded={decisionOpen}
+                      onClick={() => setDecisionOpen((v) => !v)}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-sky-800 hover:bg-sky-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md"
+                    >
+                      {decisionOpen ? (
+                        <ChevronDown className="size-3.5 shrink-0 text-sky-600" aria-hidden="true" />
+                      ) : (
+                        <ChevronRight className="size-3.5 shrink-0 text-sky-600" aria-hidden="true" />
+                      )}
+                      <span>Dispatch decision</span>
+                      {decision.isShadow && (
+                        <span className="rounded border border-sky-300 bg-sky-100 px-1.5 py-px text-[10px] font-medium text-sky-700">
+                          preview
+                        </span>
+                      )}
+                      <span className="ml-auto text-xs text-muted-foreground">
+                        {decision.outcome}
+                      </span>
+                    </button>
+                    {decisionOpen && (
+                      <div className="border-t border-sky-200 px-3 pb-3 pt-2 space-y-2">
+                        <div className="text-xs text-muted-foreground">
+                          {decision.topScore != null && (
+                            <>top score {decision.topScore.toFixed(2)}</>
+                          )}
+                          {decision.confidenceGap != null && (
+                            <> · gap {decision.confidenceGap.toFixed(2)}</>
+                          )}
+                          {decision.overriddenAt && <> · overridden by dispatcher</>}
+                        </div>
+                        <ul className="space-y-1.5">
+                          {decision.candidates.map((c) => (
+                            <li key={c.technicianId} className="text-xs">
+                              <span className="font-medium text-foreground">
+                                {c.name ?? c.technicianId}
+                              </span>{' '}
+                              · {c.score.toFixed(2)}
+                              {c.travelMinutes != null
+                                ? ` · ~${Math.round(c.travelMinutes)} min`
+                                : c.travelKm != null
+                                  ? ` · ${c.travelKm.toFixed(1)} km`
+                                  : ''}
+                              <div className="text-muted-foreground">
+                                {c.reasons.join(' · ')}
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                </section>
               )}
 
               {/* Status & scheduling */}
