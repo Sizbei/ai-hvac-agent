@@ -99,6 +99,7 @@ export async function POST(
         window: arrivalWindow,
         technicianId: parsed.data.technicianId,
         override: parsed.data.override,
+        actingUserId: session.userId,
       },
     );
 

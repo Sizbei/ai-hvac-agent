@@ -40,6 +40,7 @@ import {
   type RequestStatus,
 } from "./request-status";
 import { recordStatusEvent, type ActorType } from "./status-events";
+import { stampDispatchOverride } from "./dispatch-override";
 import { releaseReservationsForRequest } from "./capacity-reservation-queries";
 
 export type HoldReason = (typeof holdReasonEnum.enumValues)[number];
@@ -472,6 +473,7 @@ export async function assignTechnician(
   organizationId: string,
   requestId: string,
   technicianId: string,
+  actingUserId?: string,
 ): Promise<AssignTechnicianResult> {
   // Verify the assignee is an ACTIVE TECHNICIAN in this org — not an admin,
   // not a deactivated/off-boarded account, and not a user from another tenant.
@@ -550,6 +552,17 @@ export async function assignTechnician(
     actorType: "human",
   });
 
+  // Telemetry: this is a HUMAN assignment — label the autopilot decision row
+  // with the human's final pick (best-effort; never fails the assignment).
+  if (actingUserId) {
+    await stampDispatchOverride(
+      organizationId,
+      requestId,
+      technicianId,
+      actingUserId,
+    );
+  }
+
   return {
     ok: true,
     request: {
@@ -592,6 +605,7 @@ export async function reassignTechnician(
   organizationId: string,
   requestId: string,
   technicianId: string,
+  actingUserId?: string,
 ): Promise<ReassignTechnicianResult> {
   // Same active-technician-in-this-org check as assignment.
   const [tech] = await db
@@ -653,6 +667,17 @@ export async function reassignTechnician(
       reason: "request_not_reassignable",
       currentStatus: existing.status,
     };
+  }
+
+  // Telemetry: this is a HUMAN assignment — label the autopilot decision row
+  // with the human's final pick (best-effort; never fails the assignment).
+  if (actingUserId) {
+    await stampDispatchOverride(
+      organizationId,
+      requestId,
+      technicianId,
+      actingUserId,
+    );
   }
 
   return {

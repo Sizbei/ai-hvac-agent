@@ -52,6 +52,7 @@ import { recordStatusEvent } from "@/lib/admin/status-events";
 import { isTerminal, type RequestStatus } from "./request-status";
 import { releaseReservationsForRequest } from "./capacity-reservation-queries";
 import { notifyCustomerOfAssignment } from "./notify-assignment";
+import { stampDispatchOverride } from "./dispatch-override";
 import { isWindowWithinAvailability } from "./availability-coverage";
 import type { ArrivalWindow } from "./arrival-window";
 import type {
@@ -601,6 +602,12 @@ export async function placeAndAssignRequest(
      * path passes 'system'. Only matters when this call reassigns to a new tech.
      */
     readonly assignmentActor?: "human" | "system";
+    /**
+     * The human dispatcher initiating this placement, for override telemetry.
+     * Threaded from session.userId by the reschedule route. Omitted by the
+     * background auto-dispatch path (which never stamps).
+     */
+    readonly actingUserId?: string;
   },
 ): Promise<PlaceAndAssignResult> {
   const [existing] = await db
@@ -785,6 +792,24 @@ export async function placeAndAssignRequest(
       toStatus: "assigned",
       actorType: options.assignmentActor ?? "human",
     });
+  }
+
+  // Telemetry: a HUMAN drag/placement that landed a tech — label the autopilot
+  // decision row with the human's final pick. Guarded on actingUserId (present
+  // iff a human initiated this) AND on there being an effective assignee: a
+  // first-time human placement is as much a label as a reassignment, so we do
+  // NOT require `reassigning`; but an unassigned placement (targetTech === null)
+  // has no pick to label. `targetTech` is the resolved effective tech — the new
+  // one on a reassign, or the retained assignee on a pure reschedule the human
+  // confirmed. The background auto-dispatch path passes no actingUserId and
+  // never stamps. Best-effort; never fails the placement.
+  if (options.actingUserId && targetTech) {
+    await stampDispatchOverride(
+      organizationId,
+      requestId,
+      targetTech,
+      options.actingUserId,
+    );
   }
 
   // On an OVERRIDE, recompute the detail we overrode so the route can audit it.

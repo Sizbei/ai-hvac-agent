@@ -56,6 +56,7 @@ export async function POST(
       session.organizationId,
       id,
       technicianId,
+      session.userId,
     );
 
     if (!result.ok) {
@@ -139,6 +140,7 @@ export async function PATCH(
       session.organizationId,
       id,
       technicianId,
+      session.userId,
     );
 
     if (!result.ok) {
