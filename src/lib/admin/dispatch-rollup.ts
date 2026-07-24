@@ -93,7 +93,9 @@ export async function getDispatchOutcomeRollup(
           organizationId,
           and(
             gte(dispatchDecisions.createdAt, since),
-            isNotNull(dispatchDecisions.overriddenAt),
+            // Spec-canonical override signal: the stamped human pick. (Always
+            // co-written with overriddenAt today, but the tech id is the label.)
+            isNotNull(dispatchDecisions.overriddenTechnicianId),
           )!,
         ),
       ),
