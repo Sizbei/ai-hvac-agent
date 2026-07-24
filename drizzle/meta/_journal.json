@@ -288,6 +288,13 @@
       "when": 1784175344396,
       "tag": "0040_faulty_manta",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1784500000000,
+      "tag": "0041_dispatch_telemetry",
+      "breakpoints": true
     }
   ]
 }

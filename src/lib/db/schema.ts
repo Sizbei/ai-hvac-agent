@@ -2442,10 +2442,29 @@ export const dispatchDecisions = pgTable(
           reasons: string[];
           travelKm?: number | null;
           travelMinutes?: number | null;
+          // Stored by recordDispatchDecision (Task 3); read by the decision panel
+          // (Task 6). Optional: rows recorded before this field omit it (unknown).
+          skillMatched?: boolean;
         }>
       >()
       .notNull()
       .default(sql`'[]'::jsonb`),
+    // ── Override telemetry (0041): the human's final pick recorded against the
+    // autopilot decision. Set by stampDispatchOverride on any HUMAN (re)assignment
+    // when chosen_technician_id IS DISTINCT FROM the pick. Last-write-wins.
+    overriddenTechnicianId: uuid("overridden_technician_id").references(
+      () => users.id,
+      { onDelete: "set null" },
+    ),
+    overriddenByUserId: uuid("overridden_by_user_id").references(
+      () => users.id,
+      { onDelete: "set null" },
+    ),
+    overriddenAt: timestamp("overridden_at", { withTimezone: true }),
+    // Shadow mode (0041): true for a would-be decision recorded for an autopilot-
+    // OFF org (preview + tuning dataset); never touches service_requests. Operational
+    // reads filter is_shadow=false; tuning/health reads split both.
+    isShadow: boolean("is_shadow").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
