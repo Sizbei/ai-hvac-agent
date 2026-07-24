@@ -105,6 +105,38 @@ export default function DispatchPage() {
         </Alert>
       )}
 
+      {board && board.exceptions.length > 0 && (
+        <Card className="p-4">
+          <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
+            <AlertCircle className="size-4 text-amber-500" />
+            Exceptions
+            <span className="text-xs font-normal text-muted-foreground">
+              queued jobs needing a decision
+            </span>
+          </div>
+          <ul className="space-y-1.5">
+            {board.exceptions.map((ex) => (
+              <li key={ex.id}>
+                <button
+                  type="button"
+                  onClick={() => setSelectedRequestId(ex.id)}
+                  className="flex w-full items-center gap-2 rounded-md border border-border px-3 py-2 text-left text-sm hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <span className="font-medium">{ex.referenceNumber}</span>
+                  <span className="text-muted-foreground">{ex.issueType}</span>
+                  <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-px text-[11px] font-medium text-amber-700">
+                    {ex.autoDispatchOutcome.replace("queued_", "").replace("_", " ")}
+                  </span>
+                  <span className="ml-auto text-xs text-muted-foreground">
+                    {formatDayLabel(ex.createdAt.slice(0, 10))}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+
       {isLoading && !board ? (
         <div className="flex gap-4 overflow-x-auto pb-2">
           {Array.from({ length: 4 }, (_, i) => (

@@ -4,8 +4,21 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import type { DispatchBoard } from '@/lib/admin/types';
 import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 
+export interface DispatchException {
+  readonly id: string;
+  readonly referenceNumber: string;
+  readonly issueType: string;
+  readonly urgency: string;
+  readonly autoDispatchOutcome: string;
+  readonly createdAt: string;
+}
+
+export type DispatchBoardWithExceptions = DispatchBoard & {
+  readonly exceptions: readonly DispatchException[];
+};
+
 interface UseDispatchBoardResult {
-  readonly board: DispatchBoard | null;
+  readonly board: DispatchBoardWithExceptions | null;
   readonly isLoading: boolean;
   readonly error: string | null;
   readonly refetch: () => Promise<void>;
@@ -20,7 +33,7 @@ const POLL_INTERVAL_MS = 30_000;
  * poll — the stale response is discarded, not rendered.
  */
 export function useDispatchBoard(date: string): UseDispatchBoardResult {
-  const [board, setBoard] = useState<DispatchBoard | null>(null);
+  const [board, setBoard] = useState<DispatchBoardWithExceptions | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // Latest-wins: each call increments this counter; a response only applies if
@@ -46,7 +59,7 @@ export function useDispatchBoard(date: string): UseDispatchBoardResult {
 
       const body = (await res.json()) as {
         success: boolean;
-        data: DispatchBoard;
+        data: DispatchBoardWithExceptions;
       };
 
       if (isMountedRef.current && run === runRef.current && body.success) {

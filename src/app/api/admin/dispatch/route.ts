@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
 import { getDispatchBoard } from "@/lib/admin/queries";
+import { getDispatchExceptions } from "@/lib/admin/dispatch-exceptions-queries";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
@@ -28,8 +29,16 @@ export async function GET(request: NextRequest) {
     }
 
     const date = request.nextUrl.searchParams.get("date") ?? undefined;
-    const board = await getDispatchBoard(session.organizationId, date);
-    return successResponse(board);
+    const [board, exceptions] = await Promise.all([
+      getDispatchBoard(session.organizationId, date),
+      getDispatchExceptions(session.organizationId),
+    ]);
+    return successResponse({
+      date: board.date,
+      columns: board.columns,
+      unassigned: board.unassigned,
+      exceptions,
+    });
   } catch (error: unknown) {
     logger.error({ error }, "Failed to fetch dispatch board");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);
