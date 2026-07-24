@@ -36,6 +36,14 @@
     {
       "path": "/api/cron/sync-housecall-invoices",
       "schedule": "0 12 * * *"
+    },
+    {
+      "path": "/api/cron/delay-sweep",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/dispatch-digest",
+      "schedule": "0 12 * * 1"
     }
   ]
 }
