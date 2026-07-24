@@ -10,7 +10,7 @@
 
 ## Execution sequencing
 
-Tasks are **strictly sequential 1 → 10**. There is no parallelism: Task 1 (migration) unblocks everything; Tasks 2 & 3 both edit `scheduling-queries.ts` and its mock-queue test harness; Task 3 also edits `recordDispatchDecision` used by Task 4's rollup interpretation; Tasks 8 & 9 both edit `signals.ts` + `score.ts` and must not collide. Run one implementer at a time, in order.
+Tasks are **strictly sequential 1 → 10**. There is no parallelism: Task 1 (migration) unblocks everything; Tasks 2 & 3 both edit `scheduling-queries.ts` and its mock-queue test harness; Task 3 also edits `recordDispatchDecision` used by Task 4's rollup interpretation; Tasks 8 & 9 both edit `signals.ts` + `score.ts` **and both thread new scorer-input fields into `rankedTechnicianOrder` (`scheduling-queries.ts` :1139) plus its mocked `loadDispatchSignals` in `scheduling-queries.test.ts`** — they must not collide (Task 9's `bookedMinutes`/`dayMinutes`/`thisJobEstimate` additions sit alongside Task 8's `skillJobsCompletedRecent`). Run one implementer at a time, in order.
 
 ## Global Constraints
 
@@ -48,7 +48,7 @@ Adds the four telemetry columns to `dispatch_decisions`. Nothing reads them yet;
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `dispatchDecisions.overriddenTechnicianId: uuid|null`, `.overriddenByUserId: uuid|null`, `.overriddenAt: Date|null`, `.isShadow: boolean` (drizzle column refs for later tasks).
+- Produces: `dispatchDecisions.overriddenTechnicianId: uuid|null`, `.overriddenByUserId: uuid|null`, `.overriddenAt: Date|null`, `.isShadow: boolean` (drizzle column refs for later tasks). Also extends the `candidates` JSONB `$type` with an optional `skillMatched?: boolean` (a `$type`-only change, no DDL) that Task 3 stores and Task 6 reads.
 
 - [ ] **Step 1: Write the migration SQL.** Create `drizzle/0041_dispatch_telemetry.sql` (idempotent — `ADD COLUMN IF NOT EXISTS`, and FK adds guarded so re-run never errors):
 ```sql
@@ -151,6 +151,25 @@ END $$;
     // reads filter is_shadow=false; tuning/health reads split both.
     isShadow: boolean("is_shadow").notNull().default(false),
 ```
+  Also extend the `candidates` JSONB `$type` (~line 2437) to carry the per-candidate `skillMatched` flag Task 3 will store and Task 6 will read back (optional so legacy rows without it still typecheck). Change the `.$type<Array<{ ... }>>()` to add `skillMatched?: boolean;`:
+```ts
+    candidates: jsonb("candidates")
+      .$type<
+        Array<{
+          technicianId: string;
+          score: number;
+          reasons: string[];
+          travelKm?: number | null;
+          travelMinutes?: number | null;
+          // Stored by recordDispatchDecision (Task 3); read by the decision panel
+          // (Task 6). Optional: rows recorded before this field omit it (unknown).
+          skillMatched?: boolean;
+        }>
+      >()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+```
+  (This is a `$type`-only change — no column DDL, so migration 0041 is unaffected.)
 
 - [ ] **Step 5: Run the gate.**
 ```bash
@@ -186,18 +205,19 @@ New shared `stampDispatchOverride` records the human's final pick on the latest 
 - Modify: `src/app/api/admin/requests/[id]/reschedule/route.ts` (placeAndAssignRequest call site)
 
 **Interfaces:**
-- Consumes: `dispatchDecisions` columns from Task 1; `withTenant`, `logger`, `db`.
+- Consumes: `dispatchDecisions` columns from Task 1 (including `isShadow` — the latest-row lookup filters `isShadow=false` so a human assignment following a shadow preview never stamps the shadow row); `withTenant`, `logger`, `db`.
 - Produces: `stampDispatchOverride(organizationId: string, requestId: string, humanTechnicianId: string, actingUserId: string): Promise<void>` (best-effort, never throws). `assignTechnician(organizationId, requestId, technicianId, actingUserId?)`, `reassignTechnician(organizationId, requestId, technicianId, actingUserId?)`, `placeAndAssignRequest(..., options: { ...; actingUserId?: string })`.
 
 - [ ] **Step 1: Write the failing test.** Create `src/lib/admin/dispatch-override.test.ts`:
 ```ts
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { selectQueue, updateQueue, whereCalls, chain, loggerError } = vi.hoisted(
-  () => {
+const { selectQueue, updateQueue, whereCalls, setCalls, chain, loggerError } =
+  vi.hoisted(() => {
     const selectQueue: unknown[][] = [];
     const updateQueue: unknown[][] = [];
     const whereCalls: unknown[][] = [];
+    const setCalls: unknown[][] = [];
     const loggerError = vi.fn();
     const chain = (resolved: unknown): unknown => {
       const p: unknown = new Proxy(() => {}, {
@@ -209,15 +229,19 @@ const { selectQueue, updateQueue, whereCalls, chain, loggerError } = vi.hoisted(
               whereCalls.push(args);
               return p;
             };
+          if (prop === "set")
+            return (...args: unknown[]) => {
+              setCalls.push(args);
+              return p;
+            };
           return () => p;
         },
         apply: () => p,
       });
       return p;
     };
-    return { selectQueue, updateQueue, whereCalls, chain, loggerError };
-  },
-);
+    return { selectQueue, updateQueue, whereCalls, setCalls, chain, loggerError };
+  });
 
 vi.mock("@/lib/db", () => ({
   db: {
@@ -246,6 +270,7 @@ vi.mock("@/lib/db/schema", () => ({
     overriddenTechnicianId: "dd.overTech",
     overriddenByUserId: "dd.overBy",
     overriddenAt: "dd.overAt",
+    isShadow: "dd.shadow",
     createdAt: "dd.created",
   },
 }));
@@ -264,6 +289,7 @@ beforeEach(() => {
   selectQueue.length = 0;
   updateQueue.length = 0;
   whereCalls.length = 0;
+  setCalls.length = 0;
   loggerError.mockClear();
 });
 
@@ -278,6 +304,39 @@ describe("stampDispatchOverride", () => {
     expect((whereCalls[0][0] as { __tenant: string }).__tenant).toBe(ORG);
     // The write is tenant-scoped too.
     expect((whereCalls[1][0] as { __tenant: string }).__tenant).toBe(ORG);
+    // The UPDATE's set-values carry the three override fields.
+    expect(setCalls.length).toBe(1);
+    expect(setCalls[0][0]).toEqual(
+      expect.objectContaining({
+        overriddenTechnicianId: HUMAN_TECH,
+        overriddenByUserId: ACTOR,
+        overriddenAt: expect.any(Date),
+      }),
+    );
+  });
+
+  it("does NOT stamp when the latest decision row is a shadow row", async () => {
+    // The real query filters is_shadow=false, so a request whose only decision is
+    // a shadow row returns NO latest row → the stamp must be a no-op. The read's
+    // where must carry the isShadow=false filter so the shadow row is excluded.
+    selectQueue.push([]); // shadow row filtered out by the query → no latest row
+    await stampDispatchOverride(ORG, REQ, HUMAN_TECH, ACTOR);
+    expect(whereCalls.length).toBe(1); // only the read ran
+    expect(updateQueue.length).toBe(0); // no update attempted
+    expect(setCalls.length).toBe(0);
+    // The read filters out shadow rows (the isShadow=false condition is present).
+    const readConds = (whereCalls[0][0] as { conditions: unknown[] }).conditions;
+    expect(JSON.stringify(readConds)).toContain("dd.shadow");
+  });
+
+  it("does NOT update when the human pick equals what autopilot chose", async () => {
+    // Latest row's chosen tech IS the human's pick → the decision was not
+    // overridden, so the helper short-circuits in JS and issues NO update call.
+    selectQueue.push([{ id: "dec-1", chosenTechnicianId: HUMAN_TECH }]);
+    await stampDispatchOverride(ORG, REQ, HUMAN_TECH, ACTOR);
+    expect(whereCalls.length).toBe(1); // only the read ran
+    expect(updateQueue.length).toBe(0); // no update chain was consumed
+    expect(setCalls.length).toBe(0);
   });
 
   it("does nothing when there is no decision row", async () => {
@@ -326,11 +385,12 @@ Expected failure: `Failed to resolve import "./dispatch-override"` / `stampDispa
  *
  * Called from every HUMAN (re)assignment path (assignTechnician,
  * reassignTechnician, and the human placeAndAssignRequest path). Looks up the
- * request's LATEST decision row (created_at DESC LIMIT 1) and, when it exists and
- * its chosen tech IS DISTINCT FROM the human's pick, stamps the three override
- * fields. Queued rows have chosen_technician_id = NULL, so any human pick counts
- * as a resolution label — intentional. Last-write-wins: a later human
- * reassignment overwrites the stamp.
+ * request's LATEST REAL decision row (is_shadow=false, created_at DESC LIMIT 1) —
+ * a shadow preview row is never stamped, else the human pick would poison the
+ * tuning labels. When a real row exists and its chosen tech differs from the
+ * human's pick, stamps the three override fields. Queued rows have
+ * chosen_technician_id = NULL, so any human pick counts as a resolution label —
+ * intentional. Last-write-wins: a later human reassignment overwrites the stamp.
  *
  * BEST-EFFORT: a second, non-batched write. Losing a label on a crash is
  * acceptable for telemetry — money-grade atomicity is deliberately NOT required.
@@ -352,21 +412,34 @@ export async function stampDispatchOverride(
 ): Promise<void> {
   try {
     const [latest] = await db
-      .select({ id: dispatchDecisions.id })
+      .select({
+        id: dispatchDecisions.id,
+        chosenTechnicianId: dispatchDecisions.chosenTechnicianId,
+      })
       .from(dispatchDecisions)
       .where(
         withTenant(
           dispatchDecisions,
           organizationId,
-          eq(dispatchDecisions.serviceRequestId, requestId),
+          and(
+            eq(dispatchDecisions.serviceRequestId, requestId),
+            // Never stamp a shadow (autopilot-off preview) row: a human
+            // assignment following a shadow decision must land on a REAL decision
+            // row (or nothing), else it would poison the tuning labels.
+            eq(dispatchDecisions.isShadow, false),
+          )!,
         ),
       )
       .orderBy(desc(dispatchDecisions.createdAt))
       .limit(1);
     if (!latest) return;
+    // No-op when the human picked exactly what autopilot chose — the decision was
+    // NOT overridden, so there is nothing to label (and we skip the write).
+    if (latest.chosenTechnicianId === humanTechnicianId) return;
 
     // Stamp only when the human's pick differs from what autopilot chose. A
     // queued row's chosen is NULL, so IS DISTINCT FROM fires for any human pick.
+    // The SQL guard is defense-in-depth against a race with a concurrent stamp.
     await db
       .update(dispatchDecisions)
       .set({
@@ -430,12 +503,15 @@ export async function assignTechnician(
      */
     readonly actingUserId?: string;
 ```
-  3. After the `isFirstAssignment` / `recordStatusEvent` block and before the `overriddenConflicts` recompute (~after line 788), add the stamp — only on a genuine human reassignment:
+  3. After the `isFirstAssignment` / `recordStatusEvent` block and before the `overriddenConflicts` recompute (~after line 788), add the stamp — on ANY human placement (first-time placements are labels too, not only reassignments):
 ```ts
   // Telemetry: a HUMAN drag/placement that (re)assigned the tech — label the
-  // autopilot decision row. Guarded on actingUserId so the background path (which
-  // passes none) never stamps. Best-effort; never fails the placement.
-  if (reassigning && options.actingUserId) {
+  // autopilot decision row. Guarded ONLY on actingUserId (present iff a human
+  // initiated this): a first-time human placement is as much a label as a
+  // reassignment, so we do NOT also require `reassigning`. The background
+  // auto-dispatch path passes no actingUserId and never stamps. Best-effort;
+  // never fails the placement.
+  if (options.actingUserId) {
     await stampDispatchOverride(
       organizationId,
       requestId,
@@ -517,7 +593,7 @@ EOF
 
 **Interfaces:**
 - Consumes: `dispatchDecisions.isShadow` (Task 1); `rankTechnicians`, `classifyDispatch` (score.ts); `loadDispatchSignals` (signals.ts).
-- Produces: `recordDispatchDecision(organizationId, requestId, outcome, chosenTechnicianId, ranked, isShadow?)`; `loadDispatchSignals(organizationId, technicianIds, job, isoDay, requestId?, opts?: { skipRouting?: boolean })`; `rankedTechnicianOrder(organizationId, requestId, technicianIds, isoDay, fallbackUnclassified?, skipRouting?)`.
+- Produces: `recordDispatchDecision(organizationId, requestId, outcome, chosenTechnicianId, ranked, isShadow?)` — its `candidates` JSONB now also stores `skillMatched: boolean` per candidate (from `RankedTech.skillMatched`), consumed by Task 6's decision panel; `loadDispatchSignals(organizationId, technicianIds, job, isoDay, requestId?, opts?: { skipRouting?: boolean })`; `rankedTechnicianOrder(organizationId, requestId, technicianIds, isoDay, fallbackUnclassified?, skipRouting?)`.
 
 - [ ] **Step 1: Write the failing tests.**
   (a) In `src/lib/ai/dispatch/signals.test.ts`, add inside the `travel term` describe block:
@@ -547,7 +623,25 @@ EOF
       expect(durationMatrix).not.toHaveBeenCalled();
     });
 ```
-  (b) In `src/lib/admin/scheduling-queries.test.ts`, extend `queueAutoAssignLeadIn` so the disabled path can push a classification read, and add cases. First update the helper to accept an optional classification push is NOT needed — instead add a new lead-in variant inline in the tests. Add these cases inside `describe("autoAssignBookedRequest (scored vs first-fit)", ...)`:
+  (b) In `src/lib/admin/scheduling-queries.test.ts`, first make the `db.insert` mock capture the `.values()` payload so the shadow test can assert `is_shadow=true`. Change the hoisted `db` mock's `insert` (:57) from:
+```ts
+    insert: () => {
+      insertMock();
+      return chain([]);
+    },
+```
+  to capture the values object (keeps the existing call-count semantics — one call per insert, since `recordDispatchDecision` always chains `.values()`):
+```ts
+    insert: () => ({
+      values: (v: unknown) => {
+        insertMock(v);
+        return chain([]);
+      },
+    }),
+```
+  (Existing `expect(insertMock).toHaveBeenCalled()` / `toHaveBeenCalledTimes(1)` / `not.toHaveBeenCalled()` assertions still hold; the mock is now additionally called WITH the values payload.)
+
+  Then add these cases inside `describe("autoAssignBookedRequest (scored vs first-fit)", ...)`:
 ```ts
   it("shadow: autopilot OFF but classifiable → records is_shadow decision, still first-fits", async () => {
     selectQueue.push([{ id: T1 }, { id: T2 }]); // active techs
@@ -557,9 +651,11 @@ EOF
     queueSuccessfulPlacement(T1); // first-fit still places DB-order T1
 
     const result = await autoAssignBookedRequest(ORG, REQ, HELD);
-    // First-fit outcome is unchanged (T1 wins), and a shadow decision was recorded.
+    // First-fit outcome is unchanged (T1 wins), and a SHADOW decision was recorded.
     expect(result).toEqual({ assigned: true, technicianId: T1 });
-    expect(insertMock).toHaveBeenCalled(); // recordDispatchDecision inserted a row
+    expect(insertMock).toHaveBeenCalledWith(
+      expect.objectContaining({ isShadow: true }),
+    );
   });
 
   it("shadow: autopilot OFF and UNCLASSIFIABLE → records nothing, first-fits", async () => {
@@ -630,7 +726,19 @@ async function recordDispatchDecision(
   isShadow = false,
 ): Promise<void> {
 ```
-  and inside `db.insert(dispatchDecisions).values({ ... })` add `isShadow,` alongside `outcome`.
+  and inside `db.insert(dispatchDecisions).values({ ... })` add `isShadow,` alongside `outcome`. Also STORE `skillMatched` per candidate — the `RankedTech` objects already carry a `skillMatched: boolean` (verified in `src/lib/ai/dispatch/score.ts`), and the decision panel (Task 6) reads it back instead of re-deriving it from reason text. Change the existing `candidates: ranked.map((r) => ({ ... }))` (:996) to add `skillMatched: r.skillMatched,`:
+```ts
+      candidates: ranked.map((r) => ({
+        technicianId: r.technicianId,
+        score: r.score,
+        reasons: [...r.reasons],
+        // Both travel signals, for the routing-vs-haversine A/B + weight tuning.
+        travelKm: r.travelKm,
+        travelMinutes: r.travelMinutes,
+        // Stored (not parsed later) so the decision panel reports it faithfully.
+        skillMatched: r.skillMatched,
+      })),
+```
   2. `rankedTechnicianOrder` (:1111) — add a `skipRouting` param and thread it to `loadDispatchSignals`:
 ```ts
 async function rankedTechnicianOrder(
@@ -992,11 +1100,26 @@ import type { DispatchOutcomeRollup } from "./dispatch-rollup";
 ```ts
 import { getDispatchOutcomeRollup } from "./dispatch-rollup";
 ```
-  Inside `getOperationsMetrics`, add the rollup to the concurrent work (it does not need the window params — always 7-day). Add a line after the existing `Promise.all([...])` block resolves (or extend it). Simplest: after the existing aggregates are destructured and before the `return {...}`, add:
+  Add the rollup INSIDE the existing `Promise.all([...])` (the array destructured at :123-133) so it runs concurrently with the other aggregates — no serial extra roundtrip on Operations load. It takes no window params (always 7-day). Add `dispatchHealth` as a new destructured element and append its call as the last entry of the `Promise.all` array (after the imported-jobs query at :316-327, before the closing `]);` at :328):
 ```ts
-  const dispatchHealth = await getDispatchOutcomeRollup(organizationId, 7);
+  const [
+    inProgressRows,
+    assignedRows,
+    paidRows,
+    onSiteRow,
+    agingRow,
+    syncedAgingRow,
+    jobsCurrentRow,
+    jobsPreviousRow,
+    importedJobsCurrentRow,
+    dispatchHealth,
+  ] = await Promise.all([
+    // ...all existing queries unchanged...
+    // (append as the FINAL array element, after the imported-jobs query:)
+    getDispatchOutcomeRollup(organizationId, 7),
+  ]);
 ```
-  and in the `return { ... }` object, add `dispatchHealth,` alongside `firstResponseSystemSeconds`.
+  Concretely: add `dispatchHealth,` to the destructuring array (after `importedJobsCurrentRow,`) and add `getDispatchOutcomeRollup(organizationId, 7),` as the last element of the `Promise.all([...])` array (after the imported-jobs `db.select(...).where(...)` block's trailing comma). Then in the `return { ... }` object, add `dispatchHealth,` alongside `firstResponseSystemSeconds`.
   3. `src/hooks/use-operations-metrics.ts` — mirror the client type. After the `SyncedArAging` interface, add:
 ```ts
 export interface DispatchOutcomeCounts {
@@ -1213,6 +1336,31 @@ describe("GET /api/cron/dispatch-digest", () => {
     expect(body.data.alertsSent).toBe(0);
   });
 
+  it("does NOT alert when THIS WEEK's window has < 20 decisions", async () => {
+    // Trailing window has plenty (>=20) but this week is too sparse to judge —
+    // a slow week must not page the dispatcher.
+    selectQueue.push([{ organizationId: ORG, phone: "+15551234567" }]);
+    mockGetRollup
+      .mockResolvedValueOnce({
+        days: 7,
+        real: { committed: 1, queuedAmbiguous: 0, queuedNoFit: 0, queuedNeedsReview: 0, total: 12 },
+        shadow: { committed: 0, queuedAmbiguous: 0, queuedNoFit: 0, queuedNeedsReview: 0, total: 0 },
+        overrides: 0,
+        commitRate: 0.08,
+      })
+      .mockResolvedValueOnce({
+        days: 28,
+        real: { committed: 80, queuedAmbiguous: 0, queuedNoFit: 0, queuedNeedsReview: 0, total: 100 },
+        shadow: { committed: 0, queuedAmbiguous: 0, queuedNoFit: 0, queuedNeedsReview: 0, total: 0 },
+        overrides: 0,
+        commitRate: 0.8,
+      });
+    const res = await GET(req());
+    const body = await res.json();
+    expect(mockSendSms).not.toHaveBeenCalled();
+    expect(body.data.alertsSent).toBe(0);
+  });
+
   it("one org's sendSms failure does not abort the run", async () => {
     selectQueue.push([
       { organizationId: ORG, phone: "+15551110000" },
@@ -1412,7 +1560,7 @@ EOF
 
 ### Task 6: "Why this tech?" decision panel
 
-New `GET /api/admin/requests/[id]/decision` returns the latest decision row (via a new `getDispatchDecisionForRequest` query that resolves candidate tech UUIDs → display names with one `inArray` lookup). A collapsible "Dispatch decision" section renders it in the request detail sheet for requests that have a row (shadow rows labeled "preview"). Add `travelKm`/`travelMinutes` to the client `DispatchSuggestion` type.
+New `GET /api/admin/requests/[id]/decision` returns the latest decision row (via a new `getDispatchDecisionForRequest` query that resolves candidate tech UUIDs → display names with one `inArray` lookup). Each candidate's `skillMatched` is READ from the stored candidate field (recorded in Task 3) — never re-derived from reason text; legacy rows without it surface `null` (unknown, no indicator). A collapsible "Dispatch decision" section renders it in the request detail sheet for requests that have a row (shadow rows labeled "preview"). Add `travelKm`/`travelMinutes` to the client `DispatchSuggestion` type.
 
 **Files:**
 - Create: `src/lib/admin/dispatch-decision-queries.ts`
@@ -1432,7 +1580,8 @@ interface DispatchDecisionCandidate {
   readonly reasons: readonly string[];
   readonly travelKm: number | null;
   readonly travelMinutes: number | null;
-  readonly skillMatched: boolean;
+  /** From the stored candidate field; null for legacy rows (unknown). */
+  readonly skillMatched: boolean | null;
 }
 interface DispatchDecisionView {
   readonly outcome: string;
@@ -1515,6 +1664,7 @@ const ORG = "00000000-0000-0000-0000-000000000001";
 const REQ = "00000000-0000-0000-0000-0000000000b1";
 const T1 = "00000000-0000-0000-0000-0000000000a1";
 const T2 = "00000000-0000-0000-0000-0000000000a2";
+const T3 = "00000000-0000-0000-0000-0000000000a3";
 
 beforeEach(() => {
   selectQueue.length = 0;
@@ -1522,7 +1672,7 @@ beforeEach(() => {
 });
 
 describe("getDispatchDecisionForRequest", () => {
-  it("returns the latest row with candidate names resolved", async () => {
+  it("returns the latest row with candidate names + STORED skillMatched (absent → null)", async () => {
     selectQueue.push([
       {
         outcome: "committed",
@@ -1535,14 +1685,19 @@ describe("getDispatchDecisionForRequest", () => {
         overriddenByUserId: null,
         overriddenAt: null,
         candidates: [
-          { technicianId: T1, score: 0.82, reasons: ["5 prior jobs"], travelKm: 3.2, travelMinutes: 8 },
-          { technicianId: T2, score: 0.7, reasons: ["2 prior jobs"], travelKm: null, travelMinutes: null },
+          // Stored true.
+          { technicianId: T1, score: 0.82, reasons: ["5 prior jobs"], travelKm: 3.2, travelMinutes: 8, skillMatched: true },
+          // Stored false.
+          { technicianId: T2, score: 0.7, reasons: ["no prior experience"], travelKm: null, travelMinutes: null, skillMatched: false },
+          // Legacy row: skillMatched key ABSENT → surfaces as null (unknown).
+          { technicianId: T3, score: 0.6, reasons: ["2 prior jobs"], travelKm: null, travelMinutes: null },
         ],
       },
     ]);
     selectQueue.push([
       { id: T1, name: "Alice" },
       { id: T2, name: "Bob" },
+      { id: T3, name: "Carol" },
     ]);
     const view = await getDispatchDecisionForRequest(ORG, REQ);
     expect(view).not.toBeNull();
@@ -1550,16 +1705,18 @@ describe("getDispatchDecisionForRequest", () => {
     expect(view!.isShadow).toBe(false);
     expect(view!.chosenTechnicianId).toBe(T1);
     expect(view!.createdAt).toBe("2026-07-20T10:00:00.000Z");
-    expect(view!.candidates).toHaveLength(2);
+    expect(view!.candidates).toHaveLength(3);
     expect(view!.candidates[0]).toMatchObject({
       technicianId: T1,
       name: "Alice",
       score: 0.82,
       travelKm: 3.2,
       travelMinutes: 8,
-      skillMatched: true, // "prior jobs" reason implies matched; see impl note below
+      skillMatched: true, // read from the stored field
     });
-    expect(view!.candidates[1].name).toBe("Bob");
+    expect(view!.candidates[1]).toMatchObject({ name: "Bob", skillMatched: false });
+    // Legacy candidate: stored field absent → null (unknown), never guessed.
+    expect(view!.candidates[2]).toMatchObject({ name: "Carol", skillMatched: null });
     expect((whereCalls[0][0] as { __tenant: string }).__tenant).toBe(ORG);
   });
 
@@ -1570,7 +1727,7 @@ describe("getDispatchDecisionForRequest", () => {
   });
 });
 ```
-  Note: `skillMatched` is not stored on candidates in `dispatch_decisions` — derive it as `!reasons.some(r => r.includes("no prior") || r.includes("no matching-category history"))`.
+  Note: `skillMatched` is READ from the stored candidate field (recorded by `recordDispatchDecision` in Task 3). Legacy rows recorded before that field existed lack the key → the helper surfaces `null` (unknown), never re-derived from reason text.
 
 - [ ] **Step 2: Run to see it fail.**
 ```bash
@@ -1584,7 +1741,10 @@ Expected failure: `Failed to resolve import "./dispatch-decision-queries"`.
  * Read the recorded dispatch decision for a request — the "why this tech?" data.
  * Latest row (created_at DESC LIMIT 1), tenant-scoped. The candidates JSONB stores
  * tech UUIDs only, so we resolve display names with ONE org-scoped inArray lookup
- * over users. skillMatched is derived from the reason text (not stored). Read-only.
+ * over users. skillMatched is read straight from the STORED candidate field
+ * (recorded by recordDispatchDecision) — never re-derived from reason text. Rows
+ * recorded before that field existed lack the key: we surface it as `null`
+ * (unknown) rather than guessing. Read-only.
  */
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -1598,7 +1758,9 @@ export interface DispatchDecisionCandidate {
   readonly reasons: readonly string[];
   readonly travelKm: number | null;
   readonly travelMinutes: number | null;
-  readonly skillMatched: boolean;
+  /** true/false from the stored candidate; null for legacy rows recorded before
+   * skillMatched was stored (unknown — the panel renders no indicator). */
+  readonly skillMatched: boolean | null;
 }
 
 export interface DispatchDecisionView {
@@ -1612,14 +1774,6 @@ export interface DispatchDecisionView {
   readonly overriddenByUserId: string | null;
   readonly overriddenAt: string | null;
   readonly candidates: readonly DispatchDecisionCandidate[];
-}
-
-/** A candidate is skill-matched unless its reasons flag the no-history fallbacks. */
-function isSkillMatched(reasons: readonly string[]): boolean {
-  return !reasons.some(
-    (r) =>
-      r.includes("no prior") || r.includes("no matching-category history"),
-  );
 }
 
 export async function getDispatchDecisionForRequest(
@@ -1670,7 +1824,8 @@ export async function getDispatchDecisionForRequest(
     reasons: c.reasons,
     travelKm: c.travelKm ?? null,
     travelMinutes: c.travelMinutes ?? null,
-    skillMatched: isSkillMatched(c.reasons),
+    // Read the STORED flag; absent (legacy row) → null (unknown, not guessed).
+    skillMatched: typeof c.skillMatched === "boolean" ? c.skillMatched : null,
   }));
 
   return {
@@ -1847,7 +2002,8 @@ interface DispatchDecisionCandidateView {
   readonly reasons: readonly string[];
   readonly travelKm: number | null;
   readonly travelMinutes: number | null;
-  readonly skillMatched: boolean;
+  // null = unknown (legacy row without the stored flag) → render no indicator.
+  readonly skillMatched: boolean | null;
 }
 interface DispatchDecisionView {
   readonly outcome: string;
@@ -2187,14 +2343,19 @@ Expected: green.
 
 - [ ] **Step 5: Expose via the board API payload.** In `src/app/api/admin/dispatch/route.ts`:
   1. Add the import: `import { getDispatchExceptions } from "@/lib/admin/dispatch-exceptions-queries";`
-  2. Replace the board fetch + response with a combined payload:
+  2. Replace the board fetch + response with a combined payload. Enumerate the board's actual fields explicitly (`getDispatchBoard` returns `DispatchBoard = { date, columns, unassigned }` — verified in `src/lib/admin/types.ts:224`) plus `exceptions`, so a spread can't silently clobber or leak a renamed field:
 ```ts
     const date = request.nextUrl.searchParams.get("date") ?? undefined;
     const [board, exceptions] = await Promise.all([
       getDispatchBoard(session.organizationId, date),
       getDispatchExceptions(session.organizationId),
     ]);
-    return successResponse({ ...board, exceptions });
+    return successResponse({
+      date: board.date,
+      columns: board.columns,
+      unassigned: board.unassigned,
+      exceptions,
+    });
 ```
 
 - [ ] **Step 6: Extend the client payload type.** In `src/hooks/use-dispatch-board.ts`:
@@ -2209,7 +2370,7 @@ export interface DispatchException {
   readonly createdAt: string;
 }
 
-type DispatchBoardWithExceptions = DispatchBoard & {
+export type DispatchBoardWithExceptions = DispatchBoard & {
   readonly exceptions: readonly DispatchException[];
 };
 ```
@@ -2222,7 +2383,17 @@ interface UseDispatchBoardResult {
   readonly refetch: () => Promise<void>;
 }
 ```
-  and the `useState` + the response cast (`data: DispatchBoardWithExceptions`).
+  3. Change the `useState` initializer to the new type:
+```ts
+  const [board, setBoard] = useState<DispatchBoardWithExceptions | null>(null);
+```
+  4. Change the `res.json()` cast at the successful-response site (currently `data: DispatchBoard`, ~line 47-50) to the exceptions-bearing type:
+```ts
+      const body = (await res.json()) as {
+        success: boolean;
+        data: DispatchBoardWithExceptions;
+      };
+```
 
 - [ ] **Step 7: Render the rail.** In `src/app/admin/(dashboard)/dispatch/page.tsx`, add an "Exceptions" section above the board columns (after the error `Alert`, before the `isLoading ? ... : ...` block). Rows reuse `setSelectedRequestId` to open the existing sheet:
 ```tsx
@@ -2370,7 +2541,7 @@ const RECENCY_WINDOW_DAYS = 180;
             nRecent: sql<number>`count(*) FILTER (WHERE ${serviceRequests.completedAt} >= ${recencyCutoff})`,
           })
 ```
-  (If `serviceRequests` has no `completedAt`, use `updatedAt` — verify the column; the skill query already filters `status = "completed"`, so `updatedAt >= cutoff` approximates completion recency. Choose whichever exists; prefer `completedAt` if present, else `updatedAt`.)
+  (`serviceRequests.completedAt` exists — `schema.ts:601`, `timestamp("completed_at", { withTimezone: true })` — so use it directly; the skill query already filters `status = "completed"`, so the FILTER windows recent completions.)
   5. Add a 180-day window to the RATING query (:152) — add `gte(serviceRequests.updatedAt, recencyCutoff)` into its `and(...)`. Add to the CONVERSION query (:192) — add `gte(estimates.createdAt, recencyCutoff)` into its `where`'s conditions (wrap the existing `inArray(...)` in an `and(...)`). Leave the revenue query all-time (it's a reason only, not a weighted term).
   6. In the merge loop for `skillRows` (:234), set both counts:
 ```ts
@@ -2444,9 +2615,9 @@ async function loadChainOrigins(
       ON pred.organization_id = ${organizationId}
       AND pred.assigned_to = ANY(${technicianIds as string[]})
       AND pred.id <> scored.id
-      AND pred.status &lt;&gt; 'cancelled'
+      AND pred.status <> 'cancelled'
       AND pred.arrival_window_start IS NOT NULL
-      AND pred.arrival_window_start &lt; scored.arrival_window_start
+      AND pred.arrival_window_start < scored.arrival_window_start
       AND date_trunc('day', pred.arrival_window_start) = date_trunc('day', scored.arrival_window_start)
     JOIN customer_locations cl
       ON cl.id = pred.location_id
@@ -2473,7 +2644,27 @@ async function loadChainOrigins(
 ```bash
 npx vitest run src/lib/ai/dispatch/score.test.ts src/lib/ai/dispatch/signals.test.ts src/lib/admin/scheduling-queries.test.ts
 ```
-Expected: green. Note: `loadChainOrigins` uses `db.execute(sql...)`; the signals test's mocked db only provides `select`. Add `execute: vi.fn(async () => ({ rows: [] }))` to the `vi.mock("@/lib/db", ...)` in `signals.test.ts` so the chain-origin call resolves to no predecessors (haversine falls back to anchors, preserving existing travel-term assertions). Add a focused chain test:
+Expected: green. Note: `loadChainOrigins` uses `db.execute(sql...)`, but the signals test's mocked db only provides `select`. Add an `execute` mock to the `db` object RETURNED by the `vi.mock("@/lib/db", ...)` factory (NOT the `vi.hoisted` block) — a `vi.fn()` created inline in the factory so it defaults to `{ rows: [] }` (no predecessors → haversine falls back to anchors, preserving every existing travel-term assertion) and stays per-test overridable via `dbMod.db.execute`. Change the factory (:19-23) from:
+```ts
+vi.mock('@/lib/db', () => ({
+  db: {
+    select: () => chain(selectQueue.shift() ?? []),
+  },
+}));
+```
+  to:
+```ts
+vi.mock('@/lib/db', () => ({
+  db: {
+    select: () => chain(selectQueue.shift() ?? []),
+    // Chain-origin lookup (loadChainOrigins) uses db.execute. Default: no
+    // predecessors, so travel falls back to anchors and existing assertions hold.
+    // A test may override with dbMod.db.execute.mockResolvedValueOnce(...).
+    execute: vi.fn(async () => ({ rows: [] as unknown[] })),
+  },
+}));
+```
+  Then add a focused chain test:
 ```ts
     it('uses a predecessor job origin over the anchor when one exists', async () => {
       // db.execute returns a predecessor near the job → chain km ~0.
@@ -2492,7 +2683,6 @@ Expected: green. Note: `loadChainOrigins` uses `db.execute(sql...)`; the signals
       expect(m.get('t1')!.travelKm!).toBeLessThan(1); // predecessor origin won
     });
 ```
-  (Add `execute` to the hoisted db mock as a `vi.fn()` returning `{ rows: [] }` by default so the other travel tests are unaffected.)
 
 - [ ] **Step 5: Run the full gate.**
 ```bash
@@ -2698,7 +2888,7 @@ const DURATION_FIT_PENALTY = 0.1;
   (Note: `weekday` from `dayStart.getUTCDay()` — `dayStart` is the business-day range start in UTC; because business midnight maps to 04:00/05:00Z of the SAME date, its UTC weekday equals the business weekday. This matches how `businessDayUtcRange` anchors the day.)
   3. Thread the three fields into the scorer input in `rankedTechnicianOrder` (`src/lib/admin/scheduling-queries.ts` :1139) — in the `tech` object add `bookedMinutes: s.bookedMinutes, dayMinutes: s.dayMinutes, thisJobEstimate: s.thisJobEstimate,`. Update the mocked `loadDispatchSignals` in `scheduling-queries.test.ts` to include `bookedMinutes: 0, dayMinutes: 720, thisJobEstimate: 0` in its returned objects.
 
-- [ ] **Step 4: Update signals.test.ts mock pushes.** The three new queries run whenever `technicianIds.length > 0`. In `signals.test.ts`, the existing tests push exactly the aggregate-count arrays; add three more empty results per `loadDispatchSignals` call: after the existing 5 aggregate pushes (and any travel pushes), the new order is estimate-row, booked-rows, availability-rows. Since these run in a second `Promise.all` AFTER the first, the mock `selectQueue.shift()` will feed them in order. Update each test to append `[], [], []` (estimate/booked/availability → all empty) at the end of its `selectQueue.push(...)`. For the "interprets aggregated rows" test, to exercise a non-default, optionally push `[{ minutes: 90 }]`, `[{ techId: 't1', booked: 120 }]`, `[{ techId: 't1', startMinute: 480, endMinute: 1020, dayOfWeek: 2 }]` and assert `bookedMinutes: 120`, `thisJobEstimate: 90`, `dayMinutes: 540` — but only if the isoDay `'2026-06-24'` weekday matches `dayOfWeek: 2`. `2026-06-24` is a Wednesday → business weekday 3, so use `dayOfWeek: 3` in that push to make the slot count. Keep the simplest tests pushing `[], [], []` for the defaults.
+- [ ] **Step 4: Update signals.test.ts mock pushes.** The three new queries run whenever `technicianIds.length > 0`. In `signals.test.ts`, the existing tests push exactly the aggregate-count arrays; add three more empty results per `loadDispatchSignals` call: after the existing 5 aggregate pushes (and any travel pushes), the new order is estimate-row, booked-rows, availability-rows. Since these run in a second `Promise.all` AFTER the first, the mock `selectQueue.shift()` will feed them in order. Update each test to append `[], [], []` (estimate/booked/availability → all empty) at the end of its `selectQueue.push(...)`. For the "interprets aggregated rows" test, to exercise a non-default, optionally push `[{ minutes: 90 }]`, `[{ techId: 't1', booked: 120 }]`, `[{ techId: 't1', startMinute: 480, endMinute: 1020, dayOfWeek: 3 }]` and assert `bookedMinutes: 120`, `thisJobEstimate: 90`, `dayMinutes: 540`. The isoDay `'2026-06-24'` is a Wednesday → business weekday 3, so `dayOfWeek: 3` makes the slot count (a non-matching weekday would be filtered out and `dayMinutes` would fall back to the 720 default). Keep the simplest tests pushing `[], [], []` for the defaults.
 
 - [ ] **Step 5: Run to pass.**
 ```bash
@@ -2736,6 +2926,8 @@ Mark items 1–9 ✅ in `docs/DISPATCH.md` with one-line "what shipped" notes (m
 - Consumes: everything shipped in Tasks 1–9.
 - Produces: updated docs; a green full suite.
 
+- [ ] **Step 0: Establish the full-suite baseline BEFORE any Task-10 edits.** Record the current pass/fail count so a regression is attributable. Either run the full suite on the pre-work tree first (`git stash` any in-progress work, `npx vitest run`, note the "N passed / M failed" line, then `git stash pop`), OR use the last known CI baseline: **3,949 passed as of 2026-07-20** (plus the known ~7 DB/server-dependent suites that fail at import because vitest skips `.env.local` — pre-existing, NOT regressions). Any NEW failure at Step 2 beyond that baseline traces to a Task 1–9 change and must be fixed here (Step 3) before committing.
+
 - [ ] **Step 1: Update `docs/DISPATCH.md`.** In the `## Sequenced plan` section, prefix each shipped item with ✅ and append a one-line "shipped:" note. Edit items 1–9 as follows (keep all other prose intact; move nothing):
   - Item 1 heading → `1. ✅ **Override telemetry** — …` and append: `_Shipped: 0041 columns overridden_technician_id/by_user_id/at; stampDispatchOverride called from assign/reassign/reschedule with session.userId; best-effort last-write-wins._`
   - Item 2 → `2. ✅ **Shadow mode** — …` append: `_Shipped: 0041 is_shadow column; autopilot-off orgs record the would-be decision (haversine-only, no service_requests writes, quality gate skipped); recordDispatchDecision gained isShadow._`
@@ -2753,7 +2945,7 @@ npx tsc --noEmit
 npx eslint src
 npx vitest run
 ```
-Expected: 0 tsc errors, 0 eslint problems, full suite green. (Baseline note: a handful of DB/server-dependent suites fail at import under vitest because `.env.local` is skipped — those are pre-existing and NOT regressions. Confirm the count/names match the known baseline; any NEW failure traces to a Task 1–9 change and must be fixed here before committing.)
+Expected: 0 tsc errors, 0 eslint problems, full suite green. (Baseline note: a handful of DB/server-dependent suites fail at import under vitest because `.env.local` is skipped — those are pre-existing and NOT regressions. Compare against the Step 0 baseline (3,949 passed as of 2026-07-20, plus the ~7 known env-skipped import failures); confirm the count/names match. Any NEW failure beyond that baseline traces to a Task 1–9 change and must be fixed here before committing.)
 
 - [ ] **Step 3: Fix any breakage** the tasks introduced (type errors, lint, newly-red tests). Re-run the full gate until green.
 
