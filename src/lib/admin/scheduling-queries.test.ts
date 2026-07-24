@@ -975,4 +975,27 @@ describe("autoAssignBookedRequest (scored vs first-fit)", () => {
     expect(result).toEqual({ assigned: true, technicianId: T1 });
     expect(insertMock).not.toHaveBeenCalled(); // nothing recorded
   });
+
+  it("shadow: rankedTechnicianOrder throws → first-fit still places, no decision insert", async () => {
+    // Simulate a transient DB error in the signal-loading step inside the shadow
+    // rankedTechnicianOrder call.  loadDispatchSignals is already vi.mock'd above;
+    // reject the first call (shadow) and then restore normal behaviour for the
+    // enabled=false path (which won't call it again for the first-fit fallback).
+    const signalsMod = await import("@/lib/ai/dispatch/signals");
+    vi.mocked(signalsMod.loadDispatchSignals).mockRejectedValueOnce(
+      new Error("DB transient: connection reset"),
+    );
+
+    selectQueue.push([{ id: T1 }, { id: T2 }]); // active techs
+    selectQueue.push([]); // ensureEstimatedDuration
+    selectQueue.push([]); // isExternallyScheduled
+    selectQueue.push([{ enabled: false }]); // isAutoDispatchEnabled
+    selectQueue.push([CLASSIFIED]); // loadJobClassification inside rankedTechnicianOrder
+    // loadDispatchSignals throws → shadow block catches → first-fit runs below.
+    queueSuccessfulPlacement(T1);
+
+    const result = await autoAssignBookedRequest(ORG, REQ, HELD);
+    expect(result).toEqual({ assigned: true, technicianId: T1 });
+    expect(insertMock).not.toHaveBeenCalled(); // shadow failure → nothing recorded
+  });
 });

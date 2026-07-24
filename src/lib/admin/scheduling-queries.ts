@@ -1292,25 +1292,32 @@ export async function autoAssignBookedRequest(
   // spends ORS quota. Unclassifiable jobs record nothing. Then first-fit runs
   // below, unchanged.
   if (!enabled) {
-    const shadow = await rankedTechnicianOrder(
-      organizationId,
-      requestId,
-      firstFit,
-      heldSlot.isoDay,
-      false, // auto-assign semantics: unclassifiable → null (record nothing)
-      true, // skipRouting: haversine only for the preview
-    );
-    if (shadow.ranked) {
-      const decision = classifyDispatch(shadow.ranked, shadow.job?.urgency);
-      await recordDispatchDecision(
+    try {
+      const shadow = await rankedTechnicianOrder(
         organizationId,
         requestId,
-        decision.outcome,
-        decision.outcome === "committed"
-          ? (decision.technicianId ?? null)
-          : null,
-        shadow.ranked,
-        true, // is_shadow
+        firstFit,
+        heldSlot.isoDay,
+        false, // auto-assign semantics: unclassifiable → null (record nothing)
+        true, // skipRouting: haversine only for the preview
+      );
+      if (shadow.ranked) {
+        const decision = classifyDispatch(shadow.ranked, shadow.job?.urgency);
+        await recordDispatchDecision(
+          organizationId,
+          requestId,
+          decision.outcome,
+          decision.outcome === "committed"
+            ? (decision.technicianId ?? null)
+            : null,
+          shadow.ranked,
+          true, // is_shadow
+        );
+      }
+    } catch (error) {
+      logger.warn(
+        { serviceRequestId: requestId, error },
+        "Auto-dispatch: shadow scoring failed, falling through to first-fit",
       );
     }
   }
