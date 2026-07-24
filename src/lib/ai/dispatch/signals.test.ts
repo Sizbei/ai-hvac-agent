@@ -19,6 +19,10 @@ const { selectQueue, chain } = vi.hoisted(() => {
 vi.mock('@/lib/db', () => ({
   db: {
     select: () => chain(selectQueue.shift() ?? []),
+    // Chain-origin lookup (loadChainOrigins) uses db.execute. Default: no
+    // predecessors, so travel falls back to anchors and existing assertions hold.
+    // A test may override with dbMod.db.execute.mockResolvedValueOnce(...).
+    execute: vi.fn(async () => ({ rows: [] as unknown[] })),
   },
 }));
 
@@ -69,6 +73,7 @@ describe('loadDispatchSignals', () => {
     );
     expect(m.get('t1')).toEqual({
       skillJobsCompleted: 0,
+      skillJobsCompletedRecent: 0,
       avgRating: null,
       sameDayJobCount: 0,
       conversionRate: 0,
@@ -78,6 +83,7 @@ describe('loadDispatchSignals', () => {
     });
     expect(m.get('t2')).toEqual({
       skillJobsCompleted: 0,
+      skillJobsCompletedRecent: 0,
       avgRating: null,
       sameDayJobCount: 0,
       conversionRate: 0,
@@ -89,7 +95,7 @@ describe('loadDispatchSignals', () => {
 
   it('interprets aggregated rows into the per-tech signals', async () => {
     selectQueue.push(
-      [{ techId: 't1', n: 7 }], // skill
+      [{ techId: 't1', n: 7, nRecent: 3 }], // skill (all-time 7, recent 3)
       [{ techId: 't1', rating: '4.8' }], // rating (driver returns string for avg)
       [{ techId: 't1', n: 2 }], // load
       [{ techId: 't1', total: 4, sold: 2 }], // conversion → 0.5
@@ -103,6 +109,7 @@ describe('loadDispatchSignals', () => {
     );
     expect(m.get('t1')).toEqual({
       skillJobsCompleted: 7,
+      skillJobsCompletedRecent: 3,
       avgRating: 4.8,
       sameDayJobCount: 2,
       conversionRate: 0.5,
@@ -275,6 +282,23 @@ describe('loadDispatchSignals', () => {
       expect(m.get("t1")!.travelKm).not.toBeNull();
       expect(m.get("t1")!.travelMinutes).toBeNull();
       expect(durationMatrix).not.toHaveBeenCalled();
+    });
+
+    it('uses a predecessor job origin over the anchor when one exists', async () => {
+      // db.execute returns a predecessor near the job → chain km ~0.
+      const dbMod = await import('@/lib/db');
+      (dbMod.db.execute as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        rows: [{ tech_id: 't1', lat: 36.33, lon: -82.38 }],
+      });
+      selectQueue.push(
+        [], [], [], [], [],
+        [{ lat: 36.33, lon: -82.38 }],          // job coords == predecessor
+        [{ id: 't1', lat: 10.0, lon: 10.0 }],   // far home base (should be ignored)
+      );
+      const m = await loadDispatchSignals(
+        'org', ['t1'], { jobType: 'no_cool', systemType: null }, '2026-06-24', 'req-1',
+      );
+      expect(m.get('t1')!.travelKm!).toBeLessThan(1); // predecessor origin won
     });
   });
 });

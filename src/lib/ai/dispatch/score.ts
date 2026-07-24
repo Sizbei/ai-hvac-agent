@@ -14,6 +14,10 @@ export interface DispatchSignals {
     readonly technicianId: string;
     /** Completed jobs whose jobType OR systemType matches the incoming job (counted once). */
     readonly skillJobsCompleted: number;
+    /** Same-category completed jobs within the recency window (180d). Drives skill
+     * DEPTH; the all-time skillJobsCompleted still gates skillMatched so a proven
+     * tech isn't locked out by a quiet quarter. */
+    readonly skillJobsCompletedRecent: number;
     readonly avgRating: number | null;
     readonly sameDayJobCount: number;
     /** Sold estimates / estimated jobs for this tech, in [0,1] (0 when unknown). */
@@ -87,7 +91,8 @@ export function scoreTechnician(
   const { job, tech } = signals;
   const skillMatched = tech.skillJobsCompleted > 0;
 
-  const skillDepth = Math.min(tech.skillJobsCompleted, SKILL_DEPTH_CAP) / SKILL_DEPTH_CAP;
+  const skillDepth =
+    Math.min(tech.skillJobsCompletedRecent, SKILL_DEPTH_CAP) / SKILL_DEPTH_CAP;
   const quality = Math.min((tech.avgRating ?? DEFAULT_RATING) / 5, 1);
   const conversion = Math.min(Math.max(tech.conversionRate, 0), 1);
   const load = 1 - Math.min(tech.sameDayJobCount, LOAD_CAP) / LOAD_CAP;

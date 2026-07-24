@@ -12,6 +12,7 @@ function signals(
     tech: {
       technicianId,
       skillJobsCompleted: 0,
+      skillJobsCompletedRecent: 0,
       avgRating: null,
       sameDayJobCount: 0,
       conversionRate: 0,
@@ -38,6 +39,7 @@ describe('scoreTechnician', () => {
     const best = scoreTechnician(
       signals('t1', {
         skillJobsCompleted: 10,
+        skillJobsCompletedRecent: 10,
         avgRating: 5,
         conversionRate: 1,
         sameDayJobCount: 0,
@@ -49,6 +51,7 @@ describe('scoreTechnician', () => {
     const capped = scoreTechnician(
       signals('t1', {
         skillJobsCompleted: 50,
+        skillJobsCompletedRecent: 50,
         avgRating: 5,
         conversionRate: 1,
         sameDayJobCount: 0,
@@ -85,6 +88,16 @@ describe('scoreTechnician', () => {
     const overloaded = scoreTechnician(signals('t1', { skillJobsCompleted: 10, avgRating: 5, sameDayJobCount: 99 }));
     expect(heavy.score).toBeLessThan(light.score);
     expect(overloaded.score).toBeCloseTo(heavy.score, 5); // floored at 6
+  });
+
+  it('skill depth uses the recency-windowed count; the gate uses all-time', () => {
+    // All-time count 8 keeps skillMatched true, but recent depth 0 → skill term is 0.
+    const r = scoreTechnician(
+      signals('t1', { skillJobsCompleted: 8, skillJobsCompletedRecent: 0, avgRating: null, sameDayJobCount: 0 }),
+    );
+    expect(r.skillMatched).toBe(true); // gate = all-time
+    // Skill depth term contributes 0 (recent=0): score == quality+load only.
+    expect(r.score).toBeCloseTo((3.5 / 5) * 0.2 + 0.15, 5);
   });
 
   it('produces human-readable reasons', () => {
@@ -176,6 +189,7 @@ const rt = (technicianId: string, score: number) =>
 describe('travel-aware scoring + confidence classification', () => {
   const baseTech = {
     skillJobsCompleted: 5,
+    skillJobsCompletedRecent: 5,
     avgRating: 4 as number | null,
     sameDayJobCount: 2,
     conversionRate: 0.5,
@@ -270,6 +284,7 @@ describe('travel-aware scoring + confidence classification', () => {
 describe('Probook-parity: expected-value term + urgency tier', () => {
   const baseTech = {
     skillJobsCompleted: 5,
+    skillJobsCompletedRecent: 5,
     avgRating: 4 as number | null,
     sameDayJobCount: 2,
     conversionRate: 0.5,

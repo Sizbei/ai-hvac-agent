@@ -1174,6 +1174,7 @@ async function rankedTechnicianOrder(
       tech: {
         technicianId,
         skillJobsCompleted: s.skillJobsCompleted,
+        skillJobsCompletedRecent: s.skillJobsCompletedRecent,
         avgRating: s.avgRating,
         sameDayJobCount: s.sameDayJobCount,
         conversionRate: s.conversionRate,

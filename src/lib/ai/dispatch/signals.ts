@@ -49,9 +49,15 @@ export interface DispatchJobAttrs {
   readonly systemType: string | null;
 }
 
+// ~180-day window approximating the 90-day half-life intent (a simple cutoff;
+// per-row exponential decay is deliberately not built). Skill DEPTH, rating, and
+// conversion use it; the skill GATE stays all-time.
+const RECENCY_WINDOW_DAYS = 180;
+
 /** The raw signals the scorer consumes, per technician. */
 export interface TechSignalRow {
   readonly skillJobsCompleted: number;
+  readonly skillJobsCompletedRecent: number;
   readonly avgRating: number | null;
   readonly sameDayJobCount: number;
   /** Sold estimates / total estimates on this tech's jobs, in [0,1] (0 when none). */
@@ -103,6 +109,7 @@ export async function loadDispatchSignals(
   for (const id of technicianIds) {
     result.set(id, {
       skillJobsCompleted: 0,
+      skillJobsCompletedRecent: 0,
       avgRating: null,
       sameDayJobCount: 0,
       conversionRate: 0,
@@ -115,6 +122,9 @@ export async function loadDispatchSignals(
 
   const ids = [...technicianIds];
   const { start: dayStart, end: dayEnd } = businessDayUtcRange(isoDay);
+  const recencyCutoff = new Date(
+    Date.now() - RECENCY_WINDOW_DAYS * 24 * 60 * 60 * 1000,
+  );
 
   // Skill predicate from whichever classification fields are present.
   const skillMatchers = [];
@@ -134,7 +144,11 @@ export async function loadDispatchSignals(
   const [skillRows, ratingRows, loadRows, conversionRows, revenueRows] = await Promise.all([
     skillPredicate
       ? db
-          .select({ techId: serviceRequests.assignedTo, n: count() })
+          .select({
+            techId: serviceRequests.assignedTo,
+            n: count(),
+            nRecent: sql<number>`count(*) FILTER (WHERE ${serviceRequests.completedAt} >= ${recencyCutoff})`,
+          })
           .from(serviceRequests)
           .where(
             withTenant(
@@ -148,7 +162,9 @@ export async function loadDispatchSignals(
             ),
           )
           .groupBy(serviceRequests.assignedTo)
-      : Promise.resolve([] as { techId: string | null; n: number }[]),
+      : Promise.resolve(
+          [] as { techId: string | null; n: number; nRecent: number }[],
+        ),
 
     db
       .select({
@@ -167,6 +183,7 @@ export async function loadDispatchSignals(
           and(
             inArray(serviceRequests.assignedTo, ids),
             isNotNull(reviewRequests.rating),
+            gte(serviceRequests.updatedAt, recencyCutoff),
           )!,
         ),
       )
@@ -202,7 +219,14 @@ export async function loadDispatchSignals(
         sql`${estimates.serviceRequestId} = ${serviceRequests.id} AND ${serviceRequests.organizationId} = ${organizationId}`,
       )
       .where(
-        withTenant(estimates, organizationId, inArray(serviceRequests.assignedTo, ids)),
+        withTenant(
+          estimates,
+          organizationId,
+          and(
+            inArray(serviceRequests.assignedTo, ids),
+            gte(estimates.createdAt, recencyCutoff),
+          )!,
+        ),
       )
       .groupBy(serviceRequests.assignedTo),
 
@@ -237,6 +261,7 @@ export async function loadDispatchSignals(
       result.set(r.techId, {
         ...result.get(r.techId)!,
         skillJobsCompleted: Number(r.n),
+        skillJobsCompletedRecent: Number(r.nRecent),
       });
     }
   }
@@ -319,12 +344,23 @@ async function loadTravelSignals(
   const jobCoords = await loadJobCoords(organizationId, requestId);
   if (!jobCoords) return out;
 
+  // Chain-aware origin: a tech's true origin for a job later today is their
+  // previous scheduled job's location, not their GPS/home anchor. One batched
+  // DISTINCT ON query finds, per tech, their latest same-business-day non-cancelled
+  // assigned job whose window starts before THIS job's window (read inside the
+  // query via requestId) and has cached coords. A windowless scored job → no chain.
+  const chainOrigins = await loadChainOrigins(
+    organizationId,
+    requestId,
+    technicianIds,
+  );
+
   const anchors = await loadTechAnchors(organizationId, technicianIds);
   for (const id of technicianIds) {
-    const a = anchors.get(id);
-    if (a) {
+    const origin = chainOrigins.get(id) ?? anchors.get(id);
+    if (origin) {
       out.set(id, {
-        km: haversineKm(a.lat, a.lon, jobCoords.lat, jobCoords.lon),
+        km: haversineKm(origin.lat, origin.lon, jobCoords.lat, jobCoords.lon),
         minutes: null,
       });
     }
@@ -335,10 +371,11 @@ async function loadTravelSignals(
   // Shadow scoring passes skipRouting → haversine only (a preview must not spend
   // ORS quota; the km fallback already exists).
   if (!skipRouting && routingEnabled()) {
-    const withAnchor = technicianIds.filter((id) => anchors.get(id));
+    const originOf = (id: string) => chainOrigins.get(id) ?? anchors.get(id);
+    const withAnchor = technicianIds.filter((id) => originOf(id));
     if (withAnchor.length > 0) {
       const origins = withAnchor.map((id) => {
-        const a = anchors.get(id)!;
+        const a = originOf(id)!;
         return { lat: a.lat, lon: a.lon };
       });
       const minutes = await durationMatrix(origins, {
@@ -416,4 +453,50 @@ async function loadTechAnchors(
     );
   }
   return anchors;
+}
+
+/** Per-tech predecessor origin: the latest same-business-day non-cancelled
+ * assigned job (with cached coords) whose arrival window starts BEFORE the scored
+ * job's window start. DISTINCT ON tech (no N+1). The scored job's window start is
+ * read inside the query by joining on requestId; a NULL window → no chain (skip
+ * every tech). Excludes the scored request itself. */
+async function loadChainOrigins(
+  organizationId: string,
+  requestId: string,
+  technicianIds: readonly string[],
+): Promise<Map<string, { readonly lat: number; readonly lon: number }>> {
+  const out = new Map<string, { readonly lat: number; readonly lon: number }>();
+  if (technicianIds.length === 0) return out;
+  const rows = await db.execute(sql`
+    SELECT DISTINCT ON (pred.assigned_to)
+      pred.assigned_to AS tech_id,
+      cl.latitude AS lat,
+      cl.longitude AS lon
+    FROM service_requests scored
+    JOIN service_requests pred
+      ON pred.organization_id = ${organizationId}
+      AND pred.assigned_to = ANY(${technicianIds as string[]})
+      AND pred.id <> scored.id
+      AND pred.status <> 'cancelled'
+      AND pred.arrival_window_start IS NOT NULL
+      AND pred.arrival_window_start < scored.arrival_window_start
+      AND date_trunc('day', pred.arrival_window_start) = date_trunc('day', scored.arrival_window_start)
+    JOIN customer_locations cl
+      ON cl.id = pred.location_id
+      AND cl.organization_id = ${organizationId}
+      AND cl.latitude IS NOT NULL
+      AND cl.longitude IS NOT NULL
+    WHERE scored.organization_id = ${organizationId}
+      AND scored.id = ${requestId}
+      AND scored.arrival_window_start IS NOT NULL
+    ORDER BY pred.assigned_to, pred.arrival_window_start DESC
+  `);
+  const list =
+    (rows as unknown as { rows?: unknown[] }).rows ?? (rows as unknown as unknown[]);
+  for (const r of list as Array<{ tech_id: string; lat: number; lon: number }>) {
+    if (r.tech_id && r.lat != null && r.lon != null) {
+      out.set(r.tech_id, { lat: Number(r.lat), lon: Number(r.lon) });
+    }
+  }
+  return out;
 }
