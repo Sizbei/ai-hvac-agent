@@ -54,10 +54,12 @@ vi.mock("@/lib/db", () => ({
     select: () => chain(selectQueue.shift() ?? []),
     delete: () => chain(deleteQueue.shift() ?? []),
     update: () => chain(updateQueue.shift() ?? []),
-    insert: () => {
-      insertMock();
-      return chain([]);
-    },
+    insert: () => ({
+      values: (v: unknown) => {
+        insertMock(v);
+        return chain([]);
+      },
+    }),
     batch: (...args: unknown[]) => batchMock(...args),
   },
 }));
@@ -137,6 +139,17 @@ vi.mock("@/lib/db/schema", () => ({
     organizationId: "cl.org",
     latitude: "cl.lat",
     longitude: "cl.lng",
+  },
+  dispatchDecisions: {
+    id: "dd.id",
+    organizationId: "dd.org",
+    serviceRequestId: "dd.req",
+    outcome: "dd.outcome",
+    isShadow: "dd.isShadow",
+    chosenTechnicianId: "dd.chosen",
+    topScore: "dd.topScore",
+    confidenceGap: "dd.gap",
+    candidates: "dd.candidates",
   },
 }));
 
@@ -882,7 +895,9 @@ describe("autoAssignBookedRequest (scored vs first-fit)", () => {
   it("disabled (default): tries technicians in DB order (first-fit, unchanged)", async () => {
     selectQueue.push([{ id: T1 }, { id: T2 }]); // active techs (DB order)
     queueAutoAssignLeadIn(false); // duration/external/flag (scored gate skipped)
-    // Disabled → ranked === null → no classification read, no confidence gate.
+    // Disabled → the shadow branch still reads the classification; an unclassified
+    // job records nothing, then first-fit places DB-order T1 (unchanged).
+    selectQueue.push([{ jobType: null, systemType: null, urgency: "standard" }]);
     queueSuccessfulPlacement(T1); // first DB-order tech wins
 
     const result = await autoAssignBookedRequest(ORG, REQ, HELD);
@@ -933,5 +948,31 @@ describe("autoAssignBookedRequest (scored vs first-fit)", () => {
     selectQueue.push([]); // no active techs
     const result = await autoAssignBookedRequest(ORG, REQ, HELD);
     expect(result).toEqual({ assigned: false });
+  });
+
+  it("shadow: autopilot OFF but classifiable → records is_shadow decision, still first-fits", async () => {
+    selectQueue.push([{ id: T1 }, { id: T2 }]); // active techs
+    queueAutoAssignLeadIn(false); // duration/external/flag=OFF (quality gate skipped)
+    selectQueue.push([CLASSIFIED]); // rankedTechnicianOrder → classification (shadow)
+    rankedState.order = [T2, T1]; // shadow ranker prefers T2
+    queueSuccessfulPlacement(T1); // first-fit still places DB-order T1
+
+    const result = await autoAssignBookedRequest(ORG, REQ, HELD);
+    // First-fit outcome is unchanged (T1 wins), and a SHADOW decision was recorded.
+    expect(result).toEqual({ assigned: true, technicianId: T1 });
+    expect(insertMock).toHaveBeenCalledWith(
+      expect.objectContaining({ isShadow: true }),
+    );
+  });
+
+  it("shadow: autopilot OFF and UNCLASSIFIABLE → records nothing, first-fits", async () => {
+    selectQueue.push([{ id: T1 }, { id: T2 }]); // active techs
+    queueAutoAssignLeadIn(false);
+    selectQueue.push([{ jobType: null, systemType: null, urgency: "standard" }]); // unclassified
+    queueSuccessfulPlacement(T1);
+
+    const result = await autoAssignBookedRequest(ORG, REQ, HELD);
+    expect(result).toEqual({ assigned: true, technicianId: T1 });
+    expect(insertMock).not.toHaveBeenCalled(); // nothing recorded
   });
 });

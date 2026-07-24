@@ -1008,12 +1008,14 @@ async function recordDispatchDecision(
   outcome: DispatchOutcome,
   chosenTechnicianId: string | null,
   ranked: readonly RankedTech[],
+  isShadow = false,
 ): Promise<void> {
   try {
     await db.insert(dispatchDecisions).values({
       organizationId,
       serviceRequestId: requestId,
       outcome,
+      isShadow,
       chosenTechnicianId,
       topScore: ranked[0]?.score ?? null,
       confidenceGap:
@@ -1025,6 +1027,8 @@ async function recordDispatchDecision(
         // Both travel signals, for the routing-vs-haversine A/B + weight tuning.
         travelKm: r.travelKm,
         travelMinutes: r.travelMinutes,
+        // Stored (not parsed later) so the decision panel reports it faithfully.
+        skillMatched: r.skillMatched,
       })),
     });
   } catch (error) {
@@ -1143,6 +1147,7 @@ async function rankedTechnicianOrder(
   // unclassified job returns null so the caller FIRST-FITS, preserving the
   // invariant that an opted-in org never auto-assigns LESS than an opted-out one.
   fallbackUnclassified = false,
+  skipRouting = false,
 ): Promise<{
   readonly ranked: RankedTech[] | null;
   readonly job: DispatchSignals["job"] | null;
@@ -1160,6 +1165,7 @@ async function rankedTechnicianOrder(
     job,
     isoDay,
     requestId,
+    { skipRouting },
   );
   const candidates: DispatchSignals[] = technicianIds.map((technicianId) => {
     const s = signalsByTech.get(technicianId)!;
@@ -1278,6 +1284,36 @@ export async function autoAssignBookedRequest(
   // opting in never strands a job that first-fit would have placed.
   const firstFit = techs.map((t) => t.id);
   const enabled = await isAutoDispatchEnabled(organizationId);
+
+  // Shadow mode: an autopilot-OFF org still scores + records the would-be
+  // decision (preview + tuning dataset) — never touching service_requests (no
+  // outcome stamp, no assignment) and skipping the booking-quality gate (it
+  // writes to service_requests). Haversine-only (skipRouting) so a preview never
+  // spends ORS quota. Unclassifiable jobs record nothing. Then first-fit runs
+  // below, unchanged.
+  if (!enabled) {
+    const shadow = await rankedTechnicianOrder(
+      organizationId,
+      requestId,
+      firstFit,
+      heldSlot.isoDay,
+      false, // auto-assign semantics: unclassifiable → null (record nothing)
+      true, // skipRouting: haversine only for the preview
+    );
+    if (shadow.ranked) {
+      const decision = classifyDispatch(shadow.ranked, shadow.job?.urgency);
+      await recordDispatchDecision(
+        organizationId,
+        requestId,
+        decision.outcome,
+        decision.outcome === "committed"
+          ? (decision.technicianId ?? null)
+          : null,
+        shadow.ranked,
+        true, // is_shadow
+      );
+    }
+  }
 
   // Clean-before-assign gate (scored mode only): hold a dirty booking (no address /
   // no contact / out of area) for a human to clean rather than auto-assigning a

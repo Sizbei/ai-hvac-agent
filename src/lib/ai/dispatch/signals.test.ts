@@ -251,5 +251,30 @@ describe('loadDispatchSignals', () => {
       expect(m.get('t1')!.travelMinutes).toBeNull();
       expect(m.get('t1')!.travelKm).not.toBeNull();
     });
+
+    it("skips the routing call when skipRouting is set (haversine only)", async () => {
+      routingEnabled.mockReturnValue(true);
+      durationMatrix.mockResolvedValue([12]);
+      getLatestTechnicianLocations.mockResolvedValue(
+        new Map([["t1", { latitude: 36.0, longitude: -82.0 }]]),
+      );
+      selectQueue.push(
+        [], [], [], [], [],
+        [{ lat: 36.33, lon: -82.38 }], // job coords
+        [{ id: "t1", lat: 36.0, lon: -82.0 }], // home base
+      );
+      const m = await loadDispatchSignals(
+        "org",
+        ["t1"],
+        { jobType: "no_cool", systemType: null },
+        "2026-06-24",
+        "req-1",
+        { skipRouting: true },
+      );
+      // Haversine km present, but routing was NOT invoked (shadow saves ORS quota).
+      expect(m.get("t1")!.travelKm).not.toBeNull();
+      expect(m.get("t1")!.travelMinutes).toBeNull();
+      expect(durationMatrix).not.toHaveBeenCalled();
+    });
   });
 });

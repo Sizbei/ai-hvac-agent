@@ -97,6 +97,7 @@ export async function loadDispatchSignals(
   job: DispatchJobAttrs,
   isoDay: string,
   requestId?: string,
+  opts: { readonly skipRouting?: boolean } = {},
 ): Promise<Map<string, TechSignalRow>> {
   const result = new Map<string, TechSignalRow>();
   for (const id of technicianIds) {
@@ -278,7 +279,12 @@ export async function loadDispatchSignals(
   // request has cached job coordinates does travel become non-null; otherwise
   // every travel field stays null and the scorer is byte-identical to the composite.
   if (requestId) {
-    const travelByTech = await loadTravelSignals(organizationId, requestId, technicianIds);
+    const travelByTech = await loadTravelSignals(
+      organizationId,
+      requestId,
+      technicianIds,
+      opts.skipRouting ?? false,
+    );
     for (const [id, t] of travelByTech) {
       if (result.has(id) && (t.km != null || t.minutes != null)) {
         result.set(id, {
@@ -305,6 +311,7 @@ async function loadTravelSignals(
   organizationId: string,
   requestId: string,
   technicianIds: readonly string[],
+  skipRouting: boolean,
 ): Promise<Map<string, { km: number | null; minutes: number | null }>> {
   const out = new Map<string, { km: number | null; minutes: number | null }>(
     technicianIds.map((id) => [id, { km: null, minutes: null }]),
@@ -325,7 +332,9 @@ async function loadTravelSignals(
 
   // Routing overlay (best-effort, one matrix call). Only techs with a known
   // anchor are priced; a null result leaves that tech on the haversine term.
-  if (routingEnabled()) {
+  // Shadow scoring passes skipRouting → haversine only (a preview must not spend
+  // ORS quota; the km fallback already exists).
+  if (!skipRouting && routingEnabled()) {
     const withAnchor = technicianIds.filter((id) => anchors.get(id));
     if (withAnchor.length > 0) {
       const origins = withAnchor.map((id) => {
