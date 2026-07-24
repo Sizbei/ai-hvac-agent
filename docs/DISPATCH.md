@@ -35,6 +35,7 @@ pilot data**):
 - **Quality** — historical `avgRating`.
 - **Conversion** — revenue-adjacent history.
 - **Load** — `1 − min(sameDayJobCount, 6)/6` (busier techs score lower).
+- **Job value** — revenue-band term (`W_VALUE`); higher-value jobs weight experience more.
 - **Travel** — from the tech's anchor (latest live GPS fix, else configured home base) to the job. When a routing provider is configured (`ROUTING_PROVIDER`), the term uses real **road drive-time** in minutes (`TRAVEL_CAP_MIN=45`); otherwise straight-line haversine km (`TRAVEL_CAP_KM=40`). `W_TRAVEL` weight, floors at 0 beyond the cap. Only applied once job coords exist. See **Travel-time provider** below.
 
 ### 4. Confidence gate — `classifyDispatch`
@@ -167,37 +168,144 @@ comparison reads straight off recorded decisions — no extra instrumentation:
 The roadmap above, ordered by dependency. Rule of thumb: **measurement before
 tuning, trust before autonomy, data-producing work before data-consuming work.**
 
-### Phase 1 — Measure (no external dependencies; ~1–2 days)
+### Phase 1 — Measure (no external dependencies)
 The prerequisite for everything below: turn dispatch from "it ran" into a labeled
-dataset.
-1. **Override telemetry** — nullable `overridden_*` fields on `dispatch_decisions`,
-   written from `assignTechnician`/`placeAndAssignRequest` when a human's pick
-   differs from the recorded decision.
-2. **Shadow mode** — score + record (never commit) for orgs with autopilot off.
-   Multiplies the dataset and gives opt-out orgs a preview.
-3. **Outcome digest + canary** — weekly committed/queued/overridden rollup; alert
-   on a commit-rate collapse.
+dataset. All reads/writes org-scoped (`withTenant`); the decision lookup contract
+everywhere is **latest row per request** (`created_at DESC LIMIT 1`).
+Sequencing: items 1 + 2 ship as **one migration** (all four new
+`dispatch_decisions` columns — parallel migrations to the same table would
+conflict in the drizzle journal) and as **one sequenced task** (they modify the
+same orchestrator + the same mock-queue test harness); item 3 builds on their
+schema and follows them.
 
-*Exit criteria: every booking yields a decision row (real or shadow); overrides are
-labeled; a rollup query exists.*
+1. **Override telemetry** — migration adds three nullable columns to
+   `dispatch_decisions`: `overridden_technician_id` (uuid, FK `users.id`),
+   `overridden_by_user_id` (uuid, FK `users.id`), `overridden_at` (timestamptz).
+   Stamp rule: whenever a **human** (re)assigns a request — `assignTechnician`,
+   `reassignTechnician`, and the human scheduling path into
+   `placeAndAssignRequest` — look up the request's latest decision row; if it
+   exists and `chosen_technician_id IS DISTINCT FROM` the human's pick, stamp all
+   three fields on that row. **Plumbing:** none of these functions currently take
+   a caller identity — each gains an `actingUserId` parameter threaded from
+   `session.userId` in its route (assign route for the first two; the calendar
+   scheduling route for the third). The background auto-dispatch path passes no
+   actor and never stamps. Queued rows have `chosen_technician_id = NULL`, so the
+   condition fires on any human pick — intentional. Stamps are
+   **last-write-wins**: a second human reassignment overwrites the stamp (the
+   latest human decision is the tuning label). The stamp is a **best-effort
+   second write** (not batched with the assignment): losing a label on a crash is
+   acceptable for telemetry; money-grade atomicity is deliberately not required.
+   File split: `assignTechnician`/`reassignTechnician` live in
+   `src/lib/admin/queries.ts`; the scheduling path in `scheduling-queries.ts` —
+   the stamp helper should be shared. Analysis segments by `outcome`: a stamped
+   `committed` row = true override; a stamped `queued_*` row = human resolution
+   label.
+2. **Shadow mode** — migration adds `is_shadow boolean NOT NULL DEFAULT false` to
+   `dispatch_decisions`. In `autoAssignBookedRequest`, when the org has autopilot
+   **off** (and is not external-scheduler): run the same classification + ranking
+   + confidence gate, and if the job is classifiable record the decision row with
+   `is_shadow = true` and the outcome the gate *would* have produced — then
+   continue into today's first-fit behavior unchanged. Shadow never touches
+   `service_requests` (no `auto_dispatch_outcome` stamp, no assignment) and
+   **skips the booking-quality gate** (its stamps write to `service_requests`).
+   `recordDispatchDecision` gains an `isShadow` param. Shadow scoring **skips the
+   routing-provider call** (haversine-only — a preview must not spend ORS quota;
+   the travel fallback already exists). Unclassifiable bookings (no
+   `jobType`/`systemType`) record nothing. Activation is implicit — every
+   autopilot-off org shadows (that *is* the preview feature); no new toggle. Runs
+   on the existing `after()` path, so the added scoring cost never blocks the
+   customer. Every consumer of `dispatch_decisions` must filter on `is_shadow`
+   (operational reads: `false`; tuning/health reads: both, split).
+3. **Outcome rollup + canary** — three deliberately small pieces:
+   (a) pure helper `getDispatchOutcomeRollup(orgId, days)` → counts by outcome +
+   override count + commit rate, split real/shadow; (b) a **"Dispatch health"
+   card on `/admin/operations`** rendering the 7-day rollup (the existing owner
+   scorecard page — no new surface); (c) a weekly cron
+   `/api/cron/dispatch-digest` (+ `vercel.json` entry) that computes the per-org
+   rollup and fires the **existing** `dispatch_alert_phone` SMS path when the
+   commit rate collapses — computed over **all decision rows, real + shadow
+   together** (shadow exercises the same geocode/signal/weight pipeline, so a
+   shadow collapse signals the same breakage — and autopilot-off orgs would
+   otherwise never alert). Collapse = this week's commit rate < 50% of the
+   trailing-28-day rate, with ≥ 20 decisions in EACH of the two windows (guards the empty
+   denominator); log-only when no alert phone is set. Wrap the SMS send in a
+   per-org try/catch as `delay-sweep` does — `sendSms` **throws** when
+   `TWILIO_PHONE_NUMBER` is unset, and one org's config must not abort the run.
+   The Operations card goes through the existing metrics pipeline (type + query +
+   hook + card — a four-file chain, not a drop-in). **No email digest** — the
+   repo has no admin-email infrastructure and this phase does not invent one.
+4. **Register the orphaned `delay-sweep` cron** — the fully-built
+   `/api/cron/delay-sweep` route is missing from `vercel.json`, so behind-schedule
+   SMS alerts never fire in production. One JSON entry.
 
-### Phase 2 — Operator trust & speed (parallel with Phase 1; ~2–3 days)
-4. **"Why this tech?" popover** — render `dispatch_decisions.candidates` (scores,
-   reasons, travel signals) on assigned jobs + the exception queue.
-5. **Exception-queue one-click** — inline `suggestTechnicians` shortlist with
-   one-tap accept on `queued_*` jobs. Also produces cleaner override labels.
+*Exit criteria: every classifiable booking yields a decision row (real or shadow);
+human picks are labeled on the decision row; the rollup renders on Operations; the
+digest + delay-sweep crons are registered.*
 
-*Exit criteria: a dispatcher can resolve a queued job in one click and see the
-system's reasoning everywhere an assignment appears.*
+### Phase 2 — Operator trust & speed (parallel with Phase 1)
+5. **"Why this tech?" decision panel** — surface the **recorded** decision, not a
+   live re-score (the sheet's existing "Suggested technicians" card already does
+   live scoring and stays as the action path). New `GET
+   /api/admin/requests/[id]/decision` returns the latest decision row: outcome,
+   `is_shadow`, chosen tech, `top_score`, `confidence_gap`, per-candidate
+   `candidates` (score, reasons, **`travelKm` + `travelMinutes`** — the client
+   type currently drops the travel fields; add them), and `overridden_*`. The
+   `candidates` JSONB stores tech **UUIDs only** — the route resolves display
+   names with one org-scoped `inArray` lookup over `users`. Render
+   as a collapsible "Dispatch decision" section in `RequestDetailSheet` for any
+   request that has a row (assigned *and* queued; shadow rows labeled
+   "preview"). No new popover primitive (the repo has none; the sheet section is
+   the surface). Tests: route + query only — **no jsdom/RTL** (repo policy).
+6. **Exceptions rail** — the one-click accept **already exists** (the sheet's
+   suggest card assigns via the same path as the dropdown); the missing piece is
+   the view. This is a **separate, day-independent query**, not a board-query
+   tweak: the board query is bounded to the selected day and filters
+   `isNotNull(arrivalWindowStart)`, which hides windowless bookings and lets a
+   yesterday's queued job scroll out of sight. The rail queries: unassigned +
+   `auto_dispatch_outcome IN (queued_*)` + status not cancelled/completed,
+   ordered by `createdAt` ascending (oldest first), capped (~20). Renders above/beside the board (outcome badge +
+   age), each row opening the existing detail sheet. Override labels come free
+   via item 1's `assignTechnician` hook.
 
-### Phase 3 — Scoring accuracy (independent ~0.5–1 day items; ship behind tests)
-6. **Chain-aware travel origin** — predecessor job's coords as the origin for
-   later-today jobs.
-7. **Duration-fit availability** — down-rank techs whose remaining window can't fit
-   the estimated duration.
-8. **Recency-weighted signals** — ~90-day half-life on skill/rating/conversion.
-9. **Geofenced auto-status** — en-route/arrived suggestions from the location
-   stream; *produces* the actual-duration data Phase 4 consumes.
+*Exit criteria: a dispatcher can resolve a queued job in one click from the
+Exceptions rail and see the recorded reasoning on any decided job.*
+
+### Phase 3 — Scoring accuracy (ship behind tests; items 7 + 9 share
+`signals.ts` and are one task or strictly sequenced — item 8 (`score.ts`) is
+independent)
+7. **Chain-aware travel origin** — one batched query (`DISTINCT ON` tech over the
+   candidate set — no N+1): each tech's latest non-cancelled same-business-day
+   job with `arrival_window_start` before the scored job's window start and
+   non-null cached coords (excluding the scored request itself). The scored job's
+   window start is **read from the DB inside the query** (join on the `requestId`
+   already passed to `loadDispatchSignals` — no signature change; this also works
+   for the live `suggestTechnicians` path). A windowless scored job (`NULL`
+   window) skips chain logic entirely. When a predecessor is found, its coords
+   replace the GPS/home anchor as the travel origin; otherwise the existing
+   fallback chain is unchanged. Point-in-time by design — a predecessor cancelled
+   after scoring is accepted staleness (decisions re-run on re-dispatch).
+8. **Duration-fit down-rank** — explicit proxy v1: per tech, `bookedMinutes` =
+   Σ `estimated_duration_minutes` (60 when null) over same-day non-cancelled
+   assigned jobs (one grouped query); `dayMinutes` from a **new ~10-line pure
+   helper `sumAvailabilityMinutes(slots)`** — no existing helper computes span;
+   it sums `endMinute − startMinute` over the tech's weekday slots and falls back
+   to the same `DEFAULT_BUSINESS_DAY` (8:00–20:00 → 720 min) the coverage check
+   uses. If `bookedMinutes + thisJobEstimate > dayMinutes`: fixed **−0.1 score
+   penalty** + reason `"day likely full"`. Down-rank only — the hard gate remains
+   `placeAndAssignRequest`'s conflict/availability check. Full gap-finding
+   (contiguous-window math) is deliberately deferred.
+9. **Recency-windowed signals** — skill/rating/conversion aggregates take a
+   **180-day window** (a simple cutoff approximating the 90-day half-life intent;
+   per-row exponential decay SQL is deliberately not built). The **skill gate
+   stays all-time** — `skillMatched` keeps using the all-time count so a proven
+   tech is never locked out by a quiet quarter; only skill *depth* uses the
+   windowed count. One query returns both counts via a `count(*) FILTER (WHERE …)` pair (the
+   pattern the conversion query already uses); the windowed count travels as
+   `skillJobsCompletedRecent` through the signals merge loop into the scorer.
+
+*(Geofenced auto-status moved to Phase 4: it needs a status-model or suggestion
+surface that doesn't exist, and its actual-duration output only feeds Phase 4
+consumers.)*
 
 ### Phase 4 — Data-gated tuning (needs ~2–4 weeks of pilot traffic + Phase 1)
 10. **Weight/gap tuning** — fit `W_TRAVEL`, `TRAVEL_CAP_MIN`, `MIN_CONFIDENCE_GAP`
@@ -205,14 +313,20 @@ system's reasoning everywhere an assignment appears.*
 11. **Routing A/B verdict** — disagreement rate + override correlation (see
     *Measuring* above) decides: keep ORS, upgrade to a traffic-aware provider
     (Mapbox/Google adapter), or drop routing.
-12. **Actual-duration recalibration** — periodic per-org multiplier on the duration
-    base table from Phase 3's actuals.
-13. **Travel cache** — only if ORS rate limits are actually hit.
+12. **Geofenced auto-status** (moved from Phase 3) — en-route/arrived suggestions
+    when a location fix enters a job's geofence. Needs design decisions that don't
+    exist yet: a suggestion surface (the status enum has no `en_route`; the FSM
+    would race a system actor against the tech's manual updates), an ingest-hook
+    vs cron-sweep evaluation path, and a neighbor-overlap de-dup rule. Produces
+    the actual-duration data item 13 consumes.
+13. **Actual-duration recalibration** — periodic per-org multiplier on the duration
+    base table from item 12's actuals (or timesheet transitions as a proxy).
+14. **Travel cache** — only if ORS rate limits are actually hit.
 
 ### Phase 5 — Structural bets (scope on demand, after Phase 4 evidence)
-14. **Explicit skill matrix** → 15. **Weekly fairness term** → 16. **Emergency
-    displacement** → 17. **Route optimization** → 18. **SLA pre-emption /
-    real-time re-dispatch** → 19. **Learning loop** (closed-loop weights — the
+15. **Explicit skill matrix** → 16. **Weekly fairness term** → 17. **Emergency
+    displacement** → 18. **Route optimization** → 19. **SLA pre-emption /
+    real-time re-dispatch** → 20. **Learning loop** (closed-loop weights — the
     end state the earlier phases make safe).
 
 ### External-dependency ledger (operator actions)
