@@ -149,6 +149,43 @@ describe("GET /api/cron/dispatch-digest", () => {
     expect(body.data.alertsSent).toBe(0);
   });
 
+  it("healthy rates → no alert (this-week rate NOT below 50% of trailing)", async () => {
+    selectQueue.push([{ organizationId: ORG, phone: "+15551234567" }]);
+    // week=0.6, trailing=0.7 — 0.6 / 0.7 ≈ 0.857 which is well above the 0.5 threshold.
+    mockGetRollup
+      .mockResolvedValueOnce({
+        days: 7,
+        real: { committed: 12, queuedAmbiguous: 0, queuedNoFit: 0, queuedNeedsReview: 0, total: 20 },
+        shadow: { committed: 0, queuedAmbiguous: 0, queuedNoFit: 0, queuedNeedsReview: 0, total: 0 },
+        overrides: 0,
+        commitRate: 0.6,
+      })
+      .mockResolvedValueOnce({
+        days: 28,
+        real: { committed: 70, queuedAmbiguous: 0, queuedNoFit: 0, queuedNeedsReview: 0, total: 100 },
+        shadow: { committed: 0, queuedAmbiguous: 0, queuedNoFit: 0, queuedNeedsReview: 0, total: 0 },
+        overrides: 0,
+        commitRate: 0.7,
+      });
+    const res = await GET(req());
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(mockSendSms).not.toHaveBeenCalled();
+    expect(body.data.alertsSent).toBe(0);
+  });
+
+  it("org without dispatch_alert_phone is excluded → no alert attempted", async () => {
+    // The WHERE isNotNull(dispatchAlertPhone) in the route's DB query excludes phone-less orgs;
+    // here we mirror that by feeding an empty list to the select queue.
+    selectQueue.push([]);
+    const res = await GET(req());
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(mockGetRollup).not.toHaveBeenCalled();
+    expect(mockSendSms).not.toHaveBeenCalled();
+    expect(body.data.alertsSent).toBe(0);
+  });
+
   it("one org's sendSms failure does not abort the run", async () => {
     selectQueue.push([
       { organizationId: ORG, phone: "+15551110000" },
