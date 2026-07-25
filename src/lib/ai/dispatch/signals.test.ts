@@ -63,9 +63,9 @@ describe('businessDayUtcRange (same-day load counts the Eastern calendar day)', 
 
 describe('loadDispatchSignals', () => {
   it('returns a defaulted row for every requested tech even with no data', async () => {
-    // job has classification → 5 aggregates + 3 duration-fit queries (estimate,
-    // booked, availability), all empty → duration-fit defaults.
-    selectQueue.push([], [], [], [], [], [], [], []);
+    // job has classification → 5 aggregates + booked + availability
+    // (no requestId → estimate skips the queue), all empty → duration-fit defaults.
+    selectQueue.push([], [], [], [], [], [], []);
     const m = await loadDispatchSignals(
       'org',
       ['t1', 't2'],

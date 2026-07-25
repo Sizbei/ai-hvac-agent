@@ -1,10 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
-const { mockGetAdminSession, mockGetDecision } = vi.hoisted(() => ({
-  mockGetAdminSession: vi.fn(),
-  mockGetDecision: vi.fn(),
-}));
+const { mockGetAdminSession, mockGetDecision, mockSlidingWindow } = vi.hoisted(
+  () => ({
+    mockGetAdminSession: vi.fn(),
+    mockGetDecision: vi.fn(),
+    mockSlidingWindow: vi.fn().mockReturnValue({ allowed: true }),
+  }),
+);
 
 vi.mock("@/lib/auth/session", () => ({
   getAdminSession: () => mockGetAdminSession(),
@@ -14,6 +17,10 @@ vi.mock("@/lib/admin/dispatch-decision-queries", () => ({
 }));
 vi.mock("@/lib/logger", () => ({
   logger: { error: vi.fn(), info: vi.fn() },
+}));
+vi.mock("@/lib/rate-limit", () => ({
+  slidingWindow: (...a: unknown[]) => mockSlidingWindow(...a),
+  RATE_LIMITS: { adminRead: { maxRequests: 60, windowMs: 60_000 } },
 }));
 
 import { GET } from "@/app/api/admin/requests/[id]/decision/route";
@@ -31,13 +38,23 @@ function req(): NextRequest {
   return new NextRequest(`http://localhost/api/admin/requests/${VALID}/decision`);
 }
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  mockSlidingWindow.mockReturnValue({ allowed: true });
+});
 
 describe("GET /api/admin/requests/[id]/decision", () => {
   it("401 when unauthenticated", async () => {
     mockGetAdminSession.mockResolvedValue(null);
     const res = await GET(req(), { params: Promise.resolve({ id: VALID }) });
     expect(res.status).toBe(401);
+  });
+
+  it("429 when rate limited", async () => {
+    mockGetAdminSession.mockResolvedValue(session);
+    mockSlidingWindow.mockReturnValue({ allowed: false });
+    const res = await GET(req(), { params: Promise.resolve({ id: VALID }) });
+    expect(res.status).toBe(429);
   });
 
   it("400 on a non-UUID id", async () => {

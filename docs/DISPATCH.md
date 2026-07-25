@@ -138,9 +138,9 @@ comparison reads straight off recorded decisions — no extra instrumentation:
 - **Explicit skill matrix** — `skillJobsCompleted` is a proxy; add a technician skill/certification matrix (by system type, refrigeration, gas) so the skill gate is capability-based, not just history-based.
 
 **Data & tuning loop** (make autopilot self-improving — highest-leverage next work):
-- **Override telemetry** — when a dispatcher reassigns an auto-committed job or manually places a queued one, record it against the `dispatch_decisions` row (autopilot's pick vs the human's final pick, who/when). This is the ground-truth label every tuning effort needs; without it "override rate" is anecdote. Small: one nullable column set from `assignTechnician`/`placeAndAssignRequest` when the request has a decision row.
-- **Shadow mode** — for orgs with `auto_dispatch_enabled` OFF, still run scoring and record the decision (never commit). Builds the tuning dataset and lets an org preview "what autopilot would have done" before opting in.
-- **"Why this tech?" UI** — the decision audit (scores, reasons, both travel signals) is already recorded; surface it as a popover on assigned jobs and in the exception queue. Dispatcher trust in autopilot comes from seeing its reasoning.
+- ✅ **Override telemetry** — when a dispatcher reassigns an auto-committed job or manually places a queued one, record it against the `dispatch_decisions` row (autopilot's pick vs the human's final pick, who/when) (shipped — see the sequenced plan below). This is the ground-truth label every tuning effort needs; without it "override rate" is anecdote. Small: one nullable column set from `assignTechnician`/`placeAndAssignRequest` when the request has a decision row.
+- ✅ **Shadow mode** — for orgs with `auto_dispatch_enabled` OFF, still run scoring and record the decision (never commit) (shipped — see the sequenced plan below). Builds the tuning dataset and lets an org preview "what autopilot would have done" before opting in.
+- ✅ **"Why this tech?" UI** — the decision audit (scores, reasons, both travel signals) is already recorded; surface it as a popover on assigned jobs and in the exception queue (shipped — see the sequenced plan below). Dispatcher trust in autopilot comes from seeing its reasoning.
 - **Outcome digest + canary** — a daily rollup of committed vs queued vs overridden, and an alert when the commit rate collapses (the canary for silently broken geocoding, signals, or a bad weight change).
 
 **Scoring accuracy:**

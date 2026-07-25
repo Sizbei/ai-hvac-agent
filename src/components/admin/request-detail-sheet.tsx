@@ -553,6 +553,7 @@ export function RequestDetailSheet({
       }
     }
     setDecision(null);
+    setDecisionOpen(false);
     void loadDecision();
     return () => {
       cancelled = true;

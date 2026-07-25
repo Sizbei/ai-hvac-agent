@@ -4,6 +4,7 @@ import { getDispatchDecisionForRequest } from "@/lib/admin/dispatch-decision-que
 import { isUuid } from "@/lib/validation/uuid";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { logger } from "@/lib/logger";
+import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -19,6 +20,14 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
     const session = await getAdminSession();
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
+    }
+    const rateCheck = slidingWindow(
+      `admin:request-get:${session.userId}`,
+      RATE_LIMITS.adminRead.maxRequests,
+      RATE_LIMITS.adminRead.windowMs,
+    );
+    if (!rateCheck.allowed) {
+      return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
     }
     const { id } = await params;
     if (!isUuid(id)) {
