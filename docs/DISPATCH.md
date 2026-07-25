@@ -178,7 +178,7 @@ conflict in the drizzle journal) and as **one sequenced task** (they modify the
 same orchestrator + the same mock-queue test harness); item 3 builds on their
 schema and follows them.
 
-1. **Override telemetry** — migration adds three nullable columns to
+1. ✅ **Override telemetry** — migration adds three nullable columns to
    `dispatch_decisions`: `overridden_technician_id` (uuid, FK `users.id`),
    `overridden_by_user_id` (uuid, FK `users.id`), `overridden_at` (timestamptz).
    Stamp rule: whenever a **human** (re)assigns a request — `assignTechnician`,
@@ -200,7 +200,8 @@ schema and follows them.
    the stamp helper should be shared. Analysis segments by `outcome`: a stamped
    `committed` row = true override; a stamped `queued_*` row = human resolution
    label.
-2. **Shadow mode** — migration adds `is_shadow boolean NOT NULL DEFAULT false` to
+   _Shipped: 0041 columns overridden_technician_id/by_user_id/at; stampDispatchOverride called from assign/reassign/reschedule with session.userId; best-effort last-write-wins._
+2. ✅ **Shadow mode** — migration adds `is_shadow boolean NOT NULL DEFAULT false` to
    `dispatch_decisions`. In `autoAssignBookedRequest`, when the org has autopilot
    **off** (and is not external-scheduler): run the same classification + ranking
    + confidence gate, and if the job is classifiable record the decision row with
@@ -216,7 +217,8 @@ schema and follows them.
    on the existing `after()` path, so the added scoring cost never blocks the
    customer. Every consumer of `dispatch_decisions` must filter on `is_shadow`
    (operational reads: `false`; tuning/health reads: both, split).
-3. **Outcome rollup + canary** — three deliberately small pieces:
+   _Shipped: 0041 is_shadow column; autopilot-off orgs record the would-be decision (haversine-only, no service_requests writes, quality gate skipped); recordDispatchDecision gained isShadow._
+3. ✅ **Outcome rollup + canary** — three deliberately small pieces:
    (a) pure helper `getDispatchOutcomeRollup(orgId, days)` → counts by outcome +
    override count + commit rate, split real/shadow; (b) a **"Dispatch health"
    card on `/admin/operations`** rendering the 7-day rollup (the existing owner
@@ -234,16 +236,18 @@ schema and follows them.
    The Operations card goes through the existing metrics pipeline (type + query +
    hook + card — a four-file chain, not a drop-in). **No email digest** — the
    repo has no admin-email infrastructure and this phase does not invent one.
-4. **Register the orphaned `delay-sweep` cron** — the fully-built
+   _Shipped: getDispatchOutcomeRollup (real/shadow split); Operations "Dispatch health" card; weekly /api/cron/dispatch-digest collapse alert (this-week < 50% of trailing-28d, ≥20 each) via dispatch_alert_phone, per-org try/catch._
+4. ✅ **Register the orphaned `delay-sweep` cron** — the fully-built
    `/api/cron/delay-sweep` route is missing from `vercel.json`, so behind-schedule
    SMS alerts never fire in production. One JSON entry.
+   _Shipped: vercel.json now registers /api/cron/delay-sweep (*/15) and /api/cron/dispatch-digest (weekly Mon)._
 
 *Exit criteria: every classifiable booking yields a decision row (real or shadow);
 human picks are labeled on the decision row; the rollup renders on Operations; the
 digest + delay-sweep crons are registered.*
 
 ### Phase 2 — Operator trust & speed (parallel with Phase 1)
-5. **"Why this tech?" decision panel** — surface the **recorded** decision, not a
+5. ✅ **"Why this tech?" decision panel** — surface the **recorded** decision, not a
    live re-score (the sheet's existing "Suggested technicians" card already does
    live scoring and stays as the action path). New `GET
    /api/admin/requests/[id]/decision` returns the latest decision row: outcome,
@@ -256,7 +260,8 @@ digest + delay-sweep crons are registered.*
    request that has a row (assigned *and* queued; shadow rows labeled
    "preview"). No new popover primitive (the repo has none; the sheet section is
    the surface). Tests: route + query only — **no jsdom/RTL** (repo policy).
-6. **Exceptions rail** — the one-click accept **already exists** (the sheet's
+   _Shipped: GET /api/admin/requests/[id]/decision (getDispatchDecisionForRequest resolves candidate names via one inArray); collapsible "Dispatch decision" section in RequestDetailSheet (shadow labeled "preview"); travelKm/travelMinutes added to the client type._
+6. ✅ **Exceptions rail** — the one-click accept **already exists** (the sheet's
    suggest card assigns via the same path as the dropdown); the missing piece is
    the view. This is a **separate, day-independent query**, not a board-query
    tweak: the board query is bounded to the selected day and filters
@@ -266,6 +271,7 @@ digest + delay-sweep crons are registered.*
    ordered by `createdAt` ascending (oldest first), capped (~20). Renders above/beside the board (outcome badge +
    age), each row opening the existing detail sheet. Override labels come free
    via item 1's `assignTechnician` hook.
+   _Shipped: day-independent getDispatchExceptions (unassigned + queued_* + non-terminal, oldest first, cap 20) on the dispatch board payload; "Exceptions" section opens the existing sheet._
 
 *Exit criteria: a dispatcher can resolve a queued job in one click from the
 Exceptions rail and see the recorded reasoning on any decided job.*
@@ -273,7 +279,7 @@ Exceptions rail and see the recorded reasoning on any decided job.*
 ### Phase 3 — Scoring accuracy (ship behind tests; items 7 + 9 share
 `signals.ts` and are one task or strictly sequenced — item 8 (`score.ts`) is
 independent)
-7. **Chain-aware travel origin** — one batched query (`DISTINCT ON` tech over the
+7. ✅ **Chain-aware travel origin** — one batched query (`DISTINCT ON` tech over the
    candidate set — no N+1): each tech's latest non-cancelled same-business-day
    job with `arrival_window_start` before the scored job's window start and
    non-null cached coords (excluding the scored request itself). The scored job's
@@ -284,7 +290,8 @@ independent)
    replace the GPS/home anchor as the travel origin; otherwise the existing
    fallback chain is unchanged. Point-in-time by design — a predecessor cancelled
    after scoring is accepted staleness (decisions re-run on re-dispatch).
-8. **Duration-fit down-rank** — explicit proxy v1: per tech, `bookedMinutes` =
+   _Shipped: DISTINCT ON predecessor query (same-business-day, window before the scored job, cached coords) overrides the GPS/home anchor; windowless scored job skips chain._
+8. ✅ **Duration-fit down-rank** — explicit proxy v1: per tech, `bookedMinutes` =
    Σ `estimated_duration_minutes` (60 when null) over same-day non-cancelled
    assigned jobs (one grouped query); `dayMinutes` from a **new ~10-line pure
    helper `sumAvailabilityMinutes(slots)`** — no existing helper computes span;
@@ -294,7 +301,8 @@ independent)
    penalty** + reason `"day likely full"`. Down-rank only — the hard gate remains
    `placeAndAssignRequest`'s conflict/availability check. Full gap-finding
    (contiguous-window math) is deliberately deferred.
-9. **Recency-windowed signals** — skill/rating/conversion aggregates take a
+   _Shipped: sumAvailabilityMinutes helper; signals gained bookedMinutes/dayMinutes/thisJobEstimate; scoreTechnician applies −0.1 + "day likely full" when the day overflows. Down-rank only._
+9. ✅ **Recency-windowed signals** — skill/rating/conversion aggregates take a
    **180-day window** (a simple cutoff approximating the 90-day half-life intent;
    per-row exponential decay SQL is deliberately not built). The **skill gate
    stays all-time** — `skillMatched` keeps using the all-time count so a proven
@@ -302,6 +310,7 @@ independent)
    windowed count. One query returns both counts via a `count(*) FILTER (WHERE …)` pair (the
    pattern the conversion query already uses); the windowed count travels as
    `skillJobsCompletedRecent` through the signals merge loop into the scorer.
+   _Shipped: 180-day window on skill DEPTH (skillJobsCompletedRecent via count(*) FILTER), rating, and conversion; the skill GATE stays all-time._
 
 *(Geofenced auto-status moved to Phase 4: it needs a status-model or suggestion
 surface that doesn't exist, and its actual-duration output only feeds Phase 4
