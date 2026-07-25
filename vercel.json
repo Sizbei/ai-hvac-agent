@@ -39,7 +39,7 @@
     },
     {
       "path": "/api/cron/delay-sweep",
-      "schedule": "*/15 * * * *"
+      "schedule": "0 13 * * *"
     },
     {
       "path": "/api/cron/dispatch-digest",
