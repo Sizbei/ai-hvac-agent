@@ -18,6 +18,12 @@ export interface DispatchSignals {
      * DEPTH; the all-time skillJobsCompleted still gates skillMatched so a proven
      * tech isn't locked out by a quiet quarter. */
     readonly skillJobsCompletedRecent: number;
+    /** Σ estimated duration (min) of same-day non-cancelled assigned jobs. */
+    readonly bookedMinutes: number;
+    /** Total working minutes in the tech's day (sumAvailabilityMinutes). */
+    readonly dayMinutes: number;
+    /** Estimated on-site minutes for THIS job. */
+    readonly thisJobEstimate: number;
     readonly avgRating: number | null;
     readonly sameDayJobCount: number;
     /** Sold estimates / estimated jobs for this tech, in [0,1] (0 when unknown). */
@@ -73,6 +79,26 @@ const REVENUE_CAP_CENTS = 150000;
 const W_TRAVEL = 0.45;
 const TRAVEL_CAP_KM = 40; // beyond the service radius, travel score floors at 0
 const TRAVEL_CAP_MIN = 45; // drive-time equivalent; beyond this the term floors at 0
+
+// Empty availability → the same bounded default the coverage check uses
+// (Mon–Fri 8:00–20:00 = 720 min). Kept in sync with availability-coverage.ts's
+// DEFAULT_BUSINESS_DAY (module-local there; duplicated here as a constant to avoid
+// importing a server-tz helper into the pure scorer).
+const DEFAULT_DAY_MINUTES = 720;
+
+/** Total working minutes across a tech's weekday slots (sum of endMinute −
+ * startMinute). Empty → DEFAULT_DAY_MINUTES. Pure. */
+export function sumAvailabilityMinutes(
+  slots: readonly { readonly startMinute: number; readonly endMinute: number }[],
+): number {
+  if (slots.length === 0) return DEFAULT_DAY_MINUTES;
+  return slots.reduce((sum, s) => sum + (s.endMinute - s.startMinute), 0);
+}
+
+// Fixed down-rank when the tech's booked minutes + this job likely overflow their
+// working day. Down-rank ONLY — the hard gate stays placeAndAssignRequest's
+// conflict/availability check.
+const DURATION_FIT_PENALTY = 0.1;
 
 /** A short label for the job's specialty, for human-readable reasons. */
 function skillLabel(job: DispatchSignals['job']): string {
@@ -135,10 +161,19 @@ export function scoreTechnician(
     travelReason = "location unknown";
   }
 
+  // Duration-fit down-rank: if the booked day plus this job overflows the working
+  // window, the tech probably can't fit it — nudge them down (not a hard gate).
+  let dayLikelyFull = false;
+  if (tech.bookedMinutes + tech.thisJobEstimate > tech.dayMinutes) {
+    score = Math.max(0, score - DURATION_FIT_PENALTY);
+    dayLikelyFull = true;
+  }
+
   const reasons: string[] = [];
   if (travelReason) {
     reasons.push(travelReason);
   }
+  if (dayLikelyFull) reasons.push("day likely full");
   reasons.push(
     skillMatched
       ? `${tech.skillJobsCompleted} prior ${skillLabel(job)} jobs`

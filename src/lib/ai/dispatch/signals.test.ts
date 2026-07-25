@@ -63,8 +63,9 @@ describe('businessDayUtcRange (same-day load counts the Eastern calendar day)', 
 
 describe('loadDispatchSignals', () => {
   it('returns a defaulted row for every requested tech even with no data', async () => {
-    // job has classification → 5 queries run (skill, rating, load, conversion, revenue), all empty.
-    selectQueue.push([], [], [], [], []);
+    // job has classification → 5 aggregates + 3 duration-fit queries (estimate,
+    // booked, availability), all empty → duration-fit defaults.
+    selectQueue.push([], [], [], [], [], [], [], []);
     const m = await loadDispatchSignals(
       'org',
       ['t1', 't2'],
@@ -80,6 +81,9 @@ describe('loadDispatchSignals', () => {
       avgJobRevenueCents: 0,
       travelKm: null,
       travelMinutes: null,
+      bookedMinutes: 0,
+      dayMinutes: 720,
+      thisJobEstimate: 0,
     });
     expect(m.get('t2')).toEqual({
       skillJobsCompleted: 0,
@@ -90,6 +94,9 @@ describe('loadDispatchSignals', () => {
       avgJobRevenueCents: 0,
       travelKm: null,
       travelMinutes: null,
+      bookedMinutes: 0,
+      dayMinutes: 720,
+      thisJobEstimate: 0,
     });
   });
 
@@ -100,6 +107,11 @@ describe('loadDispatchSignals', () => {
       [{ techId: 't1', n: 2 }], // load
       [{ techId: 't1', total: 4, sold: 2 }], // conversion → 0.5
       [{ techId: 't1', avgCents: '12000' }], // avg revenue (driver returns string for avg)
+      // No requestId → the estimate query short-circuits (no shift); only the
+      // booked + availability duration-fit queries consume from the queue.
+      [{ techId: 't1', booked: 120 }], // booked same-day minutes
+      // availability slot 480→1020 = 540 min; dayOfWeek 3 matches Wed 2026-06-24.
+      [{ techId: 't1', startMinute: 480, endMinute: 1020, dayOfWeek: 3 }],
     );
     const m = await loadDispatchSignals(
       'org',
@@ -116,12 +128,16 @@ describe('loadDispatchSignals', () => {
       avgJobRevenueCents: 12000,
       travelKm: null,
       travelMinutes: null,
+      bookedMinutes: 120,
+      dayMinutes: 540,
+      thisJobEstimate: 0, // no requestId → estimate stays 0
     });
   });
 
   it('skips the skill query and matches nobody when the job has no classification', async () => {
     // No jobType/systemType → skill query short-circuited; rating+load+conversion+revenue run.
-    selectQueue.push([], [], [], []);
+    // No requestId → estimate query short-circuits (no shift); booked + availability run.
+    selectQueue.push([], [], [], [], [], []);
     const m = await loadDispatchSignals(
       'org',
       ['t1'],
@@ -151,7 +167,8 @@ describe('loadDispatchSignals', () => {
     });
 
     it('stays null with no requestId (byte-identical to today)', async () => {
-      selectQueue.push([], [], [], [], []); // 5 aggregates only
+      // 5 aggregates + booked + availability (no requestId → estimate short-circuits).
+      selectQueue.push([], [], [], [], [], [], []);
       const m = await loadDispatchSignals(
         'org',
         ['t1'],
@@ -162,8 +179,8 @@ describe('loadDispatchSignals', () => {
     });
 
     it('stays null when the request has no linked location', async () => {
-      // 5 aggregates + empty job-coords row → no anchor read issued.
-      selectQueue.push([], [], [], [], [], []);
+      // 5 aggregates + 3 duration-fit + empty job-coords row → no anchor read issued.
+      selectQueue.push([], [], [], [], [], [], [], [], []);
       const m = await loadDispatchSignals(
         'org',
         ['t1'],
@@ -177,6 +194,7 @@ describe('loadDispatchSignals', () => {
     it('computes haversine km from the tech home base to the job coords', async () => {
       selectQueue.push(
         [], [], [], [], [],                     // 5 aggregates
+        [], [], [],                             // 3 duration-fit (estimate/booked/availability)
         [{ lat: 36.33, lon: -82.38 }],          // job coords (near business base)
         [{ id: 't1', lat: 36.0, lon: -82.0 }],  // home base
       );
@@ -199,6 +217,7 @@ describe('loadDispatchSignals', () => {
       );
       selectQueue.push(
         [], [], [], [], [],
+        [], [], [],                              // 3 duration-fit
         [{ lat: 36.33, lon: -82.38 }],           // job coords == the live fix
         [{ id: 't1', lat: 10.0, lon: 10.0 }],    // far home base (should be ignored)
       );
@@ -221,6 +240,7 @@ describe('loadDispatchSignals', () => {
       );
       selectQueue.push(
         [], [], [], [], [],
+        [], [], [],                    // 3 duration-fit
         [{ lat: 36.33, lon: -82.38 }], // job coords
         [{ id: 't1', lat: 36.0, lon: -82.0 }], // home base (unused; live fix present)
       );
@@ -245,6 +265,7 @@ describe('loadDispatchSignals', () => {
       );
       selectQueue.push(
         [], [], [], [], [],
+        [], [], [],                    // 3 duration-fit
         [{ lat: 36.33, lon: -82.38 }],
         [{ id: 't1', lat: 36.0, lon: -82.0 }],
       );
@@ -267,6 +288,7 @@ describe('loadDispatchSignals', () => {
       );
       selectQueue.push(
         [], [], [], [], [],
+        [], [], [],                    // 3 duration-fit
         [{ lat: 36.33, lon: -82.38 }], // job coords
         [{ id: "t1", lat: 36.0, lon: -82.0 }], // home base
       );
@@ -292,6 +314,7 @@ describe('loadDispatchSignals', () => {
       });
       selectQueue.push(
         [], [], [], [], [],
+        [], [], [],                             // 3 duration-fit
         [{ lat: 36.33, lon: -82.38 }],          // job coords == predecessor
         [{ id: 't1', lat: 10.0, lon: 10.0 }],   // far home base (should be ignored)
       );

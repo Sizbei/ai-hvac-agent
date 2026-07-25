@@ -176,7 +176,7 @@ vi.mock("@/lib/ai/dispatch/signals", () => ({
     new Map(
       ids.map((id) => [
         id,
-        { skillJobsCompleted: 0, skillJobsCompletedRecent: 0, avgRating: null, sameDayJobCount: 0 },
+        { skillJobsCompleted: 0, skillJobsCompletedRecent: 0, avgRating: null, sameDayJobCount: 0, bookedMinutes: 0, dayMinutes: 720, thisJobEstimate: 0 },
       ]),
     ),
   ),

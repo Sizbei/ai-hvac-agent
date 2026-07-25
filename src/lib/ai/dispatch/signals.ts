@@ -17,6 +17,7 @@ import {
   estimates,
   invoices,
   customerLocations,
+  technicianAvailability,
   users,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
@@ -24,6 +25,7 @@ import { haversineKm } from "@/lib/address/photon";
 import { getLatestTechnicianLocations } from "@/lib/tech/location-queries";
 import { durationMatrix, routingEnabled } from "./travel";
 import { businessWallClockToUtc } from "@/lib/admin/calendar-time";
+import { sumAvailabilityMinutes } from "./score";
 
 /**
  * UTC [start, end) covering the business-timezone (Eastern) calendar day for
@@ -58,6 +60,14 @@ const RECENCY_WINDOW_DAYS = 180;
 export interface TechSignalRow {
   readonly skillJobsCompleted: number;
   readonly skillJobsCompletedRecent: number;
+  /** Σ estimated duration (min) of same-day non-cancelled assigned jobs (60-default
+   * per job when its estimate is null). */
+  readonly bookedMinutes: number;
+  /** Total working minutes in the tech's weekday shift (sumAvailabilityMinutes;
+   * empty availability → the bounded 720-min default). */
+  readonly dayMinutes: number;
+  /** Estimated on-site minutes for THIS job (0 when unknown / no requestId). */
+  readonly thisJobEstimate: number;
   readonly avgRating: number | null;
   readonly sameDayJobCount: number;
   /** Sold estimates / total estimates on this tech's jobs, in [0,1] (0 when none). */
@@ -110,6 +120,9 @@ export async function loadDispatchSignals(
     result.set(id, {
       skillJobsCompleted: 0,
       skillJobsCompletedRecent: 0,
+      bookedMinutes: 0,
+      dayMinutes: sumAvailabilityMinutes([]),
+      thisJobEstimate: 0,
       avgRating: null,
       sameDayJobCount: 0,
       conversionRate: 0,
@@ -300,6 +313,87 @@ export async function loadDispatchSignals(
     }
   }
 
+  // Duration-fit inputs: this job's estimate, each tech's booked same-day minutes,
+  // and each tech's total working minutes for the weekday. Feeds the scorer's
+  // down-rank (never a hard filter — placeAndAssignRequest stays the gate).
+  const [estimateRow, bookedRows, availabilityRows] = await Promise.all([
+    requestId
+      ? db
+          .select({ minutes: serviceRequests.estimatedDurationMinutes })
+          .from(serviceRequests)
+          .where(
+            withTenant(
+              serviceRequests,
+              organizationId,
+              eq(serviceRequests.id, requestId),
+            ),
+          )
+          .limit(1)
+      : Promise.resolve([] as { minutes: number | null }[]),
+    db
+      .select({
+        techId: serviceRequests.assignedTo,
+        booked: sql<number>`COALESCE(SUM(COALESCE(${serviceRequests.estimatedDurationMinutes}, 60)), 0)`,
+      })
+      .from(serviceRequests)
+      .where(
+        withTenant(
+          serviceRequests,
+          organizationId,
+          and(
+            inArray(serviceRequests.assignedTo, ids),
+            inArray(serviceRequests.status, [...SAME_DAY_LOAD_STATUSES]),
+            gte(serviceRequests.arrivalWindowStart, dayStart),
+            lt(serviceRequests.arrivalWindowStart, dayEnd),
+          )!,
+        ),
+      )
+      .groupBy(serviceRequests.assignedTo),
+    db
+      .select({
+        techId: technicianAvailability.technicianId,
+        startMinute: technicianAvailability.startMinute,
+        endMinute: technicianAvailability.endMinute,
+        dayOfWeek: technicianAvailability.dayOfWeek,
+      })
+      .from(technicianAvailability)
+      .where(
+        withTenant(
+          technicianAvailability,
+          organizationId,
+          inArray(technicianAvailability.technicianId, ids),
+        ),
+      ),
+  ]);
+
+  const thisJobEstimate = Number(estimateRow[0]?.minutes ?? 0);
+  // Weekday of the scored day (0=Sun..6=Sat) from the business-day range start.
+  // dayStart is business midnight in UTC; because business midnight maps to
+  // 04:00/05:00Z of the SAME calendar date, its UTC weekday equals the business
+  // weekday (matches how businessDayUtcRange anchors the day).
+  const weekday = dayStart.getUTCDay();
+  const slotsByTech = new Map<
+    string,
+    { startMinute: number; endMinute: number }[]
+  >();
+  for (const s of availabilityRows) {
+    if (s.dayOfWeek !== weekday) continue;
+    const arr = slotsByTech.get(s.techId) ?? [];
+    arr.push({ startMinute: s.startMinute, endMinute: s.endMinute });
+    slotsByTech.set(s.techId, arr);
+  }
+  const bookedByTech = new Map(
+    bookedRows.map((r) => [r.techId, Number(r.booked)]),
+  );
+  for (const id of technicianIds) {
+    result.set(id, {
+      ...result.get(id)!,
+      bookedMinutes: bookedByTech.get(id) ?? 0,
+      dayMinutes: sumAvailabilityMinutes(slotsByTech.get(id) ?? []),
+      thisJobEstimate,
+    });
+  }
+
   // Travel term (dormant until here). Only when a requestId is supplied AND the
   // request has cached job coordinates does travel become non-null; otherwise
   // every travel field stays null and the scorer is byte-identical to the composite.
@@ -480,7 +574,10 @@ async function loadChainOrigins(
       AND pred.status <> 'cancelled'
       AND pred.arrival_window_start IS NOT NULL
       AND pred.arrival_window_start < scored.arrival_window_start
-      AND date_trunc('day', pred.arrival_window_start) = date_trunc('day', scored.arrival_window_start)
+      -- Same-business-day scope truncated in the business timezone (America/New_York,
+      -- calendar-time.ts BUSINESS_TIME_ZONE), NOT UTC: a naive UTC date_trunc lands a
+      -- late-evening Eastern job on the next calendar day and breaks the chain.
+      AND date_trunc('day', pred.arrival_window_start AT TIME ZONE 'America/New_York') = date_trunc('day', scored.arrival_window_start AT TIME ZONE 'America/New_York')
     JOIN customer_locations cl
       ON cl.id = pred.location_id
       AND cl.organization_id = ${organizationId}

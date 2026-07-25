@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { scoreTechnician, rankTechnicians, classifyDispatch, type DispatchSignals } from './score';
+import { scoreTechnician, rankTechnicians, classifyDispatch, sumAvailabilityMinutes, type DispatchSignals } from './score';
 
 const job = { jobType: 'no_cool', systemType: 'central_ac', urgency: 'standard' } as const;
 
@@ -17,10 +17,27 @@ function signals(
       sameDayJobCount: 0,
       conversionRate: 0,
       avgJobRevenueCents: 0,
+      bookedMinutes: 0,
+      dayMinutes: 720,
+      thisJobEstimate: 0,
       ...over,
     },
   };
 }
+
+describe('sumAvailabilityMinutes', () => {
+  it('sums slot spans', () => {
+    expect(
+      sumAvailabilityMinutes([
+        { startMinute: 480, endMinute: 720 }, // 240
+        { startMinute: 780, endMinute: 1020 }, // 240
+      ]),
+    ).toBe(480);
+  });
+  it('falls back to 720 (8:00-20:00) for empty slots', () => {
+    expect(sumAvailabilityMinutes([])).toBe(720);
+  });
+});
 
 describe('scoreTechnician', () => {
   it('marks a tech with zero matching jobs as not skill-matched', () => {
@@ -108,6 +125,18 @@ describe('scoreTechnician', () => {
     expect(r.reasons).toContain('4.9★');
     expect(r.reasons).toContain('2 jobs today');
   });
+
+  it('down-ranks a tech whose day likely will not fit the job (-0.1 + reason)', () => {
+    const roomy = scoreTechnician(
+      signals('t1', { skillJobsCompleted: 5, skillJobsCompletedRecent: 5, bookedMinutes: 60, dayMinutes: 720, thisJobEstimate: 120 }),
+    );
+    const packed = scoreTechnician(
+      signals('t2', { skillJobsCompleted: 5, skillJobsCompletedRecent: 5, bookedMinutes: 700, dayMinutes: 720, thisJobEstimate: 120 }),
+    );
+    expect(packed.score).toBeCloseTo(roomy.score - 0.1, 5);
+    expect(packed.reasons).toContain('day likely full');
+    expect(roomy.reasons).not.toContain('day likely full');
+  });
 });
 
 describe('rankTechnicians', () => {
@@ -194,6 +223,9 @@ describe('travel-aware scoring + confidence classification', () => {
     sameDayJobCount: 2,
     conversionRate: 0.5,
     avgJobRevenueCents: 0,
+    bookedMinutes: 0,
+    dayMinutes: 720,
+    thisJobEstimate: 0,
   };
   const job = { jobType: 'repair', systemType: null, urgency: 'standard' };
 
@@ -289,6 +321,9 @@ describe('Probook-parity: expected-value term + urgency tier', () => {
     sameDayJobCount: 2,
     conversionRate: 0.5,
     avgJobRevenueCents: 0,
+    bookedMinutes: 0,
+    dayMinutes: 720,
+    thisJobEstimate: 0,
   };
   const job = { jobType: 'repair', systemType: null, urgency: 'standard' };
 
