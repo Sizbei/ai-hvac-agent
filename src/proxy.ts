@@ -55,10 +55,8 @@ export async function proxy(request: NextRequest) {
 
   // --- Admin page route protection ---
   if (pathname.startsWith("/admin")) {
-    // Redirect /admin exactly to /admin/requests
-    if (pathname === "/admin") {
-      return NextResponse.redirect(new URL("/admin/requests", request.url));
-    }
+    // /admin renders the dashboard (the KPI overview home). Auth is still
+    // enforced below like any other /admin page.
 
     // Allow /admin/login, the password-recovery page, and the public
     // invite-accept page without auth. All three are pre-authentication by
