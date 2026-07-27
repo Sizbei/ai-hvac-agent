@@ -17,13 +17,17 @@ import {
   type LocationBreakdownRow,
   type TechnicianScorecardRow,
 } from '@/hooks/use-reports';
-import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
+import { StatCard } from '@/components/admin/ui/stat-card';
+import { SectionCard } from '@/components/admin/ui/section-card';
+import { DataTableShell } from '@/components/admin/ui/data-table-shell';
+import { EmptyState } from '@/components/admin/ui/empty-state';
+import { BarChart2, MapPin, Users } from 'lucide-react';
 
 const PRESETS = [
   { label: 'Last 30 days', days: 30 },
@@ -86,92 +90,79 @@ export default function ReportsPage() {
 
       {/* Primary KPIs */}
       <div className="grid grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-3">
-        <KpiCard
+        <StatCard
           label="Net revenue (period)"
-          value={report ? formatCentsExact(report.netCollectedCents) : null}
-          hint={
+          value={report ? formatCentsExact(report.netCollectedCents) : '—'}
+          sublabel={
             report
-              ? // Surface synced (FSM-mirrored) revenue separately so the two
-                // sources are never read as one blended number.
-                report.syncedCollectedCents > 0
-                ? `${formatCentsExact(report.grossCollectedCents)} native − ${formatCentsExact(
-                    report.refundedCents,
-                  )} refunded · +${formatCentsExact(report.syncedCollectedCents)} synced`
-                : `${formatCentsExact(report.grossCollectedCents)} collected − ${formatCentsExact(
-                    report.refundedCents,
-                  )} refunded`
+              ? report.syncedCollectedCents > 0
+                ? `${formatCentsExact(report.grossCollectedCents)} native − ${formatCentsExact(report.refundedCents)} refunded · +${formatCentsExact(report.syncedCollectedCents)} synced`
+                : `${formatCentsExact(report.grossCollectedCents)} collected − ${formatCentsExact(report.refundedCents)} refunded`
               : undefined
           }
           icon={DollarSign}
-          bgColor="bg-green-100 dark:bg-green-900/30"
-          iconColor="text-green-600 dark:text-green-400"
-          isLoading={isLoading}
+          intent="success"
+          loading={isLoading}
         />
-        <KpiCard
+        <StatCard
           label="Outstanding AR"
-          value={report ? formatCentsExact(report.outstandingArCents) : null}
-          hint={
+          value={report ? formatCentsExact(report.outstandingArCents) : '—'}
+          sublabel={
             report && report.syncedArCents > 0
-              ? `${formatCentsExact(report.nativeArCents)} native · ${formatCentsExact(
-                  report.syncedArCents,
-                )} synced`
-              : "Balance on open invoices"
+              ? `${formatCentsExact(report.nativeArCents)} native · ${formatCentsExact(report.syncedArCents)} synced`
+              : 'Balance on open invoices'
           }
           icon={Wallet}
-          bgColor="bg-amber-100 dark:bg-amber-900/30"
-          iconColor="text-amber-600 dark:text-amber-400"
-          isLoading={isLoading}
+          intent="warning"
+          loading={isLoading}
         />
-        <KpiCard
+        <StatCard
           label="Estimate close rate"
-          value={report ? `${report.closeRatePct}%` : null}
-          hint={
+          value={report ? `${report.closeRatePct}%` : '—'}
+          sublabel={
             report
-              ? `${report.estimatesSold} sold of ${
-                  report.estimatesOpen + report.estimatesSold + report.estimatesExpired
-                } decided`
+              ? `${report.estimatesSold} sold of ${report.estimatesOpen + report.estimatesSold + report.estimatesExpired} decided`
               : undefined
           }
           icon={Target}
-          bgColor="bg-blue-100 dark:bg-blue-900/30"
-          iconColor="text-blue-600 dark:text-blue-400"
-          isLoading={isLoading}
+          intent="info"
+          loading={isLoading}
         />
       </div>
 
       {/* Secondary stats */}
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-        <KpiCard
+        <StatCard
           label="Estimates created"
-          value={report ? String(report.estimatesCreated) : null}
+          value={report ? String(report.estimatesCreated) : '—'}
           icon={FileText}
-          bgColor="bg-slate-100 dark:bg-slate-800/50"
-          iconColor="text-slate-600 dark:text-slate-300"
-          isLoading={isLoading}
+          intent="neutral"
+          size="sm"
+          loading={isLoading}
         />
-        <KpiCard
+        <StatCard
           label="Estimates sold"
-          value={report ? String(report.estimatesSold) : null}
+          value={report ? String(report.estimatesSold) : '—'}
           icon={Target}
-          bgColor="bg-blue-100 dark:bg-blue-900/30"
-          iconColor="text-blue-600 dark:text-blue-400"
-          isLoading={isLoading}
+          intent="info"
+          size="sm"
+          loading={isLoading}
         />
-        <KpiCard
+        <StatCard
           label="Invoices paid"
-          value={report ? `${report.invoicesPaid} / ${report.invoicesCreated}` : null}
+          value={report ? `${report.invoicesPaid} / ${report.invoicesCreated}` : '—'}
           icon={Receipt}
-          bgColor="bg-green-100 dark:bg-green-900/30"
-          iconColor="text-green-600 dark:text-green-400"
-          isLoading={isLoading}
+          intent="success"
+          size="sm"
+          loading={isLoading}
         />
-        <KpiCard
+        <StatCard
           label="Refunded (period)"
-          value={report ? formatCentsExact(report.refundedCents) : null}
+          value={report ? formatCentsExact(report.refundedCents) : '—'}
           icon={Undo2}
-          bgColor="bg-red-100 dark:bg-red-900/30"
-          iconColor="text-red-600 dark:text-red-400"
-          isLoading={isLoading}
+          intent="danger"
+          size="sm"
+          loading={isLoading}
         />
       </div>
 
@@ -227,16 +218,14 @@ function LeadSourceTable({ rows, isLoading }: LeadSourceTableProps) {
   );
 
   return (
-    <Card className="p-4">
-      <div className="mb-3">
-        <h2 className="font-heading text-lg font-semibold tracking-tight">
-          Lead source ROI
-        </h2>
+    <SectionCard
+      title="Lead source ROI"
+      action={
         <p className="text-xs text-muted-foreground">
           Revenue and close rate by where each lead came from.
         </p>
-      </div>
-
+      }
+    >
       {isLoading ? (
         <div className="space-y-2">
           {[0, 1, 2, 3].map((i) => (
@@ -244,45 +233,21 @@ function LeadSourceTable({ rows, isLoading }: LeadSourceTableProps) {
           ))}
         </div>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b text-xs uppercase tracking-wide text-muted-foreground">
-                <th className="py-2 pr-3 text-left font-medium">Source</th>
-                <th className="py-2 px-3 text-right font-medium">Leads</th>
-                <th className="py-2 px-3 text-right font-medium">Booked</th>
-                <th className="py-2 px-3 text-right font-medium">Close rate</th>
-                <th className="py-2 pl-3 text-right font-medium">Revenue</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sorted.map((row) => (
-                <tr
-                  key={row.source}
-                  className="border-b last:border-0 hover:bg-muted/40"
-                >
-                  <td className="py-2 pr-3 font-medium">
-                    {leadSourceLabel(row.source)}
-                  </td>
-                  <td className="py-2 px-3 text-right tabular-nums">
-                    {row.leads}
-                  </td>
-                  <td className="py-2 px-3 text-right tabular-nums">
-                    {row.booked}
-                  </td>
-                  <td className="py-2 px-3 text-right tabular-nums">
-                    {row.closeRatePct}%
-                  </td>
-                  <td className="py-2 pl-3 text-right font-medium tabular-nums">
-                    {formatCentsExact(row.revenueCents)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTableShell
+          columns={[
+            { key: 'source', header: 'Source', cell: (row) => <span className="font-medium">{leadSourceLabel(row.source)}</span> },
+            { key: 'leads', header: 'Leads', cell: (row) => <span className="tabular-nums">{row.leads}</span>, className: 'text-right' },
+            { key: 'booked', header: 'Booked', cell: (row) => <span className="tabular-nums">{row.booked}</span>, className: 'text-right' },
+            { key: 'closeRate', header: 'Close rate', cell: (row) => <span className="tabular-nums">{row.closeRatePct}%</span>, className: 'text-right' },
+            { key: 'revenue', header: 'Revenue', cell: (row) => <span className="font-medium tabular-nums">{formatCentsExact(row.revenueCents)}</span>, className: 'text-right' },
+          ]}
+          rows={sorted}
+          getRowKey={(row) => row.source}
+          className="border-0 shadow-none"
+          emptyState={<EmptyState icon={BarChart2} title="No lead data" description="No leads recorded in this period." className="py-8" />}
+        />
       )}
-    </Card>
+    </SectionCard>
   );
 }
 
@@ -299,60 +264,35 @@ function LocationTable({ rows, isLoading }: LocationTableProps) {
   );
 
   return (
-    <Card className="p-4">
-      <div className="mb-3">
-        <h2 className="font-heading text-lg font-semibold tracking-tight">
-          By location
-        </h2>
+    <SectionCard
+      title="By location"
+      action={
         <p className="text-xs text-muted-foreground">
           Jobs, revenue, and rating rolled up by service location.
         </p>
-      </div>
-
+      }
+    >
       {isLoading ? (
         <div className="space-y-2">
           {[0, 1, 2, 3].map((i) => (
             <Skeleton key={i} className="h-9 w-full" />
           ))}
         </div>
-      ) : sorted.length === 0 ? (
-        <p className="py-6 text-center text-sm text-muted-foreground">
-          No jobs in this period.
-        </p>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b text-xs uppercase tracking-wide text-muted-foreground">
-                <th className="py-2 pr-3 text-left font-medium">Location</th>
-                <th className="py-2 px-3 text-right font-medium">Jobs</th>
-                <th className="py-2 px-3 text-right font-medium">Avg rating</th>
-                <th className="py-2 pl-3 text-right font-medium">Revenue</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sorted.map((row) => (
-                <tr
-                  key={row.locationId}
-                  className="border-b last:border-0 hover:bg-muted/40"
-                >
-                  <td className="py-2 pr-3 font-medium">{row.label}</td>
-                  <td className="py-2 px-3 text-right tabular-nums">
-                    {row.jobs}
-                  </td>
-                  <td className="py-2 px-3 text-right tabular-nums">
-                    {formatRating(row.avgRating)}
-                  </td>
-                  <td className="py-2 pl-3 text-right font-medium tabular-nums">
-                    {formatCentsExact(row.revenueCents)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTableShell
+          columns={[
+            { key: 'location', header: 'Location', cell: (row) => <span className="font-medium">{row.label}</span> },
+            { key: 'jobs', header: 'Jobs', cell: (row) => <span className="tabular-nums">{row.jobs}</span>, className: 'text-right' },
+            { key: 'avgRating', header: 'Avg rating', cell: (row) => <span className="tabular-nums">{formatRating(row.avgRating)}</span>, className: 'text-right' },
+            { key: 'revenue', header: 'Revenue', cell: (row) => <span className="font-medium tabular-nums">{formatCentsExact(row.revenueCents)}</span>, className: 'text-right' },
+          ]}
+          rows={sorted}
+          getRowKey={(row) => row.locationId}
+          className="border-0 shadow-none"
+          emptyState={<EmptyState icon={MapPin} title="No location data" description="No jobs in this period." className="py-8" />}
+        />
       )}
-    </Card>
+    </SectionCard>
   );
 }
 
@@ -368,113 +308,35 @@ function TechnicianTable({ rows, isLoading }: TechnicianTableProps) {
   );
 
   return (
-    <Card className="p-4">
-      <div className="mb-3">
-        <h2 className="font-heading text-lg font-semibold tracking-tight">
-          Technician scorecards
-        </h2>
+    <SectionCard
+      title="Technician scorecards"
+      action={
         <p className="text-xs text-muted-foreground">
-          Jobs, revenue, labor, and rating per technician. A dash means the data
-          wasn&apos;t captured for that metric.
+          Jobs, revenue, labor, and rating per technician. A dash means the data wasn&apos;t captured for that metric.
         </p>
-      </div>
-
+      }
+    >
       {isLoading ? (
         <div className="space-y-2">
           {[0, 1, 2, 3].map((i) => (
             <Skeleton key={i} className="h-9 w-full" />
           ))}
         </div>
-      ) : sorted.length === 0 ? (
-        <p className="py-6 text-center text-sm text-muted-foreground">
-          No assigned jobs in this period.
-        </p>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b text-xs uppercase tracking-wide text-muted-foreground">
-                <th className="py-2 pr-3 text-left font-medium">Technician</th>
-                <th className="py-2 px-3 text-right font-medium">Completed</th>
-                <th className="py-2 px-3 text-right font-medium">Labor</th>
-                <th className="py-2 px-3 text-right font-medium">Avg rating</th>
-                <th className="py-2 pl-3 text-right font-medium">Revenue</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sorted.map((row) => (
-                <tr
-                  key={row.technicianId}
-                  className="border-b last:border-0 hover:bg-muted/40"
-                >
-                  <td className="py-2 pr-3 font-medium">{row.name}</td>
-                  <td className="py-2 px-3 text-right tabular-nums">
-                    {row.jobsCompleted} / {row.jobsAssigned}
-                  </td>
-                  <td className="py-2 px-3 text-right tabular-nums">
-                    {formatHours(row.laborHours)}
-                  </td>
-                  <td className="py-2 px-3 text-right tabular-nums">
-                    {formatRating(row.avgRating)}
-                  </td>
-                  <td className="py-2 pl-3 text-right font-medium tabular-nums">
-                    {formatCentsExact(row.revenueCents)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTableShell
+          columns={[
+            { key: 'name', header: 'Technician', cell: (row) => <span className="font-medium">{row.name}</span> },
+            { key: 'completed', header: 'Completed', cell: (row) => <span className="tabular-nums">{row.jobsCompleted} / {row.jobsAssigned}</span>, className: 'text-right' },
+            { key: 'labor', header: 'Labor', cell: (row) => <span className="tabular-nums">{formatHours(row.laborHours)}</span>, className: 'text-right' },
+            { key: 'avgRating', header: 'Avg rating', cell: (row) => <span className="tabular-nums">{formatRating(row.avgRating)}</span>, className: 'text-right' },
+            { key: 'revenue', header: 'Revenue', cell: (row) => <span className="font-medium tabular-nums">{formatCentsExact(row.revenueCents)}</span>, className: 'text-right' },
+          ]}
+          rows={sorted}
+          getRowKey={(row) => row.technicianId}
+          className="border-0 shadow-none"
+          emptyState={<EmptyState icon={Users} title="No scorecard data" description="No assigned jobs in this period." className="py-8" />}
+        />
       )}
-    </Card>
-  );
-}
-
-interface KpiCardProps {
-  readonly label: string;
-  readonly value: string | null;
-  readonly hint?: string;
-  readonly icon: React.ComponentType<{ className?: string }>;
-  readonly bgColor: string;
-  readonly iconColor: string;
-  readonly isLoading: boolean;
-}
-
-function KpiCard({
-  label,
-  value,
-  hint,
-  icon: Icon,
-  bgColor,
-  iconColor,
-  isLoading,
-}: KpiCardProps) {
-  return (
-    <Card className="p-4 transition-shadow duration-200 hover:shadow-md hover:ring-1 hover:ring-primary/30">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="truncate text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            {label}
-          </p>
-          {isLoading ? (
-            <Skeleton className="mt-2 h-9 w-24" />
-          ) : value === null ? (
-            <p className="mt-1 font-heading text-3xl font-bold tracking-tight tabular-nums text-muted-foreground">
-              —
-            </p>
-          ) : (
-            <p className="mt-1 font-heading text-3xl font-bold tracking-tight tabular-nums">
-              {value}
-            </p>
-          )}
-          {hint && !isLoading && value !== null && (
-            <p className="mt-1 truncate text-xs text-muted-foreground">{hint}</p>
-          )}
-        </div>
-        <div className={`shrink-0 rounded-xl p-2.5 ${bgColor}`}>
-          <Icon className={`h-5 w-5 ${iconColor}`} />
-        </div>
-      </div>
-    </Card>
+    </SectionCard>
   );
 }

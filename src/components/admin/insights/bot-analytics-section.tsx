@@ -12,6 +12,8 @@ import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { StatCard } from '@/components/admin/ui/stat-card';
+import { SectionHeading } from '@/components/admin/ui/section-heading';
 import { useBotAnalytics } from '@/hooks/use-bot-analytics';
 import type {
   IntentDistributionRow,
@@ -39,40 +41,6 @@ function humanizeIntent(intentId: string): string {
 
 function humanizeOutcome(outcome: string): string {
   return OUTCOME_LABELS[outcome] ?? outcome.replace(/_/g, ' ');
-}
-
-function KpiCard({
-  icon: Icon,
-  label,
-  value,
-  bg,
-  fg,
-  isLoading,
-}: {
-  readonly icon: typeof Cpu;
-  readonly label: string;
-  readonly value: string;
-  readonly bg: string;
-  readonly fg: string;
-  readonly isLoading: boolean;
-}) {
-  return (
-    <Card className="p-4">
-      <div className="flex items-center gap-3">
-        <div className={`rounded-lg p-2 ${bg}`}>
-          <Icon className={`h-5 w-5 ${fg}`} />
-        </div>
-        <div className="min-w-0">
-          <p className="text-sm text-muted-foreground">{label}</p>
-          {isLoading ? (
-            <Skeleton className="mt-1 h-7 w-16" />
-          ) : (
-            <p className="text-2xl font-bold">{value}</p>
-          )}
-        </div>
-      </div>
-    </Card>
-  );
 }
 
 /** A labelled horizontal bar list — shares of a total. */
@@ -120,13 +88,16 @@ export function BotAnalyticsSection() {
   );
 
   return (
-    <section className="space-y-4">
-      <div className="flex items-baseline justify-between">
-        <h2 className="text-lg font-semibold">Bot analytics</h2>
-        <span className="text-xs text-muted-foreground">
-          {data ? `${data.totalTurns} turns · last 30 days` : 'last 30 days'}
-        </span>
-      </div>
+    <section aria-labelledby="bot-analytics-heading" className="space-y-4">
+      <SectionHeading
+        as="h2"
+        title="Bot analytics"
+        right={
+          <span className="text-xs text-muted-foreground">
+            {data ? `${data.totalTurns} turns · last 30 days` : 'Last 30 days'}
+          </span>
+        }
+      />
 
       {error && (
         <Alert variant="destructive">
@@ -145,45 +116,45 @@ export function BotAnalyticsSection() {
       )}
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
-        <KpiCard
+        <StatCard
           icon={Cpu}
-          label="Deterministic ratio"
+          label="Instant reply ratio"
           value={data ? pct(data.deterministicRatio) : '0%'}
-          bg="bg-purple-100 dark:bg-purple-900/30"
-          fg="text-purple-600 dark:text-purple-400"
-          isLoading={isLoading}
+          intent="info"
+          size="sm"
+          loading={isLoading}
         />
-        <KpiCard
+        <StatCard
           icon={AlertTriangle}
           label="Escalation rate"
           value={data ? pct(data.escalationRate) : '0%'}
-          bg="bg-yellow-100 dark:bg-yellow-900/30"
-          fg="text-yellow-600 dark:text-yellow-400"
-          isLoading={isLoading}
+          intent="warning"
+          size="sm"
+          loading={isLoading}
         />
-        <KpiCard
+        <StatCard
           icon={ClipboardCheck}
           label="Extraction completion"
           value={data ? pct(data.extractionCompletionRate) : '0%'}
-          bg="bg-green-100 dark:bg-green-900/30"
-          fg="text-green-600 dark:text-green-400"
-          isLoading={isLoading}
+          intent="success"
+          size="sm"
+          loading={isLoading}
         />
-        <KpiCard
+        <StatCard
           icon={Timer}
           label="Avg latency"
           value={data?.avgLatencyMs != null ? `${data.avgLatencyMs} ms` : '—'}
-          bg="bg-blue-100 dark:bg-blue-900/30"
-          fg="text-blue-600 dark:text-blue-400"
-          isLoading={isLoading}
+          intent="neutral"
+          size="sm"
+          loading={isLoading}
         />
-        <KpiCard
+        <StatCard
           icon={Lightbulb}
           label="Knowledge answers"
           value={data ? pct(data.knowledgeAnswerRate) : '0%'}
-          bg="bg-teal-100 dark:bg-teal-900/30"
-          fg="text-teal-600 dark:text-teal-400"
-          isLoading={isLoading}
+          intent="primary"
+          size="sm"
+          loading={isLoading}
         />
       </div>
 

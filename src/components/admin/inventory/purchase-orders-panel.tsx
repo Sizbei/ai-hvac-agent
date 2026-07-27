@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Plus } from 'lucide-react';
+import { Plus, ShoppingCart } from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -13,6 +13,8 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { SectionHeading } from '@/components/admin/ui/section-heading';
+import { EmptyState } from '@/components/admin/ui/empty-state';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { PurchaseOrderFormDialog } from './purchase-order-form-dialog';
 import type {
@@ -96,19 +98,17 @@ export function PurchaseOrdersPanel({
 
   return (
     <section className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold">Purchase Orders</h2>
-          <p className="text-sm text-muted-foreground">
-            Order stock from a vendor. Receiving a PO adds its quantities to
-            inventory.
-          </p>
-        </div>
-        <Button onClick={() => setFormOpen(true)}>
-          <Plus className="mr-2 h-4 w-4" />
-          New PO
-        </Button>
-      </div>
+      <SectionHeading
+        as="h2"
+        title="Purchase orders"
+        description="Order stock from a vendor. Receiving a PO adds its quantities to inventory."
+        right={
+          <Button onClick={() => setFormOpen(true)}>
+            <Plus className="mr-2 h-4 w-4" />
+            New PO
+          </Button>
+        }
+      />
 
       {actionError && (
         <p role="alert" className="text-sm text-destructive">
@@ -117,9 +117,11 @@ export function PurchaseOrdersPanel({
       )}
 
       {!isLoading && purchaseOrders.length === 0 ? (
-        <div className="py-10 text-center text-muted-foreground">
-          No purchase orders yet.
-        </div>
+        <EmptyState
+          icon={ShoppingCart}
+          title="No purchase orders"
+          description="Create a PO to order stock from a vendor. Receiving it will update inventory."
+        />
       ) : (
         <Table>
           <TableHeader>
@@ -157,7 +159,7 @@ export function PurchaseOrdersPanel({
                           disabled={busyId === po.id}
                           onClick={() => void transition(po.id, 'order')}
                         >
-                          Mark Ordered
+                          Mark ordered
                         </Button>
                       )}
                       {(po.status === 'draft' || po.status === 'ordered') && (
