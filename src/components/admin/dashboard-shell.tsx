@@ -2,10 +2,12 @@
 
 import { useState, useCallback } from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { AlertTriangle } from 'lucide-react';
 import { Sidebar } from '@/components/admin/sidebar';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { GlobalSearch } from '@/components/admin/global-search';
+import { NAV_GROUPS } from '@/components/admin/nav-items';
 import type { AdminRole } from '@/lib/auth/types';
 
 interface DashboardShellProps {
@@ -18,6 +20,21 @@ interface DashboardShellProps {
   readonly children: React.ReactNode;
 }
 
+/** Derive a page label from the current pathname by exact-matching nav items.
+ *  Falls back to undefined (no title shown) if no match is found. */
+function useMobileTitle(): string | undefined {
+  const pathname = usePathname();
+  for (const group of NAV_GROUPS) {
+    for (const item of group.items) {
+      const match = item.exact
+        ? pathname === item.href
+        : pathname === item.href || pathname.startsWith(item.href + '/');
+      if (match) return item.label;
+    }
+  }
+  return undefined;
+}
+
 export function DashboardShell({
   adminName,
   adminEmail,
@@ -26,6 +43,7 @@ export function DashboardShell({
   children,
 }: DashboardShellProps) {
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const mobileTitle = useMobileTitle();
 
   const handleMobileClose = useCallback(() => {
     setIsMobileOpen(false);
@@ -45,7 +63,7 @@ export function DashboardShell({
         onMobileClose={handleMobileClose}
       />
       <div className="flex flex-1 flex-col overflow-hidden">
-        <AdminHeader onMenuClick={handleMenuClick} />
+        <AdminHeader onMenuClick={handleMenuClick} title={mobileTitle} />
         {billingAttention && (
           <div
             role="alert"
