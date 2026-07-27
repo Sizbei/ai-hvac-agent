@@ -2,13 +2,14 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { AlertCircle, Search, Inbox, MessagesSquare } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { pageLabel } from '@/lib/admin/invoice-list-helpers';
 import { useAdminConversations } from '@/hooks/use-admin-conversations';
 import { ConversationDetailContent } from '@/components/admin/conversations/conversation-detail-content';
 import { ConversationDetailSheet } from '@/components/admin/conversation-detail-sheet';
 import { ChannelChip } from '@/components/admin/conversations/channel-chip';
 import { StatusBadge } from '@/components/admin/status-badge';
+import { ContextBadge } from '@/components/admin/ui/context-badge';
+import { TabGroup } from '@/components/admin/ui/tab-group';
+import { Pager } from '@/components/admin/ui/pager';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -38,11 +39,11 @@ const STATUS_OPTIONS: readonly { readonly label: string; readonly value: string 
   { label: 'Abandoned', value: 'abandoned' },
 ];
 
-const CHANNEL_TABS: readonly { readonly key: string; readonly label: string }[] = [
-  { key: ALL_CHANNELS, label: 'All' },
-  { key: 'phone', label: 'Phone' },
-  { key: 'sms', label: 'SMS' },
-  { key: 'web', label: 'Web' },
+const CHANNEL_TABS: readonly { readonly id: string; readonly label: string }[] = [
+  { id: ALL_CHANNELS, label: 'All' },
+  { id: 'phone', label: 'Phone' },
+  { id: 'sms', label: 'SMS' },
+  { id: 'web', label: 'Web' },
 ];
 
 const CHANNEL_NOUN: Record<string, string> = {
@@ -92,9 +93,10 @@ function ConversationRow({
             {conversation.referenceNumber ?? conversation.id.slice(0, 8)}
           </span>
           {needsAction(conversation.status) && (
-            <span
-              title="Needs action"
-              className="size-1.5 shrink-0 rounded-full bg-primary"
+            <ContextBadge
+              variant="warning"
+              label="Needs action"
+              className="shrink-0"
             />
           )}
           <span className="ml-auto shrink-0 text-[11px] tabular-nums text-muted-foreground">
@@ -214,35 +216,19 @@ export function ConversationInbox() {
               />
             </div>
             <div className="flex items-center justify-between gap-3">
-              <div className="flex gap-5">
-                {CHANNEL_TABS.map((tab) => {
-                  const isActive = channelFilter === tab.key;
-                  return (
-                    <button
-                      key={tab.key}
-                      type="button"
-                      onClick={() => setChannelFilter(tab.key)}
-                      className={cn(
-                        'relative pb-2.5 text-sm font-medium transition-colors',
-                        isActive
-                          ? 'text-foreground'
-                          : 'text-muted-foreground hover:text-foreground',
-                      )}
-                    >
-                      {tab.label}
-                      {isActive && (
-                        <span className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-primary" />
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
+              <TabGroup
+                aria-label="Filter by channel"
+                tabs={CHANNEL_TABS}
+                activeTab={channelFilter}
+                onTabChange={setChannelFilter}
+                className="border-b-0"
+              />
               <Select
                 value={statusFilter}
                 onValueChange={(value) => setStatusFilter(value ?? ALL_STATUSES)}
               >
                 <SelectTrigger aria-label="Filter by status" className="mb-1.5 h-8 w-[150px]">
-                  <SelectValue placeholder="Status" />
+                  <SelectValue placeholder="All statuses" />
                 </SelectTrigger>
                 <SelectContent>
                   {STATUS_OPTIONS.map((option) => (
@@ -308,52 +294,15 @@ export function ConversationInbox() {
             )}
           </div>
 
-          <div className="shrink-0 border-t border-border px-4 py-2 flex items-center justify-between gap-2">
-            <span className="tabular-nums text-xs text-muted-foreground">
-              {pageLabel(safePage, total, PER_PAGE)}
-            </span>
-            <div className="flex items-center gap-1">
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2 text-xs"
-                onClick={() => setPage(1)}
-                disabled={safePage <= 1}
-              >
-                First
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-7 px-2 text-xs"
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={safePage <= 1}
-              >
-                ← Prev
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-7 px-2 text-xs"
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={safePage >= totalPages}
-              >
-                Next →
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2 text-xs"
-                onClick={() => setPage(totalPages)}
-                disabled={safePage >= totalPages}
-              >
-                Last
-              </Button>
-            </div>
+          <div className="shrink-0 border-t border-border px-2">
+            <Pager
+              page={safePage}
+              totalPages={totalPages}
+              total={total}
+              perPage={PER_PAGE}
+              onPageChange={setPage}
+              showFirstLast
+            />
           </div>
         </div>
 

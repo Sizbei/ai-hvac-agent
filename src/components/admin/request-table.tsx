@@ -1,21 +1,16 @@
 'use client';
 
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { Skeleton } from '@/components/ui/skeleton';
 import { UrgencyBadge } from '@/components/admin/urgency-badge';
 import { StatusBadge } from '@/components/admin/status-badge';
+import { ContextBadge } from '@/components/admin/ui/context-badge';
 import { EmptyState } from '@/components/admin/ui/empty-state';
+import {
+  DataTableShell,
+  type DataTableColumn,
+} from '@/components/admin/ui/data-table-shell';
 import { Button } from '@/components/ui/button';
 import type { AdminRequest } from '@/lib/admin/types';
 import { SyncPill } from '@/components/admin/sync-pill';
-import { cn } from '@/lib/utils';
 import { ClipboardList } from 'lucide-react';
 
 interface RequestTableProps {
@@ -39,8 +34,57 @@ function formatDate(dateString: string): string {
   return new Date(dateString).toLocaleDateString();
 }
 
-const SKELETON_ROWS = 5;
-const COLUMN_COUNT = 7;
+const COLUMNS: ReadonlyArray<DataTableColumn<AdminRequest>> = [
+  {
+    key: 'reference',
+    header: 'Reference #',
+    className: 'font-mono text-xs',
+    cell: (r) => r.referenceNumber,
+  },
+  {
+    key: 'customer',
+    header: 'Customer',
+    cell: (r) => r.customerName ?? 'Unknown',
+  },
+  {
+    key: 'issue',
+    header: 'Issue',
+    cell: (r) => formatIssueType(r.issueType),
+  },
+  {
+    key: 'urgency',
+    header: 'Urgency',
+    cell: (r) => (
+      <span className="inline-flex flex-wrap items-center gap-1">
+        <UrgencyBadge urgency={r.urgency} />
+        {r.isAfterHours && (
+          <ContextBadge
+            variant="after-hours"
+            label="After-hrs"
+            title="Arrived after hours"
+          />
+        )}
+        {r.syncedSource && <SyncPill source={r.syncedSource} size="md" />}
+      </span>
+    ),
+  },
+  {
+    key: 'status',
+    header: 'Status',
+    cell: (r) => <StatusBadge status={r.status} />,
+  },
+  {
+    key: 'submitted',
+    header: 'Submitted',
+    className: 'text-muted-foreground',
+    cell: (r) => formatDate(r.createdAt),
+  },
+  {
+    key: 'assignedTo',
+    header: 'Assigned to',
+    cell: (r) => r.assignedToName ?? '—',
+  },
+];
 
 export function RequestTable({
   requests,
@@ -49,109 +93,31 @@ export function RequestTable({
   hasActiveFilters = false,
   onClearFilters,
 }: RequestTableProps) {
-  // When we have rows but are revalidating, dim existing rows instead of
-  // flashing a skeleton — this is the stale-while-revalidate pattern.
-  const showSkeleton = isLoading && requests.length === 0;
-  const showDimmed = isLoading && requests.length > 0;
-
   return (
-    <div
-      className={cn(
-        'transition-opacity duration-150',
-        showDimmed && 'opacity-50 pointer-events-none',
-      )}
-    >
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Reference #</TableHead>
-            <TableHead>Customer</TableHead>
-            <TableHead>Issue</TableHead>
-            <TableHead>Urgency</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Date</TableHead>
-            <TableHead>Assigned To</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {showSkeleton
-            ? Array.from({ length: SKELETON_ROWS }, (_, i) => (
-                <TableRow key={`skeleton-${i}`}>
-                  {Array.from({ length: COLUMN_COUNT }, (__, j) => (
-                    <TableCell key={`skeleton-cell-${i}-${j}`}>
-                      <Skeleton className="h-4 w-full" />
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))
-            : requests.length === 0
-              ? (
-                  <TableRow>
-                    <TableCell colSpan={COLUMN_COUNT} className="p-0">
-                      <EmptyState
-                        icon={ClipboardList}
-                        title={hasActiveFilters ? 'No requests match' : 'No requests yet'}
-                        description={
-                          hasActiveFilters
-                            ? 'Try adjusting the filters or search to see results.'
-                            : 'Service requests submitted by customers will appear here.'
-                        }
-                        action={
-                          hasActiveFilters && onClearFilters ? (
-                            <Button variant="outline" size="sm" onClick={onClearFilters}>
-                              Clear filters
-                            </Button>
-                          ) : undefined
-                        }
-                      />
-                    </TableCell>
-                  </TableRow>
-                )
-              : requests.map((request) => (
-                  <TableRow
-                    key={request.id}
-                    className="cursor-pointer"
-                    tabIndex={0}
-                    onClick={() => onRowClick(request)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        onRowClick(request);
-                      }
-                    }}
-                  >
-                    <TableCell className="font-mono text-xs">
-                      {request.referenceNumber}
-                    </TableCell>
-                    <TableCell>{request.customerName ?? 'Unknown'}</TableCell>
-                    <TableCell>{formatIssueType(request.issueType)}</TableCell>
-                    <TableCell>
-                      <span className="inline-flex flex-wrap items-center gap-1">
-                        <UrgencyBadge urgency={request.urgency} />
-                        {request.isAfterHours && (
-                          <span
-                            title="Arrived after hours"
-                            className="inline-flex items-center rounded-full border border-amber-300 bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800"
-                          >
-                            After-hrs
-                          </span>
-                        )}
-                        {request.syncedSource && (
-                          <SyncPill source={request.syncedSource} size="md" />
-                        )}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <StatusBadge status={request.status} />
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {formatDate(request.createdAt)}
-                    </TableCell>
-                    <TableCell>{request.assignedToName ?? '—'}</TableCell>
-                  </TableRow>
-                ))}
-        </TableBody>
-      </Table>
-    </div>
+    <DataTableShell<AdminRequest>
+      columns={COLUMNS}
+      rows={requests}
+      getRowKey={(r) => r.id}
+      isLoading={isLoading}
+      onRowClick={onRowClick}
+      emptyState={
+        <EmptyState
+          icon={ClipboardList}
+          title={hasActiveFilters ? 'No requests match' : 'No requests yet'}
+          description={
+            hasActiveFilters
+              ? 'Try adjusting the filters or search to see results.'
+              : 'Service requests submitted by customers will appear here.'
+          }
+          action={
+            hasActiveFilters && onClearFilters ? (
+              <Button variant="outline" size="sm" onClick={onClearFilters}>
+                Clear filters
+              </Button>
+            ) : undefined
+          }
+        />
+      }
+    />
   );
 }

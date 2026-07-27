@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { AlertCircle, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
+import { AlertCircle, ChevronLeft, ChevronRight, RefreshCw, Users } from 'lucide-react';
 import { useDispatchBoard } from '@/hooks/use-dispatch-board';
 import { DispatchColumn } from '@/components/admin/dispatch/dispatch-column';
 import { RequestDetailSheet } from '@/components/admin/request-detail-sheet';
@@ -9,6 +9,12 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card } from '@/components/ui/card';
+import { PageShell } from '@/components/admin/ui/page-shell';
+import { PageHeader } from '@/components/admin/ui/page-header';
+import { SectionHeading } from '@/components/admin/ui/section-heading';
+import { ContextBadge } from '@/components/admin/ui/context-badge';
+import { EmptyState } from '@/components/admin/ui/empty-state';
+import { UrgencyLegend } from '@/components/admin/ui/urgency-legend';
 import { businessIsoDate } from '@/lib/admin/calendar-time';
 
 /** Current BUSINESS day as YYYY-MM-DD. Anchoring on the UTC day put the board
@@ -23,6 +29,19 @@ function shiftDate(isoDate: string, days: number): string {
   const date = new Date(`${isoDate}T00:00:00.000Z`);
   date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
+}
+
+/** Human-readable labels for the queued auto-dispatch outcomes. Replaces the
+ *  buggy non-global `.replace('_',' ')` that only stripped the first underscore. */
+const OUTCOME_LABELS: Record<string, string> = {
+  queued_no_capacity: 'no capacity',
+  queued_low_confidence: 'low confidence',
+  queued_after_hours: 'after hours',
+  queued_no_match: 'no match',
+};
+
+function outcomeLabel(outcome: string): string {
+  return OUTCOME_LABELS[outcome] ?? outcome.replace(/^queued_/, '').replace(/_/g, ' ');
 }
 
 function formatDayLabel(isoDate: string): string {
@@ -47,45 +66,42 @@ export default function DispatchPage() {
   const isToday = date === todayBusiness();
 
   return (
-    <div className="space-y-6 p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold">Dispatch</h1>
-          <p className="text-sm text-muted-foreground">
-            Scheduled jobs by technician for the day.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="icon-sm"
-            onClick={() => setDate((d) => shiftDate(d, -1))}
-            aria-label="Previous day"
-          >
-            <ChevronLeft className="size-4" />
-          </Button>
-          <div className="min-w-40 text-center text-sm font-medium">
-            {formatDayLabel(date)}
+    <PageShell>
+      <PageHeader
+        title="Dispatch"
+        subtitle="Scheduled jobs by technician for the day."
+        actions={
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="icon-sm"
+              onClick={() => setDate((d) => shiftDate(d, -1))}
+              aria-label="Previous day"
+            >
+              <ChevronLeft className="size-4" />
+            </Button>
+            <div className="min-w-40 text-center text-sm font-medium">
+              {formatDayLabel(date)}
+            </div>
+            <Button
+              variant="outline"
+              size="icon-sm"
+              onClick={() => setDate((d) => shiftDate(d, 1))}
+              aria-label="Next day"
+            >
+              <ChevronRight className="size-4" />
+            </Button>
+            <Button
+              variant={isToday ? 'secondary' : 'outline'}
+              size="sm"
+              onClick={() => setDate(todayBusiness())}
+              disabled={isToday}
+            >
+              Today
+            </Button>
           </div>
-          <Button
-            variant="outline"
-            size="icon-sm"
-            onClick={() => setDate((d) => shiftDate(d, 1))}
-            aria-label="Next day"
-          >
-            <ChevronRight className="size-4" />
-          </Button>
-          <Button
-            variant={isToday ? 'secondary' : 'outline'}
-            size="sm"
-            onClick={() => setDate(todayBusiness())}
-            disabled={isToday}
-          >
-            Today
-          </Button>
-        </div>
-      </div>
+        }
+      />
 
       {error && (
         <Alert variant="destructive">
@@ -107,13 +123,11 @@ export default function DispatchPage() {
 
       {board && board.exceptions.length > 0 && (
         <Card className="p-4">
-          <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
-            <AlertCircle className="size-4 text-amber-500" />
-            Exceptions
-            <span className="text-xs font-normal text-muted-foreground">
-              queued jobs needing a decision
-            </span>
-          </div>
+          <SectionHeading
+            title="Exceptions"
+            description="Queued jobs needing a decision"
+            className="mb-3"
+          />
           <ul className="space-y-1.5">
             {board.exceptions.map((ex) => (
               <li key={ex.id}>
@@ -124,9 +138,10 @@ export default function DispatchPage() {
                 >
                   <span className="font-medium">{ex.referenceNumber}</span>
                   <span className="text-muted-foreground">{ex.issueType}</span>
-                  <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-px text-[11px] font-medium text-amber-700">
-                    {ex.autoDispatchOutcome.replace("queued_", "").replace("_", " ")}
-                  </span>
+                  <ContextBadge
+                    variant="warning"
+                    label={outcomeLabel(ex.autoDispatchOutcome)}
+                  />
                   <span className="ml-auto text-xs text-muted-foreground">
                     {formatDayLabel(ex.createdAt.slice(0, 10))}
                   </span>
@@ -184,18 +199,23 @@ export default function DispatchPage() {
             />
           ))}
           {board && board.columns.length === 0 && (
-            <p className="self-center text-sm text-muted-foreground">
-              No active technicians. Add technicians under Staff.
-            </p>
+            <EmptyState
+              icon={Users}
+              title="No active technicians"
+              description="Add technicians under Staff to start dispatching jobs."
+              className="mx-auto"
+            />
           )}
         </div>
       )}
+
+      <UrgencyLegend />
 
       <RequestDetailSheet
         requestId={selectedRequestId}
         onClose={() => setSelectedRequestId(null)}
         onAssigned={refetch}
       />
-    </div>
+    </PageShell>
   );
 }

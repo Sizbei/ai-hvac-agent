@@ -1,6 +1,5 @@
 'use client';
 
-import { Button } from '@/components/ui/button';
 import {
   Select,
   SelectContent,
@@ -8,6 +7,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { SegmentedControl } from '@/components/ui/segmented-control';
+import { Switch } from '@/components/ui/switch';
 import { useAdminTechnicians } from '@/hooks/use-admin-technicians';
 import type { RequestSortKey } from '@/lib/admin/types';
 
@@ -35,8 +36,8 @@ const STATUS_OPTIONS: readonly { readonly label: string; readonly value: string 
   { label: 'Pending', value: 'pending' },
   { label: 'Scheduled', value: 'scheduled' },
   { label: 'Assigned', value: 'assigned' },
-  { label: 'In Progress', value: 'in_progress' },
-  { label: 'On Hold', value: 'on_hold' },
+  { label: 'In progress', value: 'in_progress' },
+  { label: 'On hold', value: 'on_hold' },
   { label: 'Completed', value: 'completed' },
   { label: 'Cancelled', value: 'cancelled' },
 ];
@@ -64,21 +65,15 @@ export function RequestFilters({
   const { technicians } = useAdminTechnicians();
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      {/* Status chips */}
-      {STATUS_OPTIONS.map((option) => {
-        const isActive = currentStatus === option.value;
-        return (
-          <Button
-            key={option.value}
-            variant={isActive ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => onStatusChange(option.value)}
-          >
-            {option.label}
-          </Button>
-        );
-      })}
+    <div className="flex flex-wrap items-center gap-3">
+      {/* Status segmented control */}
+      <SegmentedControl
+        aria-label="Filter by status"
+        options={STATUS_OPTIONS}
+        value={currentStatus}
+        onChange={onStatusChange}
+        className="max-w-full overflow-x-auto"
+      />
 
       {/* Urgency selector */}
       <Select
@@ -133,13 +128,14 @@ export function RequestFilters({
       </Select>
 
       {/* After-hours toggle */}
-      <Button
-        variant={isAfterHours ? 'default' : 'outline'}
-        size="sm"
-        onClick={() => onAfterHoursChange(!isAfterHours)}
-      >
-        After Hours
-      </Button>
+      <label className="flex cursor-pointer items-center gap-2 text-sm">
+        <Switch
+          checked={isAfterHours}
+          onCheckedChange={onAfterHoursChange}
+          aria-label="Show after-hours requests only"
+        />
+        After hours
+      </label>
     </div>
   );
 }

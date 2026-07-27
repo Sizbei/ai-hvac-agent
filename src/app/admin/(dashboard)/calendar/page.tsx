@@ -14,7 +14,10 @@ import { AgendaView } from '@/components/admin/calendar/agenda-view';
 import { RequestDetailSheet } from '@/components/admin/request-detail-sheet';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { URGENCY_LEGEND, urgencyAccent } from '@/lib/admin/urgency-accent';
+import { PageShell } from '@/components/admin/ui/page-shell';
+import { PageHeader } from '@/components/admin/ui/page-header';
+import { TabGroup } from '@/components/admin/ui/tab-group';
+import { UrgencyLegend } from '@/components/admin/ui/urgency-legend';
 
 /** A transient banner the calendar surfaces after a reschedule (soft conflict
  * warning or a failure that triggered a rollback). */
@@ -99,22 +102,12 @@ function formatRangeLabel(isoDate: string, view: CalendarView): string {
   })}`;
 }
 
-/** A compact urgency color key shown beneath the calendar. */
-function UrgencyLegend() {
-  return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-      <span className="font-medium">Urgency:</span>
-      {URGENCY_LEGEND.map(({ urgency, label }) => (
-        <span key={urgency} className="flex items-center gap-1.5">
-          <span
-            className={`size-2.5 rounded-full ${urgencyAccent(urgency).dot}`}
-          />
-          {label}
-        </span>
-      ))}
-    </div>
-  );
-}
+const VIEW_TABS: ReadonlyArray<{ readonly id: CalendarView; readonly label: string }> = [
+  { id: 'day', label: 'Day' },
+  { id: 'week', label: 'Week' },
+  { id: 'month', label: 'Month' },
+  { id: 'agenda', label: 'Agenda' },
+];
 
 export default function CalendarPage() {
   useEffect(() => { document.title = 'Calendar · Spears Admin'; }, []);
@@ -188,91 +181,65 @@ export default function CalendarPage() {
   const stepLabel = isMonth ? 'month' : view === 'week' ? 'week' : 'day';
 
   return (
-    <div className="space-y-6 p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold">Calendar</h1>
-          <p className="text-sm text-muted-foreground">
-            Scheduled jobs by technician, in Eastern time.
-          </p>
-        </div>
+    <PageShell>
+      <PageHeader
+        title="Calendar"
+        subtitle="Scheduled jobs by technician, in Eastern time."
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Show completed toggle */}
+            <Button
+              variant={showCompleted ? 'secondary' : 'outline'}
+              size="sm"
+              onClick={toggleShowCompleted}
+            >
+              {showCompleted ? 'Hide completed' : 'Show completed'}
+            </Button>
 
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Show completed toggle */}
-          <Button
-            variant={showCompleted ? 'secondary' : 'outline'}
-            size="sm"
-            onClick={toggleShowCompleted}
-          >
-            {showCompleted ? 'Hide completed' : 'Show completed'}
-          </Button>
-
-          {/* View toggle */}
-          <div className="flex items-center rounded-lg border p-0.5">
-            <Button
-              variant={view === 'day' ? 'secondary' : 'ghost'}
-              size="sm"
-              onClick={() => setView('day')}
-            >
-              Day
-            </Button>
-            <Button
-              variant={view === 'week' ? 'secondary' : 'ghost'}
-              size="sm"
-              onClick={() => setView('week')}
-            >
-              Week
-            </Button>
-            <Button
-              variant={view === 'month' ? 'secondary' : 'ghost'}
-              size="sm"
-              onClick={() => setView('month')}
-            >
-              Month
-            </Button>
-            <Button
-              variant={view === 'agenda' ? 'secondary' : 'ghost'}
-              size="sm"
-              onClick={() => setView('agenda')}
-            >
-              Agenda
-            </Button>
+            {/* Date stepper — not shown for the agenda feed (a flat, paged list). */}
+            {!isAgenda && (
+              <>
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  onClick={() => stepDate(-1)}
+                  aria-label={`Previous ${stepLabel}`}
+                >
+                  <ChevronLeft className="size-4" />
+                </Button>
+                <div className="min-w-44 text-center text-sm font-medium">
+                  {formatRangeLabel(date, view)}
+                </div>
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  onClick={() => stepDate(1)}
+                  aria-label={`Next ${stepLabel}`}
+                >
+                  <ChevronRight className="size-4" />
+                </Button>
+                <Button
+                  variant={isToday ? 'secondary' : 'outline'}
+                  size="sm"
+                  onClick={() => setDate(todayBusiness())}
+                  disabled={isToday}
+                  title={isToday ? 'Already viewing today' : undefined}
+                >
+                  Today
+                </Button>
+              </>
+            )}
           </div>
+        }
+      />
 
-          {/* Date stepper — not shown for the agenda feed (a flat, paged list). */}
-          {!isAgenda && (
-            <>
-              <Button
-                variant="outline"
-                size="icon-sm"
-                onClick={() => stepDate(-1)}
-                aria-label={`Previous ${stepLabel}`}
-              >
-                <ChevronLeft className="size-4" />
-              </Button>
-              <div className="min-w-44 text-center text-sm font-medium">
-                {formatRangeLabel(date, view)}
-              </div>
-              <Button
-                variant="outline"
-                size="icon-sm"
-                onClick={() => stepDate(1)}
-                aria-label={`Next ${stepLabel}`}
-              >
-                <ChevronRight className="size-4" />
-              </Button>
-              <Button
-                variant={isToday ? 'secondary' : 'outline'}
-                size="sm"
-                onClick={() => setDate(todayBusiness())}
-                disabled={isToday}
-              >
-                Today
-              </Button>
-            </>
-          )}
-        </div>
-      </div>
+      {/* View toggle */}
+      <TabGroup
+        aria-label="Calendar view"
+        tabs={VIEW_TABS}
+        activeTab={view}
+        onTabChange={(id) => setView(id as CalendarView)}
+      />
 
       {activeError && (
         <Alert variant="destructive">
@@ -282,7 +249,7 @@ export default function CalendarPage() {
       )}
 
       {status && (
-        <Alert variant={status.tone === 'error' ? 'destructive' : 'default'}>
+        <Alert variant={status.tone === 'error' ? 'destructive' : 'warning'}>
           <AlertCircle className="size-4" />
           <AlertDescription>{status.message}</AlertDescription>
         </Alert>
@@ -326,6 +293,6 @@ export default function CalendarPage() {
           isAgenda ? refetchAgenda : isMonth ? refetchMonth : refetch
         }
       />
-    </div>
+    </PageShell>
   );
 }

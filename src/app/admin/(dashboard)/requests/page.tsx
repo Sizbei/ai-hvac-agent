@@ -4,16 +4,14 @@ import { useState, useEffect, useCallback } from 'react';
 import { useUrlFilterSync } from '@/hooks/use-url-filter-sync';
 import { AlertCircle, Search } from 'lucide-react';
 import { useAdminRequests } from '@/hooks/use-admin-requests';
-import { StatsCards } from '@/components/admin/stats-cards';
 import { RequestFilters } from '@/components/admin/request-filters';
 import { RequestTable } from '@/components/admin/request-table';
 import { RequestDetailSheet } from '@/components/admin/request-detail-sheet';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
-import { pageLabel } from '@/lib/admin/invoice-list-helpers';
+import { Pager } from '@/components/admin/ui/pager';
 import type { RequestSortKey } from '@/lib/admin/types';
 
 const PER_PAGE = 50;
@@ -84,11 +82,9 @@ export default function AdminRequestsPage() {
   return (
     <PageShell>
       <PageHeader
-        title="Service Requests"
+        title="Service requests"
         actions={<span className="text-sm text-muted-foreground">{total} total</span>}
       />
-
-      <StatsCards />
 
       {error && (
         <Alert variant="destructive">
@@ -139,50 +135,14 @@ export default function AdminRequestsPage() {
         }}
       />
 
-      {/* Pager bar */}
-      <div className="flex items-center justify-between px-1 py-3 text-sm">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => setPage((p) => Math.max(1, p - 1))}
-          disabled={safePage <= 1}
-        >
-          ← Prev
-        </Button>
-        <span className="tabular-nums text-xs text-muted-foreground">
-          {pageLabel(safePage, total, PER_PAGE)}
-        </span>
-        <div className="flex gap-2">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => setPage(1)}
-            disabled={safePage <= 1}
-          >
-            First
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => setPage(totalPages)}
-            disabled={safePage >= totalPages}
-          >
-            Last
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={safePage >= totalPages}
-          >
-            Next →
-          </Button>
-        </div>
-      </div>
+      <Pager
+        page={safePage}
+        totalPages={totalPages}
+        total={total}
+        perPage={PER_PAGE}
+        onPageChange={setPage}
+        showFirstLast
+      />
 
       <RequestDetailSheet
         requestId={selectedRequestId}

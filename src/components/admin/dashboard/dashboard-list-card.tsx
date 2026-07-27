@@ -1,9 +1,13 @@
 'use client';
 
-import { AlertTriangle } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import { AlertTriangle, Inbox } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { UrgencyBadge } from '@/components/admin/urgency-badge';
+import { ContextBadge } from '@/components/admin/ui/context-badge';
+import { EmptyState } from '@/components/admin/ui/empty-state';
+import { IconChip, type IconChipIntent } from '@/components/admin/ui/icon-chip';
 import { formatArrivalWindow } from '@/lib/admin/arrival-window';
 import { DASHBOARD_LIST_LIMIT, type DashboardRequest } from '@/lib/admin/types';
 
@@ -11,8 +15,9 @@ type RowMeta = 'arrivalWindow' | 'followUp';
 
 interface DashboardListCardProps {
   readonly title: string;
-  readonly icon: React.ComponentType<{ className?: string }>;
-  readonly iconColor: string;
+  readonly icon: LucideIcon;
+  /** Intent drives the header IconChip tint (semantic tokens only). */
+  readonly intent: IconChipIntent;
   readonly requests: readonly DashboardRequest[];
   readonly isLoading: boolean;
   readonly emptyLabel: string;
@@ -77,7 +82,7 @@ function MetaLine({
 export function DashboardListCard({
   title,
   icon: Icon,
-  iconColor,
+  intent,
   requests,
   isLoading,
   emptyLabel,
@@ -87,9 +92,7 @@ export function DashboardListCard({
   return (
     <Card className="flex flex-col p-4">
       <div className="mb-3 flex items-center gap-2.5">
-        <span className="flex size-7 items-center justify-center rounded-lg bg-muted">
-          <Icon className={`h-4 w-4 ${iconColor}`} />
-        </span>
+        <IconChip icon={Icon} intent={intent} size="sm" />
         <h2 className="font-heading text-sm font-semibold">{title}</h2>
         {!isLoading && (
           <span
@@ -113,9 +116,12 @@ export function DashboardListCard({
           ))}
         </div>
       ) : requests.length === 0 ? (
-        <p className="py-6 text-center text-sm text-muted-foreground">
-          {emptyLabel}
-        </p>
+        <EmptyState
+          icon={Inbox}
+          title="All clear"
+          description={emptyLabel}
+          className="py-8"
+        />
       ) : (
         <ul className="space-y-1">
           {requests.map((request) => (
@@ -131,12 +137,12 @@ export function DashboardListCard({
                       {request.customerName ?? 'Unknown'}
                     </span>
                     {request.isAfterHours && (
-                      <span
+                      <ContextBadge
+                        variant="after-hours"
+                        label="After-hrs"
                         title="After hours"
-                        className="inline-flex shrink-0 items-center rounded-full border border-amber-300 bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800"
-                      >
-                        After-hrs
-                      </span>
+                        className="shrink-0"
+                      />
                     )}
                   </div>
                   <div className="truncate text-xs text-muted-foreground">

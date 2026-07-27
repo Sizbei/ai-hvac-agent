@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Clock, Plus } from 'lucide-react';
+import { Clock, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 function greetingForHour(hour: number): string {
@@ -49,8 +49,8 @@ export function DashboardGreeting() {
         </p>
       </div>
       <Button size="lg" render={<Link href="/admin/requests" />}>
-        <Plus className="size-4" />
-        New request
+        View requests
+        <ArrowRight className="size-4" />
       </Button>
     </div>
   );
