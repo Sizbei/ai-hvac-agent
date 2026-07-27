@@ -94,7 +94,7 @@ export async function getSalesReport(
     estimateRow,
     invoiceRow,
     syncedCollectedRow,
-  ] = await Promise.all([
+  ] = await db.batch([
     // Gross collected: payments that actually cleared. A FULLY-refunded payment
     // flips status to 'refunded' — it was still collected (the refund is
     // subtracted separately below), so it must stay in gross. Excluding it while
@@ -214,7 +214,7 @@ export async function getSalesReport(
           lte(invoices.createdAt, toDate),
         ),
       ),
-  ]);
+  ] as const);
 
   const grossCollectedCents = toNumber(grossRow[0]?.value);
   const refundedCents = toNumber(refundRow[0]?.value);
@@ -313,7 +313,7 @@ export async function getLeadSourceBreakdown(
   // fallback (same reason the location key below casts).
   const sourceKey = sql<string>`coalesce(cast(${serviceRequests.leadSource} as text), 'unknown')`;
 
-  const [leadRows, bookedRows, grossRows, refundRows] = await Promise.all([
+  const [leadRows, bookedRows, grossRows, refundRows] = await db.batch([
     // 1. Leads: service requests by source, created in the period.
     db
       .select({ source: sourceKey, value: count() })
@@ -405,7 +405,7 @@ export async function getLeadSourceBreakdown(
         ),
       )
       .groupBy(sourceKey),
-  ]);
+  ] as const);
 
   const leadsBySource = new Map<string, number>();
   for (const r of leadRows) leadsBySource.set(r.source, toNumber(r.value));
@@ -481,7 +481,7 @@ export async function getLocationBreakdown(
   // Inline literal (see sourceKey note). Keep in sync with UNASSIGNED_LOCATION.
   const locationKey = sql<string>`coalesce(cast(${serviceRequests.locationId} as text), 'unassigned')`;
 
-  const [jobRows, revenueRows, ratingRows, labelRows] = await Promise.all([
+  const [jobRows, revenueRows, ratingRows, labelRows] = await db.batch([
     // 1. Jobs: service requests per location bucket, created in the period.
     db
       .select({ locationId: locationKey, value: count() })
@@ -548,7 +548,7 @@ export async function getLocationBreakdown(
       })
       .from(customerLocations)
       .where(withTenant(customerLocations, organizationId)),
-  ]);
+  ] as const);
 
   const jobsByLoc = new Map<string, number>();
   for (const r of jobRows) jobsByLoc.set(r.locationId, toNumber(r.value));
@@ -635,7 +635,7 @@ export async function getTechnicianScorecards(
   const toDate = period.toDate ?? now;
   const fromDate = period.fromDate ?? new Date(toDate.getTime() - THIRTY_DAYS_MS);
 
-  const [jobRows, revenueRows, laborRows, ratingRows] = await Promise.all([
+  const [jobRows, revenueRows, laborRows, ratingRows] = await db.batch([
     // 1. Jobs assigned + completed per tech, plus the tech's name. INNER join to
     //    users (assignedTo must resolve to a real user) — org-scoped on BOTH
     //    sides. Requests with a NULL assignedTo are dropped (no tech to score).
@@ -723,7 +723,7 @@ export async function getTechnicianScorecards(
         ),
       )
       .groupBy(serviceRequests.assignedTo),
-  ]);
+  ] as const);
 
   const revenueByTech = new Map<string, number>();
   for (const r of revenueRows) {

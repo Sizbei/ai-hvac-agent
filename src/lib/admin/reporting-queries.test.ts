@@ -59,6 +59,7 @@ vi.mock('@/lib/db', () => ({
       captured.push(capture);
       return chain(selectQueue.shift() ?? [], capture);
     },
+    batch: (queries: unknown[]) => Promise.all(queries),
   },
 }));
 

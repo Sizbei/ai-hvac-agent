@@ -33,8 +33,8 @@ export async function getOpsInsights(
 ): Promise<OpsInsights> {
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-  // Grouped breakdowns and the per-tech load run independently; gather them
-  // concurrently. Each is org-scoped via withTenant.
+  // Grouped breakdowns and the per-tech load run independently; send them as a
+  // single db.batch to reduce 7 HTTP round-trips to 1. Each is org-scoped via withTenant.
   const [
     issueRows,
     urgencyRows,
@@ -43,7 +43,7 @@ export async function getOpsInsights(
     techRows,
     hourRows,
     costRow,
-  ] = await Promise.all([
+  ] = await db.batch([
     db
       .select({ key: serviceRequests.issueType, value: count() })
       .from(serviceRequests)
@@ -122,7 +122,7 @@ export async function getOpsInsights(
       })
       .from(serviceHistory)
       .where(withTenant(serviceHistory, organizationId)),
-  ]);
+  ] as const);
 
   const byIssueType: CategoryCount[] = issueRows
     .map((r) => ({ key: r.key, count: toNumber(r.value) }))

@@ -18,7 +18,10 @@ const { selectQueue, chain } = vi.hoisted(() => {
 });
 
 vi.mock('@/lib/db', () => ({
-  db: { select: () => chain(selectQueue.shift() ?? []) },
+  db: {
+    select: () => chain(selectQueue.shift() ?? []),
+    batch: (queries: unknown[]) => Promise.all(queries),
+  },
 }));
 
 vi.mock('@/lib/db/tenant', () => ({

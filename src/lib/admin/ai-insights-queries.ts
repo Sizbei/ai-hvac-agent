@@ -37,8 +37,8 @@ function asPercent(numerator: number, denominator: number): number {
 export async function getAiInsights(
   organizationId: string,
 ): Promise<AiInsights> {
-  // All 9 queries are independent — run them in parallel to cut 9 serial
-  // round-trips down to 1 concurrent batch.
+  // All 9 queries are independent — run them in a single db.batch to cut 9
+  // serial round-trips down to 1 HTTP request.
   const [
     [totalSessionsRow],
     [escalatedRow],
@@ -49,7 +49,7 @@ export async function getAiInsights(
     [tokensRow],
     [feedbackUpRow],
     [feedbackDownRow],
-  ] = await Promise.all([
+  ] = await db.batch([
     // Session counts (total + per-status).
     db
       .select({ value: count() })
@@ -141,7 +141,7 @@ export async function getAiInsights(
           sql`${auditLog.details} LIKE ${'%"vote":"down"%'}`,
         ),
       ),
-  ]);
+  ] as const);
 
   const totalSessions = toNumber(totalSessionsRow?.value);
   const submittedRequests = toNumber(submittedRow?.value);
