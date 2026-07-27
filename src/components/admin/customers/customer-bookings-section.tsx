@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { CalendarClock } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { SectionCard } from '@/components/admin/ui/section-card';
 import { BookingHistoryList } from '@/components/admin/customers/booking-history-list';
 import type { AgendaBooking } from '@/lib/admin/types';
 
@@ -44,20 +44,16 @@ export function CustomerBookingsSection({
   }, [customerId]);
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
-          <CalendarClock className="size-4" />
-          Bookings{bookings ? ` (${bookings.length})` : ''}
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <BookingHistoryList
-          bookings={bookings}
-          isLoading={isLoading}
-          error={error}
-        />
-      </CardContent>
-    </Card>
+    <SectionCard
+      title="Bookings"
+      icon={CalendarClock}
+      count={bookings ? bookings.length : undefined}
+    >
+      <BookingHistoryList
+        bookings={bookings}
+        isLoading={isLoading}
+        error={error}
+      />
+    </SectionCard>
   );
 }

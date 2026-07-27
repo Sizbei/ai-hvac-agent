@@ -133,7 +133,7 @@ export function CustomerDrawer({ customer, onClose }: CustomerDrawerProps) {
 
             {/* booking history */}
             <div className="mt-6">
-              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              <h3 className="mb-2 text-[13px] font-medium text-muted-foreground">
                 Booking history
               </h3>
               <BookingHistoryList
