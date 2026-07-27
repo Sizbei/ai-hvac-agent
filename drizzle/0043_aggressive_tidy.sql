@@ -18,7 +18,7 @@
 -- 3.1 communication_jobs — delete terminal 'cancelled' jobs.
 -- Leaf table (no FK dependents). Processor hot-path index is partial on
 -- status IN ('pending','failed'), so cancelled rows are never re-read. ~4 rows.
-DELETE FROM communication_jobs WHERE status = 'cancelled';
+DELETE FROM communication_jobs WHERE status = 'cancelled';--> statement-breakpoint
 
 -- 3.2 fp_import_runs — mark stuck 'running' rows as 'failed' (UPDATE, not DELETE).
 -- Preserves crash evidence + counts.lastPage cursor. 24h guard cannot touch a
@@ -28,7 +28,7 @@ SET status = 'failed',
     finished_at = NOW(),
     error = 'stuck: no finished_at after 24h, marked failed by tidy audit'
 WHERE status = 'running'
-  AND started_at < NOW() - INTERVAL '24 hours';
+  AND started_at < NOW() - INTERVAL '24 hours';--> statement-breakpoint
 
 -- 3.3 outbound_message_ledger — delete rows past their 30-day dedup window.
 -- Table + unique index are KEPT (on DO-NOT-TOUCH); only past-window rows expire,
