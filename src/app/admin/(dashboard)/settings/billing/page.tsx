@@ -1,6 +1,8 @@
 import { redirect } from 'next/navigation';
 import { getAdminSession } from '@/lib/auth/session';
 import { isSuperAdmin, isPlatformAdmin } from '@/lib/auth/authz';
+import { PageShell } from '@/components/admin/ui/page-shell';
+import { PageHeader } from '@/components/admin/ui/page-header';
 import { BillingPanel } from '@/components/admin/settings/billing-panel';
 
 /**
@@ -16,15 +18,12 @@ export default async function BillingSettingsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6 p-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Billing</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Manage your platform subscription, see your plan&apos;s entitlements,
-          and upgrade or change billing details.
-        </p>
-      </div>
+    <PageShell narrow>
+      <PageHeader
+        title="Billing"
+        subtitle="Manage your platform subscription, see your plan's entitlements, and upgrade or change billing details."
+      />
       <BillingPanel />
-    </div>
+    </PageShell>
   );
 }

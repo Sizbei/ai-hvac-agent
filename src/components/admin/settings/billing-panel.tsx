@@ -15,6 +15,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ALL_PLANS } from '@/lib/billing/plans';
 import { formatCentsExact } from '@/lib/admin/money-format';
+import { cn } from '@/lib/utils';
 
 interface BillingState {
   readonly plan: { id: string; label: string; priceCents: number; interval: string };
@@ -130,21 +131,38 @@ export function BillingPanel() {
                 {state.plan.priceCents > 0 ? `/${state.plan.interval}` : ''}
               </CardDescription>
             </div>
-            <Badge variant={state.active ? 'default' : 'destructive'}>
+            <Badge
+              variant="outline"
+              className={cn(
+                'capitalize',
+                state.active
+                  ? 'bg-success-light text-success border-success/30'
+                  : 'bg-danger-light text-danger border-danger/30',
+              )}
+            >
               {state.status}
             </Badge>
           </div>
         </CardHeader>
         <CardContent className="space-y-3 text-sm">
-          <ul className="space-y-1 text-muted-foreground">
-            <li>Up to {state.entitlements.maxStaff} staff members</li>
+          <ul className="space-y-1.5 text-muted-foreground">
+            <li className="flex items-center gap-2">
+              <Check className="size-4 shrink-0 text-success" aria-hidden="true" />
+              Up to {state.entitlements.maxStaff} staff members
+            </li>
             {state.entitlements.maxConversationsPerMonth !== undefined && (
-              <li>
+              <li className="flex items-center gap-2">
+                <Check className="size-4 shrink-0 text-success" aria-hidden="true" />
                 {state.entitlements.maxConversationsPerMonth.toLocaleString()}{' '}
                 conversations / month
               </li>
             )}
-            <li>Features: {state.entitlements.features.join(', ')}</li>
+            {state.entitlements.features.map((feature) => (
+              <li key={feature} className="flex items-center gap-2">
+                <Check className="size-4 shrink-0 text-success" aria-hidden="true" />
+                {feature}
+              </li>
+            ))}
           </ul>
           {state.currentPeriodEnd && (
             <p className="text-xs text-muted-foreground">
@@ -174,9 +192,12 @@ export function BillingPanel() {
           {ALL_PLANS.map((plan) => {
             const isCurrent = plan.id === state.plan.id;
             return (
-              <div
+              <Card
                 key={plan.id}
-                className="flex items-center justify-between gap-4 rounded-lg border p-4"
+                className={cn(
+                  'flex flex-row items-center justify-between gap-4 p-4',
+                  isCurrent && 'border-primary',
+                )}
               >
                 <div>
                   <div className="flex items-center gap-2">
@@ -209,7 +230,7 @@ export function BillingPanel() {
                     Choose {plan.label}
                   </Button>
                 )}
-              </div>
+              </Card>
             );
           })}
         </CardContent>

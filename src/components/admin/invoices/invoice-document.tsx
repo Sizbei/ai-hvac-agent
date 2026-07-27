@@ -111,17 +111,17 @@ export function InvoiceDocument({ invoice, org }: Props) {
         <div className="mt-8 overflow-x-auto">
           <table className="w-full border-collapse text-sm">
             <thead>
-              <tr>
-                <th className="rounded-tl-md bg-foreground px-3.5 py-2.5 text-left text-[10px] font-semibold uppercase tracking-[0.05em] text-background/70">
+              <tr className="border-b-2 border-foreground/80">
+                <th className="px-3.5 py-2.5 text-left text-[11px] font-medium text-muted-foreground">
                   Service / product description
                 </th>
-                <th className="bg-foreground px-3.5 py-2.5 text-right text-[10px] font-semibold uppercase tracking-[0.05em] text-background/70 tabular-nums">
+                <th className="px-3.5 py-2.5 text-right text-[11px] font-medium text-muted-foreground tabular-nums">
                   Qty / hrs
                 </th>
-                <th className="bg-foreground px-3.5 py-2.5 text-right text-[10px] font-semibold uppercase tracking-[0.05em] text-background/70 tabular-nums">
+                <th className="px-3.5 py-2.5 text-right text-[11px] font-medium text-muted-foreground tabular-nums">
                   Unit price / rate
                 </th>
-                <th className="rounded-tr-md bg-foreground px-3.5 py-2.5 text-right text-[10px] font-semibold uppercase tracking-[0.05em] text-background/70 tabular-nums">
+                <th className="px-3.5 py-2.5 text-right text-[11px] font-medium text-muted-foreground tabular-nums">
                   Amount
                 </th>
               </tr>
@@ -210,7 +210,7 @@ function MetaRow({ label, value }: { label: string; value: string }) {
 
 function PartyLabel({ children }: { children: React.ReactNode }) {
   return (
-    <p className="mb-2 border-b pb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/70">
+    <p className="mb-2 border-b pb-1.5 text-xs font-medium text-muted-foreground">
       {children}
     </p>
   );

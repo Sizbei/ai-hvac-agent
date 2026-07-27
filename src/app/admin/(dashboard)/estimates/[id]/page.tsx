@@ -3,10 +3,21 @@
 import { use, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Receipt } from 'lucide-react';
+import { Receipt } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { PageShell } from '@/components/admin/ui/page-shell';
+import { PageHeader } from '@/components/admin/ui/page-header';
+import { InfoBanner } from '@/components/admin/ui/info-banner';
+import { ErrorState } from '@/components/admin/ui/error-state';
 import { EstimateStatusBadge } from '@/components/admin/estimates/estimate-status-badge';
 import { FinancingPanel } from '@/components/admin/financing/financing-panel';
 import { formatCentsExact } from '@/lib/admin/money-format';
@@ -141,23 +152,27 @@ export default function EstimateDetailPage({
 
   if (isLoading) {
     return (
-      <div className="p-6 space-y-6">
+      <PageShell>
         <Skeleton className="h-8 w-48" />
         <Skeleton className="h-48 w-full" />
-      </div>
+      </PageShell>
     );
   }
 
   if (error || !estimate) {
     return (
-      <div className="py-12 text-center">
-        <p className="text-muted-foreground">{error ?? 'Estimate not found'}</p>
-        <Link href="/admin/estimates">
-          <Button variant="outline" className="mt-4">
-            Back to Estimates
-          </Button>
-        </Link>
-      </div>
+      <PageShell>
+        <PageHeader title="Estimate" back={{ href: '/admin/estimates', label: 'Back to estimates' }} />
+        <ErrorState
+          title={error ?? 'Estimate not found'}
+          description="This estimate may have been removed, or the link is out of date."
+          action={
+            <Link href="/admin/estimates">
+              <Button variant="outline">Back to estimates</Button>
+            </Link>
+          }
+        />
+      </PageShell>
     );
   }
 
@@ -165,40 +180,33 @@ export default function EstimateDetailPage({
   const isSynced = estimate.syncedSource === 'fieldpulse';
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center gap-4">
-        <Link href="/admin/estimates">
-          <Button variant="ghost" size="icon-sm">
-            <ArrowLeft className="size-4" />
-          </Button>
-        </Link>
-        <div className="flex-1">
-          <h1 className="text-2xl font-bold tracking-tight">
-            {estimate.title ?? 'Estimate'}
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Created {new Date(estimate.createdAt).toLocaleDateString()}
-            {estimate.dueDate && (
-              <> · Due {new Date(estimate.dueDate).toLocaleDateString()}</>
+    <PageShell>
+      <PageHeader
+        title={estimate.title ?? 'Estimate'}
+        back={{ href: '/admin/estimates', label: 'Back to estimates' }}
+        subtitle={
+          estimate.dueDate
+            ? `Created ${new Date(estimate.createdAt).toLocaleDateString()} · Due ${new Date(estimate.dueDate).toLocaleDateString()}`
+            : `Created ${new Date(estimate.createdAt).toLocaleDateString()}`
+        }
+        actions={
+          <>
+            <EstimateStatusBadge status={estimate.status} />
+            {isSynced && estimate.fieldpulseStatusName && (
+              <span className="ml-1 text-[11px] text-muted-foreground">({estimate.fieldpulseStatusName})</span>
             )}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <EstimateStatusBadge status={estimate.status} />
-          {isSynced && estimate.fieldpulseStatusName && (
-            <span className="text-[11px] text-muted-foreground ml-1">({estimate.fieldpulseStatusName})</span>
-          )}
-          {isSynced && (
-            <SyncPill source={estimate.syncedSource} size="md" />
-          )}
-        </div>
-      </div>
+            {isSynced && (
+              <SyncPill source={estimate.syncedSource} size="md" />
+            )}
+          </>
+        }
+      />
 
       {/* ── Synced source banner ── */}
       {isSynced && (
-        <div className="rounded-md border border-violet-200 bg-violet-50/60 px-3 py-2 text-sm text-violet-900">
+        <InfoBanner>
           Synced from FieldPulse — estimates are managed there.
-        </div>
+        </InfoBanner>
       )}
 
       {(estimate.customerId || estimate.serviceRequestId) && (
@@ -227,13 +235,13 @@ export default function EstimateDetailPage({
         const isSold = estimate.soldOptionId === opt.id;
         const margin = rollUpMargin(opt.lineItems);
         return (
-          <Card key={opt.id} className={isSold ? 'border-green-400' : undefined}>
+          <Card key={opt.id} className={isSold ? 'border-success' : undefined}>
             <CardHeader>
               <CardTitle className="flex items-center justify-between text-base">
                 <span>
                   {opt.name}
                   {isSold && (
-                    <span className="ml-2 text-xs font-medium text-green-700">
+                    <span className="ml-2 text-xs font-medium text-success">
                       (sold)
                     </span>
                   )}
@@ -268,7 +276,7 @@ export default function EstimateDetailPage({
 
               {/* Internal margin readout (admin-only; subordinate styling). */}
               <div className="mt-3 rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-                <div className="mb-1 font-medium uppercase tracking-wide text-[10px]">
+                <div className="mb-1 font-medium text-foreground">
                   Margin (internal)
                 </div>
                 <div className="flex justify-between">
@@ -364,18 +372,18 @@ export default function EstimateDetailPage({
               Record a verbal acceptance by selecting the won option.
             </p>
             <div className="flex flex-wrap items-center gap-2">
-              <select
-                aria-label="Estimate option to mark sold"
-                value={selectedOption}
-                onChange={(e) => setSelectedOption(e.target.value)}
-                className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                {estimate.options.map((o) => (
-                  <option key={o.id} value={o.id}>
-                    {o.name} — {formatCentsExact(o.totalCents)}
-                  </option>
-                ))}
-              </select>
+              <Select value={selectedOption} onValueChange={(v) => setSelectedOption(v ?? '')}>
+                <SelectTrigger aria-label="Estimate option to mark sold" className="w-auto min-w-[220px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {estimate.options.map((o) => (
+                    <SelectItem key={o.id} value={o.id}>
+                      {o.name} — {formatCentsExact(o.totalCents)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <Button
                 size="sm"
                 disabled={isMarking || !selectedOption}
@@ -391,6 +399,6 @@ export default function EstimateDetailPage({
 
       {/* FieldPulse spillover details — collapsed by default; hidden when null */}
       <FieldpulseDetails data={estimate.fieldpulseData} />
-    </div>
+    </PageShell>
   );
 }

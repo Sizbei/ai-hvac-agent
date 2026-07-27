@@ -2,11 +2,16 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Link2, Send } from 'lucide-react';
+import { Link2, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
+import { PageShell } from '@/components/admin/ui/page-shell';
+import { PageHeader } from '@/components/admin/ui/page-header';
+import { SectionCard } from '@/components/admin/ui/section-card';
+import { InfoBanner } from '@/components/admin/ui/info-banner';
+import { ErrorState } from '@/components/admin/ui/error-state';
 import { InvoiceStateBadge } from '@/components/admin/invoices/invoice-state-badge';
 import { AgeChip } from '@/components/admin/invoices/age-chip';
 import { InvoiceDocument, type OrgIdentity } from '@/components/admin/invoices/invoice-document';
@@ -281,23 +286,30 @@ export function InvoiceDetailClient({
 
   if (isLoading) {
     return (
-      <div className="p-6 space-y-6">
+      <PageShell>
         <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-48 w-full" />
-      </div>
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_280px]">
+          <Skeleton className="h-96 w-full" />
+          <Skeleton className="h-48 w-full" />
+        </div>
+      </PageShell>
     );
   }
 
   if (error || !invoice) {
     return (
-      <div className="py-12 text-center">
-        <p className="text-muted-foreground">{error ?? 'Invoice not found'}</p>
-        <Link href="/admin/invoices">
-          <Button variant="outline" className="mt-4">
-            Back to Invoices
-          </Button>
-        </Link>
-      </div>
+      <PageShell>
+        <PageHeader title="Invoice" back={{ href: '/admin/invoices', label: 'Back to invoices' }} />
+        <ErrorState
+          title={error ?? 'Invoice not found'}
+          description="This invoice may have been removed, or the link is out of date."
+          action={
+            <Link href="/admin/invoices">
+              <Button variant="outline">Back to invoices</Button>
+            </Link>
+          }
+        />
+      </PageShell>
     );
   }
 
@@ -327,62 +339,59 @@ export function InvoiceDetailClient({
   const fallbackOrg: OrgIdentity = { companyName: '—', address: null, phone: null };
 
   return (
-    <div className="p-6 space-y-6">
-      {/* ── Toolbar ── */}
-      <div className="flex flex-wrap items-center gap-3">
-        <h1 className="sr-only">Invoice {invoiceRef(invoice.id)}</h1>
-        <Link href="/admin/invoices">
-          <Button variant="ghost" size="icon-sm">
-            <ArrowLeft className="size-4" />
-          </Button>
-        </Link>
-        <div className="flex items-center gap-2">
-          <InvoiceStateBadge state={invoice.state} />
-          <AgeChip issuedAt={invoice.issuedAt?.toISOString() ?? null} createdAt={invoice.createdAt.toISOString()} state={invoice.state} />
-        </div>
-        {invoice.syncedSource && (
-          <SyncPill source={invoice.syncedSource} size="md" />
-        )}
-        <div className="flex-1" />
-        {/* Send reminder — only for open collectible invoices, never synced */}
-        {isCollectible(invoice) && !invoice.syncedSource && (
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={isSendingReminder}
-            onClick={() => void handleSendReminder()}
-          >
-            <Send className="mr-1.5 size-3.5" />
-            {reminderSentMsg ?? (isSendingReminder ? 'Sending…' : 'Send reminder')}
-          </Button>
-        )}
-        {/* Copy pay link — hidden for synced invoices */}
-        {!invoice.syncedSource && (
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={isCopyingLink}
-            onClick={() => void handleCopyPayLink()}
-          >
-            <Link2 className="mr-1.5 size-3.5" />
-            {copyLinkMsg ?? (isCopyingLink ? 'Generating…' : 'Copy pay link')}
-          </Button>
-        )}
-        {/* Take payment — native only; canTakePayment already checks syncedSource */}
-        {canTakePayment && (
-          <Button size="sm" onClick={() => setShowPaymentForm((v) => !v)}>
-            {showPaymentForm ? 'Hide form' : 'Take payment'}
-          </Button>
-        )}
-      </div>
+    <PageShell>
+      {/* ── Header ── */}
+      <PageHeader
+        title={`Invoice ${invoiceRef(invoice.id)}`}
+        back={{ href: '/admin/invoices', label: 'Back to invoices' }}
+        actions={
+          <>
+            <InvoiceStateBadge state={invoice.state} />
+            <AgeChip issuedAt={invoice.issuedAt?.toISOString() ?? null} createdAt={invoice.createdAt.toISOString()} state={invoice.state} />
+            {invoice.syncedSource && (
+              <SyncPill source={invoice.syncedSource} size="md" />
+            )}
+            {/* Send reminder — only for open collectible invoices, never synced */}
+            {isCollectible(invoice) && !invoice.syncedSource && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={isSendingReminder}
+                onClick={() => void handleSendReminder()}
+              >
+                <Send className="mr-1.5 size-3.5" />
+                {reminderSentMsg ?? (isSendingReminder ? 'Sending…' : 'Send reminder')}
+              </Button>
+            )}
+            {/* Copy pay link — hidden for synced invoices */}
+            {!invoice.syncedSource && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={isCopyingLink}
+                onClick={() => void handleCopyPayLink()}
+              >
+                <Link2 className="mr-1.5 size-3.5" />
+                {copyLinkMsg ?? (isCopyingLink ? 'Generating…' : 'Copy pay link')}
+              </Button>
+            )}
+            {/* Take payment — native only; canTakePayment already checks syncedSource */}
+            {canTakePayment && (
+              <Button size="sm" onClick={() => setShowPaymentForm((v) => !v)}>
+                {showPaymentForm ? 'Hide form' : 'Take payment'}
+              </Button>
+            )}
+          </>
+        }
+      />
 
       {/* ── Synced source banner ── */}
       {sourceLabel && (
-        <div className="rounded-md border border-violet-200 bg-violet-50/60 px-3 py-2 text-sm text-violet-900">
+        <InfoBanner>
           Synced from {sourceLabel} — billing and payments are managed in{' '}
           {sourceLabel}. The paid balance shown here is informational; see{' '}
           {sourceLabel} for the authoritative amount.
-        </div>
+        </InfoBanner>
       )}
 
       {/* ── Related links ── */}
@@ -426,65 +435,61 @@ export function InvoiceDetailClient({
               tech recorded actual field materials on the linked job, show the
               ESTIMATED figure (line snapshots) and the ACTUAL figure side by
               side — the estimate is never overwritten. */}
-          <Card>
-            <CardContent className="pt-4">
-              <div className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-                <div className="mb-1 text-[10px] font-medium uppercase tracking-wide">
-                  Margin (internal){hasActual ? ' — estimated' : ''}
-                </div>
-                <div className="flex justify-between">
-                  <span>Revenue</span>
-                  <span className="tabular-nums">
-                    {formatCentsExact(margin.revenueCents)}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span>{hasActual ? 'Estimated cost' : 'Cost'}</span>
-                  <span className="tabular-nums">
-                    {formatCentsExact(margin.costCents)}
-                  </span>
-                </div>
-                <div className="flex justify-between font-medium text-foreground">
-                  <span>{hasActual ? 'Estimated margin' : 'Margin'}</span>
-                  <span className="tabular-nums">
-                    {formatCentsExact(margin.marginCents)} (
-                    {(margin.marginPct * 100).toFixed(1)}%)
-                  </span>
-                </div>
+          <SectionCard
+            title={hasActual ? 'Margin (internal) — estimated' : 'Margin (internal)'}
+            contentClassName="text-xs text-muted-foreground"
+          >
+            <div className="flex justify-between">
+              <span>Revenue</span>
+              <span className="tabular-nums">
+                {formatCentsExact(margin.revenueCents)}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span>{hasActual ? 'Estimated cost' : 'Cost'}</span>
+              <span className="tabular-nums">
+                {formatCentsExact(margin.costCents)}
+              </span>
+            </div>
+            <div className="flex justify-between font-medium text-foreground">
+              <span>{hasActual ? 'Estimated margin' : 'Margin'}</span>
+              <span className="tabular-nums">
+                {formatCentsExact(margin.marginCents)} (
+                {(margin.marginPct * 100).toFixed(1)}%)
+              </span>
+            </div>
 
-                {hasActual && actualMargin && (
-                  <div className="mt-2 border-t pt-2">
-                    <div className="mb-1 text-[10px] font-medium uppercase tracking-wide">
-                      Actual (field)
-                    </div>
-                    {actualMaterialsCostCents !== null && (
-                      <div className="flex justify-between">
-                        <span>Actual materials cost</span>
-                        <span className="tabular-nums">
-                          {formatCentsExact(actualMaterialsCostCents)}
-                        </span>
-                      </div>
-                    )}
-                    {actualLaborCostCents !== null && (
-                      <div className="flex justify-between">
-                        <span>Actual labor cost</span>
-                        <span className="tabular-nums">
-                          {formatCentsExact(actualLaborCostCents)}
-                        </span>
-                      </div>
-                    )}
-                    <div className="flex justify-between font-medium text-foreground">
-                      <span>Actual margin</span>
-                      <span className="tabular-nums">
-                        {formatCentsExact(actualMargin.marginCents)} (
-                        {(actualMargin.marginPct * 100).toFixed(1)}%)
-                      </span>
-                    </div>
+            {hasActual && actualMargin && (
+              <div className="mt-2 border-t pt-2">
+                <div className="mb-1 font-medium text-foreground">
+                  Actual (field)
+                </div>
+                {actualMaterialsCostCents !== null && (
+                  <div className="flex justify-between">
+                    <span>Actual materials cost</span>
+                    <span className="tabular-nums">
+                      {formatCentsExact(actualMaterialsCostCents)}
+                    </span>
                   </div>
                 )}
+                {actualLaborCostCents !== null && (
+                  <div className="flex justify-between">
+                    <span>Actual labor cost</span>
+                    <span className="tabular-nums">
+                      {formatCentsExact(actualLaborCostCents)}
+                    </span>
+                  </div>
+                )}
+                <div className="flex justify-between font-medium text-foreground">
+                  <span>Actual margin</span>
+                  <span className="tabular-nums">
+                    {formatCentsExact(actualMargin.marginCents)} (
+                    {(actualMargin.marginPct * 100).toFixed(1)}%)
+                  </span>
+                </div>
               </div>
-            </CardContent>
-          </Card>
+            )}
+          </SectionCard>
 
           {/* Take payment — never for a read-only FSM-synced invoice (canTakePayment).
               Toggled by the toolbar button above. */}
@@ -569,7 +574,7 @@ export function InvoiceDetailClient({
                               {p.status}
                             </span>
                             {p.isDeposit && (
-                              <span className="rounded-full border bg-blue-50 px-2 py-0.5 text-xs text-blue-700">
+                              <span className="rounded-full border border-info/30 bg-info-light px-2 py-0.5 text-xs text-info-foreground">
                                 deposit
                               </span>
                             )}
@@ -680,6 +685,6 @@ export function InvoiceDetailClient({
         {/* Right column: collections + activity sidebar */}
         <InvoiceCollectionsSide invoice={invoice} reminders={reminders} />
       </div>
-    </div>
+    </PageShell>
   );
 }
