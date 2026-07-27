@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 
 interface ModelChoice {
   readonly id: string;
@@ -190,13 +191,12 @@ export function AiModelPanel() {
           </div>
           <div className="space-y-2">
             <Label htmlFor="ai-model-test-prompt">Prompt</Label>
-            <textarea
+            <Textarea
               id="ai-model-test-prompt"
               value={testPrompt}
               onChange={(e) => setTestPrompt(e.target.value)}
               maxLength={2000}
               rows={3}
-              className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
             />
           </div>
           <Button

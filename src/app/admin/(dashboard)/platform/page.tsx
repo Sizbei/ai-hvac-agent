@@ -2,6 +2,8 @@ import { redirect } from 'next/navigation';
 import { getAdminSession } from '@/lib/auth/session';
 import { isPlatformAdmin } from '@/lib/auth/authz';
 import { PlatformConsole } from '@/components/admin/platform/platform-console';
+import { PageShell } from '@/components/admin/ui/page-shell';
+import { PageHeader } from '@/components/admin/ui/page-header';
 
 /**
  * Platform tenant console — visible ONLY to platform admins (env allowlist).
@@ -18,15 +20,12 @@ export default async function PlatformPage() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6 p-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Platform</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Provision new tenant organizations and view existing ones. Creating a
-          tenant issues a one-time invite link for the owner to accept.
-        </p>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Platform"
+        subtitle="Provision new tenant organizations and view existing ones. Creating a tenant issues a one-time invite link for the owner to accept."
+      />
       <PlatformConsole />
-    </div>
+    </PageShell>
   );
 }

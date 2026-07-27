@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
+import { Textarea } from '@/components/ui/textarea';
 import { LAUNCHER_POSITIONS } from '@/lib/admin/org-config-types';
 import type {
   OrgConfig,
@@ -131,14 +132,13 @@ export function BrandingPanel({ config, onSave }: BrandingPanelProps) {
 
           <div className="space-y-2">
             <Label htmlFor="welcome">Welcome message</Label>
-            <textarea
+            <Textarea
               id="welcome"
               value={welcomeMessage}
               onChange={(e) => setWelcomeMessage(e.target.value)}
               placeholder="Hi! How can we help with your heating or cooling today?"
               maxLength={500}
               rows={3}
-              className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
             />
           </div>
 
