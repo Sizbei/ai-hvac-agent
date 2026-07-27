@@ -4,6 +4,7 @@ import { User, Inbox } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { UrgencyBadge } from '@/components/admin/urgency-badge';
 import { StatusBadge } from '@/components/admin/status-badge';
+import { ContextBadge } from '@/components/admin/ui/context-badge';
 import type { DashboardRequest } from '@/lib/admin/types';
 
 interface DispatchColumnProps {
@@ -52,20 +53,18 @@ function JobCard({
         </span>
         <div className="flex shrink-0 items-center gap-1">
           {job.autoAssigned && (
-            <span
+            <ContextBadge
+              variant="auto"
+              label="Auto"
               title="Auto-assigned by smart dispatch"
-              className="inline-flex items-center rounded-full border border-sky-300 bg-sky-100 px-1.5 py-0.5 text-[10px] font-medium text-sky-800"
-            >
-              Auto
-            </span>
+            />
           )}
           {job.isAfterHours && (
-            <span
+            <ContextBadge
+              variant="after-hours"
+              label="After-hrs"
               title="After hours"
-              className="inline-flex items-center rounded-full border border-amber-300 bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800"
-            >
-              After-hrs
-            </span>
+            />
           )}
         </div>
       </div>
@@ -94,9 +93,7 @@ export function DispatchColumn({
       <div className="mb-2 flex items-center gap-2">
         <Icon
           className={
-            isUnassigned
-              ? 'h-4 w-4 text-amber-600 dark:text-amber-400'
-              : 'h-4 w-4 text-muted-foreground'
+            isUnassigned ? 'h-4 w-4 text-warning' : 'h-4 w-4 text-muted-foreground'
           }
         />
         <h2 className="truncate text-sm font-semibold">{title}</h2>

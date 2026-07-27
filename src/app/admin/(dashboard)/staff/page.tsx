@@ -14,6 +14,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import type { StaffRecord } from '@/lib/admin/types';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
+import { SectionDivider } from '@/components/admin/ui/section-divider';
 
 export default function StaffPage() {
   useEffect(() => { document.title = 'Staff · Spears Admin'; }, []);
@@ -86,6 +87,8 @@ export default function StaffPage() {
         onEdit={handleEditClick}
         onResetPassword={handleResetClick}
       />
+
+      <SectionDivider label="Pending invites" />
 
       <PendingInvites
         invites={invites}

@@ -182,7 +182,7 @@ export function PricebookFormDialog({
     <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen && submittingRef.current) return; if (!isOpen) onClose(); }}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{isEditMode ? 'Edit Item' : 'Add Item'}</DialogTitle>
+          <DialogTitle>{isEditMode ? 'Edit item' : 'Add item'}</DialogTitle>
           <DialogDescription>
             {isEditMode
               ? 'Update this pricebook item.'
@@ -267,7 +267,7 @@ export function PricebookFormDialog({
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="item-member-price">Member Price (USD)</Label>
+              <Label htmlFor="item-member-price">Member price (USD)</Label>
               <Input
                 id="item-member-price"
                 type="number"

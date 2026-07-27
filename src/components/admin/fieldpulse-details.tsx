@@ -93,7 +93,7 @@ export function FieldpulseDetails({ data, customFields }: FieldpulseDetailsProps
           <div className="flex flex-col gap-3">
             {normalizedCustomFields && (
               <div>
-                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-violet-500">
+                <p className="mb-1 text-[10px] font-semibold text-violet-500">
                   Custom fields
                 </p>
                 <dl className="flex flex-col gap-1">
@@ -108,7 +108,7 @@ export function FieldpulseDetails({ data, customFields }: FieldpulseDetailsProps
             )}
             {sections.map((section) => (
               <div key={section.title}>
-                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-violet-500">
+                <p className="mb-1 text-[10px] font-semibold text-violet-500">
                   {section.title}
                 </p>
                 <dl className="flex flex-col gap-1">

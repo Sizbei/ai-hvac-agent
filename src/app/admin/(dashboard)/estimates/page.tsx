@@ -2,11 +2,12 @@
 
 import { Fragment, useCallback, useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
-import { ChevronDown, ChevronRight, Plus, AlertCircle, FileText, Search } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, AlertCircle, AlertTriangle, FileText, FolderOpen, Clock, Trophy, Gauge, Search } from 'lucide-react';
 import { useEstimates, type EstimatePipelineStats } from '@/hooks/use-estimates';
 import { useUrlFilterSync } from '@/hooks/use-url-filter-sync';
 import { EstimateCreateDialog } from '@/components/admin/estimates/estimate-create-dialog';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -15,7 +16,16 @@ import { TableSkeleton } from '@/components/admin/skeletons';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
-import { pageLabel } from '@/lib/admin/invoice-list-helpers';
+import { StatCard } from '@/components/admin/ui/stat-card';
+import { EmptyState } from '@/components/admin/ui/empty-state';
+import { SegmentedControl } from '@/components/ui/segmented-control';
+import { Pager } from '@/components/admin/ui/pager';
+import {
+  FPS_STATUS_BADGE,
+  FPS_STATUS_DEFAULT,
+  ESTIMATE_STATUS_BADGE,
+  ESTIMATE_STATUS_DEFAULT,
+} from '@/lib/admin/status-colors';
 import { SyncPill } from '@/components/admin/sync-pill';
 import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
 import { cn } from '@/lib/utils';
@@ -27,38 +37,30 @@ type Bucket = 'open' | 'won' | 'lost' | 'draft';
 
 // ── local FPS status pill ──────────────────────────────────────────────────────
 // EstimateStatusBadge renders native enum values only; fps names (Sent, Estimate,
-// Accepted, Completed, Lost, Draft) need a local pill.
+// Accepted, Completed, Lost, Draft) need a local pill. Both draw from the shared
+// token status maps so colour goes through semantic tokens only.
 
-const FPS_PILL_STYLES: Record<string, string> = {
-  Sent:      'border-sky-300 bg-sky-100 text-sky-800',
-  Estimate:  'border-gray-300 bg-gray-100 text-gray-700',
-  Accepted:  'border-green-300 bg-green-100 text-green-800',
-  Completed: 'border-green-300 bg-green-100 text-green-800',
-  Lost:      'border-red-300 bg-red-100 text-red-800',
-  Draft:     'border-amber-300 bg-amber-100 text-amber-800',
-};
-
-const NATIVE_PILL_STYLES: Record<string, string> = {
-  open:      'border-blue-300 bg-blue-100 text-blue-800',
-  sold:      'border-green-300 bg-green-100 text-green-800',
-  dismissed: 'border-gray-300 bg-gray-100 text-gray-600',
-  expired:   'border-amber-300 bg-amber-100 text-amber-800',
+const NATIVE_LABELS: Record<string, string> = {
+  open: 'Open',
+  sold: 'Sold',
+  dismissed: 'Dismissed',
+  expired: 'Expired',
 };
 
 function StatusPill({ fps, native }: { fps: string | null; native: string }) {
   if (fps) {
-    const cls = FPS_PILL_STYLES[fps] ?? 'border-gray-300 bg-gray-100 text-gray-700';
+    const cls = FPS_STATUS_BADGE[fps] ?? FPS_STATUS_DEFAULT;
     return (
-      <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${cls}`}>
+      <Badge variant="outline" className={cls}>
         {fps}
-      </span>
+      </Badge>
     );
   }
-  const cls = NATIVE_PILL_STYLES[native] ?? 'border-gray-300 bg-gray-100 text-gray-600';
+  const cls = ESTIMATE_STATUS_BADGE[native] ?? ESTIMATE_STATUS_DEFAULT;
   return (
-    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${cls}`}>
-      {native}
-    </span>
+    <Badge variant="outline" className={cls}>
+      {NATIVE_LABELS[native] ?? native}
+    </Badge>
   );
 }
 
@@ -92,50 +94,38 @@ function KpiBand({ stats }: { stats: EstimatePipelineStats | null }) {
   const s = stats;
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      {/* Open pipeline */}
-      <Card className="p-5">
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Open pipeline</p>
-        <p className="mt-2 font-heading text-2xl font-bold tabular-nums">
-          {formatCentsExact(s?.openCents ?? 0)}
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {s?.openCount ?? 0} open estimates
-        </p>
-      </Card>
-
-      {/* Needs follow-up */}
-      <Card className="p-5 border-amber-200">
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Needs follow-up</p>
-        <p className="mt-2 font-heading text-2xl font-bold tabular-nums text-amber-600">
-          {formatCentsExact(s?.staleCents ?? 0)}
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {s?.staleCount ?? 0} open &gt;14 days
-        </p>
-      </Card>
-
-      {/* Won */}
-      <Card className="p-5 border-green-200">
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Won</p>
-        <p className="mt-2 font-heading text-2xl font-bold tabular-nums text-emerald-700">
-          {formatCentsExact(s?.wonCents ?? 0)}
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {s?.wonCount ?? 0} won
-          {s?.winRatePct != null && <> · win rate {s.winRatePct}%</>}
-        </p>
-      </Card>
-
-      {/* Avg age / Lost */}
-      <Card className="p-5">
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Avg age of open</p>
-        <p className="mt-2 font-heading text-2xl font-bold tabular-nums">
-          {s?.avgOpenAgeDays ?? 0}d
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {s?.lostCount ?? 0} lost ({formatCentsExact(s?.lostCents ?? 0)})
-        </p>
-      </Card>
+      <StatCard
+        icon={FolderOpen}
+        intent="info"
+        label="Open pipeline"
+        value={formatCentsExact(s?.openCents ?? 0)}
+        sublabel={`${s?.openCount ?? 0} open estimates`}
+      />
+      <StatCard
+        icon={Clock}
+        intent="warning"
+        label="Needs follow-up"
+        value={formatCentsExact(s?.staleCents ?? 0)}
+        sublabel={`${s?.staleCount ?? 0} open >14 days`}
+      />
+      <StatCard
+        icon={Trophy}
+        intent="success"
+        label="Won"
+        value={formatCentsExact(s?.wonCents ?? 0)}
+        sublabel={
+          s?.winRatePct != null
+            ? `${s?.wonCount ?? 0} won · win rate ${s.winRatePct}%`
+            : `${s?.wonCount ?? 0} won`
+        }
+      />
+      <StatCard
+        icon={Gauge}
+        intent="neutral"
+        label="Avg age of open"
+        value={`${s?.avgOpenAgeDays ?? 0}d`}
+        sublabel={`${s?.lostCount ?? 0} lost (${formatCentsExact(s?.lostCents ?? 0)})`}
+      />
     </div>
   );
 }
@@ -296,46 +286,36 @@ export default function EstimatesPage() {
       </div>
 
       {/* Status tabs */}
-      <div className="flex gap-1 overflow-x-auto border-b">
-        {TABS.map((tab) => {
-          const isActive = activeBucket === tab.value;
-          const count = tabCount(stats, tab.value);
-          const cents = tabCents(stats, tab.value);
-          return (
-            <button
-              key={tab.label}
-              type="button"
-              onClick={() => switchTab(tab.value as Bucket | null)}
-              className={cn(
-                'flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition-colors',
-                isActive
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {tab.label}
-              {stats && (
-                <span className="text-xs tabular-nums text-muted-foreground">
-                  {count} · {formatCentsExact(cents)}
-                </span>
-              )}
-            </button>
-          );
-        })}
+      <div className="overflow-x-auto">
+        <SegmentedControl<string>
+          aria-label="Filter estimates by status"
+          options={TABS.map((tab) => ({
+            value: tab.value ?? 'all',
+            label: stats
+              ? `${tab.label} · ${formatCentsExact(tabCents(stats, tab.value))}`
+              : tab.label,
+            badge: stats ? tabCount(stats, tab.value) : undefined,
+          }))}
+          value={activeBucket ?? 'all'}
+          onChange={(v) => switchTab(v === 'all' ? null : (v as Bucket))}
+        />
       </div>
 
       {/* List */}
       {isLoading ? (
         <TableSkeleton rows={8} cols={6} />
       ) : estimates.length === 0 ? (
-        <div className="rounded-lg border border-dashed py-16 text-center">
-          <FileText className="mx-auto size-8 text-muted-foreground" />
-          <p className="mt-3 text-sm text-muted-foreground">{emptyMessage(activeBucket)}</p>
-        </div>
+        <Card className="p-5">
+          <EmptyState
+            icon={FileText}
+            title="No estimates"
+            description={emptyMessage(activeBucket)}
+          />
+        </Card>
       ) : (
         <div className="overflow-hidden rounded-lg border">
           <table className="w-full text-sm">
-            <thead className="bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
+            <thead className="border-b bg-muted/50 text-left text-[11px] font-medium text-muted-foreground">
               <tr>
                 <th className="px-4 py-2 font-medium">Customer</th>
                 <th className="px-4 py-2 font-medium max-w-48">Title</th>
@@ -386,10 +366,10 @@ export default function EstimatesPage() {
                       {/* Waiting: Nd, amber+⚠ when open >14d */}
                       <td className="px-4 py-3" onClick={toggle}>
                         <span className={cn(
-                          'text-xs tabular-nums',
-                          stale ? 'text-amber-600 font-medium' : 'text-muted-foreground',
+                          'inline-flex items-center gap-0.5 text-xs tabular-nums',
+                          stale ? 'text-warning font-medium' : 'text-muted-foreground',
                         )}>
-                          {stale && <span aria-hidden="true" className="mr-0.5">⚠</span>}
+                          {stale && <AlertTriangle aria-hidden="true" className="size-3.5" />}
                           {age}d
                         </span>
                       </td>
@@ -493,34 +473,14 @@ export default function EstimatesPage() {
 
       {/* Pager — only shown when there are results */}
       {total > 0 && (
-        <div className="flex items-center justify-between px-1 py-3 text-sm">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={safePage <= 1}
-          >
-            ← Prev
-          </Button>
-          <span className="tabular-nums text-xs text-muted-foreground">
-            {pageLabel(safePage, total, PER_PAGE)}
-          </span>
-          <div className="flex gap-2">
-            <Button type="button" variant="ghost" size="sm"
-              onClick={() => setPage(1)} disabled={safePage <= 1}>
-              First
-            </Button>
-            <Button type="button" variant="ghost" size="sm"
-              onClick={() => setPage(totalPages)} disabled={safePage >= totalPages}>
-              Last
-            </Button>
-            <Button type="button" variant="outline" size="sm"
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={safePage >= totalPages}>
-              Next →
-            </Button>
-          </div>
-        </div>
+        <Pager
+          page={safePage}
+          totalPages={totalPages}
+          total={total}
+          perPage={PER_PAGE}
+          onPageChange={setPage}
+          showFirstLast
+        />
       )}
 
       <EstimateCreateDialog

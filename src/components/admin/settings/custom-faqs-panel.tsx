@@ -15,6 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
+import { Textarea } from '@/components/ui/textarea';
 import type { CustomFaq, CustomFaqInput } from '@/lib/admin/org-config-types';
 
 interface CustomFaqsPanelProps {
@@ -96,14 +97,13 @@ export function CustomFaqsPanel({
           </div>
           <div className="space-y-2">
             <Label htmlFor="faq-answer">Answer</Label>
-            <textarea
+            <Textarea
               id="faq-answer"
               value={answer}
               onChange={(e) => setAnswer(e.target.value)}
               placeholder="Yes! Our Comfort Club is $19/mo and includes two tune-ups a year…"
               maxLength={2000}
               rows={3}
-              className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
             />
           </div>
           <div className="space-y-2">

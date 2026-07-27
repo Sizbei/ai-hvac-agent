@@ -9,6 +9,7 @@ import { DashboardListCard } from '@/components/admin/dashboard/dashboard-list-c
 import { RecentConversationsCard } from '@/components/admin/dashboard/recent-conversations-card';
 import { RequestDetailSheet } from '@/components/admin/request-detail-sheet';
 import { OnboardingChecklist } from '@/components/admin/onboarding/onboarding-checklist';
+import { PageShell } from '@/components/admin/ui/page-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
 export default function AdminDashboardPage() {
@@ -16,7 +17,7 @@ export default function AdminDashboardPage() {
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
 
   return (
-    <div className="mx-auto max-w-[1280px] space-y-7 p-6 sm:p-7">
+    <PageShell>
       <DashboardGreeting />
 
       <OnboardingChecklist />
@@ -36,7 +37,7 @@ export default function AdminDashboardPage() {
           <DashboardListCard
             title="Today's schedule"
             icon={CalendarClock}
-            iconColor="text-sky-600 dark:text-sky-400"
+            intent="info"
             requests={overview?.todaySchedule ?? []}
             isLoading={isLoading}
             emptyLabel="No jobs scheduled for today."
@@ -48,7 +49,7 @@ export default function AdminDashboardPage() {
             <DashboardListCard
               title="Needs attention"
               icon={Siren}
-              iconColor="text-red-600 dark:text-red-400"
+              intent="danger"
               requests={overview?.needsAttention ?? []}
               isLoading={isLoading}
               emptyLabel="No unassigned urgent requests."
@@ -58,7 +59,7 @@ export default function AdminDashboardPage() {
             <DashboardListCard
               title="Awaiting follow-up"
               icon={PauseCircle}
-              iconColor="text-slate-600 dark:text-slate-300"
+              intent="neutral"
               requests={overview?.awaitingFollowUp ?? []}
               isLoading={isLoading}
               emptyLabel="No on-hold jobs awaiting follow-up."
@@ -77,6 +78,6 @@ export default function AdminDashboardPage() {
         onClose={() => setSelectedRequestId(null)}
         onAssigned={refetch}
       />
-    </div>
+    </PageShell>
   );
 }

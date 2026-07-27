@@ -58,6 +58,41 @@ export const SESSION_STATUS_BADGE: Record<string, string> = {
 
 export const SESSION_STATUS_DEFAULT = SESSION_STATUS_BADGE.chatting;
 
+// Invoice / estimate money states
+
+/** Token classes for invoice `state` enum values (draft/open/paid/void/refunded). */
+export const INVOICE_STATE_BADGE: Record<string, string> = {
+  draft: 'bg-muted text-muted-foreground border-border',
+  open: 'bg-info-light text-info-foreground border-info/30',
+  paid: 'bg-success-light text-success border-success/30',
+  void: 'bg-muted text-muted-foreground border-border',
+  refunded: 'bg-warning-light text-warning-foreground border-warning/30',
+};
+
+export const INVOICE_STATE_DEFAULT = INVOICE_STATE_BADGE.draft;
+
+/** Token classes for native estimate `status` enum values. */
+export const ESTIMATE_STATUS_BADGE: Record<string, string> = {
+  open: 'bg-info-light text-info-foreground border-info/30',
+  sold: 'bg-success-light text-success border-success/30',
+  dismissed: 'bg-muted text-muted-foreground border-border',
+  expired: 'bg-warning-light text-warning-foreground border-warning/30',
+};
+
+export const ESTIMATE_STATUS_DEFAULT = ESTIMATE_STATUS_BADGE.dismissed;
+
+/** Token classes for FieldPulse estimate status names (Sent/Estimate/Accepted/…). */
+export const FPS_STATUS_BADGE: Record<string, string> = {
+  Sent: 'bg-info-light text-info-foreground border-info/30',
+  Estimate: 'bg-muted text-muted-foreground border-border',
+  Accepted: 'bg-success-light text-success border-success/30',
+  Completed: 'bg-success-light text-success border-success/30',
+  Lost: 'bg-danger-light text-danger border-danger/30',
+  Draft: 'bg-warning-light text-warning-foreground border-warning/30',
+};
+
+export const FPS_STATUS_DEFAULT = 'bg-muted text-muted-foreground border-border';
+
 // Urgency
 
 /** Tailwind token classes for the `urgency` enum values. */

@@ -1,6 +1,7 @@
 'use client';
 
 import { formatCentsExact } from '@/lib/admin/money-format';
+import { SectionCard } from '@/components/admin/ui/section-card';
 import type { InvoiceDetailView, InvoiceReminderView } from '@/lib/admin/invoice-queries';
 import { collectionsStats, buildActivity, type ActivityEvent } from './invoice-activity';
 
@@ -12,10 +13,10 @@ const KIND_LABEL: Record<ActivityEvent['kind'], string> = {
 };
 
 const KIND_DOT: Record<ActivityEvent['kind'], string> = {
-  created: 'bg-sky-500',
-  payment: 'bg-emerald-500',
-  refund: 'bg-amber-500',
-  reminder: 'bg-violet-500',
+  created: 'bg-info',
+  payment: 'bg-success',
+  refund: 'bg-warning',
+  reminder: 'bg-primary',
 };
 
 export function InvoiceCollectionsSide({
@@ -32,12 +33,8 @@ export function InvoiceCollectionsSide({
   return (
     <div className="flex flex-col gap-4">
       {/* Collections panel */}
-      <div className="rounded-xl border bg-card p-5">
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Collections
-        </p>
-
-        <div className="mt-3 flex flex-col gap-2">
+      <SectionCard title="Collections">
+        <div className="flex flex-col gap-2">
           <Row label="Balance due" value={formatCentsExact(balanceCents)} />
           <Row
             label="Days overdue"
@@ -50,18 +47,14 @@ export function InvoiceCollectionsSide({
           />
           <Row label="Last reminder" value={lastRemindedRel ?? '—'} />
         </div>
-      </div>
+      </SectionCard>
 
       {/* Activity panel */}
-      <div className="rounded-xl border bg-card p-5">
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Activity
-        </p>
-
+      <SectionCard title="Activity">
         {activity.length === 0 ? (
-          <p className="mt-3 text-sm text-muted-foreground">No activity yet.</p>
+          <p className="text-sm text-muted-foreground">No activity yet.</p>
         ) : (
-          <ol className="mt-3 flex flex-col gap-3">
+          <ol className="flex flex-col gap-3">
             {activity.map((ev, i) => (
               <li key={ev.at.toISOString() + ev.kind + i} className="flex items-start gap-2.5">
                 <span
@@ -77,7 +70,7 @@ export function InvoiceCollectionsSide({
             ))}
           </ol>
         )}
-      </div>
+      </SectionCard>
     </div>
   );
 }

@@ -1,9 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, MessagesSquare } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { EmptyState } from '@/components/admin/ui/empty-state';
 import { ChannelChip } from '@/components/admin/conversations/channel-chip';
 import { StatusBadge } from '@/components/admin/status-badge';
 import { useAdminConversations } from '@/hooks/use-admin-conversations';
@@ -48,9 +49,12 @@ export function RecentConversationsCard() {
           ))}
         </div>
       ) : recent.length === 0 ? (
-        <p className="py-8 text-center text-sm text-muted-foreground">
-          No conversations yet.
-        </p>
+        <EmptyState
+          icon={MessagesSquare}
+          title="No conversations yet"
+          description="New chats from web, phone, and SMS will show up here."
+          className="py-10"
+        />
       ) : (
         <ul className="-mx-2 space-y-0.5">
           {recent.map((c) => (

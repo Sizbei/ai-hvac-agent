@@ -11,6 +11,8 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { EmptyState } from '@/components/admin/ui/empty-state';
+import { Package } from 'lucide-react';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { cn } from '@/lib/utils';
 import type { InventoryItem } from '@/hooks/use-inventory';
@@ -41,9 +43,11 @@ function SkeletonRows() {
 export function InventoryTable({ items, isLoading, onEdit }: InventoryTableProps) {
   if (!isLoading && items.length === 0) {
     return (
-      <div className="py-12 text-center text-muted-foreground">
-        No materials tracked yet. Add a stock row from a pricebook material.
-      </div>
+      <EmptyState
+        icon={Package}
+        title="No materials tracked"
+        description="Add a stock row from a pricebook material to start tracking inventory."
+      />
     );
   }
 
@@ -52,9 +56,9 @@ export function InventoryTable({ items, isLoading, onEdit }: InventoryTableProps
       <TableHeader>
         <TableRow>
           <TableHead>Material</TableHead>
-          <TableHead className="text-right">On Hand</TableHead>
-          <TableHead className="text-right">Reorder At</TableHead>
-          <TableHead className="text-right">Unit Cost</TableHead>
+          <TableHead className="text-right">On hand</TableHead>
+          <TableHead className="text-right">Reorder at</TableHead>
+          <TableHead className="text-right">Unit cost</TableHead>
           <TableHead>Location</TableHead>
           <TableHead className="text-right">Actions</TableHead>
         </TableRow>
@@ -66,12 +70,14 @@ export function InventoryTable({ items, isLoading, onEdit }: InventoryTableProps
           items.map((item) => (
             <TableRow
               key={item.id}
-              className={cn(item.belowReorder && 'bg-amber-50')}
+              className={cn(item.belowReorder && 'bg-warning-light/40')}
             >
               <TableCell className="font-medium">
                 {item.itemName}
                 {item.belowReorder && (
-                  <Badge variant="destructive" className="ml-2 align-middle">
+                  <Badge
+                    className="ml-2 align-middle bg-warning-light text-warning border-0"
+                  >
                     Low
                   </Badge>
                 )}

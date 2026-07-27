@@ -4,7 +4,7 @@ import Link from 'next/link';
 import type { InvoiceListItem } from '@/hooks/use-invoices';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { isCollectible, invoiceRef, canResend, REMINDER_COOLDOWN_MS } from '@/lib/admin/invoice-collectible';
-import { ChevronDown, ChevronRight, MoreHorizontal } from 'lucide-react';
+import { CheckCircle, ChevronDown, ChevronRight, MoreHorizontal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -138,8 +138,9 @@ function InvoiceRowInner({ invoice, onRemind, onCopyPayLink, onVoid, pending = f
                 Send reminder
               </Button>
             ) : cooldownActive ? (
-              <span className="inline-block rounded-lg px-2.5 py-1.5 text-xs font-semibold text-emerald-700">
-                {`✓ Reminded ${remindedRel(invoice.lastReminderSentAt)}`}
+              <span className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-success">
+                <CheckCircle className="size-3.5" aria-hidden="true" />
+                {`Reminded ${remindedRel(invoice.lastReminderSentAt)}`}
               </span>
             ) : (
               <div className="flex items-center gap-1.5">

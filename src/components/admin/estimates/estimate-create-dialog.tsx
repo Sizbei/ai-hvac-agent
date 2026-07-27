@@ -373,7 +373,7 @@ export function EstimateCreateDialog({
           <div className="space-y-4">
             {error && <p className="text-sm text-destructive">{error}</p>}
             {isMember && (
-              <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800">
+              <div className="flex items-center gap-2 rounded-lg border border-success/30 bg-success-light px-3 py-2 text-sm text-success">
                 <BadgeCheck className="size-4 shrink-0" />
                 Active member — member pricing is applied by default. Toggle it per
                 line below.

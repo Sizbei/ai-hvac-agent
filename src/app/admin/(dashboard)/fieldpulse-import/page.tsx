@@ -13,7 +13,10 @@ import {
 } from '@/components/admin/fp-import/import-status-model';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
+import { SectionHeading } from '@/components/admin/ui/section-heading';
+import { SkeletonTable } from '@/components/admin/ui/skeleton-table';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 
 const PIPELINE_ORDER = ['technicians', 'customers', 'jobs', 'invoices'] as const;
@@ -31,21 +34,26 @@ function StatusChip({ status }: { status?: string }) {
 
   const chipClass = cn(
     'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
-    tone === 'info' && 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
-    tone === 'positive' && 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300',
-    tone === 'destructive' && 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
+    tone === 'info' && 'bg-info-light text-info',
+    tone === 'positive' && 'bg-success-light text-success',
+    tone === 'destructive' && 'bg-danger-light text-danger',
     tone === 'muted' && 'bg-muted text-muted-foreground',
     status === 'running' && 'animate-pulse motion-reduce:animate-none',
   );
 
-  // SINGLE TEXT NODE — no nested spans inside the chip
   return <span className={chipClass}>{label}</span>;
 }
 
 function ProgressBar({ pct, isRunning }: { pct: number | null; isRunning: boolean }) {
   if (pct !== null) {
     return (
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+      <div
+        className="h-1.5 w-full overflow-hidden rounded-full bg-muted"
+        role="progressbar"
+        aria-valuenow={pct}
+        aria-valuemin={0}
+        aria-valuemax={100}
+      >
         <div
           className="h-full rounded-full bg-primary transition-[width] duration-700 motion-reduce:transition-none"
           style={{ width: `${pct}%`, transitionTimingFunction: 'cubic-bezier(.23,1,.32,1)' }}
@@ -54,7 +62,6 @@ function ProgressBar({ pct, isRunning }: { pct: number | null; isRunning: boolea
     );
   }
   if (isRunning) {
-    // Indeterminate shimmer when running but total unknown
     return (
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
         <div className="h-full w-1/3 animate-pulse rounded-full bg-primary/50 motion-reduce:animate-none" />
@@ -95,7 +102,11 @@ function ElapsedTime({
   }, [isRunning]);
 
   const elapsed = formatElapsed(run.startedAt, run.finishedAt);
-  return <p className="text-xs text-muted-foreground">Elapsed: {elapsed}</p>;
+  return (
+    <p className="text-xs text-muted-foreground" aria-live="polite">
+      Elapsed: {elapsed}
+    </p>
+  );
 }
 
 function RecentRunsTable({ runs }: { runs: readonly FpImportRunSummary[] }) {
@@ -112,13 +123,13 @@ function RecentRunsTable({ runs }: { runs: readonly FpImportRunSummary[] }) {
       <table className="w-full text-sm">
         <thead className="border-b bg-muted/50">
           <tr>
-            <th className="px-3 py-2 text-left font-medium">Phase</th>
-            <th className="px-3 py-2 text-left font-medium">Status</th>
-            <th className="px-3 py-2 text-left font-medium tabular-nums">Fetched</th>
-            <th className="px-3 py-2 text-left font-medium tabular-nums">Created</th>
-            <th className="px-3 py-2 text-left font-medium tabular-nums">Errors</th>
-            <th className="px-3 py-2 text-left font-medium">Started</th>
-            <th className="px-3 py-2 text-left font-medium tabular-nums">Duration</th>
+            <th className="px-3 py-2 text-left text-[11px] text-muted-foreground">Phase</th>
+            <th className="px-3 py-2 text-left text-[11px] text-muted-foreground">Status</th>
+            <th className="px-3 py-2 text-left text-[11px] text-muted-foreground tabular-nums">Fetched</th>
+            <th className="px-3 py-2 text-left text-[11px] text-muted-foreground tabular-nums">Created</th>
+            <th className="px-3 py-2 text-left text-[11px] text-muted-foreground tabular-nums">Errors</th>
+            <th className="px-3 py-2 text-left text-[11px] text-muted-foreground">Started</th>
+            <th className="px-3 py-2 text-left text-[11px] text-muted-foreground tabular-nums">Duration</th>
           </tr>
         </thead>
         <tbody className="divide-y">
@@ -156,8 +167,6 @@ function RecentRunsTable({ runs }: { runs: readonly FpImportRunSummary[] }) {
 }
 
 export default function FieldpulseImportPage() {
-  // Cast at the boundary: FpImportRun.counts is Record<string,unknown> but
-  // presenter functions expect FpImportRunSummary (with typed FpRunCounts).
   const { runs: rawRuns, isLoading, error, refresh, isPolling } = useFpImportStatus();
   const runs = rawRuns as readonly FpImportRunSummary[];
 
@@ -166,15 +175,8 @@ export default function FieldpulseImportPage() {
   if (isLoading && runs.length === 0) {
     return (
       <PageShell>
-        <PageHeader title="FieldPulse Import" subtitle="Live import progress by phase" />
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {PIPELINE_ORDER.map((phase) => (
-            <div
-              key={phase}
-              className="h-40 animate-pulse rounded-xl bg-muted motion-reduce:animate-none"
-            />
-          ))}
-        </div>
+        <PageHeader title="FieldPulse import" subtitle="Live import progress by phase" />
+        <SkeletonTable rows={4} cols={4} />
       </PageShell>
     );
   }
@@ -182,7 +184,7 @@ export default function FieldpulseImportPage() {
   return (
     <PageShell>
       <PageHeader
-        title="FieldPulse Import"
+        title="FieldPulse import"
         subtitle={isPolling ? 'Live import progress by phase' : 'Import progress by phase'}
         actions={
           !isPolling ? (
@@ -204,32 +206,32 @@ export default function FieldpulseImportPage() {
           const isRunning = run?.status === 'running';
 
           return (
-            <div key={phase} className="space-y-3 rounded-xl border bg-card p-4 shadow-sm">
-              <div className="flex items-center justify-between gap-2">
-                <h2 className="text-sm font-semibold capitalize">{phase}</h2>
-                <StatusChip status={run?.status} />
-              </div>
-              {run ? (
-                <>
-                  <ProgressBar pct={pct} isRunning={isRunning} />
-                  <TalliesRow counts={counts} />
-                  <ElapsedTime run={run} isRunning={isRunning} />
-                  {run.error && (
-                    <p className="break-words text-xs text-destructive">{run.error}</p>
-                  )}
-                </>
-              ) : (
-                <p className="text-xs text-muted-foreground">No runs yet</p>
-              )}
-            </div>
+            <Card key={phase} className="shadow-sm">
+              <CardContent className="space-y-3 pt-4">
+                <div className="flex items-center justify-between gap-2">
+                  <SectionHeading as="h2" title={phase} className="capitalize" />
+                  <StatusChip status={run?.status} />
+                </div>
+                {run ? (
+                  <>
+                    <ProgressBar pct={pct} isRunning={isRunning} />
+                    <TalliesRow counts={counts} />
+                    <ElapsedTime run={run} isRunning={isRunning} />
+                    {run.error && (
+                      <p className="break-words text-xs text-destructive">{run.error}</p>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-xs text-muted-foreground">No runs yet</p>
+                )}
+              </CardContent>
+            </Card>
           );
         })}
       </div>
 
       <div>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Recent Runs
-        </h2>
+        <SectionHeading title="Recent runs" className="mb-3" />
         <RecentRunsTable runs={runs} />
       </div>
     </PageShell>

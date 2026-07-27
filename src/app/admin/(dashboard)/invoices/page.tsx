@@ -1,20 +1,29 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, AlertTriangle, Receipt } from 'lucide-react';
+import { AlertCircle, AlertTriangle, CheckCircle, Receipt, Search } from 'lucide-react';
 import { useInvoices, type InvoiceSortKey } from '@/hooks/use-invoices';
 import { useUrlFilterSync } from '@/hooks/use-url-filter-sync';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 import { EmptyState } from '@/components/admin/ui/empty-state';
+import { SegmentedControl } from '@/components/ui/segmented-control';
+import { Pager } from '@/components/admin/ui/pager';
 import { TableSkeleton, StatTileSkeleton } from '@/components/admin/skeletons';
 import { SummaryBand } from '@/components/admin/invoices/summary-band';
 import { InvoiceRow } from '@/components/admin/invoices/invoice-row';
-import { pageLabel } from '@/lib/admin/invoice-list-helpers';
 import { invoiceRef } from '@/lib/admin/invoice-collectible';
 import {
   Dialog,
@@ -337,79 +346,58 @@ export default function InvoicesPage() {
       {/* toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         {/* segmented filter */}
-        <div className="flex gap-1 rounded-xl border bg-card p-1 shadow-sm">
-          {FILTERS.map((f) => (
-            <button
-              key={f.value}
-              type="button"
-              onClick={() => { setFilter(f.value); setPage(1); }}
-              className={cn(
-                'inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition-colors',
-                filter === f.value
-                  ? 'bg-foreground text-background'
-                  : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {f.label}
-              {f.value === 'overdue' && overdueCount > 0 && (
-                <span className="rounded-full bg-rose-600 px-1.5 py-px text-[10px] font-bold text-white">
-                  {overdueCount}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl<Filter>
+          aria-label="Filter invoices by state"
+          options={FILTERS.map((f) => ({
+            value: f.value,
+            label: f.label,
+            badge:
+              f.value === 'overdue' && overdueCount > 0 ? overdueCount : undefined,
+          }))}
+          value={filter}
+          onChange={(v) => { setFilter(v); setPage(1); }}
+        />
 
         <div className="flex flex-wrap items-center gap-3">
           {/* source segmented control — hidden when only one source type exists */}
           {sourceOptions.length > 1 && (
-            <div className="flex gap-1 rounded-xl border bg-card p-1 shadow-sm">
-              {sourceOptions.map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => { setSource(opt.value); setPage(1); }}
-                  className={cn(
-                    'inline-flex items-center rounded-lg px-3 py-2 text-sm font-semibold transition-colors',
-                    source === opt.value
-                      ? 'bg-foreground text-background'
-                      : 'text-muted-foreground hover:text-foreground',
-                  )}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
+            <SegmentedControl<SourceValue>
+              aria-label="Filter invoices by source"
+              options={sourceOptions.map((opt) => ({ value: opt.value, label: opt.label }))}
+              value={source}
+              onChange={(v) => { setSource(v); setPage(1); }}
+            />
           )}
 
           {/* sort select */}
-          <select
+          <Select
             value={sortKey}
-            onChange={(e) => { setSortKey(e.target.value as InvoiceSortKey); setPage(1); }}
-            className="rounded-xl border bg-card px-3 py-2.5 text-sm font-semibold text-foreground shadow-sm outline-none focus:ring-1 focus:ring-ring"
+            onValueChange={(v) => { setSortKey(v as InvoiceSortKey); setPage(1); }}
           >
-            {SORT_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
+            <SelectTrigger aria-label="Sort invoices" className="w-[180px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {SORT_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
           {/* Never-reminded toggle */}
-          <button
+          <Button
             type="button"
+            variant={unreminded ? 'secondary' : 'outline'}
+            size="sm"
             onClick={() => setUnreminded((v) => !v)}
-            className={cn(
-              'inline-flex items-center gap-1.5 rounded-xl border px-3 py-2.5 text-sm font-semibold shadow-sm transition-colors',
-              unreminded
-                ? 'bg-foreground text-background'
-                : 'bg-card text-muted-foreground hover:text-foreground',
-            )}
+            aria-pressed={unreminded}
           >
             Never reminded
-          </button>
+          </Button>
 
           {/* Balance range inputs (dollars in UI, converted to cents) */}
           <div className="flex items-center gap-1.5">
-            <div className="flex items-center gap-1 rounded-xl border bg-card px-3 shadow-sm focus-within:ring-1 focus-within:ring-ring">
+            <div className="flex items-center gap-1 rounded-md border border-input bg-transparent px-3 shadow-xs focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50">
               <span className="shrink-0 text-xs text-muted-foreground">$</span>
               <input
                 type="number"
@@ -418,12 +406,12 @@ export default function InvoicesPage() {
                 placeholder="Min"
                 value={minDollars}
                 onChange={(e) => setMinDollars(e.target.value)}
-                className="w-20 bg-transparent py-2.5 text-sm outline-none placeholder:text-muted-foreground"
+                className="w-20 bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground"
                 aria-label="Minimum balance in dollars"
               />
             </div>
             <span className="text-xs text-muted-foreground">–</span>
-            <div className="flex items-center gap-1 rounded-xl border bg-card px-3 shadow-sm focus-within:ring-1 focus-within:ring-ring">
+            <div className="flex items-center gap-1 rounded-md border border-input bg-transparent px-3 shadow-xs focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50">
               <span className="shrink-0 text-xs text-muted-foreground">$</span>
               <input
                 type="number"
@@ -432,7 +420,7 @@ export default function InvoicesPage() {
                 placeholder="Max"
                 value={maxDollars}
                 onChange={(e) => setMaxDollars(e.target.value)}
-                className="w-20 bg-transparent py-2.5 text-sm outline-none placeholder:text-muted-foreground"
+                className="w-20 bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground"
                 aria-label="Maximum balance in dollars"
               />
             </div>
@@ -440,26 +428,16 @@ export default function InvoicesPage() {
 
           {/* search */}
           <div className="flex flex-col gap-1">
-            <div className="flex items-center gap-2 rounded-xl border bg-card px-3 shadow-sm focus-within:ring-1 focus-within:ring-ring">
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                className="shrink-0 text-muted-foreground"
-              >
-                <circle cx="11" cy="11" r="7" />
-                <path d="m21 21-4.3-4.3" />
-              </svg>
-              <input
+            <div className="relative w-full sm:w-64">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
                 type="search"
                 placeholder="Search customer or invoice ID…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Escape') { setSearch(''); setDebouncedSearch(''); } }}
-                className="bg-transparent py-2.5 text-sm outline-none placeholder:text-muted-foreground"
+                className="pl-9"
+                aria-label="Search invoices"
               />
             </div>
             {debouncedSearch && (
@@ -506,20 +484,27 @@ export default function InvoicesPage() {
         <>
           <div className="overflow-x-auto rounded-xl border bg-card shadow-sm">
             {/* header row */}
-            <div className="grid grid-cols-[minmax(200px,1fr)_90px_120px_140px_180px_32px] items-center gap-4 bg-foreground px-6 py-2.5">
-              {(['Customer', 'Created', 'Age', 'Balance', 'Actions', ''] as const).map(
-                (col) => (
-                  <p
-                    key={col}
-                    className={cn(
-                      'text-[10.5px] font-semibold uppercase tracking-widest text-background/60',
-                      col === 'Balance' || col === 'Actions' ? 'text-right' : '',
-                    )}
-                  >
-                    {col}
-                  </p>
-                ),
-              )}
+            <div className="grid grid-cols-[minmax(200px,1fr)_90px_120px_140px_180px_32px] items-center gap-4 border-b px-6 py-2.5">
+              {(
+                [
+                  { key: 'customer', label: 'Customer' },
+                  { key: 'created', label: 'Created' },
+                  { key: 'age', label: 'Age' },
+                  { key: 'balance', label: 'Balance' },
+                  { key: 'actions', label: 'Actions' },
+                  { key: 'chevron', label: '' },
+                ] as const
+              ).map((col) => (
+                <p
+                  key={col.key}
+                  className={cn(
+                    'text-[11px] font-medium text-muted-foreground',
+                    col.key === 'balance' || col.key === 'actions' ? 'text-right' : '',
+                  )}
+                >
+                  {col.label}
+                </p>
+              ))}
             </div>
             {displayRows.map((inv) => (
               <InvoiceRow
@@ -536,49 +521,14 @@ export default function InvoicesPage() {
           </div>
 
           {/* pager bar */}
-          <div className="flex items-center justify-between px-1 py-3 text-sm">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={safePage <= 1}
-            >
-              ← Prev
-            </Button>
-            <span className="tabular-nums text-xs text-muted-foreground">
-              {pageLabel(safePage, total, PER_PAGE)}
-            </span>
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setPage(1)}
-                disabled={safePage <= 1}
-              >
-                First
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setPage(totalPages)}
-                disabled={safePage >= totalPages}
-              >
-                Last
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={safePage >= totalPages}
-              >
-                Next →
-              </Button>
-            </div>
-          </div>
+          <Pager
+            page={safePage}
+            totalPages={totalPages}
+            total={total}
+            perPage={PER_PAGE}
+            onPageChange={setPage}
+            showFirstLast
+          />
         </>
       )}
       <Dialog open={voidingId !== null} onOpenChange={(open) => { if (!open && !voidBusy) setVoidingId(null); }}>
@@ -612,7 +562,11 @@ export default function InvoicesPage() {
               : 'border-destructive/30 bg-destructive text-destructive-foreground',
           )}
         >
-          <AlertCircle className="size-4 shrink-0" />
+          {flash.ok ? (
+            <CheckCircle className="size-4 shrink-0 text-success" />
+          ) : (
+            <AlertCircle className="size-4 shrink-0" />
+          )}
           {flash.msg}
         </div>
       )}

@@ -11,8 +11,14 @@ import {
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { PageShell } from '@/components/admin/ui/page-shell';
+import { PageHeader } from '@/components/admin/ui/page-header';
+import { SectionHeading } from '@/components/admin/ui/section-heading';
+import { IconChip } from '@/components/admin/ui/icon-chip';
+import { EmptyState } from '@/components/admin/ui/empty-state';
+import { SkeletonTable } from '@/components/admin/ui/skeleton-table';
+import { getIntegrationMeta } from '@/lib/admin/integration-meta';
 
 /** Display order + heading for each category section. */
 const CATEGORY_SECTIONS: ReadonlyArray<{
@@ -26,33 +32,35 @@ const CATEGORY_SECTIONS: ReadonlyArray<{
   { category: 'ai', heading: 'AI' },
 ];
 
-const STATUS_META: Record<
-  IntegrationStatus,
-  {
-    readonly label: string;
-    readonly variant: 'default' | 'secondary' | 'outline' | 'destructive';
-  }
-> = {
-  live: { label: 'Live', variant: 'default' },
-  connected: { label: 'Connected', variant: 'default' },
-  mock: { label: 'Mock', variant: 'secondary' },
-  not_configured: { label: 'Not configured', variant: 'outline' },
+/** Token badge classes for integration status — no raw palette classes. */
+const STATUS_BADGE: Record<IntegrationStatus, { label: string; className: string }> = {
+  live: {
+    label: 'Live',
+    className: 'bg-success-light text-success border-success/30',
+  },
+  connected: {
+    label: 'Connected',
+    className: 'bg-success-light text-success border-success/30',
+  },
+  mock: {
+    label: 'Mock',
+    className: 'bg-warning-light text-warning-foreground border-warning/30',
+  },
+  not_configured: {
+    label: 'Not configured',
+    className: 'bg-muted text-muted-foreground border-border',
+  },
 };
 
 export default function IntegrationsPage() {
   const { integrations, isLoading, error } = useIntegrations();
 
   return (
-    <div className="space-y-6 p-6">
-      <div>
-        <h1 className="font-heading text-2xl font-bold tracking-tight">
-          Integrations
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Connection status for every external service. Manage actions open the
-          relevant setup flow.
-        </p>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Integrations"
+        subtitle="Connection status for every external service. Manage actions open the relevant setup flow."
+      />
 
       {error && (
         <Alert variant="destructive">
@@ -62,11 +70,13 @@ export default function IntegrationsPage() {
       )}
 
       {isLoading ? (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          {[0, 1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-28 w-full" />
-          ))}
-        </div>
+        <SkeletonTable rows={4} cols={3} />
+      ) : integrations.length === 0 ? (
+        <EmptyState
+          icon={Plug}
+          title="No integrations found"
+          description="Integration status could not be loaded. Try refreshing the page."
+        />
       ) : (
         <div className="space-y-8">
           {CATEGORY_SECTIONS.map((section) => {
@@ -76,9 +86,7 @@ export default function IntegrationsPage() {
             if (items.length === 0) return null;
             return (
               <section key={section.category} className="space-y-3">
-                <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  {section.heading}
-                </h2>
+                <SectionHeading title={section.heading} />
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   {items.map((item) => (
                     <IntegrationCard key={item.key} item={item} />
@@ -89,26 +97,26 @@ export default function IntegrationsPage() {
           })}
         </div>
       )}
-    </div>
+    </PageShell>
   );
 }
 
 function IntegrationCard({ item }: { readonly item: IntegrationStatusItem }) {
-  const meta = STATUS_META[item.status];
+  const meta = getIntegrationMeta(item.key);
+  const badge = STATUS_BADGE[item.status] ?? STATUS_BADGE.not_configured;
+
   return (
     <Card className="p-4 transition-shadow duration-200 hover:shadow-md hover:ring-1 hover:ring-primary/30">
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-3">
-          <div className="shrink-0 rounded-xl bg-slate-100 p-2.5 dark:bg-slate-800/50">
-            <Plug className="h-5 w-5 text-slate-600 dark:text-slate-300" />
-          </div>
+          <IconChip icon={meta.icon} intent={meta.intent} />
           <div className="min-w-0">
             <p className="font-medium">{item.label}</p>
             <p className="mt-0.5 text-sm text-muted-foreground">{item.detail}</p>
           </div>
         </div>
-        <Badge variant={meta.variant} className="shrink-0">
-          {meta.label}
+        <Badge variant="outline" className={`shrink-0 ${badge.className}`}>
+          {badge.label}
         </Badge>
       </div>
 

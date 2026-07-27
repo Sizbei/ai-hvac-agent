@@ -31,20 +31,19 @@ import { FieldpulsePanel } from '@/components/admin/settings/fieldpulse-panel';
 import { AiModelPanel } from '@/components/admin/settings/ai-model-panel';
 import { PlatformLinkPanel } from '@/components/admin/settings/platform-link-panel';
 import { BillingLinkPanel } from '@/components/admin/settings/billing-link-panel';
+import { PageShell } from '@/components/admin/ui/page-shell';
+import { PageHeader } from '@/components/admin/ui/page-header';
 
 export default function SettingsPage() {
   useEffect(() => { document.title = 'Settings · Spears Admin'; }, []);
   const settings = useOrgSettings();
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Chatbot Settings</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Customize how your AI assistant looks and behaves, which services it
-          offers, and the answers it gives.
-        </p>
-      </div>
+    <PageShell narrow>
+      <PageHeader
+        title="Settings"
+        subtitle="Customize how your AI assistant looks and behaves, which services it offers, and the answers it gives."
+      />
 
       {settings.error && (
         <Alert variant="destructive">
@@ -71,7 +70,7 @@ export default function SettingsPage() {
             </TabsTrigger>
             <TabsTrigger value="business">
               <Building2 className="size-4" />
-              Business Info
+              Business info
             </TabsTrigger>
             <TabsTrigger value="faqs">
               <MessageSquarePlus className="size-4" />
@@ -79,7 +78,7 @@ export default function SettingsPage() {
             </TabsTrigger>
             <TabsTrigger value="embed">
               <Code2 className="size-4" />
-              Embed &amp; Keys
+              Embed &amp; keys
             </TabsTrigger>
             <TabsTrigger value="limits">
               <SlidersHorizontal className="size-4" />
@@ -153,6 +152,6 @@ export default function SettingsPage() {
           </TabsContent>
         </Tabs>
       )}
-    </div>
+    </PageShell>
   );
 }

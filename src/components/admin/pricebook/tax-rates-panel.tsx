@@ -159,14 +159,14 @@ export function TaxRatesPanel({
     <section className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold">Tax Rates</h2>
+          <h2 className="text-[15px] font-medium leading-snug">Tax rates</h2>
           <p className="text-sm text-muted-foreground">
             Jurisdictional tax rates. One rate can be the org default.
           </p>
         </div>
         <Button variant="outline" onClick={openAdd}>
           <Plus className="mr-2 h-4 w-4" />
-          Add Rate
+          Add rate
         </Button>
       </div>
 
@@ -197,7 +197,7 @@ export function TaxRatesPanel({
                 </TableCell>
                 <TableCell>
                   {rate.isDefault ? (
-                    <Badge className="bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
+                    <Badge variant="outline" className="bg-success-light text-success border-success/30">
                       Default
                     </Badge>
                   ) : (
@@ -239,7 +239,7 @@ export function TaxRatesPanel({
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>
-              {editing ? 'Edit Tax Rate' : 'Add Tax Rate'}
+              {editing ? 'Edit tax rate' : 'Add tax rate'}
             </DialogTitle>
             <DialogDescription>
               Enter the rate as a percentage (e.g. 8.25 for 8.25%).
@@ -313,7 +313,7 @@ export function TaxRatesPanel({
                 Cancel
               </Button>
               <Button type="submit" disabled={isSubmitting}>
-                {isSubmitting ? 'Saving...' : 'Save'}
+                {isSubmitting ? 'Saving…' : 'Save'}
               </Button>
             </DialogFooter>
           </form>

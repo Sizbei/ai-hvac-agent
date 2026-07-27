@@ -78,7 +78,7 @@ export function CustomerFormDialog({
     <Dialog open={open} onOpenChange={(o) => { if (!o && submittingRef.current) return; onOpenChange(o); }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Add Customer</DialogTitle>
+          <DialogTitle>Add customer</DialogTitle>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -130,7 +130,7 @@ export function CustomerFormDialog({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="propertyType">Property Type</Label>
+            <Label htmlFor="propertyType">Property type</Label>
             <Input
               id="propertyType"
               value={propertyType}

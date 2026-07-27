@@ -10,8 +10,8 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
 import { formatCentsExact } from '@/lib/admin/money-format';
+import { SkeletonTable } from '@/components/admin/ui/skeleton-table';
 import type { MembershipPlan } from '@/hooks/use-membership-plans';
 
 interface MembershipPlansTableProps {
@@ -21,34 +21,19 @@ interface MembershipPlansTableProps {
   readonly onDeactivate: (plan: MembershipPlan) => void;
 }
 
-function SkeletonRows() {
-  return (
-    <>
-      {Array.from({ length: 3 }, (_, i) => (
-        <TableRow key={i}>
-          <TableCell><Skeleton className="h-4 w-40" /></TableCell>
-          <TableCell><Skeleton className="h-5 w-20" /></TableCell>
-          <TableCell><Skeleton className="h-4 w-12" /></TableCell>
-          <TableCell><Skeleton className="h-4 w-24" /></TableCell>
-          <TableCell><Skeleton className="h-7 w-32" /></TableCell>
-        </TableRow>
-      ))}
-    </>
-  );
-}
-
 export function MembershipPlansTable({
   plans,
   isLoading,
   onEdit,
   onDeactivate,
 }: MembershipPlansTableProps) {
-  if (!isLoading && plans.length === 0) {
-    return (
-      <div className="py-12 text-center text-muted-foreground">
-        No membership plans yet.
-      </div>
-    );
+  if (isLoading) {
+    return <SkeletonTable rows={3} cols={5} />;
+  }
+
+  // Empty state is handled by the parent page; render nothing when empty
+  if (plans.length === 0) {
+    return null;
   }
 
   return (
@@ -63,54 +48,55 @@ export function MembershipPlansTable({
         </TableRow>
       </TableHeader>
       <TableBody>
-        {isLoading ? (
-          <SkeletonRows />
-        ) : (
-          plans.map((plan) => (
-            <TableRow key={plan.id} className={plan.active ? '' : 'opacity-60'}>
-              <TableCell className="font-medium">
+        {plans.map((plan) => (
+          <TableRow key={plan.id} className={plan.active ? '' : 'opacity-60'}>
+            <TableCell className="font-medium">
+              <div className="flex flex-wrap items-center gap-2">
                 {plan.name}
-                {plan.description && (
-                  <span className="block text-xs text-muted-foreground">
-                    {plan.description}
-                  </span>
-                )}
                 {!plan.active && (
-                  <span className="ml-2 text-xs text-muted-foreground">
-                    (inactive)
-                  </span>
+                  <Badge
+                    variant="outline"
+                    className="bg-muted text-muted-foreground border-border text-[11px]"
+                  >
+                    Inactive
+                  </Badge>
                 )}
-              </TableCell>
-              <TableCell>
-                <Badge variant="secondary" className="capitalize">
-                  {plan.billingPeriod}
-                </Badge>
-              </TableCell>
-              <TableCell className="text-right tabular-nums">
-                {plan.visitsPerYear > 0 ? plan.visitsPerYear : '—'}
-              </TableCell>
-              <TableCell className="text-right tabular-nums">
-                {formatCentsExact(plan.priceCents)}
-              </TableCell>
-              <TableCell>
-                <div className="flex justify-end gap-2">
-                  <Button variant="outline" size="sm" onClick={() => onEdit(plan)}>
-                    Edit
+              </div>
+              {plan.description && (
+                <span className="block text-xs text-muted-foreground">
+                  {plan.description}
+                </span>
+              )}
+            </TableCell>
+            <TableCell>
+              <Badge variant="secondary" className="capitalize">
+                {plan.billingPeriod}
+              </Badge>
+            </TableCell>
+            <TableCell className="text-right tabular-nums">
+              {plan.visitsPerYear > 0 ? plan.visitsPerYear : '—'}
+            </TableCell>
+            <TableCell className="text-right tabular-nums">
+              {formatCentsExact(plan.priceCents)}
+            </TableCell>
+            <TableCell>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" size="sm" onClick={() => onEdit(plan)}>
+                  Edit
+                </Button>
+                {plan.active && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => onDeactivate(plan)}
+                  >
+                    Deactivate
                   </Button>
-                  {plan.active && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => onDeactivate(plan)}
-                    >
-                      Deactivate
-                    </Button>
-                  )}
-                </div>
-              </TableCell>
-            </TableRow>
-          ))
-        )}
+                )}
+              </div>
+            </TableCell>
+          </TableRow>
+        ))}
       </TableBody>
     </Table>
   );

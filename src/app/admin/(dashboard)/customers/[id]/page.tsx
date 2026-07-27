@@ -4,7 +4,6 @@ import { use, useCallback, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
-  ArrowLeft,
   Building2,
   Phone,
   Mail,
@@ -19,12 +18,23 @@ import {
   Pencil,
   Archive,
   ShieldX,
+  MoreHorizontal,
+  User,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { PageShell } from '@/components/admin/ui/page-shell';
+import { PageHeader } from '@/components/admin/ui/page-header';
+import { SectionCard } from '@/components/admin/ui/section-card';
+import { SectionListItem } from '@/components/admin/ui/section-list-item';
 import { EmptyState } from '@/components/admin/ui/empty-state';
 import { StatusBadge } from '@/components/admin/status-badge';
 import { useCustomerDetail } from '@/hooks/use-admin-customers';
@@ -260,15 +270,23 @@ export default function CustomerDetailPage({
   if (isLoading) {
     return (
       <PageShell>
-        <div className="flex items-center gap-4">
-          <Skeleton className="size-7 shrink-0 rounded-lg" />
-          <div className="flex-1 space-y-2">
-            <Skeleton className="h-7 w-48" />
-            <Skeleton className="h-4 w-32" />
+        {/* Back link + title row */}
+        <div className="space-y-2">
+          <Skeleton className="h-4 w-24" />
+          <div className="flex items-center justify-between gap-4">
+            <Skeleton className="h-8 w-56" />
+            <div className="flex gap-2">
+              <Skeleton className="h-9 w-16 rounded-md" />
+              <Skeleton className="h-9 w-9 rounded-md" />
+            </div>
           </div>
+          <Skeleton className="h-4 w-40" />
         </div>
-        <Skeleton className="h-40 w-full rounded-xl" />
-        <Skeleton className="h-48 w-full rounded-xl" />
+        {/* Contact info card */}
+        <Skeleton className="h-36 w-full rounded-xl" />
+        {/* Membership card */}
+        <Skeleton className="h-24 w-full rounded-xl" />
+        {/* Equipment card */}
         <Skeleton className="h-48 w-full rounded-xl" />
       </PageShell>
     );
@@ -283,7 +301,7 @@ export default function CustomerDetailPage({
           description={error ?? 'This customer may have been deleted or archived.'}
           action={
             <Link href="/admin/customers">
-              <Button variant="outline">Back to Customers</Button>
+              <Button variant="outline">Back to customers</Button>
             </Link>
           }
         />
@@ -294,119 +312,109 @@ export default function CustomerDetailPage({
   return (
     <PageShell>
       {/* Header */}
-      <div className="flex items-center gap-4">
-        <Link href="/admin/customers">
-          <Button variant="ghost" size="icon-sm" aria-label="Back to customers">
-            <ArrowLeft className="size-4" />
-          </Button>
-        </Link>
-        <div className="flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="font-heading text-2xl font-bold tracking-tight">
-              {customer.name ?? 'Unknown Customer'}
-            </h1>
-            {/* Account type badge */}
-            <span className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${
-              customer.customerType === 'commercial'
-                ? 'border-blue-200 bg-blue-50 text-blue-700'
-                : 'border-muted bg-muted/50 text-muted-foreground'
-            }`}>
+      <PageHeader
+        back={{ href: '/admin/customers', label: 'Customers' }}
+        title={customer.name ?? 'Unknown customer'}
+        subtitle={`Customer since ${formatDate(customer.createdAt)}`}
+        actions={
+          <>
+            {/* Type + tax-exempt badges */}
+            <Badge
+              variant="outline"
+              className={
+                customer.customerType === 'commercial'
+                  ? 'bg-info-light text-info border-info/30'
+                  : 'bg-muted text-muted-foreground border-border'
+              }
+            >
               {customer.customerType === 'commercial' ? 'Commercial' : 'Residential'}
-            </span>
-            {/* Tax-exempt badge — only when true */}
+            </Badge>
             {customer.isTaxExempt === true && (
-              <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700">
+              <Badge variant="outline" className="bg-warning-light text-warning border-warning/30">
                 Tax-exempt
-              </span>
+              </Badge>
             )}
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Customer since {formatDate(customer.createdAt)}
-          </p>
-        </div>
-        <Button variant="outline" onClick={() => setShowEditForm(true)}>
-          <Pencil className="size-4" />
-          Edit
-        </Button>
-        <Button
-          variant="outline"
-          onClick={() => {
-            setArchiveError(null);
-            setShowArchiveConfirm(true);
-          }}
-        >
-          <Archive className="size-4" />
-          Archive
-        </Button>
-        <Button
-          variant="destructive"
-          onClick={() => {
-            setDeleteError(null);
-            setShowDeleteConfirm(true);
-          }}
-        >
-          <Trash2 className="size-4" />
-          Delete
-        </Button>
-        <Button
-          variant="destructive"
-          onClick={() => {
-            setEraseError(null);
-            setShowEraseConfirm(true);
-          }}
-        >
-          <ShieldX className="size-4" />
-          Erase data (GDPR)
-        </Button>
-      </div>
+            <Button variant="outline" onClick={() => setShowEditForm(true)}>
+              <Pencil className="size-4" />
+              Edit
+            </Button>
+            {/* Destructive actions in overflow menu */}
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                className="inline-flex size-9 items-center justify-center rounded-md border border-input bg-background text-sm font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+                aria-label="More actions"
+              >
+                <MoreHorizontal className="size-4" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  onClick={() => {
+                    setArchiveError(null);
+                    setShowArchiveConfirm(true);
+                  }}
+                >
+                  <Archive className="size-4" />
+                  Archive customer
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="text-destructive focus:text-destructive"
+                  onClick={() => {
+                    setDeleteError(null);
+                    setShowDeleteConfirm(true);
+                  }}
+                >
+                  <Trash2 className="size-4" />
+                  Delete customer
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="text-destructive focus:text-destructive"
+                  onClick={() => {
+                    setEraseError(null);
+                    setShowEraseConfirm(true);
+                  }}
+                >
+                  <ShieldX className="size-4" />
+                  Erase data (GDPR)
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </>
+        }
+      />
 
-      {/* Contact Info */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Building2 className="size-4" />
-            Contact Information
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-4 sm:grid-cols-2">
-            {customer.phone && (
-              <div className="flex items-center gap-2 text-sm">
-                <Phone className="size-4 text-muted-foreground" />
-                {customer.phone}
-              </div>
-            )}
-            {customer.email && (
-              <div className="flex items-center gap-2 text-sm">
-                <Mail className="size-4 text-muted-foreground" />
-                {customer.email}
-              </div>
-            )}
-            {customer.address && (
-              <div className="flex items-center gap-2 text-sm sm:col-span-2">
-                <MapPin className="size-4 text-muted-foreground" />
-                {customer.address}
-              </div>
-            )}
-            {customer.propertyType && (
-              <div className="text-sm text-muted-foreground">
-                Property: {customer.propertyType}
-                {customer.propertySqft ? ` (${customer.propertySqft} sq ft)` : ''}
-              </div>
-            )}
-            {/* Billing address — shown only when present and different from service address */}
-            {customer.billingAddress && customer.billingAddress !== customer.address && (
-              <div className="flex items-start gap-2 text-sm sm:col-span-2">
-                <MapPin className="size-4 shrink-0 text-muted-foreground mt-0.5" />
-                <div>
-                  <span className="text-xs text-muted-foreground">Billing address: </span>
-                  {customer.billingAddress}
-                </div>
-              </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+      {/* Contact info */}
+      <SectionCard
+        title="Contact information"
+        icon={customer.customerType === 'commercial' ? Building2 : User}
+      >
+        <div className="grid gap-3 sm:grid-cols-2">
+          {customer.phone && (
+            <SectionListItem icon={Phone} label="Phone" value={customer.phone} />
+          )}
+          {customer.email && (
+            <SectionListItem icon={Mail} label="Email" value={customer.email} />
+          )}
+          {customer.address && (
+            <SectionListItem icon={MapPin} label="Service address" value={customer.address} wide />
+          )}
+          {customer.propertyType && (
+            <SectionListItem
+              label="Property type"
+              value={`${customer.propertyType}${customer.propertySqft ? ` (${customer.propertySqft} sq ft)` : ''}`}
+            />
+          )}
+          {/* Billing address — only when present and different from service address */}
+          {customer.billingAddress && customer.billingAddress !== customer.address && (
+            <SectionListItem
+              icon={MapPin}
+              label="Billing address"
+              value={customer.billingAddress}
+              wide
+            />
+          )}
+        </div>
+      </SectionCard>
 
       {/* FieldPulse details — collapsed panel (custom fields + structured data) */}
       <FieldpulseDetails
@@ -425,129 +433,117 @@ export default function CustomerDetailPage({
       />
 
       {/* Equipment */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Wrench className="size-4" />
-              Equipment ({customer.equipment.length})
-            </CardTitle>
-            <Button size="sm" variant="outline" onClick={handleAddEquipment}>
-              <Plus className="mr-1 size-3" />
-              Add
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {customer.equipment.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No equipment registered yet.
-            </p>
-          ) : (
-            <div className="space-y-3">
-              {customer.equipment.map((eq) => (
-                <div
-                  key={eq.id}
-                  className="rounded-lg border p-3"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="flex items-center gap-1.5 font-medium text-sm">
-                      {EQUIPMENT_LABELS[eq.equipmentType] ?? eq.equipmentType}
-                      {eq.fieldpulseAssetId && (
-                        <SyncPill source="fieldpulse" size="md" />
-                      )}
-                    </p>
-                    <div className="flex items-center gap-1">
-                      {eq.warrantyExpiration && (
-                        <Badge
-                          variant={
-                            new Date(eq.warrantyExpiration) < new Date()
-                              ? 'destructive'
-                              : 'outline'
-                          }
-                          className="text-xs"
-                        >
-                          {warrantyStatusLabel(eq.warrantyExpiration)}
-                        </Badge>
-                      )}
-                      <Button
-                        size="icon-sm"
-                        variant="ghost"
-                        onClick={() => handleEditEquipment(eq)}
-                        aria-label="Edit equipment"
-                      >
-                        <Pencil className="size-3.5" />
-                      </Button>
-                      <Button
-                        size="icon-sm"
-                        variant="ghost"
-                        onClick={() => setDeletingEquipment(eq)}
-                        aria-label="Delete equipment"
-                        className="text-muted-foreground hover:text-destructive"
-                      >
-                        <Trash2 className="size-3.5" />
-                      </Button>
-                    </div>
-                  </div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {[eq.make, eq.model].filter(Boolean).join(' ') || 'No details'}
-                    {eq.serialNumber ? ` — S/N: ${eq.serialNumber}` : ''}
+      <SectionCard
+        title="Equipment"
+        icon={Wrench}
+        count={customer.equipment.length}
+        action={
+          <Button size="sm" variant="outline" onClick={handleAddEquipment}>
+            <Plus className="mr-1 size-3" />
+            Add
+          </Button>
+        }
+      >
+        {customer.equipment.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No equipment registered yet.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {customer.equipment.map((eq) => (
+              <div
+                key={eq.id}
+                className="rounded-lg border bg-muted/20 p-3"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <p className="flex items-center gap-1.5 text-sm font-medium">
+                    {EQUIPMENT_LABELS[eq.equipmentType] ?? eq.equipmentType}
+                    {eq.fieldpulseAssetId && (
+                      <SyncPill source="fieldpulse" size="md" />
+                    )}
                   </p>
-                  {eq.locationInHome && (
-                    <p className="text-xs text-muted-foreground">
-                      Location: {eq.locationInHome}
-                    </p>
-                  )}
+                  <div className="flex items-center gap-1">
+                    {eq.warrantyExpiration && (
+                      <Badge
+                        variant="outline"
+                        className={
+                          new Date(eq.warrantyExpiration) < new Date()
+                            ? 'bg-danger-light text-danger border-danger/30 text-xs'
+                            : 'bg-warning-light text-warning border-warning/30 text-xs'
+                        }
+                      >
+                        {warrantyStatusLabel(eq.warrantyExpiration)}
+                      </Badge>
+                    )}
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      onClick={() => handleEditEquipment(eq)}
+                      aria-label="Edit equipment"
+                    >
+                      <Pencil className="size-3.5" />
+                    </Button>
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      onClick={() => setDeletingEquipment(eq)}
+                      aria-label="Delete equipment"
+                      className="text-muted-foreground hover:text-destructive"
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  </div>
                 </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {[eq.make, eq.model].filter(Boolean).join(' ') || 'No details'}
+                  {eq.serialNumber ? ` — S/N: ${eq.serialNumber}` : ''}
+                </p>
+                {eq.locationInHome && (
+                  <p className="text-xs text-muted-foreground">
+                    Location: {eq.locationInHome}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </SectionCard>
 
       {/* Bookings — real service_requests (service_history is empty for imports) */}
       <CustomerBookingsSection customerId={id} />
 
-      {/* Service History (native manual work logs; hidden when empty — imports
+      {/* Service history (native manual work logs; hidden when empty — imports
           have no native history; real history is in the Bookings card above) */}
       {customer.serviceHistory.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Clock className="size-4" />
-              Service History ({customer.serviceHistory.length})
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {customer.serviceHistory.map((h) => (
-                <div key={h.id} className="rounded-lg border p-3">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-medium">
-                      {h.referenceNumber ?? 'Manual Entry'}
-                    </p>
-                    <span className="text-xs text-muted-foreground">
-                      {formatDate(h.createdAt)}
-                    </span>
-                  </div>
-                  {h.issueType && (
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {h.issueType.replace(/_/g, ' ')}
-                    </p>
-                  )}
-                  {h.workPerformed && (
-                    <p className="text-sm mt-1">{h.workPerformed}</p>
-                  )}
-                  {h.cost !== null && h.cost !== undefined && (
-                    <p className="text-sm font-medium mt-1">
-                      {formatCentsExact(h.cost)}
-                    </p>
-                  )}
+        <SectionCard title="Service history" icon={Clock} count={customer.serviceHistory.length}>
+          <div className="space-y-3">
+            {customer.serviceHistory.map((h) => (
+              <div key={h.id} className="rounded-lg border bg-muted/20 p-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium">
+                    {h.referenceNumber ?? 'Manual entry'}
+                  </p>
+                  <span className="text-xs text-muted-foreground">
+                    {formatDate(h.createdAt)}
+                  </span>
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+                {h.issueType && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {h.issueType.replace(/_/g, ' ')}
+                  </p>
+                )}
+                {h.workPerformed && (
+                  <p className="mt-1 text-sm">{h.workPerformed}</p>
+                )}
+                {h.cost !== null && h.cost !== undefined && (
+                  <p className="mt-1 text-sm font-medium">
+                    {formatCentsExact(h.cost)}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        </SectionCard>
       )}
 
       {/* Estimates */}
@@ -557,108 +553,92 @@ export default function CustomerDetailPage({
       <ScopedInvoicesSection customerId={id} variant="card" />
 
       {/* Notes */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <StickyNote className="size-4" />
-              Notes ({customer.customerNotes.length})
-            </CardTitle>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setShowNoteForm(true)}
-            >
-              <Plus className="mr-1 size-3" />
-              Add Note
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {customer.customerNotes.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No notes yet.</p>
-          ) : (
-            <div className="space-y-3">
-              {customer.customerNotes.map((n) => (
-                <div key={n.id} className="rounded-lg border p-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5">
-                      <Badge variant="outline" className="text-xs">
-                        {n.noteType}
-                      </Badge>
-                      {n.fieldpulseCommentId && (
-                        <SyncPill source="fieldpulse" size="md" />
-                      )}
-                    </div>
-                    <span className="text-xs text-muted-foreground">
-                      {n.authorName ? `${n.authorName} — ` : ''}
-                      {formatDate(n.createdAt)}
-                    </span>
+      <SectionCard
+        title="Notes"
+        icon={StickyNote}
+        count={customer.customerNotes.length}
+        action={
+          <Button size="sm" variant="outline" onClick={() => setShowNoteForm(true)}>
+            <Plus className="mr-1 size-3" />
+            Add note
+          </Button>
+        }
+      >
+        {customer.customerNotes.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No notes yet.</p>
+        ) : (
+          <div className="space-y-3">
+            {customer.customerNotes.map((n) => (
+              <div key={n.id} className="rounded-lg border bg-muted/20 p-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Badge variant="outline" className="text-xs">
+                      {n.noteType}
+                    </Badge>
+                    {n.fieldpulseCommentId && (
+                      <SyncPill source="fieldpulse" size="md" />
+                    )}
                   </div>
-                  <p className="mt-2 text-sm">{n.content}</p>
+                  <span className="text-xs text-muted-foreground">
+                    {n.authorName ? `${n.authorName} — ` : ''}
+                    {formatDate(n.createdAt)}
+                  </span>
                 </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                <p className="mt-2 text-sm">{n.content}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </SectionCard>
 
       {/* Follow-ups */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Bell className="size-4" />
-              Follow-ups ({customer.followUps.length})
-            </CardTitle>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setShowFollowUpForm(true)}
-            >
-              <Plus className="mr-1 size-3" />
-              Add
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {customer.followUps.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No follow-ups scheduled.
-            </p>
-          ) : (
-            <div className="space-y-3">
-              {customer.followUps.map((f) => (
-                <div key={f.id} className="flex items-center gap-3 rounded-lg border p-3">
-                  {f.status === 'completed' ? (
-                    <CheckCircle className="size-4 text-success" />
-                  ) : (
-                    <Clock className="size-4 text-muted-foreground" />
-                  )}
-                  <div className="flex-1">
-                    <p className="text-sm">{f.reason}</p>
-                    <p className="text-xs text-muted-foreground">
-                      Due: {formatDate(f.dueDate)}
-                      {f.assignedToName ? ` — ${f.assignedToName}` : ''}
-                    </p>
-                  </div>
-                  {f.status === 'pending' && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={completingId === f.id}
-                      onClick={() => handleCompleteFollowUp(f.id)}
-                    >
-                      {completingId === f.id ? 'Saving...' : 'Complete'}
-                    </Button>
-                  )}
-                  <StatusBadge status={f.status} />
+      <SectionCard
+        title="Follow-ups"
+        icon={Bell}
+        count={customer.followUps.length}
+        action={
+          <Button size="sm" variant="outline" onClick={() => setShowFollowUpForm(true)}>
+            <Plus className="mr-1 size-3" />
+            Add
+          </Button>
+        }
+      >
+        {customer.followUps.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No follow-ups scheduled.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {customer.followUps.map((f) => (
+              <div key={f.id} className="flex items-center gap-3 rounded-lg border bg-muted/20 p-3">
+                {f.status === 'completed' ? (
+                  <CheckCircle className="size-4 text-success" />
+                ) : (
+                  <Clock className="size-4 text-muted-foreground" />
+                )}
+                <div className="flex-1">
+                  <p className="text-sm">{f.reason}</p>
+                  <p className="text-xs text-muted-foreground">
+                    Due: {formatDate(f.dueDate)}
+                    {f.assignedToName ? ` — ${f.assignedToName}` : ''}
+                  </p>
                 </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                {f.status === 'pending' && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={completingId === f.id}
+                    onClick={() => handleCompleteFollowUp(f.id)}
+                  >
+                    {completingId === f.id ? 'Saving…' : 'Complete'}
+                  </Button>
+                )}
+                <StatusBadge status={f.status} />
+              </div>
+            ))}
+          </div>
+        )}
+      </SectionCard>
 
       <EquipmentFormDialog
         open={showEquipmentForm}

@@ -10,6 +10,7 @@ import {
   CardContent,
 } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
 /** Local YYYY-MM-DD for an <input type="date"> default. */
@@ -119,24 +120,24 @@ export function AccountingExportPanel() {
         <div className="flex flex-wrap items-end gap-4">
           <div className="space-y-2">
             <Label htmlFor="accounting-from">From</Label>
-            <input
+            <Input
               id="accounting-from"
               type="date"
               value={from}
               max={to}
               onChange={(e) => setFrom(e.target.value)}
-              className="flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+              className="w-auto"
             />
           </div>
           <div className="space-y-2">
             <Label htmlFor="accounting-to">To</Label>
-            <input
+            <Input
               id="accounting-to"
               type="date"
               value={to}
               min={from}
               onChange={(e) => setTo(e.target.value)}
-              className="flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+              className="w-auto"
             />
           </div>
           <Button

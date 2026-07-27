@@ -236,7 +236,7 @@ function DayView({
       <div className="flex min-w-0 flex-1 gap-2">
         <div className="flex w-56 shrink-0 flex-col">
           <div className="mb-1 flex items-center gap-1.5 text-sm font-semibold">
-            <Inbox className="size-4 text-amber-600 dark:text-amber-400" />
+            <Inbox className="size-4 text-warning" />
             <span className="truncate">Unassigned</span>
             <span className="ml-auto text-xs text-muted-foreground">
               {unassigned.length}

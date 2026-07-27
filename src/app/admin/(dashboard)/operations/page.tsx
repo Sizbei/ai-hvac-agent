@@ -7,8 +7,6 @@ import {
   Wallet,
   ClipboardList,
   UserCheck,
-  ArrowDown,
-  ArrowUp,
   Loader2,
   Zap,
 } from 'lucide-react';
@@ -16,13 +14,15 @@ import {
   useOperationsMetrics,
   type MetricTrend,
 } from '@/hooks/use-operations-metrics';
-import { Card } from '@/components/ui/card';
-import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
+import { StatCard } from '@/components/admin/ui/stat-card';
+import { SectionCard } from '@/components/admin/ui/section-card';
+import { SectionHeading } from '@/components/admin/ui/section-heading';
+import { ProgressBar } from '@/components/admin/ui/progress-bar';
 
 const PRESETS = [
   { label: 'Last 30 days', days: 30 },
@@ -40,14 +40,14 @@ function formatDuration(seconds: number | null): string {
   return `${(s / 86400).toFixed(1)} days`;
 }
 
-interface Delta {
+interface DeltaShape {
   readonly text: string;
   readonly good: boolean;
   readonly up: boolean;
 }
 
 /** Period-over-period delta for a duration metric (lower is better). */
-function durationDelta(trend: MetricTrend): Delta | null {
+function durationDelta(trend: MetricTrend): DeltaShape | null {
   const { current, previous } = trend;
   if (current === null || previous === null) return null;
   const diff = current - previous;
@@ -56,7 +56,7 @@ function durationDelta(trend: MetricTrend): Delta | null {
 }
 
 /** Period-over-period delta for a count metric (higher is better), as a percent. */
-function countDelta(trend: MetricTrend): Delta | null {
+function countDelta(trend: MetricTrend): DeltaShape | null {
   const { current, previous } = trend;
   if (current === null || previous === null || previous === 0) return null;
   const pct = ((current - previous) / previous) * 100;
@@ -64,82 +64,11 @@ function countDelta(trend: MetricTrend): Delta | null {
   return { text: `${Math.abs(Math.round(pct))}%`, good: pct > 0, up: pct > 0 };
 }
 
-function DeltaPill({ delta, rangeDays }: { delta: Delta | null; rangeDays: number }) {
-  if (!delta) return null;
-  const Arrow = delta.up ? ArrowUp : ArrowDown;
-  // Sentiment must not rely on color alone (colorblind + screen readers). The
-  // FULL spoken sentence lives in a real sr-only text node — not an aria-label on
-  // a generic span, which ARIA disallows and screen readers announce
-  // unreliably. The visual arrow + number + comparison are aria-hidden so AT
-  // hears the sr-only sentence exactly once.
-  const sentiment = delta.good ? 'improved' : 'worse';
-  return (
-    <div className="mt-1.5 flex items-center gap-2">
-      <span className="sr-only">
-        {sentiment} by {delta.text} versus the previous {rangeDays} days
-      </span>
-      <span
-        aria-hidden="true"
-        className={
-          'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ' +
-          (delta.good
-            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-            : 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400')
-        }
-      >
-        <Arrow className="size-3" />
-        {delta.text}
-      </span>
-      <span className="text-xs text-muted-foreground" aria-hidden="true">
-        vs prev {rangeDays} days
-      </span>
-    </div>
-  );
-}
-
-interface KpiCardProps {
-  readonly label: string;
-  readonly icon: typeof Clock;
-  readonly value: string | null;
-  readonly delta: Delta | null;
-  readonly rangeDays: number;
-  readonly foot?: React.ReactNode;
-  readonly isLoading: boolean;
-  readonly children?: React.ReactNode;
-}
-
-function KpiCard({
-  label,
-  icon: Icon,
-  value,
-  delta,
-  rangeDays,
-  foot,
-  isLoading,
-  children,
-}: KpiCardProps) {
-  return (
-    <Card className="flex flex-col gap-0 p-5">
-      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        <Icon className="size-4 text-primary" />
-        {label}
-      </div>
-      {isLoading ? (
-        <Skeleton className="mt-3 h-9 w-28" />
-      ) : (
-        <div className="mt-3 font-heading text-[2.1rem] font-bold leading-none tracking-tight tabular-nums">
-          {value ?? '—'}
-        </div>
-      )}
-      {!isLoading && <DeltaPill delta={delta} rangeDays={rangeDays} />}
-      {children}
-      {foot && (
-        <div className="mt-auto border-t border-dashed border-border pt-3 text-xs text-muted-foreground">
-          {foot}
-        </div>
-      )}
-    </Card>
-  );
+/** Converts a DeltaShape to the StatCard delta prop shape. */
+function toStatDelta(delta: DeltaShape | null, rangeDays: number): { value: string; good: boolean } | undefined {
+  if (!delta) return undefined;
+  const dir = delta.up ? '↑' : '↓';
+  return { value: `${dir}${delta.text} vs prev ${rangeDays}d`, good: delta.good };
 }
 
 export default function OperationsPage() {
@@ -191,32 +120,25 @@ export default function OperationsPage() {
 
       {/* Top row: 3 headline KPIs */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <KpiCard
+        <StatCard
           label="Response time"
           icon={Clock}
-          value={metrics ? formatDuration(metrics.responseTimeSeconds.current) : null}
-          delta={metrics ? durationDelta(metrics.responseTimeSeconds) : null}
-          rangeDays={days}
-          isLoading={isLoading}
-          foot={
-            <>
-              Median booking → on-site · On-site duration{' '}
-              <span className="font-semibold text-foreground">
-                {formatDuration(metrics?.onSiteSeconds ?? null)}
-              </span>
-            </>
-          }
+          value={metrics ? formatDuration(metrics.responseTimeSeconds.current) : '—'}
+          delta={metrics ? toStatDelta(durationDelta(metrics.responseTimeSeconds), days) : undefined}
+          intent="neutral"
+          loading={isLoading}
+          sublabel={metrics ? `Median booking → on-site · On-site ${formatDuration(metrics.onSiteSeconds ?? null)}` : undefined}
         />
-        <KpiCard
+        <StatCard
           label="Avg time to paid"
           icon={Wallet}
-          value={metrics ? formatDuration(metrics.timeToPaidSeconds.current) : null}
-          delta={metrics ? durationDelta(metrics.timeToPaidSeconds) : null}
-          rangeDays={days}
-          isLoading={isLoading}
-          foot="Native invoices only · synced FieldPulse/HCP excluded"
+          value={metrics ? formatDuration(metrics.timeToPaidSeconds.current) : '—'}
+          delta={metrics ? toStatDelta(durationDelta(metrics.timeToPaidSeconds), days) : undefined}
+          intent="neutral"
+          loading={isLoading}
+          sublabel="Your invoices only · synced FieldPulse/HCP excluded"
         />
-        <KpiCard
+        <StatCard
           label="Jobs booked"
           icon={ClipboardList}
           value={
@@ -225,12 +147,12 @@ export default function OperationsPage() {
                 ((metrics.importedJobsCurrent ?? 0) > 0
                   ? ` +${metrics.importedJobsCurrent} imported`
                   : '')
-              : null
+              : '—'
           }
-          delta={metrics ? countDelta(metrics.jobsBooked) : null}
-          rangeDays={days}
-          isLoading={isLoading}
-          foot={
+          delta={metrics ? toStatDelta(countDelta(metrics.jobsBooked), days) : undefined}
+          intent="neutral"
+          loading={isLoading}
+          sublabel={
             metrics
               ? `Native service requests · ${(
                   (metrics.jobsBooked.current ?? 0) / Math.max(1, metrics.rangeDays)
@@ -240,152 +162,143 @@ export default function OperationsPage() {
         />
       </div>
 
-      {/* Second row: first response + AR aging */}
+      {/* Second row: first response + dispatch health */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <KpiCard
-          label="First response · dispatcher"
+        <StatCard
+          label="First response — dispatcher"
           icon={UserCheck}
-          value={
-            metrics ? formatDuration(metrics.firstResponseHumanSeconds.current) : null
-          }
-          delta={metrics ? durationDelta(metrics.firstResponseHumanSeconds) : null}
-          rangeDays={days}
-          isLoading={isLoading}
-          foot={
-            <>
-              Created → a dispatcher assigns the job · auto-dispatch{' '}
-              <span className="font-semibold text-foreground">
-                {formatDuration(metrics?.firstResponseSystemSeconds ?? null)}
-              </span>
-            </>
+          value={metrics ? formatDuration(metrics.firstResponseHumanSeconds.current) : '—'}
+          delta={metrics ? toStatDelta(durationDelta(metrics.firstResponseHumanSeconds), days) : undefined}
+          intent="neutral"
+          loading={isLoading}
+          sublabel={
+            metrics
+              ? `Created → a dispatcher assigns the job · auto-dispatch ${formatDuration(metrics.firstResponseSystemSeconds ?? null)}`
+              : undefined
           }
         />
 
-        <KpiCard
+        <StatCard
           label="Dispatch health"
           icon={Zap}
           value={
             metrics && metrics.dispatchHealth.commitRate !== null
               ? `${Math.round(metrics.dispatchHealth.commitRate * 100)}%`
-              : null
+              : '—'
           }
-          delta={null}
-          rangeDays={metrics?.dispatchHealth.days ?? 7}
-          isLoading={isLoading}
-          foot={
-            metrics ? (
-              <>
-                Commit rate (7d, real + preview) ·{' '}
-                <span className="font-semibold text-foreground">
-                  {metrics.dispatchHealth.real.total}
-                </span>{' '}
-                real ·{' '}
-                <span className="font-semibold text-foreground">
-                  {metrics.dispatchHealth.shadow.total}
-                </span>{' '}
-                preview ·{' '}
-                <span className="font-semibold text-foreground">
-                  {metrics.dispatchHealth.overrides}
-                </span>{' '}
-                overrides
-              </>
-            ) : undefined
+          intent="neutral"
+          loading={isLoading}
+          sublabel={
+            metrics
+              ? `Commit rate (7d, real + preview) · ${metrics.dispatchHealth.real.total} real · ${metrics.dispatchHealth.shadow.total} preview · ${metrics.dispatchHealth.overrides} overrides`
+              : undefined
           }
         />
+      </div>
 
-        <Card className="p-5">
-          <div className="text-sm font-semibold">
-            Accounts receivable — open balance
+      {/* AR aging — full width card */}
+      <SectionCard
+        title="Accounts receivable — open balance"
+        action={
+          <p className="text-xs text-muted-foreground">Outstanding on unpaid invoices, by age</p>
+        }
+      >
+        {isLoading ? (
+          <div className="space-y-3">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="flex items-center gap-3">
+                <span className="w-16 h-4 rounded bg-muted animate-pulse" />
+                <ProgressBar value={0} className="flex-1" />
+                <span className="w-20 h-4 rounded bg-muted animate-pulse" />
+              </div>
+            ))}
           </div>
-          <p className="mb-4 text-xs text-muted-foreground">
-            Outstanding on unpaid invoices, by age
-          </p>
-          {isLoading ? (
+        ) : (
+          <>
             <div className="space-y-3">
-              <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-4 w-full" />
-            </div>
-          ) : (
-            <>
               {[
-                { tag: '0–30 d', cents: aging?.bucket0to30Cents ?? 0, bar: 'bg-emerald-500' },
-                { tag: '31–60 d', cents: aging?.bucket31to60Cents ?? 0, bar: 'bg-amber-500' },
-                { tag: '60+ d', cents: aging?.bucket60PlusCents ?? 0, bar: 'bg-rose-500' },
+                { tag: '0–30 d', cents: aging?.bucket0to30Cents ?? 0, intent: 'success' as const, label: '0 to 30 days' },
+                { tag: '31–60 d', cents: aging?.bucket31to60Cents ?? 0, intent: 'warning' as const, label: '31 to 60 days' },
+                { tag: '60+ d', cents: aging?.bucket60PlusCents ?? 0, intent: 'danger' as const, label: '60 or more days' },
               ].map((b) => (
-                <div key={b.tag} className="mb-3 flex items-center gap-3">
+                <div key={b.tag} className="flex items-center gap-3">
                   <span className="w-16 text-xs font-semibold text-muted-foreground">
                     {b.tag}
                   </span>
-                  <span className="h-2.5 flex-1 overflow-hidden rounded-full bg-muted">
-                    <span
-                      className={'block h-full rounded-full ' + b.bar}
-                      style={{ width: `${agingPct(b.cents)}%` }}
-                    />
-                  </span>
+                  <ProgressBar
+                    value={agingPct(b.cents)}
+                    intent={b.intent}
+                    label={`${b.label}: ${formatCentsExact(b.cents)}`}
+                    className="flex-1"
+                  />
                   <span className="w-20 text-right text-sm font-semibold tabular-nums">
                     {formatCentsExact(b.cents)}
                   </span>
                 </div>
               ))}
-              <div className="mt-4 border-t border-border pt-3">
-                <div className="flex items-baseline justify-between">
-                  <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Total outstanding
-                  </span>
+            </div>
+
+            <div className="mt-4 border-t border-border pt-3">
+              <SectionHeading
+                as="h3"
+                title="Total outstanding"
+                right={
                   <span className="font-heading text-xl font-bold tabular-nums">
                     {formatCentsExact(metrics?.totalOutstandingAllCents ?? agingTotal)}
                   </span>
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Native {formatCentsExact(agingTotal)} · Synced (FieldPulse/HCP){' '}
-                  {formatCentsExact(metrics?.syncedArTotalCents ?? 0)} — collected in the external system
-                </p>
-              </div>
-              {(metrics?.syncedArTotalCents ?? 0) > 0 && (
-                <div className="mt-4 border-t border-border pt-3">
-                  <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Synced (FieldPulse/HCP) — by due date
-                  </p>
+                }
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                Native {formatCentsExact(agingTotal)} · Synced (FieldPulse/HCP){' '}
+                {formatCentsExact(metrics?.syncedArTotalCents ?? 0)} — collected in the external system
+              </p>
+            </div>
+
+            {(metrics?.syncedArTotalCents ?? 0) > 0 && (
+              <div className="mt-4 border-t border-border pt-3">
+                <SectionHeading
+                  as="h3"
+                  title="Synced (FieldPulse/HCP) — by due date"
+                  className="mb-3"
+                />
+                <div className="space-y-2">
                   {[
-                    { tag: 'Current', cents: metrics!.syncedArAging.currentCents, bar: 'bg-sky-500' },
-                    { tag: '1–30 d over', cents: metrics!.syncedArAging.overdue1to30Cents, bar: 'bg-emerald-500' },
-                    { tag: '31–60 d over', cents: metrics!.syncedArAging.overdue31to60Cents, bar: 'bg-amber-500' },
-                    { tag: '60+ d over', cents: metrics!.syncedArAging.overdue60PlusCents, bar: 'bg-rose-500' },
+                    { tag: 'Current', cents: metrics!.syncedArAging.currentCents, intent: 'info' as const, label: 'Current' },
+                    { tag: '1–30 d over', cents: metrics!.syncedArAging.overdue1to30Cents, intent: 'success' as const, label: '1 to 30 days overdue' },
+                    { tag: '31–60 d over', cents: metrics!.syncedArAging.overdue31to60Cents, intent: 'warning' as const, label: '31 to 60 days overdue' },
+                    { tag: '60+ d over', cents: metrics!.syncedArAging.overdue60PlusCents, intent: 'danger' as const, label: '60 or more days overdue' },
                   ].map((b) => (
-                    <div key={b.tag} className="mb-2 flex items-center gap-3">
+                    <div key={b.tag} className="flex items-center gap-3">
                       <span className="w-24 text-xs font-semibold text-muted-foreground">
                         {b.tag}
                       </span>
-                      <span className="h-2.5 flex-1 overflow-hidden rounded-full bg-muted">
-                        <span
-                          className={'block h-full rounded-full ' + b.bar}
-                          style={{
-                            width: `${
-                              metrics!.syncedArAging.totalOutstandingCents > 0
-                                ? Math.round((b.cents / metrics!.syncedArAging.totalOutstandingCents) * 100)
-                                : 0
-                            }%`,
-                          }}
-                        />
-                      </span>
+                      <ProgressBar
+                        value={
+                          metrics!.syncedArAging.totalOutstandingCents > 0
+                            ? Math.round((b.cents / metrics!.syncedArAging.totalOutstandingCents) * 100)
+                            : 0
+                        }
+                        intent={b.intent}
+                        label={`${b.label}: ${formatCentsExact(b.cents)}`}
+                        className="flex-1"
+                      />
                       <span className="w-20 text-right text-sm font-semibold tabular-nums">
                         {formatCentsExact(b.cents)}
                       </span>
                     </div>
                   ))}
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    {formatCentsExact(metrics!.syncedArTotalCents)} across{' '}
-                    {metrics!.syncedArCount} invoice
-                    {metrics!.syncedArCount !== 1 ? 's' : ''} — collected in the
-                    source system
-                  </p>
                 </div>
-              )}
-            </>
-          )}
-        </Card>
-      </div>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {formatCentsExact(metrics!.syncedArTotalCents)} across{' '}
+                  {metrics!.syncedArCount} invoice
+                  {metrics!.syncedArCount !== 1 ? 's' : ''} — collected in the
+                  source system
+                </p>
+              </div>
+            )}
+          </>
+        )}
+      </SectionCard>
 
       <p className="max-w-2xl text-xs text-muted-foreground">
         Trend arrows compare the selected window against the immediately preceding

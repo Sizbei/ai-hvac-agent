@@ -11,6 +11,7 @@ import {
   List as ListIcon,
   RefreshCw,
   Search,
+  User,
   UserPlus,
   Users,
   Wrench,
@@ -36,7 +37,7 @@ import { CustomerDrawer } from '@/components/admin/customers/customer-drawer';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 import { EmptyState } from '@/components/admin/ui/empty-state';
-import { pageLabel } from '@/lib/admin/invoice-list-helpers';
+import { Pager } from '@/components/admin/ui/pager';
 import { SyncPill } from '@/components/admin/sync-pill';
 import type { CustomerListRecord } from '@/lib/admin/crm-types';
 
@@ -57,7 +58,11 @@ const CustomerRow = memo(function CustomerRow({ customer }: CustomerRowProps) {
       <Card className="transition-colors hover:bg-muted/50">
         <CardContent className="flex items-center gap-4 p-4">
           <div className="flex size-10 items-center justify-center rounded-full bg-primary/10 text-primary">
-            <Building2 className="size-5" />
+            {customer.customerType === 'commercial' ? (
+              <Building2 className="size-5" aria-hidden="true" />
+            ) : (
+              <User className="size-5" aria-hidden="true" />
+            )}
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
@@ -78,12 +83,14 @@ const CustomerRow = memo(function CustomerRow({ customer }: CustomerRowProps) {
             </p>
           </div>
           <div className="flex items-center gap-3 text-sm text-muted-foreground">
-            <span className="flex items-center gap-1">
-              <Wrench className="size-3.5" />
+            <span className="flex items-center gap-1.5">
+              <Wrench className="size-3.5" aria-hidden="true" />
+              <span className="sr-only">Equipment:</span>
               {customer.equipmentCount}
             </span>
-            <span className="flex items-center gap-1">
-              <Calendar className="size-3.5" />
+            <span className="flex items-center gap-1.5">
+              <Calendar className="size-3.5" aria-hidden="true" />
+              <span className="sr-only">Bookings:</span>
               {customer.requestCount}
             </span>
             {customer.lastServiceDate && (
@@ -248,7 +255,7 @@ export default function CustomersPage() {
         actions={
           <Button onClick={handleShowCreate}>
             <UserPlus className="mr-2 size-4" />
-            Add Customer
+            Add customer
           </Button>
         }
       />
@@ -314,8 +321,9 @@ export default function CustomersPage() {
           size="sm"
           onClick={handleToggleFieldpulseSynced}
           aria-pressed={fieldpulseSyncedFilter}
+          aria-label="Show only customers synced from FieldPulse"
         >
-          FP synced only
+          Synced from FieldPulse
         </Button>
         <Button
           variant={showArchived ? 'default' : 'outline'}
@@ -323,7 +331,7 @@ export default function CustomersPage() {
           onClick={handleToggleArchived}
         >
           <Archive className="mr-2 size-4" />
-          {showArchived ? 'Hide Archived' : 'Show Archived'}
+          {showArchived ? 'Hide archived' : 'Show archived'}
         </Button>
         <div className="flex items-center rounded-lg border p-0.5">
           <Button
@@ -384,7 +392,7 @@ export default function CustomersPage() {
               isFiltered ? undefined : (
                 <Button onClick={handleShowCreate}>
                   <UserPlus className="mr-2 size-4" />
-                  Add Customer
+                  Add customer
                 </Button>
               )
             }
@@ -406,50 +414,14 @@ export default function CustomersPage() {
             </div>
           )}
 
-          {/* pager bar */}
-          <div className="flex items-center justify-between px-1 py-3 text-sm">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={safePage <= 1}
-            >
-              ← Prev
-            </Button>
-            <span className="tabular-nums text-xs text-muted-foreground">
-              {pageLabel(safePage, total, PER_PAGE)}
-            </span>
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setPage(1)}
-                disabled={safePage <= 1}
-              >
-                First
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setPage(totalPages)}
-                disabled={safePage >= totalPages}
-              >
-                Last
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={safePage >= totalPages}
-              >
-                Next →
-              </Button>
-            </div>
-          </div>
+          <Pager
+            page={safePage}
+            totalPages={totalPages}
+            total={total}
+            perPage={PER_PAGE}
+            onPageChange={setPage}
+            showFirstLast
+          />
         </>
       )}
 

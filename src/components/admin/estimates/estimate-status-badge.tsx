@@ -1,9 +1,5 @@
-const STYLES: Record<string, string> = {
-  open: 'border-blue-300 bg-blue-100 text-blue-800',
-  sold: 'border-green-300 bg-green-100 text-green-800',
-  dismissed: 'border-gray-300 bg-gray-100 text-gray-600',
-  expired: 'border-amber-300 bg-amber-100 text-amber-800',
-};
+import { Badge } from '@/components/ui/badge';
+import { ESTIMATE_STATUS_BADGE, ESTIMATE_STATUS_DEFAULT } from '@/lib/admin/status-colors';
 
 const LABELS: Record<string, string> = {
   open: 'Open',
@@ -13,12 +9,10 @@ const LABELS: Record<string, string> = {
 };
 
 export function EstimateStatusBadge({ status }: { readonly status: string }) {
-  const className = STYLES[status] ?? 'border-gray-300 bg-gray-100 text-gray-600';
+  const className = ESTIMATE_STATUS_BADGE[status] ?? ESTIMATE_STATUS_DEFAULT;
   return (
-    <span
-      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${className}`}
-    >
+    <Badge variant="outline" className={className}>
       {LABELS[status] ?? status}
-    </span>
+    </Badge>
   );
 }

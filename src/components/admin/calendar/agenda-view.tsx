@@ -11,6 +11,7 @@ import {
 } from '@/lib/admin/calendar-time';
 import type { AgendaBooking } from '@/lib/admin/types';
 import { SyncPill } from '@/components/admin/sync-pill';
+import { REQUEST_STATUS_DOT, REQUEST_STATUS_DOT_DEFAULT } from '@/lib/admin/status-colors';
 
 interface AgendaViewProps {
   readonly bookings: readonly AgendaBooking[];
@@ -31,18 +32,7 @@ const MONTHS_SHORT = [
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
 ];
 
-/** Solid date-badge color by status. Urgency is uniformly "medium" on imported
- * data, so status is what actually carries scannable meaning here. Mirrors the
- * StatusBadge hues. */
-const STATUS_DOT: Record<string, string> = {
-  pending: 'bg-yellow-500',
-  assigned: 'bg-blue-500',
-  scheduled: 'bg-cyan-500',
-  in_progress: 'bg-purple-500',
-  on_hold: 'bg-orange-500',
-  completed: 'bg-green-600',
-  cancelled: 'bg-gray-400',
-};
+// Status dot uses the same tokens as BookingHistoryList — see REQUEST_STATUS_DOT in status-colors.ts.
 
 interface Row {
   readonly kind: 'month' | 'today' | 'booking';
@@ -105,7 +95,7 @@ function AgendaRow({
 }) {
   const when = new Date(booking.bookedAt);
   const w = toBusinessWallClock(when);
-  const dot = STATUS_DOT[booking.status] ?? 'bg-gray-400';
+  const dot = REQUEST_STATUS_DOT[booking.status] ?? REQUEST_STATUS_DOT_DEFAULT;
 
   return (
     <button
@@ -115,7 +105,7 @@ function AgendaRow({
     >
       {/* date badge */}
       <div className="flex w-12 shrink-0 flex-col items-center">
-        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <span className="text-[10px] font-semibold text-muted-foreground">
           {MONTHS_SHORT[w.month - 1]}
         </span>
         <span className="text-lg font-bold leading-none tabular-nums">{w.day}</span>

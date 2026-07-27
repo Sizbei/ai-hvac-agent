@@ -80,7 +80,7 @@ export function FollowUpFormDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Schedule Follow-up</DialogTitle>
+          <DialogTitle>Schedule follow-up</DialogTitle>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -101,7 +101,7 @@ export function FollowUpFormDialog({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="follow-up-due">Due Date *</Label>
+            <Label htmlFor="follow-up-due">Due date *</Label>
             <Input
               id="follow-up-due"
               type="date"
@@ -111,7 +111,7 @@ export function FollowUpFormDialog({
           </div>
 
           <div className="space-y-2">
-            <Label>Assign To</Label>
+            <Label>Assign to</Label>
             <Select
               value={assignedTo}
               onValueChange={(v) => setAssignedTo(v ?? UNASSIGNED)}

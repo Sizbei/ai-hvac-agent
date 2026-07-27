@@ -115,12 +115,12 @@ export default function CommunicationTemplatesPage() {
   return (
     <PageShell>
       <PageHeader
-        title="Communication Templates"
+        title="Communication templates"
         subtitle="Manage SMS and email templates for automated communications."
         actions={
           <Button onClick={openCreate}>
             <Plus className="mr-1.5 size-4" />
-            Create Template
+            Create template
           </Button>
         }
       />
@@ -150,7 +150,7 @@ export default function CommunicationTemplatesPage() {
             action={
               <Button onClick={openCreate}>
                 <Plus className="mr-1.5 size-4" />
-                Create Your First Template
+                Create your first template
               </Button>
             }
           />

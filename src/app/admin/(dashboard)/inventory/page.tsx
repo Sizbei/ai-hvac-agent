@@ -12,9 +12,16 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
-import { pageLabel } from '@/lib/admin/invoice-list-helpers';
+import { Pager } from '@/components/admin/ui/pager';
 import type { InventoryItem } from '@/hooks/use-inventory';
 
 const PER_PAGE = 50;
@@ -107,7 +114,7 @@ export default function InventoryPage() {
         actions={
           <Button onClick={handleAddClick}>
             <Plus className="mr-2 h-4 w-4" />
-            Track Material
+            Track material
           </Button>
         }
       />
@@ -123,16 +130,19 @@ export default function InventoryPage() {
             className="pl-10"
           />
         </div>
-        <select
-          aria-label="Sort order"
+        <Select
           value={sortKey}
-          onChange={(e) => { setSortKey(e.target.value as InventorySortKey); setPage(1); }}
-          className="rounded-xl border bg-card px-3 py-2.5 text-sm font-semibold text-foreground shadow-sm outline-none focus:ring-1 focus:ring-ring"
+          onValueChange={(value) => { setSortKey(value as InventorySortKey); setPage(1); }}
         >
-          {INVENTORY_SORT_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>{opt.label}</option>
-          ))}
-        </select>
+          <SelectTrigger className="w-[160px]" aria-label="Sort order">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {INVENTORY_SORT_OPTIONS.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Button
           type="button"
           variant={belowReorderOnly ? 'secondary' : 'outline'}
@@ -157,51 +167,15 @@ export default function InventoryPage() {
         onEdit={handleEditClick}
       />
 
-      {/* Inventory pager bar */}
       {inventoryTotal > 0 && (
-        <div className="flex items-center justify-between px-1 py-3 text-sm">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={safePage <= 1}
-          >
-            ← Prev
-          </Button>
-          <span className="tabular-nums text-xs text-muted-foreground">
-            {pageLabel(safePage, inventoryTotal, PER_PAGE)}
-          </span>
-          <div className="flex gap-2">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setPage(1)}
-              disabled={safePage <= 1}
-            >
-              First
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setPage(totalPages)}
-              disabled={safePage >= totalPages}
-            >
-              Last
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={safePage >= totalPages}
-            >
-              Next →
-            </Button>
-          </div>
-        </div>
+        <Pager
+          page={safePage}
+          totalPages={totalPages}
+          total={inventoryTotal}
+          perPage={PER_PAGE}
+          onPageChange={setPage}
+          showFirstLast
+        />
       )}
 
       <Separator />

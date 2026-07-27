@@ -154,7 +154,7 @@ export function PurchaseOrderFormDialog({
     <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) onClose(); }}>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>New Purchase Order</DialogTitle>
+          <DialogTitle>New purchase order</DialogTitle>
           <DialogDescription>
             Order materials from a vendor. The PO starts as a draft.
           </DialogDescription>

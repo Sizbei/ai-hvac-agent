@@ -2,6 +2,8 @@
 
 import { useEffect } from 'react';
 import dynamic from 'next/dynamic';
+import { PageShell } from '@/components/admin/ui/page-shell';
+import { PageHeader } from '@/components/admin/ui/page-header';
 
 // MapLibre needs `window`, so never render it on the server.
 const DispatchMap = dynamic(
@@ -9,8 +11,12 @@ const DispatchMap = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="flex h-full items-center justify-center rounded-xl border bg-card text-sm text-muted-foreground">
-        Loading map…
+      <div
+        className="flex h-full min-h-[400px] animate-pulse items-center justify-center rounded-xl border bg-muted text-sm text-muted-foreground"
+        aria-label="Loading map"
+        role="status"
+      >
+        <span aria-hidden="true">Loading map…</span>
       </div>
     ),
   },
@@ -19,16 +25,14 @@ const DispatchMap = dynamic(
 export default function DispatchMapPage() {
   useEffect(() => { document.title = 'Map · Spears Admin'; }, []);
   return (
-    <div className="flex h-[calc(100vh-6rem)] flex-col gap-4">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight">Map</h1>
-        <p className="text-sm text-muted-foreground">
-          Live technician locations and active jobs across your service area.
-        </p>
-      </div>
+    <PageShell fullHeight className="p-6 sm:p-7 gap-4">
+      <PageHeader
+        title="Map"
+        subtitle="Live technician locations and active jobs across your service area. Technician location is shared only when the tech opts in."
+      />
       <div className="min-h-0 flex-1">
         <DispatchMap />
       </div>
-    </div>
+    </PageShell>
   );
 }

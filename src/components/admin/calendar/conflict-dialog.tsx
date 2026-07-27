@@ -77,7 +77,7 @@ export function ConflictDialog({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <AlertTriangle className="size-4 text-amber-500" />
+            <AlertTriangle className="size-4 text-warning" />
             Scheduling conflict
           </DialogTitle>
           <DialogDescription>{message}</DialogDescription>
@@ -102,7 +102,7 @@ export function ConflictDialog({
         )}
 
         {conflict?.outsideAvailability && (
-          <p className="rounded-md bg-amber-50 px-2.5 py-1.5 text-xs text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+          <p className="rounded-md bg-warning-light px-2.5 py-1.5 text-xs text-warning-foreground">
             This window falls outside the technician&apos;s configured working
             hours.
           </p>

@@ -56,7 +56,7 @@ export function DispatchPanel({ config, onSave }: DispatchPanelProps) {
             {saving && (
               <Loader2 className="size-4 animate-spin text-muted-foreground" />
             )}
-            {saved && <Check className="size-4 text-green-600" />}
+            {saved && <Check className="size-4 text-success" />}
             <Switch
               id="auto-dispatch-switch"
               checked={config.autoDispatchEnabled}

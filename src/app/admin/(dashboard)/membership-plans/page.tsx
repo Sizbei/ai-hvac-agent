@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Plus, AlertCircle } from 'lucide-react';
+import { Plus, AlertCircle, CreditCard } from 'lucide-react';
 import { useMembershipPlans, type MembershipPlan } from '@/hooks/use-membership-plans';
 import { MembershipPlansTable } from '@/components/admin/memberships/membership-plans-table';
 import { MembershipPlanFormDialog } from '@/components/admin/memberships/membership-plan-form-dialog';
@@ -10,9 +10,10 @@ import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
+import { EmptyState } from '@/components/admin/ui/empty-state';
 
 export default function MembershipPlansPage() {
-  useEffect(() => { document.title = 'Membership Plans · Spears Admin'; }, []);
+  useEffect(() => { document.title = 'Membership plans · Spears Admin'; }, []);
   const { plans, isLoading, error, refetch } = useMembershipPlans();
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<MembershipPlan | null>(null);
@@ -52,15 +53,17 @@ export default function MembershipPlansPage() {
     }
   }
 
+  const showEmpty = !isLoading && plans.length === 0;
+
   return (
     <PageShell>
       <PageHeader
-        title="Membership Plans"
+        title="Membership plans"
         subtitle="Recurring service-agreement plans customers can enroll in for member pricing."
         actions={
           <Button onClick={handleAddClick}>
             <Plus className="mr-2 h-4 w-4" />
-            Add Plan
+            Add plan
           </Button>
         }
       />
@@ -72,12 +75,26 @@ export default function MembershipPlansPage() {
         </Alert>
       )}
 
-      <MembershipPlansTable
-        plans={plans}
-        isLoading={isLoading}
-        onEdit={handleEditClick}
-        onDeactivate={(plan) => { setDeactivateError(null); setPendingDeactivate(plan); }}
-      />
+      {showEmpty ? (
+        <EmptyState
+          icon={CreditCard}
+          title="No membership plans yet"
+          description="Create your first plan to offer recurring maintenance agreements and member pricing to customers."
+          action={
+            <Button onClick={handleAddClick}>
+              <Plus className="mr-2 h-4 w-4" />
+              Add plan
+            </Button>
+          }
+        />
+      ) : (
+        <MembershipPlansTable
+          plans={plans}
+          isLoading={isLoading}
+          onEdit={handleEditClick}
+          onDeactivate={(plan) => { setDeactivateError(null); setPendingDeactivate(plan); }}
+        />
+      )}
 
       <MembershipPlanFormDialog
         open={formOpen}

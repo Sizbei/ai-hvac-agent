@@ -51,7 +51,7 @@ export function CalendarJobCard({ job, onSelect, compact }: CalendarJobCardProps
         {job.isAfterHours && (
           <span
             title="After hours"
-            className="inline-flex shrink-0 items-center rounded-full border border-amber-300 bg-amber-100 px-1 text-[9px] font-medium text-amber-800"
+            className="inline-flex shrink-0 items-center rounded-full border border-warning/30 bg-warning-light px-1 text-[9px] font-medium text-warning-foreground"
           >
             AH
           </span>

@@ -274,7 +274,7 @@ export function ConversationDetailContent({
         {/* AI summary callout */}
         {detail.summary && (
           <div className="rounded-xl border border-primary/20 bg-primary/[0.05] p-4">
-            <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-primary">
+            <div className="mb-1.5 text-xs font-semibold text-primary">
               AI summary
             </div>
             <p className="text-sm leading-relaxed text-foreground/90 whitespace-pre-wrap">

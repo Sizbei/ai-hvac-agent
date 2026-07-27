@@ -22,7 +22,7 @@ function BookingRow({ booking }: { readonly booking: AgendaBooking }) {
   return (
     <div className="flex items-center gap-3 rounded-lg bg-muted/40 px-3 py-2">
       <div className="flex w-11 shrink-0 flex-col items-center">
-        <span className="text-[10px] font-semibold uppercase text-muted-foreground">
+        <span className="text-[10px] font-semibold text-muted-foreground">
           {MONTHS_SHORT[d.getUTCMonth()]}
         </span>
         <span className="text-sm font-bold leading-none tabular-nums">

@@ -164,7 +164,10 @@ export function CustomerMembershipCard({
                   </p>
                 )}
               </div>
-              <Badge className="bg-green-100 capitalize text-green-800">
+              <Badge
+                variant="outline"
+                className="border-success/30 bg-success-light capitalize text-success"
+              >
                 {membership.status}
               </Badge>
             </div>

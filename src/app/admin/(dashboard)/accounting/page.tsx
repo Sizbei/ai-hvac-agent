@@ -1,4 +1,6 @@
 import type { Metadata } from 'next';
+import { PageShell } from '@/components/admin/ui/page-shell';
+import { PageHeader } from '@/components/admin/ui/page-header';
 import { AccountingExportPanel } from '@/components/admin/accounting/accounting-export-panel';
 
 export const metadata: Metadata = { title: 'Accounting · Spears Admin' };
@@ -11,14 +13,12 @@ export const metadata: Metadata = { title: 'Accounting · Spears Admin' };
  */
 export default function AccountingPage() {
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Accounting</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Export your books to QuickBooks or any accounting tool.
-        </p>
-      </div>
+    <PageShell narrow>
+      <PageHeader
+        title="Accounting"
+        subtitle="Export your books to QuickBooks or any accounting tool."
+      />
       <AccountingExportPanel />
-    </div>
+    </PageShell>
   );
 }

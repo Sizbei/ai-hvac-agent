@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Check, Copy, Loader2, Plus, Download, Trash2 } from 'lucide-react';
+import { Check, Copy, Loader2, Plus, Download, Trash2, RefreshCw } from 'lucide-react';
 import {
   Card,
   CardContent,
@@ -30,12 +30,33 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { SkeletonTable } from '@/components/admin/ui/skeleton-table';
 
 interface OrgRow {
   readonly id: string;
   readonly name: string;
   readonly status: 'active' | 'suspended' | 'trial';
   readonly createdAt: string;
+}
+
+/** Token-based status badge for org status — no raw palette classes. */
+function OrgStatusBadge({ status }: { status: OrgRow['status'] }) {
+  const classes = {
+    active: 'bg-success-light text-success border-success/30',
+    suspended: 'bg-danger-light text-danger border-danger/30',
+    trial: 'bg-warning-light text-warning-foreground border-warning/30',
+  } as const;
+  const labels = {
+    active: 'Active',
+    suspended: 'Suspended',
+    trial: 'Trial',
+  } as const;
+
+  return (
+    <Badge variant="outline" className={classes[status]}>
+      {labels[status]}
+    </Badge>
+  );
 }
 
 /** Tenant console: a list of orgs + a "Create tenant" dialog that provisions an
@@ -48,6 +69,7 @@ export function PlatformConsole() {
 
   const loadOrgs = useCallback(async () => {
     setListError(null);
+    setLoading(true);
     try {
       const res = await fetch('/api/platform/organizations');
       const json = await res.json();
@@ -80,11 +102,17 @@ export function PlatformConsole() {
         <CreateTenantDialog onCreated={loadOrgs} />
       </CardHeader>
       <CardContent>
-        {listError && <p className="text-sm text-destructive">{listError}</p>}
-        {loading ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" /> Loading…
+        {listError && (
+          <div className="flex items-center justify-between gap-3 text-sm text-destructive">
+            <span>{listError}</span>
+            <Button variant="outline" size="sm" onClick={() => void loadOrgs()}>
+              <RefreshCw className="size-3.5" />
+              Retry
+            </Button>
           </div>
+        )}
+        {loading ? (
+          <SkeletonTable rows={4} cols={4} />
         ) : orgs.length === 0 ? (
           <p className="text-sm text-muted-foreground">No organizations yet.</p>
         ) : (
@@ -102,11 +130,7 @@ export function PlatformConsole() {
                 <TableRow key={o.id}>
                   <TableCell className="font-medium">{o.name}</TableCell>
                   <TableCell>
-                    <Badge
-                      variant={o.status === 'active' ? 'default' : 'secondary'}
-                    >
-                      {o.status}
-                    </Badge>
+                    <OrgStatusBadge status={o.status} />
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {new Date(o.createdAt).toLocaleDateString()}
@@ -124,9 +148,13 @@ export function PlatformConsole() {
                       >
                         <Download className="size-4" /> Export
                       </Button>
+                      {/* Purge is irreversible; ghost variant keeps it less
+                          prominent in the row — the confirmation dialog is the
+                          real guard. */}
                       <Button
                         size="sm"
-                        variant="destructive"
+                        variant="ghost"
+                        className="text-destructive hover:text-destructive hover:bg-danger-light"
                         onClick={() => setPurgingOrg(o)}
                       >
                         <Trash2 className="size-4" /> Purge
@@ -338,7 +366,7 @@ function CreateTenantDialog({ onCreated }: { onCreated: () => void }) {
                 aria-label="Copy invite link"
               >
                 {copied ? (
-                  <Check className="size-4 text-emerald-600" />
+                  <Check className="size-4 text-success" />
                 ) : (
                   <Copy className="size-4" />
                 )}

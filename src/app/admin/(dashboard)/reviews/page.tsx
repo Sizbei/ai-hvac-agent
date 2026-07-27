@@ -3,11 +3,15 @@
 import { useEffect, useState } from 'react';
 import { AlertCircle, Star, MessageSquareQuote, Send } from 'lucide-react';
 import { useReviews, type ReviewRow } from '@/hooks/use-reviews';
-import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
-import { pageLabel } from '@/lib/admin/invoice-list-helpers';
+import { Badge } from '@/components/ui/badge';
+import { PageShell } from '@/components/admin/ui/page-shell';
+import { PageHeader } from '@/components/admin/ui/page-header';
+import { StatCard } from '@/components/admin/ui/stat-card';
+import { SectionCard } from '@/components/admin/ui/section-card';
+import { EmptyState } from '@/components/admin/ui/empty-state';
+import { Pager } from '@/components/admin/ui/pager';
 
 const PER_PAGE = 50;
 
@@ -20,23 +24,23 @@ function formatDate(iso: string | null): string {
   });
 }
 
-function StatusBadge({ status }: { readonly status: ReviewRow['status'] }) {
-  const styles: Record<ReviewRow['status'], string> = {
-    pending: 'bg-gray-100 text-gray-700',
-    sent: 'bg-blue-100 text-blue-700',
-    responded: 'bg-green-100 text-green-700',
-  };
-  const label: Record<ReviewRow['status'], string> = {
-    pending: 'Pending',
-    sent: 'Sent',
-    responded: 'Responded',
-  };
+const REVIEW_STATUS_CLASS: Record<ReviewRow['status'], string> = {
+  pending: 'bg-muted text-muted-foreground border-border',
+  sent: 'bg-info-light text-info border-info/30',
+  responded: 'bg-success-light text-success border-success/30',
+};
+
+const REVIEW_STATUS_LABEL: Record<ReviewRow['status'], string> = {
+  pending: 'Pending',
+  sent: 'Sent',
+  responded: 'Responded',
+};
+
+function ReviewStatusBadge({ status }: { readonly status: ReviewRow['status'] }) {
   return (
-    <span
-      className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${styles[status]}`}
-    >
-      {label[status]}
-    </span>
+    <Badge variant="outline" className={REVIEW_STATUS_CLASS[status]}>
+      {REVIEW_STATUS_LABEL[status]}
+    </Badge>
   );
 }
 
@@ -48,7 +52,9 @@ function Stars({ rating }: { readonly rating: number | null }) {
         <Star
           key={v}
           className={
-            v <= rating ? 'size-4 fill-amber-400 text-amber-400' : 'size-4 text-gray-300'
+            v <= rating
+              ? 'size-4 fill-warning text-warning'
+              : 'size-4 text-muted-foreground/30'
           }
         />
       ))}
@@ -70,13 +76,11 @@ export default function ReviewsPage() {
   const safePage = Math.min(page, totalPages);
 
   return (
-    <div className="space-y-6 p-6">
-      <div>
-        <h1 className="font-heading text-2xl font-bold tracking-tight">Reviews</h1>
-        <p className="text-sm text-muted-foreground">
-          Post-job review requests, average rating, and response rate.
-        </p>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Reviews"
+        subtitle="Post-job review requests, average rating, and response rate."
+      />
 
       {error && (
         <Alert variant="destructive">
@@ -87,53 +91,35 @@ export default function ReviewsPage() {
 
       {/* Stat cards */}
       <div className="grid gap-4 sm:grid-cols-3">
-        <Card className="p-5">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Star className="size-4" /> Average rating
-          </div>
-          {isLoading ? (
-            <Skeleton className="mt-2 h-8 w-20" />
-          ) : (
-            <p className="mt-2 text-2xl font-bold">
-              {stats?.avgRating != null ? stats.avgRating.toFixed(1) : '—'}
-              <span className="ml-1 text-base font-normal text-muted-foreground">
-                / 5
-              </span>
-            </p>
-          )}
-        </Card>
-        <Card className="p-5">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Send className="size-4" /> Requests sent
-          </div>
-          {isLoading ? (
-            <Skeleton className="mt-2 h-8 w-20" />
-          ) : (
-            <p className="mt-2 text-2xl font-bold">{stats?.count ?? 0}</p>
-          )}
-        </Card>
-        <Card className="p-5">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <MessageSquareQuote className="size-4" /> Response rate
-          </div>
-          {isLoading ? (
-            <Skeleton className="mt-2 h-8 w-20" />
-          ) : (
-            <p className="mt-2 text-2xl font-bold">
-              {responseRate}%
-              <span className="ml-1 text-base font-normal text-muted-foreground">
-                ({stats?.responded ?? 0})
-              </span>
-            </p>
-          )}
-        </Card>
+        <StatCard
+          icon={Star}
+          intent="warning"
+          label="Average rating"
+          value={stats?.avgRating != null ? `${stats.avgRating.toFixed(1)} / 5` : '—'}
+          loading={isLoading}
+        />
+        <StatCard
+          icon={Send}
+          intent="info"
+          label="Requests sent"
+          value={String(stats?.count ?? 0)}
+          loading={isLoading}
+        />
+        <StatCard
+          icon={MessageSquareQuote}
+          intent="success"
+          label="Response rate"
+          value={`${responseRate}%`}
+          sublabel={`${stats?.responded ?? 0} responded`}
+          loading={isLoading}
+        />
       </div>
 
-      {/* List */}
-      <Card className="overflow-hidden">
+      {/* Review list */}
+      <SectionCard title="All reviews">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="border-b bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
+            <thead className="border-b text-left text-xs text-muted-foreground">
               <tr>
                 <th className="px-4 py-3 font-medium">Status</th>
                 <th className="px-4 py-3 font-medium">Rating</th>
@@ -153,19 +139,19 @@ export default function ReviewsPage() {
                 ))
               ) : reviews.length === 0 ? (
                 <tr>
-                  <td
-                    className="px-4 py-10 text-center text-muted-foreground"
-                    colSpan={5}
-                  >
-                    No review requests yet. They&apos;re sent automatically when a
-                    job is completed.
+                  <td colSpan={5}>
+                    <EmptyState
+                      icon={Star}
+                      title="No reviews yet"
+                      description="Review requests are sent automatically when a job is completed."
+                    />
                   </td>
                 </tr>
               ) : (
                 reviews.map((r) => (
                   <tr key={r.id}>
                     <td className="px-4 py-3">
-                      <StatusBadge status={r.status} />
+                      <ReviewStatusBadge status={r.status} />
                     </td>
                     <td className="px-4 py-3">
                       <Stars rating={r.rating} />
@@ -183,54 +169,18 @@ export default function ReviewsPage() {
             </tbody>
           </table>
         </div>
-      </Card>
+      </SectionCard>
 
-      {/* pager bar — only shown when there are results */}
       {total > 0 && (
-        <div className="flex items-center justify-between px-1 py-3 text-sm">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={safePage <= 1}
-          >
-            ← Prev
-          </Button>
-          <span className="tabular-nums text-xs text-muted-foreground">
-            {pageLabel(safePage, total, PER_PAGE)}
-          </span>
-          <div className="flex gap-2">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setPage(1)}
-              disabled={safePage <= 1}
-            >
-              First
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setPage(totalPages)}
-              disabled={safePage >= totalPages}
-            >
-              Last
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={safePage >= totalPages}
-            >
-              Next →
-            </Button>
-          </div>
-        </div>
+        <Pager
+          page={safePage}
+          totalPages={totalPages}
+          total={total}
+          perPage={PER_PAGE}
+          onPageChange={setPage}
+          showFirstLast
+        />
       )}
-    </div>
+    </PageShell>
   );
 }
