@@ -120,7 +120,7 @@ export function Sidebar({
           <Icon
             className={cn(
               'size-5 shrink-0 transition-colors',
-              isActive ? 'text-primary' : 'text-white/70 group-hover/nav:text-white',
+              isActive ? 'text-primary' : 'text-white/80 group-hover/nav:text-white',
             )}
           />
           {!collapsed && <span className="truncate">{item.label}</span>}
@@ -252,7 +252,7 @@ export function Sidebar({
                 className="mt-1 w-full justify-start text-white/65 hover:bg-white/10 hover:text-white"
               >
                 <LogOut className="size-4" />
-                <span>Sign Out</span>
+                <span>Sign out</span>
               </Button>
             </div>
           </div>
@@ -261,7 +261,7 @@ export function Sidebar({
     );
   }
 
-  // Desktop: fixed sidebar
+  // Desktop: fixed sidebar — single TooltipProvider wraps the entire aside interior
   return (
     <aside
       className={cn(
@@ -270,28 +270,28 @@ export function Sidebar({
         isCollapsed ? 'w-16' : 'w-64',
       )}
     >
-      <div className="flex h-full flex-col">
-        {/* Logo + env badge */}
-        <div
-          className={cn(
-            'flex h-16 items-center px-4',
-            isCollapsed && 'justify-center px-0',
-          )}
-        >
-          {isCollapsed ? (
-            <BrandMark onDark compact />
-          ) : (
-            <div className="flex flex-col gap-0.5">
-              <BrandMark onDark />
-              <EnvBadge />
-            </div>
-          )}
-        </div>
+      <TooltipProvider>
+        <div className="flex h-full flex-col">
+          {/* Logo + env badge */}
+          <div
+            className={cn(
+              'flex h-16 items-center px-4',
+              isCollapsed && 'justify-center px-0',
+            )}
+          >
+            {isCollapsed ? (
+              <BrandMark onDark compact />
+            ) : (
+              <div className="flex flex-col gap-0.5">
+                <BrandMark onDark />
+                <EnvBadge />
+              </div>
+            )}
+          </div>
 
-        {/* Search button (desktop) */}
-        <div className="px-3 pb-1 pt-2">
-          {isCollapsed ? (
-            <TooltipProvider>
+          {/* Search button (desktop) */}
+          <div className="px-3 pb-1 pt-2">
+            {isCollapsed ? (
               <Tooltip>
                 <TooltipTrigger render={<div />}>
                   <button
@@ -307,25 +307,23 @@ export function Sidebar({
                 </TooltipTrigger>
                 <TooltipContent side="right">Search ⌘K</TooltipContent>
               </Tooltip>
-            </TooltipProvider>
-          ) : (
-            <button
-              type="button"
-              onClick={() =>
-                window.dispatchEvent(new CustomEvent('global-search:open'))
-              }
-              className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-white/65 transition-colors hover:bg-white/[0.06] hover:text-white"
-            >
-              <Search className="size-5 shrink-0" />
-              <span className="flex-1 text-left">Search</span>
-              <kbd className="text-xs opacity-50">⌘K</kbd>
-            </button>
-          )}
-        </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() =>
+                  window.dispatchEvent(new CustomEvent('global-search:open'))
+                }
+                className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-white/65 transition-colors hover:bg-white/[0.06] hover:text-white"
+              >
+                <Search className="size-5 shrink-0" />
+                <span className="flex-1 text-left">Search</span>
+                <kbd className="text-xs opacity-50">⌘K</kbd>
+              </button>
+            )}
+          </div>
 
-        {/* Nav */}
-        <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-3">
-          <TooltipProvider>
+          {/* Nav */}
+          <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-3">
             {NAV_GROUPS.map((group, groupIndex) => (
               <div key={group.heading} className="space-y-1">
                 {!isCollapsed && (
@@ -352,65 +350,75 @@ export function Sidebar({
                 })}
               </div>
             ))}
-          </TooltipProvider>
-        </nav>
+          </nav>
 
-        {/* Bottom section */}
-        <div className="border-t border-white/10 px-3 py-3">
-          {/* Env switcher (super_admin only, expanded only) */}
-          {!isCollapsed && envLinks.length > 0 && (
-            <div className="mb-3 space-y-1">
-              <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/70">
-                Environments
-              </p>
-              {envLinks.map((link) => (
-                <a
-                  key={link.name}
-                  href={link.url}
-                  className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-white/65 transition-colors hover:bg-white/[0.06] hover:text-white"
-                >
-                  {link.name}
-                </a>
-              ))}
-            </div>
-          )}
-
-          {/* User info */}
-          {!isCollapsed && (
-            <div className="mb-1 flex items-center gap-3 rounded-lg bg-white/[0.06] px-3 py-2">
-              <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/20 text-xs font-semibold text-primary">
-                {initialsOf(adminName)}
-              </span>
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-white">{adminName}</p>
-                <p className="truncate text-xs text-white/70">{adminEmail}</p>
+          {/* Bottom section */}
+          <div className="border-t border-white/10 px-3 py-3">
+            {/* Env switcher (super_admin only, expanded only) */}
+            {!isCollapsed && envLinks.length > 0 && (
+              <div className="mb-3 space-y-1">
+                <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/70">
+                  Environments
+                </p>
+                {envLinks.map((link) => (
+                  <a
+                    key={link.name}
+                    href={link.url}
+                    className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-white/65 transition-colors hover:bg-white/[0.06] hover:text-white"
+                  >
+                    {link.name}
+                  </a>
+                ))}
               </div>
-            </div>
-          )}
-
-          {/* Collapse toggle */}
-          <Button
-            variant="ghost"
-            size={isCollapsed ? 'icon' : 'default'}
-            onClick={toggleCollapse}
-            aria-label={isCollapsed ? 'Expand sidebar' : undefined}
-            className={cn(
-              'w-full text-white/65 hover:bg-white/10 hover:text-white',
-              !isCollapsed && 'justify-start',
             )}
-          >
+
+            {/* User info — expanded: full card; collapsed: initials chip with tooltip */}
             {isCollapsed ? (
-              <ChevronRight className="size-4" />
+              <Tooltip>
+                <TooltipTrigger render={<div />}>
+                  <span className="mx-auto mb-2 flex size-7 cursor-default items-center justify-center rounded-full bg-primary/20 text-[11px] font-semibold text-primary">
+                    {initialsOf(adminName)}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  <p className="font-medium">{adminName}</p>
+                  <p className="text-xs text-muted-foreground">{adminEmail}</p>
+                </TooltipContent>
+              </Tooltip>
             ) : (
-              <>
-                <ChevronLeft className="size-4" />
-                <span>Collapse</span>
-              </>
+              <div className="mb-1 flex items-center gap-3 rounded-lg bg-white/[0.06] px-3 py-2">
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/20 text-xs font-semibold text-primary">
+                  {initialsOf(adminName)}
+                </span>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-white">{adminName}</p>
+                  <p className="truncate text-xs text-white/70">{adminEmail}</p>
+                </div>
+              </div>
             )}
-          </Button>
 
-          {/* Logout */}
-          <TooltipProvider>
+            {/* Collapse toggle */}
+            <Button
+              variant="ghost"
+              size={isCollapsed ? 'icon' : 'default'}
+              onClick={toggleCollapse}
+              aria-label={isCollapsed ? 'Expand sidebar' : undefined}
+              className={cn(
+                'w-full text-white/65 hover:bg-white/10 hover:text-white',
+                !isCollapsed && 'justify-start',
+              )}
+            >
+              {isCollapsed ? (
+                <ChevronRight className="size-4" />
+              ) : (
+                <>
+                  <ChevronLeft className="size-4" />
+                  <span>Collapse</span>
+                </>
+              )}
+            </Button>
+
+            {/* Logout */}
             {isCollapsed ? (
               <Tooltip>
                 <TooltipTrigger render={<div />}>
@@ -423,7 +431,7 @@ export function Sidebar({
                     <LogOut className="size-4" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent side="right">Sign Out</TooltipContent>
+                <TooltipContent side="right">Sign out</TooltipContent>
               </Tooltip>
             ) : (
               <Button
@@ -433,12 +441,12 @@ export function Sidebar({
                 className="w-full justify-start text-white/65 hover:bg-white/10 hover:text-red-300"
               >
                 <LogOut className="size-4" />
-                <span>Sign Out</span>
+                <span>Sign out</span>
               </Button>
             )}
-          </TooltipProvider>
+          </div>
         </div>
-      </div>
+      </TooltipProvider>
     </aside>
   );
 }

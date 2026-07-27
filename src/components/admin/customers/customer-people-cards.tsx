@@ -6,8 +6,8 @@ import {
   customerInitials,
   customerCity,
   lastSeenLabel,
-  lastSeenTone,
 } from '@/lib/admin/customer-display';
+import { lastSeenDotClass } from '@/lib/admin/status-colors';
 import type { CustomerListRecord } from '@/lib/admin/crm-types';
 import { SyncPill } from '@/components/admin/sync-pill';
 
@@ -76,8 +76,7 @@ function PeopleCard({
       <div className="flex items-center justify-between border-t border-dashed pt-2.5 text-xs">
         <span className="flex items-center gap-1.5 text-muted-foreground">
           <span
-            className="size-1.5 rounded-full"
-            style={{ backgroundColor: lastSeenTone(customer.lastServiceDate) }}
+            className={`size-1.5 rounded-full ${lastSeenDotClass(customer.lastServiceDate)}`}
             aria-hidden
           />
           {lastSeenLabel(customer.lastServiceDate)}

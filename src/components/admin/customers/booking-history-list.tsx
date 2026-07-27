@@ -2,6 +2,7 @@
 
 import { Skeleton } from '@/components/ui/skeleton';
 import { StatusBadge } from '@/components/admin/status-badge';
+import { REQUEST_STATUS_DOT, REQUEST_STATUS_DOT_DEFAULT } from '@/lib/admin/status-colors';
 import type { AgendaBooking } from '@/lib/admin/types';
 
 interface BookingHistoryListProps {
@@ -15,19 +16,9 @@ const MONTHS_SHORT = [
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
 ];
 
-const STATUS_DOT: Record<string, string> = {
-  pending: '#eab308',
-  assigned: '#3b82f6',
-  scheduled: '#06b6d4',
-  in_progress: '#a855f7',
-  on_hold: '#f97316',
-  completed: '#16a34a',
-  cancelled: '#9ca3af',
-};
-
 function BookingRow({ booking }: { readonly booking: AgendaBooking }) {
   const d = new Date(booking.bookedAt);
-  const dot = STATUS_DOT[booking.status] ?? '#9ca3af';
+  const dotClass = REQUEST_STATUS_DOT[booking.status] ?? REQUEST_STATUS_DOT_DEFAULT;
   return (
     <div className="flex items-center gap-3 rounded-lg bg-muted/40 px-3 py-2">
       <div className="flex w-11 shrink-0 flex-col items-center">
@@ -51,8 +42,7 @@ function BookingRow({ booking }: { readonly booking: AgendaBooking }) {
       </div>
       <span className="flex shrink-0 items-center gap-1.5">
         <span
-          className="size-1.5 rounded-full"
-          style={{ backgroundColor: dot }}
+          className={`size-1.5 rounded-full ${dotClass}`}
           aria-hidden
         />
         <StatusBadge status={booking.status} />

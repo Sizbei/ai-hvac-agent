@@ -1,21 +1,30 @@
 'use client';
 
 import { Badge } from '@/components/ui/badge';
+import {
+  REQUEST_STATUS_BADGE,
+  REQUEST_STATUS_DEFAULT,
+  SESSION_STATUS_BADGE,
+  SESSION_STATUS_DEFAULT,
+} from '@/lib/admin/status-colors';
 
 interface StatusBadgeProps {
   readonly status: string;
 }
 
-const STATUS_STYLES: Record<string, string> = {
-  pending: 'bg-yellow-100 text-yellow-700 border-yellow-200',
-  assigned: 'bg-blue-100 text-blue-700 border-blue-200',
-  scheduled: 'bg-cyan-100 text-cyan-700 border-cyan-200',
-  in_progress: 'bg-purple-100 text-purple-700 border-purple-200',
-  on_hold: 'bg-orange-100 text-orange-700 border-orange-200',
-  completed: 'bg-green-100 text-green-700 border-green-200',
-  overdue: 'bg-danger-light text-danger border-danger/30',
-  cancelled: 'bg-gray-100 text-gray-500 border-gray-200',
-};
+/**
+ * All status values from `request_status` and `session_status`/`session_outcome`
+ * enums are covered. Unknown values fall back to the pending/chatting default.
+ * Colors come exclusively from semantic design tokens — no raw palette classes.
+ */
+function resolveColorClass(status: string): string {
+  return (
+    REQUEST_STATUS_BADGE[status] ??
+    SESSION_STATUS_BADGE[status] ??
+    REQUEST_STATUS_DEFAULT ??
+    SESSION_STATUS_DEFAULT
+  );
+}
 
 function formatStatus(status: string): string {
   return status
@@ -25,7 +34,7 @@ function formatStatus(status: string): string {
 }
 
 export function StatusBadge({ status }: StatusBadgeProps) {
-  const colorClass = STATUS_STYLES[status] ?? STATUS_STYLES.pending;
+  const colorClass = resolveColorClass(status);
 
   return (
     <Badge variant="outline" className={colorClass}>

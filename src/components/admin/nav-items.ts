@@ -57,6 +57,8 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { label: 'Conversations', href: '/admin/conversations', icon: MessagesSquare },
       { label: 'AI Insights', href: '/admin/insights', icon: BarChart3 },
       { label: 'Customers', href: '/admin/customers', icon: Building2 },
+      { label: 'Reviews', href: '/admin/reviews', icon: Star },
+      { label: 'Communications', href: '/admin/communications/templates', icon: MessageSquare },
     ],
   },
   {
@@ -65,23 +67,26 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { label: 'Staff', href: '/admin/staff', icon: UsersRound },
       { label: 'Pricebook', href: '/admin/pricebook', icon: Tags },
       { label: 'Inventory', href: '/admin/inventory', icon: Boxes },
-      { label: 'Membership Plans', href: '/admin/membership-plans', icon: BadgeCheck },
+      { label: 'Membership plans', href: '/admin/membership-plans', icon: BadgeCheck },
+    ],
+  },
+  {
+    heading: 'Money',
+    items: [
       { label: 'Estimates', href: '/admin/estimates', icon: FileText },
       { label: 'Invoices', href: '/admin/invoices', icon: Receipt },
+      { label: 'Accounting', href: '/admin/accounting', icon: Calculator },
       { label: 'Operations', href: '/admin/operations', icon: Gauge },
       { label: 'Reports', href: '/admin/reports', icon: TrendingUp },
-      { label: 'Accounting', href: '/admin/accounting', icon: Calculator },
-      { label: 'Reviews', href: '/admin/reviews', icon: Star },
-      { label: 'Chatbot Settings', href: '/admin/settings', icon: Settings },
-      { label: 'Communications', href: '/admin/communications/templates', icon: MessageSquare },
-      { label: 'Audit Log', href: '/admin/audit-log', icon: ScrollText },
     ],
   },
   {
     heading: 'Integrations',
     items: [
+      { label: 'Chatbot settings', href: '/admin/settings', icon: Settings },
       { label: 'Integrations', href: '/admin/integrations', icon: Plug },
-      { label: 'FP Import', href: '/admin/fieldpulse-import', icon: Download },
+      { label: 'FP import', href: '/admin/fieldpulse-import', icon: Download },
+      { label: 'Audit log', href: '/admin/audit-log', icon: ScrollText },
     ],
   },
 ] as const;

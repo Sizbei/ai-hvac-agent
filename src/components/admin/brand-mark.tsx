@@ -37,11 +37,11 @@ export function BrandMark({ compact = false, onDark = false, className }: BrandM
           </span>
           <span
             className={cn(
-              'mt-1 text-[11px] font-medium uppercase tracking-[0.14em]',
+              'mt-1 text-[11px] font-medium tracking-tight',
               onDark ? 'text-white/55' : 'text-muted-foreground',
             )}
           >
-            Service Console
+            Service console
           </span>
         </span>
       )}
