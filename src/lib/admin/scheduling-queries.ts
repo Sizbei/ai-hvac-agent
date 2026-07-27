@@ -665,14 +665,16 @@ export async function placeAndAssignRequest(
   // Conflict + availability gate. Only meaningful with a target technician — an
   // unassigned placement shares no one's day and has no hours to violate.
   if (!options.override && targetTech) {
-    const conflicts = await checkScheduleConflict(
-      organizationId,
-      targetTech,
-      arrivalWindow.start.toISOString(),
-      arrivalWindow.end.toISOString(),
-      requestId,
-    );
-    const slots = await getTechnicianAvailability(organizationId, targetTech);
+    const [conflicts, slots] = await Promise.all([
+      checkScheduleConflict(
+        organizationId,
+        targetTech,
+        arrivalWindow.start.toISOString(),
+        arrivalWindow.end.toISOString(),
+        requestId,
+      ),
+      getTechnicianAvailability(organizationId, targetTech),
+    ]);
     const within = isWindowWithinAvailability(
       slots,
       options.isoDay,
@@ -815,14 +817,16 @@ export async function placeAndAssignRequest(
   // On an OVERRIDE, recompute the detail we overrode so the route can audit it.
   let overriddenConflicts: ScheduleConflictDetail | null = null;
   if (options.override && targetTech) {
-    const conflicts = await checkScheduleConflict(
-      organizationId,
-      targetTech,
-      (updated.arrivalWindowStart ?? arrivalWindow.start).toISOString(),
-      (updated.arrivalWindowEnd ?? arrivalWindow.end).toISOString(),
-      requestId,
-    );
-    const slots = await getTechnicianAvailability(organizationId, targetTech);
+    const [conflicts, slots] = await Promise.all([
+      checkScheduleConflict(
+        organizationId,
+        targetTech,
+        (updated.arrivalWindowStart ?? arrivalWindow.start).toISOString(),
+        (updated.arrivalWindowEnd ?? arrivalWindow.end).toISOString(),
+        requestId,
+      ),
+      getTechnicianAvailability(organizationId, targetTech),
+    ]);
     const within = isWindowWithinAvailability(
       slots,
       options.isoDay,
@@ -903,30 +907,6 @@ export async function unscheduleRequest(
   // applies; free it so the band re-opens. Best-effort.
   await releaseReservationsForRequest(organizationId, requestId);
   return { ok: true };
-}
-
-/** Org opt-in for scored dispatch. Reads the single column fresh (the settings
- * cache is for the chatbot path; a just-flipped toggle takes effect next booking).
- * organization_settings is keyed by organizationId (PK), so eq is the tenant scope. */
-async function isAutoDispatchEnabled(organizationId: string): Promise<boolean> {
-  const [row] = await db
-    .select({ enabled: organizationSettings.autoDispatchEnabled })
-    .from(organizationSettings)
-    .where(eq(organizationSettings.organizationId, organizationId))
-    .limit(1);
-  return row?.enabled ?? false;
-}
-
-/** Whether an EXTERNAL scheduler (FieldPulse/HCP) owns this org's calendar. When
- * true, native autodispatch is skipped entirely to avoid double-booking against
- * the system of record. Default 'native' → false (today's behavior). */
-async function isExternallyScheduled(organizationId: string): Promise<boolean> {
-  const [row] = await db
-    .select({ source: organizationSettings.schedulingSource })
-    .from(organizationSettings)
-    .where(eq(organizationSettings.organizationId, organizationId))
-    .limit(1);
-  return row?.source === "external";
 }
 
 /** Pre-assign booking-quality assessment for a request (Probook parity: clean
@@ -1261,33 +1241,49 @@ export async function autoAssignBookedRequest(
     readonly window: ArrivalWindow;
   },
 ): Promise<{ readonly assigned: boolean; readonly technicianId?: string }> {
-  const techs = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(
-      withTenant(
-        users,
-        organizationId,
-        and(eq(users.role, "technician"), eq(users.isActive, true))!,
+  // The active-tech list and the best-effort duration estimate are independent:
+  // the techs list doesn't need the duration, and the duration write doesn't need
+  // the techs. Run them concurrently. ensureEstimatedDuration is AI-assist
+  // (deterministic base + clamped LLM refine), runs on the booking's after() path,
+  // and never blocks or fails dispatch (its own .catch swallows errors).
+  const [techs] = await Promise.all([
+    db
+      .select({ id: users.id })
+      .from(users)
+      .where(
+        withTenant(
+          users,
+          organizationId,
+          and(eq(users.role, "technician"), eq(users.isActive, true))!,
+        ),
       ),
-    );
-  // Best-effort: estimate this booking's on-site duration (AI assist; deterministic
-  // base + clamped LLM refine). Runs on the booking's after() path; never blocks
-  // or fails dispatch.
-  await ensureEstimatedDuration(organizationId, requestId).catch(() => {});
+    ensureEstimatedDuration(organizationId, requestId).catch(() => {}),
+  ]);
 
   if (techs.length === 0) return { assigned: false };
 
+  // One read of the org settings row for BOTH flags (schedulingSource +
+  // autoDispatchEnabled) instead of two reads of the same row.
+  const [settings] = await db
+    .select({
+      source: organizationSettings.schedulingSource,
+      autoDispatchEnabled: organizationSettings.autoDispatchEnabled,
+    })
+    .from(organizationSettings)
+    .where(eq(organizationSettings.organizationId, organizationId))
+    .limit(1);
+
   // Skip native autodispatch when an external scheduler (FieldPulse/HCP) owns the
   // calendar — assigning here would double-book against the system of record.
-  if (await isExternallyScheduled(organizationId)) return { assigned: false };
+  // MUST short-circuit before any scoring/shadow work.
+  if (settings?.source === "external") return { assigned: false };
 
   // Scored mode (org opt-in) ranks skill-matched techs best-first; otherwise we
   // keep today's first-fit (DB order) for zero behavior change. A job that can't
   // be classified (rankedTechnicianOrder → null) also falls back to first-fit so
   // opting in never strands a job that first-fit would have placed.
   const firstFit = techs.map((t) => t.id);
-  const enabled = await isAutoDispatchEnabled(organizationId);
+  const enabled = settings?.autoDispatchEnabled ?? false;
 
   // Shadow mode: an autopilot-OFF org still scores + records the would-be
   // decision (preview + tuning dataset) — never touching service_requests (no

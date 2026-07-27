@@ -118,6 +118,7 @@ vi.mock("@/lib/db/schema", () => ({
   organizationSettings: {
     organizationId: "os.org",
     autoDispatchEnabled: "os.autoDispatch",
+    schedulingSource: "os.schedulingSource",
   },
   technicianAvailability: {
     id: "ta.id",
@@ -875,14 +876,15 @@ describe("autoAssignBookedRequest (scored vs first-fit)", () => {
   }
 
   // The fixed lead-in autoAssignBookedRequest runs after the active-tech list and
-  // before ranking/placement: a best-effort duration estimate, an external-
-  // scheduler check, the autodispatch flag, and (scored mode only) the booking-
-  // quality gate. Each needs its own no-op row so it doesn't consume the
-  // placement queue. Caller pushes the active-tech list first.
+  // before ranking/placement: a best-effort duration estimate (run concurrently
+  // with the tech list), ONE merged org-settings read (schedulingSource +
+  // autoDispatchEnabled), and (scored mode only) the booking-quality gate. Each
+  // needs its own no-op row so it doesn't consume the placement queue. Caller
+  // pushes the active-tech list first; ensureEstimatedDuration's read is next
+  // (it fires inside the same Promise.all as the tech list).
   function queueAutoAssignLeadIn(enabled: boolean): void {
     selectQueue.push([]); // ensureEstimatedDuration → no existing row → no update
-    selectQueue.push([]); // isExternallyScheduled → not external
-    selectQueue.push([{ enabled }]); // isAutoDispatchEnabled
+    selectQueue.push([{ source: "native", autoDispatchEnabled: enabled }]); // merged settings read
     if (enabled) selectQueue.push([]); // assessBookingQualityForRequest → clean
   }
 
@@ -987,9 +989,8 @@ describe("autoAssignBookedRequest (scored vs first-fit)", () => {
     );
 
     selectQueue.push([{ id: T1 }, { id: T2 }]); // active techs
-    selectQueue.push([]); // ensureEstimatedDuration
-    selectQueue.push([]); // isExternallyScheduled
-    selectQueue.push([{ enabled: false }]); // isAutoDispatchEnabled
+    selectQueue.push([]); // ensureEstimatedDuration (concurrent with tech list)
+    selectQueue.push([{ source: "native", autoDispatchEnabled: false }]); // merged settings read
     selectQueue.push([CLASSIFIED]); // loadJobClassification inside rankedTechnicianOrder
     // loadDispatchSignals throws → shadow block catches → first-fit runs below.
     queueSuccessfulPlacement(T1);

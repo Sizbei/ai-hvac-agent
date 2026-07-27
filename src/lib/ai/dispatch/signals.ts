@@ -202,8 +202,15 @@ export async function loadDispatchSignals(
       )
       .groupBy(serviceRequests.assignedTo),
 
+    // Same-day load, one scan for BOTH the job COUNT (sameDayJobCount) and the
+    // booked-minutes SUM (Σ estimated duration, 60-default per null estimate) —
+    // identical WHERE, so a single grouped read serves both signals.
     db
-      .select({ techId: serviceRequests.assignedTo, n: count() })
+      .select({
+        techId: serviceRequests.assignedTo,
+        n: count(),
+        booked: sql<number>`COALESCE(SUM(COALESCE(${serviceRequests.estimatedDurationMinutes}, 60)), 0)`,
+      })
       .from(serviceRequests)
       .where(
         withTenant(
@@ -286,12 +293,16 @@ export async function loadDispatchSignals(
       });
     }
   }
+  // Same-day booked minutes come from the SAME merged scan as sameDayJobCount;
+  // threaded into the duration-fit block below (bookedByTech) exactly as before.
+  const bookedByTech = new Map<string, number>();
   for (const r of loadRows) {
     if (r.techId && result.has(r.techId)) {
       result.set(r.techId, {
         ...result.get(r.techId)!,
         sameDayJobCount: Number(r.n),
       });
+      bookedByTech.set(r.techId, Number(r.booked));
     }
   }
   for (const r of conversionRows) {
@@ -316,7 +327,7 @@ export async function loadDispatchSignals(
   // Duration-fit inputs: this job's estimate, each tech's booked same-day minutes,
   // and each tech's total working minutes for the weekday. Feeds the scorer's
   // down-rank (never a hard filter — placeAndAssignRequest stays the gate).
-  const [estimateRow, bookedRows, availabilityRows] = await Promise.all([
+  const [estimateRow, availabilityRows] = await Promise.all([
     requestId
       ? db
           .select({ minutes: serviceRequests.estimatedDurationMinutes })
@@ -330,25 +341,6 @@ export async function loadDispatchSignals(
           )
           .limit(1)
       : Promise.resolve([] as { minutes: number | null }[]),
-    db
-      .select({
-        techId: serviceRequests.assignedTo,
-        booked: sql<number>`COALESCE(SUM(COALESCE(${serviceRequests.estimatedDurationMinutes}, 60)), 0)`,
-      })
-      .from(serviceRequests)
-      .where(
-        withTenant(
-          serviceRequests,
-          organizationId,
-          and(
-            inArray(serviceRequests.assignedTo, ids),
-            inArray(serviceRequests.status, [...SAME_DAY_LOAD_STATUSES]),
-            gte(serviceRequests.arrivalWindowStart, dayStart),
-            lt(serviceRequests.arrivalWindowStart, dayEnd),
-          )!,
-        ),
-      )
-      .groupBy(serviceRequests.assignedTo),
     db
       .select({
         techId: technicianAvailability.technicianId,
@@ -382,9 +374,6 @@ export async function loadDispatchSignals(
     arr.push({ startMinute: s.startMinute, endMinute: s.endMinute });
     slotsByTech.set(s.techId, arr);
   }
-  const bookedByTech = new Map(
-    bookedRows.map((r) => [r.techId, Number(r.booked)]),
-  );
   for (const id of technicianIds) {
     result.set(id, {
       ...result.get(id)!,
