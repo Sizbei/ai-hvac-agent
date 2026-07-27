@@ -92,7 +92,7 @@ export function PortalLinkCard({
               aria-label="Copy portal link"
             >
               {copied ? (
-                <Check className="size-3.5 text-green-600" />
+                <Check className="size-3.5 text-success" />
               ) : (
                 <Copy className="size-3.5" />
               )}
@@ -102,7 +102,7 @@ export function PortalLinkCard({
         )}
 
         {link && (
-          <p className="text-xs text-amber-700">
+          <p className="text-xs text-warning">
             Copy this link now — for security it&apos;s shown only once.
           </p>
         )}

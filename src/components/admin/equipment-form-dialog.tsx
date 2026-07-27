@@ -170,7 +170,7 @@ export function EquipmentFormDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>{isEditMode ? 'Edit Equipment' : 'Add Equipment'}</DialogTitle>
+          <DialogTitle>{isEditMode ? 'Edit equipment' : 'Add equipment'}</DialogTitle>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -221,7 +221,7 @@ export function EquipmentFormDialog({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="serial">Serial Number</Label>
+            <Label htmlFor="serial">Serial number</Label>
             <Input
               id="serial"
               value={form.serialNumber}
@@ -242,7 +242,7 @@ export function EquipmentFormDialog({
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
-              <Label htmlFor="install-date">Install Date</Label>
+              <Label htmlFor="install-date">Install date</Label>
               <Input
                 id="install-date"
                 type="date"
@@ -251,7 +251,7 @@ export function EquipmentFormDialog({
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="warranty">Warranty Expiration</Label>
+              <Label htmlFor="warranty">Warranty expiration</Label>
               <Input
                 id="warranty"
                 type="date"
@@ -263,7 +263,7 @@ export function EquipmentFormDialog({
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
-              <Label htmlFor="warranty-type">Warranty Type</Label>
+              <Label htmlFor="warranty-type">Warranty type</Label>
               <Input
                 id="warranty-type"
                 value={form.warrantyType}
@@ -272,7 +272,7 @@ export function EquipmentFormDialog({
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="warranty-provider">Warranty Provider</Label>
+              <Label htmlFor="warranty-provider">Warranty provider</Label>
               <Input
                 id="warranty-provider"
                 value={form.warrantyProvider}

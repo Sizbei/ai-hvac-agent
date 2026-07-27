@@ -39,7 +39,7 @@ export function UnscheduledPanel({ jobs, isLoading, onSelect }: UnscheduledPanel
   return (
     <Card className="flex w-full flex-col p-3 lg:w-72 lg:shrink-0">
       <div className="mb-2 flex items-center gap-2">
-        <Inbox className="size-4 text-amber-600 dark:text-amber-400" />
+        <Inbox className="size-4 text-warning" />
         <h2 className="text-sm font-semibold">Unscheduled</h2>
         {!isLoading && (
           <span
@@ -82,7 +82,7 @@ export function UnscheduledPanel({ jobs, isLoading, onSelect }: UnscheduledPanel
                   {job.isAfterHours && (
                     <span
                       title="After hours"
-                      className="inline-flex shrink-0 items-center rounded-full border border-amber-300 bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800"
+                      className="inline-flex shrink-0 items-center rounded-full border border-warning/30 bg-warning-light px-1.5 py-0.5 text-[10px] font-medium text-warning-foreground"
                     >
                       After-hrs
                     </span>
@@ -95,7 +95,7 @@ export function UnscheduledPanel({ jobs, isLoading, onSelect }: UnscheduledPanel
                 <div className="mt-1 flex items-center gap-1.5">
                   <UrgencyBadge urgency={job.urgency} />
                   <StatusBadge status={job.status} />
-                  <span className="ml-auto text-[10px] font-medium text-amber-700 dark:text-amber-400">
+                  <span className="ml-auto text-[10px] font-medium text-warning">
                     {reason(job)}
                   </span>
                 </div>

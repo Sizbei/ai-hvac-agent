@@ -90,7 +90,7 @@ export function StaffResetPasswordDialog({
     <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) onClose(); }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Reset Password</DialogTitle>
+          <DialogTitle>Reset password</DialogTitle>
           <DialogDescription>
             {staff
               ? `Set a new password for ${staff.name}. They will need to sign in again with it.`

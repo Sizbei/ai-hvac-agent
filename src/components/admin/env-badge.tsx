@@ -6,8 +6,8 @@ import { envName, envTone } from '@/lib/admin/environment';
 const TONE_CLASSES: Record<string, string> = {
   destructive:
     'bg-destructive/10 text-destructive border border-destructive/30',
-  warning: 'bg-amber-500/10 text-amber-600 border border-amber-500/30',
-  positive: 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/30',
+  warning: 'bg-warning-light text-warning border border-warning/30',
+  positive: 'bg-success-light text-success border border-success/30',
 };
 
 /**

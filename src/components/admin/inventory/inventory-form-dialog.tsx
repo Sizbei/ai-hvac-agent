@@ -144,7 +144,7 @@ export function InventoryFormDialog({
     <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) onClose(); }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{isEditMode ? 'Edit Stock' : 'Track Material'}</DialogTitle>
+          <DialogTitle>{isEditMode ? 'Edit stock' : 'Track material'}</DialogTitle>
           <DialogDescription>
             {isEditMode
               ? `Update on-hand stock and reorder point for ${editing?.itemName}.`
@@ -176,7 +176,7 @@ export function InventoryFormDialog({
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="inv-qty">On Hand</Label>
+              <Label htmlFor="inv-qty">On hand</Label>
               <Input
                 id="inv-qty"
                 type="number"
@@ -187,7 +187,7 @@ export function InventoryFormDialog({
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="inv-reorder">Reorder At</Label>
+              <Label htmlFor="inv-reorder">Reorder at</Label>
               <Input
                 id="inv-reorder"
                 type="number"
@@ -202,7 +202,7 @@ export function InventoryFormDialog({
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="inv-cost">Unit Cost (USD)</Label>
+              <Label htmlFor="inv-cost">Unit cost (USD)</Label>
               <Input
                 id="inv-cost"
                 type="number"

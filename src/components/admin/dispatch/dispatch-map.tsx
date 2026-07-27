@@ -383,14 +383,14 @@ export function DispatchMap() {
 
       {/* Summary bar — top left, over map */}
       <div className="pointer-events-none absolute left-4 top-4 z-10 flex items-center gap-3 rounded-lg border bg-background/95 px-3 py-2 shadow-sm backdrop-blur">
-        <MapPin className="size-4 shrink-0 text-blue-600" />
+        <MapPin className="size-4 shrink-0 text-info" />
         <div className="leading-tight">
           <p className="text-sm font-semibold text-foreground">Dispatch map</p>
           {data && (
             <p className="text-xs text-muted-foreground">
               {data.jobs.length} job{data.jobs.length !== 1 ? 's' : ''}
               {unassignedCount > 0 && (
-                <span className="ml-1 font-medium text-amber-600">{unassignedCount} unassigned</span>
+                <span className="ml-1 font-medium text-warning">{unassignedCount} unassigned</span>
               )}
               {' · '}
               <span className="font-medium text-foreground">{formatCents(totalOwingCents)}</span>

@@ -232,16 +232,16 @@ function InvoiceStatusBadge({ status }: { readonly status: string }) {
     return null;
   }
   const styles: Record<string, string> = {
-    sent: 'border-blue-300 bg-blue-100 text-blue-800',
-    paid: 'border-green-300 bg-green-100 text-green-800',
-    void: 'border-gray-300 bg-gray-100 text-gray-600',
+    sent: 'border-info/30 bg-info-light text-info-foreground',
+    paid: 'border-success/30 bg-success-light text-success',
+    void: 'border-border bg-muted text-muted-foreground',
   };
   const labels: Record<string, string> = {
     sent: 'Invoice sent',
     paid: 'Invoice paid',
     void: 'Invoice voided',
   };
-  const className = styles[status] ?? 'border-gray-300 bg-gray-100 text-gray-600';
+  const className = styles[status] ?? 'border-border bg-muted text-muted-foreground';
   const label = labels[status] ?? `Invoice: ${status}`;
   return (
     <span
@@ -291,12 +291,12 @@ function TranscriptBubble({
       <div
         className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${
           isUser
-            ? 'bg-blue-100 text-blue-900'
-            : 'bg-gray-100 text-gray-900'
+            ? 'bg-info-light text-info-foreground'
+            : 'bg-muted text-foreground'
         }`}
       >
         <p className="whitespace-pre-wrap">{content}</p>
-        <p className={`mt-1 text-xs ${isUser ? 'text-blue-500' : 'text-gray-400'}`}>
+        <p className={`mt-1 text-xs ${isUser ? 'text-info' : 'text-muted-foreground'}`}>
           {time}
         </p>
       </div>
@@ -652,7 +652,7 @@ export function RequestDetailSheet({
                 <UrgencyBadge urgency={detail.urgency} />
                 <StatusBadge status={detail.status} />
                 {detail.isAfterHours && (
-                  <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
+                  <span className="inline-flex items-center rounded-full border border-warning/30 bg-warning-light px-2 py-0.5 text-xs font-medium text-warning-foreground">
                     After-hours
                   </span>
                 )}

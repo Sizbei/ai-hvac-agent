@@ -142,7 +142,7 @@ export function MembershipPlanFormDialog({
     <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen && submittingRef.current) return; if (!isOpen) onClose(); }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{isEditMode ? 'Edit Plan' : 'Add Plan'}</DialogTitle>
+          <DialogTitle>{isEditMode ? 'Edit plan' : 'Add plan'}</DialogTitle>
           <DialogDescription>
             {isEditMode
               ? 'Update this membership plan.'

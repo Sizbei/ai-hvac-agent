@@ -165,7 +165,7 @@ export function AiModelPanel() {
               </SelectContent>
             </Select>
             {saving && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
-            {saved && <Check className="size-4 text-emerald-600" />}
+            {saved && <Check className="size-4 text-success" />}
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
         </div>

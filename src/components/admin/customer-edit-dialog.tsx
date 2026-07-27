@@ -114,7 +114,7 @@ export function CustomerEditDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Edit Customer</DialogTitle>
+          <DialogTitle>Edit customer</DialogTitle>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -168,7 +168,7 @@ export function CustomerEditDialog({
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
-              <Label htmlFor="edit-property-type">Property Type</Label>
+              <Label htmlFor="edit-property-type">Property type</Label>
               <Input
                 id="edit-property-type"
                 value={propertyType}
@@ -177,7 +177,7 @@ export function CustomerEditDialog({
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="edit-sqft">Square Feet</Label>
+              <Label htmlFor="edit-sqft">Square feet</Label>
               <Input
                 id="edit-sqft"
                 inputMode="numeric"
