@@ -163,6 +163,15 @@ export async function submitSessionServiceRequest(params: {
 }): Promise<SubmitSessionResult> {
   const { organizationId, sessionId, data, ipAddress } = params;
 
+  // Kick off the org-settings read (only needs organizationId) concurrently
+  // with the customer upsert so both round-trips overlap. The DNS guard that
+  // follows DOES need customerId and must stay sequential after the upsert.
+  const settingsPromise = db
+    .select({ afterHoursConfig: organizationSettings.afterHoursConfig })
+    .from(organizationSettings)
+    .where(eq(organizationSettings.organizationId, organizationId))
+    .limit(1);
+
   // Resolve (or atomically create) the canonical CRM customer for this
   // contact BEFORE the batch. upsertCustomerByContact dedupes via a unique
   // blind-index constraint, so two concurrent submits for the same
@@ -202,11 +211,8 @@ export async function submitSessionServiceRequest(params: {
   // After-hours: compute the flag once at submit time from the org's
   // configured window (its local clock), so dispatch + the dashboard read it
   // off the row. Best-effort config read — fall back to the default window.
-  const [settingsRow] = await db
-    .select({ afterHoursConfig: organizationSettings.afterHoursConfig })
-    .from(organizationSettings)
-    .where(eq(organizationSettings.organizationId, organizationId))
-    .limit(1);
+  // settingsPromise was started above (overlapping the upsert round-trip).
+  const [settingsRow] = await settingsPromise;
   const afterHoursConfig = resolveAfterHoursConfig(
     settingsRow?.afterHoursConfig ?? null,
   );
@@ -392,14 +398,17 @@ export async function submitSessionServiceRequest(params: {
   }
 
   // Criterion-4 eventing: the request's initial status. actorType=ai — this is
-  // the AI intake/voice path that produced the booking.
-  await recordStatusEvent({
-    organizationId,
-    serviceRequestId: serviceRequest.id,
-    fromStatus: null,
-    toStatus: "pending",
-    actorType: "ai",
-  });
+  // the AI intake/voice path that produced the booking. Append-only audit write
+  // — best-effort, deferred so it doesn't add latency to the booking response.
+  after(() =>
+    recordStatusEvent({
+      organizationId,
+      serviceRequestId: serviceRequest.id,
+      fromStatus: null,
+      toStatus: "pending",
+      actorType: "ai",
+    }).catch(() => {}),
+  );
 
   // Push this confirmed booking into FSM integrations (HCP + Fieldpulse) as
   // JOBS in the BACKGROUND — after() so the response isn't blocked, and
@@ -497,6 +506,8 @@ export async function submitSessionServiceRequest(params: {
 
   // Record the customer's equipment from the intake (ServiceTitan asset
   // history), best-effort: a failure here must not fail the submission.
+  // buildEquipmentFromIntake is pure/in-memory — kept synchronous. The DB
+  // write is deferred to after() so it doesn't block the booking response.
   const built = buildEquipmentFromIntake(
     {
       systemType: data.systemType,
@@ -506,14 +517,16 @@ export async function submitSessionServiceRequest(params: {
     new Date(),
   );
   if (built) {
-    try {
-      await recordCustomerEquipment(organizationId, customerId, built);
-    } catch (equipErr) {
-      logger.error(
-        { error: equipErr, sessionId, customerId },
-        "Failed to record customer equipment from intake (non-fatal)",
-      );
-    }
+    after(() =>
+      recordCustomerEquipment(organizationId, customerId, built).catch(
+        (equipErr: unknown) => {
+          logger.error(
+            { error: equipErr, sessionId, customerId },
+            "Failed to record customer equipment from intake (non-fatal)",
+          );
+        },
+      ),
+    );
   }
 
   logger.info({ sessionId, referenceNumber }, "Service request submitted");
