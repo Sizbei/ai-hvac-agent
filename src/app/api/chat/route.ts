@@ -1,6 +1,6 @@
 import { NextRequest, after } from "next/server";
 import { streamText } from "ai";
-import { getModel, resolveModelEntry } from "@/lib/ai/provider";
+import { getModelFromEntry, resolveModelEntry } from "@/lib/ai/provider";
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
@@ -559,18 +559,51 @@ export async function POST(request: NextRequest) {
       return cannedTextResponse(GUARDRAIL_SOFT_REPLY);
     }
 
-    // 5. Load conversation history
-    const history = await db
-      .select()
-      .from(messages)
-      .where(
-        withTenant(
-          messages,
-          organizationId,
-          eq(messages.sessionId, session.id),
-        ),
-      )
-      .orderBy(messages.createdAt);
+    // 5. Load conversation history + org config reads in parallel.
+    // All three reads need only `organizationId` and `session.id` (both known
+    // here) and are independent of each other. history MUST still complete
+    // before the user-message INSERT below — Promise.all guarantees that.
+    // Each read keeps its own failure isolation via per-read .catch() so one
+    // blip never aborts the whole group.
+    const [history, routerConfig, afterHoursConfig] = await Promise.all([
+      db
+        .select()
+        .from(messages)
+        .where(
+          withTenant(
+            messages,
+            organizationId,
+            eq(messages.sessionId, session.id),
+          ),
+        )
+        .orderBy(messages.createdAt),
+      // Org overlay (disabled services + businessInfo + companyName + custom FAQs).
+      // Memoized 60s, so a cache hit costs ~0. Non-critical: degrade to empty overlay.
+      getRouterConfig(organizationId).catch((configError: unknown) => {
+        logger.error(
+          { error: configError, sessionId: session.id },
+          "Failed to load router config — using empty overlay",
+        );
+        return EMPTY_ORG_CONFIG;
+      }),
+      // After-hours window config. Non-critical: degrade to disabled (no disclosure).
+      (async () => {
+        try {
+          const [row] = await db
+            .select({ afterHoursConfig: organizationSettings.afterHoursConfig })
+            .from(organizationSettings)
+            .where(eq(organizationSettings.organizationId, organizationId))
+            .limit(1);
+          return resolveAfterHoursConfig(row?.afterHoursConfig ?? null);
+        } catch (cfgError: unknown) {
+          logger.error(
+            { error: cfgError, sessionId: session.id },
+            "Failed to load after-hours config — disabling after-hours disclosure",
+          );
+          return resolveAfterHoursConfig({ enabled: false });
+        }
+      })(),
+    ]);
 
     const conversationHistory: AIMessage[] = history.map((m) => ({
       role: m.role as "user" | "assistant",
@@ -724,45 +757,6 @@ export async function POST(request: NextRequest) {
       !knownSlots.name && customerContext?.fullName
         ? customerContext.fullName
         : undefined;
-
-    // Org overlay (disabled services + businessInfo + companyName + custom
-    // FAQs). The deterministic router consumes it AND the LLM path reads its
-    // businessInfo/companyName to brand the system prompt — so it's hoisted to
-    // the turn scope. Non-critical: if its read fails (DB blip, cold start),
-    // degrade to the empty overlay (everything enabled, no personalization)
-    // rather than failing the customer's whole turn.
-    const routerConfig = await getRouterConfig(organizationId).catch(
-      (configError: unknown) => {
-        logger.error(
-          { error: configError, sessionId: session.id },
-          "Failed to load router config — using empty overlay",
-        );
-        return EMPTY_ORG_CONFIG;
-      },
-    );
-
-    // After-hours config: read the org's window the SAME way the confirm route
-    // does (organizationSettings.afterHoursConfig → resolveAfterHoursConfig), so
-    // the customer-facing disclosure and the confirm-time after-hours flag agree
-    // on the window. Non-critical: ANY error degrades to a DISABLED config so we never
-    // wrongly threaten a charge (resolve returns the default window otherwise).
-    const afterHoursConfig = await (async () => {
-      try {
-        const [row] = await db
-          .select({ afterHoursConfig: organizationSettings.afterHoursConfig })
-          .from(organizationSettings)
-          .where(eq(organizationSettings.organizationId, organizationId))
-          .limit(1);
-        return resolveAfterHoursConfig(row?.afterHoursConfig ?? null);
-      } catch (cfgError: unknown) {
-        logger.error(
-          { error: cfgError, sessionId: session.id },
-          "Failed to load after-hours config — disabling after-hours disclosure",
-        );
-        // Disabled → isAfterHours() returns false → decision is "none".
-        return resolveAfterHoursConfig({ enabled: false });
-      }
-    })();
 
     // Did we ASK "is this urgent?" last turn? (pendingStep === urgency, which
     // we only reach after-hours when urgency was still unknown.) If so, read the
@@ -1809,11 +1803,11 @@ export async function POST(request: NextRequest) {
     });
 
     // 8. Stream response via Vercel AI SDK per SC-09
-    // Resolve the model entry up front so its id is available for bot-telemetry
-    // (the telemetry emit below records WHICH model handled the LLM turn).
+    // Resolve the model entry once — reuse the same entry to build the model
+    // handle so resolveModelEntry (which hits the DB) runs exactly once per turn.
     const llmEntry = await resolveModelEntry(organizationId);
     const result = streamText({
-      model: await getModel(organizationId),
+      model: getModelFromEntry(llmEntry),
       // Generous timeout so a hung upstream can't stall the lambda until the
       // platform kill, while normal streams (well under 30s) are never cut.
       abortSignal: AbortSignal.timeout(30_000),
@@ -2072,21 +2066,24 @@ export async function POST(request: NextRequest) {
 
     // Bot telemetry (Step 10): an LLM-fallback turn. intentId/action stay null
     // (the deterministic router did NOT resolve this turn). Best-effort —
-    // recordBotEvent never throws.
+    // recordBotEvent never throws. Deferred via after() so telemetry never
+    // blocks the streamed reply (mirrors the deterministic path above).
     // Tagging all FALLBACK_LLM web turns as "knowledge" — simplification: the
     // web LLM path today is almost exclusively general HVAC Q&A; intake slots
     // are filled deterministically above (SLOT_FILL path). Revisit if the LLM
     // path starts handling intake slots directly.
-    await recordBotEvent({
-      organizationId,
-      sessionId: session.id,
-      turn: newTurnCount,
-      channel: session.channel,
-      routed: false,
-      model: llmEntry.modelId,
-      latencyMs: Math.round(performance.now() - turnStart),
-      kind: "knowledge",
-    });
+    after(() =>
+      recordBotEvent({
+        organizationId,
+        sessionId: session.id,
+        turn: newTurnCount,
+        channel: session.channel,
+        routed: false,
+        model: llmEntry.modelId,
+        latencyMs: Math.round(performance.now() - turnStart),
+        kind: "knowledge",
+      }),
+    );
 
     return cannedTextResponse(replyText);
   } catch (error) {

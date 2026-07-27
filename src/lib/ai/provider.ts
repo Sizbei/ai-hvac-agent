@@ -65,6 +65,10 @@ export async function resolveModelEntry(
 }
 
 /** Build a per-call SDK model handle for a resolved registry entry. */
+export function getModelFromEntry(entry: ModelRegistryEntry) {
+  return buildModel(entry, entry.modelId);
+}
+
 function buildModel(entry: ModelRegistryEntry, modelId: string) {
   const provider = createOpenAI({
     baseURL: entry.baseUrl,
