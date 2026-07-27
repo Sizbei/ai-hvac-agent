@@ -56,6 +56,10 @@ export function useAdminRequests(
   // Latest-wins run counter: a filter change mid-poll supersedes the in-flight
   // fetch instead of being dropped (the old isFetchingRef drop-guard stranded it).
   const runRef = useRef(0);
+  // Equality guard: skip setState when poll returns identical data (avoids re-rendering
+  // the full list on every 10s tick when nothing changed). Full JSON serialization so
+  // any in-place field change (e.g. status update on an existing row) still triggers.
+  const prevDataRef = useRef<string | null>(null);
 
   const fetchRequests = useCallback(async ({ bust = false }: { bust?: boolean } = {}): Promise<void> => {
     if (bust) requestsCache.invalidate(key);
@@ -108,8 +112,12 @@ export function useAdminRequests(
 
       if (run !== runRef.current) return;
       if (body.success) {
-        setRequests(body.data.requests);
-        setTotal(body.data.total);
+        const next = JSON.stringify(body.data.requests);
+        if (next !== prevDataRef.current) {
+          prevDataRef.current = next;
+          setRequests(body.data.requests);
+          setTotal(body.data.total);
+        }
         setError(null);
         requestsCache.set(key, {
           requests: body.data.requests,

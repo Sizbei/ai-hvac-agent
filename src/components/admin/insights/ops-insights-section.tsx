@@ -17,6 +17,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import type { OpsInsights } from '@/lib/admin/ops-insights-types';
 import { formatCents, hourLabel } from '@/lib/admin/ops-insights-format';
+import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 
 const ISSUE_LABELS: Record<string, string> = {
   heating_not_working: 'Heating',
@@ -187,7 +188,7 @@ export function OpsInsightsSection() {
     isFetchingRef.current = true;
     setError(null);
     try {
-      const res = await fetch('/api/admin/ops-insights');
+      const res = await adminFetch('/api/admin/ops-insights');
       if (!res.ok) {
         const body = await res.json().catch(() => ({
           error: { message: 'Failed to fetch operations insights' },
@@ -200,7 +201,8 @@ export function OpsInsightsSection() {
         setData(body.data);
         setError(null);
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof AdminAuthRedirectError) return;
       setError('Could not connect to server. Please try again.');
     } finally {
       isFetchingRef.current = false;

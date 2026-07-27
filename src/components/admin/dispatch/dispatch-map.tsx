@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
-import 'maplibre-gl/dist/maplibre-gl.css';
 import { RefreshCw, MapPin, Layers } from 'lucide-react';
+import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 
 interface Job {
   readonly id: string;
@@ -224,7 +224,7 @@ export function DispatchMap() {
   async function load(): Promise<void> {
     setLoading(true);
     try {
-      const res = await fetch('/api/admin/dispatch/map');
+      const res = await adminFetch('/api/admin/dispatch/map');
       const body = await res.json().catch(() => null);
       if (res.ok && body?.success) {
         setData(body.data);
@@ -232,7 +232,8 @@ export function DispatchMap() {
       } else {
         setError("Couldn't load the map data.");
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof AdminAuthRedirectError) return;
       setError("Couldn't load the map data.");
     } finally {
       setLoading(false);
@@ -247,6 +248,9 @@ export function DispatchMap() {
   // Init the map once data first arrives (so we can center on the base).
   useEffect(() => {
     if (!data || !containerRef.current || mapRef.current) return;
+    // Lazily import the maplibre CSS so it only loads when the map mounts,
+    // not on every admin route that shares the bundle.
+    void import('maplibre-gl/dist/maplibre-gl.css');
     const map = new maplibregl.Map({
       container: containerRef.current,
       style: STYLE_URL,

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Plus, Trash2, Copy, Check, Sparkles, BadgeCheck } from 'lucide-react';
 import {
   Dialog,
@@ -79,7 +79,7 @@ export function EstimateCreateDialog({
   onCreated,
 }: EstimateCreateDialogProps) {
   const { items, isLoading: pricebookLoading } = usePricebook({ limit: 20000 });
-  const itemById = new Map(items.map((i) => [i.id, i]));
+  const itemById = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
 
   // When the estimate is for a customer with an active membership, default the
   // per-line member-price toggle ON (the server still re-snapshots price

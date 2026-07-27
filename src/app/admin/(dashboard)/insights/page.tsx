@@ -23,6 +23,7 @@ import { OpsInsightsSection } from '@/components/admin/insights/ops-insights-sec
 import { BotAnalyticsSection } from '@/components/admin/insights/bot-analytics-section';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
+import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 
 interface InsightCard {
   readonly label: string;
@@ -92,7 +93,7 @@ export default function AiInsightsPage() {
     isFetchingRef.current = true;
 
     try {
-      const res = await fetch('/api/admin/ai-insights');
+      const res = await adminFetch('/api/admin/ai-insights');
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({
@@ -111,7 +112,8 @@ export default function AiInsightsPage() {
         setData(body.data);
         setError(null);
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof AdminAuthRedirectError) return;
       setError('Could not connect to server. Please try again.');
     } finally {
       isFetchingRef.current = false;

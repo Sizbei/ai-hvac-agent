@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { MonthCalendar } from '@/lib/admin/types';
+import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 
 interface UseMonthCalendarResult {
   readonly month: MonthCalendar | null;
@@ -31,27 +32,28 @@ export function useMonthCalendar(
   const [month, setMonth] = useState<MonthCalendar | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const isFetchingRef = useRef(false);
+  // Latest-wins: each call increments this counter; a response only applies if
+  // its captured run id still matches the current value when it resolves.
+  const runRef = useRef(0);
   const isMountedRef = useRef(true);
 
   const fetchMonth = useCallback(async (): Promise<void> => {
-    // `!enabled` MUST be checked before isFetchingRef is touched, so a disabled
-    // hook never leaves the in-flight latch stuck.
+    // `!enabled` MUST be checked before touching the run counter, so a disabled
+    // hook never advances the sequence.
     if (!enabled) return;
-    if (isFetchingRef.current) return;
-    isFetchingRef.current = true;
+    const run = ++runRef.current;
 
     try {
       const url =
         `/api/admin/calendar?date=${encodeURIComponent(date)}&view=month` +
         (includeCompleted ? '&includeCompleted=true' : '');
-      const res = await fetch(url);
-      if (!isMountedRef.current) return;
+      const res = await adminFetch(url);
+      if (!isMountedRef.current || run !== runRef.current) return;
       if (!res.ok) {
         const body = await res.json().catch(() => ({
           error: { message: 'Failed to load calendar' },
         }));
-        if (isMountedRef.current) {
+        if (isMountedRef.current && run === runRef.current) {
           setError(body?.error?.message ?? 'Failed to load calendar');
         }
         return;
@@ -62,16 +64,15 @@ export function useMonthCalendar(
         data: MonthCalendar;
       };
 
-      if (isMountedRef.current && body.success) {
+      if (isMountedRef.current && run === runRef.current && body.success) {
         setMonth(body.data);
         setError(null);
       }
-    } catch {
-      if (isMountedRef.current) {
+    } catch (err) {
+      if (err instanceof AdminAuthRedirectError) return;
+      if (isMountedRef.current && run === runRef.current) {
         setError('Could not connect to server. Please try again.');
       }
-    } finally {
-      isFetchingRef.current = false;
     }
   }, [date, enabled, includeCompleted]);
 

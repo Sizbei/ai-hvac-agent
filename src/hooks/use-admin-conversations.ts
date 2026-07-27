@@ -53,6 +53,10 @@ export function useAdminConversations(
   // Latest-wins: each call increments this counter; a response only applies if
   // its captured run id still matches the current value when it resolves.
   const runRef = useRef(0);
+  // Equality guard: skip setState when poll returns identical data (avoids re-rendering
+  // the full list on every 10s tick when nothing changed). Full JSON serialization so
+  // any in-place field change (e.g. status update on an existing row) still triggers.
+  const prevDataRef = useRef<string | null>(null);
 
   const fetchConversations = useCallback(async ({ bust = false }: { bust?: boolean } = {}): Promise<void> => {
     if (bust) conversationsCache.invalidate(key);
@@ -102,8 +106,12 @@ export function useAdminConversations(
       };
 
       if (run === runRef.current && body.success) {
-        setConversations(body.data.conversations);
-        setTotal(body.data.total);
+        const next = JSON.stringify(body.data.conversations);
+        if (next !== prevDataRef.current) {
+          prevDataRef.current = next;
+          setConversations(body.data.conversations);
+          setTotal(body.data.total);
+        }
         setError(null);
         conversationsCache.set(key, {
           conversations: body.data.conversations,
