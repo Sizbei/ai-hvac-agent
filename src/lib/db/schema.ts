@@ -651,6 +651,22 @@ export const serviceRequests = pgTable(
     uniqueIndex("requests_org_fieldpulse_job_id_unique")
       .on(table.organizationId, table.fieldpulseJobId)
       .where(sql`${table.fieldpulseJobId} IS NOT NULL`),
+    // Perf 0042: arrival window start for the dispatch board day-view. Partial.
+    index("requests_org_arrival_start_idx")
+      .on(table.organizationId, table.arrivalWindowStart)
+      .where(sql`${table.arrivalWindowStart} IS NOT NULL`),
+    // Perf 0042: tech workload rail (org + assigned_to + status). Partial.
+    index("requests_org_assigned_status_idx")
+      .on(table.organizationId, table.assignedTo, table.status)
+      .where(sql`${table.assignedTo} IS NOT NULL`),
+    // Perf 0042: org + status for queue/status filter queries.
+    index("requests_org_status_idx").on(table.organizationId, table.status),
+    // Perf 0042: exceptions rail — unassigned queued_* non-terminal rows, oldest-first.
+    index("requests_dispatch_exceptions_idx")
+      .on(table.organizationId, table.createdAt)
+      .where(
+        sql`${table.assignedTo} IS NULL AND ${table.autoDispatchOutcome} LIKE 'queued_%' AND ${table.status} NOT IN ('completed', 'cancelled')`,
+      ),
   ],
 );
 
@@ -1985,6 +2001,12 @@ export const requestStatusEvents = pgTable(
   (table) => [
     index("request_status_events_request_idx").on(table.serviceRequestId),
     index("request_status_events_org_idx").on(table.organizationId),
+    // Perf 0042: org + to_status + at for operations metrics (response-time, days-to-completed).
+    index("request_status_events_org_status_at_idx").on(
+      table.organizationId,
+      table.toStatus,
+      table.at,
+    ),
   ],
 );
 
@@ -2472,6 +2494,8 @@ export const dispatchDecisions = pgTable(
   (table) => [
     index("dispatch_decisions_org_idx").on(table.organizationId),
     index("dispatch_decisions_request_idx").on(table.serviceRequestId),
+    // Perf 0042: org + created_at for decision audit / telemetry time-range queries.
+    index("dispatch_decisions_org_created_idx").on(table.organizationId, table.createdAt),
   ],
 );
 
@@ -2772,6 +2796,17 @@ export const invoices = pgTable(
     uniqueIndex("invoices_org_hcp_invoice_id_unique")
       .on(table.organizationId, table.hcpInvoiceId)
       .where(sql`${table.hcpInvoiceId} IS NOT NULL`),
+    // Perf 0042: expression index for the default list sort.
+    index("invoices_org_issued_created_idx").on(
+      table.organizationId,
+      sql`coalesce(issued_at, created_at) desc`,
+    ),
+    // Perf 0042: customer_id lookup (invoice history, AR per-customer). Partial.
+    index("invoices_customer_id_idx")
+      .on(table.customerId)
+      .where(sql`${table.customerId} IS NOT NULL`),
+    // Perf 0042: org + state filter (AR rails, invoice state counts).
+    index("invoices_org_state_idx").on(table.organizationId, table.state),
   ],
 );
 
@@ -2828,6 +2863,9 @@ export const payments = pgTable(
     uniqueIndex("payments_org_fieldpulse_payment_id_unique")
       .on(table.organizationId, table.fieldpulsePaymentId)
       .where(sql`${table.fieldpulsePaymentId} IS NOT NULL`),
+    // Perf 0042: org + created_at for AR aging / payment timeline queries.
+    // NOTE: payments previously had no organization_id index at all.
+    index("payments_org_created_idx").on(table.organizationId, table.createdAt),
   ],
 );
 
