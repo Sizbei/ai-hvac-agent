@@ -41,18 +41,20 @@ export function Pager({
   showFirstLast = false,
   className,
 }: PagerProps) {
-  const safePage = Math.min(Math.max(1, page), Math.max(1, totalPages))
+  const safeTotal = Math.max(1, totalPages)
+  const safePage = Math.min(Math.max(1, page), safeTotal)
   const atFirst = safePage <= 1
-  const atLast = safePage >= totalPages
+  const atLast = safePage >= safeTotal
 
   const label =
     total !== undefined && perPage !== undefined
       ? rangeLabel(safePage, total, perPage)
-      : `Page ${safePage} of ${totalPages}`
+      : `Page ${safePage} of ${safeTotal}`
 
   return (
-    <div
+    <nav
       className={cn("flex items-center justify-between gap-4 px-1 py-3", className)}
+      role="navigation"
       aria-label="Pagination"
     >
       {/* Left controls */}
@@ -109,7 +111,7 @@ export function Pager({
             variant="ghost"
             size="icon-sm"
             aria-label="Last page"
-            onClick={() => onPageChange(totalPages)}
+            onClick={() => onPageChange(safeTotal)}
             disabled={atLast}
             className="min-h-[44px] min-w-[44px]"
           >
@@ -117,6 +119,6 @@ export function Pager({
           </Button>
         )}
       </div>
-    </div>
+    </nav>
   )
 }

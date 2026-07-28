@@ -34,15 +34,16 @@ export function ProgressBar({
   label,
   className,
 }: ProgressBarProps) {
-  const clamped = Math.min(100, Math.max(0, max > 0 ? (value / max) * 100 : 0));
+  const safeValue = Number.isFinite(value) ? value : 0;
+  const clamped = Math.min(100, Math.max(0, max > 0 ? (safeValue / max) * 100 : 0));
 
   return (
     <span
       role="progressbar"
-      aria-valuenow={value}
+      aria-valuenow={safeValue}
       aria-valuemin={0}
       aria-valuemax={max}
-      aria-label={label}
+      aria-label={label ?? "Progress"}
       className={cn(
         "block h-2.5 w-full overflow-hidden rounded-full bg-muted",
         className,

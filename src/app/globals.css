@@ -29,12 +29,14 @@
   --color-destructive: var(--destructive);
   --color-success: var(--success);
   --color-success-foreground: var(--success-foreground);
+  --color-success-strong: var(--success-strong);
   --color-success-light: var(--success-light);
   --color-warning: var(--warning);
   --color-warning-foreground: var(--warning-foreground);
   --color-warning-light: var(--warning-light);
   --color-danger: var(--danger);
   --color-danger-foreground: var(--danger-foreground);
+  --color-danger-strong: var(--danger-strong);
   --color-danger-light: var(--danger-light);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
@@ -54,6 +56,7 @@
   --color-info: var(--info);
   --color-info-light: var(--info-light);
   --color-info-foreground: var(--info-foreground);
+  --color-info-strong: var(--info-strong);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -84,12 +87,16 @@
    * *-light variants are the soft backgrounds for badges/icon chips. */
   --success: oklch(0.6 0.14 150);
   --success-foreground: oklch(0.99 0 0);
+  /* success-strong: dark green for text ON success-light (WCAG AA on light bg) */
+  --success-strong: oklch(0.4 0.12 150);
   --success-light: oklch(0.95 0.04 150);
   --warning: oklch(0.7 0.15 75);
   --warning-foreground: oklch(0.27 0.05 75);
   --warning-light: oklch(0.96 0.05 85);
   --danger: oklch(0.577 0.245 27.325);
   --danger-foreground: oklch(0.99 0 0);
+  /* danger-strong: dark red for text ON danger-light (WCAG AA on light bg) */
+  --danger-strong: oklch(0.45 0.18 27);
   --danger-light: oklch(0.95 0.04 25);
   --border: oklch(0.918 0.016 264.054);
   --input: oklch(0.918 0.016 264.054);
@@ -119,6 +126,8 @@
   --info: oklch(0.62 0.10 222);
   --info-light: oklch(0.95 0.03 220);
   --info-foreground: oklch(0.27 0.06 258);
+  /* info-strong: dark cyan for text ON info-light (WCAG AA on light bg) */
+  --info-strong: oklch(0.42 0.10 235);
 }
 
 .dark {
@@ -141,12 +150,16 @@
   /* Semantic status tokens (dark): brighter fills, low-chroma tinted "light" bgs. */
   --success: oklch(0.72 0.15 150);
   --success-foreground: oklch(0.16 0.04 150);
+  /* success-strong (dark): bright green readable on the dark success-light bg */
+  --success-strong: oklch(0.9 0.14 150);
   --success-light: oklch(0.3 0.07 150);
   --warning: oklch(0.78 0.15 80);
   --warning-foreground: oklch(0.92 0.12 80);
   --warning-light: oklch(0.32 0.07 80);
   --danger: oklch(0.704 0.191 22.216);
   --danger-foreground: oklch(0.16 0.04 25);
+  /* danger-strong (dark): bright red readable on the dark danger-light bg */
+  --danger-strong: oklch(0.9 0.11 25);
   --danger-light: oklch(0.32 0.09 25);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
@@ -172,6 +185,8 @@
   --info: oklch(0.70 0.10 222);
   --info-light: oklch(0.28 0.06 222);
   --info-foreground: oklch(0.95 0.03 220);
+  /* info-strong (dark): bright cyan readable on the dark info-light bg */
+  --info-strong: oklch(0.85 0.10 222);
 }
 
 @layer base {

@@ -1,5 +1,6 @@
 "use client"
 
+import { useRef } from "react"
 import { cn } from "@/lib/utils"
 
 interface SegmentedOption<T extends string = string> {
@@ -35,16 +36,43 @@ export function SegmentedControl<T extends string = string>({
   "aria-label": ariaLabel,
   className,
 }: SegmentedControlProps<T>) {
+  const groupRef = useRef<HTMLDivElement>(null)
+
+  // Radio pattern: arrows (and Home/End) move focus AND selection.
+  function handleKeyDown(
+    e: React.KeyboardEvent<HTMLButtonElement>,
+    index: number,
+  ) {
+    let next = index
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+      next = (index + 1) % options.length
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+      next = (index - 1 + options.length) % options.length
+    } else if (e.key === "Home") {
+      next = 0
+    } else if (e.key === "End") {
+      next = options.length - 1
+    } else {
+      return
+    }
+    e.preventDefault()
+    onChange(options[next].value)
+    groupRef.current
+      ?.querySelectorAll<HTMLButtonElement>('[role="radio"]')
+      ?.[next]?.focus()
+  }
+
   return (
     <div
-      role="group"
+      ref={groupRef}
+      role="radiogroup"
       aria-label={ariaLabel}
       className={cn(
         "inline-flex items-center gap-0.5 rounded-lg bg-muted p-0.5",
         className,
       )}
     >
-      {options.map((opt) => {
+      {options.map((opt, index) => {
         const isActive = opt.value === value
         return (
           <button
@@ -52,7 +80,9 @@ export function SegmentedControl<T extends string = string>({
             type="button"
             role="radio"
             aria-checked={isActive}
+            tabIndex={isActive ? 0 : -1}
             onClick={() => onChange(opt.value)}
+            onKeyDown={(e) => handleKeyDown(e, index)}
             className={cn(
               "inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-3 py-1 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
               isActive

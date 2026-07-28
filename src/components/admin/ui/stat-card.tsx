@@ -37,7 +37,9 @@ function resolveDelta(
 ): { value: string; good: boolean } | null {
   if (delta === undefined || delta === null) return null;
   if (typeof delta === "number") {
-    return { value: `${delta > 0 ? "+" : ""}${delta}`, good: delta >= 0 };
+    // A zero delta is "no change" — render no pill rather than "improved by 0".
+    if (delta === 0) return null;
+    return { value: `${delta > 0 ? "+" : ""}${delta}`, good: delta > 0 };
   }
   return delta;
 }
@@ -130,8 +132,8 @@ function DeltaPill({
         className={cn(
           "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs font-semibold",
           delta.good
-            ? "bg-success-light text-success"
-            : "bg-danger-light text-danger",
+            ? "bg-success-light text-success-strong"
+            : "bg-danger-light text-danger-strong",
         )}
       >
         <Arrow className="size-3" />

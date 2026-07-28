@@ -18,6 +18,7 @@ interface InfoBannerProps {
 export function InfoBanner({ children, icon: Icon = Info, className }: InfoBannerProps) {
   return (
     <div
+      role="note"
       className={cn(
         "flex items-start gap-2.5 rounded-md border border-info/30 bg-info-light px-3 py-2 text-sm text-info-foreground",
         className,

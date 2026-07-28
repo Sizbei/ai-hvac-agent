@@ -221,6 +221,7 @@ export function ConversationInbox() {
                 tabs={CHANNEL_TABS}
                 activeTab={channelFilter}
                 onTabChange={setChannelFilter}
+                panelIdPrefix="conversations-panel"
                 className="border-b-0"
               />
               <Select
@@ -243,7 +244,9 @@ export function ConversationInbox() {
 
           {/* Rows */}
           <div
-            aria-label="Conversations"
+            role="tabpanel"
+            id={`conversations-panel-${channelFilter}`}
+            aria-labelledby={`tab-${channelFilter}`}
             onKeyDown={handleListKeyDown}
             className={cn(
               'min-h-0 flex-1 overflow-y-auto transition-opacity duration-150',

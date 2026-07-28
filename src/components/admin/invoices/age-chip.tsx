@@ -41,12 +41,12 @@ export function daysPastDue(inv: InvoiceAgeDates, now: Date = new Date()): numbe
 }
 
 const CLS: Record<string, string> = {
-  green: 'bg-success-light text-success', amber: 'bg-warning-light text-warning',
-  red: 'bg-danger-light text-danger',
+  green: 'bg-success-light text-success-strong', amber: 'bg-warning-light text-warning-foreground',
+  red: 'bg-danger-light text-danger-strong',
 };
 export function AgeChip({ issuedAt, dueDate, createdAt, state }: { issuedAt?: string | null; dueDate?: string | null; createdAt: string; state: string }) {
   if (state === 'paid') {
-    return <span className="inline-flex items-center gap-1.5 rounded-full bg-success-light px-2.5 py-1 text-xs font-semibold text-success"><span className="size-1.5 rounded-full bg-success" />Paid</span>;
+    return <span className="inline-flex items-center gap-1.5 rounded-full bg-success-light px-2.5 py-1 text-xs font-semibold text-success-strong"><span className="size-1.5 rounded-full bg-success" />Paid</span>;
   }
   // Days PAST DUE is the number that matters for collections when the source
   // system gave us a due date (FP's issue dates are onboarding artifacts for

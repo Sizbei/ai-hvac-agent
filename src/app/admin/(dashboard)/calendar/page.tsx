@@ -239,6 +239,7 @@ export default function CalendarPage() {
         tabs={VIEW_TABS}
         activeTab={view}
         onTabChange={(id) => setView(id as CalendarView)}
+        panelIdPrefix="calendar-panel"
       />
 
       {activeError && (
@@ -255,34 +256,40 @@ export default function CalendarPage() {
         </Alert>
       )}
 
-      {isAgenda ? (
-        <AgendaView
-          bookings={bookings}
-          isLoading={agendaLoading}
-          isLoadingMore={agendaLoadingMore}
-          hasMore={agendaHasMore}
-          error={agendaError}
-          onSelect={setSelectedRequestId}
-          onLoadOlder={loadOlder}
-        />
-      ) : isMonth ? (
-        <MonthGrid
-          month={month}
-          isLoading={monthLoading}
-          onSelect={setSelectedRequestId}
-          onPickDay={pickDay}
-        />
-      ) : (
-        <InteractiveSchedulingCalendar
-          calendar={calendar}
-          view={view}
-          onSelect={setSelectedRequestId}
-          onRefetch={refetch}
-          onStatus={(message, tone) => setStatus({ message, tone })}
-          isLoading={isLoading}
-          onPickDay={pickDay}
-        />
-      )}
+      <div
+        role="tabpanel"
+        id={`calendar-panel-${view}`}
+        aria-labelledby={`tab-${view}`}
+      >
+        {isAgenda ? (
+          <AgendaView
+            bookings={bookings}
+            isLoading={agendaLoading}
+            isLoadingMore={agendaLoadingMore}
+            hasMore={agendaHasMore}
+            error={agendaError}
+            onSelect={setSelectedRequestId}
+            onLoadOlder={loadOlder}
+          />
+        ) : isMonth ? (
+          <MonthGrid
+            month={month}
+            isLoading={monthLoading}
+            onSelect={setSelectedRequestId}
+            onPickDay={pickDay}
+          />
+        ) : (
+          <InteractiveSchedulingCalendar
+            calendar={calendar}
+            view={view}
+            onSelect={setSelectedRequestId}
+            onRefetch={refetch}
+            onStatus={(message, tone) => setStatus({ message, tone })}
+            isLoading={isLoading}
+            onPickDay={pickDay}
+          />
+        )}
+      </div>
 
       <UrgencyLegend />
 

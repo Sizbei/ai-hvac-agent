@@ -30,7 +30,11 @@ export function SkeletonTable({
   className,
 }: SkeletonTableProps) {
   return (
-    <div className={cn("overflow-x-auto rounded-lg border", className)}>
+    <div
+      role="status"
+      aria-label="Loading"
+      className={cn("overflow-x-auto rounded-lg border", className)}
+    >
       <Table>
         <TableHeader>
           <TableRow>

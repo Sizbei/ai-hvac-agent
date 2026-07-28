@@ -35,26 +35,33 @@ import { SkeletonTable } from '@/components/admin/ui/skeleton-table';
 interface OrgRow {
   readonly id: string;
   readonly name: string;
-  readonly status: 'active' | 'suspended' | 'trial';
+  readonly status: 'active' | 'suspended' | 'trial' | 'past_due';
   readonly createdAt: string;
 }
 
 /** Token-based status badge for org status — no raw palette classes. */
 function OrgStatusBadge({ status }: { status: OrgRow['status'] }) {
-  const classes = {
-    active: 'bg-success-light text-success border-success/30',
-    suspended: 'bg-danger-light text-danger border-danger/30',
+  const classes: Record<string, string> = {
+    active: 'bg-success-light text-success-strong border-success/30',
+    suspended: 'bg-danger-light text-danger-strong border-danger/30',
     trial: 'bg-warning-light text-warning-foreground border-warning/30',
-  } as const;
-  const labels = {
+    past_due: 'bg-danger-light text-danger-strong border-danger/30',
+  };
+  const labels: Record<string, string> = {
     active: 'Active',
     suspended: 'Suspended',
     trial: 'Trial',
-  } as const;
+    past_due: 'Past due',
+  };
+
+  // Unknown/unexpected status: render the raw value with neutral styling
+  // rather than an empty badge or crash.
+  const className = classes[status] ?? 'bg-muted text-muted-foreground border-border';
+  const label = labels[status] ?? status;
 
   return (
-    <Badge variant="outline" className={classes[status]}>
-      {labels[status]}
+    <Badge variant="outline" className={className}>
+      {label}
     </Badge>
   );
 }

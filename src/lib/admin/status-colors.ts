@@ -17,8 +17,7 @@ export const REQUEST_STATUS_BADGE: Record<string, string> = {
   scheduled: 'bg-primary/10 text-primary border-primary/20',
   in_progress: 'bg-info-light text-info-foreground border-info/30',
   on_hold: 'bg-warning-light text-warning-foreground border-warning/30',
-  completed: 'bg-success-light text-success border-success/30',
-  overdue: 'bg-danger-light text-danger border-danger/30',
+  completed: 'bg-success-light text-success-strong border-success/30',
   cancelled: 'bg-muted text-muted-foreground border-border',
 };
 
@@ -34,7 +33,6 @@ export const REQUEST_STATUS_DOT: Record<string, string> = {
   in_progress: 'bg-info',
   on_hold: 'bg-warning',
   completed: 'bg-success',
-  overdue: 'bg-danger',
   cancelled: 'bg-muted-foreground',
 };
 
@@ -46,14 +44,14 @@ export const REQUEST_STATUS_DOT_DEFAULT = REQUEST_STATUS_DOT.cancelled;
 export const SESSION_STATUS_BADGE: Record<string, string> = {
   chatting: 'bg-info-light text-info-foreground border-info/30',
   extracting: 'bg-info-light text-info-foreground border-info/30',
-  confirmed: 'bg-success-light text-success border-success/30',
-  submitted: 'bg-success-light text-success border-success/30',
+  confirmed: 'bg-success-light text-success-strong border-success/30',
+  submitted: 'bg-success-light text-success-strong border-success/30',
   escalated: 'bg-warning-light text-warning-foreground border-warning/30',
   abandoned: 'bg-muted text-muted-foreground border-border',
   // outcome values (session_outcome enum)
-  booked: 'bg-success-light text-success border-success/30',
+  booked: 'bg-success-light text-success-strong border-success/30',
   info_provided: 'bg-info-light text-info-foreground border-info/30',
-  unresolved: 'bg-danger-light text-danger border-danger/30',
+  unresolved: 'bg-danger-light text-danger-strong border-danger/30',
 };
 
 export const SESSION_STATUS_DEFAULT = SESSION_STATUS_BADGE.chatting;
@@ -64,7 +62,7 @@ export const SESSION_STATUS_DEFAULT = SESSION_STATUS_BADGE.chatting;
 export const INVOICE_STATE_BADGE: Record<string, string> = {
   draft: 'bg-muted text-muted-foreground border-border',
   open: 'bg-info-light text-info-foreground border-info/30',
-  paid: 'bg-success-light text-success border-success/30',
+  paid: 'bg-success-light text-success-strong border-success/30',
   void: 'bg-muted text-muted-foreground border-border',
   refunded: 'bg-warning-light text-warning-foreground border-warning/30',
 };
@@ -74,7 +72,7 @@ export const INVOICE_STATE_DEFAULT = INVOICE_STATE_BADGE.draft;
 /** Token classes for native estimate `status` enum values. */
 export const ESTIMATE_STATUS_BADGE: Record<string, string> = {
   open: 'bg-info-light text-info-foreground border-info/30',
-  sold: 'bg-success-light text-success border-success/30',
+  sold: 'bg-success-light text-success-strong border-success/30',
   dismissed: 'bg-muted text-muted-foreground border-border',
   expired: 'bg-warning-light text-warning-foreground border-warning/30',
 };
@@ -85,9 +83,9 @@ export const ESTIMATE_STATUS_DEFAULT = ESTIMATE_STATUS_BADGE.dismissed;
 export const FPS_STATUS_BADGE: Record<string, string> = {
   Sent: 'bg-info-light text-info-foreground border-info/30',
   Estimate: 'bg-muted text-muted-foreground border-border',
-  Accepted: 'bg-success-light text-success border-success/30',
-  Completed: 'bg-success-light text-success border-success/30',
-  Lost: 'bg-danger-light text-danger border-danger/30',
+  Accepted: 'bg-success-light text-success-strong border-success/30',
+  Completed: 'bg-success-light text-success-strong border-success/30',
+  Lost: 'bg-danger-light text-danger-strong border-danger/30',
   Draft: 'bg-warning-light text-warning-foreground border-warning/30',
 };
 
@@ -97,7 +95,7 @@ export const FPS_STATUS_DEFAULT = 'bg-muted text-muted-foreground border-border'
 
 /** Tailwind token classes for the `urgency` enum values. */
 export const URGENCY_BADGE: Record<string, string> = {
-  emergency: 'bg-danger-light text-danger border-danger/30',
+  emergency: 'bg-danger-light text-danger-strong border-danger/30',
   high: 'bg-warning-light text-warning-foreground border-warning/30',
   medium: 'bg-info-light text-info-foreground border-info/30',
   low: 'bg-muted text-muted-foreground border-border',

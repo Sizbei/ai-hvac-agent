@@ -27,8 +27,13 @@ interface TabGroupProps {
  * Accessible tab group — adds role="tablist"/role="tab"/aria-selected +
  * arrow-key navigation around a Button-based visual.
  *
- * Replaces the calendar view toggle, conversation channel tabs, and settings
- * tabs which were plain Buttons with no keyboard/aria semantics.
+ * Manual activation (WAI-ARIA): arrows/Home/End move focus only via roving
+ * tabindex; Enter/Space activates the focused tab. Manual (not automatic)
+ * because tab switches here fetch data — auto-activation is only appropriate
+ * when panels render without latency.
+ *
+ * Replaces the calendar view toggle and conversation channel tabs which were
+ * plain Buttons with no keyboard/aria semantics.
  *
  * Visual: pill underline style using --primary for the active indicator.
  * No raw Tailwind palette classes.
@@ -50,6 +55,14 @@ export function TabGroup({
       )
       if (!buttons) return
 
+      // Enter/Space activate the focused tab (manual activation).
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault()
+        onTabChange(tabs[index].id)
+        return
+      }
+
+      // Arrows/Home/End move focus only — activation is deferred to Enter/Space.
       let next = index
       if (e.key === "ArrowRight") {
         next = (index + 1) % tabs.length
@@ -68,7 +81,6 @@ export function TabGroup({
       }
 
       buttons[next]?.focus()
-      onTabChange(tabs[next].id)
     },
     [tabs, onTabChange],
   )

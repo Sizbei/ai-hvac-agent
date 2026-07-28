@@ -72,7 +72,7 @@ interface DataTableShellProps<TRow = unknown> {
  * columns + rows + optional toolbar/footer.
  *
  * Replaces ~200 lines of hand-rolled table chrome across requests, staff,
- * pricebook, inventory, invoices, estimates, customers, reports, and audit-log.
+ * pricebook, inventory, estimates, customers, reports, and audit-log.
  */
 export function DataTableShell<TRow = unknown>({
   columns,
@@ -101,7 +101,7 @@ export function DataTableShell<TRow = unknown>({
       )}
 
       {/* Scrollable table region */}
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto" aria-busy={isLoading}>
         <div
           className={cn(
             "transition-opacity duration-150",
@@ -130,15 +130,24 @@ export function DataTableShell<TRow = unknown>({
             </TableHeader>
             <TableBody>
               {showSkeleton
-                ? Array.from({ length: skeletonRows }, (_, i) => (
-                    <TableRow key={`skeleton-row-${i}`}>
-                      {columns.map((col) => (
-                        <TableCell key={`skeleton-cell-${i}-${col.key}`}>
-                          <Skeleton className="h-4 w-full" />
-                        </TableCell>
-                      ))}
-                    </TableRow>
-                  ))
+                ? [
+                    <TableRow key="skeleton-status" className="hover:bg-transparent">
+                      <TableCell colSpan={columns.length} className="p-0">
+                        <span role="status" aria-label="Loading" className="sr-only">
+                          Loading
+                        </span>
+                      </TableCell>
+                    </TableRow>,
+                    ...Array.from({ length: skeletonRows }, (_, i) => (
+                      <TableRow key={`skeleton-row-${i}`} aria-hidden="true">
+                        {columns.map((col) => (
+                          <TableCell key={`skeleton-cell-${i}-${col.key}`}>
+                            <Skeleton className="h-4 w-full" />
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    )),
+                  ]
                 : showEmpty
                   ? emptyState
                     ? (
@@ -157,12 +166,36 @@ export function DataTableShell<TRow = unknown>({
                         key={getRowKey(row)}
                         className={cn(onRowClick && "cursor-pointer")}
                         tabIndex={onRowClick ? 0 : undefined}
-                        onClick={onRowClick ? () => onRowClick(row) : undefined}
+                        onClick={
+                          onRowClick
+                            ? (e) => {
+                                // Don't hijack clicks on nested interactive controls.
+                                if (
+                                  (e.target as HTMLElement).closest(
+                                    'button,a,input,select,textarea,[role="button"],[role="menuitem"]',
+                                  )
+                                ) {
+                                  return
+                                }
+                                // Ignore activation while a stale-revalidate dim is in effect.
+                                if (showDimmed) return
+                                onRowClick(row)
+                              }
+                            : undefined
+                        }
                         onKeyDown={
                           onRowClick
                             ? (e) => {
                                 if (e.key === "Enter" || e.key === " ") {
+                                  if (
+                                    (e.target as HTMLElement).closest(
+                                      'button,a,input,select,textarea,[role="button"],[role="menuitem"]',
+                                    )
+                                  ) {
+                                    return
+                                  }
                                   e.preventDefault()
+                                  if (showDimmed) return
                                   onRowClick(row)
                                 }
                               }
