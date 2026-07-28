@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, Copy, Loader2, Plus, Download, Trash2, RefreshCw } from 'lucide-react';
 import {
   Card,
@@ -66,14 +66,18 @@ export function PlatformConsole() {
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
   const [purgingOrg, setPurgingOrg] = useState<OrgRow | null>(null);
+  // Tracks whether we have ever received data; avoids closing over orgs state
+  // in loadOrgs while still suppressing the skeleton flash on refetch.
+  const hasData = useRef(false);
 
   const loadOrgs = useCallback(async () => {
     setListError(null);
-    setLoading(true);
+    if (!hasData.current) setLoading(true);
     try {
       const res = await fetch('/api/platform/organizations');
       const json = await res.json();
       if (res.ok && json.success) {
+        hasData.current = true;
         setOrgs(json.data.organizations as OrgRow[]);
       } else {
         setListError(json.error?.message ?? 'Could not load organizations.');

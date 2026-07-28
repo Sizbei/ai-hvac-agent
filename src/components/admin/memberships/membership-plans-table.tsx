@@ -10,8 +10,10 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { CreditCard, Plus } from 'lucide-react';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { SkeletonTable } from '@/components/admin/ui/skeleton-table';
+import { EmptyState } from '@/components/admin/ui/empty-state';
 import type { MembershipPlan } from '@/hooks/use-membership-plans';
 
 interface MembershipPlansTableProps {
@@ -19,6 +21,7 @@ interface MembershipPlansTableProps {
   readonly isLoading: boolean;
   readonly onEdit: (plan: MembershipPlan) => void;
   readonly onDeactivate: (plan: MembershipPlan) => void;
+  readonly onAdd: () => void;
 }
 
 export function MembershipPlansTable({
@@ -26,14 +29,26 @@ export function MembershipPlansTable({
   isLoading,
   onEdit,
   onDeactivate,
+  onAdd,
 }: MembershipPlansTableProps) {
   if (isLoading) {
     return <SkeletonTable rows={3} cols={5} />;
   }
 
-  // Empty state is handled by the parent page; render nothing when empty
   if (plans.length === 0) {
-    return null;
+    return (
+      <EmptyState
+        icon={CreditCard}
+        title="No membership plans yet"
+        description="Create your first plan to offer recurring maintenance agreements and member pricing to customers."
+        action={
+          <Button onClick={onAdd}>
+            <Plus className="mr-2 h-4 w-4" />
+            Add plan
+          </Button>
+        }
+      />
+    );
   }
 
   return (
