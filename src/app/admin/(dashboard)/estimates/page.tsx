@@ -317,12 +317,12 @@ export default function EstimatesPage() {
           <table className="w-full text-sm">
             <thead className="border-b bg-muted/50 text-left text-[11px] font-medium text-muted-foreground">
               <tr>
-                <th className="px-4 py-2 font-medium">Customer</th>
-                <th className="px-4 py-2 font-medium max-w-48">Title</th>
-                <th className="px-4 py-2 font-medium text-right">Total</th>
-                <th className="px-4 py-2 font-medium">Status</th>
-                <th className="px-4 py-2 font-medium">Waiting</th>
-                <th className="px-4 py-2 w-8" />
+                <th scope="col" className="px-4 py-2 font-medium">Customer</th>
+                <th scope="col" className="px-4 py-2 font-medium max-w-48">Title</th>
+                <th scope="col" className="px-4 py-2 font-medium text-right">Total</th>
+                <th scope="col" className="px-4 py-2 font-medium">Status</th>
+                <th scope="col" className="px-4 py-2 font-medium">Waiting</th>
+                <th scope="col" className="px-4 py-2 w-8" />
               </tr>
             </thead>
             <tbody>

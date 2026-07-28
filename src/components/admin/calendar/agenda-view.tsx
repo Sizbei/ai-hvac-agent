@@ -212,7 +212,7 @@ export function AgendaView({
           if (row.kind === 'today') {
             return (
               <div key={row.key} className="my-1 flex items-center gap-2">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-danger">
+                <span className="text-[10px] font-bold text-danger">
                   Today
                 </span>
                 <span className="h-px flex-1 bg-danger/30" />

@@ -202,7 +202,7 @@ export function InvoiceDocument({ invoice, org }: Props) {
 function MetaRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-6 px-4 py-2.5 odd:bg-muted/30">
-      <span className="text-xs font-semibold tracking-wide text-muted-foreground">{label}</span>
+      <span className="text-xs font-semibold text-muted-foreground">{label}</span>
       <span className="text-xs font-semibold tabular-nums text-foreground">{value}</span>
     </div>
   );

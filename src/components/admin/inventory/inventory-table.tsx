@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
+import { SkeletonTable } from '@/components/admin/ui/skeleton-table';
 import { EmptyState } from '@/components/admin/ui/empty-state';
 import { Package } from 'lucide-react';
 import { formatCentsExact } from '@/lib/admin/money-format';
@@ -23,25 +23,13 @@ interface InventoryTableProps {
   readonly onEdit: (item: InventoryItem) => void;
 }
 
-function SkeletonRows() {
-  return (
-    <>
-      {Array.from({ length: 5 }, (_, i) => (
-        <TableRow key={i}>
-          <TableCell><Skeleton className="h-4 w-40" /></TableCell>
-          <TableCell><Skeleton className="h-4 w-16" /></TableCell>
-          <TableCell><Skeleton className="h-4 w-16" /></TableCell>
-          <TableCell><Skeleton className="h-4 w-20" /></TableCell>
-          <TableCell><Skeleton className="h-4 w-24" /></TableCell>
-          <TableCell><Skeleton className="h-7 w-16" /></TableCell>
-        </TableRow>
-      ))}
-    </>
-  );
-}
-
 export function InventoryTable({ items, isLoading, onEdit }: InventoryTableProps) {
-  if (!isLoading && items.length === 0) {
+  if (isLoading) {
+    // 5 rows × 6 cols mirrors the real table (Material, On hand, Reorder at, Unit cost, Location, Actions)
+    return <SkeletonTable rows={5} cols={6} />;
+  }
+
+  if (items.length === 0) {
     return (
       <EmptyState
         icon={Package}
@@ -64,9 +52,7 @@ export function InventoryTable({ items, isLoading, onEdit }: InventoryTableProps
         </TableRow>
       </TableHeader>
       <TableBody>
-        {isLoading ? (
-          <SkeletonRows />
-        ) : (
+        {(
           items.map((item) => (
             <TableRow
               key={item.id}

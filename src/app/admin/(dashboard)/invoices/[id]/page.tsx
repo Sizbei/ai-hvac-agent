@@ -3,6 +3,7 @@ import { isSuperAdmin } from '@/lib/auth/authz';
 import { InvoiceDetailClient } from '@/components/admin/invoices/invoice-detail-client';
 
 /**
+ * Thin server wrapper — no PageShell here; PageShell lives in InvoiceDetailClient.
  * Server wrapper: reads the session role so the refund control is only RENDERED
  * for a super_admin. The /api/admin/payments/[id]/refund route enforces the gate
  * regardless — this is purely UI hygiene (don't show a button that 403s).

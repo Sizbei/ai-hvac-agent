@@ -40,7 +40,7 @@ export interface LocationBreakdownRow {
 }
 
 export interface TechnicianScorecardRow {
-  readonly technicianId: string;
+  readonly technicianId: string | null;
   readonly name: string;
   readonly jobsAssigned: number;
   readonly jobsCompleted: number;

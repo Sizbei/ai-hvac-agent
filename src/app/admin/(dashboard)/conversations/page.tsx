@@ -3,6 +3,7 @@ import { ConversationInbox } from '@/components/admin/conversations/conversation
 
 export const metadata: Metadata = { title: 'Conversations · Spears Admin' };
 
+// No PageShell — intentional full-bleed master-detail; no PageShell by design.
 export default function AdminConversationsPage() {
   return (
     <div className="h-full">

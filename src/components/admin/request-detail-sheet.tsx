@@ -955,21 +955,21 @@ export function RequestDetailSheet({
                   Hidden when no decision row has been recorded yet. */}
               {decision && (
                 <section>
-                  <div className="rounded-md border border-sky-200 bg-sky-50/40">
+                  <div className="rounded-md border border-info/30 bg-info-light">
                     <button
                       type="button"
                       aria-expanded={decisionOpen}
                       onClick={() => setDecisionOpen((v) => !v)}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-sky-800 hover:bg-sky-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-foreground hover:bg-info/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md"
                     >
                       {decisionOpen ? (
-                        <ChevronDown className="size-3.5 shrink-0 text-sky-600" aria-hidden="true" />
+                        <ChevronDown className="size-3.5 shrink-0 text-info" aria-hidden="true" />
                       ) : (
-                        <ChevronRight className="size-3.5 shrink-0 text-sky-600" aria-hidden="true" />
+                        <ChevronRight className="size-3.5 shrink-0 text-info" aria-hidden="true" />
                       )}
                       <span>Dispatch decision</span>
                       {decision.isShadow && (
-                        <span className="rounded border border-sky-300 bg-sky-100 px-1.5 py-px text-[10px] font-medium text-sky-700">
+                        <span className="rounded border border-info/30 bg-info/10 px-1.5 py-px text-[10px] font-medium text-info">
                           preview
                         </span>
                       )}
@@ -978,7 +978,7 @@ export function RequestDetailSheet({
                       </span>
                     </button>
                     {decisionOpen && (
-                      <div className="border-t border-sky-200 px-3 pb-3 pt-2 space-y-2">
+                      <div className="border-t border-info/30 px-3 pb-3 pt-2 space-y-2">
                         <div className="text-xs text-muted-foreground">
                           {decision.topScore != null && (
                             <>top score {decision.topScore.toFixed(2)}</>

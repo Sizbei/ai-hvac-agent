@@ -12,7 +12,7 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
+import { SkeletonTable } from '@/components/admin/ui/skeleton-table';
 import { SectionHeading } from '@/components/admin/ui/section-heading';
 import { EmptyState } from '@/components/admin/ui/empty-state';
 import { formatCentsExact } from '@/lib/admin/money-format';
@@ -41,21 +41,6 @@ const STATUS_VARIANT: Record<
   received: 'default',
   cancelled: 'destructive',
 };
-
-function SkeletonRows() {
-  return (
-    <>
-      {Array.from({ length: 3 }, (_, i) => (
-        <TableRow key={i}>
-          <TableCell><Skeleton className="h-4 w-32" /></TableCell>
-          <TableCell><Skeleton className="h-5 w-16" /></TableCell>
-          <TableCell><Skeleton className="h-4 w-20" /></TableCell>
-          <TableCell><Skeleton className="h-7 w-28" /></TableCell>
-        </TableRow>
-      ))}
-    </>
-  );
-}
 
 export function PurchaseOrdersPanel({
   purchaseOrders,
@@ -116,7 +101,10 @@ export function PurchaseOrdersPanel({
         </p>
       )}
 
-      {!isLoading && purchaseOrders.length === 0 ? (
+      {isLoading ? (
+        // 3 rows × 4 cols mirrors the real table (Vendor, Status, Total, Actions)
+        <SkeletonTable rows={3} cols={4} />
+      ) : purchaseOrders.length === 0 ? (
         <EmptyState
           icon={ShoppingCart}
           title="No purchase orders"
@@ -133,9 +121,7 @@ export function PurchaseOrdersPanel({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {isLoading ? (
-              <SkeletonRows />
-            ) : (
+            {(
               purchaseOrders.map((po) => (
                 <TableRow key={po.id}>
                   <TableCell className="font-medium">{po.vendorName}</TableCell>

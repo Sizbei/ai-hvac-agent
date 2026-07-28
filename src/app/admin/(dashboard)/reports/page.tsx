@@ -89,7 +89,7 @@ export default function ReportsPage() {
       )}
 
       {/* Primary KPIs */}
-      <div className="grid grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <StatCard
           label="Net revenue (period)"
           value={report ? formatCentsExact(report.netCollectedCents) : '—'}
@@ -131,7 +131,7 @@ export default function ReportsPage() {
       </div>
 
       {/* Secondary stats */}
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           label="Estimates created"
           value={report ? String(report.estimatesCreated) : '—'}
@@ -332,7 +332,7 @@ function TechnicianTable({ rows, isLoading }: TechnicianTableProps) {
             { key: 'revenue', header: 'Revenue', cell: (row) => <span className="font-medium tabular-nums">{formatCentsExact(row.revenueCents)}</span>, className: 'text-right' },
           ]}
           rows={sorted}
-          getRowKey={(row) => row.technicianId}
+          getRowKey={(row) => row.technicianId ?? 'unassigned'}
           className="border-0 shadow-none"
           emptyState={<EmptyState icon={Users} title="No scorecard data" description="No assigned jobs in this period." className="py-8" />}
         />

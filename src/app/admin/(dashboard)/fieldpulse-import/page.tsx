@@ -123,13 +123,13 @@ function RecentRunsTable({ runs }: { runs: readonly FpImportRunSummary[] }) {
       <table className="w-full text-sm">
         <thead className="border-b bg-muted/50">
           <tr>
-            <th className="px-3 py-2 text-left text-[11px] text-muted-foreground">Phase</th>
-            <th className="px-3 py-2 text-left text-[11px] text-muted-foreground">Status</th>
-            <th className="px-3 py-2 text-left text-[11px] text-muted-foreground tabular-nums">Fetched</th>
-            <th className="px-3 py-2 text-left text-[11px] text-muted-foreground tabular-nums">Created</th>
-            <th className="px-3 py-2 text-left text-[11px] text-muted-foreground tabular-nums">Errors</th>
-            <th className="px-3 py-2 text-left text-[11px] text-muted-foreground">Started</th>
-            <th className="px-3 py-2 text-left text-[11px] text-muted-foreground tabular-nums">Duration</th>
+            <th scope="col" className="px-3 py-2 text-left text-[11px] text-muted-foreground">Phase</th>
+            <th scope="col" className="px-3 py-2 text-left text-[11px] text-muted-foreground">Status</th>
+            <th scope="col" className="px-3 py-2 text-left text-[11px] text-muted-foreground tabular-nums">Fetched</th>
+            <th scope="col" className="px-3 py-2 text-left text-[11px] text-muted-foreground tabular-nums">Created</th>
+            <th scope="col" className="px-3 py-2 text-left text-[11px] text-muted-foreground tabular-nums">Errors</th>
+            <th scope="col" className="px-3 py-2 text-left text-[11px] text-muted-foreground">Started</th>
+            <th scope="col" className="px-3 py-2 text-left text-[11px] text-muted-foreground tabular-nums">Duration</th>
           </tr>
         </thead>
         <tbody className="divide-y">

@@ -157,11 +157,10 @@ export default function AiInsightsPage() {
         size="lg"
         loading={isLoading}
         sublabel="Share of assistant replies answered instantly with no AI call."
-        className="p-6"
       />
 
       {/* Metric cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {INSIGHT_CARDS.map((config) => {
           const Icon = config.icon as React.ComponentType<{ className?: string }> & { displayName?: string };
           return (

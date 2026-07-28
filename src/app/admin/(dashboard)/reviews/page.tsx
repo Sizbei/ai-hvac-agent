@@ -90,7 +90,7 @@ export default function ReviewsPage() {
       )}
 
       {/* Stat cards */}
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <StatCard
           icon={Star}
           intent="warning"
@@ -121,11 +121,11 @@ export default function ReviewsPage() {
           <table className="w-full text-sm">
             <thead className="border-b text-left text-xs text-muted-foreground">
               <tr>
-                <th className="px-4 py-3 font-medium">Status</th>
-                <th className="px-4 py-3 font-medium">Rating</th>
-                <th className="px-4 py-3 font-medium">Public link clicked</th>
-                <th className="px-4 py-3 font-medium">Sent</th>
-                <th className="px-4 py-3 font-medium">Responded</th>
+                <th scope="col" className="px-4 py-3 font-medium">Status</th>
+                <th scope="col" className="px-4 py-3 font-medium">Rating</th>
+                <th scope="col" className="px-4 py-3 font-medium">Public link clicked</th>
+                <th scope="col" className="px-4 py-3 font-medium">Sent</th>
+                <th scope="col" className="px-4 py-3 font-medium">Responded</th>
               </tr>
             </thead>
             <tbody className="divide-y">

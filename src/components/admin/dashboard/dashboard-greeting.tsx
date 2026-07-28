@@ -15,6 +15,7 @@ function greetingForHour(hour: number): string {
  * Warm dashboard header: a time-of-day greeting (resolved on the client to the
  * viewer's local time) + today's date, with a single cyan quick-action into the
  * requests surface. No fabricated stats here.
+ * No PageHeader — the greeting IS the page header; PageHeader deliberately not used.
  */
 export function DashboardGreeting() {
   // Render a stable placeholder on the server, then fill in local time after
