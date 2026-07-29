@@ -62,6 +62,11 @@ export type ExtraSlots = Partial<
 //   - frustrationScore / frustrationOffered: running dissatisfaction signal count
 //     and whether we've already proactively offered a human, so we offer once
 //     before the turn-limit fallback (CHATBOT-PLAN Step 5).
+//   - priorServiceNote: one-line PII-free HCP prior-service note, computed off the
+//     first-token path in the background after() pass and cached here so later
+//     turns can surface it WITHOUT re-paying the HCP HTTP round trip on the reply
+//     path (PERF-AUDIT-2026-07 Bucket B; one-turn lag — the first turn simply
+//     lacks it, matching the voice path which skips the call entirely).
 // They merge/parse with the same never-clobber rule as the real slots.
 export const CONTROL_SLOT_KEYS = [
   "addressVerified",
@@ -73,6 +78,7 @@ export const CONTROL_SLOT_KEYS = [
   "reAskCount",
   "frustrationScore",
   "frustrationOffered",
+  "priorServiceNote",
 ] as const;
 
 function isFilled(value: unknown): boolean {

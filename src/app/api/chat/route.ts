@@ -1712,15 +1712,23 @@ export async function POST(request: NextRequest) {
       ? "\n\n[Note: This conversation has been going for a while. If you would prefer to speak with a human agent, you can request an escalation at any time.]"
       : "";
 
-    // Best-effort HCP service-history enrichment (HCP Stage 3): when the resolved
-    // customer is linked to HCP, attach a one-line PII-free prior-service note
-    // ("last serviced in March") to the context. Behind the seam + degrade-safe:
-    // when HCP isn't connected or errors, the context is returned unchanged, so
-    // the hint is byte-identical to before. Never blocks/throws on the reply path.
-    customerContext = await enrichWithServiceHistory(
-      organizationId,
-      customerContext,
-    ).catch(() => customerContext);
+    // Best-effort HCP service-history enrichment (HCP Stage 3): attach a one-line
+    // PII-free prior-service note ("last serviced in March") to the context.
+    // PERF-AUDIT-2026-07 Bucket B: the enrichment is an outbound HCP HTTP call, so
+    // it is NO LONGER awaited on the first-token path (it blocked every returning
+    // HCP customer before the first token). Instead we READ a note cached in the
+    // session metadata by a prior turn's background pass (see the after() block),
+    // and compute-and-cache the note there. One-turn lag: the very first turn for a
+    // returning HCP customer simply lacks the note — exactly what the voice path
+    // already accepts (voice-turn.ts intentionally skips this call too).
+    const cachedServiceNote =
+      typeof knownSlots.extras?.priorServiceNote === "string" &&
+      knownSlots.extras.priorServiceNote.length > 0
+        ? knownSlots.extras.priorServiceNote
+        : null;
+    if (customerContext && cachedServiceNote) {
+      customerContext = { ...customerContext, priorServiceNote: cachedServiceNote };
+    }
 
     // Returning-customer note (non-PII: first name + counts/membership) so the
     // model greets them by name, acknowledges prior service, and skips re-asking
@@ -1873,6 +1881,29 @@ export async function POST(request: NextRequest) {
         // the extractor FILL issueType/urgency when they aren't already set —
         // pass undefined when the fresh metadata already has them.
         const freshSlots = parseKnownSlots(fresh?.metadata ?? null);
+        // PERF-AUDIT-2026-07 Bucket B: compute the HCP prior-service note HERE,
+        // off the reply path, and cache it in the extras bag so the NEXT turn's
+        // LLM hint can surface it without paying the HCP HTTP round trip. Skip the
+        // call entirely when it's already cached. Best-effort: enrichWithServiceHistory
+        // never throws (degrades to no note when HCP is absent/errors), but guard
+        // anyway so a failure here never aborts the extraction write below.
+        let cachedServiceNote =
+          typeof freshSlots.extras?.priorServiceNote === "string"
+            ? (freshSlots.extras.priorServiceNote as string)
+            : null;
+        if (!cachedServiceNote && customerContext?.hcpCustomerId) {
+          try {
+            const enriched = await enrichWithServiceHistory(
+              organizationId,
+              customerContext,
+            );
+            if (enriched?.priorServiceNote) {
+              cachedServiceNote = enriched.priorServiceNote;
+            }
+          } catch {
+            // ignore — service-history note is a best-effort enhancement
+          }
+        }
         const merged = mergeSlots(freshSlots, {
           issueType: freshSlots.issueType
             ? undefined
@@ -1887,7 +1918,11 @@ export async function POST(request: NextRequest) {
           // Step 2 — the LLM has produced a reply (and thus acknowledged the
           // issue) this turn, so latch the empathy-once flag so neither the
           // deterministic nor LLM path re-acknowledges on later turns.
-          extras: { empathyShown: "1" },
+          // Plus the off-path HCP note (undefined = never clobbers a cached one).
+          extras: {
+            empathyShown: "1",
+            priorServiceNote: cachedServiceNote ?? undefined,
+          },
         });
         const firstUserMessage =
           conversationHistory.find((m) => m.role === "user")?.content ??
