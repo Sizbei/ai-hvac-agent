@@ -168,10 +168,25 @@ describe("GET /api/admin/mapkit-token", () => {
     // header kid = key id
     expect(protectedHeader.kid).toBe(KEY_ID);
 
-    // claim origin = request origin
-    expect((payload as Record<string, unknown>).origin).toBe(ORIGIN);
+    // claim origin = request host WITHOUT scheme (Apple validates the claim
+    // as a fully-qualified domain, not a URL).
+    expect((payload as Record<string, unknown>).origin).toBe("admin.example.com");
 
     // expiresAt in response matches token exp
     expect(body.data.expiresAt).toBe(exp);
+  });
+
+  it("omits the origin claim entirely for localhost dev origins", async () => {
+    getAdminSession.mockResolvedValue(SESSION);
+    const { privateKey } = await generateKeyPair("ES256", { extractable: true });
+    const pkcs8 = await exportPKCS8(privateKey);
+    setAppleEnv("TESTTEAM1", "TESTKEYID1", pkcs8.replace(/\n/g, "\\n"));
+
+    const res = await GET(makeReq("http://localhost:3000"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    const { decodeJwt } = await import("jose");
+    const payload = decodeJwt(body.data.token);
+    expect("origin" in payload).toBe(false);
   });
 });

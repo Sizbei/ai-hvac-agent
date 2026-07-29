@@ -17,6 +17,9 @@ import { getAdminSession } from "@/lib/auth/session";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { logger } from "@/lib/logger";
 
+// Tokens are per-request (origin claim) and short-lived — never cacheable.
+export const dynamic = "force-dynamic";
+
 export async function GET(request: NextRequest) {
   try {
     const session = await getAdminSession();
@@ -40,11 +43,18 @@ export async function GET(request: NextRequest) {
     const pkcs8 = rawKey.replace(/\\n/g, "\n");
     const privateKey = await importPKCS8(pkcs8, "ES256");
 
-    const origin = request.headers.get("origin") ?? "";
+    // Apple validates the origin claim as a fully-qualified DOMAIN, no URL
+    // scheme ("app.example.com", not "https://…"). Browsers omit the Origin
+    // header on same-origin GETs, so fall back to the request URL's host.
+    // Localhost gets no origin claim at all — a localhost-pinned token is
+    // useless and Apple rejects unregistered dev origins anyway.
+    const rawOrigin = request.headers.get("origin") ?? request.nextUrl.origin;
+    const host = rawOrigin.replace(/^https?:\/\//, "");
+    const originClaim = /^localhost(:\d+)?$/.test(host) ? {} : { origin: host };
     const now = Math.floor(Date.now() / 1000);
     const exp = now + 1800; // 30 minutes
 
-    const token = await new SignJWT({ origin })
+    const token = await new SignJWT(originClaim)
       .setProtectedHeader({ alg: "ES256", kid: keyId })
       .setIssuer(teamId)
       .setIssuedAt(now)
