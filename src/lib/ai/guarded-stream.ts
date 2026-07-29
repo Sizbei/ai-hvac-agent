@@ -102,6 +102,17 @@ export function guardedFlushStream(opts: GuardedFlushOpts): GuardedFlushResult {
         }
       };
 
+      // close-after-cancel throws the same way as enqueue-after-cancel; an
+      // unguarded throw here would skip resolveDone() and leave after(done)
+      // holding the invocation open until the platform timeout.
+      const safeClose = () => {
+        try {
+          controller.close();
+        } catch {
+          /* client gone; done still resolves */
+        }
+      };
+
       try {
         for await (const chunk of textStream) {
           full += chunk;
@@ -133,7 +144,7 @@ export function guardedFlushStream(opts: GuardedFlushOpts): GuardedFlushResult {
 
       if (aborted) {
         await persist(full.slice(0, emittedLen), { violated: false, aborted: true });
-        controller.close();
+        safeClose();
         resolveDone();
         return;
       }
@@ -149,7 +160,7 @@ export function guardedFlushStream(opts: GuardedFlushOpts): GuardedFlushResult {
         if (finalScreen.safe) {
           safeEnqueue(full.slice(emittedLen));
           await persist(full, { violated: false, aborted: false });
-          controller.close();
+          safeClose();
           resolveDone();
           return;
         }
@@ -164,7 +175,7 @@ export function guardedFlushStream(opts: GuardedFlushOpts): GuardedFlushResult {
       const shownFallback = emittedLen > 0 ? `\n\n${fallback}` : fallback;
       safeEnqueue(shownFallback);
       await persist(emitted + shownFallback, { violated: true, aborted: false });
-      controller.close();
+      safeClose();
       resolveDone();
     },
     cancel() {

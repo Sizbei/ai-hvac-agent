@@ -111,6 +111,28 @@ describe("route wiring — persist content per path", () => {
     expect(w.insertedTokens).toBe(0); // aborted -> usage skipped
   });
 
+  it("client disconnect (reader.cancel): done still resolves and persist ran", async () => {
+    // Slow stream so the cancel lands mid-generation.
+    async function* slow(): AsyncIterable<string> {
+      yield "First clean sentence. ";
+      await new Promise((r) => setTimeout(r, 20));
+      yield "Second clean sentence. ";
+      await new Promise((r) => setTimeout(r, 20));
+      yield "Third clean sentence.";
+    }
+    const w = makeWiring(slow(), { inputTokens: 5, outputTokens: 5 });
+    const reader = w.readable.getReader();
+    await reader.read(); // first flush arrives
+    await reader.cancel(); // client disconnects
+    // The pull loop is driven by the model stream: it must finish, persist,
+    // and settle done — close-after-cancel must not skip resolveDone().
+    await w.done;
+    expect(w.events).toContain("persist");
+    expect(w.insertedContent).toBe(
+      "First clean sentence. Second clean sentence. Third clean sentence.",
+    );
+  });
+
   it("persists BEFORE close on the clean path", async () => {
     const w = makeWiring(charStream("First sentence. Second sentence. Third sentence."), {
       inputTokens: 1,
