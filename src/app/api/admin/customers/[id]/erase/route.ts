@@ -9,6 +9,7 @@
  */
 import { NextRequest } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
+import { isSuperAdmin } from "@/lib/auth/authz";
 import { anonymizeCustomer } from "@/lib/admin/erasure-queries";
 import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
@@ -28,6 +29,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const session = await getAdminSession();
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
+    }
+    // Irreversible PII destruction is owner-tier only — aligns with the export
+    // routes. (Also keeps the public demo admin from wiping real customers.)
+    if (!isSuperAdmin(session)) {
+      return errorResponse("Forbidden", "FORBIDDEN", 403);
     }
 
     const rateCheck = slidingWindow(

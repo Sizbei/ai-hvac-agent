@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+// The route imports isSuperAdmin from authz, whose chain pulls `server-only`.
+vi.mock("server-only", () => ({}));
+
 const getAdminSession = vi.fn();
 vi.mock("@/lib/auth/session", () => ({
   getAdminSession: () => getAdminSession(),
@@ -30,10 +33,12 @@ const CUST_ID = "22222222-2222-2222-2222-222222222222";
 const SESSION = {
   userId: "u-1",
   organizationId: "org-1",
-  email: "admin@x.com",
-  name: "Admin",
-  role: "admin" as const,
+  email: "owner@x.com",
+  name: "Owner",
+  role: "super_admin" as const,
 };
+
+const ADMIN_SESSION = { ...SESSION, email: "admin@x.com", role: "admin" as const };
 
 function postReq() {
   return new NextRequest(
@@ -58,7 +63,7 @@ describe("POST /api/admin/customers/[id]/erase", () => {
     expect(anonymizeCustomer).not.toHaveBeenCalled();
   });
 
-  it("anonymizes (tenant-scoped) + audits for an admin in their own org", async () => {
+  it("anonymizes (tenant-scoped) + audits for a super admin in their own org", async () => {
     getAdminSession.mockResolvedValue(SESSION);
     anonymizeCustomer.mockResolvedValue(true);
     const res = await POST(postReq(), ctx());
@@ -71,6 +76,13 @@ describe("POST /api/admin/customers/[id]/erase", () => {
         userId: "u-1",
       }),
     );
+  });
+
+  it("403 for a non-super admin (owner-tier only; keeps the demo admin out)", async () => {
+    getAdminSession.mockResolvedValue(ADMIN_SESSION);
+    const res = await POST(postReq(), ctx());
+    expect(res.status).toBe(403);
+    expect(anonymizeCustomer).not.toHaveBeenCalled();
   });
 
   it("404 when the customer does not exist in the org", async () => {
