@@ -896,16 +896,24 @@ export async function addRequestNote(
   authorId: string,
   content: string,
 ): Promise<AddRequestNoteResult> {
-  const [request] = await db
-    .select({ id: serviceRequests.id })
-    .from(serviceRequests)
-    .where(
-      withTenant(
-        serviceRequests,
-        organizationId,
-        eq(serviceRequests.id, requestId),
+  // The request-existence check and the author-name lookup are independent reads
+  // (both only need inputs already in scope: requestId and authorId).
+  const [[request], [author]] = await Promise.all([
+    db
+      .select({ id: serviceRequests.id })
+      .from(serviceRequests)
+      .where(
+        withTenant(
+          serviceRequests,
+          organizationId,
+          eq(serviceRequests.id, requestId),
+        ),
       ),
-    );
+    db
+      .select({ name: users.name })
+      .from(users)
+      .where(withTenant(users, organizationId, eq(users.id, authorId))),
+  ]);
 
   if (!request) {
     return { ok: false, reason: "request_not_found" };
@@ -919,13 +927,6 @@ export async function addRequestNote(
   if (!created) {
     throw new Error("Failed to create request note");
   }
-
-  // Resolve the author's display name for the returned note. The note's
-  // organizationId scopes it; the author is the acting admin.
-  const [author] = await db
-    .select({ name: users.name })
-    .from(users)
-    .where(withTenant(users, organizationId, eq(users.id, authorId)));
 
   return {
     ok: true,

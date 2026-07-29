@@ -60,18 +60,24 @@ export async function POST(request: NextRequest) {
   try {
     const organizationId = DEMO_ORG_ID;
 
-    const callerContext = await resolveVoiceIdentity(organizationId, params.From);
+    // resolveVoiceIdentity (ANI lookup) and the org-limits read are independent.
+    const [callerContext, [limitsRow]] = await Promise.all([
+      resolveVoiceIdentity(organizationId, params.From),
+      db
+        .select({
+          chatTokenBudget: organizationSettings.chatTokenBudget,
+          chatMaxTurns: organizationSettings.chatMaxTurns,
+        })
+        .from(organizationSettings)
+        .where(eq(organizationSettings.organizationId, organizationId))
+        .limit(1),
+    ]);
 
-    const [limitsRow] = await db
-      .select({
-        chatTokenBudget: organizationSettings.chatTokenBudget,
-        chatMaxTurns: organizationSettings.chatMaxTurns,
-      })
-      .from(organizationSettings)
-      .where(eq(organizationSettings.organizationId, organizationId))
-      .limit(1);
-
-    await db
+    // Use .returning() to get the new session id without a follow-up SELECT.
+    // On a Twilio retry the row already exists → onConflictDoNothing returns []
+    // (neon-http/drizzle yields no row on conflict with .returning()), so we
+    // fall back to a SELECT to recover the existing id for the idempotency check.
+    const inserted = await db
       .insert(customerSessions)
       .values({
         organizationId,
@@ -87,17 +93,22 @@ export async function POST(request: NextRequest) {
         maxTurns: resolveMaxTurns(limitsRow?.chatMaxTurns),
         customerId: callerContext?.customerId ?? null,
       })
-      .onConflictDoNothing({ target: customerSessions.token });
+      .onConflictDoNothing({ target: customerSessions.token })
+      .returning({ id: customerSessions.id });
 
+    // Fallback SELECT for the Twilio-retry (conflict) path where .returning() yields [].
     // Persist the greeting as the call's first assistant message. The LLM
     // fallback builds its context from message history — without this row it
     // believes no greeting happened and re-greets on its first turn. Guarded on
     // "no messages yet" so a Twilio retry of this webhook can't double-insert.
-    const [sessionRow] = await db
-      .select({ id: customerSessions.id })
-      .from(customerSessions)
-      .where(eq(customerSessions.token, callSid))
-      .limit(1);
+    const [sessionRow] =
+      inserted.length > 0
+        ? inserted
+        : await db
+            .select({ id: customerSessions.id })
+            .from(customerSessions)
+            .where(eq(customerSessions.token, callSid))
+            .limit(1);
     const [existingMessage] = sessionRow
       ? await db
           .select({ id: messages.id })

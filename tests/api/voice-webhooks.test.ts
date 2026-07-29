@@ -26,7 +26,11 @@ vi.mock("@/lib/db", () => ({
     insert: () => ({
       values: () => {
         insertSpy();
-        return { onConflictDoNothing: () => Promise.resolve() };
+        return {
+          onConflictDoNothing: () => ({
+            returning: () => Promise.resolve([]),
+          }),
+        };
       },
     }),
     update: () => ({ set: () => ({ where: () => Promise.resolve() }) }),

@@ -1044,10 +1044,15 @@ export async function voiceReply(params: {
   let customerHint = "";
   let crossChannelHint = "";
   if (session.customerId) {
-    const ctx = await loadCustomerContextById(
-      organizationId,
-      session.customerId,
-    ).catch(() => null);
+    // loadCustomerContextById and getThread are independent reads — parallelize.
+    // Both are degrade-safe: ctx falls back to null (catch preserved), thread
+    // fails open by contract (empty thread on any error, no try/catch needed).
+    const [ctx, thread] = await Promise.all([
+      loadCustomerContextById(organizationId, session.customerId).catch(
+        () => null,
+      ),
+      getThread(organizationId, session.customerId),
+    ]);
     customerHint = buildCustomerContextHint(ctx);
 
     // Cross-channel recognition (Probook v3, parity with web chat): when this
@@ -1055,7 +1060,6 @@ export async function voiceReply(params: {
     // agent so it can acknowledge the prior contact. Purely additive — getThread
     // fails open (returns an empty thread on any error), so no try/catch and an
     // empty hint when there's no thread or the last channel was already voice.
-    const thread = await getThread(organizationId, session.customerId);
     crossChannelHint =
       thread.exists && thread.lastChannel && thread.lastChannel !== "voice"
         ? `\n[CONTEXT] This customer last contacted us via ${thread.lastChannel}.`

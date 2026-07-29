@@ -1190,23 +1190,28 @@ export async function suggestTechnicians(
   requestId: string,
   limit = 3,
 ): Promise<RankedTech[]> {
-  const techs = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(
-      withTenant(
-        users,
-        organizationId,
-        and(eq(users.role, "technician"), eq(users.isActive, true))!,
+  // Active-techs list and the request's scheduledDate are independent reads.
+  // Note: on the empty-techs path the req read is wasted — acceptable trade
+  // to avoid a conditional waterfall on the (rare) non-empty path.
+  const [techs, [req]] = await Promise.all([
+    db
+      .select({ id: users.id })
+      .from(users)
+      .where(
+        withTenant(
+          users,
+          organizationId,
+          and(eq(users.role, "technician"), eq(users.isActive, true))!,
+        ),
       ),
-    );
+    db
+      .select({ scheduledDate: serviceRequests.scheduledDate })
+      .from(serviceRequests)
+      .where(
+        withTenant(serviceRequests, organizationId, eq(serviceRequests.id, requestId)),
+      ),
+  ]);
   if (techs.length === 0) return [];
-
-  // Score the load signal against the request's scheduled day when set, else today.
-  const [req] = await db
-    .select({ scheduledDate: serviceRequests.scheduledDate })
-    .from(serviceRequests)
-    .where(withTenant(serviceRequests, organizationId, eq(serviceRequests.id, requestId)));
   const isoDay = (req?.scheduledDate ?? new Date()).toISOString().slice(0, 10);
 
   const { ranked } = await rankedTechnicianOrder(
