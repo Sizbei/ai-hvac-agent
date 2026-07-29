@@ -59,7 +59,7 @@ export default function SettingsPage() {
         </div>
       ) : (
         <Tabs defaultValue="branding">
-          <TabsList className="w-full justify-start overflow-x-auto">
+          <TabsList className="w-full justify-start overflow-x-auto [mask-image:linear-gradient(to_right,black_85%,transparent)]">
             <TabsTrigger value="branding">
               <Palette className="size-4" />
               Branding

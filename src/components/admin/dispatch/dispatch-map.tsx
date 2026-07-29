@@ -408,8 +408,8 @@ export function DispatchMap() {
         </button>
       </div>
 
-      {/* Layer toggle — top right (below navigation control which MapLibre adds at ~top:10) */}
-      <div className="pointer-events-auto absolute right-11 top-4 z-10 flex items-center gap-1 rounded-lg border bg-background/95 p-1 shadow-sm backdrop-blur">
+      {/* Layer toggle — top right on desktop; drops below summary bar at ≤480px to avoid collision */}
+      <div className="pointer-events-auto absolute right-11 top-4 z-10 flex items-center gap-1 rounded-lg border bg-background/95 p-1 shadow-sm backdrop-blur max-[480px]:right-2 max-[480px]:top-16">
         <Layers className="ml-1 size-3.5 shrink-0 text-muted-foreground" />
         {(
           [
@@ -437,7 +437,7 @@ export function DispatchMap() {
           <li className="flex items-center gap-2 text-muted-foreground"><span className="inline-block size-3 shrink-0 rounded-full bg-emerald-600 ring-2 ring-emerald-600/30" /> Technician (live)</li>
           <li className="flex items-center gap-2 text-muted-foreground"><span className="inline-block size-3 shrink-0 rounded-full bg-red-600" /> Emergency</li>
           <li className="flex items-center gap-2 text-muted-foreground"><span className="inline-block size-3 shrink-0 rounded-full bg-orange-600" /> High priority</li>
-          <li className="flex items-center gap-2 text-muted-foreground"><span className="inline-block size-3 shrink-0 rounded-full bg-blue-600" /> Standard job</li>
+          <li className="flex items-center gap-2 text-muted-foreground"><span className="inline-block size-3 shrink-0 rounded-full bg-blue-600" /> Standard request</li>
           <li className="pt-1 text-muted-foreground font-medium">Money owed</li>
           <li className="flex items-center gap-2 text-muted-foreground"><span className="inline-block size-3 shrink-0 rounded-full border-2 border-amber-600 bg-amber-600/20" /> &lt;30d</li>
           <li className="flex items-center gap-2 text-muted-foreground"><span className="inline-block size-3 shrink-0 rounded-full border-2 border-orange-600 bg-orange-600/20" /> 30–90d</li>

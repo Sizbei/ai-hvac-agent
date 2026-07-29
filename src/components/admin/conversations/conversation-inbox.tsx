@@ -215,20 +215,22 @@ export function ConversationInbox() {
                 className="h-9 w-full pl-9"
               />
             </div>
-            <div className="flex items-center justify-between gap-3">
-              <TabGroup
-                aria-label="Filter by channel"
-                tabs={CHANNEL_TABS}
-                activeTab={channelFilter}
-                onTabChange={setChannelFilter}
-                panelIdPrefix="conversations-panel"
-                className="border-b-0"
-              />
+            <div className="flex items-center gap-3">
+              <div className="min-w-0 flex-1 overflow-x-auto">
+                <TabGroup
+                  aria-label="Filter by channel"
+                  tabs={CHANNEL_TABS}
+                  activeTab={channelFilter}
+                  onTabChange={setChannelFilter}
+                  panelIdPrefix="conversations-panel"
+                  className="border-b-0"
+                />
+              </div>
               <Select
                 value={statusFilter}
                 onValueChange={(value) => setStatusFilter(value ?? ALL_STATUSES)}
               >
-                <SelectTrigger aria-label="Filter by status" className="mb-1.5 h-8 w-[150px]">
+                <SelectTrigger aria-label="Filter by status" className="mb-1.5 h-8 w-[130px] shrink-0">
                   <SelectValue placeholder="All statuses" />
                 </SelectTrigger>
                 <SelectContent>

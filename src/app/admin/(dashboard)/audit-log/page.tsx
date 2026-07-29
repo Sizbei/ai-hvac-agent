@@ -180,6 +180,7 @@ export default function AdminAuditLogPage() {
         rows={entries}
         getRowKey={(e) => e.id}
         isLoading={isLoading}
+        minTableWidth="40rem"
         toolbar={
           <div className="flex flex-wrap items-center gap-3">
             <Select

@@ -52,6 +52,7 @@ export function MembershipPlansTable({
   }
 
   return (
+    <div className="overflow-x-auto">
     <Table>
       <TableHeader>
         <TableRow>
@@ -114,5 +115,6 @@ export function MembershipPlansTable({
         ))}
       </TableBody>
     </Table>
+    </div>
   );
 }

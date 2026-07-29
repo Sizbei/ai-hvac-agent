@@ -71,12 +71,13 @@ export function StaffTable({
       <EmptyState
         icon={Users}
         title="Invite your first teammate"
-        description="Use the Invite button above to send a link, or Add staff to create a login directly."
+        description="Use the Invite button above to send a link, or Add staff to create a sign-in directly."
       />
     );
   }
 
   return (
+    <div className="overflow-x-auto">
     <Table>
       <TableHeader>
         <TableRow>
@@ -108,7 +109,7 @@ export function StaffTable({
                 <div>
                   {member.email}
                   {member.isFpSynced && !member.hasLogin && (
-                    <div className="text-xs text-muted-foreground">no local login</div>
+                    <div className="text-xs text-muted-foreground">no local sign-in</div>
                   )}
                 </div>
               </TableCell>
@@ -153,5 +154,6 @@ export function StaffTable({
         })}
       </TableBody>
     </Table>
+    </div>
   );
 }

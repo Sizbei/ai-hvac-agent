@@ -58,6 +58,12 @@ interface DataTableShellProps<TRow = unknown> {
    * hurts usability.
    */
   readonly stickyHeader?: boolean
+  /**
+   * Minimum width applied to the inner <Table> so columns scroll rather
+   * than silently compressing on narrow viewports. Pass any CSS length
+   * (e.g. "40rem", "600px"). Optional — omit for tables that wrap naturally.
+   */
+  readonly minTableWidth?: string
   /** Row click handler. When provided, rows get `cursor-pointer`. */
   readonly onRowClick?: (row: TRow) => void
   readonly className?: string
@@ -86,6 +92,7 @@ export function DataTableShell<TRow = unknown>({
   stickyHeader = false,
   onRowClick,
   className,
+  minTableWidth,
 }: DataTableShellProps<TRow>) {
   const showSkeleton = isLoading && rows.length === 0
   const showDimmed = isLoading && rows.length > 0
@@ -108,7 +115,7 @@ export function DataTableShell<TRow = unknown>({
             showDimmed && "pointer-events-none opacity-50",
           )}
         >
-          <Table>
+          <Table style={minTableWidth ? { minWidth: minTableWidth } : undefined}>
             <TableHeader
               className={cn(stickyHeader && "sticky top-0 z-10 bg-card")}
             >

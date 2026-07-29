@@ -66,14 +66,16 @@ export function RequestFilters({
 
   return (
     <div className="flex flex-wrap items-center gap-3">
-      {/* Status segmented control */}
-      <SegmentedControl
-        aria-label="Filter by status"
-        options={STATUS_OPTIONS}
-        value={currentStatus}
-        onChange={onStatusChange}
-        className="max-w-full overflow-x-auto"
-      />
+      {/* Status segmented control — block wrapper enables horizontal scroll on narrow viewports */}
+      <div className="w-full overflow-x-auto">
+        <SegmentedControl
+          aria-label="Filter by status"
+          options={STATUS_OPTIONS}
+          value={currentStatus}
+          onChange={onStatusChange}
+          className="[&_button]:whitespace-nowrap"
+        />
+      </div>
 
       {/* Urgency selector */}
       <Select
