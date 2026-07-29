@@ -40,6 +40,11 @@ export function useDispatchBoard(date: string): UseDispatchBoardResult {
   // its captured run id still matches the current value when it resolves.
   const runRef = useRef(0);
   const isMountedRef = useRef(true);
+  // Equality guard: skip the data setState when a poll returns an identical
+  // payload (avoids re-rendering the whole board on every 30s tick when nothing
+  // changed). Full JSON serialization so any nested change still applies. Reset
+  // on date change so a new day always paints (see the effect below).
+  const prevDataRef = useRef<string | null>(null);
 
   const fetchBoard = useCallback(async (): Promise<void> => {
     const run = ++runRef.current;
@@ -63,7 +68,11 @@ export function useDispatchBoard(date: string): UseDispatchBoardResult {
       };
 
       if (isMountedRef.current && run === runRef.current && body.success) {
-        setBoard(body.data);
+        const next = JSON.stringify(body.data);
+        if (next !== prevDataRef.current) {
+          prevDataRef.current = next;
+          setBoard(body.data);
+        }
         setError(null);
       }
     } catch (err) {
@@ -80,6 +89,9 @@ export function useDispatchBoard(date: string): UseDispatchBoardResult {
     // Clear the previous day's board so the page shows its skeleton (guarded on
     // `isLoading && !board`) instead of stale columns while the new day loads.
     setBoard(null);
+    // Reset the equality guard too, so the new day's data always repaints even
+    // if it happens to serialize identically to the day we just cleared.
+    prevDataRef.current = null;
     void fetchBoard().finally(() => {
       if (isMountedRef.current) setIsLoading(false);
     });

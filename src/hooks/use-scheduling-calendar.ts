@@ -40,6 +40,11 @@ export function useSchedulingCalendar(
   // its captured run id still matches the current value when it resolves.
   const runRef = useRef(0);
   const isMountedRef = useRef(true);
+  // Equality guard: skip the data setState when a poll returns an identical
+  // payload (avoids re-rendering all lanes on every 30s tick when nothing
+  // changed). Full JSON serialization so any nested change still applies. Reset
+  // on range change so a new date/view always paints (see the effect below).
+  const prevDataRef = useRef<string | null>(null);
 
   const fetchCalendar = useCallback(async (): Promise<void> => {
     // `!enabled` MUST be checked before touching the run counter, so a disabled
@@ -70,7 +75,11 @@ export function useSchedulingCalendar(
       };
 
       if (isMountedRef.current && run === runRef.current && body.success) {
-        setCalendar(body.data);
+        const next = JSON.stringify(body.data);
+        if (next !== prevDataRef.current) {
+          prevDataRef.current = next;
+          setCalendar(body.data);
+        }
         setError(null);
       }
     } catch (err) {
@@ -91,6 +100,9 @@ export function useSchedulingCalendar(
     // Clear the previous range so the page shows its skeleton (guarded on
     // isLoading && !calendar) instead of stale lanes while the new range loads.
     setCalendar(null);
+    // Reset the equality guard so the new range's data always repaints even if
+    // it serializes identically to the range we just cleared.
+    prevDataRef.current = null;
     void fetchCalendar().finally(() => {
       if (isMountedRef.current) setIsLoading(false);
     });

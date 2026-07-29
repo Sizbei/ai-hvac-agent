@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 
+// authz.ts is `import "server-only"`; neutralize it so the route (which now
+// imports isDemoAccount) can be imported under vitest.
+vi.mock('server-only', () => ({}));
+
 // ─── Hoisted mocks ──────────────────────────────────────────────────
 const { mockGetAdminSession, mockSendInvoiceReminder, mockSlidingWindow, mockLogAudit } =
   vi.hoisted(() => ({
@@ -76,5 +80,17 @@ describe('POST /api/admin/invoices/[id]/send-reminder', () => {
     mockSendInvoiceReminder.mockResolvedValueOnce({ ok: false, reason: 'cooldown' });
     const res = await POST(req(), ctx);
     expect(res.status).toBe(409);
+  });
+
+  it('returns 403 DEMO_RESTRICTED for the demo account (no send)', async () => {
+    mockGetAdminSession.mockResolvedValueOnce({
+      ...mockSession,
+      email: 'admin@demo-hvac.com',
+    });
+    const res = await POST(req(), ctx);
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error.code).toBe('DEMO_RESTRICTED');
+    expect(mockSendInvoiceReminder).not.toHaveBeenCalled();
   });
 });

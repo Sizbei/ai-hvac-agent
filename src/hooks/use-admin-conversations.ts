@@ -11,6 +11,10 @@ interface UseAdminConversationsOptions {
   readonly search?: string;
   readonly page?: number;
   readonly limit?: number;
+  /** Background poll interval in ms. Defaults to 10s; callers that don't need
+   * that cadence (e.g. the dashboard recent-conversations card) can pass a
+   * larger value to reduce load. */
+  readonly intervalMs?: number;
 }
 
 interface UseAdminConversationsResult {
@@ -39,7 +43,7 @@ const conversationsCache = createSwrCache<ConversationsPayload>(30_000); // 30s 
 export function useAdminConversations(
   options: UseAdminConversationsOptions = {},
 ): UseAdminConversationsResult {
-  const { status, channel, search, page = 1, limit = 20 } = options;
+  const { status, channel, search, page = 1, limit = 20, intervalMs = 10_000 } = options;
 
   const key = `conversations:${status ?? ''}:${channel ?? ''}:${search ?? ''}:${page}:${limit}`;
 
@@ -135,14 +139,15 @@ export function useAdminConversations(
     void fetchConversations();
   }, [fetchConversations]);
 
-  // Poll every 10 seconds (background refresh — never shows skeleton when data exists)
+  // Background refresh (never shows skeleton when data exists). Interval is
+  // caller-tunable (defaults to 10s).
   useEffect(() => {
     const intervalId = setInterval(() => {
       void fetchConversations();
-    }, 10_000);
+    }, intervalMs);
 
     return () => clearInterval(intervalId);
-  }, [fetchConversations]);
+  }, [fetchConversations, intervalMs]);
 
   const refetch = useCallback(() => fetchConversations({ bust: true }), [fetchConversations]);
 

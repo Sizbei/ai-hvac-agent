@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
+import { isDemoAccount } from "@/lib/auth/authz";
 import { sendInvoiceReminder } from "@/lib/communication/money-triggers";
 import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
@@ -24,6 +25,16 @@ export async function POST(
   try {
     const session = await getAdminSession();
     if (!session) return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
+
+    // Public portfolio demo account: outbound sending is disabled so a visitor
+    // can't message real people.
+    if (isDemoAccount(session)) {
+      return errorResponse(
+        "Sending is disabled for the demo account",
+        "DEMO_RESTRICTED",
+        403,
+      );
+    }
 
     const rateCheck = slidingWindow(
       `admin:invoice-reminder:${session.userId}`,

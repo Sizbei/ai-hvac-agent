@@ -10,6 +10,7 @@ import { NextRequest } from "next/server";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { getAdminSession } from "@/lib/auth/session";
+import { isDemoAccount } from "@/lib/auth/authz";
 import { db } from "@/lib/db";
 import { customerSessions, messages } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
@@ -30,6 +31,15 @@ export async function POST(
     const session = await getAdminSession();
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
+    }
+    // Public portfolio demo account: outbound sending is disabled so a visitor
+    // can't message real people.
+    if (isDemoAccount(session)) {
+      return errorResponse(
+        "Sending is disabled for the demo account",
+        "DEMO_RESTRICTED",
+        403,
+      );
     }
     const rate = slidingWindow(
       `admin:conv-msg:${session.userId}`,

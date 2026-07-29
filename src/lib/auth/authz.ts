@@ -14,6 +14,17 @@ import type { AdminSessionPayload, AdminRole } from "./types";
  * session (verifyToken rejects it), so it does not appear in AdminRole.
  */
 
+/** The public portfolio demo login. Outbound sending (SMS reminders, inbox
+ * replies) is disabled for this account so a visitor can't message real people. */
+const DEMO_ACCOUNT_EMAIL = "admin@demo-hvac.com";
+
+/** True when the session belongs to the public portfolio demo account. */
+export function isDemoAccount(
+  session: Pick<AdminSessionPayload, "email">,
+): boolean {
+  return session.email.trim().toLowerCase() === DEMO_ACCOUNT_EMAIL;
+}
+
 /** True when the session belongs to a super_admin. */
 export function isSuperAdmin(
   session: Pick<AdminSessionPayload, "role">,

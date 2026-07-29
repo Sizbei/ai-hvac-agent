@@ -18,7 +18,10 @@ const RECENT_LIMIT = 5;
  * navigates to /admin/conversations.
  */
 export function RecentConversationsCard() {
-  const { conversations, isLoading } = useAdminConversations({ limit: RECENT_LIMIT });
+  const { conversations, isLoading } = useAdminConversations({
+    limit: RECENT_LIMIT,
+    intervalMs: 30_000,
+  });
   const recent = conversations.slice(0, RECENT_LIMIT);
 
   return (

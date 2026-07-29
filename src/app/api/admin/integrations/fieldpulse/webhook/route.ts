@@ -400,13 +400,23 @@ export async function POST(request: NextRequest): Promise<Response> {
     }
 
     // Append to the status-event log (system actor; FSM-driven transition).
-    await recordStatusEvent({
-      organizationId,
-      serviceRequestId: requestRow.id,
-      fromStatus: requestRow.status,
-      toStatus: newStatus,
-      actorType: "system",
-    });
+    // Best-effort for structural parity with the audit guard above: a transient
+    // event-insert failure must NOT fail the webhook (the transition already
+    // committed).
+    try {
+      await recordStatusEvent({
+        organizationId,
+        serviceRequestId: requestRow.id,
+        fromStatus: requestRow.status,
+        toStatus: newStatus,
+        actorType: "system",
+      });
+    } catch (eventError) {
+      logger.error(
+        { eventError, eventId },
+        "Fieldpulse webhook status-event insert failed (non-fatal)",
+      );
+    }
 
     logger.info(
       { eventId, eventType, jobId, newStatus, organizationId },

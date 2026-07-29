@@ -157,6 +157,34 @@ export async function loadCustomerContextById(
   };
 }
 
+/**
+ * Neutralize free-text sourced from a third party (HCP job descriptions) before
+ * it flows into the LLM system prompt. This text is attacker-influenceable (a
+ * customer/tech can type anything into a job description in HCP), so it is treated
+ * as DATA, not instructions:
+ *  - collapse all whitespace (strips newlines / control chars that could break
+ *    out of the single-line note and start a fake directive block),
+ *  - strip bracket-directive sequences like "[system: ...]" that mimic prompt
+ *    control tokens,
+ *  - cap length (defense against prompt-stuffing) with an ellipsis.
+ * The caller wraps the result in quotes so the model reads it as a quoted clause.
+ * Returns "" for empty/whitespace-only input.
+ */
+const THIRD_PARTY_TEXT_CAP = 200;
+function sanitizeThirdPartyText(raw: string): string {
+  const cleaned = raw
+    // Control chars (incl. newlines/tabs) -> space, so the note can't break out
+    // of its single line and start a fake directive block.
+    .replace(/[\x00-\x1F\x7F]+/g, " ")
+    // Strip bracket-directive sequences that mimic prompt control tokens.
+    .replace(/\[\s*(system|assistant|instruction|context|note)[^\]]*\]/gi, "")
+    // Collapse remaining whitespace.
+    .replace(/\s+/g, " ")
+    .trim();
+  if (cleaned.length <= THIRD_PARTY_TEXT_CAP) return cleaned;
+  return cleaned.slice(0, THIRD_PARTY_TEXT_CAP).trimEnd() + "…";
+}
+
 /** Format an ISO date as "Month YYYY" (e.g. "March 2026"), or null if unparsable. */
 function monthYear(iso: string | null): string | null {
   if (!iso) return null;
@@ -205,15 +233,21 @@ export async function enrichWithServiceHistory(
   }
 
   const when = monthYear(history.lastServiceDate);
-  const what = history.lastServiceDescription?.trim();
+  // Sanitize the third-party (HCP) free-text description before it can reach the
+  // LLM system prompt: strip control chars / bracket-directives and cap length,
+  // then present it as a single QUOTED clause so the model reads it as data, not
+  // an instruction. Applied here at note-build time so BOTH the live path and the
+  // session-cached copy of the note are the neutralized version.
+  const rawWhat = history.lastServiceDescription ?? "";
+  const what = rawWhat.trim() ? sanitizeThirdPartyText(rawWhat) : "";
   // Build the note from whatever we have; bail (no change) if neither is usable.
   let note: string | null = null;
   if (when && what) {
-    note = `Most recent service: ${when} — ${what}.`;
+    note = `Most recent service: ${when} — "${what}".`;
   } else if (when) {
     note = `Most recent service: ${when}.`;
   } else if (what) {
-    note = `Most recent service: ${what}.`;
+    note = `Most recent service: "${what}".`;
   }
   if (!note) {
     return context;

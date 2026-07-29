@@ -37,6 +37,10 @@ export function useDashboardOverview(): UseDashboardOverviewResult {
   // Skip any state update that resolves after the component has unmounted so we
   // never set state on a torn-down component (e.g. fast navigation away).
   const isMountedRef = useRef(true);
+  // Equality guard: skip the data setState when a poll returns an identical
+  // payload (avoids re-rendering the whole dashboard on every 30s tick when
+  // nothing changed). Full JSON serialization so any nested change still applies.
+  const prevDataRef = useRef<string | null>(null);
 
   const fetchOverview = useCallback(async (): Promise<void> => {
     if (isFetchingRef.current) return;
@@ -61,7 +65,11 @@ export function useDashboardOverview(): UseDashboardOverviewResult {
       };
 
       if (isMountedRef.current && body.success) {
-        setOverview(body.data);
+        const next = JSON.stringify(body.data);
+        if (next !== prevDataRef.current) {
+          prevDataRef.current = next;
+          setOverview(body.data);
+        }
         overviewCache.set(CACHE_KEY, body.data);
         setError(null);
       }

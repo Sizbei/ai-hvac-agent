@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 import {
   useSchedulingCalendar,
@@ -8,7 +9,6 @@ import {
 } from '@/hooks/use-scheduling-calendar';
 import { useMonthCalendar } from '@/hooks/use-month-calendar';
 import { useAgenda } from '@/hooks/use-agenda';
-import { InteractiveSchedulingCalendar } from '@/components/admin/calendar/interactive-scheduling-calendar';
 import { MonthGrid } from '@/components/admin/calendar/month-grid';
 import { AgendaView } from '@/components/admin/calendar/agenda-view';
 import { RequestDetailSheet } from '@/components/admin/request-detail-sheet';
@@ -18,6 +18,26 @@ import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 import { TabGroup } from '@/components/admin/ui/tab-group';
 import { UrgencyLegend } from '@/components/admin/ui/urgency-legend';
+
+// The interactive day/week board pulls in dnd-kit (drag-and-drop). Code-split it
+// behind next/dynamic (ssr:false) so that bundle only loads when the board is
+// actually rendered — the month/agenda views don't pay for it.
+const InteractiveSchedulingCalendar = dynamic(
+  () =>
+    import('@/components/admin/calendar/interactive-scheduling-calendar').then(
+      (m) => m.InteractiveSchedulingCalendar,
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div
+        className="min-h-[400px] animate-pulse rounded-xl border bg-muted"
+        aria-label="Loading calendar"
+        role="status"
+      />
+    ),
+  },
+);
 
 /** A transient banner the calendar surfaces after a reschedule (soft conflict
  * warning or a failure that triggered a rollback). */
@@ -184,7 +204,7 @@ export default function CalendarPage() {
     <PageShell>
       <PageHeader
         title="Calendar"
-        subtitle="Scheduled jobs by technician, in Eastern time."
+        subtitle="Scheduled requests by technician, in Eastern time."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {/* Show completed toggle */}
