@@ -85,7 +85,7 @@ export function LoginForm({ mode, googleEnabled }: LoginFormProps) {
               Use the Google account your administrator invited.{' '}
               <Link
                 href="/admin/forgot-password"
-                className="font-medium text-foreground underline underline-offset-4 hover:no-underline"
+                className="whitespace-nowrap font-medium text-foreground underline underline-offset-4 hover:no-underline"
               >
                 Trouble signing in?
               </Link>
