@@ -101,6 +101,18 @@ interface AppleDispatchMapProps {
  */
 let mapkitReady: Promise<MapKit> | null = null;
 
+/**
+ * Mid-session token refreshes re-run the authorizationCallback long after
+ * `mapkitReady` settled — its reject() is then a no-op, which would leave a
+ * dead map with no fallback. Mounted components register here so a refresh
+ * failure still reaches their onFail and the provider can swap to MapLibre.
+ */
+const tokenFailureListeners = new Set<() => void>();
+
+function notifyTokenFailure() {
+  for (const listener of tokenFailureListeners) listener();
+}
+
 function loadMapkit(): Promise<MapKit> {
   if (mapkitReady) return mapkitReady;
   mapkitReady = new Promise<MapKit>((resolve, reject) => {
@@ -118,18 +130,21 @@ function loadMapkit(): Promise<MapKit> {
                 const res = await adminFetch('/api/admin/mapkit-token');
                 if (!res.ok) {
                   reject(new Error(`token fetch ${res.status}`));
+                  notifyTokenFailure();
                   return;
                 }
                 const body = await res.json().catch(() => null);
                 const token = body?.data?.token;
                 if (typeof token !== 'string') {
                   reject(new Error('token missing in response'));
+                  notifyTokenFailure();
                   return;
                 }
                 done(token);
               } catch (err) {
                 if (err instanceof AdminAuthRedirectError) return;
                 reject(err instanceof Error ? err : new Error('token fetch failed'));
+                notifyTokenFailure();
               }
             })();
           },
@@ -224,6 +239,17 @@ export function AppleDispatchMap({ onFail }: AppleDispatchMapProps) {
     void load();
   }, []);
 
+  // A mid-session token-refresh failure (settled-promise reject is a no-op)
+  // must still swap this instance out — subscribe to the module-level notifier.
+  useEffect(() => {
+    const onTokenFailure = () => fail();
+    tokenFailureListeners.add(onTokenFailure);
+    return () => {
+      tokenFailureListeners.delete(onTokenFailure);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Load MapKit + init the map once data first arrives (center on base).
   useEffect(() => {
     if (!data || !containerRef.current || mapRef.current) return;
@@ -297,11 +323,11 @@ export function AppleDispatchMap({ onFail }: AppleDispatchMapProps) {
       new mapkit.Coordinate(data.base.latitude, data.base.longitude),
       radiusMeters,
     );
+    // Opacity rides in the rgba colors — mapkit.Style has no strokeOpacity.
     circle.style = new mapkit.Style({
       lineWidth: 1.5,
-      lineColor: '#2563eb',
+      lineColor: 'rgba(37, 99, 235, 0.35)',
       lineDash: [4, 4],
-      strokeOpacity: 0.35,
       fillColor: '#2563eb',
       fillOpacity: 0.06,
     });
