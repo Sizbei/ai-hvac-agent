@@ -133,7 +133,7 @@ function PasswordForm({ onError }: { readonly onError: (msg: string) => void }) 
 
       if (!res.ok) {
         const errorData = data as { error?: { message?: string } };
-        onError(errorData.error?.message ?? 'Login failed');
+        onError(errorData.error?.message ?? "Couldn't sign in. Please try again.");
         return;
       }
 

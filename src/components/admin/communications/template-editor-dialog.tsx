@@ -38,15 +38,15 @@ export interface Template {
 }
 
 export const TRIGGER_TYPES = [
-  { value: "appointment_scheduled", label: "Appointment Scheduled" },
-  { value: "appointment_reminder_24h", label: "24-Hour Reminder" },
-  { value: "appointment_reminder_2h", label: "2-Hour Reminder" },
-  { value: "appointment_rescheduled", label: "Appointment Rescheduled" },
-  { value: "appointment_cancelled", label: "Appointment Cancelled" },
-  { value: "technician_enroute", label: "Technician En Route" },
-  { value: "job_completed", label: "Job Completed" },
-  { value: "review_request", label: "Review Request" },
-  { value: "follow_up", label: "Follow Up" },
+  { value: "appointment_scheduled", label: "Appointment scheduled" },
+  { value: "appointment_reminder_24h", label: "24-hour reminder" },
+  { value: "appointment_reminder_2h", label: "2-hour reminder" },
+  { value: "appointment_rescheduled", label: "Appointment rescheduled" },
+  { value: "appointment_cancelled", label: "Appointment cancelled" },
+  { value: "technician_enroute", label: "Technician en route" },
+  { value: "job_completed", label: "Job completed" },
+  { value: "review_request", label: "Review request" },
+  { value: "follow_up", label: "Follow up" },
   { value: "escalation", label: "Escalation" },
 ] as const;
 
@@ -147,7 +147,8 @@ function TemplateEditorForm({
 
       onSaved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
+      console.error("Failed to save template:", err);
+      setError("Couldn't save the template. Please try again.");
     } finally {
       setSaving(false);
     }

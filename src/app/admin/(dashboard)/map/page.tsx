@@ -28,7 +28,7 @@ export default function DispatchMapPage() {
     <PageShell fullHeight className="p-6 sm:p-7 gap-4">
       <PageHeader
         title="Map"
-        subtitle="Live technician locations and active jobs across your service area. Technician location is shared only when the tech opts in."
+        subtitle="Live technician locations and active requests across your service area. Technician location is shared only when the technician opts in."
       />
       <div className="min-h-0 flex-1">
         <DispatchMap />

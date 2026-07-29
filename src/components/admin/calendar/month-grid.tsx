@@ -85,7 +85,7 @@ function MonthCell({
       type="button"
       onClick={() => onPickDay(cell.day)}
       title="Open this day"
-      aria-label={`Open ${cell.day}${cell.jobs.length ? ` (${cell.jobs.length} jobs)` : ''}`}
+      aria-label={`Open ${cell.day}${cell.jobs.length ? ` (${cell.jobs.length} requests)` : ''}`}
       className={`flex min-h-24 flex-col gap-0.5 border-b border-r p-1 text-left align-top transition-colors hover:bg-muted/50 ${
         cell.inMonth ? 'bg-card' : 'bg-muted/30'
       }`}

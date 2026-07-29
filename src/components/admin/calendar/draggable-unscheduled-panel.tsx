@@ -32,7 +32,7 @@ function formatIssueType(issueType: string): string {
 function reason(job: DashboardRequest): string {
   const noTech = !job.assignedToName;
   const noWindow = !job.arrivalWindowStart;
-  if (noTech && noWindow) return 'No tech · no time';
+  if (noTech && noWindow) return 'No technician · no window';
   if (noTech) return 'No technician';
   return 'No arrival window';
 }

@@ -40,7 +40,7 @@ export default function AdminDashboardPage() {
             intent="info"
             requests={overview?.todaySchedule ?? []}
             isLoading={isLoading}
-            emptyLabel="No jobs scheduled for today."
+            emptyLabel="No requests scheduled for today."
             meta="arrivalWindow"
             onSelect={setSelectedRequestId}
           />
@@ -62,7 +62,7 @@ export default function AdminDashboardPage() {
               intent="neutral"
               requests={overview?.awaitingFollowUp ?? []}
               isLoading={isLoading}
-              emptyLabel="No on-hold jobs awaiting follow-up."
+              emptyLabel="No on-hold requests awaiting follow-up."
               meta="followUp"
               onSelect={setSelectedRequestId}
             />

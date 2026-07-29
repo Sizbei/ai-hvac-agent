@@ -699,7 +699,7 @@ export default function CustomerDetailPage({
         title="Archive customer?"
         description="This hides the customer from your active list but keeps all their records. If they contact you again, they're automatically reactivated."
         confirmLabel="Archive"
-        confirmingLabel="Archiving..."
+        confirmingLabel="Archiving…"
         isConfirming={isArchiving}
         error={archiveError}
         onConfirm={handleArchive}
@@ -711,7 +711,7 @@ export default function CustomerDetailPage({
         title="Delete customer?"
         description="This permanently deletes the customer along with their equipment, service history, notes, and follow-ups. This action cannot be undone."
         confirmLabel="Delete"
-        confirmingLabel="Deleting..."
+        confirmingLabel="Deleting…"
         isConfirming={isDeleting}
         error={deleteError}
         onConfirm={handleDelete}
@@ -723,7 +723,7 @@ export default function CustomerDetailPage({
         title="Erase customer data (GDPR)?"
         description="This permanently anonymizes the customer: their name, contact details, address, chat messages, notes, attachments, and signatures are erased and cannot be recovered. De-identified financial records (invoices, payments) are kept for accounting. This action is terminal."
         confirmLabel="Erase permanently"
-        confirmingLabel="Erasing..."
+        confirmingLabel="Erasing…"
         isConfirming={isErasing}
         error={eraseError}
         onConfirm={handleErase}
@@ -740,7 +740,7 @@ export default function CustomerDetailPage({
         title="Delete equipment?"
         description="This permanently removes this equipment record from the customer. This action cannot be undone."
         confirmLabel="Delete"
-        confirmingLabel="Deleting..."
+        confirmingLabel="Deleting…"
         isConfirming={isDeletingEquipment}
         error={equipmentDeleteError}
         onConfirm={handleDeleteEquipment}

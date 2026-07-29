@@ -267,7 +267,7 @@ export function CustomerMembershipCard({
         title="Cancel membership?"
         description="This ends the customer's active membership. Sent quotes keep their snapshotted member pricing; new quotes will use standard pricing."
         confirmLabel="Cancel membership"
-        confirmingLabel="Cancelling..."
+        confirmingLabel="Cancelling…"
         isConfirming={isCancelling}
         error={cancelError}
         onConfirm={handleCancel}

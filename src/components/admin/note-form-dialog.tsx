@@ -9,7 +9,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 
 const NOTE_TYPES = [
   { value: 'general', label: 'General' },
-  { value: 'follow_up', label: 'Follow Up' },
+  { value: 'follow_up', label: 'Follow up' },
   { value: 'complaint', label: 'Complaint' },
   { value: 'compliment', label: 'Compliment' },
 ] as const;

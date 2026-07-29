@@ -139,7 +139,7 @@ export default function OperationsPage() {
           sublabel="Your invoices only · synced FieldPulse/HCP excluded"
         />
         <StatCard
-          label="Jobs booked"
+          label="Requests booked"
           icon={ClipboardList}
           value={
             metrics

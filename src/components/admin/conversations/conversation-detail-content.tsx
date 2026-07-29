@@ -300,10 +300,10 @@ export function ConversationDetailContent({
             <InfoRow label="Turns" value={String(detail.turnCount)} />
             <InfoRow label="Messages" value={String(detail.messages.length)} />
             <InfoRow
-              label="Tokens Used"
+              label="Tokens used"
               value={`${detail.tokensUsed.toLocaleString()} / ${detail.tokenBudget.toLocaleString()}`}
             />
-            <InfoRow label="Linked Request" value={detail.referenceNumber ?? 'None'} />
+            <InfoRow label="Linked request" value={detail.referenceNumber ?? 'None'} />
             <InfoRow label="Created" value={new Date(detail.createdAt).toLocaleString()} />
           </div>
         </section>
@@ -314,7 +314,7 @@ export function ConversationDetailContent({
         {/* Running summary (long conversations) */}
         {detail.runningSummary && (
           <section>
-            <h3 className="text-sm font-semibold mb-2">Conversation Summary</h3>
+            <h3 className="text-sm font-semibold mb-2">Conversation summary</h3>
             <div className="rounded-md border p-3">
               <p className="text-sm text-muted-foreground whitespace-pre-wrap">
                 {detail.runningSummary}

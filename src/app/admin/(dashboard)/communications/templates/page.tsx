@@ -48,12 +48,13 @@ export default function CommunicationTemplatesPage() {
     try {
       setLoading(true);
       const response = await fetch("/api/admin/communications/templates");
-      if (!response.ok) throw new Error("Failed to fetch templates");
+      if (!response.ok) throw new Error("Couldn't load templates. Please try again.");
       const data = await response.json();
       setTemplates(data.templates || []);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
+      console.error("Failed to fetch templates:", err);
+      setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -74,10 +75,11 @@ export default function CommunicationTemplatesPage() {
             body: JSON.stringify({ isActive: !template.isActive }),
           },
         );
-        if (!response.ok) throw new Error("Failed to update template");
+        if (!response.ok) throw new Error("Couldn't save the template. Please try again.");
         await fetchTemplates();
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Unknown error");
+        console.error("Failed to update template:", err);
+        setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
       }
     },
     [fetchTemplates],
@@ -92,11 +94,12 @@ export default function CommunicationTemplatesPage() {
         `/api/admin/communications/templates/${deletingTemplate.id}`,
         { method: "DELETE" },
       );
-      if (!response.ok) throw new Error("Failed to delete template");
+      if (!response.ok) throw new Error("Couldn't delete the template. Please try again.");
       setDeletingTemplate(null);
       await fetchTemplates();
     } catch (err) {
-      setDeleteError(err instanceof Error ? err.message : "Unknown error");
+      console.error("Failed to delete template:", err);
+      setDeleteError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
     } finally {
       setIsDeleting(false);
     }
@@ -193,7 +196,7 @@ export default function CommunicationTemplatesPage() {
         title="Delete template?"
         description="This permanently removes the template. Automated communications that rely on it will fall back to defaults. This action cannot be undone."
         confirmLabel="Delete"
-        confirmingLabel="Deleting..."
+        confirmingLabel="Deleting…"
         isConfirming={isDeleting}
         error={deleteError}
         onConfirm={handleConfirmDelete}

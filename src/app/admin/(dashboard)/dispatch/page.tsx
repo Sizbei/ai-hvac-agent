@@ -69,7 +69,7 @@ export default function DispatchPage() {
     <PageShell>
       <PageHeader
         title="Dispatch"
-        subtitle="Scheduled jobs by technician for the day."
+        subtitle="Scheduled requests by technician for the day."
         actions={
           <div className="flex items-center gap-2">
             <Button
@@ -80,7 +80,7 @@ export default function DispatchPage() {
             >
               <ChevronLeft className="size-4" />
             </Button>
-            <div className="min-w-40 text-center text-sm font-medium">
+            <div className="min-w-32 text-center text-sm font-medium">
               {formatDayLabel(date)}
             </div>
             <Button
@@ -125,7 +125,7 @@ export default function DispatchPage() {
         <Card className="p-4">
           <SectionHeading
             title="Exceptions"
-            description="Queued jobs needing a decision"
+            description="Queued requests needing a decision."
             className="mb-3"
           />
           <ul className="space-y-1.5">
@@ -182,7 +182,7 @@ export default function DispatchPage() {
             </Card>
           ))}
         </div>
-      ) : (
+      ) : !isLoading && !board && error ? null : (
         <div className="flex gap-4 overflow-x-auto pb-2">
           <DispatchColumn
             title="Unassigned"

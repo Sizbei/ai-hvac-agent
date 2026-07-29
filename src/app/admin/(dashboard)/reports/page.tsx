@@ -289,7 +289,7 @@ function LocationTable({ rows, isLoading }: LocationTableProps) {
           rows={sorted}
           getRowKey={(row) => row.locationId}
           className="border-0 shadow-none"
-          emptyState={<EmptyState icon={MapPin} title="No location data" description="No jobs in this period." className="py-8" />}
+          emptyState={<EmptyState icon={MapPin} title="No location data" description="No requests in this period." className="py-8" />}
         />
       )}
     </SectionCard>
@@ -334,7 +334,7 @@ function TechnicianTable({ rows, isLoading }: TechnicianTableProps) {
           rows={sorted}
           getRowKey={(row) => row.technicianId ?? 'unassigned'}
           className="border-0 shadow-none"
-          emptyState={<EmptyState icon={Users} title="No scorecard data" description="No assigned jobs in this period." className="py-8" />}
+          emptyState={<EmptyState icon={Users} title="No scorecard data" description="No technicians with completed requests in this period." className="py-8" />}
         />
       )}
     </SectionCard>
