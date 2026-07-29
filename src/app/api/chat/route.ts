@@ -29,6 +29,7 @@ import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { buildSystemPrompt, brandInfoFromConfig } from "@/lib/ai/system-prompt";
 import { sanitizeInput, GUARDRAIL_SOFT_REPLY } from "@/lib/ai/guardrails";
 import { screenAssistantReply } from "@/lib/ai/output-guardrail";
+import { guardedFlushStream } from "@/lib/ai/guarded-stream";
 import {
   extractServiceRequest,
   type Message as AIMessage,
@@ -2044,69 +2045,100 @@ export async function POST(request: NextRequest) {
       }
     });
 
-    // Output guardrail: buffer the full reply, then screen it for the two hard
-    // safety properties (never quote a price, never claim a confirmed booking)
-    // BEFORE the customer sees it. The deterministic path is template-safe; this
-    // covers the free-form LLM-fallback reply, where the constraints are
-    // prompt-only and thus elicitable. A violating reply is replaced with a safe
-    // on-brand reply. We can't retract streamed tokens, so we serve the screened
-    // text as a single text/plain response (same shape the budget/handoff paths
-    // already use). If the model errors/aborts, this throws to the outer catch →
-    // warm handoff; the after() extraction above is already registered so the
-    // user's captured details are never lost.
-    const rawReply = await result.text;
-    const usage = await result.usage;
-    const screen = screenAssistantReply(rawReply);
-    if (!screen.safe) {
-      logger.warn(
-        { sessionId: session.id, violations: screen.violations },
-        "Output guardrail replaced an unsafe LLM reply",
-      );
-    }
-    const replyText = screen.reply;
-
-    const tokensThisCall =
-      (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0);
-    // Persist the SCREENED reply (this is what the customer received, what later
-    // turns re-read as history, and what an export would show).
-    await db.insert(messages).values({
-      organizationId,
-      sessionId: session.id,
-      role: "assistant",
-      content: replyText,
-      tokensUsed: tokensThisCall,
-    });
-    const { newTotal } = addTokenUsage(
-      session.tokensUsed,
-      tokensThisCall,
-      session.tokenBudget,
-    );
-    await db
-      .update(customerSessions)
-      .set({
-        tokensUsed: newTotal,
-        turnCount: newTurnCount,
-        updatedAt: new Date(),
-      })
-      .where(sessionScope);
-    logger.info(
-      {
-        sessionId: session.id,
-        tokensUsed: tokensThisCall,
-        totalTokens: newTotal,
-        turnCount: newTurnCount,
+    // Output guardrail (streaming): flush only sentence-complete, jointly
+    // screened, punctuation-terminated prefixes so no character of any
+    // guardrail-matching span is ever shown (same guarantee as the old
+    // buffer-then-screen path). On a violation we stop emitting but keep
+    // draining the model stream, then append the canned fallback; persistence
+    // runs at loop end BEFORE close on every path. Stream errors are caught
+    // INSIDE the loop and never reach the outer catch (which would append
+    // HANDOFF_REPLY as a second body and garble the stream).
+    const { readable, done } = guardedFlushStream({
+      textStream: result.textStream,
+      screen: (t) => {
+        const s = screenAssistantReply(t);
+        return { safe: s.safe, violations: s.violations };
       },
-      "Chat message processed",
-    );
+      fallbackFor: (violations) => {
+        if (violations.length > 0) {
+          logger.warn(
+            { sessionId: session.id, violations },
+            "Output guardrail replaced an unsafe LLM reply (streaming)",
+          );
+        }
+        // screenAssistantReply maps any violation set to its safe replacement;
+        // feed a representative trigger so the SAME canned copy is returned.
+        const trigger =
+          violations.includes("dangerous-diy") || violations.includes("credentials")
+            ? "here's how to recharge your refrigerant"
+            : violations.includes("false-booking") && violations.includes("pricing")
+              ? "you're booked and it costs $200"
+              : violations.includes("false-booking")
+                ? "you're booked"
+                : "it costs $200";
+        return screenAssistantReply(trigger).reply;
+      },
+      // Persist at loop end, BEFORE close, on EVERY path — replicates today's
+      // three-step sequence (message insert → addTokenUsage → session update).
+      // NEVER persists result.text (which holds suppressed violating content);
+      // persists exactly what the loop showed.
+      persist: async (finalText, { aborted }) => {
+        try {
+          // usage resolves once the model stream is fully consumed (clean or
+          // drained); on the aborted path it may be unavailable -> record 0.
+          let tokensThisCall = 0;
+          if (!aborted) {
+            const usage = await result.usage;
+            tokensThisCall =
+              (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0);
+          }
+          await db.insert(messages).values({
+            organizationId,
+            sessionId: session.id,
+            role: "assistant",
+            content: finalText,
+            tokensUsed: tokensThisCall,
+          });
+          const { newTotal } = addTokenUsage(
+            session.tokensUsed,
+            tokensThisCall,
+            session.tokenBudget,
+          );
+          await db
+            .update(customerSessions)
+            .set({
+              tokensUsed: newTotal,
+              turnCount: newTurnCount,
+              updatedAt: new Date(),
+            })
+            .where(sessionScope);
+          logger.info(
+            {
+              sessionId: session.id,
+              tokensUsed: tokensThisCall,
+              totalTokens: newTotal,
+              turnCount: newTurnCount,
+            },
+            "Chat message processed (streaming)",
+          );
+        } catch (persistError: unknown) {
+          // Persistence must never reject the stream; the client already has
+          // the reply. Log and continue to close.
+          logger.error(
+            { error: persistError, sessionId: session.id },
+            "Streaming reply persistence failed",
+          );
+        }
+      },
+    });
 
-    // Bot telemetry (Step 10): an LLM-fallback turn. intentId/action stay null
-    // (the deterministic router did NOT resolve this turn). Best-effort —
-    // recordBotEvent never throws. Deferred via after() so telemetry never
-    // blocks the streamed reply (mirrors the deterministic path above).
-    // Tagging all FALLBACK_LLM web turns as "knowledge" — simplification: the
-    // web LLM path today is almost exclusively general HVAC Q&A; intake slots
-    // are filled deterministically above (SLOT_FILL path). Revisit if the LLM
-    // path starts handling intake slots directly.
+    // Keep the serverless runtime alive until the pull loop + persistence
+    // finish, even if the client disconnects. Promises register with waitUntil
+    // immediately, so this is safe to register at stream creation.
+    after(done);
+
+    // Bot telemetry (Step 10): an LLM-fallback turn, deferred so it never
+    // blocks the streamed reply. Same fields as the deterministic path.
     after(() =>
       recordBotEvent({
         organizationId,
@@ -2120,7 +2152,9 @@ export async function POST(request: NextRequest) {
       }),
     );
 
-    return cannedTextResponse(replyText);
+    return new Response(readable, {
+      headers: { "content-type": "text/plain; charset=utf-8" },
+    });
   } catch (error) {
     logger.error({ error }, "Chat endpoint error");
     // Degrade gracefully rather than showing the customer a raw 500 error box.
