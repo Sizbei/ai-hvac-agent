@@ -488,8 +488,8 @@ describe('E2E Smoke Test: Full Customer-to-Admin Flow', () => {
       // After-hours config lookup (no settings row → resolves to default/disabled)
       .mockResolvedValueOnce([]);
 
-    // The route now BUFFERS the reply (output guardrail screens it before send),
-    // so it reads result.text + result.usage rather than streaming. Mock those.
+    // The route streams the reply through the guarded-flush gate, reading
+    // result.textStream + result.usage. This skipped test's mock predates that.
     mockStreamText.mockReturnValue({
       text: Promise.resolve('AI response stream'),
       usage: Promise.resolve({ inputTokens: 10, outputTokens: 5 }),
