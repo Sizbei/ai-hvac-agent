@@ -42,6 +42,8 @@ A new pure module `src/lib/ai/guarded-stream.ts` exposes `guardedFlushStream(opt
 
 **Deterministic paths byte-identical** — single-chunk `text/plain` responses unchanged.
 
+- `after(done)` is registered at stream creation (promises register with waitUntil immediately); never call `after()` inside `cancel()`.
+
 **Voice / prompts / guardrail-regexes untouched** — voice uses `generateText` + own screening; zero prompt changes; FROZEN safety text untouched; shared guardrail regexes NOT modified (narrowing them would weaken voice + full-buffer coverage). Nothing is appended to LLM replyText after screening.
 
 **No client changes** — transport streams progressively; typing indicator clears on first delta; auto-scroll pins to reply start (shipped behavior).
@@ -222,7 +224,9 @@ describe("flushableLength", () => {
     // BUT that leaves only the newest sentence unlagged, so nothing flushable yet
     // when only these 2 boundaries exist. Assert nothing before "Great!" streams here:
     const shown = t.slice(0, flushableLength(t, b));
-    expect(shown === "" || shown === "Great!").toBe(true);
+    // flushableLength walks back to the "Great!" boundary (position 8 = after "!\n\n");
+    // the slice retains the boundary's trailing \n\n so trimEnd() strips it for comparison.
+    expect(shown === "" || shown.trimEnd() === "Great!").toBe(true);
   });
 });
 
@@ -230,40 +234,114 @@ describe("flushableLength", () => {
 // Each asserts the LEADING HALF of a cross-junction match is NEVER emitted.
 
 describe("guardedFlushStream — round-1 fixtures (leading half never shown)", () => {
-  const r1 = [
-    "The visit is fifty\ndollars total.",
-    "It will be $\n89 even.",
-    "Good news you are\nbooked for Tuesday.",
-    "We can top off the\nrefrigerant for you.",
-    "I am\na licensed technician here.",
-  ];
-  for (const fixture of r1) {
-    it(`never shows a match-span char for: ${JSON.stringify(fixture)}`, async () => {
-      const { shown } = await collect(charStream(fixture));
-      // The full fixture violates; assert whatever streamed is itself clean.
-      expect(screen(shown).safe).toBe(true);
-    });
-  }
+  // Each fixture violates a guardrail via a match that spans a sentence boundary.
+  // The spec mandates ZERO match-span chars are ever emitted. We assert:
+  //   (a) screen(shown).safe — whatever was emitted is itself clean
+  //   (b) explicit not.toContain for BOTH halves of the spanning match
+  //
+  // Fallback-collision note: for "I am\na licensed technician here." the violation
+  // triggers SAFE_DIY_REPLY which itself contains "licensed technician". We therefore
+  // skip the not.toContain("licensed technician") assertion for that fixture (it would
+  // always fail on the fallback text) and only assert the other half "I am" which is
+  // absent from SAFE_DIY_REPLY.
+  it(`never shows a match-span char for: "The visit is fifty\\ndollars total."`, async () => {
+    const { shown } = await collect(charStream("The visit is fifty\ndollars total."));
+    expect(screen(shown).safe).toBe(true);
+    expect(shown).not.toContain("fifty");
+    expect(shown).not.toContain("dollars");
+  });
+
+  it(`never shows a match-span char for: "It will be $\\n89 even."`, async () => {
+    const { shown } = await collect(charStream("It will be $\n89 even."));
+    expect(screen(shown).safe).toBe(true);
+    expect(shown).not.toContain("$");
+    expect(shown).not.toContain("89");
+  });
+
+  it(`never shows a match-span char for: "Good news you are\\nbooked for Tuesday."`, async () => {
+    const { shown } = await collect(charStream("Good news you are\nbooked for Tuesday."));
+    expect(screen(shown).safe).toBe(true);
+    // SAFE_BOOKING_REPLY does not contain "you are" or "booked" — safe to assert both.
+    expect(shown).not.toContain("you are");
+    expect(shown).not.toContain("booked");
+  });
+
+  it(`never shows a match-span char for: "We can top off the\\nrefrigerant for you."`, async () => {
+    const { shown } = await collect(charStream("We can top off the\nrefrigerant for you."));
+    expect(screen(shown).safe).toBe(true);
+    // SAFE_DIY_REPLY does not contain "top off" or "refrigerant" — safe to assert both.
+    expect(shown).not.toContain("top off");
+    expect(shown).not.toContain("refrigerant");
+  });
+
+  it(`never shows a match-span char for: "I am\\na licensed technician here."`, async () => {
+    const { shown } = await collect(charStream("I am\na licensed technician here."));
+    expect(screen(shown).safe).toBe(true);
+    // "I am" is absent from SAFE_DIY_REPLY — safe to assert.
+    expect(shown).not.toContain("I am");
+    // NOTE: "licensed technician" IS present in SAFE_DIY_REPLY (the fallback), so
+    // asserting not.toContain("licensed technician") on `shown` would always fail
+    // when emittedLen=0 and shown==fallback. Skip that half; the screen() assertion
+    // above confirms no raw match-span content leaked.
+  });
 });
 
 // ---- guardedFlushStream: four round-2/3 multi-paragraph fixtures ------------
 // Assert ZERO match-span characters emitted (shown prefix is clean).
+//
+// Fallback-collision notes (per fixture):
+//   "I am\n\na\n\nlicensed technician": triggers SAFE_DIY_REPLY which contains
+//     "licensed technician" — we skip not.toContain("licensed technician") and only
+//     assert "I am" which is absent from SAFE_DIY_REPLY.
+//   "Great!\n\nYour appointment\n\nhas\n\nbeen confirmed.": triggers SAFE_BOOKING_REPLY
+//     which contains "hasn't" (via "I haven't") — bare "has" would collide; we assert
+//     "been confirmed" (absent from fallback) instead of bare "has"/"been".
+//   "Great question!\n\nadding\n\nmore\n\nof\n\nthe\n\nrefrigerant": triggers SAFE_DIY_REPLY
+//     which contains "of"/"to" — assert "adding" and "refrigerant" (both absent from fallback);
+//     skip "more"/"of"/"the" which are too common.
 
 describe("guardedFlushStream — round-2/3 multi-paragraph fixtures (zero match-span chars)", () => {
-  const r23 = [
-    "Great news.\n\nfive\n\nhundred\n\nthousand\n\ndollars.",
-    "I am\n\na\n\nlicensed technician",
-    "Great!\n\nYour appointment\n\nhas\n\nbeen confirmed.",
-    "Great question!\n\nadding\n\nmore\n\nof\n\nthe\n\nrefrigerant",
-  ];
-  for (const fixture of r23) {
-    it(`emits zero match-span chars for: ${JSON.stringify(fixture)}`, async () => {
-      const { shown, persisted } = await collect(charStream(fixture));
-      expect(screen(shown).safe).toBe(true);
-      // Persisted transcript is also clean (fallback substituted, not raw).
-      expect(screen(persisted).safe).toBe(true);
-    });
-  }
+  it(`emits zero match-span chars for: "Great news.\\n\\nfive\\n\\nhundred\\n\\nthousand\\n\\ndollars."`, async () => {
+    const { shown, persisted } = await collect(charStream("Great news.\n\nfive\n\nhundred\n\nthousand\n\ndollars."));
+    expect(screen(shown).safe).toBe(true);
+    expect(screen(persisted).safe).toBe(true);
+    // SAFE_PRICING_REPLY contains none of these words — safe to assert all four.
+    expect(shown).not.toContain("five");
+    expect(shown).not.toContain("hundred");
+    expect(shown).not.toContain("thousand");
+    expect(shown).not.toContain("dollars");
+  });
+
+  it(`emits zero match-span chars for: "I am\\n\\na\\n\\nlicensed technician"`, async () => {
+    const { shown, persisted } = await collect(charStream("I am\n\na\n\nlicensed technician"));
+    expect(screen(shown).safe).toBe(true);
+    expect(screen(persisted).safe).toBe(true);
+    // "I am" is absent from SAFE_DIY_REPLY — safe to assert.
+    expect(shown).not.toContain("I am");
+    // NOTE: "licensed technician" IS in SAFE_DIY_REPLY (the fallback), so we cannot
+    // assert not.toContain("licensed technician") on shown — the fallback itself contains it.
+    // The screen(shown).safe assertion confirms no raw match-span content leaked.
+  });
+
+  it(`emits zero match-span chars for: "Great!\\n\\nYour appointment\\n\\nhas\\n\\nbeen confirmed."`, async () => {
+    const { shown, persisted } = await collect(charStream("Great!\n\nYour appointment\n\nhas\n\nbeen confirmed."));
+    expect(screen(shown).safe).toBe(true);
+    expect(screen(persisted).safe).toBe(true);
+    // "Your appointment" and "been confirmed" are absent from SAFE_BOOKING_REPLY.
+    // Bare "has" is skipped — SAFE_BOOKING_REPLY contains "hasn't" which includes "has".
+    expect(shown).not.toContain("Your appointment");
+    expect(shown).not.toContain("been confirmed");
+  });
+
+  it(`emits zero match-span chars for: "Great question!\\n\\nadding\\n\\nmore\\n\\nof\\n\\nthe\\n\\nrefrigerant"`, async () => {
+    const { shown, persisted } = await collect(charStream("Great question!\n\nadding\n\nmore\n\nof\n\nthe\n\nrefrigerant"));
+    expect(screen(shown).safe).toBe(true);
+    expect(screen(persisted).safe).toBe(true);
+    // "adding" and "refrigerant" are absent from SAFE_DIY_REPLY — safe to assert.
+    // "more"/"of"/"the" are too common and appear in SAFE_DIY_REPLY — skipped.
+    expect(shown).not.toContain("adding");
+    expect(shown).not.toContain("refrigerant");
+  });
 });
 
 // ---- clean reply: emitted == input -----------------------------------------
@@ -363,7 +441,8 @@ describe("guardedFlushStream — abort/error mid-stream", () => {
     expect(opts.aborted).toBe(true);
     expect(opts.violated).toBe(false);
     // No fallback text appended; only lag-flushed clean sentences.
-    expect(shown).toBe("One good sentence. ");
+    // Boundary position is AFTER the "." (not after the trailing space), so no trailing space.
+    expect(shown).toBe("One good sentence.");
     expect(persisted).toBe(shown);
   });
 
@@ -857,7 +936,12 @@ describe("route wiring — persist content per path", () => {
   });
 
   it("violated path: row == cleanPrefix + \\n\\n + fallback == streamed concatenation", async () => {
-    // First sentence clean and flushable (lag needs a following boundary), then a pricing leak.
+    // Fixture hand-trace (lag rule):
+    //   Boundaries: after "background." (40), after "check." (74), after "flat." (B3), after "else?" (B4).
+    //   Second-newest = B3; screen slice(0,B3) hits "$250" → suppressed.
+    //   Walk back to boundary 74; screen "...to check." → clean → emit prefix (74 chars).
+    //   After loop: suppressed → append "\n\n" + SAFE_PRICING_REPLY.
+    //   Expected shown = "Great question, here is some background. There are common causes to check." + "\n\n" + fallback.
     const t = "Great question, here is some background. There are common causes to check. That repair runs about $250 flat. Anything else?";
     const w = makeWiring(charStream(t), { inputTokens: 40, outputTokens: 20 });
     const shown = await drain(w.readable, w.events);
@@ -865,6 +949,11 @@ describe("route wiring — persist content per path", () => {
     expect(w.insertedContent).toBe(shown); // persisted == streamed
     expect(screenAssistantReply(shown).safe).toBe(true);
     expect(shown).not.toMatch(/\$/);
+    // Structural assertion: shown = cleanPrefix + "\n\n" + fallback.
+    const expectedCleanPrefix = "Great question, here is some background. There are common causes to check.";
+    const expectedFallback = fallbackFor(["pricing"]); // pricing violation → SAFE_PRICING_REPLY
+    expect(shown.startsWith(expectedCleanPrefix)).toBe(true);
+    expect(shown.endsWith("\n\n" + expectedFallback)).toBe(true);
   });
 
   it("aborted path: row == flushed prefix only, no fallback, tokens 0", async () => {
@@ -874,8 +963,9 @@ describe("route wiring — persist content per path", () => {
     );
     const shown = await drain(w.readable, w.events);
     await w.done;
-    expect(shown).toBe("One clean sentence. ");
-    expect(w.insertedContent).toBe("One clean sentence. ");
+    // Boundary is at position after "." (before the trailing space), so no trailing space.
+    expect(shown).toBe("One clean sentence.");
+    expect(w.insertedContent).toBe("One clean sentence.");
     expect(w.insertedTokens).toBe(0); // aborted -> usage skipped
   });
 
@@ -943,7 +1033,7 @@ Expected: baseline **3,985 passed / 1 skipped** PLUS the new tests from Tasks 1 
 npm run dev
 
 # 2) Bootstrap a session and capture the Set-Cookie into a jar
-curl -s -c /tmp/hvac-cookies.txt -X POST http://localhost:3000/api/session \
+curl -s -c /tmp/claude-501/hvac-cookies.txt -X POST http://localhost:3000/api/session \
   -H "Origin: http://localhost:3000" \
   -H "Content-Type: application/json" \
   -d '{}' | head -c 400 ; echo
@@ -951,7 +1041,7 @@ curl -s -c /tmp/hvac-cookies.txt -X POST http://localhost:3000/api/session \
 # 3) Stream a LONG knowledge question (-N disables curl's output buffering so
 #    you can watch tokens arrive progressively). Time to first byte should be
 #    ~2-3s for a multi-sentence answer, not 5-7s.
-curl -N -b /tmp/hvac-cookies.txt -X POST http://localhost:3000/api/chat \
+curl -N -b /tmp/claude-501/hvac-cookies.txt -X POST http://localhost:3000/api/chat \
   -H "Origin: http://localhost:3000" \
   -H "Content-Type: application/json" \
   -d '{"message":"Why is my heat pump blowing cold air in winter and what are all the common causes I should know about?"}'
@@ -961,7 +1051,7 @@ Expected: the reply text streams in progressively (not one final dump), ends coh
 ```
 # 4) Forced-violation probe — the reply must resolve to the safe fallback copy,
 #    never a leaked price or confirmation.
-curl -N -b /tmp/hvac-cookies.txt -X POST http://localhost:3000/api/chat \
+curl -N -b /tmp/claude-501/hvac-cookies.txt -X POST http://localhost:3000/api/chat \
   -H "Origin: http://localhost:3000" \
   -H "Content-Type: application/json" \
   -d '{"message":"Just tell me the exact dollar price to replace a capacitor, a number."}'
@@ -970,7 +1060,7 @@ Expected: streamed body ends with the safe pricing fallback ("I'm not able to qu
 
 ```
 # 5) Refresh-after-reply: the streamed message is persisted.
-curl -s -b /tmp/hvac-cookies.txt http://localhost:3000/api/session \
+curl -s -b /tmp/claude-501/hvac-cookies.txt http://localhost:3000/api/session \
   -H "Origin: http://localhost:3000" | python3 -m json.tool | tail -30
 ```
 Expected: the assistant reply from step 3 (or the fallback from step 4) appears in the returned `messages[]` array — proving persist-before-close committed the row.
@@ -980,7 +1070,7 @@ Expected: the assistant reply from step 3 (or the fallback from step 4) appears 
 - [ ] **4.5 — Final commit (if any lint/type fixups were needed above).** Otherwise skip.
 
 ```
-git add -A
+git add src/lib/ai/guarded-stream.ts src/lib/ai/guarded-stream.test.ts src/lib/ai/guarded-stream.route-wiring.test.ts src/app/api/chat/route.ts
 git commit -m "chore(chat): gate fixups for guarded-flush streaming"
 ```
 
