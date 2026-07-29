@@ -1,38 +1,25 @@
-'use client';
+import { DispatchMapPageClient } from './page-client';
+import type { MapProvider } from './page-client';
 
-import { useEffect } from 'react';
-import dynamic from 'next/dynamic';
-import { PageShell } from '@/components/admin/ui/page-shell';
-import { PageHeader } from '@/components/admin/ui/page-header';
-
-// MapLibre needs `window`, so never render it on the server.
-const DispatchMap = dynamic(
-  () => import('@/components/admin/dispatch/dispatch-map').then((m) => m.DispatchMap),
-  {
-    ssr: false,
-    loading: () => (
-      <div
-        className="flex h-full min-h-[400px] animate-pulse items-center justify-center rounded-xl border bg-muted text-sm text-muted-foreground"
-        aria-label="Loading map"
-        role="status"
-      >
-        <span aria-hidden="true">Loading map…</span>
-      </div>
-    ),
-  },
-);
+/**
+ * Server component: reads env vars to determine which map provider is active,
+ * then passes `mapProvider` to the client shell.
+ *
+ * mapProvider = "apple"    — all three Apple MapKit env vars are present
+ * mapProvider = "maplibre" — fallback (default; any var absent)
+ *
+ * Task 3's DispatchMapProvider consumes the `mapProvider` prop to decide
+ * which map component to render.
+ */
+function resolveMapProvider(): MapProvider {
+  const configured =
+    Boolean(process.env.APPLE_TEAM_ID) &&
+    Boolean(process.env.APPLE_MAPKIT_KEY_ID) &&
+    Boolean(process.env.APPLE_MAPKIT_PRIVATE_KEY);
+  return configured ? 'apple' : 'maplibre';
+}
 
 export default function DispatchMapPage() {
-  useEffect(() => { document.title = 'Map · Spears Admin'; }, []);
-  return (
-    <PageShell fullHeight className="p-6 sm:p-7 gap-4">
-      <PageHeader
-        title="Map"
-        subtitle="Live technician locations and active requests across your service area. Technician location is shared only when the technician opts in."
-      />
-      <div className="min-h-0 flex-1">
-        <DispatchMap />
-      </div>
-    </PageShell>
-  );
+  const mapProvider = resolveMapProvider();
+  return <DispatchMapPageClient mapProvider={mapProvider} />;
 }
