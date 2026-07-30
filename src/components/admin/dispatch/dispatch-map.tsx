@@ -36,8 +36,10 @@ interface MapData {
 
 type LayerMode = 'jobs' | 'ar' | 'both';
 
-// Keyless OpenFreeMap vector basemap — clean/light so colored markers pop.
-const STYLE_URL = 'https://tiles.openfreemap.org/styles/positron';
+// Keyless OpenFreeMap vector basemap — Flighty-dark: near-monochrome so data
+// pins and rings carry all the color.  Also acts as the permanent MapLibre
+// fallback when the Apple MapKit map is unavailable.
+const STYLE_URL = 'https://tiles.openfreemap.org/styles/dark';
 
 /** A 64-point geographic circle (degrees approximation) for the service radius. */
 function circleFeature(lng: number, lat: number, radiusKm: number): GeoJSON.Feature {
@@ -112,13 +114,16 @@ export function DispatchMap() {
         id: 'service-radius-fill',
         type: 'fill',
         source: 'service-radius',
-        paint: { 'fill-color': '#2563eb', 'fill-opacity': 0.06 },
+        // On a dark basemap, a slightly higher opacity keeps the fill visible
+        // without overpowering the underlying road grid.
+        paint: { 'fill-color': '#3b82f6', 'fill-opacity': 0.10 },
       });
       map.addLayer({
         id: 'service-radius-line',
         type: 'line',
         source: 'service-radius',
-        paint: { 'line-color': '#2563eb', 'line-opacity': 0.25, 'line-dasharray': [2, 2] },
+        // Brighter line alpha so the boundary reads against dark tiles.
+        paint: { 'line-color': '#60a5fa', 'line-opacity': 0.55, 'line-dasharray': [4, 3] },
       });
     });
     mapRef.current = map;
@@ -205,23 +210,29 @@ export function DispatchMap() {
     transition: 'background .12s,color .12s',
     lineHeight: 1.4,
   };
+  // On a dark basemap the floating panel cards are light (bg-background/95 =
+  // near-white), so invert the active/inactive button palette accordingly:
+  // active = near-white fill + dark text (legible); inactive = transparent +
+  // muted text.  This also suits the Apple MapKit dark basemap fallback.
   const layerBtnActive: React.CSSProperties = {
     ...layerBtnBase,
-    background: '#0f172a',
-    color: '#fff',
-    borderColor: '#0f172a',
+    background: '#f8fafc',
+    color: '#0f172a',
+    borderColor: '#e2e8f0',
   };
   const layerBtnInactive: React.CSSProperties = {
     ...layerBtnBase,
-    background: '#fff',
-    color: '#475569',
+    background: 'transparent',
+    color: '#64748b',
+    borderColor: 'transparent',
   };
 
   return (
     <div className="relative h-full w-full overflow-hidden rounded-xl border bg-card shadow-sm">
       <style>{`
         @keyframes dm-ping{75%,100%{transform:scale(2.2);opacity:0}}
-        .maplibregl-popup-content{padding:10px 12px;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.12);}
+        .maplibregl-popup-content{padding:10px 12px;border-radius:8px;box-shadow:0 4px 24px rgba(0,0,0,.55);}
+        .maplibregl-popup-tip{filter:drop-shadow(0 2px 4px rgba(0,0,0,.3));}
       `}</style>
       <div ref={containerRef} className="h-full w-full" />
 
@@ -277,7 +288,7 @@ export function DispatchMap() {
       <div className="absolute bottom-4 left-4 z-10 rounded-lg border bg-background/95 px-3 py-2 text-xs shadow-sm backdrop-blur">
         <p className="mb-1.5 font-semibold text-foreground">Legend</p>
         <ul className="space-y-1.5">
-          <li className="flex items-center gap-2 text-muted-foreground"><span className="inline-block size-3 shrink-0 rounded bg-slate-900" /> Base</li>
+          <li className="flex items-center gap-2 text-muted-foreground"><span className="inline-block size-3 shrink-0 rounded bg-slate-700" /> Base</li>
           <li className="flex items-center gap-2 text-muted-foreground"><span className="inline-block size-3 shrink-0 rounded-full bg-emerald-600 ring-2 ring-emerald-600/30" /> Technician (live)</li>
           <li className="flex items-center gap-2 text-muted-foreground"><span className="inline-block size-3 shrink-0 rounded-full bg-red-600" /> Emergency</li>
           <li className="flex items-center gap-2 text-muted-foreground"><span className="inline-block size-3 shrink-0 rounded-full bg-orange-600" /> High priority</li>

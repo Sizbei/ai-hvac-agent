@@ -123,9 +123,13 @@ export function esc(s: string): string {
 
 export function jobMarkerEl(job: Job): HTMLElement {
   const el = document.createElement('div');
+  // Replaced the dark drop-shadow (invisible on a dark basemap) with a soft
+  // white outer ring via box-shadow.  Reads cleanly on both OpenFreeMap dark
+  // and Apple MapKit MutedStandard dark; the white border + ring also provides
+  // sufficient separation on lighter basemaps.
   el.style.cssText = `width:26px;height:26px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:${jobColor(
     job.urgency,
-  )};box-shadow:0 2px 6px rgba(0,0,0,.35);border:2px solid #fff;cursor:pointer;`;
+  )};box-shadow:0 0 0 2px rgba(255,255,255,0.6),0 2px 8px rgba(0,0,0,.5);border:2px solid #fff;cursor:pointer;`;
   const dot = document.createElement('div');
   dot.style.cssText =
     'width:8px;height:8px;border-radius:50%;background:#fff;position:absolute;top:7px;left:7px;';
@@ -139,7 +143,9 @@ export function arMarkerEl(ar: ArCustomer, prefersReducedMotion: boolean): HTMLE
   const sz = r * 2;
   const wrap = document.createElement('div');
   wrap.style.cssText = `position:relative;width:${sz}px;height:${sz}px;cursor:pointer;`;
-  wrap.innerHTML = `<div style="position:absolute;inset:0;border-radius:50%;background:${fill};border:2.5px solid ${ring};box-shadow:0 2px 8px rgba(0,0,0,.18);${prefersReducedMotion ? '' : 'transition:transform .15s ease;'}" onmouseenter="this.style.transform='scale(1.12)'" onmouseleave="this.style.transform=''"></div>`;
+  // Use a color-matched glow (ring color at 30% alpha) so AR circles lift off
+  // the dark basemap.  The glow also looks intentional on Apple MapKit dark.
+  wrap.innerHTML = `<div style="position:absolute;inset:0;border-radius:50%;background:${fill};border:2.5px solid ${ring};box-shadow:0 0 0 1.5px rgba(255,255,255,0.12),0 2px 12px ${ring}4d;${prefersReducedMotion ? '' : 'transition:transform .15s ease;'}" onmouseenter="this.style.transform='scale(1.12)'" onmouseleave="this.style.transform=''"></div>`;
   return wrap;
 }
 
@@ -147,16 +153,22 @@ export function techMarkerEl(prefersReducedMotion: boolean): HTMLElement {
   const wrap = document.createElement('div');
   wrap.style.cssText = 'position:relative;width:18px;height:18px;cursor:pointer;';
   const ping = prefersReducedMotion ? '' : `animation:dm-ping 1.6s cubic-bezier(0,0,.2,1) infinite;`;
+  // Boosted ping ring opacity to .50 and added a green glow on the inner dot
+  // so the tech marker registers immediately on a dark basemap.
   wrap.innerHTML = `
-    <span style="position:absolute;inset:0;border-radius:50%;background:#10b981;opacity:.35;${ping}"></span>
-    <span style="position:absolute;inset:4px;border-radius:50%;background:#059669;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);"></span>`;
+    <span style="position:absolute;inset:0;border-radius:50%;background:#10b981;opacity:.50;${ping}"></span>
+    <span style="position:absolute;inset:4px;border-radius:50%;background:#059669;border:2px solid #fff;box-shadow:0 0 6px rgba(16,185,129,0.7),0 1px 4px rgba(0,0,0,.4);"></span>`;
   return wrap;
 }
 
 export function baseMarkerEl(): HTMLElement {
   const el = document.createElement('div');
+  // Slate-600 fill (#475569) with a white 2px border and a light outer ring
+  // gives the HQ marker pop on both dark (MapLibre/OpenFreeMap) and Apple
+  // MapKit's dark MutedStandard basemap.  Pure #0f172a was near-invisible
+  // against dark tiles.
   el.style.cssText =
-    'width:30px;height:30px;border-radius:8px;background:#0f172a;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.4);border:2px solid #fff;';
+    'width:30px;height:30px;border-radius:8px;background:#334155;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 2.5px rgba(255,255,255,0.25),0 2px 10px rgba(0,0,0,.55);border:2px solid #fff;';
   el.innerHTML =
     '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>';
   return el;
