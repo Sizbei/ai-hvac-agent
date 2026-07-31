@@ -52,3 +52,8 @@ src-tauri/gen/schemas
 /.promptfoo/
 promptfoo/output*
 promptfoo/redteam.generated.yaml
+
+# Repo-shared agent skills are tracked; local agent state stays ignored.
+!.claude/
+.claude/*
+!.claude/skills/
