@@ -1,0 +1,64 @@
+---
+name: page-calendar
+description: Use when working on the /admin/calendar page — day/week/month/agenda scheduling calendar with dnd-kit drag-and-drop.
+---
+
+# Calendar (/admin/calendar)
+
+**Purpose:** interactive scheduling view — drag placed jobs between technician
+lanes and time slots (day/week), scan a month overview, or page through the
+chronological agenda feed.
+
+**Files:** page `src/app/admin/(dashboard)/calendar/page.tsx` · hooks
+`src/hooks/use-scheduling-calendar.ts` (day/week) ·
+`src/hooks/use-month-calendar.ts` · `src/hooks/use-agenda.ts` ·
+APIs `src/app/api/admin/calendar/route.ts` ·
+`src/app/api/admin/agenda/route.ts` ·
+queries `src/lib/admin/queries.ts` (`getSchedulingCalendar`, `getMonthCalendar`,
+`getAgenda`) · `src/lib/admin/scheduling-queries.ts` ·
+`src/lib/admin/calendar-time.ts` (`businessIsoDate`, `businessDayBounds`) ·
+components `src/components/admin/calendar/interactive-scheduling-calendar.tsx`
+(dnd-kit, ssr:false) · `src/components/admin/calendar/month-grid.tsx` ·
+`src/components/admin/calendar/agenda-view.tsx` ·
+`src/components/admin/calendar/draggable-job-card.tsx` ·
+`src/components/admin/calendar/droppable-window-band.tsx` ·
+`src/components/admin/calendar/conflict-dialog.tsx` ·
+`src/components/admin/calendar/unscheduled-panel.tsx` ·
+`src/components/admin/ui/urgency-legend.tsx` ·
+tables `serviceRequests`, `users`, `technicianAvailability`
+
+**Data flow:** day/week use `useSchedulingCalendar` (polls 30 s, latest-wins
+monotonic counter); month uses `useMonthCalendar` (same pattern); agenda uses
+`useAgenda` (no poll — keyset cursor pagination via `/api/admin/agenda`). Each
+hook is `enabled` only for its active view so inactive hooks never fire.
+`InteractiveSchedulingCalendar` is code-split with `next/dynamic` (ssr:false)
+so dnd-kit doesn't load for month/agenda views.
+
+**Invariants:**
+- Date arithmetic uses Eastern business time (`America/New_York`) for the
+  "today" anchor and the stepper — `todayBusiness()` reads via `Intl`, not
+  `new Date().toISOString()`. UTC date math is safe for whole-day shifts only.
+- `showCompleted` persists to `localStorage` (`calendar:showCompleted`); the
+  initial state is `false` (SSR-safe) and synced in a `useEffect` to avoid
+  hydration mismatch.
+- Equality guard on every poll: `prevDataRef` serializes the payload; no
+  re-render if it hasn't changed.
+- Placed-job overlap predicate: half-open window overlap
+  (`arrivalWindowStart < rangeEnd AND arrivalWindowEnd > rangeStart`) — NOT a
+  point test. Never switch to a point test; jobs spanning a day boundary vanish.
+- Agenda feed: `loadOlder` de-dupes by id as a guard against double-fire
+  appending the same page twice.
+
+**Gotchas:**
+- `onStatus` callback surfaces a transient `CalendarStatus` banner (warning or
+  error) from `InteractiveSchedulingCalendar` after a reschedule — a rollback
+  posts an error tone, a soft conflict posts warning.
+- Month and agenda stepper is hidden for agenda (a flat paged list, not a
+  date range).
+- `unscheduled` panel in day/week: open requests with no tech OR no window —
+  distinct from the "to place" queue and from the dispatch exceptions rail.
+
+**Verify changes:** `npx vitest run src/lib/admin/scheduling-queries.test.ts`
+· `src/lib/admin/calendar-time.test.ts`
+· `src/lib/admin/calendar-optimistic.test.ts`.
+Visual: admin-pages recipe; toggle Day → Week → Month → Agenda; drag a card.
