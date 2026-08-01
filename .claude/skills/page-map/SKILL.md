@@ -38,8 +38,9 @@ at intake; missed geocodes are backfilled by the booking-recovery cron.
 **Gotchas:**
 - Apple branch is inert until APPLE_TEAM_ID / APPLE_MAPKIT_KEY_ID /
   APPLE_MAPKIT_PRIVATE_KEY exist (\n-escaped .p8; see .env.example).
-- Dev DB test requests are geocoded to Manhattan — the dev map looks empty
-  near base; use prod demo login for real-pin visuals.
+- Dev DB: active requests have seeded cached locations near Johnson City
+  (2026-08-01). Unseeded new test requests live-geocode fake addresses to
+  Manhattan — see the admin-pages skill for the seeding recipe.
 - Mobile: layer toggle uses `max-[480px]:right-2 max-[480px]:top-16` to
   avoid colliding with the summary bar — preserve on both providers.
 

@@ -89,3 +89,14 @@ jobs:
           cache: 'npm'
       - run: npm ci
       - run: npm audit --audit-level=moderate
+
+  # Skills honesty gate: every src/scripts path cited in .claude/skills must
+  # exist — a skill citing a dead path misleads every future agent session.
+  verify-skills:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/agent/verify-skills.mjs

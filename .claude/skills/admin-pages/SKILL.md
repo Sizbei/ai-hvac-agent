@@ -16,10 +16,12 @@ description: Use when working on ANY admin page — shared recipes (session mint
 3. Screenshot: `node scripts/agent/screenshot-page.mjs /admin/<page> [width]`
    (1440 desktop, 390 mobile). LOOK at the image yourself before claiming
    visual success.
-4. Dev-DB quirk: test requests are geocoded to a Manhattan placeholder
-   (40.708, -74.011) — map-adjacent pages look empty near the Johnson City
-   base. For real-data visuals use prod with the demo login
-   (admin@demo-hvac.com / admin123).
+4. Dev-DB note: active dev requests carry seeded cached locations near the
+   Johnson City base (label "dev seed", 2026-08-01) so map-adjacent pages
+   show realistic pins. NEW unseeded test requests without a cached location
+   are live-geocoded and fake addresses land in Manhattan — seed a
+   customer_locations row (reuse the request's own address ciphertext) if
+   that happens. Prod visuals: demo login (admin@demo-hvac.com / admin123).
 
 ## Gates (run before any commit)
 
