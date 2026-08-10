@@ -35,6 +35,11 @@ no distinction surfaced. The `AcceptForm` receives the token, email (read-only),
 role; it calls `/api/auth/invite/accept` to set name + hashed password.
 
 **Invariants:**
+- `/api/auth/login` and `/api/auth/invite/accept` (and `/api/auth/tech/login`,
+  see page-tech) start with the same-origin + JSON content-type guard
+  (`isSameOriginRequest` / `hasJsonContentType` from `src/lib/session-csrf.ts`)
+  BEFORE any DB read, bcrypt compare, or session mint — cross-origin gets 403,
+  non-JSON content-type gets 415. Keep new auth POST routes ahead of this guard.
 - `resolveLoginMode` returns `"password"` if Google is not configured OR if
   `?password=1` is present — the break-glass override must always work.
 - Forgot-password page NEVER claims to send a reset email (no self-serve reset

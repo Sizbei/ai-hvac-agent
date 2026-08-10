@@ -28,8 +28,15 @@ the revenue tile shows the breakdown in its sublabel.
   immutable sort — never mutate the hook's array directly.
 - Money formatting: always `formatCentsExact` from `src/lib/admin/money-format`.
   No raw currency arithmetic in the component.
-- `closeRatePct` denominator is `estimatesSold + estimatesOpen + estimatesExpired`
-  (decided estimates only) — not `estimatesCreated`.
+- `closeRatePct` denominator is `estimatesSold + estimatesOpen + estimatesExpired
+  + estimatesDismissed` — the 4 estimate statuses sum to `estimatesCreated`
+  with nothing silently vanishing. `dismissed` is a real decided "lost"
+  outcome (matches `/admin/estimates`' bucket classifier, which groups
+  `status IN ('dismissed','expired')` as 'lost') and must always be counted —
+  do not drop it back to `open + sold + expired`.
+- Location and technician table sublabels disclose that revenue is billed
+  (invoiced), not cash collected — do not let that copy drift back to a bare
+  "revenue" that implies collected cash.
 
 **Gotchas:**
 - The range `useMemo` dependency is `[days]`, not the `Date` objects. Removing the

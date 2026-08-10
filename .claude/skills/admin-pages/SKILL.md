@@ -12,10 +12,17 @@ description: Use when working on ANY admin page — shared recipes (session mint
    point it at prod (ep-withered-hill).
 2. Session: `npx tsx scripts/agent/mint-admin-session.mjs` prints a JWT.
    The payload **must include `name`** — `verifyToken` rejects tokens
-   without it (scripts handle this; hand-rolled mints often forget).
+   without it (scripts handle this; hand-rolled mints often forget). For
+   `/tech/*` pages, `npx tsx scripts/agent/mint-tech-session.mjs` mints the
+   `hvac_tech_session` cookie instead (needs an active technician row in the
+   dev DB; payload requires `name`/`email`/`userId`/`organizationId`/
+   `role: "technician"` plus the `aud: "hvac-tech"` claim).
 3. Screenshot: `node scripts/agent/screenshot-page.mjs /admin/<page> [width]`
    (1440 desktop, 390 mobile). LOOK at the image yourself before claiming
-   visual success.
+   visual success. For a technician page, add `--tech`:
+   `node scripts/agent/screenshot-page.mjs /tech/jobs 390 --tech` — it mints
+   via `mint-tech-session.mjs` and sets the `hvac_tech_session` cookie
+   instead of the admin one.
 4. Dev-DB note: active dev requests carry seeded cached locations near the
    Johnson City base (label "dev seed", 2026-08-01) so map-adjacent pages
    show realistic pins. NEW unseeded test requests without a cached location

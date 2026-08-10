@@ -82,6 +82,44 @@ describe("takePayment", () => {
     expect(db.batch).toHaveBeenCalledTimes(1); // payment + invoice update batched
   });
 
+  // The claim-time derivation is computed BEFORE provider.createCharge(), an
+  // async network call. Two concurrent partial payments can resolve out of
+  // claim-order, so writing a JS-computed literal lets the loser overwrite
+  // 'paid' back to 'open'. The final write must therefore be a SQL expression
+  // Postgres evaluates against the row's own columns at write time. This test
+  // fails if the write reverts to a plain "paid"/"open" string.
+  it("writes invoice state as a SQL expression evaluated at write time, not a precomputed literal", async () => {
+    mockInvoice({ totalCents: 10000, amountPaidCents: 0 });
+    const setPayloads: Record<string, unknown>[] = [];
+    vi.mocked(db.update).mockImplementation(
+      () =>
+        ({
+          set: (v: Record<string, unknown>) => {
+            setPayloads.push(v);
+            return {
+              where: vi.fn(() =>
+                Object.assign(Promise.resolve(undefined), {
+                  returning: vi
+                    .fn()
+                    .mockResolvedValue([
+                      { id: "inv-1", amountPaidCents: 10000, totalCents: 10000 },
+                    ]),
+                }),
+              ),
+            };
+          },
+        }) as never,
+    );
+
+    await takePayment(ORG, "inv-1", { amountCents: 10000 }, provider);
+
+    const stateWrites = setPayloads.filter((p) => "state" in p);
+    expect(stateWrites.length).toBeGreaterThan(0);
+    for (const write of stateWrites) {
+      expect(typeof write.state).not.toBe("string");
+    }
+  });
+
   it("keeps the invoice open on a partial deposit", async () => {
     mockInvoice({ totalCents: 10000, amountPaidCents: 0 });
     mockClaimReturning(5000, 10000);

@@ -32,6 +32,11 @@ const INTENT_SENSITIVITY: Record<string, "financial" | "none"> = {
   "account-check-status": "financial",
   "account-change-appointment": "financial",
   "scheduling-reschedule": "financial",
+  // Mapped in LEGACY_ACCOUNT_INTENT_TOOL but not currently reachable as an
+  // ACCOUNT_LOOKUP verdict (the router nulls its intentId first). Gated anyway:
+  // the day someone adds it to LEGACY_ACCOUNT_REFERENCE_INTENTS, the leak must
+  // not open silently. account-verify.contract.test.ts locks this.
+  "membership-account": "financial",
 };
 
 export function requiresVerify(intentId: string | null): boolean {

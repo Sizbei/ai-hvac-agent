@@ -95,7 +95,7 @@ export function formatWindow(iso: string | null): string {
   return `${day} ${fmt(startH)}–${fmt(endH)}${crossMidnight ? ' (+1d)' : ''}`;
 }
 
-/** Chip copy for jobs that exist but couldn't be plotted (missing/failed
+/** Chip copy for requests that exist but couldn't be plotted (missing/failed
  * coordinates) — distinct wording for "some dropped, under the live-geocode
  * cap" vs. "some dropped, cap exceeded" so the operator knows why. Returns
  * `null` when nothing was dropped (no chip). */
@@ -104,9 +104,9 @@ export function notPlottedChipMessage(
   geocodeCapped: boolean,
 ): string | null {
   if (notPlottedCount <= 0) return null;
-  const noun = notPlottedCount === 1 ? 'job' : 'jobs';
+  const noun = notPlottedCount === 1 ? 'request' : 'requests';
   if (geocodeCapped) {
-    return `${notPlottedCount} ${noun} couldn't be placed on the map (25-job geocoding limit reached)`;
+    return `${notPlottedCount} ${noun} couldn't be placed on the map (25-request geocoding limit reached)`;
   }
   return `${notPlottedCount} ${noun} couldn't be placed on the map`;
 }

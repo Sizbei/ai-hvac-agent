@@ -19,13 +19,23 @@ mapProvider from Apple env vars) → `src/app/admin/(dashboard)/map/page-client.
 `src/app/api/admin/dispatch/map/route.ts`.
 
 **Data flow:** one fetch of the map API on load + manual Refresh (no polling).
-Caps at first 25 geocoded requests (`geocodeCapped` chip). Geocoding happens
+Caps at first 25 geocoded requests (`geocodeCapped`). Geocoding happens
 at intake; missed geocodes are backfilled by the booking-recovery cron.
 
 **Invariants:**
 - Both providers share `map-pins.ts` builders — any styling change there must
   look right on BOTH the MapLibre dark style and Apple MutedStandard dark
   (white rings not black shadows; that was deliberate).
+- `notPlottedCount = needGeocode.length - geocodedJobs.length` (map API route)
+  is distinct from `geocodeCapped`: a job can fail to plot from a live-geocode
+  miss or a decrypt failure even when the 25-job cap wasn't hit. Both
+  providers render `notPlottedChipMessage(notPlottedCount, geocodeCapped)` —
+  it returns `null` (no chip) only when nothing was dropped; never collapse
+  this back to `geocodeCapped &&` alone, or "jobs exist but silently didn't
+  plot" becomes indistinguishable from "no jobs".
+- The technician-location query filters `users.isActive = true` — a
+  deactivated technician's last-known pin must never render alongside active
+  technicians' pins.
 - The provider conditional-renders exactly ONE dynamically-imported map;
   Apple failure (token non-2xx, script error, init throw, 8s watchdog,
   mid-session token-refresh failure) swaps to MapLibre — never a blank pane.
@@ -45,7 +55,8 @@ at intake; missed geocodes are backfilled by the booking-recovery cron.
   avoid colliding with the summary bar — preserve on both providers.
 
 **Verify changes:** `npx vitest run src/components/admin/dispatch` (provider
-swap logic) + `src/app/api/admin/mapkit-token/route.test.ts` (7 tests).
+swap logic + `map-pins.test.ts`) + `src/app/api/admin/mapkit-token/route.test.ts`
+(7 tests) + `src/app/api/admin/dispatch/map/route.test.ts`.
 Visual via the admin-pages recipe; zoom out ~3 clicks to check the service
 ring. After deploy: `bash scripts/agent/prod-smoke.sh` covers the token
 route's 503/200.

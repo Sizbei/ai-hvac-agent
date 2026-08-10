@@ -12,8 +12,18 @@
  * wrapper in `src/components/masked-analytics.tsx` feeds it to `beforeSend`.
  */
 
-/** Route prefixes whose next path segment is a secret, not an identifier. */
-const TOKEN_ROUTE_PREFIXES = new Set(["portal", "estimates", "review"]);
+/**
+ * Route prefixes whose NEXT path segment is a secret, not an identifier.
+ * Each entry is the segment path leading up to the token. Keep this in sync
+ * with the `[token]` page routes under `src/app/` — a missing entry silently
+ * ships that credential to the analytics collector.
+ */
+const TOKEN_ROUTE_PREFIXES: readonly (readonly string[])[] = [
+  ["portal"],
+  ["estimates"],
+  ["review"],
+  ["admin", "invite"],
+];
 
 const PLACEHOLDER = "[token]";
 
@@ -32,14 +42,20 @@ export function maskTokenPath(url: string): string {
   const rest = url.slice(origin.length);
   const pathname = rest.split(/[?#]/)[0];
 
+  // segments[0] is "" for a leading slash, so the route starts at segments[1].
   const segments = pathname.split("/");
-  // segments[0] is "" for a leading slash, so the route prefix is segments[1].
-  if (!TOKEN_ROUTE_PREFIXES.has(segments[1]) || !segments[2]) return url;
+  const prefix = TOKEN_ROUTE_PREFIXES.find((p) =>
+    p.every((seg, i) => segments[i + 1] === seg),
+  );
+  if (!prefix) return url;
 
-  segments[2] = PLACEHOLDER;
+  const tokenIndex = prefix.length + 1;
+  if (!segments[tokenIndex]) return url;
+
+  segments[tokenIndex] = PLACEHOLDER;
   // Truncate anything below the token segment too — a nested path under a
   // token route would otherwise still carry it.
-  return origin + segments.slice(0, 3).join("/");
+  return origin + segments.slice(0, tokenIndex + 1).join("/");
 }
 
 /** The `scheme://host` prefix, or `""` for a bare path. */

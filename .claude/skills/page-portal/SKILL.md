@@ -23,6 +23,8 @@ Review collects post-job satisfaction feedback and always offers a public review
   `src/app/review/[token]/review-form.tsx` · queries
   `src/lib/reviews/review-queries.ts` · review route
   `src/app/api/review/[token]/route.ts`
+- Shared: analytics masking `src/lib/analytics-path.ts` (pure) + client wrapper
+  `src/components/masked-analytics.tsx`, mounted in `src/app/layout.tsx`
 
 **Data flow:** all three pages are async server components. The token arrives as a
 route param (a `Promise` in this Next.js version — `await params`). Each page
@@ -47,6 +49,25 @@ Review checks `status === 'responded'` to show the already-recorded state.
   America/New_York) — never in UTC or server TZ.
 - Estimate approval is gated: `status !== 'open'` or `expiresAt` past → generic error
   card, form never renders.
+- **Token stays out of analytics:** for `/portal/[token]`, `/estimates/[token]`,
+  `/review/[token]` and `/admin/invite/[token]` the path segment IS the
+  credential — `MaskedAnalytics`
+  (root layout) feeds `beforeSend` through `maskTokenPath`, which rewrites the
+  token segment to `[token]` and drops query/hash, before Vercel Analytics
+  ever sees it. It has to be a client wrapper (`'use client'`) because
+  `beforeSend` is a function prop and the root layout is a Server Component —
+  a nested layout can't remove the `<Analytics/>` the root already emits, so
+  masking (not scoping-away) is the only feasible fix. Never swap
+  `MaskedAnalytics` back for a bare `<Analytics/>`. `TOKEN_ROUTE_PREFIXES`
+  holds segment paths (so nested routes like `admin/invite` work) and MUST
+  gain an entry whenever a new `[token]` page route is added — a missing entry
+  silently ships that credential.
+- Portal history is sourced from `service_requests` (`status = 'completed'`),
+  NOT the `service_history` table — that table is empty org-wide (same bug
+  already fixed on the admin customer page via `getCustomerBookings`). Draft
+  invoices (`state = 'draft'`, native pre-send or still-draft upstream) are
+  excluded from the portal's invoice list — never a bill the business has
+  committed to yet.
 
 **Gotchas:**
 - `params` is a `Promise` (this Next.js version) — always `await params` before
@@ -59,4 +80,5 @@ Review checks `status === 'responded'` to show the already-recorded state.
 **Verify changes:**
 - `npx vitest run src/lib/portal/portal-queries.test.ts`
 - `npx vitest run src/lib/reviews/review-queries.test.ts`
+- `npx vitest run src/lib/analytics-path.test.ts`
 - Gate: `npx tsc --noEmit`

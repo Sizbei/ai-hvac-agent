@@ -13,6 +13,17 @@ describe("maskTokenPath", () => {
     },
   );
 
+  it("masks the nested staff-invite token route", () => {
+    const masked = maskTokenPath(`/admin/invite/${TOKEN}`);
+    expect(masked).toBe("/admin/invite/[token]");
+    expect(masked).not.toContain(TOKEN);
+  });
+
+  it("does not mistake other /admin pages for the invite route", () => {
+    expect(maskTokenPath("/admin/invoices/9a1f")).toBe("/admin/invoices/9a1f");
+    expect(maskTokenPath("/admin/invite")).toBe("/admin/invite");
+  });
+
   it("masks the token in a full URL and keeps the origin", () => {
     expect(maskTokenPath(`https://example.com/portal/${TOKEN}`)).toBe(
       "https://example.com/portal/[token]",

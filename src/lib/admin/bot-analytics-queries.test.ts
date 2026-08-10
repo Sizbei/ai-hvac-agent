@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { selectQueue, chain } = vi.hoisted(() => {
+const { selectQueue, chain, batchCalls } = vi.hoisted(() => {
   const selectQueue: unknown[][] = [];
+  // Records how many statements each db.batch() call received, so a test can
+  // prove the queries were batched rather than fired as separate round-trips.
+  const batchCalls: number[] = [];
   const chain = (resolved: unknown): unknown => {
     const p: unknown = new Proxy(() => {}, {
       get(_t, prop) {
@@ -14,7 +17,7 @@ const { selectQueue, chain } = vi.hoisted(() => {
     });
     return p;
   };
-  return { selectQueue, chain };
+  return { selectQueue, chain, batchCalls };
 });
 
 vi.mock('@/lib/db', () => ({
@@ -24,7 +27,10 @@ vi.mock('@/lib/db', () => ({
     // Promise.all) — each queued statement is itself one of the thenable
     // proxies returned by db.select() above, so resolving it via Promise.all
     // mirrors real db.batch() returning each statement's rows in order.
-    batch: (queries: unknown[]) => Promise.all(queries),
+    batch: (queries: unknown[]) => {
+      batchCalls.push(queries.length);
+      return Promise.all(queries);
+    },
   },
 }));
 
@@ -236,5 +242,16 @@ describe('getBotAnalytics', () => {
     const r = await getBotAnalytics(ORG, { fromDate, toDate });
     expect(r.fromDate).toBe(fromDate.toISOString());
     expect(r.toDate).toBe(toDate.toISOString());
+  });
+
+  // neon-http charges one HTTPS round-trip per statement, so the repo's rule is
+  // db.batch() over Promise.all. Asserting the three selects arrive in ONE
+  // batch call is what makes this a real check — a revert to Promise.all would
+  // still return identical data and pass every other test in this file.
+  it('sends its three independent selects in a single db.batch call', async () => {
+    batchCalls.length = 0;
+    seed({});
+    await getBotAnalytics(ORG);
+    expect(batchCalls).toEqual([3]);
   });
 });

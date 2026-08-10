@@ -324,7 +324,15 @@ export async function takePayment(
 
   // Success: the invoice is already credited (the claim). Finalize the payment
   // and set the display state. Batched so it's one round-trip.
-  await db.batch([
+  //
+  // The state is derived IN SQL from the row's own columns at write time, not
+  // from the value computed back at claim time. Deriving it in JS is not
+  // enough: `provider.createCharge` above is an async network call, so two
+  // concurrent partial payments can resolve out of claim-order and the loser
+  // would overwrite 'paid' back to 'open' with its older snapshot — stranding
+  // a fully-paid invoice in the collections queue. Postgres evaluating the
+  // comparison during the UPDATE closes that window entirely.
+  const [, stateRows] = await db.batch([
     db
       .update(payments)
       .set({
@@ -335,11 +343,17 @@ export async function takePayment(
       .where(eq(payments.id, paymentId)),
     db
       .update(invoices)
-      .set({ state: invoiceState, updatedAt: new Date() })
-      .where(withTenant(invoices, organizationId, eq(invoices.id, invoiceId))),
+      .set({
+        state: sql`case when ${invoices.amountPaidCents} >= ${invoices.totalCents} then 'paid' else 'open' end`,
+        updatedAt: new Date(),
+      })
+      .where(withTenant(invoices, organizationId, eq(invoices.id, invoiceId)))
+      .returning({ state: invoices.state }),
   ]);
 
-  return { ok: true, paymentId, invoiceState };
+  // Report what was actually written, falling back to the claim-time
+  // derivation only if the RETURNING row is somehow absent.
+  return { ok: true, paymentId, invoiceState: stateRows?.[0]?.state ?? invoiceState };
 }
 
 export type RefundResultOut =

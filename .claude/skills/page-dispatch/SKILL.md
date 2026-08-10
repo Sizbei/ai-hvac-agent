@@ -35,6 +35,13 @@ detail sheet opens for an unassigned request — fail-open (empty = no card show
 - The dispatch board anchors on the BUSINESS day (`businessIsoDate`, Eastern
   TZ), not the UTC day — after 8 pm ET the UTC date has already rolled over;
   using it would put the evening board on tomorrow.
+- `dispatch-column.tsx`'s `formatTime` (exported, clock-label formatter for a
+  job card's arrival-window instant) renders in `BUSINESS_TIME_ZONE`
+  (`src/lib/admin/calendar-time.ts`), NOT `'UTC'` — the board is bucketed by
+  the business day, so a card's time must match that zone or it reads 4-5h
+  off. This is DIFFERENT from `page.tsx`'s `shiftDate`/date-stepper, which
+  correctly stays pinned to UTC because it formats a plain date-only value at
+  UTC midnight, not a real instant — do not "fix" that one to match.
 - Jobs are bucketed strictly to ACTIVE technician columns. A job whose assignee
   is deactivated falls to the unassigned pile — it never silently disappears.
 - `isShadow: true` in `dispatchDecisions` means the auto-assign ran in
@@ -57,6 +64,7 @@ detail sheet opens for an unassigned request — fail-open (empty = no card show
 - `suggest/[id]` is advisory only; the human's final assign call is the commit.
 
 **Verify changes:** `npx vitest run src/lib/admin/dispatch-exceptions-queries.test.ts`
-· `src/lib/admin/dispatch-decision-queries.test.ts`.
+· `src/lib/admin/dispatch-decision-queries.test.ts`
+· `src/components/admin/dispatch/dispatch-column.test.ts`.
 Visual: admin-pages recipe; create an unassigned request; confirm it appears in
 the unassigned column; assign it and confirm it moves.

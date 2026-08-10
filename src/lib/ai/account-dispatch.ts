@@ -45,7 +45,10 @@ export const ACCOUNT_INTENT_CAPABILITY: Record<string, AccountCapability> = {
 // preserved). For an IDENTIFIED session these now resolve to an account tool;
 // unidentified sessions never reach this map (they keep the LLM identify path).
 // scheduling-cancel is deliberately absent — cancel is NOT in the safe v1 set.
-const LEGACY_ACCOUNT_INTENT_TOOL: Record<string, AccountCapability> = {
+// Exported so account-verify.contract.test.ts can assert every capability
+// mapped here is also gated in INTENT_SENSITIVITY — that table's default is
+// unsafe, so the two must not drift.
+export const LEGACY_ACCOUNT_INTENT_TOOL: Record<string, AccountCapability> = {
   "membership-account": "membership",
   "account-check-status": "appointment",
   "account-change-appointment": "reschedule",

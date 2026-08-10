@@ -13,7 +13,8 @@ page `src/app/admin/(dashboard)/estimates/[id]/page.tsx` · create dialog
 `src/components/admin/estimates/estimate-create-dialog.tsx` · status badge
 `src/components/admin/estimates/estimate-status-badge.tsx` · hook
 `src/hooks/use-estimates.ts` · API `src/app/api/admin/estimates/route.ts`
-· detail API `src/app/api/admin/estimates/[id]/route.ts` · queries
+· detail API `src/app/api/admin/estimates/[id]/route.ts` · regenerate-link API
+`src/app/api/admin/estimates/[id]/regenerate-link/route.ts` · queries
 `src/lib/admin/estimate-queries.ts` · tables `estimates` `estimate_options`
 `estimate_line_items` (schema `src/lib/db/schema.ts`).
 
@@ -40,6 +41,28 @@ actionable follow-up list). Stale = open >14 days. Search debounced 300ms.
   page; only display this for admin eyes — never expose to customers.
 - Compose `PageShell`, `PageHeader`, `StatCard`, `Pager`, `SegmentedControl`
   from `src/components/admin/ui/`; status colors via `src/lib/admin/status-colors.ts`.
+- **Lazy-expiry sweep:** `GET /api/admin/estimates` calls
+  `expireOverdueEstimates(organizationId)` before reading — it flips native
+  (non-FieldPulse), still-`open` estimates past `expiresAt` to `expired`, CAS-
+  guarded the same way as `markEstimateSold` (WHERE repeats `status='open' AND
+  fieldpulseEstimateId IS NULL`, so a row a customer just approved is left
+  alone). No cron exists for this (Vercel Hobby caps crons at daily) — the list
+  fetch IS the trigger. Without this, `winRatePct` can only trend toward 100%.
+- Detail page has an "Approval link" card (open + native estimates only) that
+  calls `POST /api/admin/estimates/[id]/regenerate-link` to mint a fresh
+  one-time link when the create dialog's original display was dismissed —
+  `regenerateApprovalToken` overwrites `approvalTokenHash`, which is itself
+  what invalidates the previous plaintext token (only the newest hash is ever
+  stored). Blocked with `synced_read_only` / `already_decided` outside that
+  window.
+- Estimate line item `quantity` is capped at `MAX_QUANTITY = 1_000_000` and
+  `unitPriceCents` at `MAX_PRICE_CENTS` (`src/lib/admin/money-format.ts`) in
+  the create schema — an unbounded value overflowed the INT32 money column
+  and 500'd on insert. **Capping the factors is not enough**: the create route
+  also rejects (400) when a DERIVED value overflows — `lineTotalCents` or an
+  option's `totalCents` past `INT32_MAX`. `22 × $999,999.99` passes both
+  per-field caps and still overflows `line_total_cents`. The check runs after
+  catalog prices are resolved server-side, so it covers catalog lines too.
 
 **Gotchas:**
 - `winRatePct` can be null (no closed estimates yet); guard before rendering.

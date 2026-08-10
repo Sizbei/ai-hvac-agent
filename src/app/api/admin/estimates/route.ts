@@ -19,6 +19,10 @@ import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { isUniqueViolation } from "@/lib/db/unique-violation";
 import { logger } from "@/lib/logger";
 import { MAX_PRICE_CENTS } from "@/lib/admin/money-format";
+import { computeOptionTotals, lineTotalCents } from "@/lib/admin/money";
+
+/** Ceiling of a signed int4 — the width of every money column on estimates. */
+const INT32_MAX = 2_147_483_647;
 
 /** Generous vs any real estimate line — mirrors the purchase-order quantity cap
  * (inventory/purchase-orders/route.ts) and keeps quantity*price sane. */
@@ -191,6 +195,27 @@ export async function POST(request: NextRequest) {
 
     // Tax is the org's default rate, resolved server-side — never client-supplied.
     const taxBps = await getDefaultTaxBps(session.organizationId);
+
+    // Bounding quantity and unit price INDIVIDUALLY is not enough: their
+    // PRODUCT lands in `estimate_line_items.line_total_cents` and rolls up into
+    // `estimate_options.subtotal_cents`/`total_cents`, all signed int4. A line
+    // of 22 x $999,999.99 is valid on both factors yet overflows on insert,
+    // which surfaces as an opaque 500. Check the derived values here — after
+    // catalog prices are resolved server-side, so it covers catalog lines too,
+    // not just client-supplied ones.
+    for (const opt of resolvedOptions) {
+      const totals = computeOptionTotals(opt.lineItems, taxBps);
+      const overflows =
+        totals.totalCents > INT32_MAX ||
+        opt.lineItems.some((li) => lineTotalCents(li) > INT32_MAX);
+      if (overflows) {
+        return errorResponse(
+          "That estimate total is too large. Please split it into smaller lines.",
+          "VALIDATION_ERROR",
+          400,
+        );
+      }
+    }
 
     const { estimateId, approvalToken } = await createEstimate(
       session.organizationId,

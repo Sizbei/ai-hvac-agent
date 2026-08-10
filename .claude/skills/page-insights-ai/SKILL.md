@@ -13,7 +13,8 @@ and feedback signals; plus bot analytics and operations metrics sub-sections.
 `src/components/admin/insights/bot-analytics-section.tsx`,
 `src/components/admin/insights/ops-insights-section.tsx` · types
 `src/lib/admin/ai-insights-types.ts` · queries
-`src/lib/admin/ai-insights-queries.ts` · API
+`src/lib/admin/ai-insights-queries.ts`,
+`src/lib/admin/bot-analytics-queries.ts` (`getBotAnalytics`) · API
 `src/app/api/admin/ai-insights/route.ts` (main metrics),
 `src/app/api/admin/ops-insights/route.ts` (ops sub-section) · tables
 `customer_sessions`, `messages`, `service_requests`, `audit_log` (no dedicated
@@ -35,6 +36,17 @@ in-memory state.
 - `deterministicReplies / llmReplies` = instant vs AI reply split (shown as
   "N / N" in one card, not a percentage).
 - Tenancy: all queries in `ai-insights-queries.ts` use `withTenant`.
+- `getAiInsights` (AI assistant section) and `OpsInsightsSection`'s own counts
+  are ALL-TIME (no date filter) except "New (7 days)" — the page discloses
+  this explicitly via a `SectionHeading` description above the AI assistant
+  cards and a caption above `OpsInsightsSection`, rather than implying a
+  rolling window. If a real period-over-period delta is ever added, it needs
+  a second query in `ai-insights-queries.ts` — this pass deliberately left
+  that file untouched and only added the disclosure.
+- `getBotAnalytics` (`bot-analytics-queries.ts`) runs its three sub-queries via
+  `db.batch()`, not `Promise.all` — same neon-http invariant as
+  `ai-insights-queries.ts` / `ops-insights-queries.ts`. The batch call needs
+  `as const` on the array so drizzle's `BatchItem<'pg'>` overload resolves.
 - `AdminAuthRedirectError` from `adminFetch` is silently swallowed in the catch
   (session expired → redirect handled by `adminFetch` itself); do not surface it
   as an error message.

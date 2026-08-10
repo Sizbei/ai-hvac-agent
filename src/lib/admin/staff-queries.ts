@@ -20,7 +20,7 @@
  * application-level last-admin check is a read-then-write and is NOT race-proof
  * on its own: two admins demoting each OTHER concurrently could both pass it
  * and leave the org with zero active admins. The authoritative guard is a
- * BEFORE UPDATE trigger on `users` (migration 0008_last_admin_guard) that
+ * BEFORE UPDATE trigger on `users` (migration 0044_last_admin_guard) that
  * raises `last_active_admin` if a write would remove the org's final active
  * admin. The application check here is kept as a fast, friendly path that
  * returns a clean 409 for the common (sequential) case; updateStaff also maps
@@ -64,7 +64,7 @@ function toActorRole(role: StaffRole): AdminRole {
 export const BCRYPT_COST = 12;
 
 /** True when an error is the last-active-admin trigger violation (migration
- * 0008). We match on the marker token in the raised message rather than a
+ * 0044). We match on the marker token in the raised message rather than a
  * driver-specific error shape so it survives error wrapping by neon-http. */
 function isLastAdminViolation(error: unknown): boolean {
   const message =
@@ -324,7 +324,7 @@ export async function updateStaff(
       .where(withTenant(users, organizationId, eq(users.id, userId)))
       .returning(STAFF_COLUMNS);
   } catch (error: unknown) {
-    // The DB trigger (migration 0008) is the authoritative last-admin guard;
+    // The DB trigger (migration 0044) is the authoritative last-admin guard;
     // if the app-level check above lost a race, the trigger raises here. Map it
     // back to the same sentinel so the caller gets a 409, not a 500.
     if (isLastAdminViolation(error)) {

@@ -18,14 +18,25 @@ unlocks member pricing on estimates and invoices.
 `src/lib/admin/membership-queries.ts` · tables `membership_plans`
 `customer_memberships` (schema `src/lib/db/schema.ts`).
 
-**Data flow:** `useMembershipPlans` fetches `/api/admin/membership-plans` on
-mount (no pagination — plan counts are small). No SWR cache; data refreshes
-after every mutation via `refetch()`. Mutations use the individual-plan API
+**Data flow:** `useMembershipPlans(includeInactive)` fetches
+`/api/admin/membership-plans` on mount (no pagination — plan counts are
+small), appending `?includeInactive=true` when the page's "Show inactive"
+toggle is on. No SWR cache; data refreshes after every mutation via
+`refetch()`. Mutations use the individual-plan API
 (`/api/admin/membership-plans/[id]`).
 
 **Invariants (violate = bug):**
 - Plans are soft-deactivated only (DELETE sets `active=false`); never hard-delete
-  — historical `customer_memberships` rows reference the plan id.
+  — historical `customer_memberships` rows reference the plan id. Deactivated
+  plans are hidden by default but visible via "Show inactive", and reactivatable
+  via `PATCH { active: true }` — a reactivate-only PATCH (exactly that one key)
+  logs `reactivate_membership_plan` instead of `update_membership_plan` so the
+  audit log reads as the mirror of deactivate. `active` in the PATCH schema is
+  `z.literal(true).optional()` — deactivation stays the DELETE endpoint's job,
+  so there is exactly one code path that ever sets `active=false`.
+- `priceCents` is capped at `MAX_PRICE_CENTS` (`src/lib/admin/money-format.ts`,
+  shared constant) on BOTH create and PATCH — an earlier version enforced it
+  only on create.
 - `priceCents=0` is valid (free plan); `null` is not — the column is NOT NULL.
 - `visitsPerYear=0` means billing-only (no auto-generated maintenance visits);
   the generate-membership-visits cron skips these plans. Don't treat 0 as

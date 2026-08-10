@@ -48,6 +48,12 @@ so dnd-kit doesn't load for month/agenda views.
   point test. Never switch to a point test; jobs spanning a day boundary vanish.
 - Agenda feed: `loadOlder` de-dupes by id as a guard against double-fire
   appending the same page twice.
+- `getSchedulingCalendar`'s `unscheduled` query is ordered urgency-first
+  (`emergency` then `high` then the rest), oldest-first within a tier — same
+  approach as the dashboard's "needs attention" ordering. It is capped at
+  `DASHBOARD_LIST_LIMIT`; a plain oldest-first order let a backlog past the
+  cap push a brand-new emergency out of the very panel dispatchers place jobs
+  from. Never revert to a bare `orderBy(asc(createdAt))` here.
 
 **Gotchas:**
 - `onStatus` callback surfaces a transient `CalendarStatus` banner (warning or

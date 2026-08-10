@@ -127,12 +127,51 @@ describe("POST /api/admin/estimates — Restimates-3 money-column caps", () => {
         options: [
           {
             name: "Good",
-            lineItems: [{ name: "Custom line", quantity: 1_000_000, unitPriceCents: 99_999_999 }],
+            lineItems: [{ name: "Custom line", quantity: 1, unitPriceCents: 99_999_999 }],
           },
         ],
       }),
     );
     expect(res.status).toBe(201);
     expect(createEstimate).toHaveBeenCalledOnce();
+  });
+
+  // Bounding the factors is not the same as bounding what gets stored. Both
+  // values below are individually legal under the per-field caps, but their
+  // product is what lands in the int4 `line_total_cents` / `total_cents`
+  // columns — so without a derived-value check this 500s on insert.
+  it("rejects a line whose quantity x unitPriceCents overflows int4, even though both factors are in range", async () => {
+    const res = await POST(
+      postReq({
+        options: [
+          {
+            name: "Good",
+            lineItems: [{ name: "Custom line", quantity: 22, unitPriceCents: 99_999_999 }],
+          },
+        ],
+      }),
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("VALIDATION_ERROR");
+    expect(createEstimate).not.toHaveBeenCalled();
+  });
+
+  it("rejects when no single line overflows but the option total does", async () => {
+    const line = { name: "Custom line", quantity: 1, unitPriceCents: 99_999_999 };
+    const res = await POST(
+      postReq({
+        options: [
+          {
+            name: "Good",
+            // 25 x $999,999.99 = 2,499,999,975 > INT32_MAX, but each line
+            // total is only 99,999,999 — the rollup is what breaks.
+            lineItems: Array.from({ length: 25 }, () => ({ ...line })),
+          },
+        ],
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(createEstimate).not.toHaveBeenCalled();
   });
 });

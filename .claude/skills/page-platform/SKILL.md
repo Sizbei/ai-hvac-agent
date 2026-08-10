@@ -33,6 +33,12 @@ shown once and is not stored in plaintext.
 - Destructive actions (purge) are logged to `platform_audit_log` — a cross-org
   table separate from the per-org `audit_log` because the purge destroys the org
   record including its own audit rows.
+- `DELETE /api/platform/organizations/[id]` refuses to purge the org matching
+  `PLATFORM_ORG_ID` — `users.organizationId` cascades on org delete, so purging
+  it would delete every platform admin user row and permanently lock out
+  `isPlatformAdmin` (which requires `session.organizationId === platformOrgId`).
+  Never remove this check even if it looks redundant with `isPlatformAdmin`'s
+  own fail-closed behavior when the env var is unset.
 - Platform admin access is controlled exclusively by env var — no database role.
   There is no UI to grant/revoke it.
 

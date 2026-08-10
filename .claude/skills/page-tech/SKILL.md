@@ -17,7 +17,8 @@ jobs list page `src/app/tech/jobs/page.tsx` · jobs list client
 `src/components/tech/tech-jobs-list-client.tsx` ·
 job detail page `src/app/tech/jobs/[id]/page.tsx` · job detail client
 `src/components/tech/tech-job-detail-client.tsx` · job summary
-`src/components/tech/tech-job-summary.tsx` ·
+`src/components/tech/tech-job-summary.tsx` · terminal-status confirm helpers
+`src/components/tech/tech-status-confirm.ts` ·
 field queries `src/lib/tech/field-queries.ts` ·
 location queries `src/lib/tech/location-queries.ts` ·
 timesheet queries `src/lib/tech/timesheet-queries.ts` ·
@@ -52,6 +53,19 @@ server-side from the pricebook at add time — client-sent cost values are ignor
   coordinates without an active consent record.
 - Money is integer cents throughout; unit cost/price for catalog materials are
   snapshotted from the pricebook (client-sent costs are not trusted).
+- Interactive controls (buttons, the remove-material tap target) are `h-11` /
+  `min-h-11 min-w-11` (44×44px) — this is a mobile app used one-handed at a
+  customer's furnace, not a desktop density.
+- Tapping a terminal status target (`cancelled`, `completed`) in
+  `TechJobSummary` does NOT fire the status POST immediately — it opens an
+  inline confirm (`role="alertdialog"`, copy from `tech-status-confirm.ts`'s
+  `buildStatusConfirmCopy`) and only advances on the explicit "Yes, mark …"
+  tap. Non-terminal targets (`scheduled`, `in_progress`, `on_hold`) still
+  advance on first tap. `isTerminalStatus`/`buildStatusConfirmCopy` are pure —
+  keep new terminal statuses added there, not hardcoded in the component.
+- `/api/auth/tech/login` starts with the same-origin + JSON content-type
+  guard (`isSameOriginRequest` / `hasJsonContentType`) before any DB read or
+  session mint — see page-auth for the shared pattern.
 
 **Gotchas:**
 - `params` in `TechJobDetailPage` is a `Promise` (this Next.js version) — always
@@ -66,4 +80,5 @@ server-side from the pricebook at add time — client-sent cost values are ignor
 - `npx vitest run src/app/api/tech/jobs/[id]/route.test.ts`
 - `npx vitest run src/lib/tech/field-queries.test.ts src/lib/tech/timesheet-queries.test.ts`
 - `npx vitest run src/app/api/auth/tech/login/route.test.ts src/app/api/auth/tech/logout/route.test.ts`
+- `npx vitest run src/components/tech/tech-status-confirm.test.ts`
 - Gate: `npx tsc --noEmit`

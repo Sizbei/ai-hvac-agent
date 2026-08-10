@@ -18,7 +18,8 @@ APIs `src/app/api/admin/staff/route.ts` ·
 `src/app/api/admin/staff/[id]/reset-password/route.ts` ·
 `src/app/api/admin/invites/route.ts` ·
 queries `src/lib/admin/staff-queries.ts` (`listStaff`, `createStaff`) ·
-`src/lib/admin/invites.ts` ·
+`src/lib/admin/invites.ts` · last-admin guard trigger
+`drizzle/0044_last_admin_guard.sql` ·
 components `src/components/admin/staff-table.tsx` ·
 `src/components/admin/staff-form-dialog.tsx` ·
 `src/components/admin/staff-reset-password-dialog.tsx` ·
@@ -32,10 +33,13 @@ response so the UI can disable self-demote/self-deactivate without a second
 call. Invites are fetched separately by `useAdminInvites`.
 
 **Invariants:**
-- Last-admin guard: a plpgsql BEFORE UPDATE trigger on `users` (migration
-  `0008_last_admin_guard`) raises an exception when deactivating the last active
-  admin-tier user. The route catches this sentinel and surfaces a user-friendly
-  message — never re-raise the raw DB error.
+- Last-admin guard: a plpgsql BEFORE UPDATE trigger on `users`
+  (`drizzle/0044_last_admin_guard.sql`, idempotent via `CREATE OR REPLACE
+  FUNCTION` + `DROP TRIGGER IF EXISTS` so it's safe to re-run on Vercel's
+  auto-migrate) raises `last_active_admin` when a write would demote or
+  deactivate the last active admin-TIER user (`role IN ('admin',
+  'super_admin')`) in the org. The route catches this sentinel and surfaces a
+  user-friendly message — never re-raise the raw DB error.
 - Role assignment: only a `super_admin` can create or assign `admin`-tier roles.
   The server enforces this in `createStaff` regardless of the `canManageAdmins`
   flag the UI reads from the staff list.

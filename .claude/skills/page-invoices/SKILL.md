@@ -19,6 +19,7 @@ session for `canRefund`) · detail client
 `src/app/api/admin/invoices/[id]/void/route.ts` · pay link API
 `src/app/api/admin/invoices/[id]/pay-link/route.ts` · collectible helpers
 `src/lib/admin/invoice-collectible.ts` · queries `src/lib/admin/invoice-queries.ts`
+· reminder trigger `src/lib/communication/money-triggers.ts`
 · tables `invoices` `payments` `invoice_line_items` (schema `src/lib/db/schema.ts`).
 
 **Data flow:** `useInvoices` fetches `/api/admin/invoices` with page, state,
@@ -31,9 +32,11 @@ polls `/api/admin/payments/reconcile` on mount (best-effort, never throws).
 **Invariants (violate = bug):**
 - Multi-source money guard: `fieldpulseInvoiceId IS NOT NULL` → source=fieldpulse;
   `hcpInvoiceId IS NOT NULL` → source=housecall. Synced invoices are READ-ONLY
-  in money flows — void, payment capture, and refund are blocked with
+  in money flows — void, payment capture, refund, AND `sendInvoiceReminder`
+  (`src/lib/communication/money-triggers.ts`) are all blocked with the
   `synced_read_only` error code. The UI shows a SyncPill and InfoBanner; the
-  server enforces the gate regardless of UI.
+  server enforces the gate regardless of UI — a direct API call must not be
+  able to double-text a customer whose invoice is collected by FP/HCP.
 - Reminder cooldown: `REMINDER_COOLDOWN_MS = 6h` (in `src/lib/admin/invoice-collectible.ts`).
   The route checks `canResend` before sending and returns code=`COOLDOWN` on
   409 if within cooldown. The UI maps COOLDOWN → "A reminder was already sent
@@ -49,6 +52,17 @@ polls `/api/admin/payments/reconcile` on mount (best-effort, never throws).
 - Over-collection CAS: the refund route checks that `amountPaidCents - refundAmount
   >= 0` atomically before writing — never allow a refund that would exceed what
   was paid.
+- `takePayment` writes the `paid`/`open` state as a SQL `case` evaluated
+  against the row's own `amountPaidCents`/`totalCents` AT WRITE TIME — not as a
+  JS-computed literal. Deriving it in JS is not enough even off the claim's
+  `RETURNING` row, because `provider.createCharge()` sits between the claim and
+  the write: two concurrent partial payments can resolve out of claim-order and
+  the loser would overwrite `paid` back to `open`, stranding a fully-paid
+  invoice in the collections queue forever. Money stays exact either way (the
+  CAS holds) — this is a display-state bug class, and it goes live the moment a
+  real network-latency provider replaces the mock. The returned `invoiceState`
+  comes from that UPDATE's `RETURNING`, so callers see what was actually
+  written.
 - Refund control is rendered only when `canRefund=true` (set server-side by the
   detail page wrapper reading `isSuperAdmin`); the API enforces the gate too.
 - Compose `PageShell`, `PageHeader`, `Pager`, `SegmentedControl` from
@@ -64,5 +78,6 @@ polls `/api/admin/payments/reconcile` on mount (best-effort, never throws).
 
 **Verify changes:** `npx vitest run src/lib/admin/invoice-collectible.test.ts
 src/lib/admin/invoice-list-pagination.test.ts src/lib/admin/invoice-queries.test.ts
-src/lib/admin/invoice-synced-guards.test.ts src/lib/admin/invoice-queries-list.test.ts`
+src/lib/admin/invoice-synced-guards.test.ts src/lib/admin/invoice-queries-list.test.ts
+src/lib/communication/send-invoice-reminder.test.ts`
 · visual via admin-pages recipe.

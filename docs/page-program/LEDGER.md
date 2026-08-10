@@ -40,10 +40,49 @@ review · `plan` plan written · `plan✓` plan passed adversarial review ·
 | 29 | fieldpulse-import | workspace | — | — | — | — |
 | 30 | platform | workspace | — | — | — | — |
 
-## Wave A/B shipped (commit `3d4ca1e`)
+## Shipped
 
-Gate at commit: tsc 0 · eslint 0 · vitest **313 files / 4139 passed / 1 skipped**
-(baseline 297 / 4022 / 1 — no drop, +117 tests).
+Commits `3d4ca1e` (wave A/B), `fb27657` (wave C + promoted P0s), `766c5c1`
+(final build wave), plus the round-2 review fixes.
+
+Final gate: tsc 0 · eslint 0 · vitest **321 files / 4237 passed / 1 skipped**
+(baseline 297 / 4022 / 1 — no drop, +215 tests).
+
+### Wave C + promoted P0s (`fb27657`)
+
+| Item | Page(s) | What landed |
+|---|---|---|
+| A12 | audit-log | Actor join organization-scoped — a provisioned org's audit page no longer discloses the platform admin's name |
+| A13 | chat | `GET /api/chat/history` gated on the same verify state as A7 |
+| B4 | estimates | Lazy CAS-guarded expiry sweep (native estimates can reach a terminal state, so win rate can fall); regenerable approval link; quantity/price caps |
+| C2 | operations | Response-time and first-response KPIs exclude synced jobs |
+| C6 | portal | History from `service_requests` (not the empty `service_history`); drafts hidden |
+| DC-2 | communications | All 15 trigger types from one shared list |
+| DC-3 | communications | Template delete refused when send history exists (no FK migration) |
+
+### Final build wave (`766c5c1`)
+
+| Item | Page(s) | What landed |
+|---|---|---|
+| B7 | invoices | `takePayment` state derived from the claim's `RETURNING` row — concurrent partial payments can't strand a paid invoice as "open" |
+| C3b | dashboard | Overdue-invoices tile reusing `overdueWhere()` (a spy test proves the shared predicate runs) |
+| C3c | insights-ai | `getBotAnalytics` batched; sections disclose their time window |
+| C4 | fieldpulse-import | All 11 phases shown; stale-run detection |
+| C5 | integrations | "Connected" flips to "Sync failed" from data already written and read by nothing |
+| DC-1 | conversations | Reply composer for the unreachable takeover API; outcome/next-steps/mode rendered |
+| DC-4 | tech | 44×44 tap targets (measured on the live DOM); confirmation before terminal status changes |
+
+### Round-2 review fixes
+
+| Finding | Fix |
+|---|---|
+| IR-1 | Estimate caps bounded the factors but not their product — `22 × $999,999.99` still overflowed int4 and 500'd. Now checks derived line totals and option totals after server-side price resolution. |
+| IR-2 | New map-chip copy said "job"; canon is "request". |
+| SR-1 | Analytics masking missed `/admin/invite/[token]`, a real single-use staff-invite credential. Prefix matcher now handles nested routes. |
+| SR-2 | `membership-account` mapped to a real account capability with no verify entry. Gated, and `account-verify.contract.test.ts` now fails if the two maps ever drift again. |
+| IR-3 | This ledger was stale against its own later commits. |
+
+### Wave A/B (`3d4ca1e`)
 
 | Item | Page(s) | What landed |
 |---|---|---|

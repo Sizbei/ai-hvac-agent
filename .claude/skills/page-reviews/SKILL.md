@@ -10,7 +10,9 @@ requests were sent, how many customers responded, what the average rating is,
 and whether a public link was clicked.
 
 **Files:** page `src/app/admin/(dashboard)/reviews/page.tsx` · hook
-`src/hooks/use-reviews.ts` · API `src/app/api/admin/reviews/route.ts` · table
+`src/hooks/use-reviews.ts` · API `src/app/api/admin/reviews/route.ts` ·
+request creation `src/lib/reviews/review-queries.ts` (`createReviewRequest`) ·
+demo-org outbound guard `src/lib/communication/consent.ts` · table
 `review_requests`.
 
 **Data flow:** `useReviews({ page })` fetches `/api/admin/reviews` with a
@@ -21,6 +23,14 @@ are aggregated in the API query. No polling — manual page navigation.
 **Invariants:**
 - Review requests are created automatically when a job is completed — there is
   no manual "send" button on this page (the empty state copy says exactly this).
+  This path (technician marks complete → `createReviewRequest` →
+  `queueCommunicationJob`) has no admin session in the loop, so the
+  `isDemoAccount(session)` guards on other outbound routes can't cover it —
+  the demo org's `review_request` trigger is blocked instead at
+  `checkSendAllowed` (`src/lib/communication/consent.ts`) via a hardcoded
+  `DEMO_ORG_ID`, org-id-keyed rather than session-keyed. Scoped narrowly to
+  `review_request`: appointment confirmations/reminders/receipts for that same
+  org keep sending — they power the live, intentionally-real portfolio demo.
 - Status values: `pending` · `sent` · `responded` — must match the enum in
   `review_requests` schema exactly.
 - `responseRate` is computed client-side: `Math.round((responded / count) * 100)`;

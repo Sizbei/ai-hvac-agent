@@ -23,18 +23,36 @@ components `src/components/admin/dashboard/dashboard-greeting.tsx`
 **Data flow:** `useDashboardOverview` polls `/api/admin/overview` every 30 s.
 A module-level SWR cache (`createSwrCache`) returns the prior payload
 instantly on re-mount so returning to the dashboard paints data before the
-poll resolves — no skeleton flash. The query runs four parallel DB reads
-(stats + todaySchedule + needsAttention + awaitingFollowUp) in one round-trip.
+poll resolves — no skeleton flash. `getDashboardOverview` runs five queries
+(stats + todaySchedule + needsAttention + awaitingFollowUp +
+overdueInvoices) via `db.batch()` — ONE HTTP round-trip, not `Promise.all`
+(neon-http invariant; the stats query is built with `buildDashboardStatsQuery`
+so `getDashboardStats` and `getDashboardOverview` share the exact same SQL
+without either awaiting inside the batch array).
 
 **Invariants:**
 - Poll is equality-guarded: if the JSON payload hasn't changed since the last
   tick, `setOverview` is skipped entirely — prevents re-rendering the whole
   page on every 30 s poll when nothing changed.
 - `isMountedRef` prevents setState after unmount (fast navigation away).
-- "Needs attention" filters on `assignedTo IS NULL` — an assigned-but-urgent
-  request must NOT appear there even if it has no window.
+- "Needs attention" filters on `assignedTo IS NULL` OR the assignee is an
+  INACTIVE technician (`eq(users.isActive, false)`) — an assigned-but-urgent
+  request must NOT appear there while its assignee is active, but deactivating
+  a technician never clears `assignedTo` (see page-staff/page-technicians), so
+  without the inactive check an emergency stuck on a deactivated tech would
+  silently vanish from the one screen meant to catch it.
+- `dashboardRequestSelect.assignedToName` is a CASE that returns `NULL` when
+  `users.isActive = false` — every list built on this select withholds a
+  deactivated technician's name rather than implying coverage that no longer
+  exists.
 - Urgency order: `emergency` before `high`, then oldest-first (longest-waiting
   floats to top).
+- `DashboardStatCards` renders an "Overdue invoices" tile (links to
+  `/admin/invoices`) from `overdueInvoices`; a real `0` renders `"0"`, only the
+  pre-load state renders `"—"`.
+- `overdueInvoices` (count + cents) reuses the SAME `overdueWhere()` predicate
+  from `src/lib/admin/invoice-queries.ts` that `/admin/invoices` and
+  `/admin/operations` use — never a second "overdue" definition.
 - `onSelect` / `refetch` wiring: the `RequestDetailSheet` calls `refetch`
   after an assign so the stat cards re-count without a full page reload.
 

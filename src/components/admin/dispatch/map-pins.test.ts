@@ -126,22 +126,22 @@ describe("notPlottedChipMessage", () => {
     expect(notPlottedChipMessage(0, true)).toBeNull();
   });
 
-  it("returns a singular-noun message for exactly one dropped job, under the cap", () => {
+  it("returns a singular-noun message for exactly one dropped request, under the cap", () => {
     expect(notPlottedChipMessage(1, false)).toBe(
-      "1 job couldn't be placed on the map",
+      "1 request couldn't be placed on the map",
     );
   });
 
-  it("returns a plural-noun message for multiple dropped jobs, under the cap", () => {
+  it("returns a plural-noun message for multiple dropped requests, under the cap", () => {
     expect(notPlottedChipMessage(3, false)).toBe(
-      "3 jobs couldn't be placed on the map",
+      "3 requests couldn't be placed on the map",
     );
   });
 
   it("returns a distinct message when the live-geocode cap was exceeded", () => {
     const msg = notPlottedChipMessage(30, true);
     expect(msg).toBe(
-      "30 jobs couldn't be placed on the map (25-job geocoding limit reached)",
+      "30 requests couldn't be placed on the map (25-request geocoding limit reached)",
     );
     expect(msg).not.toBe(notPlottedChipMessage(30, false));
   });

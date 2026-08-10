@@ -39,9 +39,15 @@ work logs — real booking history is in `service_requests` via
   (`emailHash`, `phoneHash`) before inserting. Never write a raw `INSERT` that
   bypasses this.
 - **GDPR erase** (`POST /api/admin/customers/[id]/erase`) is gated to
-  `isSuperAdmin` — a regular admin cannot call it. The UI shows the option in
-  the overflow menu but the API enforces the gate. The erased row is retained
-  (anonymized), financial history kept, blind-index columns nulled.
+  `isSuperAdmin` — a regular admin cannot call it — plus an `isDemoAccount`
+  defense-in-depth check (blocks the public demo account outright, even if it
+  somehow held super_admin). The UI shows the option in the overflow menu but
+  the API enforces the gate. The erased row is retained (anonymized), financial
+  history kept, blind-index columns nulled.
+- **Hard delete** (`DELETE /api/admin/customers/[id]`) is ALSO `isSuperAdmin`-only
+  — it permanently orphans `invoices.customerId`/`estimates.customerId` (no FK,
+  no de-identification), so it is strictly more destructive than erase and must
+  never be reachable by a plain admin.
 - **Archive** soft-hides the customer (`archivedAt` set); the list hides
   archived by default. Re-contact auto-reactivates (per the confirm dialog copy).
 - Tenancy: all queries are scoped by `session.organizationId`.

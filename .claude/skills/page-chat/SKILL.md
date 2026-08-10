@@ -16,7 +16,9 @@ confirmation (or shows an inline confirmation in the embed).
 session API `src/app/api/session/route.ts` ·
 guarded-flush layer `src/lib/ai/guarded-stream.ts` ·
 output guardrail `src/lib/ai/output-guardrail.ts` ·
-voice parity `src/lib/ai/voice-turn.ts`
+voice parity `src/lib/ai/voice-turn.ts` ·
+account-verify gate `src/lib/ai/account-verify.ts` ·
+history API `src/app/api/chat/history/route.ts`
 
 **Data flow:** `useChatSession` wraps `useChat` (Vercel AI SDK) via
 `TextStreamChatTransport`. On first render it POSTs `/api/session` to create or resume
@@ -45,6 +47,19 @@ shows an inline confirmation instead of navigating.
 - The success page copy must be conditional on `arrivalWindowLabel`: only show a
   confirmed window when one was actually reserved — never promise a time for a soft
   booking (the `?window=` param is absent on soft bookings).
+- **Account-data verify gate** (`src/lib/ai/account-verify.ts`): `requiresVerify`
+  treats EVERY `account-data-*` intent (balance, membership-status, next-visit,
+  appointment-status, reschedule) plus the legacy aliases (`account-check-status`,
+  `account-change-appointment`, `scheduling-reschedule`) as needing the ZIP-verify
+  challenge — a self-reported phone/email that linked the session is not possession
+  proof. `GET /api/chat/history` gates on the same verify state (only `status ===
+  'passed'` returns real sessions; anything else gets an empty list) — the
+  contact-field match that sets `customerId` is not enough on its own. Voice
+  inherits both via the shared module. `requiresVerify` returns false for any
+  id NOT in `INTENT_SENSITIVITY` — an UNSAFE default — so every id in
+  `account-dispatch.ts`'s `LEGACY_ACCOUNT_INTENT_TOOL` must also appear there.
+  `src/lib/ai/account-verify.contract.test.ts` fails if the two ever drift, which
+  is what makes the unsafe default tolerable. Add a capability, add a gate.
 
 **Gotchas:**
 - `/embed` is wrapped in `<Suspense>` to prevent prerender errors from `useChat`'s

@@ -34,6 +34,13 @@ fixed, not the selected range).
 - Dispatch health `commitRate` is a fraction (0–1); multiply by 100 for display.
 - Metrics with no data: `null` renders `—` via `formatDuration(null)` returning
   `'—'`. Never let a `null` reach `Math.round` or arithmetic.
+- `responseTimeSeconds` and `firstResponseHumanSeconds` (the "assigned"/
+  "in_progress" `requestStatusEvents` sub-queries) filter to NATIVE requests
+  only (`isNull(fieldpulseJobId)` AND `isNull(hcpJobId)`) — FieldPulse's
+  webhook writes those same status events for synced jobs too
+  (`fieldpulse/webhook/route.ts`), and synced jobs' response-time isn't ours
+  to measure. Mirrors the `jobsCurrentRow` native-only filter already used
+  elsewhere in this file — keep any new status-event query in sync.
 
 **Gotchas:**
 - `onSiteSeconds` is not a `MetricTrend` — it has no previous value and no delta.

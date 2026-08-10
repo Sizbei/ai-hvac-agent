@@ -11,16 +11,25 @@ Each card shows a status badge and, where configurable, a Manage link.
 
 **Files:** page `src/app/admin/(dashboard)/integrations/page.tsx` · hook
 `src/hooks/use-integrations.ts` · meta registry
-`src/lib/admin/integration-meta.ts` · API `src/app/api/admin/integrations/route.ts`
+`src/lib/admin/integration-meta.ts` · status derivation
+`src/lib/admin/integrations-status.ts` · FieldPulse sync-health source
+`src/lib/integrations/fieldpulse/connection-queries.ts`
+(`getFieldpulseConnectionStatus`) · API `src/app/api/admin/integrations/route.ts`
 
 **Data flow:** `useIntegrations` fetches `/api/admin/integrations` once on mount
 (no polling, no SWR cache). The API reads env vars and org credential rows to
 derive each service's status; no writes occur here.
 
 **Invariants:**
-- Status values: `live`, `connected`, `mock`, `not_configured`. Status badge classes
-  come from the `STATUS_BADGE` constant in the page file — no raw palette classes
-  in JSX.
+- Status values: `live`, `connected`, `sync_failed`, `mock`, `not_configured`.
+  Status badge classes come from the `STATUS_BADGE` constant in the page file
+  — no raw palette classes in JSX.
+- FieldPulse shows `sync_failed` (red, over `connected`'s green) when
+  `fieldpulse.connected && availabilitySyncStatus === "failed"` — a
+  "Connected" badge must not stay green while the daily availability-sync
+  cron is actually failing. The detail string surfaces `lastSyncError`. Both
+  columns are already written by the sync job; this just stops the UI from
+  discarding them.
 - Icon + intent come from `getIntegrationMeta(key)` in
   `src/lib/admin/integration-meta.ts`. Unmapped keys fall back to
   `{ icon: Plug, intent: 'neutral' }` — the UI never breaks on unknown services.

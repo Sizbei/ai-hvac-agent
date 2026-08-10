@@ -32,6 +32,15 @@ streams a CSV blob; the client triggers a synthetic `<a download>` click.
   unauthorized. Do not break this probe/gate handshake.
 - Export file name pattern: `accounting-export-${from}_to_${to}.csv` using the
   YYYY-MM-DD strings, not the full ISO.
+- Synced invoice rows (FP/HCP-mirrored) are filtered AND dated by
+  `coalesce(issuedAt, createdAt)`, never raw `createdAt` — `issuedAt` is the
+  real source-system invoice date, `createdAt` is only when we imported the
+  row. Matches `/admin/invoices` and `/admin/operations`.
+- The synced-section subtotal label is source-accurate (`syncedSubtotalLabel`):
+  "FieldPulse synced subtotal" / "HCP synced subtotal" when every row shares
+  one source, "Synced subtotal" when mixed — never hardcode "FieldPulse" (an
+  HCP-only org's rows never touched FieldPulse). Payment rows are always
+  `source: "fieldpulse"` since HCP has no payment mirror.
 
 **Gotchas:**
 - `authorized === null` (loading) and `authorized === false` (unauthorized) both

@@ -12,7 +12,8 @@ and entity type; paginated at 50 rows.
 **Files:** page `src/app/admin/(dashboard)/audit-log/page.tsx` · hook
 `src/hooks/use-admin-audit-log.ts` · types
 `src/lib/admin/audit-types.ts` · API
-`src/app/api/admin/audit-log/route.ts` · table `audit_log`
+`src/app/api/admin/audit-log/route.ts` · queries
+`src/lib/admin/audit-queries.ts` · table `audit_log`
 
 **Data flow:** `useAdminAuditLog({ action, entity, page, limit })` fetches
 `/api/admin/audit-log` with query params; re-fetches on any filter or page change.
@@ -33,6 +34,22 @@ Entity filter uses the static `KNOWN_ENTITIES` enum in the page.
 - `humanize()` converts `snake_case` to sentence case (only first word capitalised).
   This matches the copy canon.
 - Tenancy: the API scopes all queries to `organizationId` from the session.
+  `getAuditLog`'s actor join (`src/lib/admin/audit-queries.ts`) is ALSO scoped
+  by `organizationId` on the `users` side (`and(eq(auditLog.userId, users.id),
+  eq(users.organizationId, organizationId))`), not just `userId = users.id` —
+  an unscoped join lets a cross-org row (e.g. `org_provisioned`, written by
+  platform provisioning with a foreign `userId`) resolve and leak that actor's
+  real name into a different org's audit page. A foreign actor must resolve to
+  `null` (renders "System"), never to a name outside the org.
+- Conversation delete (`DELETE /api/admin/conversations/[id]`) is
+  `isSuperAdmin`-only, same tier as customer hard-delete/erase. It preserves
+  `audit_log` rows referencing the deleted session — `sessionId` is set to
+  `NULL` (nullable FK), never deleted — so the audit trail outlives the
+  conversation it describes.
+- `create_membership_plan` / `create_pricebook_item` audit `details` no longer
+  interpolate the free-text `name` field — they log `billingPeriod`/`type`
+  plus `Object.keys(parsed.data)` (field names only), matching the
+  field-names-only invariant.
 
 **Gotchas:**
 - Action filter is populated from the live `actions` array returned by the API

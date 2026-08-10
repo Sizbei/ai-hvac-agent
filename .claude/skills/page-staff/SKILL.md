@@ -15,6 +15,7 @@ passwords, and generate tokenized invite links for new admins or technicians.
 `src/components/admin/pending-invites.tsx` · hooks
 `src/hooks/use-admin-staff.ts` · `src/hooks/use-admin-invites.ts` · APIs
 `src/app/api/admin/staff/route.ts` · `src/app/api/admin/invites/route.ts` ·
+last-admin guard trigger `drizzle/0044_last_admin_guard.sql` ·
 table `users`, `staff_invites`
 
 **Data flow:** `useAdminStaff` fetches `/api/admin/staff`; `useAdminInvites` fetches
@@ -35,8 +36,11 @@ table `users`, `staff_invites`
   still blocks a duplicate until revoked.
 - `canManageAdmins` is derived client-side from the current user's role in the
   staff list; the server is the authoritative guard regardless.
-- Last-admin guard: a database trigger (migration 0008) prevents demoting the last
-  `admin`/`super_admin` — do not attempt to enforce this in application code.
+- Last-admin guard: a database trigger (`drizzle/0044_last_admin_guard.sql`,
+  idempotent — `CREATE OR REPLACE FUNCTION` + `DROP TRIGGER IF EXISTS`) prevents
+  demoting or deactivating the last active `admin`/`super_admin` — do not
+  attempt to enforce this in application code alone (the app-level check in
+  `staff-queries.ts` is a fast-path only; the trigger is authoritative).
 
 **Gotchas:**
 - `canInviteAdmins` prop on `InviteDialog` controls whether `admin` role is
