@@ -293,6 +293,23 @@ describe('getOperationsMetrics', () => {
     expect(m.responseTimeSeconds.previous).toBeNull();
   });
 
+  it('scopes response-time and first-response queries to native requests (synced FP/HCP excluded)', async () => {
+    queueAll({});
+    await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO });
+
+    // 1st select is the in_progress (response-time) query.
+    const inProgressWhere = JSON.stringify(captured[0]?.where ?? []);
+    expect(inProgressWhere).toContain('isNull');
+    expect(inProgressWhere).toContain('serviceRequests.fieldpulseJobId');
+    expect(inProgressWhere).toContain('serviceRequests.hcpJobId');
+
+    // 2nd select is the assigned (first-response) query.
+    const assignedWhere = JSON.stringify(captured[1]?.where ?? []);
+    expect(assignedWhere).toContain('isNull');
+    expect(assignedWhere).toContain('serviceRequests.fieldpulseJobId');
+    expect(assignedWhere).toContain('serviceRequests.hcpJobId');
+  });
+
   it('scopes the paid-invoice query to native invoices (synced FP/HCP excluded)', async () => {
     queueAll({});
     await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO });

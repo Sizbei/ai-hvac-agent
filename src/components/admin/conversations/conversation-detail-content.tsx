@@ -1,14 +1,24 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Trash2 } from 'lucide-react';
+import { Trash2, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import { StatusBadge } from '@/components/admin/status-badge';
 import { ConfirmDialog } from '@/components/admin/confirm-dialog';
+import { InfoBanner } from '@/components/admin/ui/info-banner';
+import { ContextBadge } from '@/components/admin/ui/context-badge';
 import { ChannelChip, channelLabel } from '@/components/admin/conversations/channel-chip';
+import {
+  REPLY_MAX_LENGTH,
+  canReplyByChannel,
+  getReplyLengthError,
+  replyErrorToCopy,
+  modeIndicator,
+} from '@/components/admin/conversations/conversation-reply-logic';
 import type { ConversationDetail } from '@/lib/admin/conversation-types';
 
 /**
@@ -144,6 +154,10 @@ export function ConversationDetailContent({
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  const [replyMessage, setReplyMessage] = useState('');
+  const [isSendingReply, setIsSendingReply] = useState(false);
+  const [replyError, setReplyError] = useState<string | null>(null);
+
   useEffect(() => {
     if (!conversationId) {
       setDetail(null);
@@ -155,6 +169,8 @@ export function ConversationDetailContent({
     setDetailError(null);
     setIsConfirmOpen(false);
     setDeleteError(null);
+    setReplyMessage('');
+    setReplyError(null);
 
     let active = true;
     async function loadDetail(): Promise<void> {
@@ -189,6 +205,56 @@ export function ConversationDetailContent({
       active = false;
     };
   }, [conversationId]);
+
+  // Best-effort re-fetch after a successful reply send, so the new message and
+  // the mode flip to "human" show up without a full loading-skeleton reset.
+  const refetchDetailSilently = useCallback(async (): Promise<void> => {
+    if (!conversationId) return;
+    try {
+      const res = await fetch(`/api/admin/conversations/${conversationId}`);
+      if (!res.ok) return;
+      const body = (await res.json()) as { success: boolean; data: ConversationDetail };
+      if (body.success) setDetail(body.data);
+    } catch {
+      // The reply already succeeded server-side; a refresh failure here just
+      // means the transcript won't visibly update until the next reload.
+    }
+  }, [conversationId]);
+
+  const handleSendReply = useCallback(async (): Promise<void> => {
+    if (!conversationId) return;
+    const lengthError = getReplyLengthError(replyMessage);
+    if (lengthError) {
+      setReplyError(lengthError);
+      return;
+    }
+
+    setIsSendingReply(true);
+    setReplyError(null);
+
+    try {
+      const res = await fetch(`/api/admin/conversations/${conversationId}/message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: replyMessage.trim() }),
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        const code = body?.error?.code ?? '';
+        const message = body?.error?.message ?? '';
+        setReplyError(replyErrorToCopy({ code, message }));
+        return;
+      }
+
+      setReplyMessage('');
+      await refetchDetailSilently();
+    } catch {
+      setReplyError('Could not connect to server.');
+    } finally {
+      setIsSendingReply(false);
+    }
+  }, [conversationId, replyMessage, refetchDetailSilently]);
 
   const handleDelete = useCallback(async (): Promise<void> => {
     if (!conversationId) return;

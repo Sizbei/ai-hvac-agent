@@ -40,6 +40,34 @@ review · `plan` plan written · `plan✓` plan passed adversarial review ·
 | 29 | fieldpulse-import | workspace | — | — | — | — |
 | 30 | platform | workspace | — | — | — | — |
 
+## Wave A/B shipped (commit `3d4ca1e`)
+
+Gate at commit: tsc 0 · eslint 0 · vitest **313 files / 4139 passed / 1 skipped**
+(baseline 297 / 4022 / 1 — no drop, +117 tests).
+
+| Item | Page(s) | What landed |
+|---|---|---|
+| A1 | portal, estimates, review | Analytics `beforeSend` masking — raw bearer tokens no longer leave the page |
+| A2 | auth | Same-origin + JSON content-type guard on 3 auth routes |
+| A3 | communications, reviews | Demo org can no longer trigger real outbound sends |
+| A4 | customers | Hard delete now `super_admin`; erase gains demo guard |
+| A5 | platform | Cannot purge the platform's own org |
+| A7 | chat, voice | Every account-data intent (and its legacy aliases) now ZIP-verified |
+| A8 | audit-log | Free-text names out of `audit_log.details` |
+| A9 | audit-log, conversations | Delete is `super_admin`; audit rows survive (FK nulled in-batch) |
+| A10 | settings | Credential connect/disconnect now `super_admin` |
+| A11 | dashboard | Emergencies assigned to a deactivated technician are visible again |
+| B1 | invoices | Synced read-only guard on the manual reminder |
+| B2 | accounting | `coalesce(issuedAt, createdAt)` date basis; honest source label |
+| B3 | reports | Dismissed estimates counted; billed-vs-collected disclosed |
+| B5 | membership-plans | Deactivated plans visible + reactivatable; PATCH price cap |
+| C1/C9 | map | Not-plotted count surfaced; deactivated technicians unpinned |
+| C3a | dashboard | `db.batch()` per the neon-http invariant |
+| C7 | dispatch | Arrival times render Eastern, not UTC |
+| C8 | calendar | Emergencies can't be truncated out of the unscheduled queue |
+| W0-1 | tech | `mint-tech-session.mjs` — `/tech/*` is screenshot-verifiable |
+| W0-2 | staff, technicians | `drizzle/0044` restores the last-admin trigger (idempotent) |
+
 ## Run log
 
 - **2026-08-11 01:48** — baseline captured: 297 files · 4022 passed · 1 skipped.

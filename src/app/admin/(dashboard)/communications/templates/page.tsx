@@ -94,7 +94,12 @@ export default function CommunicationTemplatesPage() {
         `/api/admin/communications/templates/${deletingTemplate.id}`,
         { method: "DELETE" },
       );
-      if (!response.ok) throw new Error("Couldn't delete the template. Please try again.");
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(
+          data.error?.message || "Couldn't delete the template. Please try again.",
+        );
+      }
       setDeletingTemplate(null);
       await fetchTemplates();
     } catch (err) {
@@ -194,7 +199,7 @@ export default function CommunicationTemplatesPage() {
           }
         }}
         title="Delete template?"
-        description="This permanently removes the template. Automated communications that rely on it will fall back to defaults. This action cannot be undone."
+        description="This permanently removes the template. Templates that have already sent messages can't be deleted — deactivate them instead to stop future sends without losing that history. This action cannot be undone."
         confirmLabel="Delete"
         confirmingLabel="Deleting…"
         isConfirming={isDeleting}

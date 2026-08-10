@@ -16,18 +16,17 @@ import "server-only";
  *    param. Anything shown or paid is re-verified to belong to that token's
  *    (org, customer) via withTenant + an explicit customerId match.
  *  - Customer PII is AES-GCM encrypted per-column; decrypt SERVER-SIDE only.
- *  - Internal cost fields (costCents / margin / unitCostCents / serviceHistory
- *    cost) are NEVER selected into a portal payload. Customers must not see cost.
+ *  - Internal cost fields (costCents / margin / unitCostCents) are NEVER
+ *    selected into a portal payload. Customers must not see cost.
  */
 import { randomBytes, createHash } from "node:crypto";
-import { desc, eq, inArray } from "drizzle-orm";
+import { desc, eq, inArray, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   customers,
   invoices,
   estimates,
   serviceRequests,
-  serviceHistory,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { decrypt } from "@/lib/crypto";
@@ -222,6 +221,8 @@ export async function getPortalData(
   const customerName = safeDecrypt(custRow?.nameEncrypted ?? null);
 
   // Invoices — totals/paid/balance only; NO line items, NO costCents.
+  // Drafts (native pre-send, or FieldPulse/HCP still draft upstream) are never
+  // a bill the business has committed to — excluded from the customer's view.
   const invoiceRows = await db
     .select({
       id: invoices.id,
@@ -231,7 +232,14 @@ export async function getPortalData(
       createdAt: invoices.createdAt,
     })
     .from(invoices)
-    .where(withTenant(invoices, organizationId, eq(invoices.customerId, customerId)))
+    .where(
+      withTenant(
+        invoices,
+        organizationId,
+        eq(invoices.customerId, customerId),
+        ne(invoices.state, "draft"),
+      ),
+    )
     .orderBy(desc(invoices.createdAt));
 
   // Estimates — status + headline total + (server-side) approval token so the
@@ -270,19 +278,28 @@ export async function getPortalData(
     )
     .orderBy(desc(serviceRequests.scheduledDate));
 
-  // Basic service history — work performed + date. serviceHistory.cost is an
-  // internal field and is DELIBERATELY NOT selected.
+  // Service history — real completed jobs. Sourced from service_requests
+  // (status='completed'), NOT the service_history table: that table is empty
+  // org-wide, the same bug already root-caused and fixed on the admin customer
+  // page via getCustomerBookings (src/lib/admin/queries.ts:1708-1748). No cost/
+  // margin fields are selected.
   const historyRows = await db
     .select({
-      id: serviceHistory.id,
-      workPerformed: serviceHistory.workPerformed,
-      createdAt: serviceHistory.createdAt,
+      id: serviceRequests.id,
+      issueType: serviceRequests.issueType,
+      completedAt: serviceRequests.completedAt,
+      createdAt: serviceRequests.createdAt,
     })
-    .from(serviceHistory)
+    .from(serviceRequests)
     .where(
-      withTenant(serviceHistory, organizationId, eq(serviceHistory.customerId, customerId)),
+      withTenant(
+        serviceRequests,
+        organizationId,
+        eq(serviceRequests.customerId, customerId),
+        eq(serviceRequests.status, "completed"),
+      ),
     )
-    .orderBy(desc(serviceHistory.createdAt));
+    .orderBy(desc(serviceRequests.completedAt), desc(serviceRequests.createdAt));
 
   return {
     customerName,
@@ -313,8 +330,8 @@ export async function getPortalData(
     })),
     history: historyRows.map((r) => ({
       id: r.id,
-      workPerformed: r.workPerformed,
-      createdAt: r.createdAt,
+      workPerformed: r.issueType,
+      createdAt: r.completedAt ?? r.createdAt,
     })),
   };
 }

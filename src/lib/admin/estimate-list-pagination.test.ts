@@ -4,11 +4,19 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 interface CapturedQuery {
   where: unknown;
   hasLimit: boolean;
+  selectCols?: unknown;
 }
 
-const { selectQueue, captured, chain } = vi.hoisted(() => {
+interface CapturedUpdate {
+  set: unknown;
+  where: unknown;
+}
+
+const { selectQueue, captured, chain, updateQueue, updateCaptured } = vi.hoisted(() => {
   const selectQueue: unknown[][] = [];
   const captured: CapturedQuery[] = [];
+  const updateQueue: unknown[][] = [];
+  const updateCaptured: CapturedUpdate[] = [];
 
   const chain = (resolved: unknown, capture: CapturedQuery): unknown => {
     const p: unknown = new Proxy(() => {}, {
@@ -39,16 +47,31 @@ const { selectQueue, captured, chain } = vi.hoisted(() => {
     return p;
   };
 
-  return { selectQueue, captured, chain };
+  return { selectQueue, captured, chain, updateQueue, updateCaptured };
 });
 
 vi.mock('@/lib/db', () => {
-  const make = () => {
-    const capture: CapturedQuery = { where: undefined, hasLimit: false };
+  const make = (cols?: unknown) => {
+    const capture: CapturedQuery = { where: undefined, hasLimit: false, selectCols: cols };
     captured.push(capture);
     return chain(selectQueue.shift() ?? [], capture);
   };
-  return { db: { select: make } };
+  const makeUpdate = () => {
+    const capture: CapturedUpdate = { set: undefined, where: undefined };
+    updateCaptured.push(capture);
+    return {
+      set: (payload: unknown) => {
+        capture.set = payload;
+        return {
+          where: (cond: unknown) => {
+            capture.where = cond;
+            return { returning: () => Promise.resolve(updateQueue.shift() ?? []) };
+          },
+        };
+      },
+    };
+  };
+  return { db: { select: make, update: makeUpdate } };
 });
 
 vi.mock('@/lib/db/tenant', () => ({
@@ -66,6 +89,7 @@ vi.mock('drizzle-orm', () => ({
   count: () => 'count',
   inArray: (...a: unknown[]) => ({ kind: 'inArray', args: a }),
   isNull: (c: unknown) => ({ kind: 'isNull', col: c }),
+  lt: (...a: unknown[]) => ({ kind: 'lt', args: a }),
   sql: vi.fn((strings: TemplateStringsArray, ...vals: unknown[]) => ({
     kind: 'sql',
     text: strings.join('?'),
@@ -138,9 +162,11 @@ vi.mock('server-only', () => ({}));
 beforeEach(() => {
   selectQueue.length = 0;
   captured.length = 0;
+  updateQueue.length = 0;
+  updateCaptured.length = 0;
 });
 
-import { listEstimates, getEstimatePipelineStats } from './estimate-queries';
+import { listEstimates, getEstimatePipelineStats, expireOverdueEstimates } from './estimate-queries';
 
 const ORG = '00000000-0000-0000-0000-000000000001';
 
@@ -360,5 +386,75 @@ describe('listEstimates bucket filter', () => {
     const rowQ = captured[captured.length - 1];
     expect(JSON.stringify(countQ.where)).toContain('org-shared');
     expect(JSON.stringify(rowQ.where)).toContain('org-shared');
+  });
+});
+
+describe('expireOverdueEstimates', () => {
+  it('CAS-guards the UPDATE the same way markEstimateSold does: tenant-scoped, status=open, fieldpulseEstimateId IS NULL', async () => {
+    updateQueue.push([{ id: 'est-1' }]);
+    await expireOverdueEstimates(ORG);
+    const upd = updateCaptured[updateCaptured.length - 1]!;
+    const whereStr = JSON.stringify(upd.where);
+    expect(whereStr).toContain(ORG);
+    expect(whereStr).toContain('"kind":"eq"');
+    expect(whereStr).toContain('est.status');
+    expect(whereStr).toContain('"kind":"isNull"');
+    expect(whereStr).toContain('est.fpEstId');
+    // The overdue check compares expiresAt against "now" in the raw sql fragment.
+    expect(whereStr).toContain('est.expiresAt');
+  });
+
+  it('writes status=expired (not dismissed, not any other value)', async () => {
+    updateQueue.push([{ id: 'est-1' }]);
+    await expireOverdueEstimates(ORG);
+    const upd = updateCaptured[updateCaptured.length - 1]!;
+    expect((upd.set as { status?: string }).status).toBe('expired');
+  });
+
+  it('reports no expired ids when the guard matches nothing', async () => {
+    updateQueue.push([]);
+    const r = await expireOverdueEstimates(ORG);
+    expect(r).toEqual({ expiredIds: [] });
+  });
+});
+
+describe('getEstimatePipelineStats — bucket classification', () => {
+  /** Recursively find the shared CASE-classifier sql fragment embedded in a
+   * FILTER column expression (it's nested inside `vals` since it's itself a
+   * `sql` tagged-template value). */
+  function findBucketCase(node: unknown): { text: string } | undefined {
+    if (!node || typeof node !== 'object') return undefined;
+    const obj = node as { kind?: string; text?: string; vals?: unknown[] };
+    if (obj.kind === 'sql' && typeof obj.text === 'string' && obj.text.includes('CASE')) {
+      return obj as { text: string };
+    }
+    for (const v of obj.vals ?? []) {
+      const found = findBucketCase(v);
+      if (found) return found;
+    }
+    return undefined;
+  }
+
+  it('lostCents/lostCount FILTER classifies native dismissed/expired estimates as lost', async () => {
+    selectQueue.push([{
+      openCents: 0, openCount: 0, staleCents: 0, staleCount: 0,
+      wonCents: 0, wonCount: 0, lostCents: 0, lostCount: 0,
+      draftCents: 0, draftCount: 0, winRatePct: null, avgOpenAgeDays: 0,
+    }]);
+    await getEstimatePipelineStats(ORG);
+    const cols = captured[captured.length - 1]?.selectCols as Record<string, unknown>;
+
+    const lostCase = findBucketCase(cols.lostCents);
+    expect(lostCase).toBeDefined();
+    expect(lostCase!.text).toContain("IN ('dismissed','expired') THEN 'lost'");
+
+    // openCents/staleCents share the IDENTICAL classifier expression, and a
+    // CASE returns exactly one bucket per row — so a row the lost branch
+    // matches (native status IN dismissed/expired) can never also satisfy the
+    // open/stale branches (they check `= 'open'` against this same value).
+    const openCase = findBucketCase(cols.openCents);
+    const staleCase = findBucketCase(cols.staleCents);
+    expect(openCase).toBe(lostCase);
+    expect(staleCase).toBe(lostCase);
   });
 });

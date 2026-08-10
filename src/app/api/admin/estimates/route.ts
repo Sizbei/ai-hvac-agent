@@ -6,6 +6,7 @@ import {
   listEstimates,
   createEstimate,
   getEstimatePipelineStats,
+  expireOverdueEstimates,
   type EstimateOptionInput,
 } from "@/lib/admin/estimate-queries";
 import {
@@ -17,6 +18,11 @@ import { successResponse, errorResponse, readJsonBody } from "@/lib/api-response
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { isUniqueViolation } from "@/lib/db/unique-violation";
 import { logger } from "@/lib/logger";
+import { MAX_PRICE_CENTS } from "@/lib/admin/money-format";
+
+/** Generous vs any real estimate line — mirrors the purchase-order quantity cap
+ * (inventory/purchase-orders/route.ts) and keeps quantity*price sane. */
+const MAX_QUANTITY = 1_000_000;
 
 // taxBps is intentionally NOT accepted here — it is derived server-side from the
 // org's default tax rate so a client cannot quote at a tampered rate.
@@ -40,8 +46,10 @@ const createSchema = z.object({
               // are ignored (anti-tampering).
               pricebookItemId: z.string().uuid().nullable().optional(),
               name: z.string().trim().min(1).max(255).optional(),
-              quantity: z.number().int().min(1),
-              unitPriceCents: z.number().int().min(0).optional(),
+              // Upper bounds keep every value inside a signed int4 money column
+              // (an unbounded quantity/price overflowed INT32 on insert and 500'd).
+              quantity: z.number().int().min(1).max(MAX_QUANTITY),
+              unitPriceCents: z.number().int().min(0).max(MAX_PRICE_CENTS).optional(),
               useMemberPrice: z.boolean().optional(),
             }),
           )
@@ -86,6 +94,10 @@ export async function GET(request: NextRequest) {
       rawBucket && VALID_BUCKETS.has(rawBucket as ValidBucket)
         ? (rawBucket as ValidBucket)
         : undefined;
+
+    // Lazy-expiry sweep before reading — flips any native open estimate past
+    // expiresAt to 'expired' so this fetch's pipeline stats/list are honest.
+    await expireOverdueEstimates(session.organizationId);
 
     const [{ estimates, total }, stats] = await Promise.all([
       listEstimates(session.organizationId, { page, limit, customerId, serviceRequestId, bucket, search }),

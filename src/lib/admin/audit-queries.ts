@@ -9,7 +9,7 @@
  * `details` column only ever holds field NAMES / ids (never decrypted PII), so
  * it is safe to return verbatim.
  */
-import { eq, sql, count, desc, type SQL } from "drizzle-orm";
+import { and, eq, sql, count, desc, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { auditLog, users } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
@@ -61,7 +61,19 @@ export async function getAuditLog(
         actorName: users.name,
       })
       .from(auditLog)
-      .leftJoin(users, eq(auditLog.userId, users.id))
+      // SECURITY (A12, P1): scope the join to the session's org too, not just
+      // auditLog.userId = users.id. Some rows (e.g. org_provisioned, written
+      // by platform provisioning) have userId pointing at a user in a
+      // DIFFERENT org than auditLog.organizationId. An unscoped join would
+      // resolve that foreign userId and leak the platform admin's real name
+      // into a provisioned org's own audit-log page. Scoping the join means a
+      // foreign actor never resolves — actorName comes back null and renders
+      // as "System" (existing null-actor UI) — while the row itself, and its
+      // organizationId-scoped `details`, stays visible.
+      .leftJoin(
+        users,
+        and(eq(auditLog.userId, users.id), eq(users.organizationId, organizationId)),
+      )
       .where(whereClause)
       .orderBy(desc(auditLog.createdAt))
       .limit(limit)

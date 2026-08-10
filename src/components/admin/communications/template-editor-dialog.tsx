@@ -20,6 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { COMMUNICATION_TRIGGER_TYPES } from "@/lib/communication/sms-templates";
 
 export interface Template {
   id: string;
@@ -37,18 +38,9 @@ export interface Template {
   updatedAt: string;
 }
 
-export const TRIGGER_TYPES = [
-  { value: "appointment_scheduled", label: "Appointment scheduled" },
-  { value: "appointment_reminder_24h", label: "24-hour reminder" },
-  { value: "appointment_reminder_2h", label: "2-hour reminder" },
-  { value: "appointment_rescheduled", label: "Appointment rescheduled" },
-  { value: "appointment_cancelled", label: "Appointment cancelled" },
-  { value: "technician_enroute", label: "Technician en route" },
-  { value: "job_completed", label: "Job completed" },
-  { value: "review_request", label: "Review request" },
-  { value: "follow_up", label: "Follow up" },
-  { value: "escalation", label: "Escalation" },
-] as const;
+// Re-exported from sms-templates.ts, the single source shared with the CRUD
+// API's zod schemas — do not hand-maintain a separate list here.
+export const TRIGGER_TYPES = COMMUNICATION_TRIGGER_TYPES;
 
 export const TEMPLATE_TYPES = [
   { value: "sms", label: "SMS" },

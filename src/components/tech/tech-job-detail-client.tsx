@@ -500,6 +500,7 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
               </div>
               <Button
                 variant="destructive"
+                className="h-11"
                 disabled={isClocking}
                 onClick={() => void handleClock('clock_out')}
               >
@@ -510,6 +511,7 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
             <div className="flex items-center justify-between gap-3">
               <p className="text-sm text-muted-foreground">Not clocked in.</p>
               <Button
+                className="h-11"
                 disabled={isClocking}
                 onClick={() => void handleClock('clock_in')}
               >
@@ -582,7 +584,7 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
                       type="button"
                       aria-label="Remove material"
                       onClick={() => void handleRemove(m.id)}
-                      className="text-muted-foreground active:text-destructive"
+                      className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md text-muted-foreground active:bg-destructive/10 active:text-destructive"
                     >
                       <Trash2 className="size-4" />
                     </button>
@@ -634,7 +636,7 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
                 className="w-20"
               />
               <Button
-                size="sm"
+                className="h-11"
                 disabled={isAdding}
                 onClick={() => void handleAdd()}
               >
@@ -660,7 +662,7 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
             className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
           />
           <Button
-            size="sm"
+            className="h-11"
             disabled={isPostingNote || !note.trim()}
             onClick={() => void handlePostNote()}
           >
@@ -695,13 +697,13 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
           />
           <div className="flex items-center gap-2">
             <Button
-              size="sm"
+              className="h-11"
               disabled={isSigning || !sigName.trim()}
               onClick={() => void handleSign()}
             >
               {isSigning ? 'Saving…' : 'Save signature'}
             </Button>
-            <Button size="sm" variant="ghost" onClick={clearCanvas}>
+            <Button className="h-11" variant="ghost" onClick={clearCanvas}>
               Clear
             </Button>
           </div>

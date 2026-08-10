@@ -5,6 +5,7 @@ import { customerSessions, messages } from '@/lib/db/schema';
 import { getSessionToken } from '@/lib/session';
 import { slidingWindow, RATE_LIMITS } from '@/lib/rate-limit';
 import { logger } from '@/lib/logger';
+import { parseVerifyState } from '@/lib/ai/account-verify';
 
 /**
  * GET /api/chat/history
@@ -51,6 +52,22 @@ export async function GET() {
 
     // If no customerId linked yet, return empty history
     if (!currentSession.customerId) {
+      return NextResponse.json({
+        success: true,
+        sessions: [],
+      });
+    }
+
+    // SECURITY (A13, P0): customerId is set by an UNVERIFIED contact-field
+    // match (a self-reported phone/email typed into the public chat, see
+    // lookupCustomerContext in the chat route) — not possession proof. Serving
+    // another customer's conversation history off that link alone is exactly
+    // the leak account-verify.ts's financial-verify gate exists to prevent
+    // (see requiresVerify's doc comment). Reuse the SAME verify state: only a
+    // session that has PASSED the ZIP challenge may read history; anything
+    // else (no state yet, pending, failed) gets the empty/unlinked response.
+    const verifyState = parseVerifyState(currentSession.metadata);
+    if (verifyState?.status !== 'passed') {
       return NextResponse.json({
         success: true,
         sessions: [],

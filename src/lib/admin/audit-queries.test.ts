@@ -29,8 +29,11 @@ vi.mock('@/lib/db/tenant', () => ({
     conditions[0] ?? true,
 }));
 
+const { eqSpy } = vi.hoisted(() => ({ eqSpy: vi.fn((...a: unknown[]) => a) }));
+
 vi.mock('drizzle-orm', () => ({
-  eq: (...a: unknown[]) => a,
+  eq: eqSpy,
+  and: (...a: unknown[]) => a,
   sql: (...a: unknown[]) => a,
   count: () => 'count',
   desc: (c: unknown) => c,
@@ -49,7 +52,7 @@ vi.mock('@/lib/db/schema', () => ({
     userId: 'al.userId',
     organizationId: 'al.org',
   },
-  users: { id: 'u.id', name: 'u.name' },
+  users: { id: 'u.id', name: 'u.name', organizationId: 'u.org' },
 }));
 
 import { getAuditLog } from './audit-queries';
@@ -70,6 +73,7 @@ function seed(opts: {
 
 beforeEach(() => {
   selectQueue.length = 0;
+  eqSpy.mockClear();
 });
 
 describe('getAuditLog', () => {
@@ -144,5 +148,15 @@ describe('getAuditLog', () => {
     const result = await getAuditLog(ORG, { action: 'session_escalated' });
     expect(result.entries[0].actorName).toBeNull();
     expect(result.entries[0].details).toBeNull();
+  });
+
+  it('(A12) scopes the actor-name join to the session org, not just userId', async () => {
+    // A row's userId can point at a user in a DIFFERENT org (e.g.
+    // org_provisioned, written by platform provisioning). The join must
+    // require users.organizationId = the session's org too, or a foreign
+    // actor's real name leaks into this org's audit-log page.
+    seed({ count: 0, rows: [], actions: [] });
+    await getAuditLog(ORG, {});
+    expect(eqSpy).toHaveBeenCalledWith('u.org', ORG);
   });
 });

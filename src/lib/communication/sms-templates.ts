@@ -195,6 +195,41 @@ export const templateVariableSchemas = {
 export type TemplateVariables = typeof templateVariableSchemas;
 
 /**
+ * Single source of truth for trigger types, mirroring
+ * communicationTriggerTypeEnum (schema.ts). Consumed by the templates CRUD
+ * zod schemas (api/admin/communications/templates/route.ts, [id]/route.ts)
+ * and the editor dropdown (template-editor-dialog.tsx) so the two can't
+ * drift out of sync again. Keep in the same order as the DB enum.
+ */
+export const COMMUNICATION_TRIGGER_TYPES = [
+  { value: "appointment_scheduled", label: "Appointment scheduled" },
+  { value: "appointment_reminder_24h", label: "24-hour reminder" },
+  { value: "appointment_reminder_2h", label: "2-hour reminder" },
+  { value: "appointment_rescheduled", label: "Appointment rescheduled" },
+  { value: "appointment_cancelled", label: "Appointment cancelled" },
+  { value: "technician_enroute", label: "Technician en route" },
+  { value: "technician_arrived", label: "Technician arrived" },
+  { value: "job_completed", label: "Job completed" },
+  { value: "review_request", label: "Review request" },
+  { value: "follow_up", label: "Follow up" },
+  { value: "escalation", label: "Escalation" },
+  { value: "estimate_sent", label: "Estimate sent" },
+  { value: "payment_receipt", label: "Payment receipt" },
+  { value: "invoice_overdue", label: "Invoice overdue" },
+  { value: "warranty_expiring", label: "Warranty expiring" },
+] as const;
+
+export type CommunicationTriggerType =
+  (typeof COMMUNICATION_TRIGGER_TYPES)[number]["value"];
+
+/** Values-only tuple, shaped for `z.enum()`. */
+export const COMMUNICATION_TRIGGER_TYPE_VALUES =
+  COMMUNICATION_TRIGGER_TYPES.map((t) => t.value) as [
+    CommunicationTriggerType,
+    ...CommunicationTriggerType[],
+  ];
+
+/**
  * Compiled template cache
  */
 const templateCache = new Map<string, HandlebarsTemplateDelegate>();

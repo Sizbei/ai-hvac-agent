@@ -7,13 +7,16 @@
 import { NextRequest } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
 import { db } from "@/lib/db";
-import { communicationTemplates } from "@/lib/db/schema";
+import { communicationTemplates, communicationJobs } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { z } from "zod";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { logAudit } from "@/lib/admin/audit";
 import { logger } from "@/lib/logger";
-import { validateSmsTemplate } from "@/lib/communication/sms-templates";
+import {
+  validateSmsTemplate,
+  COMMUNICATION_TRIGGER_TYPE_VALUES,
+} from "@/lib/communication/sms-templates";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { isUuid } from "@/lib/validation/uuid";
 
@@ -23,19 +26,7 @@ export const dynamic = "force-dynamic";
 const updateTemplateSchema = z.object({
   name: z.string().min(1).max(255).optional(),
   description: z.string().optional(),
-  triggerType: z.enum([
-    "appointment_scheduled",
-    "appointment_reminder_24h",
-    "appointment_reminder_2h",
-    "appointment_rescheduled",
-    "appointment_cancelled",
-    "technician_enroute",
-    "technician_arrived",
-    "job_completed",
-    "review_request",
-    "follow_up",
-    "escalation",
-  ]).optional(),
+  triggerType: z.enum(COMMUNICATION_TRIGGER_TYPE_VALUES).optional(),
   templateType: z.enum(["sms", "email_html", "email_text"]).optional(),
   subjectTemplate: z.string().optional(),
   bodyTemplate: z.string().min(1).optional(),
@@ -191,6 +182,25 @@ export async function DELETE(
 
     if (!existing) {
       return errorResponse("Template not found", "NOT_FOUND", 404);
+    }
+
+    // Refuse to delete templates with send history: communication_jobs.
+    // template_id cascades on delete, so removing the template would wipe
+    // out every record of a message this template ever sent. Deactivating
+    // (isActive: false) already stops future sends without losing history.
+    const sentJob = await db.query.communicationJobs.findFirst({
+      where: and(
+        eq(communicationJobs.templateId, templateId),
+        eq(communicationJobs.organizationId, session.organizationId),
+      ),
+    });
+
+    if (sentJob) {
+      return errorResponse(
+        "This template has send history and can't be deleted. Deactivate it instead to stop future sends without losing that history.",
+        "HAS_SEND_HISTORY",
+        409,
+      );
     }
 
     await db

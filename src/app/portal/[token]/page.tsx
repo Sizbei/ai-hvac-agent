@@ -236,7 +236,7 @@ function HistorySection({
           {history.map((h) => (
             <li key={h.id} className="py-3">
               <p className="text-sm text-foreground">
-                {h.workPerformed ?? "Service visit"}
+                {h.workPerformed ? humanize(h.workPerformed) : "Service visit"}
               </p>
               <p className="mt-0.5 text-xs text-muted-foreground">
                 {formatDate(h.createdAt)}

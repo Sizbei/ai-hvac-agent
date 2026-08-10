@@ -151,11 +151,16 @@ export async function getOperationsMetrics(
         // first response. The upper bound (< toDate_) is enough; bucketDurations
         // then keeps only the requests whose true-first falls in a window.
         // (Grows with history; the demand_daily-style rollup is the scale seam.)
+        // NATIVE only: FieldPulse's webhook writes "in_progress" status events
+        // for synced jobs too (fieldpulse/webhook/route.ts) — exclude both
+        // synced-id columns, mirroring jobsCurrentRow below.
         withTenant(
           requestStatusEvents,
           organizationId,
           eq(requestStatusEvents.toStatus, "in_progress"),
           lt(requestStatusEvents.at, toDate_),
+          isNull(serviceRequests.fieldpulseJobId),
+          isNull(serviceRequests.hcpJobId),
         ),
       )
       .groupBy(requestStatusEvents.serviceRequestId, serviceRequests.createdAt),
@@ -179,11 +184,16 @@ export async function getOperationsMetrics(
         eq(serviceRequests.id, requestStatusEvents.serviceRequestId),
       )
       .where(
+        // NATIVE only: FieldPulse's webhook writes "assigned" status events for
+        // synced jobs too (fieldpulse/webhook/route.ts) — exclude both synced-id
+        // columns, mirroring jobsCurrentRow below.
         withTenant(
           requestStatusEvents,
           organizationId,
           eq(requestStatusEvents.toStatus, "assigned"),
           lt(requestStatusEvents.at, toDate_),
+          isNull(serviceRequests.fieldpulseJobId),
+          isNull(serviceRequests.hcpJobId),
         ),
       )
       .groupBy(

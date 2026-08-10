@@ -1,8 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { createHash } from "node:crypto";
 import {
   createEstimate,
   markEstimateSold,
   getEstimateForApproval,
+  expireOverdueEstimates,
+  regenerateApprovalToken,
 } from "./estimate-queries";
 import { db } from "@/lib/db";
 
@@ -137,5 +140,96 @@ describe("getEstimateForApproval", () => {
     mockSelectSeq([[]]);
     const r = await getEstimateForApproval("nope");
     expect(r).toBeNull();
+  });
+});
+
+describe("expireOverdueEstimates", () => {
+  it("flips overdue native open estimates to expired and reports their ids", async () => {
+    vi.mocked(db.update).mockReturnValue({
+      set: vi.fn(() => ({
+        where: vi.fn(() => ({
+          returning: vi.fn().mockResolvedValue([{ id: "est-1" }, { id: "est-2" }]),
+        })),
+      })),
+    } as never);
+    const r = await expireOverdueEstimates(ORG);
+    expect(r).toEqual({ expiredIds: ["est-1", "est-2"] });
+  });
+
+  it("is a no-op when nothing is eligible (mirrors markEstimateSold's guard shape: nothing returned -> nothing flipped)", async () => {
+    vi.mocked(db.update).mockReturnValue({
+      set: vi.fn(() => ({
+        where: vi.fn(() => ({
+          returning: vi.fn().mockResolvedValue([]),
+        })),
+      })),
+    } as never);
+    const r = await expireOverdueEstimates(ORG);
+    expect(r).toEqual({ expiredIds: [] });
+  });
+});
+
+describe("regenerateApprovalToken", () => {
+  function hash(token: string): string {
+    return createHash("sha256").update(token).digest("hex");
+  }
+
+  it("rejects a non-open estimate (status guard)", async () => {
+    mockSelectSeq([[{ id: "est-1", status: "sold", fieldpulseEstimateId: null }]]);
+    const r = await regenerateApprovalToken(ORG, "est-1");
+    expect(r).toEqual({ ok: false, reason: "already_decided" });
+    expect(db.update).not.toHaveBeenCalled();
+  });
+
+  it("returns not_found when the estimate is missing", async () => {
+    mockSelectSeq([[]]);
+    const r = await regenerateApprovalToken(ORG, "est-x");
+    expect(r).toEqual({ ok: false, reason: "not_found" });
+  });
+
+  it("refuses a FieldPulse-synced estimate and never writes", async () => {
+    mockSelectSeq([[{ id: "est-fp", status: "open", fieldpulseEstimateId: "fp-123" }]]);
+    const r = await regenerateApprovalToken(ORG, "est-fp");
+    expect(r).toEqual({ ok: false, reason: "synced_read_only" });
+    expect(db.update).not.toHaveBeenCalled();
+  });
+
+  it("mints a new plaintext token and overwrites the stored hash, invalidating the previous token", async () => {
+    // Simulate the estimate's stored hash so we can prove the second call's
+    // write no longer matches the first call's plaintext token.
+    let storedHash = hash("original-create-time-token");
+
+    mockSelectSeq([
+      [{ id: "est-1", status: "open", fieldpulseEstimateId: null }],
+      [{ id: "est-1", status: "open", fieldpulseEstimateId: null }],
+    ]);
+    vi.mocked(db.update).mockImplementation(
+      () =>
+        ({
+          set: (payload: { approvalTokenHash: string }) => ({
+            where: () => ({
+              returning: () => {
+                storedHash = payload.approvalTokenHash;
+                return Promise.resolve([{ id: "est-1" }]);
+              },
+            }),
+          }),
+        }) as never,
+    );
+
+    const first = await regenerateApprovalToken(ORG, "est-1");
+    expect(first.ok).toBe(true);
+    const token1 = (first as { ok: true; approvalToken: string }).approvalToken;
+    expect(storedHash).toBe(hash(token1));
+
+    const second = await regenerateApprovalToken(ORG, "est-1");
+    expect(second.ok).toBe(true);
+    const token2 = (second as { ok: true; approvalToken: string }).approvalToken;
+
+    expect(token1).not.toBe(token2);
+    // Only the newest token's hash is stored -> the first token's hash no
+    // longer matches, so a lookup by the old token would find nothing.
+    expect(storedHash).toBe(hash(token2));
+    expect(storedHash).not.toBe(hash(token1));
   });
 });

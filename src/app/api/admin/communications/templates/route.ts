@@ -13,7 +13,10 @@ import { z } from "zod";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { logAudit } from "@/lib/admin/audit";
 import { logger } from "@/lib/logger";
-import { validateSmsTemplate } from "@/lib/communication/sms-templates";
+import {
+  validateSmsTemplate,
+  COMMUNICATION_TRIGGER_TYPE_VALUES,
+} from "@/lib/communication/sms-templates";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
@@ -23,19 +26,7 @@ const templateSchema = z.object({
   key: z.string().regex(/^[a-z][a-z0-9_]*$/, "Invalid key format"),
   name: z.string().min(1).max(255),
   description: z.string().optional(),
-  triggerType: z.enum([
-    "appointment_scheduled",
-    "appointment_reminder_24h",
-    "appointment_reminder_2h",
-    "appointment_rescheduled",
-    "appointment_cancelled",
-    "technician_enroute",
-    "technician_arrived",
-    "job_completed",
-    "review_request",
-    "follow_up",
-    "escalation",
-  ]),
+  triggerType: z.enum(COMMUNICATION_TRIGGER_TYPE_VALUES),
   templateType: z.enum(["sms", "email_html", "email_text"]),
   subjectTemplate: z.string().optional(),
   bodyTemplate: z.string().min(1),

@@ -7,7 +7,7 @@
  * IP/timestamp capture.
  */
 import { randomBytes, randomUUID, createHash } from "node:crypto";
-import { and, asc, count, desc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNull, lt, sql, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   estimates,
@@ -207,6 +207,96 @@ export async function approveEstimate(params: {
 
   if (!updated) return { ok: false, reason: "already_decided" };
   return { ok: true, estimateId: updated.id };
+}
+
+export interface ExpireOverdueEstimatesResult {
+  readonly expiredIds: readonly string[];
+}
+
+/**
+ * Lazy-expiry sweep: transitions native (non-FieldPulse) estimates that are
+ * still `open` past their `expiresAt` to `expired`. Called from the list read
+ * on every fetch — no cron (Vercel Hobby caps crons at daily; AGENTS.md) — so
+ * pipeline KPIs (openCents/staleCents/winRatePct) reflect reality by the very
+ * next fetch instead of drifting toward 100% win rate forever.
+ *
+ * CAS-guarded exactly like markEstimateSold's final write: the WHERE repeats
+ * status='open' AND fieldpulseEstimateId IS NULL, so a row a customer just
+ * approved or an admin just marked sold in the same instant is left alone —
+ * sold/dismissed/already-expired/synced rows can never match this UPDATE.
+ */
+export async function expireOverdueEstimates(
+  organizationId: string,
+  now: Date = new Date(),
+): Promise<ExpireOverdueEstimatesResult> {
+  const updated = await db
+    .update(estimates)
+    .set({ status: "expired", updatedAt: now })
+    .where(
+      withTenant(
+        estimates,
+        organizationId,
+        eq(estimates.status, "open"),
+        isNull(estimates.fieldpulseEstimateId),
+        // lt() against a NULL expiresAt evaluates to NULL (excluded) in SQL —
+        // no separate IS NOT NULL check needed.
+        lt(estimates.expiresAt, now),
+      ),
+    )
+    .returning({ id: estimates.id });
+
+  return { expiredIds: updated.map((u) => u.id) };
+}
+
+export type RegenerateApprovalTokenResult =
+  | { readonly ok: true; readonly approvalToken: string }
+  | { readonly ok: false; readonly reason: "not_found" | "synced_read_only" | "already_decided" };
+
+/**
+ * Mint a fresh one-time approval token for an open, native, unsynced estimate
+ * — the recovery path once the create-dialog's original link is dismissed
+ * (the plaintext token is never persisted, only its hash). Overwriting
+ * `approvalTokenHash` is itself what invalidates the previous token: the
+ * column holds exactly one hash, so the old plaintext token immediately stops
+ * resolving via `getEstimateForApproval`'s hash lookup. CAS-guarded the same
+ * way as markEstimateSold/expireOverdueEstimates.
+ */
+export async function regenerateApprovalToken(
+  organizationId: string,
+  id: string,
+  now: Date = new Date(),
+): Promise<RegenerateApprovalTokenResult> {
+  const [est] = await db
+    .select({
+      id: estimates.id,
+      status: estimates.status,
+      fieldpulseEstimateId: estimates.fieldpulseEstimateId,
+    })
+    .from(estimates)
+    .where(withTenant(estimates, organizationId, eq(estimates.id, id)))
+    .limit(1);
+
+  if (!est) return { ok: false, reason: "not_found" };
+  if (est.fieldpulseEstimateId != null) return { ok: false, reason: "synced_read_only" };
+  if (est.status !== "open") return { ok: false, reason: "already_decided" };
+
+  const approvalToken = randomBytes(24).toString("hex");
+  const [updated] = await db
+    .update(estimates)
+    .set({ approvalTokenHash: hashToken(approvalToken), updatedAt: now })
+    .where(
+      withTenant(
+        estimates,
+        organizationId,
+        eq(estimates.id, est.id),
+        eq(estimates.status, "open"),
+        isNull(estimates.fieldpulseEstimateId),
+      ),
+    )
+    .returning({ id: estimates.id });
+
+  if (!updated) return { ok: false, reason: "already_decided" };
+  return { ok: true, approvalToken };
 }
 
 export interface EstimateListRow {

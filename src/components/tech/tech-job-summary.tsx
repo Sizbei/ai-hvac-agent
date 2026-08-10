@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatArrivalWindow } from '@/lib/admin/arrival-window';
+import { buildStatusConfirmCopy, isTerminalStatus } from '@/components/tech/tech-status-confirm';
 
 interface TechJobSummary {
   readonly id: string;
@@ -52,6 +53,10 @@ export function TechJobSummary({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [advancing, setAdvancing] = useState<string | null>(null);
+  // Set while a terminal status (cancelled/completed) is awaiting the
+  // technician's explicit second confirmation — the POST does not fire until
+  // they tap the confirm button. (Rtech-4)
+  const [pendingConfirm, setPendingConfirm] = useState<string | null>(null);
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -98,6 +103,19 @@ export function TechJobSummary({
       }
     },
     [id, load, onStatusChanged],
+  );
+
+  // Cancelled/completed require an explicit second tap before the POST
+  // fires; the other manual targets advance immediately, as before.
+  const handleStatusTap = useCallback(
+    (status: string): void => {
+      if (isTerminalStatus(status)) {
+        setPendingConfirm(status);
+      } else {
+        void advance(status);
+      }
+    },
+    [advance],
   );
 
   if (isLoading) {
@@ -193,16 +211,53 @@ export function TechJobSummary({
         {/* Advance status */}
         {job.allowedNextStatuses.length > 0 && (
           <div className="flex flex-wrap gap-2 border-t pt-3">
-            {job.allowedNextStatuses.map((s) => (
-              <Button
-                key={s}
-                size="sm"
-                disabled={advancing !== null}
-                onClick={() => void advance(s)}
+            {pendingConfirm ? (
+              <div
+                role="alertdialog"
+                aria-label={buildStatusConfirmCopy(pendingConfirm).question}
+                className="w-full space-y-2 rounded-md border border-destructive/40 bg-destructive/10 p-3"
               >
-                {advancing === s ? 'Saving…' : humanize(s)}
-              </Button>
-            ))}
+                <p className="text-sm font-medium text-destructive">
+                  {buildStatusConfirmCopy(pendingConfirm).question}
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    variant="destructive"
+                    className="h-11 flex-1"
+                    disabled={advancing !== null}
+                    onClick={() => {
+                      const status = pendingConfirm;
+                      setPendingConfirm(null);
+                      void advance(status);
+                    }}
+                  >
+                    {advancing === pendingConfirm
+                      ? 'Saving…'
+                      : buildStatusConfirmCopy(pendingConfirm).confirmLabel}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="h-11 flex-1"
+                    disabled={advancing !== null}
+                    onClick={() => setPendingConfirm(null)}
+                  >
+                    {buildStatusConfirmCopy(pendingConfirm).cancelLabel}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              job.allowedNextStatuses.map((s) => (
+                <Button
+                  key={s}
+                  variant={isTerminalStatus(s) ? 'destructive' : 'default'}
+                  className="h-11"
+                  disabled={advancing !== null}
+                  onClick={() => handleStatusTap(s)}
+                >
+                  {advancing === s ? 'Saving…' : humanize(s)}
+                </Button>
+              ))
+            )}
           </div>
         )}
 

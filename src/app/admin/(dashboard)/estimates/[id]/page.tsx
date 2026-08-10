@@ -3,9 +3,10 @@
 import { use, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Receipt } from 'lucide-react';
+import { Receipt, Copy, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Select,
@@ -75,6 +76,10 @@ export default function EstimateDetailPage({
   const [markError, setMarkError] = useState<string | null>(null);
   const [isInvoicing, setIsInvoicing] = useState(false);
   const [invoiceError, setInvoiceError] = useState<string | null>(null);
+  const [isRegenerating, setIsRegenerating] = useState(false);
+  const [regenerateError, setRegenerateError] = useState<string | null>(null);
+  const [newApprovalUrl, setNewApprovalUrl] = useState<string | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -149,6 +154,38 @@ export default function EstimateDetailPage({
       setIsInvoicing(false);
     }
   }, [id, router]);
+
+  const handleRegenerateLink = useCallback(async (): Promise<void> => {
+    setIsRegenerating(true);
+    setRegenerateError(null);
+    try {
+      const res = await fetch(`/api/admin/estimates/${id}/regenerate-link`, {
+        method: 'POST',
+      });
+      const body = await res.json().catch(() => ({ success: false }));
+      if (res.ok && body.success) {
+        setNewApprovalUrl(body.data.approvalUrl);
+        setLinkCopied(false);
+      } else {
+        setRegenerateError(body.error?.message ?? 'Failed to create a new link');
+      }
+    } catch {
+      setRegenerateError('Could not connect to server.');
+    } finally {
+      setIsRegenerating(false);
+    }
+  }, [id]);
+
+  const handleCopyLink = useCallback(async (): Promise<void> => {
+    if (!newApprovalUrl) return;
+    try {
+      await navigator.clipboard.writeText(newApprovalUrl);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    } catch {
+      // Clipboard may be blocked; the link is still visible to copy manually.
+    }
+  }, [newApprovalUrl]);
 
   if (isLoading) {
     return (
@@ -393,6 +430,44 @@ export default function EstimateDetailPage({
               </Button>
             </div>
             {markError && <p className="text-xs text-destructive">{markError}</p>}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Approval link — only while open and not synced. The plaintext token is
+          never persisted, so this is the only way to recover a link once the
+          create dialog's one-time display is dismissed. Regenerating invalidates
+          any previous link (only the newest token's hash is ever stored). */}
+      {isOpen && !isSynced && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Approval link</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {newApprovalUrl ? (
+              <div className="flex items-center gap-2">
+                <Input readOnly value={newApprovalUrl} className="font-mono text-xs" />
+                <Button type="button" variant="outline" size="sm" onClick={handleCopyLink}>
+                  {linkCopied ? <Check className="size-4" /> : <Copy className="size-4" />}
+                </Button>
+              </div>
+            ) : (
+              <>
+                <p className="text-sm text-muted-foreground">
+                  Get a new customer approval link. This replaces any link sent
+                  before — the old one stops working.
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={isRegenerating}
+                  onClick={handleRegenerateLink}
+                >
+                  {isRegenerating ? 'Creating…' : 'Get new link'}
+                </Button>
+              </>
+            )}
+            {regenerateError && <p className="text-xs text-destructive">{regenerateError}</p>}
           </CardContent>
         </Card>
       )}
