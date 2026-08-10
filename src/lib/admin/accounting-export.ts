@@ -16,7 +16,7 @@
  * ids) — never customer names, emails, addresses, or free-text. The exported
  * FILE does contain amounts, so the route that serves it is super_admin-gated.
  */
-import { and, or, eq, gte, lte, isNotNull, isNull } from "drizzle-orm";
+import { and, or, eq, gte, lte, isNotNull, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   invoices,
@@ -46,6 +46,8 @@ export interface JournalLine {
   /** Amount in decimal DOLLARS (cents/100). Always positive; `type`/`account`
    * carry the debit/credit semantics. */
   readonly amountDollars: number;
+  /** External system this row was mirrored from. Undefined for native rows. */
+  readonly source?: "fieldpulse" | "housecall";
 }
 
 export interface AccountingExportPeriod {
@@ -125,12 +127,18 @@ export async function getAccountingExport(
       ),
 
     // Synced invoices (FP- or HCP-mirrored) — listed separately, NOT imported to ledger.
+    // Filtered and dated by coalesce(issuedAt, createdAt) — issuedAt is the real
+    // source-system invoice date; createdAt is only when WE imported the row
+    // (schema.ts:2769-2774). Matches /admin/invoices and /admin/operations.
     db
       .select({
         id: invoices.id,
         subtotalCents: invoices.subtotalCents,
         taxCents: invoices.taxCents,
         createdAt: invoices.createdAt,
+        issuedAt: invoices.issuedAt,
+        fieldpulseInvoiceId: invoices.fieldpulseInvoiceId,
+        hcpInvoiceId: invoices.hcpInvoiceId,
       })
       .from(invoices)
       .where(
@@ -138,8 +146,8 @@ export async function getAccountingExport(
           invoices,
           organizationId,
           or(isNotNull(invoices.fieldpulseInvoiceId), isNotNull(invoices.hcpInvoiceId))!,
-          gte(invoices.createdAt, fromDate),
-          lte(invoices.createdAt, toDate),
+          gte(sql`coalesce(${invoices.issuedAt}, ${invoices.createdAt})`, fromDate),
+          lte(sql`coalesce(${invoices.issuedAt}, ${invoices.createdAt})`, toDate),
         ),
       ),
 
@@ -242,12 +250,16 @@ export async function getAccountingExport(
   for (const inv of syncedInvoiceRows) {
     const revenueCents = inv.subtotalCents + inv.taxCents;
     if (revenueCents === 0) continue;
+    // issuedAt is the real source-system invoice date; createdAt is only
+    // when WE imported the row (see the query comment above).
+    const effectiveDate = inv.issuedAt ?? inv.createdAt;
     synced.push({
-      date: isoDate(inv.createdAt),
+      date: isoDate(effectiveDate),
       type: "invoice",
       account: "Sales Revenue",
       memo: `Invoice ${inv.id}`,
       amountDollars: centsToDollars(revenueCents),
+      source: inv.fieldpulseInvoiceId ? "fieldpulse" : "housecall",
     });
   }
 
@@ -268,6 +280,9 @@ export async function getAccountingExport(
       account: "Undeposited Funds",
       memo: `Payment ${pay.id} (invoice ${pay.invoiceId})`,
       amountDollars: centsToDollars(pay.amountCents),
+      // HCP never writes to `payments` (no HCP payment mirror) — every synced
+      // payment row is FieldPulse-sourced.
+      source: "fieldpulse",
     });
   }
 
@@ -306,6 +321,25 @@ function csvField(value: string | number): string {
 }
 
 const CSV_HEADER = ["Date", "Type", "Account", "Memo", "Amount"] as const;
+
+/**
+ * The synced-section subtotal label, attributed to the actual source(s) of the
+ * rows in `lines` — never a hardcoded "FieldPulse", since an HCP-only org's
+ * synced rows never touched FieldPulse.
+ */
+function syncedSubtotalLabel(lines: readonly JournalLine[]): string {
+  const sources = new Set(
+    lines
+      .map((l) => l.source)
+      .filter((s): s is NonNullable<JournalLine["source"]> => Boolean(s)),
+  );
+  if (sources.size === 1) {
+    const [only] = sources;
+    return only === "fieldpulse" ? "FieldPulse synced subtotal" : "HCP synced subtotal";
+  }
+  // Mixed sources or no synced rows — stay source-neutral rather than guess.
+  return "Synced subtotal";
+}
 
 /** Serialize one section of lines (header already written) into CSV rows. */
 function csvRows(lines: readonly JournalLine[]): string[] {
@@ -355,7 +389,7 @@ export function buildCsv(result: AccountingExportResult): string {
       csvField(""),
       csvField("subtotal"),
       csvField(""),
-      csvField("FieldPulse synced subtotal"),
+      csvField(syncedSubtotalLabel(result.synced)),
       csvField(syncedTotal.toFixed(2)),
     ].join(","),
   ];

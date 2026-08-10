@@ -3,13 +3,13 @@
  *
  * Terminal + irreversible: scrubs all of the customer's PII and nulls the blind
  * indexes (so the contact can never be re-resolved to this row), while KEEPING
- * the de-identified financial history. Admin+ in the acting admin's own org only
- * (the dashboard layout guarantees an admin/super_admin session — technicians
- * never hold one). Tenant-scoped, rate-limited, audited (counts only, no PII).
+ * the de-identified financial history. super_admin only, in the acting admin's
+ * own org, and never the public demo account (defense-in-depth on top of the
+ * role gate). Tenant-scoped, rate-limited, audited (counts only, no PII).
  */
 import { NextRequest } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
-import { isSuperAdmin } from "@/lib/auth/authz";
+import { isSuperAdmin, isDemoAccount } from "@/lib/auth/authz";
 import { anonymizeCustomer } from "@/lib/admin/erasure-queries";
 import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
@@ -29,6 +29,17 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const session = await getAdminSession();
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
+    }
+    // Defense-in-depth: block the public portfolio demo account outright, even
+    // if it somehow held super_admin — today it's blocked only incidentally
+    // because the seeded demo role is "admin" (mirrors send-reminder/route.ts
+    // and conversations/[id]/message/route.ts).
+    if (isDemoAccount(session)) {
+      return errorResponse(
+        "Erasing customer data is disabled for the demo account",
+        "DEMO_RESTRICTED",
+        403,
+      );
     }
     // Irreversible PII destruction is owner-tier only — aligns with the export
     // routes. (Also keeps the public demo admin from wiping real customers.)

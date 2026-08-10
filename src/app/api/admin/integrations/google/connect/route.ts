@@ -5,11 +5,13 @@
  * in an httpOnly cookie, and redirects the admin to Google's consent screen.
  *
  * DEGRADES SAFELY: if GOOGLE_CLIENT_ID/SECRET/REDIRECT_URI aren't set, returns a
- * clear 503 "not configured" instead of a broken redirect. Admin-session-gated
- * + rate-limited + audited.
+ * clear 503 "not configured" instead of a broken redirect. Gsettings-2:
+ * super_admin-gated (an admin can overwrite the org's calendar credential) +
+ * rate-limited + audited.
  */
 import { NextResponse } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
+import { isSuperAdmin } from "@/lib/auth/authz";
 import { logAudit } from "@/lib/admin/audit";
 import { errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
@@ -29,6 +31,9 @@ export async function GET(): Promise<Response> {
     const session = await getAdminSession();
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
+    }
+    if (!isSuperAdmin(session)) {
+      return errorResponse("Forbidden", "FORBIDDEN", 403);
     }
 
     const rateCheck = slidingWindow(

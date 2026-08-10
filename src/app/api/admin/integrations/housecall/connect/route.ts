@@ -5,14 +5,17 @@
  * a live probe (getAccountInfo) before persisting, then stores it ENCRYPTED and
  * caches the non-secret account metadata.
  *
- * Admin-session-gated + rate-limited + audited. The submitted key is validated
- * against the live HCP API (the ONE place a real call is made); on success it
- * is encrypted at rest. The key is NEVER logged and NEVER returned. An invalid
- * key yields a clear 400 rather than a stored-but-broken connection.
+ * Super_admin-gated (Gsettings-2: any admin could otherwise overwrite the
+ * org's CRM credential) + rate-limited + audited. The submitted key is
+ * validated against the live HCP API (the ONE place a real call is made); on
+ * success it is encrypted at rest. The key is NEVER logged and NEVER
+ * returned. An invalid key yields a clear 400 rather than a stored-but-broken
+ * connection.
  */
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { getAdminSession } from "@/lib/auth/session";
+import { isSuperAdmin } from "@/lib/auth/authz";
 import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
@@ -41,6 +44,9 @@ export async function POST(request: NextRequest): Promise<Response> {
     const session = await getAdminSession();
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
+    }
+    if (!isSuperAdmin(session)) {
+      return errorResponse("Forbidden", "FORBIDDEN", 403);
     }
 
     const rateCheck = slidingWindow(

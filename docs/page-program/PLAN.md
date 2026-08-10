@@ -33,6 +33,25 @@ listed with reasons — performative compliance would bloat the plan.
 | W0-1 | Technician-session mint script (`scripts/agent/mint-tech-session.mjs`) mirroring the admin one, so `/tech/*` can be screenshot-verified at 390px | `scripts/agent/` | Wave D's tech items cannot be visually verified without it |
 | W0-2 | Re-author the last-admin guard trigger as `drizzle/0044_last_admin_guard.sql` — `--> statement-breakpoint` separators, `_journal.json` entry, snapshot copy, then `drizzle-kit generate` must report "No schema changes" | `drizzle/` | Only migration in the run; must land alone to avoid numbering collisions. Serves `Rstaff-1` + `Rtechnicians-1` |
 
+**W0-2 corrections from plan review (do not skip — either one breaks prod):**
+
+1. **Recover `0027`, not `0008`.** The 2026-06-16 squash (`0cea181`) deleted
+   *two* migrations. `0027_last_admin_guard_super_admin.sql` superseded
+   `0008_last_admin_guard.sql` with different semantics — `OLD.role IN
+   ('admin','super_admin')` vs `OLD.role = 'admin'` only — and its commit
+   message records that it fixed a real super_admin-lockout bug. Recover with
+   `git show a117843:drizzle/0027_last_admin_guard_super_admin.sql`. The
+   `technicians.md` spec cites `git show 392cbc4:drizzle/0008_…`, which would
+   reintroduce the exact bug `0027` fixed.
+2. **The migration MUST be idempotent.** The trigger and function already
+   exist on both dev and prod (they predate the squash). Migrations auto-run
+   in the Vercel build, so a bare `CREATE TRIGGER` fails the next production
+   deploy. Use `CREATE OR REPLACE FUNCTION` + `DROP TRIGGER IF EXISTS` before
+   `CREATE TRIGGER`.
+3. Verifying "a fresh DB now gets the trigger" cannot be done on the dev Neon
+   branch — dev already has it. Prove idempotency there instead (migration
+   re-runs clean), and prove creation-from-nothing by reading the SQL.
+
 ## Wave A — security and safety
 
 | id | Requirement | Change | Files |
@@ -47,6 +66,8 @@ listed with reasons — performative compliance would bloat the plan.
 | A8 | `Raudit-log-1` (P0) | Free-text, unconstrained `name` values are interpolated straight into `audit_log.details`, which the viewer renders verbatim — violates the field-names-only invariant | `src/app/api/admin/membership-plans/route.ts:86`, `.../pricebook/route.ts:125` |
 | A9 | `Raudit-log-3` | `DELETE /api/admin/conversations/[id]` is reachable by any authenticated role and permanently deletes that session's prior `audit_log` rows — the page's whole promise is immutability. Add the role gate and stop the audit wipe | `src/app/api/admin/conversations/[id]/route.ts` |
 | A10 | `Rsettings-2` | Google Calendar / Housecall Pro / FieldPulse credential connect+disconnect require only `getAdminSession()`, not `isSuperAdmin` — any admin can overwrite the org's external CRM credential. Matches the page's own precedent (AI model and billing are both `super_admin`-gated) | `src/app/api/admin/settings/**/connect` routes |
+
+| A11 | **new — P0** (ops missed-risk O-R-1) | **A deactivated technician's emergency goes invisible.** Deactivation flips `users.isActive` only (`staff-queries.ts:312-325`); it never clears `assignedTo`. The dashboard's "needs attention" triage list requires `assignedTo IS NULL` (`queries.ts:1217-1241`), so a no-heat emergency assigned to a since-deactivated technician disappears from the one screen meant to catch it — while "today's schedule" still shows that technician's name against the job, implying coverage that does not exist. Dispatch and calendar already treat such jobs as unassigned; make the dashboard consistent (treat assigned-to-inactive as unassigned, and filter the schedule join) rather than mutating rows on deactivation | `src/lib/admin/queries.ts` |
 
 ## Wave B — money correctness
 
@@ -69,7 +90,32 @@ listed with reasons — performative compliance would bloat the plan.
 | C3 | `Rdashboard-1`, `-2`, `Rinsights-ai-1`, `-2` | `db.batch()` replaces `Promise.all` in `getDashboardOverview` and `getBotAnalytics` (repo invariant); dashboard surfaces overdue-invoice signal; insights sections disclose their period | `src/lib/admin/queries.ts`, `bot-analytics-queries.ts`, both pages |
 | C4 | `Rfieldpulse-import-1`, `-2` | All 11 pipeline phases shown, not 4; a run stuck in `running` is detectable and recoverable | `src/lib/admin/import-status-model.ts`, page |
 | C5 | `Rintegrations-1`, `-2` | "Connected" stops being a write-once lie — surface the `lastSyncError`/`availabilitySyncStatus` columns that are already written and read by nothing | `src/lib/admin/integration-queries.ts`, integrations page |
+| C8 | **new — P1** (ops missed-risk O-R-2) | The calendar's "Unscheduled" queue is capped at 50, sorted oldest-first with no urgency ordering (`queries.ts:1419-1436`) — once the backlog passes 50, a fresh emergency is excluded from the very panel dispatchers place jobs from | `src/lib/admin/queries.ts` |
+| C9 | **new — P2→built** (ops missed-risk O-R-3) | The dispatch map's technician-location query has no `isActive` filter (`map/route.ts:130-146`), so a deactivated technician's last-known pin renders indistinguishably from an active one. Cheap one-predicate fix; folded into C1 since it is the same file family | `src/app/api/admin/map/route.ts` |
+| C7 | **new — P1** (ops-scope O-S, verified by me) | Dispatch board job cards format a real ISO instant with `timeZone: 'UTC'` (`dispatch-column.tsx:29-33`), so every arrival time on an Eastern-anchored board displays 4–5 hours off. `map-pins.ts:85-86` already takes a proper `tz`, so the codebase knows better elsewhere. NOTE: `dispatch/page.tsx:48-56` is **correct** and must not be "fixed" — it renders a date-only value pinned at UTC midnight, which is the right way to display a plain date. This partially overturns `dispatch.md`'s 0 P0/P1 all-clear | `src/components/admin/dispatch/dispatch-column.tsx` |
 | C6 | `Rportal-2`, `-3`, `-4` | Portal history sourced from `service_requests` (`service_history` is empty org-wide); draft invoices excluded; a working token-revoke path | portal route + queries |
+
+| A12 | **new — P1** (workspace missed-risk W-R-2) | Cross-tenant identity leak: `getAuditLog`'s actor-name join (`audit-queries.ts:58-67`) is a `leftJoin(users, …)` with NO `organizationId` predicate. Where `userId` and `organizationId` diverge — the `org_provisioned` row — every provisioned org's own `/admin/audit-log` page discloses the platform admin's real name. The audit-log spec's PII sweep examined `details` payloads, not the join | `src/lib/admin/audit-queries.ts` |
+
+Also recorded from W-R-1 (feeds D12, not built in A): `org_provisioned` is
+written only to the new org's own `audit_log`, never to `platformAuditLog` —
+so the platform audit viewer D12 builds would ship blind to tenant
+provisioning. `platform.md` cites that write site as a `platformAuditLog` path;
+it is not one. Fix when D12 is built, not before.
+
+| A13 | **new — P0** (plan review O-3) | A7 closes the account-lookup intents, but `GET /api/chat/history` is an INDEPENDENT leak on the same false premise: it returns past-conversation snippets keyed off `session.customerId`, which the unverified contact-field match sets. A7 alone does not close it. Gate the history read on the same verification state, and keep `Rchat-1` (D11) blocked until both land | `src/app/api/chat/history/route.ts` |
+
+## Wave D-committed — P0 work promoted out of best-effort (plan review O-1)
+
+The omissions critic was right that filing P0s under "best-effort" is a hedge.
+These four are P0 in their own specs and are committed scope, not best-effort:
+
+| id | Requirement | Why it is P0 |
+|---|---|---|
+| DC-1 | `Rconv-1` | The human-takeover reply API is fully built server-side — consent-gated, rate-limited, audited — with ZERO UI entry point. An operator cannot take over a conversation at all. |
+| DC-2 | `Rcommunications-1` (+`-4`, merged) | 4 of 15 live trigger types are unmanageable from the templates page; those rows exist only because a seed bypassed the CRUD validation. |
+| DC-3 | `Rcommunications-3` (re-scoped) | Deleting a template CASCADE-deletes its entire send history, while the confirm dialog promises a "fallback to defaults" that does not exist. Re-scoped to refuse deletion when history rows exist — no FK migration. |
+| DC-4 | `Rtech-1` | A ~16×16px destructive control on a one-handed mobile app used at a customer's furnace. |
 
 ## Wave D — workflow holes (best-effort; ordered by value)
 
@@ -93,7 +139,11 @@ unavailable)") and `Raudit-log-4` (entity filter missing 10 live values).
 - `Rhome-1` — SEO/OG metadata. Real, but P2; `home` ships nothing this run.
 - `Rpricebook-3` — category tree UI. Manufactured work.
 - `Rcommunications-7` — booking-recovery rewrite. Nothing is broken.
-- `dispatch` — 0 P0/P1. The spec signed the page off and the evidence held.
+- `dispatch` — the spec found 0 P0/P1 and its evidence held on every claim the
+  evidence critic re-checked (server-side confidence gate, shadow-mode
+  isolation, no-double-assign CAS). It is **not** a clean sweep though: C7
+  above fixes a real UTC-vs-Eastern display bug the spec rated P2. So: no
+  dispatch *logic* work, one dispatch *display* fix.
 - All 74 P2 items — recorded in their specs, backlog per the severity gate.
 - Anything requiring Housecall Pro or FieldPulse API keys the repo lacks.
 - **Money missed-risk M-R-2** — `enrollCustomer`'s `chargeFirstPeriod` charge is
@@ -105,6 +155,24 @@ unavailable)") and `Raudit-log-4` (entity filter missing 10 live values).
 - **Money missed-risk M-R-1** — `buildCsv` sums already-converted float dollars
   rather than integer cents (`accounting-export.ts:334-335`). Inert at current
   scale; folded into B2 only if it is a one-line change while that file is open.
+
+## Plan-review outcomes (round 1)
+
+Three lenses ran against this plan: feasibility, sequencing/collision, omissions.
+
+| Finding | Decision |
+|---|---|
+| **Feasibility F — A1 is infeasible as written.** A nested route group cannot remove `<Analytics/>` rendered by the root layout; the only "multiple root layouts" mechanism would restructure the entire app tree. | **Accepted.** A1 re-specced to `beforeSend` masking, which the installed `@vercel/analytics` types confirm (`BeforeSend = (event) => event \| null`). Needs a small client wrapper, since a function prop cannot cross the server→client boundary. |
+| Feasibility — A10 and C1/C4 cite paths that do not exist (`integrations/` not `settings/`; `components/admin/dispatch/` not `lib/admin/`). | **Accepted**, paths corrected during execution; the build agents found the real files. |
+| Feasibility — C3's `db.batch()` swap is not purely mechanical: one of `getDashboardOverview`'s four branches is a wrapped async helper drizzle's `batch<U extends BatchItem<'pg'>>` signature rejects. | **Accepted** — flagged to the implementing agent. |
+| **Sequencing S-5 (blocker) — A7 will break 3 named existing tests** because `requiresVerify` is shared with `voice-turn.ts`, which was not in A7's Files column. | **Accepted, and it happened exactly as predicted.** The implementing agent updated `voice-turn.test.ts`'s two cases, which had encoded the pre-fix vulnerable behaviour. |
+| Sequencing S-4 — A3's chokepoint has 6 callers, 3 of them cron-driven with no session, so an email-keyed `isDemoAccount(session)` cannot cover them. | **Accepted** — the guard must be org-id-keyed, not session-keyed. |
+| Sequencing S-1 — "A2 is already shipped; the guard exists in commit `9991c2e`". | **Rejected.** I checked `git show e7450a7:src/app/api/auth/login/route.ts` directly: no `isSameOriginRequest`, no `hasJsonContentType`. The guard was absent when the plan was written. |
+| **Omissions O-1 (blocker)** — four P0 requirements filed under "best-effort". | **Accepted.** Promoted to Wave D-committed above. |
+| **Omissions O-2 (blocker)** — the plan contradicted itself about `dispatch`. | **Accepted.** "Not being built" reworded. |
+| Omissions O-3 — A7 closes only part of the chat-leak finding; `GET /api/chat/history` is independently exploitable. | **Accepted.** Added as A13. |
+| Omissions O-4 — chat's per-instance rate limiter on its highest-cost LLM surface is never mentioned. | **Acknowledged, not built.** It is the same in-memory-`Map` limitation `auth.md` already tracks; fixing it properly needs shared state (Redis/KV) this deployment does not have. Recorded as a real, unaddressed exposure rather than silently dropped. |
+| Omissions O-5 — `settings.md` smuggled a P2 into `Rsettings-1`, the same pattern fixed for pricebook/estimates. | **Accepted.** The P2 sub-item (dead `businessInfo.email` schema field) stays backlog; only the saved-but-ignored `website` field is in scope. |
 
 ## Gates (every wave)
 

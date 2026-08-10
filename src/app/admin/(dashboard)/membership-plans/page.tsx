@@ -13,12 +13,15 @@ import { PageHeader } from '@/components/admin/ui/page-header';
 
 export default function MembershipPlansPage() {
   useEffect(() => { document.title = 'Membership plans · Spears Admin'; }, []);
-  const { plans, isLoading, error, refetch } = useMembershipPlans();
+  const [showInactive, setShowInactive] = useState(false);
+  const { plans, isLoading, error, refetch } = useMembershipPlans(showInactive);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<MembershipPlan | null>(null);
   const [deactivateError, setDeactivateError] = useState<string | null>(null);
   const [pendingDeactivate, setPendingDeactivate] = useState<MembershipPlan | null>(null);
   const [isConfirming, setIsConfirming] = useState(false);
+  const [reactivateError, setReactivateError] = useState<string | null>(null);
+  const [reactivatingId, setReactivatingId] = useState<string | null>(null);
 
   function handleAddClick(): void {
     setEditing(null);
@@ -52,6 +55,29 @@ export default function MembershipPlansPage() {
     }
   }
 
+  async function handleReactivate(plan: MembershipPlan): Promise<void> {
+    if (reactivatingId) return;
+    setReactivatingId(plan.id);
+    setReactivateError(null);
+    try {
+      const res = await fetch(`/api/admin/membership-plans/${plan.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: true }),
+      });
+      if (res.ok) {
+        void refetch();
+      } else {
+        const body = await res.json().catch(() => ({}));
+        setReactivateError((body as { error?: string }).error ?? 'Failed to reactivate plan.');
+      }
+    } catch {
+      setReactivateError('Network error — could not reactivate plan.');
+    } finally {
+      setReactivatingId(null);
+    }
+  }
+
   return (
     <PageShell>
       <PageHeader
@@ -72,11 +98,32 @@ export default function MembershipPlansPage() {
         </Alert>
       )}
 
+      {reactivateError && (
+        <Alert variant="destructive">
+          <AlertCircle className="size-4" />
+          <AlertDescription>{reactivateError}</AlertDescription>
+        </Alert>
+      )}
+
+      <div className="flex items-center justify-end">
+        <Button
+          type="button"
+          variant={showInactive ? 'secondary' : 'outline'}
+          size="sm"
+          onClick={() => setShowInactive((v) => !v)}
+          aria-pressed={showInactive}
+        >
+          Show inactive
+        </Button>
+      </div>
+
       <MembershipPlansTable
         plans={plans}
         isLoading={isLoading}
         onEdit={handleEditClick}
         onDeactivate={(plan) => { setDeactivateError(null); setPendingDeactivate(plan); }}
+        onReactivate={(plan) => { void handleReactivate(plan); }}
+        reactivatingId={reactivatingId}
         onAdd={handleAddClick}
       />
 

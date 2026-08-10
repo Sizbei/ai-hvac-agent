@@ -391,7 +391,10 @@ export async function getConversationById(
  * dependent tables declare ON DELETE CASCADE:
  *   1. service_history (references service_requests.id)
  *   2. service_requests (references customer_sessions.id, NOT NULL)
- *   3. audit_log        (references customer_sessions.id, nullable)
+ *   3. audit_log        (references customer_sessions.id, nullable) — NOT
+ *      deleted. audit_log is an immutable record; instead its sessionId FK is
+ *      nulled out (column is nullable) so the rows survive the conversation
+ *      they describe, satisfying the FK before customer_sessions is dropped.
  *   4. messages         (references customer_sessions.id, NOT NULL)
  *   5. customer_sessions (the conversation itself)
  *
@@ -456,9 +459,13 @@ export async function deleteConversation(
           eq(serviceRequests.sessionId, sessionId),
         ),
       ),
-    // 2. audit_log rows referencing this session (sessionId is nullable).
+    // 2. audit_log rows referencing this session are preserved, not deleted —
+    // the audit trail must outlive the conversation it describes. Null out the
+    // (nullable) sessionId FK instead so the row still satisfies the
+    // foreign key once customer_sessions is dropped below.
     db
-      .delete(auditLog)
+      .update(auditLog)
+      .set({ sessionId: null })
       .where(
         withTenant(auditLog, organizationId, eq(auditLog.sessionId, sessionId)),
       ),

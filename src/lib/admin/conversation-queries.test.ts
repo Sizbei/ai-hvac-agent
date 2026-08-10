@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ─── Hoisted mock state ─────────────────────────────────────────────
-const { selectQueue, batchMock, chain } = vi.hoisted(() => {
+const { selectQueue, batchMock, chain, deleteCalls, updateCalls } = vi.hoisted(() => {
   const selectQueue: unknown[][] = [];
   const batchMock = vi.fn(async (..._args: unknown[]) => [] as unknown[]);
+  const deleteCalls: unknown[] = [];
+  const updateCalls: Array<{ table: unknown; values: unknown }> = [];
   const chain = (resolved: unknown): unknown => {
     const p: unknown = new Proxy(() => {}, {
       get(_t, prop) {
@@ -16,15 +18,23 @@ const { selectQueue, batchMock, chain } = vi.hoisted(() => {
     });
     return p;
   };
-  return { selectQueue, batchMock, chain };
+  return { selectQueue, batchMock, chain, deleteCalls, updateCalls };
 });
 
 vi.mock('@/lib/db', () => ({
   db: {
     select: () => chain(selectQueue.shift() ?? []),
-    delete: () => chain([]),
+    delete: (table: unknown) => {
+      deleteCalls.push(table);
+      return chain([]);
+    },
     insert: () => chain([]),
-    update: () => chain([]),
+    update: (table: unknown) => ({
+      set: (values: unknown) => {
+        updateCalls.push({ table, values });
+        return chain([]);
+      },
+    }),
     batch: (...args: unknown[]) => batchMock(...args),
   },
 }));
@@ -67,6 +77,7 @@ vi.mock('@/lib/db/schema', () => ({
 }));
 
 import { deleteConversation, getConversationById } from './conversation-queries';
+import { auditLog } from '@/lib/db/schema';
 
 const ORG = '00000000-0000-0000-0000-000000000001';
 
@@ -74,6 +85,8 @@ beforeEach(() => {
   selectQueue.length = 0;
   batchMock.mockClear();
   batchMock.mockResolvedValue([]);
+  deleteCalls.length = 0;
+  updateCalls.length = 0;
 });
 
 describe('getConversationById', () => {
@@ -124,9 +137,23 @@ describe('deleteConversation', () => {
     });
     expect(result).toBe(true);
     expect(batchMock).toHaveBeenCalledTimes(1);
-    // service_history + service_requests + audit_log + messages + session
-    // deletes, then the conversation_deleted audit insert.
+    // service_history + service_requests + audit_log (updated, not deleted) +
+    // messages + session deletes, then the conversation_deleted audit insert.
     const statements = batchMock.mock.calls[0][0] as unknown[];
     expect(statements).toHaveLength(6);
+  });
+
+  it('preserves audit_log rows by nulling sessionId instead of deleting them', async () => {
+    selectQueue.push([{ id: 's1' }]); // existence check → found
+    await deleteConversation(ORG, 's1', {
+      userId: 'admin-1',
+      ipAddress: '1.2.3.4',
+    });
+    // audit_log must never be hard-deleted as part of this cascade.
+    expect(deleteCalls).not.toContain(auditLog);
+    // Instead, its sessionId FK is nulled out so the row survives.
+    expect(updateCalls).toHaveLength(1);
+    expect(updateCalls[0].table).toBe(auditLog);
+    expect(updateCalls[0].values).toEqual({ sessionId: null });
   });
 });

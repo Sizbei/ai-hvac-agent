@@ -1,4 +1,5 @@
 import { it, expect, vi, beforeEach } from "vitest";
+import { NextRequest } from "next/server";
 
 const acceptInvite = vi.fn();
 vi.mock("@/lib/admin/invites", () => ({
@@ -28,12 +29,21 @@ import { POST } from "./route";
 
 const TOKEN = "a".repeat(64);
 
-function req(body: unknown) {
-  return new Request("https://app.example.com/api/auth/invite/accept", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  }) as unknown as import("next/server").NextRequest;
+const SELF_ORIGIN = "https://app.example.com";
+
+function req(body: unknown, headers: Record<string, string> = {}) {
+  return new NextRequest(
+    new URL("https://app.example.com/api/auth/invite/accept"),
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: SELF_ORIGIN,
+        ...headers,
+      },
+      body: JSON.stringify(body),
+    },
+  );
 }
 
 beforeEach(() => {
@@ -138,4 +148,36 @@ it("collapses every accept failure to one generic 400 (no enumeration)", async (
     // No account was created → nothing to audit.
     expect(logAudit).not.toHaveBeenCalled();
   }
+});
+
+it("rejects a cross-origin request with a 403 before touching acceptInvite", async () => {
+  const res = await POST(
+    req(
+      { token: TOKEN, name: "N", password: "password1" },
+      { origin: "https://evil.example" },
+    ),
+  );
+  expect(res.status).toBe(403);
+  const json = await res.json();
+  expect(json.error.code).toBe("FORBIDDEN_ORIGIN");
+  expect(acceptInvite).not.toHaveBeenCalled();
+});
+
+it("rejects a request with no Origin header (never a legitimate browser POST)", async () => {
+  const res = await POST(
+    req({ token: TOKEN, name: "N", password: "password1" }, { origin: "" }),
+  );
+  expect(res.status).toBe(403);
+  expect(acceptInvite).not.toHaveBeenCalled();
+});
+
+it("rejects a non-JSON content type (no-preflight form-POST vector)", async () => {
+  const res = await POST(
+    req(
+      { token: TOKEN, name: "N", password: "password1" },
+      { "content-type": "text/plain" },
+    ),
+  );
+  expect(res.status).toBe(415);
+  expect(acceptInvite).not.toHaveBeenCalled();
 });

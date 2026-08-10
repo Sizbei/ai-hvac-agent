@@ -1,27 +1,36 @@
 #!/usr/bin/env node
 /**
- * Screenshot an admin page on the local dev server with a minted session.
- * Requires the dev server to ALREADY be running on :3000 (this script never
- * starts or kills servers).
+ * Screenshot an admin (or, with --tech, technician) page on the local dev
+ * server with a minted session. Requires the dev server to ALREADY be
+ * running on :3000 (this script never starts or kills servers).
  *
  *   node scripts/agent/screenshot-page.mjs /admin/map [width] [outfile]
+ *   node scripts/agent/screenshot-page.mjs /tech/jobs [width] [outfile] --tech
  *
  * Defaults: width 1440 (height 900; 390 → 844), outfile ./page-shot.png.
+ * Without --tech, behavior is unchanged: mints hvac_admin_session via
+ * mint-admin-session.mjs. With --tech, mints hvac_tech_session via
+ * mint-tech-session.mjs instead.
  * Prints the outfile path on success.
  */
 import { execFileSync } from "child_process";
 import { chromium } from "playwright";
 
-const [, , path = "/admin", widthArg, outArg] = process.argv;
+const rawArgs = process.argv.slice(2);
+const isTech = rawArgs.includes("--tech");
+const [path = "/admin", widthArg, outArg] = rawArgs.filter(
+  (a) => a !== "--tech",
+);
 const width = Number(widthArg) || 1440;
 const height = width <= 500 ? 844 : 900;
 const outfile = outArg || "./page-shot.png";
 
-const token = execFileSync(
-  "npx",
-  ["tsx", "scripts/agent/mint-admin-session.mjs"],
-  { encoding: "utf8" },
-)
+const mintScript = isTech
+  ? "scripts/agent/mint-tech-session.mjs"
+  : "scripts/agent/mint-admin-session.mjs";
+const cookieName = isTech ? "hvac_tech_session" : "hvac_admin_session";
+
+const token = execFileSync("npx", ["tsx", mintScript], { encoding: "utf8" })
   .trim()
   .split("\n")
   .pop();
@@ -32,7 +41,7 @@ const ctx = await browser.newContext({
   deviceScaleFactor: 2,
 });
 await ctx.addCookies([
-  { name: "hvac_admin_session", value: token, domain: "localhost", path: "/" },
+  { name: cookieName, value: token, domain: "localhost", path: "/" },
 ]);
 const page = await ctx.newPage();
 await page.goto(`http://localhost:3000${path}`, {

@@ -62,7 +62,11 @@ export interface SalesReport {
   readonly estimatesSold: number;
   readonly estimatesOpen: number;
   readonly estimatesExpired: number;
-  /** sold / (open + sold + expired) * 100, rounded to one decimal. 0 when no decided/open estimates. */
+  /** A real, decided "lost" outcome — matches /admin/estimates' bucket
+   * classifier, which groups status IN ('dismissed','expired') as 'lost'. Must
+   * always be counted so open+sold+expired+dismissed sums to estimatesCreated. */
+  readonly estimatesDismissed: number;
+  /** sold / (open + sold + expired + dismissed) * 100, rounded to one decimal. 0 when no decided/open estimates. */
   readonly closeRatePct: number;
   readonly invoicesCreated: number;
   readonly invoicesPaid: number;
@@ -152,7 +156,11 @@ export async function getSalesReport(
 
     // Estimate buckets in ONE pass, created within the period. Expiry is lazy
     // (expiresAt is only enforced at approval), so an 'open' estimate whose
-    // expiresAt is in the past is bucketed as expired here, NOT open.
+    // expiresAt is in the past is bucketed as expired here, NOT open. `dismissed`
+    // is its own branch (status has 4 values: open/sold/dismissed/expired) so
+    // every row lands in exactly one of these four CASE branches — sold + expired
+    // + open + dismissed always sums to `created`, with no status silently
+    // vanishing from the report.
     db
       .select({
         created: count(),
@@ -169,6 +177,9 @@ export async function getSalesReport(
                     AND (${estimates.expiresAt} IS NULL
                          OR ${estimates.expiresAt} >= ${now})
                    THEN 1 END`,
+        ),
+        dismissed: count(
+          sql`CASE WHEN ${estimates.status} = 'dismissed' THEN 1 END`,
         ),
       })
       .from(estimates)
@@ -228,8 +239,10 @@ export async function getSalesReport(
   const estimatesSold = toNumber(estimateRow[0]?.sold);
   const estimatesExpired = toNumber(estimateRow[0]?.expired);
   const estimatesOpen = toNumber(estimateRow[0]?.open);
+  const estimatesDismissed = toNumber(estimateRow[0]?.dismissed);
 
-  const closeDenominator = estimatesOpen + estimatesSold + estimatesExpired;
+  const closeDenominator =
+    estimatesOpen + estimatesSold + estimatesExpired + estimatesDismissed;
   const closeRatePct =
     closeDenominator > 0
       ? Math.round((estimatesSold / closeDenominator) * 1000) / 10
@@ -252,6 +265,7 @@ export async function getSalesReport(
     estimatesSold,
     estimatesOpen,
     estimatesExpired,
+    estimatesDismissed,
     closeRatePct,
     invoicesCreated,
     invoicesPaid,

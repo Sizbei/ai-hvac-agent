@@ -1046,9 +1046,10 @@ export async function updateTechnician(
   };
 }
 
-export async function getDashboardStats(
-  organizationId: string,
-): Promise<DashboardStats> {
+// Builds (without awaiting) the single aggregate stats query so it can be
+// awaited directly by getDashboardStats or handed to db.batch() alongside the
+// dashboard's other queries by getDashboardOverview — same SQL either way.
+function buildDashboardStatsQuery(organizationId: string) {
   const todayBounds = businessDayBounds(businessIsoDate(new Date()))!;
   const todayStart = todayBounds.start;
 
@@ -1058,7 +1059,7 @@ export async function getDashboardStats(
   // NATIVE vs IMPORTED: all status buckets count only native (non-FP/non-HCP)
   // service requests. importedPending is the FP-imported pending count for the
   // "+N imported" suffix shown in the UI.
-  const [result] = await db
+  return db
     .select({
       pending: count(sql`CASE WHEN ${serviceRequests.status} = 'pending' AND ${serviceRequests.fieldpulseJobId} IS NULL AND ${serviceRequests.hcpJobId} IS NULL THEN 1 END`),
       assignedToday: count(
@@ -1089,7 +1090,13 @@ export async function getDashboardStats(
     })
     .from(serviceRequests)
     .where(withTenant(serviceRequests, organizationId));
+}
 
+type DashboardStatsRow = Awaited<
+  ReturnType<typeof buildDashboardStatsQuery>
+>[number];
+
+function toDashboardStats(result: DashboardStatsRow | undefined): DashboardStats {
   return {
     pending: result?.pending ?? 0,
     assignedToday: result?.assignedToday ?? 0,
@@ -1101,6 +1108,13 @@ export async function getDashboardStats(
     afterHoursToday: result?.afterHoursToday ?? 0,
     importedPending: result?.importedPending ?? 0,
   };
+}
+
+export async function getDashboardStats(
+  organizationId: string,
+): Promise<DashboardStats> {
+  const [result] = await buildDashboardStatsQuery(organizationId);
+  return toDashboardStats(result);
 }
 
 // The column set every dashboard list query selects, so they all map through
@@ -1123,7 +1137,11 @@ const dashboardRequestSelect = {
   urgency: serviceRequests.urgency,
   status: serviceRequests.status,
   isAfterHours: serviceRequests.isAfterHours,
-  assignedToName: users.name,
+  // A deactivated technician's name is withheld here too: showing it would
+  // imply coverage that no longer exists (dispatch/calendar already drop
+  // deactivated techs from their columns/lanes — this keeps every list built
+  // on this select consistent with that, without mutating assignedTo itself).
+  assignedToName: sql<string | null>`CASE WHEN ${users.isActive} = true THEN ${users.name} ELSE NULL END`,
   arrivalWindowStart: serviceRequests.arrivalWindowStart,
   arrivalWindowEnd: serviceRequests.arrivalWindowEnd,
   followUpDate: serviceRequests.followUpDate,
@@ -1191,10 +1209,11 @@ export async function getDashboardOverview(
   const todayStart = todayBounds.start;
   const tomorrowStart = todayBounds.end;
 
-  // Run all queries in parallel to reduce latency (1 DB round-trip vs 4 sequential).
-  // Neon's pgwire protocol supports multiple concurrent queries per connection.
-  const [stats, scheduleRows, attentionRows, followUpRows] = await Promise.all([
-    getDashboardStats(organizationId),
+  // db.batch(): 1 HTTP round-trip for all four queries, matching the
+  // neon-http invariant every sibling aggregation follows (ai-insights-queries,
+  // conversation-queries, crm-queries) instead of Promise.all's 4 round-trips.
+  const [statsRows, scheduleRows, attentionRows, followUpRows] = await db.batch([
+    buildDashboardStatsQuery(organizationId),
 
     // Today's schedule: any open request whose arrival window starts today.
     db
@@ -1226,8 +1245,12 @@ export async function getDashboardOverview(
           // "Needs attention" = nobody is on it yet. A pending/scheduled request
           // can still carry an assignee (reassign keeps assignedTo), so filter on
           // assignedTo IS NULL, not status alone — otherwise assigned-but-urgent
-          // jobs leak into the queue.
-          isNull(serviceRequests.assignedTo),
+          // jobs leak into the queue. A request assigned to a since-DEACTIVATED
+          // technician is treated the same as unassigned: deactivation never
+          // clears assignedTo (staff-queries.ts), so without this an emergency
+          // stuck on an inactive tech would silently vanish from the one screen
+          // meant to catch it. An ACTIVE assignee still suppresses the row.
+          or(isNull(serviceRequests.assignedTo), eq(users.isActive, false))!,
           inArray(serviceRequests.status, [...UNASSIGNED_OPEN_STATUSES]),
           inArray(serviceRequests.urgency, ["emergency", "high"]),
         ),
@@ -1258,7 +1281,7 @@ export async function getDashboardOverview(
   ]);
 
   return {
-    stats,
+    stats: toDashboardStats(statsRows[0]),
     todaySchedule: scheduleRows.map(toDashboardRequest),
     needsAttention: attentionRows.map(toDashboardRequest),
     awaitingFollowUp: followUpRows.map(toDashboardRequest),
@@ -1432,7 +1455,15 @@ export async function getSchedulingCalendar(
           )!,
         ),
       )
-      .orderBy(asc(serviceRequests.createdAt))
+      // Urgency rank first (emergency, then high, then the rest), then
+      // oldest-first within a tier — same urgency-before-age approach as the
+      // "needs attention" ordering below. Without this, oldest-first alone let
+      // a backlog past 50 push a brand-new emergency past the LIMIT, dropping
+      // it from the panel dispatchers actually place jobs from.
+      .orderBy(
+        sql`case ${serviceRequests.urgency} when 'emergency' then 0 when 'high' then 1 else 2 end`,
+        asc(serviceRequests.createdAt),
+      )
       .limit(DASHBOARD_LIST_LIMIT),
     // Recurring working hours for every tech — drives S4 out-of-hours shading.
     getTechnicianAvailability(organizationId),

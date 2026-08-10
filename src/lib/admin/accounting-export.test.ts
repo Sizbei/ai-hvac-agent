@@ -66,6 +66,7 @@ vi.mock('@/lib/db/tenant', () => ({
 vi.mock('@/lib/db/schema', () => ({
   invoices: {
     createdAt: 'invoices.createdAt',
+    issuedAt: 'invoices.issuedAt',
     fieldpulseInvoiceId: 'invoices.fieldpulseInvoiceId',
     hcpInvoiceId: 'invoices.hcpInvoiceId',
   },
@@ -81,15 +82,22 @@ vi.mock('@/lib/db/schema', () => ({
   },
 }));
 
-// drizzle-orm operators are only used to build condition markers; stub to no-ops.
+// drizzle-orm operators are only used to build condition markers; stub to
+// no-ops, but capture args for gte/lte/sql so tests can assert which column
+// expression (raw createdAt vs. coalesce(issuedAt, createdAt)) is filtered on.
 vi.mock('drizzle-orm', () => ({
   eq: () => 'eq',
-  gte: () => 'gte',
-  lte: () => 'lte',
+  gte: (left: unknown, right: unknown) => ({ kind: 'gte', left, right }),
+  lte: (left: unknown, right: unknown) => ({ kind: 'lte', left, right }),
   and: (...conds: unknown[]) => ({ kind: 'and', conds }),
   or: (...conds: unknown[]) => ({ kind: 'or', conds }),
   isNull: (col: unknown) => ({ kind: 'isNull', col }),
   isNotNull: (col: unknown) => ({ kind: 'isNotNull', col }),
+  sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({
+    kind: 'sql',
+    strings: [...strings],
+    values,
+  }),
 }));
 
 import { getAccountingExport, buildCsv } from './accounting-export';
@@ -284,6 +292,55 @@ describe('getAccountingExport', () => {
     expect(syncedPayWhere).toContain('isNotNull');
     expect(syncedPayWhere).toContain('payments.fieldpulsePaymentId');
   });
+
+  // Raccounting-1: synced invoices are filtered/dated by coalesce(issuedAt,
+  // createdAt) — the real source-system invoice date — not raw createdAt (the
+  // row's IMPORT time). Native rows are unaffected (issuedAt is always null
+  // there, so the coalesce no-ops) and keep using createdAt.
+  it('synced invoice query filters by coalesce(issuedAt, createdAt), not raw createdAt', async () => {
+    queue({});
+    await getAccountingExport(ORG, { fromDate: FROM, toDate: TO });
+
+    // 2nd captured = synced invoices query.
+    const syncedInvWhere = JSON.stringify(captured[1]?.where ?? []);
+    expect(syncedInvWhere).toContain('coalesce');
+    expect(syncedInvWhere).toContain('invoices.issuedAt');
+    expect(syncedInvWhere).toContain('invoices.createdAt');
+
+    // 1st captured = native invoices query — still raw createdAt, no coalesce.
+    const nativeInvWhere = JSON.stringify(captured[0]?.where ?? []);
+    expect(nativeInvWhere).not.toContain('coalesce');
+  });
+
+  it('dates a synced invoice by issuedAt, not the import-time createdAt (Raccounting-1)', async () => {
+    // Real example from the spec: FP invoice issued 2025-10-30, but the row
+    // wasn't imported into our DB (createdAt) until 2026-07-07. A DB-level
+    // coalesce(issuedAt, createdAt) filter would include this row in an
+    // October-2025 export (issuedAt in-period) even though createdAt falls far
+    // outside it; the builder must date the journal line by issuedAt.
+    queue({
+      syncedInvoices: [
+        {
+          id: 'inv-fp-late-import',
+          subtotalCents: 10000,
+          taxCents: 0,
+          issuedAt: new Date('2025-10-30T12:00:00Z'),
+          createdAt: new Date('2026-07-07T09:00:00Z'),
+          fieldpulseInvoiceId: 'fp-inv-1',
+          hcpInvoiceId: null,
+        },
+      ],
+    });
+
+    const result = await getAccountingExport(ORG, {
+      fromDate: new Date('2025-10-01T00:00:00.000Z'),
+      toDate: new Date('2025-10-31T23:59:59.999Z'),
+    });
+
+    expect(result.synced).toHaveLength(1);
+    expect(result.synced[0].date).toBe('2025-10-30');
+    expect(result.synced[0].date).not.toBe('2026-07-07');
+  });
 });
 
 describe('buildCsv', () => {
@@ -301,6 +358,7 @@ describe('buildCsv', () => {
     account: 'Sales Revenue' as const,
     memo: 'Invoice fp-1',
     amountDollars: 200.00,
+    source: 'fieldpulse' as const,
   };
 
   it('produces header + native section + synced section with separate subtotals', () => {
@@ -336,5 +394,24 @@ describe('buildCsv', () => {
     };
     const csv = buildCsv({ native: [refundLine], synced: [] });
     expect(csv).toContain('"Refund a, ""b"""');
+  });
+
+  // Raccounting-2: the synced-section subtotal label must reflect the actual
+  // source(s) present, not an unconditional "FieldPulse synced subtotal" —
+  // that misattributes which system booked the money for HCP-only orgs.
+  it('labels the synced subtotal "HCP synced subtotal" for an all-HCP-sourced section', () => {
+    const hcpLine = { ...syncedLine, memo: 'Invoice hcp-1', source: 'housecall' as const };
+    const csv = buildCsv({ native: [], synced: [hcpLine] });
+    expect(csv).toContain('HCP synced subtotal');
+    expect(csv).not.toContain('FieldPulse synced subtotal');
+  });
+
+  it('labels the synced subtotal source-neutrally when sources are mixed', () => {
+    const fpLine = { ...syncedLine, memo: 'Invoice fp-1', source: 'fieldpulse' as const };
+    const hcpLine = { ...syncedLine, memo: 'Invoice hcp-1', source: 'housecall' as const };
+    const csv = buildCsv({ native: [], synced: [fpLine, hcpLine] });
+    expect(csv).toContain('Synced subtotal');
+    expect(csv).not.toContain('FieldPulse synced subtotal');
+    expect(csv).not.toContain('HCP synced subtotal');
   });
 });

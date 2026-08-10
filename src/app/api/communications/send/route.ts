@@ -8,6 +8,7 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { queueCommunicationJob } from "@/lib/communication/job-queue";
 import { getAdminSession } from "@/lib/auth/session";
+import { isDemoAccount } from "@/lib/auth/authz";
 import { db } from "@/lib/db";
 import { communicationTemplates } from "@/lib/db/schema";
 import { NextRequest, NextResponse } from "next/server";
@@ -52,6 +53,21 @@ export async function POST(request: NextRequest) {
     const session = await getAdminSession();
     if (!session) {
       return new NextResponse("Unauthorized", { status: 401 });
+    }
+
+    // Public portfolio demo account: outbound sending is disabled so a
+    // visitor can't message an arbitrary real phone/email. Matches the two
+    // other admin-session outbound routes (send-reminder, conversations
+    // message).
+    if (isDemoAccount(session)) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Sending is disabled for the demo account",
+          code: "DEMO_RESTRICTED",
+        },
+        { status: 403 },
+      );
     }
 
     // This endpoint enqueues outbound SMS/email — rate-limit it so a leaked

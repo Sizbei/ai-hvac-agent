@@ -4,9 +4,11 @@
  * Disconnect an org's Housecall Pro account: clears the encrypted API key and
  * cached account info, flips connected=false. Keeps the row for reconnects.
  *
- * Admin-session-gated + rate-limited + audited. No-op-safe if not connected.
+ * Super_admin-gated (Gsettings-2: disconnecting can silently stop the org's
+ * CRM sync) + rate-limited + audited. No-op-safe if not connected.
  */
 import { getAdminSession } from "@/lib/auth/session";
+import { isSuperAdmin } from "@/lib/auth/authz";
 import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
@@ -18,6 +20,9 @@ export async function POST(): Promise<Response> {
     const session = await getAdminSession();
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
+    }
+    if (!isSuperAdmin(session)) {
+      return errorResponse("Forbidden", "FORBIDDEN", 403);
     }
 
     const rateCheck = slidingWindow(

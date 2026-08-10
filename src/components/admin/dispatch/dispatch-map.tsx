@@ -16,6 +16,7 @@ import {
   arRadius,
   esc,
   formatCents,
+  notPlottedChipMessage,
   timeAgo,
 } from './map-pins';
 
@@ -32,6 +33,7 @@ interface MapData {
   readonly technicians: readonly Tech[];
   readonly arCustomers: readonly ArCustomer[];
   readonly geocodeCapped: boolean;
+  readonly notPlottedCount: number;
 }
 
 type LayerMode = 'jobs' | 'ar' | 'both';
@@ -200,6 +202,9 @@ export function DispatchMap() {
   const unassignedCount = data?.jobs.filter((j) => !j.technicianName).length ?? 0;
   const totalOwingCents = data?.arCustomers.reduce((s, a) => s + a.owingCents, 0) ?? 0;
   const arOnMap = showArLayer(layerMode) ? (data?.arCustomers.length ?? 0) : 0;
+  const notPlottedMsg = data
+    ? notPlottedChipMessage(data.notPlottedCount, data.geocodeCapped)
+    : null;
 
   const layerBtnBase: React.CSSProperties = {
     padding: '5px 12px',
@@ -308,9 +313,9 @@ export function DispatchMap() {
 
       {/* Status chips — stacked so they never overlap each other */}
       <div className="pointer-events-none absolute bottom-4 right-4 z-10 flex flex-col items-end gap-1.5">
-        {data?.geocodeCapped && (
+        {notPlottedMsg && (
           <div className="rounded-md border bg-background/90 px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm backdrop-blur">
-            Showing first 25 geocoded jobs
+            {notPlottedMsg}
           </div>
         )}
         {data && showArLayer(layerMode) && arOnMap === 0 && data.arCustomers.length === 0 && (

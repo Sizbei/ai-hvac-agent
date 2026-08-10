@@ -1117,19 +1117,21 @@ describe("voiceReply financial verify (WS3)", () => {
     expect(result.reply).not.toContain("$125.00");
   });
 
-  // ── FINDING 1 REGRESSION: verify-bypass via non-financial intent ──
-  // A non-financial ACCOUNT_LOOKUP must NEVER fabricate a "passed" verify state.
-  // If a caller first asks "when is my next visit?" (non-financial → served with
-  // no verify) and then asks "what's my balance?" (financial), the second turn
-  // must gate with a ZIP ask, not serve the balance.
-  it("REGRESSION F1: non-financial intent must not fabricate verify:passed that unlocks a subsequent financial intent", async () => {
+  // ── A7 (P0) FIX: account-data-next-visit was PREVIOUSLY unverified ──
+  // Before the fix, account-data-next-visit (and account-data-appointment-status /
+  // account-data-reschedule) were tagged "none" in INTENT_SENSITIVITY, so a caller
+  // whose session was linked by a self-reported phone/email alone (no possession
+  // proof) could pull the next-visit date immediately. Voice shares the gate via
+  // requiresVerify/advanceVerify, so this proves the fix closed the voice channel
+  // too, not just chat.
+  it("A7 FIX: account-data-next-visit now requires ZIP verify before serving (no possession-proof bypass)", async () => {
     const nextVisitSession = {
       ...balanceSession,
-      // session starts with NO verify state (null metadata)
+      // session starts with NO verify state (null metadata) — only a self-
+      // reported contact match linked customerId, never a ZIP match.
       metadata: null as string | null,
     };
 
-    // Turn 1: non-financial intent (next-visit). Route returns non-financial.
     routeMock.mockReturnValue({
       action: "ACCOUNT_LOOKUP",
       intentId: "account-data-next-visit",
@@ -1147,55 +1149,48 @@ describe("voiceReply financial verify (WS3)", () => {
       userMessage: "when is my next visit",
       ipAddress: "127.0.0.1",
     });
-    // Non-financial intent should be served immediately.
-    expect(turn1.reply).toContain("Monday");
+    // Must NOT be served on the unverified first ask — must challenge for the ZIP.
+    expect(turn1.reply).not.toContain("Monday");
+    expect(turn1.reply.toLowerCase()).toMatch(/zip/);
+    expect(buildAccountLookupReplyMock).not.toHaveBeenCalled();
 
-    // Capture the metadata written by turn 1 (should NOT be verify:passed).
+    // Metadata must record the pending challenge, never a fabricated "passed".
     const turn1SetCall = updateSetMock.mock.calls.find(
       (c: unknown[]) => typeof (c[0] as Record<string, unknown>).metadata === "string",
     );
-    const turn1MetaStr = turn1SetCall
-      ? ((turn1SetCall[0] as Record<string, unknown>).metadata as string)
-      : null;
-    if (turn1MetaStr) {
-      const turn1Meta = JSON.parse(turn1MetaStr) as Record<string, unknown>;
-      const verifyAfterTurn1 = turn1Meta.verify as Record<string, unknown> | undefined;
-      // If verify was written, it must NOT be "passed" — that would be the fabrication.
-      expect(verifyAfterTurn1?.status).not.toBe("passed");
-    }
+    expect(turn1SetCall).toBeDefined();
+    const turn1Meta = JSON.parse(
+      (turn1SetCall![0] as Record<string, unknown>).metadata as string,
+    ) as Record<string, unknown>;
+    const verifyAfterTurn1 = turn1Meta.verify as Record<string, unknown> | undefined;
+    expect(verifyAfterTurn1?.status).toBe("pending");
 
-    // Turn 2: financial intent (balance). The session now carries whatever turn 1 wrote.
-    // Reset mocks but preserve the turn1 metadata as the session state.
+    // Turn 2: a matching ZIP answer now serves the next-visit date.
     resetWS3Mocks();
     routeMock.mockReturnValue({
       action: "ACCOUNT_LOOKUP",
-      intentId: "account-data-balance",
-      confidence: 0.95,
+      intentId: "account-data-next-visit",
+      confidence: 0.9,
       reply: null,
       issueType: null,
       urgency: null,
       escalate: false,
     });
-    buildAccountLookupReplyMock.mockResolvedValue("Your current balance is $125.00.");
+    buildAccountLookupReplyMock.mockResolvedValue("Your next visit is on Monday.");
 
     const sessionAfterTurn1 = {
       ...nextVisitSession,
-      metadata: turn1MetaStr, // whatever turn 1 persisted
+      metadata: JSON.stringify(turn1Meta),
     };
 
     const turn2 = await voiceReply({
       session: sessionAfterTurn1,
       history: [],
-      userMessage: "what is my balance",
+      userMessage: "37601",
       ipAddress: "127.0.0.1",
+      dtmfDigits: "37601",
     });
-
-    // Turn 2 must NOT serve the balance — it must ask for ZIP (financial gate).
-    expect(turn2.reply).not.toContain("$125.00");
-    expect(turn2.reply.toLowerCase()).toMatch(/zip/);
-    // buildAccountLookupReply should NOT have been called with data served.
-    // (It may have been called and returned the sentinel — what matters is the
-    // spoken reply does NOT contain the balance string.)
+    expect(turn2.reply).toContain("Monday");
   });
 
   // ── FINDING 2 REGRESSION: verify-ask turn must produce dtmf+speech gather ──
@@ -1212,8 +1207,15 @@ describe("voiceReply financial verify (WS3)", () => {
     expect(result.nextGatherMode).toBe("dtmf_zip");
   });
 
-  it("REGRESSION F2b: nextGatherMode is absent/undefined on a normal (non-verify) turn", async () => {
-    // Non-financial intent — must NOT set nextGatherMode.
+  it("REGRESSION F2b: nextGatherMode is absent/undefined on a normal (already-verified) turn", async () => {
+    // A7 made every account-data-* intent gate on verify, so the "normal,
+    // non-verify-ask turn" case is now: verify already PASSED (a real ZIP match
+    // on an earlier turn) — the account data serves immediately with no fresh
+    // ZIP challenge, so nextGatherMode must be absent.
+    const passedSession = {
+      ...balanceSession,
+      metadata: JSON.stringify({ verify: { status: "passed", attempts: 1 } }),
+    };
     routeMock.mockReturnValue({
       action: "ACCOUNT_LOOKUP",
       intentId: "account-data-next-visit",
@@ -1226,11 +1228,12 @@ describe("voiceReply financial verify (WS3)", () => {
     buildAccountLookupReplyMock.mockResolvedValue("Your next visit is on Monday.");
 
     const result = await voiceReply({
-      session: balanceSession,
+      session: passedSession,
       history: [],
       userMessage: "when is my next visit",
       ipAddress: "127.0.0.1",
     });
+    expect(result.reply).toContain("Monday");
     expect(result.nextGatherMode).toBeUndefined();
   });
 });

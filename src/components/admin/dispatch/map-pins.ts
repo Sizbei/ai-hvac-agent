@@ -95,6 +95,22 @@ export function formatWindow(iso: string | null): string {
   return `${day} ${fmt(startH)}–${fmt(endH)}${crossMidnight ? ' (+1d)' : ''}`;
 }
 
+/** Chip copy for jobs that exist but couldn't be plotted (missing/failed
+ * coordinates) — distinct wording for "some dropped, under the live-geocode
+ * cap" vs. "some dropped, cap exceeded" so the operator knows why. Returns
+ * `null` when nothing was dropped (no chip). */
+export function notPlottedChipMessage(
+  notPlottedCount: number,
+  geocodeCapped: boolean,
+): string | null {
+  if (notPlottedCount <= 0) return null;
+  const noun = notPlottedCount === 1 ? 'job' : 'jobs';
+  if (geocodeCapped) {
+    return `${notPlottedCount} ${noun} couldn't be placed on the map (25-job geocoding limit reached)`;
+  }
+  return `${notPlottedCount} ${noun} couldn't be placed on the map`;
+}
+
 /** Integer cents → "$1,234.56" */
 export function formatCents(cents: number): string {
   return new Intl.NumberFormat('en-US', {

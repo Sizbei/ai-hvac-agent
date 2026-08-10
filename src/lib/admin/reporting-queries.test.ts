@@ -186,6 +186,7 @@ interface Seed {
     sold: number | string;
     expired: number | string;
     open: number | string;
+    dismissed?: number | string;
   };
   invoices: { created: number | string; paid: number | string };
   /** Amount paid on FSM-synced invoices created in the period. */
@@ -425,6 +426,53 @@ describe('getSalesReport', () => {
     });
     const r = await getSalesReport(ORG);
     expect(r.closeRatePct).toBe(33.3);
+  });
+
+  it('accounts for every estimate status: dismissed rows are counted and every bucket sums to estimatesCreated', async () => {
+    // 10 created: 3 sold, 2 expired, 2 open, 3 dismissed. Dismissed is a real,
+    // decided "lost" outcome (matches /admin/estimates' bucket classifier,
+    // which groups dismissed+expired as 'lost') and must not vanish from the
+    // report or from the close-rate denominator.
+    seed({
+      gross: 0,
+      refund: 0,
+      ar: 0,
+      estimates: { created: 10, sold: 3, expired: 2, open: 2, dismissed: 3 },
+      invoices: { created: 0, paid: 0 },
+    });
+    const r = await getSalesReport(ORG);
+    expect(r.estimatesDismissed).toBe(3);
+    // No created estimate is dropped: every status bucket sums back to created.
+    expect(
+      r.estimatesSold + r.estimatesExpired + r.estimatesOpen + r.estimatesDismissed,
+    ).toBe(r.estimatesCreated);
+    // Close rate folds dismissed into the denominator (3 sold / 10 decided = 30%).
+    expect(r.closeRatePct).toBe(30);
+
+    // The estimate select's `dismissed` column references estimates.status.
+    const estCols = captured[3].columns as Record<string, unknown>;
+    expect(
+      hasTag(
+        estCols.dismissed,
+        (v) =>
+          v.kind === 'sql' &&
+          Array.isArray(v.values) &&
+          (v.values as unknown[]).includes('estimates.status'),
+      ),
+    ).toBe(true);
+  });
+
+  it('a dismissed-only close-rate denominator still coerces null seed correctly (no dismissed = 0, not NaN)', async () => {
+    seed({
+      gross: 0,
+      refund: 0,
+      ar: 0,
+      estimates: { created: 0, sold: 0, expired: 0, open: 0 }, // no `dismissed` key at all
+      invoices: { created: 0, paid: 0 },
+    });
+    const r = await getSalesReport(ORG);
+    expect(r.estimatesDismissed).toBe(0);
+    expect(r.closeRatePct).toBe(0);
   });
 });
 

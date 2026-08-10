@@ -14,11 +14,26 @@ import {
 import { buildExtraction } from "./chat-slots";
 
 describe("requiresVerify", () => {
-  it("gates financial intents only", () => {
-    expect(requiresVerify("account-data-balance")).toBe(true);
-    expect(requiresVerify("account-data-membership-status")).toBe(true);
-    expect(requiresVerify("account-data-next-visit")).toBe(false);
-    expect(requiresVerify("account-data-appointment-status")).toBe(false);
+  // A7 (P0): a self-reported phone/email is NOT possession proof — every
+  // identified-customer account intent must gate on the ZIP-verify step, not
+  // just the two "financial" ones. Covers every intent id the routers can ever
+  // hand to requiresVerify (see intent-router.ts LEGACY_ACCOUNT_REFERENCE_INTENTS
+  // + knowledge-base.ts "account_data" category), one case per id.
+  it.each([
+    "account-data-balance",
+    "account-data-membership-status",
+    "account-data-next-visit",
+    "account-data-appointment-status",
+    "account-data-reschedule",
+    "account-check-status",
+    "account-change-appointment",
+    "scheduling-reschedule",
+  ])("requires verify for %s", (intentId) => {
+    expect(requiresVerify(intentId)).toBe(true);
+  });
+
+  it("does not require verify for a non-account intent or no intent", () => {
+    expect(requiresVerify("pricing-question")).toBe(false);
     expect(requiresVerify(null)).toBe(false);
   });
 });
@@ -114,16 +129,21 @@ describe("preserveVerifyKey — verify survives the gather-route rebuild", () =>
 describe("advanceVerify (channel-agnostic financial-verify decision)", () => {
   const ONFILE = ["37601", "37615"] as const;
 
-  it("non-financial intent serves immediately and never fabricates a passed state", () => {
+  it("a non-account intent (or none) serves immediately and never fabricates a passed state", () => {
+    // A7: every account-data-* / legacy-alias intent now requires verify (see
+    // requiresVerify tests) — this branch only exists for a null/non-account
+    // intentId, which advanceVerify is never actually called with in the routes
+    // (both call sites gate it to an ACCOUNT_LOOKUP verdict), but the pure
+    // function must still degrade safely rather than crash or fabricate a pass.
     // No state → serve, state stays null (a fabricated "passed" would let a later
     // financial ask skip the ZIP check).
     expect(
-      advanceVerify({ intentId: "account-data-next-visit", state: null, zipAnswer: "", onFileZips: [] }),
+      advanceVerify({ intentId: null, state: null, zipAnswer: "", onFileZips: [] }),
     ).toEqual({ kind: "serve", verify: null });
     // An existing pending lockout is carried through UNCHANGED, not cleared.
     const pending: VerifyState = { status: "pending", attempts: 1 };
     expect(
-      advanceVerify({ intentId: "account-data-next-visit", state: pending, zipAnswer: "", onFileZips: [] }),
+      advanceVerify({ intentId: null, state: pending, zipAnswer: "", onFileZips: [] }),
     ).toEqual({ kind: "serve", verify: pending });
   });
 

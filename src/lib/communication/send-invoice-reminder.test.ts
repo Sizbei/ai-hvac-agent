@@ -298,6 +298,38 @@ describe("sendInvoiceReminder", () => {
     expect(res).toEqual({ ok: false, reason: "not_collectible" });
     expect(queueCommunicationJob).not.toHaveBeenCalled();
   });
+
+  it("rejects a FieldPulse-mirrored invoice (synced_read_only) even though it is open/collectible", async () => {
+    selectQueue.push([{
+      id: "i1",
+      customerId: "c1",
+      totalCents: 5000,
+      amountPaidCents: 0,
+      state: "open",
+      lastReminderSentAt: null,
+      fieldpulseInvoiceId: "fp-1",
+      hcpInvoiceId: null,
+    }]);
+    const res = await sendInvoiceReminder("org-1", "i1", new Date());
+    expect(res).toEqual({ ok: false, reason: "synced_read_only" });
+    expect(queueCommunicationJob).not.toHaveBeenCalled();
+  });
+
+  it("rejects a Housecall Pro-mirrored invoice (synced_read_only) even though it is open/collectible", async () => {
+    selectQueue.push([{
+      id: "i1",
+      customerId: "c1",
+      totalCents: 5000,
+      amountPaidCents: 0,
+      state: "open",
+      lastReminderSentAt: null,
+      fieldpulseInvoiceId: null,
+      hcpInvoiceId: "hcp-1",
+    }]);
+    const res = await sendInvoiceReminder("org-1", "i1", new Date());
+    expect(res).toEqual({ ok: false, reason: "synced_read_only" });
+    expect(queueCommunicationJob).not.toHaveBeenCalled();
+  });
 });
 
 describe("sendOverdueInvoiceReminders (dunning sweep)", () => {

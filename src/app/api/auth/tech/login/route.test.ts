@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
+import { NextRequest } from "next/server";
 
 const dbRows = { current: [] as unknown[] };
 vi.mock("@/lib/db", () => ({
@@ -24,11 +25,18 @@ import { POST } from "./route";
 import bcrypt from "bcryptjs";
 import { createTechSession } from "@/lib/auth/tech-session";
 
-const req = (body: unknown) =>
-  new Request("http://t/api/auth/tech/login", {
+const SELF_ORIGIN = "http://t";
+
+const req = (body: unknown, headers: Record<string, string> = {}) =>
+  new NextRequest(new URL("http://t/api/auth/tech/login"), {
     method: "POST",
+    headers: {
+      origin: SELF_ORIGIN,
+      "content-type": "application/json",
+      ...headers,
+    },
     body: JSON.stringify(body),
-  }) as never;
+  });
 
 const techRow = {
   id: "11111111-1111-1111-1111-111111111111",
@@ -78,6 +86,42 @@ describe("POST /api/auth/tech/login", () => {
     (bcrypt.compare as unknown as Mock).mockResolvedValue(true);
     const res = await POST(req({ email: "tech@example.com", password: "pw" }));
     expect(res.status).toBe(401);
+    expect(createTechSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects a cross-origin request with a 403 before touching the DB", async () => {
+    dbRows.current = [techRow];
+    const res = await POST(
+      req(
+        { email: "tech@example.com", password: "pw" },
+        { origin: "https://evil.example" },
+      ),
+    );
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error.code).toBe("FORBIDDEN_ORIGIN");
+    expect(bcrypt.compare).not.toHaveBeenCalled();
+    expect(createTechSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects a request with no Origin header (never a legitimate browser POST)", async () => {
+    dbRows.current = [techRow];
+    const res = await POST(
+      req({ email: "tech@example.com", password: "pw" }, { origin: "" }),
+    );
+    expect(res.status).toBe(403);
+    expect(createTechSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-JSON content type (no-preflight form-POST vector)", async () => {
+    dbRows.current = [techRow];
+    const res = await POST(
+      req(
+        { email: "tech@example.com", password: "pw" },
+        { "content-type": "text/plain" },
+      ),
+    );
+    expect(res.status).toBe(415);
     expect(createTechSession).not.toHaveBeenCalled();
   });
 });

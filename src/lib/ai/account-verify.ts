@@ -1,12 +1,37 @@
 import { spokenToDigits } from "./extract-spoken-phone";
 
-/** Intent → whether reading its answer aloud needs a verify step. Data-driven. */
+/**
+ * Intent → whether reading its answer aloud (or acting on it) needs a verify
+ * step. Data-driven.
+ *
+ * SECURITY (A7, P0): every identified-customer account intent discloses real
+ * PII/schedule data — or, for reschedule, acts on the customer's behalf — off
+ * nothing more than a self-reported phone/email that linked the session (see
+ * lookupCustomerContext in the chat route). A self-reported contact match is
+ * NOT possession proof; only a correct ZIP match (checkZipMatch) is. So ALL
+ * entries here must gate on verify — there is no "none" tier. Includes both:
+ *  - the v1 "account-data-*" entries (knowledge-base.ts category "account_data"), and
+ *  - the LEGACY reference intents (intent-router.ts LEGACY_ACCOUNT_REFERENCE_INTENTS)
+ *    that dispatch to the SAME real account-tools via account-dispatch.ts's
+ *    LEGACY_ACCOUNT_INTENT_TOOL map — e.g. "any update on my appointment"
+ *    (account-check-status) reaches the identical appointment-read tool as
+ *    "when's my tech coming" (account-data-appointment-status). Gating only
+ *    the account-data-* ids would leave the same leak reachable by wording
+ *    alone, so the legacy ids are gated identically.
+ * If a new identified-customer account capability is ever added, it MUST be
+ * added here too (this table has no safe default).
+ */
 const INTENT_SENSITIVITY: Record<string, "financial" | "none"> = {
   "account-data-balance": "financial",
   "account-data-membership-status": "financial",
-  "account-data-next-visit": "none",
-  "account-data-appointment-status": "none",
-  "account-data-reschedule": "none",
+  "account-data-next-visit": "financial",
+  "account-data-appointment-status": "financial",
+  "account-data-reschedule": "financial",
+  // Legacy aliases — see comment above. Map to the same capabilities via
+  // account-dispatch.ts's LEGACY_ACCOUNT_INTENT_TOOL.
+  "account-check-status": "financial",
+  "account-change-appointment": "financial",
+  "scheduling-reschedule": "financial",
 };
 
 export function requiresVerify(intentId: string | null): boolean {

@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
+import { isSuperAdmin } from "@/lib/auth/authz";
 import {
   getConversationById,
   deleteConversation,
@@ -48,6 +49,13 @@ export async function DELETE(
     const session = await getAdminSession();
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
+    }
+    // Permanently deleting a conversation is a hard, irreversible destructive
+    // action (same tier as customer hard-delete/erase) — restrict to
+    // super_admin, matching the other destructive DELETE routes in this repo
+    // (customers/[id] hard-delete, customers/[id]/erase).
+    if (!isSuperAdmin(session)) {
+      return errorResponse("Forbidden", "FORBIDDEN", 403);
     }
 
     const ipAddress = clientIp(request);

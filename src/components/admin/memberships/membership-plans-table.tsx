@@ -21,6 +21,9 @@ interface MembershipPlansTableProps {
   readonly isLoading: boolean;
   readonly onEdit: (plan: MembershipPlan) => void;
   readonly onDeactivate: (plan: MembershipPlan) => void;
+  readonly onReactivate: (plan: MembershipPlan) => void;
+  /** id of the plan currently being reactivated, if any — disables its button. */
+  readonly reactivatingId?: string | null;
   readonly onAdd: () => void;
 }
 
@@ -29,6 +32,8 @@ export function MembershipPlansTable({
   isLoading,
   onEdit,
   onDeactivate,
+  onReactivate,
+  reactivatingId = null,
   onAdd,
 }: MembershipPlansTableProps) {
   if (isLoading) {
@@ -100,13 +105,22 @@ export function MembershipPlansTable({
                 <Button variant="outline" size="sm" onClick={() => onEdit(plan)}>
                   Edit
                 </Button>
-                {plan.active && (
+                {plan.active ? (
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => onDeactivate(plan)}
                   >
                     Deactivate
+                  </Button>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={reactivatingId === plan.id}
+                    onClick={() => onReactivate(plan)}
+                  >
+                    {reactivatingId === plan.id ? 'Reactivating…' : 'Reactivate'}
                   </Button>
                 )}
               </div>

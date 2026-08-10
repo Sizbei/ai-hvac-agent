@@ -97,7 +97,10 @@ export async function getMembershipPlanById(
   return row ?? null;
 }
 
-export type MembershipPlanUpdate = Partial<MembershipPlanInput>;
+/** `active` is included so a reactivate can flow through the same partial update. */
+export type MembershipPlanUpdate = Partial<MembershipPlanInput> & {
+  readonly active?: boolean;
+};
 
 export async function updateMembershipPlan(
   organizationId: string,
@@ -116,6 +119,7 @@ export async function updateMembershipPlan(
   if (partial.visitsPerYear !== undefined) {
     setFields.visitsPerYear = partial.visitsPerYear;
   }
+  if (partial.active !== undefined) setFields.active = partial.active;
   if (Object.keys(setFields).length === 0) return;
   await db
     .update(membershipPlans)
@@ -123,7 +127,10 @@ export async function updateMembershipPlan(
     .where(withTenant(membershipPlans, organizationId, eq(membershipPlans.id, id)));
 }
 
-/** Soft delete — existing enrollments may reference the plan, so never hard delete. */
+/**
+ * Soft delete — existing enrollments may reference the plan, so never hard delete.
+ * Reactivation is the mirror: `updateMembershipPlan(org, id, { active: true })`.
+ */
 export async function deactivateMembershipPlan(
   organizationId: string,
   id: string,

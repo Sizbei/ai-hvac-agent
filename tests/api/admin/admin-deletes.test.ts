@@ -28,6 +28,14 @@ vi.mock('@/lib/auth/session', () => ({
   getAdminSession: () => mockGetAdminSession(),
 }));
 
+// `authz` is `server-only`, so it must be mocked for these route modules to be
+// importable under vitest. The stub mirrors the real tier check rather than
+// hardcoding `true`, so a session without the required tier still fails here.
+vi.mock('@/lib/auth/authz', () => ({
+  isSuperAdmin: (s: { role?: string } | null) => s?.role === 'super_admin',
+  isDemoAccount: () => false,
+}));
+
 vi.mock('@/lib/admin/conversation-queries', () => ({
   getConversationById: (...a: unknown[]) => mockGetConversationById(...a),
   deleteConversation: (...a: unknown[]) => mockDeleteConversation(...a),
@@ -75,7 +83,12 @@ const SESSION = {
   organizationId: 'org-1',
   email: 'admin@example.com',
   name: 'Admin',
-  role: 'admin' as const,
+  // Both destructive routes exercised here are now super_admin-gated (the
+  // hard delete used to be reachable by any admin, which was strictly more
+  // permissive than the GDPR erase it should mirror). This suite covers the
+  // delete BEHAVIOUR; the 401/403 tier gating has dedicated coverage in the
+  // per-route test files.
+  role: 'super_admin' as const,
 };
 const VALID_ID = '11111111-1111-4111-8111-111111111111';
 

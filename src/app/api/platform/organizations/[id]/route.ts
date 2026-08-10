@@ -48,6 +48,20 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
       return errorResponse("Invalid organization ID format", "INVALID_ID", 400);
     }
 
+    // Refuse to purge the platform's own operating org. users.organizationId
+    // cascades on org delete, so purging this org deletes every platform admin
+    // user row; isPlatformAdmin requires session.organizationId === platformOrgId
+    // (authz.ts), so no session could ever pass that check again — an
+    // irrecoverable, product-wide lockout. (isPlatformAdmin already fails closed
+    // when PLATFORM_ORG_ID is unset, so reaching this line guarantees it's set.)
+    if (id === process.env.PLATFORM_ORG_ID?.trim()) {
+      return errorResponse(
+        "The platform's own organization cannot be purged",
+        "PLATFORM_ORG_PURGE_FORBIDDEN",
+        409,
+      );
+    }
+
     const purged = await purgeOrganization(id, {
       userId: session.userId,
       email: session.email,

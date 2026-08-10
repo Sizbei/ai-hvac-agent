@@ -4,10 +4,13 @@
  *   GET    — connection status for the settings panel (token-free).
  *   DELETE — disconnect (clear stored tokens, flip connected=false).
  *
- * Admin-session-gated. DELETE is rate-limited + audited. The response includes a
- * `configured` flag so the panel can explain a missing-credentials state.
+ * GET is admin-session-gated. DELETE is additionally super_admin-gated
+ * (Gsettings-2: disconnecting can silently stop the org's calendar sync) +
+ * rate-limited + audited. The GET response includes a `configured` flag so
+ * the panel can explain a missing-credentials state.
  */
 import { getAdminSession } from "@/lib/auth/session";
+import { isSuperAdmin } from "@/lib/auth/authz";
 import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
@@ -42,6 +45,9 @@ export async function DELETE(): Promise<Response> {
     const session = await getAdminSession();
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
+    }
+    if (!isSuperAdmin(session)) {
+      return errorResponse("Forbidden", "FORBIDDEN", 403);
     }
 
     const rateCheck = slidingWindow(

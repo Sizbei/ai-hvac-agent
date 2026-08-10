@@ -120,8 +120,11 @@ export default function ReportsPage() {
           label="Estimate close rate"
           value={report ? `${report.closeRatePct}%` : '—'}
           sublabel={
+            // estimatesCreated already accounts for every status (open, sold,
+            // dismissed, expired) — using it here keeps "decided" from silently
+            // excluding dismissed estimates, a real decided/lost outcome.
             report
-              ? `${report.estimatesSold} sold of ${report.estimatesOpen + report.estimatesSold + report.estimatesExpired} decided`
+              ? `${report.estimatesSold} sold of ${report.estimatesCreated} decided`
               : undefined
           }
           icon={Target}
@@ -268,7 +271,8 @@ function LocationTable({ rows, isLoading }: LocationTableProps) {
       title="By location"
       action={
         <p className="text-xs text-muted-foreground">
-          Jobs, revenue, and rating rolled up by service location.
+          Jobs and rating rolled up by service location. Revenue is billed
+          (invoiced), not cash collected.
         </p>
       }
     >
@@ -312,7 +316,8 @@ function TechnicianTable({ rows, isLoading }: TechnicianTableProps) {
       title="Technician scorecards"
       action={
         <p className="text-xs text-muted-foreground">
-          Jobs, revenue, labor, and rating per technician. A dash means the data wasn&apos;t captured for that metric.
+          Jobs, labor, and rating per technician. Revenue is billed (invoiced),
+          not cash collected. A dash means the data wasn&apos;t captured for that metric.
         </p>
       }
     >

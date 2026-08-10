@@ -68,14 +68,21 @@ function createMockRequest(options: {
   url?: string;
 }): NextRequest {
   const url = new URL(options.url ?? 'http://localhost:3000/api/auth/login');
+  // The auth routes now carry the same-origin + JSON content-type CSRF guard
+  // used by /api/session/* and /api/chat, so a request with no Origin is
+  // rejected before it reaches the handler. Same-origin by default here; the
+  // guard itself is covered directly in the per-route test files.
   return new NextRequest(url, {
     method: options.method ?? 'POST',
     ...(options.body
       ? {
           body: JSON.stringify(options.body),
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            Origin: url.origin,
+          },
         }
-      : {}),
+      : { headers: { Origin: url.origin } }),
   });
 }
 

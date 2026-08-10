@@ -44,6 +44,10 @@ let selectCallIndex = 0;
 let selectResolutions: unknown[][] = [[]];
 let insertResolution: unknown = [];
 let updateResolution: unknown = [];
+// Records every db.batch([...statements]) call so tests can assert
+// getDashboardOverview batches its four queries (neon-http: 1 round-trip)
+// instead of Promise.all-ing them.
+let batchCallArgs: unknown[][] = [];
 
 vi.mock('@/lib/db', () => ({
   db: {
@@ -56,6 +60,13 @@ vi.mock('@/lib/db', () => ({
     },
     insert: (..._args: unknown[]) => createChainableMock(insertResolution),
     update: (..._args: unknown[]) => createChainableMock(updateResolution),
+    // Each statement passed in is itself one of the thenable proxies returned
+    // by db.select() above — resolving it via its own `.then` mirrors real
+    // db.batch() returning each statement's rows in the same array order.
+    batch: (queries: unknown[]) => {
+      batchCallArgs.push(queries);
+      return Promise.all(queries.map((q) => Promise.resolve(q)));
+    },
   },
 }));
 
@@ -205,6 +216,7 @@ beforeEach(() => {
   selectResolutions = [[]];
   insertResolution = [];
   updateResolution = [];
+  batchCallArgs = [];
 });
 
 describe('getRequests', () => {
@@ -917,6 +929,69 @@ describe('getDashboardOverview', () => {
     await getDashboardOverview(ORG_ID);
     expect(isNull).toHaveBeenCalledWith('sr.assignedTo');
   });
+
+  it('needs-attention also treats assignment to a DEACTIVATED technician as unassigned', async () => {
+    // A11: deactivating a technician never clears assignedTo (staff-queries.ts),
+    // so the needs-attention filter must widen `assignedTo IS NULL` to also
+    // match `assignedTo IS NOT NULL AND the joined user is inactive` — an
+    // emergency stuck on a since-deactivated tech must still surface. An
+    // ACTIVE assignee must still suppress the row (the pre-existing invariant).
+    const { eq, or } = await import('drizzle-orm');
+    selectResolutions = [
+      [
+        {
+          pending: 0,
+          assignedToday: 0,
+          inProgress: 0,
+          completedToday: 0,
+          scheduled: 0,
+          onHold: 0,
+          emergencyOpen: 0,
+          afterHoursToday: 0,
+        },
+      ],
+      [], // todaySchedule
+      [], // needsAttention
+      [], // awaitingFollowUp
+    ];
+
+    await getDashboardOverview(ORG_ID);
+
+    expect(eq).toHaveBeenCalledWith('u.isActive', false);
+    // The two branches must be OR'd together, not applied separately. The
+    // mocks echo their args back as arrays (isNull('sr.assignedTo') →
+    // ['sr.assignedTo'], eq('u.isActive', false) → ['u.isActive', false]),
+    // so this asserts or() was called with exactly those two branches.
+    expect(vi.mocked(or)).toHaveBeenCalledWith(
+      ['sr.assignedTo'],
+      ['u.isActive', false],
+    );
+  });
+
+  it('batches all four queries via db.batch, not Promise.all (neon-http: 1 round-trip)', async () => {
+    selectResolutions = [
+      [
+        {
+          pending: 0,
+          assignedToday: 0,
+          inProgress: 0,
+          completedToday: 0,
+          scheduled: 0,
+          onHold: 0,
+          emergencyOpen: 0,
+          afterHoursToday: 0,
+        },
+      ],
+      [],
+      [],
+      [],
+    ];
+
+    await getDashboardOverview(ORG_ID);
+
+    expect(batchCallArgs).toHaveLength(1);
+    expect(batchCallArgs[0]).toHaveLength(4);
+  });
 });
 
 describe('getDispatchBoard', () => {
@@ -1086,6 +1161,28 @@ describe('getSchedulingCalendar', () => {
     expect(calendar.availability).toEqual([
       { id: 'av1', technicianId: TECH_A, dayOfWeek: 1, startMinute: 480, endMinute: 1020 },
     ]);
+  });
+
+  it('orders the unscheduled queue by urgency before age, so a fresh emergency cannot be capped out', async () => {
+    // C8: the queue was oldest-first with no urgency ordering and a 50-row
+    // cap, so a fresh emergency past the cap would never surface. Asserted at
+    // the query-construction level (a CASE keyed on urgency ahead of the
+    // createdAt ORDER BY), since the mock db doesn't evaluate real SQL.
+    const { sql } = await import('drizzle-orm');
+    vi.mocked(sql).mockClear();
+    selectResolutions = [
+      [{ id: TECH_A, name: 'Ann', email: 'a@x.io', isActive: true, createdAt: new Date() }],
+      [],
+      [],
+      [],
+    ];
+
+    await getSchedulingCalendar(ORG_ID, START, END, [...DAYS]);
+
+    const ordersByUrgency = vi
+      .mocked(sql)
+      .mock.calls.some((args) => args[1] === 'sr.urgency');
+    expect(ordersByUrgency).toBe(true);
   });
 
   it('throws on an invalid range rather than querying garbage', async () => {

@@ -40,6 +40,11 @@ const SESSION = {
 
 const ADMIN_SESSION = { ...SESSION, email: "admin@x.com", role: "admin" as const };
 
+const DEMO_SUPER_ADMIN_SESSION = {
+  ...SESSION,
+  email: "admin@demo-hvac.com",
+};
+
 function postReq() {
   return new NextRequest(
     `https://app.example.com/api/admin/customers/${CUST_ID}/erase`,
@@ -82,6 +87,15 @@ describe("POST /api/admin/customers/[id]/erase", () => {
     getAdminSession.mockResolvedValue(ADMIN_SESSION);
     const res = await POST(postReq(), ctx());
     expect(res.status).toBe(403);
+    expect(anonymizeCustomer).not.toHaveBeenCalled();
+  });
+
+  it("403 for the demo account even if it somehow holds super_admin", async () => {
+    getAdminSession.mockResolvedValue(DEMO_SUPER_ADMIN_SESSION);
+    const res = await POST(postReq(), ctx());
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error?.code).toBe("DEMO_RESTRICTED");
     expect(anonymizeCustomer).not.toHaveBeenCalled();
   });
 

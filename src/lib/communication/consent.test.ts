@@ -129,4 +129,51 @@ describe("checkSendAllowed", () => {
     const d = await checkSendAllowed({ ...base, triggerType: "appointment_scheduled", now: daytime });
     expect(d).toEqual({ allowed: true });
   });
+
+  describe("demo org restriction (review_request pipeline)", () => {
+    const DEMO_ORG_ID = "00000000-0000-0000-0000-000000000001";
+
+    it("blocks a review_request for the demo org, even with no customerId and no DB lookup", async () => {
+      const d = await checkSendAllowed({
+        organizationId: DEMO_ORG_ID,
+        customerId: null,
+        channel: "sms",
+        triggerType: "review_request",
+        now: daytime,
+      });
+      expect(d).toEqual({ allowed: false, reason: "demo_org_restricted" });
+      // Short-circuits before any preference lookup.
+      expect(db.select).not.toHaveBeenCalled();
+    });
+
+    it("blocks a review_request for the demo org even when the customer's own prefs allow it", async () => {
+      mockPrefs(FULL_PREFS);
+      const d = await checkSendAllowed({
+        organizationId: DEMO_ORG_ID,
+        customerId: CUST,
+        channel: "sms",
+        triggerType: "review_request",
+        now: daytime,
+      });
+      expect(d).toEqual({ allowed: false, reason: "demo_org_restricted" });
+    });
+
+    it("does NOT block other trigger types for the demo org (live voice/chat demo must keep sending)", async () => {
+      mockPrefs(FULL_PREFS);
+      const d = await checkSendAllowed({
+        organizationId: DEMO_ORG_ID,
+        customerId: CUST,
+        channel: "sms",
+        triggerType: "appointment_scheduled",
+        now: daytime,
+      });
+      expect(d).toEqual({ allowed: true });
+    });
+
+    it("does NOT block review_request for a non-demo org", async () => {
+      mockPrefs(FULL_PREFS);
+      const d = await checkSendAllowed({ ...base, triggerType: "review_request", now: daytime });
+      expect(d).toEqual({ allowed: true });
+    });
+  });
 });

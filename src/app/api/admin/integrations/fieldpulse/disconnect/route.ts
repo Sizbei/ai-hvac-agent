@@ -4,9 +4,11 @@
  * Disconnect an org's Fieldpulse account: clear credentials, set connected=false,
  * and audit the action. The row is preserved for audit trail; all secrets are wiped.
  *
- * Admin-session-gated + rate-limited + audited.
+ * Super_admin-gated (Gsettings-2: disconnecting can silently stop the org's
+ * CRM sync) + rate-limited + audited.
  */
 import { getAdminSession } from "@/lib/auth/session";
+import { isSuperAdmin } from "@/lib/auth/authz";
 import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
@@ -18,6 +20,9 @@ export async function POST(): Promise<Response> {
     const session = await getAdminSession();
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
+    }
+    if (!isSuperAdmin(session)) {
+      return errorResponse("Forbidden", "FORBIDDEN", 403);
     }
 
     const rateCheck = slidingWindow(

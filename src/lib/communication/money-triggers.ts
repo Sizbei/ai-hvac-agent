@@ -256,7 +256,7 @@ export async function sendInvoiceReminder(
 ): Promise<
   | { readonly ok: true }
   | { readonly ok: false; readonly reason:
-      "not_found" | "not_collectible" | "no_contact" | "no_template" | "cooldown" }
+      "not_found" | "synced_read_only" | "not_collectible" | "no_contact" | "no_template" | "cooldown" }
 > {
   const [inv] = await db
     .select({
@@ -266,12 +266,23 @@ export async function sendInvoiceReminder(
       amountPaidCents: invoices.amountPaidCents,
       state: invoices.state,
       lastReminderSentAt: invoices.lastReminderSentAt,
+      fieldpulseInvoiceId: invoices.fieldpulseInvoiceId,
+      hcpInvoiceId: invoices.hcpInvoiceId,
     })
     .from(invoices)
     .where(withTenant(invoices, organizationId, eq(invoices.id, invoiceId)))
     .limit(1);
 
   if (!inv || !inv.customerId) return { ok: false, reason: "not_found" };
+  // Multi-source money guard (matches takePayment/refundPayment/voidInvoice,
+  // invoice-queries.ts): FP/HCP-mirrored invoices are collected by their
+  // source platform — the UI already hides this action for synced rows, and
+  // sendOverdueInvoiceReminders (this file) already filters them out of the
+  // automated sweep with the same rationale. A direct API call bypasses the
+  // UI hide, so guard it here too before it can double-text a customer.
+  if (inv.fieldpulseInvoiceId || inv.hcpInvoiceId) {
+    return { ok: false, reason: "synced_read_only" };
+  }
   if (!isCollectible(inv)) return { ok: false, reason: "not_collectible" };
   const balanceCents = inv.totalCents - inv.amountPaidCents;
   if (

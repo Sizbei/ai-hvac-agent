@@ -10,6 +10,7 @@ import { createTechSession } from "@/lib/auth/tech-session";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
 import { clientIp } from "@/lib/http/client-ip";
+import { isSameOriginRequest, hasJsonContentType } from "@/lib/session-csrf";
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -44,6 +45,15 @@ export async function POST(request: NextRequest) {
         "RATE_LIMITED",
         429,
       );
+    }
+
+    // CSRF: same-origin only, before any DB read, bcrypt compare, or session mint.
+    if (!isSameOriginRequest(request)) {
+      return errorResponse("Cross-origin request rejected", "FORBIDDEN_ORIGIN", 403);
+    }
+    // Defense-in-depth: block the no-preflight text/plain form-POST vector.
+    if (!hasJsonContentType(request)) {
+      return errorResponse("Expected application/json", "UNSUPPORTED_MEDIA_TYPE", 415);
     }
 
     const bodyResult = await readJsonBody(request);

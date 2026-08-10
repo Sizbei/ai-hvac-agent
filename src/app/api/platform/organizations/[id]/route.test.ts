@@ -85,4 +85,21 @@ describe("DELETE /api/platform/organizations/[id] (purge)", () => {
     const res = await DELETE(delReq(), ctx());
     expect(res.status).toBe(404);
   });
+
+  it("refuses to purge the platform's own operating org (4xx, no delete)", async () => {
+    const originalPlatformOrgId = process.env.PLATFORM_ORG_ID;
+    process.env.PLATFORM_ORG_ID = ORG_ID;
+    try {
+      getAdminSession.mockResolvedValue(PLATFORM_SESSION);
+      isPlatformAdmin.mockReturnValue(true);
+      const res = await DELETE(delReq(), ctx());
+      expect(res.status).toBeGreaterThanOrEqual(400);
+      expect(res.status).toBeLessThan(500);
+      expect(purgeOrganization).not.toHaveBeenCalled();
+      const body = await res.json();
+      expect(body.error).toBeTruthy();
+    } finally {
+      process.env.PLATFORM_ORG_ID = originalPlatformOrgId;
+    }
+  });
 });

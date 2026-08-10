@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
+import { isSuperAdmin } from "@/lib/auth/authz";
 import {
   getCustomerById,
   addEquipment,
@@ -441,6 +442,12 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     const session = await getAdminSession();
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
+    }
+    // Hard delete permanently orphans invoices.customerId/estimates.customerId
+    // (no FK, no de-identification) — strictly more destructive than GDPR
+    // erase, so it must require at least the same privilege level.
+    if (!isSuperAdmin(session)) {
+      return errorResponse("Forbidden", "FORBIDDEN", 403);
     }
 
     const ipAddress = clientIp(request);

@@ -11,13 +11,17 @@ import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
 import { isUuid } from "@/lib/validation/uuid";
+import { MAX_PRICE_CENTS } from "@/lib/admin/money-format";
 
 const updateSchema = z.object({
   name: z.string().trim().min(1).max(255).optional(),
   description: z.string().trim().max(2000).nullable().optional(),
-  priceCents: z.number().int().min(0).optional(),
+  priceCents: z.number().int().min(0).max(MAX_PRICE_CENTS).optional(),
   billingPeriod: z.enum(["monthly", "annual"]).optional(),
   visitsPerYear: z.number().int().min(0).max(12).optional(),
+  // Reactivate only — deactivation stays the DELETE endpoint's job so there is
+  // one path that sets active=false (never hard-delete; see membership-queries.ts).
+  active: z.literal(true).optional(),
 });
 
 export async function PATCH(
@@ -58,10 +62,16 @@ export async function PATCH(
 
     await updateMembershipPlan(session.organizationId, id, parsed.data);
 
+    // A reactivate-only PATCH ({ active: true }) gets its own audit action so
+    // the log reads as the mirror of "deactivate_membership_plan" rather than
+    // a generic edit — details still holds only field names, never values.
+    const isReactivateOnly =
+      parsed.data.active === true && Object.keys(parsed.data).length === 1;
+
     await logAudit({
       organizationId: session.organizationId,
       userId: session.userId,
-      action: "update_membership_plan",
+      action: isReactivateOnly ? "reactivate_membership_plan" : "update_membership_plan",
       entity: "membership_plan",
       entityId: id,
       details: Object.keys(parsed.data).sort().join(","),

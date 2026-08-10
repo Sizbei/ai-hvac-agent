@@ -112,6 +112,32 @@ export function isQuietHours(now: Date, timezone: string | null): boolean {
 }
 
 /**
+ * The public portfolio demo org — the single seeded showcase tenant that
+ * `admin@demo-hvac.com` (isDemoAccount, `@/lib/auth/authz.ts`) belongs to, and
+ * the fallback org for the hosted /chat + voice demo. Mirrors
+ * `DEMO_ORG_ID` in `@/lib/tenancy/organization.ts` / `src/lib/db/seed.ts` —
+ * hardcoded (not imported) so this pure compliance module doesn't pull in
+ * that file's "server-only" + DB/widget-key dependency chain.
+ */
+const DEMO_ORG_ID = "00000000-0000-0000-0000-000000000001";
+
+/**
+ * Trigger types blocked outright for the demo org, regardless of actor or
+ * customer prefs. Scoped narrowly to `review_request`: that pipeline (a
+ * technician marking a job complete -> createReviewRequest ->
+ * queueCommunicationJob) has no session/actor in the loop, so the two
+ * isDemoAccount admin-session checks (send-reminder, conversations message)
+ * can never reach it — this is the one place downstream of it that both
+ * knows the organizationId AND runs before every send. Deliberately NOT
+ * every trigger type: appointment confirmations/reminders, receipts, and
+ * dunning are relied on by the live, intentionally-real portfolio demo
+ * (voice line + /chat) for this SAME organizationId and must keep sending.
+ */
+const DEMO_ORG_BLOCKED_TRIGGERS: ReadonlySet<CommTrigger> = new Set([
+  "review_request",
+]);
+
+/**
  * Decide whether a single outbound message may be sent. Returns allowed:false
  * with a machine-readable reason when blocked. A null customerId means we can't
  * resolve consent (e.g. an ad-hoc admin send to a raw number) — allowed, but the
@@ -126,6 +152,13 @@ export async function checkSendAllowed(params: {
 }): Promise<SendDecision> {
   const { organizationId, customerId, channel, triggerType } = params;
   const now = params.now ?? new Date();
+
+  if (
+    organizationId === DEMO_ORG_ID &&
+    DEMO_ORG_BLOCKED_TRIGGERS.has(triggerType)
+  ) {
+    return { allowed: false, reason: "demo_org_restricted" };
+  }
 
   if (!customerId) {
     return { allowed: true };

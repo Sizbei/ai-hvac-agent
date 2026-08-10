@@ -19,8 +19,12 @@ interface UseMembershipPlansResult {
   readonly refetch: () => Promise<void>;
 }
 
-/** Loads the org's membership plans on mount; refetches after mutations. */
-export function useMembershipPlans(): UseMembershipPlansResult {
+/**
+ * Loads the org's membership plans on mount; refetches after mutations.
+ * `includeInactive` mirrors the pricebook page's "Show inactive" toggle — pass
+ * `true` to also fetch deactivated plans (default: active only).
+ */
+export function useMembershipPlans(includeInactive = false): UseMembershipPlansResult {
   const [plans, setPlans] = useState<readonly MembershipPlan[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -30,7 +34,10 @@ export function useMembershipPlans(): UseMembershipPlansResult {
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
     try {
-      const res = await fetch('/api/admin/membership-plans');
+      const url = includeInactive
+        ? '/api/admin/membership-plans?includeInactive=true'
+        : '/api/admin/membership-plans';
+      const res = await fetch(url);
       if (!res.ok) {
         setError('Failed to load membership plans');
         return;
@@ -46,7 +53,7 @@ export function useMembershipPlans(): UseMembershipPlansResult {
     } finally {
       isFetchingRef.current = false;
     }
-  }, []);
+  }, [includeInactive]);
 
   useEffect(() => {
     setIsLoading(true);

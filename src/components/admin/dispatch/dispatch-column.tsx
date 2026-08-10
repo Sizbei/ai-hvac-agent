@@ -5,6 +5,7 @@ import { Card } from '@/components/ui/card';
 import { UrgencyBadge } from '@/components/admin/urgency-badge';
 import { StatusBadge } from '@/components/admin/status-badge';
 import { ContextBadge } from '@/components/admin/ui/context-badge';
+import { BUSINESS_TIME_ZONE } from '@/lib/admin/calendar-time';
 import type { DashboardRequest } from '@/lib/admin/types';
 
 interface DispatchColumnProps {
@@ -22,14 +23,23 @@ function formatIssueType(issueType: string): string {
     .join(' ');
 }
 
-function formatTime(iso: string | null): string {
+/**
+ * Format an ISO arrival-window instant as a business-timezone clock label,
+ * e.g. "2:00 PM". The board is bucketed by the BUSINESS (Eastern) day
+ * (`businessIsoDate`, see calendar-time.ts), so the card's time must render
+ * in the same zone — never UTC, which reads 4-5h off depending on DST.
+ */
+export function formatTime(iso: string | null): string {
   if (!iso) return '—';
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleTimeString(undefined, {
+  // Locale pinned to en-US (not the viewer's host locale) so the format is
+  // deterministic — matches the convention in calendar-time.ts's
+  // formatBusinessTime.
+  return date.toLocaleTimeString('en-US', {
     hour: 'numeric',
     minute: '2-digit',
-    timeZone: 'UTC',
+    timeZone: BUSINESS_TIME_ZONE,
   });
 }
 

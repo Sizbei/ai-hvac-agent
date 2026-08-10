@@ -137,7 +137,13 @@ export async function GET() {
         })
         .from(technicianLocations)
         .innerJoin(users, eq(technicianLocations.technicianId, users.id))
-        .where(withTenant(technicianLocations, session.organizationId))
+        .where(
+          withTenant(
+            technicianLocations,
+            session.organizationId,
+            eq(users.isActive, true),
+          ),
+        )
         // DISTINCT ON requires ORDER BY to lead with the distinct column;
         // capturedAt DESC tiebreak keeps the most-recent fix per tech.
         .orderBy(
@@ -221,10 +227,16 @@ export async function GET() {
         return project(r, hit.lat, hit.lon);
       }),
     );
-    const jobs = [
-      ...cached,
-      ...geocoded.filter((j): j is NonNullable<typeof j> => j !== null),
-    ];
+    const geocodedJobs = geocoded.filter(
+      (j): j is NonNullable<typeof j> => j !== null,
+    );
+    const jobs = [...cached, ...geocodedJobs];
+    // Every job in needGeocode that didn't make it into geocodedJobs was
+    // dropped — whether because it fell past MAX_GEOCODE, the live lookup
+    // found no hit, or the address failed to decrypt. Track the count
+    // (distinct from geocodeCapped) so the operator always knows when jobs
+    // exist that couldn't be plotted, not only when the cap was exceeded.
+    const notPlottedCount = needGeocode.length - geocodedJobs.length;
 
     // Filter stale tech fixes in JS (cutoff depends on request time).
     const technicians: Array<{
@@ -261,6 +273,7 @@ export async function GET() {
       technicians,
       arCustomers,
       geocodeCapped: needGeocode.length > MAX_GEOCODE,
+      notPlottedCount,
     });
   } catch (error) {
     logger.error({ error }, "Failed to build dispatch map data");

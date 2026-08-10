@@ -9,9 +9,7 @@ import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse, readJsonBody } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
-
-/** Business cap: $999,999.99 = 99,999,999 cents. */
-const MAX_PRICE_CENTS = 99_999_999;
+import { MAX_PRICE_CENTS } from "@/lib/admin/money-format";
 
 const planSchema = z.object({
   name: z.string().trim().min(1).max(255),
@@ -76,14 +74,17 @@ export async function POST(request: NextRequest) {
 
     const id = await createMembershipPlan(session.organizationId, parsed.data);
 
-    // H1: strip money values from audit details — log name/billingPeriod only.
+    // Gaudit-1: details holds field names/enums only — never the free-text name.
     await logAudit({
       organizationId: session.organizationId,
       userId: session.userId,
       action: "create_membership_plan",
       entity: "membership_plan",
       entityId: id,
-      details: `billingPeriod=${parsed.data.billingPeriod};name=${parsed.data.name}`,
+      details: JSON.stringify({
+        billingPeriod: parsed.data.billingPeriod,
+        fields: Object.keys(parsed.data),
+      }),
     }).catch((auditError: unknown) => {
       logger.error(
         { error: auditError, planId: id },

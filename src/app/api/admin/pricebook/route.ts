@@ -115,14 +115,17 @@ export async function POST(request: NextRequest) {
 
     const id = await createPricebookItem(session.organizationId, parsed.data);
 
-    // H1: strip money values from audit details — log type/name only, not prices.
+    // Gaudit-1: details holds field names/enums only — never the free-text name.
     await logAudit({
       organizationId: session.organizationId,
       userId: session.userId,
       action: "create_pricebook_item",
       entity: "pricebook_item",
       entityId: id,
-      details: `type=${parsed.data.type};name=${parsed.data.name}`,
+      details: JSON.stringify({
+        type: parsed.data.type,
+        fields: Object.keys(parsed.data),
+      }),
     }).catch((auditError: unknown) => {
       logger.error(
         { error: auditError, itemId: id },

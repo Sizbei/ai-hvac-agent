@@ -3,6 +3,8 @@ import {
   enrollCustomer,
   cancelMembership,
   getActiveMembership,
+  updateMembershipPlan,
+  listMembershipPlans,
 } from "./membership-queries";
 import { db } from "@/lib/db";
 import { MockPaymentProvider } from "@/lib/payments/provider";
@@ -185,5 +187,36 @@ describe("getActiveMembership", () => {
     mockSelectSeq([[]]);
     const m = await getActiveMembership(ORG, CUST);
     expect(m).toBeNull();
+  });
+});
+
+describe("updateMembershipPlan — reactivate (Rmembership-plans-1)", () => {
+  it("sets active=true when reactivating a deactivated plan", async () => {
+    const setSpy = vi
+      .fn()
+      .mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) });
+    vi.mocked(db.update).mockReturnValue({ set: setSpy } as never);
+
+    await updateMembershipPlan(ORG, PLAN, { active: true });
+
+    expect(setSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ active: true }),
+    );
+  });
+});
+
+describe("listMembershipPlans", () => {
+  it("includes a reactivated plan in the default active-only view", async () => {
+    const orderBy = vi.fn().mockResolvedValue([planRow({ active: true })]);
+    const where = vi.fn().mockReturnValue({ orderBy });
+    const from = vi.fn().mockReturnValue({ where });
+    vi.mocked(db.select).mockReturnValue({ from } as never);
+
+    // includeInactive unset -> the default active-only view a reactivated
+    // plan (active flipped back to true) must reappear in.
+    const plans = await listMembershipPlans(ORG);
+
+    expect(plans).toHaveLength(1);
+    expect(plans[0]!.active).toBe(true);
   });
 });
