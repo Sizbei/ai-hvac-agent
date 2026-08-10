@@ -26,30 +26,28 @@ Ideas for a great version of this page, and what shipped vs. got cut:
   live-queried like `actions` already is; rejected for *this* fix — the
   simplest correct move is making `KNOWN_ENTITIES` match reality, not
   redesigning the filter data flow.
-- **Row-level tamper protection (DB trigger blocking UPDATE/DELETE on
-  `audit_log`)** — considered, not built. The page's own claim is
-  "immutable", but nothing in Postgres enforces it (Gaudit-3). Recommended as
-  a requirement: an admin-reachable route already deletes rows, and the repo
-  has precedent for a small hand-authored trigger migration for a similar
-  guard (the last-admin-guard trigger, per repo memory).
+- **Row-level tamper protection (DB trigger blocking UPDATE/DELETE)** —
+  considered, not built; the page's "immutable" claim isn't Postgres-enforced
+  (Gaudit-3). Recommended: an admin-reachable route already deletes rows, and
+  the repo has precedent for a small hand-authored trigger migration (the
+  last-admin-guard trigger, per repo memory).
 - **CSV/export** — rejected. No evidence of demand (no button, no route, no
   skill mention). YAGNI.
 - **Raw-JSON detail view** — rejected. `formatDetails` already flattens
-  `details` to one line (`page.tsx:65-80`); a raw view adds a surface for a
-  future engineer to render un-vetted JSON without the parse-failure
-  fallback. Not worth it.
+  `details` to one line (`page.tsx:65-80`); a raw view adds a surface to
+  render un-vetted JSON without the parse-failure fallback. Not worth it.
 - **Retention / auto-purge policy** — rejected. No compliance requirement is
-  documented anywhere in the repo; building a purge job speculatively risks
-  deleting evidence nobody asked to delete. YAGNI.
+  documented anywhere in the repo; a speculative purge job risks deleting
+  evidence nobody asked to delete. YAGNI.
 - **Role-gating reads to super_admin only** — considered, explicitly
   rejected as *not* a gap: every other admin list-read route (customers,
-  invoices, staff, settings, technicians, payments) is gated the same way —
-  any authenticated session, any role (`audit-log/route.ts:10-13`, verified
-  against `customers/route.ts`, `invoices/route.ts`, `staff/route.ts`).
-  Singling this page out would be inconsistent with repo convention.
+  invoices, staff, settings) is gated the same way — any authenticated
+  session, any role (`audit-log/route.ts:10-13`, verified against
+  `customers/route.ts`, `invoices/route.ts`, `staff/route.ts`). Singling
+  this page out would be inconsistent with repo convention.
 - **Free-text search over `details`** — rejected. `details` is intentionally
   low-cardinality field names/ids; free-text search wouldn't return anything
-  a human would type. Action/entity filters already cover the real use case.
+  a human would type — action/entity filters already cover the real case.
 
 ## 3. Current state
 
@@ -62,17 +60,15 @@ Ideas for a great version of this page, and what shipped vs. got cut:
   entity labels (`:54-61`), `formatDetails()` which `JSON.parse`s `details`
   and falls back to `'(details unavailable)'` on any parse failure rather
   than echoing raw text (`:65-80`).
-- `src/hooks/use-admin-audit-log.ts` — fetches `/api/admin/audit-log` on
-  mount and on any filter/page change; no polling (historical data doesn't
-  need it), no client cache; re-entrancy guarded by `isFetchingRef` (`:39-44`).
+- `src/hooks/use-admin-audit-log.ts` — fetches on mount and on any
+  filter/page change; no polling, no client cache; re-entrancy guarded by
+  `isFetchingRef` (`:39-44`).
 - `src/app/api/admin/audit-log/route.ts` (53 lines) — `getAdminSession()`
-  gate (any role, `:10-13`), rate-limited via `adminRead` bucket (`:15-22`),
-  delegates to `getAuditLog(session.organizationId, {...})`, returns
-  `{ entries, total, actions, page, limit }`.
+  gate (any role, `:10-13`), rate-limited (`:15-22`), delegates to
+  `getAuditLog(session.organizationId, {...})`.
 - `src/lib/admin/audit-queries.ts` — `getAuditLog` builds a `withTenant`
-  where-clause (org always required, `:40`), runs count/rows/distinct-actions
-  in one `Promise.all` (`:45-75`), rows ordered `desc(createdAt)`,
-  `limit`/`offset` pagination capped at `MAX_LIMIT = 100` (`:20,27`).
+  where-clause (`:40`), runs count/rows/distinct-actions in one
+  `Promise.all` (`:45-75`), `limit`/`offset` capped at `MAX_LIMIT = 100`.
 - `src/lib/db/schema.ts:997-1023` — `audit_log` table: `organizationId` (FK,
   cascade-on-org-delete), `userId`/`sessionId` (FK, nullable), `actorType`
   enum (`human`/`ai`/`system`), `action`/`entity` (text, required),
@@ -145,10 +141,10 @@ anywhere. Two places do `db.delete(auditLog)`:
 
 **Pagination cost**: `getAuditLog` uses `OFFSET` pagination
 (`audit-queries.ts:27-28,68`) against the composite
-`(organizationId, createdAt)` index — cheap for early pages, but on an
-append-only table that grows forever, deep-page `OFFSET`s degrade linearly.
-`MAX_LIMIT` caps page size, not page depth. No evidence any org's table is
-large enough for this to matter yet — a watch item, not a current gap.
+`(organizationId, createdAt)` index — cheap for early pages, but deep-page
+`OFFSET`s degrade linearly on an append-only, ever-growing table.
+`MAX_LIMIT` caps page size, not depth. No evidence any org's table is large
+enough for this to matter yet — a watch item, not a current gap.
 
 ## 4. Gaps
 
@@ -221,18 +217,16 @@ Only Gaudit-1 through Gaudit-4 clear the P0/P1 bar.
 - **Tenancy**: every audit-log query is scoped by `organizationId` via
   `withTenant` (`audit-queries.ts:40`); Raudit-log-3/4 must not introduce an
   unscoped query.
-- **`minTableWidth="40rem"` on `DataTableShell`** must stay — prevents
-  column collapse on narrow viewports (`page-audit-log` skill).
+- **`minTableWidth="40rem"` on `DataTableShell`** must stay — prevents column
+  collapse on narrow viewports.
 - **Actor display**: `actorName` (never a raw user id) — null renders as
   `<span italic>System</span>` (`page.tsx:131-135`). Any new writer must set
   `userId` correctly (or leave it null for system/AI actors).
 - **Action filter stays live-derived**; only the entity filter is static —
-  Raudit-log-4 fixes the static list's content, not this asymmetry
-  (`page-audit-log` skill gotcha, still true post-fix).
+  Raudit-log-4 fixes the static list's content, not this asymmetry.
 - **FROZEN safety text / guardrail regexes** in `src/lib/ai` are untouched by
   this spec (repo-wide invariant, `AGENTS.md`).
-- **neon-http**: any new migration or batched write for Raudit-log-3 must use
-  `db.batch()`, never `db.transaction()` (repo-wide invariant).
+- **neon-http**: any batched write for Raudit-log-3 must use `db.batch()`, never `db.transaction()` (repo-wide invariant).
 
 ## 8. Verification
 

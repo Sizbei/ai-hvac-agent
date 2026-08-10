@@ -1,7 +1,6 @@
 # settings — target-state spec
 
-`/admin/settings` (9-tab org configuration) · `/admin/settings/billing` (own-org
-subscription).
+`/admin/settings` (9-tab org configuration) · `/admin/settings/billing` (own-org subscription).
 
 ## 1. Purpose
 
@@ -28,14 +27,12 @@ Considered, and what shipped or got cut:
   `billing-link-panel.tsx:20-38`). Rejected: branch on `session.role` in the
   page. Reason: the page has no session prop today, and a client check
   drifts from the server's real gate. verified.
-- **Write-only integration credentials, live-validated before persisting** —
-  shipped for Housecall Pro / Fieldpulse (`housecall-pro-panel.tsx:35-38`;
-  server probes the real API before saving, `housecall/connect/route.ts:
-  65-82`). Rejected: trust a pasted key unchecked — a typo'd key would
-  silently break sync until someone noticed. verified.
-- **Widget secret shown exactly once, never re-readable** — shipped
-  (`widget-keys/route.ts:96-100`; list query selects `keyPrefix`, never
-  `keyHash`, `key-queries.ts`). Rejected: let an admin re-view a key — a
+- **Write-only secrets: integration credentials live-validated before
+  persisting, widget keys shown exactly once** — shipped
+  (`housecall/connect/route.ts:65-82` probes the real API before saving;
+  `widget-keys/route.ts:96-100` + `key-queries.ts` list query selects
+  `keyPrefix`, never `keyHash`). Rejected: trust a pasted key unchecked, or
+  let an admin re-view a key — a typo'd key silently breaks sync, and a
   re-displayable secret is one a hijacked session can steal later. verified.
 - **Structured business-info fields that personalize canned FAQ replies**,
   not a freeform bio fed to the LLM — shipped for `phone`/`serviceArea`/
@@ -51,25 +48,24 @@ Considered, and what shipped or got cut:
 - **One generic PATCH endpoint for all non-FAQ config** — shipped
   (`api/admin/settings/route.ts:34-79`). Rejected: one endpoint per tab —
   every field shares the same tenancy scope, audit action, and partial-patch
-  semantics (`org-config-queries.ts:66-92`); a 9-way split would be nine
-  copies of the same boilerplate. verified.
-- **`positioning`/`serviceScope`/`voiceCues` business-info extension** — NOT
-  built. `system-prompt.ts:131-144` already reads these "opportunistically"
-  for a *future* extension (its own doc comment) — no schema field, no UI.
-  Rejected here: no evidence any org needs a bespoke brand voice today;
-  wiring UI ahead of a real request is the speculative work YAGNI blocks.
-- **Structured per-day business-hours editor, FAQ bulk import/export, and a
-  per-tab "last edited by" trail** — all rejected. The after-hours window is
-  already structured separately; `businessHours` is only echoed as prose in
-  one FAQ reply. `MAX_CUSTOM_FAQS = 100` is hand-editable. The org-wide
-  Audit log page already renders every settings/FAQ/integration action.
+  semantics (`org-config-queries.ts:66-92`); a split would be nine copies of
+  the same boilerplate. verified.
+- **`positioning`/`serviceScope`/`voiceCues` business-info extension, a
+  structured per-day business-hours editor, FAQ bulk import/export, and a
+  per-tab "last edited by" trail** — none built. `system-prompt.ts:131-144`
+  already reads the first three "opportunistically" for a *future*
+  extension (its own doc comment) with no schema field or UI; the rest are
+  rejected because the after-hours window is already structured separately,
+  `businessHours` is only echoed as prose, `MAX_CUSTOM_FAQS = 100` is
+  hand-editable, and the org-wide Audit log page already renders every
+  settings/FAQ/integration action. No evidence of demand for any of these.
 
 ## 3. Current state
 
 **Pages** (verified): `settings/page.tsx` — client page, `useOrgSettings()`
 drives a 9-tab `Tabs` (`:61-99`); loading state is two `Skeleton`s while
 `isLoading || !config` (`:55-59`); `integrations` tab stacks 6 panels, 3
-self-hiding (`:139-152`). `settings/billing/page.tsx` — server component,
+self-hiding (`:139-152`). `settings/billing/page.tsx` is a server component:
 `getAdminSession()` then `isSuperAdmin || isPlatformAdmin` else
 `redirect('/admin/settings')` (`:14-18`).
 
@@ -85,13 +81,12 @@ fields — `org-config-queries.ts:66-92` only writes present keys), then
 (`route.ts:62-69`) — field NAMES only, never values. GET/PATCH are
 rate-limited per-user and 401 on no session — no role gate beyond "is an
 admin" (see Gsettings-2). FAQs have their own `GET`/`POST`/`PATCH`/`DELETE`,
-same scoping/rate-limit/audit pattern (entity-id only, never question/answer
-text), `MAX_CUSTOM_FAQS = 100` enforced at create (`faqs/route.ts:15,68-74`).
-`updateOrgConfig` upserts on the org PK and eagerly invalidates a 60s
-in-memory router-config cache on every write/FAQ-CRUD
-(`org-config-queries.ts:119,135-137,216,241,258`) — the page-settings
-skill's "changes go live immediately" claim is real at the cache layer, not
-just an assumption.
+same scoping/rate-limit/audit pattern, `MAX_CUSTOM_FAQS = 100` enforced at
+create (`faqs/route.ts:15,68-74`). `updateOrgConfig` upserts on the org PK
+and eagerly invalidates a 60s in-memory router-config cache on every
+write/FAQ-CRUD (`org-config-queries.ts:119,135-137,216,241,258`) — the
+page-settings skill's "changes go live immediately" claim is real at the
+cache layer, not just an assumption.
 
 **Every tab traced to a live consumer** (verified, not just a writer):
 branding's `companyName`/`primaryColor`/`logoUrl`/`launcherPosition` feed
@@ -112,12 +107,12 @@ Embed's `allowedOrigins` gates `frame-ancestors` in `proxy.ts:25-49`
 `chatTokenBudget`/`chatMaxTurns` feed `resolveTokenBudget`/
 `resolveMaxTurns` (`chat-limits.ts:26-46`) at session creation. After-hours'
 full config is the direct input to `isAfterHours` (`after-hours.ts:76-91`),
-consumed by the chat route for disclosure/flagging (`api/chat/route.ts:
-594-604,1482,1775`). Dispatch's `autoDispatchEnabled` is read at
-`scheduling-queries.ts:1271-1291` to switch scored-vs-first-fit assignment.
-Integrations: Google/Housecall/Fieldpulse connect against separate
-credential tables, write-only for the secret, live-validated before
-persisting (`housecall/connect/route.ts:65-82`); `AiModelPanel` writes
+consumed by the chat route (`api/chat/route.ts:594-604,1482,1775`).
+Dispatch's `autoDispatchEnabled` is read at `scheduling-queries.ts:
+1271-1291` to switch scored-vs-first-fit assignment. Integrations:
+Google/Housecall/Fieldpulse connect against separate credential tables,
+write-only for the secret, live-validated before persisting
+(`housecall/connect/route.ts:65-82`); `AiModelPanel` writes
 `organizationSettings.aiModelId`, read by the model registry at chat time
 (super_admin-gated both ways, `ai/model/route.ts:7,30-32,60`).
 
@@ -187,12 +182,10 @@ Gsettings-3 are P2, recorded above, left in the backlog per METHOD.md).
 
 ## 6. Non-goals
 
-- Not building UI for `positioning`/`serviceScope`/`voiceCues` — Brainstorm,
-  YAGNI (documented future extension point, not broken behavior).
-- Not building a structured per-day business-hours editor or FAQ bulk
-  import/export — Brainstorm, YAGNI.
-- Not adding a per-tab audit trail UI — Brainstorm, redundant with the
-  existing Audit log page.
+- Not building UI for `positioning`/`serviceScope`/`voiceCues`, a structured
+  per-day business-hours editor, FAQ bulk import/export, or a per-tab audit
+  trail — Brainstorm, all YAGNI or redundant with the existing Audit log
+  page.
 - Not touching after-hours time-math, the router's deterministic matching,
   or the guardrail/system-prompt architecture beyond the one additive
   `BrandInfo` field Rsettings-1 needs — see Invariants.
@@ -201,8 +194,8 @@ Gsettings-3 are P2, recorded above, left in the backlog per METHOD.md).
   operational config any admin plausibly owns day-to-day (`authz.ts:69-85`:
   an admin manages operational things, only a super_admin manages other
   admins or account-owner concerns). Only the three integration-credential
-  flows get the new gate, because only those are comparable in kind to the
-  two surfaces (AI model, billing) that already have it.
+  flows are comparable in kind to the two surfaces (AI model, billing) that
+  already have the stricter gate.
 - Gsettings-1b and Gsettings-3 (P2) stay in the backlog per METHOD.md's
   severity gate; not implementation work in this run.
 
@@ -212,9 +205,9 @@ Gsettings-3 are P2, recorded above, left in the backlog per METHOD.md).
   scoped by `session.organizationId`, never a hardcoded org
   (`api/admin/settings/route.ts:26,60`). Rsettings-1/2 must not introduce an
   unscoped query.
-- Audit logging stays field-names-only, never values: `update_settings`
-  logs `Object.keys(parsed.data)` (`route.ts:69`); integration
-  connect/disconnect audits log non-secret identifiers only. Any new audit
+- Audit logging stays field-names-only, never values (`update_settings`
+  logs `Object.keys(parsed.data)`, `route.ts:69`; integration
+  connect/disconnect audits log non-secret identifiers only). Any new audit
   entry Rsettings-2 needs must follow the same shape.
 - Secrets are write-only and shown at most once (`widget-keys/route.ts:
   96-100`; `*-panel.tsx` clear-on-success). Rsettings-1/2 touch neither flow
@@ -229,12 +222,10 @@ Gsettings-3 are P2, recorded above, left in the backlog per METHOD.md).
   Rsettings-2 extends this to three more panels; no client-side
   `session.role === …` branch in the page component.
 - `organizationSettings.businessInfo` stays a `.strict()` zod-validated
-  JSONB bag — Rsettings-1's removal of `email` must update
-  `businessInfoSchema`, `BusinessInfo`, `DEFAULT_ORG_CONFIG`, and any test
-  fixture that sets `businessInfo.email`.
-- The 60s router-config cache is invalidated eagerly on every write
-  (`org-config-queries.ts:119,135-137`) — any new write path must call
-  `invalidateRouterConfig` too, though neither requirement here adds one.
+  JSONB bag — removing `email` must update `businessInfoSchema`,
+  `BusinessInfo`, `DEFAULT_ORG_CONFIG`, and any test fixture that sets it.
+  The 60s router-config cache (`org-config-queries.ts:119,135-137`) must
+  stay invalidated on every write; neither requirement here adds a new one.
 
 ## 8. Verification
 
@@ -243,17 +234,14 @@ Gsettings-3 are P2, recorded above, left in the backlog per METHOD.md).
 - `npx vitest run` → must not drop below the live baseline recorded in
   `docs/page-program/README.md`.
 - Regression pack: `npx vitest run src/lib/ai/system-prompt.test.ts src/lib/admin/org-config-queries.test.ts src/lib/admin/after-hours.test.ts` —
-  extend whichever file already covers `brandInfoFromConfig` rather than
-  adding a new one (no jsdom/RTL — pure-helper only).
+  extend whichever covers `brandInfoFromConfig` (no jsdom/RTL — pure-helper only).
 - New pure-function unit tests: (a) a saved `website` value changes
   `brandInfoFromConfig`'s output (Rsettings-1); (b)
   `businessInfoSchema.safeParse({..., email: "x@y.com"})` now fails, proving
   the field is really gone (Rsettings-1).
 - Route-level auth tests: a mocked non-super_admin admin session hitting
-  `POST .../housecall/connect`, `POST .../fieldpulse/connect`,
-  `DELETE /api/admin/integrations/google`, and their disconnect
-  counterparts all return 403; a mocked `super_admin` session succeeds
-  (Rsettings-2).
+  connect/disconnect for all three integrations returns 403; a mocked
+  `super_admin` session succeeds (Rsettings-2).
 - Manual/visual: `npm run dev` (background) → mint a non-super_admin admin
   session, screenshot `/admin/settings` Integrations tab via
   `node scripts/agent/screenshot-page.mjs /admin/settings`, confirm the
