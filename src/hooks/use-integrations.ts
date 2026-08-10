@@ -13,6 +13,7 @@ export type IntegrationStatus =
   | 'live'
   | 'mock'
   | 'connected'
+  | 'sync_failed'
   | 'not_configured';
 
 export interface IntegrationStatusItem {

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { AlertCircle, CalendarClock, Siren, PauseCircle } from 'lucide-react';
 import { useDashboardOverview } from '@/hooks/use-dashboard-overview';
+import type { DashboardOverviewWithOverdue } from '@/lib/admin/queries';
 import { DashboardGreeting } from '@/components/admin/dashboard/dashboard-greeting';
 import { DashboardStatCards } from '@/components/admin/dashboard/dashboard-stat-cards';
 import { DashboardListCard } from '@/components/admin/dashboard/dashboard-list-card';
@@ -15,6 +16,12 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 export default function AdminDashboardPage() {
   const { overview, isLoading, error, refetch } = useDashboardOverview();
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
+  // The /api/admin/overview payload carries overdueInvoices (Rdashboard-2) even
+  // though the shared DashboardOverview type (used by the polling hook) doesn't
+  // declare it — DashboardOverviewWithOverdue is the query layer's local
+  // extension for that one extra field.
+  const overdueInvoices =
+    (overview as DashboardOverviewWithOverdue | null)?.overdueInvoices ?? null;
 
   return (
     <PageShell>
@@ -29,7 +36,11 @@ export default function AdminDashboardPage() {
         </Alert>
       )}
 
-      <DashboardStatCards stats={overview?.stats ?? null} isLoading={isLoading} />
+      <DashboardStatCards
+        stats={overview?.stats ?? null}
+        overdueInvoices={overdueInvoices}
+        isLoading={isLoading}
+      />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Left: priority lists */}

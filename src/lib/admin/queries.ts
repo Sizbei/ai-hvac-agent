@@ -28,11 +28,16 @@ import {
   users,
   messages,
   customers,
+  invoices,
   requestStatusEnum,
   holdReasonEnum,
   urgencyEnum,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
+// Reuse the canonical overdue-invoice predicate — the invoices page and the
+// operations page both compute AR off this exact function. Do not
+// re-implement "overdue" here (see AGENTS.md's definitional-consistency note).
+import { overdueWhere } from "./invoice-queries";
 import { normalizeEmail } from "./staff-queries";
 import { decrypt } from "@/lib/crypto";
 import {
@@ -1196,23 +1201,74 @@ function toDashboardRequest(row: DashboardRequestRow): DashboardRequest {
   };
 }
 
+// Builds (without awaiting) the overdue-invoices AR signal for the dashboard.
+// Same isCollectible + overdue semantics as getInvoiceSummaryStats
+// (invoice-queries.ts): state='open' AND total>paid, filtered by the shared
+// overdueWhere() predicate — never a second "overdue" definition.
+function buildDashboardOverdueInvoicesQuery(organizationId: string) {
+  return db
+    .select({
+      overdueCount: sql<number>`count(*) filter (where ${overdueWhere(invoices)})::int`,
+      overdueCents: sql<number>`coalesce(sum(${invoices.totalCents} - ${invoices.amountPaidCents}) filter (where ${overdueWhere(invoices)}), 0)::bigint`,
+    })
+    .from(invoices)
+    .where(
+      withTenant(
+        invoices,
+        organizationId,
+        eq(invoices.state, "open"),
+        sql`${invoices.totalCents} > ${invoices.amountPaidCents}`,
+      ),
+    );
+}
+
+type DashboardOverdueInvoicesRow = Awaited<
+  ReturnType<typeof buildDashboardOverdueInvoicesQuery>
+>[number];
+
+/** Overdue-invoice AR signal shown on the /admin dashboard (Rdashboard-2). */
+export interface DashboardOverdueInvoices {
+  readonly count: number;
+  readonly cents: number;
+}
+
+function toDashboardOverdueInvoices(
+  row: DashboardOverdueInvoicesRow | undefined,
+): DashboardOverdueInvoices {
+  return {
+    count: Number(row?.overdueCount ?? 0),
+    cents: Number(row?.overdueCents ?? 0),
+  };
+}
+
+/**
+ * DashboardOverview plus the overdue-invoices AR signal. A local extension
+ * (rather than editing the shared DashboardOverview type in types.ts) so
+ * this stays a surgical, single-file addition — consumers that need the
+ * extra field import this type directly from here.
+ */
+export interface DashboardOverviewWithOverdue extends DashboardOverview {
+  readonly overdueInvoices: DashboardOverdueInvoices;
+}
+
 /**
  * One tenant-scoped payload for the /admin overview dashboard: the expanded
  * KPI counts, today's scheduled arrival windows, the unassigned urgent/emergency
- * queue, and on-hold requests awaiting a follow-up. All lists are capped and
- * carry decrypted customer NAMES only (no other PII).
+ * queue, on-hold requests awaiting a follow-up, and the overdue-invoices AR
+ * signal. All lists are capped and carry decrypted customer NAMES only (no
+ * other PII).
  */
 export async function getDashboardOverview(
   organizationId: string,
-): Promise<DashboardOverview> {
+): Promise<DashboardOverviewWithOverdue> {
   const todayBounds = businessDayBounds(businessIsoDate(new Date()))!;
   const todayStart = todayBounds.start;
   const tomorrowStart = todayBounds.end;
 
-  // db.batch(): 1 HTTP round-trip for all four queries, matching the
+  // db.batch(): 1 HTTP round-trip for all five queries, matching the
   // neon-http invariant every sibling aggregation follows (ai-insights-queries,
-  // conversation-queries, crm-queries) instead of Promise.all's 4 round-trips.
-  const [statsRows, scheduleRows, attentionRows, followUpRows] = await db.batch([
+  // conversation-queries, crm-queries) instead of Promise.all's 5 round-trips.
+  const [statsRows, scheduleRows, attentionRows, followUpRows, overdueInvoicesRows] = await db.batch([
     buildDashboardStatsQuery(organizationId),
 
     // Today's schedule: any open request whose arrival window starts today.
@@ -1278,6 +1334,8 @@ export async function getDashboardOverview(
       )
       .orderBy(asc(serviceRequests.followUpDate))
       .limit(DASHBOARD_LIST_LIMIT),
+
+    buildDashboardOverdueInvoicesQuery(organizationId),
   ]);
 
   return {
@@ -1285,6 +1343,7 @@ export async function getDashboardOverview(
     todaySchedule: scheduleRows.map(toDashboardRequest),
     needsAttention: attentionRows.map(toDashboardRequest),
     awaitingFollowUp: followUpRows.map(toDashboardRequest),
+    overdueInvoices: toDashboardOverdueInvoices(overdueInvoicesRows[0]),
   };
 }
 

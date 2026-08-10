@@ -4,6 +4,9 @@ import {
   progressPct,
   formatElapsed,
   runTone,
+  isStaleRun,
+  PIPELINE_PHASES,
+  STALE_RUN_THRESHOLD_MS,
   type FpImportRunSummary,
   type FpRunCounts,
 } from './import-status-model';
@@ -32,6 +35,48 @@ describe('latestRunPerPhase', () => {
     expect(result['customers']).toBeUndefined();
     expect(result['jobs']).toBeUndefined();
     expect(result['invoices']).toBeUndefined();
+  });
+
+  it('covers all 11 real pipeline phases (Rfieldpulse-import-1) — a run for any of them is resolvable', () => {
+    expect(PIPELINE_PHASES).toEqual([
+      'technicians',
+      'customers',
+      'jobs',
+      'invoices',
+      'estimates',
+      'payments',
+      'assets',
+      'comments',
+      'locations',
+      'items',
+      'job-metrics',
+    ]);
+
+    const runs = PIPELINE_PHASES.map((phase, i) =>
+      makeRun({ id: `run-${i}`, phase, startedAt: '2024-01-01T10:00:00Z' }),
+    );
+    const result = latestRunPerPhase(runs);
+    for (const phase of PIPELINE_PHASES) {
+      expect(result[phase]?.phase).toBe(phase);
+    }
+  });
+
+  it('picks up a run for each of the 7 previously-missing phases individually', () => {
+    const previouslyMissing = [
+      'estimates',
+      'payments',
+      'assets',
+      'comments',
+      'locations',
+      'items',
+      'job-metrics',
+    ] as const;
+    for (const phase of previouslyMissing) {
+      const result = latestRunPerPhase([
+        makeRun({ id: 'r1', phase, startedAt: '2024-01-01T10:00:00Z' }),
+      ]);
+      expect(result[phase]?.id).toBe('r1');
+    }
   });
 
   it('one run per phase → returns each', () => {
@@ -171,5 +216,56 @@ describe('runTone', () => {
 
   it("'unknown' → 'muted'", () => {
     expect(runTone('unknown')).toBe('muted');
+  });
+});
+
+// ─── isStaleRun ──────────────────────────────────────────────────────────────
+
+describe('isStaleRun', () => {
+  const NOW = new Date('2024-01-01T12:00:00Z').getTime();
+
+  it('fresh running run → false', () => {
+    const run = makeRun({
+      phase: 'customers',
+      status: 'running',
+      startedAt: new Date(NOW - 5 * 60 * 1000).toISOString(), // 5 min ago
+    });
+    expect(isStaleRun(run, NOW)).toBe(false);
+  });
+
+  it('running run started just under the threshold → false', () => {
+    const run = makeRun({
+      phase: 'customers',
+      status: 'running',
+      startedAt: new Date(NOW - (STALE_RUN_THRESHOLD_MS - 1000)).toISOString(),
+    });
+    expect(isStaleRun(run, NOW)).toBe(false);
+  });
+
+  it('running run past the threshold → true (stale)', () => {
+    const run = makeRun({
+      phase: 'customers',
+      status: 'running',
+      startedAt: new Date(NOW - (STALE_RUN_THRESHOLD_MS + 1000)).toISOString(),
+    });
+    expect(isStaleRun(run, NOW)).toBe(true);
+  });
+
+  it('completed run, any age → false', () => {
+    const run = makeRun({
+      phase: 'customers',
+      status: 'completed',
+      startedAt: new Date(NOW - 5 * 60 * 60 * 1000).toISOString(), // 5h ago
+    });
+    expect(isStaleRun(run, NOW)).toBe(false);
+  });
+
+  it('failed run, any age → false', () => {
+    const run = makeRun({
+      phase: 'customers',
+      status: 'failed',
+      startedAt: new Date(NOW - 5 * 60 * 60 * 1000).toISOString(), // 5h ago
+    });
+    expect(isStaleRun(run, NOW)).toBe(false);
   });
 });

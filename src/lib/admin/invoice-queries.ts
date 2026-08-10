@@ -233,18 +233,30 @@ export async function takePayment(
         )!,
       ),
     )
-    .returning({ id: invoices.id });
-  if (!claim[0]) {
+    .returning({
+      id: invoices.id,
+      amountPaidCents: invoices.amountPaidCents,
+      totalCents: invoices.totalCents,
+    });
+  const claimedInvoice = claim[0];
+  if (!claimedInvoice) {
     // Lost the race / state changed — the balance was already reserved by a
     // concurrent charge. Do NOT touch the card.
     return { ok: false, reason: "exceeds_balance" };
   }
 
-  // Best-effort state hint (the money figure is exact in the DB; state is only a
-  // display hint). Derived from the read — the claim guaranteed newPaid <= total.
-  // Under concurrent partials this hint can lag briefly; the money never does.
-  const newPaid = inv.amountPaidCents + params.amountCents;
-  const invoiceState = newPaid >= inv.totalCents ? "paid" : "open";
+  // Best-effort state hint (the money figure is exact in the DB; state is only
+  // a display hint) — derived from the claim's own RETURNING row, i.e. the
+  // ACTUAL post-claim amountPaidCents, never the pre-claim `inv` read taken
+  // before the atomic claim. Mirrors reconcilePayment, which also re-derives
+  // its state hint from a fresh read rather than a value captured earlier.
+  // Two concurrent partial payments that together exactly fill the balance
+  // would otherwise each compute their state off their own stale pre-claim
+  // snapshot (both see amountPaidCents from before either claim landed) and
+  // both write 'open' — permanently stranding a fully-paid invoice in the
+  // collections queue even though amountPaidCents is exactly right.
+  const invoiceState =
+    claimedInvoice.amountPaidCents >= claimedInvoice.totalCents ? "paid" : "open";
 
   const paymentId = randomUUID();
   let result;

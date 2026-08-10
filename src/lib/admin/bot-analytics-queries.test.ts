@@ -18,7 +18,14 @@ const { selectQueue, chain } = vi.hoisted(() => {
 });
 
 vi.mock('@/lib/db', () => ({
-  db: { select: () => chain(selectQueue.shift() ?? []) },
+  db: {
+    select: () => chain(selectQueue.shift() ?? []),
+    // getBotAnalytics batches its three independent selects (db.batch, not
+    // Promise.all) — each queued statement is itself one of the thenable
+    // proxies returned by db.select() above, so resolving it via Promise.all
+    // mirrors real db.batch() returning each statement's rows in order.
+    batch: (queries: unknown[]) => Promise.all(queries),
+  },
 }));
 
 vi.mock('@/lib/db/tenant', () => ({

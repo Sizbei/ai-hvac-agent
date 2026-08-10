@@ -23,6 +23,7 @@ import { BotAnalyticsSection } from '@/components/admin/insights/bot-analytics-s
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 import { StatCard } from '@/components/admin/ui/stat-card';
+import { SectionHeading } from '@/components/admin/ui/section-heading';
 import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 
 interface InsightCard {
@@ -148,6 +149,20 @@ export default function AiInsightsPage() {
         </Alert>
       )}
 
+      {/*
+        Rinsights-ai-1: getAiInsights (ai-insights-queries.ts) has no date
+        filter — every count below is all-time since the account was
+        created, not a rolling window. Disclosing that here (rather than
+        leaving it implicit) is the minimum bar this gap requires; a real
+        period-over-period delta needs a second query this pass doesn't
+        touch (ai-insights-queries.ts is out of scope for this change).
+      */}
+      <SectionHeading
+        as="h2"
+        title="AI assistant"
+        description="All-time totals since your account was created."
+      />
+
       {/* Headline: deflection rate — hero card gets extra padding + tint */}
       <StatCard
         label="Deflection rate"
@@ -191,6 +206,17 @@ export default function AiInsightsPage() {
 
       <BotAnalyticsSection />
 
+      {/*
+        OpsInsightsSection's own headline counts (open/completed/cancelled,
+        the issue/urgency/status breakdowns, technician load) are all-time —
+        only "New (7 days)" is time-bound. ops-insights-section.tsx isn't in
+        this change's file scope, so the window is disclosed here instead of
+        inside the section's own heading.
+      */}
+      <p className="text-xs text-muted-foreground">
+        Operations snapshot below — all-time totals, except “New (7 days)”,
+        which covers the last 7 days.
+      </p>
       <OpsInsightsSection />
     </PageShell>
   );

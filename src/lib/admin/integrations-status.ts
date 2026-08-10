@@ -36,12 +36,15 @@ export type IntegrationCategory =
  *  - "connected"      — a per-org connection exists (FSM/calendar).
  *  - "live"           — a real provider/key is active.
  *  - "mock"           — running on the deterministic mock seam (no live adapter).
+ *  - "sync_failed"     — connected, but the most recent background sync failed
+ *                        (FieldPulse availability sync only; Rintegrations-1).
  *  - "not_configured" — nothing connected and no key/env present.
  */
 export type IntegrationStatus =
   | "live"
   | "mock"
   | "connected"
+  | "sync_failed"
   | "not_configured";
 
 /** One row on the Integrations page. Contains NO secrets. */
@@ -91,23 +94,31 @@ export async function getIntegrationsStatus(
   ]);
 
   // FSM — Fieldpulse. Connected (per-org key) or env-fallback key present.
+  // A "Connected" badge must not stay green when the daily availability-sync
+  // cron is failing — that's Rintegrations-1, fed by Rintegrations-2's data.
   const fieldpulseEnv = envPresent("FIELDPULSE_API_KEY");
+  const fieldpulseSyncFailed =
+    fieldpulse.connected && fieldpulse.availabilitySyncStatus === "failed";
   const fieldpulseItem: IntegrationStatusItem = {
     key: "fieldpulse",
     label: "FieldPulse",
     category: "FSM",
-    status: fieldpulse.connected
-      ? "connected"
-      : fieldpulseEnv
-        ? "live"
-        : "not_configured",
-    detail: fieldpulse.connected
-      ? fieldpulse.accountInfo?.companyName
-        ? `Connected — ${fieldpulse.accountInfo.companyName}`
-        : "Connected"
-      : fieldpulseEnv
-        ? "Environment key present"
-        : "Not connected",
+    status: fieldpulseSyncFailed
+      ? "sync_failed"
+      : fieldpulse.connected
+        ? "connected"
+        : fieldpulseEnv
+          ? "live"
+          : "not_configured",
+    detail: fieldpulseSyncFailed
+      ? `Connected — last availability sync failed: ${fieldpulse.lastSyncError ?? "unknown error"}`
+      : fieldpulse.connected
+        ? fieldpulse.accountInfo?.companyName
+          ? `Connected — ${fieldpulse.accountInfo.companyName}`
+          : "Connected"
+        : fieldpulseEnv
+          ? "Environment key present"
+          : "Not connected",
     configurable: true,
     manageHref: SETTINGS_INTEGRATIONS_HREF,
   };

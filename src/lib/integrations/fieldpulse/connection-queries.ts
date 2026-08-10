@@ -16,12 +16,24 @@ import type { FieldpulseAccountInfo } from "./types";
 export interface FieldpulseConnectionStatus {
   readonly connected: boolean;
   readonly accountInfo: FieldpulseAccountInfo | null;
+  /**
+   * Stage 9 availability-sync health (written by `availability-sync.ts` on
+   * every daily cron run). `null` when never synced or not connected — see
+   * Rintegrations-1/2, surfaced so the integrations page can stop showing
+   * "Connected" for a credential whose background sync is failing.
+   */
+  readonly availabilitySyncStatus: string | null;
+  readonly lastAvailabilitySyncAt: string | null;
+  readonly lastSyncError: string | null;
 }
 
 /** The not-connected status, reused for the no-row and disconnected cases. */
 const DISCONNECTED: FieldpulseConnectionStatus = {
   connected: false,
   accountInfo: null,
+  availabilitySyncStatus: null,
+  lastAvailabilitySyncAt: null,
+  lastSyncError: null,
 };
 
 /** Narrow the JSON `accountInfo` column to our type (untrusted DB jsonb). */
@@ -49,6 +61,9 @@ export async function getFieldpulseConnectionStatus(
       connected: fieldpulseConnections.connected,
       apiKeyEncrypted: fieldpulseConnections.apiKeyEncrypted,
       accountInfo: fieldpulseConnections.accountInfo,
+      availabilitySyncStatus: fieldpulseConnections.availabilitySyncStatus,
+      lastAvailabilitySyncAt: fieldpulseConnections.lastAvailabilitySyncAt,
+      lastSyncError: fieldpulseConnections.lastSyncError,
     })
     .from(fieldpulseConnections)
     .where(withTenant(fieldpulseConnections, organizationId));
@@ -56,7 +71,15 @@ export async function getFieldpulseConnectionStatus(
   if (!row || !row.connected || !row.apiKeyEncrypted) {
     return DISCONNECTED;
   }
-  return { connected: true, accountInfo: toAccountInfo(row.accountInfo) };
+  return {
+    connected: true,
+    accountInfo: toAccountInfo(row.accountInfo),
+    availabilitySyncStatus: row.availabilitySyncStatus ?? null,
+    lastAvailabilitySyncAt: row.lastAvailabilitySyncAt
+      ? row.lastAvailabilitySyncAt.toISOString()
+      : null,
+    lastSyncError: row.lastSyncError ?? null,
+  };
 }
 
 /** Input to save a Fieldpulse connection (after successful validation). */

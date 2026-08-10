@@ -68,6 +68,51 @@ Gate at commit: tsc 0 · eslint 0 · vitest **313 files / 4139 passed / 1 skippe
 | W0-1 | tech | `mint-tech-session.mjs` — `/tech/*` is screenshot-verifiable |
 | W0-2 | staff, technicians | `drizzle/0044` restores the last-admin trigger (idempotent) |
 
+## Follow-ups the build surfaced (not silently dropped)
+
+Each was found while implementing something else and deliberately left out of
+scope rather than done half-way.
+
+**Real defects, not yet fixed**
+
+1. **Template variables fail silently at send time.** `renderSmsTemplate`
+   compiles with Handlebars `strict: true`, so a variable that doesn't exist
+   THROWS at render. `validateSmsTemplate` only checks syntax at save time —
+   it never renders against `templateVariableSchemas` for the trigger type. So
+   a misspelled variable saves fine, then throws on every real send, retries
+   3×, and lands in `failed`. The customer receives nothing and nobody is told.
+2. **Membership enrolment charge is never ledgered** (`enrollCustomer`'s
+   `chargeFirstPeriod`). Harmless only because the Stripe adapter is mocked.
+   **This becomes a release blocker the day a real payment adapter lands.**
+3. **Chat's rate limiter is per-instance** (`src/lib/rate-limit.ts` is a bare
+   in-memory `Map`) on the product's highest-cost surface — LLM spend. Fixing
+   it properly needs shared state this deployment doesn't have.
+4. **HCP integration never writes to `payments`**, so synced HCP invoices get
+   no cash line in the accounting export — the export's "for reconciliation"
+   promise is unkeepable for HCP-only orgs.
+5. **`org_provisioned` never reaches `platform_audit_log`** (it writes to the
+   new org's own `audit_log`), so a platform audit viewer would be blind to
+   tenant provisioning.
+
+**UI/server gate mismatches** — the server is authoritative and correct in each
+case; the UI just still offers a control that now returns 403/409:
+
+6. Platform console still renders Purge for the platform's own org.
+7. Conversation delete button shows for non-super-admins.
+8. Integration panels don't self-hide for non-super-admins.
+9. Integration *status* GET routes were left ungated (only connect/disconnect
+   were in scope); `settings.md` wanted those too.
+
+**Cosmetic / stale text**
+
+10. `staff-queries.ts` comments still cite "migration 0008"; the guard is now
+    `drizzle/0044`.
+11. `CHAT_VERIFY_PASSED` copy still says "balance or membership" though every
+    account intent is now gated.
+12. `accounting-export.ts`'s `buildCsv` sums already-converted float dollars
+    rather than integer cents — inert at current scale, but the anti-pattern
+    the file's own header warns against.
+
 ## Run log
 
 - **2026-08-11 01:48** — baseline captured: 297 files · 4022 passed · 1 skipped.

@@ -53,8 +53,29 @@ beforeEach(() => vi.clearAllMocks());
 describe("takePayment", () => {
   const provider = new MockPaymentProvider();
 
+  // Configures db.update's claim RETURNING to yield the given POST-claim
+  // amountPaidCents/totalCents — the values takePayment must now derive
+  // invoiceState from (never the pre-claim `inv` read).
+  function mockClaimReturning(amountPaidCents: number, totalCents: number) {
+    vi.mocked(db.update).mockImplementation(
+      () =>
+        ({
+          set: vi.fn(() => ({
+            where: vi.fn(() =>
+              Object.assign(Promise.resolve(undefined), {
+                returning: vi
+                  .fn()
+                  .mockResolvedValue([{ id: "inv-1", amountPaidCents, totalCents }]),
+              }),
+            ),
+          })),
+        }) as never,
+    );
+  }
+
   it("marks the invoice paid when fully covered", async () => {
     mockInvoice({ totalCents: 10000, amountPaidCents: 0 });
+    mockClaimReturning(10000, 10000);
     const r = await takePayment(ORG, "inv-1", { amountCents: 10000 }, provider);
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.invoiceState).toBe("paid");
@@ -63,9 +84,27 @@ describe("takePayment", () => {
 
   it("keeps the invoice open on a partial deposit", async () => {
     mockInvoice({ totalCents: 10000, amountPaidCents: 0 });
+    mockClaimReturning(5000, 10000);
     const r = await takePayment(ORG, "inv-1", { amountCents: 5000, isDeposit: true }, provider);
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.invoiceState).toBe("open");
+  });
+
+  // B7 regression: two concurrent partial payments that together exactly fill
+  // the balance. This call's OWN pre-claim read (via mockInvoice) sees
+  // amountPaidCents: 0 — taken before either claim landed. But by the time
+  // THIS claim's atomic increment actually runs, a concurrent payment already
+  // landed 5000, so the claim's RETURNING row reflects the true post-claim
+  // total: 10000 (fully paid). Deriving from the stale pre-claim read would
+  // compute 0 + 5000 = 5000 < 10000 -> 'open', permanently stranding a
+  // fully-paid invoice in the collections queue (state is never revisited
+  // after this write). The fix must derive from the claim's RETURNING row.
+  it("derives invoiceState from the POST-claim row, not the pre-claim stale read (B7)", async () => {
+    mockInvoice({ totalCents: 10000, amountPaidCents: 0 });
+    mockClaimReturning(10000, 10000);
+    const r = await takePayment(ORG, "inv-1", { amountCents: 5000 }, provider);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.invoiceState).toBe("paid");
   });
 
   it("returns invoice_not_found when the invoice is missing", async () => {
@@ -326,8 +365,23 @@ describe("money-loop flow (mocked db)", () => {
     const created = await createInvoiceFromSoldEstimate(ORG, "est-1");
     expect(created.ok).toBe(true);
 
-    // 3) takePayment(full): open -> paid.
+    // 3) takePayment(full): open -> paid. The claim's RETURNING row (not the
+    // markEstimateSold-era db.update mock from step 1) must drive invoiceState.
     mockCreateSeq([[{ id: "inv-1", state: "open", totalCents: 10000, amountPaidCents: 0 }]]);
+    vi.mocked(db.update).mockImplementation(
+      () =>
+        ({
+          set: vi.fn(() => ({
+            where: vi.fn(() =>
+              Object.assign(Promise.resolve(undefined), {
+                returning: vi
+                  .fn()
+                  .mockResolvedValue([{ id: "inv-1", amountPaidCents: 10000, totalCents: 10000 }]),
+              }),
+            ),
+          })),
+        }) as never,
+    );
     const paid = await takePaymentFlow(ORG, "inv-1", { amountCents: 10000 }, provider);
     expect(paid.ok).toBe(true);
     if (paid.ok) expect(paid.invoiceState).toBe("paid");

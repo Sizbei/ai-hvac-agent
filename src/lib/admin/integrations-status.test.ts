@@ -63,7 +63,13 @@ beforeEach(() => {
     delete process.env[k];
   }
   // Default: everything disconnected / mock.
-  fieldpulseStatus.mockResolvedValue({ connected: false, accountInfo: null });
+  fieldpulseStatus.mockResolvedValue({
+    connected: false,
+    accountInfo: null,
+    availabilitySyncStatus: null,
+    lastAvailabilitySyncAt: null,
+    lastSyncError: null,
+  });
   housecallStatus.mockResolvedValue({ connected: false, accountInfo: null });
   googleStatus.mockResolvedValue({ connected: false, calendarId: null });
   paymentName.mockReturnValue("mock");
@@ -151,6 +157,66 @@ describe("getIntegrationsStatus — mock vs live detection", () => {
     const items = byKey(await getIntegrationsStatus("org-1"));
     expect(items.ai_model.status).toBe("live");
     expect(items.ai_model.detail).toContain("GLM-4.6");
+  });
+});
+
+describe("getIntegrationsStatus — Rintegrations-1: sync-health folds into status", () => {
+  it("connected + availabilitySyncStatus='failed' → status is NOT 'connected'", async () => {
+    fieldpulseStatus.mockResolvedValue({
+      connected: true,
+      accountInfo: { companyName: "Acme HVAC", accountId: "acct_123" },
+      availabilitySyncStatus: "failed",
+      lastAvailabilitySyncAt: "2026-08-10T12:00:00.000Z",
+      lastSyncError: "401 Unauthorized — key revoked",
+    });
+    const items = byKey(await getIntegrationsStatus("org-1"));
+    expect(items.fieldpulse.status).not.toBe("connected");
+    expect(items.fieldpulse.detail).toContain("401 Unauthorized — key revoked");
+  });
+
+  it("connected + availabilitySyncStatus='completed' → status stays 'connected'", async () => {
+    fieldpulseStatus.mockResolvedValue({
+      connected: true,
+      accountInfo: { companyName: "Acme HVAC", accountId: "acct_123" },
+      availabilitySyncStatus: "completed",
+      lastAvailabilitySyncAt: "2026-08-10T12:00:00.000Z",
+      lastSyncError: null,
+    });
+    const items = byKey(await getIntegrationsStatus("org-1"));
+    expect(items.fieldpulse.status).toBe("connected");
+  });
+
+  it("connected + availabilitySyncStatus='pending' → status stays 'connected'", async () => {
+    fieldpulseStatus.mockResolvedValue({
+      connected: true,
+      accountInfo: null,
+      availabilitySyncStatus: "pending",
+      lastAvailabilitySyncAt: null,
+      lastSyncError: null,
+    });
+    const items = byKey(await getIntegrationsStatus("org-1"));
+    expect(items.fieldpulse.status).toBe("connected");
+  });
+
+  it("connected + no sync row (never synced) → degrades to unchanged 'connected'", async () => {
+    fieldpulseStatus.mockResolvedValue({
+      connected: true,
+      accountInfo: null,
+      availabilitySyncStatus: null,
+      lastAvailabilitySyncAt: null,
+      lastSyncError: null,
+    });
+    const items = byKey(await getIntegrationsStatus("org-1"));
+    expect(items.fieldpulse.status).toBe("connected");
+  });
+
+  it("Housecall Pro is unaffected — no equivalent sync signal exists", async () => {
+    housecallStatus.mockResolvedValue({
+      connected: true,
+      accountInfo: { companyName: "Acme HVAC", accountId: "acct_123" },
+    });
+    const items = byKey(await getIntegrationsStatus("org-1"));
+    expect(items.housecall_pro.status).toBe("connected");
   });
 });
 

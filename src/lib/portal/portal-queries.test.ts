@@ -7,9 +7,20 @@ import {
 } from "./portal-queries";
 import { db } from "@/lib/db";
 import { takePayment } from "@/lib/admin/invoice-queries";
+import { eq, ne } from "drizzle-orm";
+import { invoices, serviceRequests } from "@/lib/db/schema";
 
 // server-only is a no-op in tests (module is server-only by import).
 vi.mock("server-only", () => ({}));
+
+// eq/ne are wrapped (still delegating to the real implementation) so tests can
+// assert WHICH filter conditions the query builder asked for — the mocked
+// db.select below discards .where() args entirely, so this is the only way to
+// prove intent (e.g. "drafts are excluded") without a real database.
+vi.mock("drizzle-orm", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("drizzle-orm")>();
+  return { ...actual, eq: vi.fn(actual.eq), ne: vi.fn(actual.ne) };
+});
 
 vi.mock("@/lib/db", () => ({
   db: {
@@ -149,12 +160,13 @@ describe("getPortalData", () => {
           arrivalWindowEnd: new Date("2026-01-10T15:00:00Z"),
         },
       ],
-      // 5) service history
+      // 5) service history (sourced from service_requests, status='completed')
       [
         {
           id: "hist-1",
-          workPerformed: "Replaced capacitor",
-          createdAt: new Date("2025-12-01"),
+          issueType: "no_cooling",
+          completedAt: new Date("2025-12-01"),
+          createdAt: new Date("2025-11-25"),
         },
       ],
     ]);
@@ -173,13 +185,66 @@ describe("getPortalData", () => {
     expect(serialized).not.toContain("costCents");
     expect(serialized).not.toContain("unitCostCents");
     expect(serialized).not.toContain("margin");
-    // serviceHistory.cost is internal and must not leak either.
+    // No cost field ever leaks into the history payload either.
     expect(data.history[0]).not.toHaveProperty("cost");
 
     // Estimate exposes a safe boolean, never the token/hash.
     expect(data.estimates[0].awaitingApproval).toBe(true);
     expect(serialized).not.toContain("approvalTokenHash");
     expect(serialized).not.toContain("some-hash");
+  });
+
+  it("sources service history from service_requests (status='completed'), not the empty service_history table", async () => {
+    mockSelectSeq([
+      [{ nameEncrypted: null }], // customer name
+      [], // invoices
+      [], // estimates
+      [], // jobs
+      // history: a completed service_requests row (service_history has none — it's empty org-wide).
+      [
+        {
+          id: "req-1",
+          issueType: "no_cooling",
+          completedAt: new Date("2026-01-05"),
+          createdAt: new Date("2026-01-01"),
+        },
+      ],
+    ]);
+
+    const data = await getPortalData(ORG, CUSTOMER);
+
+    expect(data.history).toEqual([
+      { id: "req-1", workPerformed: "no_cooling", createdAt: new Date("2026-01-05") },
+    ]);
+    // The query filters to completed requests for this customer.
+    expect(eq).toHaveBeenCalledWith(serviceRequests.status, "completed");
+    expect(eq).toHaveBeenCalledWith(serviceRequests.customerId, CUSTOMER);
+  });
+
+  it("excludes draft invoices — a customer must never see an unfinalized bill", async () => {
+    mockSelectSeq([
+      [{ nameEncrypted: null }], // customer name
+      // invoices: only the open row (the draft was excluded by the SQL filter).
+      [
+        {
+          id: "inv-open",
+          state: "open",
+          totalCents: 5000,
+          amountPaidCents: 0,
+          createdAt: new Date("2026-01-01"),
+        },
+      ],
+      [], // estimates
+      [], // jobs
+      [], // history
+    ]);
+
+    const data = await getPortalData(ORG, CUSTOMER);
+
+    expect(data.invoices).toHaveLength(1);
+    expect(data.invoices[0].id).toBe("inv-open");
+    // The query asks the DB to exclude drafts.
+    expect(ne).toHaveBeenCalledWith(invoices.state, "draft");
   });
 });
 

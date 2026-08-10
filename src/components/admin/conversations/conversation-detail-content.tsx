@@ -321,6 +321,15 @@ export function ConversationDetailContent({
                   <span className="font-mono text-sm">{detail.id.slice(0, 8)}</span>
                 </h2>
                 <StatusBadge status={detail.status} />
+                <ContextBadge
+                  variant={modeIndicator(detail.mode).variant}
+                  label={modeIndicator(detail.mode).label}
+                  title={
+                    detail.mode === 'human'
+                      ? 'A human has taken over this conversation'
+                      : 'The AI is replying automatically'
+                  }
+                />
               </div>
               <p className="mt-1.5 text-xs text-muted-foreground">
                 {channelLabel(detail.channel)} · {detail.turnCount} turns ·{' '}
@@ -346,6 +355,30 @@ export function ConversationDetailContent({
             <p className="text-sm leading-relaxed text-foreground/90 whitespace-pre-wrap">
               {detail.summary}
             </p>
+          </div>
+        )}
+
+        {/* AI outcome + suggested next steps */}
+        {(detail.outcome || (detail.nextSteps && detail.nextSteps.length > 0)) && (
+          <div className="rounded-xl border border-border bg-muted/40 p-4 space-y-3">
+            {detail.outcome && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-muted-foreground">Outcome</span>
+                <StatusBadge status={detail.outcome} />
+              </div>
+            )}
+            {detail.nextSteps && detail.nextSteps.length > 0 && (
+              <div>
+                <div className="mb-1 text-xs font-semibold text-muted-foreground">
+                  Suggested next steps
+                </div>
+                <ul className="list-disc space-y-1 pl-4 text-sm text-foreground/90">
+                  {detail.nextSteps.map((step, index) => (
+                    <li key={index}>{step}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         )}
 
@@ -411,6 +444,51 @@ export function ConversationDetailContent({
             )}
           </ScrollArea>
         </section>
+      </div>
+
+      {/* Reply composer — human takeover (Rconv-1) */}
+      <div className="shrink-0 border-t border-border bg-card px-6 py-4">
+        <h3 className="text-sm font-semibold mb-2">Reply</h3>
+        {canReplyByChannel(detail.channel) ? (
+          <div className="space-y-2">
+            <Textarea
+              value={replyMessage}
+              onChange={(event) => {
+                setReplyMessage(event.target.value);
+                if (replyError) setReplyError(null);
+              }}
+              placeholder="Type a reply to send as a text message…"
+              rows={3}
+              maxLength={REPLY_MAX_LENGTH}
+              disabled={isSendingReply}
+              aria-label="Reply message"
+            />
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs text-muted-foreground">
+                {replyMessage.trim().length.toLocaleString()} / {REPLY_MAX_LENGTH.toLocaleString()}
+              </span>
+              <Button
+                size="sm"
+                onClick={() => void handleSendReply()}
+                disabled={isSendingReply || getReplyLengthError(replyMessage) !== null}
+              >
+                <Send className="size-3.5" />
+                {isSendingReply ? 'Sending…' : 'Send reply'}
+              </Button>
+            </div>
+            {replyError && <p className="text-sm text-destructive">{replyError}</p>}
+            {detail.mode === 'human' && (
+              <p className="text-xs text-muted-foreground">
+                You&apos;ve taken over this conversation — the AI stays quiet until it&apos;s
+                handed back.
+              </p>
+            )}
+          </div>
+        ) : (
+          <InfoBanner>
+            Replying is only available for active text-message conversations.
+          </InfoBanner>
+        )}
       </div>
 
       {/* Footer actions */}

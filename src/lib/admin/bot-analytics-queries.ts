@@ -90,7 +90,10 @@ export async function getBotAnalytics(
   const fromDate =
     period.fromDate ?? new Date(toDate.getTime() - THIRTY_DAYS_MS);
 
-  const [totalsRow, intentRows, outcomeRows] = await Promise.all([
+  // db.batch(): 1 HTTP round-trip for all three queries (neon-http charges one
+  // round-trip per un-batched query), matching the sibling insights aggregations
+  // (ai-insights-queries.ts, ops-insights-queries.ts).
+  const [totalsRow, intentRows, outcomeRows] = await db.batch([
     // Turn-level rollup in ONE pass: total, deterministic, escalated, complete,
     // and avg latency. count(CASE …) counts only matching rows; avg ignores NULL
     // latencies (an honest avg over measured turns).
@@ -167,7 +170,7 @@ export async function getBotAnalytics(
       // expression trips Postgres' check_ungrouped_columns_walker. coalesce over
       // a grouped column is still valid in SELECT.
       .groupBy(customerSessions.outcome),
-  ]);
+  ] as const);
 
   const totals = totalsRow[0];
   const totalTurns = toNumber(totals?.total);

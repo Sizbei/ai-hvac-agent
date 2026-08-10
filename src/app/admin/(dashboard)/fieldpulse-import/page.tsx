@@ -8,6 +8,8 @@ import {
   progressPct,
   formatElapsed,
   runTone,
+  isStaleRun,
+  PIPELINE_PHASES,
   type FpImportRunSummary,
   type FpRunCounts,
 } from '@/components/admin/fp-import/import-status-model';
@@ -19,9 +21,15 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 
-const PIPELINE_ORDER = ['technicians', 'customers', 'jobs', 'invoices'] as const;
+function StatusChip({ status, isStale }: { status?: string; isStale?: boolean }) {
+  if (isStale) {
+    return (
+      <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-warning-light text-warning-foreground">
+        Stale
+      </span>
+    );
+  }
 
-function StatusChip({ status }: { status?: string }) {
   const tone = runTone(status ?? '');
   const label =
     status === 'running'
@@ -109,7 +117,13 @@ function ElapsedTime({
   );
 }
 
-function RecentRunsTable({ runs }: { runs: readonly FpImportRunSummary[] }) {
+function RecentRunsTable({
+  runs,
+  asOfMs,
+}: {
+  runs: readonly FpImportRunSummary[];
+  asOfMs: number;
+}) {
   if (runs.length === 0) {
     return (
       <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
@@ -135,11 +149,12 @@ function RecentRunsTable({ runs }: { runs: readonly FpImportRunSummary[] }) {
         <tbody className="divide-y">
           {runs.map((run) => {
             const counts = run.counts as FpRunCounts;
+            const stale = isStaleRun(run, asOfMs);
             return (
               <tr key={run.id} className="hover:bg-muted/30">
                 <td className="px-3 py-2 capitalize">{run.phase}</td>
                 <td className="px-3 py-2">
-                  <StatusChip status={run.status} />
+                  <StatusChip status={run.status} isStale={stale} />
                 </td>
                 <td className="px-3 py-2 tabular-nums">{counts.fetched ?? 0}</td>
                 <td className="px-3 py-2 tabular-nums">{counts.created ?? 0}</td>
@@ -167,7 +182,7 @@ function RecentRunsTable({ runs }: { runs: readonly FpImportRunSummary[] }) {
 }
 
 export default function FieldpulseImportPage() {
-  const { runs: rawRuns, isLoading, error, refresh, isPolling } = useFpImportStatus();
+  const { runs: rawRuns, isLoading, error, refresh, isPolling, asOfMs } = useFpImportStatus();
   const runs = rawRuns as readonly FpImportRunSummary[];
 
   const latestPerPhase = latestRunPerPhase(runs);
@@ -199,18 +214,19 @@ export default function FieldpulseImportPage() {
       {error && <p className="text-sm text-destructive">{error}</p>}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {PIPELINE_ORDER.map((phase) => {
+        {PIPELINE_PHASES.map((phase) => {
           const run = latestPerPhase[phase];
           const counts = (run?.counts ?? {}) as FpRunCounts;
           const pct = run ? progressPct(counts) : null;
           const isRunning = run?.status === 'running';
+          const stale = run ? isStaleRun(run, asOfMs) : false;
 
           return (
             <Card key={phase} className="shadow-sm">
               <CardContent className="space-y-3 pt-4">
                 <div className="flex items-center justify-between gap-2">
                   <SectionHeading as="h2" title={phase} className="capitalize" />
-                  <StatusChip status={run?.status} />
+                  <StatusChip status={run?.status} isStale={stale} />
                 </div>
                 {run ? (
                   <>
@@ -232,7 +248,7 @@ export default function FieldpulseImportPage() {
 
       <div>
         <SectionHeading title="Recent runs" className="mb-3" />
-        <RecentRunsTable runs={runs} />
+        <RecentRunsTable runs={runs} asOfMs={asOfMs} />
       </div>
     </PageShell>
   );

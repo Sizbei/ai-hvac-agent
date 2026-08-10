@@ -130,6 +130,16 @@ vi.mock('@/lib/db/schema', () => ({
     organizationId: 'c.organizationId',
     nameEncrypted: 'c.nameEncrypted',
   },
+  invoices: {
+    id: 'inv.id',
+    organizationId: 'inv.org',
+    state: 'inv.state',
+    totalCents: 'inv.totalCents',
+    amountPaidCents: 'inv.amountPaidCents',
+    createdAt: 'inv.createdAt',
+    issuedAt: 'inv.issuedAt',
+    dueDate: 'inv.dueDate',
+  },
   users: {
     id: 'u.id',
     name: 'u.name',
@@ -886,6 +896,7 @@ describe('getDashboardOverview', () => {
       [scheduledRow], // todaySchedule
       [], // needsAttention
       [], // awaitingFollowUp
+      [{ overdueCount: 3, overdueCents: '450000' }], // overdueInvoices
     ];
 
     const result = await getDashboardOverview(ORG_ID);
@@ -899,6 +910,62 @@ describe('getDashboardOverview', () => {
     );
     expect(result.needsAttention).toEqual([]);
     expect(result.awaitingFollowUp).toEqual([]);
+    // Rdashboard-2: overdue-invoices AR signal, Number()-wrapped (neon-http
+    // returns bigint aggregates as strings).
+    expect(result.overdueInvoices).toEqual({ count: 3, cents: 450000 });
+  });
+
+  it('overdueInvoices defaults to a real zero (not "—") when there are no overdue invoices', async () => {
+    selectResolutions = [
+      [
+        {
+          pending: 0,
+          assignedToday: 0,
+          inProgress: 0,
+          completedToday: 0,
+          scheduled: 0,
+          onHold: 0,
+          emergencyOpen: 0,
+          afterHoursToday: 0,
+        },
+      ],
+      [],
+      [],
+      [],
+      [], // overdueInvoices — empty result set (no row)
+    ];
+
+    const result = await getDashboardOverview(ORG_ID);
+    expect(result.overdueInvoices).toEqual({ count: 0, cents: 0 });
+  });
+
+  it('reuses invoice-queries.ts overdueWhere for the overdue-invoices signal (no second "overdue" definition)', async () => {
+    const invoiceQueries = await import('./invoice-queries');
+    const spy = vi.spyOn(invoiceQueries, 'overdueWhere');
+    selectResolutions = [
+      [
+        {
+          pending: 0,
+          assignedToday: 0,
+          inProgress: 0,
+          completedToday: 0,
+          scheduled: 0,
+          onHold: 0,
+          emergencyOpen: 0,
+          afterHoursToday: 0,
+        },
+      ],
+      [],
+      [],
+      [],
+      [{ overdueCount: 0, overdueCents: '0' }],
+    ];
+
+    await getDashboardOverview(ORG_ID);
+
+    // Called with the invoices table — the exact predicate the invoices page
+    // and getInvoiceSummaryStats use, not a re-implementation.
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ state: 'inv.state' }));
   });
 
   it('scopes the needs-attention queue to UNASSIGNED requests', async () => {
@@ -968,7 +1035,7 @@ describe('getDashboardOverview', () => {
     );
   });
 
-  it('batches all four queries via db.batch, not Promise.all (neon-http: 1 round-trip)', async () => {
+  it('batches all five queries via db.batch, not Promise.all (neon-http: 1 round-trip)', async () => {
     selectResolutions = [
       [
         {
@@ -985,12 +1052,13 @@ describe('getDashboardOverview', () => {
       [],
       [],
       [],
+      [],
     ];
 
     await getDashboardOverview(ORG_ID);
 
     expect(batchCallArgs).toHaveLength(1);
-    expect(batchCallArgs[0]).toHaveLength(4);
+    expect(batchCallArgs[0]).toHaveLength(5);
   });
 });
 

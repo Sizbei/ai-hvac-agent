@@ -20,7 +20,27 @@ export interface FpImportRunSummary {
 
 export type RunTone = 'info' | 'positive' | 'destructive' | 'muted';
 
-const PIPELINE_PHASES = ['technicians', 'customers', 'jobs', 'invoices'] as const;
+/**
+ * The real FieldPulse import pipeline, in dependency order — mirrors `PHASES`
+ * in `src/lib/integrations/fieldpulse/import/run-import.ts:75-169` (11
+ * phases, not the 4 this page used to hardcode). This is the single source
+ * of truth for both the phase-card grid (`page.tsx`) and `latestRunPerPhase`
+ * below — do not hand-maintain a second copy of this list anywhere else in
+ * the page surface (that duplication was the root cause of Gfieldpulse-import-1).
+ */
+export const PIPELINE_PHASES = [
+  'technicians',
+  'customers',
+  'jobs',
+  'invoices',
+  'estimates',
+  'payments',
+  'assets',
+  'comments',
+  'locations',
+  'items',
+  'job-metrics',
+] as const;
 
 export function latestRunPerPhase(
   runs: readonly FpImportRunSummary[],
@@ -75,4 +95,29 @@ export function runTone(status: string): RunTone {
     default:
       return 'muted';
   }
+}
+
+/**
+ * A "running" row older than this is treated as abandoned, not active —
+ * comfortably past the GitHub Actions nightly job's 150-minute timeout
+ * (`.github/workflows/fp-nightly-sync.yml`). `run-import.ts` has no
+ * SIGINT/SIGTERM handler, so a killed process leaves its row `status:
+ * 'running'` forever; this threshold is how the UI tells "still actively
+ * running" apart from "died hours ago" without ever writing to the DB.
+ */
+export const STALE_RUN_THRESHOLD_MS = 3 * 60 * 60 * 1000; // 3 hours
+
+/**
+ * True only for a row still marked `running` whose `startedAt` is older than
+ * `STALE_RUN_THRESHOLD_MS`. Pure — no I/O, no DB write; display-only per this
+ * page's observability-only invariant (Rfieldpulse-import-2).
+ */
+export function isStaleRun(
+  run: { readonly status: string; readonly startedAt: string },
+  nowMs: number,
+): boolean {
+  if (run.status !== 'running') return false;
+  const startedMs = new Date(run.startedAt).getTime();
+  if (Number.isNaN(startedMs)) return false;
+  return nowMs - startedMs > STALE_RUN_THRESHOLD_MS;
 }

@@ -42,6 +42,10 @@ const STATUS_BADGE: Record<IntegrationStatus, { label: string; className: string
     label: 'Connected',
     className: 'bg-success-light text-success border-success/30',
   },
+  sync_failed: {
+    label: 'Sync failed',
+    className: 'bg-danger-light text-danger border-danger/30',
+  },
   mock: {
     label: 'Mock',
     className: 'bg-warning-light text-warning-foreground border-warning/30',
