@@ -101,19 +101,29 @@ below zero when a discount zeroes the header but tax remains.
 document sums correctly). Both change how invoices render, which is why this was
 not done unilaterally.
 
-### 3. Invoices marked paid that FieldPulse says nobody paid
+### 3. ~~Invoices marked paid that FieldPulse says nobody paid~~ — CONFIRMED and FIXED
 
-Reported by review and **not yet independently confirmed**: live invoices with
-`total > 0`, `amount_paid = 0`, `amount_unpaid = 0` and an empty `payments`
-array. `deriveInvoiceState` reads the zero balance as "paid", and the H2 guard
-then writes `amountPaidCents = totalCents`.
+Moved out of "open" after independent verification.
 
-If confirmed, AR is understated, collections never chases those invoices, and
-the accounting export reports them collected. Pre-existing; not introduced by
-this branch. **Verify before acting** — the claim is precise and checkable
-against `payments` rows in the mirror.
+FieldPulse emits invoices with `total > 0`, `amount_paid 0.00`,
+`amount_unpaid 0.00`, no payments and no payment date. `deriveInvoiceState`
+trusted the balance field alone, so those were recorded as fully paid and the
+H2 guard wrote `amount_paid = total`.
 
----
+Evidence gathered directly:
+
+| check | result |
+|---|---|
+| mirror rows `paid` with `amount_paid = total` and **no** payment row | **102** |
+| mirror rows `paid` that **do** have a payment row | **2,255** |
+| upstream sample of the anomalous class | `paid 0.00`, `unpaid 0.00`, `payments []`, `first_payment_date null`, `status 2` |
+
+`status 2` is `open` in this repo's own mapping. Four signals said unpaid; only
+`amount_unpaid` disagreed, and that was the one being trusted.
+
+Fixed: a zero balance is believed only alongside positive evidence of payment (a
+non-zero paid amount or a payment date). Expect reported AR to *rise* on the
+next sync as these move back to open — that is the correction.
 
 ## Operational notes worth keeping
 
