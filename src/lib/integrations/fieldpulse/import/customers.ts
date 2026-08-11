@@ -261,6 +261,22 @@ export async function importOneFpCustomer(
     // Path (a): existing row keyed on fieldpulseCustomerId.
     const existing = await findByFpId(orgId, customer.fpId);
     if (existing) {
+      // ERASURE IS NOT REVERSIBLE BY A SYNC. Anonymizing a customer scrubs the
+      // encrypted name/phone/email/address and the blind indexes, but leaves
+      // fieldpulseCustomerId in place — so without this guard the next sweep
+      // finds the row by fp id and writes every field back from FieldPulse,
+      // re-encrypting the exact PII the person asked us to delete. Worse, it
+      // does so while `anonymizedAt` stays set, so a compliance check that
+      // looks for "anonymizedAt IS NOT NULL" reports the record as erased
+      // while it holds full PII again. Skip the row and leave it erased.
+      if (existing.anonymizedAt) {
+        if (counts) counts.skipped++;
+        logger.info(
+          { orgId, fpId: customer.fpId },
+          "FP customer: row is anonymized — refusing to re-import PII over an erasure",
+        );
+        return existing.id;
+      }
       await updateCustomerFields(orgId, existing.id, customer, fpSpillover);
       if (counts) counts.updated++;
       return existing.id;
@@ -643,9 +659,9 @@ export async function importCustomersFromFieldpulse(
 async function findByFpId(
   orgId: string,
   fpId: string,
-): Promise<{ id: string } | null> {
+): Promise<{ id: string; anonymizedAt: Date | null } | null> {
   const [row] = await db
-    .select({ id: customers.id })
+    .select({ id: customers.id, anonymizedAt: customers.anonymizedAt })
     .from(customers)
     .where(
       and(

@@ -958,3 +958,42 @@ describe("makeFpCustomerHealer", () => {
     expect(logger.error).toHaveBeenCalled();
   });
 });
+
+/**
+ * GDPR erasure must survive the nightly FieldPulse sweep. Anonymizing scrubs the
+ * encrypted contact fields and the blind indexes but leaves fieldpulseCustomerId
+ * on the row, so path (a) finds it again on the next run. Without a guard it
+ * re-writes every field from FieldPulse — re-encrypting the exact PII the person
+ * asked us to delete — while `anonymizedAt` stays set, so a compliance check
+ * that looks for "anonymizedAt IS NOT NULL" still reports it as erased.
+ */
+describe("importOneFpCustomer — erasure is not undone by a re-import", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("skips an anonymized row instead of re-importing its PII", async () => {
+    wireSelect([{ id: "erased-1", anonymizedAt: new Date("2026-07-01") }]);
+    const counts = makeCounts();
+
+    const id = await importOneFpCustomer(ORG, makeCustomer(), counts);
+
+    expect(db.update).not.toHaveBeenCalled();
+    expect(db.insert).not.toHaveBeenCalled();
+    expect(counts.skipped).toBe(1);
+    expect(counts.updated).toBe(0);
+    // The row is still the right answer for linking — it just must not be refilled.
+    expect(id).toBe("erased-1");
+  });
+
+  it("still updates a normal (non-anonymized) row", async () => {
+    wireSelect([{ id: "live-1", anonymizedAt: null }]);
+    wireUpdate([{ id: "live-1" }]);
+    const counts = makeCounts();
+
+    await importOneFpCustomer(ORG, makeCustomer(), counts);
+
+    expect(db.update).toHaveBeenCalled();
+    expect(counts.updated).toBe(1);
+  });
+});
