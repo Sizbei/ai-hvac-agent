@@ -3,16 +3,36 @@
 Migrations are **forward-only** Drizzle SQL files in `drizzle/`, applied by
 `npm run db:migrate` (`src/lib/db/migrate.ts`, Neon HTTP migrator).
 
-## Why migrations are NOT auto-run on deploy
+## Migrations DO auto-run on deploy
 
-Vercel's build does not run migrations, and we deliberately do **not** auto-run
-them on every push. The chain has been squashed/reconciled in the past (the
-on-disk journal vs the ledger were brought back into sync), so an automatic run
-on every commit against the live DB is risky. Migrations are applied
-**manually, on demand**, by an operator who has reviewed the new migration.
+`vercel.json` sets `"buildCommand": "npm run db:migrate && next build"`, so
+**every production deploy applies pending migrations before the app is built**.
+By the time a deploy reports Ready, the database has already changed.
 
-Schema drift (a new migration committed but never applied) shows up as 500s on
-writes that use `.returning()`. After adding a migration, you must apply it.
+> This section previously said the opposite ("Vercel's build does not run
+> migrations… applied manually, on demand"). That was stale and actively
+> dangerous: an operator following it during an incident would run migrations a
+> second time, or assume the schema was untouched when it was not. Verified
+> against `vercel.json` on 2026-08-11.
+
+Two consequences that shape how you release:
+
+- **The migration is the one-way door, not the deploy.** Vercel Instant
+  Rollback restores the previous *build*; it cannot un-run a migration. On the
+  Hobby plan you can only roll back one deployment. Judge a release by whether
+  its migration is safe to have applied.
+- **Migrations must be forward-compatible with the currently-running code**,
+  because old instances keep serving traffic while the new build rolls out.
+
+Schema drift (a migration committed but never applied) shows up as 500s on
+writes that use `.returning()`. Deploying is what applies it.
+
+The manual paths below still exist and are the right tool for applying a
+migration WITHOUT shipping code — e.g. to a dev branch, or to pre-apply and
+verify a risky migration before the deploy that assumes it.
+
+See `docs/deploy-money-program/DEPLOY-RUNBOOK.md` for the full release
+sequence and rollback procedure.
 
 ## How to run migrations
 

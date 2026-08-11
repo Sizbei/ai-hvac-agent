@@ -20,3 +20,12 @@ jobs:
         run: |
           curl -fsS -m 60 -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
             "https://ai-hvac-agent-lovat.vercel.app/api/cron/delay-sweep" || echo "delay-sweep ping failed (non-fatal)"
+      # Heals payments stranded after a successful provider charge but before
+      # the local write landed. Its Vercel cron is daily (Hobby's floor), which
+      # leaves a stranded payment showing the wrong state for up to ~24h — on a
+      # collections surface that drives customer contact. Idempotent, so the
+      # 5-minute cadence is safe.
+      - name: reconcile-payments (stranded-payment healer)
+        run: |
+          curl -fsS -m 60 -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "https://ai-hvac-agent-lovat.vercel.app/api/cron/reconcile-payments" || echo "reconcile-payments ping failed (non-fatal)"

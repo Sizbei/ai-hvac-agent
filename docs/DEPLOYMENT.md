@@ -193,19 +193,30 @@ vercel --prod
 vercel
 ```
 
-### 5. Post-Deploy Migration
+### 5. Migrations — applied BY the deploy, not after it
 
-**IMPORTANT:** Vercel builds do NOT run migrations. You must run migrations manually after deploying:
+**Migrations run automatically during the build.** `vercel.json` sets
+`"buildCommand": "npm run db:migrate && next build"`, so pending migrations are
+applied before the app is built. There is no post-deploy migration step.
 
-```bash
-# Get the production DATABASE_URL from Vercel
-vercel env pull .env.production
+> This section previously said "Vercel builds do NOT run migrations. You must
+> run migrations manually after deploying." That was stale and dangerous —
+> following it means running migrations a second time, or believing the schema
+> is untouched when the deploy already changed it. Corrected 2026-08-11 against
+> `vercel.json`.
 
-# Run migrations
-npm run db:migrate
-```
+Because the schema changes during the build:
 
-See memory `migrations-not-run-on-deploy` for details.
+- A Vercel rollback restores the previous **build only** — it cannot un-run a
+  migration. On Hobby you can roll back exactly one deployment.
+- A migration must be forward-compatible with the code already running, since
+  old instances serve traffic during the rollout.
+
+To apply a migration WITHOUT deploying code (dev branch, or pre-verifying a
+risky migration), use the manual paths in `MIGRATIONS.md`.
+
+Full release sequence, verification and rollback:
+`docs/deploy-money-program/DEPLOY-RUNBOOK.md`.
 
 ---
 
