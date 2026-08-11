@@ -178,20 +178,40 @@ step 4's unconditional INSERT — lives behind a new `run-import` flag,
 `--dry-run` in `parseArgs` (`run-import.ts:179-221`) and threaded to the phase
 through `PhaseContext` (`:72-77`).
 
-- **Without the flag** (the default, and what the nightly sweep always gets): an
-  FP customer whose contact collides with a row of a *different* identity is
-  **skipped** — no claim, no insert, no error. Increment a new `PhaseResult`
-  counter `sharedContactSkipped` and return `null`. That is today's outcome
-  minus the 9-error noise, and it is safe against the old indexes and the new
-  ones, before and after either migration, permanently.
+- **Without the flag** (the default, and what the nightly sweep always gets):
+  the phase runs **today's path byte-for-byte** — including the
+  `upsertCustomerByContact` resolution (email *and* phone, `crm-queries.ts:668-681`)
+  and the fp-id-guard branch that resolves to the existing row and returns its
+  id so the jobs self-heal can still attach dependent records
+  (`jobs.ts:389` → `:424-428` skips the whole job on `null`, so the return
+  value must stay non-null exactly as today). The only addition: when the
+  fp-id guard fires, increment a new `PhaseResult` counter
+  `sharedContactSkipped`, so the nightly run *counts* the customers awaiting a
+  split without changing a single outcome. Because the default IS the current
+  code, it is trivially safe against the old indexes and the new ones, before
+  and after either migration. (The 9 update-path errors are **not** removed by
+  the flag — they disappear only once `0046` drops the old uniques, §2.2; until
+  then the unflagged nightly keeps reporting them, as today.)
 - **With the flag:** the full §2.1 order. Only a deliberate backfill passes it.
+- **Steady state after the backfill:** the flag is a mis-ordering safety, not a
+  permanent skip. Once `0046` is applied and the flagged backfill has completed
+  on a given database, add `--split-shared-contacts` to that environment's
+  nightly invocation (`fp-nightly-sync.yml` args for prod; the operator's
+  manual habit for dev), so *future* shared-contact FP customers keep getting
+  their own rows. The `pg_indexes` probe below makes a premature flip fail
+  loudly instead of corrupting anything.
 
 **Belt-and-braces.** When the flag is set, the phase first probes `pg_indexes`
-for `customers_org_email_hash_unique` (`db.execute(sql\`...\`)` — precedent
-`ai/dispatch/signals.ts:553`, `api/health/route.ts:28`) and **aborts** if the
-old unique is still there: running flagged against the pre-`0046` schema is
-exactly the error storm §7 warns about. Extract the decision as a pure predicate
-over the probe result so it is testable (§6).
+for **both** old uniques — `customers_org_email_hash_unique` and
+`customers_org_phone_hash_unique` (`db.execute(sql\`...\`)` — precedent
+`ai/dispatch/signals.ts:553`, `api/health/route.ts:28`) — and **aborts the
+phase with a throw** (caught at `run-import.ts:539-557` → run `failed`,
+exit 1 — loud, not a skip) if either is still present: running flagged against
+the pre-`0046` schema is exactly the error storm §7 warns about. Extract the
+decision as a pure predicate over the probe result so it is testable (§6).
+The probe runs at phase level, before the walk — never inside
+`importOneFpCustomer`'s per-record try/catch, where a throw would be absorbed
+into `counts.errors` and the walk would continue.
 
 ### 2.1 New resolution order for `importOneFpCustomer` (`:242-438`) — flagged path
 
@@ -205,8 +225,9 @@ Per FP customer, in order:
    repair**: today its `onConflictDoNothing` miss falls into
    `counts.skipped++; return null` (`:323-326`), so `null` means both "no row"
    and "a row already exists for this fp id" — and `jobs.ts:389` reads `null` as
-   unresolved and drops the job's customer link. Give this path the same
-   **re-select by fp id** step 4 uses, so `null` means only one thing.
+   unresolved and **skips the whole job** (`jobs.ts:424-428` — not merely the
+   link). Give this path the same **re-select by fp id** step 4 uses, so `null`
+   means only one thing.
 3. **Claim a native row — on `email_hash` only.** *New, replaces the
    `upsertCustomerByContact` call at `:331-336`.* A single SELECT for candidate
    rows in this org with
@@ -270,14 +291,14 @@ Path 4 subsumes today's path (c) "contactless": with the contact uniques
 relaxed there is no longer any reason to branch on "has email/phone" — the same
 INSERT serves both, writing whatever hashes exist. Collapse them.
 
-**Where the flag actually bites.** Step 4 is unconditional for an FP customer
-whose contact collides with **nothing** — that is ordinary import and it runs
-flag or no flag, exactly as today. The flag governs only the two duplicate-hash
-outcomes: the step-3 claim, and the step-4 insert reached *because a colliding
-row of a different identity exists*. Unflagged, both of those become
-`sharedContactSkipped` (§2.0).
+**Where the flag actually bites.** The flag selects between two whole paths,
+not two outcomes inside one path: unflagged runs the **legacy code unchanged**
+(including its `upsertCustomerByContact` resolution — email and phone — and its
+fp-id-guard branch, now counting `sharedContactSkipped`, §2.0); flagged runs
+this §2.1 order. An FP customer whose contact collides with nothing gets its
+row created either way — that is ordinary import on both paths.
 
-**Do not route any of this through `upsertCustomerByContact` any more.** Two
+**The flagged path must not route through `upsertCustomerByContact`.** Two
 reasons, both already documented in this file: it un-archives a matched row
 (`:286-288`), and it creates a row on a miss, which the claim path must not do
 (it needs to know whether a native row existed so it can decide claim vs
@@ -305,14 +326,15 @@ row is not in the unique population, so the write cannot collide.
 consequence, and the "split the statement so a colliding hash skips only the
 hash columns" contingency in MONEY-FINDINGS is explicitly **not** implemented.
 
-### 2.3 The fp-id-guard "linking skipped" branch becomes dead — repurpose it
+### 2.3 The fp-id-guard branch: alive unflagged, dead flagged
 
 `:342-374` sets the fp id only when the row does not already own a different one
 and, on zero rows updated, logs *"fpId guard prevented overwrite — linking
 skipped, resolved to existing row"* and returns the merged row's id so the jobs
-self-heal can still attach dependents. That branch exists solely because
-`upsertCustomerByContact` could hand back a row belonging to another FP
-customer. Under §2.1 it cannot: the claim is guarded on
+self-heal can still attach dependents. **On the unflagged (legacy) path this
+branch stays exactly as-is** — it is where `sharedContactSkipped` increments
+(§2.0), and its non-null return is what keeps nightly jobs attached. On the
+**flagged** §2.1 path it cannot fire: the claim is guarded on
 `fieldpulse_customer_id IS NULL`, and a failed claim falls through to an INSERT.
 
 **Repurpose, do not merely delete.** The guarded `UPDATE` in step 3 keeps its
@@ -616,9 +638,11 @@ which is fine at a terminal and hangs anything else. This matches how the
 nightly workflow invokes it.
 
 1. **Migrate dev** — `npm run db:migrate` (both migrations, back to back).
-   Verify with `\d customers` that the two `*_native_unique` indexes and the two
-   lookup indexes exist and the two old `customers_org_{email,phone}_hash_unique`
-   are gone.
+   Verify without assuming psql:
+   `SELECT indexname FROM pg_indexes WHERE tablename = 'customers' AND indexname LIKE '%hash%'`
+   (a one-line node script against `.env.local`, same pattern as the §2.0
+   probe) — the two `*_native_unique` indexes and the two lookup indexes exist,
+   the two old `customers_org_{email,phone}_hash_unique` are gone.
 2. **Customers phase** —
    `npm run fp:import -- --org <uuid> --phase customers --yes --split-shared-contacts`.
    **The flag is what makes this a backfill rather than a no-op**; without it
@@ -801,7 +825,7 @@ Every surface that reads the hash columns or assumed one-row-per-contact:
 | `src/lib/integrations/fieldpulse/import/customers.ts:242-438` | `importOneFpCustomer` | **Changes** — §2 |
 | `src/lib/integrations/fieldpulse/import/invoices.ts:71-105` | invoices phase | **Changes** — residual instrumentation (§4.2) |
 | `src/lib/integrations/fieldpulse/invoice-sync.ts:437-461` | `upsertInvoiceRecord` customer resolution | **Changes** — gains the optional `onUnlinked?: (fpCustomerId: string) => void` callback parameter (§4.2). Passed only by the import loop; the invoice webhook and the daily cron call it unchanged |
-| `src/lib/integrations/fieldpulse/import/run-import.ts:53-70`, `:179-221`, `:72-77` | `PhaseResult`, `parseArgs`, `PhaseContext` | **Changes** — `parseArgs` gains `--split-shared-contacts` (§2.0), threaded via `PhaseContext`; `PhaseResult` gains three new optional counters, all of which it lacks today: `sharedContactSkipped` (§2.0), `unresolvedFpCustomerIds` and `unlinkedInvoices` (§4.2) |
+| `src/lib/integrations/fieldpulse/import/run-import.ts:53-70`, `:179-221`, `:72-77` | `PhaseResult`, `parseArgs`, `PhaseContext` | **Changes** — `parseArgs` gains `--split-shared-contacts` (§2.0), threaded via `PhaseContext` (module-private today — extend it in place, no export needed); `PhaseResult` gains three new optional counters, all of which it lacks today: `sharedContactSkipped` (§2.0), `unresolvedFpCustomerIds` and `unlinkedInvoices` (§4.2) |
 | `src/lib/integrations/fieldpulse/customer-sync.ts:227-261` | **second, background writer of `fieldpulse_customer_id`** — push-side sync, reached via `after()` from `job-sync.ts:174` | **Changes.** It finds an FP customer by email/phone (`:229-232`) and stamps that fp id onto *our* row under an `IS NULL` guard (`:239-249`). Post-split, FP's find-by-email far more often returns an fp id **another** of our rows already owns, so the UPDATE trips `customers_org_fieldpulse_customer_id_unique` — and the degrade catch at `:255-261` swallows it whole, so the sync retries and fails identically forever, silently. Prescribe: **pre-check whether that fp id is already claimed** (a `SELECT` before the UPDATE) and skip the adoption with an explicit log. The set-once guard is unaffected, so §1.5's monotonicity conclusion survives. HCP twin, same shape, no data: `housecall-pro/customer-sync.ts:205-225` |
 | `src/lib/db/schema.ts:813-818` | the two contact uniques | **Changes** — §1.2 |
 | `src/lib/admin/crm-queries.ts:69-270` | customers directory list + search | **Behaviour shift, no code change.** Several businesses sharing one AP email/phone now appear as separate rows; the search path decrypts and substring-filters (`:251-270`) so a search for that email returns all of them. Correct and intended. The 5,000-row search scan cap (`:259`) still clears the ~2,640-row corpus |
@@ -895,14 +919,19 @@ fix is reverted:
    `importOneFpCustomer`, mapping **four** fields —
    `{ existingByFpId, archivedImport, candidateNativeRow, candidateClaimedEarlierThisRun }`
    — to
-   `{ kind: 'skip-anonymized' | 'update' | 'insert-archived' | 'claim' | 'insert' | 'skip-shared-contact' }`.
+   `{ kind: 'skip-anonymized' | 'update' | 'insert-archived' | 'claim' | 'insert' }`.
    The fourth input is what makes contested→insert expressible at all (§2.1).
-   Cases: fp-id hit → `update`; fp-id hit + anonymized → `skip-anonymized`;
-   deleted/merged → `insert-archived`; native candidate matched **on email** →
-   `claim`; **candidate matched on phone only → `insert`** (§2.1); **candidate
-   already claimed earlier in this run → `insert`** (contested); no candidate →
-   `insert`; **flag off + colliding candidate → `skip-shared-contact`** (§2.0 —
-   this is the case the nightly sweep hits, so it must be pinned).
+   The function models the **flagged path only** — the unflagged default is
+   today's code, untouched, and is pinned by the existing customers-phase
+   suites plus one new assertion: the fp-id-guard branch increments
+   `sharedContactSkipped` (§2.0) while still returning the resolved id (the
+   `jobs.ts:424-428` contract — fails if anyone makes the default return null).
+   So drop `skip-shared-contact` from the union; it is not a flagged-path
+   outcome. Cases: fp-id hit → `update`; fp-id hit + anonymized →
+   `skip-anonymized`; deleted/merged → `insert-archived`; native candidate
+   matched **on email** → `claim`; **candidate matched on phone only →
+   `insert`** (§2.1); **candidate already claimed earlier in this run →
+   `insert`** (contested); no candidate → `insert`.
    One case needs relabelling: **"candidate already owned by a different fp id →
    `insert`"** is *unreachable* through the real candidate query, which filters
    `fieldpulse_customer_id IS NULL` in the `WHERE` (§2.1 step 3). Keep the test,
@@ -1108,3 +1137,24 @@ Recorded so they are not re-litigated:
   note it came from predates the same file's own rebuild section, which cleared
   and re-derived the whole `invoices.customer_id` column. The stale note has
   been corrected in `MONEY-FINDINGS.md` rather than worked around here (§4.1).
+
+## Review round 3 — resolution
+
+Round 3 (final verification) found two blockers in the round-2 flag design,
+both fixed in place by the lead:
+
+- **B1/B2 — the unflagged default was specified as a new skip-with-null path**,
+  which would have dropped whole jobs nightly (`jobs.ts:424-428` skips the job
+  on `null`) and, being email-probed only, would have introduced phone-hash
+  unique violations against the pre-`0046` schema. Resolution: the unflagged
+  default is now **today's code byte-for-byte plus one counter** (§2.0), which
+  is trivially safe on both schemas and preserves the jobs contract; the §2.1
+  machinery exists only behind the flag.
+- **M1-M3 folded in**: the flag does not remove the 9 update errors (`0046`
+  does); `resolveFpCustomerAction` models the flagged path only; the flag's
+  steady state is explicit — flip the nightly invocation to flagged after the
+  backfill, guarded by the two-index `pg_indexes` probe.
+
+All round-3 "checked, holds" results (the §7 migration sequencing, the 42P10
+window analysis in both directions, the `membershipStatus` widening's lone
+null-safe consumer, count consistency) stand as recorded by the critic.
