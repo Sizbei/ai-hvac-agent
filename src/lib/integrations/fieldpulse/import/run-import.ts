@@ -15,8 +15,11 @@
  *   --yes                 Skip the interactive `import` confirmation. FOR CI USE ONLY
  *                         (nightly GitHub Actions sweep). Never pass this interactively —
  *                         the confirmation exists to prevent accidental prod writes.
- *   --allow-prod          Permit a NON-DEV database target. Without it the script
- *                         refuses any host that isn't the dev branch. The nightly
+ *   --allow-prod          Assert the target IS the production branch. Without it
+ *                         the script accepts only the dev branch; with it, only
+ *                         production — an unknown host is refused either way, and
+ *                         so is dev (a "production" sweep pointed at dev writes
+ *                         nothing to production and reports success). The nightly
  *                         sweep passes it; a human almost never should.
  *   --since <date>        deliberately deferred — Phase 0.5 verified FP ignores server-side date filters; Phase 6 deltas will full-re-page + filter client-side.
  *
@@ -219,7 +222,7 @@ export function parseArgs(argv: string[]): {
 
 // ── DB host (no credentials) ─────────────────────────────────────────────────
 
-function parseDbHost(databaseUrl: string): string {
+export function parseDbHost(databaseUrl: string): string {
   try {
     const url = new URL(databaseUrl);
     // Neon can route to a DIFFERENT compute than the hostname suggests, via
@@ -254,8 +257,16 @@ function redactHost(dbHost: string): string {
 const DEV_DB_HOST_MARKER = "ep-patient-surf";
 
 /**
- * Refuse to write to any database that isn't the dev branch unless the caller
- * explicitly opted in with --allow-prod.
+ * Neon host substring identifying the PRODUCTION branch. Already public in
+ * AGENTS.md ("NEVER point it at prod (ep-withered-hill)"), so naming it here
+ * discloses nothing new — and naming it is what lets `--allow-prod` assert a
+ * target instead of merely permitting a category.
+ */
+const PROD_DB_HOST_MARKER = "ep-withered-hill";
+
+/**
+ * Refuse to write to any database that is not a KNOWN target: the dev branch by
+ * default, or production when the caller passes --allow-prod.
  *
  * WHY THIS EXISTS. Before this guard, "dev only" was enforced by nothing but a
  * printed hostname and an interactive prompt — and `--yes` skips the prompt
@@ -264,16 +275,35 @@ const DEV_DB_HOST_MARKER = "ep-patient-surf";
  * wins over `.env.local`. This importer deletes and re-inserts invoice line
  * items, so a mis-targeted run rewrites real money.
  *
- * This is default-deny: an unrecognised host fails closed with an actionable
- * message rather than being assumed safe. The nightly sweep, which legitimately
- * targets production, opts in explicitly in its workflow.
+ * WHY --allow-prod ASSERTS RATHER THAN PERMITS. It used to mean "any non-dev
+ * host is fine", which is the wrong shape for the one path that runs
+ * unattended: the nightly workflow passes it on every run, so a DATABASE_URL
+ * secret that drifted to a third database would have been accepted in silence.
+ * It now names the database it expects, which also catches the opposite
+ * mistake — a nightly "production" sweep quietly running against dev and
+ * leaving production un-synced with nothing to show for it.
  */
-function assertWritableTarget(dbHost: string, allowProd: boolean): void {
-  if (dbHost.includes(DEV_DB_HOST_MARKER)) return;
+export function assertWritableTarget(dbHost: string, allowProd: boolean): void {
+  const isDev = dbHost.includes(DEV_DB_HOST_MARKER);
+  const isProd = dbHost.includes(PROD_DB_HOST_MARKER);
+
   if (allowProd) {
-    console.log(`  ⚠  NON-DEV TARGET, allowed by --allow-prod: ${redactHost(dbHost)}`);
-    return;
+    if (isProd) {
+      console.log(`  ⚠  PRODUCTION TARGET, asserted by --allow-prod: ${redactHost(dbHost)}`);
+      return;
+    }
+    console.error(
+      `\nERROR: --allow-prod was given, but '${redactHost(dbHost)}' is not the production branch.\n` +
+        (isDev
+          ? `It is the DEV branch. A scheduled production sweep pointed at dev writes nothing\n` +
+            `to production and reports success — drop --allow-prod, or fix the DATABASE_URL secret.\n`
+          : `It is neither the dev nor the production branch. Refusing an unknown target.\n`),
+    );
+    process.exit(1);
   }
+
+  if (isDev) return;
+
   console.error(
     `\nERROR: refusing to import into '${redactHost(dbHost)}'.\n` +
       `This is not the dev branch, and --allow-prod was not given.\n` +
@@ -283,7 +313,7 @@ function assertWritableTarget(dbHost: string, allowProd: boolean): void {
       // the override last — a remedy offered first is the one people paste.
       `FIRST check whether DATABASE_URL is exported in your shell:  echo "\${DATABASE_URL:0:40}"\n` +
       `dotenv does NOT override an already-exported value, so it silently beats .env.local.\n` +
-      `Only if you genuinely mean to write to this database, re-run with --allow-prod.\n`,
+      `Only if you genuinely mean to write to production, re-run with --allow-prod.\n`,
   );
   process.exit(1);
 }

@@ -8,7 +8,7 @@
  *  - defaults (all phases, yes=false)
  *  - --org required (can't easily test process.exit; just verify present path)
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { parseArgs } from "./run-import";
 
 function argv(...args: string[]): string[] {
@@ -105,5 +105,80 @@ describe("parseArgs — --allow-prod", () => {
     const r = parseArgs(["node", "run-import.ts", "--org", "org-1", "--yes"]);
     expect(r.yes).toBe(true);
     expect(r.allowProd).toBe(false);
+  });
+});
+
+// ── Database target guard ────────────────────────────────────────────────────
+
+import { parseDbHost, assertWritableTarget } from "./run-import";
+
+describe("parseDbHost", () => {
+  it("reads the hostname", () => {
+    expect(parseDbHost("postgres://u:p@ep-patient-surf-x.neon.tech/db")).toBe(
+      "ep-patient-surf-x.neon.tech",
+    );
+  });
+
+  it("prefers Neon's options=endpoint over the hostname", () => {
+    // Neon's SNI-less form routes to a different compute than the hostname
+    // suggests, so a URL that READS as dev can write to prod. The option wins.
+    const url =
+      "postgres://u:p@ep-patient-surf-x.neon.tech/db?options=endpoint%3Dep-withered-hill-y";
+    expect(parseDbHost(url)).toBe("ep-withered-hill-y");
+  });
+
+  it("fails closed on an unparseable url", () => {
+    expect(parseDbHost("not a url")).toBe("(unparseable)");
+  });
+});
+
+describe("assertWritableTarget", () => {
+  let exitSpy: ReturnType<typeof vi.spyOn>;
+  let errSpy: ReturnType<typeof vi.spyOn>;
+  let logSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    exitSpy = vi
+      .spyOn(process, "exit")
+      .mockImplementation((() => undefined) as never);
+    errSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+  });
+  afterEach(() => {
+    exitSpy.mockRestore();
+    errSpy.mockRestore();
+    logSpy.mockRestore();
+  });
+
+  it("allows the dev branch by default", () => {
+    assertWritableTarget("ep-patient-surf-x.neon.tech", false);
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  it("refuses an unknown host by default", () => {
+    assertWritableTarget("ep-somewhere-else.neon.tech", false);
+    expect(exitSpy).toHaveBeenCalledWith(1);
+  });
+
+  it("allows production when --allow-prod asserts it", () => {
+    assertWritableTarget("ep-withered-hill-y.neon.tech", true);
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  it("refuses an unknown host even with --allow-prod", () => {
+    // The flag names a target; it does not permit a category.
+    assertWritableTarget("ep-somewhere-else.neon.tech", true);
+    expect(exitSpy).toHaveBeenCalledWith(1);
+  });
+
+  it("refuses dev when --allow-prod is given — a prod sweep pointed at dev is a silent no-op", () => {
+    assertWritableTarget("ep-patient-surf-x.neon.tech", true);
+    expect(exitSpy).toHaveBeenCalledWith(1);
+  });
+
+  it("never prints the full host — output lands in a public repo's CI logs", () => {
+    assertWritableTarget("ep-withered-hill-y.neon.tech", true);
+    const printed = logSpy.mock.calls.flat().join(" ");
+    expect(printed).not.toContain("ep-withered-hill-y");
   });
 });
