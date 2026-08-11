@@ -308,3 +308,46 @@ describe("upsertInvoiceRecord — heals a customer link the strict lookup missed
     expect(getInvoiceValues()?.mock.calls[0]?.[0]?.customerId).toBeNull();
   });
 });
+
+/**
+ * The importer skips soft-deleted invoices, but upsertInvoiceRecord is also the
+ * webhook and daily-cron entry point and had no such check. A deleted
+ * FieldPulse invoice arriving that way was mirrored as an open balance, given a
+ * customer, and handed to collections — and nothing downstream could correct
+ * it, because deriveInvoiceState never returns "void".
+ */
+describe("upsertInvoiceRecord — a deleted FieldPulse invoice never becomes live AR", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(db.batch).mockResolvedValue([] as never);
+    vi.mocked(db.delete).mockReturnValue({ where: vi.fn() } as never);
+  });
+
+  it("refuses to create a mirror row for a deleted invoice", async () => {
+    const where = vi.fn().mockResolvedValue([]); // no existing row
+    vi.mocked(db.select).mockReturnValue({ from: () => ({ where }) } as never);
+    const insert = vi.mocked(db.insert);
+
+    const outcome = await upsertInvoiceRecord(
+      ORG,
+      makeInvoice({ deletedAt: "2026-08-01 00:00:00" }),
+    );
+
+    expect(outcome).toBe("skipped");
+    expect(insert).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a row that is still live locally but deleted upstream", async () => {
+    const where = vi.fn().mockResolvedValue([{ id: "inv-1", state: "open" }]);
+    vi.mocked(db.select).mockReturnValue({ from: () => ({ where }) } as never);
+
+    const outcome = await upsertInvoiceRecord(
+      ORG,
+      makeInvoice({ deletedAt: "2026-08-01 00:00:00" }),
+    );
+
+    // Voiding is a money mutation, so it is reported for a human, not performed.
+    expect(outcome).toBe("skipped");
+    expect(vi.mocked(db.update)).not.toHaveBeenCalled();
+  });
+});

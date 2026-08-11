@@ -354,6 +354,36 @@ export async function upsertInvoiceRecord(
   invoice: FieldpulseInvoice,
   healCustomer?: (fpCustomerId: string) => Promise<string | null>,
 ): Promise<InvoicePullOutcome> {
+  // A DELETED FieldPulse invoice must never become live AR. The importer skips
+  // these, but this function is also the webhook and daily-cron entry point,
+  // and neither checked — so a deleted invoice arriving by webhook was mirrored
+  // as an open balance, given a customer, and handed to collections. Nothing
+  // downstream corrects it: deriveInvoiceState can only return draft/open/paid,
+  // never void.
+  //
+  // Refusing to create it is the safe half. An invoice mirrored BEFORE it was
+  // deleted upstream is the other half, and that one is not ours to decide
+  // silently — voiding a row is a money mutation, so it is surfaced for a human
+  // rather than performed here.
+  if (invoice.deletedAt != null) {
+    const [stale] = await db
+      .select({ id: invoices.id, state: invoices.state })
+      .from(invoices)
+      .where(
+        and(
+          eq(invoices.organizationId, organizationId),
+          eq(invoices.fieldpulseInvoiceId, invoice.id),
+        ),
+      );
+    if (stale && stale.state !== "void") {
+      logger.warn(
+        { organizationId, fieldpulseInvoiceId: invoice.id, localState: stale.state },
+        "FieldPulse invoice is deleted upstream but the mirror still shows it as live — needs review",
+      );
+    }
+    return "skipped";
+  }
+
   const totalCents = invoice.totalCents ?? 0;
   // FP sends real subtotal + tax; fall back to total/0 only if absent so the
   // invoice document shows the true tax line (tax > 0 on ~56% of invoices),

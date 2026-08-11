@@ -543,6 +543,7 @@ async function resolveNativeCustomerByEmail(
 export function makeFpCustomerHealer(
   orgId: string,
   client: Pick<FieldpulseClient, "getCustomer">,
+  counts?: PhaseResult,
 ): (fpCustomerId: string) => Promise<string | null> {
   const cache = new Map<string, string | null>();
   let consecutiveFailures = 0;
@@ -560,6 +561,9 @@ export function makeFpCustomerHealer(
     if (consecutiveFailures >= HEAL_FAILURE_LIMIT) {
       if (!trippedLogged) {
         trippedLogged = true;
+        // Count it once, so the phase ledger cannot report a clean run while
+        // every remaining invoice is silently written without a customer.
+        if (counts) counts.errors++;
         logger.error(
           { orgId, consecutiveFailures },
           "FP customer heal: too many consecutive failures — healing disabled for the rest of this run; links will be missing until the next run",

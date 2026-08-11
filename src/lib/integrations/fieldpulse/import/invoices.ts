@@ -66,7 +66,7 @@ export async function importInvoicesFromFieldpulse(
   // fetch, not N. Without it, every invoice whose customer lost the fp-id link
   // (shared billing contacts, pagination gaps) is written with customerId null
   // and is thereafter invisible to collections.
-  const healCustomer = makeFpCustomerHealer(orgId, client);
+  const healCustomer = makeFpCustomerHealer(orgId, client, counts);
 
   for (const inv of items) {
     // Skip soft-deleted invoices.
