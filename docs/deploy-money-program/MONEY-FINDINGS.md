@@ -145,6 +145,22 @@ correct failure state.
 > links into the dev database (orphans fell 506 → 440). Because the sync never
 > un-links, they persist. Dev only — this code has never run against production.
 
+**The 9 customers-phase per-record errors are this same defect** (investigated
+2026-08-11; deterministic — an identical 9 reproduced on re-run). Each failure
+is a unique-violation on the per-org email/phone blind-index constraint: the
+FieldPulse customer being refreshed now shares an email or phone with a
+*different* FieldPulse customer that already owns a native row, so the UPDATE
+is refused. Verified from the failed statements' own parameters — every
+colliding hash resolves to an existing row holding a different
+`fieldpulse_customer_id`.
+
+Knock-on effect: the UPDATE carries all fields in one statement, so a hash
+collision also blocks the name/address/spillover refresh for those 9 rows —
+they keep whatever contact data they had at first import. If the identity
+decision lands as "one row per FieldPulse customer", this resolves itself;
+if not, the importer should split the statement so a colliding hash skips only
+the hash columns rather than the whole refresh.
+
 ### 2. FieldPulse discounts are not mirrored, so line revenue is overstated
 
 Line items store `quantity × unitPrice` and ignore FieldPulse's header and line
