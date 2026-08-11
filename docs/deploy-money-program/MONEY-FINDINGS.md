@@ -43,6 +43,38 @@ sync — surfacing exactly this is what it is for.
 > `offset`/`limit` and returns the same first page at every offset. Use
 > `page`/`page_size` and stop when a batch repeats. See `FACTS.md`.
 
+## Dev-mirror rebuild — final state after the corrections
+
+The whole `invoices.customer_id` column was cleared and rebuilt from FieldPulse
+with the shipped code, so the dev mirror now reflects exactly what this branch
+produces rather than any intermediate rule. Run completed clean:
+`fetched=2990 updated=2990 errors=0`.
+
+| | before | after |
+|---|---|---|
+| invoices linked to a customer | 2,551 | 2,490 |
+| unlinked (visibly orphaned) | 440 | 501 |
+| unpaid orphans | 72 | 94 |
+| state `paid` | 2,357 | 2,332 |
+| state `open` | 160 | 185 |
+
+Both movements are the corrections landing, not regressions:
+
+- **61 links removed.** The detector found **60** invoices attached to a row
+  belonging to a *different* FieldPulse customer (18 unpaid, $[redacted] filed
+  against the wrong business), all of them created by the withdrawn email-only
+  rule. Orphan counts returning to ~the original baseline is the honest state:
+  those invoices genuinely have no correct customer until finding 1 is decided.
+- **25 invoices moved from `paid` to `open`.** Exactly the fabricated-payment
+  class — FieldPulse reports `paid 0.00 / unpaid 0.00` with no payments — now
+  correctly counted as owed.
+
+Note the fix was *narrower* than first estimated, which is the right outcome.
+102 rows were `paid` with no local payment row; only **25** had no payment
+evidence at all and flipped. The remaining **74** carry real non-zero paid
+amounts from FieldPulse and are genuinely paid — they simply have no mirrored
+`payments` row, which is a separate and benign gap.
+
 ## FIXED
 
 ### Zero-quantity components fabricated money
