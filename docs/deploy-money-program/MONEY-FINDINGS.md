@@ -141,9 +141,9 @@ change, and the honest fix), or mark merged rows explicitly and teach the money
 surfaces about them. Until then the backlog stays visibly unlinked, which is the
 correct failure state.
 
-> Dev-mirror note: before the correction, repair passes wrote **66** email-only
-> links into the dev database (orphans fell 506 → 440). Because the sync never
-> un-links, they persist. Dev only — this code has never run against production.
+> Dev-mirror note (historical): repair passes once wrote **66** email-only links
+> into the dev database (orphans fell 506 → 440); they were **removed** by the
+> rebuild above ("61 links removed"). Dev only — never ran against production.
 
 **The 9 customers-phase per-record errors are this same defect** (investigated
 2026-08-11; deterministic — an identical 9 reproduced on re-run). Each failure

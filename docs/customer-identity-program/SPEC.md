@@ -29,9 +29,9 @@ several rows can then answer one email or phone, every identity lookup needs a
 | Fact | Source |
 |---|---|
 | 2,280 FP-linked rows + 9 native rows (both hashes set) + 0 anonymized, on dev | measured on the dev branch |
-| 6 of those 2,280 are hard-delete placeholders — archived, contactless, fp id 404s upstream, so they are **not** in the 2,631 list | `import/customers.ts:604-637` (`createDeletedPlaceholderCustomer`) |
+| 6 of those 2,280 are hard-delete placeholders — archived, contactless, fp id 404s upstream, so they are **not** in the 2,631 list. They are also **all 6** of the archived FP-linked rows on dev: the deleted/merged `archivedImported` population is currently **0** | `import/customers.ts:611-637` (`createDeletedPlaceholderCustomer`), measured on dev |
 | 2,631 customers upstream in FP → ~357 FP customers own no row (2,631 − (2,280 − 6)) | live FP API |
-| 501 FP-synced invoices have `customer_id IS NULL` (94 unpaid) | dev branch |
+| 501 FP-synced invoices have `customer_id IS NULL` (94 unpaid). The older 506 / 440 figures are pre-rebuild: the 2026-08-11 full-column rebuild cleared and re-derived `invoices.customer_id` with the strict healer, resetting dev to 501 | dev branch; `MONEY-FINDINGS.md` § "Dev-mirror rebuild" |
 | 9 deterministic customers-phase per-record errors, all unique-violations on the hash indexes | `MONEY-FINDINGS.md` § "The 9 customers-phase per-record errors" |
 | Invoices carry **no** FP customer id column, and the spillover jsonb does not retain it | `src/lib/db/schema.ts` (invoices), `src/lib/integrations/fieldpulse/import/spillover.ts` |
 
@@ -94,24 +94,32 @@ index("customers_org_phone_hash_idx")
 New index names (rather than reusing the old ones) so the `ON CONFLICT` target
 in code reads unambiguously and the migration diff is legible.
 
-### 1.3 Generate the migration with drizzle-kit — do not hand-author
+### 1.3 Generate the migrations with drizzle-kit — do not hand-author
 
 There is **no in-repo precedent** for a multi-condition partial index
 round-tripping through drizzle-kit: `schema.ts:651-653` is a *single*-condition
 partial `uniqueIndex()`, and `schema.ts:665-669`
 (`requests_dispatch_exceptions_idx`, three clauses) reached the database through
 a **hand-authored** migration (`drizzle/0042_perf_indexes.sql`). So the claim
-was checked directly instead: against this schema, drizzle-kit 0.31.10 generates
-exactly `DROP INDEX` ×2 plus 4 `CREATE`s with the correct multi-condition
-predicates, and a second `generate` reports **"No schema changes"**.
+was checked directly: against this schema, drizzle-kit 0.31.10 generates the
+correct multi-condition predicates and a second `generate` reports **"No schema
+changes"**. But bound what that probe proved: **it ran against the combined
+final schema** (old uniques deleted and four new indexes added in one edit),
+producing `DROP INDEX` ×2 plus 4 `CREATE`s. This program does **not** ship that
+combined edit — §7-dev generates **two** migrations from **two sequential
+`schema.ts` states**, and *that* sequence is what implementation must verify:
 
-So: edit `schema.ts`, run `npm run db:generate` (→ `drizzle/0045_*.sql`, journal
-entry, snapshot — all written by drizzle-kit), then re-run `npm run db:generate`
-and confirm **"No schema changes"**. Hand-authoring is only required when
-drizzle-kit cannot express the change (triggers — see `drizzle/0044_last_admin_guard.sql`);
-that is not the case here.
+1. Edit 1 — **keep** both old uniques in `schema.ts`, **add** the four new
+   indexes → `npm run db:generate` → `drizzle/0045_*.sql`, expected to contain
+   4 `CREATE`s and **no** `DROP`. Re-run `generate` → **"No schema changes"**.
+2. Edit 2 — **delete** the two old uniques → `npm run db:generate` →
+   `drizzle/0046_*.sql`, expected to contain exactly 2 `DROP INDEX`. Re-run
+   `generate` → **"No schema changes"**.
 
-Apply on dev with `npm run db:migrate`. Prod applies it in the build.
+If either generate emits something other than the shape above, stop and
+reconcile before applying — do not hand-edit the generated SQL. Hand-authoring
+is only required when drizzle-kit cannot express the change (triggers — see
+`drizzle/0044_last_admin_guard.sql`); that is not the case here.
 
 ### 1.4 Why race-safety for native intake survives
 
@@ -123,9 +131,10 @@ intake, because every row this function inserts has
 `fieldpulse_customer_id = NULL` (`crm-queries.ts:752-766` sets no FP column) —
 so both racers are inside the new partial index's population and one must lose.
 
-The only required code change is the arbiter predicate. Postgres infers a
-partial index only when the `ON CONFLICT ... WHERE` clause implies the index
-predicate — the repo has already been bitten by this twice
+One required code change here is the arbiter predicate (the un-archive gate at
+`:785-796` / `:818-819` is the other — §3.5). Postgres infers a partial index
+only when the `ON CONFLICT ... WHERE` clause implies the index predicate — the
+repo has already been bitten by this twice
 (`crm-queries.ts:800-803`, `import/customers.ts:410-412`). Make `targetWhere`
 textually identical to the new index predicate:
 
@@ -141,28 +150,12 @@ retryable 500) is unchanged, neither better nor worse.
 
 ### 1.5 Is it sound that a claimed native row leaves the protected population?
 
-When the import claims a native row (§2, path c) it sets
-`fieldpulse_customer_id`, and the row silently drops out of both new partial
-unique indexes. Assessed:
-
-- **Duplicate creation after the claim?** No. `upsertCustomerByContact` calls
-  `findCustomerIdByContact` first (`crm-queries.ts:780-783`), which reads the
-  *whole* population via the new lookup indexes, finds the claimed row, and
-  returns its id without inserting.
-- **Concurrent native insert during a claim?** Worst case the insert lands
-  before the claim's `UPDATE`, and a second native row with the same hash is
-  refused by the unique index (both rows still have a NULL fp id) — no change.
-  If the claim lands first, the native insert then finds the claimed row via
-  `findCustomerIdByContact` and reuses it. If the two interleave such that a
-  native row and an FP row end up sharing a hash, **that is now a legal state**,
-  not a defect — it is the whole point of the redesign.
-- **Reversibility.** `fieldpulse_customer_id` is only ever set, never nulled
-  (`import/customers.ts:342-360` and the guard at `:357`), so the exit from the
-  protected population is monotone. There is no oscillation.
-- **Loss of protection for that contact.** After the claim, a *second* native
-  intake on the same contact will resolve to the claimed row rather than create
-  a new one, so nothing is unprotected — the row is still reachable, it is just
-  no longer *constrained*. Sound.
+Yes. `upsertCustomerByContact` runs `findCustomerIdByContact` first
+(`crm-queries.ts:780-783`), which reads the *whole* population, so a claimed row
+is still resolved and never re-created. The exit is monotone: every writer of
+`fieldpulse_customer_id` is set-once and `IS NULL`-guarded
+(`import/customers.ts:357`, `fieldpulse/customer-sync.ts:239-249`,
+`housecall-pro/customer-sync.ts:215-225`), so there is no oscillation.
 
 ---
 
@@ -170,7 +163,37 @@ unique indexes. Assessed:
 
 File: `src/lib/integrations/fieldpulse/import/customers.ts`.
 
-### 2.1 New resolution order for `importOneFpCustomer` (`:242-438`)
+### 2.0 The split is opt-in per run — `--split-shared-contacts`
+
+**The customers phase is not a manual command someone types.** It runs
+**unattended, nightly, against production**: `.github/workflows/fp-nightly-sync.yml`
+(`cron: "30 8 * * *"`) checks out `main` and runs the full sweep with `--yes`
+and `--allow-prod` against `secrets.DATABASE_URL`. Any behaviour added here runs
+on prod the morning after this branch merges, backfill or no backfill. Parking
+the schedule is **not** the answer — prod's mirror would go stale. Gating is.
+
+So the behaviour that **creates duplicate-hash rows** — step 3's email claim and
+step 4's unconditional INSERT — lives behind a new `run-import` flag,
+`--split-shared-contacts`, parsed alongside `--yes` / `--allow-prod` /
+`--dry-run` in `parseArgs` (`run-import.ts:179-221`) and threaded to the phase
+through `PhaseContext` (`:72-77`).
+
+- **Without the flag** (the default, and what the nightly sweep always gets): an
+  FP customer whose contact collides with a row of a *different* identity is
+  **skipped** — no claim, no insert, no error. Increment a new `PhaseResult`
+  counter `sharedContactSkipped` and return `null`. That is today's outcome
+  minus the 9-error noise, and it is safe against the old indexes and the new
+  ones, before and after either migration, permanently.
+- **With the flag:** the full §2.1 order. Only a deliberate backfill passes it.
+
+**Belt-and-braces.** When the flag is set, the phase first probes `pg_indexes`
+for `customers_org_email_hash_unique` (`db.execute(sql\`...\`)` — precedent
+`ai/dispatch/signals.ts:553`, `api/health/route.ts:28`) and **aborts** if the
+old unique is still there: running flagged against the pre-`0046` schema is
+exactly the error storm §7 warns about. Extract the decision as a pure predicate
+over the probe result so it is testable (§6).
+
+### 2.1 New resolution order for `importOneFpCustomer` (`:242-438`) — flagged path
 
 Per FP customer, in order:
 
@@ -178,12 +201,26 @@ Per FP customer, in order:
    guard at `:264-279` (`anonymizedAt` set → skip, never re-import PII). Then
    `updateCustomerFields` (`:699-729`).
 2. **Deleted / merged FP record** (`archivedImport`, `mapFpCustomer:87`) —
-   unchanged: archived, contactless insert keyed on the fp id (`:289-327`).
+   archived, contactless insert keyed on the fp id (`:289-327`), with **one
+   repair**: today its `onConflictDoNothing` miss falls into
+   `counts.skipped++; return null` (`:323-326`), so `null` means both "no row"
+   and "a row already exists for this fp id" — and `jobs.ts:389` reads `null` as
+   unresolved and drops the job's customer link. Give this path the same
+   **re-select by fp id** step 4 uses, so `null` means only one thing.
 3. **Claim a native row — on `email_hash` only.** *New, replaces the
    `upsertCustomerByContact` call at `:331-336`.* A single SELECT for candidate
    rows in this org with
-   `email_hash = $h AND fieldpulse_customer_id IS NULL AND anonymized_at IS NULL AND archived_at IS NULL`;
-   pick with the same pure helper as §3.
+   `email_hash = $h AND fieldpulse_customer_id IS NULL AND anonymized_at IS NULL AND archived_at IS NULL AND do_not_service = false`.
+
+   **The claim pick is NOT `pickCustomerMatch`.** §3.2's rule 2 puts
+   do-not-service *first* so a refusal cannot be bypassed; reusing that ordering
+   here would preferentially stamp an FP identity onto a blocked row — the
+   opposite of what is wanted. So the candidate set excludes
+   `do_not_service = true` in the `WHERE` (above) and picks **oldest first
+   (`created_at ASC`, `id ASC` as the determinism backstop)**. A do-not-service
+   native row is **never** claimed; if it is the only candidate the FP customer
+   gets a fresh INSERT (step 4). Extract the candidate predicate as an exported
+   constant so it is testable (§6).
 
    **Why email only, and never phone.** The claim writes a *permanent* fp id
    onto a pre-existing row and carries that row's `portal_token_hash` with it
@@ -211,8 +248,15 @@ Per FP customer, in order:
    UPDATE customers SET fieldpulse_customer_id = $fpId, ... , updated_at = now()
    WHERE id = $candidate AND organization_id = $org
      AND fieldpulse_customer_id IS NULL AND anonymized_at IS NULL
+     AND archived_at IS NULL AND do_not_service = false
    RETURNING id;
    ```
+
+   **The UPDATE predicate must match the SELECT's, term for term.** The last two
+   terms are not decoration: the SELECT filters on both, so without them a row
+   archived or blocked by an operator between SELECT and UPDATE would still be
+   claimed — a real TOCTOU, since the phase takes ~20 minutes
+   (`fp-nightly-sync.yml` header) and an operator is not paused while it runs.
 
    Zero rows returned → fall through to 4. See §2.3 for what zero rows means.
 4. **INSERT unconditionally** — a brand-new row carrying `fieldpulse_customer_id`,
@@ -226,11 +270,28 @@ Path 4 subsumes today's path (c) "contactless": with the contact uniques
 relaxed there is no longer any reason to branch on "has email/phone" — the same
 INSERT serves both, writing whatever hashes exist. Collapse them.
 
+**Where the flag actually bites.** Step 4 is unconditional for an FP customer
+whose contact collides with **nothing** — that is ordinary import and it runs
+flag or no flag, exactly as today. The flag governs only the two duplicate-hash
+outcomes: the step-3 claim, and the step-4 insert reached *because a colliding
+row of a different identity exists*. Unflagged, both of those become
+`sharedContactSkipped` (§2.0).
+
 **Do not route any of this through `upsertCustomerByContact` any more.** Two
 reasons, both already documented in this file: it un-archives a matched row
 (`:286-288`), and it creates a row on a miss, which the claim path must not do
 (it needs to know whether a native row existed so it can decide claim vs
 insert).
+
+**New signature.** `importOneFpCustomer(orgId, customer, counts?, opts?)`, where
+`opts?: { splitSharedContacts?: boolean; claimedThisRun?: Map<string, string> }`
+carries the flag and the per-run claimed map. **Optional** because of the second
+caller: the jobs-phase self-heal at `jobs.ts:389` passes two arguments and no
+map, and must keep working unchanged — it heals one customer at a time, so it
+correctly gets the default, non-splitting behaviour. Watch `jobs.test.ts:641`:
+`toHaveBeenCalledWith(ORG, fpCust)` is an **exact-arity** assertion, so passing
+an extra argument from `jobs.ts` breaks it. Leave that call site at two
+arguments (§6).
 
 ### 2.2 Updates can now always write hashes
 
@@ -274,17 +335,8 @@ new model a skip there would be a lie.
 
 ### 2.4 The healer stays as-is
 
-`makeFpCustomerHealer` / `resolveNativeCustomerByEmail` (`:451-602`) keep their
-current shape, including the email-only rule and the ownership clause
-`(fieldpulse_customer_id IS NULL OR = this fpId)` at `:491` and the
-`isNull(anonymizedAt)` guard at `:490`. Post-split the strict fp-id lookup in
-`invoice-sync.ts:438-448` resolves essentially everything, so the healer narrows
-to two residual cases: an FP customer created upstream since the last customers
-phase (webhook arrives first), and a list-pagination gap. In both, a match on a
-row that owns **no** FP identity is the create-before-claim adoption case, which
-is correct. Leave it alone — it is read-only by design because one caller is an
-inbound webhook (`:511-520`), and narrowing it further is a separate decision
-once the backfill has shown the residual is ~0 (§4.6).
+`makeFpCustomerHealer` / `resolveNativeCustomerByEmail` (`:451-602`) are
+unchanged — §4.3 covers what they do while the phase runs.
 
 ---
 
@@ -308,16 +360,22 @@ Replace the two queries with **one** query returning all candidates for
 `lastActivityAt = (SELECT max(created_at) FROM service_requests WHERE customer_id = customers.id)`
 — index-supported by `requests_customer_id_idx` (`schema.ts:642`).
 
-**Put the ordering and a `LIMIT` in the SQL**, not only in the helper: order by
-the same keys as the table below (the ones SQL can express — do-not-service,
-email-before-phone, live-before-archived, activity, created, id) and
-`LIMIT 50`. Post-split fan-out per contact is not bounded by anything in the
-schema, so an unbounded candidate SELECT on a shared AP contact is a latency
-risk on the intake path. (The "one AP address covers up to 21 businesses" line
-at `import/customers.ts:472-476` is a prose observation about the *merged*
-state, not a measurement of post-split fan-out — do not treat it as a bound.)
-With the SQL ordering matching the helper's, the `LIMIT` can only ever drop rows
-the helper would not have picked.
+**Put rule 1 in the `WHERE`, and the ordering plus a `LIMIT` in the SQL** — not
+only in the helper. Concretely: `anonymized_at IS NULL` joins the `WHERE`
+clause; the `ORDER BY` mirrors rules 2-7 (do-not-service, email-before-phone,
+live-before-archived, activity, created, id); `LIMIT 50`. Post-split fan-out per
+contact is not bounded by anything in the schema, so an unbounded candidate
+SELECT on a shared AP contact is a latency risk on the intake path. (The "one AP
+address covers up to 21 businesses" line at `import/customers.ts:472-476` is a
+prose observation about the *merged* state, not a measurement of post-split
+fan-out — do not treat it as a bound.)
+
+That arrangement is what makes the `LIMIT` safe, stated carefully: **the `LIMIT`
+can drop only rows the helper would have filtered out or ranked below the
+winner, because the SQL `ORDER BY` mirrors rules 2-7 and rule 1's filter is in
+the `WHERE` clause.** Rule 1 is a *filter*, not an ordering key, so "the ordering
+mirrors the helper" alone would not make that sentence true. The helper keeps
+rule 1 too — it must not depend on the caller's SQL being right.
 
 Keep the legacy NULL-hash fallback scan (`:683-716`), which only fires when the
 indexed path finds nothing, with one change: add
@@ -333,12 +391,21 @@ rewriting it is not worth it for a population that is empty here.
 Ordering is then decided by a **pure, exported helper** —
 `pickCustomerMatch(candidates)` in a new `src/lib/admin/customer-match.ts` — so
 it is unit-testable under the repo's no-jsdom rule (§6). It returns
-`{ id, ambiguous }`: `ambiguous` is true when **more than one live** (not
-anonymized, not archived) candidate survived. `findCustomerIdByContact` keeps
-its `string | null` signature for the callers that only want an id; the
-ambiguity flag is exposed through a sibling `findCustomerMatchByContact` that
-the identity surfaces in §3.3 call instead. See §3.3 for what each consumer does
-with it.
+`{ id, ambiguous, doNotService } | null` — `null` for empty input, and otherwise
+a winner whose `doNotService` is carried out so callers do not have to re-read
+it to make a *local* decision (they still re-read from the id for the refusal
+itself — §3.3). `ambiguous` is true when **more than one live** (not anonymized,
+not archived) candidate survived. `findCustomerIdByContact` keeps its
+`string | null` signature for the callers that only want an id; the full match
+is exposed through a sibling `findCustomerMatchByContact` returning
+`{ id, ambiguous, doNotService } | null`, which the identity surfaces in §3.3
+and the un-archive gate in §3.5 call instead.
+
+**`pickCustomerMatch`'s ordering — rule 2 in particular — is for identity and
+refusal surfaces only.** Two other places resolve a contact to a row and must
+*not* use it, because do-not-service-first has the wrong polarity for what they
+do: the import's claim pick (§2.1 step 3) and SMS START (§3.5). Each states its
+own rule.
 
 | # | Rule | Why |
 |---|---|---|
@@ -378,19 +445,28 @@ booking a blocked account, which they cannot.
    (`ai/customer-context.ts:92-104`) returns the id (so the refusal above and
    the session FK still work) with the personalization fields blanked when
    ambiguous.
-3. **An ambiguous refusal is surfaced to a human.** A refusal that may have hit
-   the wrong business must not be invisible. Concrete mechanism: a system-actor
-   `audit_log` row — `actorType: "system"`, `entity: "customer"`,
-   `entityId` = the picked row id, `details` = candidate count + candidate ids
-   only (ids/enums, never PII — `AGENTS.md`), inserted the same way the FP
-   webhook already writes system rows
-   (`app/api/admin/integrations/fieldpulse/webhook/route.ts:383-392`). It is
-   visible on `/admin/audit-log`. Note explicitly that the **dispatch exceptions
-   rail cannot carry this**: `getDispatchExceptions`
-   (`admin/dispatch-exceptions-queries.ts:26-50`) selects `service_requests`
-   rows, and a do-not-service refusal returns before any request is inserted
-   (`submit-session-request.ts:198-202`), so there is no row for the rail to
-   show.
+3. **An ambiguous block is surfaced to a human — and the resolver writes it.**
+   The three consumers that actually refuse (`submit-session-request.ts:188-202`,
+   the chat gate `chat/route.ts:415-428`, `voice-turn.ts:274-278`) are pinned
+   "no change" above and none of them receives the ambiguity flag — verified. So
+   rather than thread a flag through three refusal sites,
+   **`findCustomerMatchByContact` writes the row itself** when the pick is
+   `ambiguous && winner.doNotService`: a system-actor `audit_log` insert —
+   `actorType: "system"` (as the FP webhook already writes at
+   `app/api/admin/integrations/fieldpulse/webhook/route.ts:383-397`),
+   `action: "ambiguous_do_not_service_refusal"` (snake_case, like
+   `customer_erased`), `entity: "customer"`, `entityId` = the picked row id,
+   `details` = candidate count + candidate ids only (ids/enums, never PII —
+   `AGENTS.md`). Best-effort in a `try/catch` like the webhook's. Visible on
+   `/admin/audit-log`.
+
+   **Honestly: this fires on lookup, not on refusal** — a lookup that resolves
+   ambiguous+blocked and never proceeds to book still logs. Accepted;
+   over-logging beats invisibility. And the **dispatch exceptions rail cannot
+   carry this**: `getDispatchExceptions`
+   (`admin/dispatch-exceptions-queries.ts:26-50`) selects `service_requests`,
+   and a refusal returns before any request is inserted
+   (`submit-session-request.ts:198-202`).
 4. **The pick persists for the session.** Chat writes the resolved id onto the
    session FK (`chat/route.ts:720`, async pass `:1985`), and the next turn's
    load gate reads do-not-service from it (`:418-428`). So one ambiguous pick
@@ -410,8 +486,8 @@ fields or clears the wrong flag from `/admin/customers/[id]` — the directory
 shows every matching business (§5), so the right row is findable. Also worth
 saying once, honestly: the verify budget is **per session** —
 `MAX_VERIFY_ATTEMPTS = 2` (`ai/account-verify.ts:46-47,140-154`) with no cap on
-the number of sessions. That is pre-existing, unchanged by this program, and
-hardening it is out of scope (§8).
+the number of sessions. Pre-existing, unchanged here, and hardening it is out of
+scope.
 
 ### 3.4 Justification per surface
 
@@ -449,11 +525,23 @@ hardening it is out of scope (§8).
     Return true if any row matched. Today a STOP from a shared number would
     silence one business and keep texting the others, which is a compliance
     defect, not a UX one.
-  - **START applies to exactly one row** — the `pickCustomerMatch` winner — and
-    never touches siblings. Un-suppressing on a shared number must not let one
-    texter revoke third parties' opt-outs; that is the same class of harm STOP's
-    fan-out exists to prevent, in the direction that cannot be undone by the
-    person who is now being texted again.
+  - **START applies to exactly one row**, and never touches siblings.
+    Un-suppressing on a shared number must not let one texter revoke third
+    parties' opt-outs; that is the same class of harm STOP's fan-out exists to
+    prevent, in the direction that cannot be undone by the person who is now
+    being texted again.
+
+    **Which row: not `pickCustomerMatch`'s winner.** Rule 2 would hand START the
+    *blocked* row and re-open it — the exact inversion of what do-not-service is
+    for. START picks the **most recently active live, non-blocked** candidate:
+    skip rule 2, drop blocked and archived rows, then rules 5-7
+    (`lastActivityAt DESC`, `createdAt DESC`, `id ASC`). No such row → no-op,
+    returns false.
+
+  Both directions take candidates from the **same resolver**: `consent.ts` calls
+  the exported candidate query behind `findCustomerMatchByContact` instead of
+  re-implementing the phone-hash SELECT it has today at `consent.ts:241-245`.
+  The *ordering* differs per direction; the *candidate set* must not.
 
   Two residuals, stated plainly because they follow from the asymmetry rather
   than from a bug. (1) A sibling that texted STOP stays stopped even after
@@ -472,11 +560,19 @@ hardening it is out of scope (§8).
   queries with `isNull(customers.fieldpulseCustomerId)` **and** apply the same
   predicate to the edited row: refuse only when the edit would actually violate
   the new index (i.e. the edited row is itself native). Editing an FP-linked
-  row's contact never conflicts. Note while touching it: the clash check is a
-  pre-existing check-then-set TOCTOU (`crm-queries.ts:1020-1033` selects, the
-  `SET` follows outside any transaction), so two concurrent edits can both pass
-  and the index decides — a 500, not corruption. Narrowing the predicate neither
-  fixes nor worsens that; fixing it is not part of this program.
+  row's contact never conflicts.
+
+  **Also wrap the `SET` and map the unique violation to `contact_conflict`.** The
+  clash check is a pre-existing check-then-set TOCTOU (`:1020-1033`, `:1043-1056`
+  select; the `SET` follows outside any transaction — neon-http has none anyway,
+  `AGENTS.md`), so two concurrent edits can both pass and the index decides.
+  Today that is a **500**: the route's catch-all returns `INTERNAL_ERROR`
+  (`app/api/admin/customers/[id]/route.ts:434-437`). Catch the error, test it
+  with the existing `isUniqueViolation` (`src/lib/db/unique-violation.ts:14`,
+  used this way at `api/admin/customers/route.ts:123`) and return the same
+  `{ ok: false, reason: "contact_conflict" }` the pre-check returns. Closes the
+  documented TOCTOU **and** the deploy-window case where new code narrows the
+  pre-check while the *old* uniques still bite (§7-prod).
 - **`upsertCustomerByContact`'s un-archive** (`crm-queries.ts:785-796` on the
   find path, `:818-819` on the conflict path) clears `archivedAt` on whatever
   row it resolves. Today that is a returning customer rebooking. Post-split it
@@ -489,35 +585,60 @@ hardening it is out of scope (§8).
   resolve to the row without touching `archivedAt` — the id is still returned,
   so the do-not-service re-read downstream is unaffected.
 
+  **Two sites, two mechanisms — both are needed.** (1) **The find path
+  (`:785-796`), gated in JS:** switch it to `findCustomerMatchByContact` (§3.2)
+  and issue the `UPDATE ... SET archivedAt = null` only when
+  `!ambiguous && !doNotService`. (2) **The conflict path (`:818-819`), gated in
+  SQL:** it is reached *only* when the find returned nothing and the INSERT then
+  lost a race, so the conflicting row appeared concurrently and is by
+  construction the single row on that hash — **unambiguous**. One term left to
+  enforce, and no JS in that path to enforce it in, so put it in the `SET`:
+  `archivedAt: sql\`CASE WHEN ${customers.doNotService} THEN ${customers.archivedAt} ELSE NULL END\``.
+  Drizzle takes a `sql` expression as a `set` value inside `onConflictDoUpdate` —
+  precedent at `src/lib/context/thread.ts:87-89`
+  (`lastChannel: channel ?? sql\`...\``, `lastEventAt: sql\`now()\``). Verify the
+  emitted SQL once during implementation rather than trusting the shape.
+
 ---
 
 ## 4. Relink / backfill on dev ("import as backfill")
 
 Prerequisites: `.env.local` points at the **dev** Neon branch (`AGENTS.md` hard
-invariant); `FIELDPULSE_API_KEY` set; **deploy 2 of §7 has completed** — the old
-contact uniques must be gone before the import runs, or every duplicate-hash FP
-insert violates them (§7.2). Never run the import against old code.
+invariant); `FIELDPULSE_API_KEY` set; **both migrations applied on dev**
+(§7-dev) — the old contact uniques must be gone before the flagged import runs,
+or every duplicate-hash FP insert violates them (§7.2). The phase's own
+`pg_indexes` probe (§2.0) enforces this and aborts if they are still there, so
+the ordering is checked, not merely written down.
 
-1. **Migrate dev** — `npm run db:migrate` (both migrations). Verify with
-   `\d customers` that the two `*_native_unique` indexes and the two lookup
-   indexes exist and the two old `customers_org_{email,phone}_hash_unique` are
-   gone.
-2. **Customers phase** — `npm run fp:import -- --org <uuid> --phase customers`.
+Every command below carries `--yes`: `run-import` otherwise blocks on an
+interactive `Type "import" and press Enter` prompt (`run-import.ts:469-483`),
+which is fine at a terminal and hangs anything else. This matches how the
+nightly workflow invokes it.
+
+1. **Migrate dev** — `npm run db:migrate` (both migrations, back to back).
+   Verify with `\d customers` that the two `*_native_unique` indexes and the two
+   lookup indexes exist and the two old `customers_org_{email,phone}_hash_unique`
+   are gone.
+2. **Customers phase** —
+   `npm run fp:import -- --org <uuid> --phase customers --yes --split-shared-contacts`.
+   **The flag is what makes this a backfill rather than a no-op**; without it
+   the phase runs its conservative default (§2.0) and the split does not happen.
    Expected: `fetched ≈ 2,631`; created ≈ **357** (2,631 upstream − the 2,274
    already-linked non-placeholder rows), less `unnamed` skips from
    `mapFpCustomer:91-93`; **`errors = 0`** — the 9 deterministic
    unique-violations are gone by construction (§2.2); the 9 previously-blocked
-   rows also finally receive their name/address/spillover refresh.
-3. **Jobs phase (recommended, idempotent)** — `--phase jobs`. Its customer
+   rows also finally receive their name/address/spillover refresh;
+   `sharedContactSkipped = 0` (it counts only the unflagged path).
+3. **Jobs phase (recommended, idempotent)** — `--phase jobs --yes`. Its customer
    self-heal (`counts.customersSelfHealed`) and `service_requests.customerId`
    links improve for the same reason invoices do. Optional; skipping it does not
    affect the invoice result.
-4. **Invoices phase** — `--phase invoices`. `upsertInvoiceRecord`'s strict fp-id
+4. **Invoices phase** — `--phase invoices --yes`. `upsertInvoiceRecord`'s strict fp-id
    lookup (`invoice-sync.ts:438-448`) now resolves the customers created in
    step 2, and the update branch re-links without ever un-linking
    (`invoice-sync.ts:507`, `...(customerId ? { customerId } : {})`).
    Expected: the 501 orphans collapse to the upstream-deleted residual.
-5. **Estimates phase — required, not optional** (`--phase estimates`).
+5. **Estimates phase — required, not optional** (`--phase estimates --yes`).
    `import/estimates.ts` has **no healer**. It builds a static
    `fieldpulse_customer_id → native id` map **once**, before the loop
    (`estimates.ts:87-92`), and resolves every estimate against that snapshot
@@ -531,9 +652,12 @@ insert violates them (§7.2). Never run the import against old code.
    the `SET` when unresolved (`estimates.ts:161-174`) — the same never-un-link
    discipline as invoices.
 
-   No incremental estimate sync exists outside `run-import` (the FP webhook and
-   both FP crons handle availability and invoices only — `app/api/webhooks/`,
-   `app/api/cron/sync-fieldpulse-{availability,invoices}`), so the static-map
+   No incremental estimate sync exists outside `run-import` (the FP webhooks and
+   both FP crons handle jobs, availability and invoices only —
+   `src/app/api/admin/integrations/fieldpulse/{webhook,invoice-webhook}/`,
+   `src/app/api/cron/sync-fieldpulse-{availability,invoices}/`; note there is no
+   FieldPulse handler under `src/app/api/webhooks/`, which holds only
+   housecall / resend / saas-billing / twilio), so the static-map
    gap has exactly one entry point and ordering closes it. If an estimate
    webhook is ever added, it must not copy this pattern.
 
@@ -548,17 +672,31 @@ insert violates them (§7.2). Never run the import against old code.
   refuses to run against a non-dev host (`reconcile-fieldpulse-money.mjs:20,39-44`).
   Must still report **0 mismatches**; this program touches identity, not money,
   so any movement in invoice totals is a bug in the change.
+- **There is no email-only mislink cohort left on dev to check.** The 66
+  email-only links a withdrawn repair pass once wrote were removed by the
+  2026-08-11 rebuild, which cleared the whole `invoices.customer_id` column and
+  re-derived it with the strict healer (`MONEY-FINDINGS.md` § "Dev-mirror
+  rebuild", "61 links removed"). The reconcile script plus the orphan counts
+  above are the ongoing check; no before/after snapshot of that cohort is owed.
 - Estimate orphans, before and after:
   `SELECT count(*) FILTER (WHERE customer_id IS NULL) FROM estimates
    WHERE organization_id = $org AND fieldpulse_estimate_id IS NOT NULL;`
   (`fieldpulse_estimate_id` is the FP-sourced discriminator — `estimates.ts:76-84`.)
-  → must fall to zero apart from estimates of hard-deleted FP customers.
-- Customer census, as an **identity, not a headcount**:
-  `FP-linked rows = upstream customers − unnamed skips + hard-delete placeholders`
-  (the 6 placeholders are FP-linked but not in the upstream list — §0). Native
-  rows (fp id NULL) should be 9 minus however many were claimed in step 2 —
-  as an **upper bound, not an equality**: live chat/voice intake during the run
-  legitimately adds native rows, so a higher number is not by itself a defect.
+  Before, on dev: **2 orphaned of 36** FP estimates. → must fall to zero apart
+  from estimates of hard-deleted FP customers.
+- Customer census, as an **identity, not a headcount** — and as an
+  **inequality**:
+  `FP-linked rows ≥ upstream customers − unnamed skips + hard-delete placeholders`
+  (the 6 placeholders are FP-linked but absent from the upstream list — §0).
+  `≥`, not `=`: placeholders are not the only rows in that position. A **full**
+  row whose FP customer is hard-deleted upstream *after* import stays FP-linked
+  here and vanishes from the list walk — like a placeholder, but not archived,
+  so it is not counted by the placeholder term. On dev today all 6 archived
+  FP-linked rows are placeholders and `archivedImported` is 0 (§0), so the extra
+  term is small — but it only grows, and an equality would start failing for a
+  reason that is not a defect. Native rows (fp id NULL) should be 9 minus
+  however many were claimed in step 2, again an **upper bound**: live intake
+  during the run legitimately adds native rows.
 
 ### 4.2 Quantifying the residual honestly — requires new instrumentation
 
@@ -572,7 +710,11 @@ So the invoices phase must report it. Add to
 `:71-105`), fed by the value `upsertInvoiceRecord` already has in hand: a
 per-run `Set<string>` of `invoice.customerId` values that resolved to no native
 row, surfaced on `PhaseResult` as `unresolvedFpCustomerIds` (count) alongside
-`unlinkedInvoices` (count). Implement it as an **optional**
+`unlinkedInvoices` (count). **Both are new optional fields on `PhaseResult`**
+(`run-import.ts:53-70` has neither today; it carries `archivedImported`,
+`multiTechJobs`, `customersSelfHealed`, `enriched`, `skippedHasAddress` — add
+these two the same way, and `sharedContactSkipped` from §2.0). Implement the
+capture as an **optional**
 `onUnlinked?: (fpCustomerId: string) => void` parameter on
 `upsertInvoiceRecord`, passed only by the import loop: the return type stays
 stable, and the invoice webhook and the daily cron — which call the same
@@ -588,12 +730,7 @@ collect from a deleted customer and a fabricated link would only hide that
 (`import/customers.ts:534-538`). Record the two numbers in this directory after
 the run; do not fold them into "done".
 
-### 4.3 Not covered by the backfill
-
-`invoice 20776752` — mirrored but 404 upstream, frozen (`MONEY-FINDINGS.md`).
-Unrelated to identity; leave it.
-
-### 4.4 Partial failure, and what the healer does while the phase is running
+### 4.3 Partial failure, and what the healer does while the phase is running
 
 The customers phase is not atomic and nothing pauses the rest of the system
 while it runs. The invoice webhook
@@ -605,9 +742,12 @@ risk than it removes. So state the contract instead:
 
 - **During the phase (or after one that failed part-way), an invoice whose FP
   customer has no row yet can transiently adopt a hash-matching *native* row.**
-  The healer's ownership clause permits rows with a NULL fp id
-  (`import/customers.ts:491`) — that is its create-before-claim case and it is
-  correct in general; it is only *premature* here, because the row this FP
+  The healer (`makeFpCustomerHealer` / `resolveNativeCustomerByEmail`,
+  `import/customers.ts:451-602`) keeps its current shape — the email-only rule,
+  the ownership clause `(fieldpulse_customer_id IS NULL OR = this fpId)` at
+  `:491`, the `isNull(anonymizedAt)` guard at `:490`. Its ownership clause
+  permits rows with a NULL fp id — that is its create-before-claim case and it
+  is correct in general; it is only *premature* here, because the row this FP
   customer will own is about to be created a few seconds later.
 - **These links self-heal.** The next invoice re-sync resolves the customer
   strictly by fp id and overwrites the FK (`invoice-sync.ts:507`, which writes
@@ -618,7 +758,7 @@ risk than it removes. So state the contract instead:
   corrupt state, only under-linked state; do not interpret §4.1 numbers from an
   aborted run, and do not "fix" transient adoptions by hand.
 
-### 4.5 State that must be reviewed on prod BEFORE the prod backfill
+### 4.4 State that must be reviewed on prod BEFORE the prod backfill
 
 Per-customer state does **not** follow invoices across the split. When the
 import gives an FP customer its own row, that row's invoices move to it, but
@@ -639,7 +779,7 @@ prod rows that carry any of the three, decide per row which split sibling should
 inherit it, and record the decision. Do not automate the transfer — which
 sibling a STOP or a portal token belongs to is a judgement about a real person.
 
-### 4.6 Follow-up gated on the result
+### 4.5 Follow-up gated on the result
 
 If step 4 leaves ~0 orphans beyond the deleted residual, the healer's email
 fallback (§2.4) has become almost pure cost — the "re-fetches merged customers
@@ -654,36 +794,35 @@ Every surface that reads the hash columns or assumed one-row-per-contact:
 
 | File:line | What it is | Effect |
 |---|---|---|
-| `src/lib/admin/crm-queries.ts:643-720` | `findCustomerIdByContact` | **Changes** — single candidate query + `pickCustomerMatch` (§3.2) |
+| `src/lib/admin/crm-queries.ts:643-720` | `findCustomerIdByContact` (body ends `:717`, closing brace `:720`) | **Changes** — single candidate query + `pickCustomerMatch`, plus the new `findCustomerMatchByContact` sibling that also writes the ambiguous-block audit row (§3.2, §3.3) |
 | `src/lib/admin/crm-queries.ts:741-830` | `upsertCustomerByContact` | **Changes** — `targetWhere` predicate (§1.4) + the un-archive gate at `:785-796`, `:818-819` (§3.5) |
 | `src/lib/admin/crm-queries.ts:1014-1060` | `updateCustomerContact` clash check | **Changes** — narrow to the native population (§3.5) |
 | `src/lib/communication/consent.ts:231-262` | `setDoNotContactByPhone` (SMS STOP **and** START — `api/sms/incoming/route.ts:81,86`) | **Changes** — STOP fans out to all matching rows, START stays on the picked row only (§3.5) |
 | `src/lib/integrations/fieldpulse/import/customers.ts:242-438` | `importOneFpCustomer` | **Changes** — §2 |
 | `src/lib/integrations/fieldpulse/import/invoices.ts:71-105` | invoices phase | **Changes** — residual instrumentation (§4.2) |
+| `src/lib/integrations/fieldpulse/invoice-sync.ts:437-461` | `upsertInvoiceRecord` customer resolution | **Changes** — gains the optional `onUnlinked?: (fpCustomerId: string) => void` callback parameter (§4.2). Passed only by the import loop; the invoice webhook and the daily cron call it unchanged |
+| `src/lib/integrations/fieldpulse/import/run-import.ts:53-70`, `:179-221`, `:72-77` | `PhaseResult`, `parseArgs`, `PhaseContext` | **Changes** — `parseArgs` gains `--split-shared-contacts` (§2.0), threaded via `PhaseContext`; `PhaseResult` gains three new optional counters, all of which it lacks today: `sharedContactSkipped` (§2.0), `unresolvedFpCustomerIds` and `unlinkedInvoices` (§4.2) |
+| `src/lib/integrations/fieldpulse/customer-sync.ts:227-261` | **second, background writer of `fieldpulse_customer_id`** — push-side sync, reached via `after()` from `job-sync.ts:174` | **Changes.** It finds an FP customer by email/phone (`:229-232`) and stamps that fp id onto *our* row under an `IS NULL` guard (`:239-249`). Post-split, FP's find-by-email far more often returns an fp id **another** of our rows already owns, so the UPDATE trips `customers_org_fieldpulse_customer_id_unique` — and the degrade catch at `:255-261` swallows it whole, so the sync retries and fails identically forever, silently. Prescribe: **pre-check whether that fp id is already claimed** (a `SELECT` before the UPDATE) and skip the adoption with an explicit log. The set-once guard is unaffected, so §1.5's monotonicity conclusion survives. HCP twin, same shape, no data: `housecall-pro/customer-sync.ts:205-225` |
 | `src/lib/db/schema.ts:813-818` | the two contact uniques | **Changes** — §1.2 |
 | `src/lib/admin/crm-queries.ts:69-270` | customers directory list + search | **Behaviour shift, no code change.** Several businesses sharing one AP email/phone now appear as separate rows; the search path decrypts and substring-filters (`:251-270`) so a search for that email returns all of them. Correct and intended. The 5,000-row search scan cap (`:259`) still clears the ~2,640-row corpus |
 | `src/lib/admin/search-queries.ts:28,45-80` | global command search | **Pre-existing defect, worsened.** `SCAN_LIMIT_CUSTOMERS = 1500` already truncates a 2,289-row corpus; +357 rows makes more customers unreachable from global search. Out of scope to fix here — record it |
 | `src/app/api/admin/customers/route.ts:119-129` | `POST` 409 `CUSTOMER_ALREADY_EXISTS` | **No code change, but the behaviour flips for one case.** `createCustomer` (`crm-queries.ts:471-518`) inserts with a NULL fp id, so **native↔native** duplicates still 409 — and an admin creating a customer whose email or phone matches an **FP-linked** row now **succeeds** instead of 409ing. That is intended: it is how an operator records the second business on a shared AP contact. Two consequences, recorded not fixed: manually force-creating a *second native* row on a shared contact stays blocked (the native unique is what makes race-safe intake work — §1.4 — so relaxing it is a scope-out, §8), and the 409 copy "already exists" now reads misleadingly in that case (backlog, not this program) |
 | `src/lib/portal/portal-queries.ts:60-84`, `:127-145` | portal token mint / resolve, per `customers.id` | **No change — this is the payoff.** Each business gets its own token and sees only its own invoices (`invoices.customer_id`) instead of a shared row's pooled AR |
-| `src/lib/ai/customer-context.ts:92-104` | `lookupCustomerContext` | **Changes** — resolve via the ambiguity-aware sibling and blank the personalization fields (name, tier, history) when `ambiguous`, keeping the id and `doNotService` (§3.3 rules 1-2) |
+| `src/lib/ai/customer-context.ts:20-52`, `:92-104` | `CustomerContext` shape + `lookupCustomerContext` | **Changes** — resolve via `findCustomerMatchByContact` and blank the personalization fields when `ambiguous`. **The blanking, defined exactly:** keep `customerId`, `doNotService`, `customerType`; set `isReturning = false`, `priorRequestCount = 0`, `membershipStatus = null`, `firstName = null`, `fullName = null`, `hcpCustomerId = null`. `priorServiceNote` is already optional and stays absent. Note `membershipStatus` is currently typed `string` (`:26`), so this widens it to `string \| null` — see the §6 note |
 | `src/lib/ai/customer-context.ts:113-158` | `loadCustomerContextById` | **No change** — id already resolved |
-| `src/lib/voice/resolve-voice-identity.ts:17-28` | ANI identity | **Changes** — same treatment as `lookupCustomerContext`: phone-only, so ambiguity is likeliest here; no name greeting, no account facts, `doNotService` still enforced |
+| `src/lib/voice/resolve-voice-identity.ts:17-28` | ANI identity | **No change — it inherits `lookupCustomerContext`.** It is a pure delegate: `return await lookupCustomerContext(organizationId, { phone: trimmed })` at `:24`, with no field handling of its own. The ambiguity blanking lands in `customer-context.ts` and voice gets it for free. (Voice is still where ambiguity is likeliest — phone-only — which is why the blanking matters, not why this file changes) |
 | `src/app/api/chat/route.ts:704-720`, `:1985` | chat identity resolution + session FK persist | **No code change**, but note the pick is persisted onto the session and governs every later turn's do-not-service gate (`:418-428`) — §3.3 rule 4 |
 | `src/lib/integrations/fieldpulse/import/estimates.ts:87-92`, `:122` | estimates phase static customer map | **No code change, runbook change.** No healer here; run `--phase estimates` after the customers phase or estimates stay customer-less in the sales pipeline (§4 step 5) |
 | `src/lib/requests/submit-session-request.ts:176-200` | intake submit + do-not-service re-read | **No change** — protected by pick rule 2 (§3.3) |
 | `src/lib/ai/account-verify.ts`, `src/lib/ai/account-zips.ts` | ZIP-verify gate, `metadata.verify` | **Untouched, explicitly.** Per-row ZIPs keep the gate sound under an ambiguous pick (§3.4) |
-| `src/lib/admin/erasure-queries.ts:182-197` | GDPR erasure | **No change to the erase itself** — still per-row, still NULLs both hashes; §2.1 step 3 refuses to claim `anonymized_at IS NOT NULL`, and `import/customers.ts:264-279` still refuses to re-import over an erasure. See the sibling-disclosure requirement below |
+| `src/lib/admin/erasure-queries.ts:182-197` | GDPR erasure | **No change to the erase itself** — still per-row, still NULLs both hashes; §2.1 step 3 refuses to claim `anonymized_at IS NOT NULL`, and `import/customers.ts:264-279` still refuses to re-import over an erasure. **Do not overstate that protection:** it is keyed on the *row*. An erased **native** row carries no fp id and NULL hashes, so nothing links it to FieldPulse — a later import of the same person as a *fresh* FP customer creates a new row with their PII pulled from FieldPulse, and the erasure guard never sees it. Pre-existing (the guard has always been per-row) and unchanged here, but it means erasure is only durable for data this system owns. See the sibling-disclosure requirement below |
 | `src/app/api/admin/customers/[id]/erase/route.ts`, `src/app/admin/(dashboard)/customers/[id]/page.tsx` | erase route + confirm UI | **Changes — disclosure, not fan-out.** See §5.1 |
 | `src/lib/db/backfill-customer-hashes.ts:73-113` | one-shot legacy hash backfill | **No change.** Its "duplicate → leave the hash NULL, resolve manually" skip exists only to respect the old uniques. It is a historical one-shot; leave it, note that re-running it post-migration would now be over-cautious |
 | `.claude/skills/page-customers/SKILL.md:36-40` | page skill "Blind-index dedupe" invariant | **Must be rewritten** — it currently instructs future agents to treat contact dedupe as the rule. Update to the new model; `scripts/agent/verify-skills.mjs` gates the cited paths |
 
-Two more consequences worth stating before an operator notices them and files a
-bug: the customers-directory headline count jumps from ~2,289 to ~2,64x after
-the backfill — that is the split, not new business, and the number to compare
-against is the FP customer count, not last week's total. And the people-cards
-now show **identical contact sub-labels** for split siblings (same AP email or
-phone under two different businesses); the name still differentiates them, and
-the alternative — hiding the shared contact — would hide the truth. Acceptable.
+Release-note material, not build material: the directory headline jumps ~2,289 →
+~2,64x (the split, not new business), and split siblings show identical contact
+sub-labels on the people-cards.
 
 ### 5.1 Erasure spans siblings: disclose, never auto-fan-out
 
@@ -726,6 +865,14 @@ It is verified by §4 steps 1-2 (migration applies; the customers phase reports
 `errors = 0` where it deterministically reported 9). Say so in the PR rather
 than faking coverage with a mock that cannot fail.
 
+**But "not unit-testable" stops at the index.** `crm-queries.test.ts` already
+mocks `@/lib/db` with a chainable thenable proxy (`:4-39`) and drives async DB
+functions directly by queueing their row results — no jsdom, no Postgres. So
+everything here that lives *inside* a DB function is testable in that harness
+(items 4-6). One nicety: `db.update` returns `chain(updateQueue.shift())` but is
+not a `vi.fn`, so asserting *no* UPDATE was issued needs a one-line wrapper
+mirroring `insertMock` at `:31-35`.
+
 What **is** extracted and tested, each with at least one test that fails when the
 fix is reverted:
 
@@ -736,111 +883,163 @@ fix is reverted:
    - an anonymized candidate is never returned even when it is the only match;
    - two candidates identical on every axis return the same id across repeated
      calls (rule 7);
-   - empty input → null;
+   - empty input → `null` (the only `null` return; every non-empty input yields
+     a `{ id, ambiguous, doNotService }` — assert the shape, so the §3.2 return
+     type and the tests cannot drift apart);
    - `ambiguous` is true for 2+ live candidates and false for one live candidate
      plus any number of archived/anonymized ones;
+   - `doNotService` on the result matches the winning candidate's flag;
    - **an ambiguous result still returns the do-not-service row's id** → fails
      if someone "fixes" ambiguity by returning null (§3.3 rule 1).
 2. **`resolveFpCustomerAction(input)`** — a pure decision function extracted from
-   `importOneFpCustomer`, mapping
-   `{ existingByFpId, archivedImport, candidateNativeRow }` to
-   `{ kind: 'skip-anonymized' | 'update' | 'insert-archived' | 'claim' | 'insert' }`.
+   `importOneFpCustomer`, mapping **four** fields —
+   `{ existingByFpId, archivedImport, candidateNativeRow, candidateClaimedEarlierThisRun }`
+   — to
+   `{ kind: 'skip-anonymized' | 'update' | 'insert-archived' | 'claim' | 'insert' | 'skip-shared-contact' }`.
+   The fourth input is what makes contested→insert expressible at all (§2.1).
    Cases: fp-id hit → `update`; fp-id hit + anonymized → `skip-anonymized`;
    deleted/merged → `insert-archived`; native candidate matched **on email** →
    `claim`; **candidate matched on phone only → `insert`** (§2.1); **candidate
-   already claimed earlier in this run → `insert`** (contested); **candidate row
-   already owned by a different fp id → `insert`** (this is the whole program —
-   it fails loudly if the old merge behaviour returns); no candidate → `insert`.
+   already claimed earlier in this run → `insert`** (contested); no candidate →
+   `insert`; **flag off + colliding candidate → `skip-shared-contact`** (§2.0 —
+   this is the case the nightly sweep hits, so it must be pinned).
+   One case needs relabelling: **"candidate already owned by a different fp id →
+   `insert`"** is *unreachable* through the real candidate query, which filters
+   `fieldpulse_customer_id IS NULL` in the `WHERE` (§2.1 step 3). Keep the test,
+   but extract that predicate as an exported constant, assert the constant
+   contains the term, and label the case a **guard against future widening** —
+   not "the whole program", which would be testing a branch that cannot fire.
 3. **Consent fan-out asymmetry** — extract the "which ids get a preferences
    upsert" step so tests assert: STOP with N matching ids → N upserts; START
    with N matching ids → exactly 1 upsert, on the picked id; single-match STOP
-   still returns true. A START that writes N rows fails the suite.
+   still returns true. A START that writes N rows fails the suite. Plus the
+   **polarity** test (§3.5): given a blocked row and a live unblocked row on one
+   phone, START picks the **unblocked** one → fails the moment someone reuses
+   `pickCustomerMatch` here.
+4. **The un-archive gate** (§3.5), in the `crm-queries.test.ts` harness: one
+   archived non-blocked match → UPDATE issued; two live matches (ambiguous) →
+   **no** UPDATE; one archived do-not-service match → **no** UPDATE. Reverting
+   the gate fails two of the three.
+5. **`lookupCustomerContext` ambiguity blanking** (§5), same harness: an
+   ambiguous resolution keeps `customerId` / `doNotService` / `customerType` and
+   blanks the rest per the definition. Reverting it fails on `firstName`.
+6. **The legacy-scan narrowing** (§3.2) — assert the fallback scan's `WHERE`
+   gains `fieldpulse_customer_id IS NULL`, in the style the suite already uses
+   for query shapes.
+7. **The `pg_indexes` abort predicate** (§2.0) — pure, no harness: old unique
+   present → abort; absent or empty result → proceed.
+8. **The claim-pick rule** (§2.1 step 3) — oldest-first, and a `do_not_service`
+   row is absent from the candidate set even as the only email match. Fails if
+   someone swaps in `pickCustomerMatch`.
 
 Existing suites to update, not delete:
 `src/lib/admin/crm-queries.test.ts` (the two-query → one-query shape; the
 `contact_conflict` case at `:278-286` must gain a "no conflict when the other
-row is FP-linked" sibling), `src/lib/integrations/fieldpulse/import/customers.test.ts`
-(path (b) assertions become claim/insert assertions),
-`src/lib/admin/erasure-queries.test.ts`. **Not**
+row is FP-linked" sibling and a "unique violation on the SET maps to
+`contact_conflict`, not a throw" sibling — §3.5),
+`src/lib/integrations/fieldpulse/import/customers.test.ts` (path (b) assertions
+become claim/insert assertions), `src/lib/admin/erasure-queries.test.ts`, and
+**`src/lib/integrations/fieldpulse/import/jobs.test.ts:641`** — its
+`toHaveBeenCalledWith(ORG, fpCust)` is an exact-arity assertion on
+`importOneFpCustomer`, so it breaks the moment the jobs self-heal passes the new
+options argument (§2.1) — keeping that call site at two arguments keeps it
+green, which is the preferred outcome. **Not**
 `src/lib/admin/export-queries.test.ts` — it only asserts the hash columns are
 absent from exports, which this program does not touch.
 
+Type note from §5: widening `CustomerContext.membershipStatus` to
+`string | null` is a public-type change, and `npx tsc --noEmit` is what finds
+every consumer that assumed non-null.
+
 Gates before commit: `npx tsc --noEmit` → 0, `npx eslint <changed>` → 0 errors,
-`npx vitest run` ≥ baseline.
+`npx vitest run` ≥ baseline, and **`node scripts/agent/verify-skills.mjs`** —
+this program rewrites `.claude/skills/page-customers/SKILL.md` (§5), and that
+script is what proves every path the rewritten skill cites still exists
+(`AGENTS.md`).
 
 ---
 
 ## 7. Rollout order and rollback
 
-### 7.1 Order — expand, then contract, in two deploys
+This program is **dev-only** (§8). §7-dev is what it executes. §7-prod is a
+runbook for a later, separate decision that is the user's to make — written now
+because the sequencing constraints are discovered now, not because anything here
+is authorised to run against production.
 
-A single deploy carrying both the migration and the code causes an **intake
-outage** for the whole build-plus-promotion window. Migrations run mid-build
-(`vercel.json` buildCommand) while the *old* code is still serving, and the
-moment the old contact uniques are dropped, old `upsertCustomerByContact`'s
-`targetWhere` (`email_hash IS NOT NULL`, `crm-queries.ts:808-811`, applied at
-`:817`) matches no index → Postgres 42P10, *"no unique or exclusion constraint
-matching the ON CONFLICT specification"*, on **every** chat/voice/API submit for
-a new contact.
-That window is **minutes**, not seconds — a Next.js build plus promotion.
+### 7.1 §7-dev — what this program actually does
 
-So: **expand, then contract.**
+**Two migrations, authored from two sequential `schema.ts` states** (the
+generation mechanics and the expected diff shapes are in §1.3):
 
-**Deploy 1 (expand).** Migration adds the two new native-partial uniques
-(`... IS NOT NULL AND fieldpulse_customer_id IS NULL`) and the two non-unique
-lookup indexes. It **drops nothing.** The same deploy ships all of the §1-§3
-code.
+- `0045` — adds the two native-partial uniques and the two lookup indexes.
+  Drops nothing.
+- `0046` — drops `customers_org_email_hash_unique` and
+  `customers_org_phone_hash_unique`.
 
-**Deploy 2 (contract).** A migration-only deploy that drops
-`customers_org_email_hash_unique` and `customers_org_phone_hash_unique`. Ship it
-only once deploy 1 is live everywhere.
+Both land in this branch with all of the §1-§3 code, and **on dev they apply
+back to back** in one `npm run db:migrate`. No expand/contract choreography is
+needed on dev: nothing serves traffic there, so the 42P10 window §7.3 describes
+has no victims. Then, separately, run the **flagged** backfill (§4) — never
+chained to the migration step, and blocked by the `pg_indexes` probe if `0046`
+has not landed (§2.0).
 
-Then, **separately and deliberately**, run the import (§4) — gated on deploy 2,
-not deploy 1 (§7.2). Do not chain it to either deploy.
+### 7.2 The two facts that drive the ordering
 
-### 7.2 Both windows, checked in both directions
+**New predicates are strictly narrower than old ones.** Old code writes only
+native rows (fp id NULL, `crm-queries.ts:752-766`), so adding the new indexes
+while old code serves can break nothing — order only matters for the **drops**,
+after which old `targetWhere` (`crm-queries.ts:808-811`, applied at `:817`)
+matches no index and Postgres raises 42P10 on every new-contact submit.
 
-Deploy 1's mid-build window — **old code, old-and-new indexes**. Old code writes
-only native rows (fp id NULL, `crm-queries.ts:752-766`), so every row it inserts
-is inside *both* the old uniques' population and the new ones'. The new
-predicates are strictly narrower than the old, so no insert can violate a new
-unique without already violating an old one — nothing new can fail. Old
-`targetWhere` still matches the still-present old index. **Sound.**
+**The backfill is gated on the drops, not on the code.** Ordinary intake never
+violates the old uniques even under new code (`findCustomerIdByContact` runs
+first, `:780-783`), but the import *deliberately* creates duplicate-hash FP rows
+— run it before `0046` and every one becomes a per-record error. §2.0's flag and
+`pg_indexes` probe enforce this instead of an operator remembering it.
 
-Deploy 1 live → deploy 2 — **new code, old-and-new indexes**. New `targetWhere`
-matches the new native unique, so `ON CONFLICT` infers correctly. The old
-uniques are still enforced, and this is the sharp edge: **new code must not
-write a row that violates them until deploy 2 lands.** Ordinary intake does not
-— `upsertCustomerByContact` runs `findCustomerIdByContact` first
-(`crm-queries.ts:780-783`), which reads the whole population, so a contact
-already held by an FP-linked row resolves to that row and never reaches the
-INSERT. (The residue is the pre-existing TOCTOU race, which raises a retryable
-500 exactly as it does today — §1.4.) **The import is different: it deliberately
-creates FP rows with duplicate hashes, which is precisely what the old uniques
-forbid.** Hence the rule stated in §4's prerequisites: **the customers-phase
-backfill is gated on deploy 2, not deploy 1.** That is operationally trivial —
-the backfill is a manual command someone types — but it must be written down,
-because running it one deploy early turns every duplicate-hash FP customer into
-a per-record error.
+### 7.3 §7-prod — a future runbook, gated on the user
 
-Post deploy 2 — **new code, new indexes only.** The steady state this spec
-describes.
+**The constraint prod adds: Vercel applies ALL pending migrations in one build.**
+Migrations run mid-build (`vercel.json` buildCommand) while the *old* code is
+still serving. Because this branch contains **both** `0045` and `0046`, a single
+deploy of it applies both together — so the old uniques disappear while old code
+is still answering requests, and every new-contact intake 42P10s until the new
+code is promoted. That window is **minutes**, not seconds (a Next.js build plus
+promotion). Two honest options:
 
-### 7.3 Rollback reality
+- **(a) Strict two-deploy — zero outage.** Deploy A carries the code and `0045`
+  only; once live everywhere, deploy B adds `0046`. Say the mechanics plainly:
+  this branch already contains both, so (a) is not "just deploy twice" — it
+  means holding `0046` back (cherry-pick code+`0045` onto a deploy branch, or
+  revert `0046` plus its journal entry, deploy, restore). Fiddly, and fiddling
+  with migration journals has its own failure modes.
+- **(b) Accepted-risk single deploy, off-hours.** New-contact intake 500s for
+  the length of the build, then self-heals when the new code is live. Nothing is
+  corrupted; the failures are retryable submits.
+
+**Recommendation: (b), off-hours** — 3am traffic is trivial and (a)'s
+cherry-pick mechanics add more ways to get the migration state wrong than they
+remove. The user's call, not the spec's; (a) is genuinely zero-outage.
+
+Either way, the **flagged prod backfill remains a separate manual act**, after
+the deploy *and* after the §4.4 prod-state review. It is not part of any deploy,
+and the nightly sweep never triggers it (§2.0).
+
+### 7.4 Rollback reality
 
 - A rolled-back deploy **does not un-run the migration** (see the corrected
   deploy memory and `docs/deploy-money-program/`). After a code rollback the
   index state stays wherever the last migration left it.
-- **After deploy 1, before deploy 2:** rollback is genuinely safe, and this is
-  the main thing the two-deploy split buys. The old uniques still exist, so old
-  code's `targetWhere` still resolves and native intake keeps working; the new
-  indexes are additive and harmless to it.
-- **After deploy 2:** the only safe rollback target is **deploy 1's code**,
-  which is the new code and works fine against the new indexes alone. Rolling
-  back past deploy 1 is a **hard break** — old `targetWhere` matches no index
-  and every new-contact intake 42P10s. Undoing that means a follow-up migration
-  restoring `customers_org_{email,phone}_hash_unique`, which itself fails once
-  duplicates exist.
+- **With `0045` applied but not `0046`** (only reachable under §7.3 option (a)):
+  rollback is genuinely safe — the old uniques still exist, so old code's
+  `targetWhere` still resolves and native intake keeps working; the new indexes
+  are additive and harmless to it. This is the whole value of option (a).
+- **Once `0046` is applied:** the only safe rollback target is **this branch's
+  code**, which works fine against the new indexes alone. Rolling back past it
+  is a **hard break** — old `targetWhere` matches no index and every
+  new-contact intake 42P10s. Undoing that means a follow-up migration restoring
+  `customers_org_{email,phone}_hash_unique`, which itself fails once duplicates
+  exist.
 - **After the import has run:** rollback is not available. Duplicate hashes
   exist, so the old uniques cannot be re-created without merging rows (data
   loss), and old code would do unordered `.limit(1)` picks over duplicates —
@@ -873,11 +1072,10 @@ describes.
   intake race-safe (§1.4). The FP-linked case — the one operators actually hit —
   is unblocked (§5). The 409 copy for the shared-contact case is now misleading;
   that is a backlog item, not this program.
-- **The per-session verify budget** (`MAX_VERIFY_ATTEMPTS = 2` with unlimited
-  sessions, `ai/account-verify.ts:46-47`) — pre-existing, noted in §3.3,
-  unchanged here.
+- **`invoice 20776752`** — mirrored but 404 upstream, frozen
+  (`MONEY-FINDINGS.md`). Unrelated to identity; the backfill does not touch it.
 - **Transferring per-customer state across a split** (recorded STOPs, portal
-  tokens, do-not-service flags). §4.5 makes it a reviewed prod prerequisite, on
+  tokens, do-not-service flags). §4.4 makes it a reviewed prod prerequisite, on
   purpose: which sibling inherits a STOP is a human judgement, not a migration.
 - **Force-push history scrub** of anything in this repo.
 
@@ -897,3 +1095,16 @@ Recorded so they are not re-litigated:
 - **Cutting the §4.2 residual instrumentation entirely** — rejected in favour of
   the minimal optional-callback form, because the residual is observable only at
   sync time and recurs at every future full sync (§4.2).
+
+## Review round 2 — rejected findings
+
+- **Parking `fp-nightly-sync.yml`'s schedule for the duration** — rejected:
+  prod's mirror would go stale, and the workflow is the only full sweep prod
+  gets. Superseded by the `--split-shared-contacts` flag (§2.0), which is
+  safe-by-default for the nightly run before *and* after the migrations,
+  permanently, rather than for a window someone has to remember to end.
+- **Adding spec machinery and before/after snapshots for the "66 persisting
+  email-only mislinks"** — rejected: that cohort no longer exists. The ledger
+  note it came from predates the same file's own rebuild section, which cleared
+  and re-derived the whole `invoices.customer_id` column. The stale note has
+  been corrected in `MONEY-FINDINGS.md` rather than worked around here (§4.1).
