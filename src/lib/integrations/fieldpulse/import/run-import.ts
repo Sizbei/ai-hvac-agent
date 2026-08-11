@@ -221,10 +221,30 @@ export function parseArgs(argv: string[]): {
 
 function parseDbHost(databaseUrl: string): string {
   try {
-    return new URL(databaseUrl).hostname;
+    const url = new URL(databaseUrl);
+    // Neon can route to a DIFFERENT compute than the hostname suggests, via
+    // `?options=endpoint%3D<id>` (the SNI-less form). Checking only the
+    // hostname would let a URL that reads as dev write to prod. When the
+    // option is present it is the authority, so report it as the target.
+    const options = url.searchParams.get("options");
+    const routed = options?.match(/endpoint=([^\s&]+)/)?.[1];
+    return routed ?? url.hostname;
   } catch {
     return "(unparseable)";
   }
+}
+
+/**
+ * Hostnames identify the database, and this importer's output lands in a PUBLIC
+ * repo's Actions logs. GitHub masks exact secret values only; the host is a
+ * substring of DATABASE_URL, so it is never masked. Keep the provider/region
+ * (useful when diagnosing) and drop the endpoint id (not useful to a reader,
+ * and an unnecessary disclosure of the production database's address).
+ */
+function redactHost(dbHost: string): string {
+  const [first, ...rest] = dbHost.split(".");
+  if (!first || rest.length === 0) return "(redacted)";
+  return `${first.slice(0, 3)}…redacted.${rest.join(".")}`;
 }
 
 /**
@@ -251,16 +271,19 @@ const DEV_DB_HOST_MARKER = "ep-patient-surf";
 function assertWritableTarget(dbHost: string, allowProd: boolean): void {
   if (dbHost.includes(DEV_DB_HOST_MARKER)) return;
   if (allowProd) {
-    console.log(`  ⚠  NON-DEV TARGET, allowed by --allow-prod: ${dbHost}`);
+    console.log(`  ⚠  NON-DEV TARGET, allowed by --allow-prod: ${redactHost(dbHost)}`);
     return;
   }
   console.error(
-    `\nERROR: refusing to import into '${dbHost}'.\n` +
-      `This is not the dev branch ('${DEV_DB_HOST_MARKER}'), and --allow-prod was not given.\n` +
+    `\nERROR: refusing to import into '${redactHost(dbHost)}'.\n` +
+      `This is not the dev branch, and --allow-prod was not given.\n` +
       `The importer rewrites invoice line items, so a mis-targeted run corrupts real money.\n\n` +
-      `If you genuinely mean to write to this database, re-run with --allow-prod.\n` +
-      `If you did not, check whether DATABASE_URL is exported in your shell —\n` +
-      `dotenv does NOT override an already-exported value, so it silently beats .env.local.\n`,
+      // Order matters. The likeliest cause of seeing this message is the very
+      // accident the guard exists to catch, so the diagnosis comes first and
+      // the override last — a remedy offered first is the one people paste.
+      `FIRST check whether DATABASE_URL is exported in your shell:  echo "\${DATABASE_URL:0:40}"\n` +
+      `dotenv does NOT override an already-exported value, so it silently beats .env.local.\n` +
+      `Only if you genuinely mean to write to this database, re-run with --allow-prod.\n`,
   );
   process.exit(1);
 }
@@ -318,7 +341,7 @@ async function main(): Promise<void> {
   const dbHost = parseDbHost(databaseUrl);
 
   console.log("=== FieldPulse Import ===");
-  console.log(`  DB host : ${dbHost}`);
+  console.log(`  DB host : ${redactHost(dbHost)}`);
   console.log(`  Org id  : ${org.id}`);
   console.log(`  Org name: ${org.name}`);
   console.log(`  Dry run : ${dryRun}`);

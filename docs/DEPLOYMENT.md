@@ -195,9 +195,19 @@ vercel
 
 ### 5. Migrations — applied BY the deploy, not after it
 
-**Migrations run automatically during the build.** `vercel.json` sets
-`"buildCommand": "npm run db:migrate && next build"`, so pending migrations are
-applied before the app is built. There is no post-deploy migration step.
+**Production deploys run migrations automatically during the build.**
+`vercel.json` sets `"buildCommand": "npm run db:migrate && next build"`, so
+pending migrations are applied before the app is built. There is no post-deploy
+migration step.
+
+**Preview deploys do NOT migrate.** `src/lib/db/migrate.ts:15-21` returns early
+whenever `VERCEL_ENV` is set to anything other than `production`. That guard is
+deliberate and protective: previews inherit the *production* `DATABASE_URL`, so
+without it an abandoned PR's forward-only migration would permanently alter
+prod. The consequence to plan around is that a preview build runs the NEW code
+against the OLD schema — so a preview is not a valid rehearsal for a migration.
+To exercise one, point a preview at a scratch database and run `npm run
+db:migrate` against it by hand (`VERCEL_ENV` is unset locally, so it runs).
 
 > This section previously said "Vercel builds do NOT run migrations. You must
 > run migrations manually after deploying." That was stale and dangerous —

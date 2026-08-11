@@ -836,18 +836,21 @@ describe("importOneFpCustomer — fieldpulseData spillover from raw payload", ()
 
 /**
  * The healer exists because a strict fieldpulseCustomerId lookup misses for
- * customers that were merged away by contact dedupe, and every miss orphans the
- * dependent record permanently.
+ * customers merged away by contact dedupe, and every miss orphans the dependent
+ * record permanently.
  *
- * LIVE CASE (dev mirror, 2026-08-11): FP customers 17492296 / 17489123 /
- * 17494181 are three different a franchise locations sharing one billing email and
- * phone. Contact dedupe collapses them onto native row <native-row-id>…, which already
- * owns fp id 17300712, so the fpId guard refuses to relink — and the other two
- * fp ids exist on no row at all. 506 FP invoices were orphaned this way, 93 of
- * them unpaid, holding four figures of AR that no collections screen could route.
+ * Live shape (dev mirror, 2026-08-11): several sibling commercial sites of one
+ * franchise share a single billing email and phone. Contact dedupe collapses
+ * them onto one native row; that row already owns a different fp id, so the
+ * fpId guard refuses to relink and the siblings' fp ids exist on no row at all.
+ * 506 FP invoices were orphaned this way, 93 of them unpaid, holding money no
+ * collections screen could route.
  *
- * The contract that matters: when the guard refuses the link, the healer must
- * still return the resolved native id.
+ * The contract that matters most is what the healer must NOT do: it resolves by
+ * SELECT only. The link it returns is an authorization boundary (the portal
+ * mints a token from invoices.customerId), and one caller is an inbound
+ * webhook — so it must never insert, un-archive, or clobber a customer, and it
+ * must not match on a phone number alone.
  */
 describe("makeFpCustomerHealer", () => {
   beforeEach(() => {
@@ -862,29 +865,49 @@ describe("makeFpCustomerHealer", () => {
     };
   }
 
-  it("returns the merged native row when the fpId guard refuses the link (the a franchise case)", async () => {
-    // Contact dedupe resolves to the row that already owns a DIFFERENT fp id…
-    vi.mocked(upsertCustomerByContact).mockResolvedValue("native-merged-row");
-    wireSelect([]); // no row carries this fp id
-    wireUpdate([]); // …so the guarded UPDATE matches nothing — link refused.
-
+  it("resolves the merged native row by email blind index", async () => {
+    wireSelect([{ id: "native-merged-row" }]);
     const { client, getCustomer } = healerClient(async () =>
-      makeCustomer({ id: "17492296", displayName: "Franchise site A" }),
+      makeCustomer({ id: "17492296", email: "billing@franchise.invalid" }),
     );
 
     const healed = await makeFpCustomerHealer(ORG, client)("17492296");
 
     expect(getCustomer).toHaveBeenCalledWith("17492296");
-    // Refusing the LINK must not mean refusing the ANSWER — the merged row is
-    // still the customer, and an invoice attached to it is collectable.
     expect(healed).toBe("native-merged-row");
   });
 
-  it("caches per instance so N records sharing a customer cost one fetch", async () => {
-    vi.mocked(upsertCustomerByContact).mockResolvedValue("native-1");
-    wireSelect([]);
-    wireUpdate([{ id: "native-1" }]);
+  it("never writes — no insert, no update, however it resolves", async () => {
+    wireSelect([{ id: "native-1" }]);
+    const { client } = healerClient(async () => makeCustomer());
 
+    await makeFpCustomerHealer(ORG, client)("10001001");
+
+    // An inbound webhook must not be able to create customers, resurrect
+    // archived ones, or null out their fields.
+    expect(db.insert).not.toHaveBeenCalled();
+    expect(db.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses to match a customer that has no email — phone alone is not identity", async () => {
+    wireSelect([{ id: "should-not-be-used" }]);
+    const { client } = healerClient(async () =>
+      makeCustomer({ email: null, phone: "555-010-9999", phoneE164: "+15550109999" }),
+    );
+
+    // A shared office line must never hand one customer another's invoices.
+    expect(await makeFpCustomerHealer(ORG, client)("10001001")).toBeNull();
+    expect(db.select).not.toHaveBeenCalled();
+  });
+
+  it("returns null when no row matches", async () => {
+    wireSelect([]);
+    const { client } = healerClient(async () => makeCustomer());
+    expect(await makeFpCustomerHealer(ORG, client)("10001001")).toBeNull();
+  });
+
+  it("caches per instance so N records sharing a customer cost one fetch", async () => {
+    wireSelect([{ id: "native-1" }]);
     const { client, getCustomer } = healerClient(async () => makeCustomer());
     const heal = makeFpCustomerHealer(ORG, client);
 
@@ -895,7 +918,7 @@ describe("makeFpCustomerHealer", () => {
     expect(getCustomer).toHaveBeenCalledTimes(1);
   });
 
-  it("caches the null result too — one 404 is not retried on every later record", async () => {
+  it("caches a 404 too — one hard-deleted id is not re-fetched per record", async () => {
     const { client, getCustomer } = healerClient(async () => null);
     const heal = makeFpCustomerHealer(ORG, client);
 
@@ -905,12 +928,33 @@ describe("makeFpCustomerHealer", () => {
     expect(getCustomer).toHaveBeenCalledTimes(1);
   });
 
-  it("swallows a fetch failure and returns null — a heal must never fail the record it was helping", async () => {
-    const { client } = healerClient(async () => {
-      throw new Error("FieldPulse 503");
+  it("does NOT cache a transient failure — a blip must not become permanent for the run", async () => {
+    let calls = 0;
+    const { client, getCustomer } = healerClient(async () => {
+      calls++;
+      if (calls === 1) throw new Error("Fieldpulse request failed: HTTP 503");
+      return makeCustomer();
     });
+    wireSelect([{ id: "native-1" }]);
+    const heal = makeFpCustomerHealer(ORG, client);
 
-    await expect(makeFpCustomerHealer(ORG, client)("10001001")).resolves.toBeNull();
+    expect(await heal("10001001")).toBeNull();
+    // Second record for the same customer must get a real answer.
+    expect(await heal("10001001")).toBe("native-1");
+    expect(getCustomer).toHaveBeenCalledTimes(2);
     expect(logger.warn).toHaveBeenCalled();
+  });
+
+  it("opens a breaker after repeated failures instead of retrying into a dead API", async () => {
+    const { client, getCustomer } = healerClient(async () => {
+      throw new Error("Fieldpulse request failed: HTTP 503");
+    });
+    const heal = makeFpCustomerHealer(ORG, client);
+
+    for (let i = 0; i < 12; i++) await heal(`id-${i}`);
+
+    // 5 failures trip it; everything after is refused without a round-trip.
+    expect(getCustomer).toHaveBeenCalledTimes(5);
+    expect(logger.error).toHaveBeenCalled();
   });
 });

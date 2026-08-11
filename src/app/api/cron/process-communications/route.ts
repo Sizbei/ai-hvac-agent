@@ -1,10 +1,23 @@
 /**
  * Vercel Cron Job: Process Communication Queue
  *
- * This endpoint is called by Vercel Cron every minute to process
- * pending communication jobs (SMS and email).
+ * Processes pending communication jobs (SMS and email).
  *
- * CRON: * * * * * (every minute)
+ * SCHEDULE — two callers, on purpose:
+ *  - `.github/workflows/sub-daily-crons.yml` pings it on a five-minute cron
+ *    expression. GitHub throttles that hard; measured delivery is ~hourly, not
+ *    5-minutely. This is the primary driver.
+ *  - `vercel.json` runs it daily (`0 5 * * *`) as an outage backstop for when
+ *    Actions is down, disabled, or the shared secret drifts.
+ *
+ * Do NOT "restore" a `* * * * *` schedule in vercel.json: sub-daily crons are
+ * rejected at deploy time on the Hobby plan, so it would break the next deploy.
+ *
+ * SIZING CAVEAT — one invocation drains at most 10 pending + 5 retries. At the
+ * ~hourly Actions cadence that keeps up with normal volume, but it means the
+ * daily Vercel backstop alone releases ≤10 messages per day. So the backstop
+ * proves the queue is still being served; it does NOT drain a real backlog. If
+ * Actions is down for a day, expect to drain manually rather than to wait.
  */
 
 import { processPendingJobs, retryFailedJobs } from "@/lib/communication/job-queue";

@@ -27,7 +27,7 @@
  *    later provides a phone) creates a separate row that the dedupe can't see.
  *    Mitigation = later reconciliation pass (name+address match → suggest merge).
  */
-import { eq, and, isNotNull, sql } from "drizzle-orm";
+import { eq, and, isNotNull, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { customers } from "@/lib/db/schema";
 import { logger } from "@/lib/logger";
@@ -422,31 +422,85 @@ export async function importOneFpCustomer(
 }
 
 /**
- * Builds a cached "resolve this FP customer id to a native customer" function.
+ * Consecutive heal failures before the breaker opens. `getCustomer` only throws
+ * when FieldPulse is unreachable, so a short run of throws means the API is
+ * down, not that these particular customers are unusual.
+ */
+const HEAL_FAILURE_LIMIT = 5;
+
+/**
+ * SELECT-only resolution of a FieldPulse customer to a native row, keyed on the
+ * email blind index. No writes, by design — see makeFpCustomerHealer.
+ */
+async function resolveNativeCustomerByEmail(
+  orgId: string,
+  fp: FieldpulseCustomer,
+): Promise<string | null> {
+  const mapped = mapFpCustomer(fp);
+  if (!mapped.ok) return null;
+
+  const { emailHash } = computeContactHashes({
+    email: mapped.customer.email,
+    phone: null,
+  });
+  if (!emailHash) return null;
+
+  const [row] = await db
+    .select({ id: customers.id })
+    .from(customers)
+    .where(
+      and(
+        eq(customers.organizationId, orgId),
+        eq(customers.emailHash, emailHash),
+        // Never re-attach live money to a record someone asked us to erase.
+        isNull(customers.anonymizedAt),
+      ),
+    )
+    .limit(1);
+
+  return row?.id ?? null;
+}
+
+/**
+ * Builds a cached, READ-ONLY "resolve this FP customer id to a native customer"
+ * function.
  *
- * WHY THIS EXISTS: a strict `fieldpulseCustomerId` lookup misses for two live,
- * verified reasons, and every miss orphans the dependent record permanently.
+ * WHY THIS EXISTS: a strict `fieldpulseCustomerId` lookup misses whenever the
+ * fp id was never written onto any row, and every miss orphans the dependent
+ * record permanently. The live cause is commercial customers: several sibling
+ * sites of one franchise share a single billing email and phone, so contact
+ * dedupe collapses them onto one native row. The first fp id wins the link and
+ * the fpId guard above then refuses to overwrite it for the siblings — rightly,
+ * it must never clobber — so those fp ids exist on no row at all, forever.
  *
- *  1. SHARED BILLING CONTACTS (the big one). `upsertCustomerByContact` dedupes
- *     on an HMAC blind index over email/phone. Commercial customers break that
- *     assumption: FP customers 17492296 / 17489123 / 17494181 are three
- *     DIFFERENT a franchise locations (Abingdon, Jonesborough, W. Stone Dr) that all
- *     carry the same billing email and phone. They collapse onto one native
- *     row, the first fp id wins the link, and `importOneFpCustomer` then
- *     REFUSES to overwrite it for the other two (see the fpId guard above).
- *     Those two fp ids therefore exist on no row at all — forever.
- *  2. LIST-PAGINATION GAPS. A handful of customers slip between FP page
- *     boundaries and never appear in the walk (the reason the jobs phase grew
- *     its own self-heal).
+ * WHY IT ONLY READS. The obvious implementation delegates to
+ * `importOneFpCustomer`, which resolves the same merged row. It also writes:
+ * it can insert a customer, un-archive one (`upsertCustomerByContact` clears
+ * `archivedAt` on a contact match — the hazard called out at path (d) above),
+ * null-clobber `isTaxExempt`/`billingAddress`/`customFields` when the FP
+ * payload omits them, and re-encrypt PII onto a row that GDPR erasure had
+ * scrubbed. None of that is needed to answer "which customer is this invoice
+ * for", and one caller is an inbound webhook — so that version would let a
+ * third-party HTTP request create and mutate customer records. This one runs a
+ * single SELECT and returns an id.
  *
- * The guard branch of `importOneFpCustomer` returns the resolved native id even
- * when it refuses the link, which is exactly what a dependent record needs: the
- * merged row IS the customer, so attaching to it beats attaching to nobody.
+ * WHY EMAIL ONLY. The link it produces is an authorization boundary, not just
+ * a display convenience: the collections flow mints a portal token from
+ * `invoices.customerId`, and the portal lists every invoice on that row. Phone
+ * numbers collide between unrelated people (an office line, a property
+ * manager, a placeholder a dispatcher typed), so a phone-only match could hand
+ * one customer another's invoices. A shared email is far stronger evidence of
+ * a genuinely shared billing identity. Refusing phone-only matches means some
+ * invoices stay unlinked — the honest failure, and the one that cannot leak.
  *
- * Returns null when FP 404s the id (HARD-DELETED). Callers decide what a
- * genuinely unreachable customer means for their record — invoices leave the
- * link null rather than invent a placeholder, because you cannot collect money
- * from a deleted customer and a fabricated link would only hide that.
+ * Anonymized rows are excluded: an erased customer must not be silently
+ * re-attached to live money.
+ *
+ * Returns null when FP 404s the id (HARD-DELETED), when the customer has no
+ * email, or when no row matches. Callers decide what that means for their
+ * record — invoices leave the link null rather than invent a placeholder,
+ * because you cannot collect from a deleted customer and a fabricated link
+ * would only hide that.
  *
  * The cache is per-factory-call (i.e. per run/request) so a sweep touching 500
  * invoices that share 20 customers issues 20 fetches, not 500.
@@ -456,19 +510,38 @@ export function makeFpCustomerHealer(
   client: Pick<FieldpulseClient, "getCustomer">,
 ): (fpCustomerId: string) => Promise<string | null> {
   const cache = new Map<string, string | null>();
+  let consecutiveFailures = 0;
+  let trippedLogged = false;
 
   return async (fpCustomerId: string): Promise<string | null> => {
     const cached = cache.get(fpCustomerId);
     if (cached !== undefined) return cached;
 
+    // Circuit breaker. `getCustomer` only throws when FieldPulse is unreachable
+    // (404 comes back as a clean null), so a run of throws means the API is
+    // down — not that these customers are special. Without this, a sweep of
+    // ~2,900 invoices would keep retrying into a dead endpoint, three attempts
+    // and up to 45s apiece, and take hours to admit defeat.
+    if (consecutiveFailures >= HEAL_FAILURE_LIMIT) {
+      if (!trippedLogged) {
+        trippedLogged = true;
+        logger.error(
+          { orgId, consecutiveFailures },
+          "FP customer heal: too many consecutive failures — healing disabled for the rest of this run; links will be missing until the next run",
+        );
+      }
+      return null;
+    }
+
     let healed: string | null = null;
     try {
       const fpCustomer = await client.getCustomer(fpCustomerId);
-      if (fpCustomer) healed = await importOneFpCustomer(orgId, fpCustomer);
+      consecutiveFailures = 0;
+      healed = fpCustomer ? await resolveNativeCustomerByEmail(orgId, fpCustomer) : null;
     } catch (err) {
       // A heal failure must never fail the record it was helping — the caller
-      // still writes the row, just without the link. Cached as null so one
-      // flaky id doesn't get retried on every subsequent record in the sweep.
+      // still writes the row, just without the link.
+      consecutiveFailures++;
       logger.warn(
         {
           orgId,
@@ -477,6 +550,11 @@ export function makeFpCustomerHealer(
         },
         "FP customer heal failed (continuing without the link)",
       );
+      // Deliberately NOT cached. A transient failure is not evidence about this
+      // customer, and caching it would make one blip permanent for the whole
+      // run — the same conflation of "absent" with "unreachable" that this
+      // function exists to avoid. The breaker above bounds the retries instead.
+      return null;
     }
 
     cache.set(fpCustomerId, healed);

@@ -26,6 +26,7 @@ import { getFieldpulseClient } from "./client";
 import { parseFpDate } from "./fp-dates";
 import type { FieldpulseInvoiceStatus, FieldpulseInvoice } from "./types";
 import { buildFpSpillover } from "./import/spillover";
+import { displayQuantity } from "./line-item-display";
 import { makeFpCustomerHealer } from "./import/customers";
 
 /**
@@ -324,14 +325,10 @@ function lineItemRows(
     organizationId,
     invoiceId,
     name: li.name,
-    // The column is an integer (display only); the MONEY below uses the exact
-    // fractional quantity so a 2.5-hr line isn't billed as 3.
-    //
-    // Floor at 0, not 1: FieldPulse's `quantity: "0"` means the component
-    // contributes nothing, and its money below correctly computes to $0.
-    // Forcing the display to 1 would render "1 × $5,500" against a $0 line
-    // total — the money would be right and the screen would contradict it.
-    quantity: Math.max(0, Math.round(li.quantity)),
+    // Display only; the MONEY below uses the exact fractional quantity so a
+    // 2.5-hr line isn't billed as 3. See displayQuantity for why neither a
+    // floor of 0 nor a floor of 1 is correct on its own.
+    quantity: displayQuantity(li.quantity),
     unitPriceCents: li.unitPriceCents,
     costCents: Math.round(li.quantity * li.unitCostCents),
     lineTotalCents: Math.round(li.quantity * li.unitPriceCents),
@@ -410,7 +407,9 @@ export async function upsertInvoiceRecord(
     // whenever the customer's fp id was never written to a row (shared billing
     // contacts, list-pagination gaps — see makeFpCustomerHealer). Live count on
     // the dev mirror before this heal existed: 506 orphaned FP invoices, 93 of
-    // them unpaid, holding $15,384.46 that no screen could route to anyone.
+    // them unpaid, holding four figures of AR that no screen could route to
+    // anyone. (Exact figures deliberately not recorded here — this repo is
+    // public and they are the operator's business data.)
     if (!customerId && healCustomer) {
       customerId = await healCustomer(invoice.customerId);
     }
@@ -448,7 +447,7 @@ export async function upsertInvoiceRecord(
           // before its customer existed locally used to stay orphaned forever:
           // this branch refreshed the money but not the FK, so no number of
           // re-pulls could ever repair it. That is how 11 open invoices came to
-          // hold $6,005.08 of real AR with no customer profile and no way to
+          // hold real AR with no customer profile and no way to
           // send a reminder.
           //
           // Only overwrite when we actually resolved someone. Spreading a null
@@ -604,10 +603,15 @@ export async function pullInvoicesForJob(
     const client = await getFieldpulseClient(organizationId, fetchImpl);
     if (!client) return summary;
     const list = await client.listJobInvoices(fieldpulseJobId);
+    // One healer for the whole job: its invoices usually share a customer, so
+    // the cache turns N lookups into 1. Without this the daily reconcile cron
+    // — the backstop for missed webhooks — inserts orphans of its own, which
+    // is the exact leak the healer was added to stop.
+    const healCustomer = makeFpCustomerHealer(organizationId, client);
     for (const inv of list) {
       let outcome: InvoicePullOutcome;
       try {
-        outcome = await upsertInvoiceRecord(organizationId, inv);
+        outcome = await upsertInvoiceRecord(organizationId, inv, healCustomer);
       } catch (error) {
         logger.warn(
           { error, fieldpulseInvoiceId: inv.id },

@@ -151,7 +151,7 @@ describe("upsertInvoiceRecord — fieldpulseData spillover from raw payload", ()
  * The UPDATE branch used to refresh money but never the customer/service-request
  * FKs. An invoice first synced BEFORE its customer was imported therefore stayed
  * orphaned forever — re-running the import could not repair it. In the dev
- * mirror that stranded 11 open invoices holding $6,005.08 of AR with no customer
+ * mirror that stranded 11 open invoices holding real AR with no customer
  * profile and no reminder path.
  *
  * The fix must be asymmetric: re-link when we resolved someone, never un-link
@@ -239,7 +239,7 @@ describe("upsertInvoiceRecord — re-links an existing invoice without un-linkin
  * dedupe holds no row under its own fp id, so every invoice pointing at it
  * resolved to null and was written orphaned — invisible to collections, with no
  * reminder path and no AR owner. Live count on the dev mirror: 506 orphaned FP
- * invoices, 93 unpaid, holding $15,384.46.
+ * invoices, 93 unpaid.
  *
  * The healer is the second chance. These assert it is actually consulted, only
  * on a miss, and that its answer reaches the row.

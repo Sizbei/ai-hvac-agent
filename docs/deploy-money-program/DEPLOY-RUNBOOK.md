@@ -6,12 +6,20 @@ goes wrong. Every constraint below was verified, not assumed — sources in
 
 ## Before you start — three facts that shape everything
 
-1. **`git push` does NOT deploy.** This repo's Vercel project does not build on
-   push. Deploys happen only via `vercel deploy --prod --yes`. Pushing is
-   therefore free: it runs CI and nothing else.
-2. **Migrations run inside the build** (`vercel.json` →
-   `"buildCommand": "npm run db:migrate && next build"`). By the time the build
-   finishes, the production database has already been altered.
+1. **`git push` does not *reliably* deploy** — and do not round that up to
+   "never". `AGENTS.md` and `FACTS.md` both say "not reliably", which means it
+   sometimes does. Deploys are *intended* to happen only via
+   `vercel deploy --prod --yes`. Treat a push as *probably* inert, never as
+   guaranteed inert: combined with fact 2, a build you did not intend is a
+   production migration you did not intend. If you need a push to be genuinely
+   safe, confirm the Git integration is disconnected first
+   (Vercel → Project → Settings → Git) and record what you saw.
+2. **Migrations run inside the build, on production deploys only** (`vercel.json`
+   → `"buildCommand": "npm run db:migrate && next build"`). By the time the
+   build finishes, the production database has already been altered. Preview
+   builds skip migrations entirely (`src/lib/db/migrate.ts:15-21` returns early
+   unless `VERCEL_ENV === "production"`), so **a preview is not a rehearsal for
+   a migration** — it runs new code against the old schema.
 3. **Rollback does not touch the database.** Vercel Instant Rollback restores
    the previous *build*; it cannot un-run a migration
    (`vercel.com/docs/deployments/instant-rollback`, fetched 2026-08-11). On
@@ -83,10 +91,25 @@ schema change has already applied. Options, worst to best:
 
 This is why the migration deserves more scrutiny than the code.
 
-## This release specifically
+## Release-specific risk — WRITE THIS FRESH EVERY TIME
 
-Shipping `7787352..082421b` (7 commits: the page program's security, money and
-data-honesty fixes).
+A stale entry here is worse than no entry: it reads as current and describes a
+release that already shipped. Before deploying, regenerate it —
+
+```bash
+git log --oneline origin/main..HEAD          # what is actually unshipped
+git diff --name-only origin/main..HEAD -- drizzle/   # empty == no one-way door
+```
+
+— and judge the release on **that** migration list, not on what is written
+below.
+
+### Assessed 2026-08-11: `7787352..082421b` — ALREADY SHIPPED, kept as an example
+
+This deployed to production at 03:31 JST on 2026-08-11 (see `FACTS.md`, and note
+it went out without authorisation — that incident is why the runbook now leads
+with "regenerate this section"). The commits after it carry **no migration at
+all**, so the current unshipped release has no one-way door.
 
 - **CI:** run `31419465582` — **success**.
 - **Migration:** `drizzle/0044_last_admin_guard.sql`, the only one in this

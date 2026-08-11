@@ -30,6 +30,7 @@
  *    target.
  */
 import { eq, and, isNotNull, sql } from "drizzle-orm";
+import { displayQuantity } from "../line-item-display";
 import { db } from "@/lib/db";
 import { estimates, estimateOptions, estimateLineItems, serviceRequests, customers } from "@/lib/db/schema";
 import { logger } from "@/lib/logger";
@@ -228,7 +229,7 @@ export async function importEstimatesFromFieldpulse(
           organizationId: orgId,
           optionId,
           name: li.name,
-          quantity: Math.max(1, Math.round(li.quantity)),
+          quantity: displayQuantity(li.quantity),
           unitPriceCents: li.unitPriceCents,
           costCents: Math.round(li.quantity * li.unitCostCents),
           lineTotalCents: Math.round(li.quantity * li.unitPriceCents),

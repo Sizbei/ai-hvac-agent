@@ -1,7 +1,19 @@
-# Sub-daily crons that Vercel's Hobby plan can't schedule (daily-only limit).
-# Runs every 5 minutes and pings the same cron endpoints Vercel would, using
-# the CRON_SECRET bearer the routes already verify. If the account upgrades to
-# Vercel Pro, move these back into vercel.json "crons" and delete this file.
+# Cron endpoints that need to run more often than Vercel's Hobby plan allows
+# (Hobby's floor is once per day). Pings the same routes Vercel would, using the
+# CRON_SECRET bearer the routes already verify.
+#
+# CADENCE — READ THIS BEFORE RELYING ON IT. The schedule below asks for every 5
+# minutes. GitHub does not deliver that: `schedule` is best-effort and is
+# throttled hard. Measured over 2026-08-09T14:46Z → 2026-08-11T04:41Z, 40 runs
+# fired against 455 requested — 8.8% delivery, median gap 51 minutes, worst
+# observed gap 124 minutes. So treat this as "roughly hourly, sometimes worse",
+# NOT as a 5-minute scheduler. Anything that genuinely needs minute-level
+# latency needs a real scheduler (Vercel Pro crons, or an external trigger).
+#
+# If the account upgrades to Vercel Pro, move these schedules into vercel.json
+# "crons" and delete this file — but note that process-communications and
+# reconcile-payments ALSO have daily entries in vercel.json as an outage
+# backstop, so remove those at the same time or they will double-invoke.
 name: sub-daily-crons
 on:
   schedule:
@@ -12,20 +24,36 @@ jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: process-communications (comms job queue)
+      # One step, so a failure in the first endpoint cannot silently skip the
+      # rest. Every endpoint is pinged, then the step fails if any did not
+      # return 2xx.
+      #
+      # The old form ended each curl with `|| echo "... (non-fatal)"`, which
+      # turned every 401/500 into exit 0. The run went green whether or not the
+      # work happened — so the single failure it most needed to surface, a
+      # CRON_SECRET that drifted out of sync with Vercel's, was invisible
+      # forever. That is the exact outage this workflow exists to prevent.
+      #
+      # The secret goes through `env:`, never interpolated into the script text.
+      - name: Ping sub-daily cron endpoints
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          BASE_URL: https://ai-hvac-agent-lovat.vercel.app
         run: |
-          curl -fsS -m 60 -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
-            "https://ai-hvac-agent-lovat.vercel.app/api/cron/process-communications" || echo "process-communications ping failed (non-fatal)"
-      - name: delay-sweep (technician delay alerts)
-        run: |
-          curl -fsS -m 60 -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
-            "https://ai-hvac-agent-lovat.vercel.app/api/cron/delay-sweep" || echo "delay-sweep ping failed (non-fatal)"
-      # Heals payments stranded after a successful provider charge but before
-      # the local write landed. Its Vercel cron is daily (Hobby's floor), which
-      # leaves a stranded payment showing the wrong state for up to ~24h — on a
-      # collections surface that drives customer contact. Idempotent, so the
-      # 5-minute cadence is safe.
-      - name: reconcile-payments (stranded-payment healer)
-        run: |
-          curl -fsS -m 60 -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
-            "https://ai-hvac-agent-lovat.vercel.app/api/cron/reconcile-payments" || echo "reconcile-payments ping failed (non-fatal)"
+          set -uo pipefail
+          failed=""
+          for endpoint in process-communications delay-sweep reconcile-payments; do
+            code=$(curl -sS -m 60 -o /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer $CRON_SECRET" \
+              "$BASE_URL/api/cron/$endpoint" || echo "000")
+            if [ "$code" -ge 200 ] 2>/dev/null && [ "$code" -lt 300 ]; then
+              echo "ok   $endpoint ($code)"
+            else
+              echo "FAIL $endpoint ($code)"
+              failed="$failed $endpoint"
+            fi
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::sub-daily cron pings failed:$failed"
+            exit 1
+          fi

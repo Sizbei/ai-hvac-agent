@@ -602,11 +602,31 @@ describe("RestFieldpulseClient — getCustomer", () => {
     expect(result).toBeNull();
   });
 
-  it("returns null on network error (degrades gracefully)", async () => {
+  /**
+   * This used to return null and call it graceful degradation. It wasn't: null
+   * is how callers learn a customer is GONE, and they act on it. The jobs
+   * self-heal writes a permanent "FieldPulse customer (deleted #id)" placeholder
+   * for it; the invoice healer caches it and orphans the invoice's money. A
+   * 15-second timeout or a rate-limit would trigger both for customers that are
+   * alive and well, and the run would report success. Transient failures now
+   * propagate, so callers can count them as errors and retry on the next run.
+   */
+  it("throws on network error — a blip must not be reported as a deleted customer", async () => {
     mockFetch.mockRejectedValue(new Error("network down"));
     const client = new RestFieldpulseClient(config, mockFetch as never);
-    const result = await client.getCustomer("17431277");
-    expect(result).toBeNull();
+    await expect(client.getCustomer("17431277")).rejects.toThrow(
+      "Fieldpulse request failed: network error",
+    );
+  });
+
+  it("throws on a 503 rather than reporting absence", async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: async () => ({ error: "unavailable" }),
+    });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    await expect(client.getCustomer("17431277")).rejects.toThrow("HTTP 503");
   });
 });
 

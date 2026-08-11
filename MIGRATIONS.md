@@ -36,7 +36,13 @@ sequence and rollback procedure.
 
 ## How to run migrations
 
-### Option A — GitHub Actions (recommended for prod)
+> **You usually do not need either option.** A production deploy applies pending
+> migrations by itself (see the top of this file). Reach for the options below
+> only when you need to migrate *without* deploying: a preview or scratch
+> database (preview builds deliberately skip migrations), or a schema fix you
+> want applied before the code that depends on it ships.
+
+### Option A — GitHub Actions (manual, out-of-band)
 
 1. Open the repo's **Actions** tab → **Migrate (manual)** workflow.
 2. Click **Run workflow**, pick the target `environment`, and run.

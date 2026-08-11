@@ -52,6 +52,23 @@ function isRetryableStatus(status: number): boolean {
   return status === 429 || (status >= 500 && status <= 599);
 }
 
+/** A FieldPulse request failure that still knows which HTTP status caused it. */
+export interface FieldpulseRequestError extends Error {
+  /** HTTP status, or null when the request never got a response (network/timeout). */
+  readonly fpStatus: number | null;
+}
+
+/**
+ * Failures must stay distinguishable by the caller. "Absent" (404) and
+ * "temporarily unreachable" (429/5xx/network/timeout) demand opposite
+ * responses — one is a fact to record, the other is a reason to try again —
+ * and collapsing them into a bare Error forces every caller to guess. The
+ * message text is unchanged so existing assertions on it still hold.
+ */
+function fpRequestError(message: string, fpStatus: number | null): FieldpulseRequestError {
+  return Object.assign(new Error(message), { fpStatus });
+}
+
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -875,7 +892,7 @@ export class RestFieldpulseClient implements FieldpulseClient {
         // is never in the error; we re-throw a sanitized error if attempts run out.
         lastNetworkError = err;
         if (attempt === MAX_ATTEMPTS - 1) {
-          throw new Error("Fieldpulse request failed: network error");
+          throw fpRequestError("Fieldpulse request failed: network error", null);
         }
         await sleep(BACKOFF_BASE_MS * 2 ** attempt);
         continue;
@@ -891,13 +908,13 @@ export class RestFieldpulseClient implements FieldpulseClient {
 
       lastStatus = res.status;
       if (!isRetryableStatus(res.status) || attempt === MAX_ATTEMPTS - 1) {
-        throw new Error(`Fieldpulse request failed: HTTP ${res.status}`);
+        throw fpRequestError(`Fieldpulse request failed: HTTP ${res.status}`, res.status);
       }
       await sleep(BACKOFF_BASE_MS * 2 ** attempt);
     }
     // Unreachable: the loop either returns or throws, but satisfies the compiler.
     void lastNetworkError;
-    throw new Error(`Fieldpulse request failed: HTTP ${lastStatus}`);
+    throw fpRequestError(`Fieldpulse request failed: HTTP ${lastStatus}`, lastStatus);
   }
 
   async createCustomer(
@@ -1175,9 +1192,17 @@ export class RestFieldpulseClient implements FieldpulseClient {
         { method: "GET" },
       );
       return toCustomer(unwrap(raw));
-    } catch {
-      // Return null on 404 (customer not in FP list page) or malformed payload.
-      return null;
+    } catch (err) {
+      // null means ABSENT, and nothing else. This used to swallow every
+      // failure, which quietly turned a rate-limit or a 15s timeout into
+      // "this customer does not exist" — and callers act on that: the jobs
+      // self-heal writes a permanent "FieldPulse customer (deleted #id)"
+      // placeholder for a customer that is alive and well, and the invoice
+      // healer caches the lie for the rest of the sweep and orphans the money.
+      // A transient failure is a reason to try again later, so it propagates.
+      const fpStatus = (err as Partial<FieldpulseRequestError>)?.fpStatus;
+      if (fpStatus === 404) return null;
+      throw err;
     }
   }
 

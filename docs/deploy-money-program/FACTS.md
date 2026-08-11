@@ -13,7 +13,8 @@ do not quietly write around it.
   mis-memory), **minimum interval once per day**, scheduling precision
   ±59 min. A sub-daily expression **fails at deploy time**, it does not
   silently degrade.
-- `vercel.json` currently declares **11 crons**, all daily or weekly — all
+- `vercel.json` declared **11 crons** when this was written; commit `320db94`
+  added `process-communications`, making it **12**. All daily or weekly — all
   legal on Hobby. There is no cron-count problem today.
 - Project `ai-hvac-agent`, team `rchenworkmail-3397s-projects`.
 - **Last production deploy was 7 days old** at program start. Six commits from
