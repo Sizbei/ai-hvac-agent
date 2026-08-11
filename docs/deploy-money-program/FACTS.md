@@ -90,6 +90,17 @@ the new commits, which makes this a genuinely useful comparison point.
   `GET {base}/customers?limit=1` → **HTTP 200**, `total_count: 2631`.
   Base URL `https://ywe3crmpll.execute-api.us-east-2.amazonaws.com/stage`,
   auth header `x-api-key` (see `src/lib/integrations/fieldpulse/config.ts`).
+- **FieldPulse pagination: `offset`/`limit` are silently ignored on
+  `/invoices`.** They look accepted — HTTP 200, a full page of rows — but the
+  same first page comes back at every offset. Verified: offsets 0, 2,900,
+  3,000, 3,100, 5,000 and 10,000 all return the identical first invoice id. A
+  loop that stops on "a short page" therefore never stops; one probe reached
+  offset 25,600 against a corpus of ~2,990 before the API 500'd, having seen
+  only the first 20 rows the whole time.
+  The supported contract is `page` + `page_size`, at a **fixed 20 rows per
+  page**, and even `page` must be treated as advisory: compare each batch to
+  the previous one and stop when they are identical. `client.ts fetchAllPages`
+  already does this correctly — copy it rather than hand-rolling a walk.
 - **Housecall Pro: NOT connected, and cannot be tonight.** No
   `HOUSECALL_API_KEY` in the environment, and `housecall_pro_connections` has
   **0 rows**. `getHousecallConfig` therefore resolves null and every HCP path
