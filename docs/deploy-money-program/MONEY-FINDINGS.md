@@ -10,6 +10,39 @@ Status key: **FIXED** (shipped on this branch) · **OPEN** (needs a decision).
 
 ---
 
+## Whole-corpus reconciliation — invoice totals are correct
+
+`scripts/agent/reconcile-fieldpulse-money.mjs --org <uuid>` compares every
+mirrored invoice's `total_cents` against the live FieldPulse API. Not a sample —
+the full corpus.
+
+| | |
+|---|---|
+| local mirrored invoices | 2,991 |
+| upstream invoices fetched | 2,990 |
+| compared | 2,990 |
+| **mismatches** | **0** |
+| local rows with no upstream match | 1 |
+
+Every compared invoice total matches FieldPulse exactly. This is the headline
+answer to "does the money on screen match the source of truth": for invoice
+totals, yes.
+
+Two caveats that this check does *not* cover, both tracked below: line-item
+totals (which ignore discounts) and payment state (fixed, but the mirror still
+holds pre-fix values until the next sync).
+
+The single unmatched row is invoice `20776752` — **404 in FieldPulse**, deleted
+upstream, yet still mirrored as paid at $405.00 with $0 actually paid. It is
+frozen: a 404 makes the sync skip rather than update, and the list walk no
+longer includes it, so nothing will ever correct it. Stale rather than wrong,
+but it is real money-shaped data with no source. Re-run this script after any
+sync — surfacing exactly this is what it is for.
+
+> Note for anyone querying FieldPulse directly: `/invoices` silently ignores
+> `offset`/`limit` and returns the same first page at every offset. Use
+> `page`/`page_size` and stop when a batch repeats. See `FACTS.md`.
+
 ## FIXED
 
 ### Zero-quantity components fabricated money
