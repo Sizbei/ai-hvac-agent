@@ -325,7 +325,12 @@ function lineItemRows(
     name: li.name,
     // The column is an integer (display only); the MONEY below uses the exact
     // fractional quantity so a 2.5-hr line isn't billed as 3.
-    quantity: Math.max(1, Math.round(li.quantity)),
+    //
+    // Floor at 0, not 1: FieldPulse's `quantity: "0"` means the component
+    // contributes nothing, and its money below correctly computes to $0.
+    // Forcing the display to 1 would render "1 × $5,500" against a $0 line
+    // total — the money would be right and the screen would contradict it.
+    quantity: Math.max(0, Math.round(li.quantity)),
     unitPriceCents: li.unitPriceCents,
     costCents: Math.round(li.quantity * li.unitCostCents),
     lineTotalCents: Math.round(li.quantity * li.unitPriceCents),

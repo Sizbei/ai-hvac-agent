@@ -1378,3 +1378,70 @@ describe("RestFieldpulseClient — toEstimate P1 field-parity", () => {
     expect(result?.dueDate).toBeNull();
   });
 });
+
+describe("RestFieldpulseClient — zero-quantity line components (real FP data)", () => {
+  let mockFetch: ReturnType<typeof vi.fn>;
+  const config = { baseUrl: "https://api.fieldpulse.com", apiKey: "k" };
+
+  beforeEach(() => {
+    mockFetch = vi.fn();
+    vi.stubGlobal("fetch", mockFetch);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  /**
+   * Verbatim shape of FieldPulse invoice 20820875, fetched live 2026-08-11.
+   * Header total is $1,059.75. The first component carries `quantity: "0"` at a
+   * $5,500 unit price — FieldPulse's way of saying "this contributes nothing".
+   */
+  function invoiceEnvelope() {
+    return {
+      error: false,
+      response: {
+        id: 20820875,
+        total: "1059.75",
+        subtotal: "1059.750000",
+        tax: "0.00",
+        line_items: [
+          { line_title: "", line_components: [{ title: "Tune Ups", quantity: "0", unit_price: "5500.0000", unit_cost: "0" }] },
+          { line_title: "", line_components: [{ title: "Tune Ups", quantity: "7.5", unit_price: "100.0000", unit_cost: "0" }] },
+          { line_title: "", line_components: [{ title: "Tune Ups", quantity: "4.13", unit_price: "75.0000", unit_cost: "0" }] },
+        ],
+      },
+    };
+  }
+
+  it("treats quantity '0' as zero, so the line sum reconciles to the header total", async () => {
+    mockFetch.mockResolvedValue({ ok: true, status: 200, json: async () => invoiceEnvelope() });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const inv = await client.getInvoice("20820875");
+
+    const lines = inv?.lineItems ?? [];
+    expect(lines).toHaveLength(3);
+    expect(lines[0].quantity).toBe(0);
+
+    // The whole point: summing qty × unit price must equal the invoice header
+    // total ($1,059.75 = 105,975 cents). Coercing the zero to 1 yields
+    // $6,559.75 — a phantom $5,500 line.
+    const sumCents = lines.reduce(
+      (acc, li) => acc + Math.round(li.quantity * li.unitPriceCents),
+      0,
+    );
+    expect(sumCents).toBe(105_975);
+  });
+
+  it("still falls back to 1 for a missing or unparseable quantity, and for a negative", async () => {
+    const env = invoiceEnvelope();
+    env.response.line_items = [
+      { line_title: "", line_components: [{ title: "A", quantity: "not-a-number", unit_price: "10.00", unit_cost: "0" }] },
+      { line_title: "", line_components: [{ title: "B", quantity: "-3", unit_price: "10.00", unit_cost: "0" }] },
+    ];
+    mockFetch.mockResolvedValue({ ok: true, status: 200, json: async () => env });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    const inv = await client.getInvoice("20820875");
+    expect((inv?.lineItems ?? []).map((l) => l.quantity)).toEqual([1, 1]);
+  });
+});

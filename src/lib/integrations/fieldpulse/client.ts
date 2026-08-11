@@ -610,8 +610,16 @@ function toLineItems(raw: unknown): FieldpulseInvoiceLineItem[] {
       // a whole number here inflated the mirrored line total (qty × price). The
       // consumer rounds it to the integer `quantity` column for display but
       // computes the money from this exact value.
+      //
+      // ZERO IS MEANINGFUL, NOT MISSING. FieldPulse sends `quantity: "0"` for a
+      // component that contributes nothing to the invoice. Coercing it to 1
+      // fabricated money: on FP invoice 20820875 the header total is $1,059.75,
+      // and summing the components with q=0 treated as 1 gives $6,559.75 — a
+      // phantom $5,500 line ($5,500 unit price × the fabricated 1). Treating it
+      // as 0 reproduces $1,059.75 exactly, to the cent. So the fallback must
+      // catch only NaN and negatives, never a legitimate zero.
       const parsedQty = Number.parseFloat(String(comp.quantity ?? "1"));
-      const qty = Number.isFinite(parsedQty) && parsedQty > 0 ? parsedQty : 1;
+      const qty = Number.isFinite(parsedQty) && parsedQty >= 0 ? parsedQty : 1;
       out.push({
         name,
         quantity: qty,
