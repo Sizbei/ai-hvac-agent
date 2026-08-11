@@ -19,7 +19,10 @@ config({ path: '.env.local' });
 
 const DEV_HOST_MARKER = 'ep-patient-surf';
 const FP_BASE = 'https://ywe3crmpll.execute-api.us-east-2.amazonaws.com/stage';
-const PAGE_SIZE = 100;
+// FieldPulse serves /invoices at a fixed 20 rows per page; page_size is
+// advisory at best. MAX_PAGES is a spin guard, not an expected bound.
+const PAGE_SIZE = 20;
+const MAX_PAGES = 1000;
 
 const args = process.argv.slice(2);
 const limitArg = args.indexOf('--limit');
@@ -50,17 +53,42 @@ function toCents(v) {
   return Number.isFinite(n) ? Math.round(n * 100) : null;
 }
 
+/**
+ * Page /invoices the way the app's own client does.
+ *
+ * FieldPulse does NOT support `offset`/`limit` on this endpoint — it ignores
+ * them and returns the identical first page forever, so an offset walk never
+ * terminates and never sees past row 100. (Verified: offsets 0, 2900, 5000 and
+ * 10000 all return the same first id.) The supported contract is
+ * `page`/`page_size`, with a fixed 20 rows per page, and even that must be
+ * treated as advisory: if a page comes back identical to the previous one, the
+ * API is ignoring the parameter and the walk has to stop rather than spin.
+ */
 async function fetchAllUpstream() {
   const byId = new Map();
-  for (let offset = 0; ; offset += PAGE_SIZE) {
-    const res = await fetch(`${FP_BASE}/invoices?limit=${PAGE_SIZE}&offset=${offset}`, {
+  let lastBatchKey = null;
+
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const res = await fetch(`${FP_BASE}/invoices?page=${page}&page_size=${PAGE_SIZE}`, {
       headers: { 'x-api-key': apiKey },
     });
-    if (!res.ok) throw new Error(`FieldPulse /invoices ${res.status} at offset ${offset}`);
+    if (!res.ok) throw new Error(`FieldPulse /invoices ${res.status} on page ${page}`);
     const body = await res.json();
     const rows = Array.isArray(body.response) ? body.response : [];
-    for (const r of rows) byId.set(String(r.id), r);
-    if (rows.length < PAGE_SIZE) break;
+    if (rows.length === 0) break;
+
+    const batchKey = rows.map((r) => r.id).join(',');
+    if (batchKey === lastBatchKey) break; // API ignored `page` — stop, don't spin.
+    lastBatchKey = batchKey;
+
+    let added = 0;
+    for (const r of rows) {
+      const id = String(r.id);
+      if (!byId.has(id)) added++;
+      byId.set(id, r);
+    }
+
+    if (rows.length < PAGE_SIZE || added === 0) break;
     if (byId.size >= LIMIT) break;
   }
   return byId;
