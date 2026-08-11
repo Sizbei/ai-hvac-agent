@@ -233,3 +233,78 @@ describe("upsertInvoiceRecord — re-links an existing invoice without un-linkin
     expect(set && "customerId" in set).toBe(false);
   });
 });
+
+/**
+ * Strict fp-id resolution is not enough. A customer merged away by contact
+ * dedupe holds no row under its own fp id, so every invoice pointing at it
+ * resolved to null and was written orphaned — invisible to collections, with no
+ * reminder path and no AR owner. Live count on the dev mirror: 506 orphaned FP
+ * invoices, 93 unpaid, holding $15,384.46.
+ *
+ * The healer is the second chance. These assert it is actually consulted, only
+ * on a miss, and that its answer reaches the row.
+ */
+describe("upsertInvoiceRecord — heals a customer link the strict lookup missed", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(db.batch).mockResolvedValue([] as never);
+    vi.mocked(db.delete).mockReturnValue({ where: vi.fn() } as never);
+  });
+
+  /** select #1 = customer lookup, #2 = existing invoice. */
+  function wireSelects(customerRows: unknown[], invoiceRows: unknown[]) {
+    const results = [customerRows, invoiceRows];
+    let call = 0;
+    vi.mocked(db.select).mockImplementation(
+      () =>
+        ({
+          from: () => ({
+            where: () => {
+              const r = results[call] ?? [];
+              call++;
+              return Object.assign(Promise.resolve(r), {
+                limit: () => Promise.resolve(r),
+              });
+            },
+          }),
+        }) as never,
+    );
+  }
+
+  it("uses the healed customer id when the strict fp-id lookup finds nothing", async () => {
+    wireSelects([], []); // customer misses, invoice is new → INSERT branch
+    const { getInvoiceValues } = wireInsert();
+    const heal = vi.fn().mockResolvedValue("healed-customer-id");
+
+    await upsertInvoiceRecord(ORG, makeInvoice({ customerId: "17492296" }), heal);
+
+    expect(heal).toHaveBeenCalledWith("17492296");
+    const values = getInvoiceValues();
+    expect(values).not.toBeNull();
+    expect(values?.mock.calls[0]?.[0]?.customerId).toBe("healed-customer-id");
+  });
+
+  it("does NOT call the healer when the strict lookup already resolved", async () => {
+    wireSelects([{ id: "cust-1" }], []);
+    const { getInvoiceValues } = wireInsert();
+    const heal = vi.fn();
+
+    await upsertInvoiceRecord(ORG, makeInvoice({ customerId: "17431130" }), heal);
+
+    // A hit must not cost a FieldPulse round-trip.
+    expect(heal).not.toHaveBeenCalled();
+    expect(getInvoiceValues()?.mock.calls[0]?.[0]?.customerId).toBe("cust-1");
+  });
+
+  it("leaves the link null when the healer also comes up empty (hard-deleted in FP)", async () => {
+    wireSelects([], []);
+    const { getInvoiceValues } = wireInsert();
+    const heal = vi.fn().mockResolvedValue(null);
+
+    await upsertInvoiceRecord(ORG, makeInvoice({ customerId: "99999999" }), heal);
+
+    // Honest null beats a fabricated link — you cannot collect from a customer
+    // that no longer exists, and inventing one would only hide that.
+    expect(getInvoiceValues()?.mock.calls[0]?.[0]?.customerId).toBeNull();
+  });
+});

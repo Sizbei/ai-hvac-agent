@@ -22,6 +22,7 @@ import { db } from "@/lib/db";
 import { invoices } from "@/lib/db/schema";
 import { logger } from "@/lib/logger";
 import { upsertInvoiceRecord } from "../invoice-sync";
+import { makeFpCustomerHealer } from "./customers";
 import type { FieldpulseClient } from "../client";
 import type { FieldpulseInvoice } from "../types";
 import type { PhaseResult } from "./run-import";
@@ -61,6 +62,12 @@ export async function importInvoicesFromFieldpulse(
     );
   const existingFpIds = new Set(existingRows.map((r) => r.fieldpulseInvoiceId as string));
 
+  // One healer per run: its cache means N invoices sharing a customer cost one
+  // fetch, not N. Without it, every invoice whose customer lost the fp-id link
+  // (shared billing contacts, pagination gaps) is written with customerId null
+  // and is thereafter invisible to collections.
+  const healCustomer = makeFpCustomerHealer(orgId, client);
+
   for (const inv of items) {
     // Skip soft-deleted invoices.
     if (inv.deletedAt != null) {
@@ -73,7 +80,7 @@ export async function importInvoicesFromFieldpulse(
       // outcome string (upsertInvoiceRecord may return "updated" for race winners).
       const isNew = !existingFpIds.has(inv.id);
 
-      const outcome = await upsertInvoiceRecord(orgId, inv);
+      const outcome = await upsertInvoiceRecord(orgId, inv, healCustomer);
 
       if (outcome === "failed") {
         counts.errors++;

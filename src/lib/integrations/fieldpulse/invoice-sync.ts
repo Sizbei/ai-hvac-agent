@@ -26,6 +26,7 @@ import { getFieldpulseClient } from "./client";
 import { parseFpDate } from "./fp-dates";
 import type { FieldpulseInvoiceStatus, FieldpulseInvoice } from "./types";
 import { buildFpSpillover } from "./import/spillover";
+import { makeFpCustomerHealer } from "./import/customers";
 
 /**
  * Map a Fieldpulse invoice status to our invoice status enum.
@@ -345,10 +346,16 @@ function lineItemRows(
  *
  * Exported so the Phase 5 backfill (import/invoices.ts) can feed already-fetched
  * invoices in without the N wasteful re-fetches that pullInvoiceFromFieldpulse adds.
+ *
+ * `healCustomer` is optional: when omitted the customer link resolves by strict
+ * fp-id only (unchanged behaviour). Callers that hold a FieldPulse client pass
+ * `makeFpCustomerHealer(...)` so a customer the strict lookup can't see is
+ * fetched and resolved rather than left orphaned.
  */
 export async function upsertInvoiceRecord(
   organizationId: string,
   invoice: FieldpulseInvoice,
+  healCustomer?: (fpCustomerId: string) => Promise<string | null>,
 ): Promise<InvoicePullOutcome> {
   const totalCents = invoice.totalCents ?? 0;
   // FP sends real subtotal + tax; fall back to total/0 only if absent so the
@@ -396,6 +403,17 @@ export async function upsertInvoiceRecord(
         ),
       );
     customerId = c?.id ?? null;
+
+    // A missed link is not cosmetic: an invoice with no customer is invisible
+    // to collections — no reminder, no pay link, no AR owner — so the money
+    // silently stops being chaseable. The strict fp-id lookup above misses
+    // whenever the customer's fp id was never written to a row (shared billing
+    // contacts, list-pagination gaps — see makeFpCustomerHealer). Live count on
+    // the dev mirror before this heal existed: 506 orphaned FP invoices, 93 of
+    // them unpaid, holding $15,384.46 that no screen could route to anyone.
+    if (!customerId && healCustomer) {
+      customerId = await healCustomer(invoice.customerId);
+    }
   }
 
   const [existing] = await db
@@ -555,7 +573,13 @@ export async function pullInvoiceFromFieldpulse(
     if (!client) return "skipped";
     const invoice = await client.getInvoice(fieldpulseInvoiceId);
     if (!invoice) return "skipped";
-    return await upsertInvoiceRecord(organizationId, invoice);
+    // Heal here too, or the webhook path keeps minting fresh orphans between
+    // nightly sweeps — the day-to-day source of the backlog, not just its history.
+    return await upsertInvoiceRecord(
+      organizationId,
+      invoice,
+      makeFpCustomerHealer(organizationId, client),
+    );
   } catch (error) {
     logger.warn(
       { error, fieldpulseInvoiceId },

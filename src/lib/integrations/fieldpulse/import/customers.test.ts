@@ -12,7 +12,7 @@
  * (FAKE PII only — no real customer data).
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { mapFpCustomer, importCustomersFromFieldpulse, importOneFpCustomer, mapAccountType } from "./customers";
+import { mapFpCustomer, importCustomersFromFieldpulse, importOneFpCustomer, mapAccountType, makeFpCustomerHealer } from "./customers";
 import type { FieldpulseCustomer } from "../types";
 import type { FieldpulseClient } from "../client";
 import type { PhaseResult } from "./run-import";
@@ -829,5 +829,88 @@ describe("importOneFpCustomer — fieldpulseData spillover from raw payload", ()
     const spillover = buildFpSpillover(raw, "customers");
     expect(spillover).not.toBeNull();
     expect(spillover?.is_email_notification_subscribed).toBe(false);
+  });
+});
+
+// ── makeFpCustomerHealer ─────────────────────────────────────────────────────
+
+/**
+ * The healer exists because a strict fieldpulseCustomerId lookup misses for
+ * customers that were merged away by contact dedupe, and every miss orphans the
+ * dependent record permanently.
+ *
+ * LIVE CASE (dev mirror, 2026-08-11): FP customers 17492296 / 17489123 /
+ * 17494181 are three different a franchise locations sharing one billing email and
+ * phone. Contact dedupe collapses them onto native row <native-row-id>…, which already
+ * owns fp id 17300712, so the fpId guard refuses to relink — and the other two
+ * fp ids exist on no row at all. 506 FP invoices were orphaned this way, 93 of
+ * them unpaid, holding four figures of AR that no collections screen could route.
+ *
+ * The contract that matters: when the guard refuses the link, the healer must
+ * still return the resolved native id.
+ */
+describe("makeFpCustomerHealer", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function healerClient(impl: (id: string) => Promise<FieldpulseCustomer | null>) {
+    const getCustomer = vi.fn(impl);
+    return {
+      client: { getCustomer } as unknown as Pick<FieldpulseClient, "getCustomer">,
+      getCustomer,
+    };
+  }
+
+  it("returns the merged native row when the fpId guard refuses the link (the a franchise case)", async () => {
+    // Contact dedupe resolves to the row that already owns a DIFFERENT fp id…
+    vi.mocked(upsertCustomerByContact).mockResolvedValue("native-merged-row");
+    wireSelect([]); // no row carries this fp id
+    wireUpdate([]); // …so the guarded UPDATE matches nothing — link refused.
+
+    const { client, getCustomer } = healerClient(async () =>
+      makeCustomer({ id: "17492296", displayName: "Franchise site A" }),
+    );
+
+    const healed = await makeFpCustomerHealer(ORG, client)("17492296");
+
+    expect(getCustomer).toHaveBeenCalledWith("17492296");
+    // Refusing the LINK must not mean refusing the ANSWER — the merged row is
+    // still the customer, and an invoice attached to it is collectable.
+    expect(healed).toBe("native-merged-row");
+  });
+
+  it("caches per instance so N records sharing a customer cost one fetch", async () => {
+    vi.mocked(upsertCustomerByContact).mockResolvedValue("native-1");
+    wireSelect([]);
+    wireUpdate([{ id: "native-1" }]);
+
+    const { client, getCustomer } = healerClient(async () => makeCustomer());
+    const heal = makeFpCustomerHealer(ORG, client);
+
+    await heal("10001001");
+    await heal("10001001");
+    await heal("10001001");
+
+    expect(getCustomer).toHaveBeenCalledTimes(1);
+  });
+
+  it("caches the null result too — one 404 is not retried on every later record", async () => {
+    const { client, getCustomer } = healerClient(async () => null);
+    const heal = makeFpCustomerHealer(ORG, client);
+
+    expect(await heal("99999999")).toBeNull();
+    expect(await heal("99999999")).toBeNull();
+
+    expect(getCustomer).toHaveBeenCalledTimes(1);
+  });
+
+  it("swallows a fetch failure and returns null — a heal must never fail the record it was helping", async () => {
+    const { client } = healerClient(async () => {
+      throw new Error("FieldPulse 503");
+    });
+
+    await expect(makeFpCustomerHealer(ORG, client)("10001001")).resolves.toBeNull();
+    expect(logger.warn).toHaveBeenCalled();
   });
 });

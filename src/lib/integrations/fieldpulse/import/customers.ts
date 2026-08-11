@@ -422,6 +422,69 @@ export async function importOneFpCustomer(
 }
 
 /**
+ * Builds a cached "resolve this FP customer id to a native customer" function.
+ *
+ * WHY THIS EXISTS: a strict `fieldpulseCustomerId` lookup misses for two live,
+ * verified reasons, and every miss orphans the dependent record permanently.
+ *
+ *  1. SHARED BILLING CONTACTS (the big one). `upsertCustomerByContact` dedupes
+ *     on an HMAC blind index over email/phone. Commercial customers break that
+ *     assumption: FP customers 17492296 / 17489123 / 17494181 are three
+ *     DIFFERENT a franchise locations (Abingdon, Jonesborough, W. Stone Dr) that all
+ *     carry the same billing email and phone. They collapse onto one native
+ *     row, the first fp id wins the link, and `importOneFpCustomer` then
+ *     REFUSES to overwrite it for the other two (see the fpId guard above).
+ *     Those two fp ids therefore exist on no row at all — forever.
+ *  2. LIST-PAGINATION GAPS. A handful of customers slip between FP page
+ *     boundaries and never appear in the walk (the reason the jobs phase grew
+ *     its own self-heal).
+ *
+ * The guard branch of `importOneFpCustomer` returns the resolved native id even
+ * when it refuses the link, which is exactly what a dependent record needs: the
+ * merged row IS the customer, so attaching to it beats attaching to nobody.
+ *
+ * Returns null when FP 404s the id (HARD-DELETED). Callers decide what a
+ * genuinely unreachable customer means for their record — invoices leave the
+ * link null rather than invent a placeholder, because you cannot collect money
+ * from a deleted customer and a fabricated link would only hide that.
+ *
+ * The cache is per-factory-call (i.e. per run/request) so a sweep touching 500
+ * invoices that share 20 customers issues 20 fetches, not 500.
+ */
+export function makeFpCustomerHealer(
+  orgId: string,
+  client: Pick<FieldpulseClient, "getCustomer">,
+): (fpCustomerId: string) => Promise<string | null> {
+  const cache = new Map<string, string | null>();
+
+  return async (fpCustomerId: string): Promise<string | null> => {
+    const cached = cache.get(fpCustomerId);
+    if (cached !== undefined) return cached;
+
+    let healed: string | null = null;
+    try {
+      const fpCustomer = await client.getCustomer(fpCustomerId);
+      if (fpCustomer) healed = await importOneFpCustomer(orgId, fpCustomer);
+    } catch (err) {
+      // A heal failure must never fail the record it was helping — the caller
+      // still writes the row, just without the link. Cached as null so one
+      // flaky id doesn't get retried on every subsequent record in the sweep.
+      logger.warn(
+        {
+          orgId,
+          fpCustomerId,
+          error: err instanceof Error ? err.message : String(err),
+        },
+        "FP customer heal failed (continuing without the link)",
+      );
+    }
+
+    cache.set(fpCustomerId, healed);
+    return healed;
+  };
+}
+
+/**
  * Placeholder for a customer that is HARD-DELETED in FieldPulse (absent from
  * the list walk AND 404 on per-id fetch — live-verified 2026-07-09: six such
  * customers own ten real calendar jobs, incl. future ones). The jobs must land

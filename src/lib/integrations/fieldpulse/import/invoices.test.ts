@@ -124,7 +124,7 @@ describe("importInvoicesFromFieldpulse", () => {
     expect(counts.created).toBe(1);
     // upsertInvoiceRecord must NOT be called for the deleted invoice.
     expect(upsertInvoiceRecord).toHaveBeenCalledTimes(1);
-    expect(upsertInvoiceRecord).toHaveBeenCalledWith(ORG, active);
+    expect(upsertInvoiceRecord).toHaveBeenCalledWith(ORG, active, expect.any(Function));
   });
 
   it("delegates to upsertInvoiceRecord with orgId and the fetched invoice", async () => {
@@ -137,7 +137,9 @@ describe("importInvoicesFromFieldpulse", () => {
     await importInvoicesFromFieldpulse(ORG, counts, client);
 
     expect(upsertInvoiceRecord).toHaveBeenCalledTimes(1);
-    expect(upsertInvoiceRecord).toHaveBeenCalledWith(ORG, inv);
+    // Third arg is the per-run customer healer — without it, an invoice whose
+    // customer lost its fp-id link is written orphaned and never collectable.
+    expect(upsertInvoiceRecord).toHaveBeenCalledWith(ORG, inv, expect.any(Function));
   });
 
   it("counts created for new invoices (not in pre-select Set) when outcome is 'created'", async () => {
