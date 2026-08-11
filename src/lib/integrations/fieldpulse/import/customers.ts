@@ -468,8 +468,27 @@ async function resolveNativeCustomerByEmail(
       and(
         eq(customers.organizationId, orgId),
         eq(customers.emailHash, emailHash),
+        // THE ROW MUST NOT ALREADY BE SOMEONE ELSE. A shared email does not
+        // mean a shared identity: in this operator's live data a single
+        // accounts-payable address covers up to 21 unrelated businesses,
+        // because third-party AP desks, warranty administrators and property
+        // managers pay invoices on behalf of many customers. Contact dedupe
+        // collapses all of them onto one native row, and the first fp id to
+        // arrive wins the link. Matching on email alone would therefore file
+        // one company's invoices under another company's name — and since
+        // that row drives the customer portal, it would show them there too.
+        //
+        // So the heal only fires when the matched row carries no FieldPulse
+        // identity of its own (a native/bot-created customer, or one lost to a
+        // list-pagination gap), or when it is already this exact customer.
+        // For a collapsed group it deliberately does nothing: those invoices
+        // stay visibly unlinked, which is the honest state. The real repair
+        // there is at the customer level — give each FieldPulse customer its
+        // own row — not at the invoice level.
+        //
         // Never re-attach live money to a record someone asked us to erase.
         isNull(customers.anonymizedAt),
+        sql`(${customers.fieldpulseCustomerId} IS NULL OR ${customers.fieldpulseCustomerId} = ${mapped.customer.fpId})`,
       ),
     )
     .limit(1);

@@ -57,3 +57,6 @@ promptfoo/redteam.generated.yaml
 !.claude/
 .claude/*
 !.claude/skills/
+
+# Throwaway probe scripts (agents/humans) — never commit
+.probe-*

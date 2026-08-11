@@ -852,6 +852,30 @@ describe("importOneFpCustomer — fieldpulseData spillover from raw payload", ()
  * webhook — so it must never insert, un-archive, or clobber a customer, and it
  * must not match on a phone number alone.
  */
+/**
+ * True when a drizzle predicate contains the healer's fp-id ownership clause.
+ * Matches the raw SQL fragment's own text: searching for the column name would
+ * succeed regardless, because the table object referenced by any condition
+ * reaches every column in the schema.
+ */
+function hasOwnershipClause(predicate: unknown): boolean {
+  const seen = new Set<object>();
+  let found = false;
+  const walk = (n: unknown): void => {
+    if (n == null || found) return;
+    if (typeof n === "string") {
+      if (n.includes("IS NULL OR")) found = true;
+      return;
+    }
+    if (typeof n !== "object") return;
+    if (seen.has(n as object)) return;
+    seen.add(n as object);
+    for (const v of Object.values(n as Record<string, unknown>)) walk(v);
+  };
+  walk(predicate);
+  return found;
+}
+
 describe("makeFpCustomerHealer", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -865,16 +889,36 @@ describe("makeFpCustomerHealer", () => {
     };
   }
 
-  it("resolves the merged native row by email blind index", async () => {
-    wireSelect([{ id: "native-merged-row" }]);
+  it("resolves a native row that carries no FieldPulse identity of its own", async () => {
+    wireSelect([{ id: "native-row" }]);
     const { client, getCustomer } = healerClient(async () =>
-      makeCustomer({ id: "17492296", email: "billing@franchise.invalid" }),
+      makeCustomer({ id: "17492296", email: "billing@example.invalid" }),
     );
 
     const healed = await makeFpCustomerHealer(ORG, client)("17492296");
 
     expect(getCustomer).toHaveBeenCalledWith("17492296");
-    expect(healed).toBe("native-merged-row");
+    expect(healed).toBe("native-row");
+  });
+
+  it("refuses a row that already belongs to a DIFFERENT FieldPulse customer", async () => {
+    // A shared email is not a shared identity. In this operator's live data a
+    // single accounts-payable address covers many unrelated businesses, because
+    // AP desks, warranty administrators and property managers pay on behalf of
+    // multiple customers. Filing one company's invoices under another company's
+    // row would also expose them in that company's portal.
+    //
+    // The guard lives in SQL, so the mocked db can't filter for us — assert the
+    // predicate itself carries the ownership clause. Walking for the column name
+    // would pass either way (the drizzle table object reaches every column), so
+    // match the raw fragment's own text instead, which appears only when the
+    // clause is present.
+    const { where } = wireSelect([]);
+    const { client } = healerClient(async () => makeCustomer({ id: "17492296" }));
+
+    expect(await makeFpCustomerHealer(ORG, client)("17492296")).toBeNull();
+    expect(where).toHaveBeenCalledTimes(1);
+    expect(hasOwnershipClause(where.mock.calls[0]?.[0])).toBe(true);
   });
 
   it("never writes — no insert, no update, however it resolves", async () => {
