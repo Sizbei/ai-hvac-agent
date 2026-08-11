@@ -15,6 +15,9 @@
  *   --yes                 Skip the interactive `import` confirmation. FOR CI USE ONLY
  *                         (nightly GitHub Actions sweep). Never pass this interactively —
  *                         the confirmation exists to prevent accidental prod writes.
+ *   --allow-prod          Permit a NON-DEV database target. Without it the script
+ *                         refuses any host that isn't the dev branch. The nightly
+ *                         sweep passes it; a human almost never should.
  *   --since <date>        deliberately deferred — Phase 0.5 verified FP ignores server-side date filters; Phase 6 deltas will full-re-page + filter client-side.
  *
  * Safety: On a real run the script prints DB host + org name and requires the
@@ -177,12 +180,15 @@ export function parseArgs(argv: string[]): {
   phaseNames: string[] | null;
   /** Skip interactive confirmation. FOR CI (nightly sweep) ONLY. */
   yes: boolean;
+  /** Permit a non-dev database target. Required for the production sweep. */
+  allowProd: boolean;
 } {
   const args = argv.slice(2);
   let orgId: string | null = null;
   let dryRun = false;
   let phaseFilter: string | null = null;
   let yes = false;
+  let allowProd = false;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--org" && args[i + 1]) {
@@ -193,6 +199,8 @@ export function parseArgs(argv: string[]): {
       phaseFilter = args[++i];
     } else if (args[i] === "--yes") {
       yes = true;
+    } else if (args[i] === "--allow-prod") {
+      allowProd = true;
     }
   }
 
@@ -206,7 +214,7 @@ export function parseArgs(argv: string[]): {
     ? phaseFilter.split(",").map((s) => s.trim()).filter(Boolean)
     : null;
 
-  return { orgId, dryRun, phaseNames, yes };
+  return { orgId, dryRun, phaseNames, yes, allowProd };
 }
 
 // ── DB host (no credentials) ─────────────────────────────────────────────────
@@ -217,6 +225,44 @@ function parseDbHost(databaseUrl: string): string {
   } catch {
     return "(unparseable)";
   }
+}
+
+/**
+ * Neon host substring identifying the DEVELOPMENT branch — the only database
+ * this importer may write to without an explicit opt-in.
+ */
+const DEV_DB_HOST_MARKER = "ep-patient-surf";
+
+/**
+ * Refuse to write to any database that isn't the dev branch unless the caller
+ * explicitly opted in with --allow-prod.
+ *
+ * WHY THIS EXISTS. Before this guard, "dev only" was enforced by nothing but a
+ * printed hostname and an interactive prompt — and `--yes` skips the prompt
+ * entirely. Worse, `dotenv.config()` does NOT override an already-exported
+ * `DATABASE_URL`, so a shell that happens to have production exported silently
+ * wins over `.env.local`. This importer deletes and re-inserts invoice line
+ * items, so a mis-targeted run rewrites real money.
+ *
+ * This is default-deny: an unrecognised host fails closed with an actionable
+ * message rather than being assumed safe. The nightly sweep, which legitimately
+ * targets production, opts in explicitly in its workflow.
+ */
+function assertWritableTarget(dbHost: string, allowProd: boolean): void {
+  if (dbHost.includes(DEV_DB_HOST_MARKER)) return;
+  if (allowProd) {
+    console.log(`  ⚠  NON-DEV TARGET, allowed by --allow-prod: ${dbHost}`);
+    return;
+  }
+  console.error(
+    `\nERROR: refusing to import into '${dbHost}'.\n` +
+      `This is not the dev branch ('${DEV_DB_HOST_MARKER}'), and --allow-prod was not given.\n` +
+      `The importer rewrites invoice line items, so a mis-targeted run corrupts real money.\n\n` +
+      `If you genuinely mean to write to this database, re-run with --allow-prod.\n` +
+      `If you did not, check whether DATABASE_URL is exported in your shell —\n` +
+      `dotenv does NOT override an already-exported value, so it silently beats .env.local.\n`,
+  );
+  process.exit(1);
 }
 
 // ── stdin confirmation ───────────────────────────────────────────────────────
@@ -241,13 +287,18 @@ async function requireConfirmation(prompt: string): Promise<void> {
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  const { orgId, dryRun, phaseNames, yes } = parseArgs(process.argv);
+  const { orgId, dryRun, phaseNames, yes, allowProd } = parseArgs(process.argv);
 
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
     console.error("ERROR: DATABASE_URL is not set");
     process.exit(1);
   }
+
+  // Check the target BEFORE opening a connection or issuing any query — the
+  // guard is worthless if a mis-targeted run has already touched the database.
+  // A dry run is read-only, so it is exempt.
+  if (!dryRun) assertWritableTarget(parseDbHost(databaseUrl), allowProd);
 
   const sql = neon(databaseUrl);
   const db = drizzle(sql);

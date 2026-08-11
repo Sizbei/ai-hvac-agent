@@ -144,3 +144,92 @@ describe("upsertInvoiceRecord — fieldpulseData spillover from raw payload", ()
     );
   });
 });
+
+// ── Re-linking an already-mirrored invoice ────────────────────────────────────
+
+/**
+ * The UPDATE branch used to refresh money but never the customer/service-request
+ * FKs. An invoice first synced BEFORE its customer was imported therefore stayed
+ * orphaned forever — re-running the import could not repair it. In the dev
+ * mirror that stranded 11 open invoices holding $6,005.08 of AR with no customer
+ * profile and no reminder path.
+ *
+ * The fix must be asymmetric: re-link when we resolved someone, never un-link
+ * when we didn't (spreading a null would erase a good link on any sync that
+ * failed to resolve).
+ */
+describe("upsertInvoiceRecord — re-links an existing invoice without un-linking", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(db.batch).mockResolvedValue([] as never);
+    vi.mocked(db.delete).mockReturnValue({ where: vi.fn() } as never);
+  });
+
+  /** Captures the .set() payload the UPDATE branch builds. */
+  function wireExistingInvoice(): { getSet: () => Record<string, unknown> | null } {
+    let captured: Record<string, unknown> | null = null;
+    vi.mocked(db.update).mockReturnValue({
+      set: (v: Record<string, unknown>) => {
+        captured = v;
+        return { where: vi.fn() };
+      },
+    } as never);
+    return { getSet: () => captured };
+  }
+
+  it("writes customerId into the update when the customer resolves", async () => {
+    // Order matters: link resolution runs BEFORE the existing-invoice lookup.
+    // select #1 = customer lookup (resolves), #2 = existing invoice.
+    const results = [[{ id: "cust-1" }], [{ id: "existing-invoice", state: "open" }]];
+    let call = 0;
+    vi.mocked(db.select).mockImplementation(
+      () =>
+        ({
+          from: () => ({
+            where: () => {
+              const r = results[call] ?? [];
+              call++;
+              return Object.assign(Promise.resolve(r), {
+                limit: () => Promise.resolve(r),
+              });
+            },
+          }),
+        }) as never,
+    );
+    const { getSet } = wireExistingInvoice();
+
+    await upsertInvoiceRecord(ORG, makeInvoice({ customerId: "17431130" }));
+
+    const set = getSet();
+    expect(set).not.toBeNull();
+    expect(set?.customerId).toBe("cust-1");
+  });
+
+  it("omits customerId entirely when the customer does NOT resolve — never nulls a good link", async () => {
+    // select #1 = customer lookup (NO match), #2 = existing invoice.
+    const results = [[], [{ id: "existing-invoice", state: "open" }]];
+    let call = 0;
+    vi.mocked(db.select).mockImplementation(
+      () =>
+        ({
+          from: () => ({
+            where: () => {
+              const r = results[call] ?? [];
+              call++;
+              return Object.assign(Promise.resolve(r), {
+                limit: () => Promise.resolve(r),
+              });
+            },
+          }),
+        }) as never,
+    );
+    const { getSet } = wireExistingInvoice();
+
+    await upsertInvoiceRecord(ORG, makeInvoice({ customerId: "99999999" }));
+
+    const set = getSet();
+    expect(set).not.toBeNull();
+    // Absent, not null — a null would overwrite an existing good link.
+    expect(set && "customerId" in set).toBe(false);
+  });
+});

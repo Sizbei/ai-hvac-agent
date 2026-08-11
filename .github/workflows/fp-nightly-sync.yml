@@ -70,4 +70,5 @@ jobs:
           npx tsx src/lib/integrations/fieldpulse/import/run-import.ts \
             --org ${{ vars.FP_SYNC_ORG_ID }} \
             --phase ${{ inputs.phases != '' && inputs.phases || 'technicians,customers,jobs,invoices,estimates,payments,assets,comments,locations,items,job-metrics' }} \
-            --yes
+            --yes \
+            --allow-prod

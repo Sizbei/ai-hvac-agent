@@ -426,11 +426,23 @@ export async function upsertInvoiceRecord(
           taxCents,
           totalCents,
           amountPaidCents,
+          // Re-link on update, but NEVER un-link. An invoice first synced
+          // before its customer existed locally used to stay orphaned forever:
+          // this branch refreshed the money but not the FK, so no number of
+          // re-pulls could ever repair it. That is how 11 open invoices came to
+          // hold $6,005.08 of real AR with no customer profile and no way to
+          // send a reminder.
+          //
+          // Only overwrite when we actually resolved someone. Spreading a null
+          // would erase a good link whenever a later sync failed to resolve —
+          // trading a repairable gap for a destructive one.
           // Real-world issue date: FP's invoiced_date. For QB-originated
           // invoices, created_at is the day the row was BULK-IMPORTED into FP
           // (live-verified: fp#20824708 invoiced 2025-10-30, created
           // 2026-07-07) — using it flattened all aging to the import day.
           // Written on UPDATE too so re-imports backfill older rows.
+          ...(customerId ? { customerId } : {}),
+          ...(serviceRequestId ? { serviceRequestId } : {}),
           issuedAt: parseFpDate(invoice.invoicedDate ?? invoice.createdAt),
           dueDate: parseFpDate(invoice.dueDate),
           fieldpulseData: fpSpillover,

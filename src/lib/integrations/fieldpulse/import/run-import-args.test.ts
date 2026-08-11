@@ -80,3 +80,30 @@ describe("parseArgs", () => {
     expect(result.dryRun).toBe(true);
   });
 });
+
+/**
+ * --allow-prod: the target guard's opt-in.
+ *
+ * Before it existed, "dev branch only" was enforced by nothing but a printed
+ * hostname and an interactive prompt that --yes skips. Since dotenv does not
+ * override an already-exported DATABASE_URL, a shell with production exported
+ * silently beat .env.local — and this importer deletes and re-inserts invoice
+ * line items, so a mis-targeted run rewrites real money.
+ */
+describe("parseArgs — --allow-prod", () => {
+  it("defaults to false so a non-dev target fails closed", () => {
+    const r = parseArgs(["node", "run-import.ts", "--org", "org-1"]);
+    expect(r.allowProd).toBe(false);
+  });
+
+  it("is true only when explicitly passed", () => {
+    const r = parseArgs(["node", "run-import.ts", "--org", "org-1", "--allow-prod"]);
+    expect(r.allowProd).toBe(true);
+  });
+
+  it("is independent of --yes — skipping the prompt does not imply prod consent", () => {
+    const r = parseArgs(["node", "run-import.ts", "--org", "org-1", "--yes"]);
+    expect(r.yes).toBe(true);
+    expect(r.allowProd).toBe(false);
+  });
+});
