@@ -351,3 +351,73 @@ describe("upsertInvoiceRecord — a deleted FieldPulse invoice never becomes liv
     expect(vi.mocked(db.update)).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * FieldPulse emits invoices with total > 0, amount_paid 0.00, amount_unpaid
+ * 0.00, no payments and no payment date. A zero balance on a positive total
+ * implies someone paid, so trusting amount_unpaid recorded them as fully paid —
+ * AR understated, collections never chasing them, the export calling them
+ * collected. 102 such rows in the dev mirror; upstream, FieldPulse's own status
+ * reads open on the ones sampled.
+ */
+describe("deriveInvoiceState — a zero balance is not proof of payment", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(db.batch).mockResolvedValue([] as never);
+    vi.mocked(db.delete).mockReturnValue({ where: vi.fn() } as never);
+  });
+
+  function captureInsert() {
+    wireSelectNoExisting();
+    return wireInsert();
+  }
+
+  it("keeps an invoice open when nothing evidences a payment", async () => {
+    const { getInvoiceValues } = captureInsert();
+
+    await upsertInvoiceRecord(
+      ORG,
+      makeInvoice({
+        totalCents: 36847,
+        amountPaidCents: 0,
+        amountUnpaidCents: 0, // contradicts the total — not trustworthy alone
+        paidAt: null,
+      }),
+    );
+
+    const row = getInvoiceValues()?.mock.calls[0]?.[0];
+    expect(row?.state).toBe("open");
+    // And must not fabricate the payment either.
+    expect(row?.amountPaidCents).toBe(0);
+  });
+
+  it("still marks paid when a payment date evidences it, filling the zeroed amount", async () => {
+    const { getInvoiceValues } = captureInsert();
+
+    await upsertInvoiceRecord(
+      ORG,
+      makeInvoice({
+        totalCents: 36847,
+        amountPaidCents: 0,
+        amountUnpaidCents: 0,
+        paidAt: "2026-07-02 10:00:00",
+      }),
+    );
+
+    const row = getInvoiceValues()?.mock.calls[0]?.[0];
+    expect(row?.state).toBe("paid");
+    // The original H2 case: FP zeroed the amount but the invoice is settled.
+    expect(row?.amountPaidCents).toBe(36847);
+  });
+
+  it("still marks paid on a normal fully-paid invoice", async () => {
+    const { getInvoiceValues } = captureInsert();
+
+    await upsertInvoiceRecord(
+      ORG,
+      makeInvoice({ totalCents: 27000, amountPaidCents: 27000, amountUnpaidCents: 0 }),
+    );
+
+    expect(getInvoiceValues()?.mock.calls[0]?.[0]?.state).toBe("paid");
+  });
+});

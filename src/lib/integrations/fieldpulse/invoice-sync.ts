@@ -299,7 +299,23 @@ function deriveInvoiceState(
 ): "draft" | "open" | "paid" | "void" {
   if (totalCents <= 0) return "draft";
   const unpaid = invoice.amountUnpaidCents;
-  const fullyPaid = unpaid != null ? unpaid <= 0 : amountPaidCents >= totalCents;
+
+  // `amount_unpaid` alone is not sufficient evidence of payment. FieldPulse
+  // emits a class of invoices with total > 0, amount_paid 0.00, amount_unpaid
+  // 0.00, no payments and no first_payment_date — internally contradictory,
+  // since a zero balance on a positive total implies someone paid. Trusting the
+  // balance field made us record those as fully paid: AR understated,
+  // collections never chasing them, the accounting export calling them
+  // collected. Live check on the dev mirror: 102 invoices, and on the ones
+  // sampled upstream FieldPulse's own `status` reads open, not paid.
+  //
+  // So require positive evidence: a non-zero paid amount, or a payment date. If
+  // neither exists, ignore the balance field and fall back to the amounts.
+  const hasPaymentEvidence = amountPaidCents > 0 || invoice.paidAt != null;
+  const fullyPaid =
+    unpaid != null && hasPaymentEvidence
+      ? unpaid <= 0
+      : amountPaidCents >= totalCents;
   return fullyPaid ? "paid" : "open";
 }
 
