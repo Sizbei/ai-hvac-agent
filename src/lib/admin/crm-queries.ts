@@ -2,6 +2,8 @@ import {
   and,
   eq,
   ne,
+  or,
+  asc,
   desc,
   count,
   sql,
@@ -23,7 +25,15 @@ import {
   membershipStatusEnum,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
+import { isUniqueViolation } from "@/lib/db/unique-violation";
 import { logAudit } from "@/lib/admin/audit";
+import {
+  pickCustomerMatch,
+  customerMatchCandidatePredicate,
+  CUSTOMER_MATCH_CANDIDATE_LIMIT,
+  type CustomerMatch,
+  type CustomerMatchCandidate,
+} from "@/lib/admin/customer-match";
 import { encrypt, decrypt, blindIndex } from "@/lib/crypto";
 import {
   sanitizeName,
@@ -629,58 +639,107 @@ export function computeContactHashes(input: {
   };
 }
 
+function toDate(value: Date | string | null | undefined): Date | null {
+  if (!value) return null;
+  return value instanceof Date ? value : new Date(value);
+}
+
 /**
- * Finds an existing customer id for the org by email (case-insensitive, trimmed),
- * falling back to phone (non-digits stripped). Returns null when nothing matches.
+ * Every row in the org that answers this email or phone, ordered by the pick
+ * rules (see {@link pickCustomerMatch}) and capped.
  *
- * Primary path: an indexed equality lookup on the deterministic blind-index
- * (HMAC) columns — fast and used by the unique constraint to make dedupe
- * atomic. Fallback path: for legacy rows written before the hash columns
- * existed (emailHash/phoneHash still NULL), decrypt-and-compare in app code so
- * those customers still dedupe correctly until backfilled. Email is the
- * stronger identity key and is matched first; phone is the secondary fallback.
+ * One query, not two: a contact can now legitimately answer with several rows
+ * (FieldPulse-linked rows share contacts), so email and phone are matched
+ * together and the winner is chosen by rank rather than by query order. Rule 1
+ * (never resolve an erased row) is in the `WHERE`; rules 2-7 are in the
+ * `ORDER BY`, which is what makes the `LIMIT` safe — it can only drop rows that
+ * would have ranked below the winner.
+ *
+ * Exported because SMS consent resolves the SAME candidate set with a DIFFERENT
+ * order (STOP fans out, START skips the do-not-service rule): the ordering may
+ * differ per direction, the candidate set must not.
  */
-export async function findCustomerIdByContact(
+export async function findCustomerMatchCandidates(
   organizationId: string,
   input: { readonly email: string | null; readonly phone: string | null },
-): Promise<string | null> {
+): Promise<CustomerMatchCandidate[]> {
   const targetEmail = normalizeEmail(input.email);
   const targetPhone = normalizePhone(input.phone);
 
-  if (!targetEmail && !targetPhone) return null;
+  const emailHash = targetEmail ? blindIndex(targetEmail) : null;
+  const phoneHash = targetPhone ? blindIndex(targetPhone) : null;
 
-  // Fast path — indexed lookup on the blind-index columns.
-  if (targetEmail) {
-    const [byEmail] = await db
-      .select({ id: customers.id })
-      .from(customers)
-      .where(
-        withTenant(
-          customers,
-          organizationId,
-          eq(customers.emailHash, blindIndex(targetEmail)),
-        ),
-      )
-      .limit(1);
-    if (byEmail) return byEmail.id;
-  }
+  const contactConditions: SQL[] = [];
+  if (emailHash) contactConditions.push(eq(customers.emailHash, emailHash));
+  if (phoneHash) contactConditions.push(eq(customers.phoneHash, phoneHash));
+  if (contactConditions.length === 0) return [];
+  const contactMatch = or(...contactConditions) ?? contactConditions[0];
 
-  if (targetPhone) {
-    const [byPhone] = await db
-      .select({ id: customers.id })
-      .from(customers)
-      .where(
-        withTenant(
-          customers,
-          organizationId,
-          eq(customers.phoneHash, blindIndex(targetPhone)),
-        ),
-      )
-      .limit(1);
-    if (byPhone) return byPhone.id;
-  }
+  // A NULL hash is never equal to anything, so an absent email can only ever
+  // produce a 'phone' match.
+  const emailMatched = sql`${customers.emailHash} = ${emailHash}`;
+  const lastActivityAt = sql<
+    string | null
+  >`(select max(${serviceRequests.createdAt}) from ${serviceRequests} where ${serviceRequests.customerId} = ${customers.id})`;
 
-  // Fallback — scan rows that have no blind index yet (pre-migration data).
+  const rows = await db
+    .select({
+      id: customers.id,
+      matchedOn: sql<"email" | "phone">`case when ${emailMatched} then 'email' else 'phone' end`,
+      anonymizedAt: customers.anonymizedAt,
+      archivedAt: customers.archivedAt,
+      doNotService: customers.doNotService,
+      createdAt: customers.createdAt,
+      lastActivityAt,
+    })
+    .from(customers)
+    .where(
+      withTenant(
+        customers,
+        organizationId,
+        contactMatch,
+        customerMatchCandidatePredicate(),
+      ),
+    )
+    .orderBy(
+      desc(customers.doNotService),
+      sql`case when ${emailMatched} then 0 else 1 end`,
+      sql`case when ${customers.archivedAt} is null then 0 else 1 end`,
+      sql`${lastActivityAt} desc nulls last`,
+      desc(customers.createdAt),
+      asc(customers.id),
+    )
+    .limit(CUSTOMER_MATCH_CANDIDATE_LIMIT);
+
+  return rows.map((row) => ({
+    id: row.id,
+    matchedOn: row.matchedOn === "email" ? "email" : "phone",
+    anonymizedAt: toDate(row.anonymizedAt),
+    archivedAt: toDate(row.archivedAt),
+    doNotService: Boolean(row.doNotService),
+    createdAt: toDate(row.createdAt),
+    lastActivityAt: toDate(row.lastActivityAt),
+  }));
+}
+
+/**
+ * Decrypt-and-compare fallback for legacy rows written before the hash columns
+ * existed (both hashes still NULL). Only fires when the indexed path found
+ * nothing.
+ *
+ * Narrowed to `fieldpulse_customer_id IS NULL`: contactless FieldPulse imports
+ * also satisfy "both hashes NULL", and none of them carry encrypted contact
+ * either, so excluding them keeps this scan unreachable in practice by
+ * construction as the FP population grows.
+ *
+ * This scan deliberately bypasses the pick order — it is a first-match loop
+ * over a pre-migration population, not an identity ranking.
+ */
+async function findLegacyCustomerMatch(
+  organizationId: string,
+  targetEmail: string | null,
+  targetPhone: string | null,
+): Promise<CustomerMatch | null> {
   const legacy = await db
     .select({
       id: customers.id,
@@ -688,13 +747,14 @@ export async function findCustomerIdByContact(
       phoneEncrypted: customers.phoneEncrypted,
       emailHash: customers.emailHash,
       phoneHash: customers.phoneHash,
+      doNotService: customers.doNotService,
     })
     .from(customers)
     .where(
       withTenant(
         customers,
         organizationId,
-        sql`(${customers.emailHash} IS NULL AND ${customers.phoneHash} IS NULL)`,
+        sql`(${customers.emailHash} IS NULL AND ${customers.phoneHash} IS NULL AND ${customers.fieldpulseCustomerId} IS NULL)`,
       ),
     );
 
@@ -702,7 +762,11 @@ export async function findCustomerIdByContact(
     for (const row of legacy) {
       const decryptedEmail = normalizeEmail(safeDecrypt(row.emailEncrypted));
       if (decryptedEmail && decryptedEmail === targetEmail) {
-        return row.id;
+        return {
+          id: row.id,
+          ambiguous: false,
+          doNotService: Boolean(row.doNotService),
+        };
       }
     }
   }
@@ -711,12 +775,100 @@ export async function findCustomerIdByContact(
     for (const row of legacy) {
       const decryptedPhone = normalizePhone(safeDecrypt(row.phoneEncrypted));
       if (decryptedPhone && decryptedPhone === targetPhone) {
-        return row.id;
+        return {
+          id: row.id,
+          ambiguous: false,
+          doNotService: Boolean(row.doNotService),
+        };
       }
     }
   }
 
   return null;
+}
+
+async function resolveCustomerMatch(
+  organizationId: string,
+  input: { readonly email: string | null; readonly phone: string | null },
+): Promise<{
+  readonly match: CustomerMatch | null;
+  readonly candidates: readonly CustomerMatchCandidate[];
+}> {
+  const targetEmail = normalizeEmail(input.email);
+  const targetPhone = normalizePhone(input.phone);
+
+  if (!targetEmail && !targetPhone) return { match: null, candidates: [] };
+
+  const candidates = await findCustomerMatchCandidates(organizationId, input);
+  const picked = pickCustomerMatch(candidates);
+  if (picked) return { match: picked, candidates };
+
+  const legacy = await findLegacyCustomerMatch(
+    organizationId,
+    targetEmail,
+    targetPhone,
+  );
+  return { match: legacy, candidates };
+}
+
+/**
+ * Finds an existing customer id for the org by email (case-insensitive, trimmed)
+ * or phone (non-digits stripped). Returns null when nothing matches.
+ *
+ * Kept as `string | null` for the callers that only want an id; the callers that
+ * must react to an ambiguous cluster use {@link findCustomerMatchByContact}.
+ */
+export async function findCustomerIdByContact(
+  organizationId: string,
+  input: { readonly email: string | null; readonly phone: string | null },
+): Promise<string | null> {
+  const { match } = await resolveCustomerMatch(organizationId, input);
+  return match?.id ?? null;
+}
+
+/**
+ * Same lookup as {@link findCustomerIdByContact}, exposing the full result so
+ * callers can tell a confident identity from an ambiguous cluster.
+ *
+ * Writes the forensic row for the one case a human needs to see: an ambiguous
+ * cluster whose fail-closed winner is do-not-service. The three refusal sites
+ * never receive the flag (by design — they re-read do-not-service from the id),
+ * so the resolver records it instead of threading a flag through them. This
+ * fires on LOOKUP, not on refusal — over-logging beats invisibility.
+ * Best-effort: the audit insert must never fail an identity lookup.
+ */
+export async function findCustomerMatchByContact(
+  organizationId: string,
+  input: { readonly email: string | null; readonly phone: string | null },
+): Promise<CustomerMatch | null> {
+  const { match, candidates } = await resolveCustomerMatch(
+    organizationId,
+    input,
+  );
+
+  if (match?.ambiguous && match.doNotService) {
+    try {
+      await db.insert(auditLog).values({
+        organizationId,
+        actorType: "system",
+        action: "ambiguous_do_not_service_refusal",
+        entity: "customer",
+        entityId: match.id,
+        // Ids and counts only — never contact values (AGENTS.md).
+        details: JSON.stringify({
+          candidateCount: candidates.length,
+          candidateIds: candidates.map((candidate) => candidate.id),
+        }),
+        ipAddress: null,
+      });
+    } catch {
+      // Swallowed on purpose, and not logged: this module is imported by the
+      // intake path and by pure-helper suites that do not mock the logger. The
+      // lookup result is what the caller needs; the trail is a nicety.
+    }
+  }
+
+  return match;
 }
 
 /**
@@ -775,39 +927,50 @@ export async function upsertCustomerByContact(
   }
 
   // If we already know the customer (incl. legacy non-hashed rows), reuse it.
-  const existingId = await findCustomerIdByContact(organizationId, {
+  const existing = await findCustomerMatchByContact(organizationId, {
     email: input.email,
     phone: input.phone,
   });
-  if (existingId) {
+  if (existing) {
     // A returning customer who was archived is reactivated by their new
     // booking — clearing archived_at brings them back into the active list.
-    await db
-      .update(customers)
-      .set({ archivedAt: null, updatedAt: new Date() })
-      .where(
-        withTenant(
-          customers,
-          organizationId,
-          eq(customers.id, existingId),
-          sql`${customers.archivedAt} IS NOT NULL`,
-        ),
-      );
-    return existingId;
+    //
+    // Gated, because the pick ranks do-not-service first: without this an
+    // ambiguous or blocked resolution would let every refused intake attempt
+    // resurrect a tombstone into the active customer list. The id is still
+    // returned either way, so the downstream do-not-service re-read is
+    // unaffected.
+    if (!existing.ambiguous && !existing.doNotService) {
+      await db
+        .update(customers)
+        .set({ archivedAt: null, updatedAt: new Date() })
+        .where(
+          withTenant(
+            customers,
+            organizationId,
+            eq(customers.id, existing.id),
+            sql`${customers.archivedAt} IS NOT NULL`,
+          ),
+        );
+    }
+    return existing.id;
   }
 
   // Pick ONE arbiter index for ON CONFLICT — email when present (the stronger
   // identity key), else phone. Postgres can only infer a PARTIAL unique index
-  // when the conflict spec repeats the index predicate, so targetWhere supplies
-  // the matching `... IS NOT NULL`. Without it Postgres raises "no unique or
-  // exclusion constraint matching the ON CONFLICT specification" at runtime.
+  // when the conflict spec repeats the index predicate, so targetWhere is
+  // textually identical to the native-only index predicate in schema.ts.
+  // Without it Postgres raises "no unique or exclusion constraint matching the
+  // ON CONFLICT specification" at runtime. Every row this function inserts has
+  // fieldpulse_customer_id = NULL, so both racers are inside that index's
+  // population and one must lose — the race-safety mechanism is preserved.
   const onEmail = Boolean(emailHash);
   const conflictTarget = onEmail
     ? [customers.organizationId, customers.emailHash]
     : [customers.organizationId, customers.phoneHash];
   const conflictPredicate = onEmail
-    ? sql`${customers.emailHash} IS NOT NULL`
-    : sql`${customers.phoneHash} IS NOT NULL`;
+    ? sql`${customers.emailHash} IS NOT NULL AND ${customers.fieldpulseCustomerId} IS NULL`
+    : sql`${customers.phoneHash} IS NOT NULL AND ${customers.fieldpulseCustomerId} IS NULL`;
 
   const [row] = await db
     .insert(customers)
@@ -815,8 +978,16 @@ export async function upsertCustomerByContact(
     .onConflictDoUpdate({
       target: conflictTarget,
       targetWhere: conflictPredicate,
-      // Reactivate an archived match on conflict (a returning customer rebooking).
-      set: { updatedAt: new Date(), archivedAt: null },
+      set: {
+        updatedAt: new Date(),
+        // Reactivate an archived match on conflict (a returning customer
+        // rebooking). This path is reached only when the find above found
+        // nothing and the INSERT then lost a race, so the conflicting row
+        // appeared concurrently and is by construction the only row on that
+        // hash — unambiguous. The one remaining gate term has no JS to live in
+        // here, so it goes in the SET: a blocked row keeps its archived_at.
+        archivedAt: sql`CASE WHEN ${customers.doNotService} THEN ${customers.archivedAt} ELSE NULL END`,
+      },
     })
     .returning({ id: customers.id });
 
@@ -976,9 +1147,15 @@ export async function archiveCustomer(
  * correctly. Before writing a new email/phone we check the corresponding
  * blind-index does not already belong to a DIFFERENT customer in the org —
  * returning `contact_conflict` instead of letting the partial unique index
- * raise a raw 500. This is a check-then-write (not fully atomic), but the
- * unique constraint is still the backstop: a losing concurrent write throws and
- * surfaces as a retryable error rather than corrupting data.
+ * raise a raw 500.
+ *
+ * Both the check and the edited row are narrowed to the NATIVE population
+ * (`fieldpulse_customer_id IS NULL`), which is the only population the unique
+ * index still covers: recording one accounts-payable email on a second
+ * FieldPulse-linked business is a legitimate state, not a conflict. The check
+ * is a check-then-write (not fully atomic — neon-http has no transactions), so
+ * the write itself is wrapped: a concurrent edit that slips past the check hits
+ * the index and is mapped to the same `contact_conflict` rather than a 500.
  *
  * Only the fields present on `input` are touched; `undefined` leaves a column
  * as-is, `null` clears it (except `name`, which is NOT NULL). The audit entry
@@ -995,12 +1172,16 @@ export async function updateCustomerContact(
       id: customers.id,
       emailHash: customers.emailHash,
       phoneHash: customers.phoneHash,
+      fieldpulseCustomerId: customers.fieldpulseCustomerId,
     })
     .from(customers)
     .where(withTenant(customers, organizationId, eq(customers.id, customerId)));
 
   if (!existing) return { ok: false, reason: "not_found" };
 
+  // Only a native row can violate the native-only contact uniques, so only a
+  // native row needs the clash check at all.
+  const editedRowIsNative = !existing.fieldpulseCustomerId;
   const set: Record<string, unknown> = { updatedAt: new Date() };
   const changedFields: string[] = [];
 
@@ -1017,7 +1198,7 @@ export async function updateCustomerContact(
   if (input.email !== undefined) {
     const normalized = normalizeEmail(input.email);
     const newHash = normalized ? blindIndex(normalized) : null;
-    if (newHash && newHash !== existing.emailHash) {
+    if (editedRowIsNative && newHash && newHash !== existing.emailHash) {
       const [clash] = await db
         .select({ id: customers.id })
         .from(customers)
@@ -1027,6 +1208,7 @@ export async function updateCustomerContact(
             organizationId,
             eq(customers.emailHash, newHash),
             ne(customers.id, customerId),
+            isNull(customers.fieldpulseCustomerId),
           ),
         )
         .limit(1);
@@ -1040,7 +1222,7 @@ export async function updateCustomerContact(
   if (input.phone !== undefined) {
     const normalized = normalizePhone(input.phone);
     const newHash = normalized ? blindIndex(normalized) : null;
-    if (newHash && newHash !== existing.phoneHash) {
+    if (editedRowIsNative && newHash && newHash !== existing.phoneHash) {
       const [clash] = await db
         .select({ id: customers.id })
         .from(customers)
@@ -1050,6 +1232,7 @@ export async function updateCustomerContact(
             organizationId,
             eq(customers.phoneHash, newHash),
             ne(customers.id, customerId),
+            isNull(customers.fieldpulseCustomerId),
           ),
         )
         .limit(1);
@@ -1087,10 +1270,20 @@ export async function updateCustomerContact(
     return { ok: true };
   }
 
-  await db
-    .update(customers)
-    .set(set)
-    .where(withTenant(customers, organizationId, eq(customers.id, customerId)));
+  try {
+    await db
+      .update(customers)
+      .set(set)
+      .where(withTenant(customers, organizationId, eq(customers.id, customerId)));
+  } catch (error: unknown) {
+    // The clash check above is a check-then-set with no transaction around it,
+    // so two concurrent edits can both pass it and the index decides. Report
+    // the loser the same way the pre-check does instead of a raw 500.
+    if (isUniqueViolation(error)) {
+      return { ok: false, reason: "contact_conflict" };
+    }
+    throw error;
+  }
 
   await logAudit({
     organizationId,
