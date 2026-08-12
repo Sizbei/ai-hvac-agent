@@ -57,7 +57,7 @@ export function LoginForm({ mode, googleEnabled }: LoginFormProps) {
           New to Spears?{' '}
           <Link
             href="/signup"
-            className="font-medium text-foreground underline underline-offset-4 hover:no-underline"
+            className="font-medium text-link underline underline-offset-4 hover:no-underline"
           >
             Create an account
           </Link>
@@ -85,7 +85,7 @@ export function LoginForm({ mode, googleEnabled }: LoginFormProps) {
               Use the Google account your administrator invited.{' '}
               <Link
                 href="/admin/forgot-password"
-                className="whitespace-nowrap font-medium text-foreground underline underline-offset-4 hover:no-underline"
+                className="whitespace-nowrap font-medium text-link underline underline-offset-4 hover:no-underline"
               >
                 Trouble signing in?
               </Link>
@@ -158,6 +158,7 @@ function PasswordForm({ onError }: { readonly onError: (msg: string) => void }) 
           required
           autoFocus
           disabled={isLoading}
+          className="h-10"
         />
       </div>
 
@@ -166,7 +167,7 @@ function PasswordForm({ onError }: { readonly onError: (msg: string) => void }) 
           <Label htmlFor="password">Password</Label>
           <Link
             href="/admin/forgot-password"
-            className="text-xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+            className="text-xs font-medium text-link underline-offset-4 hover:underline"
           >
             Forgot password?
           </Link>
@@ -178,10 +179,11 @@ function PasswordForm({ onError }: { readonly onError: (msg: string) => void }) 
           onChange={(e) => setPassword(e.target.value)}
           required
           disabled={isLoading}
+          className="h-10"
         />
       </div>
 
-      <Button type="submit" className="w-full" disabled={isLoading}>
+      <Button type="submit" className="h-10 w-full" disabled={isLoading}>
         {isLoading ? (
           <>
             <Loader2 className="size-4 animate-spin" />
@@ -204,8 +206,8 @@ function GoogleSignInButton({ prominent = false }: { readonly prominent?: boolea
       href="/api/auth/google/start"
       className={
         prominent
-          ? 'inline-flex h-11 w-full items-center justify-center gap-2.5 rounded-lg border border-input bg-background px-4 text-sm font-medium shadow-xs transition-all duration-200 ease-out hover:bg-accent hover:text-accent-foreground hover:shadow-md focus-visible:ring-3 focus-visible:ring-ring/50'
-          : 'inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg border border-input bg-background px-4 text-sm font-medium shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-3 focus-visible:ring-ring/50'
+          ? 'inline-flex h-11 w-full items-center justify-center gap-2.5 rounded-md border border-border-input bg-surface-raised px-4 text-sm font-medium text-foreground transition-[background-color,border-color] duration-[var(--dur-hover)] outline-none hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring'
+          : 'inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-border-input bg-surface-raised px-4 text-sm font-medium text-foreground transition-[background-color,border-color] duration-[var(--dur-hover)] outline-none hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring'
       }
     >
       <GoogleGlyph />

@@ -16,7 +16,7 @@ import { TableSkeleton } from '@/components/admin/skeletons';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
-import { StatCard } from '@/components/admin/ui/stat-card';
+import { StatCard, StatStrip } from '@/components/admin/ui/stat-card';
 import { EmptyState } from '@/components/admin/ui/empty-state';
 import { SegmentedControl } from '@/components/ui/segmented-control';
 import { Pager } from '@/components/admin/ui/pager';
@@ -93,7 +93,7 @@ function isOpenEstimate(fps: string | null, native: string): boolean {
 function KpiBand({ stats }: { stats: EstimatePipelineStats | null }) {
   const s = stats;
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <StatStrip>
       <StatCard
         icon={FolderOpen}
         intent="info"
@@ -126,7 +126,7 @@ function KpiBand({ stats }: { stats: EstimatePipelineStats | null }) {
         value={`${s?.avgOpenAgeDays ?? 0}d`}
         sublabel={`${s?.lostCount ?? 0} lost (${formatCentsExact(s?.lostCents ?? 0)})`}
       />
-    </div>
+    </StatStrip>
   );
 }
 

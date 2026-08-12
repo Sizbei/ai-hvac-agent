@@ -107,7 +107,7 @@ function HourLines() {
       {Array.from({ length: GRID_HOURS }, (_, i) => (
         <div
           key={`line-${i}`}
-          className="border-b border-dashed border-border/60"
+          className="border-b border-dashed border-border"
           style={{ height: HOUR_PX }}
         />
       ))}
@@ -122,7 +122,7 @@ function TimeAxis() {
       {labels.map((label, i) => (
         <div
           key={label}
-          className="relative text-[10px] tabular-nums text-muted-foreground"
+          className="relative font-mono text-[11px] leading-[14px] tabular-nums text-muted-foreground"
           style={{ height: HOUR_PX }}
         >
           <span className="absolute -top-1.5 right-0">{i === 0 ? '' : label}</span>
@@ -158,7 +158,7 @@ function DayLane({
 
   return (
     <div
-      className="relative flex-1 rounded-md bg-muted/20"
+      className="relative flex-1 rounded-sm border border-border bg-canvas"
       style={{ height: GRID_PX }}
     >
       <HourLines />
@@ -235,10 +235,10 @@ function DayView({
       <TimeAxis />
       <div className="flex min-w-0 flex-1 gap-2">
         <div className="flex w-56 shrink-0 flex-col">
-          <div className="mb-1 flex items-center gap-1.5 text-sm font-semibold">
-            <Inbox className="size-4 text-warning" />
+          <div className="mb-1 flex h-6 items-center gap-1.5 rounded-sm bg-surface-sunken px-2 text-[13px] font-semibold">
+            <Inbox className="size-4 text-warning-strong" />
             <span className="truncate">Unassigned</span>
-            <span className="ml-auto text-xs text-muted-foreground">
+            <span className="ml-auto font-mono text-xs tabular-nums text-muted-foreground">
               {unassigned.length}
             </span>
           </div>
@@ -252,10 +252,10 @@ function DayView({
         </div>
         {lanes.map((lane) => (
           <div key={lane.technicianId} className="flex w-56 shrink-0 flex-col">
-            <div className="mb-1 flex items-center gap-1.5 text-sm font-semibold">
-              <User className="size-4 text-muted-foreground" />
+            <div className="mb-1 flex h-6 items-center gap-1.5 rounded-sm bg-surface-sunken px-2 text-[13px] font-semibold">
+              <User className="size-4 text-foreground-faint" />
               <span className="truncate">{lane.technicianName}</span>
-              <span className="ml-auto text-xs text-muted-foreground">
+              <span className="ml-auto font-mono text-xs tabular-nums text-muted-foreground">
                 {lane.jobs.length}
               </span>
             </div>
@@ -328,17 +328,17 @@ function WeekView({
                 onClick={() => onPickDay?.(isoDay)}
                 title="Open this day"
                 aria-label={`Open ${isoDay} in day view`}
-                className={`mb-1 rounded-md py-1 text-center text-xs font-semibold transition-colors hover:bg-muted ${
+                className={`mb-1 rounded-sm py-1 text-center text-xs font-semibold transition-colors hover:bg-row-hover ${
                   isToday
-                    ? 'bg-primary/10 text-primary'
+                    ? 'bg-primary-soft text-foreground shadow-[inset_0_-2px_0_var(--marker)]'
                     : 'text-foreground'
                 }`}
               >
                 {weekday}{' '}
                 <span
-                  className={
-                    isToday ? 'font-bold' : 'font-normal text-muted-foreground'
-                  }
+                  className={`font-mono tabular-nums ${
+                    isToday ? 'font-semibold' : 'font-normal text-muted-foreground'
+                  }`}
                 >
                   {wall.month}/{wall.day}
                 </span>
@@ -377,8 +377,9 @@ function NowLine() {
       style={{ top: topPx }}
       aria-hidden
     >
-      <div className="relative h-px bg-red-500">
-        <div className="absolute -left-1 -top-1 size-2 rounded-full bg-red-500" />
+      {/* 1px danger rule with a 5px square cap in the left gutter. */}
+      <div className="relative h-px bg-danger">
+        <div className="absolute -left-1 -top-0.5 size-[5px] rounded-[1px] bg-danger" />
       </div>
     </div>
   );
@@ -616,7 +617,7 @@ export function InteractiveSchedulingCalendar({
           {showSkeleton || !board ? (
             <Skeleton className="h-[28rem] w-full" />
           ) : (
-            <div className="rounded-lg border bg-card p-3">
+            <div className="rounded-lg border border-border-strong bg-surface p-3">
               {view === 'week' ? (
                 <WeekView
                   days={board.days}
@@ -653,7 +654,9 @@ export function InteractiveSchedulingCalendar({
       </div>
       <DragOverlay dropAnimation={null}>
         {activeJob ? (
-          <div className="w-52 opacity-90 shadow-lg">
+          // Drag ghost per the motion spec: --shadow-pop, 0.95 opacity, and a
+          // 1px marker border so the travelling card reads as lifted.
+          <div className="w-52 rounded-sm border border-marker opacity-95 shadow-[var(--shadow-pop)]">
             <CalendarJobCard job={activeJob} onSelect={() => {}} />
           </div>
         ) : null}

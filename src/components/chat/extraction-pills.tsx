@@ -52,10 +52,10 @@ export function ExtractionPills({ fields }: ExtractionPillsProps) {
               key={field.key}
               title={field.label}
               className={cn(
-                'inline-flex items-center justify-center rounded-full transition-colors duration-150',
+                'inline-flex items-center justify-center rounded-[2px] transition-colors duration-150',
                 field.collected
-                  ? 'size-5 bg-green-500 text-white'
-                  : 'size-2.5 bg-muted border border-border',
+                  ? 'size-5 bg-success text-success-foreground'
+                  : 'size-2.5 bg-surface-sunken border border-border',
               )}
               animate={
                 reduceMotion
@@ -78,10 +78,10 @@ export function ExtractionPills({ fields }: ExtractionPillsProps) {
           <span
             key={field.key}
             className={cn(
-              'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors',
+              'inline-flex items-center gap-1 rounded-[3px] border px-2 py-0.5 text-[11px] font-medium transition-colors',
               field.collected
-                ? 'border-green-200 bg-green-50 text-green-700'
-                : 'border-border bg-muted/50 text-muted-foreground',
+                ? 'border-success-border bg-success-light text-success-strong'
+                : 'border-border bg-surface-raised text-muted-foreground',
             )}
           >
             {field.collected && <Check className="size-3" aria-hidden />}
@@ -91,14 +91,14 @@ export function ExtractionPills({ fields }: ExtractionPillsProps) {
       </div>
 
       <div
-        className="h-1.5 w-full overflow-hidden rounded-full bg-muted"
+        className="h-1.5 w-full overflow-hidden rounded-[2px] bg-surface-sunken"
         role="progressbar"
         aria-valuenow={collected}
         aria-valuemin={0}
         aria-valuemax={total}
       >
         <motion.div
-          className={cn('h-full rounded-full', done ? 'bg-green-500' : 'bg-primary')}
+          className={cn('h-full rounded-[2px]', done ? 'bg-success' : 'bg-marker')}
           initial={reduceMotion ? false : { width: 0 }}
           animate={{ width: `${pct}%` }}
           transition={{ duration: reduceMotion ? 0 : 0.35, ease: 'easeOut' }}

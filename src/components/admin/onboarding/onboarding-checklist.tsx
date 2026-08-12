@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Check, Circle, X, Rocket } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { ProgressBar } from '@/components/admin/ui/progress-bar';
 import { cn } from '@/lib/utils';
 
 interface OnboardingStep {
@@ -68,10 +69,10 @@ export function OnboardingChecklist() {
   const pct = Math.round((state.completedCount / state.totalCount) * 100);
 
   return (
-    <Card className="border-primary/20">
+    <Card className="border-border-strong">
       <CardHeader className="flex flex-row items-start justify-between gap-4 pb-3">
         <div className="flex items-center gap-2.5">
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-[oklch(0.62_0.13_222)] text-primary-foreground shadow-sm">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-[4px] bg-primary text-primary-foreground">
             <Rocket className="size-4.5" />
           </span>
           <div>
@@ -94,28 +95,21 @@ export function OnboardingChecklist() {
       </CardHeader>
       <CardContent className="space-y-4">
         {/* Progress bar */}
-        <div
-          className="h-1.5 w-full overflow-hidden rounded-full bg-muted"
-          role="progressbar"
-          aria-valuenow={pct}
-          aria-valuemin={0}
-          aria-valuemax={100}
-        >
-          <div
-            className="h-full rounded-full bg-gradient-to-r from-primary to-[oklch(0.62_0.13_222)] transition-[width] duration-300"
-            style={{ width: `${pct}%` }}
-          />
-        </div>
+        <ProgressBar
+          value={pct}
+          label={`Setup ${pct}% complete`}
+          className="h-1.5"
+        />
 
         <ul className="space-y-1.5">
           {state.steps.map((step) => (
             <li key={step.id} className="flex items-center gap-2.5 text-sm">
               {step.done ? (
-                <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">
+                <span className="flex size-5 shrink-0 items-center justify-center rounded-[3px] bg-success-light text-success-strong">
                   <Check className="size-3.5" />
                 </span>
               ) : (
-                <Circle className="size-5 shrink-0 text-muted-foreground/40" />
+                <Circle className="size-5 shrink-0 text-foreground-faint" />
               )}
               <span
                 className={cn(

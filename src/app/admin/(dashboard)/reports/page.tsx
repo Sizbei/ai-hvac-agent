@@ -23,7 +23,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
-import { StatCard } from '@/components/admin/ui/stat-card';
+import { StatCard, StatStrip } from '@/components/admin/ui/stat-card';
 import { SectionCard } from '@/components/admin/ui/section-card';
 import { DataTableShell } from '@/components/admin/ui/data-table-shell';
 import { EmptyState } from '@/components/admin/ui/empty-state';
@@ -89,7 +89,7 @@ export default function ReportsPage() {
       )}
 
       {/* Primary KPIs */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <StatStrip>
         <StatCard
           label="Net revenue (period)"
           value={report ? formatCentsExact(report.netCollectedCents) : '—'}
@@ -131,10 +131,10 @@ export default function ReportsPage() {
           intent="info"
           loading={isLoading}
         />
-      </div>
+      </StatStrip>
 
       {/* Secondary stats */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <StatStrip>
         <StatCard
           label="Estimates created"
           value={report ? String(report.estimatesCreated) : '—'}
@@ -167,7 +167,7 @@ export default function ReportsPage() {
           size="sm"
           loading={isLoading}
         />
-      </div>
+      </StatStrip>
 
       {/* Lead source ROI */}
       <LeadSourceTable rows={leadSourceBreakdown} isLoading={isLoading} />

@@ -34,21 +34,23 @@ function PeopleCard({
       type="button"
       onClick={() => onSelect(customer.id)}
       aria-current={active ? 'true' : undefined}
-      className={`flex flex-col gap-3 rounded-xl border bg-card p-4 text-left transition-[transform,box-shadow,border-color] duration-150 ease-out motion-reduce:transition-none hover:-translate-y-0.5 hover:border-muted-foreground/40 hover:shadow-md ${
-        active ? 'border-primary ring-1 ring-primary' : ''
+      className={`flex flex-col gap-3 rounded-lg border p-4 text-left transition-colors duration-100 motion-reduce:transition-none ${
+        active
+          ? 'border-marker bg-primary-soft shadow-[inset_2px_0_0_var(--marker)]'
+          : 'border-border-strong bg-surface hover:bg-row-hover'
       }`}
     >
-      {/* header: avatar + name */}
+      {/* header: avatar + name — square 4 px sunken tile, mono initials */}
       <div className="flex items-center gap-3">
         <div
-          className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground"
+          className="flex size-9 shrink-0 items-center justify-center rounded-[4px] bg-surface-sunken font-mono text-[11px] font-medium text-muted-foreground"
           aria-hidden
         >
           {customerInitials(customer.name)}
         </div>
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
-            <p className="truncate font-semibold">{customer.name ?? 'Unknown'}</p>
+            <p className="truncate text-sm font-medium">{customer.name ?? 'Unknown'}</p>
             {customer.fieldpulseCustomerId && (
               <SyncPill source="fieldpulse" size="sm" />
             )}
@@ -60,23 +62,23 @@ function PeopleCard({
       {/* booking count */}
       <div className="flex items-center gap-4 text-sm text-muted-foreground">
         <span className="flex items-center gap-1.5">
-          <Calendar className="size-3.5" />
-          <span className="font-semibold text-foreground tabular-nums">
+          <Calendar className="size-3.5 text-foreground-faint" />
+          <span className="font-mono font-medium tabular-nums text-foreground">
             {customer.requestCount}
           </span>
           booking{customer.requestCount === 1 ? '' : 's'}
         </span>
         <span className="flex items-center gap-1.5">
-          <Wrench className="size-3.5" />
-          <span className="tabular-nums">{customer.equipmentCount}</span>
+          <Wrench className="size-3.5 text-foreground-faint" />
+          <span className="font-mono tabular-nums">{customer.equipmentCount}</span>
         </span>
       </div>
 
       {/* footer: last seen + archived */}
-      <div className="flex items-center justify-between border-t border-dashed pt-2.5 text-xs">
+      <div className="flex items-center justify-between border-t border-border pt-2.5 text-xs">
         <span className="flex items-center gap-1.5 text-muted-foreground">
           <span
-            className={`size-1.5 rounded-full ${lastSeenDotClass(customer.lastServiceDate)}`}
+            className={`size-1.5 rounded-[1px] ${lastSeenDotClass(customer.lastServiceDate)}`}
             aria-hidden
           />
           {lastSeenLabel(customer.lastServiceDate)}

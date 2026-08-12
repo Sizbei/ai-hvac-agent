@@ -144,7 +144,7 @@ export function AddressAutocomplete({
   const showDropdown = open && suggestions.length > 0;
 
   return (
-    <div className="relative border-t bg-background p-3">
+    <div className="relative border-t border-border-strong bg-surface p-3">
       <div className="relative">
         <MapPin className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input
@@ -157,7 +157,7 @@ export function AddressAutocomplete({
           placeholder={placeholder}
           disabled={disabled}
           autoFocus
-          className="pl-8"
+          className="h-11 pl-8 text-[15px]"
           role="combobox"
           aria-expanded={showDropdown}
           aria-controls={LISTBOX_ID}
@@ -174,7 +174,7 @@ export function AddressAutocomplete({
           id={LISTBOX_ID}
           role="listbox"
           aria-label="Address suggestions"
-          className="absolute bottom-full left-3 right-3 z-10 mb-1 max-h-60 overflow-auto rounded-lg border border-border bg-background py-1 shadow-md"
+          className="absolute bottom-full left-3 right-3 z-10 mb-1 max-h-60 overflow-auto rounded-md border border-border-strong bg-surface-raised py-1 shadow-[var(--shadow-pop)]"
         >
           {suggestions.map((s, i) => {
             const hint = distanceHint(s);
@@ -190,9 +190,9 @@ export function AddressAutocomplete({
                   choose(s);
                 }}
                 onMouseEnter={() => setHighlighted(i)}
-                className={`flex cursor-pointer items-center gap-2 px-3 py-2 text-sm ${
+                className={`flex min-h-11 cursor-pointer items-center gap-2 px-3 py-2 text-[15px] ${
                   i === highlighted
-                    ? 'bg-muted text-foreground'
+                    ? 'bg-accent text-foreground'
                     : 'text-foreground'
                 }`}
               >

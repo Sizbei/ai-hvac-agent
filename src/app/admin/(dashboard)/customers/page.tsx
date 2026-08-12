@@ -55,9 +55,9 @@ interface CustomerRowProps {
 const CustomerRow = memo(function CustomerRow({ customer }: CustomerRowProps) {
   return (
     <Link href={`/admin/customers/${customer.id}`}>
-      <Card className="transition-colors hover:bg-muted/50">
+      <Card className="transition-colors hover:bg-row-hover">
         <CardContent className="flex items-center gap-4 p-4">
-          <div className="flex size-10 items-center justify-center rounded-full bg-primary/10 text-primary">
+          <div className="flex size-9 items-center justify-center rounded-[4px] bg-primary-soft text-marker-strong">
             {customer.customerType === 'commercial' ? (
               <Building2 className="size-5" aria-hidden="true" />
             ) : (
@@ -84,14 +84,14 @@ const CustomerRow = memo(function CustomerRow({ customer }: CustomerRowProps) {
           </div>
           <div className="flex items-center gap-3 text-sm text-muted-foreground">
             <span className="flex items-center gap-1.5">
-              <Wrench className="size-3.5" aria-hidden="true" />
+              <Wrench className="size-3.5 text-foreground-faint" aria-hidden="true" />
               <span className="sr-only">Equipment:</span>
-              {customer.equipmentCount}
+              <span className="font-mono tabular-nums">{customer.equipmentCount}</span>
             </span>
             <span className="flex items-center gap-1.5">
-              <Calendar className="size-3.5" aria-hidden="true" />
+              <Calendar className="size-3.5 text-foreground-faint" aria-hidden="true" />
               <span className="sr-only">Bookings:</span>
-              {customer.requestCount}
+              <span className="font-mono tabular-nums">{customer.requestCount}</span>
             </span>
             {customer.lastServiceDate && (
               <Badge variant="outline" className="text-xs">

@@ -13,7 +13,7 @@ function JobCardSkeleton() {
         {/* Header row: reference number + status badge */}
         <div className="flex items-center justify-between">
           <Skeleton className="h-3.5 w-20" />
-          <Skeleton className="h-5 w-16 rounded-full" />
+          <Skeleton className="h-5 w-16 rounded-[3px]" />
         </div>
         {/* Issue type line */}
         <Skeleton className="mt-2 h-3.5 w-40" />
@@ -73,12 +73,12 @@ export function TechJobsListClient() {
   }
 
   if (error) {
-    return <p className="text-sm text-destructive">{error}</p>;
+    return <p className="text-[15px] text-danger-strong">{error}</p>;
   }
 
   if (jobs.length === 0) {
     return (
-      <p className="py-12 text-center text-sm text-muted-foreground">
+      <p className="py-12 text-center text-[15px] text-muted-foreground">
         No active jobs assigned to you.
       </p>
     );
@@ -89,24 +89,26 @@ export function TechJobsListClient() {
       {jobs.map((job) => (
         <li key={job.id}>
           <Link href={`/tech/jobs/${job.id}`}>
-            <Card className="transition-colors active:bg-muted">
+            <Card className="transition-colors active:bg-accent">
               <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">
+                <div className="flex min-h-6 items-center justify-between gap-2">
+                  <span className="font-mono text-[13px] font-medium tabular-nums">
                     {job.referenceNumber}
                   </span>
-                  <span className="rounded-full border bg-muted px-2 py-0.5 text-xs">
+                  {/* raw enum value (no humanize here) — left as-is, so no
+                    * uppercase transform: it would render "IN_PROGRESS". */}
+                  <span className="rounded-[3px] border border-border bg-surface-raised px-2 py-0.5 text-[11px] font-medium tracking-[0.02em] text-muted-foreground">
                     {job.status}
                   </span>
                 </div>
-                <p className="mt-1 text-sm">{job.issueType}</p>
+                <p className="mt-1.5 text-[15px] font-medium">{job.issueType}</p>
                 {job.address && (
-                  <p className="mt-1 text-xs text-muted-foreground">
+                  <p className="mt-1 text-[13px] text-muted-foreground">
                     {job.address}
                   </p>
                 )}
                 {job.arrivalWindowStart && (
-                  <p className="mt-1 text-xs text-muted-foreground">
+                  <p className="mt-1 font-mono text-[13px] tabular-nums text-muted-foreground">
                     {new Date(job.arrivalWindowStart).toLocaleString()}
                   </p>
                 )}

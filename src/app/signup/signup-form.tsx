@@ -45,7 +45,7 @@ export function SignupForm({ signupEnabled }: SignupFormProps) {
           Already have an account?{' '}
           <Link
             href="/admin/login"
-            className="font-medium text-foreground underline underline-offset-4 hover:no-underline"
+            className="font-medium text-link underline underline-offset-4 hover:no-underline"
           >
             Sign in
           </Link>
@@ -80,6 +80,7 @@ export function SignupForm({ signupEnabled }: SignupFormProps) {
                 required
                 maxLength={100}
                 autoFocus
+                className="h-10"
               />
               <p className="text-xs text-muted-foreground">
                 You can rename it later in settings.
@@ -89,7 +90,7 @@ export function SignupForm({ signupEnabled }: SignupFormProps) {
             <button
               type="submit"
               disabled={businessName.trim().length === 0}
-              className="inline-flex h-11 w-full items-center justify-center gap-2.5 rounded-lg border border-input bg-background px-4 text-sm font-medium shadow-xs transition-all duration-200 ease-out hover:bg-accent hover:text-accent-foreground hover:shadow-md focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50"
+              className="inline-flex h-11 w-full items-center justify-center gap-2.5 rounded-md border border-border-input bg-surface-raised px-4 text-sm font-medium text-foreground transition-[background-color,border-color] duration-[var(--dur-hover)] outline-none hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50"
             >
               <GoogleGlyph />
               Sign up with Google

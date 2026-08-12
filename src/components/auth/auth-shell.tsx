@@ -89,7 +89,7 @@ export function AuthShell({ title, subtitle, children, footer }: AuthShellProps)
         <div className="lp-rise w-full max-w-sm">
           {/* compact brand — mobile only */}
           <div className="mb-8 flex items-center gap-2.5 lg:hidden">
-            <span className="flex size-9 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-[oklch(0.62_0.13_222)] text-white shadow-sm">
+            <span className="flex size-9 items-center justify-center rounded-lg bg-gradient-to-br from-brand-cyan to-brand-navy text-primary-foreground">
               <Wind className="size-4.5" strokeWidth={2.25} />
             </span>
             <span className="font-heading text-base font-bold tracking-tight">

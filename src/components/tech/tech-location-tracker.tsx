@@ -115,14 +115,14 @@ export function TechLocationTracker() {
   }, [enabled]);
 
   return (
-    <div className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2">
+    <div className="flex min-h-11 items-center justify-between gap-3 rounded-lg border border-border-strong bg-surface px-3 py-2">
       <div className="flex items-center gap-2">
         <MapPin
-          className={`size-4 ${enabled ? 'text-emerald-600' : 'text-muted-foreground'}`}
+          className={`size-4 ${enabled ? 'text-success' : 'text-foreground-faint'}`}
         />
         <div>
-          <p className="text-sm font-medium">Share my location</p>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-[15px] font-medium">Share my location</p>
+          <p className="text-[13px] text-muted-foreground">
             {status ??
               (enabled
                 ? 'On while you work — helps dispatch route jobs.'
@@ -137,12 +137,16 @@ export function TechLocationTracker() {
         aria-label="Share my location while working"
         disabled={busy}
         onClick={() => void toggle()}
-        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
-          enabled ? 'bg-emerald-600' : 'bg-muted'
+        /* 44px hit area on a 24px knob via ::before (touch carve-out) */
+        className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors before:absolute before:-inset-x-2 before:-inset-y-2.5 before:content-[''] ${
+          enabled
+            ? 'border-success bg-success'
+            : 'border-border-strong bg-surface-sunken'
         } ${busy ? 'opacity-50' : ''}`}
       >
+        {/* switch knob — a listed circular exemption */}
         <span
-          className={`absolute top-0.5 size-5 rounded-full bg-white shadow transition-transform ${
+          className={`absolute top-[1px] size-5 rounded-full border border-border-strong bg-surface-raised transition-transform ${
             enabled ? 'translate-x-5' : 'translate-x-0.5'
           }`}
         />

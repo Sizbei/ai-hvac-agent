@@ -20,18 +20,18 @@ export function MobileNav() {
   return (
     <Sheet>
       <SheetTrigger
-        className="flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:hidden"
+        className="flex size-11 items-center justify-center rounded-md text-muted-foreground transition-colors duration-[var(--dur-hover)] hover:bg-accent hover:text-foreground md:hidden"
         aria-label="Open menu"
       >
         <Menu className="size-5" />
       </SheetTrigger>
       <SheetContent side="right" className="w-64 px-0 pt-0">
-        <SheetHeader className="border-b border-border/60 px-5 py-4">
+        <SheetHeader className="border-b border-border-strong px-5 py-4">
           <SheetTitle className="flex items-center gap-2">
-            <span className="flex size-7 items-center justify-center rounded-md bg-gradient-to-br from-primary to-[var(--hvac-accent)] text-white">
+            <span className="flex size-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
               <Wind className="size-4" strokeWidth={2.25} />
             </span>
-            <span className="font-bold tracking-tight">Spears Services</span>
+            <span className="font-heading font-semibold tracking-tight">Spears Services</span>
           </SheetTitle>
         </SheetHeader>
         <nav className="flex flex-col gap-1 p-4">
@@ -39,7 +39,7 @@ export function MobileNav() {
             <Link
               key={item.href}
               href={item.href}
-              className="rounded-md px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              className="flex min-h-11 items-center rounded-md px-3 text-sm font-medium text-muted-foreground transition-colors duration-[var(--dur-hover)] hover:bg-accent hover:text-foreground"
             >
               {item.label}
             </Link>

@@ -99,13 +99,13 @@ export function CustomerDrawer({ customer, onClose }: CustomerDrawerProps) {
             <SheetHeader className="space-y-0">
               <SheetTitle className="flex items-center gap-3">
                 <div
-                  className="flex size-12 shrink-0 items-center justify-center rounded-full bg-primary text-base font-bold text-primary-foreground"
+                  className="flex size-10 shrink-0 items-center justify-center rounded-[4px] bg-surface-sunken font-mono text-xs font-medium text-muted-foreground"
                   aria-hidden
                 >
                   {customerInitials(customer.name)}
                 </div>
                 <span className="min-w-0">
-                  <span className="block truncate text-lg font-semibold">
+                  <span className="block truncate text-[20px] font-semibold leading-[26px] tracking-[-0.02em]">
                     {customer.name ?? 'Unknown'}
                   </span>
                   <span className="block text-xs font-normal text-muted-foreground">

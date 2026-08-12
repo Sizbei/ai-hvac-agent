@@ -348,8 +348,8 @@ export function ConversationDetailContent({
       <div className="flex-1 overflow-y-auto space-y-4 px-6 py-5">
         {/* AI summary callout */}
         {detail.summary && (
-          <div className="rounded-xl border border-primary/20 bg-primary/[0.05] p-4">
-            <div className="mb-1.5 text-xs font-semibold text-primary">
+          <div className="rounded-md border border-primary-border bg-primary-soft p-4">
+            <div className="mb-1.5 text-xs font-semibold text-marker-strong">
               AI summary
             </div>
             <p className="text-sm leading-relaxed text-foreground/90 whitespace-pre-wrap">
@@ -360,7 +360,7 @@ export function ConversationDetailContent({
 
         {/* AI outcome + suggested next steps */}
         {(detail.outcome || (detail.nextSteps && detail.nextSteps.length > 0)) && (
-          <div className="rounded-xl border border-border bg-muted/40 p-4 space-y-3">
+          <div className="rounded-md border border-border bg-surface-sunken p-4 space-y-3">
             {detail.outcome && (
               <div className="flex items-center gap-2">
                 <span className="text-xs font-semibold text-muted-foreground">Outcome</span>

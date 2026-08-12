@@ -25,10 +25,10 @@ export function MessageBubble({ message, isLatest }: MessageBubbleProps) {
       className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}
     >
       <div
-        className={`max-w-[80%] shadow-sm ${
+        className={`max-w-[80%] ${
           isUser
-            ? 'bg-primary text-primary-foreground rounded-2xl rounded-br-md'
-            : 'bg-card border border-border rounded-2xl rounded-bl-md'
+            ? 'bg-primary text-primary-foreground rounded-xl rounded-br-md'
+            : 'bg-surface-raised border border-border rounded-xl rounded-bl-md'
         }`}
       >
         {/* Image Attachments */}
@@ -38,7 +38,7 @@ export function MessageBubble({ message, isLatest }: MessageBubbleProps) {
               {message.attachments!.map((attachment) => (
                 <div
                   key={attachment.id}
-                  className="rounded-lg overflow-hidden border border-border/20"
+                  className="rounded-md overflow-hidden border border-border"
                 >
                   <img
                     src={attachment.url}
@@ -55,7 +55,7 @@ export function MessageBubble({ message, isLatest }: MessageBubbleProps) {
         {/* Message Text */}
         {message.content && (
           <div className={`px-4 py-2.5 ${hasAttachments ? 'pt-2' : ''}`}>
-            <p className="text-sm whitespace-pre-wrap break-words">
+            <p className="text-[15px] leading-6 whitespace-pre-wrap break-words">
               {message.content}
             </p>
           </div>

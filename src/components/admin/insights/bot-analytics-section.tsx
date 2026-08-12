@@ -12,7 +12,8 @@ import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { StatCard } from '@/components/admin/ui/stat-card';
+import { StatCard, StatStrip } from '@/components/admin/ui/stat-card';
+import { ProgressBar } from '@/components/admin/ui/progress-bar';
 import { SectionHeading } from '@/components/admin/ui/section-heading';
 import { useBotAnalytics } from '@/hooks/use-bot-analytics';
 import type {
@@ -62,13 +63,12 @@ function BarList({
           <span className="w-36 shrink-0 truncate text-sm" title={format(r.key)}>
             {format(r.key)}
           </span>
-          <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
-            <div
-              className="h-full rounded-full bg-primary"
-              style={{ width: `${Math.round((r.count / max) * 100)}%` }}
-            />
-          </div>
-          <span className="w-10 shrink-0 text-right text-sm font-medium">
+          <ProgressBar
+            value={Math.round((r.count / max) * 100)}
+            label={`${format(r.key)}: ${r.count}`}
+            className="h-1.5 flex-1"
+          />
+          <span className="w-10 shrink-0 text-right font-mono text-sm tabular-nums">
             {r.count}
           </span>
         </div>
@@ -115,7 +115,7 @@ export function BotAnalyticsSection() {
         </Alert>
       )}
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+      <StatStrip>
         <StatCard
           icon={Cpu}
           label="Instant reply ratio"
@@ -156,10 +156,10 @@ export function BotAnalyticsSection() {
           size="sm"
           loading={isLoading}
         />
-      </div>
+      </StatStrip>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card className="p-4">
+        <Card className="border-t-2 border-t-signal p-4">
           <p className="mb-3 text-sm font-medium">Top intents</p>
           {isLoading ? (
             <Skeleton className="h-40 w-full" />
@@ -168,7 +168,7 @@ export function BotAnalyticsSection() {
           )}
         </Card>
 
-        <Card className="p-4">
+        <Card className="border-t-2 border-t-signal p-4">
           <div className="mb-3 flex items-center justify-between">
             <p className="text-sm font-medium">Conversation outcomes</p>
             {data && (

@@ -101,20 +101,22 @@ function AgendaRow({
     <button
       type="button"
       onClick={() => onSelect(booking.id)}
-      className="flex w-full items-center gap-3 rounded-lg border bg-card px-3 py-2.5 text-left transition-colors hover:border-muted-foreground/40 hover:bg-muted/40"
+      className="flex w-full items-center gap-3 rounded-sm border border-border bg-surface-raised px-3 py-2.5 text-left transition-colors hover:bg-row-hover"
     >
       {/* date badge */}
       <div className="flex w-12 shrink-0 flex-col items-center">
-        <span className="text-[10px] font-semibold text-muted-foreground">
+        <span className="text-[11px] font-semibold leading-[14px] text-muted-foreground">
           {MONTHS_SHORT[w.month - 1]}
         </span>
-        <span className="text-lg font-bold leading-none tabular-nums">{w.day}</span>
-        <span className={`mt-1 size-1.5 rounded-full ${dot}`} aria-hidden />
+        <span className="font-mono text-lg font-medium leading-none tabular-nums">
+          {w.day}
+        </span>
+        <span className={`mt-1 size-1.5 rounded-[1px] ${dot}`} aria-hidden />
       </div>
 
       {/* body */}
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-semibold">
+        <div className="truncate text-[13px] font-semibold">
           {booking.issueType || 'Service request'}
         </div>
         <div className="mt-0.5 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
@@ -136,7 +138,7 @@ function AgendaRow({
       {/* right rail */}
       <div className="flex shrink-0 items-center gap-2">
         {booking.isScheduled ? (
-          <span className="hidden text-xs tabular-nums text-muted-foreground sm:inline">
+          <span className="hidden font-mono text-xs tabular-nums text-muted-foreground sm:inline">
             {formatBusinessTime(when)}
           </span>
         ) : (
@@ -172,7 +174,7 @@ export function AgendaView({
     return (
       <div className="flex flex-col gap-2">
         {Array.from({ length: 8 }, (_, i) => (
-          <Skeleton key={i} className="h-14 w-full rounded-lg" />
+          <Skeleton key={i} className="h-14 w-full" />
         ))}
       </div>
     );
@@ -180,10 +182,12 @@ export function AgendaView({
 
   if (bookings.length === 0) {
     return (
-      <div className="rounded-lg border bg-card p-10 text-center">
-        <Inbox className="mx-auto size-8 text-muted-foreground/60" />
-        <p className="mt-3 text-sm font-medium">No bookings yet</p>
-        <p className="mt-1 text-sm text-muted-foreground">
+      <div className="rounded-lg border border-border-strong bg-surface p-10 text-center">
+        <span className="mx-auto flex size-10 items-center justify-center rounded-md bg-surface-sunken">
+          <Inbox className="size-5 text-foreground-faint" />
+        </span>
+        <p className="mt-3 text-[15px] font-medium">No bookings yet</p>
+        <p className="mt-1 text-[13px] text-muted-foreground">
           Bookings will appear here as they come in.
         </p>
       </div>
@@ -193,7 +197,9 @@ export function AgendaView({
   const rows = buildRows(bookings);
 
   return (
-    <div className="mx-auto max-w-3xl">
+    // Left-aligned to the shared page gutter (alignment covenant) rather than
+    // centered — the tabs and title above it start at the same optical edge.
+    <div className="max-w-3xl">
       <div className="flex flex-col gap-1.5">
         {rows.map((row) => {
           if (row.kind === 'month') {
@@ -202,9 +208,14 @@ export function AgendaView({
                 key={row.key}
                 className="mt-4 flex items-baseline gap-2 first:mt-0"
               >
-                <h2 className="text-base font-semibold text-marker">{row.label}</h2>
+                {/* Sentence-case section heading in graphite — teal stays
+                    scarce (nav marker / selection / sort only). */}
+                <h2 className="text-[15px] font-semibold text-foreground">
+                  {row.label}
+                </h2>
                 <span className="text-xs text-muted-foreground">
-                  {row.count} booking{row.count === 1 ? '' : 's'}
+                  <span className="font-mono tabular-nums">{row.count}</span>{' '}
+                  booking{row.count === 1 ? '' : 's'}
                 </span>
               </div>
             );
@@ -212,10 +223,10 @@ export function AgendaView({
           if (row.kind === 'today') {
             return (
               <div key={row.key} className="my-1 flex items-center gap-2">
-                <span className="text-[10px] font-bold text-danger">
+                <span className="text-[11px] font-semibold leading-[14px] text-danger-strong">
                   Today
                 </span>
-                <span className="h-px flex-1 bg-danger/30" />
+                <span className="h-px flex-1 bg-danger-border" />
               </div>
             );
           }
@@ -227,7 +238,7 @@ export function AgendaView({
       </div>
 
       {error && (
-        <p className="mt-3 text-center text-sm text-danger">{error}</p>
+        <p className="mt-3 text-center text-[13px] text-danger-strong">{error}</p>
       )}
 
       {hasMore && (

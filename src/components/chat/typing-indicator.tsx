@@ -12,17 +12,19 @@ export function TypingIndicator() {
 
   return (
     <div className="flex flex-col items-start gap-1" aria-live="polite">
-      <div className="bg-card border border-border rounded-2xl rounded-bl-md px-4 py-3 shadow-sm">
+      <div className="bg-surface-raised border border-border rounded-xl rounded-bl-md px-4 py-3">
         <div className="flex gap-1.5">
           {[0, 1, 2].map((i) => (
             <motion.span
               key={i}
-              className="w-2 h-2 rounded-full bg-slate-400"
-              animate={reduceMotion ? { opacity: 0.6 } : { y: [0, -6, 0] }}
+              className="size-1 bg-foreground-faint"
+              animate={
+                reduceMotion ? { opacity: 0.6 } : { opacity: [0.25, 1, 0.25] }
+              }
               transition={
                 reduceMotion
                   ? { duration: 0 }
-                  : { duration: 0.6, repeat: Infinity, delay: i * 0.15 }
+                  : { duration: 1.2, repeat: Infinity, delay: i * 0.2 }
               }
             />
           ))}

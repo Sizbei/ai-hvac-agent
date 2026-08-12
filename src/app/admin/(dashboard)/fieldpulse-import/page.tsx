@@ -24,7 +24,7 @@ import { cn } from '@/lib/utils';
 function StatusChip({ status, isStale }: { status?: string; isStale?: boolean }) {
   if (isStale) {
     return (
-      <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-warning-light text-warning-foreground">
+      <span className="inline-flex h-5 items-center rounded-[3px] border border-warning-border bg-warning-light px-2 text-[11px] font-medium text-warning-strong">
         Stale
       </span>
     );
@@ -41,12 +41,12 @@ function StatusChip({ status, isStale }: { status?: string; isStale?: boolean })
           : 'Not started';
 
   const chipClass = cn(
-    'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
-    tone === 'info' && 'bg-info-light text-info',
-    tone === 'positive' && 'bg-success-light text-success',
-    tone === 'destructive' && 'bg-danger-light text-danger',
-    tone === 'muted' && 'bg-muted text-muted-foreground',
-    status === 'running' && 'animate-pulse motion-reduce:animate-none',
+    'inline-flex h-5 items-center rounded-[3px] border px-2 text-[11px] font-medium',
+    tone === 'info' && 'border-info-border bg-info-light text-info-strong',
+    tone === 'positive' && 'border-success-border bg-success-light text-success-strong',
+    tone === 'destructive' && 'border-danger-border bg-danger-light text-danger-strong',
+    tone === 'muted' && 'border-border bg-surface-raised text-muted-foreground',
+    status === 'running' && 'skeleton-breathe',
   );
 
   return <span className={chipClass}>{label}</span>;
@@ -56,23 +56,24 @@ function ProgressBar({ pct, isRunning }: { pct: number | null; isRunning: boolea
   if (pct !== null) {
     return (
       <div
-        className="h-1.5 w-full overflow-hidden rounded-full bg-muted"
+        className="h-1.5 w-full overflow-hidden rounded-[2px] bg-surface-sunken"
         role="progressbar"
         aria-valuenow={pct}
         aria-valuemin={0}
         aria-valuemax={100}
       >
         <div
-          className="h-full rounded-full bg-primary transition-[width] duration-700 motion-reduce:transition-none"
-          style={{ width: `${pct}%`, transitionTimingFunction: 'cubic-bezier(.23,1,.32,1)' }}
+          className="h-full rounded-[2px] bg-marker transition-[width] duration-700 motion-reduce:transition-none"
+          style={{ width: `${pct}%`, transitionTimingFunction: 'var(--ease-out)' }}
         />
       </div>
     );
   }
   if (isRunning) {
+    // Indeterminate: a breathing slab, the one loading animation in the system.
     return (
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-        <div className="h-full w-1/3 animate-pulse rounded-full bg-primary/50 motion-reduce:animate-none" />
+      <div className="h-1.5 w-full overflow-hidden rounded-[2px] bg-surface-sunken">
+        <div className="skeleton-breathe h-full w-1/3 rounded-[2px] bg-marker-border" />
       </div>
     );
   }
@@ -135,7 +136,7 @@ function RecentRunsTable({
   return (
     <div className="overflow-x-auto rounded-lg border">
       <table className="w-full text-sm">
-        <thead className="border-b bg-muted/50">
+        <thead className="border-b border-border-strong bg-surface-sunken">
           <tr>
             <th scope="col" className="px-3 py-2 text-left text-[11px] text-muted-foreground">Phase</th>
             <th scope="col" className="px-3 py-2 text-left text-[11px] text-muted-foreground">Status</th>
@@ -151,7 +152,7 @@ function RecentRunsTable({
             const counts = run.counts as FpRunCounts;
             const stale = isStaleRun(run, asOfMs);
             return (
-              <tr key={run.id} className="hover:bg-muted/30">
+              <tr key={run.id} className="hover:bg-row-hover">
                 <td className="px-3 py-2 capitalize">{run.phase}</td>
                 <td className="px-3 py-2">
                   <StatusChip status={run.status} isStale={stale} />
@@ -222,7 +223,7 @@ export default function FieldpulseImportPage() {
           const stale = run ? isStaleRun(run, asOfMs) : false;
 
           return (
-            <Card key={phase} className="shadow-sm">
+            <Card key={phase}>
               <CardContent className="space-y-3 pt-4">
                 <div className="flex items-center justify-between gap-2">
                   <SectionHeading as="h2" title={phase} className="capitalize" />

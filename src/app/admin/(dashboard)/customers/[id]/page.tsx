@@ -5,9 +5,6 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   Building2,
-  Phone,
-  Mail,
-  MapPin,
   Wrench,
   Plus,
   StickyNote,
@@ -42,7 +39,6 @@ import {
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 import { SectionCard } from '@/components/admin/ui/section-card';
-import { SectionListItem } from '@/components/admin/ui/section-list-item';
 import { EmptyState } from '@/components/admin/ui/empty-state';
 import { StatusBadge } from '@/components/admin/status-badge';
 import { useCustomerDetail } from '@/hooks/use-admin-customers';
@@ -80,6 +76,36 @@ const EQUIPMENT_LABELS: Record<string, string> = {
   thermostat: 'Thermostat',
   other: 'Other',
 };
+
+/**
+ * Ruled definition row — 140 px label, value right-aligned, one hairline per
+ * pair. The detail-page pattern for the redesign; replaces the label-above-value
+ * card grid.
+ */
+function DetailRow({
+  label,
+  value,
+  mono = false,
+}: {
+  readonly label: string;
+  readonly value: React.ReactNode;
+  readonly mono?: boolean;
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-6 border-b border-border py-2 last:border-b-0 last:pb-0">
+      <dt className="w-[140px] shrink-0 text-[13px] leading-5 text-muted-foreground">
+        {label}
+      </dt>
+      <dd
+        className={`min-w-0 flex-1 break-words text-right text-[13px] leading-5 text-foreground${
+          mono ? ' font-mono tabular-nums' : ''
+        }`}
+      >
+        {value}
+      </dd>
+    </div>
+  );
+}
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', {
@@ -384,7 +410,7 @@ export default function CustomerDetailPage({
             {/* Destructive actions in overflow menu */}
             <DropdownMenu>
               <DropdownMenuTrigger
-                className="inline-flex size-9 items-center justify-center rounded-md border border-input bg-background text-sm font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+                className="inline-flex size-[30px] items-center justify-center rounded-[4.8px] border border-input bg-surface-raised text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
                 aria-label="More actions"
               >
                 <MoreHorizontal className="size-4" />
@@ -430,32 +456,23 @@ export default function CustomerDetailPage({
         title="Contact information"
         icon={customer.customerType === 'commercial' ? Building2 : User}
       >
-        <div className="grid gap-3 sm:grid-cols-2">
-          {customer.phone && (
-            <SectionListItem icon={Phone} label="Phone" value={customer.phone} />
-          )}
-          {customer.email && (
-            <SectionListItem icon={Mail} label="Email" value={customer.email} />
-          )}
+        <dl className="flex flex-col">
+          {customer.phone && <DetailRow label="Phone" value={customer.phone} mono />}
+          {customer.email && <DetailRow label="Email" value={customer.email} />}
           {customer.address && (
-            <SectionListItem icon={MapPin} label="Service address" value={customer.address} wide />
+            <DetailRow label="Service address" value={customer.address} />
           )}
           {customer.propertyType && (
-            <SectionListItem
+            <DetailRow
               label="Property type"
               value={`${customer.propertyType}${customer.propertySqft ? ` (${customer.propertySqft} sq ft)` : ''}`}
             />
           )}
           {/* Billing address — only when present and different from service address */}
           {customer.billingAddress && customer.billingAddress !== customer.address && (
-            <SectionListItem
-              icon={MapPin}
-              label="Billing address"
-              value={customer.billingAddress}
-              wide
-            />
+            <DetailRow label="Billing address" value={customer.billingAddress} />
           )}
-        </div>
+        </dl>
       </SectionCard>
 
       {/* FieldPulse details — collapsed panel (custom fields + structured data) */}

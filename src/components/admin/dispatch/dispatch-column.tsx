@@ -6,6 +6,7 @@ import { UrgencyBadge } from '@/components/admin/urgency-badge';
 import { StatusBadge } from '@/components/admin/status-badge';
 import { ContextBadge } from '@/components/admin/ui/context-badge';
 import { BUSINESS_TIME_ZONE } from '@/lib/admin/calendar-time';
+import { urgencyAccent } from '@/lib/admin/urgency-accent';
 import type { DashboardRequest } from '@/lib/admin/types';
 
 interface DispatchColumnProps {
@@ -55,7 +56,7 @@ function JobCard({
       type="button"
       aria-label={`${job.customerName ?? 'Unknown'} · ${job.referenceNumber}`}
       onClick={() => onSelect(job.id)}
-      className="w-full rounded-lg border bg-card px-3 py-2 text-left transition-colors hover:bg-muted"
+      className={`w-full rounded-sm border border-border border-l-2 bg-surface-raised px-3 py-2 text-left transition-colors hover:bg-row-hover ${urgencyAccent(job.urgency).bar}`}
     >
       <div className="flex items-center justify-between gap-2">
         <span className="text-sm font-medium tabular-nums">
@@ -99,23 +100,27 @@ export function DispatchColumn({
 }: DispatchColumnProps) {
   const Icon = isUnassigned ? Inbox : User;
   return (
-    <Card className="flex w-72 shrink-0 flex-col p-3">
-      <div className="mb-2 flex items-center gap-2">
+    <Card className="flex w-72 shrink-0 flex-col p-0">
+      <div className="flex h-10 items-center gap-2 border-b border-border-strong bg-surface-sunken px-3 shadow-[var(--keyline-top)]">
         <Icon
           className={
-            isUnassigned ? 'h-4 w-4 text-warning' : 'h-4 w-4 text-muted-foreground'
+            isUnassigned
+              ? 'h-4 w-4 text-warning-strong'
+              : 'h-4 w-4 text-foreground-faint'
           }
         />
-        <h2 className="truncate text-sm font-semibold">{title}</h2>
-        <span className="ml-auto text-xs text-muted-foreground">{jobs.length}</span>
+        <h2 className="truncate text-[15px] font-semibold">{title}</h2>
+        <span className="ml-auto font-mono text-xs tabular-nums text-muted-foreground">
+          {jobs.length}
+        </span>
       </div>
 
       {jobs.length === 0 ? (
-        <p className="py-6 text-center text-xs text-muted-foreground">
+        <p className="py-8 text-center text-xs text-muted-foreground">
           {isUnassigned ? 'Nothing to place' : 'No jobs'}
         </p>
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-2 p-3">
           {jobs.map((job) => (
             <JobCard key={job.id} job={job} onSelect={onSelect} />
           ))}

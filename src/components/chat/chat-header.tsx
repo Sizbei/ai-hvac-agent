@@ -35,6 +35,11 @@ function getStatusColor(status: SessionState): string {
   }
 }
 
+// Chat is a touch surface: the 30px header controls keep their instrument size
+// but get a 44px hit area via a transparent ::before overlay (no visual bloat).
+const TOUCH_TARGET =
+  "relative before:absolute before:inset-x-0 before:-inset-y-[7px] before:content-['']";
+
 function isEscalationDisabled(status: SessionState): boolean {
   return status === 'escalated' || status === 'abandoned' || status === 'submitted';
 }
@@ -46,8 +51,8 @@ export function ChatHeader({
   onShowHistory,
 }: ChatHeaderProps) {
   return (
-    <header className="sticky top-0 z-10 flex items-center justify-between border-b bg-background/80 backdrop-blur px-4 py-3">
-      <div className="flex items-center gap-2.5">
+    <header className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-y-2 border-b border-border-strong bg-surface px-4 py-3">
+      <div className="flex min-w-0 basis-full items-center gap-2.5 sm:basis-auto">
         {/* Brand the customer chat with the Spears logo lozenge. `compact` shows
             just the logo (the admin "Service Console" subtitle isn't customer
             copy), paired with a chat-appropriate wordmark below. */}
@@ -55,15 +60,15 @@ export function ChatHeader({
           <BrandMark compact />
           {/* Semantic session-status dot, anchored to the brand lozenge. */}
           <span
-            className={`absolute -right-0.5 -top-0.5 inline-block size-2.5 rounded-full ring-2 ring-background ${getStatusColor(status)}`}
+            className={`absolute -right-0.5 -top-0.5 inline-block size-2.5 rounded-[2px] ring-2 ring-surface ${getStatusColor(status)}`}
             aria-label={`Status: ${status}`}
           />
         </div>
-        <div className="leading-tight">
-          <h1 className="font-heading text-base font-bold tracking-tight">
+        <div className="min-w-0 leading-tight">
+          <h1 className="truncate font-heading text-[15px] font-semibold tracking-tight">
             Spears Services
           </h1>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="truncate text-[11px] text-muted-foreground">
             AI assistant · our team follows up on every request
           </p>
         </div>
@@ -72,9 +77,9 @@ export function ChatHeader({
         {onShowHistory && (
           <Button
             variant="ghost"
-            size="sm"
             onClick={onShowHistory}
             title="View conversation history"
+            className={TOUCH_TARGET}
           >
             <History className="size-3.5" data-icon="inline-start" />
           </Button>
@@ -82,9 +87,9 @@ export function ChatHeader({
         {onNewConversation && (
           <Button
             variant="ghost"
-            size="sm"
             onClick={onNewConversation}
             title="Start a new conversation"
+            className={TOUCH_TARGET}
           >
             <RotateCcw className="size-3.5" data-icon="inline-start" />
             New
@@ -92,9 +97,9 @@ export function ChatHeader({
         )}
         <Button
           variant="outline"
-          size="sm"
           onClick={onEscalate}
           disabled={isEscalationDisabled(status)}
+          className={TOUCH_TARGET}
         >
           <PhoneForwarded className="size-3.5" data-icon="inline-start" />
           Talk to a Human

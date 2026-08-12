@@ -42,16 +42,17 @@ export function CalendarJobCard({ job, onSelect, compact }: CalendarJobCardProps
       type="button"
       aria-label={`${job.customerName ?? 'Unknown'} · ${job.referenceNumber}`}
       onClick={() => onSelect(job.id)}
-      // Sky body + an urgency-colored left rail (border-l-4) so a glance reads
-      // priority by color — consistent with the urgency badges.
-      className={`flex h-full w-full flex-col overflow-hidden rounded-md border border-l-4 border-sky-200 ${accent.bar} bg-sky-50 px-2 py-1 text-left text-xs leading-tight transition-colors hover:bg-sky-100 dark:border-sky-900 dark:bg-sky-950 dark:hover:bg-sky-900`}
+      // Raised (white = a record) body, hairline border, and a 3px urgency
+      // left rail so a glance reads priority by color — same semantic families
+      // as the urgency badges.
+      className={`flex h-full w-full flex-col overflow-hidden rounded-sm border border-border border-l-[3px] ${accent.bar} bg-surface-raised px-2 py-1 text-left text-xs leading-tight transition-colors hover:bg-row-hover`}
     >
       <div className="flex items-center gap-1">
-        <span className="font-medium tabular-nums">{time}</span>
+        <span className="font-mono font-medium tabular-nums">{time}</span>
         {job.isAfterHours && (
           <span
             title="After hours"
-            className="inline-flex shrink-0 items-center rounded-full border border-warning/30 bg-warning-light px-1 text-[9px] font-medium text-warning-foreground"
+            className="inline-flex shrink-0 items-center rounded-[3px] border border-warning-border bg-warning-light px-1 text-[9px] font-medium text-warning-strong"
           >
             AH
           </span>
@@ -68,7 +69,7 @@ export function CalendarJobCard({ job, onSelect, compact }: CalendarJobCardProps
       </span>
       {!compact && (
         <>
-          <span className="truncate text-[11px] text-muted-foreground">
+          <span className="truncate text-[11px] leading-[14px] text-muted-foreground">
             {formatIssueType(job.issueType)} ·{' '}
             <span className="font-mono">{job.referenceNumber}</span>
           </span>

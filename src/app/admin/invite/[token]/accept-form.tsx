@@ -80,11 +80,11 @@ export function AcceptForm({ token, email, role }: AcceptFormProps) {
   const roleLabel = role === 'admin' ? 'Admin' : 'Technician';
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
+    <div className="flex min-h-screen items-center justify-center bg-canvas p-4">
       <Card className="w-full max-w-sm">
         <CardHeader className="space-y-1 text-center">
-          <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
-            <Wind className="h-5 w-5 text-primary" />
+          <div className="mx-auto flex size-10 items-center justify-center rounded-lg bg-primary">
+            <Wind className="size-5 text-primary-foreground" />
           </div>
           <CardTitle>Accept your invitation</CardTitle>
           <CardDescription>
@@ -95,7 +95,14 @@ export function AcceptForm({ token, email, role }: AcceptFormProps) {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="invite-email">Email</Label>
-              <Input id="invite-email" type="email" value={email} readOnly disabled />
+              <Input
+                id="invite-email"
+                type="email"
+                value={email}
+                readOnly
+                disabled
+                className="h-10"
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="invite-name">Name</Label>
@@ -106,6 +113,7 @@ export function AcceptForm({ token, email, role }: AcceptFormProps) {
                 placeholder="Your full name"
                 autoComplete="name"
                 required
+                className="h-10"
               />
             </div>
             <div className="space-y-2">
@@ -119,6 +127,7 @@ export function AcceptForm({ token, email, role }: AcceptFormProps) {
                 autoComplete="new-password"
                 minLength={8}
                 required
+                className="h-10"
               />
             </div>
             <div className="space-y-2">
@@ -132,6 +141,7 @@ export function AcceptForm({ token, email, role }: AcceptFormProps) {
                 autoComplete="new-password"
                 minLength={8}
                 required
+                className="h-10"
               />
             </div>
 
@@ -142,10 +152,10 @@ export function AcceptForm({ token, email, role }: AcceptFormProps) {
               </Alert>
             )}
 
-            <Button type="submit" className="w-full" disabled={isSubmitting}>
+            <Button type="submit" className="h-10 w-full" disabled={isSubmitting}>
               {isSubmitting ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Loader2 className="mr-2 size-4 animate-spin" />
                   Creating account...
                 </>
               ) : (

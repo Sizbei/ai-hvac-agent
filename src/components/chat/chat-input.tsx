@@ -163,14 +163,14 @@ export function ChatInput({
   }
 
   return (
-    <div className="border-t bg-background">
+    <div className="border-t border-border-strong bg-surface">
       {/* Attachment Previews */}
       {attachments.length > 0 && (
         <div className="flex gap-2 p-3 overflow-x-auto">
           {attachments.map((attachment) => (
             <div
               key={attachment.id}
-              className="relative flex-shrink-0 w-20 h-20 rounded-lg overflow-hidden border"
+              className="relative flex-shrink-0 w-20 h-20 rounded-md overflow-hidden border border-border"
             >
               <img
                 src={attachment.preview}
@@ -180,7 +180,7 @@ export function ChatInput({
               <button
                 type="button"
                 onClick={() => removeAttachment(attachment.id)}
-                className="absolute top-1 right-1 p-1 bg-background/80 rounded-full hover:bg-background"
+                className="absolute top-1 right-1 flex size-6 items-center justify-center rounded-sm border border-border bg-surface-raised text-foreground hover:bg-accent"
                 aria-label="Remove attachment"
                 disabled={isUploading}
               >
@@ -208,7 +208,7 @@ export function ChatInput({
           disabled={disabled || isUploading || attachments.length >= MAX_ATTACHMENTS}
           onClick={() => fileInputRef.current?.click()}
           aria-label="Attach image"
-          className="flex-shrink-0 self-end mb-0.5"
+          className="size-11 flex-shrink-0 self-end"
         >
           {attachments.length > 0 ? (
             <ImageIcon className="size-4" />
@@ -227,8 +227,8 @@ export function ChatInput({
           autoFocus
           rows={1}
           aria-label="Chat message input"
-          className="flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 overflow-y-auto"
-          style={{ lineHeight: '1.5rem', minHeight: '2.25rem' }}
+          className="flex-1 resize-none rounded-md border border-border-input bg-surface-raised px-3 py-2.5 text-[15px] text-foreground placeholder:text-foreground-faint transition-[background-color,border-color] duration-[var(--dur-hover)] focus-visible:border-primary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-50 overflow-y-auto"
+          style={{ lineHeight: '1.5rem', minHeight: '2.75rem' }}
         />
 
         <Button
@@ -236,7 +236,7 @@ export function ChatInput({
           size="icon"
           disabled={(value.trim().length === 0 && attachments.length === 0) || disabled || isUploading}
           aria-label="Send message"
-          className="flex-shrink-0 self-end mb-0.5"
+          className="size-11 flex-shrink-0 self-end"
         >
           {isUploading ? (
             <span className="size-4 animate-pulse">...</span>

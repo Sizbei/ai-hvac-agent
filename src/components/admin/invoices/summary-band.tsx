@@ -1,7 +1,7 @@
 'use client';
 import { Wallet, AlertTriangle, TrendingUp } from 'lucide-react';
 import { formatCentsExact } from '@/lib/admin/money-format';
-import { StatCard } from '@/components/admin/ui/stat-card';
+import { StatCard, StatStrip } from '@/components/admin/ui/stat-card';
 import type { InvoiceStats } from '@/hooks/use-invoices';
 
 export function SummaryBand({
@@ -18,17 +18,15 @@ export function SummaryBand({
   const oldestOverdueDays = stats?.oldestOverdueDays ?? 0;
 
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+    <StatStrip>
       <StatCard
         icon={Wallet}
-        intent="neutral"
         label="Outstanding"
         value={formatCentsExact(outstanding)}
         sublabel={`Across ${outstandingCount} open invoices`}
       />
       <StatCard
         icon={AlertTriangle}
-        intent="danger"
         label="Overdue"
         value={formatCentsExact(overdueSum)}
         sublabel={
@@ -39,11 +37,10 @@ export function SummaryBand({
       />
       <StatCard
         icon={TrendingUp}
-        intent="success"
         label="Collected this month"
         value={formatCentsExact(collectedThisMonthCents)}
         sublabel="Payments received since the 1st"
       />
-    </div>
+    </StatStrip>
   );
 }

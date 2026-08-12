@@ -14,7 +14,7 @@ export function ChatContainer({
   inputDisabled = false,
 }: ChatContainerProps) {
   return (
-    <div className="flex flex-col h-dvh md:mx-auto md:max-w-lg md:shadow-lg">
+    <div className="flex flex-col h-dvh bg-canvas md:mx-auto md:max-w-lg md:border-x md:border-border-strong">
       <ChatHeader status={status} onEscalate={onEscalate} />
       <MessageList messages={messages} isStreaming={isStreaming} />
       <ChatInput

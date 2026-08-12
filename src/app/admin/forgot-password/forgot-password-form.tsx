@@ -33,7 +33,7 @@ export function ForgotPasswordForm({ googleEnabled }: ForgotPasswordFormProps) {
         footer={
           <Link
             href="/admin/login"
-            className="inline-flex items-center gap-1.5 font-medium text-foreground underline-offset-4 hover:underline"
+            className="inline-flex items-center gap-1.5 font-medium text-link underline-offset-4 hover:underline"
           >
             <ArrowLeft className="size-3.5" />
             Back to sign in
@@ -41,8 +41,8 @@ export function ForgotPasswordForm({ googleEnabled }: ForgotPasswordFormProps) {
         }
       >
         <div className="flex flex-col gap-5">
-          <div className="flex items-start gap-3 rounded-lg border border-primary/25 bg-primary/5 p-4">
-            <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-primary" />
+          <div className="flex items-start gap-3 rounded-lg border border-info-border bg-info-light p-4">
+            <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-info-strong" />
             <p className="text-sm text-foreground">
               If a password account exists for{' '}
               <span className="font-medium break-all">
@@ -80,7 +80,7 @@ export function ForgotPasswordForm({ googleEnabled }: ForgotPasswordFormProps) {
                 No administrator handy? Email{' '}
                 <a
                   href={`mailto:${SUPPORT_EMAIL}`}
-                  className="font-medium text-foreground underline underline-offset-4 hover:no-underline"
+                  className="font-medium text-link underline underline-offset-4 hover:no-underline"
                 >
                   {SUPPORT_EMAIL}
                 </a>{' '}
@@ -92,7 +92,7 @@ export function ForgotPasswordForm({ googleEnabled }: ForgotPasswordFormProps) {
           {googleEnabled && (
             <a
               href="/api/auth/google/start"
-              className="inline-flex h-11 w-full items-center justify-center gap-2.5 rounded-lg border border-input bg-background px-4 text-sm font-medium shadow-xs transition-all duration-200 ease-out hover:bg-accent hover:text-accent-foreground hover:shadow-md focus-visible:ring-3 focus-visible:ring-ring/50"
+              className="inline-flex h-11 w-full items-center justify-center gap-2.5 rounded-md border border-border-input bg-surface-raised px-4 text-sm font-medium text-foreground transition-[background-color,border-color] duration-[var(--dur-hover)] outline-none hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
             >
               <GoogleGlyph />
               Continue with Google
@@ -134,10 +134,11 @@ export function ForgotPasswordForm({ googleEnabled }: ForgotPasswordFormProps) {
             onChange={(e) => setEmail(e.target.value)}
             required
             autoFocus
+            className="h-10"
           />
         </div>
 
-        <Button type="submit" className="w-full">
+        <Button type="submit" className="h-10 w-full">
           Continue
         </Button>
 
@@ -150,7 +151,7 @@ export function ForgotPasswordForm({ googleEnabled }: ForgotPasswordFormProps) {
             </div>
             <a
               href="/api/auth/google/start"
-              className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg border border-input bg-background px-4 text-sm font-medium shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+              className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-border-input bg-surface-raised px-4 text-sm font-medium text-foreground transition-[background-color,border-color] duration-[var(--dur-hover)] outline-none hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
             >
               <GoogleGlyph />
               Continue with Google
@@ -165,7 +166,7 @@ export function ForgotPasswordForm({ googleEnabled }: ForgotPasswordFormProps) {
 /** Small numbered step marker for the recovery list. */
 function Step({ n }: { readonly n: number }) {
   return (
-    <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-foreground">
+    <span className="flex size-5 shrink-0 items-center justify-center rounded-[3px] bg-surface-sunken font-mono text-xs font-semibold tabular-nums text-foreground">
       {n}
     </span>
   );

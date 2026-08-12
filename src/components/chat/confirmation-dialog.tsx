@@ -106,13 +106,13 @@ function EditableRow({ label, value, onSave, disabled, badge }: EditableRowProps
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={handleKeyDown}
-            className="h-7 text-sm py-0 flex-1"
+            className="h-11 text-sm py-0 flex-1"
             disabled={disabled}
           />
           <button
             type="button"
             onClick={commitEdit}
-            className="p-1 rounded-sm text-green-600 hover:bg-green-50"
+            className="relative before:absolute before:-inset-2 before:content-[''] p-1 rounded-sm text-success hover:bg-success-light"
             aria-label={`Save ${label}`}
             disabled={disabled}
           >
@@ -121,7 +121,7 @@ function EditableRow({ label, value, onSave, disabled, badge }: EditableRowProps
           <button
             type="button"
             onClick={cancelEdit}
-            className="p-1 rounded-sm text-muted-foreground hover:bg-muted"
+            className="relative before:absolute before:-inset-2 before:content-[''] p-1 rounded-sm text-muted-foreground hover:bg-muted"
             aria-label={`Cancel editing ${label}`}
             disabled={disabled}
           >
@@ -134,7 +134,7 @@ function EditableRow({ label, value, onSave, disabled, badge }: EditableRowProps
           <button
             type="button"
             onClick={startEdit}
-            className="p-0.5 rounded-sm text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity hover:bg-muted"
+            className="relative before:absolute before:-inset-2 before:content-[''] p-0.5 rounded-sm text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity hover:bg-muted"
             aria-label={`Edit ${label}`}
             disabled={disabled}
           >
@@ -267,10 +267,11 @@ export function ConfirmationDialog({
             variant="outline"
             onClick={() => onOpenChange(false)}
             disabled={isLoading}
+            className="h-11 text-sm"
           >
             Go back
           </Button>
-          <Button onClick={handleConfirm} disabled={isLoading}>
+          <Button onClick={handleConfirm} disabled={isLoading} className="h-11 text-sm">
             {isLoading && <Loader2 className="size-4 animate-spin" />}
             Confirm &amp; Submit
           </Button>
