@@ -16,8 +16,10 @@ interface SectionHeadingProps {
 }
 
 /**
- * Card-level heading with consistent type hierarchy:
- * ~15 px medium title + optional 12 px muted descriptor + right slot.
+ * Section heading with consistent type hierarchy:
+ * 15 px/600 title + optional 12 px muted descriptor + right slot — the same
+ * title treatment the panel header band uses, so headings inside and outside
+ * a panel read as one rank.
  *
  * Replaces the `text-xs font-semibold uppercase tracking-wide text-muted-foreground`
  * pattern in integrations, fieldpulse-import, dispatch exceptions, and reports
@@ -36,12 +38,14 @@ export function SectionHeading({
 }: SectionHeadingProps) {
   return (
     <div className={cn("flex items-start justify-between gap-4", className)}>
-      <div className="space-y-0.5">
-        <Tag className="text-[15px] font-medium leading-snug text-foreground">
+      <div className="min-w-0 space-y-0.5">
+        <Tag className="text-[15px] font-semibold leading-5 text-foreground">
           {title}
         </Tag>
         {description && (
-          <p className="text-xs text-muted-foreground">{description}</p>
+          <p className="text-[12px] leading-4 text-muted-foreground">
+            {description}
+          </p>
         )}
       </div>
       {right && (

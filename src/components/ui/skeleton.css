@@ -1,0 +1,24 @@
+/* Skeleton "breathe" — the one loading animation in the system.
+ *
+ * Replaces the shimmer/pulse look: a single slow opacity breath, no gradient
+ * sweep, no transform. Lives in its own stylesheet because a `@keyframes` rule
+ * cannot be expressed as a Tailwind utility; fold it into globals.css when the
+ * foundation layer is next touched.
+ *
+ * prefers-reduced-motion is handled by the global rule in globals.css, which
+ * clamps animation-duration to 0.01ms and iteration-count to 1 — the bar simply
+ * settles at 0.9 opacity and stays legible.
+ */
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 0.9;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.skeleton-breathe {
+  animation: breathe 1.5s ease-in-out infinite;
+}

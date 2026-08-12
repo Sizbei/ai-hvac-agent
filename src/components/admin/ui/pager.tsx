@@ -29,8 +29,9 @@ function rangeLabel(page: number, total: number, perPage: number): string {
  * Stateless pager — replaces 6+ ad-hoc pagers across requests, conversations,
  * customers, reviews, invoices, estimates, pricebook, inventory, and audit-log.
  *
- * Uses Lucide ChevronLeft/Right icons (not ASCII arrows) with 44 px min touch
- * targets for mobile. Label is centered between nav controls.
+ * 26 px controls with Lucide chevrons (not ASCII arrows) and a tabular-mono
+ * range label centered between them. Touch targets grow to 44 px below the
+ * `sm` breakpoint.
  */
 export function Pager({
   page,
@@ -67,9 +68,9 @@ export function Pager({
             aria-label="First page"
             onClick={() => onPageChange(1)}
             disabled={atFirst}
-            className="min-h-[44px] min-w-[44px]"
+            className="size-[26px] max-sm:min-h-[44px] max-sm:min-w-[44px]"
           >
-            <ChevronsLeft className="size-4" />
+            <ChevronsLeft className="size-3.5" />
           </Button>
         )}
         <Button
@@ -79,15 +80,15 @@ export function Pager({
           aria-label="Previous page"
           onClick={() => onPageChange(safePage - 1)}
           disabled={atFirst}
-          className="min-h-[44px]"
+          className="h-[26px] px-2 text-[12px] max-sm:min-h-[44px]"
         >
-          <ChevronLeft className="size-4" aria-hidden="true" />
+          <ChevronLeft className="size-3.5" aria-hidden="true" />
           <span>Prev</span>
         </Button>
       </div>
 
       {/* Center label */}
-      <span className="flex-1 text-center text-xs tabular-nums text-muted-foreground">
+      <span className="flex-1 text-center font-mono text-[11px] tabular-nums text-muted-foreground">
         {label}
       </span>
 
@@ -100,10 +101,10 @@ export function Pager({
           aria-label="Next page"
           onClick={() => onPageChange(safePage + 1)}
           disabled={atLast}
-          className="min-h-[44px]"
+          className="h-[26px] px-2 text-[12px] max-sm:min-h-[44px]"
         >
           <span>Next</span>
-          <ChevronRight className="size-4" aria-hidden="true" />
+          <ChevronRight className="size-3.5" aria-hidden="true" />
         </Button>
         {showFirstLast && (
           <Button
@@ -113,9 +114,9 @@ export function Pager({
             aria-label="Last page"
             onClick={() => onPageChange(safeTotal)}
             disabled={atLast}
-            className="min-h-[44px] min-w-[44px]"
+            className="size-[26px] max-sm:min-h-[44px] max-sm:min-w-[44px]"
           >
-            <ChevronsRight className="size-4" />
+            <ChevronsRight className="size-3.5" />
           </Button>
         )}
       </div>

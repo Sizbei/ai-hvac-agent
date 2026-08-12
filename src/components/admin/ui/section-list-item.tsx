@@ -11,9 +11,9 @@ interface SectionListItemProps {
 }
 
 /**
- * A single label/value row inside a SectionCard content area.
- * Replaces the repeated `rounded-lg border p-3` rows across the customer
- * detail page (contact info, equipment details, notes, follow-ups).
+ * A single label/value pair inside a SectionCard content area — a ruled
+ * definition row: no box, no fill, just a hairline under each pair with an
+ * 11 px/600 sentence-case label above a 13 px value.
  *
  * Uses semantic tokens only — no raw Tailwind palette classes.
  */
@@ -27,20 +27,22 @@ export function SectionListItem({
   return (
     <div
       className={cn(
-        "flex items-start gap-3 rounded-lg border bg-muted/20 px-3 py-2.5",
+        "flex items-start gap-2.5 border-b border-border py-2.5",
         wide && "sm:col-span-2",
         className,
       )}
     >
       {Icon && (
         <Icon
-          className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+          className="mt-1 size-3.5 shrink-0 text-foreground-faint"
           aria-hidden="true"
         />
       )}
       <div className="min-w-0 flex-1">
-        <p className="text-xs text-muted-foreground">{label}</p>
-        <div className="mt-0.5 text-sm">{value}</div>
+        <p className="text-[11px] font-semibold leading-[14px] tracking-[0.04em] text-muted-foreground">
+          {label}
+        </p>
+        <div className="mt-1 text-[13px] leading-5 text-foreground">{value}</div>
       </div>
     </div>
   );

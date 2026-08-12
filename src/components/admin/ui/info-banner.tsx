@@ -20,11 +20,11 @@ export function InfoBanner({ children, icon: Icon = Info, className }: InfoBanne
     <div
       role="note"
       className={cn(
-        "flex items-start gap-2.5 rounded-md border border-info/30 bg-info-light px-3 py-2 text-sm text-info-foreground",
+        "flex items-start gap-2.5 rounded-md border border-info-border bg-info-light px-3 py-2 text-[13px] leading-5 text-info-strong",
         className,
       )}
     >
-      <Icon className="mt-0.5 size-4 shrink-0 text-info" aria-hidden="true" />
+      <Icon className="mt-0.5 size-3.5 shrink-0 text-info-strong" aria-hidden="true" />
       <div className="min-w-0">{children}</div>
     </div>
   );

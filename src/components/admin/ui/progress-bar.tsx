@@ -13,16 +13,16 @@ interface ProgressBarProps {
 
 const TRACK_CLASSES: Record<ProgressBarIntent, string> = {
   success: "bg-success",
-  warning: "bg-warning",
+  warning: "bg-warning-strong",
   danger: "bg-danger",
   info: "bg-info",
-  neutral: "bg-muted-foreground",
+  neutral: "bg-marker",
 };
 
 /**
- * Accessible progress bar using semantic tokens.
- * Replaces the inline `bg-emerald-500` / `bg-amber-500` / `bg-rose-500` bars
- * in the AR aging section of the operations page.
+ * Accessible progress bar using semantic tokens: a 4 px sunken track with a
+ * flat fill (`--marker` by default). Replaces the inline `bg-emerald-500` /
+ * `bg-amber-500` / `bg-rose-500` bars in the AR aging section of operations.
  *
  * `role="progressbar"` with `aria-valuenow`, `aria-valuemin`, `aria-valuemax`
  * for screen-reader compatibility. Dark-mode-safe via token colors only.
@@ -45,12 +45,12 @@ export function ProgressBar({
       aria-valuemax={max}
       aria-label={label ?? "Progress"}
       className={cn(
-        "block h-2.5 w-full overflow-hidden rounded-full bg-muted",
+        "block h-1 w-full overflow-hidden rounded-[2px] bg-surface-sunken",
         className,
       )}
     >
       <span
-        className={cn("block h-full rounded-full", TRACK_CLASSES[intent])}
+        className={cn("block h-full rounded-[2px]", TRACK_CLASSES[intent])}
         style={{ width: `${clamped}%` }}
         aria-hidden="true"
       />

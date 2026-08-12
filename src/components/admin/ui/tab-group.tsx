@@ -35,8 +35,8 @@ interface TabGroupProps {
  * Replaces the calendar view toggle and conversation channel tabs which were
  * plain Buttons with no keyboard/aria semantics.
  *
- * Visual: pill underline style using --primary for the active indicator.
- * No raw Tailwind palette classes.
+ * Visual: tabs sit on a `--border-strong` rule with a 2 px `--marker` underline
+ * marking the active tab. No raw Tailwind palette classes.
  */
 export function TabGroup({
   tabs,
@@ -91,7 +91,7 @@ export function TabGroup({
       role="tablist"
       aria-label={ariaLabel}
       className={cn(
-        "inline-flex items-center gap-0 border-b border-border",
+        "inline-flex items-center gap-0 border-b border-border-strong",
         className,
       )}
     >
@@ -111,9 +111,10 @@ export function TabGroup({
             onClick={() => onTabChange(tab.id)}
             onKeyDown={(e) => handleKeyDown(e, index)}
             className={cn(
-              "relative inline-flex min-h-[44px] items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+              "relative inline-flex min-h-9 items-center gap-1.5 px-3 text-[13px] font-medium transition-colors max-sm:min-h-[44px]",
+              "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring",
               isActive
-                ? "text-foreground after:absolute after:inset-x-0 after:bottom-[-1px] after:h-0.5 after:rounded-full after:bg-primary"
+                ? "text-foreground after:absolute after:inset-x-0 after:bottom-[-1px] after:h-0.5 after:bg-marker"
                 : "text-muted-foreground hover:text-foreground",
             )}
           >
@@ -121,7 +122,7 @@ export function TabGroup({
             {tab.badge !== undefined && (
               <span
                 aria-label={`${tab.badge} items`}
-                className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-foreground/10 px-1 text-[10px] font-semibold tabular-nums text-foreground"
+                className="font-mono text-[11px] tabular-nums text-muted-foreground"
               >
                 {tab.badge}
               </span>
