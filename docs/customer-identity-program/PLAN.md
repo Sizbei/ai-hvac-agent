@@ -39,9 +39,10 @@ code lands).
 
 **T1. Resolver + pick order + crm-queries surgery.**
 Files: `src/lib/admin/crm-queries.ts`, NEW `src/lib/admin/customer-match.ts`
-(pure: `pickCustomerMatch`, the candidate-query predicate constant, the
-`pg_indexes` abort predicate), `src/lib/admin/crm-queries.test.ts`, NEW
-`customer-match.test.ts`.
+(pure: `pickCustomerMatch`, the candidate-query predicate constant),
+`src/lib/admin/crm-queries.test.ts`, NEW `customer-match.test.ts`.
+(The `pg_indexes` abort predicate belongs to T2's import machinery, not here —
+keeping the waves disjoint.)
 Changes per SPEC §1.4 (new `targetWhere`), §3.2 (candidate SQL with rule-1
 filter in WHERE, ordering + LIMIT 50, `{id, ambiguous, doNotService} | null`;
 `findCustomerIdByContact` keeps its `string | null` shape; new
@@ -60,7 +61,8 @@ NEW pure module if §6 places `resolveFpCustomerAction` separately.
 Changes per SPEC §2.0 (flag parse → `PhaseContext`; unflagged = legacy path
 byte-for-byte + `sharedContactSkipped` on the fp-id-guard branch, non-null
 return preserved — the `jobs.ts:424-428` contract; phase-level two-index
-`pg_indexes` probe, loud abort), §2.1 (flagged resolution: email-only claim
+`pg_indexes` probe with the abort decision extracted as a pure predicate IN
+THIS TASK's files, loud abort), §2.1 (flagged resolution: email-only claim
 with claim-pick polarity, per-run claimed map + contested→insert, path-2
 re-select repair, erasure guard untouched), §2.2, §2.3.
 `importOneFpCustomer` gains the optional opts param — verify `jobs.ts:389`
@@ -80,6 +82,9 @@ NOTE: `PhaseResult` type lives in run-import.ts (T2's file) — T3 only READS
 the type; coordinate by having T2 land the three counter fields, T3 rebase on
 it (T3 starts after T2's commit; it is Wave 1.5 in practice — run T3 after T2
 completes, in parallel with nothing that touches its files).
+Revert-tests: `onUnlinked` fires exactly once per unresolved fp customer and
+never for resolved ones (fails if the callback wiring is removed); the two
+counters populate on `PhaseResult` from a mixed resolved/unresolved batch.
 
 **T4. Background fp-id adoption pre-check.**
 Files: `src/lib/integrations/fieldpulse/customer-sync.ts`,
@@ -95,8 +100,11 @@ confirm UI, tests for the query helper (route/UI logic stays thin; extract
 the sibling-listing as a tested query helper).
 Changes per SPEC §5.1: list sibling rows sharing either hash (id + server-side
 decrypted name) in the erase confirmation; erase itself stays per-row.
+Revert-tests: the sibling-listing query helper returns rows sharing either
+hash and excludes the target row and anonymized rows (fails if the helper is
+removed or the either-hash OR collapses to one hash).
 
-## Wave 2 — consumers of T1's resolver (parallel, after T1)
+## Wave 2 — consumers of T1's resolver (parallel; T6/T7 after T1, T8 after ALL of Wave 1)
 
 **T6. Chat/voice identity blanking.**
 Files: `src/lib/ai/customer-context.ts`, tests.
@@ -129,15 +137,20 @@ Full `npx tsc --noEmit`, `npx eslint` on all changed files,
 1. Apply migrations on dev: `npm run db:migrate`; verify via pg_indexes
    SELECT (SPEC §4 step 1) — new indexes present, old uniques gone.
 2. `npm run fp:import -- --org <uuid> --phase customers --yes
-   --split-shared-contacts`. Expect: created ≥ ~357 (census identity is an
-   inequality — SPEC §4.1), errors 0 (the 9 gone), `sharedContactSkipped` 0.
+   --split-shared-contacts`. Expect: created ≈ 357 **minus unnamed skips**
+   (SPEC §4.1: 2,631 upstream − 2,274 already-linked non-placeholder rows —
+   so `created ≤ 357`; a lower number is legitimate, a higher one is not).
+   The separate census inequality (final FP-linked count ≥ upstream − skips
+   + placeholders) is checked after the run. Errors 0 (the 9 gone);
+   `sharedContactSkipped` 0.
 3. `--phase jobs` (self-heal touch-up), then `--phase invoices`, then
    `--phase estimates`.
 4. `node scripts/agent/reconcile-fieldpulse-money.mjs --org <uuid>` → exit 0.
 5. §4.1 checks: FP-invoice orphans 501 → upstream-deleted residual only
    (quantified via `unresolvedFpCustomerIds`); unpaid orphans 94 → small;
-   estimates orphans (baseline 2/36) → 0; duplicate-hash groups now > 0 and
-   stable; native rows ≤ 9.
+   estimates orphans (baseline 2/36) → 0; duplicate-hash groups now > 0
+   (plan-original sanity check, not from SPEC §4.1 — the split's signature);
+   native rows ≤ 9.
 6. Record before/after in `docs/customer-identity-program/RESULTS.md`
    (counts and mechanisms only — no dollar figures).
 
