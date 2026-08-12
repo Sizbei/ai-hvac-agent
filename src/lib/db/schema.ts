@@ -816,6 +816,28 @@ export const customers = pgTable(
     uniqueIndex("customers_org_phone_hash_unique")
       .on(table.organizationId, table.phoneHash)
       .where(sql`${table.phoneHash} IS NOT NULL`),
+    // Per-org uniqueness for the NATIVE population only. FP-linked rows are
+    // identified by fieldpulse_customer_id and may legitimately share a contact:
+    // one accounts-payable email/phone covers many unrelated businesses.
+    uniqueIndex("customers_org_email_hash_native_unique")
+      .on(table.organizationId, table.emailHash)
+      .where(
+        sql`${table.emailHash} IS NOT NULL AND ${table.fieldpulseCustomerId} IS NULL`,
+      ),
+    uniqueIndex("customers_org_phone_hash_native_unique")
+      .on(table.organizationId, table.phoneHash)
+      .where(
+        sql`${table.phoneHash} IS NOT NULL AND ${table.fieldpulseCustomerId} IS NULL`,
+      ),
+    // Lookup indexes over the WHOLE population (the native uniques above do not
+    // cover FP-linked rows, and findCustomerIdByContact must stay an indexed
+    // equality).
+    index("customers_org_email_hash_idx")
+      .on(table.organizationId, table.emailHash)
+      .where(sql`${table.emailHash} IS NOT NULL`),
+    index("customers_org_phone_hash_idx")
+      .on(table.organizationId, table.phoneHash)
+      .where(sql`${table.phoneHash} IS NOT NULL`),
     // Unique per org so the Fieldpulse invoice/customer pull resolves a customer
     // by its Fieldpulse id unambiguously (the id isn't globally unique). Partial
     // so the many rows without a Fieldpulse id don't collide on NULL.

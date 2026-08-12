@@ -1,0 +1,4 @@
+CREATE UNIQUE INDEX "customers_org_email_hash_native_unique" ON "customers" USING btree ("organization_id","email_hash") WHERE "customers"."email_hash" IS NOT NULL AND "customers"."fieldpulse_customer_id" IS NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX "customers_org_phone_hash_native_unique" ON "customers" USING btree ("organization_id","phone_hash") WHERE "customers"."phone_hash" IS NOT NULL AND "customers"."fieldpulse_customer_id" IS NULL;--> statement-breakpoint
+CREATE INDEX "customers_org_email_hash_idx" ON "customers" USING btree ("organization_id","email_hash") WHERE "customers"."email_hash" IS NOT NULL;--> statement-breakpoint
+CREATE INDEX "customers_org_phone_hash_idx" ON "customers" USING btree ("organization_id","phone_hash") WHERE "customers"."phone_hash" IS NOT NULL;
