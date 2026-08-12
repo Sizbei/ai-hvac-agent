@@ -90,7 +90,11 @@ export interface PhaseResult {
    * observable only at sync time.
    */
   unresolvedFpCustomerIds?: number;
-  /** invoices phase: invoices written without a customer link. */
+  /**
+   * invoices phase: upsert attempts whose KNOWN FP customer id failed to
+   * resolve (counted at resolution time, before the write — an invoice with no
+   * FP customer id at all is unlinked but not counted here).
+   */
   unlinkedInvoices?: number;
 }
 
