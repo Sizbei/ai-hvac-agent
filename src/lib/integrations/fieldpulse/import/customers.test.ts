@@ -24,6 +24,7 @@ vi.mock("@/lib/db", () => ({
     select: vi.fn(),
     insert: vi.fn(),
     update: vi.fn(),
+    execute: vi.fn(),
   },
 }));
 vi.mock("@/lib/crypto", () => ({
@@ -1039,5 +1040,380 @@ describe("importOneFpCustomer — erasure is not undone by a re-import", () => {
 
     expect(db.update).toHaveBeenCalled();
     expect(counts.updated).toBe(1);
+  });
+});
+
+// ── --split-shared-contacts (SPEC §2.0/§2.1) ─────────────────────────────────
+//
+// The customers phase runs unattended, nightly, against production. So the
+// behaviour that gives every FieldPulse customer its own row — and therefore
+// creates rows sharing a contact hash — is opt-in per run, and the DEFAULT is
+// today's code with exactly one addition: a counter.
+
+/**
+ * A db.select() mock that answers a QUEUE of results, one per call, and
+ * supports both chain shapes used by the importer: .where().limit() and
+ * .where().orderBy().limit(). Records every predicate it was handed.
+ */
+function wireSelectQueue(results: unknown[][]) {
+  const wheres: unknown[] = [];
+  const queue = [...results];
+  vi.mocked(db.select).mockImplementation((() => {
+    const rows = queue.shift() ?? [];
+    const limit = vi.fn().mockResolvedValue(rows);
+    const orderBy = vi.fn().mockReturnValue({ limit });
+    const where = vi.fn((predicate: unknown) => {
+      wheres.push(predicate);
+      return { limit, orderBy };
+    });
+    const from = vi.fn().mockReturnValue({ where });
+    return { from };
+  }) as never);
+  return { wheres };
+}
+
+/** True when a drizzle predicate carries the given raw SQL text. */
+function predicateContains(predicate: unknown, needle: string): boolean {
+  const seen = new Set<object>();
+  let found = false;
+  const walk = (n: unknown): void => {
+    if (n == null || found) return;
+    if (typeof n === "string") {
+      if (n.includes(needle)) found = true;
+      return;
+    }
+    if (typeof n !== "object") return;
+    if (seen.has(n as object)) return;
+    seen.add(n as object);
+    for (const v of Object.values(n as Record<string, unknown>)) walk(v);
+  };
+  walk(predicate);
+  return found;
+}
+
+const SPLIT = { splitSharedContacts: true } as const;
+
+describe("importOneFpCustomer — unflagged default is today's path plus a counter", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  /**
+   * The fp-id guard's return value is a contract with the jobs phase:
+   * jobs.ts:424-428 skips the WHOLE job when the customer resolves to null, so
+   * a null here would silently drop jobs on every nightly run. The counter is
+   * the only thing that may change on this path.
+   */
+  it("fp-id guard: counts sharedContactSkipped and STILL returns the resolved row id", async () => {
+    wireSelect([]); // no row owns this fp id
+    vi.mocked(upsertCustomerByContact).mockResolvedValue("merged-row-id");
+    wireUpdate([]); // guard UPDATE matches nothing — another row owns the fp id
+    const counts = makeCounts();
+
+    const id = await importOneFpCustomer(ORG, makeCustomer(), counts);
+
+    expect(id).toBe("merged-row-id");
+    expect(counts.sharedContactSkipped).toBe(1);
+    expect(counts.skipped).toBe(1);
+    expect(counts.created).toBe(0);
+  });
+
+  it("does not count sharedContactSkipped when the fp id stamp succeeds", async () => {
+    wireSelect([]);
+    vi.mocked(upsertCustomerByContact).mockResolvedValue("native-id");
+    wireUpdate([{ id: "native-id" }]);
+    const counts = makeCounts();
+
+    await importOneFpCustomer(ORG, makeCustomer(), counts);
+
+    expect(counts.sharedContactSkipped).toBeUndefined();
+    expect(counts.created).toBe(1);
+  });
+
+  it("never probes pg_indexes and keeps using upsertCustomerByContact", async () => {
+    const client = makeClient([makeCustomer()]);
+    const counts = makeCounts();
+    wireSelect([]);
+    vi.mocked(upsertCustomerByContact).mockResolvedValue("native-id");
+    wireUpdate([{ id: "native-id" }]);
+
+    await importCustomersFromFieldpulse(ORG, counts, client);
+
+    expect(db.execute).not.toHaveBeenCalled();
+    expect(upsertCustomerByContact).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("importCustomersFromFieldpulse — flagged pre-flight index probe", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("aborts the whole phase when a legacy contact unique is still present", async () => {
+    // A throw here reaches run-import's phase handler → run 'failed', exit 1.
+    // It must NOT be a per-record error, which the walk would absorb.
+    vi.mocked(db.execute).mockResolvedValue([
+      { indexname: "customers_org_email_hash_unique" },
+    ] as never);
+    const client = makeClient([makeCustomer()]);
+    const counts = makeCounts();
+
+    await expect(
+      importCustomersFromFieldpulse(ORG, counts, client, SPLIT),
+    ).rejects.toThrow(/split-shared-contacts refused/);
+
+    // Nothing was fetched and nothing was written.
+    expect(client.listCustomers).not.toHaveBeenCalled();
+    expect(counts.errors).toBe(0);
+    expect(db.insert).not.toHaveBeenCalled();
+  });
+
+  it("aborts on the neon-http { rows } result shape too", async () => {
+    vi.mocked(db.execute).mockResolvedValue({
+      rows: [{ indexname: "customers_org_phone_hash_unique" }],
+    } as never);
+    const client = makeClient([makeCustomer()]);
+
+    await expect(
+      importCustomersFromFieldpulse(ORG, makeCounts(), client, SPLIT),
+    ).rejects.toThrow(/split-shared-contacts refused/);
+  });
+
+  it("proceeds when the probe comes back empty", async () => {
+    vi.mocked(db.execute).mockResolvedValue([] as never);
+    const client = makeClient([makeCustomer()]);
+    const counts = makeCounts();
+    wireSelectQueue([[], []]); // findByFpId miss, no claim candidate
+    wireInsert([{ id: "fresh-1" }]);
+
+    await importCustomersFromFieldpulse(ORG, counts, client, SPLIT);
+
+    expect(counts.created).toBe(1);
+    expect(counts.errors).toBe(0);
+  });
+});
+
+describe("importOneFpCustomer — flagged split resolution", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("claims the oldest live native row on an email match, without upsertCustomerByContact", async () => {
+    wireSelectQueue([[], [{ id: "native-1", fieldpulseCustomerId: null }]]);
+    const { set } = wireUpdate([{ id: "native-1" }]);
+    const counts = makeCounts();
+
+    const id = await importOneFpCustomer(ORG, makeCustomer(), counts, SPLIT);
+
+    expect(id).toBe("native-1");
+    expect(counts.created).toBe(1);
+    expect(db.insert).not.toHaveBeenCalled();
+    // The flagged path must never route through upsertCustomerByContact: it
+    // un-archives a matched row and creates one on a miss.
+    expect(upsertCustomerByContact).not.toHaveBeenCalled();
+    expect(set).toHaveBeenCalledWith(
+      expect.objectContaining({ fieldpulseCustomerId: "10001001" }),
+    );
+  });
+
+  it("candidate SELECT and guarded UPDATE carry the SAME filter, do-not-service included", async () => {
+    // A do-not-service row is excluded from the candidate set, so a refusal can
+    // never be bypassed by stamping an FP identity onto the blocked row. And
+    // the UPDATE repeats every SELECT term: the phase runs ~20 minutes and
+    // nothing pauses an operator archiving or blocking a row in between.
+    const { wheres } = wireSelectQueue([
+      [],
+      [{ id: "native-1", fieldpulseCustomerId: null }],
+    ]);
+    const { where: updateWhere } = wireUpdate([{ id: "native-1" }]);
+
+    await importOneFpCustomer(ORG, makeCustomer(), makeCounts(), SPLIT);
+
+    const candidateWhere = wheres[1];
+    for (const term of [
+      "fieldpulse_customer_id IS NULL",
+      "anonymized_at IS NULL",
+      "archived_at IS NULL",
+      "do_not_service = false",
+    ]) {
+      expect(predicateContains(candidateWhere, term)).toBe(true);
+      expect(predicateContains(updateWhere.mock.calls[0]?.[0], term)).toBe(true);
+    }
+  });
+
+  it("contested candidate: the second FP customer in the run inserts its own row", async () => {
+    // FP list order carries no identity meaning, so first-arrival must not win
+    // a candidate outright — the loser gets its own row rather than none.
+    vi.mocked(db.execute).mockResolvedValue([] as never);
+    const client = makeClient([
+      makeCustomer({ id: "10001001" }),
+      makeCustomer({ id: "10001002" }),
+    ]);
+    wireSelectQueue([
+      [], // findByFpId — customer 1
+      [{ id: "native-1", fieldpulseCustomerId: null }], // candidate — customer 1
+      [], // findByFpId — customer 2
+      [{ id: "native-1", fieldpulseCustomerId: null }], // same candidate
+    ]);
+    wireUpdate([{ id: "native-1" }]);
+    const { values } = wireInsert([{ id: "fresh-2" }]);
+    const counts = makeCounts();
+
+    await importCustomersFromFieldpulse(ORG, counts, client, SPLIT);
+
+    expect(db.update).toHaveBeenCalledTimes(1); // only the first claim
+    expect(values).toHaveBeenCalledTimes(1);
+    expect(values).toHaveBeenCalledWith(
+      expect.objectContaining({ fieldpulseCustomerId: "10001002" }),
+    );
+    expect(counts.created).toBe(2);
+    expect(counts.errors).toBe(0);
+  });
+
+  it("a claim that matches no row falls through to the insert — never null, never an error", async () => {
+    // Zero rows can only mean "that row is not available to me" (raced, erased,
+    // archived or blocked in between). An FP customer must never end a run with
+    // no row because of a race.
+    wireSelectQueue([[], [{ id: "native-1", fieldpulseCustomerId: null }]]);
+    wireUpdate([]); // guarded claim matched nothing
+    const { values } = wireInsert([{ id: "fresh-1" }]);
+    const counts = makeCounts();
+
+    const id = await importOneFpCustomer(ORG, makeCustomer(), counts, SPLIT);
+
+    expect(id).toBe("fresh-1");
+    expect(counts.created).toBe(1);
+    expect(counts.errors).toBe(0);
+    expect(counts.skipped).toBe(0);
+    expect(values).toHaveBeenCalledWith(
+      expect.objectContaining({ fieldpulseCustomerId: "10001001" }),
+    );
+  });
+
+  it("phone-only FP customer gets its own row — a phone is never claimed on", async () => {
+    // The claim carries the row's portal token, so a shared office line would
+    // hand one customer another's invoices.
+    const fp = makeCustomer({ email: null });
+    const { wheres } = wireSelectQueue([[]]); // findByFpId only
+    const { values } = wireInsert([{ id: "fresh-phone" }]);
+    const counts = makeCounts();
+
+    const id = await importOneFpCustomer(ORG, fp, counts, SPLIT);
+
+    expect(id).toBe("fresh-phone");
+    expect(wheres).toHaveLength(1); // no candidate query at all
+    expect(db.update).not.toHaveBeenCalled();
+    expect(values).toHaveBeenCalledWith(
+      expect.objectContaining({
+        emailHash: null,
+        phoneHash: "h:15550109999",
+        fieldpulseCustomerId: "10001001",
+      }),
+    );
+    expect(counts.created).toBe(1);
+  });
+
+  it("contactless FP customer takes the same insert — no separate branch", async () => {
+    const fp = makeCustomer({ email: null, phone: null, phoneE164: null });
+    wireSelectQueue([[]]);
+    const { values } = wireInsert([{ id: "fresh-contactless" }]);
+    const counts = makeCounts();
+
+    expect(await importOneFpCustomer(ORG, fp, counts, SPLIT)).toBe(
+      "fresh-contactless",
+    );
+    expect(values).toHaveBeenCalledWith(
+      expect.objectContaining({ emailHash: null, phoneHash: null }),
+    );
+  });
+
+  it("insert conflict (concurrent run) re-selects by fp id instead of returning null", async () => {
+    wireSelectQueue([
+      [], // findByFpId — miss (contactless, so no candidate query)
+      [{ id: "raced-in" }], // re-select after the conflict
+    ]);
+    wireInsert([]); // onConflictDoNothing → no row
+    const counts = makeCounts();
+
+    const id = await importOneFpCustomer(
+      ORG,
+      makeCustomer({ email: null, phone: null, phoneE164: null }),
+      counts,
+      SPLIT,
+    );
+
+    expect(id).toBe("raced-in");
+    expect(counts.skipped).toBe(1);
+    expect(counts.created).toBe(0);
+  });
+
+  it("archived import: a conflict miss re-selects by fp id instead of returning null", async () => {
+    // Before the repair, null meant BOTH "no row" and "a row already exists" —
+    // and jobs.ts:424-428 reads null as unresolved and skips the whole job.
+    const fp = makeCustomer({ deletedAt: "2026-01-01 00:00:00" });
+    wireSelectQueue([
+      [], // findByFpId — miss
+      [{ id: "archived-existing" }], // re-select after the conflict
+    ]);
+    const { values } = wireInsert([]); // conflict — the placeholder exists
+    const counts = makeCounts();
+
+    const id = await importOneFpCustomer(ORG, fp, counts, SPLIT);
+
+    expect(id).toBe("archived-existing");
+    expect(counts.skipped).toBe(1);
+    expect(values).toHaveBeenCalledWith(
+      expect.objectContaining({ archivedAt: expect.any(Date) }),
+    );
+    expect(db.update).not.toHaveBeenCalled();
+  });
+
+  it("archived import still inserts as archived and is never claimed", async () => {
+    const fp = makeCustomer({ mergedCustomerId: "99999" });
+    const { wheres } = wireSelectQueue([[]]);
+    wireInsert([{ id: "archived-new" }]);
+    const counts = makeCounts();
+
+    expect(await importOneFpCustomer(ORG, fp, counts, SPLIT)).toBe("archived-new");
+    expect(wheres).toHaveLength(1); // no candidate query for an archived import
+    expect(counts.created).toBe(1);
+    expect(counts.archivedImported).toBe(1);
+  });
+
+  it("updates the row already keyed on the fp id, exactly as the unflagged path does", async () => {
+    wireSelectQueue([[{ id: "existing-id", anonymizedAt: null }]]);
+    const { set } = wireUpdate([{ id: "existing-id" }]);
+    const counts = makeCounts();
+
+    expect(await importOneFpCustomer(ORG, makeCustomer(), counts, SPLIT)).toBe(
+      "existing-id",
+    );
+    expect(counts.updated).toBe(1);
+    expect(db.insert).not.toHaveBeenCalled();
+    expect(set).toHaveBeenCalledWith(
+      expect.objectContaining({ emailHash: "h:test@example.invalid" }),
+    );
+  });
+
+  it("keeps the erasure guard: an anonymized row is not refilled with PII", async () => {
+    wireSelectQueue([[{ id: "erased-1", anonymizedAt: new Date("2026-07-01") }]]);
+    const counts = makeCounts();
+
+    const id = await importOneFpCustomer(ORG, makeCustomer(), counts, SPLIT);
+
+    expect(id).toBe("erased-1");
+    expect(db.update).not.toHaveBeenCalled();
+    expect(db.insert).not.toHaveBeenCalled();
+    expect(counts.skipped).toBe(1);
+  });
+
+  it("does not count sharedContactSkipped — the fp-id guard cannot fire on this path", async () => {
+    wireSelectQueue([[], [{ id: "native-1", fieldpulseCustomerId: null }]]);
+    wireUpdate([{ id: "native-1" }]);
+    const counts = makeCounts();
+
+    await importOneFpCustomer(ORG, makeCustomer(), counts, SPLIT);
+
+    expect(counts.sharedContactSkipped).toBeUndefined();
   });
 });

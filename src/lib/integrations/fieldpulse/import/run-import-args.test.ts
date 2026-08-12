@@ -108,6 +108,41 @@ describe("parseArgs — --allow-prod", () => {
   });
 });
 
+/**
+ * --split-shared-contacts: the customers-phase split's opt-in.
+ *
+ * The customers phase is not a command someone types — it runs unattended,
+ * nightly, against production. Anything that creates duplicate-hash rows must
+ * therefore be OFF unless a deliberate backfill asks for it, or the behaviour
+ * ships to production the morning after this branch merges.
+ */
+describe("parseArgs — --split-shared-contacts", () => {
+  it("defaults to false, so the nightly sweep keeps today's behaviour", () => {
+    const r = parseArgs(argv("--org", "org-1"));
+    expect(r.splitSharedContacts).toBe(false);
+  });
+
+  it("is true only when explicitly passed", () => {
+    const r = parseArgs(argv("--org", "org-1", "--split-shared-contacts"));
+    expect(r.splitSharedContacts).toBe(true);
+  });
+
+  it("is independent of --yes and --allow-prod — neither implies the split", () => {
+    const r = parseArgs(argv("--org", "org-1", "--yes", "--allow-prod"));
+    expect(r.yes).toBe(true);
+    expect(r.allowProd).toBe(true);
+    expect(r.splitSharedContacts).toBe(false);
+  });
+
+  it("combines with a phase filter", () => {
+    const r = parseArgs(
+      argv("--org", "org-1", "--phase", "customers", "--split-shared-contacts", "--yes"),
+    );
+    expect(r.phaseNames).toEqual(["customers"]);
+    expect(r.splitSharedContacts).toBe(true);
+  });
+});
+
 // ── Database target guard ────────────────────────────────────────────────────
 
 import { parseDbHost, assertWritableTarget } from "./run-import";

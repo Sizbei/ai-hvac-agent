@@ -21,6 +21,17 @@
  *                         so is dev (a "production" sweep pointed at dev writes
  *                         nothing to production and reports success). The nightly
  *                         sweep passes it; a human almost never should.
+ *   --split-shared-contacts
+ *                         customers phase only: give every FieldPulse customer
+ *                         its own native row instead of merging FP customers
+ *                         that share an email or phone onto one row. OFF by
+ *                         default, because this phase runs unattended nightly
+ *                         against production — the default path is today's
+ *                         behaviour, unchanged. Only a deliberate backfill
+ *                         passes it, and only after the migration that drops
+ *                         the legacy per-org contact uniques has been applied:
+ *                         the phase probes pg_indexes and aborts the run if
+ *                         they are still there.
  *   --since <date>        deliberately deferred — Phase 0.5 verified FP ignores server-side date filters; Phase 6 deltas will full-re-page + filter client-side.
  *
  * Safety: On a real run the script prints DB host + org name and requires the
@@ -67,6 +78,20 @@ export interface PhaseResult {
   enriched?: number;
   /** locations phase: customers already having an address (skipped enrichment). */
   skippedHasAddress?: number;
+  /**
+   * customers phase, unflagged runs: FP customers whose contact resolved to a
+   * row that already owns a different fp id, so the link was skipped. These are
+   * the customers awaiting a --split-shared-contacts run.
+   */
+  sharedContactSkipped?: number;
+  /**
+   * invoices phase: distinct FP customer ids that resolved to no native row.
+   * The database keeps no fp customer id for an unlinked invoice, so this is
+   * observable only at sync time.
+   */
+  unresolvedFpCustomerIds?: number;
+  /** invoices phase: invoices written without a customer link. */
+  unlinkedInvoices?: number;
 }
 
 interface PhaseContext {
@@ -74,6 +99,12 @@ interface PhaseContext {
   dryRun: boolean;
   db: ReturnType<typeof drizzle>;
   fpClient: Awaited<ReturnType<typeof getFieldpulseClient>>;
+  /**
+   * customers phase: give every FP customer its own row (opt-in per run).
+   * Optional so a context built without it is unambiguously the default —
+   * absent means "run today's path", the same as false.
+   */
+  splitSharedContacts?: boolean;
 }
 
 type PhaseFn = (ctx: PhaseContext, counts: PhaseResult) => Promise<PhaseResult>;
@@ -96,7 +127,9 @@ export const PHASES: { name: string; fn: PhaseFn }[] = [
     name: "customers",
     fn: async (ctx, counts) => {
       if (!ctx.fpClient) throw new Error("No FieldPulse client available");
-      await importCustomersFromFieldpulse(ctx.orgId, counts, ctx.fpClient);
+      await importCustomersFromFieldpulse(ctx.orgId, counts, ctx.fpClient, {
+        splitSharedContacts: ctx.splitSharedContacts === true,
+      });
       return counts;
     },
   },
@@ -185,6 +218,12 @@ export function parseArgs(argv: string[]): {
   yes: boolean;
   /** Permit a non-dev database target. Required for the production sweep. */
   allowProd: boolean;
+  /**
+   * customers phase: give every FieldPulse customer its own row instead of
+   * dedupe-merging on a shared contact. OFF by default — the nightly sweep must
+   * keep running today's path.
+   */
+  splitSharedContacts: boolean;
 } {
   const args = argv.slice(2);
   let orgId: string | null = null;
@@ -192,6 +231,7 @@ export function parseArgs(argv: string[]): {
   let phaseFilter: string | null = null;
   let yes = false;
   let allowProd = false;
+  let splitSharedContacts = false;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--org" && args[i + 1]) {
@@ -204,6 +244,8 @@ export function parseArgs(argv: string[]): {
       yes = true;
     } else if (args[i] === "--allow-prod") {
       allowProd = true;
+    } else if (args[i] === "--split-shared-contacts") {
+      splitSharedContacts = true;
     }
   }
 
@@ -217,7 +259,7 @@ export function parseArgs(argv: string[]): {
     ? phaseFilter.split(",").map((s) => s.trim()).filter(Boolean)
     : null;
 
-  return { orgId, dryRun, phaseNames, yes, allowProd };
+  return { orgId, dryRun, phaseNames, yes, allowProd, splitSharedContacts };
 }
 
 // ── DB host (no credentials) ─────────────────────────────────────────────────
@@ -340,7 +382,8 @@ async function requireConfirmation(prompt: string): Promise<void> {
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  const { orgId, dryRun, phaseNames, yes, allowProd } = parseArgs(process.argv);
+  const { orgId, dryRun, phaseNames, yes, allowProd, splitSharedContacts } =
+    parseArgs(process.argv);
 
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
@@ -378,6 +421,9 @@ async function main(): Promise<void> {
   if (phaseNames) {
     console.log(`  Phase(s): ${phaseNames.join(", ")}`);
   }
+  if (splitSharedContacts) {
+    console.log("  Split   : --split-shared-contacts (one row per FP customer)");
+  }
   console.log("");
 
   // Build the FP client.
@@ -403,7 +449,7 @@ async function main(): Promise<void> {
     selectedPhases = PHASES.filter((p) => phaseNames.includes(p.name));
   }
 
-  const ctx: PhaseContext = { orgId, dryRun, db, fpClient };
+  const ctx: PhaseContext = { orgId, dryRun, db, fpClient, splitSharedContacts };
 
   if (dryRun) {
     // Dry-run: first page only, print counts, no writes.
