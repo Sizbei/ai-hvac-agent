@@ -236,7 +236,7 @@ export function ChatInput({
           size="icon"
           disabled={(value.trim().length === 0 && attachments.length === 0) || disabled || isUploading}
           aria-label="Send message"
-          className="size-11 flex-shrink-0 self-end"
+          className="size-11 flex-shrink-0 self-end disabled:bg-muted disabled:text-foreground-faint disabled:opacity-100"
         >
           {isUploading ? (
             <span className="size-4 animate-pulse">...</span>

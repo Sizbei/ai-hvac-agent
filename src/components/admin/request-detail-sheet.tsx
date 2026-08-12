@@ -700,25 +700,25 @@ export function RequestDetailSheet({
                   (detail.fieldpulseMetrics.statusLogSeconds.on_the_way ?? 0) > 0 ||
                   (detail.fieldpulseMetrics.statusLogSeconds.in_progress ?? 0) > 0) && (
                 <section>
-                  <div className="rounded-md border border-violet-200 bg-violet-50/40">
+                  <div className="rounded-md border border-border-strong bg-surface-sunken">
                     <button
                       type="button"
                       aria-expanded={fpMetricsOpen}
                       onClick={() => setFpMetricsOpen((v) => !v)}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-violet-800 hover:bg-violet-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md"
                     >
                       {fpMetricsOpen ? (
-                        <ChevronDown className="size-3.5 shrink-0 text-violet-600 motion-reduce:transition-none" aria-hidden="true" />
+                        <ChevronDown className="size-3.5 shrink-0 text-foreground-faint motion-reduce:transition-none" aria-hidden="true" />
                       ) : (
-                        <ChevronRight className="size-3.5 shrink-0 text-violet-600 motion-reduce:transition-none" aria-hidden="true" />
+                        <ChevronRight className="size-3.5 shrink-0 text-foreground-faint motion-reduce:transition-none" aria-hidden="true" />
                       )}
-                      <span className="rounded border border-violet-300 bg-violet-100 px-1.5 py-px text-[10px] font-medium text-violet-700">
+                      <span className="rounded-[3px] border border-border-strong bg-surface-raised px-1.5 py-px text-[10px] font-medium text-muted-foreground">
                         FieldPulse
                       </span>
                       <span>metrics</span>
                     </button>
                     {fpMetricsOpen && (
-                      <div className="border-t border-violet-200 px-3 pb-3 pt-2 space-y-1">
+                      <div className="border-t border-border px-3 pb-3 pt-2 space-y-1">
                         {detail.fieldpulseMetrics.totalPriceCents != null && (
                           <InfoRow
                             label="Total price"

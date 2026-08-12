@@ -339,7 +339,7 @@ export default function EstimatesPage() {
                     <tr className="border-t hover:bg-muted/30 cursor-pointer">
                       {/* Customer (bold) + SyncPill */}
                       <td className="px-4 py-3" onClick={toggle}>
-                        <div className="flex flex-col gap-0.5">
+                        <div className="flex flex-col items-start gap-0.5">
                           <span className="font-semibold">
                             {est.customerName ?? (est.customerId ? 'Customer' : '—')}
                           </span>

@@ -36,14 +36,14 @@ function formatDate(dateString: string): string {
 function RoleBadge({ role }: { role: StaffRecord['role'] }) {
   if (role === 'super_admin') {
     return (
-      <Badge variant="outline" className="bg-muted text-foreground border-border">
+      <Badge variant="outline" className="bg-marker-light text-marker-strong border-marker-border">
         Super admin
       </Badge>
     );
   }
   if (role === 'admin') {
     return (
-      <Badge variant="outline" className="bg-marker-light text-marker-strong border-marker-border">
+      <Badge variant="outline" className="bg-surface-raised text-muted-foreground border-border-strong">
         Admin
       </Badge>
     );
