@@ -210,6 +210,37 @@ export async function syncCustomerToHcp(
       ? existing.id
       : (await client.createCustomer(toCreateInput(contact))).id;
 
+    // Pre-check whether another row in this org already owns this HCP id.
+    // Post-split, HCP's find-by-email far more often returns an id a
+    // DIFFERENT one of our rows already claimed; without this check the
+    // guarded UPDATE below would trip customers_org_hcp_customer_id_unique
+    // and the catch below would swallow it, retrying and failing identically
+    // forever. Skip the adoption instead — the set-once IS NULL guard is
+    // unaffected.
+    const [claimedBy] = await db
+      .select({ id: customers.id })
+      .from(customers)
+      .where(
+        withTenant(
+          customers,
+          organizationId,
+          eq(customers.hcpCustomerId, hcpId),
+        ),
+      );
+
+    if (claimedBy) {
+      logger.warn(
+        {
+          organizationId,
+          customerId,
+          hcpCustomerId: hcpId,
+          claimedByCustomerId: claimedBy.id,
+        },
+        "Housecall Pro customer id already claimed by another row — skipping adoption",
+      );
+      return;
+    }
+
     // Persist the mapping, guarded on hcp_customer_id IS NULL so a racing sync
     // that already wrote an id is never overwritten.
     await db

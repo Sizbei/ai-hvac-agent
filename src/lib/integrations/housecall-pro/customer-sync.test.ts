@@ -19,16 +19,30 @@ vi.mock("./client", () => ({
 }));
 
 // ── Mock the DB ──────────────────────────────────────────────────────────────
-// select().from().where() resolves the staged customer row(s); update()...where()
-// records what was written so we can assert the mapping is persisted.
+// select().from().where() resolves the staged customer row(s) on the FIRST
+// call (the row lookup) and the staged claimant row(s) on every subsequent
+// call (the adoption pre-check); update()...where() records what was written
+// so we can assert the mapping is persisted (or, for the pre-check tests,
+// that it was NOT).
 const dbState: {
   selectRows: Record<string, unknown>[];
+  claimedRows: Record<string, unknown>[];
+  selectCallCount: number;
   updateSet?: Record<string, unknown>;
-} = { selectRows: [] };
+} = { selectRows: [], claimedRows: [], selectCallCount: 0 };
 
 vi.mock("@/lib/db", () => {
   const select = vi.fn(() => ({
-    from: () => ({ where: () => Promise.resolve(dbState.selectRows) }),
+    from: () => ({
+      where: () => {
+        dbState.selectCallCount += 1;
+        const rows =
+          dbState.selectCallCount === 1
+            ? dbState.selectRows
+            : dbState.claimedRows;
+        return Promise.resolve(rows);
+      },
+    }),
   }));
   const update = vi.fn(() => ({
     set: (v: Record<string, unknown>) => ({
@@ -98,6 +112,8 @@ function hcpCustomer(id: string): HousecallCustomer {
 beforeEach(() => {
   getHousecallClient.mockReset();
   dbState.selectRows = [];
+  dbState.claimedRows = [];
+  dbState.selectCallCount = 0;
   dbState.updateSet = undefined;
 });
 
@@ -313,6 +329,51 @@ describe("syncCustomerToHcp — find vs create", () => {
     expect(findCustomer).not.toHaveBeenCalled();
     expect(createCustomer).toHaveBeenCalledTimes(1);
     expect(dbState.updateSet).toMatchObject({ hcpCustomerId: "hcp-noid" });
+  });
+});
+
+describe("syncCustomerToHcp — adoption pre-check", () => {
+  it("skips adoption (issues no UPDATE) when the resolved HCP id is already claimed by another row", async () => {
+    const { client, createCustomer, findCustomer } = fakeClient();
+    findCustomer.mockResolvedValue(hcpCustomer("hcp-taken"));
+    getHousecallClient.mockResolvedValue(client);
+    dbState.selectRows = [
+      {
+        id: "cust-1",
+        hcpCustomerId: null,
+        nameEncrypted: encrypt("Jane Doe"),
+        emailEncrypted: encrypt("jane@example.com"),
+        phoneEncrypted: null,
+        addressEncrypted: null,
+      },
+    ];
+    // The pre-check SELECT finds a different native row already owns this id.
+    dbState.claimedRows = [{ id: "cust-other" }];
+    await syncCustomerToHcp("org-1", "cust-1");
+    expect(createCustomer).not.toHaveBeenCalled();
+    // The guarded UPDATE must never be attempted once the id is known-taken.
+    expect(dbState.updateSet).toBeUndefined();
+  });
+
+  it("proceeds with adoption when the resolved HCP id is not claimed by any other row", async () => {
+    const { client, createCustomer, findCustomer } = fakeClient();
+    findCustomer.mockResolvedValue(hcpCustomer("hcp-free"));
+    getHousecallClient.mockResolvedValue(client);
+    dbState.selectRows = [
+      {
+        id: "cust-1",
+        hcpCustomerId: null,
+        nameEncrypted: encrypt("Jane Doe"),
+        emailEncrypted: encrypt("jane@example.com"),
+        phoneEncrypted: null,
+        addressEncrypted: null,
+      },
+    ];
+    // The pre-check SELECT finds no claimant — the id is free to adopt.
+    dbState.claimedRows = [];
+    await syncCustomerToHcp("org-1", "cust-1");
+    expect(createCustomer).not.toHaveBeenCalled();
+    expect(dbState.updateSet).toMatchObject({ hcpCustomerId: "hcp-free" });
   });
 });
 
