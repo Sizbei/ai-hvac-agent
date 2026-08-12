@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeMargin, rollUpMargin } from "./margin";
+import { computeMargin, rollUpMargin, fpDiscountCents } from "./margin";
 
 describe("computeMargin", () => {
   it("positive margin: revenue above cost", () => {
@@ -64,5 +64,53 @@ describe("rollUpMargin", () => {
     expect(r.costCents).toBe(4000);
     expect(r.marginCents).toBe(-1000);
     expect(r.marginPct).toBeCloseTo(-1000 / 3000, 10);
+  });
+});
+
+describe("rollUpMargin — header discount", () => {
+  it("subtracts the discount from revenue before computing margin", () => {
+    const r = rollUpMargin(
+      [{ lineTotalCents: 10000, costCents: 6000 }],
+      2000,
+    );
+    expect(r.revenueCents).toBe(8000);
+    expect(r.costCents).toBe(6000);
+    expect(r.marginCents).toBe(2000);
+    expect(r.marginPct).toBeCloseTo(2000 / 8000, 10);
+  });
+
+  it("a fully-discounted invoice shows ZERO revenue, not phantom revenue at 100% margin", () => {
+    const r = rollUpMargin(
+      [{ lineTotalCents: 10000, costCents: 6000 }],
+      10000,
+    );
+    expect(r.revenueCents).toBe(0);
+    expect(r.marginCents).toBe(-6000);
+    expect(r.marginPct).toBe(0);
+  });
+
+  it("clamps at zero when the discount exceeds the line sum", () => {
+    const r = rollUpMargin([{ lineTotalCents: 1000, costCents: 500 }], 5000);
+    expect(r.revenueCents).toBe(0);
+  });
+
+  it("omitted or zero discount leaves the rollup unchanged", () => {
+    const base = rollUpMargin([{ lineTotalCents: 7000, costCents: 3000 }]);
+    const zero = rollUpMargin([{ lineTotalCents: 7000, costCents: 3000 }], 0);
+    expect(zero).toEqual(base);
+  });
+});
+
+describe("fpDiscountCents", () => {
+  it("parses the FieldPulse spillover discount (dollars string) into cents", () => {
+    expect(fpDiscountCents({ discount: "182.00" })).toBe(18200);
+    expect(fpDiscountCents({ discount: "105.50" })).toBe(10550);
+  });
+
+  it("returns 0 for missing spillover, absent key, or malformed values", () => {
+    expect(fpDiscountCents(null)).toBe(0);
+    expect(fpDiscountCents({})).toBe(0);
+    expect(fpDiscountCents({ discount: "not-a-number" })).toBe(0);
+    expect(fpDiscountCents({ discount: "-5.00" })).toBe(0);
   });
 });

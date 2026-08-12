@@ -34,12 +34,39 @@ export interface MarginLine {
   readonly lineTotalCents: number;
 }
 
-/** Sum line revenue + cost, then compute the rolled-up margin over the set. */
-export function rollUpMargin(lines: readonly MarginLine[]): MarginRollup {
-  const revenueCents = lines.reduce((sum, l) => sum + l.lineTotalCents, 0);
+/**
+ * Sum line revenue + cost, then compute the rolled-up margin over the set.
+ *
+ * `discountCents` is a header-level discount applied AFTER the line sum —
+ * FieldPulse mirrors carry it in spillover, not on lines, so summing lines
+ * alone overstates revenue (a fully-discounted invoice would show its whole
+ * line sum as revenue at 100% margin). Revenue clamps at zero: a discount can
+ * erase revenue, never mint negative revenue.
+ */
+export function rollUpMargin(
+  lines: readonly MarginLine[],
+  discountCents = 0,
+): MarginRollup {
+  const lineSumCents = lines.reduce((sum, l) => sum + l.lineTotalCents, 0);
+  const revenueCents = Math.max(0, lineSumCents - discountCents);
   const costCents = lines.reduce((sum, l) => sum + l.costCents, 0);
   const { marginCents, marginPct } = computeMargin(revenueCents, costCents);
   return { revenueCents, costCents, marginCents, marginPct };
+}
+
+/**
+ * Header discount from a FieldPulse spillover blob, in integer cents.
+ * FP sends dollars as a string ("182.00"); anything missing, malformed, or
+ * negative is 0 — a bad value must never inflate or invent a discount.
+ */
+export function fpDiscountCents(
+  fieldpulseData: Record<string, unknown> | null | undefined,
+): number {
+  const raw = fieldpulseData?.["discount"];
+  if (raw === null || raw === undefined || raw === "") return 0;
+  const n = Number.parseFloat(String(raw));
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.round(n * 100);
 }
 
 /** A material a tech actually used: snapshotted unit cost × quantity. */

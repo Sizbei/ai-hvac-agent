@@ -18,7 +18,7 @@ import { InvoiceDocument, type OrgIdentity } from '@/components/admin/invoices/i
 import { InvoiceCollectionsSide } from '@/components/admin/invoices/invoice-collections-side';
 import { FinancingPanel } from '@/components/admin/financing/financing-panel';
 import { formatCentsExact, parseDollarsToCents } from '@/lib/admin/money-format';
-import { rollUpMargin, computeMargin } from '@/lib/admin/margin';
+import { rollUpMargin, computeMargin, fpDiscountCents } from '@/lib/admin/margin';
 import { deriveInvoicePresentation } from '@/lib/admin/invoice-presentation';
 import { isCollectible, invoiceRef } from '@/lib/admin/invoice-collectible';
 import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
@@ -319,8 +319,13 @@ export function InvoiceDetailClient({
   const { balanceCents: balance, canTakePayment, sourceLabel } =
     deriveInvoicePresentation(invoice);
   // Margin is line revenue vs snapshotted line cost (excludes tax — tax is not
-  // revenue). Internal/admin-only readout.
-  const margin = rollUpMargin(invoice.lineItems);
+  // revenue). FieldPulse mirrors carry a header-level discount in spillover
+  // that lines don't reflect — without it a fully-discounted invoice reads as
+  // full revenue at 100% margin. Internal/admin-only readout.
+  const margin = rollUpMargin(
+    invoice.lineItems,
+    fpDiscountCents(invoice.fieldpulseData),
+  );
   // Actual field costs the tech recorded on the linked job (if any): materials
   // used + labor logged (clocked time × snapshotted rate). Shown ALONGSIDE the
   // estimated figure — never overwriting it. The actual margin recomputes
