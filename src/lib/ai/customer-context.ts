@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { customers } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { decrypt } from "@/lib/crypto";
-import { findCustomerIdByContact } from "@/lib/admin/crm-queries";
+import { findCustomerMatchByContact } from "@/lib/admin/crm-queries";
 import { getCustomerServiceHistory } from "@/lib/integrations/housecall-pro/customer-history";
 
 /**
@@ -19,11 +19,17 @@ import { getCustomerServiceHistory } from "@/lib/integrations/housecall-pro/cust
  */
 export interface CustomerContext {
   readonly customerId: string;
-  /** Always true here — the object only exists when a prior customer matched. */
+  /**
+   * True for a confident identity. FALSE when the contact resolved to an
+   * AMBIGUOUS cluster (several live rows share the email/phone) — see
+   * {@link lookupCustomerContext}: the id is still carried, but nothing
+   * personalizing is.
+   */
   readonly isReturning: boolean;
   /** Number of service requests already on file for this customer. */
   readonly priorRequestCount: number;
-  readonly membershipStatus: string;
+  /** Null when unknown — including a blanked ambiguous resolution. */
+  readonly membershipStatus: string | null;
   readonly customerType: string;
   /** ServiceTitan "Do Not Service" — the bot must refuse to book + route to a human. */
   readonly doNotService: boolean;
@@ -79,12 +85,21 @@ function safeDecrypt(ciphertext: string | null): string | null {
  * creating one, returning light personalization context or null when no
  * customer matches.
  *
- * Pure read. Uses the existing blind-index dedupe (`findCustomerIdByContact`)
- * to resolve the id, then a single targeted select for the context fields +
- * a correlated count of prior service requests. Never inserts or updates —
- * customer creation happens only at confirm time (`upsertCustomerByContact`),
- * so an in-progress chat never materializes a customer before the customer
- * actually confirms.
+ * Pure read. Uses the deterministic contact resolver
+ * (`findCustomerMatchByContact`) to resolve the id, then a single targeted
+ * select for the context fields + a correlated count of prior service
+ * requests. Never inserts or updates — customer creation happens only at
+ * confirm time (`upsertCustomerByContact`), so an in-progress chat never
+ * materializes a customer before the customer actually confirms.
+ *
+ * AMBIGUOUS RESOLUTIONS ARE NOT AN IDENTITY. Several live customer rows can
+ * legitimately share an email or phone (one accounts-payable contact covering
+ * unrelated businesses), so the resolver's pick is then a guess. A
+ * confident-sounding wrong name is worse than no name, so every personalizing
+ * field is blanked: only `customerId` (the session FK and the id the
+ * do-not-service re-read keys on), `doNotService` (rule 2 is fail-closed and
+ * ambiguity never softens it) and `customerType` survive. The blanking is
+ * inherited for free by the voice path, which delegates here.
  *
  * Returns null when neither a normalized email nor phone is supplied, or when
  * nothing matches.
@@ -93,14 +108,27 @@ export async function lookupCustomerContext(
   organizationId: string,
   contact: { readonly email?: string | null; readonly phone?: string | null },
 ): Promise<CustomerContext | null> {
-  const customerId = await findCustomerIdByContact(organizationId, {
+  const match = await findCustomerMatchByContact(organizationId, {
     email: contact.email ?? null,
     phone: contact.phone ?? null,
   });
 
-  if (!customerId) return null;
+  if (!match) return null;
 
-  return loadCustomerContextById(organizationId, customerId);
+  const context = await loadCustomerContextById(organizationId, match.id);
+  if (!context || !match.ambiguous) return context;
+
+  return {
+    customerId: context.customerId,
+    isReturning: false,
+    priorRequestCount: 0,
+    membershipStatus: null,
+    customerType: context.customerType,
+    doNotService: context.doNotService,
+    firstName: null,
+    fullName: null,
+    hcpCustomerId: null,
+  };
 }
 
 /**

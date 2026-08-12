@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { findIdMock, selectResult, decryptMock, historyMock } = vi.hoisted(
+const { findMatchMock, selectResult, decryptMock, historyMock } = vi.hoisted(
   () => ({
-    findIdMock: vi.fn(),
+    findMatchMock: vi.fn(),
     selectResult: { value: [] as unknown[] },
     decryptMock: vi.fn(),
     historyMock: vi.fn(),
@@ -10,7 +10,7 @@ const { findIdMock, selectResult, decryptMock, historyMock } = vi.hoisted(
 );
 
 vi.mock("@/lib/admin/crm-queries", () => ({
-  findCustomerIdByContact: findIdMock,
+  findCustomerMatchByContact: findMatchMock,
 }));
 
 vi.mock("@/lib/integrations/housecall-pro/customer-history", () => ({
@@ -61,6 +61,20 @@ import {
 
 const ORG = "org-1";
 
+/** A confident (non-ambiguous) resolution, as T1's resolver returns it. */
+const confident = (id: string, doNotService = false) => ({
+  id,
+  ambiguous: false,
+  doNotService,
+});
+
+/** An ambiguous cluster: several live rows share the contact. */
+const ambiguous = (id: string, doNotService = false) => ({
+  id,
+  ambiguous: true,
+  doNotService,
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
   selectResult.value = [];
@@ -75,7 +89,7 @@ beforeEach(() => {
 
 describe("lookupCustomerContext", () => {
   it("returns null when no customer matches (not found)", async () => {
-    findIdMock.mockResolvedValue(null);
+    findMatchMock.mockResolvedValue(null);
     const result = await lookupCustomerContext(ORG, {
       email: "nobody@example.com",
     });
@@ -85,14 +99,14 @@ describe("lookupCustomerContext", () => {
   });
 
   it("returns null when neither email nor phone is provided", async () => {
-    findIdMock.mockResolvedValue(null);
+    findMatchMock.mockResolvedValue(null);
     const result = await lookupCustomerContext(ORG, {});
     expect(result).toBeNull();
-    expect(findIdMock).toHaveBeenCalledWith(ORG, { email: null, phone: null });
+    expect(findMatchMock).toHaveBeenCalledWith(ORG, { email: null, phone: null });
   });
 
   it("returns light context for a found returning customer", async () => {
-    findIdMock.mockResolvedValue("cust-123");
+    findMatchMock.mockResolvedValue(confident("cust-123"));
     decryptMock.mockReturnValue("Jane Doe");
     selectResult.value = [
       {
@@ -123,7 +137,7 @@ describe("lookupCustomerContext", () => {
   });
 
   it("surfaces the do_not_service flag", async () => {
-    findIdMock.mockResolvedValue("cust-dns");
+    findMatchMock.mockResolvedValue(confident("cust-dns", true));
     decryptMock.mockReturnValue("Bad Actor");
     selectResult.value = [
       {
@@ -142,7 +156,7 @@ describe("lookupCustomerContext", () => {
   });
 
   it("drops the 'Unknown' placeholder from name fields", async () => {
-    findIdMock.mockResolvedValue("cust-anon");
+    findMatchMock.mockResolvedValue(confident("cust-anon"));
     decryptMock.mockReturnValue("Unknown");
     selectResult.value = [
       {
@@ -160,7 +174,7 @@ describe("lookupCustomerContext", () => {
   });
 
   it("returns null when the id resolves but the row was deleted concurrently", async () => {
-    findIdMock.mockResolvedValue("cust-gone");
+    findMatchMock.mockResolvedValue(confident("cust-gone"));
     selectResult.value = [];
     const result = await lookupCustomerContext(ORG, {
       email: "gone@example.com",
@@ -169,7 +183,7 @@ describe("lookupCustomerContext", () => {
   });
 
   it("tolerates a decrypt failure and yields null names", async () => {
-    findIdMock.mockResolvedValue("cust-x");
+    findMatchMock.mockResolvedValue(confident("cust-x"));
     decryptMock.mockImplementation(() => {
       throw new Error("bad ciphertext");
     });
@@ -190,6 +204,127 @@ describe("lookupCustomerContext", () => {
   });
 });
 
+describe("lookupCustomerContext — ambiguous cluster", () => {
+  // The winning row as the light query returns it: a fully-populated,
+  // personalizable customer. None of it may survive an ambiguous pick.
+  const winningRow = {
+    nameEncrypted: "enc-name",
+    customerType: "commercial",
+    membershipStatus: "active",
+    doNotService: false,
+    hcpCustomerId: "hcp-1",
+    priorRequestCount: 7,
+  };
+
+  it("blanks every personalization field but keeps the id, doNotService and customerType", async () => {
+    findMatchMock.mockResolvedValue(ambiguous("cust-shared"));
+    decryptMock.mockReturnValue("Jane Doe");
+    selectResult.value = [winningRow];
+
+    const result = await lookupCustomerContext(ORG, { phone: "5555550000" });
+
+    expect(result).toEqual({
+      customerId: "cust-shared",
+      isReturning: false,
+      priorRequestCount: 0,
+      membershipStatus: null,
+      customerType: "commercial",
+      doNotService: false,
+      firstName: null,
+      fullName: null,
+      hcpCustomerId: null,
+    });
+  });
+
+  it("still carries the id — the session FK and the do-not-service re-read key on it", async () => {
+    findMatchMock.mockResolvedValue(ambiguous("cust-shared"));
+    decryptMock.mockReturnValue("Jane Doe");
+    selectResult.value = [winningRow];
+
+    const result = await lookupCustomerContext(ORG, { phone: "5555550000" });
+    expect(result).not.toBeNull();
+    expect(result?.customerId).toBe("cust-shared");
+  });
+
+  it("never softens do-not-service — a blocked ambiguous winner stays blocked", async () => {
+    findMatchMock.mockResolvedValue(ambiguous("cust-blocked", true));
+    decryptMock.mockReturnValue("Bad Actor");
+    selectResult.value = [{ ...winningRow, doNotService: true }];
+
+    const result = await lookupCustomerContext(ORG, { phone: "5555551111" });
+    expect(result?.doNotService).toBe(true);
+    expect(result?.firstName).toBeNull();
+    expect(result?.isReturning).toBe(false);
+  });
+
+  it("produces a hint with no name, no history and no membership claim", async () => {
+    findMatchMock.mockResolvedValue(ambiguous("cust-shared"));
+    decryptMock.mockReturnValue("Jane Doe");
+    selectResult.value = [winningRow];
+
+    const hint = buildCustomerContextHint(
+      await lookupCustomerContext(ORG, { phone: "5555550000" }),
+    );
+    expect(hint).not.toContain("Jane");
+    expect(hint).not.toContain("prior service");
+    expect(hint).not.toContain("active member");
+  });
+
+  it("suppresses HCP enrichment (no hcpCustomerId survives the blanking)", async () => {
+    findMatchMock.mockResolvedValue(ambiguous("cust-shared"));
+    decryptMock.mockReturnValue("Jane Doe");
+    selectResult.value = [winningRow];
+
+    const enriched = await enrichWithServiceHistory(
+      ORG,
+      await lookupCustomerContext(ORG, { phone: "5555550000" }),
+    );
+    expect(historyMock).not.toHaveBeenCalled();
+    expect(enriched?.priorServiceNote).toBeUndefined();
+  });
+
+  it("returns null when the ambiguous winner's row raced a delete", async () => {
+    findMatchMock.mockResolvedValue(ambiguous("cust-gone"));
+    selectResult.value = [];
+    expect(await lookupCustomerContext(ORG, { phone: "5555552222" })).toBeNull();
+  });
+
+  it("leaves an UNAMBIGUOUS resolution fully populated (blanking is scoped)", async () => {
+    findMatchMock.mockResolvedValue(confident("cust-solo"));
+    decryptMock.mockReturnValue("Jane Doe");
+    selectResult.value = [winningRow];
+
+    const result = await lookupCustomerContext(ORG, { phone: "5555553333" });
+    expect(result).toEqual({
+      customerId: "cust-solo",
+      isReturning: true,
+      priorRequestCount: 7,
+      membershipStatus: "active",
+      customerType: "commercial",
+      doNotService: false,
+      firstName: "Jane",
+      fullName: "Jane Doe",
+      hcpCustomerId: "hcp-1",
+    });
+  });
+
+  it("types membershipStatus as nullable (the blanked value is assignable)", () => {
+    const blanked: CustomerContext = {
+      customerId: "cust-shared",
+      isReturning: false,
+      priorRequestCount: 0,
+      membershipStatus: null,
+      customerType: "commercial",
+      doNotService: false,
+      firstName: null,
+      fullName: null,
+      hcpCustomerId: null,
+    };
+    // The lone membershipStatus consumer must stay null-safe.
+    expect(buildCustomerContextHint(blanked)).not.toContain("active member");
+  });
+});
+
 describe("loadCustomerContextById", () => {
   it("maps the row to a context WITHOUT a contact lookup (id is known)", async () => {
     decryptMock.mockReturnValue("Jane Doe");
@@ -206,7 +341,7 @@ describe("loadCustomerContextById", () => {
 
     const result = await loadCustomerContextById(ORG, "cust-123");
 
-    expect(findIdMock).not.toHaveBeenCalled(); // no contact resolution needed
+    expect(findMatchMock).not.toHaveBeenCalled(); // no contact resolution needed
     expect(result).toEqual({
       customerId: "cust-123",
       isReturning: true,
