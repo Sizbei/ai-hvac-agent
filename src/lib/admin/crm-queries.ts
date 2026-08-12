@@ -658,10 +658,16 @@ function toDate(value: Date | string | null | undefined): Date | null {
  * Exported because SMS consent resolves the SAME candidate set with a DIFFERENT
  * order (STOP fans out, START skips the do-not-service rule): the ordering may
  * differ per direction, the candidate set must not.
+ *
+ * The default LIMIT is a winner-selection guard and is only safe because the
+ * ORDER BY ranks the winner first. A fan-out consumer (SMS STOP) needs the
+ * WHOLE set — it passes `{ limit: null }` to lift the cap, because a capped
+ * STOP would silence 50 businesses and keep texting the 51st.
  */
 export async function findCustomerMatchCandidates(
   organizationId: string,
   input: { readonly email: string | null; readonly phone: string | null },
+  opts?: { readonly limit?: number | null },
 ): Promise<CustomerMatchCandidate[]> {
   const targetEmail = normalizeEmail(input.email);
   const targetPhone = normalizePhone(input.phone);
@@ -682,7 +688,7 @@ export async function findCustomerMatchCandidates(
     string | null
   >`(select max(${serviceRequests.createdAt}) from ${serviceRequests} where ${serviceRequests.customerId} = ${customers.id})`;
 
-  const rows = await db
+  const query = db
     .select({
       id: customers.id,
       matchedOn: sql<"email" | "phone">`case when ${emailMatched} then 'email' else 'phone' end`,
@@ -708,8 +714,11 @@ export async function findCustomerMatchCandidates(
       sql`${lastActivityAt} desc nulls last`,
       desc(customers.createdAt),
       asc(customers.id),
-    )
-    .limit(CUSTOMER_MATCH_CANDIDATE_LIMIT);
+    );
+  const rows =
+    opts?.limit === null
+      ? await query
+      : await query.limit(opts?.limit ?? CUSTOMER_MATCH_CANDIDATE_LIMIT);
 
   return rows.map((row) => ({
     id: row.id,

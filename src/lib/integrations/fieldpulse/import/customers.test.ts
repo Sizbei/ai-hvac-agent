@@ -1057,11 +1057,15 @@ describe("importOneFpCustomer — erasure is not undone by a re-import", () => {
  */
 function wireSelectQueue(results: unknown[][]) {
   const wheres: unknown[] = [];
+  const orderBys: unknown[][] = [];
   const queue = [...results];
   vi.mocked(db.select).mockImplementation((() => {
     const rows = queue.shift() ?? [];
     const limit = vi.fn().mockResolvedValue(rows);
-    const orderBy = vi.fn().mockReturnValue({ limit });
+    const orderBy = vi.fn((...args: unknown[]) => {
+      orderBys.push(args);
+      return { limit };
+    });
     const where = vi.fn((predicate: unknown) => {
       wheres.push(predicate);
       return { limit, orderBy };
@@ -1069,7 +1073,7 @@ function wireSelectQueue(results: unknown[][]) {
     const from = vi.fn().mockReturnValue({ where });
     return { from };
   }) as never);
-  return { wheres };
+  return { wheres, orderBys };
 }
 
 /** True when a drizzle predicate carries the given raw SQL text. */
@@ -1239,6 +1243,30 @@ describe("importOneFpCustomer — flagged split resolution", () => {
       expect(predicateContains(candidateWhere, term)).toBe(true);
       expect(predicateContains(updateWhere.mock.calls[0]?.[0], term)).toBe(true);
     }
+    // The UPDATE must ALSO repeat the email-hash equality the candidate was
+    // selected by — a concurrent contact edit between SELECT and UPDATE must
+    // not let a permanent claim land on a row whose email changed.
+    expect(
+      predicateContains(updateWhere.mock.calls[0]?.[0], "email_hash"),
+    ).toBe(true);
+  });
+
+  it("claim candidates are ordered oldest-first (created_at ASC, id ASC)", async () => {
+    // Oldest-first is the spec'd deterministic claim pick; losing the ORDER BY
+    // would make the claimed row depend on storage order.
+    const { orderBys } = wireSelectQueue([
+      [],
+      [{ id: "native-1", fieldpulseCustomerId: null }],
+    ]);
+    wireUpdate([{ id: "native-1" }]);
+
+    await importOneFpCustomer(ORG, makeCustomer(), makeCounts(), SPLIT);
+
+    const claimOrder = orderBys[0];
+    expect(claimOrder).toBeDefined();
+    expect(claimOrder).toHaveLength(2);
+    expect(predicateContains(claimOrder?.[0], "created_at")).toBe(true);
+    expect(predicateContains(claimOrder?.[1], "id")).toBe(true);
   });
 
   it("contested candidate: the second FP customer in the run inserts its own row", async () => {

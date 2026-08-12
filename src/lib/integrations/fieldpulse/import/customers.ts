@@ -624,9 +624,10 @@ async function selectClaimCandidate(
 }
 
 /**
- * The guarded claim. Its predicate is the candidate SELECT's, term for term
- * (same exported constant): the phase runs for ~20 minutes and nothing pauses
- * an operator, so a row archived or blocked in between must not be claimed.
+ * The guarded claim. Its predicate is the candidate SELECT's, term for term —
+ * the shared constant PLUS the email-hash equality the candidate was selected
+ * by: the phase runs for ~20 minutes and nothing pauses an operator, so a row
+ * archived, blocked, or re-contacted in between must not be claimed.
  * Zero rows returned is a normal outcome, handled by the caller.
  */
 async function claimNativeCustomer(
@@ -639,6 +640,10 @@ async function claimNativeCustomer(
     email: customer.email,
     phone: customer.phone,
   });
+  // A claim is email-only by design (§2.1): reaching here without an email
+  // hash means the caller's candidate search was broken — refuse rather than
+  // claim on a predicate that would match rows by accident.
+  if (!emailHash) return null;
 
   const claimed = await db
     .update(customers)
@@ -661,6 +666,12 @@ async function claimNativeCustomer(
       and(
         eq(customers.id, candidateId),
         eq(customers.organizationId, orgId),
+        // The candidate was selected BY this email hash; requiring it again
+        // here closes the SELECT→UPDATE window where a concurrent contact
+        // edit changes the row's email — a claim is permanent and carries the
+        // row's portal token, so it must only land on the row still holding
+        // the email it was chosen for.
+        eq(customers.emailHash, emailHash),
         sql.raw(NATIVE_CLAIM_CANDIDATE_FILTER_SQL),
       ),
     )

@@ -305,10 +305,14 @@ export async function setDoNotContactByPhone(
   phone: string,
   doNotContact: boolean,
 ): Promise<boolean> {
-  const candidates = await findCustomerMatchCandidates(organizationId, {
-    email: null,
-    phone,
-  });
+  // limit: null — STOP is a fan-out, not a winner selection. The resolver's
+  // default LIMIT is only safe when picking one winner; a capped STOP would
+  // silence 50 businesses on a shared number and keep texting the 51st.
+  const candidates = await findCustomerMatchCandidates(
+    organizationId,
+    { email: null, phone },
+    { limit: null },
+  );
   if (candidates.length === 0) {
     return false;
   }

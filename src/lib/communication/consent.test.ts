@@ -253,10 +253,13 @@ describe("setDoNotContactByPhone — STOP fans out (SPEC §3.5)", () => {
 
     await setDoNotContactByPhone(ORG, PHONE, true);
 
-    expect(findCustomerMatchCandidates).toHaveBeenCalledWith(ORG, {
-      email: null,
-      phone: PHONE,
-    });
+    expect(findCustomerMatchCandidates).toHaveBeenCalledWith(
+      ORG,
+      { email: null, phone: PHONE },
+      // limit: null — STOP is a fan-out; the resolver's winner-selection cap
+      // must be lifted or a shared number saturates at 50 rows.
+      { limit: null },
+    );
     expect(db.select).not.toHaveBeenCalled();
   });
 

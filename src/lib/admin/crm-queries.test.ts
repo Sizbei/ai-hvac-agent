@@ -190,6 +190,7 @@ import {
   getCustomers,
   findCustomerIdByContact,
   findCustomerMatchByContact,
+  findCustomerMatchCandidates,
   upsertCustomerByContact,
   deleteCustomer,
   archiveCustomer,
@@ -287,6 +288,29 @@ describe('findCustomerIdByContact', () => {
     // Rule 1 must be a SQL filter — the helper re-applies it, but the LIMIT is
     // only safe when the erased rows never enter the candidate set.
     expect(tenantCalls[0]).toContainEqual({ __sql: 'customers.anonymized IS NULL' });
+  });
+
+  it('orders the candidate query (6 rank expressions) and caps at 50 — the cap is only safe under that ordering', async () => {
+    selectQueue.push([]);
+    await findCustomerIdByContact(ORG, { email: 'bob@example.com', phone: null });
+    // The SQL ORDER BY must mirror pickCustomerMatch rules 2-7; if it is ever
+    // removed or truncated, LIMIT 50 can silently drop the true winner.
+    const orderArgs = lastChainCall('orderBy');
+    expect(orderArgs).toBeDefined();
+    expect(orderArgs).toHaveLength(6);
+    expect(lastChainCall('limit')).toEqual([50]);
+  });
+
+  it('lifts the cap when a fan-out consumer passes { limit: null }', async () => {
+    selectQueue.push([]);
+    await findCustomerMatchCandidates(
+      ORG,
+      { email: null, phone: '555-010-0100' },
+      { limit: null },
+    );
+    // No LIMIT call at all — a capped fan-out would stop a shared-number STOP
+    // at 50 rows and keep texting the 51st.
+    expect(lastChainCall('limit')).toBeUndefined();
   });
 
   it('falls back to the legacy decrypt scan for rows with no blind index', async () => {
