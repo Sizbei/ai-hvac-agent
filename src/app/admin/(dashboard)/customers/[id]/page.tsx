@@ -31,6 +31,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 import { SectionCard } from '@/components/admin/ui/section-card';
@@ -52,6 +60,16 @@ import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
 import { SyncPill } from '@/components/admin/sync-pill';
 import type { EquipmentRecord } from '@/lib/admin/crm-types';
 import { formatCentsExact } from '@/lib/admin/money-format';
+
+/** Another row in this org sharing the target's email or phone hash — id +
+ * server-side decrypted name only (customer-identity SPEC §5.1 disclosure). */
+interface ContactSibling {
+  readonly id: string;
+  readonly name: string | null;
+}
+
+/** Bullet list caps here; the rest collapse into a single "+N more…" row. */
+const MAX_SIBLINGS_SHOWN = 8;
 
 const EQUIPMENT_LABELS: Record<string, string> = {
   ac: 'Air Conditioner',
@@ -111,6 +129,8 @@ export default function CustomerDetailPage({
   const [showEraseConfirm, setShowEraseConfirm] = useState(false);
   const [isErasing, setIsErasing] = useState(false);
   const [eraseError, setEraseError] = useState<string | null>(null);
+  const [eraseSiblings, setEraseSiblings] = useState<readonly ContactSibling[]>([]);
+  const [isLoadingSiblings, setIsLoadingSiblings] = useState(false);
   const [completingId, setCompletingId] = useState<string | null>(null);
 
   const handleCompleteFollowUp = useCallback(
@@ -195,6 +215,29 @@ export default function CustomerDetailPage({
       setIsArchiving(false);
     }
   }, [id, router]);
+
+  // Opens the erase confirmation and loads the sibling disclosure (SPEC §5.1):
+  // other rows in the org sharing this contact's email or phone. Informational
+  // only — a failed lookup does not block the confirm dialog or the erase
+  // itself, it just leaves the "also on this contact" list empty.
+  const handleOpenEraseConfirm = useCallback(async (): Promise<void> => {
+    setEraseError(null);
+    setEraseSiblings([]);
+    setShowEraseConfirm(true);
+    setIsLoadingSiblings(true);
+
+    try {
+      const res = await fetch(`/api/admin/customers/${id}/erase`);
+      const json = await res.json().catch(() => ({ success: false }));
+      if (res.ok && json.success) {
+        setEraseSiblings(json.data.siblings ?? []);
+      }
+    } catch {
+      // Non-blocking — see comment above.
+    } finally {
+      setIsLoadingSiblings(false);
+    }
+  }, [id]);
 
   const handleErase = useCallback(async (): Promise<void> => {
     setIsErasing(true);
@@ -370,8 +413,7 @@ export default function CustomerDetailPage({
                 <DropdownMenuItem
                   className="text-destructive focus:text-destructive"
                   onClick={() => {
-                    setEraseError(null);
-                    setShowEraseConfirm(true);
+                    void handleOpenEraseConfirm();
                   }}
                 >
                   <ShieldX className="size-4" />
@@ -717,17 +759,76 @@ export default function CustomerDetailPage({
         onConfirm={handleDelete}
       />
 
-      <ConfirmDialog
+      <Dialog
         open={showEraseConfirm}
-        onOpenChange={setShowEraseConfirm}
-        title="Erase customer data (GDPR)?"
-        description="This permanently anonymizes the customer: their name, contact details, address, chat messages, notes, attachments, and signatures are erased and cannot be recovered. De-identified financial records (invoices, payments) are kept for accounting. This action is terminal."
-        confirmLabel="Erase permanently"
-        confirmingLabel="Erasing…"
-        isConfirming={isErasing}
-        error={eraseError}
-        onConfirm={handleErase}
-      />
+        onOpenChange={(open) => {
+          if (!isErasing) setShowEraseConfirm(open);
+        }}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Erase customer data (GDPR)?</DialogTitle>
+            <DialogDescription>
+              This permanently anonymizes the customer: their name, contact
+              details, address, chat messages, notes, attachments, and
+              signatures are erased and cannot be recovered. De-identified
+              financial records (invoices, payments) are kept for accounting.
+              This action is terminal.
+            </DialogDescription>
+          </DialogHeader>
+
+          {isLoadingSiblings && (
+            <p className="text-sm text-muted-foreground">
+              Checking for other rows on this contact…
+            </p>
+          )}
+
+          {!isLoadingSiblings && eraseSiblings.length > 0 && (
+            <div className="rounded-md border bg-muted/20 p-3 text-sm">
+              <p className="font-medium">
+                Also on this contact ({eraseSiblings.length}{' '}
+                other {eraseSiblings.length === 1 ? 'row' : 'rows'}):
+              </p>
+              <ul className="mt-1 list-disc space-y-0.5 pl-4 text-muted-foreground">
+                {eraseSiblings.slice(0, MAX_SIBLINGS_SHOWN).map((sibling) => (
+                  <li key={sibling.id}>{sibling.name ?? 'Unknown customer'}</li>
+                ))}
+                {eraseSiblings.length > MAX_SIBLINGS_SHOWN && (
+                  <li>
+                    +{eraseSiblings.length - MAX_SIBLINGS_SHOWN} more…
+                  </li>
+                )}
+              </ul>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Erasing this customer does not affect them. A shared email or
+                phone is usually a different customer — review each row and
+                erase it separately only if it is the same person.
+              </p>
+            </div>
+          )}
+
+          {eraseError && <p className="text-sm text-destructive">{eraseError}</p>}
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowEraseConfirm(false)}
+              disabled={isErasing}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={handleErase}
+              disabled={isErasing}
+            >
+              {isErasing ? 'Erasing…' : 'Erase permanently'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <ConfirmDialog
         open={deletingEquipment !== null}

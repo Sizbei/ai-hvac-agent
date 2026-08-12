@@ -21,11 +21,22 @@ interface Captured {
   values?: Record<string, unknown>;
 }
 
-const { batchCalls, insertCalls, selectQueue, makeUpdate, makeDelete, makeInsert } =
-  vi.hoisted(() => {
+const {
+  batchCalls,
+  insertCalls,
+  selectQueue,
+  selectWhereCalls,
+  makeUpdate,
+  makeDelete,
+  makeInsert,
+} = vi.hoisted(() => {
     const batchCalls: Captured[][] = [];
     const insertCalls: Captured[] = [];
     const selectQueue: unknown[][] = [];
+    // Records whatever each db.select(...).from(...).where(x) call was given,
+    // in call order — lets the sibling-listing tests inspect the actual
+    // eq/ne/isNull/or condition tree instead of only the returned rows.
+    const selectWhereCalls: unknown[] = [];
 
     const tableName = (t: unknown): string => {
       // Drizzle tables carry a Symbol-keyed name; fall back to a marker we set
@@ -65,6 +76,7 @@ const { batchCalls, insertCalls, selectQueue, makeUpdate, makeDelete, makeInsert
       batchCalls,
       insertCalls,
       selectQueue,
+      selectWhereCalls,
       makeUpdate,
       makeDelete,
       makeInsert,
@@ -75,7 +87,10 @@ vi.mock("@/lib/db", () => ({
   db: {
     select: () => ({
       from: () => ({
-        where: () => Promise.resolve(selectQueue.shift() ?? []),
+        where: (condition: unknown) => {
+          selectWhereCalls.push(condition);
+          return Promise.resolve(selectQueue.shift() ?? []);
+        },
       }),
     }),
     update: (t: unknown) => makeUpdate(t),
@@ -125,13 +140,23 @@ vi.mock("@/lib/db/tenant", () => ({
   withTenant: (_t: unknown, _org: string, ...c: unknown[]) => c,
 }));
 
+// Condition builders are tagged (not just passed through) so the
+// listContactSiblings tests can assert on the SHAPE of the built query —
+// e.g. that `or` really received two branches (email OR phone), not one.
 vi.mock("drizzle-orm", () => ({
-  eq: (...a: unknown[]) => a,
+  eq: (...a: unknown[]) => ({ op: "eq", args: a }),
+  ne: (...a: unknown[]) => ({ op: "ne", args: a }),
+  isNull: (...a: unknown[]) => ({ op: "isNull", args: a }),
+  or: (...a: unknown[]) => ({ op: "or", args: a.filter((x) => x !== undefined) }),
   inArray: (...a: unknown[]) => a,
 }));
 
 vi.mock("@/lib/crypto", () => ({
   encrypt: (s: string) => `ENC(${s})`,
+  decrypt: (s: string) => {
+    if (s === "CORRUPT") throw new Error("bad ciphertext");
+    return s.startsWith("ENC(") ? s.slice(4, -1) : s;
+  },
 }));
 
 vi.mock("@/lib/admin/audit", () => ({ logAudit: vi.fn() }));
@@ -154,7 +179,11 @@ vi.mock("@/lib/logger", () => ({
 
 vi.mock("server-only", () => ({}));
 
-import { anonymizeCustomer, purgeOrganization } from "./erasure-queries";
+import {
+  anonymizeCustomer,
+  purgeOrganization,
+  listContactSiblings,
+} from "./erasure-queries";
 
 const ORG = "org-1";
 const CUST = "cust-1";
@@ -169,6 +198,7 @@ beforeEach(() => {
   batchCalls.length = 0;
   insertCalls.length = 0;
   selectQueue.length = 0;
+  selectWhereCalls.length = 0;
   afterCallbacks.length = 0;
   deleteFile.mockClear();
 });
@@ -389,5 +419,124 @@ describe("purgeOrganization", () => {
     await afterCallbacks[0]!();
     expect(deleteFile).toHaveBeenCalledWith("a1");
     expect(deleteFile).toHaveBeenCalledWith("s1");
+  });
+});
+
+/** Shape produced by the tagged eq/ne/isNull/or mocks above. */
+interface TaggedCondition {
+  readonly op: string;
+  readonly args: readonly unknown[];
+}
+
+describe("listContactSiblings", () => {
+  /** The array withTenant(...) received for the SIBLINGS select — index 1,
+   * since index 0 is always the target-row lookup. */
+  function siblingConditions(): readonly TaggedCondition[] {
+    return selectWhereCalls[1] as readonly TaggedCondition[];
+  }
+
+  it("returns [] when the target customer does not exist in the org", async () => {
+    selectQueue.push([]); // target lookup -> none
+    const r = await listContactSiblings(ORG, CUST);
+    expect(r).toEqual([]);
+    // No second query — nothing to disclose without a target row.
+    expect(selectWhereCalls).toHaveLength(1);
+  });
+
+  it("returns [] when the target carries neither email nor phone hash", async () => {
+    selectQueue.push([{ emailHash: null, phoneHash: null }]);
+    const r = await listContactSiblings(ORG, CUST);
+    expect(r).toEqual([]);
+    expect(selectWhereCalls).toHaveLength(1);
+  });
+
+  // REGRESSION: this is the core of SPEC §5.1 — matching must be EITHER hash,
+  // not AND, and not just one of the two. Reverting the OR to a single
+  // condition (or to `and`) fails this test.
+  it("matches siblings on EITHER hash — an or() over both eq branches, not one", async () => {
+    selectQueue.push([{ emailHash: "eh-1", phoneHash: "ph-1" }]); // target has both
+    selectQueue.push([]); // sibling rows (unused by this assertion)
+
+    await listContactSiblings(ORG, CUST);
+
+    const [contactMatch] = siblingConditions();
+    expect(contactMatch.op).toBe("or");
+    // Fails if the OR collapses to a single hash.
+    expect(contactMatch.args).toHaveLength(2);
+    const [emailBranch, phoneBranch] = contactMatch.args as TaggedCondition[];
+    expect(emailBranch).toMatchObject({
+      op: "eq",
+      args: ["customers.emailHash", "eh-1"],
+    });
+    expect(phoneBranch).toMatchObject({
+      op: "eq",
+      args: ["customers.phoneHash", "ph-1"],
+    });
+  });
+
+  it("matches on the email hash alone when the target has no phone hash", async () => {
+    selectQueue.push([{ emailHash: "eh-1", phoneHash: null }]);
+    selectQueue.push([]);
+
+    await listContactSiblings(ORG, CUST);
+
+    const [contactMatch] = siblingConditions();
+    expect(contactMatch.args).toHaveLength(1);
+    expect(contactMatch.args[0]).toMatchObject({
+      op: "eq",
+      args: ["customers.emailHash", "eh-1"],
+    });
+  });
+
+  it("matches on the phone hash alone when the target has no email hash", async () => {
+    selectQueue.push([{ emailHash: null, phoneHash: "ph-1" }]);
+    selectQueue.push([]);
+
+    await listContactSiblings(ORG, CUST);
+
+    const [contactMatch] = siblingConditions();
+    expect(contactMatch.args).toHaveLength(1);
+    expect(contactMatch.args[0]).toMatchObject({
+      op: "eq",
+      args: ["customers.phoneHash", "ph-1"],
+    });
+  });
+
+  // REGRESSION: excludes the target row itself and already-anonymized rows —
+  // fails if either exclusion is dropped from the query.
+  it("excludes the target row (ne id) and anonymized rows (isNull anonymizedAt)", async () => {
+    selectQueue.push([{ emailHash: "eh-1", phoneHash: null }]);
+    selectQueue.push([]);
+
+    await listContactSiblings(ORG, CUST);
+
+    const [, neCondition, isNullCondition] = siblingConditions();
+    expect(neCondition).toMatchObject({ op: "ne", args: ["customers.id", CUST] });
+    expect(isNullCondition).toMatchObject({
+      op: "isNull",
+      args: ["customers.anonymizedAt"],
+    });
+  });
+
+  it("returns id + server-side decrypted name for each sibling row", async () => {
+    selectQueue.push([{ emailHash: "eh-1", phoneHash: null }]);
+    selectQueue.push([
+      { id: "cust-2", nameEncrypted: "ENC(Jane Doe)" },
+      { id: "cust-3", nameEncrypted: "ENC(Acme HVAC)" },
+    ]);
+
+    const r = await listContactSiblings(ORG, CUST);
+    expect(r).toEqual([
+      { id: "cust-2", name: "Jane Doe" },
+      { id: "cust-3", name: "Acme HVAC" },
+    ]);
+  });
+
+  it("falls back to a null name (never throws) when decryption fails", async () => {
+    selectQueue.push([{ emailHash: "eh-1", phoneHash: null }]);
+    selectQueue.push([{ id: "cust-2", nameEncrypted: "CORRUPT" }]);
+
+    const r = await listContactSiblings(ORG, CUST);
+    expect(r).toEqual([{ id: "cust-2", name: null }]);
   });
 });

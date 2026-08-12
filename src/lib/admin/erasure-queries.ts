@@ -17,12 +17,18 @@
  *    CASCADE). Evidence is written to platform_audit_log FIRST, because that
  *    table is intentionally NOT org-FK'd and so survives the cascade.
  *
+ * A third, read-only helper also lives here — listContactSiblings — the
+ * erasure sibling DISCLOSURE required by customer-identity SPEC §5.1: since
+ * one contact hash can now legitimately match several unrelated customers,
+ * the erase confirmation surfaces them so an operator erases each row that is
+ * genuinely the same person, one at a time. It never triggers an erase itself.
+ *
  * R2 object cleanup is best-effort and runs in after() (never a detached
  * promise — Vercel freezes the function after the response otherwise).
  */
 import "server-only";
 import { after } from "next/server";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, isNull, ne, or } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   organizations,
@@ -48,12 +54,21 @@ import {
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { logAudit } from "@/lib/admin/audit";
-import { encrypt } from "@/lib/crypto";
+import { encrypt, decrypt } from "@/lib/crypto";
 import { getStorageClient } from "@/lib/storage/r2-client";
 import { logger } from "@/lib/logger";
 
 /** Sentinel plaintext written into the two NOT NULL encrypted columns. */
 const DELETED_PLACEHOLDER = "[deleted]";
+
+function safeDecrypt(ciphertext: string | null): string | null {
+  if (!ciphertext) return null;
+  try {
+    return decrypt(ciphertext);
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Best-effort deletion of R2 objects. Runs in after() so a slow/down R2 never
@@ -386,6 +401,65 @@ export async function anonymizeCustomer(
   scheduleStorageCleanup(storageKeys);
 
   return true;
+}
+
+/** A row in the org that shares the erasure target's email or phone hash. */
+export interface ContactSibling {
+  readonly id: string;
+  readonly name: string | null;
+}
+
+/**
+ * Lists the OTHER customer rows in the org that share the target customer's
+ * email hash or phone hash — id plus server-side decrypted name only (the
+ * hashes themselves never leave this function).
+ *
+ * Per SPEC §5.1: post-split, a hash match usually means a DIFFERENT data
+ * subject (e.g. several FieldPulse-linked businesses sharing one
+ * accounts-payable contact), not the same person split across rows. So this
+ * is disclosure only, feeding the erase confirmation UI so an operator can
+ * see "this contact appears on N rows" and deliberately erase each row that
+ * is genuinely the same person, one at a time — NEVER auto-fan-out.
+ *
+ * Excludes the target row itself and any already-anonymized row (nothing
+ * left to disclose there). Returns [] when the target does not exist in the
+ * org, or carries neither hash (already erased, or no matched contact yet).
+ */
+export async function listContactSiblings(
+  organizationId: string,
+  customerId: string,
+): Promise<readonly ContactSibling[]> {
+  const [target] = await db
+    .select({ emailHash: customers.emailHash, phoneHash: customers.phoneHash })
+    .from(customers)
+    .where(withTenant(customers, organizationId, eq(customers.id, customerId)));
+
+  if (!target || (!target.emailHash && !target.phoneHash)) return [];
+
+  // EITHER hash, not both — a sibling can share just the email or just the
+  // phone (e.g. same AP email, different phone per business).
+  const contactMatch = or(
+    target.emailHash ? eq(customers.emailHash, target.emailHash) : undefined,
+    target.phoneHash ? eq(customers.phoneHash, target.phoneHash) : undefined,
+  )!;
+
+  const rows = await db
+    .select({ id: customers.id, nameEncrypted: customers.nameEncrypted })
+    .from(customers)
+    .where(
+      withTenant(
+        customers,
+        organizationId,
+        contactMatch,
+        ne(customers.id, customerId),
+        isNull(customers.anonymizedAt),
+      ),
+    );
+
+  return rows.map((row) => ({
+    id: row.id,
+    name: safeDecrypt(row.nameEncrypted),
+  }));
 }
 
 /** The platform operator performing a purge/export (recorded in the evidence). */
