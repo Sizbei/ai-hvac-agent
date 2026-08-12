@@ -310,6 +310,118 @@ describe("upsertInvoiceRecord — heals a customer link the strict lookup missed
 });
 
 /**
+ * The invoices-phase backfill cannot count unlinked invoices from the database
+ * afterward — an unlinked mirrored invoice carries no evidence of which FP
+ * customer it belonged to. So upsertInvoiceRecord reports it live via an
+ * optional onUnlinked callback, fired exactly when a known FP customer id
+ * resolved to no native row (strict lookup miss, and the healer either absent
+ * or also missing). Never fired when resolution succeeds, or when the invoice
+ * carries no FP customer id at all. The webhook and daily cron simply omit the
+ * callback, so this is pure addition — their behaviour is unchanged.
+ */
+describe("upsertInvoiceRecord — onUnlinked callback (residual instrumentation)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(db.batch).mockResolvedValue([] as never);
+    vi.mocked(db.delete).mockReturnValue({ where: vi.fn() } as never);
+  });
+
+  /** select #1 = customer lookup, #2 = existing invoice. */
+  function wireSelects(customerRows: unknown[], invoiceRows: unknown[]) {
+    const results = [customerRows, invoiceRows];
+    let call = 0;
+    vi.mocked(db.select).mockImplementation(
+      () =>
+        ({
+          from: () => ({
+            where: () => {
+              const r = results[call] ?? [];
+              call++;
+              return Object.assign(Promise.resolve(r), {
+                limit: () => Promise.resolve(r),
+              });
+            },
+          }),
+        }) as never,
+    );
+  }
+
+  it("fires onUnlinked with the fp customer id when the strict lookup misses and there is no healer", async () => {
+    wireSelects([], []); // customer miss, invoice new → INSERT branch
+    wireInsert();
+    const onUnlinked = vi.fn();
+
+    await upsertInvoiceRecord(
+      ORG,
+      makeInvoice({ customerId: "17492296" }),
+      undefined,
+      onUnlinked,
+    );
+
+    expect(onUnlinked).toHaveBeenCalledTimes(1);
+    expect(onUnlinked).toHaveBeenCalledWith("17492296");
+  });
+
+  it("fires onUnlinked when the healer is consulted and also misses", async () => {
+    wireSelects([], []);
+    wireInsert();
+    const heal = vi.fn().mockResolvedValue(null);
+    const onUnlinked = vi.fn();
+
+    await upsertInvoiceRecord(
+      ORG,
+      makeInvoice({ customerId: "99999999" }),
+      heal,
+      onUnlinked,
+    );
+
+    expect(onUnlinked).toHaveBeenCalledTimes(1);
+    expect(onUnlinked).toHaveBeenCalledWith("99999999");
+  });
+
+  it("does NOT fire onUnlinked when the strict lookup resolves", async () => {
+    wireSelects([{ id: "cust-1" }], []);
+    wireInsert();
+    const onUnlinked = vi.fn();
+
+    await upsertInvoiceRecord(
+      ORG,
+      makeInvoice({ customerId: "17431130" }),
+      undefined,
+      onUnlinked,
+    );
+
+    expect(onUnlinked).not.toHaveBeenCalled();
+  });
+
+  it("does NOT fire onUnlinked when the healer resolves", async () => {
+    wireSelects([], []);
+    wireInsert();
+    const heal = vi.fn().mockResolvedValue("healed-customer-id");
+    const onUnlinked = vi.fn();
+
+    await upsertInvoiceRecord(
+      ORG,
+      makeInvoice({ customerId: "17492296" }),
+      heal,
+      onUnlinked,
+    );
+
+    expect(onUnlinked).not.toHaveBeenCalled();
+  });
+
+  it("does NOT fire onUnlinked when the invoice carries no fp customer id", async () => {
+    wireSelectNoExisting();
+    wireInsert();
+    const onUnlinked = vi.fn();
+
+    await upsertInvoiceRecord(ORG, makeInvoice(), undefined, onUnlinked);
+
+    expect(onUnlinked).not.toHaveBeenCalled();
+  });
+});
+
+/**
  * The importer skips soft-deleted invoices, but upsertInvoiceRecord is also the
  * webhook and daily-cron entry point and had no such check. A deleted
  * FieldPulse invoice arriving that way was mirrored as an open balance, given a

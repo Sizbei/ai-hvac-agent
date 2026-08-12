@@ -364,11 +364,17 @@ function lineItemRows(
  * fp-id only (unchanged behaviour). Callers that hold a FieldPulse client pass
  * `makeFpCustomerHealer(...)` so a customer the strict lookup can't see is
  * fetched and resolved rather than left orphaned.
+ *
+ * `onUnlinked` is optional: called with the FP customer id when it is known
+ * (`invoice.customerId` is set) but resolved to no native row, even after
+ * healing. Passed only by the import backfill (`import/invoices.ts`) to
+ * surface the residual on `PhaseResult`; the webhook and daily cron omit it.
  */
 export async function upsertInvoiceRecord(
   organizationId: string,
   invoice: FieldpulseInvoice,
   healCustomer?: (fpCustomerId: string) => Promise<string | null>,
+  onUnlinked?: (fpCustomerId: string) => void,
 ): Promise<InvoicePullOutcome> {
   // A DELETED FieldPulse invoice must never become live AR. The importer skips
   // these, but this function is also the webhook and daily-cron entry point,
@@ -458,6 +464,10 @@ export async function upsertInvoiceRecord(
     // public and they are the operator's business data.)
     if (!customerId && healCustomer) {
       customerId = await healCustomer(invoice.customerId);
+    }
+
+    if (!customerId) {
+      onUnlinked?.(invoice.customerId);
     }
   }
 

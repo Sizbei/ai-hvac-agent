@@ -68,6 +68,18 @@ export async function importInvoicesFromFieldpulse(
   // and is thereafter invisible to collections.
   const healCustomer = makeFpCustomerHealer(orgId, client, counts);
 
+  // The database keeps no fp customer id for an unlinked invoice, so the
+  // residual — invoices whose FP customer is hard-deleted upstream — is
+  // observable only here, at sync time. unresolvedCustomerIds is the distinct
+  // set (→ counts.unresolvedFpCustomerIds); unlinkedInvoices counts every
+  // invoice write that landed without a link, which can exceed the distinct
+  // set when one FP customer owns several unlinked invoices.
+  const unresolvedCustomerIds = new Set<string>();
+  const onUnlinked = (fpCustomerId: string) => {
+    unresolvedCustomerIds.add(fpCustomerId);
+    counts.unlinkedInvoices = (counts.unlinkedInvoices ?? 0) + 1;
+  };
+
   for (const inv of items) {
     // Skip soft-deleted invoices.
     if (inv.deletedAt != null) {
@@ -80,7 +92,7 @@ export async function importInvoicesFromFieldpulse(
       // outcome string (upsertInvoiceRecord may return "updated" for race winners).
       const isNew = !existingFpIds.has(inv.id);
 
-      const outcome = await upsertInvoiceRecord(orgId, inv, healCustomer);
+      const outcome = await upsertInvoiceRecord(orgId, inv, healCustomer, onUnlinked);
 
       if (outcome === "failed") {
         counts.errors++;
@@ -107,6 +119,8 @@ export async function importInvoicesFromFieldpulse(
       );
     }
   }
+
+  counts.unresolvedFpCustomerIds = unresolvedCustomerIds.size;
 
   if (counts.errors > 0) {
     logger.warn(

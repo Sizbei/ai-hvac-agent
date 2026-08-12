@@ -124,7 +124,12 @@ describe("importInvoicesFromFieldpulse", () => {
     expect(counts.created).toBe(1);
     // upsertInvoiceRecord must NOT be called for the deleted invoice.
     expect(upsertInvoiceRecord).toHaveBeenCalledTimes(1);
-    expect(upsertInvoiceRecord).toHaveBeenCalledWith(ORG, active, expect.any(Function));
+    expect(upsertInvoiceRecord).toHaveBeenCalledWith(
+      ORG,
+      active,
+      expect.any(Function),
+      expect.any(Function),
+    );
   });
 
   it("delegates to upsertInvoiceRecord with orgId and the fetched invoice", async () => {
@@ -139,7 +144,14 @@ describe("importInvoicesFromFieldpulse", () => {
     expect(upsertInvoiceRecord).toHaveBeenCalledTimes(1);
     // Third arg is the per-run customer healer — without it, an invoice whose
     // customer lost its fp-id link is written orphaned and never collectable.
-    expect(upsertInvoiceRecord).toHaveBeenCalledWith(ORG, inv, expect.any(Function));
+    // Fourth arg is the per-run onUnlinked callback that feeds the residual
+    // counters (unresolvedFpCustomerIds / unlinkedInvoices).
+    expect(upsertInvoiceRecord).toHaveBeenCalledWith(
+      ORG,
+      inv,
+      expect.any(Function),
+      expect.any(Function),
+    );
   });
 
   it("counts created for new invoices (not in pre-select Set) when outcome is 'created'", async () => {
@@ -257,5 +269,50 @@ describe("importInvoicesFromFieldpulse", () => {
     expect(counts.created).toBe(0);
     expect(counts.errors).toBe(0);
     expect(upsertInvoiceRecord).not.toHaveBeenCalled();
+  });
+
+  // ── Residual instrumentation: unresolvedFpCustomerIds / unlinkedInvoices ────
+  //
+  // The database keeps no fp customer id for an unlinked invoice, so the
+  // residual (invoices whose FP customer is hard-deleted upstream) is
+  // observable only at sync time. upsertInvoiceRecord reports it live via the
+  // onUnlinked callback this loop wires up; these tests simulate that by
+  // having the mocked upsertInvoiceRecord invoke the callback it receives,
+  // the same way the real function does on an unresolved fp customer id.
+
+  it("populates unresolvedFpCustomerIds (distinct) and unlinkedInvoices (per-write) from a mixed batch", async () => {
+    const resolved = makeInvoice({ id: "50000001", customerId: "20000001" });
+    // Two different invoices unresolved against the SAME fp customer id — the
+    // distinct-id counter must not double count it, but the per-invoice
+    // counter must.
+    const unresolvedA = makeInvoice({ id: "50000002", customerId: "20000002" });
+    const unresolvedB = makeInvoice({ id: "50000003", customerId: "20000002" });
+    const client = makeClient([resolved, unresolvedA, unresolvedB]);
+    const counts = makeCounts();
+    wireSelect([]);
+    vi.mocked(upsertInvoiceRecord).mockImplementation(async (_org, inv, _heal, onUnlinked) => {
+      if (inv.id !== "50000001") {
+        onUnlinked?.(inv.customerId as string);
+      }
+      return "created";
+    });
+
+    await importInvoicesFromFieldpulse(ORG, counts, client);
+
+    expect(counts.unresolvedFpCustomerIds).toBe(1);
+    expect(counts.unlinkedInvoices).toBe(2);
+  });
+
+  it("leaves both counters at 0 when every invoice resolves (onUnlinked never fires)", async () => {
+    const inv = makeInvoice({ id: "50000001" });
+    const client = makeClient([inv]);
+    const counts = makeCounts();
+    wireSelect([]);
+    vi.mocked(upsertInvoiceRecord).mockResolvedValue("created");
+
+    await importInvoicesFromFieldpulse(ORG, counts, client);
+
+    expect(counts.unresolvedFpCustomerIds).toBe(0);
+    expect(counts.unlinkedInvoices ?? 0).toBe(0);
   });
 });
