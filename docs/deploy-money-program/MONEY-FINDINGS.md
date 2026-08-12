@@ -161,10 +161,26 @@ decision lands as "one row per FieldPulse customer", this resolves itself;
 if not, the importer should split the statement so a colliding hash skips only
 the hash columns rather than the whole refresh.
 
-### 2. FieldPulse discounts are not mirrored, so line revenue is overstated
+### 2. ~~FieldPulse discounts are not mirrored~~ — they ARE mirrored; the reporting ignored them. FIXED 2026-08-13
 
-Line items store `quantity × unitPrice` and ignore FieldPulse's header and line
-discounts. Verified against the dev mirror:
+The premise was half wrong: the header discount IS mirrored, in the invoice
+spillover jsonb (`fieldpulse_data->>'discount'`). Probed on dev: **140**
+FP invoices carry a non-zero discount, and **all 140** reconcile to the cent
+once the discount is subtracted from the line sum (only 1 reconciles without).
+So no sync change and no migration were needed — the defect was entirely in
+the reporting layer, which summed `lineTotalCents` and ignored the header.
+
+Fix (commit `6c14308`): `rollUpMargin` takes an optional header
+`discountCents` (revenue clamps at zero — a discount can erase revenue, never
+mint negative revenue), `fpDiscountCents` parses the spillover value
+defensively, and the invoice detail's margin card passes it — the "actual"
+margin readout flows through the same discounted revenue. A fully-discounted
+invoice now shows zero revenue and a negative margin instead of phantom
+revenue at 100% margin. Estimates were checked and carry **0** discounts on
+dev — left unchanged.
+
+Original evidence (kept for the record) — line items store
+`quantity × unitPrice` and ignore FieldPulse's header and line discounts:
 
 | measure | count |
 |---|---|
