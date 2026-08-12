@@ -179,7 +179,10 @@ step 4's unconditional INSERT — lives behind a new `run-import` flag,
 through `PhaseContext` (`:72-77`).
 
 - **Without the flag** (the default, and what the nightly sweep always gets):
-  the phase runs **today's path byte-for-byte** — including the
+  the phase runs **today's path byte-for-byte in this file** — shared callees
+  still change underneath it per §3.5 (`upsertCustomerByContact` no longer
+  un-archives an ambiguous or blocked match, and can write an audit row), so
+  nightly *behaviour* shifts exactly as §3.5 intends — including the
   `upsertCustomerByContact` resolution (email *and* phone, `crm-queries.ts:668-681`)
   and the fp-id-guard branch that resolves to the existing row and returns its
   id so the jobs self-heal can still attach dependent records
@@ -266,8 +269,15 @@ Per FP customer, in order:
    Then a guarded claim:
 
    ```sql
+   -- SET is the FULL FP mirror — updateCustomerFields' SET plus the fp id
+   -- (anything less leaves the claimed row holding stale native contact data
+   -- until the next nightly refresh):
    UPDATE customers SET fieldpulse_customer_id = $fpId, ... , updated_at = now()
    WHERE id = $candidate AND organization_id = $org
+     AND email_hash = $h  -- the hash the candidate was selected BY: closes the
+                          -- SELECT->UPDATE window against a concurrent contact
+                          -- edit (a claim is permanent and carries the portal
+                          -- token)
      AND fieldpulse_customer_id IS NULL AND anonymized_at IS NULL
      AND archived_at IS NULL AND do_not_service = false
    RETURNING id;
@@ -418,7 +428,8 @@ a winner whose `doNotService` is carried out so callers do not have to re-read
 it to make a *local* decision (they still re-read from the id for the refusal
 itself — §3.3). `ambiguous` is true when **more than one live** (not anonymized,
 not archived) candidate survived. `findCustomerIdByContact` keeps its
-`string | null` signature for the callers that only want an id; the full match
+`string | null` signature (retained for API stability — it has no production
+callers today, tests only); the full match
 is exposed through a sibling `findCustomerMatchByContact` returning
 `{ id, ambiguous, doNotService } | null`, which the identity surfaces in §3.3
 and the un-archive gate in §3.5 call instead.
@@ -479,7 +490,11 @@ booking a blocked account, which they cannot.
    `action: "ambiguous_do_not_service_refusal"` (snake_case, like
    `customer_erased`), `entity: "customer"`, `entityId` = the picked row id,
    `details` = candidate count + candidate ids only (ids/enums, never PII —
-   `AGENTS.md`). Best-effort in a `try/catch` like the webhook's. Visible on
+   `AGENTS.md`). Best-effort in a silent `try/catch` — `crm-queries.ts` has no
+   logger import (pure-helper suites would all have to mock it), so a
+   persistently failing audit insert is invisible; accepted. Note the nightly
+   unflagged import resolves ~2,650 contacts through this path, so a blocked
+   ambiguous cluster re-emits its audit row nightly — accepted noise. Visible on
    `/admin/audit-log`.
 
    **Honestly: this fires on lookup, not on refusal** — a lookup that resolves
@@ -541,8 +556,11 @@ scope.
   (`app/api/sms/incoming/route.ts:81` and `:86`), and the two directions must
   **not** be symmetric:
 
-  - **STOP fans out to every row matching the phone hash** — fail-closed.
-    Resolve all candidate ids and upsert `communication_preferences` for each in
+  - **STOP fans out to every row matching the phone hash** — fail-closed,
+    and **unbounded**: the resolver's default LIMIT is a winner-selection guard
+    and must be lifted for the fan-out (`findCustomerMatchCandidates(...,
+    { limit: null })`) — a capped STOP would silence 50 businesses and keep
+    texting the 51st. Upsert `communication_preferences` for each in
     a single `db.batch()` (neon-http: `db.transaction()` throws — `AGENTS.md`).
     Return true if any row matched. Today a STOP from a shared number would
     silence one business and keep texting the others, which is a compliance
@@ -907,7 +925,7 @@ fix is reverted:
    - an anonymized candidate is never returned even when it is the only match;
    - two candidates identical on every axis return the same id across repeated
      calls (rule 7);
-   - empty input → `null` (the only `null` return; every non-empty input yields
+   - empty or all-erased input → `null` (the only `null` returns; every other input yields
      a `{ id, ambiguous, doNotService }` — assert the shape, so the §3.2 return
      type and the tests cannot drift apart);
    - `ambiguous` is true for 2+ live candidates and false for one live candidate
@@ -1086,7 +1104,8 @@ and the nightly sweep never triggers it (§2.0).
   program.
 - **Housecall Pro.** `hcpCustomerId` + `customers_org_hcp_customer_id_unique`
   (`schema.ts:826-828`) have the identical structure and would need the identical
-  treatment, but no HCP customer data exists. Do not pre-emptively change it.
+  treatment, but no HCP customer data exists. Do not pre-emptively change its
+  *schema/uniqueness*; the §5 adoption pre-check twin is in scope.
 - **Production deploy and the production import run.** This spec is
   dev-branch-only. Prod is a separate, gated decision with its own runbook.
 - **Merging or de-duplicating native rows**, and any merge UI. The split
