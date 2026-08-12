@@ -2,12 +2,12 @@
 
 import type { LucideIcon } from 'lucide-react';
 import { AlertTriangle, Inbox } from 'lucide-react';
-import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { UrgencyBadge } from '@/components/admin/urgency-badge';
 import { ContextBadge } from '@/components/admin/ui/context-badge';
 import { EmptyState } from '@/components/admin/ui/empty-state';
-import { IconChip, type IconChipIntent } from '@/components/admin/ui/icon-chip';
+import { SectionCard } from '@/components/admin/ui/section-card';
+import { type IconChipIntent } from '@/components/admin/ui/icon-chip';
 import { formatArrivalWindow } from '@/lib/admin/arrival-window';
 import { DASHBOARD_LIST_LIMIT, type DashboardRequest } from '@/lib/admin/types';
 
@@ -16,8 +16,11 @@ type RowMeta = 'arrivalWindow' | 'followUp';
 interface DashboardListCardProps {
   readonly title: string;
   readonly icon: LucideIcon;
-  /** Intent drives the header IconChip tint (semantic tokens only). */
-  readonly intent: IconChipIntent;
+  /**
+   * Retained for API compatibility. The panel header no longer tints: the
+   * redesign spec bans tinted icon squares in panel headers.
+   */
+  readonly intent?: IconChipIntent;
   readonly requests: readonly DashboardRequest[];
   readonly isLoading: boolean;
   readonly emptyLabel: string;
@@ -82,7 +85,6 @@ function MetaLine({
 export function DashboardListCard({
   title,
   icon: Icon,
-  intent,
   requests,
   isLoading,
   emptyLabel,
@@ -90,13 +92,16 @@ export function DashboardListCard({
   onSelect,
 }: DashboardListCardProps) {
   return (
-    <Card className="flex flex-col p-4">
-      <div className="mb-3 flex items-center gap-2.5">
-        <IconChip icon={Icon} intent={intent} size="sm" />
-        <h2 className="font-heading text-sm font-semibold">{title}</h2>
-        {!isLoading && (
+    <SectionCard
+      title={title}
+      icon={Icon}
+      className="flex flex-col"
+      contentClassName="p-2"
+      action={
+        !isLoading && (
+          // Bare tabular-mono count — no pill.
           <span
-            className="ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-muted px-1.5 text-xs font-medium tabular-nums text-muted-foreground"
+            className="font-mono text-[13px] leading-none tabular-nums text-muted-foreground"
             title={
               requests.length >= DASHBOARD_LIST_LIMIT
                 ? `Showing the first ${DASHBOARD_LIST_LIMIT}`
@@ -106,9 +111,9 @@ export function DashboardListCard({
             {requests.length}
             {requests.length >= DASHBOARD_LIST_LIMIT ? '+' : ''}
           </span>
-        )}
-      </div>
-
+        )
+      }
+    >
       {isLoading ? (
         <div className="space-y-2">
           {Array.from({ length: 3 }, (_, i) => (
@@ -129,7 +134,7 @@ export function DashboardListCard({
               <button
                 type="button"
                 onClick={() => onSelect(request.id)}
-                className="flex w-full items-start gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-muted"
+                className="flex w-full items-start gap-3 rounded-[3px] px-2 py-2 text-left transition-colors hover:bg-row-hover"
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
@@ -170,6 +175,6 @@ export function DashboardListCard({
           ))}
         </ul>
       )}
-    </Card>
+    </SectionCard>
   );
 }

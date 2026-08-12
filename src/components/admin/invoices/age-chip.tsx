@@ -40,13 +40,20 @@ export function daysPastDue(inv: InvoiceAgeDates, now: Date = new Date()): numbe
   return inv.dueDate != null ? daysBetween(new Date(inv.dueDate), now) : 0;
 }
 
+// Status chip per the redesign spec: 3 px radius, 20 px tall, semantic
+// light/border/strong triplet, 11 px. The label text ("Paid" / "12 days" /
+// "863d overdue") is the primary disambiguator — no redundant dot glyph, which
+// is reserved for the shared badge components.
+const CHIP =
+  'inline-flex h-5 items-center rounded-[3px] border px-1.5 text-[11px] font-medium leading-none';
 const CLS: Record<string, string> = {
-  green: 'bg-success-light text-success-strong', amber: 'bg-warning-light text-warning-foreground',
-  red: 'bg-danger-light text-danger-strong',
+  green: 'bg-success-light text-success-strong border-success-border',
+  amber: 'bg-warning-light text-warning-strong border-warning-border',
+  red: 'bg-danger-light text-danger-strong border-danger-border',
 };
 export function AgeChip({ issuedAt, dueDate, createdAt, state }: { issuedAt?: string | null; dueDate?: string | null; createdAt: string; state: string }) {
   if (state === 'paid') {
-    return <span className="inline-flex items-center gap-1.5 rounded-full bg-success-light px-2.5 py-1 text-xs font-semibold text-success-strong"><span className="size-1.5 rounded-full bg-success" />Paid</span>;
+    return <span className={`${CHIP} ${CLS.green}`}>Paid</span>;
   }
   // Days PAST DUE is the number that matters for collections when the source
   // system gave us a due date (FP's issue dates are onboarding artifacts for
@@ -54,9 +61,9 @@ export function AgeChip({ issuedAt, dueDate, createdAt, state }: { issuedAt?: st
   // invoice is never green — the chip must agree with the Overdue filter.
   const overdueDays = state === 'open' ? daysPastDue({ issuedAt, dueDate, createdAt }) : 0;
   if (overdueDays >= 1) {
-    return <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${CLS.red}`}><span className="size-1.5 rounded-full bg-current opacity-70" />{overdueDays}d overdue</span>;
+    return <span className={`${CHIP} ${CLS.red} font-mono tabular-nums`}>{overdueDays}d overdue</span>;
   }
   const days = invoiceAgeDays({ issuedAt, createdAt });
   const b = state === 'open' && overdueByDates({ issuedAt, dueDate, createdAt }) ? 'red' : ageBucket(days);
-  return <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${CLS[b]}`}><span className="size-1.5 rounded-full bg-current opacity-70" />{days} days</span>;
+  return <span className={`${CHIP} ${CLS[b]} font-mono tabular-nums`}>{days} days</span>;
 }

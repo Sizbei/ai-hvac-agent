@@ -8,6 +8,7 @@ import { ConversationDetailSheet } from '@/components/admin/conversation-detail-
 import { ChannelChip } from '@/components/admin/conversations/channel-chip';
 import { StatusBadge } from '@/components/admin/status-badge';
 import { ContextBadge } from '@/components/admin/ui/context-badge';
+import { EmptyState } from '@/components/admin/ui/empty-state';
 import { TabGroup } from '@/components/admin/ui/tab-group';
 import { Pager } from '@/components/admin/ui/pager';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -81,15 +82,19 @@ function ConversationRow({
       aria-label={`Open conversation ${conversation.referenceNumber ?? conversation.id.slice(0, 8)}`}
       aria-current={isSelected}
       className={cn(
-        'relative flex w-full items-start gap-3 border-b border-border/60 px-4 py-3.5 text-left transition-colors',
-        isSelected ? 'bg-primary/[0.06]' : isFocused ? 'bg-muted/70' : 'hover:bg-muted/50',
+        'relative flex w-full items-start gap-3 border-b border-border px-4 py-3 text-left transition-colors',
+        isSelected
+          ? 'bg-primary-soft'
+          : isFocused
+            ? 'bg-row-hover'
+            : 'hover:bg-row-hover',
       )}
     >
-      {isSelected && <span className="absolute inset-y-0 left-0 w-0.5 bg-primary" />}
+      {isSelected && <span className="absolute inset-y-0 left-0 w-0.5 bg-marker" />}
       <ChannelChip channel={conversation.channel} size="sm" />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="truncate text-sm font-semibold">
+          <span className="truncate font-mono text-[13px] font-medium tabular-nums">
             {conversation.referenceNumber ?? conversation.id.slice(0, 8)}
           </span>
           {needsAction(conversation.status) && (
@@ -99,7 +104,7 @@ function ConversationRow({
               className="shrink-0"
             />
           )}
-          <span className="ml-auto shrink-0 text-[11px] tabular-nums text-muted-foreground">
+          <span className="ml-auto shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
             {formatRelativeTime(conversation.lastMessageAt ?? conversation.updatedAt)}
           </span>
         </div>
@@ -202,9 +207,9 @@ export function ConversationInbox() {
 
       <div className="flex min-h-0 flex-1">
         {/* LEFT: list pane */}
-        <div className="flex w-full shrink-0 flex-col border-r border-border bg-card lg:w-[380px]">
+        <div className="flex w-full shrink-0 flex-col border-r border-border-strong bg-surface lg:w-[380px]">
           {/* Filters */}
-          <div className="shrink-0 border-b border-border px-4 pt-4">
+          <div className="shrink-0 border-b border-border-strong bg-surface-sunken px-4 pt-4">
             <div className="relative mb-3">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -258,32 +263,30 @@ export function ConversationInbox() {
             {isLoading && conversations.length === 0 ? (
               <div className="space-y-px">
                 {Array.from({ length: 6 }, (_, i) => (
-                  <div key={`skeleton-${i}`} className="flex gap-3 border-b border-border/60 px-4 py-3.5">
-                    <Skeleton className="size-7 shrink-0 rounded-lg" />
+                  <div key={`skeleton-${i}`} className="flex gap-3 border-b border-border px-4 py-3">
+                    <Skeleton className="size-7 shrink-0 rounded-[3px]" />
                     <div className="flex-1 space-y-2">
                       <Skeleton className="h-3.5 w-1/2" />
                       <Skeleton className="h-3 w-full" />
-                      <Skeleton className="h-4 w-20 rounded-full" />
+                      <Skeleton className="h-4 w-20 rounded-[3px]" />
                     </div>
                   </div>
                 ))}
               </div>
             ) : conversations.length === 0 ? (
-              <div className="flex flex-col items-center justify-center gap-2 px-6 py-16 text-center">
-                <span className="flex size-11 items-center justify-center rounded-full bg-muted text-muted-foreground">
-                  <Inbox className="size-5" />
-                </span>
-                <p className="text-sm font-semibold text-foreground">
-                  {isFiltered
+              <EmptyState
+                icon={Inbox}
+                title={
+                  isFiltered
                     ? `No ${channelNoun} conversations match`
-                    : 'No conversations yet'}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {isFiltered
+                    : 'No conversations yet'
+                }
+                description={
+                  isFiltered
                     ? 'Try a different channel, status, or search.'
-                    : 'New conversations from chat, phone, and SMS will appear here.'}
-                </p>
-              </div>
+                    : 'New conversations from chat, phone, and SMS will appear here.'
+                }
+              />
             ) : (
               conversations.map((conversation, idx) => (
                 <ConversationRow
@@ -299,7 +302,7 @@ export function ConversationInbox() {
             )}
           </div>
 
-          <div className="shrink-0 border-t border-border px-2">
+          <div className="shrink-0 border-t border-border-strong bg-surface-sunken px-2">
             <Pager
               page={safePage}
               totalPages={totalPages}
@@ -324,17 +327,12 @@ export function ConversationInbox() {
               }}
             />
           ) : (
-            <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
-              <span className="flex size-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
-                <MessagesSquare className="size-6" />
-              </span>
-              <p className="text-sm font-semibold text-foreground">
-                Select a conversation
-              </p>
-              <p className="max-w-xs text-xs text-muted-foreground">
-                Pick a conversation from the list to read its transcript and AI summary.
-              </p>
-            </div>
+            <EmptyState
+              className="flex-1"
+              icon={MessagesSquare}
+              title="Select a conversation"
+              description="Pick a conversation from the list to read its transcript and AI summary."
+            />
           )}
         </div>
       </div>

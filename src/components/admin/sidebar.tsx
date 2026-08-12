@@ -45,6 +45,18 @@ function initialsOf(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
+/** One 30px rail row: nav links, the search button, and the env links all share
+ *  this geometry so the rail reads as a single ruled column. */
+const RAIL_ROW =
+  'flex h-[30px] w-full items-center gap-2.5 rounded-[4px] px-2.5 text-sm ' +
+  'text-sidebar-foreground transition-colors duration-100 ' +
+  'hover:bg-sidebar-accent hover:text-foreground ' +
+  'focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring';
+
+/** Uppercase group label — the transform lives in the .u-label CSS class so the
+ *  source strings stay sentence case (copy canon). */
+const GROUP_LABEL = 'u-label px-2.5 pb-1 text-muted-foreground';
+
 export function Sidebar({
   adminName,
   adminEmail,
@@ -106,36 +118,39 @@ export function Sidebar({
         <Link
           href={item.href}
           className={cn(
-            'group/nav relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-            isActive
-              ? 'bg-white/10 text-white'
-              : 'text-white/65 hover:bg-white/[0.06] hover:text-white',
-            collapsed && 'justify-center px-2',
+            'group/nav relative',
+            RAIL_ROW,
+            // Active: soft marker fill + a 2px marker edge drawn as an inset
+            // box-shadow (no extra element, no layout shift).
+            isActive &&
+              'bg-primary-soft font-semibold text-foreground shadow-[inset_2px_0_0_0_var(--marker)] hover:bg-primary-soft hover:text-foreground',
+            collapsed && 'justify-center px-0',
           )}
         >
-          {/* Active accent bar */}
-          {isActive && (
-            <span className="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-primary" />
-          )}
           <Icon
             className={cn(
-              'size-5 shrink-0 transition-colors',
-              isActive ? 'text-primary' : 'text-white/80 group-hover/nav:text-white',
+              'size-4 shrink-0 transition-colors',
+              isActive
+                ? 'text-marker'
+                : 'text-foreground-faint group-hover/nav:text-muted-foreground',
             )}
           />
           {!collapsed && <span className="truncate">{item.label}</span>}
           {showBadge && !collapsed && (
             <span
               aria-label={badge.srLabel}
-              className="ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500 px-1.5 text-[11px] font-semibold text-white"
+              className="ml-auto inline-flex items-center gap-1 font-mono text-[11px] font-medium tabular-nums text-warning-strong"
             >
+              <span aria-hidden="true" className="text-[7px] leading-none">
+                ◆
+              </span>
               {badge.label}
             </span>
           )}
           {showBadge && collapsed && (
             <span
               aria-label={badge.srLabel}
-              className="absolute right-1 top-1 size-2 rounded-full bg-amber-500 ring-2 ring-[oklch(0.21_0.05_258)]"
+              className="absolute right-1.5 top-1.5 size-[6px] rotate-45 bg-warning-strong"
             />
           )}
         </Link>
@@ -144,9 +159,9 @@ export function Sidebar({
     [badge, isItemActive],
   );
 
-  // Shared navy surface for both mobile and desktop sidebars.
-  const surfaceClass =
-    'bg-gradient-to-b from-[oklch(0.24_0.055_258)] to-[oklch(0.18_0.05_260)] text-white';
+  // Shared rail surface: a light sunken column separated from the canvas by a
+  // hairline — no radius, no shadow, no gradient.
+  const surfaceClass = 'bg-sidebar text-sidebar-foreground';
 
   // Mobile: overlay sidebar
   if (isMobile) {
@@ -154,7 +169,7 @@ export function Sidebar({
       <>
         {isMobileOpen && (
           <div
-            className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
+            className="fixed inset-0 z-40 bg-foreground/45"
             onClick={onMobileClose}
             onKeyDown={(e) => {
               if (e.key === 'Escape') {
@@ -169,21 +184,21 @@ export function Sidebar({
 
         <aside
           className={cn(
-            'fixed inset-y-0 left-0 z-50 w-64 transition-transform duration-200 motion-reduce:transition-none',
+            'fixed inset-y-0 left-0 z-50 w-[var(--sidebar-w,232px)] border-r border-sidebar-border transition-transform duration-200 motion-reduce:transition-none',
             surfaceClass,
             isMobileOpen ? 'translate-x-0' : '-translate-x-full',
           )}
         >
           <div className="flex h-full flex-col">
-            <div className="flex h-16 items-center px-4">
+            <div className="flex h-16 items-center border-b border-sidebar-border px-4">
               <div className="flex flex-col gap-0.5">
-                <BrandMark onDark />
+                <BrandMark />
                 <EnvBadge />
               </div>
               <Button
                 variant="ghost"
                 size="icon-sm"
-                className="ml-auto text-white/70 hover:bg-white/10 hover:text-white"
+                className="ml-auto text-sidebar-foreground hover:bg-sidebar-accent hover:text-foreground"
                 onClick={onMobileClose}
                 aria-label="Close navigation"
               >
@@ -192,26 +207,24 @@ export function Sidebar({
             </div>
 
             {/* Search button (mobile) */}
-            <div className="px-3 pb-1 pt-2">
+            <div className="px-3 pb-1 pt-3">
               <button
                 type="button"
                 onClick={() =>
                   window.dispatchEvent(new CustomEvent('global-search:open'))
                 }
-                className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-white/65 transition-colors hover:bg-white/[0.06] hover:text-white"
+                className={RAIL_ROW}
               >
-                <Search className="size-5 shrink-0" />
+                <Search className="size-4 shrink-0 text-foreground-faint" />
                 <span className="flex-1 text-left">Search</span>
-                <kbd className="text-xs opacity-50">⌘K</kbd>
+                <kbd className="font-mono text-[11px] text-foreground-faint">⌘K</kbd>
               </button>
             </div>
 
-            <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-3">
+            <nav className="flex-1 space-y-4 overflow-y-auto px-3 py-3">
               {NAV_GROUPS.map((group) => (
-                <div key={group.heading} className="space-y-1">
-                  <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/70">
-                    {group.heading}
-                  </p>
+                <div key={group.heading} className="space-y-0.5">
+                  <p className={GROUP_LABEL}>{group.heading}</p>
                   {group.items.map((item) => (
                     <div key={item.href}>{renderNavLink(item, false)}</div>
                   ))}
@@ -219,37 +232,31 @@ export function Sidebar({
               ))}
             </nav>
 
-            <div className="border-t border-white/10 px-3 py-3">
+            <div className="border-t border-sidebar-border px-3 py-3">
               {envLinks.length > 0 && (
-                <div className="mb-3 space-y-1">
-                  <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/70">
-                    Environments
-                  </p>
+                <div className="mb-3 space-y-0.5">
+                  <p className={GROUP_LABEL}>Environments</p>
                   {envLinks.map((link) => (
-                    <a
-                      key={link.name}
-                      href={link.url}
-                      className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-white/65 transition-colors hover:bg-white/[0.06] hover:text-white"
-                    >
+                    <a key={link.name} href={link.url} className={RAIL_ROW}>
                       {link.name}
                     </a>
                   ))}
                 </div>
               )}
-              <div className="flex items-center gap-3 rounded-lg bg-white/[0.06] px-3 py-2">
-                <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/20 text-xs font-semibold text-primary">
+              <div className="flex items-center gap-2.5 rounded-[4px] bg-sidebar-accent px-2.5 py-2">
+                <span className="flex size-7 shrink-0 items-center justify-center rounded-[4px] bg-primary font-mono text-[11px] font-medium text-primary-foreground">
                   {initialsOf(adminName)}
                 </span>
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-white">{adminName}</p>
-                  <p className="truncate text-xs text-white/70">{adminEmail}</p>
+                  <p className="truncate text-sm font-medium text-foreground">{adminName}</p>
+                  <p className="truncate text-xs text-muted-foreground">{adminEmail}</p>
                 </div>
               </div>
               <Button
                 variant="ghost"
                 size="default"
                 onClick={handleLogout}
-                className="mt-1 w-full justify-start text-white/65 hover:bg-white/10 hover:text-white"
+                className="mt-1 w-full justify-start text-sidebar-foreground hover:bg-sidebar-accent hover:text-danger-strong"
               >
                 <LogOut className="size-4" />
                 <span>Sign out</span>
@@ -265,9 +272,9 @@ export function Sidebar({
   return (
     <aside
       className={cn(
-        'shrink-0 transition-[width] duration-200 motion-reduce:transition-none',
+        'shrink-0 border-r border-sidebar-border transition-[width] duration-200 motion-reduce:transition-none',
         surfaceClass,
-        isCollapsed ? 'w-16' : 'w-64',
+        isCollapsed ? 'w-16' : 'w-[var(--sidebar-w,232px)]',
       )}
     >
       <TooltipProvider>
@@ -275,22 +282,22 @@ export function Sidebar({
           {/* Logo + env badge */}
           <div
             className={cn(
-              'flex h-16 items-center px-4',
+              'flex h-16 items-center border-b border-sidebar-border px-4',
               isCollapsed && 'justify-center px-0',
             )}
           >
             {isCollapsed ? (
-              <BrandMark onDark compact />
+              <BrandMark compact />
             ) : (
               <div className="flex flex-col gap-0.5">
-                <BrandMark onDark />
+                <BrandMark />
                 <EnvBadge />
               </div>
             )}
           </div>
 
           {/* Search button (desktop) */}
-          <div className="px-3 pb-1 pt-2">
+          <div className="px-3 pb-1 pt-3">
             {isCollapsed ? (
               <Tooltip>
                 <TooltipTrigger render={<div />}>
@@ -299,10 +306,10 @@ export function Sidebar({
                     onClick={() =>
                       window.dispatchEvent(new CustomEvent('global-search:open'))
                     }
-                    className="flex w-full items-center justify-center rounded-lg py-2 text-white/65 transition-colors hover:bg-white/[0.06] hover:text-white"
+                    className={cn(RAIL_ROW, 'justify-center px-0')}
                     aria-label="Search"
                   >
-                    <Search className="size-5 shrink-0" />
+                    <Search className="size-4 shrink-0 text-foreground-faint" />
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="right">Search ⌘K</TooltipContent>
@@ -313,27 +320,26 @@ export function Sidebar({
                 onClick={() =>
                   window.dispatchEvent(new CustomEvent('global-search:open'))
                 }
-                className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-white/65 transition-colors hover:bg-white/[0.06] hover:text-white"
+                className={RAIL_ROW}
               >
-                <Search className="size-5 shrink-0" />
+                <Search className="size-4 shrink-0 text-foreground-faint" />
                 <span className="flex-1 text-left">Search</span>
-                <kbd className="text-xs opacity-50">⌘K</kbd>
+                <kbd className="font-mono text-[11px] text-foreground-faint">⌘K</kbd>
               </button>
             )}
           </div>
 
           {/* Nav */}
-          <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-3">
+          <nav className="flex-1 space-y-4 overflow-y-auto px-3 py-3">
             {NAV_GROUPS.map((group, groupIndex) => (
-              <div key={group.heading} className="space-y-1">
-                {!isCollapsed && (
-                  <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/70">
-                    {group.heading}
-                  </p>
-                )}
+              <div key={group.heading} className="space-y-0.5">
+                {!isCollapsed && <p className={GROUP_LABEL}>{group.heading}</p>}
                 {/* Collapsed: a short rule separates groups (not above the first). */}
                 {isCollapsed && groupIndex > 0 && (
-                  <div className="mx-auto mb-1 h-px w-6 bg-white/10" aria-hidden="true" />
+                  <div
+                    className="mx-auto mb-1 h-px w-6 bg-sidebar-border"
+                    aria-hidden="true"
+                  />
                 )}
                 {group.items.map((item) => {
                   if (isCollapsed) {
@@ -353,19 +359,13 @@ export function Sidebar({
           </nav>
 
           {/* Bottom section */}
-          <div className="border-t border-white/10 px-3 py-3">
+          <div className="border-t border-sidebar-border px-3 py-3">
             {/* Env switcher (super_admin only, expanded only) */}
             {!isCollapsed && envLinks.length > 0 && (
-              <div className="mb-3 space-y-1">
-                <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/70">
-                  Environments
-                </p>
+              <div className="mb-3 space-y-0.5">
+                <p className={GROUP_LABEL}>Environments</p>
                 {envLinks.map((link) => (
-                  <a
-                    key={link.name}
-                    href={link.url}
-                    className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-white/65 transition-colors hover:bg-white/[0.06] hover:text-white"
-                  >
+                  <a key={link.name} href={link.url} className={RAIL_ROW}>
                     {link.name}
                   </a>
                 ))}
@@ -376,7 +376,7 @@ export function Sidebar({
             {isCollapsed ? (
               <Tooltip>
                 <TooltipTrigger render={<div />}>
-                  <span className="mx-auto mb-2 flex size-7 cursor-default items-center justify-center rounded-full bg-primary/20 text-[11px] font-semibold text-primary">
+                  <span className="mx-auto mb-2 flex size-7 cursor-default items-center justify-center rounded-[4px] bg-primary font-mono text-[11px] font-medium text-primary-foreground">
                     {initialsOf(adminName)}
                   </span>
                 </TooltipTrigger>
@@ -386,13 +386,13 @@ export function Sidebar({
                 </TooltipContent>
               </Tooltip>
             ) : (
-              <div className="mb-1 flex items-center gap-3 rounded-lg bg-white/[0.06] px-3 py-2">
-                <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/20 text-xs font-semibold text-primary">
+              <div className="mb-1 flex items-center gap-2.5 rounded-[4px] bg-sidebar-accent px-2.5 py-2">
+                <span className="flex size-7 shrink-0 items-center justify-center rounded-[4px] bg-primary font-mono text-[11px] font-medium text-primary-foreground">
                   {initialsOf(adminName)}
                 </span>
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-white">{adminName}</p>
-                  <p className="truncate text-xs text-white/70">{adminEmail}</p>
+                  <p className="truncate text-sm font-medium text-foreground">{adminName}</p>
+                  <p className="truncate text-xs text-muted-foreground">{adminEmail}</p>
                 </div>
               </div>
             )}
@@ -404,7 +404,7 @@ export function Sidebar({
               onClick={toggleCollapse}
               aria-label={isCollapsed ? 'Expand sidebar' : undefined}
               className={cn(
-                'w-full text-white/65 hover:bg-white/10 hover:text-white',
+                'w-full text-sidebar-foreground hover:bg-sidebar-accent hover:text-foreground',
                 !isCollapsed && 'justify-start',
               )}
             >
@@ -426,7 +426,7 @@ export function Sidebar({
                     variant="ghost"
                     size="icon"
                     onClick={handleLogout}
-                    className="w-full text-white/65 hover:bg-white/10 hover:text-red-300"
+                    className="w-full text-sidebar-foreground hover:bg-sidebar-accent hover:text-danger-strong"
                   >
                     <LogOut className="size-4" />
                   </Button>
@@ -438,7 +438,7 @@ export function Sidebar({
                 variant="ghost"
                 size="default"
                 onClick={handleLogout}
-                className="w-full justify-start text-white/65 hover:bg-white/10 hover:text-red-300"
+                className="w-full justify-start text-sidebar-foreground hover:bg-sidebar-accent hover:text-danger-strong"
               >
                 <LogOut className="size-4" />
                 <span>Sign out</span>

@@ -17,17 +17,6 @@ import { SyncPill } from '@/components/admin/sync-pill';
 import { InvoiceStateBadge } from './invoice-state-badge';
 import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
 
-/** Stable hue from a string id — deterministic avatar colour. */
-function avatarHue(id: string): string {
-  const HUES = [
-    'bg-blue-600', 'bg-teal-600', 'bg-violet-600', 'bg-sky-600',
-    'bg-emerald-600', 'bg-slate-600', 'bg-purple-600', 'bg-amber-600',
-  ];
-  let h = 0;
-  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
-  return HUES[h % HUES.length];
-}
-
 /** Two-letter initials from a display name. */
 function initials(name: string | null): string {
   if (!name) return '?';
@@ -61,6 +50,7 @@ interface InvoiceRowProps {
 
 function InvoiceRowInner({ invoice, onRemind, onCopyPayLink, onVoid, pending = false, isExpanded, onToggle }: InvoiceRowProps) {
   const balance = invoice.totalCents - invoice.amountPaidCents;
+  const shownCents = invoice.state === 'paid' ? invoice.totalCents : balance;
   const isPartial = invoice.state !== 'paid' && invoice.amountPaidCents > 0;
   const cooldownActive = isCooldownActive(invoice.lastReminderSentAt ?? null);
 
@@ -80,17 +70,19 @@ function InvoiceRowInner({ invoice, onRemind, onCopyPayLink, onVoid, pending = f
             onToggle(invoice.id);
           }
         }}
-        className="grid grid-cols-[minmax(200px,1fr)_90px_120px_140px_180px_32px] items-center gap-4 border-t px-6 py-4 transition-colors hover:bg-muted/30 first:border-t-0 w-full text-left cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+        className="grid grid-cols-[minmax(200px,1fr)_90px_120px_140px_180px_32px] items-center gap-4 border-t border-border px-6 py-2.5 transition-colors hover:bg-row-hover first:border-t-0 w-full text-left cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
       >
-        {/* Customer */}
+        {/* Customer — square 4 px sunken tile with mono initials. The old
+            deterministic-hue tiles painted a rainbow down the column. */}
         <div className="flex min-w-0 items-center gap-3">
           <span
-            className={`inline-flex size-10 shrink-0 items-center justify-center rounded-xl text-sm font-bold text-white ${avatarHue(invoice.id)}`}
+            aria-hidden="true"
+            className="inline-flex size-8 shrink-0 items-center justify-center rounded-[4px] bg-surface-sunken font-mono text-[11px] font-medium text-muted-foreground"
           >
             {initials(invoice.customerName)}
           </span>
           <div className="min-w-0">
-            <p className="truncate text-sm font-semibold">
+            <p className="truncate text-sm font-medium">
               {invoice.customerName ?? '—'}
             </p>
             <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -105,7 +97,7 @@ function InvoiceRowInner({ invoice, onRemind, onCopyPayLink, onVoid, pending = f
         {/* Issued date (source-system date for mirrored invoices; row creation
             for native). UTC-rendered: the source dates are UTC-pinned by
             parseFpDate, so local-zone rendering would shift them a day back. */}
-        <div className="text-xs text-muted-foreground">
+        <div className="font-mono text-xs tabular-nums text-muted-foreground">
           {new Date(invoice.issuedAt ?? invoice.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}
         </div>
 
@@ -114,13 +106,17 @@ function InvoiceRowInner({ invoice, onRemind, onCopyPayLink, onVoid, pending = f
           <AgeChip issuedAt={invoice.issuedAt} dueDate={invoice.dueDate} createdAt={invoice.createdAt} state={invoice.state} />
         </div>
 
-        {/* Balance */}
+        {/* Balance — right-aligned tabular mono; a zero balance recedes. */}
         <div className="text-right">
-          <p className="text-sm font-bold tabular-nums">
-            {invoice.state === 'paid' ? formatCentsExact(invoice.totalCents) : formatCentsExact(balance)}
+          <p
+            className={`font-mono text-sm font-medium tabular-nums ${
+              shownCents === 0 ? 'text-muted-foreground' : 'text-foreground'
+            }`}
+          >
+            {formatCentsExact(shownCents)}
           </p>
           {isPartial && (
-            <p className="mt-0.5 text-xs text-muted-foreground">
+            <p className="mt-0.5 font-mono text-xs tabular-nums text-muted-foreground">
               of {formatCentsExact(invoice.totalCents)}
             </p>
           )}
@@ -138,7 +134,7 @@ function InvoiceRowInner({ invoice, onRemind, onCopyPayLink, onVoid, pending = f
                 Send reminder
               </Button>
             ) : cooldownActive ? (
-              <span className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-success">
+              <span className="inline-flex items-center gap-1 rounded-[3px] px-2 py-1 text-xs font-medium text-success-strong">
                 <CheckCircle className="size-3.5" aria-hidden="true" />
                 {`Reminded ${remindedRel(invoice.lastReminderSentAt)}`}
               </span>
@@ -196,7 +192,7 @@ function InvoiceRowInner({ invoice, onRemind, onCopyPayLink, onVoid, pending = f
       {/* Expansion panel — no border-t so it reads as one unit with its row;
           the NEXT row's border-t separates it from what follows. */}
       {isExpanded && (
-        <div className="bg-muted/30 px-6 py-4 animate-in fade-in-0 slide-in-from-top-1 duration-100 motion-reduce:animate-none">
+        <div className="bg-surface-sunken px-6 py-4 animate-in fade-in-0 slide-in-from-top-1 duration-100 motion-reduce:animate-none">
           <div className="flex flex-wrap gap-6">
             {/* Key facts */}
             <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
@@ -204,7 +200,7 @@ function InvoiceRowInner({ invoice, onRemind, onCopyPayLink, onVoid, pending = f
               <dd><InvoiceStateBadge state={invoice.state} /></dd>
 
               <dt className="text-muted-foreground">Issued</dt>
-              <dd className="tabular-nums">
+              <dd className="font-mono tabular-nums">
                 {invoice.issuedAt
                   ? new Date(invoice.issuedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
                   : new Date(invoice.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
@@ -213,20 +209,20 @@ function InvoiceRowInner({ invoice, onRemind, onCopyPayLink, onVoid, pending = f
               {invoice.dueDate && (
                 <>
                   <dt className="text-muted-foreground">Due</dt>
-                  <dd className="tabular-nums">
+                  <dd className="font-mono tabular-nums">
                     {new Date(invoice.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}
                   </dd>
                 </>
               )}
 
               <dt className="text-muted-foreground">Total</dt>
-              <dd className="font-medium tabular-nums">{formatCentsExact(invoice.totalCents)}</dd>
+              <dd className="text-right font-mono font-medium tabular-nums">{formatCentsExact(invoice.totalCents)}</dd>
 
               <dt className="text-muted-foreground">Paid</dt>
-              <dd className="tabular-nums">{formatCentsExact(invoice.amountPaidCents)}</dd>
+              <dd className={`text-right font-mono tabular-nums ${invoice.amountPaidCents === 0 ? 'text-muted-foreground' : ''}`}>{formatCentsExact(invoice.amountPaidCents)}</dd>
 
               <dt className="text-muted-foreground">Balance</dt>
-              <dd className="font-semibold tabular-nums">{formatCentsExact(balance)}</dd>
+              <dd className={`text-right font-mono font-medium tabular-nums ${balance === 0 ? 'text-muted-foreground' : ''}`}>{formatCentsExact(balance)}</dd>
             </dl>
 
             {/* FieldPulse details */}

@@ -12,9 +12,9 @@ interface EmptyStateProps {
 }
 
 /**
- * Standard empty/zero state: icon in a muted circle, bold title, muted
- * description, optional action. Covers first-run / no-results / filtered-out
- * by varying the copy + action passed in.
+ * Standard empty/zero state: 20 px glyph in a 40 px sunken square, 15 px
+ * headline, 13 px muted line, optional action. Covers first-run / no-results /
+ * filtered-out by varying the copy + action passed in.
  */
 export function EmptyState({
   icon: Icon,
@@ -26,16 +26,20 @@ export function EmptyState({
   return (
     <div
       className={cn(
-        "flex flex-col items-center justify-center gap-3 px-6 py-16 text-center",
+        "flex flex-col items-center justify-center gap-3 px-6 py-12 text-center",
         className,
       )}
     >
-      <span className="flex size-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
-        <Icon className="size-6" />
+      <span className="flex size-10 items-center justify-center rounded-md bg-surface-sunken text-foreground-faint">
+        <Icon className="size-5" aria-hidden="true" />
       </span>
       <div className="space-y-1">
-        <p className="text-sm font-semibold text-foreground">{title}</p>
-        <p className="max-w-sm text-xs text-muted-foreground">{description}</p>
+        <p className="text-[15px] font-medium leading-5 text-foreground">
+          {title}
+        </p>
+        <p className="max-w-sm text-[13px] leading-5 text-muted-foreground">
+          {description}
+        </p>
       </div>
       {action && <div className="mt-1">{action}</div>}
     </div>

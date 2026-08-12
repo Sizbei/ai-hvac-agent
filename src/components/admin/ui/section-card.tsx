@@ -1,11 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardContent,
-  CardAction,
-} from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 interface SectionCardProps {
@@ -13,7 +7,7 @@ interface SectionCardProps {
   readonly title: string;
   /** Optional icon shown left of the title. */
   readonly icon?: LucideIcon;
-  /** Optional numeric count shown as a muted badge next to the title. */
+  /** Optional numeric count shown as a mono figure next to the title. */
   readonly count?: number;
   /** Right-aligned action slot (button, link, badge, etc.). */
   readonly action?: React.ReactNode;
@@ -23,12 +17,13 @@ interface SectionCardProps {
 }
 
 /**
- * Thin Card wrapper with a consistent header row + border-b divider.
- * Replaces per-page `Card` + hand-rolled header rows across reviews,
- * reports, integrations, insights, and detail pages.
+ * Panel — the one boxed surface of the admin: `--surface` body, 1 px
+ * `--border-strong` hairline, 6 px radius, no shadow, and a 40 px sunken
+ * header band with a top keyline separating it from the body.
  *
- * Title uses `font-heading` at ~15 px medium (CardTitle's default).
- * All text must be sentence-case; this component does not enforce it.
+ * Title is 15 px/600 sentence case; the optional count renders as a bare
+ * tabular-mono figure (no badge). All text must be sentence-case; this
+ * component does not enforce it.
  */
 export function SectionCard({
   title,
@@ -40,27 +35,37 @@ export function SectionCard({
   contentClassName,
 }: SectionCardProps) {
   return (
-    <Card className={className}>
-      <CardHeader className="border-b">
-        <CardTitle className="flex items-center gap-2">
-          {Icon && (
-            <Icon
-              className="size-4 shrink-0 text-muted-foreground"
-              aria-hidden="true"
-            />
-          )}
+    <Card
+      className={cn(
+        "gap-0 overflow-hidden rounded-lg border border-border-strong bg-surface p-0 shadow-none ring-0",
+        className,
+      )}
+    >
+      <div
+        className="flex h-10 shrink-0 items-center gap-2 border-b border-border-strong bg-surface-sunken px-4"
+        style={{ boxShadow: "var(--keyline-top)" }}
+      >
+        {Icon && (
+          <Icon
+            className="size-3.5 shrink-0 text-foreground-faint"
+            aria-hidden="true"
+          />
+        )}
+        <h2 className="min-w-0 truncate text-[15px] font-semibold leading-none text-foreground">
           {title}
-          {count !== undefined && (
-            <span className="ml-1 text-sm font-normal text-muted-foreground">
-              ({count})
-            </span>
-          )}
-        </CardTitle>
-        {action && <CardAction>{action}</CardAction>}
-      </CardHeader>
-      <CardContent className={cn("pt-4", contentClassName)}>
-        {children}
-      </CardContent>
+        </h2>
+        {count !== undefined && (
+          <span className="font-mono text-[13px] leading-none tabular-nums text-muted-foreground">
+            {count}
+          </span>
+        )}
+        {action && (
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            {action}
+          </div>
+        )}
+      </div>
+      <div className={cn("p-4", contentClassName)}>{children}</div>
     </Card>
   );
 }

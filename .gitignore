@@ -60,3 +60,6 @@ promptfoo/redteam.generated.yaml
 
 # Throwaway probe scripts (agents/humans) — never commit
 .probe-*
+
+# ndemo demo-recorder state (contains a UNIX socket that panics Turbopack)
+.ndemo/

@@ -15,7 +15,8 @@ import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { StatCard } from '@/components/admin/ui/stat-card';
+import { StatCard, StatStrip } from '@/components/admin/ui/stat-card';
+import { ProgressBar } from '@/components/admin/ui/progress-bar';
 import { SectionHeading } from '@/components/admin/ui/section-heading';
 import { DataTableShell } from '@/components/admin/ui/data-table-shell';
 import type { OpsInsights } from '@/lib/admin/ops-insights-types';
@@ -73,13 +74,12 @@ function BarList({
           <span className="w-32 shrink-0 truncate text-sm">
             {humanize(r.key, labels)}
           </span>
-          <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
-            <div
-              className="h-full rounded-full bg-primary"
-              style={{ width: `${Math.round((r.count / max) * 100)}%` }}
-            />
-          </div>
-          <span className="w-10 shrink-0 text-right text-sm font-medium">
+          <ProgressBar
+            value={Math.round((r.count / max) * 100)}
+            label={`${humanize(r.key, labels)}: ${r.count}`}
+            className="h-1.5 flex-1"
+          />
+          <span className="w-10 shrink-0 text-right font-mono text-sm tabular-nums">
             {r.count}
           </span>
         </div>
@@ -113,8 +113,8 @@ function HourHistogram({
             title={`${hourLabel(r.hour)} — ${r.count} request${r.count === 1 ? '' : 's'}`}
           >
             <div
-              className={`w-full rounded-t-sm ${
-                r.hour === peakHour ? 'bg-primary' : 'bg-primary/40'
+              className={`w-full rounded-t-[2px] ${
+                r.hour === peakHour ? 'bg-marker' : 'bg-marker-border'
               }`}
               // Zero-count hours render nothing; non-zero hours get a >=2% floor
               // so a single request is still visible against a tall peak.
@@ -202,7 +202,7 @@ export function OpsInsightsSection() {
         </Alert>
       )}
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <StatStrip>
         <StatCard
           icon={Clock}
           label="Open requests"
@@ -235,7 +235,7 @@ export function OpsInsightsSection() {
           size="sm"
           loading={isLoading}
         />
-      </div>
+      </StatStrip>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="p-4">
@@ -270,9 +270,9 @@ export function OpsInsightsSection() {
           <DataTableShell
             columns={[
               { key: 'name', header: 'Technician', cell: (row) => row.technicianName ?? <span className="italic text-muted-foreground">Unassigned</span> },
-              { key: 'active', header: 'Active', cell: (row) => <span className="font-medium">{row.active}</span>, className: 'text-right' },
-              { key: 'completed', header: 'Completed', cell: (row) => <span className="text-muted-foreground">{row.completed}</span>, className: 'text-right' },
-              { key: 'total', header: 'Total', cell: (row) => String(row.total), className: 'text-right' },
+              { key: 'active', header: 'Active', cell: (row) => <span className="font-mono tabular-nums">{row.active}</span>, className: 'text-right' },
+              { key: 'completed', header: 'Completed', cell: (row) => <span className="font-mono tabular-nums text-muted-foreground">{row.completed}</span>, className: 'text-right' },
+              { key: 'total', header: 'Total', cell: (row) => <span className="font-mono tabular-nums">{row.total}</span>, className: 'text-right' },
             ]}
             rows={data.technicianLoad}
             getRowKey={(row) => row.technicianId ?? 'unassigned'}
@@ -310,19 +310,21 @@ export function OpsInsightsSection() {
             <div className="grid grid-cols-3 gap-3">
               <div>
                 <p className="text-xs text-muted-foreground">Total</p>
-                <p className="text-xl font-bold">
+                <p className="font-mono text-xl font-medium tabular-nums">
                   {formatCents(data.costStats.totalCents)}
                 </p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Avg / job</p>
-                <p className="text-xl font-bold">
+                <p className="font-mono text-xl font-medium tabular-nums">
                   {formatCents(data.costStats.averageCents)}
                 </p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Jobs costed</p>
-                <p className="text-xl font-bold">{data.costStats.count}</p>
+                <p className="font-mono text-xl font-medium tabular-nums">
+                  {data.costStats.count}
+                </p>
               </div>
             </div>
           )}

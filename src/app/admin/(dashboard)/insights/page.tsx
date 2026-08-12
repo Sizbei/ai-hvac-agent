@@ -22,7 +22,7 @@ import { OpsInsightsSection } from '@/components/admin/insights/ops-insights-sec
 import { BotAnalyticsSection } from '@/components/admin/insights/bot-analytics-section';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
-import { StatCard } from '@/components/admin/ui/stat-card';
+import { StatCard, StatStrip } from '@/components/admin/ui/stat-card';
 import { SectionHeading } from '@/components/admin/ui/section-heading';
 import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 
@@ -175,7 +175,7 @@ export default function AiInsightsPage() {
       />
 
       {/* Metric cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <StatStrip>
         {INSIGHT_CARDS.map((config) => {
           const Icon = config.icon as React.ComponentType<{ className?: string }> & { displayName?: string };
           return (
@@ -202,7 +202,7 @@ export default function AiInsightsPage() {
           loading={isLoading}
           sublabel={data ? `${data.feedbackUp} helpful · ${data.feedbackDown} not helpful` : undefined}
         />
-      </div>
+      </StatStrip>
 
       <BotAnalyticsSection />
 

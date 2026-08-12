@@ -176,15 +176,15 @@ export function BrandingPanel({ config, onSave }: BrandingPanelProps) {
       {/* Live preview */}
       <div className="space-y-2">
         <Label className="text-muted-foreground">Live preview</Label>
-        <div className="relative h-[320px] overflow-hidden rounded-xl border bg-gradient-to-b from-muted/40 to-muted/10">
+        <div className="relative h-[320px] overflow-hidden rounded-lg border border-border-strong bg-surface-sunken">
           <div
             className={cn(
-              'absolute bottom-4 w-[220px] overflow-hidden rounded-2xl border bg-background shadow-xl',
+              'absolute bottom-4 w-[220px] overflow-hidden rounded-2xl border border-border-strong bg-surface-raised shadow-[var(--shadow-pop)]',
               launcherPosition === 'bottom-right' ? 'right-4' : 'left-4',
             )}
           >
             <div
-              className="flex items-center gap-2 px-3 py-2.5 text-sm font-medium text-white"
+              className="flex items-center gap-2 px-3 py-2.5 text-sm font-medium text-primary-foreground"
               style={{ backgroundColor: previewColor }}
             >
               <MessageCircle className="size-4" />
@@ -196,7 +196,7 @@ export function BrandingPanel({ config, onSave }: BrandingPanelProps) {
                   'Hi! How can we help with your heating or cooling today?'}
               </div>
               <div
-                className="ml-auto max-w-[70%] rounded-2xl rounded-tr-sm px-3 py-2 text-xs text-white"
+                className="ml-auto max-w-[70%] rounded-2xl rounded-tr-sm px-3 py-2 text-xs text-primary-foreground"
                 style={{ backgroundColor: previewColor }}
               >
                 My AC isn&apos;t cooling.
@@ -205,7 +205,10 @@ export function BrandingPanel({ config, onSave }: BrandingPanelProps) {
           </div>
           <div
             className={cn(
-              'absolute bottom-4 flex size-12 items-center justify-center rounded-full text-white shadow-lg',
+              // rounded-full is deliberate: this mirrors the live embed
+              // launcher, and widget/embed styling is exempt from the
+              // shop-floor austerity laws (see SPEC "EXEMPT tonight").
+              'absolute bottom-4 flex size-12 items-center justify-center rounded-full text-primary-foreground shadow-[var(--shadow-pop)]',
               launcherPosition === 'bottom-right' ? 'right-4' : 'left-4',
               'translate-y-[120%]',
             )}

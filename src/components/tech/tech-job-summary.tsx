@@ -124,7 +124,7 @@ export function TechJobSummary({
   if (!job) {
     return (
       <Card>
-        <CardContent className="py-4 text-sm text-destructive">
+        <CardContent className="py-4 text-[15px] text-danger-strong">
           {error ?? "Couldn't load this job."}
         </CardContent>
       </Card>
@@ -140,14 +140,14 @@ export function TechJobSummary({
     <Card>
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-2">
-          <CardTitle className="text-base">
+          <CardTitle className="text-[17px]">
             {job.customerName ?? 'Customer'}
           </CardTitle>
-          <span className="shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+          <span className="shrink-0 rounded-[3px] border border-border bg-surface-raised px-2 py-0.5 text-[11px] font-semibold tracking-[0.07em] text-muted-foreground uppercase">
             {humanize(job.status)}
           </span>
         </div>
-        <p className="font-mono text-xs text-muted-foreground">
+        <p className="font-mono text-[13px] tabular-nums text-muted-foreground">
           {job.referenceNumber}
         </p>
       </CardHeader>
@@ -157,7 +157,7 @@ export function TechJobSummary({
           {job.customerPhone && (
             <a
               href={`tel:${job.customerPhone}`}
-              className="inline-flex items-center gap-1.5 rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium active:bg-muted"
+              className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-border-input bg-surface-raised px-4 text-[15px] font-medium text-foreground active:bg-accent"
             >
               <Phone className="size-4" /> Call
             </a>
@@ -167,42 +167,42 @@ export function TechJobSummary({
               href={directionsUrl(job.address)}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium active:bg-muted"
+              className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-border-input bg-surface-raised px-4 text-[15px] font-medium text-foreground active:bg-accent"
             >
               <Navigation className="size-4" /> Navigate
             </a>
           )}
         </div>
 
-        {job.address && <p className="text-sm">{job.address}</p>}
+        {job.address && <p className="text-[15px]">{job.address}</p>}
 
         {/* What */}
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="rounded-md bg-muted px-2 py-0.5 text-xs font-medium">
+          <span className="rounded-[3px] border border-border bg-surface-raised px-2 py-0.5 text-[13px] font-medium">
             {humanize(job.issueType)}
           </span>
           {job.systemType && (
-            <span className="rounded-md bg-muted px-2 py-0.5 text-xs">
+            <span className="rounded-[3px] border border-border bg-surface-raised px-2 py-0.5 text-[13px]">
               {humanize(job.systemType)}
             </span>
           )}
-          <span className="rounded-md bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+          <span className="rounded-[3px] border border-warning-border bg-warning-light px-2 py-0.5 text-[11px] font-semibold tracking-[0.07em] text-warning-strong uppercase">
             {humanize(job.urgency)}
           </span>
         </div>
 
         {windowLabel && (
-          <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
-            <Clock className="size-4" /> {windowLabel}
+          <p className="flex items-center gap-1.5 text-[15px] text-muted-foreground">
+            <Clock className="size-4 text-foreground-faint" /> {windowLabel}
           </p>
         )}
 
         {job.description && (
-          <p className="whitespace-pre-wrap text-sm">{job.description}</p>
+          <p className="whitespace-pre-wrap text-[15px]">{job.description}</p>
         )}
 
         {job.accessNotes && (
-          <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm dark:border-amber-800 dark:bg-amber-950/40">
+          <p className="rounded-md border border-warning-border bg-warning-light px-3 py-2 text-[15px] text-foreground">
             <span className="font-medium">Access: </span>
             {job.accessNotes}
           </p>
@@ -215,15 +215,17 @@ export function TechJobSummary({
               <div
                 role="alertdialog"
                 aria-label={buildStatusConfirmCopy(pendingConfirm).question}
-                className="w-full space-y-2 rounded-md border border-destructive/40 bg-destructive/10 p-3"
+                className="w-full space-y-2 rounded-md border border-danger-border bg-danger-light p-3"
               >
-                <p className="text-sm font-medium text-destructive">
+                <p className="text-[15px] font-medium text-danger-strong">
                   {buildStatusConfirmCopy(pendingConfirm).question}
                 </p>
                 <div className="flex gap-2">
                   <Button
                     variant="destructive"
-                    className="h-11 flex-1"
+                    /* solid danger: the tinted default would vanish on the
+                     * danger-light confirm panel it sits inside */
+                    className="h-11 flex-1 rounded-xl bg-danger text-[15px] text-danger-foreground hover:bg-danger-strong"
                     disabled={advancing !== null}
                     onClick={() => {
                       const status = pendingConfirm;
@@ -237,7 +239,7 @@ export function TechJobSummary({
                   </Button>
                   <Button
                     variant="outline"
-                    className="h-11 flex-1"
+                    className="h-11 flex-1 rounded-xl text-[15px]"
                     disabled={advancing !== null}
                     onClick={() => setPendingConfirm(null)}
                   >
@@ -250,7 +252,7 @@ export function TechJobSummary({
                 <Button
                   key={s}
                   variant={isTerminalStatus(s) ? 'destructive' : 'default'}
-                  className="h-11"
+                  className="h-11 rounded-xl px-4 text-[15px]"
                   disabled={advancing !== null}
                   onClick={() => handleStatusTap(s)}
                 >
@@ -261,7 +263,7 @@ export function TechJobSummary({
           </div>
         )}
 
-        {error && <p className="text-xs text-destructive">{error}</p>}
+        {error && <p className="text-[13px] text-danger-strong">{error}</p>}
       </CardContent>
     </Card>
   );

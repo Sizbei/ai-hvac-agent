@@ -15,9 +15,11 @@ interface ErrorStateProps {
 }
 
 /**
- * Standard error state for detail-page load failures — icon in a muted circle,
- * bold title, optional description, optional action. Mirrors `EmptyState`'s
- * shape so error and empty paths read consistently.
+ * Standard error state for detail-page load failures — 20 px glyph in a 40 px
+ * sunken square, 15 px headline, optional 13 px muted line, optional action.
+ * Mirrors `EmptyState`'s shape so error and empty paths read consistently.
+ *
+ * Copy stays human: no `err.message`, no codes.
  */
 export function ErrorState({
   title,
@@ -29,17 +31,21 @@ export function ErrorState({
   return (
     <div
       className={cn(
-        "flex flex-col items-center justify-center gap-3 px-6 py-16 text-center",
+        "flex flex-col items-center justify-center gap-3 px-6 py-12 text-center",
         className,
       )}
     >
-      <span className="flex size-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
-        <Icon className="size-6" />
+      <span className="flex size-10 items-center justify-center rounded-md bg-surface-sunken text-danger-strong">
+        <Icon className="size-5" aria-hidden="true" />
       </span>
       <div className="space-y-1">
-        <p className="text-sm font-semibold text-foreground">{title}</p>
+        <p className="text-[15px] font-medium leading-5 text-foreground">
+          {title}
+        </p>
         {description && (
-          <p className="max-w-sm text-xs text-muted-foreground">{description}</p>
+          <p className="max-w-sm text-[13px] leading-5 text-muted-foreground">
+            {description}
+          </p>
         )}
       </div>
       {action && <div className="mt-1">{action}</div>}

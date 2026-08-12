@@ -34,12 +34,12 @@ export function InvoiceCollectionsSide({
     <div className="flex flex-col gap-4">
       {/* Collections panel */}
       <SectionCard title="Collections">
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col">
           <Row label="Balance due" value={formatCentsExact(balanceCents)} />
           <Row
             label="Days overdue"
             value={daysOverdue !== null ? `${daysOverdue}d` : '—'}
-            valueClassName={daysOverdue !== null ? 'text-destructive font-semibold' : ''}
+            valueClassName={daysOverdue !== null ? 'text-danger-strong font-medium' : ''}
           />
           <Row
             label="Reminders sent"
@@ -58,7 +58,8 @@ export function InvoiceCollectionsSide({
             {activity.map((ev, i) => (
               <li key={ev.at.toISOString() + ev.kind + i} className="flex items-start gap-2.5">
                 <span
-                  className={`mt-1 size-2 shrink-0 rounded-full ${KIND_DOT[ev.kind]}`}
+                  aria-hidden="true"
+                  className={`mt-1 size-1.5 shrink-0 rounded-[1px] ${KIND_DOT[ev.kind]}`}
                 />
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium leading-none">{ev.label}</p>
@@ -84,10 +85,13 @@ function Row({
   value: string;
   valueClassName?: string;
 }) {
+  // Ruled definition row: 140 px label, value right, hairline per pair.
   return (
-    <div className="flex items-center justify-between gap-2">
-      <span className="text-sm text-muted-foreground">{label}</span>
-      <span className={`text-sm tabular-nums ${valueClassName}`}>{value}</span>
+    <div className="flex items-baseline justify-between gap-4 border-b border-border py-2 last:border-b-0 last:pb-0">
+      <span className="w-[140px] shrink-0 text-[13px] text-muted-foreground">{label}</span>
+      <span className={`text-right font-mono text-[13px] tabular-nums ${valueClassName}`}>
+        {value}
+      </span>
     </div>
   );
 }

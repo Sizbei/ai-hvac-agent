@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Star } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 
 interface ReviewFormProps {
@@ -56,11 +57,11 @@ export function ReviewForm({ token, publicReviewUrl }: ReviewFormProps) {
 
   if (done) {
     return (
-      <div className="rounded-lg border border-green-200 bg-green-50 p-6 text-center">
-        <p className="text-lg font-semibold text-green-800">
+      <div className="rounded-lg border border-success-border bg-success-light p-6 text-center">
+        <p className="text-[17px] font-semibold text-success-strong">
           Thank you for your feedback!
         </p>
-        <p className="mt-1 text-sm text-green-700">
+        <p className="mt-1 text-[15px] text-foreground">
           We truly appreciate it. If you have a moment, a public review really
           helps us out.
         </p>
@@ -68,7 +69,7 @@ export function ReviewForm({ token, publicReviewUrl }: ReviewFormProps) {
           href={publicReviewUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="mt-5 inline-flex items-center justify-center rounded-lg bg-gray-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-gray-800"
+          className="mt-5 inline-flex min-h-11 items-center justify-center rounded-xl bg-primary px-5 text-[15px] font-semibold text-primary-foreground transition-[background-color] duration-[var(--dur-hover)] hover:bg-primary-deep"
         >
           Leave a public review
         </a>
@@ -96,21 +97,21 @@ export function ReviewForm({ token, publicReviewUrl }: ReviewFormProps) {
               onClick={() => setRating(value)}
               onMouseEnter={() => setHovered(value)}
               onMouseLeave={() => setHovered(0)}
-              className="p-1 transition-transform hover:scale-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 rounded"
+              className="flex min-h-11 min-w-11 items-center justify-center rounded-xl p-1 outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
             >
               <Star
                 className={cn(
-                  'size-9',
+                  'size-9 transition-colors duration-[var(--dur-hover)]',
                   value <= active
-                    ? 'fill-amber-400 text-amber-400'
-                    : 'text-gray-300',
+                    ? 'fill-warning text-warning'
+                    : 'text-foreground-faint',
                 )}
               />
             </button>
           ))}
         </div>
         {rating > 0 && (
-          <p className="text-sm text-gray-600">
+          <p className="text-[15px] text-muted-foreground">
             You rated us {rating} out of 5.
           </p>
         )}
@@ -119,28 +120,28 @@ export function ReviewForm({ token, publicReviewUrl }: ReviewFormProps) {
       <div className="space-y-2">
         <label
           htmlFor="review-feedback"
-          className="text-sm font-medium text-gray-900"
+          className="text-[15px] font-medium text-foreground"
         >
           Anything you&apos;d like to share? (optional)
         </label>
-        <textarea
+        <Textarea
           id="review-feedback"
           value={feedback}
           onChange={(e) => setFeedback(e.target.value)}
           rows={4}
           maxLength={2000}
           placeholder="Tell us about your experience…"
-          className="w-full resize-y rounded-lg border border-gray-300 p-3 text-sm text-gray-900 focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900"
+          className="resize-y rounded-xl p-3 text-[15px] md:text-[15px]"
         />
-        <p className="text-xs text-gray-500">
+        <p className="text-[13px] text-muted-foreground">
           Your written feedback is private and goes straight to our team.
         </p>
       </div>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-[15px] text-danger-strong">{error}</p>}
 
       <Button
-        className="w-full"
+        className="h-11 w-full rounded-xl text-[15px]"
         disabled={isSubmitting || rating < 1}
         onClick={handleSubmit}
       >

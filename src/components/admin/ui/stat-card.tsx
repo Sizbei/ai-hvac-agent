@@ -1,8 +1,6 @@
 import type { LucideIcon } from "lucide-react";
-import { ArrowUp, ArrowDown } from "lucide-react";
-import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { IconChip, type IconChipIntent } from "@/components/admin/ui/icon-chip";
+import { type IconChipIntent } from "@/components/admin/ui/icon-chip";
 import { cn } from "@/lib/utils";
 
 export type { IconChipIntent as StatCardIntent };
@@ -10,11 +8,14 @@ export type { IconChipIntent as StatCardIntent };
 interface StatCardProps {
   /** Sentence-case label, e.g. "Pending requests". */
   readonly label: string;
-  /** The primary metric value, displayed at 2× body scale. */
+  /** The primary metric value — rendered in tabular mono. */
   readonly value: string | number;
-  /** Optional icon, rendered through IconChip. */
+  /** Optional icon, pinned 14 px top-right in `--foreground-faint`. */
   readonly icon?: LucideIcon;
-  /** Intent drives the IconChip tint. Defaults to "neutral". */
+  /**
+   * Retained for API compatibility. The KPI cell no longer tints: the redesign
+   * spec bans tinted icon chips inside KPI cells (the number is the signal).
+   */
   readonly intent?: IconChipIntent;
   /** Optional muted sub-label beneath the value (e.g. "vs prev period"). */
   readonly sublabel?: string;
@@ -37,7 +38,7 @@ function resolveDelta(
 ): { value: string; good: boolean } | null {
   if (delta === undefined || delta === null) return null;
   if (typeof delta === "number") {
-    // A zero delta is "no change" — render no pill rather than "improved by 0".
+    // A zero delta is "no change" — render nothing rather than "improved by 0".
     if (delta === 0) return null;
     return { value: `${delta > 0 ? "+" : ""}${delta}`, good: delta > 0 };
   }
@@ -45,19 +46,20 @@ function resolveDelta(
 }
 
 /**
- * Unified stat / KPI tile — replaces the six diverging implementations:
- * stats-cards.tsx, dashboard-stat-cards.tsx, reports KpiCard, operations
- * KpiCard, insights inline cards, ops-insights-section StatCard.
+ * KPI cell — the single stat tile for every admin surface (dashboard, reports,
+ * operations, insights, estimates, reviews, invoices).
  *
- * Value renders at 2× body scale with `font-heading` + `tabular-nums`.
- * Icon is threaded through `IconChip` using semantic tokens only.
- * Skeleton matches the loaded shape.
+ * Shop-floor instrument treatment: flat bordered panel, sentence-case 11 px
+ * label, 26 px tabular-mono value, bare ▲/▼ delta line, and a 14 px faint icon
+ * pinned top-right. No tinted chips, no pills, no shadow.
+ *
+ * Wrap several in `<StatStrip>` to fuse them into one container with internal
+ * hairlines (the cell renders borderless and square inside a strip).
  */
 export function StatCard({
   label,
   value,
-  icon,
-  intent = "neutral",
+  icon: Icon,
   sublabel,
   delta,
   size = "lg",
@@ -67,78 +69,99 @@ export function StatCard({
   const resolvedDelta = resolveDelta(delta);
 
   return (
-    <Card
+    <div
+      data-slot="stat-card"
       className={cn(
-        "flex flex-col gap-0",
-        size === "lg" ? "p-5" : "p-4",
+        "relative flex flex-col rounded-lg border border-border-strong bg-surface",
+        size === "lg" ? "px-4 py-3" : "px-3 py-2.5",
         className,
       )}
     >
-      <div className="flex items-start gap-3">
-        {icon && (
-          <IconChip icon={icon} intent={intent} size={size === "lg" ? "md" : "sm"} />
-        )}
-        <div className="min-w-0 flex-1">
-          <p
-            className={cn(
-              "text-muted-foreground",
-              size === "lg" ? "text-sm" : "text-xs",
-            )}
-          >
-            {label}
-          </p>
+      {Icon && (
+        <Icon
+          aria-hidden="true"
+          className="absolute right-3 top-3 size-3.5 text-foreground-faint"
+        />
+      )}
 
-          {loading ? (
-            <Skeleton
-              className={cn("mt-1", size === "lg" ? "h-9 w-24" : "h-7 w-16")}
-            />
-          ) : (
-            <p
-              className={cn(
-                "mt-0.5 font-heading font-bold leading-none tabular-nums tracking-tight",
-                size === "lg" ? "text-3xl" : "text-2xl",
-              )}
-            >
-              {value}
-            </p>
-          )}
+      <p className="pr-6 text-[11px] font-semibold leading-[14px] tracking-[0.04em] text-muted-foreground">
+        {label}
+      </p>
 
-          {!loading && sublabel && (
-            <p className="mt-0.5 text-xs text-muted-foreground">{sublabel}</p>
+      {loading ? (
+        <Skeleton
+          className={cn("mt-2", size === "lg" ? "h-[26px] w-24" : "h-5 w-16")}
+        />
+      ) : (
+        <p
+          className={cn(
+            "mt-1.5 font-mono font-medium leading-none tabular-nums text-foreground",
+            size === "lg" ? "text-[26px]" : "text-[20px]",
           )}
+        >
+          {value}
+        </p>
+      )}
 
-          {!loading && resolvedDelta && (
-            <DeltaPill delta={resolvedDelta} />
-          )}
-        </div>
-      </div>
-    </Card>
+      {!loading && sublabel && (
+        <p className="mt-1.5 text-[11px] leading-[14px] text-muted-foreground">
+          {sublabel}
+        </p>
+      )}
+
+      {!loading && resolvedDelta && <DeltaLine delta={resolvedDelta} />}
+    </div>
   );
 }
 
-function DeltaPill({
+/**
+ * Fused KPI strip — one container, internal hairlines, zero gap.
+ *
+ * Children (typically `<StatCard>`) render borderless and square inside; the
+ * strip owns the outer border and draws the dividers as inset shadows so a
+ * child's own border utilities can't double up.
+ */
+export function StatStrip({
+  children,
+  className,
+}: {
+  readonly children: React.ReactNode;
+  readonly className?: string;
+}) {
+  return (
+    <div
+      data-slot="stat-strip"
+      className={cn(
+        "grid grid-flow-row overflow-hidden rounded-lg border border-border-strong bg-surface sm:auto-cols-fr sm:grid-flow-col",
+        // children go borderless + square; dividers are drawn by the strip
+        "[&>*]:rounded-none [&>*]:border-0 [&>*]:bg-transparent",
+        "[&>*+*]:shadow-[inset_0_1px_0_var(--border)] sm:[&>*+*]:shadow-[inset_1px_0_0_var(--border)]",
+        className,
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+function DeltaLine({
   delta,
 }: {
   readonly delta: { value: string; good: boolean };
 }) {
-  const Arrow = delta.good ? ArrowUp : ArrowDown;
   return (
-    <div className="mt-1.5 flex items-center gap-1">
+    <p className="mt-1.5 font-mono text-[11px] leading-[14px] tabular-nums">
       <span className="sr-only">
         {delta.good ? "Improved" : "Declined"} by {delta.value}
       </span>
       <span
         aria-hidden="true"
-        className={cn(
-          "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs font-semibold",
-          delta.good
-            ? "bg-success-light text-success-strong"
-            : "bg-danger-light text-danger-strong",
-        )}
+        className={
+          delta.good ? "text-success-strong" : "text-danger-strong"
+        }
       >
-        <Arrow className="size-3" />
-        {delta.value}
+        {delta.good ? "▲" : "▼"} {delta.value}
       </span>
-    </div>
+    </p>
   );
 }

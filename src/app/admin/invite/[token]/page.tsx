@@ -40,11 +40,11 @@ async function InviteAcceptContent({ params }: PageProps) {
 
   if (!resolved.ok) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background p-4">
+      <div className="flex min-h-screen items-center justify-center bg-canvas p-4">
         <Card className="w-full max-w-sm">
           <CardHeader className="space-y-1 text-center">
-            <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-muted">
-              <Wind className="h-5 w-5 text-muted-foreground" />
+            <div className="mx-auto flex size-10 items-center justify-center rounded-lg bg-surface-sunken">
+              <Wind className="size-5 text-foreground-faint" />
             </div>
             <CardTitle>Invitation unavailable</CardTitle>
             <CardDescription>
@@ -57,7 +57,7 @@ async function InviteAcceptContent({ params }: PageProps) {
               href="/admin/login"
               className={buttonVariants({
                 variant: 'outline',
-                className: 'w-full',
+                className: 'h-10 w-full',
               })}
             >
               Go to sign in
@@ -79,10 +79,10 @@ async function InviteAcceptContent({ params }: PageProps) {
 
 function InviteAcceptLoading() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
+    <div className="flex min-h-screen items-center justify-center bg-canvas p-4">
       <Card className="w-full max-w-sm">
         <CardHeader className="space-y-1 text-center">
-          <Loader2 className="h-6 w-6 animate-spin mx-auto" />
+          <Loader2 className="mx-auto size-6 animate-spin text-foreground-faint" />
         </CardHeader>
       </Card>
     </div>

@@ -10,10 +10,10 @@ function MessageState({
   readonly body: string;
 }) {
   return (
-    <main className="mx-auto flex min-h-screen max-w-lg items-center justify-center p-6">
-      <div className="w-full rounded-xl border border-gray-200 bg-white p-8 text-center shadow-sm">
-        <h1 className="text-xl font-semibold text-gray-900">{title}</h1>
-        <p className="mt-2 text-sm text-gray-600">{body}</p>
+    <main className="flex min-h-screen items-center justify-center bg-canvas p-6">
+      <div className="w-full max-w-lg rounded-lg border border-border-strong bg-surface p-8 text-center">
+        <h1 className="text-xl font-semibold text-foreground">{title}</h1>
+        <p className="mt-2 text-[15px] text-muted-foreground">{body}</p>
       </div>
     </main>
   );
@@ -65,13 +65,13 @@ export default async function EstimateApprovalPage({
   }));
 
   return (
-    <main className="mx-auto max-w-2xl p-6">
-      <div className="rounded-xl border border-gray-200 bg-white p-8 shadow-sm">
+    <main className="min-h-screen bg-canvas p-4 sm:p-6">
+      <div className="mx-auto max-w-2xl rounded-lg border border-border-strong bg-surface p-6 sm:p-8">
         <header className="mb-6">
-          <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+          <h1 className="font-heading text-[26px] leading-[30px] font-semibold tracking-[-0.02em] text-foreground">
             Your estimate
           </h1>
-          <p className="mt-1 text-sm text-gray-600">
+          <p className="mt-1.5 text-[15px] text-muted-foreground">
             Review the options below, then choose one and sign to approve.
           </p>
         </header>
@@ -81,13 +81,13 @@ export default async function EstimateApprovalPage({
           {estimate.options.map((opt) => (
             <section
               key={opt.id}
-              className="rounded-lg border border-gray-200 p-4"
+              className="rounded-lg border border-border-strong p-4"
             >
-              <div className="mb-3 flex items-baseline justify-between">
-                <h2 className="text-base font-semibold text-gray-900">
+              <div className="mb-3 flex items-baseline justify-between gap-3">
+                <h2 className="text-[17px] font-semibold text-foreground">
                   {opt.name}
                 </h2>
-                <span className="text-lg font-bold text-gray-900">
+                <span className="font-mono text-[20px] font-medium tabular-nums text-foreground">
                   {formatCentsExact(opt.totalCents)}
                 </span>
               </div>
@@ -95,24 +95,30 @@ export default async function EstimateApprovalPage({
                 {opt.lineItems.map((li) => (
                   <li
                     key={li.id}
-                    className="flex justify-between text-sm text-gray-700"
+                    className="flex justify-between gap-3 text-[15px] text-foreground"
                   >
                     <span>
                       {li.name}
                       {li.quantity > 1 ? ` × ${li.quantity}` : ''}
                     </span>
-                    <span>{formatCentsExact(li.lineTotalCents)}</span>
+                    <span className="font-mono tabular-nums">
+                      {formatCentsExact(li.lineTotalCents)}
+                    </span>
                   </li>
                 ))}
               </ul>
-              <div className="mt-3 space-y-1 border-t border-gray-100 pt-3 text-sm">
-                <div className="flex justify-between text-gray-600">
+              <div className="mt-3 space-y-1 border-t border-border pt-3 text-[15px]">
+                <div className="flex justify-between gap-3 text-muted-foreground">
                   <span>Subtotal</span>
-                  <span>{formatCentsExact(opt.subtotalCents)}</span>
+                  <span className="font-mono tabular-nums">
+                    {formatCentsExact(opt.subtotalCents)}
+                  </span>
                 </div>
-                <div className="flex justify-between text-gray-600">
+                <div className="flex justify-between gap-3 text-muted-foreground">
                   <span>Tax</span>
-                  <span>{formatCentsExact(opt.taxCents)}</span>
+                  <span className="font-mono tabular-nums">
+                    {formatCentsExact(opt.taxCents)}
+                  </span>
                 </div>
               </div>
             </section>

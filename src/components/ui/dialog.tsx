@@ -31,7 +31,8 @@ function DialogOverlay({
     <DialogPrimitive.Backdrop
       data-slot="dialog-overlay"
       className={cn(
-        "fixed inset-0 isolate z-50 bg-black/10 duration-100 supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
+        // Flat graphite scrim, no blur (the panels behind stay legible/crisp).
+        "fixed inset-0 isolate z-50 bg-[oklch(0.245_0.010_95/0.45)] transition-opacity duration-[var(--dur-enter)] ease-[var(--ease-out)] data-starting-style:opacity-0 data-ending-style:opacity-0 data-ending-style:duration-[120ms]",
         className
       )}
       {...props}
@@ -53,7 +54,10 @@ function DialogContent({
       <DialogPrimitive.Popup
         data-slot="dialog-content"
         className={cn(
-          "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          // Centering uses the discrete `translate`/`scale` properties (Tailwind
+          // v4), so the enter transition can animate scale + a 4px lift without
+          // fighting the -50%/-50% centering the way a transform keyframe would.
+          "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-lg border border-border-strong bg-surface-raised p-5 text-sm text-popover-foreground shadow-[var(--shadow-pop)] transition-[opacity,translate,scale] duration-[var(--dur-enter)] ease-[var(--ease-out)] outline-none sm:max-w-sm data-starting-style:translate-y-[calc(-50%+4px)] data-starting-style:scale-[0.98] data-starting-style:opacity-0 data-ending-style:opacity-0 data-ending-style:duration-[120ms]",
           className
         )}
         {...props}
@@ -65,7 +69,7 @@ function DialogContent({
             render={
               <Button
                 variant="ghost"
-                className="absolute top-2 right-2"
+                className="absolute top-3 right-3"
                 size="icon-sm"
               />
             }
@@ -102,7 +106,7 @@ function DialogFooter({
     <div
       data-slot="dialog-footer"
       className={cn(
-        "-mx-4 -mb-4 flex flex-col-reverse gap-2 rounded-b-xl border-t bg-muted/50 p-4 sm:flex-row sm:justify-end",
+        "-mx-5 -mb-5 flex flex-col-reverse gap-2 rounded-b-lg border-t border-border bg-surface-sunken p-5 sm:flex-row sm:justify-end",
         className
       )}
       {...props}
@@ -122,7 +126,7 @@ function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props) {
     <DialogPrimitive.Title
       data-slot="dialog-title"
       className={cn(
-        "font-heading text-base leading-none font-medium",
+        "font-heading text-[15px] leading-5 font-semibold text-foreground",
         className
       )}
       {...props}

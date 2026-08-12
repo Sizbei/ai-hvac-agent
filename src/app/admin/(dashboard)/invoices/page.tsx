@@ -452,8 +452,8 @@ export default function InvoicesPage() {
       {/* list */}
       {isLoading ? (
         <>
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <StatTileSkeleton />
+          {/* Three tiles — matches the loaded SummaryBand exactly. */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <StatTileSkeleton />
             <StatTileSkeleton />
             <StatTileSkeleton />
@@ -482,9 +482,9 @@ export default function InvoicesPage() {
         </Card>
       ) : (
         <>
-          <div className="overflow-x-auto rounded-xl border bg-card shadow-sm">
-            {/* header row */}
-            <div className="grid grid-cols-[minmax(200px,1fr)_90px_120px_140px_180px_32px] items-center gap-4 border-b px-6 py-2.5">
+          <div className="overflow-x-auto rounded-lg border border-border-strong bg-surface">
+            {/* header row — 32 px sunken band, matching DataTableShell */}
+            <div className="grid h-8 grid-cols-[minmax(200px,1fr)_90px_120px_140px_180px_32px] items-center gap-4 border-b border-border-strong bg-surface-sunken px-6">
               {(
                 [
                   { key: 'customer', label: 'Customer' },
@@ -498,7 +498,7 @@ export default function InvoicesPage() {
                 <p
                   key={col.key}
                   className={cn(
-                    'text-[11px] font-medium text-muted-foreground',
+                    'text-[11px] font-semibold tracking-[0.04em] text-muted-foreground',
                     col.key === 'balance' || col.key === 'actions' ? 'text-right' : '',
                   )}
                 >
@@ -555,10 +555,10 @@ export default function InvoicesPage() {
           role="status"
           aria-live="polite"
           className={cn(
-            'fixed bottom-6 right-6 z-50 flex items-center gap-2.5 rounded-xl border px-4 py-3 text-sm font-medium shadow-lg',
+            'fixed bottom-6 right-6 z-50 flex items-center gap-2.5 rounded-md border px-4 py-3 text-sm font-medium shadow-[var(--shadow-pop)]',
             'animate-in fade-in slide-in-from-bottom-2 duration-200 ease-out motion-reduce:animate-none',
             flash.ok
-              ? 'border-border bg-card text-foreground'
+              ? 'border-border-strong bg-surface-raised text-foreground'
               : 'border-destructive/30 bg-destructive text-destructive-foreground',
           )}
         >

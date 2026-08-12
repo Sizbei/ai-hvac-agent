@@ -251,7 +251,7 @@ export default function EstimateDetailPage({
           {estimate.customerId && (
             <Link
               href={`/admin/customers/${estimate.customerId}`}
-              className="text-primary hover:underline"
+              className="text-link hover:underline"
             >
               View customer
             </Link>
@@ -259,7 +259,7 @@ export default function EstimateDetailPage({
           {estimate.serviceRequestId && (
             <Link
               href={`/admin/requests?request=${estimate.serviceRequestId}`}
-              className="text-primary hover:underline"
+              className="text-link hover:underline"
             >
               View request
             </Link>

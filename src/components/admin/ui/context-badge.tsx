@@ -13,12 +13,13 @@ interface ContextBadgeProps {
  *  outcome, etc.). Replaces the hand-rolled sky/amber chips in dispatch-column,
  *  request-table, and dashboard-list-card. No raw palette classes. */
 const VARIANT_CLASSES: Record<ContextBadgeVariant, string> = {
-  auto: 'border-info/30 bg-info-light text-info-foreground',
-  'after-hours': 'border-warning/30 bg-warning-light text-warning-foreground',
-  queued: 'border-border bg-muted text-muted-foreground',
-  info: 'border-info/30 bg-info-light text-info-foreground',
-  warning: 'border-warning/30 bg-warning-light text-warning-foreground',
-  neutral: 'border-border bg-muted text-muted-foreground',
+  auto: 'border-info-border bg-info-light text-info-strong',
+  'after-hours': 'border-warning-border bg-warning-light text-warning-strong',
+  // Neutral chips sit on --surface-raised: a muted fill vanishes on sunken bands.
+  queued: 'border-border bg-surface-raised text-muted-foreground',
+  info: 'border-info-border bg-info-light text-info-strong',
+  warning: 'border-warning-border bg-warning-light text-warning-strong',
+  neutral: 'border-border bg-surface-raised text-muted-foreground',
 };
 
 export function ContextBadge({ variant = 'neutral', label, title, className }: ContextBadgeProps) {
@@ -26,7 +27,7 @@ export function ContextBadge({ variant = 'neutral', label, title, className }: C
     <span
       title={title}
       className={cn(
-        'inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium',
+        'inline-flex h-5 items-center rounded-[3px] border px-1.5 text-[11px] font-medium leading-none',
         VARIANT_CLASSES[variant],
         className,
       )}

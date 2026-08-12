@@ -50,22 +50,24 @@ export function MessageFeedback({ messageIndex }: MessageFeedbackProps) {
         onClick={() => submit('up')}
         aria-label="Yes, this was helpful"
         className={cn(
-          'rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-green-600',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          'relative size-7 rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-success',
+          "before:absolute before:-inset-2 before:content-['']",
+          'focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring',
         )}
       >
-        <ThumbsUp className="size-3.5" />
+        <ThumbsUp className="mx-auto size-3.5" />
       </button>
       <button
         type="button"
         onClick={() => submit('down')}
         aria-label="No, this was not helpful"
         className={cn(
-          'rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-red-600',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          'relative size-7 rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-danger',
+          "before:absolute before:-inset-2 before:content-['']",
+          'focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring',
         )}
       >
-        <ThumbsDown className="size-3.5" />
+        <ThumbsDown className="mx-auto size-3.5" />
       </button>
     </div>
   );

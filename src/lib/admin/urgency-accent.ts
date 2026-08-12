@@ -1,41 +1,53 @@
 /**
- * Urgency → calendar accent classes. Derived from the same palette as
- * urgency-badge.tsx so calendar cards/chips read consistently with the badges.
+ * Urgency → calendar accent classes. Derived from the same semantic families as
+ * URGENCY_BADGE in status-colors.ts (emergency = danger, high = warning,
+ * medium = info, low = muted) so calendar cards/chips read consistently with
+ * the badges.
  *
- * `bar` is a left-border accent for week cards; `dot` is a small status dot for
- * month chips; `chip` is a soft background+text for compact month chips. Falls
- * back to the "low" styling for any unknown urgency string.
+ * `bar` is a left-border accent for week cards; `dot` is a small square marker
+ * for month chips and the legend; `chip` is a soft background+text for compact
+ * month chips. Falls back to the "low" styling for any unknown urgency string.
+ *
+ * LIGHTNESS LADDER (deliberate — the four urgencies must survive greyscale and
+ * CVD, per the redesign spec's red/amber collision risk). The `dot`/`bar` fills
+ * step monotonically:
+ *   medium  --info-strong        L 0.43
+ *   emergency --danger           L 0.505
+ *   high    --warning            L 0.66
+ *   low     --ink-500            L 0.795
+ * No two are within 6% lightness, and the closest pair (medium/emergency) is
+ * additionally 231° apart in hue.
  */
 
 export type UrgencyAccent = {
   /** Left-border color class, e.g. for a week-grid card's accent rail. */
   readonly bar: string;
-  /** Small dot color (background) for a month chip. */
+  /** Small square marker color (background) for a month chip / legend key. */
   readonly dot: string;
-  /** Soft chip background + text for compact month chips. */
+  /** Soft chip background + border + text for compact month chips. */
   readonly chip: string;
 };
 
 const ACCENTS: Record<string, UrgencyAccent> = {
   emergency: {
-    bar: "border-l-red-500",
-    dot: "bg-red-500",
-    chip: "bg-red-50 text-red-700 hover:bg-red-100 dark:bg-red-950/40 dark:text-red-300",
+    bar: "border-l-danger",
+    dot: "bg-danger",
+    chip: "border border-danger-border bg-danger-light text-danger-strong hover:bg-danger-border",
   },
   high: {
-    bar: "border-l-orange-500",
-    dot: "bg-orange-500",
-    chip: "bg-orange-50 text-orange-700 hover:bg-orange-100 dark:bg-orange-950/40 dark:text-orange-300",
+    bar: "border-l-warning",
+    dot: "bg-warning",
+    chip: "border border-warning-border bg-warning-light text-warning-strong hover:bg-warning-border",
   },
   medium: {
-    bar: "border-l-blue-500",
-    dot: "bg-blue-500",
-    chip: "bg-blue-50 text-blue-700 hover:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-300",
+    bar: "border-l-info-strong",
+    dot: "bg-info-strong",
+    chip: "border border-info-border bg-info-light text-info-strong hover:bg-info-border",
   },
   low: {
-    bar: "border-l-gray-400",
-    dot: "bg-gray-400",
-    chip: "bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300",
+    bar: "border-l-ink-500",
+    dot: "bg-ink-500",
+    chip: "border border-border bg-muted text-muted-foreground hover:bg-ink-300",
   },
 };
 

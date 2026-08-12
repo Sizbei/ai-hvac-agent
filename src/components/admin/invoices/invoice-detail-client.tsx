@@ -405,7 +405,7 @@ export function InvoiceDetailClient({
           {invoice.customerId && (
             <Link
               href={`/admin/customers/${invoice.customerId}`}
-              className="text-primary hover:underline"
+              className="text-link hover:underline"
             >
               View customer
             </Link>
@@ -413,7 +413,7 @@ export function InvoiceDetailClient({
           {invoice.serviceRequestId && (
             <Link
               href={`/admin/requests?request=${invoice.serviceRequestId}`}
-              className="text-primary hover:underline"
+              className="text-link hover:underline"
             >
               View request
             </Link>
@@ -421,7 +421,7 @@ export function InvoiceDetailClient({
           {invoice.estimateId && (
             <Link
               href={`/admin/estimates/${invoice.estimateId}`}
-              className="text-primary hover:underline"
+              className="text-link hover:underline"
             >
               View estimate
             </Link>
@@ -575,11 +575,11 @@ export function InvoiceDetailClient({
                             <span className="font-medium">
                               {formatCentsExact(p.amountCents)}
                             </span>
-                            <span className="rounded-full border bg-muted px-2 py-0.5 text-xs">
+                            <span className="inline-flex h-5 items-center rounded-[3px] border border-border bg-surface-raised px-1.5 text-[11px] font-medium">
                               {p.status}
                             </span>
                             {p.isDeposit && (
-                              <span className="rounded-full border border-info/30 bg-info-light px-2 py-0.5 text-xs text-info-foreground">
+                              <span className="inline-flex h-5 items-center rounded-[3px] border border-info-border bg-info-light px-1.5 text-[11px] font-medium text-info-strong">
                                 deposit
                               </span>
                             )}

@@ -10,10 +10,10 @@ function MessageState({
   readonly body: string;
 }) {
   return (
-    <main className="mx-auto flex min-h-screen max-w-lg items-center justify-center p-6">
-      <div className="w-full rounded-xl border border-gray-200 bg-white p-8 text-center shadow-sm">
-        <h1 className="text-xl font-semibold text-gray-900">{title}</h1>
-        <p className="mt-2 text-sm text-gray-600">{body}</p>
+    <main className="flex min-h-screen items-center justify-center bg-canvas p-6">
+      <div className="w-full max-w-lg rounded-lg border border-border-strong bg-surface p-8 text-center">
+        <h1 className="text-xl font-semibold text-foreground">{title}</h1>
+        <p className="mt-2 text-[15px] text-muted-foreground">{body}</p>
       </div>
     </main>
   );
@@ -44,12 +44,12 @@ export default async function ReviewPage({
 
   if (review.status === 'responded') {
     return (
-      <main className="mx-auto flex min-h-screen max-w-lg items-center justify-center p-6">
-        <div className="w-full rounded-xl border border-gray-200 bg-white p-8 text-center shadow-sm">
-          <h1 className="text-xl font-semibold text-gray-900">
+      <main className="flex min-h-screen items-center justify-center bg-canvas p-6">
+        <div className="w-full max-w-lg rounded-lg border border-border-strong bg-surface p-8 text-center">
+          <h1 className="text-xl font-semibold text-foreground">
             Thank you for your feedback!
           </h1>
-          <p className="mt-2 text-sm text-gray-600">
+          <p className="mt-2 text-[15px] text-muted-foreground">
             We&apos;ve already recorded your response. If you have a moment, a
             public review really helps us out.
           </p>
@@ -57,7 +57,7 @@ export default async function ReviewPage({
             href={publicReviewUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="mt-5 inline-flex items-center justify-center rounded-lg bg-gray-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-gray-800"
+            className="mt-5 inline-flex min-h-11 items-center justify-center rounded-xl bg-primary px-5 text-[15px] font-semibold text-primary-foreground transition-[background-color] duration-[var(--dur-hover)] hover:bg-primary-deep"
           >
             Leave a public review
           </a>
@@ -67,13 +67,13 @@ export default async function ReviewPage({
   }
 
   return (
-    <main className="mx-auto max-w-lg p-6">
-      <div className="rounded-xl border border-gray-200 bg-white p-8 shadow-sm">
+    <main className="min-h-screen bg-canvas p-4 sm:p-6">
+      <div className="mx-auto max-w-lg rounded-lg border border-border-strong bg-surface p-6 sm:p-8">
         <header className="mb-6 text-center">
-          <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+          <h1 className="font-heading text-[26px] leading-[30px] font-semibold tracking-[-0.02em] text-foreground">
             How did we do?
           </h1>
-          <p className="mt-1 text-sm text-gray-600">
+          <p className="mt-1.5 text-[15px] text-muted-foreground">
             Your feedback helps us serve you better.
           </p>
         </header>

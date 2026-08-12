@@ -59,24 +59,24 @@ export function PayButton({
 
   if (status === "paid") {
     return (
-      <p className="text-sm font-medium text-green-700">
+      <p className="text-[15px] font-medium text-success-strong">
         {message ?? "Paid"}
       </p>
     );
   }
 
   return (
-    <div className="flex flex-col items-end gap-1">
+    <div className="flex w-full flex-col gap-1 sm:w-auto">
       <button
         type="button"
         onClick={handlePay}
         disabled={status === "paying"}
-        className="inline-flex items-center justify-center rounded-lg bg-gray-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
+        className="inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-primary px-5 text-[15px] font-semibold text-primary-foreground transition-[background-color] duration-[var(--dur-hover)] hover:bg-primary-deep disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
       >
         {status === "paying" ? "Processing…" : "Pay now"}
       </button>
       {status === "error" && message && (
-        <p className="text-xs text-red-600">{message}</p>
+        <p className="text-[13px] text-danger-strong">{message}</p>
       )}
     </div>
   );

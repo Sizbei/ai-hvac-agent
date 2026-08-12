@@ -92,8 +92,8 @@ export function ChatExperience({
   const containerClass = cn(
     'flex flex-col',
     variant === 'embed'
-      ? 'h-dvh'
-      : 'h-dvh md:mx-auto md:max-w-lg md:shadow-lg',
+      ? 'h-dvh bg-canvas'
+      : 'h-dvh bg-canvas md:mx-auto md:max-w-lg md:border-x md:border-border-strong',
   );
 
   const isTerminal =
@@ -172,7 +172,7 @@ export function ChatExperience({
   if (isLoading) {
     return (
       <div className={containerClass}>
-        <div className="flex items-center justify-between border-b bg-background/80 px-4 py-3">
+        <div className="flex items-center justify-between border-b border-border-strong bg-surface px-4 py-3">
           <Skeleton className="h-5 w-36" />
           <Skeleton className="h-8 w-32" />
         </div>
@@ -181,7 +181,7 @@ export function ChatExperience({
           <Skeleton className="h-10 w-1/2 ml-auto" />
           <Skeleton className="h-10 w-3/4" />
         </div>
-        <div className="border-t p-3">
+        <div className="border-t border-border-strong bg-surface p-3">
           <Skeleton className="h-9 w-full" />
         </div>
       </div>
@@ -252,7 +252,7 @@ export function ChatExperience({
         )}
 
       {!hasUserMessages && !isStreaming && !isTerminal && (
-        <div className="border-t bg-muted/30 px-3 py-3">
+        <div className="border-t border-border bg-surface px-3 py-3">
           <QuickReplies onSelect={sendMessage} disabled={inputDisabled} />
         </div>
       )}
@@ -272,10 +272,10 @@ export function ChatExperience({
       {/* When the session has ended (submitted / escalated / abandoned) the
           input is locked — offer a clear way to start over instead of a dead box. */}
       {isTerminal && (
-        <div className="border-t bg-muted/30 px-3 py-3">
+        <div className="border-t border-border bg-surface px-3 py-3">
           <Button
             variant="outline"
-            className="w-full"
+            className="h-11 w-full text-sm"
             onClick={handleNewConversation}
           >
             <RotateCcw className="size-4" data-icon="inline-start" />

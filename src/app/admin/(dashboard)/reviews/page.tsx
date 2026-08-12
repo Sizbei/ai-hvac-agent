@@ -8,7 +8,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
-import { StatCard } from '@/components/admin/ui/stat-card';
+import { StatCard, StatStrip } from '@/components/admin/ui/stat-card';
 import { SectionCard } from '@/components/admin/ui/section-card';
 import { EmptyState } from '@/components/admin/ui/empty-state';
 import { Pager } from '@/components/admin/ui/pager';
@@ -90,7 +90,7 @@ export default function ReviewsPage() {
       )}
 
       {/* Stat cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <StatStrip>
         <StatCard
           icon={Star}
           intent="warning"
@@ -113,7 +113,7 @@ export default function ReviewsPage() {
           sublabel={`${stats?.responded ?? 0} responded`}
           loading={isLoading}
         />
-      </div>
+      </StatStrip>
 
       {/* Review list */}
       <SectionCard title="All reviews">

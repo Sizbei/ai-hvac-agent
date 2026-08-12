@@ -209,7 +209,7 @@ function WeekView({
             <div key={isoDay} className="flex min-w-32 flex-1 flex-col">
               <div
                 className={`mb-1 text-center text-xs font-semibold ${
-                  isToday ? 'text-primary' : 'text-foreground'
+                  isToday ? 'text-marker' : 'text-foreground'
                 }`}
               >
                 {weekday}{' '}

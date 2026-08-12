@@ -6,6 +6,7 @@ import { ArrowLeft, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { TechJobSummary } from '@/components/tech/tech-job-summary';
@@ -467,7 +468,7 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
     <div className="space-y-5">
       <Link
         href="/tech/jobs"
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground"
+        className="inline-flex min-h-11 items-center gap-1.5 text-[15px] text-link"
       >
         <ArrowLeft className="size-4" /> Back
       </Link>
@@ -478,7 +479,7 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
       {loadError && (
         <div
           role="alert"
-          className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          className="rounded-md border border-danger-border bg-danger-light px-3 py-2 text-[15px] text-danger-strong"
         >
           {loadError} Some data may be missing — pull to refresh or reopen the job.
         </div>
@@ -487,20 +488,20 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
       {/* Time on this job (clock in / out) */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Time on this job</CardTitle>
+          <CardTitle className="text-[17px]">Time on this job</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           {openSince ? (
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm text-muted-foreground">On the clock</p>
-                <p className="text-2xl font-semibold tabular-nums">
+                <p className="text-[13px] text-muted-foreground">On the clock</p>
+                <p className="font-mono text-[26px] leading-[30px] font-medium tabular-nums">
                   {formatMinutes(elapsedMins)}
                 </p>
               </div>
               <Button
                 variant="destructive"
-                className="h-11"
+                className="h-11 rounded-xl px-4 text-[15px]"
                 disabled={isClocking}
                 onClick={() => void handleClock('clock_out')}
               >
@@ -509,9 +510,9 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
             </div>
           ) : (
             <div className="flex items-center justify-between gap-3">
-              <p className="text-sm text-muted-foreground">Not clocked in.</p>
+              <p className="text-[15px] text-muted-foreground">Not clocked in.</p>
               <Button
-                className="h-11"
+                className="h-11 rounded-xl px-4 text-[15px]"
                 disabled={isClocking}
                 onClick={() => void handleClock('clock_in')}
               >
@@ -520,15 +521,15 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
             </div>
           )}
           {clockError && (
-            <p className="text-xs text-destructive">{clockError}</p>
+            <p className="text-[13px] text-danger-strong">{clockError}</p>
           )}
 
           {todaysEntries.length > 0 && (
-            <ul className="space-y-1 border-t pt-3">
+            <ul className="space-y-1 border-t border-border pt-3">
               {todaysEntries.map((e) => (
                 <li
                   key={e.id}
-                  className="flex justify-between text-sm text-muted-foreground"
+                  className="flex justify-between font-mono text-[13px] tabular-nums text-muted-foreground"
                 >
                   <span>
                     {new Date(e.clockInAt).toLocaleTimeString([], {
@@ -543,7 +544,7 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
                         })
                       : 'now'}
                   </span>
-                  <span className="tabular-nums">
+                  <span className="tabular-nums text-foreground">
                     {e.minutes !== null ? formatMinutes(e.minutes) : '—'}
                   </span>
                 </li>
@@ -556,13 +557,13 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
       {/* Materials used */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Materials used</CardTitle>
+          <CardTitle className="text-[17px]">Materials used</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           {isLoading ? (
             <Skeleton className="h-12 w-full" />
           ) : materials.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
+            <p className="text-[15px] text-muted-foreground">
               No materials recorded yet.
             </p>
           ) : (
@@ -570,21 +571,21 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
               {materials.map((m) => (
                 <li
                   key={m.id}
-                  className="flex items-center justify-between gap-2 text-sm"
+                  className="flex min-h-11 items-center justify-between gap-2 text-[15px]"
                 >
                   <span>
                     {m.description ?? 'Material'}
                     {m.quantity > 1 ? ` × ${m.quantity}` : ''}
                   </span>
                   <span className="flex items-center gap-2">
-                    <span className="tabular-nums text-muted-foreground">
+                    <span className="font-mono text-[14px] tabular-nums text-foreground">
                       {formatCentsExact(m.unitPriceCents * m.quantity)}
                     </span>
                     <button
                       type="button"
                       aria-label="Remove material"
                       onClick={() => void handleRemove(m.id)}
-                      className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md text-muted-foreground active:bg-destructive/10 active:text-destructive"
+                      className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-xl text-foreground-faint active:bg-danger-light active:text-danger-strong"
                     >
                       <Trash2 className="size-4" />
                     </button>
@@ -595,11 +596,12 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
           )}
 
           {/* Add material */}
-          <div className="space-y-2 border-t pt-3">
+          <div className="space-y-2 border-t border-border pt-3">
             <Input
               placeholder="Search pricebook…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              className="h-11 rounded-xl text-[15px] md:text-[15px]"
             />
             <select
               aria-label="Pricebook item (or choose manual entry)"
@@ -608,7 +610,7 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
                 setSelectedItemId(e.target.value);
                 if (e.target.value) setManualDesc('');
               }}
-              className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm"
+              className="flex h-11 w-full rounded-xl border border-border-input bg-surface-raised px-3 text-[15px] text-foreground outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
             >
               <option value="">— Manual entry —</option>
               {filteredCatalog.map((c) => (
@@ -622,6 +624,7 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
                 placeholder="Manual description"
                 value={manualDesc}
                 onChange={(e) => setManualDesc(e.target.value)}
+                className="h-11 rounded-xl text-[15px] md:text-[15px]"
               />
             )}
             <div className="flex items-center gap-2">
@@ -633,17 +636,19 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
                 inputMode="numeric"
                 value={quantity}
                 onChange={(e) => setQuantity(e.target.value)}
-                className="w-20"
+                className="h-11 w-20 rounded-xl font-mono text-[15px] tabular-nums md:text-[15px]"
               />
               <Button
-                className="h-11"
+                className="h-11 rounded-xl px-4 text-[15px]"
                 disabled={isAdding}
                 onClick={() => void handleAdd()}
               >
                 {isAdding ? 'Adding…' : 'Add'}
               </Button>
             </div>
-            {addError && <p className="text-xs text-destructive">{addError}</p>}
+            {addError && (
+              <p className="text-[13px] text-danger-strong">{addError}</p>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -651,25 +656,25 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
       {/* On-site note */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">On-site note</CardTitle>
+          <CardTitle className="text-[17px]">On-site note</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
-          <textarea
+          <Textarea
             value={note}
             onChange={(e) => setNote(e.target.value)}
             rows={3}
             placeholder="What you found / did on-site…"
-            className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            className="rounded-xl text-[15px] md:text-[15px]"
           />
           <Button
-            className="h-11"
+            className="h-11 rounded-xl px-4 text-[15px]"
             disabled={isPostingNote || !note.trim()}
             onClick={() => void handlePostNote()}
           >
             {isPostingNote ? 'Saving…' : 'Save note'}
           </Button>
           {noteStatus && (
-            <p className="text-xs text-muted-foreground">{noteStatus}</p>
+            <p className="text-[13px] text-muted-foreground">{noteStatus}</p>
           )}
         </CardContent>
       </Card>
@@ -677,7 +682,7 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
       {/* Customer signature */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Customer signature</CardTitle>
+          <CardTitle className="text-[17px]">Customer signature</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
           <canvas
@@ -688,27 +693,32 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
             onPointerMove={moveDraw}
             onPointerUp={endDraw}
             onPointerLeave={endDraw}
-            className="w-full touch-none rounded-md border bg-white"
+            className="w-full touch-none rounded-xl border border-border-strong bg-surface-raised"
           />
           <Input
             placeholder="Customer name"
             value={sigName}
             onChange={(e) => setSigName(e.target.value)}
+            className="h-11 rounded-xl text-[15px] md:text-[15px]"
           />
           <div className="flex items-center gap-2">
             <Button
-              className="h-11"
+              className="h-11 rounded-xl px-4 text-[15px]"
               disabled={isSigning || !sigName.trim()}
               onClick={() => void handleSign()}
             >
               {isSigning ? 'Saving…' : 'Save signature'}
             </Button>
-            <Button className="h-11" variant="ghost" onClick={clearCanvas}>
+            <Button
+              className="h-11 rounded-xl px-4 text-[15px]"
+              variant="ghost"
+              onClick={clearCanvas}
+            >
               Clear
             </Button>
           </div>
           {sigStatus && (
-            <p className="text-xs text-muted-foreground">{sigStatus}</p>
+            <p className="text-[13px] text-muted-foreground">{sigStatus}</p>
           )}
         </CardContent>
       </Card>
@@ -716,7 +726,7 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
       {/* Job photos */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Photos</CardTitle>
+          <CardTitle className="text-[17px]">Photos</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <label className="inline-flex">
@@ -728,17 +738,17 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
               disabled={isUploadingPhoto}
               onChange={(e) => void handlePhotoChange(e)}
               aria-label="Add a job photo"
-              className="text-sm file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-sm file:text-primary-foreground"
+              className="text-[15px] file:mr-3 file:h-11 file:rounded-xl file:border-0 file:bg-primary file:px-4 file:text-[15px] file:font-medium file:text-primary-foreground"
             />
           </label>
           {isUploadingPhoto && (
-            <p className="text-xs text-muted-foreground">Uploading…</p>
+            <p className="text-[13px] text-muted-foreground">Uploading…</p>
           )}
           {photoStatus && (
-            <p className="text-xs text-muted-foreground">{photoStatus}</p>
+            <p className="text-[13px] text-muted-foreground">{photoStatus}</p>
           )}
           {photos.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No photos yet.</p>
+            <p className="text-[15px] text-muted-foreground">No photos yet.</p>
           ) : (
             <div className="grid grid-cols-3 gap-2">
               {photos.map((p) =>
@@ -748,13 +758,13 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
                     <img
                       src={p.url}
                       alt={p.filename}
-                      className="aspect-square w-full rounded-md border object-cover"
+                      className="aspect-square w-full rounded-md border border-border object-cover"
                     />
                   </a>
                 ) : (
                   <div
                     key={p.id}
-                    className="flex aspect-square w-full items-center justify-center rounded-md border text-[10px] text-muted-foreground"
+                    className="flex aspect-square w-full items-center justify-center rounded-md border border-border text-[11px] text-muted-foreground"
                   >
                     {p.filename}
                   </div>
@@ -768,20 +778,25 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
       {/* Status timeline (read-only history) */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Status history</CardTitle>
+          <CardTitle className="text-[17px]">Status history</CardTitle>
         </CardHeader>
         <CardContent>
           {timeline.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No status changes yet.</p>
+            <p className="text-[15px] text-muted-foreground">
+              No status changes yet.
+            </p>
           ) : (
             <ol className="space-y-2">
               {timeline.map((e, i) => (
-                <li key={i} className="flex items-baseline justify-between gap-3 text-sm">
+                <li
+                  key={i}
+                  className="flex items-baseline justify-between gap-3 text-[15px]"
+                >
                   <span>
                     {e.fromStatus ? `${humanizeStatus(e.fromStatus)} → ` : ''}
                     <span className="font-medium">{humanizeStatus(e.toStatus)}</span>
                   </span>
-                  <span className="shrink-0 text-xs text-muted-foreground">
+                  <span className="shrink-0 font-mono text-[13px] tabular-nums text-muted-foreground">
                     {new Date(e.at).toLocaleString()}
                   </span>
                 </li>

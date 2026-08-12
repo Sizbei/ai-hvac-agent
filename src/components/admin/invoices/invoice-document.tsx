@@ -29,8 +29,10 @@ function fmt(d: Date): string {
 export function InvoiceDocument({ invoice, org }: Props) {
   const m = invoiceDocModel(invoice);
 
+  // The sheet is pinned to --surface-raised (pure white): this is paper, and it
+  // must keep reading as paper against the warm canvas.
   return (
-    <div className="rounded-lg border bg-card shadow-sm">
+    <div className="rounded-lg border border-border-strong bg-surface-raised">
       {/* ── paper body ── */}
       <div className="px-10 py-10 max-sm:px-6 max-sm:py-6">
 
@@ -39,7 +41,7 @@ export function InvoiceDocument({ invoice, org }: Props) {
           {/* Logo + company address */}
           <div>
             <div className="flex items-center gap-3">
-              <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-primary/70 text-primary-foreground shadow-sm">
+              <span className="flex size-10 shrink-0 items-center justify-center rounded-[4px] bg-primary text-primary-foreground">
                 <Wind className="size-5" />
               </span>
               <div className="leading-none">

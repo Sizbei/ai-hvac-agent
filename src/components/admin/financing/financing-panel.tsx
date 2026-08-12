@@ -112,7 +112,7 @@ export function FinancingPanel({
           <div className="space-y-2 text-sm">
             <div className="flex items-center gap-2">
               <span className="text-muted-foreground">Status</span>
-              <span className="rounded-full border bg-muted px-2 py-0.5 text-xs">
+              <span className="rounded-[3px] border border-border bg-surface-raised px-2 py-0.5 text-xs font-medium text-muted-foreground">
                 {STATUS_LABEL[application.status] ?? application.status}
               </span>
             </div>
@@ -122,7 +122,7 @@ export function FinancingPanel({
                   href={application.applyUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="break-all text-primary hover:underline"
+                  className="break-all text-link hover:underline"
                 >
                   {application.applyUrl}
                 </a>

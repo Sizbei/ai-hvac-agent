@@ -99,10 +99,15 @@ export function DataTableShell<TRow = unknown>({
   const showEmpty = !isLoading && rows.length === 0
 
   return (
-    <Card className={cn("gap-0 p-0", className)}>
+    <Card
+      className={cn(
+        "gap-0 overflow-hidden rounded-lg border border-border-strong bg-surface p-0 shadow-none ring-0",
+        className,
+      )}
+    >
       {/* Toolbar (filters, search, actions) */}
       {toolbar && (
-        <div className="border-b px-4 py-3">
+        <div className="border-b border-border-strong bg-surface-sunken px-4 py-2.5">
           {toolbar}
         </div>
       )}
@@ -117,16 +122,22 @@ export function DataTableShell<TRow = unknown>({
         >
           <Table style={minTableWidth ? { minWidth: minTableWidth } : undefined}>
             <TableHeader
-              className={cn(stickyHeader && "sticky top-0 z-10 bg-card")}
+              className={cn(
+                "bg-surface-sunken",
+                stickyHeader && "sticky top-0 z-10",
+              )}
             >
-              <TableRow className="hover:bg-transparent">
+              {/* Hairline under the header is a box-shadow, not a border, so it
+               * survives the sticky offset without shifting row heights. */}
+              <TableRow className="border-0 shadow-[inset_0_-1px_0_var(--border-strong)] hover:bg-transparent">
                 {columns.map((col) => (
                   <TableHead
                     key={col.key}
                     scope="col"
                     className={cn(
-                      // Enforced header style: ~11–12px, muted, no uppercase/tracking
-                      "h-9 text-[11px] font-medium text-muted-foreground",
+                      // Enforced header style: 11px/600 sentence case, muted,
+                      // no uppercase (the uppercase look is CSS-only elsewhere).
+                      "h-8 text-[11px] font-semibold tracking-[0.04em] text-muted-foreground",
                       col.className,
                     )}
                   >
@@ -149,7 +160,7 @@ export function DataTableShell<TRow = unknown>({
                       <TableRow key={`skeleton-row-${i}`} aria-hidden="true">
                         {columns.map((col) => (
                           <TableCell key={`skeleton-cell-${i}-${col.key}`}>
-                            <Skeleton className="h-4 w-full" />
+                            <Skeleton className="h-3.5 w-full" />
                           </TableCell>
                         ))}
                       </TableRow>
@@ -226,7 +237,7 @@ export function DataTableShell<TRow = unknown>({
 
       {/* Footer (typically a Pager) */}
       {footer && (
-        <div className="border-t px-4">
+        <div className="border-t border-border-strong bg-surface-sunken px-4">
           {footer}
         </div>
       )}

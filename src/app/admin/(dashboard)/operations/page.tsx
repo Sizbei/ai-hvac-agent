@@ -19,10 +19,11 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
-import { StatCard } from '@/components/admin/ui/stat-card';
+import { StatCard, StatStrip } from '@/components/admin/ui/stat-card';
 import { SectionCard } from '@/components/admin/ui/section-card';
 import { SectionHeading } from '@/components/admin/ui/section-heading';
 import { ProgressBar } from '@/components/admin/ui/progress-bar';
+import { Skeleton } from '@/components/ui/skeleton';
 
 const PRESETS = [
   { label: 'Last 30 days', days: 30 },
@@ -67,8 +68,9 @@ function countDelta(trend: MetricTrend): DeltaShape | null {
 /** Converts a DeltaShape to the StatCard delta prop shape. */
 function toStatDelta(delta: DeltaShape | null, rangeDays: number): { value: string; good: boolean } | undefined {
   if (!delta) return undefined;
-  const dir = delta.up ? '↑' : '↓';
-  return { value: `${dir}${delta.text} vs prev ${rangeDays}d`, good: delta.good };
+  // No glyph here — StatCard renders the ▲/▼ from `good`. A second hand-rolled
+  // arrow would double up (and could disagree with the sentiment colour).
+  return { value: `${delta.text} vs prev ${rangeDays}d`, good: delta.good };
 }
 
 export default function OperationsPage() {
@@ -119,7 +121,7 @@ export default function OperationsPage() {
       )}
 
       {/* Top row: 3 headline KPIs */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <StatStrip>
         <StatCard
           label="Response time"
           icon={Clock}
@@ -141,14 +143,7 @@ export default function OperationsPage() {
         <StatCard
           label="Requests booked"
           icon={ClipboardList}
-          value={
-            metrics
-              ? String(metrics.jobsBooked.current ?? 0) +
-                ((metrics.importedJobsCurrent ?? 0) > 0
-                  ? ` +${metrics.importedJobsCurrent} imported`
-                  : '')
-              : '—'
-          }
+          value={metrics ? String(metrics.jobsBooked.current ?? 0) : '—'}
           delta={metrics ? toStatDelta(countDelta(metrics.jobsBooked), days) : undefined}
           intent="neutral"
           loading={isLoading}
@@ -156,14 +151,17 @@ export default function OperationsPage() {
             metrics
               ? `Native service requests · ${(
                   (metrics.jobsBooked.current ?? 0) / Math.max(1, metrics.rangeDays)
-                ).toFixed(1)} / day avg`
+                ).toFixed(1)} / day avg` +
+                ((metrics.importedJobsCurrent ?? 0) > 0
+                  ? ` · +${metrics.importedJobsCurrent} imported`
+                  : '')
               : undefined
           }
         />
-      </div>
+      </StatStrip>
 
       {/* Second row: first response + dispatch health */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <StatStrip>
         <StatCard
           label="First response — dispatcher"
           icon={UserCheck}
@@ -194,7 +192,7 @@ export default function OperationsPage() {
               : undefined
           }
         />
-      </div>
+      </StatStrip>
 
       {/* AR aging — full width card */}
       <SectionCard
@@ -207,9 +205,9 @@ export default function OperationsPage() {
           <div className="space-y-3">
             {[0, 1, 2].map((i) => (
               <div key={i} className="flex items-center gap-3">
-                <span className="w-16 h-4 rounded bg-muted animate-pulse" />
+                <Skeleton className="h-4 w-16" />
                 <ProgressBar value={0} className="flex-1" />
-                <span className="w-20 h-4 rounded bg-muted animate-pulse" />
+                <Skeleton className="h-4 w-20" />
               </div>
             ))}
           </div>
@@ -231,7 +229,7 @@ export default function OperationsPage() {
                     label={`${b.label}: ${formatCentsExact(b.cents)}`}
                     className="flex-1"
                   />
-                  <span className="w-20 text-right text-sm font-semibold tabular-nums">
+                  <span className="w-20 text-right font-mono text-sm tabular-nums">
                     {formatCentsExact(b.cents)}
                   </span>
                 </div>
@@ -243,7 +241,7 @@ export default function OperationsPage() {
                 as="h3"
                 title="Total outstanding"
                 right={
-                  <span className="font-heading text-xl font-bold tabular-nums">
+                  <span className="font-mono text-xl font-medium tabular-nums">
                     {formatCentsExact(metrics?.totalOutstandingAllCents ?? agingTotal)}
                   </span>
                 }
@@ -282,7 +280,7 @@ export default function OperationsPage() {
                         label={`${b.label}: ${formatCentsExact(b.cents)}`}
                         className="flex-1"
                       />
-                      <span className="w-20 text-right text-sm font-semibold tabular-nums">
+                      <span className="w-20 text-right font-mono text-sm tabular-nums">
                         {formatCentsExact(b.cents)}
                       </span>
                     </div>

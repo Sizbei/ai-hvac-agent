@@ -42,21 +42,24 @@ export function DroppableWindowBand({
     data,
   });
 
-  // Out-of-hours bands get a dim hatch so a drop there reads as off-shift; the
-  // drag-over highlight (amber, not sky) reinforces that this slot would warn.
+  // Out-of-hours bands get a dim graphite hatch so a drop there reads as
+  // off-shift; the drag-over highlight (warning, not marker) reinforces that
+  // this slot would warn. The drop affordance carries NO transition — the
+  // motion spec requires the target to appear instantly (hesitation reads as
+  // lag) — so only the hatch is painted at rest.
   const baseClass = outOfHours
-    ? 'bg-[repeating-linear-gradient(45deg,transparent,transparent_6px,rgba(120,113,108,0.12)_6px,rgba(120,113,108,0.12)_12px)]'
+    ? 'bg-[repeating-linear-gradient(45deg,transparent,transparent_6px,var(--hatch-ink)_6px,var(--hatch-ink)_12px)]'
     : '';
   const overClass = isOver
     ? outOfHours
-      ? 'border-dashed border-amber-400 bg-amber-100/50 dark:bg-amber-900/30'
-      : 'border-dashed border-sky-400 bg-sky-100/60 dark:bg-sky-900/40'
+      ? 'border-dashed border-warning bg-warning-light'
+      : 'border-dashed border-marker bg-primary-soft'
     : '';
 
   return (
     <div
       ref={setNodeRef}
-      className={`absolute inset-x-0 rounded-sm border border-transparent transition-colors ${baseClass} ${overClass}`}
+      className={`absolute inset-x-0 rounded-sm border border-transparent [--hatch-ink:color-mix(in_oklch,var(--foreground)_8%,transparent)] ${baseClass} ${overClass}`}
       style={{ top: topPx, height: heightPx }}
       data-window={window}
       data-out-of-hours={outOfHours ? 'true' : undefined}

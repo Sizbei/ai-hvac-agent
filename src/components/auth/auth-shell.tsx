@@ -1,17 +1,5 @@
-import { Bricolage_Grotesque } from 'next/font/google';
 import { Wind, Clock, ShieldCheck, Wrench } from 'lucide-react';
 import { EnvBadge } from '@/components/admin/env-badge';
-
-/**
- * Display face for auth headings — same family the marketing site uses, so the
- * console and the landing page read as one brand. Loaded here (not globally) so
- * only the auth surfaces pay for it.
- */
-const display = Bricolage_Grotesque({
-  subsets: ['latin'],
-  weight: ['600', '700', '800'],
-  variable: '--font-display',
-});
 
 /** Trust markers on the brand rail. Sentence case on purpose — capitals are
  * reserved for the wordmark. */
@@ -40,9 +28,7 @@ interface AuthShellProps {
  */
 export function AuthShell({ title, subtitle, children, footer }: AuthShellProps) {
   return (
-    <div
-      className={`${display.variable} grid min-h-dvh lg:grid-cols-[1.05fr_1fr]`}
-    >
+    <div className="grid min-h-dvh lg:grid-cols-[1.05fr_1fr]">
       {/* ── Brand rail (lg+) ─────────────────────────────────────────── */}
       <aside className="relative hidden overflow-hidden bg-gradient-to-br from-[oklch(0.24_0.05_258)] via-[oklch(0.2_0.05_259)] to-[oklch(0.15_0.05_261)] p-12 text-white lg:flex lg:flex-col lg:justify-between xl:p-16">
         {/* atmosphere */}
@@ -65,7 +51,7 @@ export function AuthShell({ title, subtitle, children, footer }: AuthShellProps)
             <Wind className="size-5" strokeWidth={2.25} />
           </span>
           <span className="flex flex-col leading-tight">
-            <span className="font-[family-name:var(--font-display)] text-lg font-bold tracking-tight">
+            <span className="font-heading text-lg font-bold tracking-tight">
               Spears Services
             </span>
             <span className="text-xs text-white/55">Service console</span>
@@ -74,7 +60,7 @@ export function AuthShell({ title, subtitle, children, footer }: AuthShellProps)
 
         {/* value line — the biggest type on the page (hierarchy by scale) */}
         <div className="relative max-w-md">
-          <h2 className="font-[family-name:var(--font-display)] text-4xl font-extrabold leading-[1.05] tracking-tight text-balance xl:text-5xl">
+          <h2 className="font-heading text-4xl font-extrabold leading-[1.05] tracking-tight text-balance xl:text-5xl">
             Where every service call becomes a{' '}
             <span className="bg-gradient-to-r from-[oklch(0.82_0.12_215)] to-[oklch(0.72_0.13_222)] bg-clip-text text-transparent">
               dispatched job
@@ -103,17 +89,17 @@ export function AuthShell({ title, subtitle, children, footer }: AuthShellProps)
         <div className="lp-rise w-full max-w-sm">
           {/* compact brand — mobile only */}
           <div className="mb-8 flex items-center gap-2.5 lg:hidden">
-            <span className="flex size-9 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-[oklch(0.62_0.13_222)] text-white shadow-sm">
+            <span className="flex size-9 items-center justify-center rounded-lg bg-gradient-to-br from-brand-cyan to-brand-navy text-primary-foreground">
               <Wind className="size-4.5" strokeWidth={2.25} />
             </span>
-            <span className="font-[family-name:var(--font-display)] text-base font-bold tracking-tight">
+            <span className="font-heading text-base font-bold tracking-tight">
               Spears Services
             </span>
           </div>
 
           <div className="mb-6">
             <div className="flex items-center gap-2.5">
-              <h1 className="font-[family-name:var(--font-display)] text-2xl font-bold tracking-tight text-foreground">
+              <h1 className="font-heading text-2xl font-bold tracking-tight text-foreground">
                 {title}
               </h1>
               <EnvBadge />

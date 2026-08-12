@@ -12,8 +12,9 @@ interface PageShellProps {
 
 /**
  * Standard admin page wrapper: centers content, caps width, and applies the
- * refreshed-surface page padding + vertical rhythm. Replaces the per-page
- * `p-6 space-y-6` / no-padding drift across the dashboard.
+ * one page gutter (24 px) plus the 20 px vertical rhythm every section — the
+ * page header included — sits on. Replaces the per-page `p-6 space-y-6` /
+ * no-padding drift across the dashboard.
  */
 export function PageShell({ children, className, narrow, fullHeight }: PageShellProps) {
   if (fullHeight) {
@@ -27,7 +28,7 @@ export function PageShell({ children, className, narrow, fullHeight }: PageShell
   return (
     <div
       className={cn(
-        "mx-auto space-y-7 p-6 sm:p-7",
+        "mx-auto space-y-5 p-6",
         narrow ? "max-w-3xl" : "max-w-[1280px]",
         className,
       )}

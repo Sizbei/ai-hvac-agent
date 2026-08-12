@@ -58,11 +58,11 @@ export function ApproveForm({ token, options }: ApproveFormProps) {
 
   if (done) {
     return (
-      <div className="rounded-lg border border-green-200 bg-green-50 p-6 text-center">
-        <p className="text-lg font-semibold text-green-800">
+      <div className="rounded-lg border border-success-border bg-success-light p-6 text-center">
+        <p className="text-[17px] font-semibold text-success-strong">
           Thank you — your approval is signed.
         </p>
-        <p className="mt-1 text-sm text-green-700">
+        <p className="mt-1 text-[15px] text-foreground">
           We&apos;ve recorded your selection and will be in touch shortly.
         </p>
       </div>
@@ -72,30 +72,33 @@ export function ApproveForm({ token, options }: ApproveFormProps) {
   return (
     <div className="space-y-5">
       <fieldset className="space-y-3">
-        <legend className="text-sm font-semibold text-gray-900">
+        <legend className="text-[15px] font-semibold text-foreground">
           Choose your option
         </legend>
         {options.map((opt) => (
           <label
             key={opt.id}
-            className={`flex cursor-pointer items-center justify-between rounded-lg border p-4 transition-colors ${
+            className={`flex min-h-11 cursor-pointer items-center justify-between gap-3 rounded-xl border p-4 transition-colors duration-[var(--dur-hover)] ${
               optionId === opt.id
-                ? 'border-gray-900 bg-gray-50'
-                : 'border-gray-200 hover:border-gray-400'
+                ? 'border-marker bg-primary-soft'
+                : 'border-border-strong hover:border-border-input'
             }`}
           >
             <span className="flex items-center gap-3">
+              {/* radio glyph — a listed circular exemption */}
               <input
                 type="radio"
                 name="estimate-option"
                 value={opt.id}
                 checked={optionId === opt.id}
                 onChange={() => setOptionId(opt.id)}
-                className="size-4"
+                className="size-4 accent-[var(--marker)]"
               />
-              <span className="font-medium text-gray-900">{opt.name}</span>
+              <span className="text-[15px] font-medium text-foreground">
+                {opt.name}
+              </span>
             </span>
-            <span className="font-semibold text-gray-900">
+            <span className="font-mono text-[17px] font-medium tabular-nums text-foreground">
               {formatCentsExact(opt.totalCents)}
             </span>
           </label>
@@ -103,7 +106,9 @@ export function ApproveForm({ token, options }: ApproveFormProps) {
       </fieldset>
 
       <div className="space-y-2">
-        <Label htmlFor="signature">Type your full name to sign</Label>
+        <Label htmlFor="signature" className="text-[13px]">
+          Type your full name to sign
+        </Label>
         <Input
           id="signature"
           value={signatureName}
@@ -111,16 +116,17 @@ export function ApproveForm({ token, options }: ApproveFormProps) {
           placeholder="Your full name"
           maxLength={200}
           autoComplete="name"
+          className="h-11 rounded-xl text-[15px] md:text-[15px]"
         />
-        <p className="text-xs text-gray-500">
+        <p className="text-[13px] text-muted-foreground">
           By typing your name and approving, you authorize the selected work.
         </p>
       </div>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-[15px] text-danger-strong">{error}</p>}
 
       <Button
-        className="w-full"
+        className="h-11 w-full rounded-xl text-[15px]"
         disabled={isSubmitting || !optionId || !signatureName.trim()}
         onClick={handleSubmit}
       >

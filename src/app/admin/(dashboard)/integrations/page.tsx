@@ -36,23 +36,23 @@ const CATEGORY_SECTIONS: ReadonlyArray<{
 const STATUS_BADGE: Record<IntegrationStatus, { label: string; className: string }> = {
   live: {
     label: 'Live',
-    className: 'bg-success-light text-success border-success/30',
+    className: 'bg-success-light text-success-strong border-success-border',
   },
   connected: {
     label: 'Connected',
-    className: 'bg-success-light text-success border-success/30',
+    className: 'bg-success-light text-success-strong border-success-border',
   },
   sync_failed: {
     label: 'Sync failed',
-    className: 'bg-danger-light text-danger border-danger/30',
+    className: 'bg-danger-light text-danger-strong border-danger-border',
   },
   mock: {
     label: 'Mock',
-    className: 'bg-warning-light text-warning-foreground border-warning/30',
+    className: 'bg-warning-light text-warning-strong border-warning-border',
   },
   not_configured: {
     label: 'Not configured',
-    className: 'bg-muted text-muted-foreground border-border',
+    className: 'bg-surface-raised text-muted-foreground border-border',
   },
 };
 
@@ -110,7 +110,7 @@ function IntegrationCard({ item }: { readonly item: IntegrationStatusItem }) {
   const badge = STATUS_BADGE[item.status] ?? STATUS_BADGE.not_configured;
 
   return (
-    <Card className="p-4 transition-shadow duration-200 hover:shadow-md hover:ring-1 hover:ring-primary/30">
+    <Card className="p-4 transition-colors duration-[var(--dur-hover)] hover:border-marker-border hover:bg-row-hover">
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-3">
           <IconChip icon={meta.icon} intent={meta.intent} />

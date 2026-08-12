@@ -49,10 +49,12 @@ function JobChip({
         onSelect(job.id);
       }}
       title={`${time} ${label}`}
-      className={`flex w-full items-center gap-1 truncate rounded px-1 py-0.5 text-left text-[11px] leading-tight transition-colors ${accent.chip}`}
+      className={`flex w-full items-center gap-1 truncate rounded-[3px] px-1 py-0.5 text-left text-[11px] leading-tight transition-colors ${accent.chip}`}
     >
-      <span className={`size-1.5 shrink-0 rounded-full ${accent.dot}`} />
-      {time && <span className="shrink-0 font-medium tabular-nums">{time}</span>}
+      <span className={`size-1.5 shrink-0 rounded-[1px] ${accent.dot}`} />
+      {time && (
+        <span className="shrink-0 font-mono font-medium tabular-nums">{time}</span>
+      )}
       <span className="truncate">{label}</span>
       {job.syncedSource && (
         // ml-auto keeps the pill right-anchored so the truncating label gets
@@ -86,13 +88,13 @@ function MonthCell({
       onClick={() => onPickDay(cell.day)}
       title="Open this day"
       aria-label={`Open ${cell.day}${cell.jobs.length ? ` (${cell.jobs.length} requests)` : ''}`}
-      className={`flex min-h-24 flex-col gap-0.5 border-b border-r p-1 text-left align-top transition-colors hover:bg-muted/50 ${
-        cell.inMonth ? 'bg-card' : 'bg-muted/30'
+      className={`flex min-h-24 flex-col gap-0.5 border-b border-r border-border p-1 text-left align-top transition-colors hover:bg-row-hover ${
+        cell.inMonth ? 'bg-surface-raised' : 'bg-surface-sunken'
       }`}
     >
       <div className="flex justify-end">
         <span
-          className={`flex h-5 w-5 items-center justify-center rounded-full text-xs ${
+          className={`flex h-5 w-5 items-center justify-center rounded-[3px] font-mono text-xs tabular-nums ${
             isToday
               ? 'bg-primary font-semibold text-primary-foreground'
               : cell.inMonth
@@ -108,7 +110,7 @@ function MonthCell({
           <JobChip key={job.id} job={job} onSelect={onSelect} />
         ))}
         {overflow > 0 && (
-          <span className="px-1 text-[11px] font-medium text-muted-foreground">
+          <span className="px-1 font-mono text-[11px] font-medium tabular-nums text-muted-foreground">
             +{overflow} more
           </span>
         )}
@@ -134,7 +136,7 @@ export function MonthGrid({
   }
   if (!month || month.days.length === 0) {
     return (
-      <div className="rounded-lg border bg-card p-8 text-center text-sm text-muted-foreground">
+      <div className="rounded-lg border border-border-strong bg-surface p-8 text-center text-[13px] text-muted-foreground">
         No calendar data for this month.
       </div>
     );
@@ -143,12 +145,13 @@ export function MonthGrid({
   const todayIso = businessIsoDate(new Date());
 
   return (
-    <div className="overflow-hidden rounded-lg border bg-card">
-      <div className="grid grid-cols-7 border-b bg-muted/40">
+    <div className="overflow-hidden rounded-lg border border-border-strong bg-surface">
+      {/* Sunken header band + keyline, matching the panel/table header contract. */}
+      <div className="grid grid-cols-7 border-b border-border-strong bg-surface-sunken shadow-[var(--keyline-top)]">
         {WEEKDAY_LABELS.map((label) => (
           <div
             key={label}
-            className="border-r px-2 py-1.5 text-center text-xs font-semibold text-muted-foreground last:border-r-0"
+            className="border-r border-border px-2 py-1.5 text-center text-[11px] font-semibold leading-[14px] tracking-[0.04em] text-muted-foreground last:border-r-0"
           >
             {label}
           </div>

@@ -53,7 +53,7 @@ export function StreamingError({
         <button
           type="button"
           onClick={onDismiss}
-          className="absolute right-2 top-2 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+          className="absolute right-2 top-2 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
         >
           <span className="sr-only">Dismiss</span>
           ×
@@ -69,7 +69,7 @@ export function MessageSkeleton({ count = 1 }: { readonly count?: number }) {
     <div className="space-y-4">
       {Array.from({ length: count }).map((_, i) => (
         <div key={i} className="flex gap-3">
-          <div className="size-8 shrink-0 rounded-full bg-muted" />
+          <div className="size-8 shrink-0 rounded-sm bg-surface-sunken" />
           <div className="flex-1 space-y-2">
             <Skeleton className="h-4 w-3/4" />
             <Skeleton className="h-4 w-1/2" />
@@ -112,7 +112,7 @@ export function ConnectionStatus({ isOnline }: { readonly isOnline: boolean }) {
   if (isOnline) return null;
 
   return (
-    <div className="flex items-center gap-2 border-t bg-muted/50 px-4 py-2 text-xs text-muted-foreground">
+    <div className="flex items-center gap-2 border-t border-warning-border bg-warning-light px-4 py-2 text-xs text-warning-strong">
       <AlertCircle className="size-3" />
       <span>You&apos;re offline. Messages will send when you reconnect.</span>
     </div>
@@ -123,9 +123,9 @@ export function ConnectionStatus({ isOnline }: { readonly isOnline: boolean }) {
 export function TypingIndicator() {
   return (
     <div className="flex items-center gap-1 text-muted-foreground">
-      <span className="size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.3s]" />
-      <span className="size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.15s]" />
-      <span className="size-1.5 animate-bounce rounded-full bg-current" />
+      <span className="size-1 animate-pulse bg-current [animation-delay:-0.4s]" />
+      <span className="size-1 animate-pulse bg-current [animation-delay:-0.2s]" />
+      <span className="size-1 animate-pulse bg-current" />
     </div>
   );
 }
@@ -144,9 +144,9 @@ export function StreamingProgress({
         <span>{message || 'Uploading...'}</span>
         <span>{Math.round(progress)}%</span>
       </div>
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+      <div className="h-1.5 w-full overflow-hidden rounded-[2px] bg-surface-sunken">
         <div
-          className="h-full bg-primary transition-all duration-300 ease-out"
+          className="h-full bg-marker transition-all duration-300 ease-out"
           style={{ width: `${progress}%` }}
         />
       </div>

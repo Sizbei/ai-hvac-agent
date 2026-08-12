@@ -22,8 +22,9 @@ interface SegmentedControlProps<T extends string = string> {
 }
 
 /**
- * Segmented (pill) control — canonical data-workspace filter.
- * Active segment: `bg-foreground text-background`.
+ * Segmented control — canonical data-workspace filter.
+ * Fused strip: one bordered container, 1px hairlines between options, no pills
+ * and no gaps. Active segment is a filled navy position, like a selector switch.
  * Replaces the 3-per-page hand-rolled pill/underline/native-select filters
  * in invoices, estimates, and pricebook.
  *
@@ -68,7 +69,7 @@ export function SegmentedControl<T extends string = string>({
       role="radiogroup"
       aria-label={ariaLabel}
       className={cn(
-        "inline-flex items-center gap-0.5 rounded-lg bg-muted p-0.5",
+        "inline-flex h-[30px] items-center overflow-hidden rounded-md border border-border-strong bg-surface-raised max-md:h-11",
         className,
       )}
     >
@@ -84,10 +85,10 @@ export function SegmentedControl<T extends string = string>({
             onClick={() => onChange(opt.value)}
             onKeyDown={(e) => handleKeyDown(e, index)}
             className={cn(
-              "inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-3 py-1 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+              "inline-flex h-full items-center gap-1.5 border-l border-border px-3 text-[13px] font-medium transition-colors duration-[var(--dur-hover)] first:border-l-0 focus-visible:relative focus-visible:z-10 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
               isActive
-                ? "bg-foreground text-background shadow-sm"
-                : "text-muted-foreground hover:text-foreground",
+                ? "bg-primary font-semibold text-primary-foreground"
+                : "text-muted-foreground hover:bg-accent hover:text-foreground",
             )}
           >
             {opt.label}
@@ -95,10 +96,10 @@ export function SegmentedControl<T extends string = string>({
               <span
                 aria-label={`${opt.badge} items`}
                 className={cn(
-                  "inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold tabular-nums",
+                  "inline-flex h-4 min-w-4 items-center justify-center rounded-[3px] px-1 font-mono text-[10px] font-semibold tabular-nums",
                   isActive
-                    ? "bg-background/20 text-background"
-                    : "bg-foreground/10 text-foreground",
+                    ? "bg-primary-foreground/20 text-primary-foreground"
+                    : "bg-surface-sunken text-foreground",
                 )}
               >
                 {opt.badge}

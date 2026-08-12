@@ -23,9 +23,9 @@ interface HistorySidebarProps {
 }
 
 const statusIcons = {
-  submitted: <CheckCircle2 className="size-4 text-green-500" />,
-  completed: <CheckCircle2 className="size-4 text-green-500" />,
-  escalated: <AlertCircle className="size-4 text-amber-500" />,
+  submitted: <CheckCircle2 className="size-4 text-success" />,
+  completed: <CheckCircle2 className="size-4 text-success" />,
+  escalated: <AlertCircle className="size-4 text-warning-strong" />,
   abandoned: <XCircle className="size-4 text-muted-foreground" />,
 } as const;
 
@@ -95,12 +95,12 @@ export function HistorySidebar({
       <SheetContent
         side="left"
         className={cn(
-          'w-full border-r bg-background sm:max-w-sm',
+          'w-full border-r border-border-strong bg-surface sm:max-w-sm',
           // Safe area for notched phones
           'safe-area-all'
         )}
       >
-        <SheetHeader className="border-b px-4 py-3">
+        <SheetHeader className="border-b border-border-strong px-4 py-3">
           <SheetTitle className="flex items-center justify-between gap-2">
             <span className="flex items-center gap-2">
               <MessageSquare className="size-5" />
@@ -148,9 +148,9 @@ export function HistorySidebar({
                     type="button"
                     onClick={() => onSelectSession(session.id)}
                     className={cn(
-                      'flex w-full items-start gap-3 rounded-lg px-3 py-3 text-left',
-                      'transition-colors hover:bg-accent active:bg-accent/70',
-                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                      'flex w-full items-start gap-3 rounded-md px-3 py-3 text-left',
+                      'transition-colors duration-[var(--dur-hover)] hover:bg-accent active:bg-accent/70',
+                      'focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring',
                       // 44px minimum touch target
                       'min-h-[44px]'
                     )}
@@ -161,10 +161,10 @@ export function HistorySidebar({
                       )}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-xs font-medium text-foreground">
+                      <p className="truncate text-[13px] font-medium text-foreground">
                         {session.preview}
                       </p>
-                      <p className="mt-0.5 text-[10px] text-muted-foreground tabular-nums">
+                      <p className="mt-0.5 font-mono text-[11px] text-muted-foreground tabular-nums">
                         {formatRelativeTime(session.createdAt)} · {session.messageCount} messages
                       </p>
                     </div>
@@ -176,8 +176,8 @@ export function HistorySidebar({
           )}
         </div>
 
-        <div className="border-t px-4 py-3">
-          <p className="text-[10px] text-muted-foreground">
+        <div className="border-t border-border px-4 py-3">
+          <p className="text-[11px] text-muted-foreground">
             History is available for your account
           </p>
         </div>

@@ -54,10 +54,10 @@ function MessageState({
   readonly body: string;
 }) {
   return (
-    <main className="mx-auto flex min-h-screen max-w-lg items-center justify-center p-6">
-      <div className="w-full rounded-xl border border-border bg-card p-8 text-center shadow-sm">
+    <main className="flex min-h-screen items-center justify-center bg-canvas p-6">
+      <div className="w-full max-w-lg rounded-lg border border-border-strong bg-surface p-8 text-center">
         <h1 className="text-xl font-semibold text-foreground">{title}</h1>
-        <p className="mt-2 text-sm text-muted-foreground">{body}</p>
+        <p className="mt-2 text-[15px] text-muted-foreground">{body}</p>
       </div>
     </main>
   );
@@ -71,25 +71,27 @@ function Section({
   readonly children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-xl border border-border bg-card p-5 shadow-sm sm:p-6">
-      <h2 className="mb-4 text-base font-semibold text-foreground">{title}</h2>
+    <section className="rounded-lg border border-border-strong bg-surface p-5 sm:p-6">
+      <h2 className="mb-4 text-[17px] font-semibold text-foreground">{title}</h2>
       {children}
     </section>
   );
 }
 
 function InvoiceStateBadge({ state }: { readonly state: string }) {
+  const NEUTRAL =
+    "border-border bg-surface-raised text-muted-foreground";
   const colors: Record<string, string> = {
-    paid: "bg-success-light text-success",
-    open: "bg-warning-light text-warning-foreground",
-    draft: "bg-muted text-muted-foreground",
-    void: "bg-muted text-muted-foreground",
-    refunded: "bg-muted text-muted-foreground",
+    paid: "border-success-border bg-success-light text-success-strong",
+    open: "border-warning-border bg-warning-light text-warning-strong",
+    draft: NEUTRAL,
+    void: NEUTRAL,
+    refunded: NEUTRAL,
   };
   return (
     <span
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-        colors[state] ?? "bg-muted text-muted-foreground"
+      className={`inline-flex items-center rounded-[3px] border px-2 py-0.5 text-[11px] font-semibold tracking-[0.07em] uppercase ${
+        colors[state] ?? NEUTRAL
       }`}
     >
       {humanize(state)}
@@ -107,7 +109,7 @@ function InvoicesSection({
   return (
     <Section title="Invoices">
       {invoices.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No invoices yet.</p>
+        <p className="text-[15px] text-muted-foreground">No invoices yet.</p>
       ) : (
         <ul className="divide-y divide-border">
           {invoices.map((inv) => {
@@ -115,16 +117,16 @@ function InvoicesSection({
             return (
               <li
                 key={inv.id}
-                className="flex flex-wrap items-center justify-between gap-3 py-3"
+                className="flex min-h-11 flex-wrap items-center justify-between gap-3 py-3"
               >
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="font-medium text-foreground">
+                    <span className="font-mono text-[17px] font-medium tabular-nums text-foreground">
                       {formatCentsExact(inv.totalCents)}
                     </span>
                     <InvoiceStateBadge state={inv.state} />
                   </div>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
+                  <p className="mt-0.5 font-mono text-[13px] tabular-nums text-muted-foreground">
                     {formatDate(inv.createdAt)}
                     {inv.amountPaidCents > 0 &&
                       ` · ${formatCentsExact(inv.amountPaidCents)} paid`}
@@ -156,19 +158,19 @@ function EstimatesSection({
   return (
     <Section title="Estimates">
       {estimates.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No estimates yet.</p>
+        <p className="text-[15px] text-muted-foreground">No estimates yet.</p>
       ) : (
         <ul className="divide-y divide-border">
           {estimates.map((est) => (
             <li
               key={est.id}
-              className="flex flex-wrap items-center justify-between gap-3 py-3"
+              className="flex min-h-11 flex-wrap items-center justify-between gap-3 py-3"
             >
               <div>
-                <span className="font-medium text-foreground">
+                <span className="font-mono text-[17px] font-medium tabular-nums text-foreground">
                   {formatCentsExact(est.totalCents)}
                 </span>
-                <p className="mt-0.5 text-xs text-muted-foreground">
+                <p className="mt-0.5 text-[13px] text-muted-foreground">
                   {est.awaitingApproval
                     ? "Awaiting your approval"
                     : humanize(est.status)}
@@ -189,7 +191,9 @@ function JobsSection({ jobs }: { readonly jobs: PortalData["jobs"] }) {
   return (
     <Section title="Upcoming service">
       {jobs.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No upcoming visits scheduled.</p>
+        <p className="text-[15px] text-muted-foreground">
+          No upcoming visits scheduled.
+        </p>
       ) : (
         <ul className="divide-y divide-border">
           {jobs.map((job) => {
@@ -200,14 +204,14 @@ function JobsSection({ jobs }: { readonly jobs: PortalData["jobs"] }) {
             return (
               <li key={job.id} className="py-3">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-medium text-foreground">
+                  <span className="text-[15px] font-medium text-foreground">
                     {humanize(job.issueType)}
                   </span>
-                  <span className="text-xs font-medium text-muted-foreground">
+                  <span className="rounded-[3px] border border-border bg-surface-raised px-2 py-0.5 text-[11px] font-semibold tracking-[0.07em] text-muted-foreground uppercase">
                     {humanize(job.status)}
                   </span>
                 </div>
-                <p className="mt-0.5 text-xs text-muted-foreground">
+                <p className="mt-1 font-mono text-[13px] tabular-nums text-muted-foreground">
                   {window ??
                     (job.scheduledDate
                       ? formatDate(job.scheduledDate)
@@ -230,15 +234,17 @@ function HistorySection({
   return (
     <Section title="Service history">
       {history.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No past service on record.</p>
+        <p className="text-[15px] text-muted-foreground">
+          No past service on record.
+        </p>
       ) : (
         <ul className="divide-y divide-border">
           {history.map((h) => (
             <li key={h.id} className="py-3">
-              <p className="text-sm text-foreground">
+              <p className="text-[15px] text-foreground">
                 {h.workPerformed ? humanize(h.workPerformed) : "Service visit"}
               </p>
-              <p className="mt-0.5 text-xs text-muted-foreground">
+              <p className="mt-1 font-mono text-[13px] tabular-nums text-muted-foreground">
                 {formatDate(h.createdAt)}
               </p>
             </li>
@@ -272,27 +278,29 @@ export default async function CustomerPortalPage({
   );
 
   return (
-    <main className="mx-auto max-w-2xl space-y-5 p-4 sm:p-6">
-      <header className="pt-2">
-        <h1 className="text-2xl font-bold tracking-tight text-foreground">
-          {data.customerName
-            ? `Welcome back, ${data.customerName}`
-            : "Your account"}
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          View your estimates and invoices, pay a balance, and track upcoming
-          service.
+    <main className="min-h-screen bg-canvas">
+      <div className="mx-auto max-w-2xl space-y-5 p-4 sm:p-6">
+        <header className="pt-2">
+          <h1 className="font-heading text-[26px] leading-[30px] font-semibold tracking-[-0.02em] text-foreground">
+            {data.customerName
+              ? `Welcome back, ${data.customerName}`
+              : "Your account"}
+          </h1>
+          <p className="mt-1.5 text-[15px] text-muted-foreground">
+            View your estimates and invoices, pay a balance, and track upcoming
+            service.
+          </p>
+        </header>
+
+        <InvoicesSection token={token} invoices={data.invoices} />
+        <EstimatesSection estimates={data.estimates} />
+        <JobsSection jobs={data.jobs} />
+        <HistorySection history={data.history} />
+
+        <p className="pb-4 text-center text-[13px] text-muted-foreground">
+          Questions? Reply to your confirmation message or give us a call.
         </p>
-      </header>
-
-      <InvoicesSection token={token} invoices={data.invoices} />
-      <EstimatesSection estimates={data.estimates} />
-      <JobsSection jobs={data.jobs} />
-      <HistorySection history={data.history} />
-
-      <p className="pb-4 text-center text-xs text-muted-foreground">
-        Questions? Reply to your confirmation message or give us a call.
-      </p>
+      </div>
     </main>
   );
 }

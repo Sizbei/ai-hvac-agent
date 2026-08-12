@@ -20,15 +20,15 @@ function BookingRow({ booking }: { readonly booking: AgendaBooking }) {
   const d = new Date(booking.bookedAt);
   const dotClass = REQUEST_STATUS_DOT[booking.status] ?? REQUEST_STATUS_DOT_DEFAULT;
   return (
-    <div className="flex items-center gap-3 rounded-lg bg-muted/40 px-3 py-2">
-      <div className="flex w-11 shrink-0 flex-col items-center">
+    <div className="flex items-center gap-3 rounded-[3px] bg-surface-sunken px-3 py-2">
+      <div className="flex w-11 shrink-0 flex-col items-center font-mono tabular-nums">
         <span className="text-[10px] font-semibold text-muted-foreground">
           {MONTHS_SHORT[d.getUTCMonth()]}
         </span>
-        <span className="text-sm font-bold leading-none tabular-nums">
+        <span className="text-sm font-medium leading-none">
           {d.getUTCDate()}
         </span>
-        <span className="text-[9px] tabular-nums text-muted-foreground">
+        <span className="text-[9px] text-muted-foreground">
           {d.getUTCFullYear()}
         </span>
       </div>
@@ -36,13 +36,13 @@ function BookingRow({ booking }: { readonly booking: AgendaBooking }) {
         <p className="truncate text-sm font-medium">
           {booking.issueType || 'Service request'}
         </p>
-        <p className="truncate text-xs text-muted-foreground">
+        <p className="truncate font-mono text-xs tabular-nums text-muted-foreground">
           {booking.referenceNumber}
         </p>
       </div>
       <span className="flex shrink-0 items-center gap-1.5">
         <span
-          className={`size-1.5 rounded-full ${dotClass}`}
+          className={`size-1.5 rounded-[1px] ${dotClass}`}
           aria-hidden
         />
         <StatusBadge status={booking.status} />
@@ -65,7 +65,7 @@ export function BookingHistoryList({
     return (
       <div className="flex flex-col gap-2">
         {Array.from({ length: 3 }, (_, i) => (
-          <Skeleton key={i} className="h-12 w-full rounded-lg" />
+          <Skeleton key={i} className="h-12 w-full rounded-[3px]" />
         ))}
       </div>
     );

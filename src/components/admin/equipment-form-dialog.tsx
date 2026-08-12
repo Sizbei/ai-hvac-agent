@@ -290,7 +290,8 @@ export function EquipmentFormDialog({
               onChange={(e) => update('notes', e.target.value)}
               placeholder="Any additional details about this unit"
               rows={3}
-              className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              // Matches the recessed instrument field in components/ui/input.tsx.
+              className="flex w-full rounded-md border border-border-input bg-surface-raised px-2.5 py-1.5 text-sm text-foreground shadow-[inset_0_1px_2px_color-mix(in_oklab,var(--color-ink-900)_5%,transparent)] outline-none transition-[background-color,border-color] duration-[var(--dur-hover)] placeholder:text-foreground-faint focus-visible:border-primary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
             />
           </div>
 

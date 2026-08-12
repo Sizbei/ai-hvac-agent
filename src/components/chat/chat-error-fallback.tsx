@@ -28,8 +28,8 @@ export function ChatErrorFallback({
 }: ChatErrorFallbackProps) {
   return (
     <div className="flex flex-col items-center justify-center gap-4 p-8 text-center">
-      <AlertTriangle className="size-12 text-orange-500" aria-hidden="true" />
-      <h2 className="text-xl font-semibold text-foreground">
+      <AlertTriangle className="size-12 text-danger" aria-hidden="true" />
+      <h2 className="font-heading text-xl font-semibold text-foreground">
         Something went wrong
       </h2>
       <p className="max-w-sm text-sm text-muted-foreground">
@@ -41,10 +41,10 @@ export function ChatErrorFallback({
         </p>
       )}
       <div className="flex items-center gap-3">
-        <Button variant="default" onClick={onRetry}>
+        <Button variant="default" onClick={onRetry} className="h-11 text-sm">
           Try Again
         </Button>
-        <Button variant="outline" render={<Link href="/" />}>
+        <Button variant="outline" render={<Link href="/" />} className="h-11 text-sm">
           Go Home
         </Button>
       </div>

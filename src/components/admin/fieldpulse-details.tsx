@@ -58,19 +58,19 @@ export function FieldpulseDetails({ data, customFields }: FieldpulseDetailsProps
   }
 
   return (
-    <div className="rounded-md border border-violet-200 bg-violet-50/40">
+    <div className="rounded-md border border-border-strong bg-surface-sunken">
       <button
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-violet-800 hover:bg-violet-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md"
       >
         {open ? (
-          <ChevronDown className="size-3.5 shrink-0 text-violet-600 motion-reduce:transition-none" aria-hidden="true" />
+          <ChevronDown className="size-3.5 shrink-0 text-foreground-faint motion-reduce:transition-none" aria-hidden="true" />
         ) : (
-          <ChevronRight className="size-3.5 shrink-0 text-violet-600 motion-reduce:transition-none" aria-hidden="true" />
+          <ChevronRight className="size-3.5 shrink-0 text-foreground-faint motion-reduce:transition-none" aria-hidden="true" />
         )}
-        <span className="rounded border border-violet-300 bg-violet-100 px-1.5 py-px text-[10px] font-medium text-violet-700">
+        <span className="rounded-[3px] border border-border-strong bg-surface-raised px-1.5 py-px text-[10px] font-medium text-muted-foreground">
           FieldPulse
         </span>
         <span>details · {totalFields} {totalFields === 1 ? 'field' : 'fields'}</span>
@@ -79,7 +79,7 @@ export function FieldpulseDetails({ data, customFields }: FieldpulseDetailsProps
             {combinedPreview.map((chip) => (
               <span
                 key={chip}
-                className="truncate rounded bg-violet-100 px-1.5 py-px text-[10px] text-violet-600"
+                className="truncate rounded-[3px] bg-surface-raised px-1.5 py-px text-[10px] text-muted-foreground"
               >
                 {chip}
               </span>
@@ -89,17 +89,17 @@ export function FieldpulseDetails({ data, customFields }: FieldpulseDetailsProps
       </button>
 
       {open && (
-        <div className="border-t border-violet-200 px-3 pb-3 pt-2">
+        <div className="border-t border-border px-3 pb-3 pt-2">
           <div className="flex flex-col gap-3">
             {normalizedCustomFields && (
               <div>
-                <p className="mb-1 text-[10px] font-semibold text-violet-500">
+                <p className="mb-1 text-[10px] font-semibold text-muted-foreground">
                   Custom fields
                 </p>
                 <dl className="flex flex-col gap-1">
                   {normalizedCustomFields.map((cf) => (
                     <div key={cf.name} className="flex gap-2 text-xs">
-                      <dt className="min-w-40 shrink-0 text-violet-700">{cf.name}</dt>
+                      <dt className="min-w-40 shrink-0 text-muted-foreground">{cf.name}</dt>
                       <dd className="break-words text-foreground">{cf.value}</dd>
                     </div>
                   ))}
@@ -108,13 +108,13 @@ export function FieldpulseDetails({ data, customFields }: FieldpulseDetailsProps
             )}
             {sections.map((section) => (
               <div key={section.title}>
-                <p className="mb-1 text-[10px] font-semibold text-violet-500">
+                <p className="mb-1 text-[10px] font-semibold text-muted-foreground">
                   {section.title}
                 </p>
                 <dl className="flex flex-col gap-1">
                   {section.entries.map((entry) => (
                     <div key={entry.label} className="flex gap-2 text-xs">
-                      <dt className="min-w-40 shrink-0 text-violet-700">{entry.label}</dt>
+                      <dt className="min-w-40 shrink-0 text-muted-foreground">{entry.label}</dt>
                       <dd
                         className={
                           section.title === 'IDs'
@@ -131,7 +131,7 @@ export function FieldpulseDetails({ data, customFields }: FieldpulseDetailsProps
             ))}
           </div>
           {hiddenCount > 0 && (
-            <p className="mt-2 text-[10px] text-violet-500">
+            <p className="mt-2 text-[10px] text-foreground-faint">
               +{hiddenCount} nested {hiddenCount === 1 ? 'field' : 'fields'} not shown
             </p>
           )}

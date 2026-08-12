@@ -87,7 +87,35 @@ interface MapData {
 
 type LayerMode = 'jobs' | 'ar' | 'both';
 
-const MAPKIT_SRC = 'https://cdn.apple-mapkit.com/mk/6/mapkit.core.js';
+/**
+ * Legend swatches MIRROR the pin fills built in ./map-pins.ts. Those pin colors
+ * are deliberately exempt from the token migration (they are painted onto a
+ * dark basemap, not onto app surfaces), so the key has to quote them literally
+ * or it stops being a key. Every other color on this component is a token.
+ * Kept in step with dispatch-map.tsx by duplication, per the FieldPulse/HCP
+ * house rule for the two map implementations.
+ */
+const JOB_PIN_LEGEND: readonly {
+  readonly label: string;
+  readonly fill: string;
+  /** Optional outer halo, for the live-technician ping. */
+  readonly halo?: string;
+}[] = [
+  { label: 'Base', fill: '#334155' },
+  { label: 'Technician (live)', fill: '#059669', halo: '#10b981' },
+  { label: 'Emergency', fill: '#dc2626' },
+  { label: 'High priority', fill: '#ea580c' },
+  { label: 'Standard request', fill: '#2563eb' },
+];
+
+/** AR ring colors, mirroring arStyle() in ./map-pins.ts. */
+const AR_PIN_LEGEND: readonly { readonly label: string; readonly ring: string }[] = [
+  { label: '<30d', ring: '#d97706' },
+  { label: '30–90d', ring: '#ea580c' },
+  { label: '90d+', ring: '#dc2626' },
+];
+
+const MAPKIT_SRC ='https://cdn.apple-mapkit.com/mk/6/mapkit.core.js';
 const READY_WATCHDOG_MS = 8000;
 
 interface AppleDispatchMapProps {
@@ -342,7 +370,7 @@ export function AppleDispatchMap({ onFail }: AppleDispatchMapProps) {
       {
         anchorOffset: new DOMPoint(0, 0),
         callout: htmlCalloutDelegate(
-          `<div style="font:13px system-ui"><strong>${esc(data.base.name)}</strong><br/>Base</div>`,
+          `<div style="font:13px var(--font-sans),system-ui"><strong>${esc(data.base.name)}</strong><br/>Base</div>`,
         ),
       },
     );
@@ -373,7 +401,7 @@ export function AppleDispatchMap({ onFail }: AppleDispatchMapProps) {
           () => techMarkerEl(prefersReducedMotion),
           {
             callout: htmlCalloutDelegate(
-              `<div style="font:13px system-ui"><strong>${esc(tech.name)}</strong><br/><span style="color:#64748b">Updated ${timeAgo(tech.capturedAt)}</span></div>`,
+              `<div style="font:13px var(--font-sans),system-ui"><strong>${esc(tech.name)}</strong><br/><span style="color:var(--muted-foreground)">Updated ${timeAgo(tech.capturedAt)}</span></div>`,
             ),
           },
         ),
@@ -412,47 +440,56 @@ export function AppleDispatchMap({ onFail }: AppleDispatchMapProps) {
     : null;
 
   const layerBtnBase: React.CSSProperties = {
-    padding: '5px 12px',
+    height: 26,
+    padding: '0 12px',
     fontSize: 12,
-    fontWeight: 600,
-    border: '1px solid #cbd5e1',
+    fontWeight: 500,
+    borderRadius: 'var(--radius-md)',
+    border: '1px solid transparent',
     cursor: 'pointer',
-    transition: 'background .12s,color .12s',
-    lineHeight: 1.4,
+    transition: 'background var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out)',
+    lineHeight: '24px',
   };
+  // Matches the MapLibre reference exactly: navy fill for the active segment,
+  // ghost for the rest, on the --surface-raised floating panel.
   const layerBtnActive: React.CSSProperties = {
     ...layerBtnBase,
-    background: '#0f172a',
-    color: '#fff',
-    borderColor: '#0f172a',
+    background: 'var(--primary)',
+    color: 'var(--primary-foreground)',
+    borderColor: 'var(--primary)',
   };
   const layerBtnInactive: React.CSSProperties = {
     ...layerBtnBase,
-    background: '#fff',
-    color: '#475569',
+    background: 'transparent',
+    color: 'var(--muted-foreground)',
   };
 
   return (
-    <div className="relative h-full w-full overflow-hidden rounded-xl border bg-card shadow-sm">
+    <div className="relative h-full w-full overflow-hidden rounded-lg border border-border-strong bg-surface">
       <style>{`
         @keyframes dm-ping{75%,100%{transform:scale(2.2);opacity:0}}
-        .apple-dm-callout{padding:10px 12px;border-radius:8px;background:#fff;box-shadow:0 4px 16px rgba(0,0,0,.18);}
+        .apple-dm-callout{padding:10px 12px;border-radius:var(--radius-lg);background:var(--surface-raised);box-shadow:var(--shadow-pop);}
       `}</style>
       <div ref={containerRef} className="h-full w-full" />
 
       {/* Summary bar — top left, over map */}
-      <div className="pointer-events-none absolute left-4 top-4 z-10 flex items-center gap-3 rounded-lg border bg-background/95 px-3 py-2 shadow-sm backdrop-blur">
-        <MapPin className="size-4 shrink-0 text-info" />
+      <div className="pointer-events-none absolute left-4 top-4 z-10 flex items-center gap-3 rounded-md border border-border-strong bg-surface-raised/95 px-3 py-2 shadow-[var(--shadow-pop)] backdrop-blur">
+        <MapPin className="size-4 shrink-0 text-info-strong" />
         <div className="leading-tight">
-          <p className="text-sm font-semibold text-foreground">Dispatch map</p>
+          <p className="text-[13px] font-semibold text-foreground">Dispatch map</p>
           {data && (
             <p className="text-xs text-muted-foreground">
-              {data.jobs.length} job{data.jobs.length !== 1 ? 's' : ''}
+              <span className="font-mono tabular-nums">{data.jobs.length}</span> job
+              {data.jobs.length !== 1 ? 's' : ''}
               {unassignedCount > 0 && (
-                <span className="ml-1 font-medium text-warning">{unassignedCount} unassigned</span>
+                <span className="ml-1 font-medium text-warning-strong">
+                  <span className="font-mono tabular-nums">{unassignedCount}</span> unassigned
+                </span>
               )}
               {' · '}
-              <span className="font-medium text-foreground">{formatCents(totalOwingCents)}</span>
+              <span className="font-mono font-medium tabular-nums text-foreground">
+                {formatCents(totalOwingCents)}
+              </span>
               {' owed on map'}
             </p>
           )}
@@ -460,7 +497,7 @@ export function AppleDispatchMap({ onFail }: AppleDispatchMapProps) {
         <button
           type="button"
           onClick={() => void load()}
-          className="pointer-events-auto ml-1 rounded-md p-1.5 text-muted-foreground hover:bg-muted"
+          className="pointer-events-auto ml-1 rounded-md p-1.5 text-muted-foreground hover:bg-accent"
           aria-label="Refresh map"
         >
           <RefreshCw className={`size-4 ${loading ? 'animate-spin' : ''}`} />
@@ -468,8 +505,8 @@ export function AppleDispatchMap({ onFail }: AppleDispatchMapProps) {
       </div>
 
       {/* Layer toggle — top right on desktop; drops below summary bar at ≤480px */}
-      <div className="pointer-events-auto absolute right-11 top-4 z-10 flex items-center gap-1 rounded-lg border bg-background/95 p-1 shadow-sm backdrop-blur max-[480px]:right-2 max-[480px]:top-16">
-        <Layers className="ml-1 size-3.5 shrink-0 text-muted-foreground" />
+      <div className="pointer-events-auto absolute right-11 top-4 z-10 flex items-center gap-1 rounded-md border border-border-strong bg-surface-raised/95 p-1 shadow-[var(--shadow-pop)] backdrop-blur max-[480px]:right-2 max-[480px]:top-16">
+        <Layers className="ml-1 size-3.5 shrink-0 text-foreground-faint" />
         {(
           [
             { key: 'jobs', label: 'Jobs' },
@@ -489,23 +526,36 @@ export function AppleDispatchMap({ onFail }: AppleDispatchMapProps) {
       </div>
 
       {/* Legend */}
-      <div className="absolute bottom-4 left-4 z-10 rounded-lg border bg-background/95 px-3 py-2 text-xs shadow-sm backdrop-blur">
+      <div className="absolute bottom-4 left-4 z-10 rounded-md border border-border-strong bg-surface-raised/95 px-3 py-2 text-xs shadow-[var(--shadow-pop)] backdrop-blur">
         <p className="mb-1.5 font-semibold text-foreground">Legend</p>
         <ul className="space-y-1.5">
-          <li className="flex items-center gap-2 text-muted-foreground"><span className="inline-block size-3 shrink-0 rounded bg-slate-900" /> Base</li>
-          <li className="flex items-center gap-2 text-muted-foreground"><span className="inline-block size-3 shrink-0 rounded-full bg-emerald-600 ring-2 ring-emerald-600/30" /> Technician (live)</li>
-          <li className="flex items-center gap-2 text-muted-foreground"><span className="inline-block size-3 shrink-0 rounded-full bg-red-600" /> Emergency</li>
-          <li className="flex items-center gap-2 text-muted-foreground"><span className="inline-block size-3 shrink-0 rounded-full bg-orange-600" /> High priority</li>
-          <li className="flex items-center gap-2 text-muted-foreground"><span className="inline-block size-3 shrink-0 rounded-full bg-blue-600" /> Standard request</li>
-          <li className="pt-1 text-muted-foreground font-medium">Money owed</li>
-          <li className="flex items-center gap-2 text-muted-foreground"><span className="inline-block size-3 shrink-0 rounded-full border-2 border-amber-600 bg-amber-600/20" /> &lt;30d</li>
-          <li className="flex items-center gap-2 text-muted-foreground"><span className="inline-block size-3 shrink-0 rounded-full border-2 border-orange-600 bg-orange-600/20" /> 30–90d</li>
-          <li className="flex items-center gap-2 text-muted-foreground"><span className="inline-block size-3 shrink-0 rounded-full border-2 border-red-600 bg-red-600/20" /> 90d+</li>
+          {JOB_PIN_LEGEND.map(({ label, fill, halo }) => (
+            <li key={label} className="flex items-center gap-2 text-muted-foreground">
+              <span
+                className="inline-block size-3 shrink-0 rounded-[2px]"
+                style={{
+                  background: fill,
+                  boxShadow: halo ? `0 0 0 2px ${halo}4d` : undefined,
+                }}
+              />{' '}
+              {label}
+            </li>
+          ))}
+          <li className="pt-1 font-medium text-muted-foreground">Money owed</li>
+          {AR_PIN_LEGEND.map(({ label, ring }) => (
+            <li key={label} className="flex items-center gap-2 text-muted-foreground">
+              <span
+                className="inline-block size-3 shrink-0 rounded-[2px] border-2"
+                style={{ borderColor: ring, background: `${ring}33` }}
+              />{' '}
+              {label}
+            </li>
+          ))}
         </ul>
       </div>
 
       {error && (
-        <div className="absolute inset-x-0 top-1/2 z-10 mx-auto w-fit -translate-y-1/2 rounded-md border border-destructive/40 bg-background px-4 py-2 text-sm text-destructive shadow">
+        <div className="absolute inset-x-0 top-1/2 z-10 mx-auto w-fit -translate-y-1/2 rounded-md border border-danger-border bg-surface-raised px-4 py-2 text-[13px] text-danger-strong shadow-[var(--shadow-pop)]">
           {error}
         </div>
       )}
@@ -513,12 +563,12 @@ export function AppleDispatchMap({ onFail }: AppleDispatchMapProps) {
       {/* Status chips — stacked so they never overlap each other */}
       <div className="pointer-events-none absolute bottom-4 right-4 z-10 flex flex-col items-end gap-1.5">
         {notPlottedMsg && (
-          <div className="rounded-md border bg-background/90 px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm backdrop-blur">
+          <div className="rounded-[3px] border border-border bg-surface-raised/90 px-2.5 py-1 text-[11px] text-muted-foreground shadow-[var(--shadow-pop)] backdrop-blur">
             {notPlottedMsg}
           </div>
         )}
         {data && showArLayer(layerMode) && arOnMap === 0 && data.arCustomers.length === 0 && (
-          <div className="rounded-md border bg-background/90 px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm backdrop-blur">
+          <div className="rounded-[3px] border border-border bg-surface-raised/90 px-2.5 py-1 text-[11px] text-muted-foreground shadow-[var(--shadow-pop)] backdrop-blur">
             No geocoded AR customers
           </div>
         )}

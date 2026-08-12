@@ -80,7 +80,7 @@ export default function DispatchPage() {
             >
               <ChevronLeft className="size-4" />
             </Button>
-            <div className="min-w-32 text-center text-sm font-medium">
+            <div className="min-w-32 text-center font-mono text-[13px] font-medium tabular-nums">
               {formatDayLabel(date)}
             </div>
             <Button
@@ -131,18 +131,19 @@ export default function DispatchPage() {
           <ul className="space-y-1.5">
             {board.exceptions.map((ex) => (
               <li key={ex.id}>
+                {/* Exception row: 2px status left edge, body stays --surface. */}
                 <button
                   type="button"
                   onClick={() => setSelectedRequestId(ex.id)}
-                  className="flex w-full items-center gap-2 rounded-md border border-border px-3 py-2 text-left text-sm hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="flex w-full items-center gap-2 rounded-sm border border-border border-l-2 border-l-warning bg-surface px-3 py-2 text-left text-[13px] transition-colors hover:bg-row-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
-                  <span className="font-medium">{ex.referenceNumber}</span>
+                  <span className="font-mono font-medium">{ex.referenceNumber}</span>
                   <span className="text-muted-foreground">{ex.issueType}</span>
                   <ContextBadge
                     variant="warning"
                     label={outcomeLabel(ex.autoDispatchOutcome)}
                   />
-                  <span className="ml-auto text-xs text-muted-foreground">
+                  <span className="ml-auto font-mono text-xs tabular-nums text-muted-foreground">
                     {formatDayLabel(ex.createdAt.slice(0, 10))}
                   </span>
                 </button>
@@ -155,17 +156,20 @@ export default function DispatchPage() {
       {isLoading && !board ? (
         <div className="flex gap-4 overflow-x-auto pb-2">
           {Array.from({ length: 4 }, (_, i) => (
-            <Card key={`col-skeleton-${i}`} className="flex w-72 shrink-0 flex-col p-3">
-              {/* Column header bar */}
-              <div className="mb-3 flex items-center gap-2">
-                <Skeleton className="size-4 shrink-0 rounded-full" />
+            <Card key={`col-skeleton-${i}`} className="flex w-72 shrink-0 flex-col gap-0 p-0">
+              {/* Sunken 40px column header band + keyline, matching the real column */}
+              <div className="flex h-10 items-center gap-2 border-b border-border-strong bg-surface-sunken px-3 shadow-[var(--keyline-top)]">
+                <Skeleton className="size-4 shrink-0" />
                 <Skeleton className="h-3.5 w-28" />
                 <Skeleton className="ml-auto h-3 w-4" />
               </div>
               {/* Stacked job-card bars */}
-              <div className="space-y-2">
+              <div className="space-y-2 p-3">
                 {Array.from({ length: 3 }, (__, j) => (
-                  <div key={j} className="rounded-lg border bg-card px-3 py-2 space-y-1.5">
+                  <div
+                    key={j}
+                    className="space-y-1.5 rounded-sm border border-border bg-surface-raised px-3 py-2"
+                  >
                     <div className="flex items-center justify-between gap-2">
                       <Skeleton className="h-3 w-10" />
                       <Skeleton className="h-3 w-8" />
@@ -173,8 +177,8 @@ export default function DispatchPage() {
                     <Skeleton className="h-3.5 w-32" />
                     <Skeleton className="h-3 w-44" />
                     <div className="flex gap-1.5 pt-0.5">
-                      <Skeleton className="h-4 w-12 rounded-full" />
-                      <Skeleton className="h-4 w-14 rounded-full" />
+                      <Skeleton className="h-4 w-12" />
+                      <Skeleton className="h-4 w-14" />
                     </div>
                   </div>
                 ))}

@@ -232,8 +232,8 @@ function InvoiceStatusBadge({ status }: { readonly status: string }) {
     return null;
   }
   const styles: Record<string, string> = {
-    sent: 'border-info/30 bg-info-light text-info-foreground',
-    paid: 'border-success/30 bg-success-light text-success',
+    sent: 'border-info-border bg-info-light text-info-strong',
+    paid: 'border-success-border bg-success-light text-success-strong',
     void: 'border-border bg-muted text-muted-foreground',
   };
   const labels: Record<string, string> = {
@@ -245,7 +245,7 @@ function InvoiceStatusBadge({ status }: { readonly status: string }) {
   const label = labels[status] ?? `Invoice: ${status}`;
   return (
     <span
-      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${className}`}
+      className={`inline-flex h-5 items-center rounded-[3px] border px-2 text-[11px] font-medium ${className}`}
     >
       {label}
     </span>
@@ -652,7 +652,7 @@ export function RequestDetailSheet({
                 <UrgencyBadge urgency={detail.urgency} />
                 <StatusBadge status={detail.status} />
                 {detail.isAfterHours && (
-                  <span className="inline-flex items-center rounded-full border border-warning/30 bg-warning-light px-2 py-0.5 text-xs font-medium text-warning-foreground">
+                  <span className="inline-flex h-5 items-center rounded-[3px] border border-warning-border bg-warning-light px-2 text-[11px] font-medium text-warning-strong">
                     After-hours
                   </span>
                 )}
@@ -700,25 +700,25 @@ export function RequestDetailSheet({
                   (detail.fieldpulseMetrics.statusLogSeconds.on_the_way ?? 0) > 0 ||
                   (detail.fieldpulseMetrics.statusLogSeconds.in_progress ?? 0) > 0) && (
                 <section>
-                  <div className="rounded-md border border-violet-200 bg-violet-50/40">
+                  <div className="rounded-md border border-border-strong bg-surface-sunken">
                     <button
                       type="button"
                       aria-expanded={fpMetricsOpen}
                       onClick={() => setFpMetricsOpen((v) => !v)}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-violet-800 hover:bg-violet-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md"
                     >
                       {fpMetricsOpen ? (
-                        <ChevronDown className="size-3.5 shrink-0 text-violet-600 motion-reduce:transition-none" aria-hidden="true" />
+                        <ChevronDown className="size-3.5 shrink-0 text-foreground-faint motion-reduce:transition-none" aria-hidden="true" />
                       ) : (
-                        <ChevronRight className="size-3.5 shrink-0 text-violet-600 motion-reduce:transition-none" aria-hidden="true" />
+                        <ChevronRight className="size-3.5 shrink-0 text-foreground-faint motion-reduce:transition-none" aria-hidden="true" />
                       )}
-                      <span className="rounded border border-violet-300 bg-violet-100 px-1.5 py-px text-[10px] font-medium text-violet-700">
+                      <span className="rounded-[3px] border border-border-strong bg-surface-raised px-1.5 py-px text-[10px] font-medium text-muted-foreground">
                         FieldPulse
                       </span>
                       <span>metrics</span>
                     </button>
                     {fpMetricsOpen && (
-                      <div className="border-t border-violet-200 px-3 pb-3 pt-2 space-y-1">
+                      <div className="border-t border-border px-3 pb-3 pt-2 space-y-1">
                         {detail.fieldpulseMetrics.totalPriceCents != null && (
                           <InfoRow
                             label="Total price"
@@ -876,7 +876,7 @@ export function RequestDetailSheet({
                         return (
                           <div
                             key={s.technicianId}
-                            className="flex items-start justify-between gap-2 rounded-md border bg-muted/30 p-2"
+                            className="flex items-start justify-between gap-2 rounded-md border border-border bg-surface-sunken p-2"
                           >
                             <div className="min-w-0">
                               <p className="text-sm font-medium">
@@ -955,21 +955,21 @@ export function RequestDetailSheet({
                   Hidden when no decision row has been recorded yet. */}
               {decision && (
                 <section>
-                  <div className="rounded-md border border-info/30 bg-info-light">
+                  <div className="rounded-md border border-info-border bg-info-light">
                     <button
                       type="button"
                       aria-expanded={decisionOpen}
                       onClick={() => setDecisionOpen((v) => !v)}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-foreground hover:bg-info/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md"
+                      className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-foreground transition-colors duration-[var(--dur-hover)] hover:text-info-strong focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
                     >
                       {decisionOpen ? (
-                        <ChevronDown className="size-3.5 shrink-0 text-info" aria-hidden="true" />
+                        <ChevronDown className="size-3.5 shrink-0 text-info-strong" aria-hidden="true" />
                       ) : (
-                        <ChevronRight className="size-3.5 shrink-0 text-info" aria-hidden="true" />
+                        <ChevronRight className="size-3.5 shrink-0 text-info-strong" aria-hidden="true" />
                       )}
                       <span>Dispatch decision</span>
                       {decision.isShadow && (
-                        <span className="rounded border border-info/30 bg-info/10 px-1.5 py-px text-[10px] font-medium text-info">
+                        <span className="rounded-[3px] border border-info-border bg-surface-raised px-1.5 py-px text-[10px] font-medium text-info-strong">
                           preview
                         </span>
                       )}
@@ -978,7 +978,7 @@ export function RequestDetailSheet({
                       </span>
                     </button>
                     {decisionOpen && (
-                      <div className="border-t border-info/30 px-3 pb-3 pt-2 space-y-2">
+                      <div className="border-t border-info-border px-3 pb-3 pt-2 space-y-2">
                         <div className="text-xs text-muted-foreground">
                           {decision.topScore != null && (
                             <>top score {decision.topScore.toFixed(2)}</>

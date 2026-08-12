@@ -6,39 +6,39 @@ export function ChatLoadingSkeleton() {
       {/* Header skeleton */}
       <div className="flex items-center justify-between border-b px-4 py-3">
         <div className="flex items-center gap-2">
-          <Skeleton className="size-2.5 rounded-full" />
+          <Skeleton className="size-2.5 rounded-[3px]" />
           <Skeleton className="h-5 w-32" />
         </div>
-        <Skeleton className="h-7 w-36 rounded-lg" />
+        <Skeleton className="h-7 w-36 rounded-md" />
       </div>
 
       {/* Message area skeleton */}
       <div className="flex flex-1 flex-col gap-4 overflow-hidden p-4">
         {/* Assistant message */}
         <div className="flex justify-start">
-          <Skeleton className="h-12 w-3/4 rounded-2xl rounded-bl-md" />
+          <Skeleton className="h-12 w-3/4 rounded-xl rounded-bl-sm" />
         </div>
 
         {/* Assistant message (longer) */}
         <div className="flex justify-start">
-          <Skeleton className="h-16 w-4/5 rounded-2xl rounded-bl-md" />
+          <Skeleton className="h-16 w-4/5 rounded-xl rounded-bl-sm" />
         </div>
 
         {/* User message */}
         <div className="flex justify-end">
-          <Skeleton className="h-10 w-1/2 rounded-2xl rounded-br-md" />
+          <Skeleton className="h-10 w-1/2 rounded-xl rounded-br-sm" />
         </div>
 
         {/* Assistant message */}
         <div className="flex justify-start">
-          <Skeleton className="h-14 w-2/3 rounded-2xl rounded-bl-md" />
+          <Skeleton className="h-14 w-2/3 rounded-xl rounded-bl-sm" />
         </div>
       </div>
 
       {/* Input skeleton */}
       <div className="flex items-center gap-2 border-t px-4 py-3">
         <Skeleton className="h-10 flex-1 rounded-md" />
-        <Skeleton className="size-10 rounded-lg" />
+        <Skeleton className="size-10 rounded-md" />
       </div>
     </div>
   );

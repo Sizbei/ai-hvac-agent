@@ -1,24 +1,18 @@
 /**
  * Shared skeleton components for heavy admin pages.
  * Display-only — no logic, no state, no props beyond optional className.
- * Uses theme tokens (bg-muted) and animate-pulse; respects prefers-reduced-motion
- * via the motion-reduce:animate-none Tailwind variant.
+ * Bars are sunken slabs that breathe (opacity 0.9 ↔ 0.55) — the single loading
+ * animation in the system. No shimmer, no pulse; prefers-reduced-motion is
+ * handled globally by the animation clamp in globals.css.
  */
 
 import { cn } from '@/lib/utils';
+import { Skeleton } from '@/components/ui/skeleton';
 
 // ── primitives ────────────────────────────────────────────────────────────────
 
 function Bar({ className }: { className?: string }) {
-  return (
-    <div
-      aria-hidden="true"
-      className={cn(
-        'animate-pulse rounded-md bg-muted motion-reduce:animate-none',
-        className,
-      )}
-    />
-  );
+  return <Skeleton aria-hidden="true" className={cn('rounded-[3px]', className)} />;
 }
 
 // ── TableSkeleton ─────────────────────────────────────────────────────────────
@@ -31,21 +25,21 @@ interface TableSkeletonProps {
 }
 
 /**
- * Shimmering table-like rows that match a list-grid layout.
+ * Breathing table-like rows that match a list-grid layout.
  * Wrap in the same container your real table lives in.
  */
 export function TableSkeleton({ rows = 6, cols = 5 }: TableSkeletonProps) {
   return (
-    <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
-      {/* header bar */}
-      <div className="border-b bg-muted/40 px-4 py-3">
+    <div className="overflow-hidden rounded-lg border border-border-strong bg-surface">
+      {/* sunken header band */}
+      <div className="border-b border-border-strong bg-surface-sunken px-4 py-2.5">
         <Bar className="h-3 w-64" />
       </div>
       {/* rows */}
       {Array.from({ length: rows }, (_, i) => (
         <div
           key={i}
-          className="flex items-center gap-4 border-b px-4 py-3.5 last:border-0"
+          className="flex items-center gap-4 border-b border-border px-4 py-3.5 last:border-0"
         >
           {Array.from({ length: cols }, (__, j) => (
             <Bar
@@ -70,9 +64,9 @@ export function TableSkeleton({ rows = 6, cols = 5 }: TableSkeletonProps) {
  */
 export function StatTileSkeleton() {
   return (
-    <div className="flex flex-col gap-3 rounded-xl border bg-card p-5 shadow-sm">
+    <div className="flex flex-col gap-2.5 rounded-lg border border-border-strong bg-surface px-4 py-3">
       <Bar className="h-3 w-24" />
-      <Bar className="h-9 w-28" />
+      <Bar className="h-[26px] w-28" />
       <Bar className="h-3 w-16" />
     </div>
   );
@@ -85,9 +79,9 @@ export function StatTileSkeleton() {
  */
 export function CardSkeleton() {
   return (
-    <div className="flex items-center gap-4 rounded-xl border bg-card p-4 shadow-sm">
-      {/* avatar circle */}
-      <Bar className="size-10 shrink-0 rounded-full" />
+    <div className="flex items-center gap-4 rounded-lg border border-border-strong bg-surface p-4">
+      {/* square avatar slab */}
+      <Bar className="size-10 shrink-0 rounded-[4px]" />
       <div className="flex flex-1 flex-col gap-2">
         <Bar className="h-3.5 w-40" />
         <Bar className="h-3 w-56" />

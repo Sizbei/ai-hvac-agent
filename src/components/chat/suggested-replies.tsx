@@ -1,6 +1,12 @@
 'use client';
 
 import { PhoneForwarded } from 'lucide-react';
+import { cn } from '@/lib/utils';
+
+// De-pilled machined key: 6px radius, hairline input border, 44px touch height,
+// colour-only transition with a 0.5px mechanical settle on press.
+const CHIP_BASE =
+  'inline-flex min-h-11 items-center rounded-md border px-3 text-[13px] font-medium transition-[background-color,border-color,color] duration-[var(--dur-hover)] ease-[var(--ease-out)] active:translate-y-[0.5px] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring disabled:opacity-50 disabled:pointer-events-none';
 
 export interface Suggestion {
   readonly label: string;
@@ -37,7 +43,7 @@ export function SuggestedReplies({
           type="button"
           disabled={disabled}
           onClick={() => onSelect(s.message)}
-          className="rounded-full border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-[background-color,border-color,color,scale] duration-150 ease-out active:scale-[0.97] hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:pointer-events-none"
+          className={cn(CHIP_BASE, 'border-border-input bg-surface-raised text-foreground hover:bg-accent')}
         >
           {s.label}
         </button>
@@ -46,7 +52,7 @@ export function SuggestedReplies({
         type="button"
         disabled={disabled}
         onClick={onEscalate}
-        className="inline-flex items-center gap-1 rounded-full border border-orange-200 bg-orange-50 px-3 py-1.5 text-xs font-medium text-orange-700 transition-[background-color,border-color,color,scale] duration-150 ease-out active:scale-[0.97] hover:bg-orange-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:pointer-events-none"
+        className={cn(CHIP_BASE, 'gap-1 border-warning-border bg-warning-light text-warning-strong hover:bg-warning-light/70')}
       >
         <PhoneForwarded className="size-3" />
         Talk to a human

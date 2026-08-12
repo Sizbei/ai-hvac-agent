@@ -9,23 +9,27 @@ interface UrgencyLegendProps {
  * Compact urgency colour key. Shared by the calendar and dispatch surfaces so
  * the dot colours read consistently with the urgency-accented cards/chips.
  *
- * Dots reuse `urgencyAccent().dot` to stay in lockstep with the calendar's
- * card accents (which are keyed off the same palette).
+ * Keys reuse `urgencyAccent().dot` to stay in lockstep with the calendar's
+ * card accents (which are keyed off the same palette). Shape is a 6 px square,
+ * not a dot — round markers are reserved for technician photos and switches.
  */
 export function UrgencyLegend({ className }: UrgencyLegendProps) {
   return (
     <div
       className={cn(
-        "flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground",
+        "flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] leading-[14px] text-muted-foreground",
         className,
       )}
     >
-      <span className="font-medium">Urgency:</span>
+      <span className="font-semibold tracking-[0.04em]">Urgency:</span>
       {URGENCY_LEGEND.map(({ urgency, label }) => (
         <span key={urgency} className="flex items-center gap-1.5">
           <span
             aria-hidden="true"
-            className={cn("size-2.5 rounded-full", urgencyAccent(urgency).dot)}
+            className={cn(
+              "size-1.5 rounded-[1px]",
+              urgencyAccent(urgency).dot,
+            )}
           />
           {label}
         </span>
