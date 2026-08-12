@@ -120,6 +120,67 @@ describe("takePayment", () => {
     }
   });
 
+  // 42804 regression: invoices.state is a Postgres ENUM (invoice_state). A bare
+  // CASE resolves its 'paid'/'open' branches to text, and Postgres refuses
+  // text → enum in an UPDATE assignment — the finalize batch threw, stranding
+  // every native payment 'pending' with the invoice left 'open' (found live via
+  // the portal pay flow). The SQL expression must carry an explicit
+  // ::invoice_state cast; this test fails if the cast is dropped.
+  it("casts the SQL-derived state to the invoice_state enum (42804 regression)", async () => {
+    mockInvoice({ totalCents: 10000, amountPaidCents: 0 });
+    const setPayloads: Record<string, unknown>[] = [];
+    vi.mocked(db.update).mockImplementation(
+      () =>
+        ({
+          set: (v: Record<string, unknown>) => {
+            setPayloads.push(v);
+            return {
+              where: vi.fn(() =>
+                Object.assign(Promise.resolve(undefined), {
+                  returning: vi
+                    .fn()
+                    .mockResolvedValue([
+                      { id: "inv-1", amountPaidCents: 10000, totalCents: 10000 },
+                    ]),
+                }),
+              ),
+            };
+          },
+        }) as never,
+    );
+
+    await takePayment(ORG, "inv-1", { amountCents: 10000 }, provider);
+
+    const stateWrites = setPayloads.filter((p) => "state" in p);
+    expect(stateWrites.length).toBeGreaterThan(0);
+    // Collect the literal string fragments of a drizzle sql`` expression
+    // (queryChunks → StringChunk.value) without serializing table objects,
+    // which are circular.
+    const flattenChunks = (expr: unknown): string => {
+      const out: string[] = [];
+      const visit = (node: unknown): void => {
+        if (typeof node === "string") {
+          out.push(node);
+          return;
+        }
+        if (Array.isArray(node)) {
+          node.forEach(visit);
+          return;
+        }
+        if (node && typeof node === "object") {
+          const rec = node as { queryChunks?: unknown; value?: unknown };
+          if (rec.queryChunks !== undefined) visit(rec.queryChunks);
+          if (rec.value !== undefined) visit(rec.value);
+        }
+      };
+      visit(expr);
+      return out.join("");
+    };
+    for (const write of stateWrites) {
+      expect(flattenChunks(write.state)).toContain("::invoice_state");
+    }
+  });
+
   it("keeps the invoice open on a partial deposit", async () => {
     mockInvoice({ totalCents: 10000, amountPaidCents: 0 });
     mockClaimReturning(5000, 10000);

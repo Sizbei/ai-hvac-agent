@@ -344,7 +344,10 @@ export async function takePayment(
     db
       .update(invoices)
       .set({
-        state: sql`case when ${invoices.amountPaidCents} >= ${invoices.totalCents} then 'paid' else 'open' end`,
+        // ::invoice_state — a bare CASE resolves its branches to text, and
+        // Postgres refuses text → enum in an UPDATE assignment (42804), which
+        // left every native payment stranded 'pending' with the invoice 'open'.
+        state: sql`(case when ${invoices.amountPaidCents} >= ${invoices.totalCents} then 'paid' else 'open' end)::invoice_state`,
         updatedAt: new Date(),
       })
       .where(withTenant(invoices, organizationId, eq(invoices.id, invoiceId)))
