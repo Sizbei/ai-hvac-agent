@@ -807,15 +807,6 @@ export const customers = pgTable(
     index("customers_org_id_idx").on(table.organizationId),
     // Composite index for the list-page query: WHERE org=$1 ORDER BY created_at DESC LIMIT.
     index("customers_org_created_idx").on(table.organizationId, table.createdAt),
-    // Unique per org: one customer row per email / per phone within a tenant.
-    // Partial (WHERE ... IS NOT NULL) so the many rows lacking an email or
-    // phone don't all collide on NULL.
-    uniqueIndex("customers_org_email_hash_unique")
-      .on(table.organizationId, table.emailHash)
-      .where(sql`${table.emailHash} IS NOT NULL`),
-    uniqueIndex("customers_org_phone_hash_unique")
-      .on(table.organizationId, table.phoneHash)
-      .where(sql`${table.phoneHash} IS NOT NULL`),
     // Per-org uniqueness for the NATIVE population only. FP-linked rows are
     // identified by fieldpulse_customer_id and may legitimately share a contact:
     // one accounts-payable email/phone covers many unrelated businesses.
