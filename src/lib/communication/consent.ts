@@ -13,10 +13,9 @@
  */
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { customers, communicationPreferences } from "@/lib/db/schema";
-import { withTenant } from "@/lib/db/tenant";
-import { blindIndex } from "@/lib/crypto";
-import { normalizePhone } from "@/lib/admin/crm-queries";
+import { communicationPreferences } from "@/lib/db/schema";
+import { findCustomerMatchCandidates } from "@/lib/admin/crm-queries";
+import type { CustomerMatchCandidate } from "@/lib/admin/customer-match";
 import type { communicationTriggerTypeEnum } from "@/lib/db/schema";
 
 export type CommChannel = "sms" | "email" | "voice";
@@ -223,40 +222,113 @@ export function classifySmsKeyword(body: string): SmsKeyword {
   return null;
 }
 
+/** Descending date order with NULLs last (mirrors `customer-match.ts`). */
+function compareDatesDesc(a: Date | null, b: Date | null): number {
+  if (a === null && b === null) return 0;
+  if (a === null) return 1;
+  if (b === null) return -1;
+  return b.getTime() - a.getTime();
+}
+
 /**
- * Set (or clear) do-not-contact for the customer matching a phone number, by
- * blind-index lookup. Upserts the preferences row. Returns true if a customer
- * matched. Used by the inbound STOP/START handler.
+ * The single row an SMS START may un-suppress, or null when there is none.
+ *
+ * Deliberately NOT `pickCustomerMatch`: its rule 2 hands the *do-not-service*
+ * row the win, so START would re-open the one row the block exists to keep
+ * closed. START drops blocked and archived rows entirely, then applies the
+ * remaining order — most recently active, newest, id as the determinism
+ * backstop. Pure, so the pick is unit-testable without a database.
+ */
+export function pickStartTarget(
+  candidates: readonly CustomerMatchCandidate[],
+): string | null {
+  const eligible = candidates.filter(
+    (candidate) =>
+      candidate.anonymizedAt === null &&
+      candidate.archivedAt === null &&
+      !candidate.doNotService,
+  );
+  if (eligible.length === 0) return null;
+
+  const [winner] = [...eligible].sort((a, b) => {
+    const byActivity = compareDatesDesc(a.lastActivityAt, b.lastActivityAt);
+    if (byActivity !== 0) return byActivity;
+    const byCreated = compareDatesDesc(a.createdAt, b.createdAt);
+    if (byCreated !== 0) return byCreated;
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  });
+  return winner.id;
+}
+
+/** The do-not-contact upsert for one customer, as an un-awaited statement so
+ *  callers can either await it directly or hand it to `db.batch()`. */
+function buildDoNotContactUpsert(
+  organizationId: string,
+  customerId: string,
+  doNotContact: boolean,
+  now: Date,
+) {
+  return db
+    .insert(communicationPreferences)
+    .values({ organizationId, customerId, doNotContact, updatedAt: now })
+    .onConflictDoUpdate({
+      target: [
+        communicationPreferences.organizationId,
+        communicationPreferences.customerId,
+      ],
+      set: { doNotContact, updatedAt: now },
+    });
+}
+
+/**
+ * Set (or clear) do-not-contact for the customers matching a phone number.
+ * Returns true if any row was written. Used by the inbound STOP/START handler
+ * (`app/api/sms/incoming/route.ts`), which distinguishes the two directions by
+ * this flag.
+ *
+ * The two directions are NOT symmetric (SPEC §3.5). A phone number no longer
+ * resolves to a single customer row — FieldPulse-linked rows may legitimately
+ * share one (an accounts-payable line covering several businesses):
+ *
+ * - **STOP fans out** to every matching row, fail-closed. Silencing one
+ *   business while still texting the others on that number is a compliance
+ *   defect, not a UX one.
+ * - **START applies to exactly one row** and never touches siblings: one texter
+ *   must not be able to revoke third parties' opt-outs, which is the same class
+ *   of harm in the direction the affected party cannot undo.
+ *
+ * Both directions take candidates from the SAME resolver — only the ordering
+ * differs.
  */
 export async function setDoNotContactByPhone(
   organizationId: string,
   phone: string,
   doNotContact: boolean,
 ): Promise<boolean> {
-  const normalized = normalizePhone(phone);
-  if (!normalized) {
+  const candidates = await findCustomerMatchCandidates(organizationId, {
+    email: null,
+    phone,
+  });
+  if (candidates.length === 0) {
     return false;
   }
-  const hash = blindIndex(normalized);
-  const [cust] = await db
-    .select({ id: customers.id })
-    .from(customers)
-    .where(withTenant(customers, organizationId, eq(customers.phoneHash, hash)))
-    .limit(1);
+  const now = new Date();
 
-  if (!cust) {
-    return false;
+  if (!doNotContact) {
+    // START — exactly one row, never a sibling.
+    const targetId = pickStartTarget(candidates);
+    if (!targetId) return false;
+    await buildDoNotContactUpsert(organizationId, targetId, false, now);
+    return true;
   }
 
-  await db
-    .insert(communicationPreferences)
-    .values({ organizationId, customerId: cust.id, doNotContact, updatedAt: new Date() })
-    .onConflictDoUpdate({
-      target: [
-        communicationPreferences.organizationId,
-        communicationPreferences.customerId,
-      ],
-      set: { doNotContact, updatedAt: new Date() },
-    });
+  // STOP — every row on the number, in ONE round trip. neon-http has no
+  // interactive transactions (`db.transaction()` throws — AGENTS.md), so this
+  // is a batch, which the driver executes as a single non-interactive one.
+  const statements = candidates.map((candidate) =>
+    buildDoNotContactUpsert(organizationId, candidate.id, true, now),
+  );
+  type BatchStmt = (typeof statements)[number];
+  await db.batch(statements as unknown as [BatchStmt, ...BatchStmt[]]);
   return true;
 }

@@ -7,14 +7,19 @@ import {
   classifySmsKeyword,
   isQuietHours,
   localHour,
+  pickStartTarget,
+  setDoNotContactByPhone,
 } from "./consent";
 import { db } from "@/lib/db";
+import { findCustomerMatchCandidates } from "@/lib/admin/crm-queries";
+import type { CustomerMatchCandidate } from "@/lib/admin/customer-match";
 
-vi.mock("@/lib/db", () => ({ db: { select: vi.fn() } }));
-vi.mock("@/lib/admin/crm-queries", () => ({
-  normalizePhone: (p: string) => p.replace(/\D/g, "") || null,
+vi.mock("@/lib/db", () => ({
+  db: { select: vi.fn(), insert: vi.fn(), batch: vi.fn() },
 }));
-vi.mock("@/lib/crypto", () => ({ blindIndex: (s: string) => `h:${s}` }));
+vi.mock("@/lib/admin/crm-queries", () => ({
+  findCustomerMatchCandidates: vi.fn(),
+}));
 
 const ORG = "org-1";
 const CUST = "cust-1";
@@ -175,5 +180,176 @@ describe("checkSendAllowed", () => {
       const d = await checkSendAllowed({ ...base, triggerType: "review_request", now: daytime });
       expect(d).toEqual({ allowed: true });
     });
+  });
+});
+
+// ── STOP / START asymmetry (SPEC §3.5) ────────────────────────────────────────
+
+const PHONE = "+1 (800) 555-1212";
+
+function candidate(
+  over: Partial<CustomerMatchCandidate> & { readonly id: string },
+): CustomerMatchCandidate {
+  return {
+    matchedOn: "phone",
+    anonymizedAt: null,
+    archivedAt: null,
+    doNotService: false,
+    createdAt: new Date("2026-01-01T00:00:00Z"),
+    lastActivityAt: null,
+    ...over,
+  };
+}
+
+/** Every preferences upsert the code built, in build order. */
+let upserts: { customerId: string; doNotContact: boolean }[] = [];
+/** The statement array handed to db.batch, or null when it was never called. */
+let batched: unknown[] | null = null;
+
+function mockConsentWrites(candidates: CustomerMatchCandidate[]) {
+  upserts = [];
+  batched = null;
+  vi.mocked(findCustomerMatchCandidates).mockResolvedValue(candidates);
+  vi.mocked(db.insert).mockImplementation(
+    () =>
+      ({
+        values: (v: { customerId: string; doNotContact: boolean }) => {
+          const stmt = { customerId: v.customerId, doNotContact: v.doNotContact };
+          upserts.push(stmt);
+          return { onConflictDoUpdate: () => stmt };
+        },
+      }) as never,
+  );
+  vi.mocked(db.batch).mockImplementation((stmts: unknown) => {
+    batched = stmts as unknown[];
+    return Promise.resolve([]) as never;
+  });
+}
+
+describe("setDoNotContactByPhone — STOP fans out (SPEC §3.5)", () => {
+  it("suppresses EVERY row on the number in one db.batch, not just one", async () => {
+    mockConsentWrites([
+      candidate({ id: "live" }),
+      candidate({ id: "blocked", doNotService: true }),
+      candidate({ id: "archived", archivedAt: new Date("2026-02-01T00:00:00Z") }),
+    ]);
+
+    const result = await setDoNotContactByPhone(ORG, PHONE, true);
+
+    expect(result).toBe(true);
+    expect(upserts.map((u) => u.customerId).sort()).toEqual([
+      "archived",
+      "blocked",
+      "live",
+    ]);
+    expect(upserts.every((u) => u.doNotContact === true)).toBe(true);
+    // One round trip for the fan-out (neon-http has no interactive transaction).
+    expect(db.batch).toHaveBeenCalledTimes(1);
+    expect(batched).toHaveLength(3);
+  });
+
+  it("takes candidates from the shared resolver, not its own phone SELECT", async () => {
+    mockConsentWrites([candidate({ id: "live" })]);
+
+    await setDoNotContactByPhone(ORG, PHONE, true);
+
+    expect(findCustomerMatchCandidates).toHaveBeenCalledWith(ORG, {
+      email: null,
+      phone: PHONE,
+    });
+    expect(db.select).not.toHaveBeenCalled();
+  });
+
+  it("writes nothing and returns false when the number matches no row", async () => {
+    mockConsentWrites([]);
+
+    expect(await setDoNotContactByPhone(ORG, PHONE, true)).toBe(false);
+    expect(db.insert).not.toHaveBeenCalled();
+    expect(db.batch).not.toHaveBeenCalled();
+  });
+});
+
+describe("setDoNotContactByPhone — START touches exactly one row (SPEC §3.5)", () => {
+  it("un-suppresses only the picked row and never a sibling on the same number", async () => {
+    // `sibling` texted STOP earlier; `target` is the most recently active row.
+    mockConsentWrites([
+      candidate({ id: "sibling", lastActivityAt: new Date("2026-01-05T00:00:00Z") }),
+      candidate({ id: "target", lastActivityAt: new Date("2026-03-01T00:00:00Z") }),
+    ]);
+
+    const result = await setDoNotContactByPhone(ORG, PHONE, false);
+
+    expect(result).toBe(true);
+    expect(upserts).toEqual([{ customerId: "target", doNotContact: false }]);
+    // No fan-out on START: a sibling's opt-out must survive.
+    expect(db.batch).not.toHaveBeenCalled();
+  });
+
+  it("never re-opens a do-not-service row, even when it is the most recently active", async () => {
+    mockConsentWrites([
+      candidate({
+        id: "blocked",
+        doNotService: true,
+        lastActivityAt: new Date("2026-03-01T00:00:00Z"),
+      }),
+      candidate({ id: "live", lastActivityAt: new Date("2026-01-05T00:00:00Z") }),
+    ]);
+
+    expect(await setDoNotContactByPhone(ORG, PHONE, false)).toBe(true);
+    expect(upserts).toEqual([{ customerId: "live", doNotContact: false }]);
+  });
+
+  it("is a no-op when every candidate is blocked or archived", async () => {
+    mockConsentWrites([
+      candidate({ id: "blocked", doNotService: true }),
+      candidate({ id: "archived", archivedAt: new Date("2026-02-01T00:00:00Z") }),
+    ]);
+
+    expect(await setDoNotContactByPhone(ORG, PHONE, false)).toBe(false);
+    expect(db.insert).not.toHaveBeenCalled();
+    expect(db.batch).not.toHaveBeenCalled();
+  });
+});
+
+describe("pickStartTarget", () => {
+  it("prefers the most recently active live row", () => {
+    expect(
+      pickStartTarget([
+        candidate({ id: "old", lastActivityAt: new Date("2026-01-01T00:00:00Z") }),
+        candidate({ id: "new", lastActivityAt: new Date("2026-04-01T00:00:00Z") }),
+      ]),
+    ).toBe("new");
+  });
+
+  it("ranks a row with activity above one with none", () => {
+    expect(
+      pickStartTarget([
+        candidate({ id: "none", createdAt: new Date("2026-06-01T00:00:00Z") }),
+        candidate({ id: "some", lastActivityAt: new Date("2026-01-01T00:00:00Z") }),
+      ]),
+    ).toBe("some");
+  });
+
+  it("falls back to newest created, then lowest id", () => {
+    expect(
+      pickStartTarget([
+        candidate({ id: "older", createdAt: new Date("2026-01-01T00:00:00Z") }),
+        candidate({ id: "newer", createdAt: new Date("2026-05-01T00:00:00Z") }),
+      ]),
+    ).toBe("newer");
+    expect(
+      pickStartTarget([candidate({ id: "b" }), candidate({ id: "a" })]),
+    ).toBe("a");
+  });
+
+  it("skips anonymized, archived, and do-not-service rows", () => {
+    expect(
+      pickStartTarget([
+        candidate({ id: "erased", anonymizedAt: new Date("2026-02-01T00:00:00Z") }),
+        candidate({ id: "archived", archivedAt: new Date("2026-02-01T00:00:00Z") }),
+        candidate({ id: "blocked", doNotService: true }),
+      ]),
+    ).toBeNull();
+    expect(pickStartTarget([])).toBeNull();
   });
 });
