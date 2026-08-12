@@ -122,7 +122,7 @@ export function FinancingPanel({
                   href={application.applyUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="break-all text-primary hover:underline"
+                  className="break-all text-link hover:underline"
                 >
                   {application.applyUrl}
                 </a>

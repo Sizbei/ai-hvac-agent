@@ -35,7 +35,7 @@ function ContactRow({
       <Icon className="size-4 shrink-0 text-muted-foreground" />
       {value ? (
         href ? (
-          <a href={href} className="truncate text-primary hover:underline">
+          <a href={href} className="truncate text-link hover:underline">
             {value}
           </a>
         ) : (

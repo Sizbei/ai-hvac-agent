@@ -19,8 +19,11 @@ export function BrandMark({ compact = false, onDark = false, className }: BrandM
     <div className={cn('flex items-center gap-2.5', className)}>
       <span
         className={cn(
-          'flex size-9 shrink-0 items-center justify-center rounded-xl shadow-sm',
-          'bg-gradient-to-br from-primary to-[oklch(0.62_0.13_222)] text-primary-foreground',
+          'flex size-9 shrink-0 items-center justify-center rounded-xl',
+          // Brand tokens, NOT --primary: primary is now the navy action color, so
+          // painting the lozenge from it would silently turn the logo navy. The
+          // Spears cyan lives in --brand-cyan / --brand-navy.
+          'bg-gradient-to-br from-brand-cyan to-brand-navy text-primary-foreground',
         )}
       >
         <Wind className="size-5" />

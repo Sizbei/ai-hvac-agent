@@ -170,7 +170,7 @@ export function ExtractionCard({ extraction, onConfirm }: ExtractionCardProps) {
       <Card className="w-full max-w-[90%]" size="sm">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <ClipboardCheck className="size-4 text-primary" />
+            <ClipboardCheck className="size-4 text-marker" />
             Service request summary
           </CardTitle>
         </CardHeader>

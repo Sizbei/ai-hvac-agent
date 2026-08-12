@@ -202,7 +202,7 @@ export function AgendaView({
                 key={row.key}
                 className="mt-4 flex items-baseline gap-2 first:mt-0"
               >
-                <h2 className="text-base font-semibold text-primary">{row.label}</h2>
+                <h2 className="text-base font-semibold text-marker">{row.label}</h2>
                 <span className="text-xs text-muted-foreground">
                   {row.count} booking{row.count === 1 ? '' : 's'}
                 </span>

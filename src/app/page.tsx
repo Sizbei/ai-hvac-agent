@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import { Bricolage_Grotesque } from 'next/font/google';
 import { MobileNav } from './_components/mobile-nav';
 import {
   ArrowRight,
@@ -20,12 +19,6 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { BUSINESS_BASE_LOCATION } from '@/lib/config/business-location';
-
-const display = Bricolage_Grotesque({
-  subsets: ['latin'],
-  weight: ['600', '700', '800'],
-  variable: '--font-display',
-});
 
 /** Verified Spears Services contact facts (spearsservices.com). */
 const SPEARS = {
@@ -90,7 +83,7 @@ function delay(ms: number): React.CSSProperties {
 
 export default function Home() {
   return (
-    <div className={`${display.variable} relative flex min-h-full flex-1 flex-col overflow-x-clip bg-background text-foreground`}>
+    <div className="relative flex min-h-full flex-1 flex-col overflow-x-clip bg-background text-foreground">
       {/* Atmosphere — pinned to the top of the page so the blurred glows and grid
           never paint into the empty space below the footer. */}
       <div className="lp-mesh pointer-events-none absolute inset-x-0 top-0 -z-10 h-[120vh] overflow-hidden" aria-hidden />
@@ -121,7 +114,7 @@ export default function Home() {
               <Wind className="size-5" strokeWidth={2.25} />
             </span>
             <span className="flex flex-col leading-none">
-              <span className="font-[family-name:var(--font-display)] text-lg font-bold tracking-tight">
+              <span className="font-heading text-lg font-bold tracking-tight">
                 Spears&nbsp;Services
               </span>
               <span className="text-xs font-medium text-muted-foreground">
@@ -173,7 +166,7 @@ export default function Home() {
             </div>
 
             <h1
-              className="lp-rise mt-5 font-[family-name:var(--font-display)] text-5xl font-extrabold leading-[1.02] tracking-tight md:text-6xl"
+              className="lp-rise mt-5 font-heading text-5xl font-extrabold leading-[1.02] tracking-tight md:text-6xl"
               style={delay(80)}
             >
               Commercial repair experts,{' '}
@@ -264,7 +257,7 @@ export default function Home() {
                 <div className="flex size-11 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
                   <s.icon className="size-5" strokeWidth={2} />
                 </div>
-                <h3 className="mt-4 font-[family-name:var(--font-display)] text-lg font-semibold tracking-tight">
+                <h3 className="mt-4 font-heading text-lg font-semibold tracking-tight">
                   {s.title}
                 </h3>
                 <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
@@ -292,7 +285,7 @@ export default function Home() {
                   <w.icon className="size-5" strokeWidth={2} />
                 </div>
                 <div>
-                  <h3 className="font-[family-name:var(--font-display)] text-base font-semibold tracking-tight">
+                  <h3 className="font-heading text-base font-semibold tracking-tight">
                     {w.title}
                   </h3>
                   <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
@@ -346,7 +339,7 @@ export default function Home() {
           <div className="relative overflow-hidden rounded-3xl border border-border/70 bg-gradient-to-br from-primary/8 via-card to-[var(--hvac-accent)]/8 p-10 text-center md:p-16">
             <Flame className="lp-float absolute -right-6 -top-6 size-32 text-[var(--hvac-accent)]/10" aria-hidden />
             <Wind className="lp-float absolute -bottom-8 -left-6 size-32 text-primary/10" style={delay(800)} aria-hidden />
-            <h2 className="relative font-[family-name:var(--font-display)] text-3xl font-bold tracking-tight md:text-4xl">
+            <h2 className="relative font-heading text-3xl font-bold tracking-tight md:text-4xl">
               Equipment down? Let&apos;s get you back up and running.
             </h2>
             <p className="relative mx-auto mt-3 max-w-xl text-muted-foreground">
@@ -381,7 +374,7 @@ export default function Home() {
         <div className="mx-auto max-w-6xl px-5 py-10">
           <div className="flex flex-col gap-8 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <span className="font-[family-name:var(--font-display)] text-lg font-bold tracking-tight">
+              <span className="font-heading text-lg font-bold tracking-tight">
                 Spears&nbsp;Services
               </span>
               <p className="mt-1 text-sm text-muted-foreground">AI intake demo</p>
@@ -451,7 +444,7 @@ function SectionHeading({ eyebrow, title, subtitle }: SectionHeadingProps) {
         <span className="h-px w-5 bg-primary/50" aria-hidden />
         {eyebrow}
       </span>
-      <h2 className="mt-3 font-[family-name:var(--font-display)] text-3xl font-bold tracking-tight text-balance md:text-[2.6rem] md:leading-[1.1]">
+      <h2 className="mt-3 font-heading text-3xl font-bold tracking-tight text-balance md:text-[2.6rem] md:leading-[1.1]">
         {title}
       </h2>
       <p className="mt-4 text-lg text-muted-foreground">{subtitle}</p>
@@ -478,7 +471,7 @@ function SurfaceCard({ icon: Icon, tone, title, href, cta, points }: SurfaceCard
       <div className={`flex size-11 items-center justify-center rounded-xl bg-muted ${accent}`}>
         <Icon className="size-5" strokeWidth={2} />
       </div>
-      <h3 className="mt-4 font-[family-name:var(--font-display)] text-xl font-semibold tracking-tight">
+      <h3 className="mt-4 font-heading text-xl font-semibold tracking-tight">
         {title}
       </h3>
       <ul className="mt-4 flex flex-1 flex-col gap-2.5">

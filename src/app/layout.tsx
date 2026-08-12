@@ -1,16 +1,23 @@
 import type { Metadata } from "next";
-import { Inter, Bricolage_Grotesque } from "next/font/google";
+import { Archivo, IBM_Plex_Mono } from "next/font/google";
 import { MaskedAnalytics } from "@/components/masked-analytics";
 import "./globals.css";
 
-const inter = Inter({
+/** One family for everything. The `wdth` axis carries the condensed micro
+ * labels (`.u-label`), so no second display face is loaded. */
+const archivo = Archivo({
   subsets: ["latin"],
+  axes: ["wdth"],
+  variable: "--font-archivo",
+  display: "swap",
 });
 
-const bricolage = Bricolage_Grotesque({
+/** Mono is mandatory for money, ids, dates, durations, counts, percentages. */
+const plexMono = IBM_Plex_Mono({
   subsets: ["latin"],
-  weight: ["600", "700", "800"],
-  variable: "--font-display",
+  weight: ["400", "500", "600"],
+  variable: "--font-plex-mono",
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -24,7 +31,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${inter.className} ${bricolage.variable} h-full antialiased`}>
+    <html lang="en" className={`${archivo.variable} ${plexMono.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col">
         {children}
         <MaskedAnalytics />

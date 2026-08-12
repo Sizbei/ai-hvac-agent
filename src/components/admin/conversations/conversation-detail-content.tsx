@@ -334,7 +334,7 @@ export function ConversationDetailContent({
               <p className="mt-1.5 text-xs text-muted-foreground">
                 {channelLabel(detail.channel)} · {detail.turnCount} turns ·{' '}
                 {detail.referenceNumber ? (
-                  <span className="font-medium text-primary">{detail.referenceNumber}</span>
+                  <span className="font-medium text-marker">{detail.referenceNumber}</span>
                 ) : (
                   'No linked request'
                 )}
