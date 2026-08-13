@@ -22,6 +22,7 @@ import { EmptyState } from '@/components/admin/ui/empty-state';
 import { SegmentedControl } from '@/components/ui/segmented-control';
 import { Pager } from '@/components/admin/ui/pager';
 import { TableSkeleton, StatTileSkeleton } from '@/components/admin/skeletons';
+import { StatStrip } from '@/components/admin/ui/stat-card';
 import { SummaryBand } from '@/components/admin/invoices/summary-band';
 import { InvoiceRow } from '@/components/admin/invoices/invoice-row';
 import { invoiceRef } from '@/lib/admin/invoice-collectible';
@@ -343,22 +344,50 @@ export default function InvoicesPage() {
         </Alert>
       )}
 
-      {/* toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        {/* segmented filter */}
-        <SegmentedControl<Filter>
-          aria-label="Filter invoices by state"
-          options={FILTERS.map((f) => ({
-            value: f.value,
-            label: f.label,
-            badge:
-              f.value === 'overdue' && overdueCount > 0 ? overdueCount : undefined,
-          }))}
-          value={filter}
-          onChange={(v) => { setFilter(v); setPage(1); }}
-        />
+      {/* Filter band — one fused strip (spec: filter rows are fused strips).
+          Two registers on a shared hairline: the primary state filter + search
+          on top, the refinements below. Every control is 34 px, so the band
+          reads as one machined instrument instead of six loose controls. */}
+      <div className="overflow-hidden rounded-lg border border-border-strong bg-surface">
+        {/* register 1 — primary filter + search */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2">
+          <SegmentedControl<Filter>
+            aria-label="Filter invoices by state"
+            options={FILTERS.map((f) => ({
+              value: f.value,
+              label: f.label,
+              badge:
+                f.value === 'overdue' && overdueCount > 0 ? overdueCount : undefined,
+            }))}
+            value={filter}
+            onChange={(v) => { setFilter(v); setPage(1); }}
+          />
 
-        <div className="flex flex-wrap items-center gap-3">
+          {/* search — the result count sits inline so it can never shift the
+              band's height while typing. */}
+          <div className="ml-auto flex items-center gap-2.5">
+            {debouncedSearch && (
+              <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
+                {total} result{total === 1 ? '' : 's'}
+              </span>
+            )}
+            <div className="relative w-full sm:w-72">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-foreground-faint" />
+              <Input
+                type="search"
+                placeholder="Search customer or invoice ID…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Escape') { setSearch(''); setDebouncedSearch(''); } }}
+                className="pl-8"
+                aria-label="Search invoices"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* register 2 — refinements */}
+        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-2 border-t border-border px-4 py-2">
           {/* source segmented control — hidden when only one source type exists */}
           {sourceOptions.length > 1 && (
             <SegmentedControl<SourceValue>
@@ -374,8 +403,13 @@ export default function InvoicesPage() {
             value={sortKey}
             onValueChange={(v) => { setSortKey(v as InvoiceSortKey); setPage(1); }}
           >
-            <SelectTrigger aria-label="Sort invoices" className="w-[180px]">
-              <SelectValue />
+            <SelectTrigger aria-label="Sort invoices" className="w-[168px]">
+              {/* Base UI renders the raw value unless it is given a formatter —
+                  without this the trigger read "age-oldest" instead of the
+                  option label. */}
+              <SelectValue>
+                {(v: string) => SORT_OPTIONS.find((o) => o.value === v)?.label ?? v}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               {SORT_OPTIONS.map((opt) => (
@@ -388,63 +422,38 @@ export default function InvoicesPage() {
           <Button
             type="button"
             variant={unreminded ? 'secondary' : 'outline'}
-            size="sm"
             onClick={() => setUnreminded((v) => !v)}
             aria-pressed={unreminded}
           >
             Never reminded
           </Button>
 
-          {/* Balance range inputs (dollars in UI, converted to cents) */}
-          <div className="flex items-center gap-1.5">
-            <div className="flex items-center gap-1 rounded-md border border-input bg-transparent px-3 shadow-xs focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50">
-              <span className="shrink-0 text-xs text-muted-foreground">$</span>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder="Min"
-                value={minDollars}
-                onChange={(e) => setMinDollars(e.target.value)}
-                className="w-20 bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground"
-                aria-label="Minimum balance in dollars"
-              />
-            </div>
-            <span className="text-xs text-muted-foreground">–</span>
-            <div className="flex items-center gap-1 rounded-md border border-input bg-transparent px-3 shadow-xs focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50">
-              <span className="shrink-0 text-xs text-muted-foreground">$</span>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder="Max"
-                value={maxDollars}
-                onChange={(e) => setMaxDollars(e.target.value)}
-                className="w-20 bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground"
-                aria-label="Maximum balance in dollars"
-              />
-            </div>
-          </div>
-
-          {/* search */}
-          <div className="flex flex-col gap-1">
-            <div className="relative w-full sm:w-64">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                type="search"
-                placeholder="Search customer or invoice ID…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Escape') { setSearch(''); setDebouncedSearch(''); } }}
-                className="pl-9"
-                aria-label="Search invoices"
-              />
-            </div>
-            {debouncedSearch && (
-              <span className="px-1 text-xs text-muted-foreground">
-                {total} result{total === 1 ? '' : 's'}
-              </span>
-            )}
+          {/* Balance range — one fused field: a single $ marker labels the pair
+              and an internal hairline splits it, so two empty boxes stop
+              reading as loose clutter. Dollars in UI, converted to cents. */}
+          <div className="ml-auto flex h-[34px] items-center rounded-md border border-border-input bg-surface-raised shadow-[inset_0_1px_2px_oklch(0.245_0.010_95/0.05)] transition-[border-color] duration-[var(--dur-hover)] focus-within:border-primary focus-within:outline-2 focus-within:-outline-offset-1 focus-within:outline-ring">
+            <span aria-hidden="true" className="pl-2.5 pr-1 font-mono text-[13px] text-muted-foreground">$</span>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="Min"
+              value={minDollars}
+              onChange={(e) => setMinDollars(e.target.value)}
+              className="w-[62px] bg-transparent font-mono text-[13px] tabular-nums outline-none placeholder:font-sans placeholder:text-foreground-faint"
+              aria-label="Minimum balance in dollars"
+            />
+            <span aria-hidden="true" className="h-[18px] w-px shrink-0 bg-border" />
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="Max"
+              value={maxDollars}
+              onChange={(e) => setMaxDollars(e.target.value)}
+              className="w-[62px] bg-transparent pl-2.5 pr-2.5 font-mono text-[13px] tabular-nums outline-none placeholder:font-sans placeholder:text-foreground-faint"
+              aria-label="Maximum balance in dollars"
+            />
           </div>
         </div>
       </div>
@@ -452,12 +461,14 @@ export default function InvoicesPage() {
       {/* list */}
       {isLoading ? (
         <>
-          {/* Three tiles — matches the loaded SummaryBand exactly. */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          {/* Three tiles in the same fused strip the loaded SummaryBand uses —
+              loading and loaded share one silhouette, so nothing re-draws its
+              own borders when the stats land. */}
+          <StatStrip>
             <StatTileSkeleton />
             <StatTileSkeleton />
             <StatTileSkeleton />
-          </div>
+          </StatStrip>
           <TableSkeleton rows={8} cols={6} />
         </>
       ) : displayRows.length === 0 ? (
@@ -483,8 +494,12 @@ export default function InvoicesPage() {
       ) : (
         <>
           <div className="overflow-x-auto rounded-lg border border-border-strong bg-surface">
-            {/* header row — 32 px sunken band, matching DataTableShell */}
-            <div className="grid h-8 grid-cols-[minmax(200px,1fr)_90px_120px_140px_232px_32px] items-center gap-4 border-b border-border-strong bg-surface-sunken px-6">
+            {/* header row — 32 px sunken band, matching DataTableShell. The
+                hairline is an inset shadow (spec) so it never adds height, and
+                the 16 px gutter is the one every stacked panel on this page
+                shares: KPI label, filter control, header label and first cell
+                text all land on the same vertical line. */}
+            <div className="grid h-8 grid-cols-[minmax(200px,1fr)_90px_120px_140px_232px_32px] items-center gap-4 bg-surface-sunken px-4 shadow-[inset_0_-1px_0_var(--border-strong)]">
               {(
                 [
                   { key: 'customer', label: 'Customer' },

@@ -17,14 +17,6 @@ import { SyncPill } from '@/components/admin/sync-pill';
 import { InvoiceStateBadge } from './invoice-state-badge';
 import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
 
-/** Two-letter initials from a display name. */
-function initials(name: string | null): string {
-  if (!name) return '?';
-  const parts = name.trim().split(/\s+/);
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-}
-
 /** True while the 6h re-send cooldown is still active. */
 function isCooldownActive(lastReminderSentAt: string | null): boolean {
   return !canResend(lastReminderSentAt, Date.now(), REMINDER_COOLDOWN_MS);
@@ -70,27 +62,21 @@ function InvoiceRowInner({ invoice, onRemind, onCopyPayLink, onVoid, pending = f
             onToggle(invoice.id);
           }
         }}
-        className="grid grid-cols-[minmax(200px,1fr)_90px_120px_140px_232px_32px] items-center gap-4 border-t border-border px-6 py-2.5 transition-colors hover:bg-row-hover first:border-t-0 w-full text-left cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+        className="grid grid-cols-[minmax(200px,1fr)_90px_120px_140px_232px_32px] items-center gap-4 border-t border-border px-4 py-2.5 transition-colors hover:bg-row-hover first:border-t-0 w-full text-left cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
       >
-        {/* Customer — square 4 px sunken tile with mono initials. The old
-            deterministic-hue tiles painted a rainbow down the column. */}
-        <div className="flex min-w-0 items-center gap-3">
-          <span
-            aria-hidden="true"
-            className="inline-flex size-8 shrink-0 items-center justify-center rounded-[4px] bg-surface-sunken font-mono text-[11px] font-medium text-muted-foreground"
-          >
-            {initials(invoice.customerName)}
-          </span>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-medium">
-              {invoice.customerName ?? '—'}
-            </p>
-            <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-              <span className="font-mono tabular-nums">{invoiceRef(invoice.id)}</span>
-              {invoice.syncedSource && (
-                <SyncPill source={invoice.syncedSource} size="md" />
-              )}
-            </div>
+        {/* Customer — name over its mono invoice ref. The initials tile that
+            used to lead this cell carried no information the name beside it
+            didn't, and it pushed the first cell off the gutter every other
+            panel on the page shares. */}
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium">
+            {invoice.customerName ?? '—'}
+          </p>
+          <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+            <span className="font-mono tabular-nums">{invoiceRef(invoice.id)}</span>
+            {invoice.syncedSource && (
+              <SyncPill source={invoice.syncedSource} size="md" />
+            )}
           </div>
         </div>
 
@@ -200,7 +186,7 @@ function InvoiceRowInner({ invoice, onRemind, onCopyPayLink, onVoid, pending = f
       {/* Expansion panel — no border-t so it reads as one unit with its row;
           the NEXT row's border-t separates it from what follows. */}
       {isExpanded && (
-        <div className="bg-surface-sunken px-6 py-4 animate-in fade-in-0 slide-in-from-top-1 duration-100 motion-reduce:animate-none">
+        <div className="bg-surface-sunken px-4 py-4 animate-in fade-in-0 slide-in-from-top-1 duration-100 motion-reduce:animate-none">
           <div className="flex flex-wrap gap-6">
             {/* Key facts */}
             <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
