@@ -70,6 +70,15 @@ jobs:
       # email and address — plus the production DATABASE_URL in scope. This
       # repo is public, so dispatch is broadly reachable. Same rule for
       # FP_SYNC_ORG_ID: a repo variable is not a trust boundary.
+      #
+      # WHY --split-shared-contacts IS ON HERE (SPEC §2.0 "steady state"):
+      # migrations 0045+0046 are applied on prod and the flagged backfill has
+      # completed against it, so future FieldPulse customers that share an email
+      # or phone with an existing row keep getting their own native row instead
+      # of silently merging onto one. The flag is a mis-ordering safety, not a
+      # permanent skip: the customers phase probes pg_indexes for the dropped
+      # legacy contact uniques and aborts the run loudly if they are ever back,
+      # so this can never corrupt data — it can only fail fast.
       - name: Run FieldPulse full sweep
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -83,4 +92,5 @@ jobs:
             --org "$ORG_ID" \
             --phase "${PHASES:-technicians,customers,jobs,invoices,estimates,payments,assets,comments,locations,items,job-metrics}" \
             --yes \
-            --allow-prod
+            --allow-prod \
+            --split-shared-contacts
