@@ -29,6 +29,15 @@ Migrations auto-run in the build. Vercel Hobby caps crons at daily.
   (dev server must already be running). Look at the image yourself.
 - `prod-smoke.sh` — post-deploy probe pack (pages, demo guards, streaming).
 - `verify-skills.mjs` — every path cited in `.claude/skills` must exist.
+- `seed-org.mjs --name "…" [--customers N] [--invoices N]` — seed a fictional
+  demo org (dev only; `--force` reseeds that org).
+
+## Multiple demo orgs
+
+The dev branch carries several fictional tenants; `seed-org.mjs` adds another
+(customers, invoices, pricebook, technicians, requests). `mint-admin-session.mjs`
+honors `MINT_ORG_ID=<org id>` to scope the session to one of them instead of
+"whichever super_admin comes first" — `screenshot-page.mjs` passes it through.
 
 ## Hard invariants
 
