@@ -211,15 +211,19 @@
   --chart-5: oklch(0.46 0.090 320);
   --chart-6: oklch(0.58 0.020 95);
 
-  /* ── sidebar: light sunken rail (the dark navy rail is deleted) ── */
-  --sidebar: var(--surface-sunken);
-  --sidebar-foreground: oklch(0.330 0.008 95);
-  --sidebar-primary: var(--primary);
+  /* ── sidebar: flat Spears-navy two-tone rail against the graphite content.
+   * NOT the 2020 gradient rail: no gradient, no glow, hairline navy dividers,
+   * Archivo type, cyan doing the accent work. Owner-requested "life". ── */
+  --sidebar: oklch(0.245 0.055 258);
+  --sidebar-foreground: oklch(0.85 0.02 250);      /* blue-white, 8.9:1 on rail */
+  --sidebar-foreground-dim: oklch(0.68 0.03 252);  /* rest icons / secondary */
+  --sidebar-primary: var(--brand-cyan);
   --sidebar-primary-foreground: oklch(0.99 0 0);
-  --sidebar-accent: oklch(0.905 0.005 95);
-  --sidebar-accent-foreground: var(--foreground);
-  --sidebar-border: oklch(0.870 0.006 95);
-  --sidebar-ring: var(--ring);
+  --sidebar-accent: oklch(0.30 0.055 258);         /* hover fill */
+  --sidebar-accent-foreground: oklch(0.97 0.01 250);
+  --sidebar-active: oklch(1 0 0 / 0.14);           /* active item fill */
+  --sidebar-border: oklch(0.33 0.05 258);          /* hairlines on navy */
+  --sidebar-ring: var(--brand-cyan);
 
   /* ── brand (BrandMark + marketing only) ── */
   --brand-cyan: oklch(0.72 0.13 220);

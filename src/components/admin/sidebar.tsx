@@ -48,14 +48,14 @@ function initialsOf(name: string): string {
 /** One 30px rail row: nav links, the search button, and the env links all share
  *  this geometry so the rail reads as a single ruled column. */
 const RAIL_ROW =
-  'flex h-[30px] w-full items-center gap-2.5 rounded-[4px] px-2.5 text-sm ' +
+  'flex h-9 w-full items-center gap-2.5 rounded-[4px] px-2.5 text-sm ' +
   'text-sidebar-foreground transition-colors duration-100 ' +
-  'hover:bg-sidebar-accent hover:text-foreground ' +
-  'focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring';
+  'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground ' +
+  'focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-sidebar-ring';
 
 /** Uppercase group label — the transform lives in the .u-label CSS class so the
  *  source strings stay sentence case (copy canon). */
-const GROUP_LABEL = 'u-label px-2.5 pb-1 text-muted-foreground';
+const GROUP_LABEL = 'u-label px-2.5 pb-1 [color:var(--sidebar-foreground-dim)]';
 
 export function Sidebar({
   adminName,
@@ -123,7 +123,7 @@ export function Sidebar({
             // Active: soft marker fill + a 2px marker edge drawn as an inset
             // box-shadow (no extra element, no layout shift).
             isActive &&
-              'bg-primary-soft font-semibold text-foreground shadow-[inset_2px_0_0_0_var(--marker)] hover:bg-primary-soft hover:text-foreground',
+              'bg-[var(--sidebar-active)] font-semibold text-white shadow-[inset_3px_0_0_0_var(--sidebar-primary)] hover:bg-[var(--sidebar-active)] hover:text-white',
             collapsed && 'justify-center px-0',
           )}
         >
@@ -131,15 +131,15 @@ export function Sidebar({
             className={cn(
               'size-4 shrink-0 transition-colors',
               isActive
-                ? 'text-marker'
-                : 'text-foreground-faint group-hover/nav:text-muted-foreground',
+                ? 'text-sidebar-primary'
+                : '[color:var(--sidebar-foreground-dim)] group-hover/nav:text-sidebar-accent-foreground',
             )}
           />
           {!collapsed && <span className="truncate">{item.label}</span>}
           {showBadge && !collapsed && (
             <span
               aria-label={badge.srLabel}
-              className="ml-auto inline-flex items-center gap-1 font-mono text-[11px] font-medium tabular-nums text-warning-strong"
+              className="ml-auto inline-flex items-center gap-1 font-mono text-[11px] font-medium tabular-nums text-warning"
             >
               <span aria-hidden="true" className="text-[7px] leading-none">
                 ◆
@@ -150,7 +150,7 @@ export function Sidebar({
           {showBadge && collapsed && (
             <span
               aria-label={badge.srLabel}
-              className="absolute right-1.5 top-1.5 size-[6px] rotate-45 bg-warning-strong"
+              className="absolute right-1.5 top-1.5 size-[6px] rotate-45 bg-warning"
             />
           )}
         </Link>
@@ -192,13 +192,13 @@ export function Sidebar({
           <div className="flex h-full flex-col">
             <div className="flex h-16 items-center border-b border-sidebar-border px-4">
               <div className="flex flex-col gap-0.5">
-                <BrandMark />
+                <BrandMark onDark />
                 <EnvBadge />
               </div>
               <Button
                 variant="ghost"
                 size="icon-sm"
-                className="ml-auto text-sidebar-foreground hover:bg-sidebar-accent hover:text-foreground"
+                className="ml-auto text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                 onClick={onMobileClose}
                 aria-label="Close navigation"
               >
@@ -215,9 +215,9 @@ export function Sidebar({
                 }
                 className={RAIL_ROW}
               >
-                <Search className="size-4 shrink-0 text-foreground-faint" />
+                <Search className="size-4 shrink-0 [color:var(--sidebar-foreground-dim)]" />
                 <span className="flex-1 text-left">Search</span>
-                <kbd className="font-mono text-[11px] text-foreground-faint">⌘K</kbd>
+                <kbd className="font-mono text-[11px] [color:var(--sidebar-foreground-dim)]">⌘K</kbd>
               </button>
             </div>
 
@@ -248,15 +248,15 @@ export function Sidebar({
                   {initialsOf(adminName)}
                 </span>
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-foreground">{adminName}</p>
-                  <p className="truncate text-xs text-muted-foreground">{adminEmail}</p>
+                  <p className="truncate text-sm font-medium text-white">{adminName}</p>
+                  <p className="truncate text-xs [color:var(--sidebar-foreground-dim)]">{adminEmail}</p>
                 </div>
               </div>
               <Button
                 variant="ghost"
                 size="default"
                 onClick={handleLogout}
-                className="mt-1 w-full justify-start text-sidebar-foreground hover:bg-sidebar-accent hover:text-danger-strong"
+                className="mt-1 w-full justify-start text-sidebar-foreground hover:bg-sidebar-accent hover:text-white"
               >
                 <LogOut className="size-4" />
                 <span>Sign out</span>
@@ -287,10 +287,10 @@ export function Sidebar({
             )}
           >
             {isCollapsed ? (
-              <BrandMark compact />
+              <BrandMark compact onDark />
             ) : (
               <div className="flex flex-col gap-0.5">
-                <BrandMark />
+                <BrandMark onDark />
                 <EnvBadge />
               </div>
             )}
@@ -309,7 +309,7 @@ export function Sidebar({
                     className={cn(RAIL_ROW, 'justify-center px-0')}
                     aria-label="Search"
                   >
-                    <Search className="size-4 shrink-0 text-foreground-faint" />
+                    <Search className="size-4 shrink-0 [color:var(--sidebar-foreground-dim)]" />
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="right">Search ⌘K</TooltipContent>
@@ -322,9 +322,9 @@ export function Sidebar({
                 }
                 className={RAIL_ROW}
               >
-                <Search className="size-4 shrink-0 text-foreground-faint" />
+                <Search className="size-4 shrink-0 [color:var(--sidebar-foreground-dim)]" />
                 <span className="flex-1 text-left">Search</span>
-                <kbd className="font-mono text-[11px] text-foreground-faint">⌘K</kbd>
+                <kbd className="font-mono text-[11px] [color:var(--sidebar-foreground-dim)]">⌘K</kbd>
               </button>
             )}
           </div>
@@ -382,7 +382,7 @@ export function Sidebar({
                 </TooltipTrigger>
                 <TooltipContent side="right">
                   <p className="font-medium">{adminName}</p>
-                  <p className="text-xs text-muted-foreground">{adminEmail}</p>
+                  <p className="text-xs [color:var(--sidebar-foreground-dim)]">{adminEmail}</p>
                 </TooltipContent>
               </Tooltip>
             ) : (
@@ -391,8 +391,8 @@ export function Sidebar({
                   {initialsOf(adminName)}
                 </span>
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-foreground">{adminName}</p>
-                  <p className="truncate text-xs text-muted-foreground">{adminEmail}</p>
+                  <p className="truncate text-sm font-medium text-white">{adminName}</p>
+                  <p className="truncate text-xs [color:var(--sidebar-foreground-dim)]">{adminEmail}</p>
                 </div>
               </div>
             )}
@@ -426,7 +426,7 @@ export function Sidebar({
                     variant="ghost"
                     size="icon"
                     onClick={handleLogout}
-                    className="w-full text-sidebar-foreground hover:bg-sidebar-accent hover:text-danger-strong"
+                    className="w-full text-sidebar-foreground hover:bg-sidebar-accent hover:text-white"
                   >
                     <LogOut className="size-4" />
                   </Button>
@@ -438,7 +438,7 @@ export function Sidebar({
                 variant="ghost"
                 size="default"
                 onClick={handleLogout}
-                className="w-full justify-start text-sidebar-foreground hover:bg-sidebar-accent hover:text-danger-strong"
+                className="w-full justify-start text-sidebar-foreground hover:bg-sidebar-accent hover:text-white"
               >
                 <LogOut className="size-4" />
                 <span>Sign out</span>
