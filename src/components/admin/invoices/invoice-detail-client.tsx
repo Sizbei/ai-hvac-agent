@@ -361,6 +361,7 @@ export function InvoiceDetailClient({
               <Button
                 variant="outline"
                 size="sm"
+                className="min-w-[132px]"
                 disabled={isSendingReminder}
                 onClick={() => void handleSendReminder()}
               >
@@ -368,11 +369,15 @@ export function InvoiceDetailClient({
                 {reminderSentMsg ?? (isSendingReminder ? 'Sending…' : 'Send reminder')}
               </Button>
             )}
-            {/* Copy pay link — hidden for synced invoices */}
+            {/* Copy pay link — hidden for synced invoices. Both this and the
+                reminder button swap their label to a transient status
+                ("Sent!", "Copied!", "Generating…"); the min-width keeps the
+                whole right-aligned header row from reflowing when they do. */}
             {!invoice.syncedSource && (
               <Button
                 variant="outline"
                 size="sm"
+                className="min-w-[132px]"
                 disabled={isCopyingLink}
                 onClick={() => void handleCopyPayLink()}
               >

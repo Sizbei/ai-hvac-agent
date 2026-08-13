@@ -70,7 +70,7 @@ function InvoiceRowInner({ invoice, onRemind, onCopyPayLink, onVoid, pending = f
             onToggle(invoice.id);
           }
         }}
-        className="grid grid-cols-[minmax(200px,1fr)_90px_120px_140px_180px_32px] items-center gap-4 border-t border-border px-6 py-2.5 transition-colors hover:bg-row-hover first:border-t-0 w-full text-left cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+        className="grid grid-cols-[minmax(200px,1fr)_90px_120px_140px_232px_32px] items-center gap-4 border-t border-border px-6 py-2.5 transition-colors hover:bg-row-hover first:border-t-0 w-full text-left cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
       >
         {/* Customer — square 4 px sunken tile with mono initials. The old
             deterministic-hue tiles painted a rainbow down the column. */}
@@ -122,9 +122,15 @@ function InvoiceRowInner({ invoice, onRemind, onCopyPayLink, onVoid, pending = f
           )}
         </div>
 
-        {/* Action rail — stopPropagation so clicks don't toggle expansion */}
+        {/* Action rail — stopPropagation so clicks don't toggle expansion.
+            Fixed-width, right-aligned and nowrap: whatever state a row is in
+            (button / reminded pill / em-dash), its control ends on the same
+            right edge, just left of the ⋯ trigger. The "last …" meta therefore
+            sits BEFORE the button on one line — rendered after it, it wrapped
+            to two ragged lines and shoved the button ~50 px left of every
+            other row's. */}
         <div
-          className="flex items-center justify-end gap-2"
+          className="flex items-center justify-end gap-2 whitespace-nowrap"
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
         >
@@ -134,17 +140,19 @@ function InvoiceRowInner({ invoice, onRemind, onCopyPayLink, onVoid, pending = f
                 Send reminder
               </Button>
             ) : cooldownActive ? (
-              <span className="inline-flex items-center gap-1 rounded-[3px] px-2 py-1 text-xs font-medium text-success-strong">
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-[3px] px-2 py-1 text-xs font-medium text-success-strong">
                 <CheckCircle className="size-3.5" aria-hidden="true" />
                 {`Reminded ${remindedRel(invoice.lastReminderSentAt)}`}
               </span>
             ) : (
-              <div className="flex items-center gap-1.5">
+              <>
+                <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
+                  {`last ${remindedRel(invoice.lastReminderSentAt)}`}
+                </span>
                 <Button size="sm" disabled={pending} onClick={(e) => { e.stopPropagation(); onRemind(invoice.id); }}>
                   Remind again
                 </Button>
-                <span className="text-xs text-muted-foreground">{`· last ${remindedRel(invoice.lastReminderSentAt)}`}</span>
-              </div>
+              </>
             )
           ) : (
             <span className="text-xs text-muted-foreground">—</span>

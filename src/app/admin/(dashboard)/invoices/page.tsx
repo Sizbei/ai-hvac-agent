@@ -484,7 +484,7 @@ export default function InvoicesPage() {
         <>
           <div className="overflow-x-auto rounded-lg border border-border-strong bg-surface">
             {/* header row — 32 px sunken band, matching DataTableShell */}
-            <div className="grid h-8 grid-cols-[minmax(200px,1fr)_90px_120px_140px_180px_32px] items-center gap-4 border-b border-border-strong bg-surface-sunken px-6">
+            <div className="grid h-8 grid-cols-[minmax(200px,1fr)_90px_120px_140px_232px_32px] items-center gap-4 border-b border-border-strong bg-surface-sunken px-6">
               {(
                 [
                   { key: 'customer', label: 'Customer' },
