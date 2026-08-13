@@ -21,19 +21,22 @@ export default async function DashboardLayout({
   // subscription is past_due/suspended. Degrade-safe — a query miss leaves the
   // org treated as active (no banner) rather than blocking the dashboard.
   let billingAttention = false;
+  let orgName: string | undefined;
   try {
     const [org] = await db
-      .select({ status: organizations.status })
+      .select({ status: organizations.status, name: organizations.name })
       .from(organizations)
       .where(eq(organizations.id, session.organizationId))
       .limit(1);
     billingAttention = org ? !isOrgActive(org) : false;
+    orgName = org?.name ?? undefined;
   } catch {
     billingAttention = false;
   }
 
   return (
     <DashboardShell
+      orgName={orgName}
       adminName={session.name}
       adminEmail={session.email}
       role={session.role}

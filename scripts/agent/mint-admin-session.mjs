@@ -19,9 +19,15 @@ const { signToken } = await import("../../src/lib/auth/config.ts");
 const { neon } = await import("@neondatabase/serverless");
 
 const sql = neon(process.env.DATABASE_URL);
+// Optional: scope the pick to one tenant (e.g. the fictional demo org) instead
+// of "whichever super_admin comes first". Unset = unchanged behavior.
+const orgId = process.env.MINT_ORG_ID || null;
 const [u] = await sql`
   SELECT id, email, name, role, organization_id
-  FROM users WHERE role = 'super_admin' AND is_active LIMIT 1`;
+  FROM users
+  WHERE role = 'super_admin' AND is_active
+    AND (${orgId}::uuid IS NULL OR organization_id = ${orgId}::uuid)
+  LIMIT 1`;
 if (!u) {
   console.error("no active super_admin in the dev DB");
   process.exit(1);

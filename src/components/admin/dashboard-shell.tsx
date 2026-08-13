@@ -11,6 +11,7 @@ import { NAV_GROUPS } from '@/components/admin/nav-items';
 import type { AdminRole } from '@/lib/auth/types';
 
 interface DashboardShellProps {
+  readonly orgName?: string;
   readonly adminName: string;
   readonly adminEmail: string;
   readonly role: AdminRole;
@@ -36,6 +37,7 @@ function useMobileTitle(): string | undefined {
 }
 
 export function DashboardShell({
+  orgName,
   adminName,
   adminEmail,
   role,
@@ -56,6 +58,7 @@ export function DashboardShell({
   return (
     <div className="flex h-dvh bg-background-admin dark:bg-background">
       <Sidebar
+        orgName={orgName}
         adminName={adminName}
         adminEmail={adminEmail}
         role={role}
