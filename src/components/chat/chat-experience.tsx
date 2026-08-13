@@ -52,6 +52,7 @@ export function ChatExperience({
 }: ChatExperienceProps) {
   const {
     messages,
+    companyName,
     status,
     isStreaming,
     extraction,
@@ -202,6 +203,7 @@ export function ChatExperience({
 
       <div className={containerClass}>
       <ChatHeader
+        companyName={companyName}
         status={status}
         onEscalate={() => setShowEscalation(true)}
         onNewConversation={handleNewConversation}

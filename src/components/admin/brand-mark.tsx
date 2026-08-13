@@ -2,6 +2,8 @@ import { Wind } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface BrandMarkProps {
+  /** Org display name; defaults to the Spears wordmark for legacy callers. */
+  readonly name?: string;
   /** Hide the wordmark text and show only the logo lozenge (collapsed sidebar). */
   readonly compact?: boolean;
   /** Render the wordmark in light ink for dark/navy surfaces (the sidebar). */
@@ -14,7 +16,7 @@ interface BrandMarkProps {
  * lozenge plus a two-line wordmark ("Spears Services" / "Service Console").
  * Colors come from the brand tokens so light and dark themes both read well.
  */
-export function BrandMark({ compact = false, onDark = false, className }: BrandMarkProps) {
+export function BrandMark({ name = 'Spears Services', compact = false, onDark = false, className }: BrandMarkProps) {
   return (
     <div className={cn('flex items-center gap-2.5', className)}>
       <span
@@ -36,7 +38,7 @@ export function BrandMark({ compact = false, onDark = false, className }: BrandM
               onDark ? 'text-white' : 'text-foreground',
             )}
           >
-            Spears Services
+            {name}
           </span>
           <span
             className={cn(

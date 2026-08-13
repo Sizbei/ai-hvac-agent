@@ -27,6 +27,7 @@ interface SessionData {
 }
 
 interface UseChatSessionReturn {
+  readonly companyName: string | null;
   readonly messages: readonly ChatMessage[];
   readonly status: SessionState;
   readonly isStreaming: boolean;
@@ -75,6 +76,7 @@ export function useChatSession(): UseChatSessionReturn {
   const [extraction, setExtraction] = useState<ExtractionResult | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [sessionError, setSessionError] = useState<string | null>(null);
+  const [companyName, setCompanyName] = useState<string | null>(null);
   const sessionCreatedRef = useRef(false);
   const previousStatusRef = useRef<string>('ready');
 
@@ -200,8 +202,9 @@ export function useChatSession(): UseChatSessionReturn {
         // IS the conversation's first turn (not a display-only bubble that
         // vanishes when they reply).
         const body = (await res.json().catch(() => null)) as {
-          data?: { greeting?: string | null };
+          data?: { greeting?: string | null; companyName?: string | null };
         } | null;
+        if (body?.data?.companyName) setCompanyName(body.data.companyName);
         setMessages([
           greetingUiMessage(body?.data?.greeting ?? FALLBACK_GREETING),
         ]);
@@ -487,6 +490,7 @@ export function useChatSession(): UseChatSessionReturn {
 
   return {
     messages,
+    companyName,
     status: sessionStatus,
     isStreaming,
     extraction,

@@ -114,8 +114,10 @@ export async function POST(request: NextRequest) {
     // assistant reply already exists so it never greets a second time.
     // Best-effort — a failure here must not fail session creation.
     let greeting: string | null = null;
+    let companyName: string | null = null;
     try {
       const config = await getRouterConfig(organizationId);
+      companyName = config.companyName ?? null;
       greeting = buildWelcomeMessage(
         brandInfoFromConfig(config.companyName, config.businessInfo),
       );
@@ -146,6 +148,7 @@ export async function POST(request: NextRequest) {
       {
         sessionId: session.id,
         status: session.status,
+        companyName,
         // The persisted welcome copy, so the client can seed its transcript
         // without a second round-trip. Null if persistence failed (the client
         // falls back to its generic copy).

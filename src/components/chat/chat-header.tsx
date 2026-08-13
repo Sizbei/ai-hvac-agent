@@ -6,6 +6,7 @@ import { BrandMark } from '@/components/admin/brand-mark';
 import type { SessionState } from '@/lib/types/chat';
 
 interface ChatHeaderProps {
+  readonly companyName?: string | null;
   readonly status: SessionState;
   readonly onEscalate: () => void;
   readonly onShowHistory?: () => void;
@@ -45,6 +46,7 @@ function isEscalationDisabled(status: SessionState): boolean {
 }
 
 export function ChatHeader({
+  companyName,
   status,
   onEscalate,
   onNewConversation,
@@ -66,7 +68,7 @@ export function ChatHeader({
         </div>
         <div className="min-w-0 leading-tight">
           <h1 className="truncate font-heading text-[15px] font-semibold tracking-tight">
-            Spears Services
+            {companyName ?? 'Spears Services'}
           </h1>
           <p className="truncate text-[11px] text-muted-foreground">
             AI assistant · our team follows up on every request

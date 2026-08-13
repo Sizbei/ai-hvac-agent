@@ -30,6 +30,7 @@ import { cn } from '@/lib/utils';
 
 
 interface SidebarProps {
+  readonly orgName?: string;
   readonly adminName: string;
   readonly adminEmail: string;
   readonly role: AdminRole;
@@ -58,6 +59,7 @@ const RAIL_ROW =
 const GROUP_LABEL = 'u-label px-2.5 pb-1 [color:var(--sidebar-foreground-dim)]';
 
 export function Sidebar({
+  orgName,
   adminName,
   adminEmail,
   role,
@@ -192,7 +194,7 @@ export function Sidebar({
           <div className="flex h-full flex-col">
             <div className="flex h-16 items-center border-b border-sidebar-border px-4">
               <div className="flex flex-col gap-0.5">
-                <BrandMark onDark />
+                <BrandMark name={orgName} onDark />
                 <EnvBadge />
               </div>
               <Button
@@ -290,7 +292,7 @@ export function Sidebar({
               <BrandMark compact onDark />
             ) : (
               <div className="flex flex-col gap-0.5">
-                <BrandMark onDark />
+                <BrandMark name={orgName} onDark />
                 <EnvBadge />
               </div>
             )}
