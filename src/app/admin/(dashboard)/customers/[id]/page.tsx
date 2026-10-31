@@ -47,6 +47,7 @@ import { NoteFormDialog } from '@/components/admin/note-form-dialog';
 import { FollowUpFormDialog } from '@/components/admin/follow-up-form-dialog';
 import { CustomerEditDialog } from '@/components/admin/customer-edit-dialog';
 import { ConfirmDialog } from '@/components/admin/confirm-dialog';
+import { LocationsSection } from '@/components/admin/customers/locations-section';
 import { CustomerBookingsSection } from '@/components/admin/customers/customer-bookings-section';
 import { ScopedEstimatesSection } from '@/components/admin/estimates/scoped-estimates-section';
 import { ScopedInvoicesSection } from '@/components/admin/invoices/scoped-invoices-section';
@@ -450,6 +451,9 @@ export default function CustomerDetailPage({
           </>
         }
       />
+
+      {/* Service locations */}
+      <LocationsSection customerId={id} />
 
       {/* Contact info */}
       <SectionCard

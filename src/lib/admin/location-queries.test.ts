@@ -8,7 +8,7 @@ import {
 } from "./location-queries";
 import { db } from "@/lib/db";
 
-vi.mock("@/lib/db", () => ({ db: { select: vi.fn(), insert: vi.fn() } }));
+vi.mock("@/lib/db", () => ({ db: { select: vi.fn(), insert: vi.fn(), execute: vi.fn() } }));
 vi.mock("@/lib/crypto", () => ({
   encrypt: (s: string) => `enc:${s}`,
   decrypt: (s: string) => s.replace(/^enc:/, ""),
@@ -50,6 +50,41 @@ describe("upsertCustomerLocation", () => {
       label: "rental",
     });
     expect(id).toBe("loc-new");
+  });
+
+  function mockInsertNew() {
+    const returning = vi.fn().mockResolvedValue([{ id: "loc-new" }]);
+    vi.mocked(db.insert).mockReturnValue({
+      values: vi.fn().mockReturnValue({
+        onConflictDoNothing: vi.fn().mockReturnValue({ returning }),
+      }),
+    } as never);
+  }
+
+  it("marks the first location primary with a guarded UPDATE and returns the id", async () => {
+    mockSelectOnce([]); // no existing by hash
+    mockInsertNew();
+    vi.mocked(db.execute).mockResolvedValueOnce({ rows: [] } as never);
+    await expect(upsertCustomerLocation(ORG, CUST, { address: "9 Elm St" })).resolves.toBe("loc-new");
+    expect(db.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("swallows a lost primary race (wrapped 23505)", async () => {
+    mockSelectOnce([]);
+    mockInsertNew();
+    vi.mocked(db.execute).mockRejectedValueOnce(
+      Object.assign(new Error("q"), {
+        cause: { code: "23505", constraint: "customer_locations_one_primary_idx" },
+      }),
+    );
+    await expect(upsertCustomerLocation(ORG, CUST, { address: "9 Elm St" })).resolves.toBe("loc-new");
+  });
+
+  it("rethrows a non-unique error from the primary UPDATE", async () => {
+    mockSelectOnce([]);
+    mockInsertNew();
+    vi.mocked(db.execute).mockRejectedValueOnce(new Error("boom"));
+    await expect(upsertCustomerLocation(ORG, CUST, { address: "9 Elm St" })).rejects.toThrow("boom");
   });
 });
 

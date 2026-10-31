@@ -4,10 +4,11 @@
  * One billing customer can hold many service locations. Address is encrypted at
  * rest; an address blind index dedupes a location within a customer.
  */
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { customerLocations, serviceHistory } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
+import { isUniqueViolation } from "@/lib/db/unique-violation";
 import { encrypt, decrypt, blindIndex } from "@/lib/crypto";
 
 /** Normalize an address string for blind-index matching (case/space-insensitive). */
@@ -29,6 +30,7 @@ export interface CustomerLocation {
   readonly address: string | null;
   readonly label: string | null;
   readonly zone: string | null;
+  readonly isPrimary: boolean;
 }
 
 /**
@@ -80,23 +82,103 @@ export async function upsertCustomerLocation(
     .onConflictDoNothing()
     .returning({ id: customerLocations.id });
 
-  if (created) return created.id;
+  let locationId: string;
+  if (created) {
+    locationId = created.id;
+  } else {
+    // Lost a race on the unique index — read the winner back.
+    const [winner] = await db
+      .select({ id: customerLocations.id })
+      .from(customerLocations)
+      .where(
+        and(
+          eq(customerLocations.organizationId, organizationId),
+          eq(customerLocations.customerId, customerId),
+          addressHash
+            ? eq(customerLocations.addressHash, addressHash)
+            : eq(customerLocations.customerId, customerId),
+        ),
+      )
+      .limit(1);
+    locationId = winner!.id;
+  }
 
-  // Lost a race on the unique index — read the winner back.
-  const [winner] = await db
+  // First location becomes primary. A separate guarded UPDATE (never part of
+  // the insert) so a lost race on customer_locations_one_primary_idx is
+  // harmless: the predicate re-checks at write time, and a wrapped 23505 from
+  // a concurrent winner is swallowed.
+  try {
+    await db.execute(sql`
+      UPDATE customer_locations SET is_primary = true
+      WHERE id = ${locationId} AND organization_id = ${organizationId}
+        AND NOT EXISTS (SELECT 1 FROM customer_locations p WHERE p.customer_id = ${customerId} AND p.is_primary)`);
+  } catch (error: unknown) {
+    if (!isUniqueViolation(error, "customer_locations_one_primary_idx"))
+      throw error;
+  }
+  return locationId;
+}
+
+export async function locationBelongsToCustomer(
+  organizationId: string,
+  customerId: string,
+  locationId: string,
+): Promise<boolean> {
+  const [row] = await db
     .select({ id: customerLocations.id })
     .from(customerLocations)
     .where(
-      and(
-        eq(customerLocations.organizationId, organizationId),
+      withTenant(
+        customerLocations,
+        organizationId,
+        eq(customerLocations.id, locationId),
         eq(customerLocations.customerId, customerId),
-        addressHash
-          ? eq(customerLocations.addressHash, addressHash)
-          : eq(customerLocations.customerId, customerId),
       ),
     )
     .limit(1);
-  return winner!.id;
+  return Boolean(row);
+}
+
+export async function setPrimaryLocation(
+  organizationId: string,
+  customerId: string,
+  locationId: string,
+): Promise<boolean | { readonly reason: "race" }> {
+  if (
+    !(await locationBelongsToCustomer(organizationId, customerId, locationId))
+  )
+    return false;
+  try {
+    await db.batch([
+      db
+        .update(customerLocations)
+        .set({ isPrimary: false })
+        .where(
+          withTenant(
+            customerLocations,
+            organizationId,
+            eq(customerLocations.customerId, customerId),
+            eq(customerLocations.isPrimary, true),
+          ),
+        ),
+      db
+        .update(customerLocations)
+        .set({ isPrimary: true })
+        .where(
+          withTenant(
+            customerLocations,
+            organizationId,
+            eq(customerLocations.id, locationId),
+          ),
+        ),
+    ]);
+  } catch (error: unknown) {
+    // Two concurrent "make primary" calls: the second set trips the partial unique index.
+    if (isUniqueViolation(error, "customer_locations_one_primary_idx"))
+      return { reason: "race" };
+    throw error;
+  }
+  return true;
 }
 
 /** List a customer's locations (addresses decrypted). */
@@ -110,6 +192,7 @@ export async function listCustomerLocations(
       addressEncrypted: customerLocations.addressEncrypted,
       label: customerLocations.label,
       zone: customerLocations.zone,
+      isPrimary: customerLocations.isPrimary,
     })
     .from(customerLocations)
     .where(
@@ -125,6 +208,7 @@ export async function listCustomerLocations(
     address: safeDecrypt(r.addressEncrypted),
     label: r.label,
     zone: r.zone,
+    isPrimary: r.isPrimary,
   }));
 }
 
@@ -156,7 +240,11 @@ export async function getEquipmentServiceHistory(
     })
     .from(serviceHistory)
     .where(
-      withTenant(serviceHistory, organizationId, eq(serviceHistory.equipmentId, equipmentId)),
+      withTenant(
+        serviceHistory,
+        organizationId,
+        eq(serviceHistory.equipmentId, equipmentId),
+      ),
     )
     .orderBy(desc(serviceHistory.createdAt));
 
