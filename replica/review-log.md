@@ -147,3 +147,15 @@ day in a full rewrite of both plans.
   dashboard-bucket decision; "before" captures moved ahead of the
   migration with the real URLs; Tasks 5 and 6 split (5a/5b, 6a/6b/6c);
   trigger names from the spec; `tech-status-confirm.ts` reused.
+
+## Plan round 2 — 2026-11-01
+
+One blind critic on both rewritten plans. 1 blocker (M0a visit update:
+a bare `${array}` expands to `($1, $2)`; use `sql.param`), 6 majors (xmin
+gate instead of version+1 for the batched assignment replace; lead from
+caller order; time off bypassable via /assign and the PATCH schedule path;
+mint-tech-session takes no args; persist-job-location path; `raw` vs `b`;
+multiple primary contacts), ~10 minors — all applied. Convergence: round
+2 found no new design-level defects in M0b; the M0a findings are confined
+to Task 5a/6b code blocks. Further plan rounds are folded into the
+per-task reviews of subagent-driven development.
