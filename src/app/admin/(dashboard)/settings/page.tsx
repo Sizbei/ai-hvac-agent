@@ -14,6 +14,7 @@ import {
   Plug,
   Truck,
   ClipboardList,
+  Tag,
 } from 'lucide-react';
 import { useOrgSettings } from '@/hooks/use-org-settings';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -32,6 +33,7 @@ import { HousecallProPanel } from '@/components/admin/settings/housecall-pro-pan
 import { FieldpulsePanel } from '@/components/admin/settings/fieldpulse-panel';
 import { AiModelPanel } from '@/components/admin/settings/ai-model-panel';
 import { PlatformLinkPanel } from '@/components/admin/settings/platform-link-panel';
+import { TagsPanel } from '@/components/admin/settings/tags-panel';
 import { JobTypesPanel } from '@/components/admin/settings/job-types-panel';
 import { BillingLinkPanel } from '@/components/admin/settings/billing-link-panel';
 import { PageShell } from '@/components/admin/ui/page-shell';
@@ -76,6 +78,10 @@ export default function SettingsPage() {
               <ClipboardList className="size-4" />
               Job types
             </TabsTrigger>
+            <TabsTrigger value="tags">
+              <Tag className="size-4" />
+              Tags
+            </TabsTrigger>
             <TabsTrigger value="business">
               <Building2 className="size-4" />
               Business info
@@ -114,6 +120,9 @@ export default function SettingsPage() {
           </TabsContent>
           <TabsContent value="job-types" className="mt-6">
             <JobTypesPanel />
+          </TabsContent>
+          <TabsContent value="tags" className="mt-6">
+            <TagsPanel />
           </TabsContent>
           <TabsContent value="business" className="mt-6">
             <BusinessInfoPanel
