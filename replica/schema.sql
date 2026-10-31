@@ -10,177 +10,161 @@
 -- session's organization_id (withTenant). Nothing in this file changes that.
 
 -- ---------------------------------------------------------------------------
--- M0  Foundation: tags, contacts, locations, job types, status kinds,
---     appointments + assignments, shifts
+-- Migration conventions (verified against src/lib/db/migrate.ts and
+-- node_modules/drizzle-orm/neon-http/migrator.js):
+--   * the neon-http migrator runs each statement with its own autocommit and
+--     records a file in __drizzle_migrations only after EVERY pending file
+--     has run. A failure half-way leaves partial DDL with no record, and the
+--     next build re-runs the file from the top. So every statement here is
+--     idempotent: IF NOT EXISTS on tables/columns/indexes, DO $$ … EXCEPTION
+--     WHEN duplicate_object $$ around CREATE TYPE / ADD CONSTRAINT,
+--     CREATE OR REPLACE FUNCTION + DROP TRIGGER IF EXISTS (precedent:
+--     drizzle/0042_perf_indexes.sql, drizzle/0044_last_admin_guard.sql).
+--   * ALTER TYPE … ADD VALUE works (no transaction; precedent 0001, 0008,
+--     0013). A new value is not USED in the same file; the backfill that
+--     writes it is a later file.
+--   * every index, unique and check constraint is NAMED and the same name
+--     goes in schema.ts, so `drizzle-kit generate` reports "No schema
+--     changes" (AGENTS.md).
+--   * a new journal `when` must exceed the previous entry's.
 -- ---------------------------------------------------------------------------
 
-create type tag_entity as enum ('customer','location','job','invoice','item','user');
+-- ---------------------------------------------------------------------------
+-- M0b  Config foundation: tags, contacts, primary location, job types.
+--      No dual writes, no backfill of behaviour; ships first.
+-- ---------------------------------------------------------------------------
 
-create table tag_types (
+-- must rows closed: 27 customer/location tags, 55 job tags with colour and
+-- dispatch visibility.
+do $$ begin
+  create type tag_entity as enum ('customer','location','job');
+exception when duplicate_object then null; end $$;
+
+create table if not exists tag_types (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references organizations(id) on delete cascade,
   entity tag_entity not null,
   name text not null,
-  color text not null default 'graphite',
-  importance smallint not null default 0,
+  color text not null default 'graphite',    -- a status-colors.ts token name, never hex
   visible_on_board boolean not null default false,
   active boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  unique (organization_id, entity, name)
+  constraint tag_types_org_entity_name_unique unique (organization_id, entity, name),
+  -- lets entity_tags carry a composite FK so a tag can never cross orgs or kinds
+  constraint tag_types_id_org_entity_unique unique (id, organization_id, entity)
 );
 
--- one polymorphic link table; entity + entity_id are not FKs on purpose
-create table entity_tags (
+-- one polymorphic link table; entity_id is not an FK on purpose (three
+-- target tables). Each entity's delete/erase path deletes its rows.
+create table if not exists entity_tags (
   organization_id uuid not null references organizations(id) on delete cascade,
-  tag_type_id uuid not null references tag_types(id) on delete cascade,
+  tag_type_id uuid not null,
   entity tag_entity not null,
   entity_id uuid not null,
   created_at timestamptz not null default now(),
-  primary key (tag_type_id, entity, entity_id)
+  constraint entity_tags_pkey primary key (tag_type_id, entity, entity_id),
+  constraint entity_tags_tag_type_fk foreign key (tag_type_id, organization_id, entity)
+    references tag_types(id, organization_id, entity) on delete cascade
 );
-create index on entity_tags (organization_id, entity, entity_id);
+create index if not exists entity_tags_org_entity_idx
+  on entity_tags (organization_id, entity, entity_id);
 
-create table customer_contacts (
+-- must rows closed: 22 multiple contacts with per-method preferences;
+-- 49 create job with customer / contact / location (contact part).
+-- PII encrypted + blind-indexed exactly like customers; the erase batch in
+-- src/lib/admin/erasure-queries.ts anonymises these rows in the SAME PR
+-- (the customer row is updated, not deleted, so the cascade never fires).
+create table if not exists customer_contacts (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references organizations(id) on delete cascade,
   customer_id uuid not null references customers(id) on delete cascade,
   location_id uuid references customer_locations(id) on delete set null,
   name_encrypted text not null,
-  role text,                              -- "tenant", "property manager", ...
-  phone_encrypted text, phone_hash text,  -- blind index like customers
-  email_encrypted text, email_hash text,
+  role text,                                 -- "tenant", "property manager", ...
+  phone_encrypted text,
+  phone_hash text,                           -- HMAC blind index like customers
+  email_encrypted text,
+  email_hash text,
   do_not_text boolean not null default false,
   job_reminders boolean not null default true,
-  marketing boolean not null default false,
   invoice_notifications boolean not null default true,
   is_primary boolean not null default false,
   position smallint not null default 0,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
-create index on customer_contacts (organization_id, customer_id);
-create index on customer_contacts (organization_id, phone_hash);
+create index if not exists customer_contacts_org_customer_idx
+  on customer_contacts (organization_id, customer_id);
+create index if not exists customer_contacts_org_phone_hash_idx
+  on customer_contacts (organization_id, phone_hash);
 
--- customer_locations exists (address, label, zone text, property type,
--- access notes, lat/lng). Extend:
+-- must row closed: 23 multiple service locations (the primary flag; the
+-- table and the S04 UI exist). Backfill: the oldest location per customer
+-- becomes primary.
 alter table customer_locations
-  add column is_primary boolean not null default false,
-  add column tax_zone_id uuid references tax_zones(id) on delete set null,
-  add column zone_id uuid references service_zones(id) on delete set null,
-  add column preferred_technician_id uuid references users(id) on delete set null,
-  add column merged_to_id uuid references customer_locations(id) on delete set null;
-create unique index customer_locations_one_primary
+  add column if not exists is_primary boolean not null default false;
+create unique index if not exists customer_locations_one_primary_idx
   on customer_locations (customer_id) where is_primary;
+update customer_locations l set is_primary = true
+  where not is_primary and l.id = (
+    select id from customer_locations x
+    where x.customer_id = l.customer_id order by created_at, id limit 1)
+  and not exists (
+    select 1 from customer_locations p where p.customer_id = l.customer_id and p.is_primary);
 
-alter table customers
-  add column customer_status text not null default 'customer'
-    check (customer_status in ('lead','opportunity','customer','lost','inactive')),
-  add column parent_customer_id uuid references customers(id) on delete set null,
-  add column merged_to_id uuid references customers(id) on delete set null,
-  add column payment_term_days smallint,
-  add column tax_exempt boolean not null default false;
-
-create table service_zones (
+-- must rows closed: 56 org-configurable job types; 83 job-type default
+-- duration. The job_type ENUM stays as the canonical "kind" that the AI
+-- intake, duration table, FP/HCP mappers and forecasting read (about 25
+-- files; none change). Every org gets one seeded row per enum value
+-- (provisioning hook + a one-off backfill for existing orgs);
+-- service_requests.job_type_id is backfilled from job_type. The create
+-- path writes BOTH job_type_id and job_type = job_types.kind.
+create table if not exists job_types (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references organizations(id) on delete cascade,
   name text not null,
-  color text,
-  zip_codes text[] not null default '{}',
-  active boolean not null default true,
-  created_at timestamptz not null default now(),
-  unique (organization_id, name)
-);
-create table technician_zones (
-  technician_id uuid not null references users(id) on delete cascade,
-  zone_id uuid not null references service_zones(id) on delete cascade,
-  is_main boolean not null default false,
-  primary key (technician_id, zone_id)
-);
-
--- job types become rows; the job_type enum stays as the "kind" the AI and
--- the FP status map read. Every org gets seeded rows, one per enum value.
-create table job_types (
-  id uuid primary key default gen_random_uuid(),
-  organization_id uuid not null references organizations(id) on delete cascade,
-  name text not null,
-  kind job_type not null,                 -- existing enum = canonical kind
+  kind job_type not null,
   default_duration_minutes integer not null default 90,
   default_priority urgency not null default 'medium',
-  required_skills text[] not null default '{}',
-  workflow_id uuid,                       -- fk added after status_workflows
-  required_form_ids uuid[] not null default '{}',
   active boolean not null default true,
   position smallint not null default 0,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  unique (organization_id, name)
+  constraint job_types_org_name_unique unique (organization_id, name),
+  constraint job_types_duration_check check (default_duration_minutes between 15 and 1440)
 );
 alter table service_requests
-  add column job_type_id uuid references job_types(id) on delete set null,
-  add column project_id uuid,
-  add column recall_for_id uuid references service_requests(id) on delete set null,
-  add column warranty_of_id uuid references service_requests(id) on delete set null,
-  add column cancel_reason text,
-  add column cancel_memo text,
-  add column sold_by_id uuid references users(id) on delete set null,
-  add column created_from_estimate_id uuid references estimates(id) on delete set null,
-  add column template_id uuid,
-  add column recurring_series_id uuid,
-  add column no_charge boolean not null default false,
-  add column archived_at timestamptz,
-  add column booking_source text
-    check (booking_source in ('chat','voice','sms','widget','portal','booking_page','admin','tech','fieldpulse','housecall','agreement'));
+  add column if not exists job_type_id uuid references job_types(id) on delete set null;
+create index if not exists requests_job_type_id_idx on service_requests (job_type_id);
 
--- Status workflows: display statuses an org defines, each mapped to a
--- canonical kind. service_requests.status (the enum) stays the source of
--- truth that the AI intake, triggers, KPIs and the FP status map read; the
--- workflow adds a display status id on top. Two new canonical values are
--- added to the enum for the tech loop: en_route, arrived.
-alter type service_request_status add value if not exists 'en_route' after 'scheduled';
-alter type service_request_status add value if not exists 'arrived' after 'en_route';
+-- ---------------------------------------------------------------------------
+-- M0a  Schedule foundation: two status values, appointments + assignments
+--      (backfilled, kept in step by a trigger), shifts. Gets its own
+--      adversarial review before merge.
+-- ---------------------------------------------------------------------------
 
-create type status_kind as enum
-  ('new','scheduled','travel','arrived','in_progress','pause','hold','complete','cancel');
+-- must row closed: 117 en route / arrived statuses. The enum is
+-- `request_status` (schema.ts:55). Its own migration file; nothing in the
+-- same file uses the values. Code changes in the same PR, enumerated in
+-- architecture.md "Status enum readers" (22 readers; one shared constant).
+alter type request_status add value if not exists 'en_route' after 'assigned';
+alter type request_status add value if not exists 'arrived' after 'en_route';
 
-create table status_workflows (
-  id uuid primary key default gen_random_uuid(),
-  organization_id uuid not null references organizations(id) on delete cascade,
-  entity text not null check (entity in ('job','estimate','invoice','agreement')),
-  name text not null,
-  is_default boolean not null default false,
-  active boolean not null default true,
-  created_at timestamptz not null default now(),
-  unique (organization_id, entity, name)
-);
-create table workflow_statuses (
-  id uuid primary key default gen_random_uuid(),
-  workflow_id uuid not null references status_workflows(id) on delete cascade,
-  name text not null,
-  kind status_kind not null,              -- what the enum readers see
-  color text not null,
-  position smallint not null,
-  is_default boolean not null default false,
-  instructions text,                      -- guided flow (ClearPath) text
-  action_buttons jsonb not null default '[]',   -- [{action,label}] max 10
-  required_form_ids uuid[] not null default '{}',
-  unique (workflow_id, name)
-);
-alter table job_types
-  add constraint job_types_workflow_fk foreign key (workflow_id)
-  references status_workflows(id) on delete set null;
-alter table service_requests
-  add column workflow_status_id uuid references workflow_statuses(id) on delete set null;
-
--- Appointments: a job can have N visits. Backfill one appointment per
--- existing request from scheduledDate + arrivalWindowStart/End + assignedTo.
--- The request keeps its denormalised first-appointment columns so the
--- FieldPulse/HCP one-job-one-id sync, the calendar and the KPIs keep reading
--- what they read today. appointment_number 1 == the request's own columns.
-create type appointment_status as enum
-  ('scheduled','confirmed','en_route','arrived','working','paused','hold','done','cancelled','unused');
-
-create table appointments (
+-- must row closed: 64 multi-visit and multi-day jobs.
+--
+-- Ownership rule (the one that keeps the FP/HCP sync, the AI booking path,
+-- 25 request-update sites and the calendar working unchanged):
+--   * service_requests.scheduled_date / arrival_window_start / _end /
+--     assigned_to / status REMAIN the source of truth for appointment #1.
+--   * a trigger on service_requests mirrors them into
+--     appointments(appointment_number = 1) and its lead assignment.
+--   * appointments with appointment_number >= 2 are written only by the data
+--     layer (never by the trigger) and never touch the request columns.
+--   * the job status (request_status) is the job's status. Per-technician
+--     progress lives on appointment_assignments.status and uses the SAME
+--     enum, so there is one vocabulary.
+create table if not exists appointments (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references organizations(id) on delete cascade,
   service_request_id uuid not null references service_requests(id) on delete cascade,
@@ -189,37 +173,83 @@ create table appointments (
   ends_at timestamptz,
   arrival_window_start timestamptz,
   arrival_window_end timestamptz,
-  status appointment_status not null default 'scheduled',
   is_confirmed boolean not null default false,
-  special_instructions text,
+  cancelled_at timestamptz,
+  special_instructions text,                 -- free text; included in the erase batch
+  version integer not null default 0,        -- optimistic concurrency (CAS on version, not updated_at)
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  unique (service_request_id, appointment_number),
-  constraint appt_window check (arrival_window_end is null or arrival_window_end > arrival_window_start)
+  constraint appointments_request_number_unique unique (service_request_id, appointment_number),
+  constraint appointments_window_check
+    check (arrival_window_end is null or arrival_window_start is null or arrival_window_end > arrival_window_start),
+  constraint appointments_span_check
+    check (ends_at is null or starts_at is null or ends_at >= starts_at)
 );
-create index on appointments (organization_id, starts_at);
-create index on appointments (organization_id, status);
+create index if not exists appointments_org_starts_at_idx on appointments (organization_id, starts_at);
+create index if not exists appointments_request_idx on appointments (service_request_id);
 
-create table appointment_assignments (
+create table if not exists appointment_assignments (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references organizations(id) on delete cascade,
   appointment_id uuid not null references appointments(id) on delete cascade,
   technician_id uuid not null references users(id) on delete cascade,
-  is_lead boolean not null default true,
-  status appointment_status not null default 'scheduled',  -- per-tech done
+  is_lead boolean not null default false,
+  status request_status not null default 'assigned',  -- per-tech progress, same vocabulary
   assigned_by uuid references users(id) on delete set null,
   assigned_at timestamptz not null default now(),
-  dispatched_at timestamptz, arrived_at timestamptz, done_at timestamptz,
-  unique (appointment_id, technician_id)
+  en_route_at timestamptz,
+  arrived_at timestamptz,
+  started_at timestamptz,
+  completed_at timestamptz,
+  constraint appointment_assignments_unique unique (appointment_id, technician_id)
 );
-create index on appointment_assignments (organization_id, technician_id, assigned_at);
--- Reassign guard is enforced in the data layer: refuse when the assignment
--- status is in ('en_route','arrived','working','done').
+create unique index if not exists appointment_assignments_one_lead_idx
+  on appointment_assignments (appointment_id) where is_lead;
+create index if not exists appointment_assignments_tech_appt_idx
+  on appointment_assignments (technician_id, appointment_id);
+create index if not exists appointment_assignments_org_tech_idx
+  on appointment_assignments (organization_id, technician_id);
 
--- Shifts and non-job events: technician_availability (weekly) stays as the
--- baseline; shifts override per date.
-create type shift_kind as enum ('normal','on_call','time_off','non_job');
-create table technician_shifts (
+-- Trigger: request -> appointment #1 (+ lead assignment). Idempotent DDL in
+-- the 0044 style. Fires AFTER INSERT and AFTER UPDATE OF the five columns.
+--   starts_at            = coalesce(arrival_window_start, scheduled_date)
+--   ends_at              = coalesce(arrival_window_end,
+--                            starts_at + coalesce(estimated_duration_minutes, 90) minutes)
+--   arrival_window_*     = the request's, nulled when end <= start
+--   cancelled_at         = now() when status becomes 'cancelled', else unchanged
+--   lead assignment      = assigned_to; when assigned_to changes, the old lead
+--                          row is deleted if its status is still 'assigned',
+--                          otherwise demoted to is_lead = false (history kept)
+--   assignment.status    = mirrors request.status for the lead ONLY while the
+--                          per-tech endpoints (M3) have not written it; M0a
+--                          rule: lead.status = request.status on every change
+--                          (single-tech jobs stay in step; multi-tech jobs
+--                          come with M3's roll-up)
+-- A request with neither scheduled_date nor arrival_window_start nor
+-- assigned_to gets NO appointment row (a pending request is not a visit).
+create or replace function sync_request_appointment() returns trigger
+  language plpgsql as $$ … see drizzle/00XX_appointments.sql … $$;
+drop trigger if exists service_requests_sync_appointment on service_requests;
+create trigger service_requests_sync_appointment
+  after insert or update of scheduled_date, arrival_window_start, arrival_window_end,
+    assigned_to, status, estimated_duration_minutes
+  on service_requests for each row execute function sync_request_appointment();
+
+-- Backfill (separate file, after the trigger exists; idempotent via NOT
+-- EXISTS): one appointment #1 per request that has a date or a window or an
+-- assignee, using the same formulas as the trigger; lead assignment where
+-- assigned_to is not null with status = request status; cancelled_at =
+-- updated_at where status = 'cancelled'. Done-when check: count(requests
+-- with a date or assignee) = count(appointments where number = 1).
+
+-- must rows closed: 85 shifts (on-call / time-off); 86 non-job events that
+-- remove capacity. The weekly pattern stays in technician_availability
+-- (already read by scheduling, FP availability sync, autodispatch); shifts
+-- are date-bound exceptions only. No RRULE: a repeating PTO is N rows.
+do $$ begin
+  create type shift_kind as enum ('on_call','time_off','non_job');
+exception when duplicate_object then null; end $$;
+create table if not exists technician_shifts (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references organizations(id) on delete cascade,
   technician_id uuid not null references users(id) on delete cascade,
@@ -228,21 +258,26 @@ create table technician_shifts (
   starts_at timestamptz not null,
   ends_at timestamptz not null,
   removes_capacity boolean not null default true,
-  show_on_board boolean not null default true,
-  repeat_rule text,                        -- RRULE or null
+  created_by uuid references users(id) on delete set null,
   created_at timestamptz not null default now(),
-  constraint shift_order check (ends_at > starts_at)
+  constraint technician_shifts_order_check check (ends_at > starts_at)
 );
-create index on technician_shifts (organization_id, technician_id, starts_at);
+create index if not exists technician_shifts_org_tech_starts_idx
+  on technician_shifts (organization_id, technician_id, starts_at);
 
-create table capacity_adjustments (
-  organization_id uuid not null references organizations(id) on delete cascade,
-  day date not null,
-  "window" text not null,                  -- morning|afternoon|evening|custom id
-  delta_minutes integer not null default 0,
-  threshold_pct smallint not null default 100,
-  primary key (organization_id, day, "window")
-);
+-- Deferred out of M0 (each moves to the milestone that first writes it):
+--   service_zones / technician_zones / customer_locations.zone_id  -> M2 (should, row 100)
+--   capacity_adjustments                                          -> M2 (should, row 82)
+--   status_workflows / workflow_statuses / guided flows           -> M6+ (should, rows 57, 128)
+--   customers.customer_status / parent / merged_to / payment_term -> M1 (leads, merge)
+--   customer_locations.preferred_technician_id / merged_to_id     -> M1
+--   service_requests: cancel_reason, cancel_memo, sold_by_id,
+--     template_id, archived_at, booking_source                    -> M1
+--   service_requests.created_from_estimate_id                     -> M4
+--   service_requests.recall_for_id / warranty_of_id / no_charge   -> M3 (should)
+--   project_id, recurring_series_id                               -> not in plan (no table)
+--   customers.tax_exempt                                          -> dropped: is_tax_exempt exists
+--   customer_locations.tax_zone_id                                -> M4, after tax_zones
 
 -- ---------------------------------------------------------------------------
 -- M1  Office booking loop: leads, bookings review, call reasons
@@ -258,8 +293,8 @@ create table leads (
   status text not null default 'open'
     check (status in ('open','contacted','unreachable','booked','dismissed')),
   priority urgency not null default 'medium',
-  summary text,
-  call_reason text,
+  summary_encrypted text,                  -- free text can hold names/phones: AES-GCM like customers
+  call_reason text,                        -- enum-like reason code, not free text
   follow_up_at timestamptz,
   dismiss_reason text,
   booked_request_id uuid references service_requests(id) on delete set null,
@@ -317,6 +352,7 @@ create index on form_submissions (organization_id, service_request_id);
 
 -- technician_time_entries exists per job. Add general time + status stamps.
 alter table technician_time_entries
+  alter column service_request_id drop not null,   -- 'general' entries have no job
   add column kind text not null default 'job' check (kind in ('job','general')),
   add column appointment_id uuid references appointments(id) on delete set null,
   add column clock_in_method text check (clock_in_method in ('auto','manual')),
@@ -325,16 +361,25 @@ alter table technician_time_entries
   add column timesheet_code text;
 
 -- offline: a client-side queue, no server table. Every tech POST carries an
--- idempotency key; the server stores it:
+-- idempotency key. Protocol: (1) INSERT the key with state 'in_progress'
+-- (on conflict do nothing; a loser gets the stored response, or 409 while
+-- in progress); (2) do the write; (3) UPDATE the row with the response.
+-- A replay with the same key but a different request_hash gets 422. The
+-- stored response holds ids and statuses only (no PII); rows expire after
+-- 24h via the cleanup cron.
 create table idempotency_keys (
-  organization_id uuid not null,
-  key text not null,
+  organization_id uuid not null references organizations(id) on delete cascade,
+  user_id uuid not null references users(id) on delete cascade,
   route text not null,
-  response_status smallint not null,
-  response_body jsonb,
+  key text not null,
+  request_hash text not null,
+  state text not null default 'in_progress' check (state in ('in_progress','done')),
+  response_status smallint,
+  response_body jsonb,                     -- ids/enums only
   created_at timestamptz not null default now(),
-  primary key (organization_id, key)
+  constraint idempotency_keys_pkey primary key (organization_id, user_id, route, key)
 );
+create index idempotency_keys_created_idx on idempotency_keys (created_at);
 
 -- ---------------------------------------------------------------------------
 -- M4  Money builder: invoice/estimate editing, templates, discounts, tax zones,
@@ -381,10 +426,10 @@ alter table estimates add constraint estimates_template_fk
 alter table estimate_line_items
   add column booked_request_id uuid references service_requests(id) on delete set null;
 
+-- invoices already has service_request_id, due_date (timestamptz) and
+-- state (invoice_state enum: draft/open/paid/void/...). Extend only:
 alter table invoices
-  add column service_request_id uuid references service_requests(id) on delete set null,
   add column location_id uuid references customer_locations(id) on delete set null,
-  add column due_date date,
   add column payment_term_days smallint,
   add column display_settings jsonb not null default '{}',   -- show qty/price/sku/tax toggles
   add column amount_due_display text not null default 'remaining_balance'
@@ -399,10 +444,15 @@ alter table invoice_line_items
   add column price_visible boolean not null default true,
   add column position smallint not null default 0,
   add column discount_fee_id uuid;
--- draft invoice auto-created at booking: invoices.status='draft',
--- service_request_id set, zero lines. One draft per request:
-create unique index invoices_one_per_request
-  on invoices (service_request_id) where service_request_id is not null and status <> 'void';
+-- draft invoice auto-created at booking: invoices.state='draft',
+-- service_request_id set, zero lines. One NATIVE DRAFT per request (synced
+-- FP/HCP invoices and finalised invoices are excluded, so estimate-to-invoice,
+-- deposit + final invoices and the mirrors keep working). The
+-- estimate-to-invoice path ADOPTS the draft when one exists.
+create unique index invoices_one_native_draft_per_request_idx
+  on invoices (service_request_id)
+  where service_request_id is not null and state = 'draft'
+    and fieldpulse_invoice_id is null and hcp_invoice_id is null;
 
 create table discounts_fees (
   id uuid primary key default gen_random_uuid(),
@@ -470,6 +520,18 @@ alter table invoices add constraint invoices_batch_fk
 alter table payments add constraint payments_batch_fk
   foreign key (batch_id) references accounting_batches(id) on delete set null;
 
+-- Stripe webhook ledger, same pattern as the existing *_webhook_events tables:
+create table stripe_events (
+  organization_id uuid references organizations(id) on delete cascade,
+  event_id text primary key,               -- Stripe evt_… ; a duplicate delivery is a no-op
+  type text not null,
+  received_at timestamptz not null default now(),
+  processed_at timestamptz
+);
+-- refunds dedupe on the provider id (webhook charge.refunded after an in-app refund is a no-op):
+create unique index refunds_provider_refund_unique
+  on refunds (provider_refund_id) where provider_refund_id is not null;
+
 -- ---------------------------------------------------------------------------
 -- M5  Agreements: types with billing table, routines, service events,
 --     recurring billing
@@ -525,9 +587,15 @@ alter table membership_visits
   add column event_status text not null default 'unscheduled'
     check (event_status in ('no_job','unscheduled','scheduled','completed','skipped','auto_failed','claimed','expired')),
   add column window_start date, add column window_end date;
--- period_key + routine_id is the idempotency key for materialisation:
+-- period_key + routine_id is the idempotency key for materialisation. The
+-- existing membership_visits_membership_period_unique (membership, period)
+-- is DROPPED in the same migration (it forbids two routines per period);
+-- legacy rows get routine_id backfilled to the plan's first routine so NULLs
+-- never bypass the index; the generate-membership-visits cron is retired in
+-- the same PR (one writer).
+drop index if exists membership_visits_membership_period_unique;
 create unique index membership_visits_idem
-  on membership_visits (customer_membership_id, routine_id, period_key);
+  on membership_visits (customer_membership_id, routine_id, period_key) nulls not distinct;
 
 create table recurring_billing (
   id uuid primary key default gen_random_uuid(),
@@ -553,11 +621,14 @@ create table recurring_billing (
   updated_at timestamptz not null default now()
 );
 create index on recurring_billing (organization_id, status, next_at);
-create unique index recurring_billing_period_idem
-  on invoices (recurring_billing_id, billing_period_key) where recurring_billing_id is not null;
 alter table invoices
   add column recurring_billing_id uuid references recurring_billing(id) on delete set null,
   add column billing_period_key text;
+create unique index recurring_billing_period_idem
+  on invoices (recurring_billing_id, billing_period_key) where recurring_billing_id is not null;
+-- Charging is idempotent at Stripe with key rb:{recurring_billing_id}:{period_key}:{retry_stage};
+-- every retry first re-reads the invoice and skips when state <> 'open' or
+-- amount_paid_cents >= total_cents (a cheque on D2 stops the D3 card retry).
 
 -- ---------------------------------------------------------------------------
 -- M6  Follow-up hub, automations, inbox
@@ -605,7 +676,7 @@ alter table messages add column is_internal_note boolean not null default false;
 alter table pricebook_items
   add column add_on_price_cents integer,
   add column add_on_member_price_cents integer,
-  add column hours numeric(6,2),
+  -- hours already exists (integer); keep it
   add column markup_pct smallint,
   add column images jsonb not null default '[]',
   add column recommendations uuid[] not null default '{}',
@@ -627,7 +698,7 @@ create table suppliers (
 );
 alter table purchase_orders add column supplier_id uuid references suppliers(id) on delete set null,
   add column delivery_method text check (delivery_method in ('delivery','pickup')),
-  add column expected_at timestamptz, add column received_at timestamptz,
+  add column expected_at timestamptz,      -- received_at already exists
   add column linked_request_id uuid references service_requests(id) on delete set null,
   add column hub_id uuid;
 alter table po_line_items add column qty_received integer not null default 0;
@@ -646,7 +717,9 @@ alter table purchase_orders add constraint po_hub_fk foreign key (hub_id) refere
 -- inventory_items exists (item, qty on hand, reorder point, unit cost, location text).
 -- Re-key per hub:
 alter table inventory_items add column hub_id uuid references inventory_hubs(id) on delete cascade;
-create unique index inventory_items_hub_item on inventory_items (hub_id, pricebook_item_id);
+-- the existing inventory_items_org_item_unique (org, item) is replaced by a per-hub key:
+drop index if exists inventory_items_org_item_unique;
+create unique index inventory_items_hub_item on inventory_items (organization_id, hub_id, pricebook_item_id);
 
 create table inventory_movements (
   id uuid primary key default gen_random_uuid(),
@@ -697,8 +770,10 @@ alter table organization_settings add column features jsonb not null default '{}
 -- M9  Team, reporting, accounting
 -- ---------------------------------------------------------------------------
 
-alter type user_role add value if not exists 'dispatcher';
-alter type user_role add value if not exists 'office';
+-- users.role is plain text (no pg enum); the role union lives in
+-- src/lib/auth/authz.ts. Add 'dispatcher' and 'office' there + a check:
+alter table users add constraint users_role_check
+  check (role in ('super_admin','admin','dispatcher','office','technician'));
 alter table users add column permissions jsonb not null default '{}';   -- per-user overrides
 alter table users add column skills text[] not null default '{}';
 alter table users add column team text;

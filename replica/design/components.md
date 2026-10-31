@@ -33,8 +33,40 @@ roles so the board, the status bar and the badges agree.
 | non-job | `bg-surface-sunken text-foreground-faint border-border` (hatched) | — | PTO, meeting |
 | alert overlay | `ring-1 ring-signal` on any of the above | — | running late, unconfirmed within 2h |
 
-Add `APPOINTMENT_STATUS_BADGE` / `_DOT` maps next to `REQUEST_STATUS_*`
-in `status-colors.ts` when M0 lands; keep `REQUEST_STATUS_*` as is.
+M0a adds `en_route` and `arrived` to the existing `REQUEST_STATUS_BADGE` /
+`_DOT` maps in `status-colors.ts` (travel = info, arrived = success);
+assignments reuse the same maps because they share the enum. The
+"kind" column above is the design vocabulary; the data vocabulary is the
+`request_status` enum (no workflow rows until M6+).
+
+## M0 components (small)
+
+### Tag chip picker (S04, S07, S08)
+- Inline chip row (`icon-chip`, colour from the tag's token) + an "Add tag"
+  popover listing the org's active tag types for that entity, with a search
+  box and a "New tag" row that creates inline (name + colour token).
+- Remove with the chip's ×; keyboard: Backspace on a focused chip removes.
+- Board visibility: chips with `visible_on_board` render on calendar cards,
+  max 2 then `+n`.
+
+### Contacts editor (S04)
+- `section-list-item` rows: name, role muted, phone/email in mono, a
+  "Primary" chip, preference icons (no text, reminders, invoices) as muted
+  toggles; row menu: edit, make primary, remove.
+- Add/edit as a small dialog: name, role, phone, email, the three
+  preferences; same sanitisers as the customer form.
+
+### Job-type row editor (S28 settings)
+- `data-table-shell`: name (editable), kind (select of the enum, shown in
+  sentence case), default duration (mono, minutes), default priority,
+  active toggle, drag handle for order. Inline add row at the bottom.
+- Deactivating a type keeps old jobs; the picker hides inactive types.
+
+### Time-off editor (S13, technician page)
+- List of upcoming shifts grouped by kind with date range in mono; "Add"
+  opens a dialog: kind (on call / time off / non-job event), title, start,
+  end, "Removes capacity" toggle (on by default). Repeating PTO is entered
+  as a date range, which creates one row per day.
 
 ## Components
 
