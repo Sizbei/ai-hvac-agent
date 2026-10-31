@@ -2,33 +2,33 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add `en_route` / `arrived` to the job lifecycle, give every job an `appointments` row (visits, backfilled and kept in step by a database trigger) with per-technician `appointment_assignments`, and let the office record technician time off / on-call / non-job events that every availability path respects.
+**Prerequisite:** M0b is merged (`ls drizzle/0047_*` shows the config-foundation migration; `schema.ts` already imports `check`, `unique`, `smallint`, `foreignKey`, `primaryKey`).
 
-**Architecture:** The request columns (`scheduled_date`, `arrival_window_start/end`, `assigned_to`, `status`) stay the source of truth for visit #1; two Postgres triggers (INSERT, and UPDATE with a `WHEN` clause) mirror them into `appointments` #1 and its lead assignment, so the 25 existing request-update sites, the FieldPulse/HCP sync, the AI booking path, the calendar and the KPIs are untouched. Visits #2+ are written only by the data layer. The two new enum values are added in their own migration and the ~25 hard-coded status lists move onto shared constants without merging lists that differ today. Shifts are date-bound rows (no RRULE) subtracted in the five availability paths.
+**Goal:** Add `en_route` / `arrived` to the request lifecycle, give every request an `appointments` row (visits, backfilled and kept in step by database triggers) with per-technician `appointment_assignments`, and let the office record technician time off / on-call / non-job events that every availability path respects.
 
-**Tech Stack:** Next.js 16 App Router, TypeScript, Drizzle ORM 0.45 on Neon (neon-http, `db.batch()` only), plpgsql triggers, zod, vitest (pure helpers only).
+**Architecture:** The request columns (`scheduled_date`, `arrival_window_start/end`, `assigned_to`, `status`) stay the source of truth for visit #1; two Postgres triggers (INSERT, and UPDATE with a `WHEN` clause) mirror them into `appointments` #1 and its lead assignment, so the 25 existing request-update sites, the FieldPulse/HCP sync, the AI booking path, the calendar and the KPIs are untouched. Visits #2+ are written only by `appointment-queries.ts`. The two new enum values are added in their own migration and the ~25 hard-coded status lists move onto shared constants without merging lists that differ today. Shifts are date-bound rows (no RRULE) subtracted in every availability path.
 
-**Spec:** `replica/architecture.md` (Schema decisions 1–2, hard constraints, "M0 Foundation" API table, "The parts that bite" → Races, Status enum readers, Stand-in sessions; build-order item 3) and `replica/schema.sql` section "M0a" (trigger rules, backfill rules). Companion: `replica/review-log.md` (what the critics established), `replica/design/components.md` ("Time-off editor", status token note).
+**Tech Stack:** Next.js 16, TypeScript, Drizzle ORM 0.45.2 + drizzle-kit 0.31 on Neon (neon-http, `db.batch()` only), plpgsql triggers, zod 4, vitest (pure helpers, mocked `@/lib/db`).
+
+**Spec:** `replica/architecture.md` (Schema decisions 1–2, hard constraints, "M0 Foundation" API table, "The parts that bite" → Races, Status enum readers, Stand-in sessions; build-order item 3) and `replica/schema.sql` section "M0a". Companion: `replica/review-log.md`, `replica/design/components.md` ("Time-off editor").
 
 ## Global Constraints
 
-- Gates before every commit: `npx tsc --noEmit` → 0; `npx eslint <changed>` → 0 errors; `npx vitest run` → capture the live baseline FIRST and never let the pass count drop. No jsdom/RTL.
-- neon-http: no `db.transaction()`; `db.batch([...])` for multi-statement writes. Background work via `after()`.
-- Tenancy: `withTenant(table, orgId, ...)`; every body/path id re-read under the org before a write; technician ids re-read as `role = 'technician' AND is_active`.
-- Migration conventions (`replica/schema.sql` header): idempotent statements, Drizzle-style names on every index/unique/check/FK, `--> statement-breakpoint`, journal `when` > the previous entry, snapshot copy, `npx drizzle-kit generate` → "No schema changes". Enum values in their own file; nothing in that file uses them.
+Everything in the M0b plan's Global Constraints applies (gates, mocked tests, `isUniqueViolation` from `@/lib/db/unique-violation`, `readJsonBody`, `withTenant`, audit shape, copy canon, migration conventions and the six-step drizzle recipe, DB-probe recipe with `config({ path: ".env.local" })`, explicit `git add` lists, Fable attribution line, skills). Plus:
+
 - Tech-app ownership stays `service_requests.assigned_to = session.userId` in M0a. Assignment rows grant nothing in the tech app.
 - Byte-identical rule: an existing status list gets the new values added where they belong and is pointed at the constant whose members equal it; lists that differ today are NOT merged.
-- FROZEN: `src/lib/ai` prompt text and `output-guardrail.ts` untouched. Copy canon as in M0b. Audit details ids/enums only.
-- Commits end with `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.
-- Read `.claude/skills/page-requests/SKILL.md`, `page-tech/SKILL.md`, `page-staff/SKILL.md`, `page-calendar/SKILL.md` before touching those pages; run `node scripts/agent/verify-skills.mjs` after adding routes.
+- Admin status changes go through `PATCH /api/admin/requests/<id>` with `{ "status": "<value>" }` (validated by `MANUAL_TARGET_STATUSES`). Tech session for curl: `TECH=$(npx tsx scripts/agent/mint-tech-session.mjs <technician user id>)` → cookie `hvac_tech_session=$TECH` (read the script for its exact arguments); tech screenshots: `node scripts/agent/screenshot-page.mjs <path> 390 <out> --tech`.
+- Do not deploy between Task 1 and Task 2 (the tech list would drop `en_route` jobs until the readers learn the value).
+- Time off is never overridable by "schedule anyway": a `removes_capacity` shift blocks placement even with `override`.
 
 ## Review Focus
 
-1. Reassign A → B → A on one job (three `PATCH`/assign calls) → the lead row ends on A, no unique-key error, exactly one `is_lead` row. (Pinned in Task 3 step 6.)
-2. The FieldPulse nightly import re-writes identical values on 1,500 rows → `appointments.version` does not change on any of them. (Pinned in Task 3 step 6.)
-3. A membership visit (date only, no window, no tech) → appointment #1 exists with `scheduled_date` set and `starts_at` NULL; it is still listed as unscheduled. (Pinned in Task 3 step 6.)
-4. A technician on time off is dragged onto a job in the calendar, or auto-dispatch considers them → the placement is refused (409) and the tech is not a candidate. (Pinned in Task 6 step 7.)
-5. A tech taps "En route" → the job stays in their list, the admin sheet shows "En route", the AI account reply says the technician is on the way, the delay sweep still considers the job not started. (Pinned in Tasks 2 and 4.)
+1. Reassign A → B → A on one request → the lead row ends on A, no unique-key error, exactly one `is_lead` row. (Task 3 step 7.)
+2. The FieldPulse nightly import re-writes identical values on every row → `appointments.version` does not change on any of them. (Task 3 step 7.)
+3. A membership visit (date only, no window, no tech) → appointment #1 has `scheduled_date` set and `starts_at` NULL; it still lists as unscheduled. (Task 3 step 7.)
+4. A technician on time off: placement via `POST /api/admin/requests/[id]/assign` or reschedule onto the window → 409 even with override; auto-dispatch never picks them; public availability drops their capacity. (Task 6b step 6.)
+5. A tech taps "On my way" → the request stays in their list, the admin sheet shows "En route", the AI account reply says it is on the way, the delay sweep still treats it as not started. (Task 2 step 6 + Task 4 step 3.)
 
 ---
 
@@ -36,21 +36,19 @@
 
 | file | responsibility |
 | --- | --- |
-| `drizzle/0048_request_status_en_route.sql` | the two `ADD VALUE`s, nothing else |
+| `drizzle/0048_request_status_en_route.sql` | two `ADD VALUE`s only |
 | `drizzle/0049_appointments_shifts.sql` | tables, triggers, backfill |
 | `drizzle/meta/_journal.json`, `0048_snapshot.json`, `0049_snapshot.json` | journal + snapshots |
 | `src/lib/db/schema.ts` | enum values, `appointments`, `appointmentAssignments`, `shiftKindEnum`, `technicianShifts` |
-| `src/lib/admin/request-status.ts` (+ test) | TRANSITIONS edges, MANUAL_TARGET_STATUSES, the six shared constants, coverage test |
-| 25 reader files (Task 2 table) | point at constants / add values |
-| `src/lib/admin/appointment-queries.ts` (+ test) | list/add/update/cancel visits #2+ with CAS on `version` |
+| `src/lib/admin/request-status.ts` (+ test) | TRANSITIONS edges, MANUAL_TARGET_STATUSES, seven shared constants |
+| reader files (Task 2 table) | constants / values |
+| `src/lib/admin/appointment-types.ts` (+ test), `appointment-queries.ts` | visits #2+ |
 | `src/app/api/admin/requests/[id]/appointments/route.ts`, `…/[aid]/route.ts` | visits API |
-| `src/components/admin/request-detail-sheet.tsx` | "Visits" section |
-| `src/lib/admin/shift-queries.ts` (+ test) | shifts CRUD + `listCapacityBlocks` |
+| `src/components/admin/window-picker.tsx`, `request-create-dialog.tsx`, `request-detail-sheet.tsx` | "Visits" section |
+| `src/lib/admin/shift-types.ts` (+ test), `shift-queries.ts` | shifts |
 | `src/app/api/admin/technicians/[id]/shifts/route.ts`, `…/[sid]/route.ts` | shifts API |
-| `src/components/admin/staff/time-off-dialog.tsx`, `src/components/admin/staff-table.tsx` | time-off editor on the staff page |
-| `src/lib/admin/scheduling-source.ts`, `availability-queries.ts`, `scheduling-queries.ts`, `create-request-queries.ts`, `src/lib/ai/dispatch/signals.ts` | shifts subtracted |
-| `src/lib/admin/status-colors.ts`, `src/components/admin/request-filters.tsx`, `src/app/admin/(dashboard)/requests/page.tsx`, `src/components/admin/insights/ops-insights-section.tsx` | UI readers |
-| `src/lib/ai/account-reply.ts` | wording for en_route / arrived (NOT prompt text; a deterministic reply helper) |
+| `src/components/admin/staff/time-off-dialog.tsx`, `src/components/admin/staff-table.tsx` | time-off editor |
+| `src/lib/admin/scheduling-source.ts`, `src/lib/integrations/housecall-pro/scheduling-source.ts`, `src/lib/integrations/fieldpulse/scheduling-source.ts`, `src/lib/admin/availability-queries.ts` (+ test), `availability.test.ts`, `scheduling-queries.ts` | shifts subtracted |
 | `.claude/skills/page-*/SKILL.md`, `replica/features.csv`, `replica/parity.md`, `replica/build-log.md` | docs |
 
 ---
@@ -58,39 +56,35 @@
 ### Task 1: Enum migration + status constants + transitions
 
 **Files:**
-- Create: `drizzle/0048_request_status_en_route.sql`, `drizzle/meta/0048_snapshot.json`; modify `drizzle/meta/_journal.json`
-- Modify: `src/lib/db/schema.ts` (`requestStatusEnum` values), `src/lib/admin/request-status.ts`, `src/lib/admin/request-status.test.ts`
+- Modify: `src/lib/db/schema.ts` (`requestStatusEnum`), `src/lib/admin/request-status.ts`, `src/lib/admin/request-status.test.ts`, `src/components/admin/request-detail-sheet.tsx` (`STATUS_ACTION_LABELS: Record<ManualTargetStatus, string>` at ~line 56 fails to compile until the two labels exist)
+- Create via the drizzle recipe: `drizzle/0048_request_status_en_route.sql`, `drizzle/meta/0048_snapshot.json`; modify `_journal.json`
 
-**Interfaces:**
-- Produces (all exported from `@/lib/admin/request-status`):
-  ```ts
-  export const IN_FLIGHT_STATUSES = ["scheduled","assigned","en_route","arrived","in_progress","on_hold"] as const;
-  export const OPEN_STATUSES = ["pending","scheduled","assigned","en_route","arrived","in_progress","on_hold"] as const;
-  export const ON_SITE_STATUSES = ["arrived","in_progress"] as const;
-  export const NOT_STARTED_STATUSES = ["scheduled","assigned","en_route"] as const;
-  export const UNASSIGNED_OPEN_STATUSES = ["pending","scheduled"] as const;
-  export const NEEDS_PLACEMENT_STATUSES = ["pending","scheduled","assigned","en_route","arrived","in_progress"] as const;
-  export const TERMINAL_STATUSES = ["completed","cancelled"] as const;
-  export const MANUAL_TARGET_STATUSES = ["scheduled","en_route","arrived","in_progress","on_hold","completed","cancelled"] as const;
-  ```
+**Interfaces (all exported from `@/lib/admin/request-status`):**
+```ts
+export const IN_FLIGHT_STATUSES = ["scheduled","assigned","en_route","arrived","in_progress","on_hold"] as const;
+export const OPEN_STATUSES = ["pending", ...IN_FLIGHT_STATUSES] as const;
+export const ON_SITE_STATUSES = ["arrived","in_progress"] as const;
+export const NOT_STARTED_STATUSES = ["scheduled","assigned","en_route"] as const;
+export const UNASSIGNED_OPEN_STATUSES = ["pending","scheduled"] as const;
+export const NEEDS_PLACEMENT_STATUSES = ["pending","scheduled","assigned","en_route","arrived","in_progress"] as const;
+export const TERMINAL_STATUSES = ["completed","cancelled"] as const;
+export const MANUAL_TARGET_STATUSES = ["scheduled","en_route","arrived","in_progress","on_hold","completed","cancelled"] as const;  // replaces the existing declaration at ~lines 47–53
+```
 
-- [ ] **Step 1: Migration 0048**
+- [ ] **Step 1: `schema.ts`** — `requestStatusEnum` values become `["pending", "assigned", "en_route", "arrived", "scheduled", "in_progress", "on_hold", "completed", "cancelled"]` (this is the Postgres order after the two `AFTER` clauses). Drizzle recipe with `--name request_status_en_route`; overwrite the generated SQL with:
 
 ```sql
 -- M0a: two new canonical job statuses for the tech loop. Own file: nothing
--- here USES the values (Postgres forbids using a new enum value in the same
--- transaction; the neon-http migrator autocommits per statement, but keep the
--- rule so a future runner change cannot break it). Precedent: 0001, 0008, 0013.
+-- here USES the values. Precedent: 0001, 0008, 0013.
 ALTER TYPE "public"."request_status" ADD VALUE IF NOT EXISTS 'en_route' AFTER 'assigned';
 --> statement-breakpoint
 ALTER TYPE "public"."request_status" ADD VALUE IF NOT EXISTS 'arrived' AFTER 'en_route';
 ```
-`schema.ts`: `requestStatusEnum` values become `["pending","assigned","en_route","arrived","scheduled","in_progress","on_hold","completed","cancelled"]` — keep the array order equal to the Postgres enum order (`assigned`, then `en_route`, `arrived`, then `scheduled`) so the snapshot matches. Journal entry idx 48 with `when` > 0047's; snapshot via the probe-generate-rename recipe from the M0b plan Task 1 Step 3; `npx drizzle-kit generate` → "No schema changes".
+Then `npx drizzle-kit generate` → "No schema changes".
 
-- [ ] **Step 2: Failing tests**
+- [ ] **Step 2: Failing tests** — in `request-status.test.ts` add `'en_route','arrived'` to the `vi.mock` enumValues, then append:
 
 ```ts
-// append to src/lib/admin/request-status.test.ts (and add 'en_route','arrived' to the vi.mock enumValues)
 import { IN_FLIGHT_STATUSES, OPEN_STATUSES, ON_SITE_STATUSES, NOT_STARTED_STATUSES, TERMINAL_STATUSES } from './request-status';
 
 describe('en_route / arrived', () => {
@@ -121,9 +115,9 @@ describe('en_route / arrived', () => {
 });
 ```
 
-- [ ] **Step 3: Run** — `npx vitest run src/lib/admin/request-status.test.ts` → FAIL (exports missing; TRANSITIONS is `Record<RequestStatus,…>` so tsc also fails until the rows exist).
+- [ ] **Step 3: Run** `npx vitest run src/lib/admin/request-status.test.ts` → FAIL.
 
-- [ ] **Step 4: Implement** in `request-status.ts`:
+- [ ] **Step 4: Implement** in `request-status.ts`: replace `TRANSITIONS` and `MANUAL_TARGET_STATUSES`, add the constants:
 
 ```ts
 const TRANSITIONS: Record<RequestStatus, readonly RequestStatus[]> = {
@@ -132,8 +126,8 @@ const TRANSITIONS: Record<RequestStatus, readonly RequestStatus[]> = {
   assigned: ["scheduled", "en_route", "in_progress", "on_hold", "cancelled"],
   // Driving to the site. Can turn back (scheduled), arrive, start, pause, cancel.
   en_route: ["arrived", "in_progress", "scheduled", "on_hold", "cancelled"],
-  // On site, not yet working. No arrived → completed: the response-time KPI is
-  // anchored on reaching the site, completion still goes through in_progress.
+  // On site, not yet working. No arrived → completed: completion goes through
+  // in_progress, and the response-time KPI is anchored on reaching the site.
   arrived: ["in_progress", "on_hold", "cancelled"],
   in_progress: ["on_hold", "completed", "cancelled"],
   on_hold: ["en_route", "in_progress", "scheduled", "completed", "cancelled"],
@@ -144,10 +138,9 @@ const TRANSITIONS: Record<RequestStatus, readonly RequestStatus[]> = {
 export const MANUAL_TARGET_STATUSES = ["scheduled", "en_route", "arrived", "in_progress", "on_hold", "completed", "cancelled"] as const satisfies readonly RequestStatus[];
 
 // ── Shared status lists (M0a) ────────────────────────────────────────────────
-// One place for the lists that used to be hand-written in ~25 readers. Lists
-// that differed before (some include `pending`, ops-insights drops
-// scheduled/on_hold) keep their own members; nothing is merged.
-/** A job somebody is working toward: booked through paused. */
+// One home for the lists that used to be hand-written in ~25 readers. Lists
+// that differed before keep their own members; nothing is merged.
+/** Booked through paused: somebody is working toward this request. */
 export const IN_FLIGHT_STATUSES = ["scheduled", "assigned", "en_route", "arrived", "in_progress", "on_hold"] as const satisfies readonly RequestStatus[];
 /** Non-terminal: IN_FLIGHT plus pending intake. */
 export const OPEN_STATUSES = ["pending", ...IN_FLIGHT_STATUSES] as const satisfies readonly RequestStatus[];
@@ -161,15 +154,12 @@ export const UNASSIGNED_OPEN_STATUSES = ["pending", "scheduled"] as const satisf
 export const NEEDS_PLACEMENT_STATUSES = ["pending", "scheduled", "assigned", "en_route", "arrived", "in_progress"] as const satisfies readonly RequestStatus[];
 export const TERMINAL_STATUSES = ["completed", "cancelled"] as const satisfies readonly RequestStatus[];
 ```
+In `request-detail-sheet.tsx` add `en_route: 'Mark en route', arrived: 'Mark arrived'` to `STATUS_ACTION_LABELS`.
 
-- [ ] **Step 5: Run** the test file → PASS. `npx tsc --noEmit` now fails in `request-detail-sheet.tsx` (`STATUS_ACTION_LABELS`) — that is Task 2; proceed there before committing, or commit with the labels fix included (preferred: include it here: add `en_route: 'Mark en route', arrived: 'Mark arrived'`).
-
-- [ ] **Step 6: Apply + gates + commit**
-
-Run: `npm run db:migrate` (dev) → ok; `npx drizzle-kit generate` → No schema changes; `npx tsc --noEmit` → 0; vitest ≥ baseline.
+- [ ] **Step 5: Apply + gates + commit** — `npm run db:migrate` (dev); `npx drizzle-kit generate` → No schema changes; `npx tsc --noEmit` → 0; vitest ≥ baseline.
 ```bash
-git add drizzle/0048_request_status_en_route.sql drizzle/meta src/lib/db/schema.ts src/lib/admin/request-status.ts src/lib/admin/request-status.test.ts src/components/admin/request-detail-sheet.tsx
-git commit -m "feat(status): en_route and arrived job statuses with shared status lists
+git add drizzle/0048_request_status_en_route.sql drizzle/meta/_journal.json drizzle/meta/0048_snapshot.json src/lib/db/schema.ts src/lib/admin/request-status.ts src/lib/admin/request-status.test.ts src/components/admin/request-detail-sheet.tsx
+git commit -m "feat(status): en_route and arrived request statuses with shared status lists
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
@@ -178,80 +168,190 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ### Task 2: Point every status reader at the constants
 
-**Files (each with the exact change):**
+**Files and the exact change (all verified against the code on 2026-11-01):**
 
 | file | today | change |
 | --- | --- | --- |
-| `src/lib/admin/queries.ts:446` `OPEN_STATUSES` | 5 values | delete the local const; `import { OPEN_STATUSES, UNASSIGNED_OPEN_STATUSES } from "./request-status"`; `TERMINAL_STATUSES` → import too |
+| `src/lib/admin/queries.ts:446` `OPEN_STATUSES`, `:454` `TERMINAL_STATUSES`, `:460` `UNASSIGNED_OPEN_STATUSES` | local consts | delete the locals; `import { OPEN_STATUSES, TERMINAL_STATUSES, UNASSIGNED_OPEN_STATUSES } from "./request-status"` (same members + the two new in OPEN) |
 | `queries.ts:442` `ASSIGNABLE_STATUSES` | pending/scheduled/assigned | unchanged |
 | `queries.ts:465` `REASSIGNABLE_STATUSES` | assigned/in_progress/on_hold | add `"en_route", "arrived"` (the 409 guard is M2) |
-| `queries.ts:1073` raw SQL in-progress KPI | `status = 'in_progress'`-style | read it; if it is an "in progress" count keep as is; if it is an "active" list add `'en_route','arrived'` |
-| `src/lib/admin/scheduling-queries.ts:67` `ACTIVE_BOOKING_STATUSES` | 5 values | replace with `OPEN_STATUSES` import (same members + the two new) |
-| `scheduling-queries.ts:81` `UNSCHEDULED_STATUSES` | 4 values | replace with `NEEDS_PLACEMENT_STATUSES` |
+| `queries.ts:1068-1078` dashboard status buckets (CASE per status) | pending / assignedToday / inProgress / completedToday / scheduled / onHold | fold the new values into `inProgress`: `status IN ('en_route','arrived','in_progress')` with a comment "en route and arrived count as in progress on the dashboard tiles" — `DashboardStats` and the UI do not change |
+| `src/lib/admin/scheduling-queries.ts:67` `ACTIVE_BOOKING_STATUSES` | 5 values | delete; import `OPEN_STATUSES` (identical members + new) and use it where the local was used |
+| `scheduling-queries.ts:81` `UNSCHEDULED_STATUSES` | pending/scheduled/assigned/in_progress | delete; import `NEEDS_PLACEMENT_STATUSES` |
 | `scheduling-queries.ts:721` raw SQL guard | `IN ('pending','assigned','scheduled','in_progress','on_hold')` | `IN ('pending','assigned','scheduled','en_route','arrived','in_progress','on_hold')` |
-| `src/app/api/tech/jobs/route.ts:19` `ACTIVE_STATUSES` | scheduled/assigned/in_progress/on_hold | `IN_FLIGHT_STATUSES` |
-| `src/app/api/admin/dispatch/map/route.ts:22` | same 4 | `IN_FLIGHT_STATUSES` |
+| `src/app/api/tech/jobs/route.ts:19` `ACTIVE_STATUSES` | scheduled/assigned/in_progress/on_hold | delete; import `IN_FLIGHT_STATUSES` |
+| `src/app/api/admin/dispatch/map/route.ts:22` `ACTIVE_STATUSES` | same 4 | `IN_FLIGHT_STATUSES` |
 | `src/lib/portal/portal-queries.ts:199` `ACTIVE_JOB_STATUSES` | 5 incl. pending | `OPEN_STATUSES` |
 | `src/lib/ai/account-tools.ts:85` `UPCOMING_STATUSES` | 5 incl. pending | `OPEN_STATUSES` |
-| `src/lib/ai/account-reply.ts:44` `statusLabel` switch | default "being scheduled" | add `case "en_route": return "on the way (your technician is driving to you)"; case "arrived": return "on site (your technician has arrived)";` |
+| `src/lib/ai/account-reply.ts:44` `statusLabel` | default "being scheduled" | add `case "en_route": return "on the way"; case "arrived": return "on site";` (the label is interpolated into a sentence; keep it short) |
 | `src/lib/ai/dispatch/signals.ts:91` `SAME_DAY_LOAD_STATUSES` | 4 | add `"en_route", "arrived"` |
-| `src/lib/dispatch/delay-detection.ts:17` `NOT_STARTED_STATUSES` | scheduled/assigned | `NOT_STARTED_STATUSES` import (adds en_route) |
-| `src/lib/admin/ops-insights-queries.ts:29` + raw SQL `:83` | pending/assigned/in_progress | add `en_route`, `arrived` to both (same spelling in the SQL literal) |
-| `src/lib/admin/operations-metrics-queries.ts:160` | `eq(toStatus, "in_progress")` | `inArray(requestStatusEvents.toStatus, [...ON_SITE_STATUSES])`; the JS reducer that picks the first event per request must take the MIN `at` across both statuses (read the reducer; it groups by request already) |
-| `src/lib/admin/status-colors.ts:25,40` | 7 keys | add `en_route: 'bg-info-light text-info-strong border-info-border'`, `arrived: 'bg-success-light text-success-strong border-success-border'`; DOT `en_route: 'bg-info'`, `arrived: 'bg-success'`. Run `npx vitest run src/lib/admin/status-colors-contrast.test.ts`; if `info` tokens are missing from `globals.css` or fail 4.5:1, use the `marker` pair for en_route instead and note it in the commit |
+| `src/lib/dispatch/delay-detection.ts:17` `NOT_STARTED_STATUSES` | scheduled/assigned | delete; import `NOT_STARTED_STATUSES` (adds en_route) |
+| `src/lib/admin/ops-insights-queries.ts:29` + raw SQL `:83` | pending/assigned/in_progress | add `en_route`, `arrived` in both (same spelling in the SQL literal); do NOT add scheduled/on_hold (pre-existing drift, out of scope) |
+| `src/lib/admin/operations-metrics-queries.ts:160` | `eq(requestStatusEvents.toStatus, "in_progress")` | `inArray(requestStatusEvents.toStatus, [...ON_SITE_STATUSES])` (the SQL already takes `min(at)` per request; no JS change). Update the doc comment in `src/lib/admin/operations-metrics-types.ts` ~line 50: the clock now stops at arrival |
+| `src/lib/admin/status-colors.ts:25,40` | 7 keys | BADGE: `en_route: 'bg-info-light text-info-strong border-info-border'`, `arrived: 'bg-success-light text-success-strong border-success-border'`; DOT: `en_route: 'bg-info'`, `arrived: 'bg-success'`. Run `npx vitest run src/lib/admin/status-colors-contrast.test.ts`; if the `info` pair is missing or fails 4.5:1, use the `marker` pair for en_route and say so in the commit |
 | `src/app/admin/(dashboard)/requests/page.tsx:47` whitelist | 7 | add `'en_route','arrived'` |
 | `src/components/admin/request-filters.tsx:35` `STATUS_OPTIONS` | 7 | add `{ label: 'En route', value: 'en_route' }, { label: 'Arrived', value: 'arrived' }` after Assigned |
-| `src/components/admin/request-detail-sheet.tsx:56` | 5 labels | done in Task 1 |
 | `src/components/admin/insights/ops-insights-section.tsx:45` `STATUS_LABELS` | — | add `en_route: 'En route', arrived: 'Arrived'` |
-| `src/lib/integrations/fieldpulse/import/jobs.ts:66` `FP_JOB_STATUS_MAP` | `"2": "assigned"` | `"2": "en_route"`; update the comment block above it (FP stage 2 = "on the way"); the `on_hold` CASE at `:531` stays exactly as is (no preserve for en_route/arrived) |
-| `src/app/api/admin/integrations/fieldpulse/webhook/route.ts:94` | en_route/on_site → in_progress | `case "en_route": return "en_route"; case "on_site": return "arrived";` and widen the function's return union |
-| `src/lib/integrations/housecall-pro/webhook-events.ts:118` | `job.on_my_way` → in_progress | `case "job.on_my_way": return "en_route";` (keep `job.started` → in_progress); update the doc comment |
-| `src/components/tech/tech-job-summary.tsx:29` `humanize` | generic | fine ("En route", "Arrived"); check `isTerminalStatus` and `buildStatusConfirmCopy` tolerate the new values (they key on completed/cancelled) |
+| `src/lib/integrations/fieldpulse/import/jobs.ts:66` `FP_JOB_STATUS_MAP` | `"2": "assigned"` | `"2": "en_route"`; rewrite the comment above (FP stage 2 = "on the way"). The `on_hold` CASE at `:530` stays exactly as is. Known limitation to note in the commit: the nightly sync still rewrites a native `arrived`/`cancelled` on an FP-linked request back to FP's stage |
+| `src/app/api/admin/integrations/fieldpulse/webhook/route.ts:94` | en_route/on_site → in_progress | `case "en_route": return "en_route"; case "on_site": return "arrived";` and widen the hand-written return union to `RequestStatus \| null` |
+| `src/lib/integrations/housecall-pro/webhook-events.ts:118` | `job.on_my_way` → in_progress | `case "job.on_my_way": return "en_route";` (`job.started` stays in_progress); update the doc comment at ~105–110 |
 
-- [ ] **Step 1: Grep to confirm the list is complete**
+**Tests to update in this task (they encode the old behaviour or mock too narrowly):**
+- `src/lib/integrations/housecall-pro/webhook-events.test.ts:66` → `expect(eventTypeToStatus("job.on_my_way")).toBe("en_route")`.
+- `src/lib/integrations/fieldpulse/import/jobs.test.ts:185-191` → rename to "maps statusInt 2 → en_route" and `toBe('en_route')`.
+- `src/lib/dispatch/delay-detection.test.ts:37` schema mock → add `requestStatusEnum: { enumValues: [...9 values] }, holdReasonEnum: { enumValues: ['awaiting_parts','awaiting_customer','awaiting_access','weather','other'] }` (request-status.ts reads both at load). Add a case: an `en_route` job whose window end has passed is flagged late.
+- `src/lib/admin/scheduling-queries.test.ts:69` mocks `./request-status` with only `isTerminal` → `vi.mock('./request-status', async (importOriginal) => ({ ...(await importOriginal()), isTerminal: … }))` or add the constants to the mock.
+- `src/lib/ai/account-tools.test.ts` and `src/lib/admin/operations-metrics-queries.test.ts` schema mocks → add both enums.
+- `src/lib/ai/bot-edge-cases-account.test.ts` (or wherever `appointmentReply`/`statusLabel` is tested) → assert the reply for `status: "en_route"` contains "on the way" and for `arrived` contains "on site".
+- Any other test whose schema mock lacks the enums will fail loudly at import; fix each by adding the two enums.
 
-Run: `grep -rnE "\"on_hold\"|'on_hold'" src --include='*.ts' --include='*.tsx' | grep -v '\.test\.' | grep -v 'request-status.ts'`
-Expected: every hit is in the table above or is a `hold_reason` / FP-availability / seed-demo context. Add any genuine miss to the table and fix it.
+- [ ] **Step 1: Completeness grep**
 
-- [ ] **Step 2: Apply the table.** Existing tests that mock `requestStatusEnum.enumValues` (grep `enumValues: \[` in `src --include='*.test.ts'`) need the two new values added to the mock.
+Run: `grep -rnE "'(assigned|in_progress)'|\"(assigned|in_progress)\"" src --include='*.ts' --include='*.tsx' | grep -v '\.test\.' | grep -v 'request-status.ts'`
+Expected: every hit is in the table or is a `hold_reason`, FP-availability, type-literal or seed-demo context. Add any genuine miss to the table and fix it.
 
-- [ ] **Step 3: Tests**
-
-Add to `src/lib/dispatch/delay-detection.test.ts` (exists? if not, create with the same vi.mock pattern as `request-status.test.ts`): an en_route job whose window end has passed is flagged late. Add to `src/lib/integrations/housecall-pro/webhook-events.test.ts` (exists per the module's style; if not, create): `eventTypeToStatus("job.on_my_way") === "en_route"`. Add to the FP import test (`src/lib/integrations/fieldpulse/import/jobs.test.ts` if present) or `jobs-status-map.test.ts`: stage `"2"` → `en_route`.
+- [ ] **Step 2: Apply the table.** **Step 3: Update the tests listed.**
 
 - [ ] **Step 4: Gates**
 
 Run: `npx tsc --noEmit && npx eslint $(git diff --name-only | tr '\n' ' ') && npx vitest run 2>&1 | tail -3`
 
-- [ ] **Step 5: Probe (Review Focus 5, first half)**
+- [ ] **Step 5: FP histogram (done-when "identical except stage 2")**
 
-With the dev server running: mint a tech session (read `scripts/agent/mint-admin-session.mjs`; if it cannot mint a technician JWT, use the admin status route instead: `PATCH /api/admin/requests/<id>/status` with `{ "status": "en_route" }` — read `src/app/api/admin/requests/[id]/status/route.ts` for the exact body). Then:
+Before and after running one FP import on dev (if FP credentials are configured on dev; otherwise skip and say so): `select status, count(*) from service_requests where fieldpulse_job_id is not null group by 1 order by 1`. Expected delta: only `assigned` → `en_route` moves.
+
+- [ ] **Step 6: Probe (Review Focus 5, admin side)**
+
 ```bash
-curl -s -b "hvac_admin_session=$TOKEN" http://localhost:3000/api/admin/requests/<id> | grep -o '"status":"[a-z_]*"'
+TOKEN=$(npx tsx scripts/agent/mint-admin-session.mjs); H='content-type: application/json'
+RID=<an assigned request id>
+curl -s -b "hvac_admin_session=$TOKEN" -H "$H" -X PATCH http://localhost:3000/api/admin/requests/$RID -d '{"status":"en_route"}'; echo
+curl -s -b "hvac_admin_session=$TOKEN" http://localhost:3000/api/admin/requests/$RID | grep -o '"status":"[a-z_]*"'      # en_route
+curl -s -b "hvac_admin_session=$TOKEN" "http://localhost:3000/api/admin/requests?status=en_route" | grep -c "$RID"     # 1
+TECH=$(npx tsx scripts/agent/mint-tech-session.mjs <assigned tech id>)
+curl -s -b "hvac_tech_session=$TECH" http://localhost:3000/api/tech/jobs | grep -c "$RID"                              # 1
 ```
-Expected: `en_route`; the requests list filter "En route" shows it; `GET /api/tech/jobs` for the assigned tech still lists it.
+Screenshot `/admin/requests` at 1440 with the detail sheet showing "En route" (Playwright snippet from the M0b plan Task 8 step 8, clicking the request row).
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit** (explicit list):
 
 ```bash
-git add -A src
+git add src/lib/admin/queries.ts src/lib/admin/scheduling-queries.ts src/lib/admin/scheduling-queries.test.ts src/app/api/tech/jobs/route.ts src/app/api/admin/dispatch/map/route.ts src/lib/portal/portal-queries.ts src/lib/ai/account-tools.ts src/lib/ai/account-tools.test.ts src/lib/ai/account-reply.ts src/lib/ai/bot-edge-cases-account.test.ts src/lib/ai/dispatch/signals.ts src/lib/dispatch/delay-detection.ts src/lib/dispatch/delay-detection.test.ts src/lib/admin/ops-insights-queries.ts src/lib/admin/operations-metrics-queries.ts src/lib/admin/operations-metrics-queries.test.ts src/lib/admin/operations-metrics-types.ts src/lib/admin/status-colors.ts 'src/app/admin/(dashboard)/requests/page.tsx' src/components/admin/request-filters.tsx src/components/admin/insights/ops-insights-section.tsx src/lib/integrations/fieldpulse/import/jobs.ts src/lib/integrations/fieldpulse/import/jobs.test.ts src/app/api/admin/integrations/fieldpulse/webhook/route.ts src/lib/integrations/housecall-pro/webhook-events.ts src/lib/integrations/housecall-pro/webhook-events.test.ts
 git commit -m "feat(status): every status reader learns en_route and arrived
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
+(Add any further test file you had to touch.)
 
 ---
 
 ### Task 3: Appointments + assignments + shifts migration with triggers and backfill
 
 **Files:**
-- Create: `drizzle/0049_appointments_shifts.sql`, `drizzle/meta/0049_snapshot.json`; modify `_journal.json`
 - Modify: `src/lib/db/schema.ts`
+- Create via the drizzle recipe (`--name appointments_shifts`): `drizzle/0049_appointments_shifts.sql`, `drizzle/meta/0049_snapshot.json`; modify `_journal.json`
 
-**Interfaces:**
-- Produces Drizzle tables `appointments`, `appointmentAssignments`, `technicianShifts`; enum `shiftKindEnum` (`on_call | time_off | non_job`).
+**Interfaces:** Drizzle tables `appointments`, `appointmentAssignments`, `technicianShifts`; enum `shiftKindEnum` (`on_call | time_off | non_job`).
 
-- [ ] **Step 1: Migration**
+- [ ] **Step 0: "Before" captures** (must run BEFORE the migration is applied; FP/HCP sync idle):
+
+```bash
+TOKEN=$(npx tsx scripts/agent/mint-admin-session.mjs); TECH=$(npx tsx scripts/agent/mint-tech-session.mjs <tech id>); D=$(date +%F); S=/private/tmp/claude-501/-Users-sizbei-Documents-GitHub-ai-hvac-agent/fde8e78e-e26b-44a5-921c-c4bf61138d99/scratchpad/m0a
+mkdir -p $S
+curl -s -b "hvac_admin_session=$TOKEN" "http://localhost:3000/api/admin/calendar?date=$D&view=day" > $S/cal-day-before.json
+curl -s -b "hvac_admin_session=$TOKEN" "http://localhost:3000/api/admin/calendar?date=$D&view=week&includeCompleted=true" > $S/cal-week-before.json
+curl -s -b "hvac_admin_session=$TOKEN" "http://localhost:3000/api/admin/dispatch?date=$D" > $S/dispatch-before.json
+curl -s -b "hvac_admin_session=$TOKEN" "http://localhost:3000/api/admin/calendar/unscheduled-count" > $S/unsched-before.json
+curl -s -b "hvac_tech_session=$TECH" "http://localhost:3000/api/tech/jobs" > $S/tech-before.json
+```
+
+- [ ] **Step 1: `schema.ts`** (after `serviceRequests`):
+
+```ts
+export const shiftKindEnum = pgEnum("shift_kind", ["on_call", "time_off", "non_job"]);
+
+// M0a: a visit. #1 is mirrored from the request by trigger (drizzle/0049);
+// #2+ are written by appointment-queries.ts only. starts_at/ends_at = the
+// arrival window; a date-only booking has scheduled_date and NULL starts_at.
+export const appointments = pgTable(
+  "appointments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    serviceRequestId: uuid("service_request_id").notNull().references(() => serviceRequests.id, { onDelete: "cascade" }),
+    appointmentNumber: smallint("appointment_number").notNull().default(1),
+    scheduledDate: timestamp("scheduled_date", { withTimezone: true }),
+    startsAt: timestamp("starts_at", { withTimezone: true }),
+    endsAt: timestamp("ends_at", { withTimezone: true }),
+    arrivalWindowStart: timestamp("arrival_window_start", { withTimezone: true }),
+    arrivalWindowEnd: timestamp("arrival_window_end", { withTimezone: true }),
+    isConfirmed: boolean("is_confirmed").notNull().default(false),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    specialInstructions: text("special_instructions"),
+    // Optimistic concurrency token (CAS on version, never on updated_at).
+    version: integer("version").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique("appointments_request_number_unique").on(table.serviceRequestId, table.appointmentNumber),
+    check("appointments_window_check", sql`${table.arrivalWindowEnd} IS NULL OR ${table.arrivalWindowStart} IS NULL OR ${table.arrivalWindowEnd} > ${table.arrivalWindowStart}`),
+    check("appointments_span_check", sql`${table.endsAt} IS NULL OR ${table.startsAt} IS NULL OR ${table.endsAt} >= ${table.startsAt}`),
+    index("appointments_org_starts_at_idx").on(table.organizationId, table.startsAt),
+    index("appointments_request_idx").on(table.serviceRequestId),
+  ],
+);
+
+// M0a: who is on a visit. One lead per visit; status uses the request enum so
+// there is one vocabulary. Progress timestamps are written by M3.
+export const appointmentAssignments = pgTable(
+  "appointment_assignments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    appointmentId: uuid("appointment_id").notNull().references(() => appointments.id, { onDelete: "cascade" }),
+    technicianId: uuid("technician_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    isLead: boolean("is_lead").notNull().default(false),
+    status: requestStatusEnum("status").notNull().default("assigned"),
+    assignedBy: uuid("assigned_by").references(() => users.id, { onDelete: "set null" }),
+    assignedAt: timestamp("assigned_at", { withTimezone: true }).defaultNow().notNull(),
+    enRouteAt: timestamp("en_route_at", { withTimezone: true }),
+    arrivedAt: timestamp("arrived_at", { withTimezone: true }),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (table) => [
+    unique("appointment_assignments_unique").on(table.appointmentId, table.technicianId),
+    uniqueIndex("appointment_assignments_one_lead_idx").on(table.appointmentId).where(sql`${table.isLead} = true`),
+    index("appointment_assignments_tech_appt_idx").on(table.technicianId, table.appointmentId),
+    index("appointment_assignments_org_tech_idx").on(table.organizationId, table.technicianId),
+  ],
+);
+
+// M0a: date-bound exceptions to technician_availability (on call, time off,
+// non-job events). No RRULE: a repeating absence is N rows.
+export const technicianShifts = pgTable(
+  "technician_shifts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    technicianId: uuid("technician_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    kind: shiftKindEnum("kind").notNull(),
+    title: text("title"),
+    startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+    endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
+    removesCapacity: boolean("removes_capacity").notNull().default(true),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    check("technician_shifts_order_check", sql`${table.endsAt} > ${table.startsAt}`),
+    index("technician_shifts_org_tech_starts_idx").on(table.organizationId, table.technicianId, table.startsAt),
+  ],
+);
+```
+
+- [ ] **Step 2: Generate** with `--name appointments_shifts`, compare objects, then overwrite the SQL with:
 
 ```sql
 -- M0a schedule foundation: appointments (visits) + per-technician assignments,
@@ -368,21 +468,32 @@ DECLARE
   v_appt_id uuid;
   v_window_end timestamptz;
   v_old_assigned uuid;
+  v_has_progress boolean;
 BEGIN
   v_old_assigned := CASE WHEN TG_OP = 'UPDATE' THEN OLD.assigned_to ELSE NULL END;
 
-  -- 1. Nothing to mirror: delete #1 when it has no progress, else null its times.
+  -- 0. Cancelling the request cancels every visit (frees the calendar and
+  --    capacity). Runs first so it also covers requests with no visit #1.
+  IF NEW.status = 'cancelled' THEN
+    UPDATE appointments SET cancelled_at = COALESCE(cancelled_at, now()),
+        version = version + 1, updated_at = now()
+      WHERE service_request_id = NEW.id AND cancelled_at IS NULL;
+  END IF;
+
+  -- 1. Nothing to mirror: delete #1 when it has no progress, else null its
+  --    times and demote the lead.
   IF NEW.scheduled_date IS NULL AND NEW.arrival_window_start IS NULL
      AND NEW.arrival_window_end IS NULL AND NEW.assigned_to IS NULL THEN
     SELECT id INTO v_appt_id FROM appointments
       WHERE service_request_id = NEW.id AND appointment_number = 1;
     IF v_appt_id IS NOT NULL THEN
-      IF NOT EXISTS (
+      SELECT EXISTS (
         SELECT 1 FROM appointment_assignments a
         WHERE a.appointment_id = v_appt_id
           AND (a.en_route_at IS NOT NULL OR a.arrived_at IS NOT NULL
                OR a.started_at IS NOT NULL OR a.completed_at IS NOT NULL)
-      ) THEN
+      ) INTO v_has_progress;
+      IF NOT v_has_progress THEN
         DELETE FROM appointments WHERE id = v_appt_id;
       ELSE
         UPDATE appointments
@@ -390,6 +501,8 @@ BEGIN
               arrival_window_start = NULL, arrival_window_end = NULL,
               version = version + 1, updated_at = now()
           WHERE id = v_appt_id;
+        UPDATE appointment_assignments SET is_lead = false, status = 'cancelled'
+          WHERE appointment_id = v_appt_id AND is_lead;
       END IF;
     END IF;
     RETURN NEW;
@@ -403,6 +516,8 @@ BEGIN
 
   -- 2. Upsert visit #1. starts_at/ends_at come from the window ONLY: a
   --    date-only booking keeps starts_at NULL (it is "unscheduled" today).
+  --    cancelled_at follows the request: the FieldPulse import can reopen a
+  --    cancelled request, so a non-cancelled status clears it on #1.
   INSERT INTO appointments (organization_id, service_request_id, appointment_number,
       scheduled_date, starts_at, ends_at, arrival_window_start, arrival_window_end, cancelled_at)
   VALUES (NEW.organization_id, NEW.id, 1, NEW.scheduled_date,
@@ -414,17 +529,11 @@ BEGIN
       ends_at = EXCLUDED.ends_at,
       arrival_window_start = EXCLUDED.arrival_window_start,
       arrival_window_end = EXCLUDED.arrival_window_end,
-      cancelled_at = COALESCE(appointments.cancelled_at, EXCLUDED.cancelled_at),
+      cancelled_at = CASE WHEN NEW.status = 'cancelled'
+                          THEN COALESCE(appointments.cancelled_at, now()) ELSE NULL END,
       version = appointments.version + 1,
       updated_at = now()
   RETURNING id INTO v_appt_id;
-
-  -- Cancelling the job cancels every visit (frees the calendar and capacity).
-  IF NEW.status = 'cancelled' THEN
-    UPDATE appointments SET cancelled_at = COALESCE(cancelled_at, now()),
-        version = version + 1, updated_at = now()
-      WHERE service_request_id = NEW.id AND cancelled_at IS NULL;
-  END IF;
 
   -- 3. Lead assignment follows assigned_to.
   IF TG_OP = 'INSERT' OR v_old_assigned IS DISTINCT FROM NEW.assigned_to THEN
@@ -455,17 +564,17 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 --> statement-breakpoint
-DROP TRIGGER IF EXISTS trg_sync_request_appointment_ins ON service_requests;
+DROP TRIGGER IF EXISTS service_requests_sync_appointment_ins ON service_requests;
 --> statement-breakpoint
-CREATE TRIGGER trg_sync_request_appointment_ins
+CREATE TRIGGER service_requests_sync_appointment_ins
   AFTER INSERT ON service_requests
   FOR EACH ROW EXECUTE FUNCTION sync_request_appointment();
 --> statement-breakpoint
-DROP TRIGGER IF EXISTS trg_sync_request_appointment_upd ON service_requests;
+DROP TRIGGER IF EXISTS service_requests_sync_appointment_upd ON service_requests;
 --> statement-breakpoint
 -- UPDATE OF fires on unchanged values (the FieldPulse sync rewrites every row
 -- nightly), so the WHEN clause limits it to real changes.
-CREATE TRIGGER trg_sync_request_appointment_upd
+CREATE TRIGGER service_requests_sync_appointment_upd
   AFTER UPDATE OF scheduled_date, arrival_window_start, arrival_window_end, assigned_to, status
   ON service_requests
   FOR EACH ROW
@@ -503,146 +612,61 @@ WHERE r.assigned_to IS NOT NULL
 ON CONFLICT ("appointment_id","technician_id") DO NOTHING;
 ```
 
-- [ ] **Step 2: `schema.ts` mirror** (place after `serviceRequests`; the trigger is SQL-only):
+- [ ] **Step 3:** `npx drizzle-kit generate` → "No schema changes".
 
-```ts
-export const shiftKindEnum = pgEnum("shift_kind", ["on_call", "time_off", "non_job"]);
+- [ ] **Step 4: Pre-flight, then apply twice**
 
-// M0a: a visit. #1 is mirrored from the request by trigger (drizzle/0049);
-// #2+ are written by appointment-queries.ts only. starts_at/ends_at = the
-// arrival window; a date-only booking has scheduled_date and NULL starts_at.
-export const appointments = pgTable(
-  "appointments",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
-    serviceRequestId: uuid("service_request_id").notNull().references(() => serviceRequests.id, { onDelete: "cascade" }),
-    appointmentNumber: smallint("appointment_number").notNull().default(1),
-    scheduledDate: timestamp("scheduled_date", { withTimezone: true }),
-    startsAt: timestamp("starts_at", { withTimezone: true }),
-    endsAt: timestamp("ends_at", { withTimezone: true }),
-    arrivalWindowStart: timestamp("arrival_window_start", { withTimezone: true }),
-    arrivalWindowEnd: timestamp("arrival_window_end", { withTimezone: true }),
-    isConfirmed: boolean("is_confirmed").notNull().default(false),
-    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
-    specialInstructions: text("special_instructions"),
-    // Optimistic concurrency token (CAS on version, never on updated_at).
-    version: integer("version").notNull().default(0),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-  },
-  (table) => [
-    unique("appointments_request_number_unique").on(table.serviceRequestId, table.appointmentNumber),
-    check("appointments_window_check", sql`${table.arrivalWindowEnd} IS NULL OR ${table.arrivalWindowStart} IS NULL OR ${table.arrivalWindowEnd} > ${table.arrivalWindowStart}`),
-    check("appointments_span_check", sql`${table.endsAt} IS NULL OR ${table.startsAt} IS NULL OR ${table.endsAt} >= ${table.startsAt}`),
-    index("appointments_org_starts_at_idx").on(table.organizationId, table.startsAt),
-    index("appointments_request_idx").on(table.serviceRequestId),
-  ],
-);
+DB probe: `select (select count(*) from service_requests where arrival_window_end <= arrival_window_start) as bad_windows, (select count(*) from service_requests where scheduled_date is not null or arrival_window_start is not null or arrival_window_end is not null or assigned_to is not null) as to_backfill;`
+Run: `npm run db:migrate && npm run db:migrate` → both succeed.
 
-// M0a: who is on a visit. One lead per visit; status uses the job enum so
-// there is one vocabulary. Progress timestamps are written by M3.
-export const appointmentAssignments = pgTable(
-  "appointment_assignments",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
-    appointmentId: uuid("appointment_id").notNull().references(() => appointments.id, { onDelete: "cascade" }),
-    technicianId: uuid("technician_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-    isLead: boolean("is_lead").notNull().default(false),
-    status: requestStatusEnum("status").notNull().default("assigned"),
-    assignedBy: uuid("assigned_by").references(() => users.id, { onDelete: "set null" }),
-    assignedAt: timestamp("assigned_at", { withTimezone: true }).defaultNow().notNull(),
-    enRouteAt: timestamp("en_route_at", { withTimezone: true }),
-    arrivedAt: timestamp("arrived_at", { withTimezone: true }),
-    startedAt: timestamp("started_at", { withTimezone: true }),
-    completedAt: timestamp("completed_at", { withTimezone: true }),
-  },
-  (table) => [
-    unique("appointment_assignments_unique").on(table.appointmentId, table.technicianId),
-    uniqueIndex("appointment_assignments_one_lead_idx").on(table.appointmentId).where(sql`${table.isLead} = true`),
-    index("appointment_assignments_tech_appt_idx").on(table.technicianId, table.appointmentId),
-    index("appointment_assignments_org_tech_idx").on(table.organizationId, table.technicianId),
-  ],
-);
-
-// M0a: date-bound exceptions to technician_availability (on call, time off,
-// non-job events). No RRULE: a repeating absence is N rows.
-export const technicianShifts = pgTable(
-  "technician_shifts",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
-    technicianId: uuid("technician_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-    kind: shiftKindEnum("kind").notNull(),
-    title: text("title"),
-    startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
-    endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
-    removesCapacity: boolean("removes_capacity").notNull().default(true),
-    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-  },
-  (table) => [
-    check("technician_shifts_order_check", sql`${table.endsAt} > ${table.startsAt}`),
-    index("technician_shifts_org_tech_starts_idx").on(table.organizationId, table.technicianId, table.startsAt),
-  ],
-);
-```
-
-- [ ] **Step 3: Journal/snapshot** (idx 49; probe-generate-rename as before) → `npx drizzle-kit generate` prints "No schema changes".
-
-- [ ] **Step 4: Pre-flight on dev, then apply twice**
-
-```bash
-npx tsx -e 'import {neon} from "@neondatabase/serverless"; import "dotenv/config"; const s=neon(process.env.DATABASE_URL);
-console.log("bad windows", await s`select count(*) from service_requests where arrival_window_end <= arrival_window_start`);
-console.log("to backfill", await s`select count(*) from service_requests where scheduled_date is not null or arrival_window_start is not null or arrival_window_end is not null or assigned_to is not null`);'
-npm run db:migrate && npm run db:migrate
-```
-(`dotenv/config` reads `.env`; this repo uses `.env.local` — pass `DATABASE_URL` from `.env.local` with `set -a; source .env.local; set +a` first.)
-Expected: both runs succeed.
-
-- [ ] **Step 5: Done-when counts**
+- [ ] **Step 5: Done-when checks**
 
 ```sql
 select (select count(*) from service_requests where scheduled_date is not null or arrival_window_start is not null or arrival_window_end is not null or assigned_to is not null) as expected,
        (select count(*) from appointments where appointment_number = 1) as actual;
+-- columns match
 select count(*) from service_requests r join appointments a on a.service_request_id = r.id and a.appointment_number = 1
-  where r.assigned_to is not null and not exists (select 1 from appointment_assignments x where x.appointment_id = a.id and x.technician_id = r.assigned_to and x.is_lead);
-select count(*) from appointments a group by a.id having count(*) filter (where true) > 1;  -- sanity: 0 rows
+ where a.scheduled_date is distinct from r.scheduled_date or a.arrival_window_start is distinct from r.arrival_window_start
+    or (r.assigned_to is not null and not exists (select 1 from appointment_assignments x where x.appointment_id = a.id and x.technician_id = r.assigned_to and x.is_lead));
+-- never more than one lead
+select appointment_id from appointment_assignments where is_lead group by 1 having count(*) > 1;
 ```
-Expected: `expected = actual`; second count `0`.
+Expected: `expected = actual`; `0`; no rows.
 
-- [ ] **Step 6: Trigger behaviour probes (Review Focus 1–3)** — run as SQL against dev with a throwaway request row (insert one via `POST /api/admin/requests` or the seed), then:
+- [ ] **Step 6: "After" captures and diff**
+
+Re-run the Step 0 curls into `*-after.json` and `diff` each pair. Expected: no diff (the calendar/dispatch/tech payloads carry no generated timestamps; if one does, strip it with `jq 'del(.data.generatedAt)'` and note it).
+
+- [ ] **Step 7: Trigger behaviour probes (Review Focus 1–3)** — create a throwaway request via `POST /api/admin/requests` with `customerId` and no schedule; then run via the DB probe recipe (one statement per `sql` call):
 
 ```sql
--- (1) A -> B -> A: three updates; expect one lead row on A, no error.
+-- (1) A -> B -> A
 update service_requests set assigned_to = '<techA>' where id = '<rid>';
 update service_requests set assigned_to = '<techB>' where id = '<rid>';
 update service_requests set assigned_to = '<techA>' where id = '<rid>';
-select technician_id, is_lead, status from appointment_assignments where appointment_id = (select id from appointments where service_request_id='<rid>' and appointment_number=1);
--- (2) identical rewrite: version unchanged
-select version from appointments where service_request_id='<rid>' and appointment_number=1;
-update service_requests set assigned_to = assigned_to, status = status, scheduled_date = scheduled_date, updated_at = now() where id = '<rid>';
-select version from appointments where service_request_id='<rid>' and appointment_number=1;  -- same number
+select technician_id, is_lead, status from appointment_assignments where appointment_id = (select id from appointments where service_request_id = '<rid>' and appointment_number = 1);
+-- expect exactly one row: techA, true, pending
+-- (2) FP-style identical rewrite: version unchanged
+select version from appointments where service_request_id = '<rid>' and appointment_number = 1;
+update service_requests set status = case when status = 'on_hold' then status else 'pending'::request_status end, assigned_to = assigned_to, scheduled_date = scheduled_date, arrival_window_start = arrival_window_start, arrival_window_end = arrival_window_end, updated_at = now() where id = '<rid>';
+select version from appointments where service_request_id = '<rid>' and appointment_number = 1;   -- same
 -- (3) date-only: starts_at null, scheduled_date set
 update service_requests set arrival_window_start = null, arrival_window_end = null, scheduled_date = now() + interval '3 days' where id = '<rid>';
-select scheduled_date, starts_at from appointments where service_request_id='<rid>' and appointment_number=1;
--- unschedule: row deleted
+select scheduled_date, starts_at from appointments where service_request_id = '<rid>' and appointment_number = 1;
+-- (4) cancel cascade with a request that has NO visit #1: new throwaway request <rid2>, insert a visit #2 by hand:
+insert into appointments (organization_id, service_request_id, appointment_number, arrival_window_start, arrival_window_end, starts_at, ends_at) values ('<org>', '<rid2>', 2, now() + interval '5 days', now() + interval '5 days 4 hours', now() + interval '5 days', now() + interval '5 days 4 hours');
+update service_requests set status = 'cancelled' where id = '<rid2>';
+select appointment_number, cancelled_at is not null from appointments where service_request_id = '<rid2>';   -- (2, true)
+-- (5) unschedule: row deleted
 update service_requests set scheduled_date = null, assigned_to = null where id = '<rid>';
-select count(*) from appointments where service_request_id='<rid>';  -- 0
--- cancel cascades
+select count(*) from appointments where service_request_id = '<rid>';   -- 0
 ```
-Record the outputs in the commit body. Then delete the throwaway request.
-
-- [ ] **Step 7: Before/after check for the calendar, dispatch and tech app**
-
-Before applying 0049 (i.e. do this step's "before" capture right after Task 2's commit), capture: `curl -s …/api/admin/calendar?date=<today>` and `…/api/admin/dispatch/board?date=<today>` (read the real query params in their routes) to files in the scratchpad; after 0049, capture again and `diff`. Expected: no diff.
+Record the outputs in the commit body; delete the throwaway requests afterwards (`delete from service_requests where id in (...)`).
 
 - [ ] **Step 8: Gates + commit**
 
 ```bash
-git add drizzle/0049_appointments_shifts.sql drizzle/meta src/lib/db/schema.ts
+git add drizzle/0049_appointments_shifts.sql drizzle/meta/_journal.json drizzle/meta/0049_snapshot.json src/lib/db/schema.ts
 git commit -m "feat(db): appointments, assignments and shifts; visit #1 mirrored by trigger and backfilled
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
@@ -650,19 +674,53 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 4: Tech taps en route / arrived (and the admin sheet)
+### Task 4: Tech taps "On my way" / "I've arrived"
 
 **Files:**
-- Modify: `src/app/api/tech/jobs/[id]/status/route.ts` (no change needed if `MANUAL_TARGET_STATUSES` already drives the zod enum — verify; the ownership check stays `assignedTo = userId`)
-- Modify: `src/components/tech/tech-job-summary.tsx` (button labels: `en_route` → "On my way", `arrived` → "I've arrived"; keep `humanize` as the fallback; read `buildStatusConfirmCopy` and `isTerminalStatus` to make sure the two new values are non-terminal and need no confirm)
-- Modify: `src/lib/tech/field-queries.ts` only if `allowedNextStatuses` is computed there from `allowedTransitions` (it should already pick up the new edges).
+- Modify: `src/components/tech/tech-status-confirm.ts` (already holds `buildStatusConfirmCopy` and `isTerminalStatus`; add `techStatusLabel`), its test file (create `tech-status-confirm.test.ts` if none), `src/components/tech/tech-job-summary.tsx` (use `techStatusLabel(s)` instead of `humanize(s)` for the buttons)
+- No change: `src/app/api/tech/jobs/[id]/status/route.ts` (its zod enum is `MANUAL_TARGET_STATUSES`), `src/lib/tech/field-queries.ts` (`allowedNextStatuses` derives from `allowedTransitions` filtered by the manual list at ~110–113)
 
-- [ ] **Step 1:** Extract the label map as a pure function `techStatusLabel(status: string): string` in `src/components/tech/tech-status-copy.ts` (no React), with a vitest file asserting `en_route → "On my way"`, `arrived → "I've arrived"`, `in_progress → "Start work"` (keep whatever labels exist today for the others; read `buildStatusConfirmCopy` first and put both helpers in the same module if they already live outside the component).
-- [ ] **Step 2:** Probe with a technician session: the `page-tech` skill documents how to mint one (`mint-admin-session.mjs` with role technician, or the tech sign-in route). Tap sequence via curl: `POST /api/tech/jobs/<id>/status {"status":"en_route"}` → 200; `{"status":"arrived"}` → 200; `{"status":"completed"}` → 409 `INVALID_TRANSITION`; `{"status":"in_progress"}` → 200. `GET /api/tech/jobs` lists the job at every step (Review Focus 5). Screenshot `/tech/jobs/<id>` at 390 after the en_route tap and look at it.
-- [ ] **Step 3: Gates + commit**
+- [ ] **Step 1: Failing test**
+
+```ts
+import { describe, it, expect } from "vitest";
+import { techStatusLabel } from "./tech-status-confirm";
+describe("techStatusLabel", () => {
+  it("gives field wording to the new taps and keeps humanized defaults", () => {
+    expect(techStatusLabel("en_route")).toBe("On my way");
+    expect(techStatusLabel("arrived")).toBe("I've arrived");
+    expect(techStatusLabel("in_progress")).toBe("In progress");
+    expect(techStatusLabel("completed")).toBe("Completed");
+  });
+});
+```
+
+- [ ] **Step 2: Implement**
+
+```ts
+const TECH_STATUS_LABELS: Record<string, string> = { en_route: "On my way", arrived: "I've arrived" };
+export function techStatusLabel(status: string): string {
+  return TECH_STATUS_LABELS[status] ?? status.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+}
+```
+Use it in `tech-job-summary.tsx`'s button text. Confirm `buildStatusConfirmCopy`/`isTerminalStatus` key only on completed/cancelled (no confirm for the new taps).
+
+- [ ] **Step 3: Probe (Review Focus 5, tech side)**
 
 ```bash
-git add src/components/tech src/app/api/tech src/lib/tech
+RID=<request assigned to tech T>; TECH=$(npx tsx scripts/agent/mint-tech-session.mjs <T>); H='content-type: application/json'
+curl -s -b "hvac_tech_session=$TECH" -H "$H" -X POST http://localhost:3000/api/tech/jobs/$RID/status -d '{"status":"en_route"}'; echo    # 200
+curl -s -b "hvac_tech_session=$TECH" http://localhost:3000/api/tech/jobs | grep -c "$RID"                                           # 1
+curl -s -b "hvac_tech_session=$TECH" -H "$H" -X POST http://localhost:3000/api/tech/jobs/$RID/status -d '{"status":"arrived"}'; echo     # 200
+curl -s -b "hvac_tech_session=$TECH" -H "$H" -X POST http://localhost:3000/api/tech/jobs/$RID/status -d '{"status":"completed"}'; echo   # 409 INVALID_TRANSITION
+curl -s -b "hvac_tech_session=$TECH" -H "$H" -X POST http://localhost:3000/api/tech/jobs/$RID/status -d '{"status":"in_progress"}'; echo # 200
+```
+`node scripts/agent/screenshot-page.mjs /tech/jobs/$RID 390 /tmp/tech-en-route.png --tech` after the en_route step (re-run the sequence) and look at it.
+
+- [ ] **Step 4: Gates + commit**
+
+```bash
+git add src/components/tech/tech-status-confirm.ts src/components/tech/tech-status-confirm.test.ts src/components/tech/tech-job-summary.tsx
 git commit -m "feat(tech): on my way and arrived taps
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
@@ -670,50 +728,108 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 5: Visits #2+ — queries, API, detail sheet
+### Task 5a: Visits #2+ — types, queries, API
 
 **Files:**
-- Create: `src/lib/admin/appointment-queries.ts`, `src/lib/admin/appointment-queries.test.ts`
-- Create: `src/app/api/admin/requests/[id]/appointments/route.ts` (GET, POST), `…/appointments/[aid]/route.ts` (PATCH, DELETE = cancel)
-- Modify: `src/components/admin/request-detail-sheet.tsx` ("Visits" section)
+- Create: `src/lib/admin/appointment-types.ts` (+ `.test.ts`), `src/lib/admin/appointment-queries.ts`
+- Create: `src/app/api/admin/requests/[id]/appointments/route.ts` (GET, POST), `…/appointments/[aid]/route.ts` (PATCH, DELETE = cancel). Copy the route shape from `src/app/api/admin/settings/faqs/route.ts`.
 
 **Interfaces:**
-- Produces:
+- `appointment-types.ts` (client-safe):
   ```ts
-  export interface AppointmentRecord { id: string; serviceRequestId: string; appointmentNumber: number; scheduledDate: string | null; startsAt: string | null; endsAt: string | null; arrivalWindowStart: string | null; arrivalWindowEnd: string | null; isConfirmed: boolean; cancelledAt: string | null; specialInstructions: string | null; version: number; assignments: readonly { technicianId: string; technicianName: string; isLead: boolean; status: string }[] }
-  export const appointmentInputSchema  // arrivalWindowStart ISO, arrivalWindowEnd ISO > start, technicianIds uuid[] (≤5, first is lead), specialInstructions ≤1000
-  export function listAppointments(organizationId, requestId): Promise<readonly AppointmentRecord[]>
-  export function addAppointment(organizationId, requestId, input, actorUserId): Promise<AppointmentRecord | { reason: "request_not_found" | "technician_not_found" }>
-  export function updateAppointment(organizationId, requestId, appointmentId, input & { version: number }, actorUserId): Promise<AppointmentRecord | { reason: "not_found" | "version_conflict" | "is_first_visit" | "technician_not_found" }>
-  export function cancelAppointment(organizationId, requestId, appointmentId, version): Promise<{ ok: true } | { reason: "not_found" | "version_conflict" | "is_first_visit" }>
-  export function nextAppointmentNumber(existing: readonly { appointmentNumber: number }[]): number  // pure: max + 1, min 2
-  export function windowIsValid(start: string, end: string): boolean  // pure
+  export interface AppointmentAssignmentRecord { technicianId: string; technicianName: string; isLead: boolean; status: string }
+  export interface AppointmentRecord { id; serviceRequestId; appointmentNumber: number; scheduledDate: string|null; startsAt: string|null; endsAt: string|null; arrivalWindowStart: string|null; arrivalWindowEnd: string|null; isConfirmed: boolean; cancelledAt: string|null; specialInstructions: string|null; version: number; assignments: readonly AppointmentAssignmentRecord[] }
+  export const appointmentInputSchema  // arrivalWindowStart: z.iso.datetime(), arrivalWindowEnd: z.iso.datetime(), technicianIds: z.array(uuid).min(1).max(5), specialInstructions ≤1000; refine end > start
+  export const appointmentPatchSchema = appointmentInputSchema.extend({ version: z.number().int().min(0) })
+  export function nextAppointmentNumber(existing: readonly { appointmentNumber: number }[]): number   // max + 1, min 2
+  export function windowIsValid(start: string, end: string): boolean
   ```
-- Visit #1 is read-only through this API (`is_first_visit` → 409 "Edit the first visit from the job itself."): it is owned by the request columns.
+- `appointment-queries.ts`: `listAppointments(orgId, requestId)`, `addAppointment(orgId, requestId, input, actorUserId) → AppointmentRecord | { reason: "request_not_found" | "technician_not_found" | "conflict" }`, `updateAppointment(orgId, requestId, appointmentId, patch, actorUserId) → AppointmentRecord | { reason: "not_found" | "version_conflict" | "is_first_visit" | "technician_not_found" }`, `cancelAppointment(orgId, requestId, appointmentId, version) → { ok: true } | { reason: "not_found" | "version_conflict" | "is_first_visit" }`.
+- Visit #1 is read-only through this API (409 `IS_FIRST_VISIT` "Edit the first visit from the request itself."). Technician ids are re-read as `role = 'technician' AND is_active` under the org (copy the check from `reassignTechnician`, `queries.ts:616-630`).
 
-- [ ] **Step 1: Failing tests (pure)** for `nextAppointmentNumber` ([] → 2; [{1},{2}] → 3) and `windowIsValid` (end ≤ start false; both ISO true) and `appointmentInputSchema` (rejects >5 technicians, rejects end before start).
+- [ ] **Step 1: Failing tests** (pure) for `nextAppointmentNumber([]) === 2`, `nextAppointmentNumber([{1},{2}]) === 3`, `windowIsValid` (end ≤ start → false), `appointmentInputSchema` rejects 6 technicians and end-before-start, `appointmentPatchSchema` requires `version`.
 
-- [ ] **Step 2: Implement.** `addAppointment`: verify request in org; verify every technician id (`role='technician' AND is_active`, `withTenant(users, …)`); compute number from a `select appointmentNumber` of existing rows; `db.batch([insert appointments (startsAt = window start, endsAt = window end, arrivalWindow* = window), insert appointmentAssignments (first id is_lead true, status 'assigned', assigned_by actor)])`, then read back. `updateAppointment`: `update appointments set … , version = version + 1 where id and organization_id and version = $version and appointment_number > 1` → 0 rows → re-read: missing → not_found, number = 1 → is_first_visit, else version_conflict; then replace assignments in a batch (delete all for the appointment + insert). `cancelAppointment`: same CAS, sets `cancelledAt = now()`.
+- [ ] **Step 2: Implement the queries.** The race-safe shapes (neon-http: each `db.batch` is one implicit transaction; statements outside it are not):
 
-- [ ] **Step 3: Routes** in the Task-3 (M0b) shape; `PATCH` body includes `version`; map reasons: `version_conflict` → 409 `VERSION_CONFLICT` "This visit changed. Reload and try again."; `is_first_visit` → 409; `technician_not_found` → 400. Audit `add_appointment` / `update_appointment` / `cancel_appointment`, entity `appointments`, details `{ serviceRequestId, appointmentNumber, technicianIds }`.
+```ts
+// addAppointment — number allocation can race on appointments_request_number_unique; retry once.
+export async function addAppointment(organizationId: string, requestId: string, input: AppointmentInput, actorUserId: string) {
+  if (!(await requestExists(organizationId, requestId))) return { reason: "request_not_found" } as const;
+  const techs = await activeTechnicianIds(organizationId, input.technicianIds);   // withTenant(users, org, inArray(users.id, ids), eq(users.role,"technician"), eq(users.isActive,true))
+  if (techs.length !== new Set(input.technicianIds).size) return { reason: "technician_not_found" } as const;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const existing = await db.select({ appointmentNumber: appointments.appointmentNumber }).from(appointments)
+      .where(withTenant(appointments, organizationId, eq(appointments.serviceRequestId, requestId)));
+    const appointmentNumber = nextAppointmentNumber(existing);
+    const id = randomUUID();
+    const start = new Date(input.arrivalWindowStart), end = new Date(input.arrivalWindowEnd);
+    try {
+      await db.batch([
+        db.insert(appointments).values({ id, organizationId, serviceRequestId: requestId, appointmentNumber, startsAt: start, endsAt: end,
+          arrivalWindowStart: start, arrivalWindowEnd: end, specialInstructions: input.specialInstructions ?? null }),
+        db.insert(appointmentAssignments).values(techs.map((technicianId, i) => ({ organizationId, appointmentId: id, technicianId, isLead: i === 0, status: "assigned" as const, assignedBy: actorUserId }))),
+      ]);
+      return (await getAppointment(organizationId, requestId, id))!;
+    } catch (error: unknown) {
+      if (isUniqueViolation(error, "appointments_request_number_unique") && attempt === 0) continue;
+      if (isUniqueViolation(error)) return { reason: "conflict" } as const;
+      throw error;
+    }
+  }
+  return { reason: "conflict" } as const;
+}
 
-- [ ] **Step 4: Detail sheet**: a "Visits" `SectionCard` listing `listAppointments` rows: "#n · <date> <window> · <tech names> · Confirmed/Cancelled", visit #1 flagged "(from the job)"; "Add visit" button → small dialog: day + window (reuse the dialog's day/window chips from `request-create-dialog.tsx` by extracting them into `src/components/admin/window-picker.tsx` if they are not already shared) + technician multi-select; cancel action per visit #2+ with `ConfirmDialog`.
+// updateAppointment — ONE batch: CAS update + assignment delete + assignment insert, the
+// latter two gated on the CAS having landed (EXISTS … version = $v + 1).
+export async function updateAppointment(organizationId: string, requestId: string, appointmentId: string, patch: AppointmentPatch, actorUserId: string) {
+  const techs = await activeTechnicianIds(organizationId, patch.technicianIds);
+  if (techs.length !== new Set(patch.technicianIds).size) return { reason: "technician_not_found" } as const;
+  const start = new Date(patch.arrivalWindowStart), end = new Date(patch.arrivalWindowEnd);
+  const landed = sql`EXISTS (SELECT 1 FROM ${appointments} p WHERE p.id = ${appointmentId} AND p.organization_id = ${organizationId} AND p.version = ${patch.version + 1})`;
+  const [updated] = await db.batch([
+    db.update(appointments).set({ startsAt: start, endsAt: end, arrivalWindowStart: start, arrivalWindowEnd: end,
+        specialInstructions: patch.specialInstructions ?? null, version: sql`${appointments.version} + 1`, updatedAt: new Date() })
+      .where(withTenant(appointments, organizationId, eq(appointments.id, appointmentId), eq(appointments.serviceRequestId, requestId),
+        eq(appointments.version, patch.version), gt(appointments.appointmentNumber, 1)))
+      .returning({ id: appointments.id }),
+    db.delete(appointmentAssignments).where(withTenant(appointmentAssignments, organizationId, eq(appointmentAssignments.appointmentId, appointmentId), landed)),
+    db.execute(sql`INSERT INTO appointment_assignments (organization_id, appointment_id, technician_id, is_lead, status, assigned_by)
+      SELECT ${organizationId}, ${appointmentId}, t.id, t.ord = 1, 'assigned', ${actorUserId}
+      FROM unnest(${techs}::uuid[]) WITH ORDINALITY AS t(id, ord) WHERE ${landed}`),
+  ]);
+  if (updated.length === 0) {
+    const [row] = await db.select({ n: appointments.appointmentNumber }).from(appointments)
+      .where(withTenant(appointments, organizationId, eq(appointments.id, appointmentId), eq(appointments.serviceRequestId, requestId))).limit(1);
+    if (!row) return { reason: "not_found" } as const;
+    if (row.n === 1) return { reason: "is_first_visit" } as const;
+    return { reason: "version_conflict" } as const;
+  }
+  return (await getAppointment(organizationId, requestId, appointmentId))!;
+}
 
-- [ ] **Step 5: Probe**
-
-```bash
-curl -s -b "hvac_admin_session=$TOKEN" -H 'content-type: application/json' -X POST http://localhost:3000/api/admin/requests/<rid>/appointments -d '{"arrivalWindowStart":"2026-11-10T13:00:00Z","arrivalWindowEnd":"2026-11-10T17:00:00Z","technicianIds":["<techA>"]}'
-curl -s -b "hvac_admin_session=$TOKEN" http://localhost:3000/api/admin/requests/<rid>/appointments
-# cancel the job → both visits cancelled
-curl -s -b "hvac_admin_session=$TOKEN" -H 'content-type: application/json' -X PATCH http://localhost:3000/api/admin/requests/<rid>/status -d '{"status":"cancelled"}'
-curl -s -b "hvac_admin_session=$TOKEN" http://localhost:3000/api/admin/requests/<rid>/appointments | grep -o '"cancelledAt":"[^"]*"' | wc -l   # 2
+// cancelAppointment — same CAS; also cancels its assignments in the same batch.
 ```
-Screenshot the detail sheet with two visits at 1440.
+(`gt` from drizzle-orm; `sql` array parameter `${techs}::uuid[]` works with neon-http; if the driver rejects it, pass `sql.raw` of a quoted list built from validated uuids.) `listAppointments` joins `users` for `technicianName`, orders by `appointmentNumber`.
 
-- [ ] **Step 6: Gates + commit**
+- [ ] **Step 3: Routes.** `POST …/appointments` → 201; `PATCH …/[aid]` body `appointmentPatchSchema`; `DELETE …/[aid]` body `{ version }`. Map reasons: `version_conflict` → 409 `VERSION_CONFLICT` "This visit changed. Reload and try again."; `is_first_visit` → 409 `IS_FIRST_VISIT`; `technician_not_found` → 400; `conflict` → 409 `CONFLICT` "Couldn't add the visit. Try again."; `request_not_found`/`not_found` → 404. Audit `add_appointment` / `update_appointment` / `cancel_appointment`, entity `appointments`, details `{ serviceRequestId, appointmentNumber, technicianIds }`.
+
+- [ ] **Step 4: Probe**
 
 ```bash
-git add src/lib/admin/appointment-queries.ts src/lib/admin/appointment-queries.test.ts 'src/app/api/admin/requests/[id]/appointments' src/components/admin/request-detail-sheet.tsx src/components/admin/window-picker.tsx
+curl -s -b "hvac_admin_session=$TOKEN" -H "$H" -X POST http://localhost:3000/api/admin/requests/$RID/appointments -d '{"arrivalWindowStart":"2026-11-10T13:00:00Z","arrivalWindowEnd":"2026-11-10T17:00:00Z","technicianIds":["<techA>"]}'; echo   # 201, appointmentNumber 2
+AID=<id>; V=<version>
+curl -s -b "hvac_admin_session=$TOKEN" -H "$H" -X PATCH http://localhost:3000/api/admin/requests/$RID/appointments/$AID -d "{\"arrivalWindowStart\":\"2026-11-11T13:00:00Z\",\"arrivalWindowEnd\":\"2026-11-11T17:00:00Z\",\"technicianIds\":[\"<techB>\"],\"version\":$V}"; echo   # 200, version V+1, assignments = [B lead]
+curl -s -b "hvac_admin_session=$TOKEN" -H "$H" -X PATCH http://localhost:3000/api/admin/requests/$RID/appointments/$AID -d "{\"arrivalWindowStart\":\"2026-11-11T13:00:00Z\",\"arrivalWindowEnd\":\"2026-11-11T17:00:00Z\",\"technicianIds\":[\"<techB>\"],\"version\":$V}"; echo   # 409 VERSION_CONFLICT (stale)
+A1=<appointment #1 id>
+curl -s -b "hvac_admin_session=$TOKEN" -H "$H" -X DELETE http://localhost:3000/api/admin/requests/$RID/appointments/$A1 -d '{"version":0}'; echo   # 409 IS_FIRST_VISIT
+curl -s -b "hvac_admin_session=$TOKEN" -H "$H" -X PATCH http://localhost:3000/api/admin/requests/$RID -d '{"status":"cancelled"}'; echo
+curl -s -b "hvac_admin_session=$TOKEN" http://localhost:3000/api/admin/requests/$RID/appointments | grep -o '"cancelledAt":"[^"]*"' | wc -l   # 2
+```
+
+- [ ] **Step 5: Gates + commit**
+
+```bash
+git add src/lib/admin/appointment-types.ts src/lib/admin/appointment-types.test.ts src/lib/admin/appointment-queries.ts 'src/app/api/admin/requests/[id]/appointments'
 git commit -m "feat(requests): additional visits with per-technician assignments
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
@@ -721,61 +837,125 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 6: Shifts — queries, API, staff UI, and the five availability paths
+### Task 5b: "Visits" on the request detail sheet
 
 **Files:**
-- Create: `src/lib/admin/shift-queries.ts`, `src/lib/admin/shift-queries.test.ts`
+- Create: `src/components/admin/window-picker.tsx` — extract the day-chip + window-chip + technician select block from `src/components/admin/request-create-dialog.tsx` (the "Schedule now" section) into a reusable component with props `{ value: { isoDay, window, technicianId } | null; onChange; availability: OpenWindow[]; technicians }`; the dialog then uses it (unconditional extraction).
+- Modify: `src/components/admin/request-create-dialog.tsx`, `src/components/admin/request-detail-sheet.tsx`
+
+- [ ] **Step 1:** Extract `WindowPicker`; the dialog's behaviour is unchanged (re-run the M0b Task 8 dialog screenshot and compare).
+- [ ] **Step 2:** In the detail sheet add a `SectionCard` "Visits": rows "#n · <day> <window> · <tech names> · Confirmed / Cancelled"; visit #1 labelled "(from the request)" and read-only; "Add visit" opens a `Dialog` with `WindowPicker` (a window chip resolves to the band's start/end instants via the same helper the dialog uses) + a technician multi-select (first = lead); per-visit (#2+) "Cancel visit" with `ConfirmDialog` sending `{ version }`; 409 `VERSION_CONFLICT` → refetch + "This visit changed. Reload and try again."
+- [ ] **Step 3:** Screenshot the sheet with two visits at 1440 (Playwright snippet, click the request row). Look at it.
+- [ ] **Step 4: Gates + commit**
+
+```bash
+git add src/components/admin/window-picker.tsx src/components/admin/request-create-dialog.tsx src/components/admin/request-detail-sheet.tsx
+git commit -m "feat(requests): visits section on the detail sheet with a shared window picker
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 6a: Shifts — types, queries, API
+
+**Files:**
+- Create: `src/lib/admin/shift-types.ts` (+ `.test.ts`), `src/lib/admin/shift-queries.ts`
 - Create: `src/app/api/admin/technicians/[id]/shifts/route.ts` (GET `?from=&to=`, POST), `…/shifts/[sid]/route.ts` (DELETE)
-- Create: `src/components/admin/staff/time-off-dialog.tsx`; modify `src/components/admin/staff-table.tsx` (row action "Time off" for technician rows)
-- Modify: `src/lib/admin/scheduling-source.ts` (interface + DB impl `getCapacityBlocks`), `src/lib/admin/availability-queries.ts` (`readSchedulingFacts` concatenates blocks into `jobs`), `src/lib/admin/scheduling-queries.ts` (`checkScheduleConflict` + the raw guard in `placeAndAssignRequest`), `src/lib/admin/create-request-queries.ts` (`technicianWindowClash` — read it; if it calls `checkScheduleConflict` nothing changes), `src/lib/ai/dispatch/signals.ts` (hard-exclude candidates with an overlapping capacity-removing shift)
 
 **Interfaces:**
-- Produces:
-  ```ts
-  export type ShiftKind = "on_call" | "time_off" | "non_job";
-  export interface ShiftRecord { id: string; technicianId: string; kind: ShiftKind; title: string | null; startsAt: string; endsAt: string; removesCapacity: boolean }
-  export const shiftInputSchema  // kind enum, title? ≤80, startsAt ISO, endsAt ISO > startsAt, ≤ 31 days long, removesCapacity? (default: kind !== "on_call")
-  export function defaultRemovesCapacity(kind: ShiftKind): boolean  // pure: on_call → false
-  export function listShifts(organizationId, technicianId, fromIso, toIso): Promise<readonly ShiftRecord[]>
-  export function createShift(organizationId, technicianId, input, createdBy): Promise<ShiftRecord | { reason: "technician_not_found" }>
-  export function deleteShift(organizationId, technicianId, shiftId): Promise<boolean>
-  export function listCapacityBlocks(organizationId, startIso, endIso): Promise<readonly ScheduledJob[]>  // removes_capacity rows as ScheduledJob { id: shift.id, referenceNumber: "TIME-OFF", status: "assigned", assignedTo: technicianId, arrivalWindowStart: startsAt, arrivalWindowEnd: endsAt }
-  export function shiftOverlapSql(organizationId: string, technicianId: SQL | string, startIso: Date, endIso: Date): SQL  // `NOT EXISTS (… technician_shifts … removes_capacity AND starts_at < end AND ends_at > start)`
-  ```
-- `SchedulingSource` gains `getCapacityBlocks(startIso, endIso): Promise<readonly ScheduledJob[]>`; `DbSchedulingSource` returns `listCapacityBlocks`; the HCP source returns `[]` (HCP tech ids are not `users.id`).
+- `shift-types.ts`: `ShiftKind = "on_call"|"time_off"|"non_job"`, `ShiftRecord { id; technicianId; kind; title: string|null; startsAt: string; endsAt: string; removesCapacity: boolean }`, `shiftInputSchema` (kind, title? ≤80, startsAt/endsAt `z.iso.datetime()`, end > start, ≤ 31 days, `removesCapacity?`), `defaultRemovesCapacity(kind)` (on_call → false, else true), `blocksToScheduledJobs(rows) → ScheduledJob[]` (pure mapper: `{ id, referenceNumber: title ?? "Time off", status: "assigned", assignedTo: technicianId, arrivalWindowStart: startsAt, arrivalWindowEnd: endsAt }`).
+- `shift-queries.ts`: `listShifts(orgId, technicianId, fromIso, toIso)`, `createShift(orgId, technicianId, input, createdBy) → ShiftRecord | { reason: "technician_not_found" }`, `deleteShift(orgId, technicianId, shiftId) → boolean`, `listCapacityBlocks(orgId, startIso, endIso) → ScheduledJob[]` (rows with `removesCapacity` overlapping the range), `technicianTimeOffOverlapping(orgId, technicianId, start: Date, end: Date) → ShiftRecord[]`.
 
-- [ ] **Step 1: Failing tests** for `defaultRemovesCapacity`, `shiftInputSchema` (end before start rejected; 32-day shift rejected; on_call default false), and a pure `blocksToScheduledJobs(rows)` mapper.
-
-- [ ] **Step 2: Implement queries + routes** (routes: verify `[id]` is an active technician in the org as `reassignTechnician` does at `queries.ts:616-630`; audit `create_shift` / `delete_shift`, entity `technician_shifts`, details `{ technicianId, kind, removesCapacity }`). A date-range POST (`days` ≥ 2) creates one row per business day: the dialog sends one request per day; the API stays single-row.
-
-- [ ] **Step 3: Five subtraction points**
-  1. `availability-queries.ts` `readSchedulingFacts`: `const [activeTechIds, availability, jobs, blocks] = await Promise.all([…, source.getCapacityBlocks(rangeStartIso, rangeEndIso)]); return { …, jobs: [...jobs, ...blocks] }`.
-  2. `scheduling-queries.ts` `checkScheduleConflict`: after `rows`, also `select` overlapping `technicianShifts` for the tech with `removesCapacity = true` and append them mapped as `ScheduledJob` with `referenceNumber: "Time off"` (or the shift title). Callers surface `referenceNumber` in the 409 copy, so a clash reads "Conflicts with Time off".
-  3. `placeAndAssignRequest` guard (`:715-726`): add `AND NOT EXISTS (SELECT 1 FROM technician_shifts s WHERE s.organization_id = ${organizationId} AND s.technician_id = ${targetTech} AND s.removes_capacity AND s.starts_at < ${arrivalWindow.end} AND s.ends_at > ${arrivalWindow.start})` inside the same `sql` fragment, so an override-less placement onto PTO lands 0 rows and returns the existing conflict result.
-  4. `create-request-queries.ts` `technicianWindowClash`: read it; if it delegates to `checkScheduleConflict`, done; otherwise add the same shift query.
-  5. `signals.ts`: next to the `technicianAvailability` read (`:346-356`), read `technicianShifts` for `ids` overlapping the candidate window with `removesCapacity`, and drop those technicians from the candidate set before scoring (a hard filter; log the exclusion reason as `"time_off"` in the existing decision telemetry if the structure has a reasons list — read `src/lib/ai/dispatch/` first).
-
-- [ ] **Step 4: Staff UI** (`replica/design/components.md` "Time-off editor"): on the staff table's technician rows, a "Time off" action opens `TimeOffDialog`: kind (segmented: Time off / On call / Non-job event), title, start date + time, end date + time, "Removes capacity" switch (default from `defaultRemovesCapacity`), and a list of the technician's upcoming shifts with a remove button. Multi-day: when the end date is a later day than the start, send one POST per day using the same clock times.
-
-- [ ] **Step 5: Tests for the subtraction**: `src/lib/admin/availability.test.ts` already tests `computeOpenWindows` with jobs; add a case: a block (`ScheduledJob` from a shift) covering a tech's morning band removes that tech's morning capacity (same assertion style as the existing job-overlap tests).
-
-- [ ] **Step 6: Probe (Review Focus 4)**
+- [ ] **Step 1: Failing tests** for `defaultRemovesCapacity`, `shiftInputSchema` (end before start rejected; 32-day rejected; on_call default false; time_off default true), `blocksToScheduledJobs` shape.
+- [ ] **Step 2: Implement** (queries follow the Task-5a style; `listCapacityBlocks` = `select … from technicianShifts where withTenant(org, eq(removesCapacity,true), lt(startsAt, end), gt(endsAt, start))` mapped through `blocksToScheduledJobs`).
+- [ ] **Step 3: Routes** — verify `[id]` is an active technician in the org (copy `queries.ts:616-630`); `readJsonBody`; audit `create_shift` / `delete_shift`, entity `technician_shifts`, details `{ technicianId, kind, removesCapacity }`. A multi-day absence is N single-day POSTs from the dialog; the API stays single-row.
+- [ ] **Step 4: Probe** — POST a `time_off` for tomorrow, GET `?from=&to=` lists it, DELETE removes it.
+- [ ] **Step 5: Gates + commit**
 
 ```bash
-# time off for tech A tomorrow 08:00–17:00 Eastern (adjust the ISO instants)
-curl -s -b "hvac_admin_session=$TOKEN" -H 'content-type: application/json' -X POST http://localhost:3000/api/admin/technicians/<techA>/shifts -d '{"kind":"time_off","title":"PTO","startsAt":"2026-11-03T13:00:00Z","endsAt":"2026-11-03T22:00:00Z"}'
-# availability for that day drops by one tech per band
-curl -s -b "hvac_admin_session=$TOKEN" "http://localhost:3000/api/admin/requests/availability?start=2026-11-03&days=1"
-# office booking assigned to tech A in the morning → 409 conflict naming Time off
-curl -s -b "hvac_admin_session=$TOKEN" -H 'content-type: application/json' -X POST http://localhost:3000/api/admin/requests -d '{"customerId":"<cid>","address":"1 Main St","description":"test","issueType":"maintenance","urgency":"low","schedule":{"isoDay":"2026-11-03","window":"morning","technicianId":"<techA>"}}'
+git add src/lib/admin/shift-types.ts src/lib/admin/shift-types.test.ts src/lib/admin/shift-queries.ts 'src/app/api/admin/technicians/[id]/shifts'
+git commit -m "feat(scheduling): technician shifts (time off, on call, non-job events)
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
-Expected: 201; the morning count is one lower than yesterday's; 409 `SCHEDULE_CONFLICT` (or the slice's existing code) whose message names the time off. Then delete the shift and the test request.
 
-- [ ] **Step 7: Gates + commit**
+---
+
+### Task 6b: Shifts subtracted in every availability path
+
+**Files:**
+- Modify: `src/lib/admin/scheduling-source.ts` (interface + `DbSchedulingSource`), `src/lib/integrations/housecall-pro/scheduling-source.ts:133` and `src/lib/integrations/fieldpulse/scheduling-source.ts:113` (both `implements SchedulingSource`; return `[]` — their tech ids are not `users.id`), `src/lib/admin/availability-queries.ts` (`readSchedulingFacts`), `src/lib/admin/availability-queries.test.ts` (both fakes gain `getCapacityBlocks: vi.fn().mockResolvedValue([])`), `src/lib/admin/availability.test.ts` (new case), `src/lib/admin/scheduling-queries.ts` (`checkScheduleConflict`, `placeAndAssignRequest`, `autoAssignBookedRequest`, `suggestTechnicians`)
+- No change: `create-request-queries.ts` `technicianWindowClash` (delegates to `checkScheduleConflict`), `signals.ts` (only knows the day; the filter lives in the callers below).
+
+- [ ] **Step 1: Interface** — add to `SchedulingSource`:
+```ts
+  /** Capacity-removing shifts (time off, non-job events) overlapping [startIso, endIso), as busy blocks. */
+  getCapacityBlocks(startIso: string, endIso: string): Promise<readonly ScheduledJob[]>;
+```
+`DbSchedulingSource.getCapacityBlocks = (s, e) => listCapacityBlocks(this.organizationId, s, e)`; HCP and FieldPulse sources: `async getCapacityBlocks() { return []; }`.
+
+- [ ] **Step 2: `readSchedulingFacts`** — `const [activeTechIds, availability, jobs, blocks] = await Promise.all([…, source.getCapacityBlocks(rangeStartIso, rangeEndIso)]); return { activeTechIds, availability, jobs: [...jobs, ...blocks] };`. Update the two fakes in `availability-queries.test.ts`.
+
+- [ ] **Step 3: `availability.test.ts`** — add: a `ScheduledJob` block (from `blocksToScheduledJobs`) covering tech T's whole morning band removes T's morning capacity (same assertion style as the existing job-overlap cases).
+
+- [ ] **Step 4: `checkScheduleConflict`** — after `rows`, also:
+```ts
+  const blocks = await db.select().from(technicianShifts)
+    .where(withTenant(technicianShifts, organizationId, eq(technicianShifts.technicianId, technicianId), eq(technicianShifts.removesCapacity, true),
+      lt(technicianShifts.startsAt, end), gt(technicianShifts.endsAt, start)))
+    .orderBy(asc(technicianShifts.startsAt));
+  return [...rows.map(toScheduledJob), ...blocksToScheduledJobs(blocks.map(toShiftRecord))];
+```
+Callers surface `referenceNumber` in 409 copy, so a clash reads "Conflicts with Time off".
+
+- [ ] **Step 5: `placeAndAssignRequest`** — time off is NOT overridable. Add a guard built whenever `targetTech` is set (independent of `options.override`):
+```ts
+  const noTimeOffGuard = targetTech
+    ? sql`NOT EXISTS (SELECT 1 FROM technician_shifts s WHERE s.organization_id = ${organizationId} AND s.technician_id = ${targetTech}
+          AND s.removes_capacity AND s.starts_at < ${arrivalWindow.end} AND s.ends_at > ${arrivalWindow.start})`
+    : undefined;
+```
+and include it in the UPDATE's `and(...)`. Before the UPDATE, when `targetTech` is set, run `technicianTimeOffOverlapping(organizationId, targetTech, arrivalWindow.start, arrivalWindow.end)`; if non-empty return the existing conflict result shape (`{ ok: false, reason: "conflict", detail: { conflicts: blocksToScheduledJobs(blocks), outsideAvailability: false } }` — match the real shape at ~686) on BOTH the override and non-override paths. On a 0-row UPDATE, re-check the shift before falling through to the existing disambiguation, so PTO never surfaces as `request_not_found`.
+
+- [ ] **Step 6: Auto-dispatch + suggestions** — in `autoAssignBookedRequest` (~1240) after the `techs` read, drop ids with a `removes_capacity` shift overlapping `[heldSlot.start, heldSlot.end)` before `firstFit` and `rankedTechnicianOrder` (one query: `listCapacityBlocks(org, heldSlot.start, heldSlot.end)` → set of `assignedTo`). In `suggestTechnicians` (~1196), drop techs whose capacity-removing shift covers the whole business day of `isoDay`. Add a pure helper `excludeTechniciansWithBlocks(techIds, blocks): string[]` in `shift-types.ts` with a test.
+
+- [ ] **Step 7: Probe (Review Focus 4)**
 
 ```bash
-git add src/lib/admin/shift-queries.ts src/lib/admin/shift-queries.test.ts 'src/app/api/admin/technicians/[id]/shifts' src/components/admin/staff src/components/admin/staff-table.tsx src/lib/admin/scheduling-source.ts src/lib/admin/availability-queries.ts src/lib/admin/availability.test.ts src/lib/admin/scheduling-queries.ts src/lib/admin/create-request-queries.ts src/lib/ai/dispatch/signals.ts
-git commit -m "feat(scheduling): technician time off, on call and non-job events remove capacity everywhere
+TA=<techA>; D=<tomorrow YYYY-MM-DD>
+curl -s -b "hvac_admin_session=$TOKEN" -H "$H" -X POST http://localhost:3000/api/admin/technicians/$TA/shifts -d "{\"kind\":\"time_off\",\"title\":\"PTO\",\"startsAt\":\"${D}T13:00:00Z\",\"endsAt\":\"${D}T22:00:00Z\"}"; echo
+curl -s -b "hvac_admin_session=$TOKEN" "http://localhost:3000/api/admin/requests/availability?start=$D&days=1"; echo      # morning/afternoon counts one lower than before the shift
+# office booking assigned to A → 409 naming the time off
+curl -s -b "hvac_admin_session=$TOKEN" -H "$H" -X POST http://localhost:3000/api/admin/requests -d "{\"customerId\":\"$CID\",\"address\":\"1 Main St\",\"description\":\"test\",\"issueType\":\"maintenance\",\"urgency\":\"low\",\"schedule\":{\"isoDay\":\"$D\",\"window\":\"morning\",\"technicianId\":\"$TA\"}}"; echo
+# placement path with override → still 409 (read the assign/reschedule route bodies first)
+curl -s -b "hvac_admin_session=$TOKEN" -H "$H" -X POST http://localhost:3000/api/admin/requests/<unassigned rid>/assign -d "{\"technicianId\":\"$TA\",\"isoDay\":\"$D\",\"window\":\"morning\",\"override\":true}"; echo
+```
+Auto-dispatch: run the existing autodispatch unit test suite (`npx vitest run src/lib/admin/scheduling-queries.test.ts src/lib/ai/dispatch`) and add a case in `scheduling-queries.test.ts` (it mocks db) showing a tech with a block is excluded from `firstFit` candidates. Delete the shift and any test request afterwards.
+
+- [ ] **Step 8: Gates + commit**
+
+```bash
+git add src/lib/admin/scheduling-source.ts src/lib/integrations/housecall-pro/scheduling-source.ts src/lib/integrations/fieldpulse/scheduling-source.ts src/lib/admin/availability-queries.ts src/lib/admin/availability-queries.test.ts src/lib/admin/availability.test.ts src/lib/admin/scheduling-queries.ts src/lib/admin/scheduling-queries.test.ts src/lib/admin/shift-types.ts src/lib/admin/shift-types.test.ts
+git commit -m "feat(scheduling): time off removes capacity in availability, conflicts, placement and auto-dispatch
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 6c: Time-off editor on the staff page
+
+**Files:**
+- Create: `src/components/admin/staff/time-off-dialog.tsx`; modify `src/components/admin/staff-table.tsx` (row action "Time off" on technician rows). Read `.claude/skills/page-staff/SKILL.md` first.
+
+- [ ] **Step 1:** Dialog (spec "Time-off editor"): kind segmented control (Time off / On call / Non-job event), title, start date + time, end date + time, "Removes capacity" `Switch` defaulting to `defaultRemovesCapacity(kind)`, list of upcoming shifts (GET `?from=today&to=+90d`) with a remove button. Multi-day: when the end date is later than the start date, POST one row per day with the same clock times. Copy: "Couldn't save the time off. Please try again."
+- [ ] **Step 2:** Screenshot `/admin/staff` with the dialog open (Playwright snippet; click the row action) at 1440 and 390. Look at them.
+- [ ] **Step 3: Gates + commit**
+
+```bash
+git add src/components/admin/staff/time-off-dialog.tsx src/components/admin/staff-table.tsx
+git commit -m "feat(staff): time off, on call and non-job events editor
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
@@ -784,14 +964,14 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ### Task 7: Docs, skills, parity
 
-- [ ] Update `.claude/skills/page-requests/SKILL.md` (visits API, new statuses), `page-tech/SKILL.md` (taps), `page-staff/SKILL.md` (time off), `page-calendar/SKILL.md` (shifts subtracted; visits #2+ not rendered until M2), `admin-pages/SKILL.md` (status constants live in `request-status.ts`). `node scripts/agent/verify-skills.mjs` → 0 missing.
-- [ ] `replica/features.csv`: flip 117 ("En route / arrived / working statuses") → yes; 64 ("Multi-visit and multi-day jobs") → partial, note "visits via API + detail sheet; calendar rendering is M2"; 85 ("Technician shifts…") → yes; 86 ("Non-job events…") → yes; 98 ("Multi-technician…") → partial, note "assignment rows; UI + guard in M2". Regenerate `replica/parity.md`. Append `replica/build-log.md` lines for S08 (visits), S13 (shifts), S38 (taps).
-- [ ] Commit: `docs(replica): M0a in page skills, feature matrix and build log`.
+- [ ] Update `.claude/skills/page-requests/SKILL.md` (visits API, new statuses, admin PATCH status values), `page-tech/SKILL.md` (taps), `page-staff/SKILL.md` (time off), `page-calendar/SKILL.md` (shifts subtracted; visits #2+ rendered in M2), `admin-pages/SKILL.md` (status constants live in `request-status.ts`; time off is never overridable). `node scripts/agent/verify-skills.mjs` → 0 missing.
+- [ ] `replica/features.csv`: 117 ("En route / arrived / working statuses") → yes; 64 ("Multi-visit and multi-day jobs") → partial, note "visits via API + detail sheet; calendar rendering is M2"; 85 ("Technician shifts … with repeat") → partial, note "on-call / time-off / non-job rows; no repeat rule"; 86 ("Non-job events … remove capacity") → yes; 98 ("Multi-technician …") → partial, note "assignment rows + visits API; lane UI and guard in M2". Regenerate `replica/parity.md`. Append `replica/build-log.md` lines for S08, S13, S38.
+- [ ] Commit `docs(replica): M0a in page skills, feature matrix and build log`.
 
 ---
 
 ## Self-review notes
 
-- Spec coverage: enum + readers (Tasks 1–2), appointments/assignments/trigger/backfill (3), taps (4), visits API + sheet (5), shifts + five paths (6), docs (7). Ownership unchanged (spec). En-route texts: out of scope (spec). Calendar rendering of visits #2+: M2 (spec).
-- Type consistency: `ScheduledJob` is the existing type in `src/lib/admin/types.ts:262`; `AppointmentRecord`, `ShiftRecord`, the six constants are defined once and consumed by name.
-- Review Focus pins: 1–3 → Task 3 step 6; 4 → Task 6 step 6; 5 → Task 2 step 5 + Task 4 step 2.
+- Spec coverage: enum + readers (T1–T2), appointments/assignments/trigger/backfill (T3), taps (T4), visits API + sheet (T5a–5b), shifts + five paths + UI (T6a–6c), docs (T7). Ownership unchanged, en-route texts out of scope, calendar rendering of visits #2+ is M2 (all per spec).
+- Review Focus pins: 1–3 → T3 step 7; 4 → T6b step 7; 5 → T2 step 6 + T4 step 3.
+- Cross-task names: `ScheduledJob` (existing, `types.ts:262`), `blocksToScheduledJobs`, `listCapacityBlocks`, `technicianTimeOffOverlapping`, `excludeTechniciansWithBlocks`, `AppointmentRecord`, the seven constants — each defined once and consumed by name.

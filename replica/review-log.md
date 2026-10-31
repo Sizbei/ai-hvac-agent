@@ -102,3 +102,48 @@ Convergence: round 2 surfaced new blockers in text round 1 had added
 (trigger rules, ownership), both now resolved by narrowing M0a. Round 3
 on the spec is folded into the implementation-plan review, whose critics
 read the spec and the plan together.
+
+## Plan round 1 — 2026-11-01 (M0b + M0a implementation plans)
+
+Three blind critics (M0b vs codebase; M0a SQL/trigger; plan quality for
+both). Verdict: no sign-off; 5 blockers, ~30 majors; all applied the same
+day in a full rewrite of both plans.
+
+### Established
+- Drizzle wraps driver errors: only `@/lib/db/unique-violation` matches a
+  23505 (a local `.code` check never does).
+- `readJsonBody` returns `{ ok, data }`; `logAudit` takes `details: string`.
+- `parseCreateRequestBody(raw, todayIso)` is the create-request API; zod 4
+  `z.uuid()` rejects non-v4-shaped ids in tests.
+- Nothing exposed customer locations before M0b → `GET …/[id]/locations`
+  + a Locations section are in scope.
+- Existing tests with fixed schema mocks / statement counts
+  (erasure, crm deleteCustomer, conversation delete, location-queries,
+  provisioning, delay-detection, scheduling-queries, account-tools,
+  operations-metrics, HCP webhook-events, FP jobs) must change in the
+  same task.
+- Three classes implement `SchedulingSource` (DB, HCP, FieldPulse).
+- `signals.ts` only knows the day → the time-off filter lives in
+  `autoAssignBookedRequest` / `suggestTechnicians`.
+- Trigger: cancel cascade must run before the "nothing to mirror" early
+  return; `cancelled_at` on #1 follows the request (FP can reopen).
+- Time off is never overridable; the guard is independent of `override`.
+- Visit updates: CAS + assignment replace in ONE batch gated on
+  `version = v + 1`; number allocation retries once on 23505.
+- Admin status route is `PATCH /api/admin/requests/<id>`; dispatch is
+  `GET /api/admin/dispatch?date=`; tech sessions via `mint-tech-session.mjs`.
+
+### Rejected
+- "The attribution trailer should be Opus" — this session's attribution
+  is Fable 5.1 (system instruction); kept.
+- "Don't add `contact_id`" — added to 0047 instead so row 49 can close.
+
+### Changes of note
+- M0b: `*-types.ts` client-safe modules; `contactPatchSchema` without the
+  undefined→null transform; tags validated before the insert; dialog binds
+  `jobTypeId`; `?active=1`; `persistJobLocation` no longer overwrites a
+  chosen location; Task 7 split into 7a/7b; drizzle recipe simplified.
+- M0a: prerequisite on M0b; Task 2 explicit file + test lists and a
+  dashboard-bucket decision; "before" captures moved ahead of the
+  migration with the real URLs; Tasks 5 and 6 split (5a/5b, 6a/6b/6c);
+  trigger names from the spec; `tech-status-confirm.ts` reused.
