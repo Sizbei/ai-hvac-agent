@@ -11,6 +11,7 @@ import {
 } from "@/lib/db/schema";
 import { seedCommunicationTemplates } from "@/lib/communication/seeds";
 import { logger } from "@/lib/logger";
+import { seedDefaultJobTypes } from "./job-type-queries";
 import {
   generateInviteToken,
   INVITE_TTL_MS,
@@ -293,6 +294,12 @@ export async function createOrgCore(
       { error, organizationId },
       "Failed to seed communication templates for new org; continuing",
     );
+  }
+
+  try {
+    await seedDefaultJobTypes(organizationId);
+  } catch (seedError: unknown) {
+    logger.warn({ error: seedError, organizationId }, "Default job types were not seeded");
   }
 
   return { ok: true, result: { organizationId, ownerUserId } };

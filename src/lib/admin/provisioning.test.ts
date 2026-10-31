@@ -24,6 +24,10 @@ vi.mock('@/lib/db/schema', () => ({
   },
 }));
 
+vi.mock('./job-type-queries', () => ({
+  seedDefaultJobTypes: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock('./staff-queries', () => ({
   normalizeEmail: (e: string) => e.trim().toLowerCase(),
 }));
