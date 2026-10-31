@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { TagChipPicker } from '@/components/admin/tag-chip-picker';
 import {
   Sheet,
   SheetContent,
@@ -673,6 +674,11 @@ export function RequestDetailSheet({
                   {detail.customerEmail && <InfoRow label="Email" value={detail.customerEmail} />}
                   {detail.address && <InfoRow label="Address" value={detail.address} />}
                 </div>
+              </section>
+
+              <section>
+                <h3 className="text-sm font-semibold mb-2">Tags</h3>
+                <TagChipPicker entity="job" entityId={detail.id} />
               </section>
 
               {/* Issue details */}

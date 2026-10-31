@@ -48,6 +48,8 @@ import { FollowUpFormDialog } from '@/components/admin/follow-up-form-dialog';
 import { CustomerEditDialog } from '@/components/admin/customer-edit-dialog';
 import { ConfirmDialog } from '@/components/admin/confirm-dialog';
 import { LocationsSection } from '@/components/admin/customers/locations-section';
+import { ContactsSection } from '@/components/admin/customers/contacts-section';
+import { TagChipPicker } from '@/components/admin/tag-chip-picker';
 import { CustomerBookingsSection } from '@/components/admin/customers/customer-bookings-section';
 import { ScopedEstimatesSection } from '@/components/admin/estimates/scoped-estimates-section';
 import { ScopedInvoicesSection } from '@/components/admin/invoices/scoped-invoices-section';
@@ -452,8 +454,12 @@ export default function CustomerDetailPage({
         }
       />
 
+      <TagChipPicker entity="customer" entityId={customer.id} />
+
       {/* Service locations */}
       <LocationsSection customerId={id} />
+
+      <ContactsSection customerId={id} />
 
       {/* Contact info */}
       <SectionCard

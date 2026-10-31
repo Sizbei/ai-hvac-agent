@@ -11,6 +11,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from '@/components/ui/dropdown-menu';
+import { TagChipPicker } from '@/components/admin/tag-chip-picker';
 import type { CustomerLocation } from '@/lib/admin/location-queries';
 
 interface LocationsSectionProps {
@@ -93,6 +94,7 @@ export function LocationsSection({ customerId }: LocationsSectionProps) {
                 {loc.label && <span className="text-xs text-muted-foreground">{loc.label}</span>}
                 {loc.isPrimary && <ContextBadge variant="info" label="Primary" />}
                 {loc.zone && <span className="text-xs text-muted-foreground">{loc.zone}</span>}
+                <TagChipPicker entity="location" entityId={loc.id} size="sm" />
               </div>
               {!loc.isPrimary && (
                 <DropdownMenu>
