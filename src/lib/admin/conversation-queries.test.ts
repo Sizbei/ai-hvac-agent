@@ -73,6 +73,7 @@ vi.mock('@/lib/db/schema', () => ({
     referenceNumber: 'sr.ref',
   },
   serviceHistory: { serviceRequestId: 'sh.srid', organizationId: 'sh.org' },
+  entityTags: { entity: 'tags.entity', entityId: 'tags.eid', organizationId: 'tags.org' },
   auditLog: { sessionId: 'audit.sid', organizationId: 'audit.org' },
 }));
 
@@ -137,10 +138,10 @@ describe('deleteConversation', () => {
     });
     expect(result).toBe(true);
     expect(batchMock).toHaveBeenCalledTimes(1);
-    // service_history + service_requests + audit_log (updated, not deleted) +
+    // service_history + job entity_tags + service_requests + audit_log (updated, not deleted) +
     // messages + session deletes, then the conversation_deleted audit insert.
     const statements = batchMock.mock.calls[0][0] as unknown[];
-    expect(statements).toHaveLength(6);
+    expect(statements).toHaveLength(7);
   });
 
   it('preserves audit_log rows by nulling sessionId instead of deleting them', async () => {

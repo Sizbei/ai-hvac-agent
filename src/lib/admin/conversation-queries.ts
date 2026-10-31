@@ -18,6 +18,7 @@ import {
   messages,
   serviceRequests,
   serviceHistory,
+  entityTags,
   auditLog,
   sessionStatusEnum,
   sessionChannelEnum,
@@ -452,7 +453,9 @@ export async function deleteConversation(
           inArray(serviceHistory.serviceRequestId, sessionRequestIds),
         ),
       ),
-    // 1b. service_requests for this session.
+    // 1b. Job tags are polymorphic (no FK) — clear them before the requests go.
+    db.delete(entityTags).where(withTenant(entityTags, organizationId, eq(entityTags.entity, "job"), inArray(entityTags.entityId, sessionRequestIds))),
+    // 1c. service_requests for this session.
     db
       .delete(serviceRequests)
       .where(

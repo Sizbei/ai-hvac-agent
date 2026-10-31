@@ -173,6 +173,8 @@ vi.mock('@/lib/db/schema', () => ({
     notes: 'equip.notes',
   },
   customerNotes: { customerId: 'notes.cid' },
+  customerLocations: { id: 'loc.id', customerId: 'loc.cid' },
+  entityTags: { entity: 'tags.entity', entityId: 'tags.eid' },
   followUps: { id: 'fu.id', customerId: 'fu.cid', status: 'fu.status' },
   serviceHistory: { customerId: 'sh.cid', serviceRequestId: 'sh.srid' },
   serviceRequests: {
@@ -476,9 +478,10 @@ describe('deleteCustomer', () => {
     });
     expect(result).toBe(true);
     expect(batchMock).toHaveBeenCalledTimes(1);
-    // 4 child deletes + 1 service_requests detach + 1 customer delete + 1 audit insert.
+    // 4 child deletes + 1 service_requests detach + 2 entity_tags deletes
+    // (customer + its locations) + 1 customer delete + 1 audit insert.
     const statements = batchMock.mock.calls[0][0] as unknown[];
-    expect(statements).toHaveLength(7);
+    expect(statements).toHaveLength(9);
   });
 });
 

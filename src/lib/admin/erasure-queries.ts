@@ -35,6 +35,8 @@ import {
   customers,
   customerSessions,
   customerLocations,
+  customerContacts,
+  entityTags,
   customerNotes,
   messages,
   attachments,
@@ -384,6 +386,12 @@ export async function anonymizeCustomer(
           inArray(technicianTimeEntries.serviceRequestId, requestIds),
         ),
       ),
+    // Contacts carry their own encrypted PII: delete outright. Tags are not PII
+    // but must not dangle on the erased customer or its locations.
+    db.delete(customerContacts).where(withTenant(customerContacts, organizationId, eq(customerContacts.customerId, customerId))),
+    db.delete(entityTags).where(withTenant(entityTags, organizationId, eq(entityTags.entity, "customer"), eq(entityTags.entityId, customerId))),
+    db.delete(entityTags).where(withTenant(entityTags, organizationId, eq(entityTags.entity, "location"),
+      inArray(entityTags.entityId, db.select({ id: customerLocations.id }).from(customerLocations).where(withTenant(customerLocations, organizationId, eq(customerLocations.customerId, customerId)))))),
     // Audit: counts/table names ONLY — never name/email/phone.
     db.insert(auditLog).values({
       organizationId,

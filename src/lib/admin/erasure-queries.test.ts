@@ -117,6 +117,8 @@ vi.mock("@/lib/db/schema", () => {
     customers: t("customers"),
     customerSessions: t("customerSessions"),
     customerLocations: t("customerLocations"),
+    customerContacts: t("customerContacts"),
+    entityTags: t("entityTags"),
     customerNotes: t("customerNotes"),
     messages: t("messages"),
     attachments: t("attachments"),
@@ -237,6 +239,17 @@ describe("anonymizeCustomer", () => {
       notes: null,
     });
     expect(cust?.set?.anonymizedAt).toBeInstanceOf(Date);
+  });
+
+  it("deletes contacts and the customer's + locations' tags in the batch", async () => {
+    seedExisting();
+    await anonymizeCustomer(ORG, CUST);
+
+    const batch = batchCalls.at(-1) ?? [];
+    expect(opFor("customerContacts")?.op).toBe("delete");
+    const tagDeletes = batch.filter((c) => c.table === "entityTags");
+    expect(tagDeletes).toHaveLength(2);
+    expect(tagDeletes.every((c) => c.op === "delete")).toBe(true);
   });
 
   it("scrubs both signatureName spots (serviceRequests + estimates) but keeps the customerId link", async () => {

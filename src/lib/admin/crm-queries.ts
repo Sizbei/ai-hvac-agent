@@ -9,12 +9,15 @@ import {
   sql,
   isNull,
   isNotNull,
+  inArray,
   type SQL,
 } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   customers,
   customerEquipment,
+  customerLocations,
+  entityTags,
   customerNotes,
   followUps,
   serviceHistory,
@@ -1090,6 +1093,11 @@ export async function deleteCustomer(
           eq(serviceRequests.customerId, customerId),
         ),
       ),
+    // Tags are polymorphic (no FK): clear them for the customer and its
+    // locations before the customer row goes. Contacts cascade by FK.
+    db.delete(entityTags).where(withTenant(entityTags, organizationId, eq(entityTags.entity, "customer"), eq(entityTags.entityId, customerId))),
+    db.delete(entityTags).where(withTenant(entityTags, organizationId, eq(entityTags.entity, "location"),
+      inArray(entityTags.entityId, db.select({ id: customerLocations.id }).from(customerLocations).where(withTenant(customerLocations, organizationId, eq(customerLocations.customerId, customerId)))))),
     db
       .delete(customers)
       .where(
