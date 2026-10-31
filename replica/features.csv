@@ -1,0 +1,289 @@
+feature,area,priority,original,clone,notes
+Inbound call screen with call bubbles for CSRs,intake,must,yes,no,ST; AI voice agent only - no CSR call-handling screen
+Caller ID auto-pops customer record (with unlink),intake,must,yes,partial,ST; /api/voice/incoming ANI identity - no CSR screen pop
+Close call with call reason (lead / non-lead),intake,must,yes,no,ST
+Lead capture from non-booking contact,intake,must,yes,partial,ST; /api/cron/booking-recovery recovers abandoned intakes - no lead entity
+Convert existing lead to job,intake,must,yes,no,ST; no lead entity
+Configurable required booking fields,intake,should,yes,no,ST
+Bookings inbox for web and partner leads,intake,must,yes,partial,ST; /admin/requests receives chat/widget bookings - no partner-lead inbox
+Abandoned / unbooked calls view,intake,should,yes,partial,ST; /api/cron/booking-recovery - no abandoned-calls view
+Call scripts for CSRs,intake,could,yes,no,ST
+AI phone agent books jobs (overflow and after-hours),intake,must,addon,yes,FP+ST; /api/voice/incoming voice agent with after-hours handling
+Web chat AI intake,intake,could,addon,yes,FP; /chat + /embed widget
+Online booking widget / booking portal,intake,must,yes,partial,FP+ST; /embed chat widget books - no standalone booking page
+Real-availability slot picker for online booking,intake,should,yes,partial,FP+ST; /api/availability offers bands only - no exact-time slots
+Abandoned online booking SMS recovery,intake,should,addon,yes,ST; /api/cron/booking-recovery
+Online scheduling funnel report,intake,should,addon,partial,ST; /admin/insights bot outcomes - no booking funnel
+Attach existing equipment to job at booking,intake,should,yes,no,ST
+Campaign auto-attribution from tracking number,intake,should,yes,skip,ST; call-tracking DNIS number pools are carrier telephony
+Job-value-based call routing (AI vs CSR),intake,could,addon,skip,ST; needs cross-tenant ML job-value model
+Customer record with separate billing and service locations,crm,must,yes,partial,FP+ST; /admin/customers + customer_locations soft split - no bill-to vs site UI
+Residential / commercial customer type,crm,must,yes,yes,FP+ST; customer_type enum on /admin/customers
+Multiple contacts per customer with per-method preferences,crm,must,yes,no,FP+ST
+Multiple service locations per customer,crm,must,yes,partial,FP+ST; customer_locations table - no locations management UI
+Customer status lifecycle (lead / current / lost),crm,should,yes,partial,FP; archive and reactivate only - no lead/lost lifecycle
+Sales pipeline kanban of customers,crm,could,yes,no,FP
+Lead sources,crm,should,yes,yes,FP+ST; lead_source enum + /admin/reports lead-source ROI
+Customer and location tags,crm,must,yes,no,FP+ST; FP tags kept in jsonb only
+Custom fields on customer / location / job / membership,crm,should,yes,partial,FP+ST; /api/admin/custom-fields - no definition-management page
+Merge duplicate customers and locations,crm,should,yes,no,FP+ST
+Parent / child and national accounts,crm,could,yes,no,FP+ST
+Import customers from CSV / Excel / Sheets,crm,must,yes,partial,FP; /admin/fieldpulse-import only - no CSV import
+Import customers from QuickBooks,crm,should,yes,no,FP
+Export customers,crm,should,yes,yes,FP; /api/admin/export
+Assign customer to a user,crm,could,yes,no,FP
+Do-not-text per phone,crm,must,yes,yes,ST; communication_preferences + STOP keywords
+Do-not-service flag,crm,must,yes,yes,ST; voice/chat gate on customer match
+Do-not-mail flag,crm,should,yes,no,ST
+Customer KPIs and customer-since date,crm,should,yes,no,ST
+Pinned notes on customer / location / job,crm,must,yes,partial,ST; customer_notes + request_notes - no pin-to-top
+Move location to another customer / relocation workflow,crm,could,yes,no,ST
+Preferred technician per location,crm,should,yes,no,ST
+Marketing activity log per customer,crm,should,yes,no,ST
+Global search by name / phone / address,crm,must,yes,partial,ST; /api/admin/search - customer scan truncated at SCAN_LIMIT_CUSTOMERS
+Installed equipment with warranties,crm,must,yes,yes,ST; customer_equipment on /admin/customers/[id]
+Predicted equipment replacement date,crm,should,yes,no,ST
+Equipment systems (grouped units),crm,could,yes,no,ST
+Equipment service history,crm,must,yes,partial,ST; history via service_requests per customer - not per unit
+Equipment custom fields and attachments,crm,could,yes,partial,ST; attachments per equipment - no equipment custom fields
+Create job from admin with customer / contact / location,jobs,must,yes,no,FP+ST; no POST /api/admin/requests
+Tasks (work items without a customer),jobs,should,yes,no,FP+ST
+Job templates and duplicate job,jobs,should,yes,no,FP+ST
+Job record with actions menu,jobs,must,yes,yes,ST; /admin/requests request-detail-sheet
+Job priority levels,jobs,must,yes,yes,ST; urgency low/medium/high/emergency
+Job summary / description,jobs,must,yes,yes,ST; /admin/requests detail with structured intake fields
+Job tags with color and dispatch visibility,jobs,must,yes,no,ST
+Org-configurable job types,jobs,must,yes,partial,ST; fixed job-type enum - not org-configurable
+Custom status workflows per job type,jobs,should,yes,no,FP
+Time-in-status tracking,jobs,should,yes,partial,FP; request_status_events - no time-in-status view
+Recall / warranty links and no-charge flag,jobs,should,yes,no,ST
+Job hold with reasons,jobs,must,yes,yes,ST; hold_reason enum + followUpDate on /admin/requests
+Job cancel with reasons and memo (and uncancel),jobs,must,yes,partial,ST; cancelled status via PATCH /api/admin/requests/[id] - no cancel reason
+Job history event log,jobs,must,yes,yes,FP+ST; request_status_events timeline
+History filter tabs (events / calls / notes / files / email),jobs,should,yes,no,ST
+Multi-visit and multi-day jobs,jobs,must,yes,no,FP+ST; FP is_multiday_job stored read-only
+Appointment special instructions,jobs,must,yes,yes,ST; access notes intake field on service_requests
+Appointment AI summaries,jobs,could,yes,no,ST
+Job media gallery,jobs,must,yes,yes,ST; attachments-section + /api/admin/attachments
+Customer PO on job,jobs,could,yes,no,ST
+Sold-by attribution,jobs,must,yes,no,ST
+Findings on job,jobs,could,yes,no,ST
+Projects grouping multiple jobs (status / daily logs / budget codes),jobs,could,yes,no,FP+ST
+Subtasks with required-for-job flag,jobs,could,yes,no,FP
+Recurring jobs with edit scope,jobs,must,yes,partial,FP; membership visits only - no generic recurring series
+Configurable job numbering,jobs,could,yes,no,FP
+Schedule calendar view,scheduling,must,yes,yes,FP; /admin/calendar day/week/month
+Schedule list view,scheduling,should,yes,yes,FP; /api/admin/agenda agenda view
+Scheduling conflict detection,scheduling,must,yes,yes,FP; conflict dialog on /admin/calendar
+Customer arrival windows,scheduling,must,yes,yes,FP+ST; arrivalWindowStart/End + ARRIVAL_WINDOWS
+Custom one-off arrival window,scheduling,should,yes,no,ST; named bands only
+Business hours,scheduling,must,yes,partial,ST; businessInfo + afterHoursConfig - no holiday calendar
+Capacity by open vs total hours per slot,scheduling,must,yes,partial,ST; capacity_reservations slot counts - no hours-based capacity
+Capacity planning board with buffers / overrides / booking-% warning,scheduling,should,yes,no,ST
+Job type default duration,scheduling,must,yes,partial,ST; estimatedDurationMinutes per job - no per-type config
+Find-availability slot and tech suggester,scheduling,should,yes,partial,FP+ST; /api/admin/dispatch/suggest ranks techs - no time-slot search
+Technician shifts (normal / on-call / time-off) with repeat,scheduling,must,yes,partial,FP+ST; technician_availability weekly hours - no admin edit UI or on-call/time-off
+Non-job events (meetings / PTO) that remove capacity,scheduling,must,yes,no,ST
+Adaptive capacity rules in natural language,scheduling,could,addon,no,ST
+Dispatch board timeline by technician,dispatch,must,yes,yes,FP+ST; /admin/calendar technician lanes + /admin/dispatch
+Weekly dispatch board,dispatch,should,yes,yes,ST; /admin/calendar week view
+Status color legend on appointment cards,dispatch,must,yes,yes,ST; status-colors.ts on calendar cards
+Configurable card / job tile fields,dispatch,should,yes,no,FP+ST
+Unassigned / unscheduled jobs tray,dispatch,must,yes,yes,FP+ST; unscheduled-panel on /admin/calendar
+Jobs tray tabs and status-count filters,dispatch,should,yes,no,ST
+Holding area visual matching,dispatch,could,yes,no,ST
+Drag-drop schedule and assign,dispatch,must,yes,yes,FP+ST; dnd-kit /admin/calendar + /api/admin/requests/[id]/assign
+Edit arrival window prompt on move,dispatch,must,yes,partial,ST; calendar drag reschedules - no window prompt
+Block reassign of working or done jobs,dispatch,must,yes,no,ST
+Multi-technician and team assignment with team grouping,dispatch,must,yes,no,FP+ST; single assignee per request
+Technician skills with skill filter and skill-based availability,dispatch,should,yes,no,FP+ST; skillJobsCompleted history proxy only
+Zones on technicians and locations,dispatch,should,yes,partial,ST; customer_locations.zone column only - no zone routing
+Late / alert outline on cards,dispatch,should,yes,partial,ST; /api/cron/delay-sweep SMS alerts - no card outline
+Mass reschedule,dispatch,could,yes,no,ST
+Technician route view and manual route sequencing,dispatch,should,yes,no,FP+ST
+Route optimization per technician,dispatch,could,yes,partial,ST; ORS travel score - no multi-stop optimizer
+Dispatch map with job and technician pins,dispatch,should,yes,yes,FP+ST; /admin/map
+Last-known technician location,dispatch,should,yes,yes,FP; /api/tech/location opt-in with consent
+Live vehicle GPS from telematics feed and fleet log,dispatch,could,yes,no,FP+ST; telematics API ingest buildable
+Activity center with mass text to technicians,dispatch,should,yes,no,ST
+Office check-in of technicians,dispatch,could,yes,no,ST
+Duplicate dispatch checker,dispatch,could,yes,no,FP
+Auto-dispatched flag on job,dispatch,could,addon,yes,ST; dispatch_decisions + autoDispatchEnabled
+Dispatch shift extension window,dispatch,could,addon,no,ST
+ML auto-dispatch by predicted job value,dispatch,could,addon,skip,ST; needs cross-tenant ML job-value model
+Fleet telematics hardware and dashcams,dispatch,could,addon,skip,FP+ST; fleet hardware reseller partnership
+Tech app schedule (today / upcoming / past),tech-app,must,yes,partial,FP+ST; /tech/jobs assigned list - no calendar or map view
+Mobile job status updates,tech-app,must,yes,yes,FP; /api/tech/jobs/[id]/status
+En route / arrived / working statuses,tech-app,must,yes,no,ST; status enum lacks en-route and arrived
+Pause or hold job with reason from field,tech-app,must,yes,partial,ST; on_hold via /api/tech/jobs/[id]/status - no reason or reschedule from field
+Tech schedules follow-up or books a lead from field,tech-app,should,yes,no,ST
+Mark myself done vs close out job,tech-app,must,yes,partial,ST; single completed status - no per-tech done
+Navigate to job location,tech-app,must,yes,yes,FP; tech-job-summary.tsx Google Maps directions link
+Photos / video / files on job with quality setting,tech-app,must,yes,partial,FP+ST; /api/tech/jobs/[id]/photo - photos only
+Field vs internal notes and job comments with notify,tech-app,should,yes,partial,FP; /api/tech/jobs/[id]/note - no field/internal split or comments
+Offline mode with cached jobs and pricebook,tech-app,must,yes,no,FP+ST
+Job forms and checklists,tech-app,must,yes,no,FP+ST; FP forms are an add-on
+Required forms block close-out,tech-app,should,yes,no,ST
+Non-job and PDF-overlay forms,tech-app,could,yes,no,FP+ST; FP PDF overlay is an add-on
+Guided status flows,tech-app,should,yes,no,FP
+Equipment add / replace from field,tech-app,must,yes,no,ST; equipment registry not exposed in tech routes
+Equipment barcode / serial capture,tech-app,should,yes,partial,ST; serial field in equipment form - no barcode scan
+Location info tab (history / opportunities / recurring),tech-app,must,yes,partial,ST; /tech/jobs/[id] summary only
+Present estimate with options on site,tech-app,must,yes,no,FP+ST; estimates are admin-only
+Sold items onto invoice now or later,tech-app,must,yes,no,ST
+Invoice presentation and signature on site,tech-app,must,yes,partial,ST; /api/tech/jobs/[id]/signature job sign-off - no invoice presentation
+Take payment in the field,tech-app,must,yes,no,ST; nothing under /api/tech
+Tech scorecard in app,tech-app,should,yes,no,ST; scorecards are admin-only
+Timeclock and timesheets (general + per job),tech-app,must,yes,partial,FP+ST; /api/tech/jobs/[id]/timesheet per-job only - no general clock
+Job timesheets from status timestamps,tech-app,must,yes,partial,ST; request_status_events exist - timesheets are separate entries
+Timesheet extras (GPS geostamp / backdating / status prompts),tech-app,should,yes,no,FP
+Location tracking toggle,tech-app,should,yes,yes,ST; tech-location-tracker + /consent
+Tech app language and terminology options (Spanish / residential-commercial),tech-app,could,yes,no,FP+ST
+AI tech Q&A and troubleshooting assistant,tech-app,should,yes,no,ST; diagnostics/parts depth is an add-on
+AI sales coach from tech recordings,tech-app,could,addon,no,ST
+Estimates with line items from pricebook,estimates,must,yes,yes,FP+ST; /admin/estimates estimate-create-dialog
+Good / better / best options with recommended flag,estimates,must,yes,yes,FP+ST; estimate_options 1-10 per estimate
+Add-on options and line-item groupings,estimates,should,yes,no,FP
+Markup / margin tool,estimates,should,yes,yes,FP; src/lib/admin/margin.ts on estimate detail
+Line-item photos and barcode scan to add item,estimates,could,yes,no,FP
+Web estimate link,estimates,must,yes,yes,FP; /estimates/[token]
+Customer accepts estimate options online,estimates,must,yes,yes,FP+ST; /estimates/[token] option pick + /api/estimates/approve
+Customer e-signature on estimates,estimates,must,yes,yes,FP+ST; /estimates/[token] signature name/IP
+Contracts attached to estimates with countersign,estimates,should,yes,no,FP+ST
+Estimate expiration,estimates,should,yes,yes,FP; lazy expiry in /api/admin/estimates
+Estimate and proposal templates,estimates,must,yes,no,ST
+Sell / unsell / dismiss estimate,estimates,must,yes,yes,ST; PATCH /api/admin/estimates/[id]
+Estimate status change log,estimates,should,yes,no,ST
+Estimate bulk actions (email many / duplicate / XLSX),estimates,should,yes,no,ST
+Internal estimate notes,estimates,should,yes,no,ST
+Estimate visibility restricted by creator,estimates,could,yes,no,ST
+Change orders,estimates,could,yes,no,ST
+Estimate deposit on signature,estimates,should,yes,no,ST; payments.isDeposit on invoices only
+Sold-estimate queue to book (incl. partial items),estimates,must,yes,no,ST
+Unsold estimates / opportunities queue with status,estimates,must,yes,partial,ST; /admin/estimates stale KPIs - no follow-up queue or opportunity status
+Log follow-up with templates and next date,estimates,must,yes,partial,ST; Log follow-up link to follow_ups - no templates
+Automated unsold-estimate follow-up (SMS / email / AI agent),estimates,should,addon,no,ST
+Convert estimate to invoice,invoicing,must,yes,yes,FP; POST /api/admin/invoices with estimateId
+Invoice auto-created at booking,invoicing,must,yes,no,ST; invoices only from estimates
+Invoice line items from pricebook,invoicing,must,yes,partial,ST; lines copied from estimate - no invoice line editor
+Invoice themes / company profiles / display toggles,invoicing,should,yes,no,FP
+Progress billing and automatic deposit invoices,invoicing,could,yes,no,FP
+Partial payments and deposits,invoicing,must,yes,partial,FP; /api/admin/invoices/[id]/payments partial + deposit flag - no progress billing
+Lock edits at milestones,invoicing,should,yes,no,FP
+Tax zones with multiple and automatic rates,invoicing,must,yes,partial,FP+ST; tax_rates single default - no zones
+Expenses on invoice,invoicing,could,yes,no,FP
+Payment terms and customer credit limits,invoicing,should,yes,no,ST
+Payment splits across invoices / unapplied payments,invoicing,should,yes,no,ST
+Credit memos,invoicing,should,yes,no,ST
+Customer statements (email / print),invoicing,should,yes,no,ST
+Real-time payment status badges,invoicing,should,yes,yes,FP; invoice states on /admin/invoices
+Batch / post / export transactions,invoicing,should,yes,partial,ST; /admin/accounting CSV/IIF export - no batches
+GL accounts / journal entries / AP bills / period close,invoicing,could,yes,no,ST
+AI invoice anomaly review,invoicing,could,addon,no,ST
+Online card and ACH payment,payments,must,yes,partial,FP+ST; /api/portal/[token]/pay MOCK provider - Stripe adapter not built
+Pay link without login,payments,must,yes,yes,FP+ST; /api/admin/invoices/[id]/pay-link
+Record manual payments (cash / check / types),payments,must,yes,partial,FP+ST; /api/admin/invoices/[id]/payments - method tracking unconfirmed
+Refunds linked to payment,payments,must,yes,yes,FP+ST; /api/admin/payments/[id]/refund
+Saved payment method on file,payments,should,yes,no,FP+ST
+Failed card auto-retry,payments,should,yes,no,FP
+Apple Pay / Google Pay / pay-by-bank,payments,could,yes,no,ST
+Card reader and Tap to Pay hardware,payments,should,yes,skip,FP+ST; processor-certified card hardware
+Merchant extras (next-day funding / surcharging / chargebacks),payments,should,addon,skip,FP; payment processor rails
+Consumer financing offers,payments,could,addon,skip,FP+ST; lender partnerships (current panel is MOCK)
+Pricebook items (services / materials / equipment),pricebook,must,yes,yes,FP+ST; /admin/pricebook pricebook_items
+Pricebook category tree,pricebook,must,yes,partial,ST; pricebook_categories table - no category UI
+Member price and add-on price,pricebook,must,yes,partial,ST; memberPriceCents - no add-on price
+Service-material kits and bundles,pricebook,should,yes,partial,FP+ST; pricebook_item_materials table - no bundle UI
+Recommendations and upgrades on SKUs,pricebook,should,yes,no,ST
+Vendor costs per SKU,pricebook,should,yes,partial,ST; single unit cost - no vendor cost list
+SKU detail fields (images / sold hours / commission),pricebook,should,yes,no,ST
+Price lock / cost lock,pricebook,could,yes,no,ST
+Discounts and fees,pricebook,must,yes,no,ST
+Customer price tiers / rate sheets,pricebook,could,yes,no,FP+ST
+Pricebook bulk import / export,pricebook,should,yes,partial,FP+ST; FieldPulse items import only - no CSV import
+Flat-rate pricebook with labor / overhead / markup categories,pricebook,should,addon,no,FP
+Good / better / best pricebook templates,pricebook,should,addon,no,FP+ST
+Dimensional pricebook,pricebook,could,addon,no,FP
+Supplier catalog pricing (Reece / Winsupply),pricebook,could,yes,skip,FP; supplier B2B partnerships
+Managed pricebook content updates,pricebook,could,addon,skip,ST; licensed pricebook content
+Regional pricing averages,pricebook,could,addon,skip,ST; needs cross-tenant pricing data
+Inventory tracking on items,inventory,should,yes,yes,FP; /admin/inventory inventory_items
+Multiple stock locations / trucks with transfers,inventory,should,yes,no,FP+ST; single free-text location
+Serialized inventory,inventory,could,yes,no,FP
+Auto-deduct stock on job and auto-replenish,inventory,could,yes,no,FP; job_materials not tied to inventory
+Inventory counts and adjustments,inventory,could,yes,no,FP+ST
+Purchase orders with statuses / approval / markups,inventory,should,yes,partial,FP+ST; /api/admin/inventory/purchase-orders - vendor submit MOCK and no approval
+Supplier / vendor management,inventory,should,yes,no,FP; no vendors table
+Receiving with labels and landed cost,inventory,could,yes,no,FP+ST
+Material lists,inventory,could,yes,no,FP
+Membership / maintenance agreement plans,memberships,must,yes,yes,FP+ST; /admin/membership-plans
+Enrol and cancel customer membership,memberships,must,yes,yes,FP+ST; /api/admin/customers/[id]/membership
+Membership discounts per SKU / category,memberships,must,yes,partial,ST; memberPriceCents per item - no category discount rules
+Recurring service types attached to location,memberships,must,yes,partial,ST; visitsPerYear per customer - no seasonal types or location link
+Auto-generate maintenance visits as jobs,memberships,must,yes,yes,FP+ST; /api/cron/generate-membership-visits
+Bulk book recurring events into jobs,memberships,must,yes,partial,ST; cron creates requests - no bulk booking UI
+Combine overlapping routines into one visit,memberships,could,yes,no,FP
+On-demand visit allowance and banking,memberships,should,yes,no,FP
+Recurring membership billing (monthly to annual),memberships,must,yes,no,FP+ST; billing mocked - providerSubscriptionId placeholder
+Membership visit and renewal reminders,memberships,must,yes,partial,FP; visit jobs generated - no membership-renewal trigger
+Membership auto-renew and expiring follow-up queue,memberships,should,yes,no,ST
+Membership contract e-sign,memberships,should,yes,no,FP
+Sell membership from estimate or invoice line,memberships,should,yes,no,FP
+Rename membership entity,memberships,could,yes,no,FP
+Membership status change log,memberships,should,yes,no,ST
+Deferred revenue recognition,memberships,could,yes,no,ST
+Membership savings and recurring-visit invoice templates,memberships,should,yes,no,ST
+Commercial service agreements,memberships,could,yes,no,ST
+Automated triggered messages (booking / job / estimate / invoice / payment),comms,must,yes,yes,FP+ST; /admin/communications/templates + triggers.ts
+On-the-way text with tracking link,comms,must,yes,partial,FP+ST; technician_enroute template - no en-route action or tracking link
+Email and SMS templates with merge fields,comms,must,yes,yes,FP; /admin/communications/templates
+Manual send to customer,comms,must,yes,partial,FP; /admin/conversations SMS reply only
+Attach files to communications,comms,should,yes,no,FP
+Two-way SMS inbox,comms,must,addon,partial,FP+ST; /admin/conversations - no polling and SMS-only reply
+Customer text-to-confirm appointment,comms,should,yes,no,ST
+Email delivery status tracking,comms,should,yes,partial,ST; /api/admin/communications/outcomes API only - no UI
+Call recording with AI transcripts linked to jobs,comms,should,yes,partial,FP+ST; phone sessions in /admin/conversations - no recordings UI
+Embedded dialer and contact-center call bar,comms,should,yes,no,ST; dashboard/call bar is an add-on
+Call routing / IVR / sequential ring,comms,should,addon,no,FP; buildable on Twilio
+Business phone numbers and porting,comms,should,addon,skip,FP+ST; carrier telephony (porting / 10DLC / CNAM)
+Review requests,marketing,should,yes,yes,FP+ST; /admin/reviews + /review/[token]
+Marketing campaigns with categories / cost / ROI,marketing,should,yes,partial,ST; lead-source ROI in /admin/reports - no campaign entity
+SMS opt-in import,marketing,should,yes,no,ST
+Email / direct-mail campaigns on live audiences,marketing,could,addon,no,ST
+Dashboard with KPI widgets,reporting,must,yes,yes,FP+ST; /admin dashboard + /admin/operations
+Custom dashboards and report builder,reporting,should,yes,no,FP+ST
+Relative-date filters and time-in-status reports,reporting,could,yes,partial,FP; 30/90/365d presets in /admin/reports - no time-in-status report
+Technician scorecards,reporting,must,yes,yes,ST; /admin/reports
+Job costing / profitability,reporting,should,yes,partial,FP; job_materials + time entries - no job-costing report
+Customer satisfaction survey,reporting,should,yes,partial,ST; /admin/reviews ratings - no survey
+Multi-location roll-up dashboards,reporting,could,yes,no,FP+ST
+Owner mobile KPI app,reporting,could,addon,no,ST
+Roles with granular permissions,team-settings,must,yes,partial,FP+ST; super_admin/admin/technician only
+Per-user permission toggles and schedule visibility,team-settings,should,yes,no,FP
+Features and plugins switchboard,team-settings,should,yes,no,FP
+Google SSO and 2FA,team-settings,should,yes,partial,FP; Google OIDC on /admin/login - no MFA
+Business units (trades / divisions / invoice header / tax default),team-settings,must,yes,no,ST; single org = single business
+Employees vs technicians,team-settings,must,yes,yes,ST; /admin/staff roles
+Technician burden / commission / hourly rates,team-settings,should,yes,partial,ST; users.laborRateCents - no burden or commission
+Technician daily goal,team-settings,could,yes,no,ST
+Commissions with job splits,team-settings,should,yes,no,FP+ST
+Payroll periods with codes / pay items / adjustments / approve-lock,team-settings,should,yes,no,ST; no admin timesheet page
+Flexible timekeeping and prevailing-wage labor types,team-settings,could,yes,no,ST
+QuickBooks Online sync,integrations,must,yes,partial,FP+ST; /admin/accounting CSV/IIF export - no QBO API
+QuickBooks Online touchless sync,integrations,could,yes,no,ST
+QuickBooks Desktop sync,integrations,should,yes,skip,FP; QuickBooks certification and Web Connector maturity
+Xero sync,integrations,could,yes,no,FP
+Zapier,integrations,could,yes,no,FP
+Public REST API with export and reporting feeds,integrations,should,yes,no,FP+ST
+Outbound webhooks (incl. scheduler events),integrations,could,yes,no,FP+ST; inbound webhooks only
+Google Calendar sync,integrations,could,yes,yes,FP; /api/admin/integrations/google
+CompanyCam integration,integrations,could,yes,no,FP
+Lead marketplaces and booking providers (Angi / Thumbtack / Google LSA),integrations,should,yes,skip,FP+ST; partner marketplace agreements
+Customer portal (jobs / estimates / invoices / equipment / memberships),customer-portal,must,yes,partial,FP+ST; /portal/[token] - no equipment or membership view
+Portal visibility toggles,customer-portal,should,yes,no,FP
+Pay invoices online in portal (full or partial),customer-portal,must,yes,partial,FP+ST; /api/portal/[token]/pay MOCK provider
+Portal equipment search and next service,customer-portal,could,yes,no,ST
+Booking deposits / full prepay,customer-portal,could,addon,no,FP
+Customer trip-tracking view,customer-portal,could,yes,no,FP; no customer ETA link
+Audit trail on records,platform,must,yes,partial,ST; /admin/audit-log action-level - no per-record history
+AI admin assistant (natural-language search / create / refine),platform,should,yes,no,FP+ST
