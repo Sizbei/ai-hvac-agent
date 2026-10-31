@@ -56,6 +56,8 @@ type ManualTargetStatus = (typeof MANUAL_TARGET_STATUSES)[number];
 
 const STATUS_ACTION_LABELS: Record<ManualTargetStatus, string> = {
   scheduled: 'Schedule visit',
+  en_route: 'Mark en route',
+  arrived: 'Mark arrived',
   in_progress: 'Start work',
   on_hold: 'Put on hold',
   completed: 'Mark complete',

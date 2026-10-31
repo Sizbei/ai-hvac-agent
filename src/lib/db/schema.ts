@@ -60,6 +60,8 @@ export const urgencyEnum = pgEnum("urgency", [
 export const requestStatusEnum = pgEnum("request_status", [
   "pending",
   "assigned",
+  "en_route",
+  "arrived",
   // Booked with an arrival window, before/independent of a tech actively
   // working it (ServiceTitan "Scheduled").
   "scheduled",

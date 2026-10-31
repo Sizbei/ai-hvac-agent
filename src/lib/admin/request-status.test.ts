@@ -8,6 +8,8 @@ vi.mock('@/lib/db/schema', () => ({
     enumValues: [
       'pending',
       'assigned',
+      'en_route',
+      'arrived',
       'scheduled',
       'in_progress',
       'on_hold',
@@ -107,5 +109,34 @@ describe('request-status state machine', () => {
       expect(MANUAL_TARGET_STATUSES).toContain('scheduled');
       expect(MANUAL_TARGET_STATUSES).toContain('on_hold');
     });
+  });
+});
+
+import { IN_FLIGHT_STATUSES, OPEN_STATUSES, ON_SITE_STATUSES, NOT_STARTED_STATUSES, TERMINAL_STATUSES } from './request-status';
+
+describe('en_route / arrived', () => {
+  it('tech taps follow assigned → en_route → arrived → in_progress', () => {
+    expect(canTransition('assigned', 'en_route')).toBe(true);
+    expect(canTransition('scheduled', 'en_route')).toBe(true);
+    expect(canTransition('on_hold', 'en_route')).toBe(true);
+    expect(canTransition('en_route', 'arrived')).toBe(true);
+    expect(canTransition('en_route', 'in_progress')).toBe(true);
+    expect(canTransition('en_route', 'scheduled')).toBe(true);
+    expect(canTransition('arrived', 'in_progress')).toBe(true);
+    expect(canTransition('arrived', 'completed')).toBe(false);
+    expect(canTransition('en_route', 'completed')).toBe(false);
+  });
+  it('are manual targets', () => {
+    expect(MANUAL_TARGET_STATUSES).toContain('en_route');
+    expect(MANUAL_TARGET_STATUSES).toContain('arrived');
+  });
+  it('every enum value is in OPEN or TERMINAL, and the derived lists are subsets', () => {
+    const all = ['pending','assigned','en_route','arrived','scheduled','in_progress','on_hold','completed','cancelled'];
+    for (const s of all) expect([...OPEN_STATUSES, ...TERMINAL_STATUSES]).toContain(s);
+    for (const s of IN_FLIGHT_STATUSES) expect(OPEN_STATUSES).toContain(s);
+    for (const s of ON_SITE_STATUSES) expect(IN_FLIGHT_STATUSES).toContain(s);
+    for (const s of NOT_STARTED_STATUSES) expect(IN_FLIGHT_STATUSES).toContain(s);
+    expect(NOT_STARTED_STATUSES).toContain('en_route');
+    expect(ON_SITE_STATUSES).not.toContain('en_route');
   });
 });

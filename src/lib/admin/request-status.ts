@@ -26,16 +26,16 @@ export type HoldReason = (typeof HOLD_REASONS)[number];
 /** Allowed manual transitions, keyed by the current status. Assignment is
  * handled separately (assignTechnician); it is not a manual target here. */
 const TRANSITIONS: Record<RequestStatus, readonly RequestStatus[]> = {
-  // A pending request can be scheduled (book an arrival window) or cancelled.
   pending: ["scheduled", "cancelled"],
-  // A scheduled (but unassigned) request can start, pause, or cancel.
-  scheduled: ["in_progress", "on_hold", "cancelled"],
-  // An assigned request can be scheduled, started, paused, or cancelled.
-  assigned: ["scheduled", "in_progress", "on_hold", "cancelled"],
+  scheduled: ["en_route", "in_progress", "on_hold", "cancelled"],
+  assigned: ["scheduled", "en_route", "in_progress", "on_hold", "cancelled"],
+  // Driving to the site. Can turn back (scheduled), arrive, start, pause, cancel.
+  en_route: ["arrived", "in_progress", "scheduled", "on_hold", "cancelled"],
+  // On site, not yet working. No arrived → completed: completion goes through
+  // in_progress, and the response-time KPI is anchored on reaching the site.
+  arrived: ["in_progress", "on_hold", "cancelled"],
   in_progress: ["on_hold", "completed", "cancelled"],
-  // A paused job resumes (in_progress), can be re-scheduled, completed directly
-  // (a tech may finish while it's flagged on hold), or cancelled.
-  on_hold: ["in_progress", "scheduled", "completed", "cancelled"],
+  on_hold: ["en_route", "in_progress", "scheduled", "completed", "cancelled"],
   completed: [],
   cancelled: [],
 };
@@ -44,13 +44,24 @@ const TRANSITIONS: Record<RequestStatus, readonly RequestStatus[]> = {
  * `as const` keeps the literal element types so consumers can derive a narrow
  * union (`(typeof MANUAL_TARGET_STATUSES)[number]`) rather than the full set.
  * Assignment is a separate flow, so "assigned" is not a manual target. */
-export const MANUAL_TARGET_STATUSES = [
-  "scheduled",
-  "in_progress",
-  "on_hold",
-  "completed",
-  "cancelled",
-] as const satisfies readonly RequestStatus[];
+export const MANUAL_TARGET_STATUSES = ["scheduled", "en_route", "arrived", "in_progress", "on_hold", "completed", "cancelled"] as const satisfies readonly RequestStatus[];
+
+// ── Shared status lists (M0a) ────────────────────────────────────────────────
+// One home for the lists that used to be hand-written in ~25 readers. Lists
+// that differed before keep their own members; nothing is merged.
+/** Booked through paused: somebody is working toward this request. */
+export const IN_FLIGHT_STATUSES = ["scheduled", "assigned", "en_route", "arrived", "in_progress", "on_hold"] as const satisfies readonly RequestStatus[];
+/** Non-terminal: IN_FLIGHT plus pending intake. */
+export const OPEN_STATUSES = ["pending", ...IN_FLIGHT_STATUSES] as const satisfies readonly RequestStatus[];
+/** The technician is physically at the site. */
+export const ON_SITE_STATUSES = ["arrived", "in_progress"] as const satisfies readonly RequestStatus[];
+/** Not yet on site (the delay sweep's "could still be late"). */
+export const NOT_STARTED_STATUSES = ["scheduled", "assigned", "en_route"] as const satisfies readonly RequestStatus[];
+/** Open and nobody owns it yet (dashboard "needs attention"). */
+export const UNASSIGNED_OPEN_STATUSES = ["pending", "scheduled"] as const satisfies readonly RequestStatus[];
+/** Can sit in the unscheduled sidebar when it has no arrival window. */
+export const NEEDS_PLACEMENT_STATUSES = ["pending", "scheduled", "assigned", "en_route", "arrived", "in_progress"] as const satisfies readonly RequestStatus[];
+export const TERMINAL_STATUSES = ["completed", "cancelled"] as const satisfies readonly RequestStatus[];
 
 export function canTransition(
   from: RequestStatus,
