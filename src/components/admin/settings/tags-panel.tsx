@@ -80,6 +80,7 @@ function ColorSelect({
   return (
     <Select items={COLOR_ITEMS} value={value} onValueChange={(v) => v && onChange(v as TagColor)}>
       <SelectTrigger aria-label={label} className="w-36">
+        <span className={cn('inline-block size-3 shrink-0 rounded-sm border', tagBadgeClass(value))} />
         <SelectValue />
       </SelectTrigger>
       <SelectContent>

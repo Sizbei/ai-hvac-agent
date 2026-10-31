@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, X, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { nextTagIds, isStaleResponse } from '@/lib/admin/tag-picker-logic';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -30,6 +31,7 @@ import {
 
 const SAVE_COPY = "Couldn't save tags. Please try again.";
 const DUPLICATE_COPY = 'A tag with that name already exists for this type.';
+const LIMIT_COPY = 'You can have at most 100 tags.';
 const CREATE_COPY = "Couldn't create the tag. Please try again.";
 const COLOR_ITEMS = TAG_COLOR_TOKENS.map((c) => ({ value: c, label: c.charAt(0).toUpperCase() + c.slice(1) }));
 
@@ -66,7 +68,9 @@ export function TagChipPicker({
   const [options, setOptions] = useState<readonly TagTypeRecord[]>([]);
   const [boundTags, setBoundTags] = useState<readonly TagTypeRecord[]>(initialTags ?? []);
   const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [inflight, setInflight] = useState(0);
+  const seqRef = useRef(0);
+  const saving = inflight > 0;
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
   const [newColor, setNewColor] = useState<TagColor>('graphite');
@@ -104,21 +108,26 @@ export function TagChipPicker({
     [bound, boundTags, value, options],
   );
   const selectedIds = useMemo(() => new Set(selected.map((t) => t.id)), [selected]);
+  // Controlled mode derives the id set from `value` itself so ids that can't
+  // be resolved to a chip (not loaded yet, inactive) are never dropped.
+  const currentIds: readonly string[] = bound ? boundTags.map((t) => t.id) : (value ?? []);
+  const unresolvedIds = bound ? [] : currentIds.filter((id) => !selectedIds.has(id));
 
-  async function commit(nextIds: readonly string[]): Promise<void> {
+  async function commit(nextIds: readonly string[], extra: readonly TagTypeRecord[] = []): Promise<void> {
     if (!bound) {
       onChange?.(nextIds);
       return;
     }
+    const seq = ++seqRef.current;
     const previous = boundTags;
-    const catalog = [...options, ...previous];
+    const catalog = [...options, ...extra, ...previous];
     setBoundTags(
       nextIds
         .map((id) => catalog.find((t) => t.id === id))
         .filter((t): t is TagTypeRecord => t !== undefined),
     );
     setError(null);
-    setSaving(true);
+    setInflight((n) => n + 1);
     try {
       const res = await fetch(`/api/admin/tags/${entity}/${entityId}`, {
         method: 'PUT',
@@ -127,19 +136,22 @@ export function TagChipPicker({
       });
       if (!res.ok) throw new Error('bad status');
       const json = (await res.json()) as { data?: { tags?: TagTypeRecord[] } };
-      if (json.data?.tags) setBoundTags(json.data.tags);
-      onChange?.(nextIds);
+      if (!isStaleResponse(seq, seqRef.current)) {
+        if (json.data?.tags) setBoundTags(json.data.tags);
+        onChange?.(nextIds);
+      }
     } catch {
-      setBoundTags(previous);
-      setError(SAVE_COPY);
+      if (!isStaleResponse(seq, seqRef.current)) {
+        setBoundTags(previous);
+        setError(SAVE_COPY);
+      }
     } finally {
-      setSaving(false);
+      setInflight((n) => n - 1);
     }
   }
 
-  function toggle(id: string, on: boolean): void {
-    const ids = selected.map((t) => t.id);
-    void commit(on ? [...ids.filter((i) => i !== id), id] : ids.filter((i) => i !== id));
+  function toggle(id: string): void {
+    void commit(nextTagIds(currentIds, id));
   }
 
   async function createTag(): Promise<void> {
@@ -153,7 +165,8 @@ export function TagChipPicker({
         body: JSON.stringify({ entity, name, color: newColor }),
       });
       if (res.status === 409) {
-        setError(DUPLICATE_COPY);
+        const body = (await res.json().catch(() => null)) as { error?: { code?: string } } | null;
+        setError(body?.error?.code === 'LIMIT_REACHED' ? LIMIT_COPY : DUPLICATE_COPY);
         return;
       }
       if (!res.ok) throw new Error('bad status');
@@ -164,11 +177,7 @@ export function TagChipPicker({
       setCreating(false);
       setNewName('');
       setNewColor('graphite');
-      if (bound) {
-        await commit([...selected.map((t) => t.id), tag.id]);
-      } else {
-        onChange?.([...selected.map((t) => t.id), tag.id]);
-      }
+      await commit(nextTagIds(currentIds, tag.id), [tag]);
     } catch {
       setError(CREATE_COPY);
     }
@@ -187,7 +196,7 @@ export function TagChipPicker({
             onKeyDown={(e) => {
               if (e.key === 'Backspace') {
                 e.preventDefault();
-                toggle(tag.id, false);
+                toggle(tag.id);
               }
             }}
             className={cn(
@@ -201,7 +210,26 @@ export function TagChipPicker({
               type="button"
               aria-label={`Remove tag ${tag.name}`}
               className="-mr-1 rounded-sm p-0.5 hover:bg-black/10"
-              onClick={() => toggle(tag.id, false)}
+              onClick={() => toggle(tag.id)}
+            >
+              <X className="size-3" />
+            </button>
+          </span>
+        ))}
+        {unresolvedIds.map((id) => (
+          <span
+            key={id}
+            className={cn(
+              'inline-flex items-center gap-1 rounded-md border border-border bg-muted px-2 py-0.5 text-muted-foreground',
+              chipText,
+            )}
+          >
+            …
+            <button
+              type="button"
+              aria-label="Remove tag"
+              className="-mr-1 rounded-sm p-0.5 hover:bg-black/10"
+              onClick={() => toggle(id)}
             >
               <X className="size-3" />
             </button>
@@ -219,7 +247,7 @@ export function TagChipPicker({
               <DropdownMenuCheckboxItem
                 key={o.id}
                 checked={selectedIds.has(o.id)}
-                onCheckedChange={(checked) => toggle(o.id, checked)}
+                onCheckedChange={() => toggle(o.id)}
               >
                 {o.name}
               </DropdownMenuCheckboxItem>
