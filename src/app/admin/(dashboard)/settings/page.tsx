@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
   AlertCircle,
   Palette,
@@ -12,6 +13,7 @@ import {
   Clock,
   Plug,
   Truck,
+  ClipboardList,
 } from 'lucide-react';
 import { useOrgSettings } from '@/hooks/use-org-settings';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -30,6 +32,7 @@ import { HousecallProPanel } from '@/components/admin/settings/housecall-pro-pan
 import { FieldpulsePanel } from '@/components/admin/settings/fieldpulse-panel';
 import { AiModelPanel } from '@/components/admin/settings/ai-model-panel';
 import { PlatformLinkPanel } from '@/components/admin/settings/platform-link-panel';
+import { JobTypesPanel } from '@/components/admin/settings/job-types-panel';
 import { BillingLinkPanel } from '@/components/admin/settings/billing-link-panel';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
@@ -37,6 +40,7 @@ import { PageHeader } from '@/components/admin/ui/page-header';
 export default function SettingsPage() {
   useEffect(() => { document.title = 'Settings · Spears Admin'; }, []);
   const settings = useOrgSettings();
+  const initialTab = useSearchParams().get('tab') ?? 'branding';
 
   return (
     <PageShell narrow>
@@ -58,7 +62,7 @@ export default function SettingsPage() {
           <Skeleton className="h-64 w-full" />
         </div>
       ) : (
-        <Tabs defaultValue="branding">
+        <Tabs defaultValue={initialTab}>
           <TabsList className="w-full flex-wrap justify-start">
             <TabsTrigger value="branding">
               <Palette className="size-4" />
@@ -67,6 +71,10 @@ export default function SettingsPage() {
             <TabsTrigger value="services">
               <Wrench className="size-4" />
               Services
+            </TabsTrigger>
+            <TabsTrigger value="job-types">
+              <ClipboardList className="size-4" />
+              Job types
             </TabsTrigger>
             <TabsTrigger value="business">
               <Building2 className="size-4" />
@@ -103,6 +111,9 @@ export default function SettingsPage() {
           </TabsContent>
           <TabsContent value="services" className="mt-6">
             <ServicesPanel config={settings.config} onSave={settings.saveConfig} />
+          </TabsContent>
+          <TabsContent value="job-types" className="mt-6">
+            <JobTypesPanel />
           </TabsContent>
           <TabsContent value="business" className="mt-6">
             <BusinessInfoPanel
