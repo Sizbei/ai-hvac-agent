@@ -12,6 +12,11 @@ import {
   jsonb,
   doublePrecision,
   date,
+  check,
+  foreignKey,
+  primaryKey,
+  unique,
+  smallint,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -513,6 +518,10 @@ export const serviceRequests = pgTable(
     // ── ServiceTitan-style intake fields (all nullable; intake fills when known) ──
     // Work classification, distinct from the customer-language issueType symptom.
     jobType: jobTypeEnum("job_type"),
+    // M0b: the org-defined job type row; `jobType` (enum) is derived from its kind.
+    jobTypeId: uuid("job_type_id").references(() => jobTypes.id, { onDelete: "set null" }),
+    // M0b: the person to contact for this visit (a customer_contacts row).
+    contactId: uuid("contact_id").references(() => customerContacts.id, { onDelete: "set null" }),
     // The HVAC system the issue concerns.
     systemType: systemTypeEnum("system_type"),
     equipmentBrand: text("equipment_brand"),
@@ -633,6 +642,7 @@ export const serviceRequests = pgTable(
   },
   (table) => [
     index("requests_org_id_idx").on(table.organizationId),
+    index("requests_job_type_id_idx").on(table.jobTypeId),
     index("requests_session_id_idx").on(table.sessionId),
     index("requests_status_idx").on(table.status),
     index("requests_ref_idx").on(table.referenceNumber),
@@ -2201,6 +2211,8 @@ export const customerLocations = pgTable(
     addressHash: text("address_hash"),
     label: text("label"), // e.g. "Main St rental", "Warehouse B"
     zone: text("zone"), // dispatch/routing zone
+    // M0b: exactly one primary per customer (partial unique index below).
+    isPrimary: boolean("is_primary").notNull().default(false),
     propertyType: text("property_type"),
     accessNotes: text("access_notes"),
     latitude: doublePrecision("latitude"),
@@ -2219,8 +2231,105 @@ export const customerLocations = pgTable(
     uniqueIndex("customer_locations_customer_addr_unique")
       .on(table.customerId, table.addressHash)
       .where(sql`${table.addressHash} IS NOT NULL`),
+    uniqueIndex("customer_locations_one_primary_idx").on(table.customerId).where(sql`${table.isPrimary} = true`),
   ],
 );
+
+export const tagEntityEnum = pgEnum("tag_entity", ["customer", "location", "job"]);
+
+// M0b: org-defined tags for customers, locations and requests ("job" is the
+// enum value; UI copy says request). `color` is a tag-types.ts token, never hex.
+export const tagTypes = pgTable(
+  "tag_types",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    entity: tagEntityEnum("entity").notNull(),
+    name: text("name").notNull(),
+    color: text("color").notNull().default("graphite"),
+    visibleOnBoard: boolean("visible_on_board").notNull().default(false),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique("tag_types_org_entity_name_unique").on(table.organizationId, table.entity, table.name),
+    // Lets entity_tags carry a composite FK so a tag can never cross orgs or kinds.
+    unique("tag_types_id_org_entity_unique").on(table.id, table.organizationId, table.entity),
+  ],
+);
+
+// Polymorphic link table. entity_id is deliberately not an FK (three target
+// tables); deleteCustomer / anonymizeCustomer / the request hard-delete remove rows.
+export const entityTags = pgTable(
+  "entity_tags",
+  {
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    tagTypeId: uuid("tag_type_id").notNull(),
+    entity: tagEntityEnum("entity").notNull(),
+    entityId: uuid("entity_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ name: "entity_tags_tag_type_id_entity_entity_id_pk", columns: [table.tagTypeId, table.entity, table.entityId] }),
+    foreignKey({
+      name: "entity_tags_tag_type_fk",
+      columns: [table.tagTypeId, table.organizationId, table.entity],
+      foreignColumns: [tagTypes.id, tagTypes.organizationId, tagTypes.entity],
+    }).onDelete("cascade"),
+    index("entity_tags_org_entity_idx").on(table.organizationId, table.entity, table.entityId),
+  ],
+);
+
+// M0b: org-configurable job types. `kind` is the canonical job_type enum the
+// AI intake, duration table and FP/HCP mappers keep reading.
+export const jobTypes = pgTable(
+  "job_types",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    kind: jobTypeEnum("kind").notNull(),
+    defaultDurationMinutes: integer("default_duration_minutes").notNull().default(90),
+    defaultPriority: urgencyEnum("default_priority").notNull().default("medium"),
+    active: boolean("active").notNull().default(true),
+    position: smallint("position").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique("job_types_org_name_unique").on(table.organizationId, table.name),
+    check("job_types_duration_check", sql`${table.defaultDurationMinutes} BETWEEN 15 AND 1440`),
+  ],
+);
+
+// M0b: extra people on a customer account (tenant, property manager…). Same
+// encrypt + blind-index shape as customers. NEVER part of the identity lookup.
+export const customerContacts = pgTable(
+  "customer_contacts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    customerId: uuid("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }),
+    locationId: uuid("location_id").references(() => customerLocations.id, { onDelete: "set null" }),
+    nameEncrypted: text("name_encrypted").notNull(),
+    role: text("role"),
+    phoneEncrypted: text("phone_encrypted"),
+    phoneHash: text("phone_hash"),
+    emailEncrypted: text("email_encrypted"),
+    emailHash: text("email_hash"),
+    isPrimary: boolean("is_primary").notNull().default(false),
+    position: smallint("position").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("customer_contacts_org_customer_idx").on(table.organizationId, table.customerId),
+    index("customer_contacts_org_phone_hash_idx").on(table.organizationId, table.phoneHash),
+    uniqueIndex("customer_contacts_one_primary_idx").on(table.customerId).where(sql`${table.isPrimary} = true`),
+  ],
+);
+
 
 // ════════ Stage 8: Pricebook + tax (sales-money spine root) ════════
 export const pricebookItemTypeEnum = pgEnum("pricebook_item_type", [
