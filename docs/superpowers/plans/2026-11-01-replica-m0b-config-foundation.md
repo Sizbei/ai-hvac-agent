@@ -62,7 +62,7 @@
 | `src/app/api/admin/tags/[entity]/[id]/route.ts` | GET / PUT the tag set on one entity |
 | `src/app/api/admin/customers/[id]/locations/route.ts`, `…/locations/[lid]/route.ts` | GET locations; PATCH isPrimary |
 | `src/app/api/admin/customers/[id]/contacts/route.ts`, `…/contacts/[cid]/route.ts` | GET / POST; PATCH / DELETE |
-| `src/lib/admin/create-request.ts` (+ test), `create-request-flow.ts`, `create-request-queries.ts`, `src/lib/admin/persist-job-location.ts`, `src/app/api/admin/requests/route.ts` | new fields, ownership checks, derived `jobType`, duration, tags |
+| `src/lib/admin/create-request.ts` (+ test), `create-request-flow.ts`, `create-request-queries.ts`, `src/lib/requests/persist-job-location.ts`, `src/app/api/admin/requests/route.ts` | new fields, ownership checks, derived `jobType`, duration, tags |
 | `src/components/admin/settings/job-types-panel.tsx`, `tags-panel.tsx`, `src/app/admin/(dashboard)/settings/page.tsx` | settings tabs (+ `?tab=`) |
 | `src/components/admin/tag-chip-picker.tsx` | shared picker (bound + controlled modes) |
 | `src/components/admin/customers/contacts-section.tsx`, `locations-section.tsx`, `src/app/admin/(dashboard)/customers/[id]/page.tsx`, `src/components/admin/request-detail-sheet.tsx` | customer page sections, request tags |
@@ -179,6 +179,7 @@ export const customerContacts = pgTable(
   (table) => [
     index("customer_contacts_org_customer_idx").on(table.organizationId, table.customerId),
     index("customer_contacts_org_phone_hash_idx").on(table.organizationId, table.phoneHash),
+    uniqueIndex("customer_contacts_one_primary_idx").on(table.customerId).where(sql`${table.isPrimary} = true`),
   ],
 );
 ```
@@ -197,9 +198,9 @@ In `serviceRequests` add after `jobType`:
     // M0b: the person to contact for this visit (a customer_contacts row).
     contactId: uuid("contact_id").references(() => customerContacts.id, { onDelete: "set null" }),
 ```
-and to its index list: `index("requests_job_type_id_idx").on(table.jobTypeId),`. (`jobTypes` and `customerContacts` are declared before `serviceRequests` only if `customerLocations` is; if `serviceRequests` comes first in the file, the `() =>` thunks still resolve at runtime, which is how `customers` already references later tables — keep the thunk form.)
+and to its index list: `index("requests_job_type_id_idx").on(table.jobTypeId),`. (`serviceRequests` is at ~line 490 and `customerLocations` at ~2188, so the new tables land after `serviceRequests`; the `() =>` thunks resolve at runtime, exactly as `serviceRequests` already references `customers`, declared at ~724.)
 
-- [ ] **Step 3: Generate** — `npx drizzle-kit generate --name m0b_config_foundation`. Open the generated SQL and confirm it creates exactly: type `tag_entity`; tables `tag_types`, `entity_tags`, `customer_contacts`, `job_types`; the two `service_requests` columns + FKs + index; `customer_locations.is_primary` + partial unique index; the constraint names above. If anything differs, fix `schema.ts` (recipe step 4) and regenerate.
+- [ ] **Step 3: Generate** — `npx drizzle-kit generate --name m0b_config_foundation`. Open the generated SQL and confirm it creates exactly: type `tag_entity`; tables `tag_types`, `entity_tags`, `customer_contacts` (incl. `customer_contacts_one_primary_idx`), `job_types`; the two `service_requests` columns + FKs + index; `customer_locations.is_primary` + partial unique index; the constraint names above (drizzle-kit 0.31 generates `service_requests_job_type_id_job_types_id_fk`-style FK names, matching the hand SQL). If anything differs, fix `schema.ts` (recipe step 4) and regenerate.
 
 - [ ] **Step 4: Overwrite the SQL** with this idempotent version (same objects + seed + backfills):
 
@@ -299,6 +300,8 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 CREATE INDEX IF NOT EXISTS "customer_contacts_org_customer_idx" ON "customer_contacts" USING btree ("organization_id","customer_id");
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "customer_contacts_org_phone_hash_idx" ON "customer_contacts" USING btree ("organization_id","phone_hash");
+--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "customer_contacts_one_primary_idx" ON "customer_contacts" USING btree ("customer_id") WHERE "customer_contacts"."is_primary" = true;
 --> statement-breakpoint
 ALTER TABLE "customer_locations" ADD COLUMN IF NOT EXISTS "is_primary" boolean DEFAULT false NOT NULL;
 --> statement-breakpoint
@@ -571,7 +574,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 - [ ] **Step 2: Panel** (`job-types-panel.tsx`; compose like `custom-faqs-panel.tsx`; spec: `replica/design/components.md` "Job-type row editor"). Self-fetching: `useEffect` → `fetch('/api/admin/settings/job-types')`. Rows: name (`Input`), kind (`Select` over `jobTypeValues` with `JOB_TYPE_LABELS` from `@/lib/admin/create-request`), default duration (`Input type="number" step={15} className="font-mono w-24"`), default priority (`Select` with `URGENCY_LABELS`), position (`Input type="number" className="w-16"`), active (`Switch`). Save a row on blur/change with `PATCH`; inline add row at the bottom posts. Errors: 409 → "A job type with that name already exists."; other → "Couldn't save the job type. Please try again."
 
-- [ ] **Step 3: Settings tab** — in `settings/page.tsx` add `<TabsTrigger value="job-types"><ClipboardList className="size-4" />Job types</TabsTrigger>` after Services and `<TabsContent value="job-types"><JobTypesPanel /></TabsContent>`; make `defaultValue` come from `useSearchParams().get('tab') ?? 'branding'` (wrap in `Suspense` if Next complains about `useSearchParams` in a client page — the page is already `'use client'`).
+- [ ] **Step 3: Settings tab** — in `settings/page.tsx` add `<TabsTrigger value="job-types"><ClipboardList className="size-4" />Job types</TabsTrigger>` after Services and `<TabsContent value="job-types"><JobTypesPanel /></TabsContent>`; make `defaultValue` come from `useSearchParams().get('tab') ?? 'branding'` (the page is `'use client'` inside a dynamic layout; no `Suspense` wrapper is needed, and `<Tabs>` mounts only after settings load so `defaultValue` takes effect).
 
 - [ ] **Step 4: Probe**
 
@@ -613,7 +616,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - Create: `src/components/admin/customers/locations-section.tsx`; modify `src/app/admin/(dashboard)/customers/[id]/page.tsx` (mount it after the header card; the page has no locations block today)
 
 **Interfaces:**
-- `listCustomerLocations` rows gain `isPrimary: boolean` (add to the `CustomerLocation` type in `src/lib/admin/crm-types.ts` or wherever it is declared — grep `interface CustomerLocation`).
+- `listCustomerLocations` rows gain `isPrimary: boolean` (the `CustomerLocation` type is declared in `location-queries.ts:27`).
 - `setPrimaryLocation(orgId, customerId, locationId): Promise<boolean>`; `locationBelongsToCustomer(orgId, customerId, locationId): Promise<boolean>` (used by Tasks 7a and 8).
 - `GET /api/admin/customers/[id]/locations` → `{ locations: CustomerLocation[] }` (addresses decrypted; admin-only like the customer detail route).
 
@@ -638,9 +641,9 @@ it("rethrows a non-unique error from the primary UPDATE", async () => {
   await expect(upsertCustomerLocation(ORG, CUST, { address: "9 Elm St" })).rejects.toThrow("boom");
 });
 ```
-(Read the existing file first and reuse its exact helper names and constants.)
+(Read the existing file first and reuse its exact helper names and constants. Set the insert mock explicitly in EACH of the three tests — do not rely on a mock left in place by an earlier test.)
 
-- [ ] **Step 2: Implement** in `location-queries.ts` (add `import { sql } from "drizzle-orm"` and `import { isUniqueViolation } from "@/lib/db/unique-violation"`). At the end of `upsertCustomerLocation`, replace the two `return` sites with a single `const locationId = created?.id ?? winner!.id;` followed by:
+- [ ] **Step 2: Implement** in `location-queries.ts` (add `import { sql } from "drizzle-orm"` and `import { isUniqueViolation } from "@/lib/db/unique-violation"`). `upsertCustomerLocation` has three returns: the dedupe hit (`return existing.id`, ~line 64) stays as is and skips the primary step (an existing location already went through it). Replace the two later returns (`created.id`, `winner!.id`) with a single `const locationId = created?.id ?? winner!.id;` followed by:
 
 ```ts
   // First location becomes primary. A separate guarded UPDATE (never part of
@@ -665,20 +668,24 @@ export async function locationBelongsToCustomer(organizationId: string, customer
   return Boolean(row);
 }
 
-export async function setPrimaryLocation(organizationId: string, customerId: string, locationId: string): Promise<boolean> {
+export async function setPrimaryLocation(organizationId: string, customerId: string, locationId: string): Promise<boolean | { readonly reason: "race" }> {
   if (!(await locationBelongsToCustomer(organizationId, customerId, locationId))) return false;
-  await db.batch([
+  try { await db.batch([
     db.update(customerLocations).set({ isPrimary: false })
       .where(withTenant(customerLocations, organizationId, eq(customerLocations.customerId, customerId), eq(customerLocations.isPrimary, true))),
     db.update(customerLocations).set({ isPrimary: true })
       .where(withTenant(customerLocations, organizationId, eq(customerLocations.id, locationId))),
-  ]);
+  ]); } catch (error: unknown) {
+    // Two concurrent "make primary" calls: the second set trips the partial unique index.
+    if (isUniqueViolation(error, "customer_locations_one_primary_idx")) return { reason: "race" };
+    throw error;
+  }
   return true;
 }
 ```
 and include `isPrimary: customerLocations.isPrimary` in `listCustomerLocations`'s select + mapped output. (There is no location delete path in the codebase, so no re-selection is needed.)
 
-- [ ] **Step 3: Routes** — GET: `getAdminSession`, `adminRead` limit, UUID check, confirm the customer exists in the org (`db.select({ id: customers.id }).from(customers).where(withTenant(customers, orgId, eq(customers.id, id))).limit(1)` → 404), return `listCustomerLocations`. PATCH: `adminMutation` limit, body `z.object({ isPrimary: z.literal(true) })` via `readJsonBody`, `setPrimaryLocation` → false → 404, audit `set_primary_location` (entity `customer_locations`, entityId `lid`, details `{ customerId }`).
+- [ ] **Step 3: Routes** — GET: `getAdminSession`, `adminRead` limit, UUID check, confirm the customer exists in the org (`db.select({ id: customers.id }).from(customers).where(withTenant(customers, orgId, eq(customers.id, id))).limit(1)` → 404), return `listCustomerLocations`. PATCH: `adminMutation` limit, body `z.object({ isPrimary: z.literal(true) })` via `readJsonBody`, `setPrimaryLocation` → `false` → 404, `{ reason: "race" }` → 409 "Someone else just changed the primary location. Reload and try again.", audit `set_primary_location` (entity `customer_locations`, entityId `lid`, details `{ customerId }`).
 
 - [ ] **Step 4: Section** (`locations-section.tsx`): `SectionCard` "Service locations"; rows: address, label muted, "Primary" chip, zone muted; row menu "Make primary" (PATCH then refetch). Mount in `customers/[id]/page.tsx`. (The location tag picker is mounted in Task 7b once the picker exists.)
 
@@ -694,12 +701,11 @@ Expected: list shows exactly one `isPrimary: true`; after PATCH the other one is
 - [ ] **Step 6: Gates + commit**
 
 ```bash
-git add src/lib/admin/location-queries.ts src/lib/admin/location-queries.test.ts src/lib/admin/crm-types.ts 'src/app/api/admin/customers/[id]/locations' src/components/admin/customers/locations-section.tsx 'src/app/admin/(dashboard)/customers/[id]/page.tsx'
+git add src/lib/admin/location-queries.ts src/lib/admin/location-queries.test.ts 'src/app/api/admin/customers/[id]/locations' src/components/admin/customers/locations-section.tsx 'src/app/admin/(dashboard)/customers/[id]/page.tsx'
 git commit -m "feat(customers): service locations list with one primary per customer
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
-(If `CustomerLocation` lives elsewhere than `crm-types.ts`, substitute that file.)
 
 ---
 
@@ -782,7 +788,7 @@ const BADGE: Record<TagColor, string> = {
 export function tagBadgeClass(color: TagColor): string { return BADGE[color] ?? BADGE.graphite; }
 export function isTagColor(v: string): v is TagColor { return (TAG_COLOR_TOKENS as readonly string[]).includes(v); }
 ```
-Check every class pair above exists in `src/lib/admin/status-colors.ts` / `globals.css` (`info-light`, `info-strong`, `danger-light` …); if `info` is missing, drop it from `TAG_COLOR_TOKENS`.
+Every class pair above already exists in `src/lib/admin/status-colors.ts` (the `info` pair is used by `SESSION_STATUS_BADGE`).
 
 - [ ] **Step 4: Implement `tag-queries.ts`**
 
@@ -985,7 +991,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
 - [ ] **Step 2: `settings/tags/route.ts` + `[id]/route.ts`** — copy Task 3's job-types routes; GET takes `entity` (validated against `TAG_ENTITIES`) and `active=1`; POST uses `tagTypeInputSchema`, 409 `DUPLICATE_NAME` "A tag with that name already exists for this type."; cap 100 per org; PATCH uses `tagTypePatchSchema`; audit `create_tag_type` / `update_tag_type` on entity `tag_types`.
 
-- [ ] **Step 3: Chip picker** (`tag-chip-picker.tsx`, spec "Tag chip picker"). Chips: `<span className={cn("inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[12px]", tagBadgeClass(tag.color))}>` with an × `button` (`aria-label="Remove tag <name>"`); Backspace on a focused chip removes it. "Add tag" opens a `DropdownMenu` whose items are `DropdownMenuCheckboxItem`s for the org's active tag types of `entity` (fetched once from `/api/admin/settings/tags?entity=…&active=1`), plus a "New tag…" item that reveals an inline name `Input` + colour `Select` and POSTs to `/api/admin/settings/tags`. Bound mode: every change PUTs the full id set, optimistic, revert + inline "Couldn't save tags. Please try again." on failure; when `initialTags` is absent, GET on mount. Controlled mode: `value`/`onChange` only. Chips with `visibleOnBoard` get `title="Shown on board"`.
+- [ ] **Step 3: Chip picker** (`tag-chip-picker.tsx`, spec "Tag chip picker"). Chips: `<span className={cn("inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[12px]", tagBadgeClass(tag.color))}>` with an × `button` (`aria-label="Remove tag <name>"`); Backspace on a focused chip removes it. "Add tag" opens a `DropdownMenu` whose items are `DropdownMenuCheckboxItem`s for the org's active tag types of `entity` (fetched once from `/api/admin/settings/tags?entity=…&active=1`), plus a "New tag…" item that CLOSES the menu and reveals an inline name `Input` + colour `Select` below the chips (a text input inside the base-ui menu would fight its keyboard navigation), which POSTs to `/api/admin/settings/tags`. Bound mode: every change PUTs the full id set, optimistic, revert + inline "Couldn't save tags. Please try again." on failure; when `initialTags` is absent, GET on mount. Controlled mode: `value`/`onChange` only. Chips with `visibleOnBoard` get `title="Shown on board"`.
 
 - [ ] **Step 4: Settings panel** (`tags-panel.tsx`): three `Card`s titled "Customers", "Locations", "Requests"; rows: name `Input`, colour `Select` over `TAG_COLOR_TOKENS` rendering a swatch `span` with `tagBadgeClass`, "Show on board" `Switch` (Requests group only), active `Switch`; inline add row per group. Tab wired in `settings/page.tsx` as "Tags" (`value="tags"`).
 
@@ -1044,8 +1050,8 @@ describe("contactInputSchema", () => {
     const r = contactInputSchema.safeParse({ name: "  jane   DOE ", phone: "(423) 555-0100", email: " Jane@Example.com " });
     expect(r.success).toBe(true);
     if (r.success) {
-      expect(r.data.name).toBe("Jane Doe");             // adjust to sanitizeName's real output
-      expect(r.data.phone).toBe("(423) 555-0100");       // adjust to sanitizePhone's real output
+      expect(r.data.name).toBe("Jane Doe");
+      expect(r.data.phone).toBe("(423) 555-0100");
       expect(r.data.email).toBe("jane@example.com");
     }
   });
@@ -1108,11 +1114,12 @@ export interface ContactRecord {
   readonly isPrimary: boolean; readonly position: number;
 }
 ```
-(If `sanitizePhone` throws or returns `""` on garbage, adjust the refine accordingly after reading it.)
+(Verified with a zod probe: the schemas behave exactly as the tests expect. Blank strings are rejected by `phoneField`/`emailField`, so the Task 7b dialog sends `null` (or omits the key) for an empty input.)
 
 - [ ] **Step 3: Implement `contact-queries.ts`**
 
 ```ts
+import { randomUUID } from "node:crypto";
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { customerContacts } from "@/lib/db/schema";
@@ -1148,12 +1155,22 @@ export async function contactBelongsToCustomer(organizationId: string, customerI
   return Boolean(row);
 }
 
+/** One primary per customer (customer_contacts_one_primary_idx). Setting a
+ * new primary unsets the others in the same batch. */
+function unsetPrimary(organizationId: string, customerId: string) {
+  return db.update(customerContacts).set({ isPrimary: false })
+    .where(withTenant(customerContacts, organizationId, eq(customerContacts.customerId, customerId), eq(customerContacts.isPrimary, true)));
+}
+
 export async function createContact(organizationId: string, customerId: string, input: ContactInput): Promise<ContactRecord | { readonly reason: "location_not_owned" }> {
   if (input.locationId && !(await locationBelongsToCustomer(organizationId, customerId, input.locationId))) return { reason: "location_not_owned" };
-  const [row] = await db.insert(customerContacts).values({
-    organizationId, customerId, locationId: input.locationId, role: input.role, isPrimary: input.isPrimary ?? false,
+  const id = randomUUID();
+  const insert = db.insert(customerContacts).values({
+    id, organizationId, customerId, locationId: input.locationId, role: input.role, isPrimary: input.isPrimary ?? false,
     ...toContactRow(input.name, input.phone, input.email),
-  }).returning();
+  });
+  if (input.isPrimary) await db.batch([unsetPrimary(organizationId, customerId), insert]); else await insert;
+  const [row] = await db.select().from(customerContacts).where(withTenant(customerContacts, organizationId, eq(customerContacts.id, id))).limit(1);
   if (!row) throw new Error("Failed to create contact");
   return toRecord(row);
 }
@@ -1166,13 +1183,15 @@ export async function updateContact(organizationId: string, customerId: string, 
   const name = patch.name ?? safeDecrypt(existing.nameEncrypted) ?? "";
   const phone = patch.phone === undefined ? safeDecrypt(existing.phoneEncrypted) : patch.phone;
   const email = patch.email === undefined ? safeDecrypt(existing.emailEncrypted) : patch.email;
-  const [row] = await db.update(customerContacts).set({
+  const update = db.update(customerContacts).set({
     ...toContactRow(name, phone, email),
     role: patch.role === undefined ? existing.role : patch.role,
     locationId: patch.locationId === undefined ? existing.locationId : patch.locationId,
     isPrimary: patch.isPrimary ?? existing.isPrimary,
     updatedAt: new Date(),
-  }).where(withTenant(customerContacts, organizationId, eq(customerContacts.id, contactId))).returning();
+  }).where(withTenant(customerContacts, organizationId, eq(customerContacts.id, contactId)));
+  if (patch.isPrimary === true && !existing.isPrimary) await db.batch([unsetPrimary(organizationId, customerId), update]); else await update;
+  const [row] = await db.select().from(customerContacts).where(withTenant(customerContacts, organizationId, eq(customerContacts.id, contactId))).limit(1);
   return row ? toRecord(row) : null;
 }
 
@@ -1229,7 +1248,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - Create: `src/components/admin/customers/contacts-section.tsx`
 - Modify: `src/app/admin/(dashboard)/customers/[id]/page.tsx` (mount `ContactsSection`; mount `<TagChipPicker entity="customer" entityId={customer.id} />` in the header area), `src/components/admin/customers/locations-section.tsx` (add `<TagChipPicker entity="location" entityId={loc.id} size="sm" />` per row), `src/components/admin/request-detail-sheet.tsx` (a "Tags" row with `<TagChipPicker entity="job" entityId={request.id} />` — read `.claude/skills/page-requests/SKILL.md` first)
 
-- [ ] **Step 1: `contacts-section.tsx`** (spec "Contacts editor"): `SectionCard` "Contacts"; self-fetch `/api/admin/customers/<id>/contacts`; rows: name, role muted, phone/email `font-mono text-[13px]`, "Primary" chip; row `DropdownMenu`: Edit, Make primary, Remove (`ConfirmDialog`); add/edit `Dialog` with name, role, phone, email, location `Select` (from `/api/admin/customers/<id>/locations`), "Primary" `Switch`. Copy: "Couldn't save the contact. Please try again."
+- [ ] **Step 1: `contacts-section.tsx`** (spec "Contacts editor"): `SectionCard` "Contacts"; self-fetch `/api/admin/customers/<id>/contacts`; rows: name, role muted, phone/email `font-mono text-[13px]`, "Primary" chip; row `DropdownMenu`: Edit, Make primary, Remove (`ConfirmDialog`); add/edit `Dialog` with name, role, phone, email, location `Select` (from `/api/admin/customers/<id>/locations`), "Primary" `Switch`; blank phone/email/role inputs are sent as `null` (create) or omitted (edit), never as `""`. Copy: "Couldn't save the contact. Please try again."
 - [ ] **Step 2: Mount** the pickers and section as listed.
 - [ ] **Step 3: Screenshots**: `node scripts/agent/screenshot-page.mjs /admin/customers/$CID 1440` and `… 390`; `/admin/requests` with the detail sheet open is not scriptable by path, so verify the request tags via the Task 6 curl and the sheet by the Playwright snippet in Task 8 step 8 (same script, click a request row instead of "New request"). Look at every image; nothing overflows at 390.
 - [ ] **Step 4: Gates + commit**
@@ -1247,7 +1266,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 **Files:**
 - Modify: `src/lib/admin/create-request.ts` (`bodySchema` ~line 129, `CreateRequestInput` ~159–171, the `data` mapping in `parseCreateRequestBody` ~234–247, the `hasId === hasInline` check ~214–218, `CreateRequestDraft` + `buildCreateRequestPayload` ~390), `src/lib/admin/create-request.test.ts` (uses `parse = (raw) => parseCreateRequestBody(raw, TODAY)` and `baseBody()`; v4-shaped UUIDs like `11111111-1111-4111-8111-111111111111`; the typed `CreateRequestDraft` literal at ~195–208 must gain the new optional fields)
-- Modify: `src/lib/admin/create-request-flow.ts` (`CreateAdminRequestResult` ~36–50: add reasons), `src/lib/admin/create-request-queries.ts`, `src/lib/admin/persist-job-location.ts` (skip the `locationId` overwrite when the request already has one), `src/app/api/admin/requests/route.ts` (map the new reasons), `src/components/admin/request-create-dialog.tsx`
+- Modify: `src/lib/admin/create-request-flow.ts` (`CreateAdminRequestResult` ~36–50: add reasons), `src/lib/admin/create-request-queries.ts`, `src/lib/requests/persist-job-location.ts` (skip the `locationId` overwrite when the request already has one), `src/app/api/admin/requests/route.ts` (map the new reasons), `src/components/admin/request-create-dialog.tsx`
 
 **Interfaces:**
 - POST body gains `jobTypeId?: uuid`, `contactId?: uuid`, `locationId?: uuid`, `tagTypeIds?: uuid[] (≤10)`. `contactId`/`locationId` require `customerId` (not an inline customer). New 400 codes: `JOB_TYPE_NOT_FOUND`, `CONTACT_NOT_OWNED`, `LOCATION_NOT_OWNED`, `UNKNOWN_TAG`. `estimatedDurationSource` value `"job_type"`. When `jobTypeId` is sent, the server derives `jobType` from `job_types.kind` and ignores a client `jobType`.
@@ -1278,7 +1297,7 @@ describe("M0b fields", () => {
 
 - [ ] **Step 2: Run** → the three new tests FAIL.
 
-- [ ] **Step 3: `create-request.ts`** — add to `bodySchema`: `jobTypeId: z.uuid().optional()`, `contactId: z.uuid().optional()`, `locationId: z.uuid().optional()`, `tagTypeIds: z.array(z.uuid()).max(10).optional()`. After the `hasId === hasInline` check add: `if (!hasId && (raw.contactId || raw.locationId)) return { ok: false, message: "Pick an existing customer to choose a contact or location." };` (same return shape as the XOR failure). Add the four fields to `CreateRequestInput` (`readonly jobTypeId: string | null; readonly contactId: string | null; readonly locationId: string | null; readonly tagTypeIds: readonly string[]`) and to the `data` mapping (`?? null` / `?? []`). Add optional `jobTypeId`, `contactId`, `locationId`, `tagTypeIds` to `CreateRequestDraft` and send them from `buildCreateRequestPayload`; when `draft.jobTypeId` is set do NOT send `jobType`.
+- [ ] **Step 3: `create-request.ts`** — add to `bodySchema`: `jobTypeId: z.uuid().optional()`, `contactId: z.uuid().optional()`, `locationId: z.uuid().optional()`, `tagTypeIds: z.array(z.uuid()).max(10).optional()`. After the `hasId === hasInline` check add: `if (!hasId && (b.contactId || b.locationId)) return { ok: false, message: "Pick an existing customer to choose a contact or location." };` (`b` is the parsed body; `raw` is `unknown`; same return shape as the XOR failure). Add the four fields to `CreateRequestInput` (`readonly jobTypeId: string | null; readonly contactId: string | null; readonly locationId: string | null; readonly tagTypeIds: readonly string[]`) and to the `data` mapping (`?? null` / `?? []`). Add optional `jobTypeId`, `contactId`, `locationId`, `tagTypeIds` to `CreateRequestDraft` and send them from `buildCreateRequestPayload`; when `draft.jobTypeId` is set do NOT send `jobType`.
 
 - [ ] **Step 4: `create-request-flow.ts`** — extend `CreateAdminRequestResult` failures with `reason: "job_type_not_found" | "contact_not_owned" | "location_not_owned" | "unknown_tag"`.
 
@@ -1286,14 +1305,14 @@ describe("M0b fields", () => {
 ```ts
   const jobTypeRow = input.jobTypeId ? await resolveJobTypeForRequest(organizationId, input.jobTypeId) : null;
   if (input.jobTypeId && !jobTypeRow) return { ok: false, reason: "job_type_not_found" };
-  if (input.customer.kind === "existing") {   // match the real discriminator name in CreateRequestInput
+  if (input.customer.kind === "existing") {   // CreateRequestCustomer = { kind: "existing"; customerId } (create-request.ts:144)
     if (input.contactId && !(await contactBelongsToCustomer(organizationId, input.customer.customerId, input.contactId))) return { ok: false, reason: "contact_not_owned" };
     if (input.locationId && !(await locationBelongsToCustomer(organizationId, input.customer.customerId, input.locationId))) return { ok: false, reason: "location_not_owned" };
   }
   const tags = await validateTagTypeIds(organizationId, "job", input.tagTypeIds);
   if (!tags.ok) return { ok: false, reason: "unknown_tag" };
   // The server derives the enum from the row; a client-sent jobType is ignored when jobTypeId is set.
-  const jobType = jobTypeRow ? jobTypeRow.kind : resolveJobType(input.issueType, input.jobType);
+  const jobType = jobTypeRow ? jobTypeRow.kind : resolveJobType(input.issueType, input.jobType);   // REPLACES the existing `const jobType = …` at ~line 202
 ```
 In the `serviceRequests` insert add `jobTypeId: jobTypeRow?.id ?? null, contactId: input.contactId, locationId: input.locationId,` and when `jobTypeRow` is set `estimatedDurationMinutes: jobTypeRow.defaultDurationMinutes, estimatedDurationSource: "job_type"`. Audit `details` gains `jobTypeId`, `contactId`, `locationId`, `tagTypeIds` (ids only). After the save (next to `recordCreated`), when `tags.ids.length > 0`: `await replaceEntityTags(organizationId, "job", requestId, tags.ids)` in try/catch logging `"Office booking saved but tags failed"`.
 
@@ -1340,7 +1359,7 @@ node /tmp/dialog-shot.mjs "$TOKEN" 1440 && node /tmp/dialog-shot.mjs "$TOKEN" 39
 - [ ] **Step 9: Gates + commit**
 
 ```bash
-git add src/lib/admin/create-request.ts src/lib/admin/create-request.test.ts src/lib/admin/create-request-flow.ts src/lib/admin/create-request-queries.ts src/lib/admin/persist-job-location.ts src/app/api/admin/requests/route.ts src/components/admin/request-create-dialog.tsx
+git add src/lib/admin/create-request.ts src/lib/admin/create-request.test.ts src/lib/admin/create-request-flow.ts src/lib/admin/create-request-queries.ts src/lib/requests/persist-job-location.ts src/app/api/admin/requests/route.ts src/components/admin/request-create-dialog.tsx
 git commit -m "feat(requests): job type, contact, location and tags on the New request dialog
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"

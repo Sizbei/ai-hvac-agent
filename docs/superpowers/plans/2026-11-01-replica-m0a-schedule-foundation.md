@@ -18,7 +18,7 @@ Everything in the M0b plan's Global Constraints applies (gates, mocked tests, `i
 
 - Tech-app ownership stays `service_requests.assigned_to = session.userId` in M0a. Assignment rows grant nothing in the tech app.
 - Byte-identical rule: an existing status list gets the new values added where they belong and is pointed at the constant whose members equal it; lists that differ today are NOT merged.
-- Admin status changes go through `PATCH /api/admin/requests/<id>` with `{ "status": "<value>" }` (validated by `MANUAL_TARGET_STATUSES`). Tech session for curl: `TECH=$(npx tsx scripts/agent/mint-tech-session.mjs <technician user id>)` → cookie `hvac_tech_session=$TECH` (read the script for its exact arguments); tech screenshots: `node scripts/agent/screenshot-page.mjs <path> 390 <out> --tech`.
+- Admin status changes go through `PATCH /api/admin/requests/<id>` with `{ "status": "<value>" }` (validated by `MANUAL_TARGET_STATUSES`). Tech session for curl: `TECH=$(npx tsx scripts/agent/mint-tech-session.mjs)` → cookie `hvac_tech_session=$TECH`. The script takes NO arguments: it signs the first `role='technician' AND is_active` user. Find that id first (`select id from users where role = 'technician' and is_active order by created_at limit 1` under the org `mint-admin-session` uses) and assign the probe request to it; tech screenshots: `node scripts/agent/screenshot-page.mjs <path> 390 <out> --tech`.
 - Do not deploy between Task 1 and Task 2 (the tech list would drop `en_route` jobs until the readers learn the value).
 - Time off is never overridable by "schedule anyway": a `removes_capacity` shift blocks placement even with `override`.
 
@@ -27,7 +27,7 @@ Everything in the M0b plan's Global Constraints applies (gates, mocked tests, `i
 1. Reassign A → B → A on one request → the lead row ends on A, no unique-key error, exactly one `is_lead` row. (Task 3 step 7.)
 2. The FieldPulse nightly import re-writes identical values on every row → `appointments.version` does not change on any of them. (Task 3 step 7.)
 3. A membership visit (date only, no window, no tech) → appointment #1 has `scheduled_date` set and `starts_at` NULL; it still lists as unscheduled. (Task 3 step 7.)
-4. A technician on time off: placement via `POST /api/admin/requests/[id]/assign` or reschedule onto the window → 409 even with override; auto-dispatch never picks them; public availability drops their capacity. (Task 6b step 6.)
+4. A technician on time off: window placement via `POST …/reschedule` (even with `override`), `POST …/assign` onto a windowed request, and the PATCH schedule path all → 409; auto-dispatch never picks them; public availability drops their capacity. (Task 6b step 7.)
 5. A tech taps "On my way" → the request stays in their list, the admin sheet shows "En route", the AI account reply says it is on the way, the delay sweep still treats it as not started. (Task 2 step 6 + Task 4 step 3.)
 
 ---
@@ -183,12 +183,12 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 | `src/app/api/admin/dispatch/map/route.ts:22` `ACTIVE_STATUSES` | same 4 | `IN_FLIGHT_STATUSES` |
 | `src/lib/portal/portal-queries.ts:199` `ACTIVE_JOB_STATUSES` | 5 incl. pending | `OPEN_STATUSES` |
 | `src/lib/ai/account-tools.ts:85` `UPCOMING_STATUSES` | 5 incl. pending | `OPEN_STATUSES` |
-| `src/lib/ai/account-reply.ts:44` `statusLabel` | default "being scheduled" | add `case "en_route": return "on the way"; case "arrived": return "on site";` (the label is interpolated into a sentence; keep it short) |
+| `src/lib/ai/account-reply.ts:44` `statusLabel` + `appointmentReply` (~line 102) | default "being scheduled"; the label is interpolated into "Your appointment (REF) is … for <day> …" | add `case "en_route": return "on the way"; case "arrived": return "on site";` AND, in `appointmentReply` before the `day` branch, return early: `en_route` → "Your technician is on the way for <REF>." and `arrived` → "Your technician has arrived for <REF>." (so the sentence never reads "is on the way for Monday") |
 | `src/lib/ai/dispatch/signals.ts:91` `SAME_DAY_LOAD_STATUSES` | 4 | add `"en_route", "arrived"` |
 | `src/lib/dispatch/delay-detection.ts:17` `NOT_STARTED_STATUSES` | scheduled/assigned | delete; import `NOT_STARTED_STATUSES` (adds en_route) |
 | `src/lib/admin/ops-insights-queries.ts:29` + raw SQL `:83` | pending/assigned/in_progress | add `en_route`, `arrived` in both (same spelling in the SQL literal); do NOT add scheduled/on_hold (pre-existing drift, out of scope) |
 | `src/lib/admin/operations-metrics-queries.ts:160` | `eq(requestStatusEvents.toStatus, "in_progress")` | `inArray(requestStatusEvents.toStatus, [...ON_SITE_STATUSES])` (the SQL already takes `min(at)` per request; no JS change). Update the doc comment in `src/lib/admin/operations-metrics-types.ts` ~line 50: the clock now stops at arrival |
-| `src/lib/admin/status-colors.ts:25,40` | 7 keys | BADGE: `en_route: 'bg-info-light text-info-strong border-info-border'`, `arrived: 'bg-success-light text-success-strong border-success-border'`; DOT: `en_route: 'bg-info'`, `arrived: 'bg-success'`. Run `npx vitest run src/lib/admin/status-colors-contrast.test.ts`; if the `info` pair is missing or fails 4.5:1, use the `marker` pair for en_route and say so in the commit |
+| `src/lib/admin/status-colors.ts:25,40` | 7 keys | BADGE: `en_route: 'bg-info-light text-info-strong border-info-border'`, `arrived: 'bg-success-light text-success-strong border-success-border'`; DOT: `en_route: 'bg-info'`, `arrived: 'bg-success'`. The `info` pair already passes the contrast test (used by `SESSION_STATUS_BADGE`); run `npx vitest run src/lib/admin/status-colors-contrast.test.ts` to confirm |
 | `src/app/admin/(dashboard)/requests/page.tsx:47` whitelist | 7 | add `'en_route','arrived'` |
 | `src/components/admin/request-filters.tsx:35` `STATUS_OPTIONS` | 7 | add `{ label: 'En route', value: 'en_route' }, { label: 'Arrived', value: 'arrived' }` after Assigned |
 | `src/components/admin/insights/ops-insights-section.tsx:45` `STATUS_LABELS` | — | add `en_route: 'En route', arrived: 'Arrived'` |
@@ -202,7 +202,8 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - `src/lib/dispatch/delay-detection.test.ts:37` schema mock → add `requestStatusEnum: { enumValues: [...9 values] }, holdReasonEnum: { enumValues: ['awaiting_parts','awaiting_customer','awaiting_access','weather','other'] }` (request-status.ts reads both at load). Add a case: an `en_route` job whose window end has passed is flagged late.
 - `src/lib/admin/scheduling-queries.test.ts:69` mocks `./request-status` with only `isTerminal` → `vi.mock('./request-status', async (importOriginal) => ({ ...(await importOriginal()), isTerminal: … }))` or add the constants to the mock.
 - `src/lib/ai/account-tools.test.ts` and `src/lib/admin/operations-metrics-queries.test.ts` schema mocks → add both enums.
-- `src/lib/ai/bot-edge-cases-account.test.ts` (or wherever `appointmentReply`/`statusLabel` is tested) → assert the reply for `status: "en_route"` contains "on the way" and for `arrived` contains "on site".
+- `src/lib/ai/bot-edge-cases-account.test.ts` → its `vi.mock("@/lib/db/schema", () => tables)` (~line 81) gains `requestStatusEnum` and `holdReasonEnum` (it imports `account-tools`, which now imports `request-status`); add assertions that `appointmentReply` for `status: "en_route"` contains "on the way" and for `arrived` contains "on site".
+- `src/lib/admin/operations-metrics-queries.test.ts:81-94` mocks `drizzle-orm` without `inArray` → add it to the mock, and add `inArray` to the import at `operations-metrics-queries.ts:16`.
 - Any other test whose schema mock lacks the enums will fail loudly at import; fix each by adding the two enums.
 
 - [ ] **Step 1: Completeness grep**
@@ -256,7 +257,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - [ ] **Step 0: "Before" captures** (must run BEFORE the migration is applied; FP/HCP sync idle):
 
 ```bash
-TOKEN=$(npx tsx scripts/agent/mint-admin-session.mjs); TECH=$(npx tsx scripts/agent/mint-tech-session.mjs <tech id>); D=$(date +%F); S=/private/tmp/claude-501/-Users-sizbei-Documents-GitHub-ai-hvac-agent/fde8e78e-e26b-44a5-921c-c4bf61138d99/scratchpad/m0a
+TOKEN=$(npx tsx scripts/agent/mint-admin-session.mjs); TECH=$(npx tsx scripts/agent/mint-tech-session.mjs); D=$(date +%F); S=/private/tmp/claude-501/-Users-sizbei-Documents-GitHub-ai-hvac-agent/fde8e78e-e26b-44a5-921c-c4bf61138d99/scratchpad/m0a
 mkdir -p $S
 curl -s -b "hvac_admin_session=$TOKEN" "http://localhost:3000/api/admin/calendar?date=$D&view=day" > $S/cal-day-before.json
 curl -s -b "hvac_admin_session=$TOKEN" "http://localhost:3000/api/admin/calendar?date=$D&view=week&includeCompleted=true" > $S/cal-week-before.json
@@ -708,7 +709,7 @@ Use it in `tech-job-summary.tsx`'s button text. Confirm `buildStatusConfirmCopy`
 - [ ] **Step 3: Probe (Review Focus 5, tech side)**
 
 ```bash
-RID=<request assigned to tech T>; TECH=$(npx tsx scripts/agent/mint-tech-session.mjs <T>); H='content-type: application/json'
+RID=<request assigned to the technician mint-tech-session signs>; TECH=$(npx tsx scripts/agent/mint-tech-session.mjs); H='content-type: application/json'
 curl -s -b "hvac_tech_session=$TECH" -H "$H" -X POST http://localhost:3000/api/tech/jobs/$RID/status -d '{"status":"en_route"}'; echo    # 200
 curl -s -b "hvac_tech_session=$TECH" http://localhost:3000/api/tech/jobs | grep -c "$RID"                                           # 1
 curl -s -b "hvac_tech_session=$TECH" -H "$H" -X POST http://localhost:3000/api/tech/jobs/$RID/status -d '{"status":"arrived"}'; echo     # 200
@@ -755,8 +756,9 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 // addAppointment — number allocation can race on appointments_request_number_unique; retry once.
 export async function addAppointment(organizationId: string, requestId: string, input: AppointmentInput, actorUserId: string) {
   if (!(await requestExists(organizationId, requestId))) return { reason: "request_not_found" } as const;
-  const techs = await activeTechnicianIds(organizationId, input.technicianIds);   // withTenant(users, org, inArray(users.id, ids), eq(users.role,"technician"), eq(users.isActive,true))
-  if (techs.length !== new Set(input.technicianIds).size) return { reason: "technician_not_found" } as const;
+  const ordered = [...new Set(input.technicianIds)];                               // the caller's order decides the lead
+  const found = await activeTechnicianIds(organizationId, ordered);                 // withTenant(users, org, inArray(users.id, ids), eq(users.role,"technician"), eq(users.isActive,true)) — returns ids in DB order
+  if (found.length !== ordered.length) return { reason: "technician_not_found" } as const;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const existing = await db.select({ appointmentNumber: appointments.appointmentNumber }).from(appointments)
       .where(withTenant(appointments, organizationId, eq(appointments.serviceRequestId, requestId)));
@@ -767,7 +769,7 @@ export async function addAppointment(organizationId: string, requestId: string, 
       await db.batch([
         db.insert(appointments).values({ id, organizationId, serviceRequestId: requestId, appointmentNumber, startsAt: start, endsAt: end,
           arrivalWindowStart: start, arrivalWindowEnd: end, specialInstructions: input.specialInstructions ?? null }),
-        db.insert(appointmentAssignments).values(techs.map((technicianId, i) => ({ organizationId, appointmentId: id, technicianId, isLead: i === 0, status: "assigned" as const, assignedBy: actorUserId }))),
+        db.insert(appointmentAssignments).values(ordered.map((technicianId, i) => ({ organizationId, appointmentId: id, technicianId, isLead: i === 0, status: "assigned" as const, assignedBy: actorUserId }))),
       ]);
       return (await getAppointment(organizationId, requestId, id))!;
     } catch (error: unknown) {
@@ -779,13 +781,17 @@ export async function addAppointment(organizationId: string, requestId: string, 
   return { reason: "conflict" } as const;
 }
 
-// updateAppointment — ONE batch: CAS update + assignment delete + assignment insert, the
-// latter two gated on the CAS having landed (EXISTS … version = $v + 1).
+// updateAppointment — ONE batch (one implicit transaction on neon-http): CAS update +
+// assignment delete + assignment insert. The latter two are gated on "THIS transaction
+// wrote the appointment row" (xmin = current xid), not on version = v + 1: under READ
+// COMMITTED a loser whose CAS matched 0 rows would otherwise see the winner's v + 1 and
+// replace the winner's technicians.
 export async function updateAppointment(organizationId: string, requestId: string, appointmentId: string, patch: AppointmentPatch, actorUserId: string) {
-  const techs = await activeTechnicianIds(organizationId, patch.technicianIds);
-  if (techs.length !== new Set(patch.technicianIds).size) return { reason: "technician_not_found" } as const;
+  const ordered = [...new Set(patch.technicianIds)];
+  const found = await activeTechnicianIds(organizationId, ordered);
+  if (found.length !== ordered.length) return { reason: "technician_not_found" } as const;
   const start = new Date(patch.arrivalWindowStart), end = new Date(patch.arrivalWindowEnd);
-  const landed = sql`EXISTS (SELECT 1 FROM ${appointments} p WHERE p.id = ${appointmentId} AND p.organization_id = ${organizationId} AND p.version = ${patch.version + 1})`;
+  const landed = sql`EXISTS (SELECT 1 FROM ${appointments} p WHERE p.id = ${appointmentId}::uuid AND p.organization_id = ${organizationId}::uuid AND p.xmin = pg_current_xact_id()::xid)`;
   const [updated] = await db.batch([
     db.update(appointments).set({ startsAt: start, endsAt: end, arrivalWindowStart: start, arrivalWindowEnd: end,
         specialInstructions: patch.specialInstructions ?? null, version: sql`${appointments.version} + 1`, updatedAt: new Date() })
@@ -794,8 +800,8 @@ export async function updateAppointment(organizationId: string, requestId: strin
       .returning({ id: appointments.id }),
     db.delete(appointmentAssignments).where(withTenant(appointmentAssignments, organizationId, eq(appointmentAssignments.appointmentId, appointmentId), landed)),
     db.execute(sql`INSERT INTO appointment_assignments (organization_id, appointment_id, technician_id, is_lead, status, assigned_by)
-      SELECT ${organizationId}, ${appointmentId}, t.id, t.ord = 1, 'assigned', ${actorUserId}
-      FROM unnest(${techs}::uuid[]) WITH ORDINALITY AS t(id, ord) WHERE ${landed}`),
+      SELECT ${organizationId}::uuid, ${appointmentId}::uuid, t.id, t.ord = 1, 'assigned'::request_status, ${actorUserId}::uuid
+      FROM unnest(${sql.param(ordered)}::uuid[]) WITH ORDINALITY AS t(id, ord) WHERE ${landed}`),
   ]);
   if (updated.length === 0) {
     const [row] = await db.select({ n: appointments.appointmentNumber }).from(appointments)
@@ -807,9 +813,9 @@ export async function updateAppointment(organizationId: string, requestId: strin
   return (await getAppointment(organizationId, requestId, appointmentId))!;
 }
 
-// cancelAppointment — same CAS; also cancels its assignments in the same batch.
+// cancelAppointment — same CAS + the same xmin gate; also sets its assignments to 'cancelled' in the same batch.
 ```
-(`gt` from drizzle-orm; `sql` array parameter `${techs}::uuid[]` works with neon-http; if the driver rejects it, pass `sql.raw` of a quoted list built from validated uuids.) `listAppointments` joins `users` for `technicianName`, orders by `appointmentNumber`.
+(`gt` from drizzle-orm. `sql.param(ordered)` renders one `$n::uuid[]` parameter and the neon driver serialises the JS array as a Postgres array literal; a bare `${ordered}` would expand to `($1, $2)` and fail. Never build the list with `sql.raw`.) `listAppointments` joins `users` for `technicianName`, orders by `appointmentNumber`.
 
 - [ ] **Step 3: Routes.** `POST …/appointments` → 201; `PATCH …/[aid]` body `appointmentPatchSchema`; `DELETE …/[aid]` body `{ version }`. Map reasons: `version_conflict` → 409 `VERSION_CONFLICT` "This visit changed. Reload and try again."; `is_first_visit` → 409 `IS_FIRST_VISIT`; `technician_not_found` → 400; `conflict` → 409 `CONFLICT` "Couldn't add the visit. Try again."; `request_not_found`/`not_found` → 404. Audit `add_appointment` / `update_appointment` / `cancel_appointment`, entity `appointments`, details `{ serviceRequestId, appointmentNumber, technicianIds }`.
 
@@ -886,6 +892,8 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 **Files:**
 - Modify: `src/lib/admin/scheduling-source.ts` (interface + `DbSchedulingSource`), `src/lib/integrations/housecall-pro/scheduling-source.ts:133` and `src/lib/integrations/fieldpulse/scheduling-source.ts:113` (both `implements SchedulingSource`; return `[]` — their tech ids are not `users.id`), `src/lib/admin/availability-queries.ts` (`readSchedulingFacts`), `src/lib/admin/availability-queries.test.ts` (both fakes gain `getCapacityBlocks: vi.fn().mockResolvedValue([])`), `src/lib/admin/availability.test.ts` (new case), `src/lib/admin/scheduling-queries.ts` (`checkScheduleConflict`, `placeAndAssignRequest`, `autoAssignBookedRequest`, `suggestTechnicians`)
+- Modify: `src/lib/admin/queries.ts` `assignTechnician` / `reassignTechnician` (when the request already has an arrival window) and `scheduleRequest` (when `assignedTo` is set): call `technicianTimeOffOverlapping` and return a new `reason: "time_off"` variant that the `assign` route and the `[id]` PATCH route map to 409 `TIME_OFF` "That technician is off during this window." (read each function's result union and both routes first). Without this, `/assign` and the PATCH schedule path bypass time off.
+- Modify: `src/lib/admin/scheduling-queries.test.ts:97` schema mock gains `technicianShifts`; mock `./shift-queries` (`technicianTimeOffOverlapping: vi.fn().mockResolvedValue([])`, `listCapacityBlocks: vi.fn().mockResolvedValue([])`); same for `queries.test.ts` if it mocks the schema.
 - No change: `create-request-queries.ts` `technicianWindowClash` (delegates to `checkScheduleConflict`), `signals.ts` (only knows the day; the filter lives in the callers below).
 
 - [ ] **Step 1: Interface** — add to `SchedulingSource`:
@@ -907,6 +915,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
     .orderBy(asc(technicianShifts.startsAt));
   return [...rows.map(toScheduledJob), ...blocksToScheduledJobs(blocks.map(toShiftRecord))];
 ```
+(`toShiftRecord` is exported from `shift-queries.ts` in Task 6a: `{ id, technicianId, kind, title, startsAt: startsAt.toISOString(), endsAt: endsAt.toISOString(), removesCapacity }`.)
 Callers surface `referenceNumber` in 409 copy, so a clash reads "Conflicts with Time off".
 
 - [ ] **Step 5: `placeAndAssignRequest`** — time off is NOT overridable. Add a guard built whenever `targetTech` is set (independent of `options.override`):
@@ -928,15 +937,17 @@ curl -s -b "hvac_admin_session=$TOKEN" -H "$H" -X POST http://localhost:3000/api
 curl -s -b "hvac_admin_session=$TOKEN" "http://localhost:3000/api/admin/requests/availability?start=$D&days=1"; echo      # morning/afternoon counts one lower than before the shift
 # office booking assigned to A → 409 naming the time off
 curl -s -b "hvac_admin_session=$TOKEN" -H "$H" -X POST http://localhost:3000/api/admin/requests -d "{\"customerId\":\"$CID\",\"address\":\"1 Main St\",\"description\":\"test\",\"issueType\":\"maintenance\",\"urgency\":\"low\",\"schedule\":{\"isoDay\":\"$D\",\"window\":\"morning\",\"technicianId\":\"$TA\"}}"; echo
-# placement path with override → still 409 (read the assign/reschedule route bodies first)
-curl -s -b "hvac_admin_session=$TOKEN" -H "$H" -X POST http://localhost:3000/api/admin/requests/<unassigned rid>/assign -d "{\"technicianId\":\"$TA\",\"isoDay\":\"$D\",\"window\":\"morning\",\"override\":true}"; echo
+# window placement with override → still 409 (reschedule is the window-placement route: { date, arrivalWindow, technicianId?, override? })
+curl -s -b "hvac_admin_session=$TOKEN" -H "$H" -X POST http://localhost:3000/api/admin/requests/<rid with no window>/reschedule -d "{\"date\":\"$D\",\"arrivalWindow\":\"morning\",\"technicianId\":\"$TA\",\"override\":true}"; echo
+# assign onto a request that already has a window inside the PTO → 409 TIME_OFF
+curl -s -b "hvac_admin_session=$TOKEN" -H "$H" -X POST http://localhost:3000/api/admin/requests/<rid windowed in PTO>/assign -d "{\"technicianId\":\"$TA\"}"; echo
 ```
 Auto-dispatch: run the existing autodispatch unit test suite (`npx vitest run src/lib/admin/scheduling-queries.test.ts src/lib/ai/dispatch`) and add a case in `scheduling-queries.test.ts` (it mocks db) showing a tech with a block is excluded from `firstFit` candidates. Delete the shift and any test request afterwards.
 
 - [ ] **Step 8: Gates + commit**
 
 ```bash
-git add src/lib/admin/scheduling-source.ts src/lib/integrations/housecall-pro/scheduling-source.ts src/lib/integrations/fieldpulse/scheduling-source.ts src/lib/admin/availability-queries.ts src/lib/admin/availability-queries.test.ts src/lib/admin/availability.test.ts src/lib/admin/scheduling-queries.ts src/lib/admin/scheduling-queries.test.ts src/lib/admin/shift-types.ts src/lib/admin/shift-types.test.ts
+git add src/lib/admin/scheduling-source.ts src/lib/integrations/housecall-pro/scheduling-source.ts src/lib/integrations/fieldpulse/scheduling-source.ts src/lib/admin/availability-queries.ts src/lib/admin/availability-queries.test.ts src/lib/admin/availability.test.ts src/lib/admin/scheduling-queries.ts src/lib/admin/scheduling-queries.test.ts src/lib/admin/queries.ts 'src/app/api/admin/requests/[id]/assign/route.ts' 'src/app/api/admin/requests/[id]/route.ts' src/lib/admin/shift-types.ts src/lib/admin/shift-types.test.ts
 git commit -m "feat(scheduling): time off removes capacity in availability, conflicts, placement and auto-dispatch
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
