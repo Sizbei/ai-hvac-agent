@@ -9,7 +9,7 @@
  * NOTE: the neon-http driver returns SQL aggregates (count, sum) as strings, so
  * every aggregate value is coerced with Number() before use.
  */
-import { eq, sql, count, gt } from "drizzle-orm";
+import { and, eq, exists, sql, count, gt } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   customerSessions,
@@ -18,6 +18,7 @@ import {
   auditLog,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
+import { notStandInSession } from "./stand-in-session";
 import type { AiInsights } from "./ai-insights-types";
 
 /** Coerce a possibly-string aggregate value (neon-http) to a finite number. */
@@ -50,11 +51,18 @@ export async function getAiInsights(
     [feedbackUpRow],
     [feedbackDownRow],
   ] = await db.batch([
-    // Session counts (total + per-status).
+    // Session counts (total + per-status). Stand-in sessions (office
+    // bookings, membership visits, FieldPulse import) are not conversations.
     db
       .select({ value: count() })
       .from(customerSessions)
-      .where(withTenant(customerSessions, organizationId)),
+      .where(
+        withTenant(
+          customerSessions,
+          organizationId,
+          notStandInSession(customerSessions.token),
+        ),
+      ),
 
     db
       .select({ value: count() })
@@ -64,6 +72,7 @@ export async function getAiInsights(
           customerSessions,
           organizationId,
           eq(customerSessions.status, "escalated"),
+          notStandInSession(customerSessions.token),
         ),
       ),
 
@@ -75,14 +84,32 @@ export async function getAiInsights(
           customerSessions,
           organizationId,
           eq(customerSessions.status, "abandoned"),
+          notStandInSession(customerSessions.token),
         ),
       ),
 
-    // Submitted service requests.
+    // Submitted service requests that came from a real conversation, so the
+    // conversion rate is conversation-booked / conversations.
     db
       .select({ value: count() })
       .from(serviceRequests)
-      .where(withTenant(serviceRequests, organizationId)),
+      .where(
+        withTenant(
+          serviceRequests,
+          organizationId,
+          exists(
+            db
+              .select({ one: sql`1` })
+              .from(customerSessions)
+              .where(
+                and(
+                  eq(customerSessions.id, serviceRequests.sessionId),
+                  notStandInSession(customerSessions.token),
+                ),
+              ),
+          ),
+        ),
+      ),
 
     // Assistant reply breakdown: 0-token (deterministic router) vs LLM (>0).
     db

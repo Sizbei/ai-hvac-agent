@@ -13,6 +13,7 @@
 import { gte, lte, sql, count, avg, isNotNull, desc } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { botEvents, customerSessions } from "@/lib/db/schema";
+import { notStandInSession } from "./stand-in-session";
 import { withTenant } from "@/lib/db/tenant";
 
 export interface BotAnalyticsPeriod {
@@ -163,6 +164,8 @@ export async function getBotAnalytics(
           organizationId,
           gte(customerSessions.createdAt, fromDate),
           lte(customerSessions.createdAt, toDate),
+          // Stand-in sessions are never summarized and would pad "unclassified".
+          notStandInSession(customerSessions.token),
         ),
       )
       // GROUP BY the raw column (NOT the coalesce expr): Drizzle parameterizes

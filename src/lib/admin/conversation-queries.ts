@@ -23,6 +23,7 @@ import {
   sessionChannelEnum,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
+import { notStandInSession } from "./stand-in-session";
 import type {
   ConversationSummary,
   ConversationMessage,
@@ -114,8 +115,10 @@ export async function getConversations(
   );
   const offset = (page - 1) * limit;
 
-  // Build the set of tenant-scoped conditions for the session listing.
-  const conditions: SQL[] = [];
+  // Build the set of tenant-scoped conditions for the session listing. Stand-in
+  // sessions (office bookings, membership visits, FieldPulse import) have no
+  // messages — they are not conversations.
+  const conditions: SQL[] = [notStandInSession(customerSessions.token)];
   if (filters.status && isValidStatus(filters.status)) {
     conditions.push(eq(customerSessions.status, filters.status));
   }
