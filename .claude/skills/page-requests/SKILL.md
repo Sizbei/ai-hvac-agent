@@ -20,12 +20,42 @@ components `src/components/admin/request-filters.tsx` ·
 types `src/lib/admin/types.ts` (`RequestSortKey`, `AdminRequest`) ·
 tables `serviceRequests`, `users`
 
+**Create (office booking):** dialog `src/components/admin/request-create-dialog.tsx`
+(opened by the header "New request" button) · pure helpers + labels
+`src/lib/admin/create-request.ts` (tests `create-request.test.ts`) · write path
+`src/lib/admin/create-request-queries.ts` (`createAdminRequest`) · availability
+API `src/app/api/admin/requests/availability/route.ts`.
+
 **Data flow:** `useAdminRequests` fetches `/api/admin/requests` with a composite
 cache key (all filter/sort/page params), polls every 10 s (not 30 s — the
 request list is the operator's primary triage surface). SWR cache keeps the
 prior page visible (dimmed) while a new filter/page loads — no skeleton flash
 between page changes. Latest-wins monotonic counter: a filter change mid-poll
 supersedes the in-flight fetch.
+
+**POST /api/admin/requests contract:** body = `customerId` (uuid) XOR inline
+`customer: { name, phone?, email? }` (deduped via `upsertCustomerByContact`),
+`address`, `issueType`, `urgency`, `description` (≤2000), optional `jobType`
+(derived from the issue when omitted), `accessNotes`, `systemType`,
+`preferredWindow`, `schedule: { isoDay, window: morning|afternoon|evening,
+technicianId? }`, `override`. 201 → `{ request (AdminRequest row), requestId,
+referenceNumber, schedule: none | placed | failed }`. 400 validation (human
+copy), 404 customer/technician, 422 do-not-service.
+- **409 SCHEDULE_CONFLICT** (with `details: { conflicts, outsideAvailability }`)
+  is decided BEFORE the insert, so nothing is written; the dialog shows
+  "Schedule anyway?" and resubmits with `override: true`. `schedule.kind ===
+  "failed"` means a concurrent booking won the slot after the pre-check: the
+  request exists, unscheduled.
+- With a technician: `placeAndAssignRequest` then a guarded pending→assigned
+  flip (the tech app hides `pending`). Window without technician: placed +
+  a best-effort capacity reservation so the band count drops.
+- `session_id` is NOT NULL → each office booking gets a synthetic submitted
+  session (token `admin-<uuid>`). Audit row (`service_request_created`,
+  details ids/enums only) is in the same `db.batch` as the insert.
+- The route lazy-imports the create modules: `tests/e2e/smoke.test.ts` mocks
+  `@/lib/ai/extraction-schema` without `jobTypeValues` and imports this route.
+- Dialog: `<fieldset>`/form inside the grid `DialogContent` need `min-w-0` or
+  the 14 day chips widen the dialog past the viewport.
 
 **Invariants:**
 - `PER_PAGE = 50`; limit is enforced server-side too (max 100). The pager uses
@@ -54,6 +84,7 @@ supersedes the in-flight fetch.
   default — the "Clear filters" button should not appear for sort-only changes.
 
 **Verify changes:** `npx vitest run src/lib/admin/queries.test.ts`
+· `src/lib/admin/create-request.test.ts`
 · `src/lib/admin/url-filters.test.ts`. Visual: admin-pages recipe; apply a
 status filter and confirm the URL updates; navigate away and back, confirm
 filters restore.

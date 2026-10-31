@@ -46,7 +46,7 @@ Predicted equipment replacement date,crm,should,yes,no,ST
 Equipment systems (grouped units),crm,could,yes,no,ST
 Equipment service history,crm,must,yes,partial,ST; history via service_requests per customer - not per unit
 Equipment custom fields and attachments,crm,could,yes,partial,ST; attachments per equipment - no equipment custom fields
-Create job from admin with customer / contact / location,jobs,must,yes,no,FP+ST; no POST /api/admin/requests
+Create job from admin with customer / contact / location,jobs,must,yes,partial,FP+ST; S07 New request dialog + POST /api/admin/requests (pick or inline-create deduped customer + one contact + address) - no multi-contact or location-record picker until M0
 Tasks (work items without a customer),jobs,should,yes,no,FP+ST
 Job templates and duplicate job,jobs,should,yes,no,FP+ST
 Job record with actions menu,jobs,must,yes,yes,ST; /admin/requests request-detail-sheet
@@ -74,14 +74,14 @@ Recurring jobs with edit scope,jobs,must,yes,partial,FP; membership visits only 
 Configurable job numbering,jobs,could,yes,no,FP
 Schedule calendar view,scheduling,must,yes,yes,FP; /admin/calendar day/week/month
 Schedule list view,scheduling,should,yes,yes,FP; /api/admin/agenda agenda view
-Scheduling conflict detection,scheduling,must,yes,yes,FP; conflict dialog on /admin/calendar
+Scheduling conflict detection,scheduling,must,yes,yes,FP; conflict dialog on /admin/calendar; S07 create path pre-checks before insert and returns 409 with Schedule anyway override
 Customer arrival windows,scheduling,must,yes,yes,FP+ST; arrivalWindowStart/End + ARRIVAL_WINDOWS
 Custom one-off arrival window,scheduling,should,yes,no,ST; named bands only
 Business hours,scheduling,must,yes,partial,ST; businessInfo + afterHoursConfig - no holiday calendar
 Capacity by open vs total hours per slot,scheduling,must,yes,partial,ST; capacity_reservations slot counts - no hours-based capacity
 Capacity planning board with buffers / overrides / booking-% warning,scheduling,should,yes,no,ST
 Job type default duration,scheduling,must,yes,partial,ST; estimatedDurationMinutes per job - no per-type config
-Find-availability slot and tech suggester,scheduling,should,yes,partial,FP+ST; /api/admin/dispatch/suggest ranks techs - no time-slot search
+Find-availability slot and tech suggester,scheduling,should,yes,partial,FP+ST; /api/admin/dispatch/suggest ranks techs; S07 dialog shows open-window counts per day via /api/admin/requests/availability - no combined slot+tech ranking
 Technician shifts (normal / on-call / time-off) with repeat,scheduling,must,yes,partial,FP+ST; technician_availability weekly hours - no admin edit UI or on-call/time-off
 Non-job events (meetings / PTO) that remove capacity,scheduling,must,yes,no,ST
 Adaptive capacity rules in natural language,scheduling,could,addon,no,ST
