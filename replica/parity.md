@@ -1,8 +1,8 @@
-## Parity: 42.7 / 100
+## Parity: 42.2 / 100
 
-features 42.7  (275 counted, must-haves 45 of 111 done)
+features 42.2  (275 counted, must-haves 43 of 111 done)
 
-Not shippable yet: 66 must-have features are not done.
+Not shippable yet: 68 must-have features are not done.
 
 ## By area, weakest first
 - integrations                  22.7  (8 features)
@@ -19,9 +19,9 @@ Not shippable yet: 66 must-have features are not done.
 - comms                         46.3  (11 features)
 - dispatch                      46.9  (25 features)
 - estimates                     49.0  (22 features)
-- crm                           52.3  (29 features)
+- crm                           50.0  (29 features)
 - payments                      52.9  (7 features)
-- jobs                          56.7  (26 features)
+- jobs                          54.2  (26 features)
 - reporting                     56.7  (8 features)
 - scheduling                    59.1  (13 features)
 
@@ -55,6 +55,7 @@ Not shippable yet: 66 must-have features are not done.
 - [must] crm: Global search by name / phone / address, partial  (ST; /api/admin/search - customer scan truncated at SCAN_LIMIT_CUSTOMERS)
 - [must] crm: Import customers from CSV / Excel / Sheets, partial  (FP; /admin/fieldpulse-import only - no CSV import)
 - [must] crm: Multiple contacts per customer with per-method preferences, partial  (FP+ST; contacts + roles + primary shipped; per-contact comms routing is M6)
+- [must] crm: Multiple service locations per customer, partial  (FP+ST; Service locations card with one primary; locations are created only by bookings; no add/edit/delete; most legacy customers show 0 until the location backfill (M0a))
 - [must] crm: Pinned notes on customer / location / job, partial  (ST; customer_notes + request_notes - no pin-to-top)
 - [must] customer-portal: Customer portal (jobs / estimates / invoices / equipment / memberships), partial  (FP+ST; /portal/[token] - no equipment or membership view)
 - [must] customer-portal: Pay invoices online in portal (full or partial), partial  (FP+ST; /api/portal/[token]/pay MOCK provider)
@@ -70,6 +71,7 @@ Not shippable yet: 66 must-have features are not done.
 - [must] invoicing: Partial payments and deposits, partial  (FP; /api/admin/invoices/[id]/payments partial + deposit flag - no progress billing)
 - [must] invoicing: Tax zones with multiple and automatic rates, partial  (FP+ST; tax_rates single default - no zones)
 - [must] jobs: Job cancel with reasons and memo (and uncancel), partial  (ST; cancelled status via PATCH /api/admin/requests/[id] - no cancel reason)
+- [must] jobs: Job tags with color and dispatch visibility, partial  (ST; tags + colour + visible_on_board flag shipped; board rendering is M2; picker in New request dialog, read-only row on the sheet)
 - [must] jobs: Recurring jobs with edit scope, partial  (FP; membership visits only - no generic recurring series)
 - [must] memberships: Bulk book recurring events into jobs, partial  (ST; cron creates requests - no bulk booking UI)
 - [must] memberships: Membership discounts per SKU / category, partial  (ST; memberPriceCents per item - no category discount rules)

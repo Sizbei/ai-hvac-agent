@@ -36,7 +36,7 @@ export function LocationsSection({ customerId }: LocationsSectionProps) {
         setError(null);
       })
       .catch(() => {
-        if (active) setError('Could not load service locations.');
+        if (active) setError("Couldn't load service locations. Please refresh.");
       });
     return () => {
       active = false;
@@ -55,14 +55,14 @@ export function LocationsSection({ customerId }: LocationsSectionProps) {
         setError(
           res.status === 409 && body?.error?.message
             ? body.error.message
-            : 'Could not change the primary location.',
+            : "Couldn't change the primary location. Please try again.",
         );
         if (res.status === 409) reload();
         return;
       }
       reload();
     } catch {
-      setError('Could not change the primary location.');
+      setError("Couldn't change the primary location. Please try again.");
     }
   }
 
@@ -81,7 +81,7 @@ export function LocationsSection({ customerId }: LocationsSectionProps) {
         <p className="px-4 py-3 text-sm text-muted-foreground">Loading…</p>
       )}
       {locations?.length === 0 && (
-        <p className="px-4 py-3 text-sm text-muted-foreground">No service locations yet.</p>
+        <p className="px-4 py-3 text-sm text-muted-foreground">No service locations yet. Bookings use the customer&apos;s service address until a location is recorded.</p>
       )}
       {locations && locations.length > 0 && (
         <ul className="flex flex-col divide-y divide-border">

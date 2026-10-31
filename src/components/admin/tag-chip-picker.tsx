@@ -29,6 +29,7 @@ import {
   type TagTypeRecord,
 } from '@/lib/admin/tag-types';
 
+const LOAD_COPY = "Couldn't load tags. Please refresh.";
 const SAVE_COPY = "Couldn't save tags. Please try again.";
 const DUPLICATE_COPY = 'A tag with that name already exists for this type.';
 const LIMIT_COPY = 'You can have at most 100 tags.';
@@ -56,7 +57,12 @@ async function fetchTags(url: string): Promise<readonly TagTypeRecord[] | null> 
   }
 }
 
-export function TagChipPicker({
+/** Keyed by entity so switching records resets all bound state and re-runs the mount GET. */
+export function TagChipPicker(props: TagChipPickerProps) {
+  return <TagChipPickerInner key={`${props.entity}:${props.entityId ?? 'controlled'}`} {...props} />;
+}
+
+function TagChipPickerInner({
   entity,
   entityId,
   initialTags,
@@ -95,7 +101,7 @@ export function TagChipPicker({
       if (tags) {
         if (seqRef.current === 0) setBoundTags(tags);
         setLoaded(true);
-      } else setError(SAVE_COPY);
+      } else setError(LOAD_COPY);
     });
     return () => {
       cancelled = true;

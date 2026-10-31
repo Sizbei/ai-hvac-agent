@@ -47,7 +47,10 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     if (!parsed.success) return errorResponse("Invalid tags", "VALIDATION_ERROR", 400);
     if (!(await taggableExists(session.organizationId, p.entity, p.id))) return errorResponse("Not found", "NOT_FOUND", 404);
     const result = await replaceEntityTags(session.organizationId, p.entity, p.id, parsed.data.tagTypeIds);
-    if (!result.ok) return errorResponse("One of those tags doesn't exist.", "UNKNOWN_TAG", 400);
+    if (!result.ok) {
+      if (result.reason === "race") return errorResponse("Tags changed while you were editing. Reload and try again.", "RACE", 409);
+      return errorResponse("One of those tags doesn't exist.", "UNKNOWN_TAG", 400);
+    }
     await logAudit({ organizationId: session.organizationId, userId: session.userId, action: "replace_entity_tags", entity: `${p.entity}_tags`, entityId: p.id, details: JSON.stringify({ tagTypeIds: parsed.data.tagTypeIds }) })
       .catch((auditError: unknown) => logger.error({ error: auditError }, "Failed to audit tag change"));
     const map = await listEntityTags(session.organizationId, p.entity, [p.id]);

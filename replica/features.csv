@@ -20,7 +20,7 @@ Job-value-based call routing (AI vs CSR),intake,could,addon,skip,ST; needs cross
 Customer record with separate billing and service locations,crm,must,yes,partial,FP+ST; /admin/customers + customer_locations soft split - no bill-to vs site UI
 Residential / commercial customer type,crm,must,yes,yes,FP+ST; customer_type enum on /admin/customers
 Multiple contacts per customer with per-method preferences,crm,must,yes,partial,FP+ST; contacts + roles + primary shipped; per-contact comms routing is M6
-Multiple service locations per customer,crm,must,yes,yes,FP+ST; Service locations card with one primary; no add/edit/delete of locations from the page yet (created via bookings)
+Multiple service locations per customer,crm,must,yes,partial,FP+ST; Service locations card with one primary; locations are created only by bookings; no add/edit/delete; most legacy customers show 0 until the location backfill (M0a)
 Customer status lifecycle (lead / current / lost),crm,should,yes,partial,FP; archive and reactivate only - no lead/lost lifecycle
 Sales pipeline kanban of customers,crm,could,yes,no,FP
 Lead sources,crm,should,yes,yes,FP+ST; lead_source enum + /admin/reports lead-source ROI
@@ -52,7 +52,7 @@ Job templates and duplicate job,jobs,should,yes,no,FP+ST
 Job record with actions menu,jobs,must,yes,yes,ST; /admin/requests request-detail-sheet
 Job priority levels,jobs,must,yes,yes,ST; urgency low/medium/high/emergency
 Job summary / description,jobs,must,yes,yes,ST; /admin/requests detail with structured intake fields
-Job tags with color and dispatch visibility,jobs,must,yes,yes,"ST; job tags with color and show-on-board flag (visibleOnBoard); picker in New request dialog, read-only row on the sheet"
+Job tags with color and dispatch visibility,jobs,must,yes,partial,"ST; tags + colour + visible_on_board flag shipped; board rendering is M2; picker in New request dialog, read-only row on the sheet"
 Org-configurable job types,jobs,must,yes,yes,"ST; Settings > Job types (name, kind, duration, priority, order, active); kind = canonical enum"
 Custom status workflows per job type,jobs,should,yes,no,FP
 Time-in-status tracking,jobs,should,yes,partial,FP; request_status_events - no time-in-status view

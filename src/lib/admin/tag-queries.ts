@@ -57,7 +57,9 @@ export async function listEntityTags(organizationId: string, entity: TagEntity, 
   return out;
 }
 
-/** Re-read tag ids under the org with the right kind and active = true. */
+/** Re-read tag ids under the org with the right kind and active = true.
+ * Callers editing an entity must NOT pass ids it already carries: those may
+ * have been deactivated since (see replaceEntityTags). */
 export async function validateTagTypeIds(organizationId: string, entity: TagEntity, ids: readonly string[]): Promise<{ readonly ok: true; readonly ids: readonly string[] } | { readonly ok: false }> {
   const unique = [...new Set(ids)];
   if (unique.length === 0) return { ok: true, ids: [] };
@@ -66,13 +68,38 @@ export async function validateTagTypeIds(organizationId: string, entity: TagEnti
   return found.length === unique.length ? { ok: true, ids: unique } : { ok: false };
 }
 
+/** Same org/kind check as validateTagTypeIds but WITHOUT the active filter —
+ * for ids the entity already carries. */
+async function tagIdsExist(organizationId: string, entity: TagEntity, ids: readonly string[]): Promise<boolean> {
+  if (ids.length === 0) return true;
+  const found = await db.select({ id: tagTypes.id }).from(tagTypes)
+    .where(withTenant(tagTypes, organizationId, eq(tagTypes.entity, entity), inArray(tagTypes.id, [...ids])));
+  return found.length === ids.length;
+}
+
+export type ReplaceEntityTagsResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly reason: "unknown_tag" | "race" };
+
 /** Replace the tag set on one entity. The CALLER verified the entity belongs
- * to the org. Delete + insert in one batch. */
-export async function replaceEntityTags(organizationId: string, entity: TagEntity, entityId: string, tagTypeIds: readonly string[]): Promise<{ readonly ok: true } | { readonly ok: false; readonly reason: "unknown_tag" }> {
-  const valid = await validateTagTypeIds(organizationId, entity, tagTypeIds);
-  if (!valid.ok) return { ok: false, reason: "unknown_tag" };
+ * to the org. Delete + insert in one batch. Tags already attached stay valid
+ * even if deactivated since; tags being added must be active. */
+export async function replaceEntityTags(organizationId: string, entity: TagEntity, entityId: string, tagTypeIds: readonly string[]): Promise<ReplaceEntityTagsResult> {
+  const unique = [...new Set(tagTypeIds)];
+  const currentRows = await db.select({ id: entityTags.tagTypeId }).from(entityTags)
+    .where(withTenant(entityTags, organizationId, eq(entityTags.entity, entity), eq(entityTags.entityId, entityId)));
+  const current = new Set(currentRows.map((r) => r.id));
+  const added = unique.filter((id) => !current.has(id));
+  const kept = unique.filter((id) => current.has(id));
+  if (!(await validateTagTypeIds(organizationId, entity, added)).ok) return { ok: false, reason: "unknown_tag" };
+  if (!(await tagIdsExist(organizationId, entity, kept))) return { ok: false, reason: "unknown_tag" };
   const del = db.delete(entityTags).where(withTenant(entityTags, organizationId, eq(entityTags.entity, entity), eq(entityTags.entityId, entityId)));
-  if (valid.ids.length === 0) { await del; return { ok: true }; }
-  await db.batch([del, db.insert(entityTags).values(valid.ids.map((tagTypeId) => ({ organizationId, tagTypeId, entity, entityId })))]);
+  try {
+    if (unique.length === 0) { await del; return { ok: true }; }
+    await db.batch([del, db.insert(entityTags).values(unique.map((tagTypeId) => ({ organizationId, tagTypeId, entity, entityId })))]);
+  } catch (error: unknown) {
+    if (isUniqueViolation(error)) return { ok: false, reason: "race" };
+    throw error;
+  }
   return { ok: true };
 }

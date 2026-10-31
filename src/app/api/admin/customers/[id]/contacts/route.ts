@@ -101,6 +101,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const result = await createContact(session.organizationId, id, parsed.data);
     if ("reason" in result) {
+      if (result.reason === "race") {
+        return errorResponse("Someone else just changed the primary contact. Reload and try again.", "RACE", 409);
+      }
       return errorResponse(
         "That location doesn't belong to this customer.",
         "VALIDATION_ERROR",

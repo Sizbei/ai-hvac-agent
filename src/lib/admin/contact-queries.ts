@@ -5,8 +5,11 @@ import { customerContacts } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { encrypt, decrypt } from "@/lib/crypto";
 import { computeContactHashes } from "@/lib/admin/crm-queries";
+import { isUniqueViolation } from "@/lib/db/unique-violation";
 import { locationBelongsToCustomer } from "@/lib/admin/location-queries";
 import type { ContactInput, ContactPatch, ContactRecord } from "./contact-types";
+
+const PRIMARY_IDX = "customer_contacts_one_primary_idx";
 
 function safeDecrypt(v: string | null): string | null { if (!v) return null; try { return decrypt(v); } catch { return null; } }
 function toRecord(r: typeof customerContacts.$inferSelect): ContactRecord {
@@ -41,20 +44,25 @@ function unsetPrimary(organizationId: string, customerId: string) {
     .where(withTenant(customerContacts, organizationId, eq(customerContacts.customerId, customerId), eq(customerContacts.isPrimary, true)));
 }
 
-export async function createContact(organizationId: string, customerId: string, input: ContactInput): Promise<ContactRecord | { readonly reason: "location_not_owned" }> {
+export async function createContact(organizationId: string, customerId: string, input: ContactInput): Promise<ContactRecord | { readonly reason: "location_not_owned" | "race" }> {
   if (input.locationId && !(await locationBelongsToCustomer(organizationId, customerId, input.locationId))) return { reason: "location_not_owned" };
   const id = randomUUID();
   const insert = db.insert(customerContacts).values({
     id, organizationId, customerId, locationId: input.locationId, role: input.role, isPrimary: input.isPrimary ?? false,
     ...toContactRow(input.name, input.phone, input.email),
   });
-  if (input.isPrimary) await db.batch([unsetPrimary(organizationId, customerId), insert]); else await insert;
+  try {
+    if (input.isPrimary) await db.batch([unsetPrimary(organizationId, customerId), insert]); else await insert;
+  } catch (error: unknown) {
+    if (isUniqueViolation(error, PRIMARY_IDX)) return { reason: "race" };
+    throw error;
+  }
   const [row] = await db.select().from(customerContacts).where(withTenant(customerContacts, organizationId, eq(customerContacts.id, id))).limit(1);
   if (!row) throw new Error("Failed to create contact");
   return toRecord(row);
 }
 
-export async function updateContact(organizationId: string, customerId: string, contactId: string, patch: ContactPatch): Promise<ContactRecord | null | { readonly reason: "location_not_owned" }> {
+export async function updateContact(organizationId: string, customerId: string, contactId: string, patch: ContactPatch): Promise<ContactRecord | null | { readonly reason: "location_not_owned" | "race" }> {
   if (patch.locationId && !(await locationBelongsToCustomer(organizationId, customerId, patch.locationId))) return { reason: "location_not_owned" };
   const [existing] = await db.select().from(customerContacts)
     .where(withTenant(customerContacts, organizationId, eq(customerContacts.id, contactId), eq(customerContacts.customerId, customerId))).limit(1);
@@ -69,7 +77,12 @@ export async function updateContact(organizationId: string, customerId: string, 
     isPrimary: patch.isPrimary ?? existing.isPrimary,
     updatedAt: new Date(),
   }).where(withTenant(customerContacts, organizationId, eq(customerContacts.id, contactId)));
-  if (patch.isPrimary === true && !existing.isPrimary) await db.batch([unsetPrimary(organizationId, customerId), update]); else await update;
+  try {
+    if (patch.isPrimary === true && !existing.isPrimary) await db.batch([unsetPrimary(organizationId, customerId), update]); else await update;
+  } catch (error: unknown) {
+    if (isUniqueViolation(error, PRIMARY_IDX)) return { reason: "race" };
+    throw error;
+  }
   const [row] = await db.select().from(customerContacts).where(withTenant(customerContacts, organizationId, eq(customerContacts.id, contactId))).limit(1);
   return row ? toRecord(row) : null;
 }

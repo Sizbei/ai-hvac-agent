@@ -316,8 +316,8 @@ describe("M0b fields", () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.message).toMatch(/existing customer/i);
   });
-  it("rejects more than 10 tags", () => {
-    const r = parse({ ...baseBody(), tagTypeIds: Array.from({ length: 11 }, (_, i) => `66666666-6666-4666-8666-${String(i).padStart(12, "0")}`) });
+  it("rejects more than 20 tags", () => {
+    const r = parse({ ...baseBody(), tagTypeIds: Array.from({ length: 21 }, (_, i) => `66666666-6666-4666-8666-${String(i).padStart(12, "0")}`) });
     expect(r.ok).toBe(false);
   });
 });

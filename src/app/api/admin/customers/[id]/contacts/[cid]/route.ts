@@ -51,6 +51,9 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       return errorResponse("Contact not found", "NOT_FOUND", 404);
     }
     if ("reason" in result) {
+      if (result.reason === "race") {
+        return errorResponse("Someone else just changed the primary contact. Reload and try again.", "RACE", 409);
+      }
       return errorResponse(
         "That location doesn't belong to this customer.",
         "VALIDATION_ERROR",

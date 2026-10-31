@@ -5,10 +5,11 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   upsertCustomerLocation,
   getEquipmentServiceHistory,
+  setPrimaryLocation,
 } from "./location-queries";
 import { db } from "@/lib/db";
 
-vi.mock("@/lib/db", () => ({ db: { select: vi.fn(), insert: vi.fn(), execute: vi.fn() } }));
+vi.mock("@/lib/db", () => ({ db: { select: vi.fn(), insert: vi.fn(), update: vi.fn(), batch: vi.fn(), execute: vi.fn() } }));
 vi.mock("@/lib/crypto", () => ({
   encrypt: (s: string) => `enc:${s}`,
   decrypt: (s: string) => s.replace(/^enc:/, ""),
@@ -111,5 +112,42 @@ describe("getEquipmentServiceHistory", () => {
     expect(history).toHaveLength(1);
     expect(history[0]!.workPerformed).toBe("replaced capacitor");
     expect(history[0]!.createdAt).toBe("2026-01-01T00:00:00.000Z");
+  });
+});
+
+describe("setPrimaryLocation", () => {
+  it("returns false when the location is not the customer's", async () => {
+    mockSelectOnce([]);
+    await expect(setPrimaryLocation(ORG, CUST, "loc-x")).resolves.toBe(false);
+    expect(db.batch).not.toHaveBeenCalled();
+  });
+
+  it("batches the unset statement before the set statement", async () => {
+    mockSelectOnce([{ id: "loc-1" }]);
+    const order: string[] = [];
+    const stmt = (label: string, isPrimary: boolean) => ({
+      set: vi.fn((v: { isPrimary: boolean }) => {
+        expect(v.isPrimary).toBe(isPrimary);
+        return { where: vi.fn(() => { order.push(label); return { label }; }) };
+      }),
+    });
+    vi.mocked(db.update)
+      .mockReturnValueOnce(stmt("unset", false) as never)
+      .mockReturnValueOnce(stmt("set", true) as never);
+    vi.mocked(db.batch).mockResolvedValueOnce([] as never);
+    await expect(setPrimaryLocation(ORG, CUST, "loc-1")).resolves.toBe(true);
+    const arg = vi.mocked(db.batch).mock.calls[0]![0] as unknown as { label: string }[];
+    expect(arg.map((a) => a.label)).toEqual(["unset", "set"]);
+    expect(order).toEqual(["unset", "set"]);
+  });
+
+  it("maps a wrapped 23505 on the primary index to a race", async () => {
+    mockSelectOnce([{ id: "loc-1" }]);
+    const chain = { set: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({}) }) };
+    vi.mocked(db.update).mockReturnValue(chain as never);
+    vi.mocked(db.batch).mockRejectedValueOnce(
+      Object.assign(new Error("q"), { cause: { code: "23505", constraint: "customer_locations_one_primary_idx" } }),
+    );
+    await expect(setPrimaryLocation(ORG, CUST, "loc-1")).resolves.toEqual({ reason: "race" });
   });
 });

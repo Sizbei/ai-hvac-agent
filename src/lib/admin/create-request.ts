@@ -142,7 +142,7 @@ const bodySchema = z.object({
   jobTypeId: z.uuid("Job type isn't valid.").optional(),
   contactId: z.uuid("Contact isn't valid.").optional(),
   locationId: z.uuid("Location isn't valid.").optional(),
-  tagTypeIds: z.array(z.uuid("Tag isn't valid.")).max(10, "Pick up to 10 tags.").optional(),
+  tagTypeIds: z.array(z.uuid("Tag isn't valid.")).max(20, "Pick up to 20 tags.").optional(),
 });
 
 export type CreateRequestCustomer =

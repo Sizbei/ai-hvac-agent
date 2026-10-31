@@ -33,7 +33,7 @@ const GENERIC_COPY = "Couldn't save the tag. Please try again.";
 const GROUPS: readonly { entity: TagEntity; title: string; description: string }[] = [
   { entity: 'customer', title: 'Customers', description: 'Labels on customer profiles, such as VIP or Commercial.' },
   { entity: 'location', title: 'Locations', description: 'Labels on service locations, such as Gate code or Dog.' },
-  { entity: 'job', title: 'Requests', description: 'Labels on requests. Tags marked "Show on board" appear on dispatch cards.' },
+  { entity: 'job', title: 'Requests', description: 'Labels on requests. Tags marked "Show on board" will appear on dispatch cards once the board shows tags (coming with the dispatch milestone).' },
 ];
 
 const COLOR_ITEMS = TAG_COLOR_TOKENS.map((c) => ({ value: c, label: c.charAt(0).toUpperCase() + c.slice(1) }));
