@@ -25,6 +25,28 @@ sibling disclosure) · APIs `src/app/api/admin/customers/route.ts`,
 POST = erase) · tables `customers`, `customer_notes`, `follow_ups`,
 `equipment`, `service_history`, `service_requests`.
 
+**Locations, contacts, tags (M0b):** the detail page has a "Service locations"
+card (`src/components/admin/customers/locations-section.tsx`), a "Contacts" card
+(`.../contacts-section.tsx`) and a tag picker (`src/components/admin/tag-chip-picker.tsx`,
+pure logic `src/lib/admin/tag-picker-logic.ts`) in the header and on each
+location row.
+- Locations: `GET /api/admin/customers/[id]/locations`;
+  `PATCH .../locations/[lid]` with `{ isPrimary: true }` moves the primary flag
+  (409 on a lost race). Queries `src/lib/admin/location-queries.ts`;
+  `customer_locations.is_primary`.
+- Contacts: `GET/POST .../contacts`, `PATCH/DELETE .../contacts/[cid]`. Fields
+  name, role, phone, email, optional `locationId`, `isPrimary`. 400 when the
+  location is not owned by the customer, 409 `LIMIT_REACHED` at 20 contacts.
+  Table `customer_contacts`: name/phone/email encrypted; contacts are NEVER part
+  of identity lookup (no blind-index hashes, not used by `upsertCustomerByContact`
+  or `pickCustomerMatch`). Queries `src/lib/admin/contact-queries.ts`, types
+  `contact-types.ts`.
+- Tags: `GET/PUT /api/admin/tags/customer/[id]` and `.../tags/location/[id]`
+  (`entity_tags` rows; 400 `UNKNOWN_TAG`, 404). Tag types are configured on the
+  Settings > Tags tab.
+- Erase and hard-delete both cover contacts and tags (`erasure-queries.ts`,
+  `crm-queries.ts`): erase removes contact rows + entity tags; delete cascades.
+
 **Data flow:** list is server-paginated at 50/page via `useAdminCustomers`
 (SWR-style fetch with debounced 300ms search). Filters (property type, customer
 type, membership status, FieldPulse-synced, archived) are synced to URL via

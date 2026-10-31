@@ -1,8 +1,8 @@
-## Parity: 40.4 / 100
+## Parity: 42.7 / 100
 
-features 40.4  (275 counted, must-haves 39 of 111 done)
+features 42.7  (275 counted, must-haves 45 of 111 done)
 
-Not shippable yet: 72 must-have features are not done.
+Not shippable yet: 66 must-have features are not done.
 
 ## By area, weakest first
 - integrations                  22.7  (8 features)
@@ -16,18 +16,16 @@ Not shippable yet: 72 must-have features are not done.
 - memberships                   37.5  (18 features)
 - intake                        39.5  (16 features)
 - marketing                     42.9  (4 features)
-- crm                           43.0  (29 features)
 - comms                         46.3  (11 features)
-- jobs                          46.7  (26 features)
 - dispatch                      46.9  (25 features)
 - estimates                     49.0  (22 features)
+- crm                           52.3  (29 features)
 - payments                      52.9  (7 features)
-- scheduling                    54.5  (13 features)
+- jobs                          56.7  (26 features)
 - reporting                     56.7  (8 features)
+- scheduling                    59.1  (13 features)
 
 ## Missing, in build order
-- [must] crm: Customer and location tags, no  (FP+ST; FP tags kept in jsonb only)
-- [must] crm: Multiple contacts per customer with per-method preferences, no  (FP+ST)
 - [must] dispatch: Block reassign of working or done jobs, no  (ST)
 - [must] dispatch: Multi-technician and team assignment with team grouping, no  (FP+ST; single assignee per request)
 - [must] estimates: Estimate and proposal templates, no  (ST)
@@ -36,7 +34,6 @@ Not shippable yet: 72 must-have features are not done.
 - [must] intake: Convert existing lead to job, no  (ST; no lead entity)
 - [must] intake: Inbound call screen with call bubbles for CSRs, no  (ST; AI voice agent only - no CSR call-handling screen)
 - [must] invoicing: Invoice auto-created at booking, no  (ST; invoices only from estimates)
-- [must] jobs: Job tags with color and dispatch visibility, no  (ST)
 - [must] jobs: Multi-visit and multi-day jobs, no  (FP+ST; FP is_multiday_job stored read-only)
 - [must] jobs: Sold-by attribution, no  (ST)
 - [must] memberships: Recurring membership billing (monthly to annual), no  (FP+ST; billing mocked - providerSubscriptionId placeholder)
@@ -57,7 +54,7 @@ Not shippable yet: 72 must-have features are not done.
 - [must] crm: Equipment service history, partial  (ST; history via service_requests per customer - not per unit)
 - [must] crm: Global search by name / phone / address, partial  (ST; /api/admin/search - customer scan truncated at SCAN_LIMIT_CUSTOMERS)
 - [must] crm: Import customers from CSV / Excel / Sheets, partial  (FP; /admin/fieldpulse-import only - no CSV import)
-- [must] crm: Multiple service locations per customer, partial  (FP+ST; customer_locations table - no locations management UI)
+- [must] crm: Multiple contacts per customer with per-method preferences, partial  (FP+ST; contacts + roles + primary shipped; per-contact comms routing is M6)
 - [must] crm: Pinned notes on customer / location / job, partial  (ST; customer_notes + request_notes - no pin-to-top)
 - [must] customer-portal: Customer portal (jobs / estimates / invoices / equipment / memberships), partial  (FP+ST; /portal/[token] - no equipment or membership view)
 - [must] customer-portal: Pay invoices online in portal (full or partial), partial  (FP+ST; /api/portal/[token]/pay MOCK provider)
@@ -72,9 +69,7 @@ Not shippable yet: 72 must-have features are not done.
 - [must] invoicing: Invoice line items from pricebook, partial  (ST; lines copied from estimate - no invoice line editor)
 - [must] invoicing: Partial payments and deposits, partial  (FP; /api/admin/invoices/[id]/payments partial + deposit flag - no progress billing)
 - [must] invoicing: Tax zones with multiple and automatic rates, partial  (FP+ST; tax_rates single default - no zones)
-- [must] jobs: Create job from admin with customer / contact / location, partial  (FP+ST; S07 New request dialog + POST /api/admin/requests (pick or inline-create deduped customer + one contact + address) - no multi-contact or location-record picker until M0)
 - [must] jobs: Job cancel with reasons and memo (and uncancel), partial  (ST; cancelled status via PATCH /api/admin/requests/[id] - no cancel reason)
-- [must] jobs: Org-configurable job types, partial  (ST; fixed job-type enum - not org-configurable)
 - [must] jobs: Recurring jobs with edit scope, partial  (FP; membership visits only - no generic recurring series)
 - [must] memberships: Bulk book recurring events into jobs, partial  (ST; cron creates requests - no bulk booking UI)
 - [must] memberships: Membership discounts per SKU / category, partial  (ST; memberPriceCents per item - no category discount rules)
@@ -87,7 +82,6 @@ Not shippable yet: 72 must-have features are not done.
 - [must] pricebook: Pricebook category tree, partial  (ST; pricebook_categories table - no category UI)
 - [must] scheduling: Business hours, partial  (ST; businessInfo + afterHoursConfig - no holiday calendar)
 - [must] scheduling: Capacity by open vs total hours per slot, partial  (ST; capacity_reservations slot counts - no hours-based capacity)
-- [must] scheduling: Job type default duration, partial  (ST; estimatedDurationMinutes per job - no per-type config)
 - [must] scheduling: Technician shifts (normal / on-call / time-off) with repeat, partial  (FP+ST; technician_availability weekly hours - no admin edit UI or on-call/time-off)
 - [must] team-settings: Roles with granular permissions, partial  (FP+ST; super_admin/admin/technician only)
 - [must] tech-app: Invoice presentation and signature on site, partial  (ST; /api/tech/jobs/[id]/signature job sign-off - no invoice presentation)

@@ -1,6 +1,6 @@
 ---
 name: page-settings
-description: Use when working on the /admin/settings page — 9-tab org configuration (branding, services, business info, custom Q&A, embed/keys, limits, after-hours, dispatch, integrations) plus the super-admin-only /admin/settings/billing sub-page.
+description: Use when working on the /admin/settings page — 11-tab org configuration (branding, services, business info, custom Q&A, embed/keys, limits, after-hours, dispatch, integrations, job types, tags) plus the super-admin-only /admin/settings/billing sub-page.
 ---
 
 # Settings (/admin/settings + /admin/settings/billing)
@@ -32,6 +32,25 @@ layout) · billing sub-page `src/app/admin/(dashboard)/settings/billing/page.tsx
 `.../fieldpulse/disconnect/route.ts`, `.../google/connect/route.ts`,
 `.../google/route.ts` (DELETE), `.../housecall/connect/route.ts`,
 `.../housecall/disconnect/route.ts`
+
+**Job types + Tags tabs (M0b):** the page also hosts two config tabs, selected
+by `?tab=job-types` / `?tab=tags` (the shell reads `useSearchParams().get('tab')`,
+default `branding`). Panels `src/components/admin/settings/job-types-panel.tsx`
+and `.../tags-panel.tsx`; types/schemas `src/lib/admin/job-type-types.ts`,
+`tag-types.ts`; queries `job-type-queries.ts`, `tag-queries.ts`.
+- `GET/POST /api/admin/settings/job-types` (`?active=1` filters to active) and
+  `PATCH .../job-types/[id]`. A job type = name, `kind` (the canonical
+  `job_type` enum value, which stays canonical), `defaultDurationMinutes`
+  (15-1440), `defaultPriority`, `active`, `position`. Nine rows are seeded per
+  org (migration 0047 + `provisioning.ts`; defaults in `DEFAULT_JOB_TYPES`).
+- `GET/POST /api/admin/settings/tags` (`?entity=customer|location|job&active=1`)
+  and `PATCH .../tags/[id]`. A tag type = entity, name (≤40), `color` token
+  (graphite/marker/danger/success/warning/info), `visibleOnBoard` (job tags
+  only meaningfully: shows on dispatch cards), `active`. `entity` is immutable
+  after create (not in the patch schema). Tag types are deactivated, not deleted.
+- `GET/PUT /api/admin/tags/[entity]/[id]` reads/replaces the tags on one
+  customer/location/job; unknown entity or tag id -> 400 `UNKNOWN_TAG`, missing
+  target row -> 404.
 
 **Data flow:** `useOrgSettings` fetches `/api/admin/settings` and
 `/api/admin/settings/faqs` in parallel on mount, then provides typed save/CRUD

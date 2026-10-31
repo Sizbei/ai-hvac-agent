@@ -45,6 +45,18 @@ technicianId? }` (isoDay within today−1 … today+365), `override`. 201 →
 `{ request (AdminRequest row, or null if the best-effort read-back failed),
 requestId, referenceNumber, schedule: none | placed | failed }`. 400 validation
 (human copy), 404 customer/technician, 422 do-not-service.
+- **M0b additions to the body:** optional `jobTypeId` (uuid of an org
+  `job_types` row; the row's `kind` becomes `jobType` and its default duration
+  and priority apply), `contactId` (a `customer_contacts` row of the chosen
+  customer; saved as `service_requests.contact_id`), `locationId` (a
+  `customer_locations` row of the customer, used instead of creating an
+  address-derived one), `tagTypeIds` (job-entity tag type ids, written to
+  `entity_tags`). 400 codes: `JOB_TYPE_NOT_FOUND`, `CONTACT_NOT_OWNED`,
+  `LOCATION_NOT_OWNED`, `UNKNOWN_TAG`. Ownership is checked against the
+  session org/customer before the insert.
+- The New request dialog has job type, contact, service location and tag
+  pickers (contact/location load once a customer is picked); the request detail
+  sheet has a read-only "Tags" row.
 - **Once the batch commits the response is always 201.** Anything after it
   (status event, placement, pending→assigned flip, read-back) is caught and
   logged; a scheduling failure is `schedule.kind === "failed"`, never a 500 —
