@@ -30,6 +30,7 @@ import type {
 } from '@/lib/admin/job-type-types';
 
 const DUPLICATE_COPY = 'A job type with that name already exists.';
+const LIMIT_COPY = 'You can have at most 100 job types.';
 const GENERIC_COPY = "Couldn't save the job type. Please try again.";
 
 const KIND_ITEMS = jobTypeValues.map((v) => ({ value: v, label: JOB_TYPE_LABELS[v] }));
@@ -56,6 +57,9 @@ async function send(
         | null;
       if (json?.error?.code === 'DUPLICATE_NAME') {
         return { ok: false, message: DUPLICATE_COPY };
+      }
+      if (json?.error?.code === 'LIMIT_REACHED') {
+        return { ok: false, message: LIMIT_COPY };
       }
       return { ok: false, message: GENERIC_COPY };
     }
@@ -279,6 +283,18 @@ export function JobTypesPanel() {
           </div>
         ) : (
           <div>
+            <div
+              aria-hidden
+              className="hidden flex-wrap items-center gap-x-2 pb-1 text-[12px] sm:flex text-muted-foreground"
+            >
+              <span className="min-w-40 flex-1">Name</span>
+              <span className="w-40">Kind</span>
+              <span className="w-24">Minutes</span>
+              <span className="w-32">Priority</span>
+              <span className="w-16">Order</span>
+              <span className="w-[32px]">Active</span>
+              <span className="size-4" />
+            </div>
             {jobTypes.map((jt) => (
               <JobTypeRow key={jt.id} jobType={jt} onSaved={handleSaved} onError={setError} />
             ))}

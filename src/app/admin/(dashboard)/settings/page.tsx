@@ -63,7 +63,7 @@ export default function SettingsPage() {
         </div>
       ) : (
         <Tabs defaultValue={initialTab}>
-          <TabsList className="w-full flex-wrap justify-start">
+          <TabsList className="h-auto w-full flex-wrap justify-start gap-y-1 group-data-horizontal/tabs:h-auto">
             <TabsTrigger value="branding">
               <Palette className="size-4" />
               Branding
