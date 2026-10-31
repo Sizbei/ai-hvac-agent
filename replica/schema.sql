@@ -23,9 +23,14 @@
 --   * ALTER TYPE … ADD VALUE works (no transaction; precedent 0001, 0008,
 --     0013). A new value is not USED in the same file; the backfill that
 --     writes it is a later file.
---   * every index, unique and check constraint is NAMED and the same name
---     goes in schema.ts, so `drizzle-kit generate` reports "No schema
---     changes" (AGENTS.md).
+--   * every index, unique, check AND foreign key is NAMED with the Drizzle
+--     name (`<table>_<col>_<reftable>_<refcol>_fk`, `<table>_<cols>_unique`,
+--     `<table>_<cols>_idx`) and the same name goes in schema.ts, so
+--     `drizzle-kit generate` reports "No schema changes" (AGENTS.md) and a
+--     later generated DROP CONSTRAINT finds the live name. Inline
+--     `references` below is shorthand for the migration's
+--     `DO $$ … ADD CONSTRAINT "<name>" FOREIGN KEY … EXCEPTION WHEN
+--     duplicate_object $$` block; columns are added plain, the FK after.
 --   * a new journal `when` must exceed the previous entry's.
 -- ---------------------------------------------------------------------------
 
@@ -56,7 +61,8 @@ create table if not exists tag_types (
 );
 
 -- one polymorphic link table; entity_id is not an FK on purpose (three
--- target tables). Each entity's delete/erase path deletes its rows.
+-- target tables). deleteCustomer, the request delete path and the location
+-- delete path delete their entity_tags rows in the same batch.
 create table if not exists entity_tags (
   organization_id uuid not null references organizations(id) on delete cascade,
   tag_type_id uuid not null,
@@ -74,7 +80,9 @@ create index if not exists entity_tags_org_entity_idx
 -- 49 create job with customer / contact / location (contact part).
 -- PII encrypted + blind-indexed exactly like customers; the erase batch in
 -- src/lib/admin/erasure-queries.ts anonymises these rows in the SAME PR
--- (the customer row is updated, not deleted, so the cascade never fires).
+-- (erase updates the customer row, so the cascade never fires there;
+-- deleteCustomer in crm-queries.ts hard-deletes and must also delete the
+-- customer's and its locations' entity_tags).
 create table if not exists customer_contacts (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references organizations(id) on delete cascade,
@@ -86,9 +94,8 @@ create table if not exists customer_contacts (
   phone_hash text,                           -- HMAC blind index like customers
   email_encrypted text,
   email_hash text,
-  do_not_text boolean not null default false,
-  job_reminders boolean not null default true,
-  invoice_notifications boolean not null default true,
+  -- channel opt-outs stay in communication_preferences (one store); per-contact
+  -- routing of reminders/invoices is M6 work, so row 22 closes as partial.
   is_primary boolean not null default false,
   position smallint not null default 0,
   created_at timestamptz not null default now(),
@@ -101,7 +108,10 @@ create index if not exists customer_contacts_org_phone_hash_idx
 
 -- must row closed: 23 multiple service locations (the primary flag; the
 -- table and the S04 UI exist). Backfill: the oldest location per customer
--- becomes primary.
+-- becomes primary. The create path (location-queries.ts persistJobLocation)
+-- sets is_primary = NOT EXISTS (another location for the customer) with a
+-- conflict target on customer_locations_customer_addr_unique, and the
+-- delete path re-selects the oldest remaining location as primary.
 alter table customer_locations
   add column if not exists is_primary boolean not null default false;
 create unique index if not exists customer_locations_one_primary_idx
@@ -116,8 +126,10 @@ update customer_locations l set is_primary = true
 -- must rows closed: 56 org-configurable job types; 83 job-type default
 -- duration. The job_type ENUM stays as the canonical "kind" that the AI
 -- intake, duration table, FP/HCP mappers and forecasting read (about 25
--- files; none change). Every org gets one seeded row per enum value
--- (provisioning hook + a one-off backfill for existing orgs);
+-- files; none change). Every org gets one seeded row per enum value with
+-- default_duration_minutes from JOB_DURATION_DEFAULTS in
+-- src/lib/ai/dispatch/duration.ts (provisioning hook + a one-off backfill
+-- for existing orgs);
 -- service_requests.job_type_id is backfilled from job_type. The create
 -- path writes BOTH job_type_id and job_type = job_types.kind.
 create table if not exists job_types (
@@ -169,14 +181,15 @@ create table if not exists appointments (
   organization_id uuid not null references organizations(id) on delete cascade,
   service_request_id uuid not null references service_requests(id) on delete cascade,
   appointment_number smallint not null default 1,
-  starts_at timestamptz,
-  ends_at timestamptz,
+  scheduled_date timestamptz,                -- date-only booking (no window), mirrored from the request
+  starts_at timestamptz,                     -- = arrival_window_start for #1; set directly for #2+
+  ends_at timestamptz,                       -- = arrival_window_end for #1
   arrival_window_start timestamptz,
   arrival_window_end timestamptz,
   is_confirmed boolean not null default false,
   cancelled_at timestamptz,
   special_instructions text,                 -- free text; included in the erase batch
-  version integer not null default 0,        -- optimistic concurrency (CAS on version, not updated_at)
+  version integer not null default 0,        -- optimistic concurrency (CAS on version, not updated_at); the trigger bumps it on every real change
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint appointments_request_number_unique unique (service_request_id, appointment_number),
@@ -210,37 +223,81 @@ create index if not exists appointment_assignments_tech_appt_idx
 create index if not exists appointment_assignments_org_tech_idx
   on appointment_assignments (organization_id, technician_id);
 
--- Trigger: request -> appointment #1 (+ lead assignment). Idempotent DDL in
--- the 0044 style. Fires AFTER INSERT and AFTER UPDATE OF the five columns.
---   starts_at            = coalesce(arrival_window_start, scheduled_date)
---   ends_at              = coalesce(arrival_window_end,
---                            starts_at + coalesce(estimated_duration_minutes, 90) minutes)
---   arrival_window_*     = the request's, nulled when end <= start
---   cancelled_at         = now() when status becomes 'cancelled', else unchanged
---   lead assignment      = assigned_to; when assigned_to changes, the old lead
---                          row is deleted if its status is still 'assigned',
---                          otherwise demoted to is_lead = false (history kept)
---   assignment.status    = mirrors request.status for the lead ONLY while the
---                          per-tech endpoints (M3) have not written it; M0a
---                          rule: lead.status = request.status on every change
---                          (single-tech jobs stay in step; multi-tech jobs
---                          come with M3's roll-up)
--- A request with neither scheduled_date nor arrival_window_start nor
--- assigned_to gets NO appointment row (a pending request is not a visit).
+-- Triggers: request -> appointment #1 (+ lead assignment). Idempotent DDL
+-- in the 0044 style. TWO triggers so the UPDATE one can carry a WHEN clause
+-- (OLD is not allowed in the WHEN of a trigger that also fires on INSERT):
+--   AFTER INSERT                                   -> sync_request_appointment()
+--   AFTER UPDATE OF scheduled_date, arrival_window_start, arrival_window_end,
+--     assigned_to, status
+--     WHEN (OLD.scheduled_date IS DISTINCT FROM NEW.scheduled_date OR … each column)
+--                                                  -> sync_request_appointment()
+-- so the FP nightly sync, which rewrites identical values on every row,
+-- does not fire it. The function, in order:
+--   1. if NEW.scheduled_date, arrival_window_start, arrival_window_end and
+--      assigned_to are all null: delete appointment #1 when no assignment on
+--      it has a progress timestamp (en_route_at/arrived_at/started_at/
+--      completed_at), otherwise null its times; return.
+--   2. upsert appointments #1 (on conflict (service_request_id,
+--      appointment_number) do update):
+--        scheduled_date        = NEW.scheduled_date
+--        arrival_window_start  = NEW.arrival_window_start
+--        arrival_window_end    = NEW.arrival_window_end, or null when
+--                                <= NEW.arrival_window_start
+--        starts_at / ends_at   = the (possibly nulled) window; a date-only
+--                                booking has starts_at null (it is listed as
+--                                unscheduled today and stays so)
+--        cancelled_at          = coalesce(cancelled_at, now()) when
+--                                NEW.status = 'cancelled' (un-cancel is not a
+--                                legal transition); the same UPDATE also
+--                                stamps cancelled_at on every OTHER
+--                                appointment of the request, so visits #2+
+--                                leave the calendar and release capacity
+--        version               = version + 1, updated_at = now()
+--   3. lead assignment, when NEW.assigned_to is not null:
+--        a. the current lead row with technician_id <> NEW.assigned_to:
+--           delete it when all four progress timestamps are null (a dispatch
+--           change, the FP sync, a drag), otherwise set is_lead = false,
+--           status = 'cancelled' and keep it (history; a removed technician
+--           never reads as active on the job);
+--        b. insert (appointment #1, NEW.assigned_to, is_lead = true,
+--           status = NEW.status, assigned_at = now())
+--           on conflict (appointment_id, technician_id) do update set
+--           is_lead = true, status = NEW.status   -- A -> B -> A works
+--      when NEW.assigned_to is null: the current lead is deleted or demoted
+--      by the same rule as 3a.
+--   4. lead status mirror: when the lead's technician_id = NEW.assigned_to,
+--      set lead.status = NEW.status (single-tech jobs stay in step; M3's
+--      per-tech endpoints write non-lead rows and the roll-up).
+-- Visits #2+ are touched by the function only for the cancel stamp above.
+-- Tech-app ownership stays `service_requests.assigned_to = me` in M0a
+-- (reads and writes); assignment rows grant nothing in the tech app until
+-- M3 defines per-visit status and the roll-up.
 create or replace function sync_request_appointment() returns trigger
   language plpgsql as $$ … see drizzle/00XX_appointments.sql … $$;
-drop trigger if exists service_requests_sync_appointment on service_requests;
-create trigger service_requests_sync_appointment
-  after insert or update of scheduled_date, arrival_window_start, arrival_window_end,
-    assigned_to, status, estimated_duration_minutes
-  on service_requests for each row execute function sync_request_appointment();
+drop trigger if exists service_requests_sync_appointment_ins on service_requests;
+create trigger service_requests_sync_appointment_ins
+  after insert on service_requests
+  for each row execute function sync_request_appointment();
+drop trigger if exists service_requests_sync_appointment_upd on service_requests;
+create trigger service_requests_sync_appointment_upd
+  after update of scheduled_date, arrival_window_start, arrival_window_end, assigned_to, status
+  on service_requests for each row
+  when (old.scheduled_date is distinct from new.scheduled_date
+     or old.arrival_window_start is distinct from new.arrival_window_start
+     or old.arrival_window_end is distinct from new.arrival_window_end
+     or old.assigned_to is distinct from new.assigned_to
+     or old.status is distinct from new.status)
+  execute function sync_request_appointment();
 
--- Backfill (separate file, after the trigger exists; idempotent via NOT
--- EXISTS): one appointment #1 per request that has a date or a window or an
--- assignee, using the same formulas as the trigger; lead assignment where
--- assigned_to is not null with status = request status; cancelled_at =
--- updated_at where status = 'cancelled'. Done-when check: count(requests
--- with a date or assignee) = count(appointments where number = 1).
+-- Backfill (separate file, after the triggers exist; idempotent via NOT
+-- EXISTS): one appointment #1 per request that has a scheduled_date OR an
+-- arrival_window_start OR an assigned_to, using the same formulas as the
+-- function; lead assignment where assigned_to is not null with status =
+-- request status; cancelled_at = updated_at where status = 'cancelled'.
+-- Pre-flight in the PR: count rows where arrival_window_end <=
+-- arrival_window_start (they get a null end). Done-when check:
+-- count(requests with date OR window OR assignee) = count(appointments
+-- where appointment_number = 1).
 
 -- must rows closed: 85 shifts (on-call / time-off); 86 non-job events that
 -- remove capacity. The weekly pattern stays in technician_availability

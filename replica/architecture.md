@@ -45,9 +45,12 @@ Three modelling decisions carry the whole plan:
    mirrors them into `appointments` #1 and its lead assignment on every
    insert/update. That is what keeps the 25 request-update sites, the
    FieldPulse/HCP sync, the AI booking path, the calendar and the KPIs
-   working without being touched. Visits #2+ are written only by the data
-   layer and never touch the request columns. Backfill is one idempotent
-   INSERT … SELECT after the trigger exists.
+   working without being touched. Appointment #1 has `starts_at` only
+   when the request has an arrival window; a date-only booking stays
+   "unscheduled" exactly as today. Visits #2+ are written only by the data
+   layer, never touch the request columns, and are cancelled with the
+   request. Backfill is one idempotent INSERT … SELECT after the trigger
+   exists. The calendar keeps rendering requests until M2 unions visits.
 2. **One status vocabulary.** `request_status` gains `en_route` and
    `arrived`; per-technician progress on `appointment_assignments.status`
    uses the same enum. No display-status layer: `status_workflows` and
@@ -55,6 +58,13 @@ Three modelling decisions carry the whole plan:
    Roll-up rule for multi-tech visits (M3): the request becomes
    `completed` only when every assignment is `completed` or `cancelled`;
    the lead's status mirrors the request until M3 writes per-tech rows.
+   New edges in `TRANSITIONS`: scheduled/assigned/on_hold → en_route;
+   en_route → arrived, in_progress, scheduled, on_hold, cancelled;
+   arrived → in_progress, on_hold, cancelled (no arrived → completed, so
+   the response-time KPI stays anchored on being on site). Tech-app
+   ownership stays `assigned_to = me` until M3; a tech on visit #2 only
+   has rows, not access, before then. En-route / arrived customer texts
+   are M3 work (the trigger function exists but has no caller today).
    Job types become rows with a `kind` = the existing `job_type` enum; the
    enum's ~25 readers do not change, and the create path writes both.
 3. **Money stays snapshot-based and source-guarded.** Line items snapshot
@@ -99,12 +109,12 @@ technician JWT; `token` = a hashed single-purpose token; `cron` = bearer
 | --- | --- | --- | --- | --- |
 | GET/POST /api/admin/settings/job-types, PATCH …/[id] | configurable job types (name, kind, default duration, priority, active, order) | admin | row | row |
 | GET/POST /api/admin/settings/tags, PATCH …/[id] | tag types per entity | admin | row | row |
-| PUT /api/admin/tags/[entity]/[id] | replace the tag set on a customer / location / job (ids re-read under the org) | admin | tagTypeIds[] | tags |
-| GET/POST /api/admin/customers/[id]/contacts, PATCH/DELETE …/contacts/[cid] | contacts | admin | name, role, phone, email, prefs | contact |
+| PUT /api/admin/tags/[entity]/[id] | replace the tag set on a customer / location / job: `[id]` re-read in the entity's table under the org, tag ids re-read with `entity = [entity] and active` (400, never a FK 500), delete + insert in one `db.batch` | admin | tagTypeIds[] | tags |
+| GET/POST /api/admin/customers/[id]/contacts, PATCH/DELETE …/contacts/[cid] | contacts (sanitise → encrypt → `computeContactHashes`; `locationId` must belong to the customer; deleted, not anonymised, by erase) | admin | name, role, phone, email, locationId, isPrimary | contact |
 | PATCH /api/admin/customers/[id]/locations/[lid] | set primary | admin | isPrimary | location |
 | GET/POST /api/admin/technicians/[id]/shifts, DELETE …/shifts/[sid] | on-call / time off / non-job events | admin | kind, title, start, end, removesCapacity | shift |
 | POST /api/admin/requests/[id]/appointments, PATCH/DELETE …/appointments/[aid] | visits #2+ (CAS on version) | admin | start, end, window, technicianIds | appointment |
-| POST /api/tech/jobs/[id]/status | extended with en_route, arrived (writes request status + the caller's assignment row) | tech | status | job |
+| POST /api/tech/jobs/[id]/status | extended with en_route, arrived (writes request status; the trigger mirrors the lead row; ownership = assigned_to) | tech | status | job |
 
 ### F01 Office books a job (M1)
 
@@ -240,8 +250,11 @@ Jobs (crons): `materialize-service-events` daily, `recurring-billing` daily,
   enter the tech bundle.
 - **Search.** The customer scan cap in global search (`SCAN_LIMIT_CUSTOMERS`)
   is a known gap. Name/phone/address are ciphertext, so trigram indexes do
-  not apply; M0b adds contacts to the blind-index lookup (phone/email
-  hash) and leaves fuzzy search open.
+  not apply. Contacts are searchable by phone/email hash in admin global
+  search ONLY: they never join `findCustomerMatchByContact` /
+  `upsertCustomerByContact`, which feed the AI, voice caller-ID and SMS
+  consent paths (a tenant calling from a contact phone must not be greeted
+  as the landlord). Fuzzy search stays open.
 - **Multi-tenancy.** Every new table carries `organization_id`; every
   body id is re-read under the org before a write; public endpoints
   resolve the org from the slug or token, never from the body.
@@ -265,11 +278,17 @@ Jobs (crons): `materialize-service-events` daily, `recurring-billing` daily,
   token (`admin-`, `mvisit-`, `fp-import-`, and new `tech-`, `lead-`,
   `agreement-`) and the shared predicate keeps them out of conversations
   and analytics.
-- **Status enum readers.** Adding `en_route`/`arrived` touches 22
-  hard-coded status lists, not one. M0a replaces them with shared
-  constants exported from `src/lib/admin/request-status.ts`
-  (`ACTIVE_STATUSES`, `UNSCHEDULED_STATUSES`, `ON_SITE_STATUSES`) and adds
-  a test that fails when an enum value appears in no list. The readers:
+- **Status enum readers.** Adding `en_route`/`arrived` touches 25
+  hard-coded status lists, not one. M0a adds shared constants to
+  `src/lib/admin/request-status.ts` (`OPEN` = in flight + pending,
+  `IN_FLIGHT` = scheduled/assigned/en_route/arrived/in_progress/on_hold,
+  `UNASSIGNED_OPEN`, `NEEDS_PLACEMENT`, `ON_SITE` = arrived/in_progress,
+  `NOT_STARTED` = scheduled/assigned/en_route) and a test that fails when
+  an enum value appears in no list. Rule: each existing list gets the new
+  values added where they belong and is pointed at the constant whose
+  members are byte-identical to it; lists that differ today (some include
+  `pending`, some not; ops-insights drops `scheduled`/`on_hold`) are NOT
+  merged in M0a, so output stays identical. The readers:
   `queries.ts` (OPEN/ASSIGNABLE/UNASSIGNED_OPEN/REASSIGNABLE + raw SQL at
   the in-progress KPI), `scheduling-queries.ts` (ACTIVE_BOOKING,
   UNSCHEDULED, the raw-SQL double-book guard), `api/tech/jobs/route.ts`
@@ -277,12 +296,18 @@ Jobs (crons): `materialize-service-events` daily, `recurring-billing` daily,
   `ai/account-tools.ts`, `ai/account-reply.ts` (switch default),
   `ai/dispatch/signals.ts`, `dispatch/delay-detection.ts`
   (NOT_STARTED_STATUSES must include en_route), `ops-insights-queries.ts`,
-  `operations-metrics-queries.ts`, `status-colors.ts`, the requests page
-  whitelist + `request-filters.tsx`, `request-status.ts` TRANSITIONS +
-  MANUAL_TARGET_STATUSES (feeds the tech status zod enum), the FP import
-  `FP_JOB_STATUS_MAP` (FP "on the way" → `en_route`; the sync preserves
-  native `en_route`/`arrived` like it preserves `on_hold`), the FP webhook
-  mapper and the HCP webhook mapper (`job.on_my_way` → `en_route`).
+  `operations-metrics-queries.ts` (response time becomes the first
+  event into `ON_SITE`, backward compatible), `status-colors.ts`, the
+  requests page whitelist + `request-filters.tsx`, `request-status.ts`
+  TRANSITIONS + MANUAL_TARGET_STATUSES (feeds the tech status zod enum and
+  `STATUS_ACTION_LABELS` in `request-detail-sheet.tsx`, which fails to
+  compile until "Mark en route" / "Mark arrived" exist),
+  `insights/ops-insights-section.tsx` STATUS_LABELS, the FP import
+  `FP_JOB_STATUS_MAP` (FP stage "2" → `en_route`; no preserve clause: FP
+  jobs are FP's, and a preserved `en_route` would block FP's later
+  `in_progress`), the FP webhook mapper and the HCP webhook mapper
+  (`job.on_my_way` → `en_route`), and `account-reply.ts`, which needs
+  en_route/arrived wording instead of the "being scheduled" default.
 
 ## Build order
 
@@ -298,24 +323,38 @@ until a tech can finish and collect on a job here.
    and it appears on the calendar, the dispatch board and the tech app.
 2. **M0b Config foundation.** Tags (customer, location, job), contacts
    (S04 customer page), primary location, configurable job types with
-   default duration (settings page), `job_type_id` on requests, contacts in
-   the erase batch, S07 uses all three. Tables: 4 new, 2 extended. No dual
+   default duration (settings page; `color` is a zod enum of
+   status-colors tokens), `job_type_id` on requests (the server derives
+   `job_type` from `kind` and sets `estimatedDurationMinutes` with source
+   `job_type` in the create batch; `locationId`/`contactId` must belong to
+   the customer and are null for an inline customer), primary location set
+   by a separate guarded UPDATE on create and re-selected on delete,
+   contacts deleted and tags removed in the erase / hard-delete paths, S07
+   uses all three. Tables: 4 new, 2 extended. No dual
    writes. Must-haves closed: 22, 23, 27, 55, 56, 83.
    Done when: an admin creates a job type with a default duration, tags a
    customer and a job, adds a second contact, and the New request dialog
    offers all three; erase anonymises contacts.
-3. **M0a Schedule foundation.** `en_route`/`arrived` with the 22 readers
+3. **M0a Schedule foundation.** `en_route`/`arrived` with the 25 readers
    on shared constants, appointments + assignments backfilled and kept in
-   step by the trigger, tech ownership = `assigned_to` OR an assignment
-   row, shifts (on-call / time off / non-job) removing capacity, tech taps
-   en route / arrived. Tables: 2 new (+ shifts = 3), 1 enum. Gets its own
+   step by the trigger, visits #2+ through the API + detail sheet, shifts
+   (on-call / time off / non-job) subtracted in `readSchedulingFacts`,
+   `checkScheduleConflict`, the `placeAndAssignRequest` guard,
+   `technicianWindowClash` and autodispatch `signals.ts` (DB scheduling
+   source only; HCP-sourced orgs ignore shifts), tech taps en route /
+   arrived. Tables: 2 new (+ shifts = 3), 1 enum. Gets its own
    adversarial review before merge. Must-haves closed: 64, 85, 86, 98
    (data), 117.
-   Done when: every request with a date or assignee has appointment #1 and
-   a lead assignment matching its columns; the calendar, dispatch, tech
-   app and FieldPulse nightly sync produce identical output before and
-   after; a second visit on a job shows on the calendar; a tech taps en
-   route then arrived and the customer-facing status reads the same.
+   Done when: every request with a date, window or assignee has
+   appointment #1 (and a lead assignment when assigned) matching its
+   columns; the calendar, dispatch and tech app produce identical output
+   before and after, and the FieldPulse nightly sync is identical except
+   FP stage 2 now reads `en_route`; a second visit added through the API
+   is listed on the request detail sheet and cancelled with the request;
+   a tech (the request's `assigned_to`) taps en route then arrived, the
+   admin sheet shows the same, and the AI account reply describes it
+   correctly; a technician on time off is skipped by availability, the
+   conflict check, placement and auto-dispatch.
 4. **M3 Tech close-out loop.** S38 en route → arrived → working → paused /
    hold → done per tech (roll-up rule) → close-out sheet; forms (S29
    config + fill); equipment from the field; S39 present estimate; S40

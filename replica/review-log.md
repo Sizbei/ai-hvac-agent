@@ -56,3 +56,49 @@ milestone; business-hours claim dropped; trigram-on-ciphertext removed.
 - Build-order proposal "M4 money before M2 calendar" — kept M2 (small
   calendar deltas) before M4 because the reassign guard and multi-tech UI
   are needed as soon as M0a's assignments exist.
+
+## Spec round 2 — 2026-11-01 (revised M0 only)
+
+Two blind critics (DDL/trigger/backfill; runtime/feasibility/security).
+Verdict: no sign-off on the round-1 text; 2 blockers, ~15 majors, all
+applied the same day.
+
+### Established
+- Postgres `UPDATE OF` fires on unchanged values; the FP sync rewrites
+  every row nightly → separate INSERT and UPDATE triggers, the UPDATE one
+  with a `WHEN (OLD.x IS DISTINCT FROM NEW.x …)` clause; the function bumps
+  `version` only on real changes, so CAS stays honest.
+- Reassign A → B → A would hit the (appointment, technician) unique key
+  if the old lead row is kept → new lead is an upsert; old lead deleted
+  when it has no progress timestamps, else demoted with status
+  `cancelled`.
+- Date-only bookings (membership visits, `scheduleRequest` without a
+  window) are "unscheduled" today → appointment #1 gets `starts_at` only
+  from the arrival window; `scheduled_date` is mirrored as its own column.
+- Unschedule nulls all columns → delete appointment #1 (no progress) or
+  null its times.
+- The existing lists differ (some include `pending`, ops-insights drops
+  `scheduled`/`on_hold`) → six constants, no merging, byte-identical output.
+- `findCustomerMatchByContact` feeds AI, voice caller-ID and SMS consent →
+  contacts never join it.
+- FKs need Drizzle names; `drizzle-orm` 0.45.2 supports `check`, composite
+  `foreignKey`, partial `uniqueIndex().where()`.
+- `deleteCustomer` hard-deletes; users are never deleted (`is_active`).
+- The calendar renders requests keyed by request id → visits #2+ on the
+  calendar is M2 work; M0a's done-when is API + detail sheet.
+- Shifts must be subtracted in five places, not one; HCP-sourced orgs use
+  HCP tech ids, so shifts apply to the DB scheduling source only.
+
+### Rejected
+- "Ownership = assigned_to OR assignment row" (my own round-1 text) —
+  withdrawn for M0a: a visit-#2 tech would be able to complete the whole
+  job through the request-status route. Ownership stays `assigned_to`
+  until M3 defines per-visit status.
+- "Fire en-route / arrived texts from the status tap" — M3 (needs the
+  idempotency ledger key and copy review).
+- "Fix the ops-insights status drift" — pre-existing; not in M0a.
+
+Convergence: round 2 surfaced new blockers in text round 1 had added
+(trigger rules, ownership), both now resolved by narrowing M0a. Round 3
+on the spec is folded into the implementation-plan review, whose critics
+read the spec and the plan together.
