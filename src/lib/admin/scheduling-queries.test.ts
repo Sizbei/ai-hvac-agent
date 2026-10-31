@@ -66,7 +66,8 @@ vi.mock("@/lib/db", () => ({
 
 // isTerminal is the only request-status surface rescheduleRequest uses; mock it
 // rather than pull the real enum (the schema mock omits requestStatusEnum).
-vi.mock("./request-status", () => ({
+vi.mock("./request-status", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./request-status")>()),
   isTerminal: (status: string) =>
     status === "completed" || status === "cancelled",
 }));
@@ -95,6 +96,12 @@ vi.mock("drizzle-orm", () => ({
 }));
 
 vi.mock("@/lib/db/schema", () => ({
+  requestStatusEnum: {
+    enumValues: ["pending", "scheduled", "assigned", "en_route", "arrived", "in_progress", "on_hold", "completed", "cancelled"],
+  },
+  holdReasonEnum: {
+    enumValues: ["awaiting_parts", "awaiting_customer", "awaiting_access", "weather", "other"],
+  },
   serviceRequests: {
     id: "sr.id",
     organizationId: "sr.org",
@@ -470,7 +477,7 @@ describe("listUnscheduledRequests", () => {
       (c) => Array.isArray(c) && c[0] === "inArray" && c[1] === "sr.status",
     ) as unknown[];
     // assigned/in_progress jobs with a null window are now surfaced too.
-    expect(statusCond[2]).toEqual(["pending", "scheduled", "assigned", "in_progress"]);
+    expect(statusCond[2]).toEqual(["pending", "scheduled", "assigned", "en_route", "arrived", "in_progress"]);
     // "Unscheduled" = unassigned OR no window — an OR over the two null checks.
     expect(conds.some((c) => Array.isArray(c) && c[0] === "or")).toBe(true);
   });

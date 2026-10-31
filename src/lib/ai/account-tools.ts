@@ -34,6 +34,7 @@ import {
   customers,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
+import { OPEN_STATUSES } from "@/lib/admin/request-status";
 
 /** Active membership summary for an identified customer. */
 export interface MembershipSummary {
@@ -80,15 +81,6 @@ export interface RescheduleHandoff {
   /** The request the hand-off was attached to, when one was found. */
   readonly referenceNumber: string | null;
 }
-
-/** Request statuses considered "upcoming" (not terminal). */
-const UPCOMING_STATUSES = [
-  "pending",
-  "assigned",
-  "scheduled",
-  "in_progress",
-  "on_hold",
-] as const;
 
 /**
  * Active membership + plan name for an identified customer, or a not-a-member
@@ -256,7 +248,7 @@ export async function getUpcomingAppointment(
         serviceRequests,
         organizationId,
         eq(serviceRequests.customerId, customerId),
-        inArray(serviceRequests.status, [...UPCOMING_STATUSES]),
+        inArray(serviceRequests.status, [...OPEN_STATUSES]),
       ),
     )
     // Soonest dated job first; undated (pending) rows sort last via the CASE.

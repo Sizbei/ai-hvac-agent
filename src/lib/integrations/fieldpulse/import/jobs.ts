@@ -55,15 +55,14 @@ import { isAfterHours } from "@/lib/admin/after-hours";
 //   This reveals the canonical FP pipeline: pending → on_the_way → in_progress → completed
 //   Confirmed mappings:
 //     "1" = pending  (named in pipeline; 0 s elapsed = not yet started)
-//     "2" = on_the_way (5940 s logged = technician en route; maps to native "assigned" — closest
-//            native status for "tech dispatched, not yet on site"; "scheduled" has no dispatch
-//            commitment, "in_progress" means already working; "assigned" is the correct seam)
+//     "2" = on_the_way (5940 s logged = technician en route; maps to native "en_route" —
+//            the tech is on the way but not yet on site)
 //     "3" = in_progress (108756 s logged = tech actively on site)
 //     "4" = completed (×9 live jobs, all with completedAt; confirmed Phase 4)
 //     "6" stays unmapped → falls through to "pending" + tally (custom/unknown workflow step)
 const FP_JOB_STATUS_MAP: Record<string, RequestStatus> = {
   "1": "pending",
-  "2": "assigned",
+  "2": "en_route",
   "3": "in_progress",
   "4": "completed",
 };

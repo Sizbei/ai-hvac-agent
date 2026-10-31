@@ -47,7 +47,7 @@ export interface OperationsMetrics {
   readonly rangeDays: number;
 
   // 1. Technician time to job.
-  /** Median seconds from request created → tech starts work (first in_progress). */
+  /** Median seconds from request created → tech arrives on site (first arrived or in_progress). */
   readonly responseTimeSeconds: MetricTrend;
   /** Avg seconds on site (clock-in → clock-out). Secondary line; current window. */
   readonly onSiteSeconds: number | null;

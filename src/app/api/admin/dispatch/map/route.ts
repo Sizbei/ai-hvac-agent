@@ -16,10 +16,10 @@ import { fetchAddressSuggestions } from "@/lib/address/photon";
 import { BUSINESS_BASE_LOCATION } from "@/lib/config/business-location";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { logger } from "@/lib/logger";
+import { IN_FLIGHT_STATUSES } from "@/lib/admin/request-status";
 
 export const dynamic = "force-dynamic";
 
-const ACTIVE_STATUSES = ["scheduled", "assigned", "in_progress", "on_hold"] as const;
 // Most jobs carry cached coordinates from geocode-at-intake (customer_locations).
 // Only jobs still missing them (a booking taken seconds ago, pre-geocode) fall
 // back to a live Photon lookup — capped to bound latency, be a good Photon
@@ -118,7 +118,7 @@ export async function GET() {
           withTenant(
             serviceRequests,
             session.organizationId,
-            inArray(serviceRequests.status, [...ACTIVE_STATUSES]),
+            inArray(serviceRequests.status, [...IN_FLIGHT_STATUSES]),
           ),
         )
         .limit(200),

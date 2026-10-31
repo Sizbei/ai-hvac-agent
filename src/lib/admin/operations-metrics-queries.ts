@@ -13,7 +13,7 @@
  * thousands of rows over a year) this is well within budget. If it ever slows,
  * the seam to precompute into demand_daily-style rollups is here.
  */
-import { eq, gte, lt, isNull, isNotNull, or, sql, count } from "drizzle-orm";
+import { eq, gte, inArray, lt, isNull, isNotNull, or, sql, count } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   serviceRequests,
@@ -30,6 +30,7 @@ import type {
   SyncedArAging,
 } from "./operations-metrics-types";
 import { getDispatchOutcomeRollup } from "./dispatch-rollup";
+import { ON_SITE_STATUSES } from "./request-status";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const THIRTY_DAYS_MS = 30 * DAY_MS;
@@ -157,7 +158,7 @@ export async function getOperationsMetrics(
         withTenant(
           requestStatusEvents,
           organizationId,
-          eq(requestStatusEvents.toStatus, "in_progress"),
+          inArray(requestStatusEvents.toStatus, [...ON_SITE_STATUSES]),
           lt(requestStatusEvents.at, toDate_),
           isNull(serviceRequests.fieldpulseJobId),
           isNull(serviceRequests.hcpJobId),

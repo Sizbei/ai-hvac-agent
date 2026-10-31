@@ -30,6 +30,7 @@ import {
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { decrypt } from "@/lib/crypto";
+import { OPEN_STATUSES } from "@/lib/admin/request-status";
 import { takePayment, type TakePaymentResult } from "@/lib/admin/invoice-queries";
 
 /** Random bytes in the token body (32 bytes -> 64 hex chars -> 256-bit). */
@@ -195,15 +196,6 @@ export interface PortalData {
   readonly history: PortalHistoryView[];
 }
 
-/** Jobs we consider "active" — shown as upcoming/in-progress in the portal. */
-const ACTIVE_JOB_STATUSES = [
-  "pending",
-  "assigned",
-  "scheduled",
-  "in_progress",
-  "on_hold",
-] as const;
-
 /**
  * Build the customer-facing dashboard for a resolved (org, customer). Every
  * query is tenant-scoped AND customer-scoped. The customer's display name is
@@ -273,7 +265,7 @@ export async function getPortalData(
         serviceRequests,
         organizationId,
         eq(serviceRequests.customerId, customerId),
-        inArray(serviceRequests.status, [...ACTIVE_JOB_STATUSES]),
+        inArray(serviceRequests.status, [...OPEN_STATUSES]),
       ),
     )
     .orderBy(desc(serviceRequests.scheduledDate));

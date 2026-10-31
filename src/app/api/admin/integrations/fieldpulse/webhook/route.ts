@@ -44,6 +44,7 @@ import {
 } from "@/lib/integrations/fieldpulse/invoice-sync";
 import { getFieldpulseWebhookSecret } from "@/lib/integrations/fieldpulse/config";
 import { recordStatusEvent } from "@/lib/admin/status-events";
+import type { RequestStatus } from "@/lib/admin/request-status";
 import {
   verifySignature,
   isReplayTimestamp,
@@ -93,7 +94,7 @@ function verifyWebhookSignature(
  */
 function mapFieldpulseStatusToRequestStatus(
   fieldpulseStatus: string,
-): "pending" | "assigned" | "scheduled" | "in_progress" | "on_hold" | "completed" | "cancelled" | null {
+): RequestStatus | null {
   const normalized = fieldpulseStatus.toLowerCase();
   switch (normalized) {
     case "pending":
@@ -108,9 +109,11 @@ function mapFieldpulseStatusToRequestStatus(
       return "scheduled";
     case "in_progress":
     case "started":
-    case "en_route":
-    case "on_site":
       return "in_progress";
+    case "en_route":
+      return "en_route";
+    case "on_site":
+      return "arrived";
     case "on_hold":
     case "paused":
       return "on_hold";

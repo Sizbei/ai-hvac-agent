@@ -13,10 +13,10 @@ import { withTenant } from "@/lib/db/tenant";
 import { decrypt } from "@/lib/crypto";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { logger } from "@/lib/logger";
+import { IN_FLIGHT_STATUSES } from "@/lib/admin/request-status";
 
 export const dynamic = "force-dynamic";
 
-const ACTIVE_STATUSES = ["scheduled", "assigned", "in_progress", "on_hold"] as const;
 
 function safeDecrypt(v: string | null): string | null {
   if (!v) return null;
@@ -56,7 +56,7 @@ export async function GET() {
           session.organizationId,
           and(
             eq(serviceRequests.assignedTo, session.userId),
-            inArray(serviceRequests.status, [...ACTIVE_STATUSES]),
+            inArray(serviceRequests.status, [...IN_FLIGHT_STATUSES]),
           )!,
         ),
       )

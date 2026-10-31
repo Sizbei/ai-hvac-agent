@@ -44,7 +44,7 @@ export default function AdminRequestsPage() {
     q: searchInput,
   };
   const restoreFiltersFromUrl = useCallback((p: Record<string, string>) => {
-    const statuses: readonly string[] = ['pending', 'scheduled', 'assigned', 'in_progress', 'on_hold', 'completed', 'cancelled'];
+    const statuses: readonly string[] = ['pending', 'scheduled', 'assigned', 'en_route', 'arrived', 'in_progress', 'on_hold', 'completed', 'cancelled'];
     const urgencies: readonly string[] = ['low', 'medium', 'high', 'emergency'];
     const sorts: readonly string[] = ['newest', 'oldest', 'urgency'];
     if (p.status && statuses.includes(p.status)) setStatusFilter(p.status);

@@ -105,7 +105,8 @@ export function parseWebhookEvent(raw: unknown): HcpWebhookEvent | null {
  * or null when the event implies no status change (or is unknown). We map
  * lifecycle-bearing events only:
  *
- *   - job.started / job.on_my_way → in_progress (a tech is actively on it)
+ *   - job.started                 → in_progress (a tech is actively on it)
+ *   - job.on_my_way               → en_route (tech dispatched, not yet on site)
  *   - job.completed               → completed
  *   - job.canceled / job.deleted  → cancelled
  *   - job.scheduled               → scheduled (HCP booked/rebooked a window)
@@ -121,8 +122,9 @@ export function eventTypeToStatus(eventType: string): RequestStatus | null {
     case "job.scheduled":
       return "scheduled";
     case "job.started":
-    case "job.on_my_way":
       return "in_progress";
+    case "job.on_my_way":
+      return "en_route";
     case "job.completed":
       return "completed";
     case "job.canceled":

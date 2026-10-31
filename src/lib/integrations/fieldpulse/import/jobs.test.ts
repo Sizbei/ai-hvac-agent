@@ -182,12 +182,12 @@ describe("mapFpJob", () => {
     expect(tally.size).toBe(0);
   });
 
-  it("maps statusInt 2 → assigned", () => {
+  it("maps statusInt 2 → en_route", () => {
     const tally: UnknownStatusTally = new Map();
     const result = mapFpJob(makeJob({ statusInt: 2, workStatus: '2', completedAt: null }), tally);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.job.status).toBe('assigned');
+    expect(result.job.status).toBe('en_route');
     expect(tally.size).toBe(0);
   });
 

@@ -11,10 +11,7 @@ import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { serviceRequests, users } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
-
-// Statuses that mean the tech has NOT yet arrived/started — only these can be
-// "behind". in_progress/completed/cancelled are excluded (already there / done).
-const NOT_STARTED_STATUSES = ["scheduled", "assigned"] as const;
+import { NOT_STARTED_STATUSES } from "@/lib/admin/request-status";
 
 /** True when the job's arrival window passed (by more than the grace) and the
  * tech hasn't started it yet. Pure. */

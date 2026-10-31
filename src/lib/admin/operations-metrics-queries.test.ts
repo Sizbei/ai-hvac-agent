@@ -81,6 +81,7 @@ vi.mock('@/lib/db/tenant', () => ({
 vi.mock('drizzle-orm', () => ({
   eq: (...a: unknown[]) => ({ kind: 'eq', args: a }),
   gte: (...a: unknown[]) => ({ kind: 'gte', args: a }),
+  inArray: (...a: unknown[]) => ({ kind: 'inArray', args: a }),
   lt: (...a: unknown[]) => ({ kind: 'lt', args: a }),
   isNull: (col: unknown) => ({ kind: 'isNull', col }),
   isNotNull: (col: unknown) => ({ kind: 'isNotNull', col }),
@@ -94,6 +95,12 @@ vi.mock('drizzle-orm', () => ({
 }));
 
 vi.mock('@/lib/db/schema', () => ({
+  requestStatusEnum: {
+    enumValues: ['pending', 'scheduled', 'assigned', 'en_route', 'arrived', 'in_progress', 'on_hold', 'completed', 'cancelled'],
+  },
+  holdReasonEnum: {
+    enumValues: ['awaiting_parts', 'awaiting_customer', 'awaiting_access', 'weather', 'other'],
+  },
   serviceRequests: {
     id: 'serviceRequests.id',
     createdAt: 'serviceRequests.createdAt',

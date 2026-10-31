@@ -148,6 +148,12 @@ vi.mock('@/lib/requests/submit-session-request', () => ({
 }));
 
 vi.mock('@/lib/db/schema', () => ({
+  requestStatusEnum: {
+    enumValues: ['pending', 'scheduled', 'assigned', 'en_route', 'arrived', 'in_progress', 'on_hold', 'completed', 'cancelled'],
+  },
+  holdReasonEnum: {
+    enumValues: ['awaiting_parts', 'awaiting_customer', 'awaiting_access', 'weather', 'other'],
+  },
   customerSessions: { id: 'customer_sessions.id', token: 'token', status: 'status', organizationId: 'org_id', updatedAt: 'updated_at', createdAt: 'created_at' },
   messages: { sessionId: 'session_id', organizationId: 'org_id', createdAt: 'created_at' },
   technicianLocations: { id: 'tl.id', capturedAt: 'tl.captured_at' },

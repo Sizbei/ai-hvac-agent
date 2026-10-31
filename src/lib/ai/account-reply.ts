@@ -48,6 +48,10 @@ function statusLabel(status: string): string {
       return "scheduled";
     case "assigned":
       return "assigned to a technician";
+    case "en_route":
+      return "on the way";
+    case "arrived":
+      return "on site";
     case "in_progress":
       return "in progress";
     case "on_hold":
@@ -92,6 +96,13 @@ export function balanceReply(balance: OpenBalance): string {
 export function appointmentReply(appointment: UpcomingAppointment | null): string {
   if (!appointment) {
     return "I don't see an upcoming appointment on your account right now. Would you like to start a new request?";
+  }
+  // "is on the way for Monday" would read wrong — these two states are live.
+  if (appointment.status === "en_route") {
+    return `Your technician is on the way for ${appointment.referenceNumber}.`;
+  }
+  if (appointment.status === "arrived") {
+    return `Your technician has arrived for ${appointment.referenceNumber}.`;
   }
   const day = formatDay(appointment.scheduledDate);
   const window =

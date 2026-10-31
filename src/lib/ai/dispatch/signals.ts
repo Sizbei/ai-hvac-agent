@@ -91,6 +91,8 @@ export interface TechSignalRow {
 const SAME_DAY_LOAD_STATUSES = [
   "assigned",
   "scheduled",
+  "en_route",
+  "arrived",
   "in_progress",
   "on_hold",
 ] as const;

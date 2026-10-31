@@ -26,7 +26,7 @@ function toNumber(value: number | string | null | undefined): number {
 }
 
 /** Statuses that count as "open" (actionable backlog). */
-const OPEN_STATUSES = ["pending", "assigned", "in_progress"] as const;
+const OPEN_STATUSES = ["pending", "assigned", "en_route", "arrived", "in_progress"] as const;
 
 export async function getOpsInsights(
   organizationId: string,
@@ -80,7 +80,7 @@ export async function getOpsInsights(
         technicianId: serviceRequests.assignedTo,
         technicianName: users.name,
         total: count(),
-        active: sql<number | string>`count(*) filter (where ${serviceRequests.status} in ('pending','assigned','in_progress'))`,
+        active: sql<number | string>`count(*) filter (where ${serviceRequests.status} in ('pending','assigned','en_route','arrived','in_progress'))`,
         completed: sql<number | string>`count(*) filter (where ${serviceRequests.status} = 'completed')`,
       })
       .from(serviceRequests)

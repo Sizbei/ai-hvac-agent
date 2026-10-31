@@ -45,6 +45,8 @@ const URGENCY_LABELS: Record<string, string> = {
 const STATUS_LABELS: Record<string, string> = {
   pending: 'Pending',
   assigned: 'Assigned',
+  en_route: 'En route',
+  arrived: 'Arrived',
   in_progress: 'In progress',
   completed: 'Completed',
   cancelled: 'Cancelled',

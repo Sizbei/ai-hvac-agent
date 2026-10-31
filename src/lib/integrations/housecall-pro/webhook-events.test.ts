@@ -63,7 +63,7 @@ describe("eventTypeToStatus", () => {
   it("maps lifecycle events to request-status targets", () => {
     expect(eventTypeToStatus("job.scheduled")).toBe("scheduled");
     expect(eventTypeToStatus("job.started")).toBe("in_progress");
-    expect(eventTypeToStatus("job.on_my_way")).toBe("in_progress");
+    expect(eventTypeToStatus("job.on_my_way")).toBe("en_route");
     expect(eventTypeToStatus("job.completed")).toBe("completed");
     expect(eventTypeToStatus("job.canceled")).toBe("cancelled");
     expect(eventTypeToStatus("job.deleted")).toBe("cancelled");

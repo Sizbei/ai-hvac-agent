@@ -49,7 +49,12 @@ import {
 import { estimateJobDuration } from "@/lib/ai/dispatch/duration";
 import { loadDispatchSignals } from "@/lib/ai/dispatch/signals";
 import { recordStatusEvent } from "@/lib/admin/status-events";
-import { isTerminal, type RequestStatus } from "./request-status";
+import {
+  isTerminal,
+  NEEDS_PLACEMENT_STATUSES,
+  OPEN_STATUSES,
+  type RequestStatus,
+} from "./request-status";
 import { releaseReservationsForRequest } from "./capacity-reservation-queries";
 import { notifyCustomerOfAssignment } from "./notify-assignment";
 import { stampDispatchOverride } from "./dispatch-override";
@@ -60,30 +65,6 @@ import type {
   AvailabilitySlotInput,
   ScheduledJob,
 } from "./types";
-
-/** Statuses that hold a "live" booking on the calendar — a job in one of these
- * states with an arrival window genuinely occupies a technician's time, so it
- * counts for conflict detection and as a scheduled job. Terminal states
- * (completed/cancelled) free the slot. */
-const ACTIVE_BOOKING_STATUSES = [
-  "pending",
-  "assigned",
-  "scheduled",
-  "in_progress",
-  "on_hold",
-] as const;
-
-/** Statuses an "unscheduled" request can sit in: still open intake (pending),
- * booked-as-a-status (scheduled), OR already assigned/in-progress but missing an
- * arrival window (needs-scheduling). The query additionally filters on
- * arrivalWindowStart IS NULL so assigned/in_progress jobs that already have a
- * window don't appear in the unscheduled sidebar. */
-const UNSCHEDULED_STATUSES = [
-  "pending",
-  "scheduled",
-  "assigned",
-  "in_progress",
-] as const;
 
 /** Minutes in a day. A slot's [start, end) span lives in [0, 1440] (1440 =
  * end-of-day midnight), measured in business-tz wall clock. */
@@ -254,7 +235,7 @@ export async function checkScheduleConflict(
 
   const conditions: SQL[] = [
     eq(serviceRequests.assignedTo, technicianId),
-    inArray(serviceRequests.status, [...ACTIVE_BOOKING_STATUSES]),
+    inArray(serviceRequests.status, [...OPEN_STATUSES]),
     isNotNull(serviceRequests.arrivalWindowStart),
     isNotNull(serviceRequests.arrivalWindowEnd),
     // Half-open overlap: existing.start < proposed.end AND proposed.start < existing.end.
@@ -311,7 +292,7 @@ export async function getScheduledJobsForRange(
       withTenant(
         serviceRequests,
         organizationId,
-        inArray(serviceRequests.status, [...ACTIVE_BOOKING_STATUSES]),
+        inArray(serviceRequests.status, [...OPEN_STATUSES]),
         isNotNull(serviceRequests.arrivalWindowStart),
         isNotNull(serviceRequests.arrivalWindowEnd),
         // Strict end bound (gt): a job ending exactly at the range start
@@ -350,7 +331,7 @@ export async function listUnscheduledRequests(
       withTenant(
         serviceRequests,
         organizationId,
-        inArray(serviceRequests.status, [...UNSCHEDULED_STATUSES]),
+        inArray(serviceRequests.status, [...NEEDS_PLACEMENT_STATUSES]),
         // "Unscheduled" = not yet fully placed: no tech, or no arrival window.
         or(
           isNull(serviceRequests.assignedTo),
@@ -718,7 +699,7 @@ export async function placeAndAssignRequest(
           WHERE conflict_check.organization_id = ${organizationId}
             AND conflict_check.assigned_to = ${targetTech}
             AND conflict_check.id <> ${requestId}
-            AND conflict_check.status IN ('pending','assigned','scheduled','in_progress','on_hold')
+            AND conflict_check.status IN ('pending','assigned','scheduled','en_route','arrived','in_progress','on_hold')
             AND conflict_check.arrival_window_start IS NOT NULL
             AND conflict_check.arrival_window_end IS NOT NULL
             AND conflict_check.arrival_window_start < ${arrivalWindow.end}

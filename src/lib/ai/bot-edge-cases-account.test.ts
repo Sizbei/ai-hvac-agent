@@ -72,6 +72,12 @@ const { tables, store, inserts } = vi.hoisted(() => {
       organizationId: col("customers", "organizationId"),
       portalTokenHash: col("customers", "portalTokenHash"),
     },
+    requestStatusEnum: {
+      enumValues: ["pending", "scheduled", "assigned", "en_route", "arrived", "in_progress", "on_hold", "completed", "cancelled"],
+    },
+    holdReasonEnum: {
+      enumValues: ["awaiting_parts", "awaiting_customer", "awaiting_access", "weather", "other"],
+    },
   };
   const store: Record<string, Row[]> = {};
   const inserts: { table: string; values: Row }[] = [];
@@ -403,6 +409,21 @@ describe("4d. account reply layer — pricing-safe & no false booking", () => {
     expect(r).toContain("REF-AAAAA");
     // It reports the EXISTING appointment; it must not self-book a new one.
     expect(r.toLowerCase()).not.toContain("i've booked");
+  });
+
+  it("appointmentReply reads live for en_route and arrived", () => {
+    const base = {
+      referenceNumber: "REF-AAAAA",
+      scheduledDate: new Date("2026-07-01T13:00:00Z"),
+      arrivalWindowStart: null,
+      arrivalWindowEnd: null,
+    };
+    const enRoute = appointmentReply({ ...base, status: "en_route" });
+    expect(enRoute).toContain("on the way");
+    expect(enRoute).toContain("REF-AAAAA");
+    const arrived = appointmentReply({ ...base, status: "arrived" });
+    expect(arrived).toContain("arrived");
+    expect(arrived).toContain("REF-AAAAA");
   });
 
   it("membership/nextVisit non-member & no-visit replies are graceful, no PII", () => {

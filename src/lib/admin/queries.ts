@@ -42,6 +42,9 @@ import { normalizeEmail } from "./staff-queries";
 import { decrypt } from "@/lib/crypto";
 import {
   canTransition,
+  OPEN_STATUSES,
+  TERMINAL_STATUSES,
+  UNASSIGNED_OPEN_STATUSES,
   type RequestStatus,
 } from "./request-status";
 import { recordStatusEvent, type ActorType } from "./status-events";
@@ -441,28 +444,10 @@ export async function getRequestById(
  * assignable. */
 const ASSIGNABLE_STATUSES = ["pending", "scheduled", "assigned"] as const;
 
-/** Non-terminal statuses — a request still needs work. Excludes completed and
- * cancelled. Used by dashboard KPIs (e.g. open emergencies). */
-const OPEN_STATUSES = [
-  "pending",
-  "assigned",
-  "scheduled",
-  "in_progress",
-  "on_hold",
-] as const;
-
-/** Terminal statuses — included in the calendar only when the
- * "show completed" toggle is on. Never mixed into the unscheduled queue. */
-const TERMINAL_STATUSES = ["completed", "cancelled"] as const;
-
-/** Statuses a dashboard "needs attention" queue draws from: open and not yet
- * assigned to a tech. */
-const UNASSIGNED_OPEN_STATUSES = ["pending", "scheduled"] as const;
-
 /** Statuses from which a REASSIGNMENT (changing the assignee without resetting
  * the lifecycle) is allowed: a request that already has work in flight or
  * paused (on_hold) — reassign without discarding the lifecycle stage. */
-const REASSIGNABLE_STATUSES = ["assigned", "in_progress", "on_hold"] as const;
+const REASSIGNABLE_STATUSES = ["assigned", "en_route", "arrived", "in_progress", "on_hold"] as const;
 
 export type AssignTechnicianResult =
   | { readonly ok: true; readonly request: AdminRequest }
@@ -1070,7 +1055,8 @@ function buildDashboardStatsQuery(organizationId: string) {
       assignedToday: count(
         sql`CASE WHEN ${serviceRequests.status} = 'assigned' AND ${serviceRequests.updatedAt} >= ${todayStart} AND ${serviceRequests.fieldpulseJobId} IS NULL AND ${serviceRequests.hcpJobId} IS NULL THEN 1 END`,
       ),
-      inProgress: count(sql`CASE WHEN ${serviceRequests.status} = 'in_progress' AND ${serviceRequests.fieldpulseJobId} IS NULL AND ${serviceRequests.hcpJobId} IS NULL THEN 1 END`),
+      // en route and arrived count as in progress on the dashboard tiles
+      inProgress: count(sql`CASE WHEN ${serviceRequests.status} IN ('en_route', 'arrived', 'in_progress') AND ${serviceRequests.fieldpulseJobId} IS NULL AND ${serviceRequests.hcpJobId} IS NULL THEN 1 END`),
       completedToday: count(
         sql`CASE WHEN ${serviceRequests.status} = 'completed' AND ${serviceRequests.completedAt} >= ${todayStart} AND ${serviceRequests.fieldpulseJobId} IS NULL AND ${serviceRequests.hcpJobId} IS NULL THEN 1 END`,
       ),

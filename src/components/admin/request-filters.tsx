@@ -36,6 +36,8 @@ const STATUS_OPTIONS: readonly { readonly label: string; readonly value: string 
   { label: 'Pending', value: 'pending' },
   { label: 'Scheduled', value: 'scheduled' },
   { label: 'Assigned', value: 'assigned' },
+  { label: 'En route', value: 'en_route' },
+  { label: 'Arrived', value: 'arrived' },
   { label: 'In progress', value: 'in_progress' },
   { label: 'On hold', value: 'on_hold' },
   { label: 'Completed', value: 'completed' },

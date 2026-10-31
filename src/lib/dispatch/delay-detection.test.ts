@@ -22,6 +22,12 @@ describe("isArrivalLate", () => {
     expect(isArrivalLate({ status: "completed", arrivalWindowEnd: windowEnd }, now, GRACE)).toBe(false);
   });
 
+  it("flags an en_route job whose window has passed as late", () => {
+    const windowEnd = new Date("2026-07-03T12:00:00.000Z");
+    const now = windowEnd.getTime() + 60 * 60_000;
+    expect(isArrivalLate({ status: "en_route", arrivalWindowEnd: windowEnd }, now, GRACE)).toBe(true);
+  });
+
   it("is NOT late with no arrival window set", () => {
     const now = Date.now();
     expect(isArrivalLate({ status: "assigned", arrivalWindowEnd: null }, now, GRACE)).toBe(false);
@@ -34,7 +40,16 @@ import { findLateJobsForOrg } from "./delay-detection";
 import { db } from "@/lib/db";
 
 vi.mock("@/lib/db", () => ({ db: { select: vi.fn() } }));
-vi.mock("@/lib/db/schema", () => ({ serviceRequests: {}, users: {} }));
+vi.mock("@/lib/db/schema", () => ({
+  serviceRequests: {},
+  users: {},
+  requestStatusEnum: {
+    enumValues: ["pending", "scheduled", "assigned", "en_route", "arrived", "in_progress", "on_hold", "completed", "cancelled"],
+  },
+  holdReasonEnum: {
+    enumValues: ["awaiting_parts", "awaiting_customer", "awaiting_access", "weather", "other"],
+  },
+}));
 vi.mock("@/lib/db/tenant", () => ({ withTenant: (_t: unknown, _o: unknown, c: unknown) => c }));
 
 function mockRows(rows: unknown[]) {

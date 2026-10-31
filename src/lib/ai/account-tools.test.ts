@@ -68,6 +68,12 @@ const { tables, store, inserts } = vi.hoisted(() => {
       organizationId: col("customers", "organizationId"),
       portalTokenHash: col("customers", "portalTokenHash"),
     },
+    requestStatusEnum: {
+      enumValues: ["pending", "scheduled", "assigned", "en_route", "arrived", "in_progress", "on_hold", "completed", "cancelled"],
+    },
+    holdReasonEnum: {
+      enumValues: ["awaiting_parts", "awaiting_customer", "awaiting_access", "weather", "other"],
+    },
   };
   // The seeded dataset, keyed by table name. Tests reset/populate it per case.
   const store: Record<string, Row[]> = {};
