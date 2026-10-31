@@ -1,6 +1,6 @@
-## Parity: 40.2 / 100
+## Parity: 40.4 / 100
 
-features 40.2  (275 counted, must-haves 39 of 111 done)
+features 40.4  (275 counted, must-haves 39 of 111 done)
 
 Not shippable yet: 72 must-have features are not done.
 
@@ -17,8 +17,8 @@ Not shippable yet: 72 must-have features are not done.
 - intake                        39.5  (16 features)
 - marketing                     42.9  (4 features)
 - crm                           43.0  (29 features)
-- jobs                          44.2  (26 features)
 - comms                         46.3  (11 features)
+- jobs                          46.7  (26 features)
 - dispatch                      46.9  (25 features)
 - estimates                     49.0  (22 features)
 - payments                      52.9  (7 features)
@@ -36,7 +36,6 @@ Not shippable yet: 72 must-have features are not done.
 - [must] intake: Convert existing lead to job, no  (ST; no lead entity)
 - [must] intake: Inbound call screen with call bubbles for CSRs, no  (ST; AI voice agent only - no CSR call-handling screen)
 - [must] invoicing: Invoice auto-created at booking, no  (ST; invoices only from estimates)
-- [must] jobs: Create job from admin with customer / contact / location, no  (FP+ST; no POST /api/admin/requests)
 - [must] jobs: Job tags with color and dispatch visibility, no  (ST)
 - [must] jobs: Multi-visit and multi-day jobs, no  (FP+ST; FP is_multiday_job stored read-only)
 - [must] jobs: Sold-by attribution, no  (ST)
@@ -73,6 +72,7 @@ Not shippable yet: 72 must-have features are not done.
 - [must] invoicing: Invoice line items from pricebook, partial  (ST; lines copied from estimate - no invoice line editor)
 - [must] invoicing: Partial payments and deposits, partial  (FP; /api/admin/invoices/[id]/payments partial + deposit flag - no progress billing)
 - [must] invoicing: Tax zones with multiple and automatic rates, partial  (FP+ST; tax_rates single default - no zones)
+- [must] jobs: Create job from admin with customer / contact / location, partial  (FP+ST; S07 New request dialog + POST /api/admin/requests (pick or inline-create deduped customer + one contact + address) - no multi-contact or location-record picker until M0)
 - [must] jobs: Job cancel with reasons and memo (and uncancel), partial  (ST; cancelled status via PATCH /api/admin/requests/[id] - no cancel reason)
 - [must] jobs: Org-configurable job types, partial  (ST; fixed job-type enum - not org-configurable)
 - [must] jobs: Recurring jobs with edit scope, partial  (FP; membership visits only - no generic recurring series)
@@ -183,7 +183,7 @@ Not shippable yet: 72 must-have features are not done.
 - [should] pricebook: Vendor costs per SKU, partial  (ST; single unit cost - no vendor cost list)
 - [should] reporting: Customer satisfaction survey, partial  (ST; /admin/reviews ratings - no survey)
 - [should] reporting: Job costing / profitability, partial  (FP; job_materials + time entries - no job-costing report)
-- [should] scheduling: Find-availability slot and tech suggester, partial  (FP+ST; /api/admin/dispatch/suggest ranks techs - no time-slot search)
+- [should] scheduling: Find-availability slot and tech suggester, partial  (FP+ST; /api/admin/dispatch/suggest ranks techs; S07 dialog shows open-window counts per day via /api/admin/requests/availability - no combined slot+tech ranking)
 - [should] team-settings: Google SSO and 2FA, partial  (FP; Google OIDC on /admin/login - no MFA)
 - [should] team-settings: Technician burden / commission / hourly rates, partial  (ST; users.laborRateCents - no burden or commission)
 - [should] tech-app: Equipment barcode / serial capture, partial  (ST; serial field in equipment form - no barcode scan)
