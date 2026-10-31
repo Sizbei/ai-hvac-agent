@@ -5,11 +5,11 @@ description: Use when working on the /admin/settings page — 11-tab org configu
 
 # Settings (/admin/settings + /admin/settings/billing)
 
-**Purpose:** full org configuration surface. Nine tabs cover every tunable that
+**Purpose:** full org configuration surface. Eleven tabs (branding, services, business info, custom Q&A, embed/keys, limits, after-hours, dispatch, integrations, job types, tags) cover every tunable that
 affects the AI chatbot's appearance, scope, and behavior, plus integration
 credentials and dispatch policy.
 
-**Files:** page `src/app/admin/(dashboard)/settings/page.tsx` (9-tab shell, `narrow`
+**Files:** page `src/app/admin/(dashboard)/settings/page.tsx` (11-tab shell, `narrow`
 layout) · billing sub-page `src/app/admin/(dashboard)/settings/billing/page.tsx`
 (server component, access-gated) · hook `src/hooks/use-org-settings.ts` · panels
 `src/components/admin/settings/branding-panel.tsx` ·
@@ -72,7 +72,7 @@ single global form). FAQs use separate create/update/delete helpers.
   admin-session-gated; only the mutating connect/disconnect calls require
   super_admin.
 - Tab overflow: `[mask-image:linear-gradient(…)]` on `TabsList` provides a soft
-  scroll fade. Do not remove it — 9 tabs overflow on small viewports.
+  scroll fade. Do not remove it — 11 tabs overflow on small viewports.
 - Page uses `<PageShell narrow>` — narrower max-width than standard pages.
 
 **Gotchas:**

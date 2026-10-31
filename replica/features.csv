@@ -20,11 +20,11 @@ Job-value-based call routing (AI vs CSR),intake,could,addon,skip,ST; needs cross
 Customer record with separate billing and service locations,crm,must,yes,partial,FP+ST; /admin/customers + customer_locations soft split - no bill-to vs site UI
 Residential / commercial customer type,crm,must,yes,yes,FP+ST; customer_type enum on /admin/customers
 Multiple contacts per customer with per-method preferences,crm,must,yes,partial,FP+ST; contacts + roles + primary shipped; per-contact comms routing is M6
-Multiple service locations per customer,crm,must,yes,yes,FP+ST; customer_locations table - no locations management UI
+Multiple service locations per customer,crm,must,yes,yes,FP+ST; Service locations card with one primary; no add/edit/delete of locations from the page yet (created via bookings)
 Customer status lifecycle (lead / current / lost),crm,should,yes,partial,FP; archive and reactivate only - no lead/lost lifecycle
 Sales pipeline kanban of customers,crm,could,yes,no,FP
 Lead sources,crm,should,yes,yes,FP+ST; lead_source enum + /admin/reports lead-source ROI
-Customer and location tags,crm,must,yes,yes,FP+ST; FP tags kept in jsonb only
+Customer and location tags,crm,must,yes,yes,"FP+ST; Settings > Tags per entity with color; tag picker on customer, location and request; FP tags still also kept in jsonb"
 Custom fields on customer / location / job / membership,crm,should,yes,partial,FP+ST; /api/admin/custom-fields - no definition-management page
 Merge duplicate customers and locations,crm,should,yes,no,FP+ST
 Parent / child and national accounts,crm,could,yes,no,FP+ST
@@ -46,14 +46,14 @@ Predicted equipment replacement date,crm,should,yes,no,ST
 Equipment systems (grouped units),crm,could,yes,no,ST
 Equipment service history,crm,must,yes,partial,ST; history via service_requests per customer - not per unit
 Equipment custom fields and attachments,crm,could,yes,partial,ST; attachments per equipment - no equipment custom fields
-Create job from admin with customer / contact / location,jobs,must,yes,yes,FP+ST; S07 New request dialog + POST /api/admin/requests (pick or inline-create deduped customer + one contact + address) - no multi-contact or location-record picker until M0
+Create job from admin with customer / contact / location,jobs,must,yes,yes,"FP+ST; New request dialog: job type, contact, service location, tags; schedule-now optional"
 Tasks (work items without a customer),jobs,should,yes,no,FP+ST
 Job templates and duplicate job,jobs,should,yes,no,FP+ST
 Job record with actions menu,jobs,must,yes,yes,ST; /admin/requests request-detail-sheet
 Job priority levels,jobs,must,yes,yes,ST; urgency low/medium/high/emergency
 Job summary / description,jobs,must,yes,yes,ST; /admin/requests detail with structured intake fields
-Job tags with color and dispatch visibility,jobs,must,yes,yes,ST
-Org-configurable job types,jobs,must,yes,yes,ST; fixed job-type enum - not org-configurable
+Job tags with color and dispatch visibility,jobs,must,yes,yes,"ST; job tags with color and show-on-board flag (visibleOnBoard); picker in New request dialog, read-only row on the sheet"
+Org-configurable job types,jobs,must,yes,yes,"ST; Settings > Job types (name, kind, duration, priority, order, active); kind = canonical enum"
 Custom status workflows per job type,jobs,should,yes,no,FP
 Time-in-status tracking,jobs,should,yes,partial,FP; request_status_events - no time-in-status view
 Recall / warranty links and no-charge flag,jobs,should,yes,no,ST
@@ -80,7 +80,7 @@ Custom one-off arrival window,scheduling,should,yes,no,ST; named bands only
 Business hours,scheduling,must,yes,partial,ST; businessInfo + afterHoursConfig - no holiday calendar
 Capacity by open vs total hours per slot,scheduling,must,yes,partial,ST; capacity_reservations slot counts - no hours-based capacity
 Capacity planning board with buffers / overrides / booking-% warning,scheduling,should,yes,no,ST
-Job type default duration,scheduling,must,yes,yes,ST; estimatedDurationMinutes per job - no per-type config
+Job type default duration,scheduling,must,yes,yes,ST; job_types.default_duration_minutes feeds estimatedDurationMinutes on office bookings
 Find-availability slot and tech suggester,scheduling,should,yes,partial,FP+ST; /api/admin/dispatch/suggest ranks techs; S07 dialog shows open-window counts per day via /api/admin/requests/availability - no combined slot+tech ranking
 Technician shifts (normal / on-call / time-off) with repeat,scheduling,must,yes,partial,FP+ST; technician_availability weekly hours - no admin edit UI or on-call/time-off
 Non-job events (meetings / PTO) that remove capacity,scheduling,must,yes,no,ST
