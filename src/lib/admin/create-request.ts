@@ -278,6 +278,27 @@ export function windowAvailability(
     : { capacity: 0, available: 0 };
 }
 
+/** "Mon, Nov 2" for a business-tz ISO date. Formatted at UTC noon so the
+ * viewer's own timezone can never shift it onto a neighbouring day. */
+export function formatIsoDayShort(isoDay: string): string {
+  return new Date(`${isoDay}T12:00:00Z`).toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+/** The first day with any open band (the dialog's default pick), else the
+ * first day, else "" when there are no days. */
+export function firstOpenDay(
+  days: readonly string[],
+  windows: ReadonlyArray<{ readonly day: string; readonly available: number }>,
+): string {
+  const open = days.find((d) => windows.some((w) => w.day === d && w.available > 0));
+  return open ?? days[0] ?? "";
+}
+
 // ── Client payload ─────────────────────────────────────────────────────────
 
 /** The dialog's raw form state. Empty string = not chosen. */

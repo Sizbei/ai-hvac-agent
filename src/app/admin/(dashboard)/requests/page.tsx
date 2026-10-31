@@ -2,11 +2,13 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useUrlFilterSync } from '@/hooks/use-url-filter-sync';
-import { AlertCircle, Search } from 'lucide-react';
+import { AlertCircle, Plus, Search } from 'lucide-react';
 import { useAdminRequests } from '@/hooks/use-admin-requests';
 import { RequestFilters } from '@/components/admin/request-filters';
 import { RequestTable } from '@/components/admin/request-table';
 import { RequestDetailSheet } from '@/components/admin/request-detail-sheet';
+import { RequestCreateDialog } from '@/components/admin/request-create-dialog';
+import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Input } from '@/components/ui/input';
 import { PageShell } from '@/components/admin/ui/page-shell';
@@ -26,6 +28,7 @@ export default function AdminRequestsPage() {
   const [debouncedSearch, setDebouncedSearch] = useState<string>('');
   const [page, setPage] = useState<number>(1);
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
 
   useEffect(() => { document.title = 'Requests · Spears Admin'; }, []);
 
@@ -83,7 +86,15 @@ export default function AdminRequestsPage() {
     <PageShell>
       <PageHeader
         title="Service requests"
-        actions={<span className="text-sm text-muted-foreground">{total} total</span>}
+        actions={
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-muted-foreground">{total} total</span>
+            <Button onClick={() => setCreateOpen(true)}>
+              <Plus className="mr-1.5 size-4" />
+              New request
+            </Button>
+          </div>
+        }
       />
 
       {error && (
@@ -142,6 +153,15 @@ export default function AdminRequestsPage() {
         perPage={PER_PAGE}
         onPageChange={setPage}
         showFirstLast
+      />
+
+      <RequestCreateDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        onCreated={(id) => {
+          void refetch();
+          setSelectedRequestId(id);
+        }}
       />
 
       <RequestDetailSheet

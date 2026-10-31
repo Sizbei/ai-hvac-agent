@@ -6,6 +6,8 @@ import {
   scheduleConflictMessage,
   windowAvailability,
   buildCreateRequestPayload,
+  formatIsoDayShort,
+  firstOpenDay,
   BOOKABLE_WINDOWS,
   ISSUE_TYPE_LABELS,
   type CreateRequestDraft,
@@ -235,5 +237,26 @@ describe("labels", () => {
     for (const v of issueTypeValues) expect(ISSUE_TYPE_LABELS[v]).toBeTruthy();
     expect(BOOKABLE_WINDOWS).toEqual(["morning", "afternoon", "evening"]);
     expect(jobTypeValues.length).toBeGreaterThan(0);
+  });
+});
+
+describe("formatIsoDayShort", () => {
+  it("formats a business day without timezone drift", () => {
+    expect(formatIsoDayShort("2026-11-02")).toBe("Mon, Nov 2");
+  });
+});
+
+describe("firstOpenDay", () => {
+  const days = ["2026-11-01", "2026-11-02", "2026-11-03"];
+  it("picks the first day with an open band", () => {
+    const windows = [
+      { day: "2026-11-01", window: "morning", capacity: 0, available: 0 },
+      { day: "2026-11-02", window: "evening", capacity: 2, available: 1 },
+    ];
+    expect(firstOpenDay(days, windows)).toBe("2026-11-02");
+  });
+  it("falls back to the first day, or empty with no days", () => {
+    expect(firstOpenDay(days, [])).toBe("2026-11-01");
+    expect(firstOpenDay([], [])).toBe("");
   });
 });

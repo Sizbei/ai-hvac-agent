@@ -1,0 +1,730 @@
+'use client';
+
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { AlertTriangle, CalendarClock, ChevronDown, Search, UserPlus } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from '@/components/ui/select';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { useAdminTechnicians } from '@/hooks/use-admin-technicians';
+import { issueTypeValues, jobTypeValues, urgencyValues } from '@/lib/ai/extraction-schema';
+import {
+  BOOKABLE_WINDOWS,
+  DESCRIPTION_MAX,
+  ISSUE_TYPE_LABELS,
+  JOB_TYPE_LABELS,
+  URGENCY_LABELS,
+  WINDOW_LABELS,
+  buildCreateRequestPayload,
+  firstOpenDay,
+  formatIsoDayShort,
+  windowAvailability,
+  type CreateRequestDraft,
+} from '@/lib/admin/create-request';
+import type { CustomerListRecord } from '@/lib/admin/crm-types';
+import type { OpenWindow } from '@/lib/admin/types';
+import { cn } from '@/lib/utils';
+
+interface RequestCreateDialogProps {
+  readonly open: boolean;
+  readonly onOpenChange: (open: boolean) => void;
+  /** Called with the new request's id once it is saved. */
+  readonly onCreated: (requestId: string) => void;
+}
+
+type FieldErrors = Partial<Record<'customer' | 'address' | 'issueType' | 'description', string>>;
+
+const UNASSIGNED = '__unassigned__';
+const SEARCH_LIMIT = 5;
+const AVAILABILITY_DAYS = 14;
+
+const EMPTY_DRAFT: CreateRequestDraft = {
+  customerId: null,
+  newCustomer: { name: '', phone: '', email: '' },
+  address: '',
+  issueType: '',
+  jobType: '',
+  urgency: 'medium',
+  description: '',
+  accessNotes: '',
+  scheduleOpen: false,
+  isoDay: '',
+  window: '',
+  technicianId: '',
+};
+
+const ISSUE_ITEMS = issueTypeValues.map((v) => ({ value: v, label: ISSUE_TYPE_LABELS[v] }));
+const JOB_TYPE_ITEMS = [
+  { value: '', label: 'Match the issue' },
+  ...jobTypeValues.map((v) => ({ value: v, label: JOB_TYPE_LABELS[v] })),
+];
+const URGENCY_ITEMS = urgencyValues.map((v) => ({ value: v, label: URGENCY_LABELS[v] }));
+
+function validate(draft: CreateRequestDraft, newCustomerMode: boolean): FieldErrors {
+  const errors: FieldErrors = {};
+  if (!draft.customerId && !(newCustomerMode && draft.newCustomer.name.trim())) {
+    errors.customer = newCustomerMode ? 'Enter the customer’s name.' : 'Pick a customer or add a new one.';
+  }
+  if (!draft.address.trim()) errors.address = 'Enter the service address.';
+  if (!draft.issueType) errors.issueType = 'Pick what the issue is.';
+  if (!draft.description.trim()) errors.description = 'Describe the job.';
+  return errors;
+}
+
+/** Debounced customer search against /api/admin/customers?search=. */
+function useCustomerSearch(query: string, enabled: boolean) {
+  const [results, setResults] = useState<readonly CustomerListRecord[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const q = query.trim();
+  const active = enabled && q.length >= 2;
+
+  useEffect(() => {
+    if (!active) return;
+    let cancelled = false;
+    const handle = setTimeout(async () => {
+      setIsSearching(true);
+      setFailed(false);
+      try {
+        const res = await fetch(`/api/admin/customers?search=${encodeURIComponent(q)}`);
+        const body = await res.json().catch(() => null);
+        if (cancelled) return;
+        if (res.ok && body?.success) {
+          setResults((body.data.customers as CustomerListRecord[]).slice(0, SEARCH_LIMIT));
+        } else {
+          setFailed(true);
+        }
+      } catch {
+        if (!cancelled) setFailed(true);
+      } finally {
+        if (!cancelled) setIsSearching(false);
+      }
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [q, active]);
+
+  return { results: active ? results : [], isSearching: active && isSearching, failed, active };
+}
+
+/** Open bands for the next fortnight, fetched once the schedule panel opens. */
+function useAvailability(enabled: boolean) {
+  const [days, setDays] = useState<readonly string[]>([]);
+  const [windows, setWindows] = useState<readonly OpenWindow[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+    void (async () => {
+      setIsLoading(true);
+      setFailed(false);
+      try {
+        const res = await fetch(`/api/admin/requests/availability?days=${AVAILABILITY_DAYS}`);
+        const body = await res.json().catch(() => null);
+        if (cancelled) return;
+        if (res.ok && body?.success) {
+          setDays(body.data.days as string[]);
+          setWindows(body.data.windows as OpenWindow[]);
+        } else {
+          setFailed(true);
+        }
+      } catch {
+        if (!cancelled) setFailed(true);
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled]);
+
+  return { days, windows, isLoading, failed };
+}
+
+function FieldError({ id, message }: { readonly id: string; readonly message?: string }) {
+  if (!message) return null;
+  return (
+    <p id={id} className="text-xs text-danger">
+      {message}
+    </p>
+  );
+}
+
+export function RequestCreateDialog({ open, onOpenChange, onCreated }: RequestCreateDialogProps) {
+  const [draft, setDraft] = useState<CreateRequestDraft>(EMPTY_DRAFT);
+  const [pickedCustomer, setPickedCustomer] = useState<CustomerListRecord | null>(null);
+  const [newCustomerMode, setNewCustomerMode] = useState(false);
+  const [searchInput, setSearchInput] = useState('');
+  const [errors, setErrors] = useState<FieldErrors>({});
+  const [serverError, setServerError] = useState<string | null>(null);
+  const [conflict, setConflict] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ id: string; message: string } | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+
+  const search = useCustomerSearch(searchInput, open && !pickedCustomer && !newCustomerMode);
+  const availability = useAvailability(open && draft.scheduleOpen);
+  const { technicians } = useAdminTechnicians();
+  const activeTechs = useMemo(() => technicians.filter((t) => t.isActive), [technicians]);
+  const techItems = useMemo(
+    () => [
+      { value: UNASSIGNED, label: 'Unassigned' },
+      ...activeTechs.map((t) => ({ value: t.id, label: t.name })),
+    ],
+    [activeTechs],
+  );
+
+  // Until the dispatcher picks a day, default to the first day with an opening.
+  const selectedDay = draft.isoDay || firstOpenDay(availability.days, availability.windows);
+
+  function patch(p: Partial<CreateRequestDraft>): void {
+    setDraft((d) => ({ ...d, ...p }));
+    setConflict(null);
+  }
+
+  function reset(): void {
+    setDraft(EMPTY_DRAFT);
+    setPickedCustomer(null);
+    setNewCustomerMode(false);
+    setSearchInput('');
+    setErrors({});
+    setServerError(null);
+    setConflict(null);
+    setNotice(null);
+  }
+
+  // Start fresh on each open (not on close, so the form doesn't blank out
+  // while the dialog animates away). State adjustment during render, per
+  // https://react.dev/learn/you-might-not-need-an-effect.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) reset();
+  }
+
+  function close(): void {
+    if (submittingRef.current) return;
+    onOpenChange(false);
+  }
+
+  function pickCustomer(c: CustomerListRecord): void {
+    setPickedCustomer(c);
+    setDraft((d) => ({
+      ...d,
+      customerId: c.id,
+      // Prefill the service address from the customer, without clobbering one
+      // the dispatcher already typed.
+      address: d.address.trim() ? d.address : (c.address ?? ''),
+    }));
+    setErrors((e) => ({ ...e, customer: undefined }));
+  }
+
+  function clearCustomer(): void {
+    setPickedCustomer(null);
+    setDraft((d) => ({ ...d, customerId: null }));
+  }
+
+  async function submit(override: boolean): Promise<void> {
+    setServerError(null);
+    const found = validate(draft, newCustomerMode);
+    setErrors(found);
+    if (Object.keys(found).length > 0) return;
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setIsSubmitting(true);
+    try {
+      const res = await fetch('/api/admin/requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildCreateRequestPayload({ ...draft, isoDay: selectedDay }, override)),
+      });
+      const body = await res.json().catch(() => null);
+      if (res.status === 409 && body?.error?.code === 'SCHEDULE_CONFLICT') {
+        setConflict(body.error.message as string);
+        return;
+      }
+      if (!res.ok || !body?.success) {
+        // Validation copy from the server is written for people; anything
+        // else gets the generic line.
+        setServerError(
+          res.status === 400 || res.status === 422
+            ? (body?.error?.message as string) ?? 'Couldn’t save the request. Please try again.'
+            : 'Couldn’t save the request. Please try again.',
+        );
+        return;
+      }
+      const requestId = body.data.requestId as string;
+      const ref = body.data.referenceNumber as string;
+      if (body.data.schedule?.kind === 'failed') {
+        // The request exists; only the time slot was taken meanwhile.
+        onCreated(requestId);
+        setNotice({
+          id: requestId,
+          message: `Request ${ref} was saved, but that time was just taken. Schedule it from the request.`,
+        });
+        return;
+      }
+      onCreated(requestId);
+      submittingRef.current = false;
+      close();
+    } catch {
+      setServerError('Couldn’t reach the server. Please try again.');
+    } finally {
+      submittingRef.current = false;
+      setIsSubmitting(false);
+    }
+  }
+
+  const customerErrorId = 'new-request-customer-error';
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => (o ? onOpenChange(true) : close())}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>New request</DialogTitle>
+          <DialogDescription>Book a request for a customer. Scheduling is optional.</DialogDescription>
+        </DialogHeader>
+
+        {notice ? (
+          <div className="space-y-3">
+            <InfoLine tone="warning">{notice.message}</InfoLine>
+          </div>
+        ) : (
+          <form
+            id="new-request-form"
+            className="min-w-0 space-y-5"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submit(false);
+            }}
+          >
+            {serverError && (
+              <Alert variant="destructive">
+                <AlertDescription>{serverError}</AlertDescription>
+              </Alert>
+            )}
+
+            {/* ── Customer ── */}
+            <fieldset className="min-w-0 space-y-2">
+              <legend className="mb-2 text-sm font-medium">Customer</legend>
+              {pickedCustomer ? (
+                <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/30 px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">{pickedCustomer.name ?? 'Unnamed customer'}</p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {pickedCustomer.phone ?? pickedCustomer.email ?? 'No contact on file'}
+                    </p>
+                  </div>
+                  <Button type="button" variant="ghost" size="sm" onClick={clearCustomer}>
+                    Change
+                  </Button>
+                </div>
+              ) : newCustomerMode ? (
+                <div className="space-y-3 rounded-md border p-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="nr-name">Name</Label>
+                    <Input
+                      id="nr-name"
+                      value={draft.newCustomer.name}
+                      onChange={(e) => patch({ newCustomer: { ...draft.newCustomer, name: e.target.value } })}
+                      aria-invalid={Boolean(errors.customer)}
+                      aria-describedby={errors.customer ? customerErrorId : undefined}
+                      placeholder="Jordan Smith"
+                      autoComplete="off"
+                    />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="nr-phone">Phone</Label>
+                      <Input
+                        id="nr-phone"
+                        type="tel"
+                        value={draft.newCustomer.phone}
+                        onChange={(e) => patch({ newCustomer: { ...draft.newCustomer, phone: e.target.value } })}
+                        placeholder="(423) 555-0100"
+                        autoComplete="off"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="nr-email">Email</Label>
+                      <Input
+                        id="nr-email"
+                        type="email"
+                        value={draft.newCustomer.email}
+                        onChange={(e) => patch({ newCustomer: { ...draft.newCustomer, email: e.target.value } })}
+                        placeholder="name@example.com"
+                        autoComplete="off"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    A matching phone or email links this to the existing customer.
+                  </p>
+                  <Button type="button" variant="link" size="sm" className="px-0" onClick={() => setNewCustomerMode(false)}>
+                    Search existing customers instead
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      value={searchInput}
+                      onChange={(e) => setSearchInput(e.target.value)}
+                      placeholder="Search by name, phone, email or address"
+                      aria-label="Search customers"
+                      aria-invalid={Boolean(errors.customer)}
+                      aria-describedby={errors.customer ? customerErrorId : undefined}
+                      className="pl-9"
+                      autoFocus
+                    />
+                  </div>
+                  {search.active && (
+                    <div className="rounded-md border" aria-live="polite">
+                      {search.isSearching && search.results.length === 0 ? (
+                        <p className="px-3 py-2 text-sm text-muted-foreground">Searching…</p>
+                      ) : search.failed ? (
+                        <p className="px-3 py-2 text-sm text-danger">Couldn’t search customers. Please try again.</p>
+                      ) : search.results.length === 0 ? (
+                        <p className="px-3 py-2 text-sm text-muted-foreground">
+                          No customers match “{searchInput.trim()}”.
+                        </p>
+                      ) : (
+                        <ul className="divide-y">
+                          {search.results.map((c) => (
+                            <li key={c.id}>
+                              <button
+                                type="button"
+                                onClick={() => pickCustomer(c)}
+                                className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
+                              >
+                                <span className="truncate font-medium">{c.name ?? 'Unnamed customer'}</span>
+                                <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+                                  {c.phone ?? c.email ?? ''}
+                                </span>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setNewCustomerMode(true);
+                      // Carry a typed name over so it isn't retyped.
+                      if (searchInput.trim() && !/\d|@/.test(searchInput)) {
+                        patch({ newCustomer: { ...draft.newCustomer, name: searchInput.trim() } });
+                      }
+                    }}
+                  >
+                    <UserPlus className="mr-1.5 size-3.5" />
+                    New customer
+                  </Button>
+                </div>
+              )}
+              <FieldError id={customerErrorId} message={errors.customer} />
+            </fieldset>
+
+            {/* ── Job ── */}
+            <fieldset className="min-w-0 space-y-3">
+              <legend className="mb-2 text-sm font-medium">Job</legend>
+              <div className="space-y-1.5">
+                <Label htmlFor="nr-address">Service address</Label>
+                <Input
+                  id="nr-address"
+                  value={draft.address}
+                  onChange={(e) => patch({ address: e.target.value })}
+                  aria-invalid={Boolean(errors.address)}
+                  aria-describedby={errors.address ? 'nr-address-error' : undefined}
+                  placeholder="123 Main St, Johnson City, TN 37601"
+                  autoComplete="off"
+                />
+                <FieldError id="nr-address-error" message={errors.address} />
+              </div>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="space-y-1.5">
+                  <Label id="nr-issue-label">Issue</Label>
+                  <Select
+                    items={ISSUE_ITEMS}
+                    value={draft.issueType}
+                    onValueChange={(v) => {
+                      patch({ issueType: v ?? '' });
+                      setErrors((e) => ({ ...e, issueType: undefined }));
+                    }}
+                  >
+                    <SelectTrigger
+                      className="w-full"
+                      aria-labelledby="nr-issue-label"
+                      aria-invalid={Boolean(errors.issueType)}
+                    >
+                      <SelectValue placeholder="Pick one" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ISSUE_ITEMS.map((o) => (
+                        <SelectItem key={o.value} value={o.value}>
+                          {o.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FieldError id="nr-issue-error" message={errors.issueType} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label id="nr-jobtype-label">Job type</Label>
+                  <Select items={JOB_TYPE_ITEMS} value={draft.jobType} onValueChange={(v) => patch({ jobType: v ?? '' })}>
+                    <SelectTrigger className="w-full" aria-labelledby="nr-jobtype-label">
+                      <SelectValue placeholder="Match the issue" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {JOB_TYPE_ITEMS.map((o) => (
+                        <SelectItem key={o.value || 'auto'} value={o.value}>
+                          {o.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label id="nr-urgency-label">Urgency</Label>
+                  <Select items={URGENCY_ITEMS} value={draft.urgency} onValueChange={(v) => patch({ urgency: v ?? 'medium' })}>
+                    <SelectTrigger className="w-full" aria-labelledby="nr-urgency-label">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {URGENCY_ITEMS.map((o) => (
+                        <SelectItem key={o.value} value={o.value}>
+                          {o.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="nr-description">Description</Label>
+                <Textarea
+                  id="nr-description"
+                  rows={3}
+                  maxLength={DESCRIPTION_MAX}
+                  value={draft.description}
+                  onChange={(e) => patch({ description: e.target.value })}
+                  aria-invalid={Boolean(errors.description)}
+                  aria-describedby={errors.description ? 'nr-description-error' : undefined}
+                  placeholder="What the customer reported"
+                />
+                <FieldError id="nr-description-error" message={errors.description} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="nr-access">Access notes</Label>
+                <Input
+                  id="nr-access"
+                  value={draft.accessNotes}
+                  onChange={(e) => patch({ accessNotes: e.target.value })}
+                  placeholder="Gate code, pets, parking…"
+                  maxLength={1000}
+                />
+              </div>
+            </fieldset>
+
+            {/* ── Schedule (optional) ── */}
+            <fieldset className="min-w-0 space-y-3">
+              <legend className="sr-only">Schedule</legend>
+              <button
+                type="button"
+                aria-expanded={draft.scheduleOpen}
+                aria-controls="nr-schedule-panel"
+                onClick={() => patch({ scheduleOpen: !draft.scheduleOpen })}
+                className="flex w-full items-center justify-between rounded-md border px-3 py-2 text-left text-sm hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+              >
+                <span className="flex items-center gap-2 font-medium">
+                  <CalendarClock className="size-4 text-muted-foreground" />
+                  {draft.scheduleOpen ? 'Schedule now' : 'Leave unscheduled'}
+                </span>
+                <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                  {draft.scheduleOpen ? 'Hide' : 'Pick a time'}
+                  <ChevronDown className={cn('size-4 transition-transform', draft.scheduleOpen && 'rotate-180')} />
+                </span>
+              </button>
+
+              {draft.scheduleOpen && (
+                <div id="nr-schedule-panel" className="space-y-3 rounded-md border p-3">
+                  {availability.isLoading && availability.days.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">Loading availability…</p>
+                  ) : availability.failed ? (
+                    <p className="text-sm text-danger">Couldn’t load availability. Please try again.</p>
+                  ) : (
+                    <>
+                      <div className="space-y-1.5">
+                        <p id="nr-day-label" className="text-sm font-medium">Day</p>
+                        <div
+                          role="radiogroup"
+                          aria-labelledby="nr-day-label"
+                          className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1"
+                        >
+                          {availability.days.map((d) => {
+                            const open = availability.windows.some((w) => w.day === d && w.available > 0);
+                            const selected = selectedDay === d;
+                            return (
+                              <button
+                                key={d}
+                                type="button"
+                                role="radio"
+                                aria-checked={selected}
+                                onClick={() => patch({ isoDay: d, window: '' })}
+                                className={cn(
+                                  'shrink-0 rounded-md border px-2.5 py-1.5 text-xs tabular-nums focus-visible:outline-2 focus-visible:outline-ring',
+                                  selected
+                                    ? 'border-primary bg-primary text-primary-foreground'
+                                    : open
+                                      ? 'hover:bg-accent'
+                                      : 'text-muted-foreground',
+                                )}
+                              >
+                                {formatIsoDayShort(d)}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <p id="nr-window-label" className="text-sm font-medium">Arrival window</p>
+                        <div role="radiogroup" aria-labelledby="nr-window-label" className="grid gap-1.5 sm:grid-cols-3">
+                          {BOOKABLE_WINDOWS.map((w) => {
+                            const counts = windowAvailability(availability.windows, selectedDay, w);
+                            const selected = draft.window === w;
+                            return (
+                              <button
+                                key={w}
+                                type="button"
+                                role="radio"
+                                aria-checked={selected}
+                                disabled={!selectedDay}
+                                onClick={() => patch({ window: w })}
+                                className={cn(
+                                  'flex flex-col items-start rounded-md border px-2.5 py-1.5 text-left text-xs focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50',
+                                  selected ? 'border-primary bg-primary/10' : 'hover:bg-accent',
+                                )}
+                              >
+                                <span className="font-medium text-foreground">{WINDOW_LABELS[w]}</span>
+                                <span
+                                  className={cn(
+                                    'tabular-nums',
+                                    counts.available > 0 ? 'text-muted-foreground' : 'text-warning',
+                                  )}
+                                >
+                                  {counts.capacity === 0
+                                    ? 'No technicians working'
+                                    : `${counts.available} of ${counts.capacity} open`}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label id="nr-tech-label">Technician</Label>
+                        <Select
+                          items={techItems}
+                          value={draft.technicianId || UNASSIGNED}
+                          onValueChange={(v) => patch({ technicianId: !v || v === UNASSIGNED ? '' : v })}
+                        >
+                          <SelectTrigger className="w-full sm:w-64" aria-labelledby="nr-tech-label">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {techItems.map((o) => (
+                              <SelectItem key={o.value} value={o.value}>
+                                {o.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      {!draft.window && (
+                        <p className="text-xs text-muted-foreground">Pick a window to schedule, or leave it unscheduled.</p>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+            </fieldset>
+
+            {conflict && (
+              <div role="alert" className="space-y-2 rounded-md border border-warning/40 bg-warning/10 p-3">
+                <p className="flex items-start gap-2 text-sm">
+                  <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
+                  {conflict}
+                </p>
+                <div className="flex gap-2">
+                  <Button type="button" size="sm" onClick={() => void submit(true)} disabled={isSubmitting}>
+                    Schedule anyway?
+                  </Button>
+                  <Button type="button" size="sm" variant="outline" onClick={() => setConflict(null)}>
+                    Pick another time
+                  </Button>
+                </div>
+              </div>
+            )}
+          </form>
+        )}
+
+        <DialogFooter>
+          {notice ? (
+            <Button onClick={close}>Done</Button>
+          ) : (
+            <>
+              <Button type="button" variant="outline" onClick={close}>
+                Cancel
+              </Button>
+              <Button type="submit" form="new-request-form" disabled={isSubmitting || Boolean(conflict)}>
+                {isSubmitting ? 'Saving…' : 'Create request'}
+              </Button>
+            </>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function InfoLine({ tone, children }: { readonly tone: 'warning'; readonly children: React.ReactNode }) {
+  return (
+    <p
+      className={cn(
+        'flex items-start gap-2 rounded-md border p-3 text-sm',
+        tone === 'warning' && 'border-warning/40 bg-warning/10',
+      )}
+    >
+      <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
+      {children}
+    </p>
+  );
+}
+
