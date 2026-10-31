@@ -20,6 +20,7 @@ import {
   type JobType,
 } from "@/lib/ai/extraction-schema";
 import { isRealIsoDate } from "@/lib/admin/calendar-time";
+import { sanitizeName, sanitizePhone, sanitizeEmail } from "@/lib/ai/sanitize-fields";
 
 /** The bands the availability surface reports — what the office can book. */
 export const BOOKABLE_WINDOWS = ["morning", "afternoon", "evening"] as const;
@@ -29,6 +30,9 @@ export const DESCRIPTION_MAX = 2000;
 const ADDRESS_MAX = 500;
 const NAME_MAX = 200;
 const ACCESS_NOTES_MAX = 1000;
+/** How far ahead the office may book (maintenance is often months out). */
+export const SCHEDULE_MAX_DAYS_AHEAD = 365;
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /** Office-facing labels for the issue (symptom) select. */
 export const ISSUE_TYPE_LABELS: Record<IssueType, string> = {
@@ -166,12 +170,37 @@ export interface CreateRequestInput {
   readonly override: boolean;
 }
 
+/** Whether a business-tz ISO day falls in [today − 1, today + max]. Yesterday
+ * is allowed so a late-evening booking across the date line isn't refused. */
+export function isScheduleDayInRange(isoDay: string, todayIso: string): boolean {
+  const diff = (Date.parse(`${isoDay}T00:00:00Z`) - Date.parse(`${todayIso}T00:00:00Z`)) / MS_PER_DAY;
+  return Number.isFinite(diff) && diff >= -1 && diff <= SCHEDULE_MAX_DAYS_AHEAD;
+}
+
+/** The plaintext contact snapshot to encrypt onto the request: the inline
+ * customer's fields passed through the SAME sanitizers upsertCustomerByContact
+ * applies to the customer row, so both copies match. Null for an existing
+ * customer, whose encrypted blobs are copied across as-is. */
+export function requestContactSnapshot(customer: CreateRequestCustomer): {
+  readonly name: string;
+  readonly phone: string | null;
+  readonly email: string | null;
+} | null {
+  if (customer.kind === "existing") return null;
+  return {
+    name: sanitizeName(customer.name),
+    phone: customer.phone ? sanitizePhone(customer.phone) : null,
+    email: customer.email ? sanitizeEmail(customer.email) : null,
+  };
+}
+
 export type ParseResult =
   | { readonly ok: true; readonly data: CreateRequestInput }
   | { readonly ok: false; readonly message: string };
 
-/** Validate + normalise a POST /api/admin/requests body. */
-export function parseCreateRequestBody(raw: unknown): ParseResult {
+/** Validate + normalise a POST /api/admin/requests body. `todayIso` is the
+ * business-tz today, used to bound the schedule day. */
+export function parseCreateRequestBody(raw: unknown, todayIso: string): ParseResult {
   const parsed = bodySchema.safeParse(raw);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
@@ -186,6 +215,12 @@ export function parseCreateRequestBody(raw: unknown): ParseResult {
   const hasInline = Boolean(b.customer);
   if (hasId === hasInline) {
     return { ok: false, message: "Pick a customer or add a new one." };
+  }
+  if (b.schedule && !isScheduleDayInRange(b.schedule.isoDay, todayIso)) {
+    return {
+      ok: false,
+      message: `Pick a date between yesterday and ${SCHEDULE_MAX_DAYS_AHEAD} days from now.`,
+    };
   }
   const customer: CreateRequestCustomer = hasId
     ? { kind: "existing", customerId: b.customerId! }

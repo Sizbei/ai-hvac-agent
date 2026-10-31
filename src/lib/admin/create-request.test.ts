@@ -8,11 +8,17 @@ import {
   buildCreateRequestPayload,
   formatIsoDayShort,
   firstOpenDay,
+  isScheduleDayInRange,
+  requestContactSnapshot,
+  SCHEDULE_MAX_DAYS_AHEAD,
   BOOKABLE_WINDOWS,
   ISSUE_TYPE_LABELS,
   type CreateRequestDraft,
 } from "./create-request";
 import { issueTypeValues, jobTypeValues } from "@/lib/ai/extraction-schema";
+
+const TODAY = "2026-11-01";
+const parse = (raw: unknown) => parseCreateRequestBody(raw, TODAY);
 
 const CUSTOMER_ID = "11111111-1111-4111-8111-111111111111";
 const TECH_ID = "22222222-2222-4222-8222-222222222222";
@@ -30,7 +36,7 @@ function baseBody(overrides: Record<string, unknown> = {}): Record<string, unkno
 
 describe("parseCreateRequestBody", () => {
   it("accepts an existing-customer body and trims text", () => {
-    const r = parseCreateRequestBody(baseBody());
+    const r = parse(baseBody());
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.data.customer).toEqual({ kind: "existing", customerId: CUSTOMER_ID });
@@ -42,7 +48,7 @@ describe("parseCreateRequestBody", () => {
   });
 
   it("accepts an inline customer and blanks empty contact fields to null", () => {
-    const r = parseCreateRequestBody(
+    const r = parse(
       baseBody({
         customerId: undefined,
         customer: { name: " Dana Fox ", phone: "", email: "  " },
@@ -60,42 +66,42 @@ describe("parseCreateRequestBody", () => {
 
   it("rejects when both or neither customer forms are given", () => {
     expect(
-      parseCreateRequestBody(
+      parse(
         baseBody({ customer: { name: "Dana Fox" } }),
       ).ok,
     ).toBe(false);
-    expect(parseCreateRequestBody(baseBody({ customerId: undefined })).ok).toBe(false);
+    expect(parse(baseBody({ customerId: undefined })).ok).toBe(false);
   });
 
   it("rejects a malformed customer id, phone or email", () => {
-    expect(parseCreateRequestBody(baseBody({ customerId: "nope" })).ok).toBe(false);
+    expect(parse(baseBody({ customerId: "nope" })).ok).toBe(false);
     expect(
-      parseCreateRequestBody(
+      parse(
         baseBody({ customerId: undefined, customer: { name: "A B", phone: "123" } }),
       ).ok,
     ).toBe(false);
     expect(
-      parseCreateRequestBody(
+      parse(
         baseBody({ customerId: undefined, customer: { name: "A B", email: "x@" } }),
       ).ok,
     ).toBe(false);
   });
 
   it("requires address and description, caps description at 2000", () => {
-    expect(parseCreateRequestBody(baseBody({ address: "   " })).ok).toBe(false);
-    expect(parseCreateRequestBody(baseBody({ description: "" })).ok).toBe(false);
-    expect(parseCreateRequestBody(baseBody({ description: "x".repeat(2001) })).ok).toBe(false);
-    expect(parseCreateRequestBody(baseBody({ description: "x".repeat(2000) })).ok).toBe(true);
+    expect(parse(baseBody({ address: "   " })).ok).toBe(false);
+    expect(parse(baseBody({ description: "" })).ok).toBe(false);
+    expect(parse(baseBody({ description: "x".repeat(2001) })).ok).toBe(false);
+    expect(parse(baseBody({ description: "x".repeat(2000) })).ok).toBe(true);
   });
 
   it("rejects unknown enums", () => {
-    expect(parseCreateRequestBody(baseBody({ issueType: "fire" })).ok).toBe(false);
-    expect(parseCreateRequestBody(baseBody({ urgency: "now" })).ok).toBe(false);
-    expect(parseCreateRequestBody(baseBody({ jobType: "party" })).ok).toBe(false);
+    expect(parse(baseBody({ issueType: "fire" })).ok).toBe(false);
+    expect(parse(baseBody({ urgency: "now" })).ok).toBe(false);
+    expect(parse(baseBody({ jobType: "party" })).ok).toBe(false);
   });
 
   it("accepts a schedule with a bookable band and rejects impossible dates", () => {
-    const ok = parseCreateRequestBody(
+    const ok = parse(
       baseBody({ schedule: { isoDay: "2026-11-02", window: "morning", technicianId: TECH_ID } }),
     );
     expect(ok.ok).toBe(true);
@@ -107,20 +113,20 @@ describe("parseCreateRequestBody", () => {
       });
     }
     expect(
-      parseCreateRequestBody(baseBody({ schedule: { isoDay: "2026-02-31", window: "morning" } })).ok,
+      parse(baseBody({ schedule: { isoDay: "2026-02-31", window: "morning" } })).ok,
     ).toBe(false);
     expect(
-      parseCreateRequestBody(baseBody({ schedule: { isoDay: "2026-11-02", window: "anytime" } })).ok,
+      parse(baseBody({ schedule: { isoDay: "2026-11-02", window: "anytime" } })).ok,
     ).toBe(false);
     expect(
-      parseCreateRequestBody(
+      parse(
         baseBody({ schedule: { isoDay: "2026-11-02", window: "morning", technicianId: "x" } }),
       ).ok,
     ).toBe(false);
   });
 
   it("returns a human message on failure, never a zod dump", () => {
-    const r = parseCreateRequestBody("not an object");
+    const r = parse("not an object");
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.message).toMatch(/^[A-Z]/);
   });
@@ -226,7 +232,7 @@ describe("buildCreateRequestPayload", () => {
 
   it("round-trips through the server parser", () => {
     const p = buildCreateRequestPayload({ ...draft, scheduleOpen: true }, false);
-    const r = parseCreateRequestBody(p);
+    const r = parse(p);
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.data.schedule).toEqual({ isoDay: "2026-11-02", window: "morning", technicianId: null });
   });
@@ -258,5 +264,41 @@ describe("firstOpenDay", () => {
   it("falls back to the first day, or empty with no days", () => {
     expect(firstOpenDay(days, [])).toBe("2026-11-01");
     expect(firstOpenDay([], [])).toBe("");
+  });
+});
+
+describe("isScheduleDayInRange", () => {
+  it("allows yesterday through the max horizon", () => {
+    expect(isScheduleDayInRange("2026-10-31", TODAY)).toBe(true);
+    expect(isScheduleDayInRange(TODAY, TODAY)).toBe(true);
+    expect(isScheduleDayInRange("2027-11-01", TODAY)).toBe(true);
+  });
+  it("refuses two days back or past the horizon", () => {
+    expect(isScheduleDayInRange("2026-10-30", TODAY)).toBe(false);
+    expect(isScheduleDayInRange("2027-11-02", TODAY)).toBe(false);
+    expect(SCHEDULE_MAX_DAYS_AHEAD).toBe(365);
+  });
+  it("is enforced by the body parser", () => {
+    const r = parse(baseBody({ schedule: { isoDay: "2020-01-01", window: "morning" } }));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.message).toMatch(/date/i);
+  });
+});
+
+describe("requestContactSnapshot", () => {
+  it("sanitises an inline customer the way the customer row is sanitised", () => {
+    expect(
+      requestContactSnapshot({ kind: "inline", name: "dana  o'brien", phone: "423.555.0100", email: "Dana@Example.COM" }),
+    ).toEqual({ name: "Dana O'Brien", phone: "(423) 555-0100", email: "dana@example.com" });
+  });
+  it("keeps absent contact fields null", () => {
+    expect(requestContactSnapshot({ kind: "inline", name: "Dana Fox", phone: null, email: null })).toEqual({
+      name: "Dana Fox",
+      phone: null,
+      email: null,
+    });
+  });
+  it("returns null for an existing customer (blobs are copied, not re-typed)", () => {
+    expect(requestContactSnapshot({ kind: "existing", customerId: "x" })).toBeNull();
   });
 });

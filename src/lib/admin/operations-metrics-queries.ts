@@ -171,6 +171,9 @@ export async function getOperationsMetrics(
     // not be mistaken for the first response. NO lower bound on `at` for the same
     // reason as above: we need the genuine first assignment, so an in-window
     // reassignment of a job first assigned long ago is correctly excluded.
+    // Office bookings (POST /api/admin/requests) record their at-creation
+    // assignment with actor "system", so they are excluded from the human
+    // first-response headline by actor.
     db
       .select({
         serviceRequestId: requestStatusEvents.serviceRequestId,

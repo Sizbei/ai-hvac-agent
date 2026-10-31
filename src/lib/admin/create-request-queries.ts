@@ -9,11 +9,9 @@
  *  - service_requests.session_id is NOT NULL, so the request gets a synthetic
  *    "submitted" session (token `admin-<id>`), the same way membership visits
  *    and the FieldPulse import do.
- *  - The scheduling conflict gate runs BEFORE the insert, so a 409 never leaves
- *    an orphan request behind and the "schedule anyway" retry can't create a
- *    duplicate. placeAndAssignRequest re-checks atomically afterwards; if a
- *    concurrent booking wins that race the request still exists, unscheduled,
- *    and the caller is told so.
+ *  - Step ORDER lives in create-request-flow.ts (pure, unit-tested): refusals
+ *    before the insert, and nothing after the insert can fail the create.
+ *    This module only supplies the real database/integration dependencies.
  *
  * Every read and write is scoped by the session's organizationId.
  */
@@ -33,7 +31,6 @@ import { withTenant } from "@/lib/db/tenant";
 import { encrypt } from "@/lib/crypto";
 import { upsertCustomerByContact } from "@/lib/admin/crm-queries";
 import { resolveAfterHoursConfig, isAfterHours } from "@/lib/admin/after-hours";
-import { arrivalWindowUtcForBusinessDate } from "@/lib/admin/calendar-time";
 import { isWindowWithinAvailability } from "@/lib/admin/availability-coverage";
 import {
   checkScheduleConflict,
@@ -51,41 +48,23 @@ import { pushJobToHcp } from "@/lib/integrations/housecall-pro/job-sync";
 import { pushJobToFieldpulse } from "@/lib/integrations/fieldpulse/job-sync";
 import { syncRequestToCalendar } from "@/lib/integrations/google-calendar/sync";
 import { logger } from "@/lib/logger";
+import { sanitizeAddress } from "@/lib/ai/sanitize-fields";
 import {
   planSchedule,
+  requestContactSnapshot,
   resolveJobType,
   type CreateRequestInput,
   type SchedulePlan,
 } from "./create-request";
+import {
+  runCreateRequest,
+  type ArrivalRange,
+  type CreateAdminRequestResult,
+  type CreateRequestDeps,
+} from "./create-request-flow";
+import { ADMIN_SESSION_TOKEN_PREFIX } from "./stand-in-session";
 
-/** What happened to the optional schedule after the request was written. */
-export type CreateScheduleOutcome =
-  | { readonly kind: "none" }
-  | {
-      readonly kind: "placed";
-      readonly arrivalWindowStart: string;
-      readonly arrivalWindowEnd: string;
-      readonly assignedTo: string | null;
-      readonly overridden: boolean;
-    }
-  /** The request exists but the window could not be booked (lost a race). */
-  | { readonly kind: "failed" };
-
-export type CreateAdminRequestResult =
-  | {
-      readonly ok: true;
-      readonly requestId: string;
-      readonly referenceNumber: string;
-      readonly schedule: CreateScheduleOutcome;
-    }
-  | { readonly ok: false; readonly reason: "customer_not_found" }
-  | { readonly ok: false; readonly reason: "do_not_service" }
-  | { readonly ok: false; readonly reason: "technician_not_found" }
-  | {
-      readonly ok: false;
-      readonly reason: "conflict";
-      readonly detail: ScheduleConflictDetail;
-    };
+export type { CreateAdminRequestResult, CreateScheduleOutcome } from "./create-request-flow";
 
 interface ResolvedCustomer {
   readonly id: string;
@@ -128,15 +107,16 @@ async function resolveCustomer(
   if (!row) return "not_found";
   if (row.doNotService) return "do_not_service";
 
-  // Inline: snapshot exactly what the dispatcher typed (as submit-session does).
-  // Existing: copy the customer's encrypted blobs across (same key + IV-per-
-  // blob, as membership-visit generation does) — no decrypt round-trip.
-  if (input.customer.kind === "inline") {
+  // Inline: what the dispatcher typed, through the same sanitizers the
+  // customer row got. Existing: copy the customer's encrypted blobs across
+  // (same key + IV-per-blob, as membership-visit generation does).
+  const snapshot = requestContactSnapshot(input.customer);
+  if (snapshot) {
     return {
       id: row.id,
-      nameEncrypted: encrypt(input.customer.name),
-      phoneEncrypted: input.customer.phone ? encrypt(input.customer.phone) : null,
-      emailEncrypted: input.customer.email ? encrypt(input.customer.email) : null,
+      nameEncrypted: encrypt(snapshot.name),
+      phoneEncrypted: snapshot.phone ? encrypt(snapshot.phone) : null,
+      emailEncrypted: snapshot.email ? encrypt(snapshot.email) : null,
     };
   }
   return {
@@ -147,14 +127,7 @@ async function resolveCustomer(
   };
 }
 
-/** Pre-insert gate for the assign path: the technician must be an active
- * technician in this org, and (unless overriding) the window must be clear. */
-async function preflightAssign(
-  organizationId: string,
-  plan: Extract<SchedulePlan, { kind: "assign" }>,
-  window: { readonly start: Date; readonly end: Date },
-  override: boolean,
-): Promise<"ok" | "technician_not_found" | ScheduleConflictDetail> {
+async function isActiveTechnician(organizationId: string, technicianId: string): Promise<boolean> {
   const [tech] = await db
     .select({ id: users.id })
     .from(users)
@@ -163,30 +136,33 @@ async function preflightAssign(
         users,
         organizationId,
         and(
-          eq(users.id, plan.technicianId),
+          eq(users.id, technicianId),
           eq(users.role, "technician"),
           eq(users.isActive, true),
         )!,
       ),
     )
     .limit(1);
-  if (!tech) return "technician_not_found";
-  if (override) return "ok";
+  return Boolean(tech);
+}
 
+async function technicianWindowClash(
+  organizationId: string,
+  technicianId: string,
+  plan: Extract<SchedulePlan, { kind: "assign" }>,
+  window: ArrivalRange,
+): Promise<ScheduleConflictDetail | null> {
   const [conflicts, slots] = await Promise.all([
     checkScheduleConflict(
       organizationId,
-      plan.technicianId,
+      technicianId,
       window.start.toISOString(),
       window.end.toISOString(),
     ),
-    getTechnicianAvailability(organizationId, plan.technicianId),
+    getTechnicianAvailability(organizationId, technicianId),
   ]);
   const within = isWindowWithinAvailability(slots, plan.isoDay, plan.window);
-  if (conflicts.length > 0 || !within) {
-    return { conflicts, outsideAvailability: !within };
-  }
-  return "ok";
+  return conflicts.length > 0 || !within ? { conflicts, outsideAvailability: !within } : null;
 }
 
 /** Window without a technician: hold a unit of band capacity so the slot the
@@ -215,62 +191,6 @@ async function holdBandCapacity(
   }
 }
 
-async function applySchedule(
-  organizationId: string,
-  requestId: string,
-  plan: Exclude<SchedulePlan, { kind: "none" }>,
-  window: { readonly start: Date; readonly end: Date },
-  override: boolean,
-  actingUserId: string,
-): Promise<CreateScheduleOutcome> {
-  const result = await placeAndAssignRequest(organizationId, requestId, window, {
-    isoDay: plan.isoDay,
-    window: plan.window,
-    technicianId: plan.kind === "assign" ? plan.technicianId : undefined,
-    override,
-    actingUserId,
-  });
-  if (!result.ok) {
-    logger.warn(
-      { serviceRequestId: requestId, reason: result.reason },
-      "Office booking created the request but could not place it",
-    );
-    return { kind: "failed" };
-  }
-
-  if (plan.kind === "assign") {
-    // placeAndAssignRequest sets the assignee + window and records the
-    // first-assignment status event but leaves status alone; the technician app
-    // lists only assigned/scheduled/... jobs, so flip pending → assigned here
-    // (the same target assignTechnician uses). Guarded on the row still being
-    // pending + this assignee.
-    await db
-      .update(serviceRequests)
-      .set({ status: "assigned", updatedAt: new Date() })
-      .where(
-        withTenant(
-          serviceRequests,
-          organizationId,
-          and(
-            eq(serviceRequests.id, requestId),
-            eq(serviceRequests.status, "pending"),
-            eq(serviceRequests.assignedTo, plan.technicianId),
-          )!,
-        ),
-      );
-  } else {
-    await holdBandCapacity(organizationId, requestId, plan.isoDay, plan.window);
-  }
-
-  return {
-    kind: "placed",
-    arrivalWindowStart: result.arrivalWindowStart,
-    arrivalWindowEnd: result.arrivalWindowEnd,
-    assignedTo: result.assignedTo,
-    overridden: result.overriddenConflicts !== null,
-  };
-}
-
 export async function createAdminRequest(params: {
   readonly organizationId: string;
   readonly userId: string;
@@ -279,130 +199,175 @@ export async function createAdminRequest(params: {
 }): Promise<CreateAdminRequestResult> {
   const { organizationId, userId, input, ipAddress } = params;
   const plan = planSchedule(input.schedule);
-  const window =
-    plan.kind === "none"
-      ? null
-      : arrivalWindowUtcForBusinessDate(plan.isoDay, plan.window);
-
-  // Gate the technician + conflicts BEFORE anything is written.
-  if (plan.kind === "assign" && window) {
-    const gate = await preflightAssign(organizationId, plan, window, input.override);
-    if (gate === "technician_not_found") {
-      return { ok: false, reason: "technician_not_found" };
-    }
-    if (gate !== "ok") return { ok: false, reason: "conflict", detail: gate };
-  }
-
-  const settingsPromise = db
-    .select({ afterHoursConfig: organizationSettings.afterHoursConfig })
-    .from(organizationSettings)
-    .where(eq(organizationSettings.organizationId, organizationId))
-    .limit(1);
-
-  const customer = await resolveCustomer(organizationId, input);
-  if (customer === "not_found") return { ok: false, reason: "customer_not_found" };
-  if (customer === "do_not_service") return { ok: false, reason: "do_not_service" };
-
-  const [settingsRow] = await settingsPromise;
-  const afterHours = isAfterHours(
-    window?.start ?? new Date(),
-    resolveAfterHoursConfig(settingsRow?.afterHoursConfig ?? null),
-  );
-
-  const sessionId = randomUUID();
-  const requestId = randomUUID();
-  const referenceNumber = generateReferenceNumber();
   const jobType = resolveJobType(input.issueType, input.jobType);
-  const now = new Date();
 
-  // One atomic neon-http batch (no db.transaction on neon-http): synthetic
-  // session + request + audit row commit together or not at all.
-  await db.batch([
-    db.insert(customerSessions).values({
-      id: sessionId,
-      organizationId,
-      token: `admin-${sessionId}`,
-      status: "submitted",
-      channel: "web",
-      customerId: customer.id,
-      createdAt: now,
-      updatedAt: now,
-    }),
-    db.insert(serviceRequests).values({
-      id: requestId,
-      organizationId,
-      sessionId,
-      customerId: customer.id,
-      status: "pending",
-      issueType: input.issueType,
-      jobType,
-      urgency: input.urgency,
-      description: input.description,
-      customerNameEncrypted: customer.nameEncrypted,
-      customerPhoneEncrypted: customer.phoneEncrypted,
-      customerEmailEncrypted: customer.emailEncrypted,
-      addressEncrypted: encrypt(input.address),
-      referenceNumber,
-      systemType: input.systemType,
-      accessNotes: input.accessNotes,
-      preferredWindow: input.preferredWindow,
-      isAfterHours: afterHours,
-    }),
-    db.insert(auditLog).values({
-      organizationId,
-      userId,
-      actorType: "human",
-      action: "service_request_created",
-      entity: "service_request",
-      entityId: requestId,
-      // ids / enums only — never customer PII.
-      details: JSON.stringify({
-        source: "admin",
-        customerId: customer.id,
-        customerMode: input.customer.kind,
-        issueType: input.issueType,
-        jobType,
-        urgency: input.urgency,
-        schedule: plan.kind,
-        technicianId: plan.kind === "assign" ? plan.technicianId : null,
-        override: input.override,
+  const deps: CreateRequestDeps<ResolvedCustomer> = {
+    verifyTechnician: (technicianId) => isActiveTechnician(organizationId, technicianId),
+    checkTechnicianWindow: (technicianId, assignPlan, window) =>
+      technicianWindowClash(organizationId, technicianId, assignPlan, window),
+    resolveCustomer: () => resolveCustomer(organizationId, input),
+
+    async insertRequest(customer, window) {
+      const [settingsRow] = await db
+        .select({ afterHoursConfig: organizationSettings.afterHoursConfig })
+        .from(organizationSettings)
+        .where(eq(organizationSettings.organizationId, organizationId))
+        .limit(1);
+      const afterHours = isAfterHours(
+        window?.start ?? new Date(),
+        resolveAfterHoursConfig(settingsRow?.afterHoursConfig ?? null),
+      );
+      const sessionId = randomUUID();
+      const requestId = randomUUID();
+      const referenceNumber = generateReferenceNumber();
+      const now = new Date();
+
+      // One atomic neon-http batch (no db.transaction on neon-http): stand-in
+      // session + request + audit row commit together or not at all.
+      await db.batch([
+        db.insert(customerSessions).values({
+          id: sessionId,
+          organizationId,
+          token: `${ADMIN_SESSION_TOKEN_PREFIX}${sessionId}`,
+          status: "submitted",
+          channel: "web",
+          customerId: customer.id,
+          createdAt: now,
+          updatedAt: now,
+        }),
+        db.insert(serviceRequests).values({
+          id: requestId,
+          organizationId,
+          sessionId,
+          customerId: customer.id,
+          status: "pending",
+          issueType: input.issueType,
+          jobType,
+          urgency: input.urgency,
+          description: input.description,
+          customerNameEncrypted: customer.nameEncrypted,
+          customerPhoneEncrypted: customer.phoneEncrypted,
+          customerEmailEncrypted: customer.emailEncrypted,
+          addressEncrypted: encrypt(sanitizeAddress(input.address)),
+          referenceNumber,
+          systemType: input.systemType,
+          accessNotes: input.accessNotes,
+          preferredWindow: input.preferredWindow,
+          isAfterHours: afterHours,
+        }),
+        db.insert(auditLog).values({
+          organizationId,
+          userId,
+          actorType: "human",
+          action: "service_request_created",
+          entity: "service_request",
+          entityId: requestId,
+          // ids / enums only — never customer PII.
+          details: JSON.stringify({
+            source: "admin",
+            customerId: customer.id,
+            customerMode: input.customer.kind,
+            issueType: input.issueType,
+            jobType,
+            urgency: input.urgency,
+            schedule: plan.kind,
+            technicianId: plan.kind === "assign" ? plan.technicianId : null,
+            override: input.override,
+          }),
+          ipAddress,
+        }),
+      ]);
+      return { requestId, referenceNumber };
+    },
+
+    // Initial status event, awaited (best-effort; never throws) so it is
+    // ordered before the placement's "assigned" event.
+    recordCreated: (requestId) =>
+      recordStatusEvent({
+        organizationId,
+        serviceRequestId: requestId,
+        fromStatus: null,
+        toStatus: "pending",
+        actorType: "human",
+        actorId: userId,
       }),
-      ipAddress,
-    }),
-  ]);
 
-  // Initial status event, awaited (best-effort; never throws) so it is ordered
-  // before the placement's "assigned" event for dwell-time KPIs.
-  await recordStatusEvent({
-    organizationId,
-    serviceRequestId: requestId,
-    fromStatus: null,
-    toStatus: "pending",
-    actorType: "human",
-    actorId: userId,
-  });
+    async place(requestId, placedPlan, window, override) {
+      const result = await placeAndAssignRequest(organizationId, requestId, window, {
+        isoDay: placedPlan.isoDay,
+        window: placedPlan.window,
+        technicianId: placedPlan.kind === "assign" ? placedPlan.technicianId : undefined,
+        override,
+        // The assignment is part of CREATING the request, not a dispatcher
+        // responding to a waiting one: tag its status event "system" so the
+        // human first-response KPI doesn't log a ~0s response per booking.
+        // (No actingUserId either: a brand-new request has no autopilot
+        // decision row for override telemetry to label.)
+        assignmentActor: "system",
+      });
+      if (!result.ok) {
+        logger.warn(
+          { serviceRequestId: requestId, reason: result.reason },
+          "Office booking created the request but could not place it",
+        );
+        return { ok: false, reason: result.reason };
+      }
+      return {
+        ok: true,
+        arrivalWindowStart: result.arrivalWindowStart,
+        arrivalWindowEnd: result.arrivalWindowEnd,
+        assignedTo: result.assignedTo,
+        overridden: result.overriddenConflicts !== null,
+      };
+    },
 
-  const schedule: CreateScheduleOutcome =
-    plan.kind === "none" || !window
-      ? { kind: "none" }
-      : await applySchedule(organizationId, requestId, plan, window, input.override, userId);
+    // placeAndAssignRequest sets assignee + window but leaves status alone; the
+    // technician app lists only assigned/scheduled/... jobs, so flip pending →
+    // assigned (assignTechnician's target), guarded on pending + this assignee.
+    async markAssigned(requestId, technicianId) {
+      await db
+        .update(serviceRequests)
+        .set({ status: "assigned", updatedAt: new Date() })
+        .where(
+          withTenant(
+            serviceRequests,
+            organizationId,
+            and(
+              eq(serviceRequests.id, requestId),
+              eq(serviceRequests.status, "pending"),
+              eq(serviceRequests.assignedTo, technicianId),
+            )!,
+          ),
+        );
+    },
 
-  // Background mirrors, as on the intake path. All degrade-safe no-ops when an
-  // integration isn't connected.
-  after(() =>
-    persistJobLocation({
-      organizationId,
-      customerId: customer.id,
-      serviceRequestId: requestId,
-      address: input.address,
-    }),
-  );
-  after(() => pushJobToHcp(organizationId, requestId));
-  after(() => pushJobToFieldpulse(organizationId, requestId));
-  if (schedule.kind === "placed") {
-    after(() => syncRequestToCalendar(organizationId, requestId));
-  }
+    reserveCapacity: (requestId, isoDay, window) =>
+      holdBandCapacity(organizationId, requestId, isoDay, window),
 
-  logger.info({ serviceRequestId: requestId, referenceNumber }, "Office request created");
-  return { ok: true, requestId, referenceNumber, schedule };
+    // Background mirrors, as on the intake path. Degrade-safe no-ops when an
+    // integration isn't connected.
+    scheduleBackground(requestId, customer, placed) {
+      after(() =>
+        persistJobLocation({
+          organizationId,
+          customerId: customer.id,
+          serviceRequestId: requestId,
+          address: input.address,
+        }),
+      );
+      after(() => pushJobToHcp(organizationId, requestId));
+      after(() => pushJobToFieldpulse(organizationId, requestId));
+      if (placed) after(() => syncRequestToCalendar(organizationId, requestId));
+      logger.info({ serviceRequestId: requestId }, "Office request created");
+    },
+
+    logError(error, context) {
+      logger.error(
+        { error, ...context },
+        "Office booking step failed after the request was saved (request kept)",
+      );
+    },
+  };
+
+  return runCreateRequest(deps, input);
 }

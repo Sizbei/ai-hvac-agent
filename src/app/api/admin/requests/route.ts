@@ -5,6 +5,7 @@ import { successResponse, errorResponse, readJsonBody } from "@/lib/api-response
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
 import { clientIp } from "@/lib/http/client-ip";
+import { businessIsoDate } from "@/lib/admin/calendar-time";
 import type { RequestSortKey } from "@/lib/admin/types";
 
 export async function GET(request: NextRequest) {
@@ -81,7 +82,10 @@ export async function GET(request: NextRequest) {
  * With a technician, the conflict gate runs before anything is written: a clash
  * returns 409 SCHEDULE_CONFLICT with the conflict detail and NO request is
  * created; resubmitting with `override: true` books it anyway. Returns 201
- * `{ request, schedule }` where `request` is shaped like a getRequests row.
+ * `{ request, requestId, referenceNumber, schedule }`; `request` is a
+ * getRequests-shaped row or null if the read-back failed. Once the request is
+ * saved the response is always 201 — a scheduling failure after the save comes
+ * back as `schedule.kind === "failed"`, never a 500.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -110,7 +114,7 @@ export async function POST(request: NextRequest) {
         import("@/lib/admin/create-request"),
         import("@/lib/admin/create-request-queries"),
       ]);
-    const parsed = parseCreateRequestBody(bodyResult.data);
+    const parsed = parseCreateRequestBody(bodyResult.data, businessIsoDate(new Date()));
     if (!parsed.ok) {
       return errorResponse(parsed.message, "VALIDATION_ERROR", 400);
     }
@@ -151,15 +155,25 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Shape the response like a list row so the page can show it directly.
-    const { requests } = await getRequests(session.organizationId, {
+    // Shape the response like a list row so a caller can show it directly.
+    // Best-effort: the request is already saved, so a failed read-back must
+    // not turn into an error the office would answer by booking it again.
+    const listRow = await getRequests(session.organizationId, {
       search: result.referenceNumber,
       limit: 1,
-    });
+    })
+      .then(({ requests }) => requests[0] ?? null)
+      .catch((readError: unknown) => {
+        logger.error(
+          { error: readError, requestId: result.requestId },
+          "Office request saved but the list-row read-back failed",
+        );
+        return null;
+      });
 
     return successResponse(
       {
-        request: requests[0] ?? null,
+        request: listRow,
         requestId: result.requestId,
         referenceNumber: result.referenceNumber,
         schedule: result.schedule,
