@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { nextTagIds, isStaleResponse } from "./tag-picker-logic";
+import { nextTagIds, isStaleResponse, isPickerReady } from "./tag-picker-logic";
 
 describe("nextTagIds", () => {
   it("keeps unresolved ids when toggling another one", () => {
@@ -25,5 +25,16 @@ describe("isStaleResponse", () => {
   it("is stale only when a newer sequence exists", () => {
     expect(isStaleResponse(1, 2)).toBe(true);
     expect(isStaleResponse(2, 2)).toBe(false);
+  });
+});
+
+describe("isPickerReady", () => {
+  it("controlled pickers are always ready", () => {
+    expect(isPickerReady(false, false, false)).toBe(true);
+  });
+  it("bound pickers wait for initial tags or a finished load", () => {
+    expect(isPickerReady(true, false, false)).toBe(false);
+    expect(isPickerReady(true, true, false)).toBe(true);
+    expect(isPickerReady(true, false, true)).toBe(true);
   });
 });

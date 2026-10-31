@@ -32,6 +32,9 @@ import {
 import type { ContactRecord } from "@/lib/admin/contact-types";
 
 const SAVE_COPY = "Couldn't save the contact. Please try again.";
+const INVALID_COPY =
+  "Check the contact's name, phone and email, then try again.";
+const LIMIT_COPY = "A customer can have at most 20 contacts.";
 const REMOVE_COPY = "Couldn't remove the contact. Please try again.";
 const NO_LOCATION = "__none__";
 
@@ -135,13 +138,12 @@ function ContactDialog({
       });
       if (!res.ok) {
         const json = (await res.json().catch(() => null)) as {
-          error?: { message?: string };
+          error?: { code?: string };
         } | null;
-        setError(
-          res.status === 400 && json?.error?.message
-            ? json.error.message
-            : SAVE_COPY,
-        );
+        if (res.status === 400) setError(INVALID_COPY);
+        else if (res.status === 409 && json?.error?.code === "LIMIT_REACHED")
+          setError(LIMIT_COPY);
+        else setError(SAVE_COPY);
         return;
       }
       onOpenChange(false);

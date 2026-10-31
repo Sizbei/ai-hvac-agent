@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, X, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { nextTagIds, isStaleResponse } from '@/lib/admin/tag-picker-logic';
+import { nextTagIds, isStaleResponse, isPickerReady } from '@/lib/admin/tag-picker-logic';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -70,6 +70,8 @@ export function TagChipPicker({
   const [error, setError] = useState<string | null>(null);
   const [inflight, setInflight] = useState(0);
   const seqRef = useRef(0);
+  const [loaded, setLoaded] = useState(false);
+  const ready = isPickerReady(bound, initialTags !== undefined, loaded);
   const saving = inflight > 0;
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
@@ -90,8 +92,10 @@ export function TagChipPicker({
     let cancelled = false;
     void fetchTags(`/api/admin/tags/${entity}/${entityId}`).then((tags) => {
       if (cancelled) return;
-      if (tags) setBoundTags(tags);
-      else setError(SAVE_COPY);
+      if (tags) {
+        if (seqRef.current === 0) setBoundTags(tags);
+        setLoaded(true);
+      } else setError(SAVE_COPY);
     });
     return () => {
       cancelled = true;
@@ -151,12 +155,13 @@ export function TagChipPicker({
   }
 
   function toggle(id: string): void {
+    if (!ready) return;
     void commit(nextTagIds(currentIds, id));
   }
 
   async function createTag(): Promise<void> {
     const name = newName.trim();
-    if (!name) return;
+    if (!name || !ready) return;
     setError(null);
     try {
       const res = await fetch('/api/admin/settings/tags', {
@@ -209,6 +214,7 @@ export function TagChipPicker({
             <button
               type="button"
               aria-label={`Remove tag ${tag.name}`}
+              disabled={!ready}
               className="-mr-1 rounded-sm p-0.5 hover:bg-black/10"
               onClick={() => toggle(tag.id)}
             >
@@ -228,6 +234,7 @@ export function TagChipPicker({
             <button
               type="button"
               aria-label="Remove tag"
+              disabled={!ready}
               className="-mr-1 rounded-sm p-0.5 hover:bg-black/10"
               onClick={() => toggle(id)}
             >
@@ -237,7 +244,7 @@ export function TagChipPicker({
         ))}
         <DropdownMenu>
           <DropdownMenuTrigger
-            render={<Button variant="ghost" size="xs" aria-label="Add tag" />}
+            render={<Button variant="ghost" size="xs" aria-label="Add tag" disabled={!ready} />}
           >
             <Plus className="size-3" />
             Add tag

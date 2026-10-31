@@ -9,3 +9,8 @@ export function nextTagIds(current: readonly string[], id: string): readonly str
 export function isStaleResponse(seq: number, latest: number): boolean {
   return seq !== latest;
 }
+
+/** Bound pickers may only change tags once their current set is known (initial tags or a finished load). */
+export function isPickerReady(bound: boolean, hasInitialTags: boolean, loaded: boolean): boolean {
+  return !bound || hasInitialTags || loaded;
+}
