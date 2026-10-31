@@ -139,6 +139,10 @@ const bodySchema = z.object({
   preferredWindow: z.enum(preferredWindowValues).optional().nullable(),
   schedule: scheduleSchema.optional().nullable(),
   override: z.boolean().optional(),
+  jobTypeId: z.uuid("Job type isn't valid.").optional(),
+  contactId: z.uuid("Contact isn't valid.").optional(),
+  locationId: z.uuid("Location isn't valid.").optional(),
+  tagTypeIds: z.array(z.uuid("Tag isn't valid.")).max(10, "Pick up to 10 tags.").optional(),
 });
 
 export type CreateRequestCustomer =
@@ -168,6 +172,10 @@ export interface CreateRequestInput {
   readonly preferredWindow: (typeof preferredWindowValues)[number] | null;
   readonly schedule: CreateRequestSchedule | null;
   readonly override: boolean;
+  readonly jobTypeId: string | null;
+  readonly contactId: string | null;
+  readonly locationId: string | null;
+  readonly tagTypeIds: readonly string[];
 }
 
 /** Whether a business-tz ISO day falls in [today − 1, today + max]. Yesterday
@@ -216,6 +224,9 @@ export function parseCreateRequestBody(raw: unknown, todayIso: string): ParseRes
   if (hasId === hasInline) {
     return { ok: false, message: "Pick a customer or add a new one." };
   }
+  if (!hasId && (b.contactId || b.locationId)) {
+    return { ok: false, message: "Pick an existing customer to choose a contact or location." };
+  }
   if (b.schedule && !isScheduleDayInRange(b.schedule.isoDay, todayIso)) {
     return {
       ok: false,
@@ -244,6 +255,10 @@ export function parseCreateRequestBody(raw: unknown, todayIso: string): ParseRes
       preferredWindow: b.preferredWindow ?? null,
       schedule: b.schedule ?? null,
       override: b.override === true,
+      jobTypeId: b.jobTypeId ?? null,
+      contactId: b.contactId ?? null,
+      locationId: b.locationId ?? null,
+      tagTypeIds: b.tagTypeIds ?? [],
     },
   };
 }
@@ -350,6 +365,10 @@ export interface CreateRequestDraft {
   readonly isoDay: string;
   readonly window: string;
   readonly technicianId: string;
+  readonly jobTypeId?: string;
+  readonly contactId?: string;
+  readonly locationId?: string;
+  readonly tagTypeIds?: readonly string[];
 }
 
 export interface CreateRequestPayload {
@@ -363,6 +382,10 @@ export interface CreateRequestPayload {
   readonly accessNotes?: string;
   readonly schedule?: { readonly isoDay: string; readonly window: string; readonly technicianId?: string };
   readonly override?: boolean;
+  readonly jobTypeId?: string;
+  readonly contactId?: string;
+  readonly locationId?: string;
+  readonly tagTypeIds?: readonly string[];
 }
 
 /** Build the POST body from the dialog state, dropping blanks. */
@@ -387,7 +410,14 @@ export function buildCreateRequestPayload(
         }),
     address: t(draft.address),
     issueType: draft.issueType,
-    ...(draft.jobType ? { jobType: draft.jobType } : {}),
+    ...(draft.jobTypeId
+      ? { jobTypeId: draft.jobTypeId }
+      : draft.jobType
+        ? { jobType: draft.jobType }
+        : {}),
+    ...(draft.customerId && draft.contactId ? { contactId: draft.contactId } : {}),
+    ...(draft.customerId && draft.locationId ? { locationId: draft.locationId } : {}),
+    ...(draft.tagTypeIds && draft.tagTypeIds.length > 0 ? { tagTypeIds: draft.tagTypeIds } : {}),
     urgency: draft.urgency,
     description: t(draft.description),
     ...(accessNotes ? { accessNotes } : {}),

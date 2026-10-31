@@ -43,6 +43,10 @@ export type CreateAdminRequestResult =
   | { readonly ok: false; readonly reason: "customer_not_found" }
   | { readonly ok: false; readonly reason: "do_not_service" }
   | { readonly ok: false; readonly reason: "technician_not_found" }
+  | { readonly ok: false; readonly reason: "job_type_not_found" }
+  | { readonly ok: false; readonly reason: "contact_not_owned" }
+  | { readonly ok: false; readonly reason: "location_not_owned" }
+  | { readonly ok: false; readonly reason: "unknown_tag" }
   | {
       readonly ok: false;
       readonly reason: "conflict";

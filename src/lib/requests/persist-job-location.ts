@@ -18,7 +18,7 @@
  * committed. A missing coordinate simply means the map falls back to on-demand
  * geocoding, exactly as it does today.
  */
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { serviceRequests } from "@/lib/db/schema";
 import { fetchAddressSuggestions } from "@/lib/address/photon";
@@ -58,7 +58,7 @@ export async function persistJobLocation(params: {
     });
 
     // Link the location to the request (tenant-scoped). Idempotent — a re-run
-    // sets the same id.
+    // sets the same id. Never overwrites a location the office already chose.
     await db
       .update(serviceRequests)
       .set({ locationId, updatedAt: new Date() })
@@ -66,6 +66,7 @@ export async function persistJobLocation(params: {
         and(
           eq(serviceRequests.id, serviceRequestId),
           eq(serviceRequests.organizationId, organizationId),
+          isNull(serviceRequests.locationId),
         ),
       );
   } catch (err) {

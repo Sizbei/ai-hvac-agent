@@ -142,6 +142,22 @@ export async function POST(request: NextRequest) {
             "TECHNICIAN_NOT_FOUND",
             404,
           );
+        case "job_type_not_found":
+          return errorResponse("That job type isn't available.", "JOB_TYPE_NOT_FOUND", 400);
+        case "contact_not_owned":
+          return errorResponse(
+            "That contact doesn't belong to this customer.",
+            "CONTACT_NOT_OWNED",
+            400,
+          );
+        case "location_not_owned":
+          return errorResponse(
+            "That location doesn't belong to this customer.",
+            "LOCATION_NOT_OWNED",
+            400,
+          );
+        case "unknown_tag":
+          return errorResponse("One of those tags doesn't exist.", "UNKNOWN_TAG", 400);
         case "conflict":
           return errorResponse(
             scheduleConflictMessage({

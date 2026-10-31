@@ -302,3 +302,22 @@ describe("requestContactSnapshot", () => {
     expect(requestContactSnapshot({ kind: "existing", customerId: "x" })).toBeNull();
   });
 });
+
+describe("M0b fields", () => {
+  const JT = "22222222-2222-4222-8222-222222222222", CT = "33333333-3333-4333-8333-333333333333", LOC = "44444444-4444-4444-8444-444444444444", TAG = "55555555-5555-4555-8555-555555555555";
+  it("accepts jobTypeId, contactId, locationId and tags with an existing customer", () => {
+    const r = parse({ ...baseBody(), jobTypeId: JT, contactId: CT, locationId: LOC, tagTypeIds: [TAG] });
+    expect(r.ok).toBe(true);
+    if (r.ok) { expect(r.data.jobTypeId).toBe(JT); expect(r.data.contactId).toBe(CT); expect(r.data.locationId).toBe(LOC); expect(r.data.tagTypeIds).toEqual([TAG]); }
+  });
+  it("rejects contactId/locationId with an inline customer", () => {
+    const body = { ...baseBody(), customerId: undefined, customer: { name: "New Person" }, contactId: CT };
+    const r = parse(body);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.message).toMatch(/existing customer/i);
+  });
+  it("rejects more than 10 tags", () => {
+    const r = parse({ ...baseBody(), tagTypeIds: Array.from({ length: 11 }, (_, i) => `66666666-6666-4666-8666-${String(i).padStart(12, "0")}`) });
+    expect(r.ok).toBe(false);
+  });
+});

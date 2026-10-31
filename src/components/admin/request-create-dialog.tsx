@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { TagChipPicker } from '@/components/admin/tag-chip-picker';
 import { useAdminTechnicians } from '@/hooks/use-admin-technicians';
 import { issueTypeValues, jobTypeValues, urgencyValues } from '@/lib/ai/extraction-schema';
 import {
@@ -38,6 +39,9 @@ import {
   type CreateRequestDraft,
 } from '@/lib/admin/create-request';
 import type { CustomerListRecord } from '@/lib/admin/crm-types';
+import type { ContactRecord } from '@/lib/admin/contact-types';
+import type { JobTypeRecord } from '@/lib/admin/job-type-types';
+import type { CustomerLocation } from '@/lib/admin/location-queries';
 import type { OpenWindow } from '@/lib/admin/types';
 import { cn } from '@/lib/utils';
 
@@ -51,6 +55,7 @@ interface RequestCreateDialogProps {
 type FieldErrors = Partial<Record<'customer' | 'address' | 'issueType' | 'description', string>>;
 
 const UNASSIGNED = '__unassigned__';
+const NO_CONTACT = '__no_contact__';
 const SEARCH_LIMIT = 5;
 const AVAILABILITY_DAYS = 14;
 
@@ -60,6 +65,10 @@ const EMPTY_DRAFT: CreateRequestDraft = {
   address: '',
   issueType: '',
   jobType: '',
+  jobTypeId: '',
+  contactId: '',
+  locationId: '',
+  tagTypeIds: [],
   urgency: 'medium',
   description: '',
   accessNotes: '',
@@ -125,6 +134,69 @@ function useCustomerSearch(query: string, enabled: boolean) {
   return { results: active ? results : [], isSearching: active && isSearching, failed, active };
 }
 
+/** GET a list out of the `{ success, data }` envelope; null on any failure. */
+async function fetchList<T>(url: string, key: string): Promise<readonly T[] | null> {
+  try {
+    const res = await fetch(url);
+    const body = await res.json().catch(() => null);
+    if (!res.ok || !body?.success) return null;
+    return (body.data[key] as T[]) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Active job types, fetched each time the dialog opens. */
+function useJobTypes(open: boolean) {
+  const [jobTypes, setJobTypes] = useState<readonly JobTypeRecord[]>([]);
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void fetchList<JobTypeRecord>('/api/admin/settings/job-types?active=1', 'jobTypes').then((list) => {
+      if (!cancelled && list) setJobTypes(list);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+  return jobTypes;
+}
+
+/** Contacts + service locations of the picked customer. */
+function useCustomerExtras(
+  customerId: string | null,
+  onLocations: (locations: readonly CustomerLocation[]) => void,
+) {
+  const [loaded, setLoaded] = useState<{
+    readonly customerId: string;
+    readonly contacts: readonly ContactRecord[];
+    readonly locations: readonly CustomerLocation[];
+  } | null>(null);
+  const onLocationsRef = useRef(onLocations);
+  useEffect(() => {
+    onLocationsRef.current = onLocations;
+  });
+
+  useEffect(() => {
+    if (!customerId) return;
+    let cancelled = false;
+    void Promise.all([
+      fetchList<ContactRecord>(`/api/admin/customers/${customerId}/contacts`, 'contacts'),
+      fetchList<CustomerLocation>(`/api/admin/customers/${customerId}/locations`, 'locations'),
+    ]).then(([contacts, locations]) => {
+      if (cancelled) return;
+      setLoaded({ customerId, contacts: contacts ?? [], locations: locations ?? [] });
+      if (locations) onLocationsRef.current(locations);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [customerId]);
+
+  const fresh = loaded && loaded.customerId === customerId ? loaded : null;
+  return { contacts: fresh?.contacts ?? [], locations: fresh?.locations ?? [] };
+}
+
 /** Open bands for the next fortnight, fetched once the schedule panel opens. */
 function useAvailability(enabled: boolean) {
   const [days, setDays] = useState<readonly string[]>([]);
@@ -185,6 +257,45 @@ export function RequestCreateDialog({ open, onOpenChange, onCreated }: RequestCr
 
   const search = useCustomerSearch(searchInput, open && !pickedCustomer && !newCustomerMode);
   const availability = useAvailability(open && draft.scheduleOpen);
+  const [urgencyTouched, setUrgencyTouched] = useState(false);
+  const jobTypes = useJobTypes(open);
+  const extras = useCustomerExtras(draft.customerId, (locations) => {
+    // Default the service location to the customer's primary one. Its address
+    // replaces the form's only while that is empty or still the customer's
+    // prefilled address, so a typed address is never clobbered and the saved
+    // location always matches the address shown.
+    const primary = locations.find((l) => l.isPrimary);
+    if (!primary) return;
+    const prefilled = (pickedCustomer?.address ?? '').trim();
+    setDraft((d) => {
+      if (d.locationId) return d;
+      const untouched = !d.address.trim() || d.address.trim() === prefilled;
+      if (!untouched) return d;
+      return { ...d, locationId: primary.id, address: primary.address ?? d.address };
+    });
+  });
+  const jobTypeItems = useMemo(
+    () => [
+      { value: '', label: 'Auto (match the issue)' },
+      ...jobTypes.map((jt) => ({ value: jt.id, label: jt.name })),
+    ],
+    [jobTypes],
+  );
+  const contactItems = useMemo(
+    () => [
+      { value: NO_CONTACT, label: 'No specific contact' },
+      ...extras.contacts.map((c) => ({ value: c.id, label: c.role ? `${c.name} (${c.role})` : c.name })),
+    ],
+    [extras.contacts],
+  );
+  const locationItems = useMemo(
+    () =>
+      extras.locations.map((l) => ({
+        value: l.id,
+        label: [l.label, l.address].filter(Boolean).join(' · ') || 'Unnamed location',
+      })),
+    [extras.locations],
+  );
   const { technicians } = useAdminTechnicians();
   const activeTechs = useMemo(() => technicians.filter((t) => t.isActive), [technicians]);
   const techItems = useMemo(
@@ -212,6 +323,7 @@ export function RequestCreateDialog({ open, onOpenChange, onCreated }: RequestCr
     setServerError(null);
     setConflict(null);
     setNotice(null);
+    setUrgencyTouched(false);
   }
 
   // Start fresh on each open (not on close, so the form doesn't blank out
@@ -242,7 +354,7 @@ export function RequestCreateDialog({ open, onOpenChange, onCreated }: RequestCr
 
   function clearCustomer(): void {
     setPickedCustomer(null);
-    setDraft((d) => ({ ...d, customerId: null }));
+    setDraft((d) => ({ ...d, customerId: null, contactId: '', locationId: '' }));
   }
 
   async function submit(override: boolean): Promise<void> {
@@ -458,7 +570,7 @@ export function RequestCreateDialog({ open, onOpenChange, onCreated }: RequestCr
                 <Input
                   id="nr-address"
                   value={draft.address}
-                  onChange={(e) => patch({ address: e.target.value })}
+                  onChange={(e) => patch({ address: e.target.value, locationId: '' })}
                   aria-invalid={Boolean(errors.address)}
                   aria-describedby={errors.address ? 'nr-address-error' : undefined}
                   placeholder="123 Main St, Johnson City, TN 37601"
@@ -466,6 +578,53 @@ export function RequestCreateDialog({ open, onOpenChange, onCreated }: RequestCr
                 />
                 <FieldError id="nr-address-error" message={errors.address} />
               </div>
+              {draft.customerId && (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label id="nr-contact-label">Contact (optional)</Label>
+                    <Select
+                      items={contactItems}
+                      value={draft.contactId || NO_CONTACT}
+                      onValueChange={(v) => patch({ contactId: !v || v === NO_CONTACT ? '' : v })}
+                    >
+                      <SelectTrigger className="w-full" aria-labelledby="nr-contact-label">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {contactItems.map((o) => (
+                          <SelectItem key={o.value} value={o.value}>
+                            {o.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {locationItems.length > 0 && (
+                    <div className="space-y-1.5">
+                      <Label id="nr-location-label">Service location</Label>
+                      <Select
+                        items={locationItems}
+                        value={draft.locationId}
+                        onValueChange={(v) => {
+                          const loc = extras.locations.find((l) => l.id === v);
+                          patch({ locationId: v ?? '', ...(loc?.address ? { address: loc.address } : {}) });
+                        }}
+                      >
+                        <SelectTrigger className="w-full" aria-labelledby="nr-location-label">
+                          <SelectValue placeholder="Pick a location" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {locationItems.map((o) => (
+                            <SelectItem key={o.value} value={o.value}>
+                              {o.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </div>
+              )}
               <div className="grid gap-3 sm:grid-cols-3">
                 <div className="space-y-1.5">
                   <Label id="nr-issue-label">Issue</Label>
@@ -496,12 +655,28 @@ export function RequestCreateDialog({ open, onOpenChange, onCreated }: RequestCr
                 </div>
                 <div className="space-y-1.5">
                   <Label id="nr-jobtype-label">Job type</Label>
-                  <Select items={JOB_TYPE_ITEMS} value={draft.jobType} onValueChange={(v) => patch({ jobType: v ?? '' })}>
+                  <Select
+                    items={jobTypes.length > 0 ? jobTypeItems : JOB_TYPE_ITEMS}
+                    value={jobTypes.length > 0 ? draft.jobTypeId : draft.jobType}
+                    onValueChange={(v) => {
+                      const id = v ?? '';
+                      if (jobTypes.length === 0) {
+                        patch({ jobType: id });
+                        return;
+                      }
+                      const picked = jobTypes.find((jt) => jt.id === id);
+                      patch({
+                        jobTypeId: id,
+                        jobType: '',
+                        ...(picked && !urgencyTouched ? { urgency: picked.defaultPriority } : {}),
+                      });
+                    }}
+                  >
                     <SelectTrigger className="w-full" aria-labelledby="nr-jobtype-label">
-                      <SelectValue placeholder="Match the issue" />
+                      <SelectValue placeholder="Auto (match the issue)" />
                     </SelectTrigger>
                     <SelectContent>
-                      {JOB_TYPE_ITEMS.map((o) => (
+                      {(jobTypes.length > 0 ? jobTypeItems : JOB_TYPE_ITEMS).map((o) => (
                         <SelectItem key={o.value || 'auto'} value={o.value}>
                           {o.label}
                         </SelectItem>
@@ -511,7 +686,10 @@ export function RequestCreateDialog({ open, onOpenChange, onCreated }: RequestCr
                 </div>
                 <div className="space-y-1.5">
                   <Label id="nr-urgency-label">Urgency</Label>
-                  <Select items={URGENCY_ITEMS} value={draft.urgency} onValueChange={(v) => patch({ urgency: v ?? 'medium' })}>
+                  <Select items={URGENCY_ITEMS} value={draft.urgency} onValueChange={(v) => {
+                      setUrgencyTouched(true);
+                      patch({ urgency: v ?? 'medium' });
+                    }}>
                     <SelectTrigger className="w-full" aria-labelledby="nr-urgency-label">
                       <SelectValue />
                     </SelectTrigger>
@@ -538,6 +716,15 @@ export function RequestCreateDialog({ open, onOpenChange, onCreated }: RequestCr
                   placeholder="What the customer reported"
                 />
                 <FieldError id="nr-description-error" message={errors.description} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Tags</Label>
+                <TagChipPicker
+                  entity="job"
+                  entityId={null}
+                  value={draft.tagTypeIds ?? []}
+                  onChange={(ids) => patch({ tagTypeIds: ids })}
+                />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="nr-access">Access notes</Label>

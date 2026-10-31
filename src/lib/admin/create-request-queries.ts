@@ -41,6 +41,10 @@ import {
 import { getOpenAvailability } from "@/lib/admin/availability-queries";
 import { reserveCeilingForBand } from "@/lib/admin/capacity-hold";
 import { reserveCapacitySlot } from "@/lib/admin/capacity-reservation-queries";
+import { resolveJobTypeForRequest } from "@/lib/admin/job-type-queries";
+import { contactBelongsToCustomer } from "@/lib/admin/contact-queries";
+import { locationBelongsToCustomer } from "@/lib/admin/location-queries";
+import { replaceEntityTags, validateTagTypeIds } from "@/lib/admin/tag-queries";
 import { recordStatusEvent } from "@/lib/admin/status-events";
 import { generateReferenceNumber } from "@/lib/requests/submit-session-request";
 import { persistJobLocation } from "@/lib/requests/persist-job-location";
@@ -199,7 +203,29 @@ export async function createAdminRequest(params: {
 }): Promise<CreateAdminRequestResult> {
   const { organizationId, userId, input, ipAddress } = params;
   const plan = planSchedule(input.schedule);
-  const jobType = resolveJobType(input.issueType, input.jobType);
+  const jobTypeRow = input.jobTypeId
+    ? await resolveJobTypeForRequest(organizationId, input.jobTypeId)
+    : null;
+  if (input.jobTypeId && !jobTypeRow) return { ok: false, reason: "job_type_not_found" };
+  if (input.customer.kind === "existing") {
+    const { customerId } = input.customer;
+    if (
+      input.contactId &&
+      !(await contactBelongsToCustomer(organizationId, customerId, input.contactId))
+    ) {
+      return { ok: false, reason: "contact_not_owned" };
+    }
+    if (
+      input.locationId &&
+      !(await locationBelongsToCustomer(organizationId, customerId, input.locationId))
+    ) {
+      return { ok: false, reason: "location_not_owned" };
+    }
+  }
+  const tags = await validateTagTypeIds(organizationId, "job", input.tagTypeIds);
+  if (!tags.ok) return { ok: false, reason: "unknown_tag" };
+  // The server derives the enum from the row; a client-sent jobType is ignored when jobTypeId is set.
+  const jobType = jobTypeRow ? jobTypeRow.kind : resolveJobType(input.issueType, input.jobType);
 
   const deps: CreateRequestDeps<ResolvedCustomer> = {
     verifyTechnician: (technicianId) => isActiveTechnician(organizationId, technicianId),
@@ -243,6 +269,15 @@ export async function createAdminRequest(params: {
           status: "pending",
           issueType: input.issueType,
           jobType,
+          jobTypeId: jobTypeRow?.id ?? null,
+          contactId: input.contactId,
+          locationId: input.locationId,
+          ...(jobTypeRow
+            ? {
+                estimatedDurationMinutes: jobTypeRow.defaultDurationMinutes,
+                estimatedDurationSource: "job_type",
+              }
+            : {}),
           urgency: input.urgency,
           description: input.description,
           customerNameEncrypted: customer.nameEncrypted,
@@ -269,6 +304,10 @@ export async function createAdminRequest(params: {
             customerMode: input.customer.kind,
             issueType: input.issueType,
             jobType,
+            jobTypeId: jobTypeRow?.id ?? null,
+            contactId: input.contactId,
+            locationId: input.locationId,
+            tagTypeIds: tags.ids,
             urgency: input.urgency,
             schedule: plan.kind,
             technicianId: plan.kind === "assign" ? plan.technicianId : null,
@@ -282,15 +321,26 @@ export async function createAdminRequest(params: {
 
     // Initial status event, awaited (best-effort; never throws) so it is
     // ordered before the placement's "assigned" event.
-    recordCreated: (requestId) =>
-      recordStatusEvent({
+    async recordCreated(requestId) {
+      if (tags.ids.length > 0) {
+        try {
+          await replaceEntityTags(organizationId, "job", requestId, tags.ids);
+        } catch (error: unknown) {
+          logger.error(
+            { error, serviceRequestId: requestId },
+            "Office booking saved but tags failed",
+          );
+        }
+      }
+      await recordStatusEvent({
         organizationId,
         serviceRequestId: requestId,
         fromStatus: null,
         toStatus: "pending",
         actorType: "human",
         actorId: userId,
-      }),
+      });
+    },
 
     async place(requestId, placedPlan, window, override) {
       const result = await placeAndAssignRequest(organizationId, requestId, window, {
