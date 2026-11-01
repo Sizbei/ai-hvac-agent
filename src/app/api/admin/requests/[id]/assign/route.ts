@@ -75,6 +75,12 @@ export async function POST(
             "REQUEST_NOT_ASSIGNABLE",
             409,
           );
+        case "time_off":
+          return errorResponse(
+            "That technician is off during this window.",
+            "TIME_OFF",
+            409,
+          );
       }
     }
 
@@ -157,6 +163,12 @@ export async function PATCH(
           return errorResponse(
             `Request cannot be reassigned while it is '${result.currentStatus}'`,
             "REQUEST_NOT_REASSIGNABLE",
+            409,
+          );
+        case "time_off":
+          return errorResponse(
+            "That technician is off during this window.",
+            "TIME_OFF",
             409,
           );
       }

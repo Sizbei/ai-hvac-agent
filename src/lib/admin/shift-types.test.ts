@@ -4,6 +4,7 @@ import {
   shiftInputSchema,
   blocksToScheduledJobs,
   excludeTechniciansWithBlocks,
+  blocksCoveringSpan,
   type ShiftRecord,
 } from "./shift-types";
 
@@ -58,5 +59,20 @@ describe("excludeTechniciansWithBlocks", () => {
     const blocks = blocksToScheduledJobs([rec({ technicianId: "b" })]);
     expect(excludeTechniciansWithBlocks(["c", "b", "a"], blocks)).toEqual(["c", "a"]);
     expect(excludeTechniciansWithBlocks(["a"], [])).toEqual(["a"]);
+  });
+});
+
+describe("blocksCoveringSpan", () => {
+  it("keeps blocks covering the whole span and drops partial overlaps", () => {
+    const blocks = blocksToScheduledJobs([
+      rec({ id: "full", technicianId: "a" }),
+      rec({ id: "part", technicianId: "b", endsAt: "2026-11-02T18:00:00.000Z" }),
+    ]);
+    const out = blocksCoveringSpan(
+      blocks,
+      new Date("2026-11-02T13:00:00.000Z"),
+      new Date("2026-11-02T22:00:00.000Z"),
+    );
+    expect(out.map((b) => b.id)).toEqual(["full"]);
   });
 });

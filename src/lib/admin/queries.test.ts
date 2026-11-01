@@ -6,6 +6,24 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // transitively imports "server-only". No-op it so this test can load the module.
 vi.mock('server-only', () => ({}));
 
+// Time-off reads: default "nobody is off"; a test queues a shift with
+// mockResolvedValueOnce.
+const { timeOffMock } = vi.hoisted(() => ({
+  timeOffMock: vi.fn(async (..._args: unknown[]) => [] as unknown[]),
+}));
+vi.mock('./shift-queries', () => ({
+  technicianTimeOffOverlapping: timeOffMock,
+}));
+const TIME_OFF_SHIFT = {
+  id: 'shift-1',
+  technicianId: 'tech-1',
+  kind: 'time_off',
+  title: null,
+  startsAt: '2026-07-01T12:00:00.000Z',
+  endsAt: '2026-07-01T22:00:00.000Z',
+  removesCapacity: true,
+};
+
 // Mock bcryptjs so we can verify hashing behavior
 const mockHash = vi.fn().mockResolvedValue('$2a$12$hashed');
 vi.mock('bcryptjs', () => ({
@@ -621,6 +639,42 @@ describe('assignTechnician', () => {
   });
 });
 
+describe('time off on assign / reassign', () => {
+  const start = new Date('2026-07-01T12:00:00.000Z');
+  const end = new Date('2026-07-01T16:00:00.000Z');
+
+  it('assignTechnician refuses a windowed request inside the tech\'s time off', async () => {
+    selectResolutions = [
+      [{ id: 'tech-1', name: 'John Tech' }],
+      [{ status: 'scheduled', arrivalWindowStart: start, arrivalWindowEnd: end }],
+    ];
+    timeOffMock.mockResolvedValueOnce([TIME_OFF_SHIFT]);
+    updateResolution = [{ id: 'req-1' }]; // would succeed if reached
+    const result = await assignTechnician(ORG_ID, 'req-1', 'tech-1');
+    expect(result).toEqual({ ok: false, reason: 'time_off' });
+  });
+
+  it('assignTechnician skips the check for a request with no window', async () => {
+    selectResolutions = [
+      [{ id: 'tech-1', name: 'John Tech' }],
+      [{ status: 'pending', arrivalWindowStart: null, arrivalWindowEnd: null }],
+    ];
+    updateResolution = [];
+    await assignTechnician(ORG_ID, 'req-1', 'tech-1');
+    expect(timeOffMock).not.toHaveBeenCalled();
+  });
+
+  it('reassignTechnician refuses a windowed request inside the tech\'s time off', async () => {
+    selectResolutions = [
+      [{ id: 'tech-1', name: 'John Tech' }],
+      [{ arrivalWindowStart: start, arrivalWindowEnd: end }],
+    ];
+    timeOffMock.mockResolvedValueOnce([TIME_OFF_SHIFT]);
+    const result = await reassignTechnician(ORG_ID, 'req-1', 'tech-1');
+    expect(result).toEqual({ ok: false, reason: 'time_off' });
+  });
+});
+
 describe('reassignTechnician', () => {
   it('fails with technician_not_found when the assignee is not an active technician', async () => {
     selectResolutions = [[]]; // tech lookup returns nothing
@@ -681,6 +735,7 @@ describe('reassignTechnician', () => {
   it('reports request_not_reassignable for a pending (unassigned) request', async () => {
     selectResolutions = [
       [{ id: 'tech-2', name: 'Jane Tech' }], // tech ok
+      [{ arrivalWindowStart: null, arrivalWindowEnd: null }], // window read
       [{ status: 'pending' }], // disambiguation: pending is not reassignable
     ];
     updateResolution = []; // status guard matched zero rows
@@ -696,6 +751,7 @@ describe('reassignTechnician', () => {
   it('reports request_not_found when the request does not exist in the org', async () => {
     selectResolutions = [
       [{ id: 'tech-2', name: 'Jane Tech' }],
+      [], // window read finds nothing
       [], // disambiguation finds nothing
     ];
     updateResolution = [];
@@ -1605,6 +1661,7 @@ describe('scheduleRequest', () => {
     const when = new Date('2026-07-01T00:00:00.000Z');
     const start = new Date('2026-07-01T08:00:00.000Z');
     const end = new Date('2026-07-01T12:00:00.000Z');
+    selectResolutions = [[{ assignedTo: null }]]; // assignee read
     updateResolution = [
       { scheduledDate: when, arrivalWindowStart: start, arrivalWindowEnd: end },
     ];
@@ -1615,6 +1672,19 @@ describe('scheduleRequest', () => {
       arrivalWindowStart: '2026-07-01T08:00:00.000Z',
       arrivalWindowEnd: '2026-07-01T12:00:00.000Z',
     });
+  });
+
+  it('refuses a window inside the assigned technician\'s time off', async () => {
+    const start = new Date('2026-07-01T12:00:00.000Z');
+    const end = new Date('2026-07-01T16:00:00.000Z');
+    selectResolutions = [[{ assignedTo: 'tech-1' }]];
+    timeOffMock.mockResolvedValueOnce([TIME_OFF_SHIFT]);
+    updateResolution = [
+      { scheduledDate: start, arrivalWindowStart: start, arrivalWindowEnd: end },
+    ];
+    const result = await scheduleRequest(ORG_ID, 'req-1', start, { start, end });
+    expect(result).toEqual({ ok: false, reason: 'time_off' });
+    expect(timeOffMock).toHaveBeenCalledWith(ORG_ID, 'tech-1', start, end);
   });
 });
 

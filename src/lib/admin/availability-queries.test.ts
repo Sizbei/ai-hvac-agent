@@ -29,6 +29,7 @@ const {
     getActiveTechnicianIds = dbActiveTechIdsMock;
     getAvailability = dbAvailabilityMock;
     getJobs = dbJobsMock;
+    getCapacityBlocks = vi.fn().mockResolvedValue([]);
   }
   return {
     getActiveTechnicianIdsMock: vi.fn(),
@@ -64,6 +65,7 @@ const activeSource = {
   getActiveTechnicianIds: getActiveTechnicianIdsMock,
   getAvailability: getAvailabilityMock,
   getJobs: getJobsMock,
+  getCapacityBlocks: vi.fn().mockResolvedValue([]),
 };
 
 beforeEach(() => {

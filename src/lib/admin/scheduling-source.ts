@@ -25,6 +25,7 @@ import {
   getTechnicianAvailability,
   getScheduledJobsForRange,
 } from "./scheduling-queries";
+import { listCapacityBlocks } from "./shift-queries";
 
 /**
  * A source of scheduling truth for one organization. Today this is our DB;
@@ -58,6 +59,9 @@ export interface SchedulingSource {
    * WHICHEVER source is active, without the consumer knowing which.
    */
   getActiveTechnicianIds(): Promise<readonly string[]>;
+
+  /** Capacity-removing shifts (time off, non-job events) overlapping [startIso, endIso), as busy blocks. */
+  getCapacityBlocks(startIso: string, endIso: string): Promise<readonly ScheduledJob[]>;
 }
 
 /**
@@ -79,6 +83,13 @@ export class DbSchedulingSource implements SchedulingSource {
     endIso: string,
   ): Promise<readonly ScheduledJob[]> {
     return getScheduledJobsForRange(this.organizationId, startIso, endIso);
+  }
+
+  getCapacityBlocks(
+    startIso: string,
+    endIso: string,
+  ): Promise<readonly ScheduledJob[]> {
+    return listCapacityBlocks(this.organizationId, startIso, endIso);
   }
 
   /** Active technicians for the org — bookable staff whose hours count toward

@@ -62,3 +62,18 @@ export function excludeTechniciansWithBlocks(
   const blocked = new Set(blocks.map((b) => b.assignedTo));
   return techIds.filter((id) => !blocked.has(id));
 }
+
+/** Blocks that cover the whole [start, end) span (not merely overlap it). */
+export function blocksCoveringSpan(
+  blocks: readonly ScheduledJob[],
+  start: Date,
+  end: Date,
+): readonly ScheduledJob[] {
+  return blocks.filter(
+    (b) =>
+      b.arrivalWindowStart !== null &&
+      b.arrivalWindowEnd !== null &&
+      Date.parse(b.arrivalWindowStart) <= start.getTime() &&
+      Date.parse(b.arrivalWindowEnd) >= end.getTime(),
+  );
+}

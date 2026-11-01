@@ -204,6 +204,17 @@ vi.mock("@/lib/ai/dispatch/score", async (importOriginal) => ({
     })),
 }));
 
+// Shift reads are their own module: default to "nobody is off"; a test sets
+// blocks to exercise the time-off paths.
+const { timeOffMock, capacityBlocksMock } = vi.hoisted(() => ({
+  timeOffMock: vi.fn(),
+  capacityBlocksMock: vi.fn(),
+}));
+vi.mock("./shift-queries", () => ({
+  technicianTimeOffOverlapping: timeOffMock,
+  listCapacityBlocks: capacityBlocksMock,
+}));
+
 import {
   getTechnicianAvailability,
   setTechnicianAvailability,
@@ -237,7 +248,23 @@ beforeEach(() => {
   batchMock.mockResolvedValue([]);
   loggerInfo.mockClear();
   vi.mocked(recordStatusEvent).mockClear();
+  timeOffMock.mockReset();
+  timeOffMock.mockResolvedValue([]);
+  capacityBlocksMock.mockReset();
+  capacityBlocksMock.mockResolvedValue([]);
 });
+
+function timeOffShift(technicianId: string, startsAt: string, endsAt: string) {
+  return {
+    id: "shift-1",
+    technicianId,
+    kind: "time_off" as const,
+    title: null,
+    startsAt,
+    endsAt,
+    removesCapacity: true,
+  };
+}
 
 describe("getTechnicianAvailability", () => {
   it("maps rows and scopes to the org", async () => {
@@ -361,6 +388,17 @@ describe("checkScheduleConflict", () => {
     expect(result).toHaveLength(1);
     expect(result[0].id).toBe("j1");
     expect(result[0].arrivalWindowStart).toBe("2026-06-10T13:00:00.000Z");
+  });
+
+  it("appends the tech's overlapping time off as a 'Time off' clash", async () => {
+    selectQueue.push([]); // no overlapping job
+    timeOffMock.mockResolvedValue([
+      timeOffShift(TECH, "2026-06-10T13:00:00.000Z", "2026-06-10T22:00:00.000Z"),
+    ]);
+    const result = await checkScheduleConflict(ORG, TECH, START, END);
+    expect(result).toHaveLength(1);
+    expect(result[0].referenceNumber).toBe("Time off");
+    expect(timeOffMock).toHaveBeenCalledWith(ORG, TECH, new Date(START), new Date(END));
   });
 
   it("returns no conflict (empty) when the DB matches nothing", async () => {
@@ -663,6 +701,47 @@ describe("placeAndAssignRequest (S4 hard enforcement)", () => {
     expect(whereCalls).toHaveLength(3);
   });
 
+  it("time off BLOCKS even with override:true, before any write", async () => {
+    selectQueue.push([{ status: "assigned", assignedTo: TECH }]); // 0: read
+    timeOffMock.mockResolvedValue([
+      timeOffShift(TECH, "2026-07-01T13:00:00.000Z", "2026-07-01T22:00:00.000Z"),
+    ]);
+    updateQueue.push([updatedRow(TECH)]); // would succeed if reached
+
+    const result = await placeAndAssignRequest(ORG, REQ, WINDOW, {
+      isoDay: ISO_DAY,
+      window: "morning",
+      override: true,
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok || result.reason !== "conflict") return;
+    expect(result.detail.outsideAvailability).toBe(false);
+    expect(result.detail.conflicts.map((c) => c.referenceNumber)).toEqual(["Time off"]);
+    // Only the request read ran; the UPDATE was never issued.
+    expect(whereCalls).toHaveLength(1);
+    expect(updateQueue).toHaveLength(1);
+  });
+
+  it("a 0-row UPDATE caused by time off reports conflict, not request_not_found", async () => {
+    selectQueue.push([{ status: "assigned", assignedTo: TECH }]); // 0: read
+    // Pre-write check passes; a shift lands before the UPDATE (guard → 0 rows).
+    timeOffMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        timeOffShift(TECH, "2026-07-01T13:00:00.000Z", "2026-07-01T22:00:00.000Z"),
+      ]);
+    updateQueue.push([]); // guarded UPDATE matched nothing
+
+    const result = await placeAndAssignRequest(ORG, REQ, WINDOW, {
+      isoDay: ISO_DAY,
+      window: "morning",
+      override: true,
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe("conflict");
+  });
+
   it("BLOCKS on an out-of-hours window (availability boundary) without writing", async () => {
     selectQueue.push([{ status: "assigned", assignedTo: TECH }]); // 0: read
     selectQueue.push([]); // 1: no overlap
@@ -913,6 +992,31 @@ describe("autoAssignBookedRequest (scored vs first-fit)", () => {
     expect(result).toEqual({ assigned: true, technicianId: T1 });
     // First-fit has no score → nothing logged as a scored decision.
     expect(loggerInfo).not.toHaveBeenCalled();
+  });
+
+  it("a technician with time off over the held slot is not a first-fit candidate", async () => {
+    selectQueue.push([{ id: T1 }, { id: T2 }]); // active techs (DB order)
+    capacityBlocksMock.mockResolvedValue([
+      {
+        id: "shift-1",
+        referenceNumber: "Time off",
+        status: "assigned",
+        assignedTo: T1,
+        arrivalWindowStart: HELD.start.toISOString(),
+        arrivalWindowEnd: HELD.end.toISOString(),
+      },
+    ]);
+    queueAutoAssignLeadIn(false);
+    selectQueue.push([{ jobType: null, systemType: null, urgency: "standard" }]);
+    queueSuccessfulPlacement(T2); // T1 is skipped, so T2 is the first try
+
+    const result = await autoAssignBookedRequest(ORG, REQ, HELD);
+    expect(result).toEqual({ assigned: true, technicianId: T2 });
+    expect(capacityBlocksMock).toHaveBeenCalledWith(
+      ORG,
+      HELD.start.toISOString(),
+      HELD.end.toISOString(),
+    );
   });
 
   it("enabled: tries technicians in ranked order (best first)", async () => {

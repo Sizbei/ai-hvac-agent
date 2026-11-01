@@ -256,6 +256,13 @@ export async function PATCH(
         arrivalWindow,
       );
       if (!result.ok) {
+        if (result.reason === "time_off") {
+          return errorResponse(
+            "That technician is off during this window.",
+            "TIME_OFF",
+            409,
+          );
+        }
         return errorResponse("Request not found", "NOT_FOUND", 404);
       }
       await logAudit({

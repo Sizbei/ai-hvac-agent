@@ -190,6 +190,14 @@ export class HcpSchedulingSource implements SchedulingSource {
   }
 
   /**
+   * No capacity blocks: our shifts are keyed by `users.id`, and HCP's
+   * technician ids are not, so local time off cannot be matched here.
+   */
+  async getCapacityBlocks(): Promise<readonly ScheduledJob[]> {
+    return [];
+  }
+
+  /**
    * The REAL HCP technician roster as opaque ids — the "bookable staff" the
    * open-window aggregation counts when HCP is the source of truth. Fetched via
    * client.listTechnicians + technician-mapping (active filter), cached per org

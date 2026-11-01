@@ -59,6 +59,16 @@ import { releaseReservationsForRequest } from "./capacity-reservation-queries";
 import { notifyCustomerOfAssignment } from "./notify-assignment";
 import { stampDispatchOverride } from "./dispatch-override";
 import { isWindowWithinAvailability } from "./availability-coverage";
+import {
+  listCapacityBlocks,
+  technicianTimeOffOverlapping,
+} from "./shift-queries";
+import {
+  blocksCoveringSpan,
+  blocksToScheduledJobs,
+  excludeTechniciansWithBlocks,
+} from "./shift-types";
+import { arrivalWindowUtcForBusinessDate } from "./calendar-time";
 import type { ArrivalWindow } from "./arrival-window";
 import type {
   AvailabilitySlot,
@@ -261,7 +271,15 @@ export async function checkScheduleConflict(
     .where(withTenant(serviceRequests, organizationId, ...conditions))
     .orderBy(asc(serviceRequests.arrivalWindowStart));
 
-  return rows.map(toScheduledJob);
+  // Time off and non-job events clash like a booked job; their pseudo-job
+  // referenceNumber is the shift title (or "Time off") for the 409 copy.
+  const blocks = await technicianTimeOffOverlapping(
+    organizationId,
+    technicianId,
+    start,
+    end,
+  );
+  return [...rows.map(toScheduledJob), ...blocksToScheduledJobs(blocks)];
 }
 
 /**
@@ -520,6 +538,27 @@ export type PlaceAndAssignResult =
       readonly detail: ScheduleConflictDetail;
     };
 
+/** The conflict result when `technicianId` has a capacity-removing shift
+ * overlapping the window, else null. */
+async function timeOffConflict(
+  organizationId: string,
+  technicianId: string,
+  arrivalWindow: { readonly start: Date; readonly end: Date },
+): Promise<Extract<PlaceAndAssignResult, { reason: "conflict" }> | null> {
+  const blocks = await technicianTimeOffOverlapping(
+    organizationId,
+    technicianId,
+    arrivalWindow.start,
+    arrivalWindow.end,
+  );
+  if (blocks.length === 0) return null;
+  return {
+    ok: false,
+    reason: "conflict",
+    detail: { conflicts: blocksToScheduledJobs(blocks), outsideAvailability: false },
+  };
+}
+
 /** Resolve the technician a placement targets: an explicit `technicianId` (a
  * drag-to-assign), else the request's CURRENT assignee (a pure reschedule).
  * Returns `null` when neither yields a tech (unassigned reschedule). */
@@ -643,6 +682,13 @@ export async function placeAndAssignRequest(
 
   const targetTech = resolveTargetTech(options.technicianId, existing.assignedTo);
 
+  // Time off is NEVER overridable: checked on both the override and the
+  // non-override path, before anything is written.
+  if (targetTech) {
+    const timeOff = await timeOffConflict(organizationId, targetTech, arrivalWindow);
+    if (timeOff) return timeOff;
+  }
+
   // Conflict + availability gate. Only meaningful with a target technician — an
   // unassigned placement shares no one's day and has no hours to violate.
   if (!options.override && targetTech) {
@@ -707,6 +753,19 @@ export async function placeAndAssignRequest(
         )`
       : undefined;
 
+  // Atomic time-off guard: independent of `override`, so a shift written
+  // between the read above and this UPDATE still blocks the placement.
+  const noTimeOffGuard = targetTech
+    ? sql`NOT EXISTS (
+        SELECT 1 FROM technician_shifts s
+        WHERE s.organization_id = ${organizationId}
+          AND s.technician_id = ${targetTech}
+          AND s.removes_capacity
+          AND s.starts_at < ${arrivalWindow.end}
+          AND s.ends_at > ${arrivalWindow.start}
+      )`
+    : undefined;
+
   const [updated] = await db
     .update(serviceRequests)
     .set(setValues)
@@ -724,6 +783,7 @@ export async function placeAndAssignRequest(
             ? isNull(serviceRequests.assignedTo)
             : undefined,
           noDoubleBookGuard,
+          noTimeOffGuard,
         )!,
       ),
     )
@@ -738,6 +798,11 @@ export async function placeAndAssignRequest(
   if (!updated) {
     // The guarded UPDATE matched nothing. Disambiguate: a concurrent overlapping
     // booking (the double-book guard) vs the row moving (status/assignee changed).
+    // Time off first, so PTO never surfaces as request_not_found.
+    if (targetTech) {
+      const timeOff = await timeOffConflict(organizationId, targetTech, arrivalWindow);
+      if (timeOff) return timeOff;
+    }
     if (!options.override && targetTech) {
       const conflicts = await checkScheduleConflict(
         organizationId,
@@ -1195,10 +1260,23 @@ export async function suggestTechnicians(
   if (techs.length === 0) return [];
   const isoDay = (req?.scheduledDate ?? new Date()).toISOString().slice(0, 10);
 
+  // Drop technicians who are off (or in a non-job event) for the whole business day.
+  const day = arrivalWindowUtcForBusinessDate(isoDay, "anytime");
+  const dayBlocks = await listCapacityBlocks(
+    organizationId,
+    day.start.toISOString(),
+    day.end.toISOString(),
+  );
+  const techIds = excludeTechniciansWithBlocks(
+    techs.map((t) => t.id),
+    blocksCoveringSpan(dayBlocks, day.start, day.end),
+  );
+  if (techIds.length === 0) return [];
+
   const { ranked } = await rankedTechnicianOrder(
     organizationId,
     requestId,
-    techs.map((t) => t.id),
+    techIds,
     isoDay,
     true, // suggest panel: skill-neutral fallback for unclassified jobs
   );
@@ -1248,6 +1326,19 @@ export async function autoAssignBookedRequest(
 
   if (techs.length === 0) return { assigned: false };
 
+  // A technician with time off or a non-job event overlapping the held slot is
+  // never a candidate (first-fit or scored).
+  const heldBlocks = await listCapacityBlocks(
+    organizationId,
+    heldSlot.start.toISOString(),
+    heldSlot.end.toISOString(),
+  );
+  const candidateIds = excludeTechniciansWithBlocks(
+    techs.map((t) => t.id),
+    heldBlocks,
+  );
+  if (candidateIds.length === 0) return { assigned: false };
+
   // One read of the org settings row for BOTH flags (schedulingSource +
   // autoDispatchEnabled) instead of two reads of the same row.
   const [settings] = await db
@@ -1268,7 +1359,7 @@ export async function autoAssignBookedRequest(
   // keep today's first-fit (DB order) for zero behavior change. A job that can't
   // be classified (rankedTechnicianOrder → null) also falls back to first-fit so
   // opting in never strands a job that first-fit would have placed.
-  const firstFit = techs.map((t) => t.id);
+  const firstFit = candidateIds;
   const enabled = settings?.autoDispatchEnabled ?? false;
 
   // Shadow mode: an autopilot-OFF org still scores + records the would-be

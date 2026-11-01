@@ -52,12 +52,14 @@ async function readSchedulingFacts(
   readonly availability: readonly AvailabilitySlot[];
   readonly jobs: readonly ScheduledJob[];
 }> {
-  const [activeTechIds, availability, jobs] = await Promise.all([
+  const [activeTechIds, availability, jobs, blocks] = await Promise.all([
     source.getActiveTechnicianIds(),
     source.getAvailability(),
     source.getJobs(rangeStartIso, rangeEndIso),
+    source.getCapacityBlocks(rangeStartIso, rangeEndIso),
   ]);
-  return { activeTechIds, availability, jobs };
+  // Time off and non-job events are busy time, same as a booked job.
+  return { activeTechIds, availability, jobs: [...jobs, ...blocks] };
 }
 
 /**

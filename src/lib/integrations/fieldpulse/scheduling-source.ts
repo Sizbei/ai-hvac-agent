@@ -169,6 +169,14 @@ export class FieldpulseSchedulingSource implements SchedulingSource {
   }
 
   /**
+   * No capacity blocks: our shifts are keyed by `users.id`, and Fieldpulse's
+   * technician ids are not, so local time off cannot be matched here.
+   */
+  async getCapacityBlocks(): Promise<readonly ScheduledJob[]> {
+    return [];
+  }
+
+  /**
    * The Fieldpulse technician roster as opaque ids — the "bookable staff" the
    * open-window aggregation counts when Fieldpulse is the source of truth.
    * Fetched via client.listUsers + technician-mapping, cached per org.

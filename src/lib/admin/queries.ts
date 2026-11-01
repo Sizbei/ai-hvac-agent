@@ -54,6 +54,7 @@ import { releaseReservationsForRequest } from "./capacity-reservation-queries";
 export type HoldReason = (typeof holdReasonEnum.enumValues)[number];
 import { DASHBOARD_LIST_LIMIT } from "./types";
 import { getTechnicianAvailability } from "./scheduling-queries";
+import { technicianTimeOffOverlapping } from "./shift-queries";
 import { businessIsoDate, businessDayBounds } from "./calendar-time";
 import type {
   AdminRequest,
@@ -457,7 +458,27 @@ export type AssignTechnicianResult =
       readonly ok: false;
       readonly reason: "request_not_assignable";
       readonly currentStatus: AdminRequest["status"];
-    };
+    }
+  | { readonly ok: false; readonly reason: "time_off" };
+
+/** True when the technician has a capacity-removing shift overlapping the
+ * request's arrival window. A request with no window cannot clash. Time off is
+ * never overridable. */
+async function windowHitsTimeOff(
+  organizationId: string,
+  technicianId: string,
+  windowStart: Date | null | undefined,
+  windowEnd: Date | null | undefined,
+): Promise<boolean> {
+  if (!windowStart || !windowEnd) return false;
+  const blocks = await technicianTimeOffOverlapping(
+    organizationId,
+    technicianId,
+    windowStart,
+    windowEnd,
+  );
+  return blocks.length > 0;
+}
 
 export async function assignTechnician(
   organizationId: string,
@@ -489,11 +510,26 @@ export async function assignTechnician(
   // Capture the prior status so the status event records the real from-state
   // (pending|scheduled|assigned), not null — needed for accurate dwell-time KPIs.
   const [before] = await db
-    .select({ status: serviceRequests.status })
+    .select({
+      status: serviceRequests.status,
+      arrivalWindowStart: serviceRequests.arrivalWindowStart,
+      arrivalWindowEnd: serviceRequests.arrivalWindowEnd,
+    })
     .from(serviceRequests)
     .where(
       withTenant(serviceRequests, organizationId, eq(serviceRequests.id, requestId)),
     );
+
+  if (
+    await windowHitsTimeOff(
+      organizationId,
+      technicianId,
+      before?.arrivalWindowStart,
+      before?.arrivalWindowEnd,
+    )
+  ) {
+    return { ok: false, reason: "time_off" };
+  }
 
   const now = new Date();
   // Only flip to "assigned" from an assignable state. Guarding the status in
@@ -580,7 +616,8 @@ export type ReassignTechnicianResult =
       readonly ok: false;
       readonly reason: "request_not_reassignable";
       readonly currentStatus: AdminRequest["status"];
-    };
+    }
+  | { readonly ok: false; readonly reason: "time_off" };
 
 /**
  * Move an in-flight request to a different technician WITHOUT resetting its
@@ -615,6 +652,26 @@ export async function reassignTechnician(
 
   if (!tech) {
     return { ok: false, reason: "technician_not_found" };
+  }
+
+  const [windowed] = await db
+    .select({
+      arrivalWindowStart: serviceRequests.arrivalWindowStart,
+      arrivalWindowEnd: serviceRequests.arrivalWindowEnd,
+    })
+    .from(serviceRequests)
+    .where(
+      withTenant(serviceRequests, organizationId, eq(serviceRequests.id, requestId)),
+    );
+  if (
+    await windowHitsTimeOff(
+      organizationId,
+      technicianId,
+      windowed?.arrivalWindowStart,
+      windowed?.arrivalWindowEnd,
+    )
+  ) {
+    return { ok: false, reason: "time_off" };
   }
 
   // Change the assignee only; status is deliberately left untouched. Guard on
@@ -809,7 +866,8 @@ export type ScheduleRequestResult =
       readonly arrivalWindowStart: string | null;
       readonly arrivalWindowEnd: string | null;
     }
-  | { readonly ok: false; readonly reason: "request_not_found" };
+  | { readonly ok: false; readonly reason: "request_not_found" }
+  | { readonly ok: false; readonly reason: "time_off" };
 
 /**
  * Sets (or clears, with `null`) a request's scheduled service date and optional
@@ -831,6 +889,29 @@ export async function scheduleRequest(
   scheduledDate: Date | null,
   arrivalWindow?: { readonly start: Date; readonly end: Date } | null,
 ): Promise<ScheduleRequestResult> {
+  // A new window on an assigned request must not land in that technician's
+  // time off (never overridable).
+  if (arrivalWindow) {
+    const [current] = await db
+      .select({ assignedTo: serviceRequests.assignedTo })
+      .from(serviceRequests)
+      .where(
+        withTenant(serviceRequests, organizationId, eq(serviceRequests.id, requestId)),
+      );
+    if (!current) return { ok: false, reason: "request_not_found" };
+    if (
+      current.assignedTo &&
+      (await windowHitsTimeOff(
+        organizationId,
+        current.assignedTo,
+        arrivalWindow.start,
+        arrivalWindow.end,
+      ))
+    ) {
+      return { ok: false, reason: "time_off" };
+    }
+  }
+
   const patch: {
     scheduledDate: Date | null;
     updatedAt: Date;

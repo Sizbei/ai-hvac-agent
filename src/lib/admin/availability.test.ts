@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { computeOpenWindows } from "./availability";
 import { businessWallClockToUtc } from "./calendar-time";
+import { blocksToScheduledJobs } from "./shift-types";
 import type { AvailabilitySlot, ScheduledJob } from "./types";
 
 // 2026-07-01 is a Wednesday (weekday 3), summer → EDT (UTC-4).
@@ -171,6 +172,27 @@ describe("computeOpenWindows — availability MINUS bookings", () => {
     );
     expect(out.map((w) => w.window)).toEqual(["morning"]);
     expect(out[0]!.available).toBe(1);
+  });
+});
+
+describe("computeOpenWindows — capacity-removing shifts", () => {
+  it("a time-off block covering a tech's morning removes that tech's morning capacity", () => {
+    const blocks = blocksToScheduledJobs([
+      {
+        id: "shift-1",
+        technicianId: "t1",
+        kind: "time_off",
+        title: null,
+        startsAt: businessWallClockToUtc(WED, 8, 0).toISOString(),
+        endsAt: businessWallClockToUtc(WED, 12, 0).toISOString(),
+        removesCapacity: true,
+      },
+    ]);
+    const out = computeOpenWindows(["t1", "t2"], [slot("t1"), slot("t2")], blocks, [WED]);
+    const morning = out.find((w) => w.window === "morning")!;
+    expect(morning.capacity).toBe(2);
+    expect(morning.available).toBe(1);
+    expect(out.find((w) => w.window === "afternoon")!.available).toBe(2);
   });
 });
 
