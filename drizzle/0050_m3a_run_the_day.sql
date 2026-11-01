@@ -146,13 +146,14 @@ BEGIN
     END IF;
   ELSIF NEW.assigned_to IS NOT NULL AND NEW.status <> 'cancelled' THEN
     -- 4. Status mirror for the lead, only until the tech app has written it.
-    -- Only an OPEN untouched row is mirrored, and never to a terminal value: a
-    -- row a hold has cancelled must stay cancelled, and request 'completed'
-    -- leaves rows alone (rule d).
+    -- Only a NON-TERMINAL untouched row is mirrored (pending included: a lead
+    -- row inserted while the request is pending must follow it to scheduled),
+    -- and never to a terminal value: a row a hold has cancelled must stay
+    -- cancelled, and request 'completed' leaves rows alone (rule d).
     IF NEW.status NOT IN ('completed','cancelled') THEN
       UPDATE appointment_assignments SET status = NEW.status
         WHERE appointment_id = v_appt_id AND technician_id = NEW.assigned_to AND is_lead
-          AND status IN ('assigned','scheduled','en_route','arrived','in_progress','on_hold')
+          AND status NOT IN ('completed','cancelled')
           AND en_route_at IS NULL AND arrived_at IS NULL
           AND started_at IS NULL AND completed_at IS NULL;
     END IF;
