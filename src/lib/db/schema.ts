@@ -682,6 +682,88 @@ export const serviceRequests = pgTable(
   ],
 );
 
+export const shiftKindEnum = pgEnum("shift_kind", ["on_call", "time_off", "non_job"]);
+
+// M0a: a visit. #1 is mirrored from the request by trigger (drizzle/0049);
+// #2+ are written by appointment-queries.ts only. starts_at/ends_at = the
+// arrival window; a date-only booking has scheduled_date and NULL starts_at.
+export const appointments = pgTable(
+  "appointments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    serviceRequestId: uuid("service_request_id").notNull().references(() => serviceRequests.id, { onDelete: "cascade" }),
+    appointmentNumber: smallint("appointment_number").notNull().default(1),
+    scheduledDate: timestamp("scheduled_date", { withTimezone: true }),
+    startsAt: timestamp("starts_at", { withTimezone: true }),
+    endsAt: timestamp("ends_at", { withTimezone: true }),
+    arrivalWindowStart: timestamp("arrival_window_start", { withTimezone: true }),
+    arrivalWindowEnd: timestamp("arrival_window_end", { withTimezone: true }),
+    isConfirmed: boolean("is_confirmed").notNull().default(false),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    specialInstructions: text("special_instructions"),
+    // Optimistic concurrency token (CAS on version, never on updated_at).
+    version: integer("version").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique("appointments_request_number_unique").on(table.serviceRequestId, table.appointmentNumber),
+    check("appointments_window_check", sql`${table.arrivalWindowEnd} IS NULL OR ${table.arrivalWindowStart} IS NULL OR ${table.arrivalWindowEnd} > ${table.arrivalWindowStart}`),
+    check("appointments_span_check", sql`${table.endsAt} IS NULL OR ${table.startsAt} IS NULL OR ${table.endsAt} >= ${table.startsAt}`),
+    index("appointments_org_starts_at_idx").on(table.organizationId, table.startsAt),
+    index("appointments_request_idx").on(table.serviceRequestId),
+  ],
+);
+
+// M0a: who is on a visit. One lead per visit; status uses the request enum so
+// there is one vocabulary. Progress timestamps are written by M3.
+export const appointmentAssignments = pgTable(
+  "appointment_assignments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    appointmentId: uuid("appointment_id").notNull().references(() => appointments.id, { onDelete: "cascade" }),
+    technicianId: uuid("technician_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    isLead: boolean("is_lead").notNull().default(false),
+    status: requestStatusEnum("status").notNull().default("assigned"),
+    assignedBy: uuid("assigned_by").references(() => users.id, { onDelete: "set null" }),
+    assignedAt: timestamp("assigned_at", { withTimezone: true }).defaultNow().notNull(),
+    enRouteAt: timestamp("en_route_at", { withTimezone: true }),
+    arrivedAt: timestamp("arrived_at", { withTimezone: true }),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (table) => [
+    unique("appointment_assignments_unique").on(table.appointmentId, table.technicianId),
+    uniqueIndex("appointment_assignments_one_lead_idx").on(table.appointmentId).where(sql`${table.isLead} = true`),
+    index("appointment_assignments_tech_appt_idx").on(table.technicianId, table.appointmentId),
+    index("appointment_assignments_org_tech_idx").on(table.organizationId, table.technicianId),
+  ],
+);
+
+// M0a: date-bound exceptions to technician_availability (on call, time off,
+// non-job events). No RRULE: a repeating absence is N rows.
+export const technicianShifts = pgTable(
+  "technician_shifts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    technicianId: uuid("technician_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    kind: shiftKindEnum("kind").notNull(),
+    title: text("title"),
+    startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+    endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
+    removesCapacity: boolean("removes_capacity").notNull().default(true),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    check("technician_shifts_order_check", sql`${table.endsAt} > ${table.startsAt}`),
+    index("technician_shifts_org_tech_starts_idx").on(table.organizationId, table.technicianId, table.startsAt),
+  ],
+);
+
 // 5b. request_notes — internal dispatcher notes on a service request.
 // Distinct from `messages` (the customer-facing chat transcript): these are
 // staff-only, never shown to the customer. Threaded/timestamped per author so
