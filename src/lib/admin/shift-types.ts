@@ -21,6 +21,15 @@ export function defaultRemovesCapacity(kind: ShiftKind): boolean {
   return kind !== "on_call";
 }
 
+interface Span {
+  readonly startsAt: string;
+  readonly endsAt: string;
+}
+const endAfterStart = (v: Span): boolean => Date.parse(v.endsAt) > Date.parse(v.startsAt);
+const withinMaxShift = (v: Span): boolean => Date.parse(v.endsAt) - Date.parse(v.startsAt) <= MAX_SHIFT_MS;
+const END_AFTER_START = { message: "End must be after start.", path: ["endsAt"] };
+const WITHIN_MAX_SHIFT = { message: "A shift can be at most 31 days.", path: ["endsAt"] };
+
 export const shiftInputSchema = z
   .object({
     kind: z.enum(shiftKindValues),
@@ -29,30 +38,57 @@ export const shiftInputSchema = z
     endsAt: z.iso.datetime(),
     removesCapacity: z.boolean().optional(),
   })
-  .refine((v) => Date.parse(v.endsAt) > Date.parse(v.startsAt), {
-    message: "End must be after start.",
-    path: ["endsAt"],
-  })
-  .refine((v) => Date.parse(v.endsAt) - Date.parse(v.startsAt) <= MAX_SHIFT_MS, {
-    message: "A shift can be at most 31 days.",
-    path: ["endsAt"],
-  })
+  .refine(endAfterStart, END_AFTER_START)
+  .refine(withinMaxShift, WITHIN_MAX_SHIFT)
   .transform((v) => ({
     ...v,
     removesCapacity: v.removesCapacity ?? defaultRemovesCapacity(v.kind),
   }));
 export type ShiftInput = z.output<typeof shiftInputSchema>;
 
+export const MAX_SHIFT_SPANS = 31;
+
+const spanSchema = z
+  .object({ startsAt: z.iso.datetime(), endsAt: z.iso.datetime() })
+  .refine(endAfterStart, END_AFTER_START)
+  .refine(withinMaxShift, WITHIN_MAX_SHIFT);
+
+/** Several spans of one kind saved together (multi-day time off): all or nothing. */
+export const shiftBatchInputSchema = z
+  .object({
+    kind: z.enum(shiftKindValues),
+    title: z.string().trim().max(80).optional(),
+    removesCapacity: z.boolean().optional(),
+    spans: z.array(spanSchema).min(1).max(MAX_SHIFT_SPANS),
+  })
+  .transform((v) => ({
+    ...v,
+    removesCapacity: v.removesCapacity ?? defaultRemovesCapacity(v.kind),
+  }));
+export type ShiftBatchInput = z.output<typeof shiftBatchInputSchema>;
+
+const SHIFT_KIND_LABEL: Record<ShiftKind, string> = {
+  time_off: "Time off",
+  on_call: "On call",
+  non_job: "Non-job event",
+};
+
 /** Capacity-removing shifts as pseudo-jobs so the conflict/calendar logic treats them as busy time. */
 export function blocksToScheduledJobs(rows: readonly ShiftRecord[]): readonly ScheduledJob[] {
   return rows.map((r) => ({
     id: r.id,
-    referenceNumber: r.title ?? "Time off",
+    referenceNumber: r.title ?? SHIFT_KIND_LABEL[r.kind],
     status: "assigned",
     assignedTo: r.technicianId,
     arrivalWindowStart: r.startsAt,
     arrivalWindowEnd: r.endsAt,
+    timeOff: true,
   }));
+}
+
+/** Time off is never overridable: any time-off entry in a clash blocks "schedule anyway". */
+export function hasTimeOff(conflicts: readonly ScheduledJob[]): boolean {
+  return conflicts.some((c) => c.timeOff === true);
 }
 
 export function excludeTechniciansWithBlocks(

@@ -84,6 +84,12 @@ export async function PATCH(request: NextRequest, { params }: Params) {
             "TECHNICIAN_NOT_FOUND",
             400,
           );
+        case "time_off":
+          return errorResponse(
+            "One of those technicians is off during this window.",
+            "TIME_OFF",
+            409,
+          );
       }
     }
 

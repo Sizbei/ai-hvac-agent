@@ -2,9 +2,11 @@ import { describe, it, expect } from "vitest";
 import {
   defaultRemovesCapacity,
   shiftInputSchema,
+  shiftBatchInputSchema,
   blocksToScheduledJobs,
   excludeTechniciansWithBlocks,
   blocksCoveringSpan,
+  hasTimeOff,
   type ShiftRecord,
 } from "./shift-types";
 
@@ -41,6 +43,29 @@ describe("shiftInputSchema", () => {
   });
 });
 
+describe("shiftBatchInputSchema", () => {
+  const day = (d: number) => ({
+    startsAt: `2026-11-${String(d).padStart(2, "0")}T13:00:00.000Z`,
+    endsAt: `2026-11-${String(d).padStart(2, "0")}T22:00:00.000Z`,
+  });
+  it("accepts 1 to 31 spans and defaults removesCapacity by kind", () => {
+    const one = shiftBatchInputSchema.parse({ kind: "time_off", spans: [day(2)] });
+    expect(one.removesCapacity).toBe(true);
+    expect(one.spans).toHaveLength(1);
+    const many = Array.from({ length: 31 }, (_, i) => ({ startsAt: new Date(Date.parse(base.startsAt) + i * 86_400_000).toISOString(), endsAt: new Date(Date.parse(base.endsAt) + i * 86_400_000).toISOString() }));
+    expect(shiftBatchInputSchema.parse({ kind: "on_call", spans: many }).removesCapacity).toBe(false);
+  });
+  it("rejects no spans or more than 31", () => {
+    expect(shiftBatchInputSchema.safeParse({ kind: "time_off", spans: [] }).success).toBe(false);
+    expect(shiftBatchInputSchema.safeParse({ kind: "time_off", spans: Array.from({ length: 32 }, () => day(2)) }).success).toBe(false);
+  });
+  it("applies the single-shift rules to every span", () => {
+    expect(shiftBatchInputSchema.safeParse({ kind: "time_off", spans: [day(2), { startsAt: day(3).endsAt, endsAt: day(3).startsAt }] }).success).toBe(false);
+    expect(shiftBatchInputSchema.safeParse({ kind: "time_off", spans: [{ startsAt: "2026-11-01T00:00:00.000Z", endsAt: "2026-12-03T00:00:00.000Z" }] }).success).toBe(false);
+    expect(shiftBatchInputSchema.safeParse({ kind: "time_off", spans: [{ startsAt: "nope", endsAt: day(2).endsAt }] }).success).toBe(false);
+  });
+});
+
 const rec = (over: Partial<ShiftRecord>): ShiftRecord => ({
   id: "s1", technicianId: "t1", kind: "time_off", title: null, ...base, removesCapacity: true, ...over,
 });
@@ -48,9 +73,28 @@ const rec = (over: Partial<ShiftRecord>): ShiftRecord => ({
 describe("blocksToScheduledJobs", () => {
   it("maps rows to scheduled jobs", () => {
     expect(blocksToScheduledJobs([rec({}), rec({ id: "s2", technicianId: "t2", title: "Training" })])).toEqual([
-      { id: "s1", referenceNumber: "Time off", status: "assigned", assignedTo: "t1", arrivalWindowStart: base.startsAt, arrivalWindowEnd: base.endsAt },
-      { id: "s2", referenceNumber: "Training", status: "assigned", assignedTo: "t2", arrivalWindowStart: base.startsAt, arrivalWindowEnd: base.endsAt },
+      { id: "s1", referenceNumber: "Time off", status: "assigned", assignedTo: "t1", arrivalWindowStart: base.startsAt, arrivalWindowEnd: base.endsAt, timeOff: true },
+      { id: "s2", referenceNumber: "Training", status: "assigned", assignedTo: "t2", arrivalWindowStart: base.startsAt, arrivalWindowEnd: base.endsAt, timeOff: true },
     ]);
+  });
+  it("labels untitled shifts by kind", () => {
+    const out = blocksToScheduledJobs([
+      rec({ id: "a", kind: "time_off" }),
+      rec({ id: "b", kind: "on_call" }),
+      rec({ id: "c", kind: "non_job" }),
+    ]);
+    expect(out.map((j) => j.referenceNumber)).toEqual(["Time off", "On call", "Non-job event"]);
+  });
+});
+
+describe("hasTimeOff", () => {
+  const job = { id: "j", referenceNumber: "R-1", status: "assigned", assignedTo: "t1", arrivalWindowStart: base.startsAt, arrivalWindowEnd: base.endsAt };
+  it("is false for an empty list or plain jobs", () => {
+    expect(hasTimeOff([])).toBe(false);
+    expect(hasTimeOff([job])).toBe(false);
+  });
+  it("is true when any entry is time off", () => {
+    expect(hasTimeOff([job, ...blocksToScheduledJobs([rec({})])])).toBe(true);
   });
 });
 

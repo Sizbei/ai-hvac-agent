@@ -41,6 +41,7 @@ import {
   messages,
   attachments,
   serviceRequests,
+  appointments,
   serviceHistory,
   estimates,
   communicationJobs,
@@ -250,6 +251,29 @@ export async function anonymizeCustomer(
           serviceRequests,
           organizationId,
           eq(serviceRequests.customerId, customerId),
+        ),
+      ),
+    // Visits #2+: special instructions are office free text that can carry PII.
+    db
+      .update(appointments)
+      .set({ specialInstructions: null })
+      .where(
+        withTenant(
+          appointments,
+          organizationId,
+          inArray(
+            appointments.serviceRequestId,
+            db
+              .select({ id: serviceRequests.id })
+              .from(serviceRequests)
+              .where(
+                withTenant(
+                  serviceRequests,
+                  organizationId,
+                  eq(serviceRequests.customerId, customerId),
+                ),
+              ),
+          ),
         ),
       ),
     // Estimates: drop the customer's e-signature name + IP.

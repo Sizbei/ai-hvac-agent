@@ -207,7 +207,8 @@ export function RequestCreateDialog({ open, onOpenChange, onCreated }: RequestCr
   const [searchInput, setSearchInput] = useState('');
   const [errors, setErrors] = useState<FieldErrors>({});
   const [serverError, setServerError] = useState<string | null>(null);
-  const [conflict, setConflict] = useState<string | null>(null);
+  // Time off is never overridable, so its conflict hides "Schedule anyway?".
+  const [conflict, setConflict] = useState<{ message: string; overridable: boolean } | null>(null);
   const [notice, setNotice] = useState<{ id: string; message: string } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const submittingRef = useRef(false);
@@ -322,8 +323,9 @@ export function RequestCreateDialog({ open, onOpenChange, onCreated }: RequestCr
         body: JSON.stringify(buildCreateRequestPayload({ ...draft, isoDay: selectedDay }, override)),
       });
       const body = await res.json().catch(() => null);
-      if (res.status === 409 && body?.error?.code === 'SCHEDULE_CONFLICT') {
-        setConflict(body.error.message as string);
+      const code = body?.error?.code;
+      if (res.status === 409 && (code === 'SCHEDULE_CONFLICT' || code === 'TIME_OFF')) {
+        setConflict({ message: body.error.message as string, overridable: code === 'SCHEDULE_CONFLICT' });
         return;
       }
       if (!res.ok || !body?.success) {
@@ -727,12 +729,14 @@ export function RequestCreateDialog({ open, onOpenChange, onCreated }: RequestCr
               <div role="alert" className="space-y-2 rounded-md border border-warning/40 bg-warning/10 p-3">
                 <p className="flex items-start gap-2 text-sm">
                   <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
-                  {conflict}
+                  {conflict.message}
                 </p>
                 <div className="flex gap-2">
-                  <Button type="button" size="sm" onClick={() => void submit(true)} disabled={isSubmitting}>
-                    Schedule anyway?
-                  </Button>
+                  {conflict.overridable && (
+                    <Button type="button" size="sm" onClick={() => void submit(true)} disabled={isSubmitting}>
+                      Schedule anyway?
+                    </Button>
+                  )}
                   <Button type="button" size="sm" variant="outline" onClick={() => setConflict(null)}>
                     Pick another time
                   </Button>

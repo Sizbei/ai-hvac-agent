@@ -23,6 +23,8 @@ export interface RescheduleConflictDetail {
     readonly referenceNumber: string;
     readonly arrivalWindowStart: string;
     readonly arrivalWindowEnd: string;
+    /** A technician's time off: never overridable. */
+    readonly timeOff: boolean;
   }>;
   readonly outsideAvailability: boolean;
 }
@@ -60,6 +62,7 @@ function parseConflictDetail(value: unknown): RescheduleConflictDetail {
             referenceNumber: String(job.referenceNumber ?? ''),
             arrivalWindowStart: String(job.arrivalWindowStart ?? ''),
             arrivalWindowEnd: String(job.arrivalWindowEnd ?? ''),
+            timeOff: job.timeOff === true,
           },
         ];
       })
@@ -114,8 +117,11 @@ export function useRescheduleJob(): UseRescheduleJobResult {
         const message =
           body?.error?.message ?? 'Failed to reschedule. Please try again.';
 
-        // 409 with our conflict code → a blockable conflict the caller can override.
-        if (res.status === 409 && body?.error?.code === 'SCHEDULE_CONFLICT') {
+        // 409 with a conflict code → the conflict dialog. SCHEDULE_CONFLICT can
+        // be overridden; TIME_OFF can't (its entries carry timeOff, which hides
+        // the override in the dialog).
+        const code = body?.error?.code;
+        if (res.status === 409 && (code === 'SCHEDULE_CONFLICT' || code === 'TIME_OFF')) {
           return {
             status: 'conflict',
             detail: parseConflictDetail(body?.error?.details),

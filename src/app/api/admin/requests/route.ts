@@ -7,6 +7,7 @@ import { logger } from "@/lib/logger";
 import { clientIp } from "@/lib/http/client-ip";
 import { businessIsoDate } from "@/lib/admin/calendar-time";
 import type { RequestSortKey } from "@/lib/admin/types";
+import { hasTimeOff } from "@/lib/admin/shift-types";
 
 export async function GET(request: NextRequest) {
   try {
@@ -159,6 +160,14 @@ export async function POST(request: NextRequest) {
         case "unknown_tag":
           return errorResponse("One of those tags doesn't exist.", "UNKNOWN_TAG", 400);
         case "conflict":
+          if (hasTimeOff(result.detail.conflicts)) {
+            return errorResponse(
+              "That technician is off during this window.",
+              "TIME_OFF",
+              409,
+              result.detail,
+            );
+          }
           return errorResponse(
             scheduleConflictMessage({
               conflictCount: result.detail.conflicts.length,

@@ -246,7 +246,8 @@ SELECT r.organization_id, r.id, 1, r.scheduled_date,
 FROM service_requests r
 WHERE (r.scheduled_date IS NOT NULL OR r.arrival_window_start IS NOT NULL
        OR r.arrival_window_end IS NOT NULL OR r.assigned_to IS NOT NULL)
-  AND NOT EXISTS (SELECT 1 FROM appointments a WHERE a.service_request_id = r.id AND a.appointment_number = 1);
+  AND NOT EXISTS (SELECT 1 FROM appointments a WHERE a.service_request_id = r.id AND a.appointment_number = 1)
+ON CONFLICT ("service_request_id","appointment_number") DO NOTHING;
 --> statement-breakpoint
 INSERT INTO appointment_assignments (organization_id, appointment_id, technician_id, is_lead, status, assigned_at)
 SELECT r.organization_id, a.id, r.assigned_to, true, r.status, r.updated_at

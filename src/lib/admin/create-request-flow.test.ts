@@ -76,12 +76,34 @@ describe("runCreateRequest — gate ordering", () => {
     expect(d.insertRequest).not.toHaveBeenCalled();
   });
 
-  it("override skips the conflict check but not the technician check", async () => {
-    const { d } = deps();
-    await runCreateRequest(d, input({ ...withTech, override: true }));
+  it("override proceeds past a job clash but still checks the window and the technician", async () => {
+    const jobClash = {
+      conflicts: [
+        { id: "j1", referenceNumber: "HVAC-9", status: "assigned", assignedTo: TECH, arrivalWindowStart: "a", arrivalWindowEnd: "b" },
+      ],
+      outsideAvailability: true,
+    };
+    const { d } = deps({ checkTechnicianWindow: vi.fn(async () => jobClash) });
+    const r = await runCreateRequest(d, input({ ...withTech, override: true }));
+    expect(r.ok).toBe(true);
     expect(d.verifyTechnician).toHaveBeenCalledOnce();
-    expect(d.checkTechnicianWindow).not.toHaveBeenCalled();
+    expect(d.checkTechnicianWindow).toHaveBeenCalledOnce();
     expect(d.place).toHaveBeenCalledWith("req-1", expect.objectContaining({ kind: "assign" }), expect.anything(), true);
+  });
+
+  it("override + a time-off clash is still a conflict and nothing is inserted", async () => {
+    const detail = {
+      conflicts: [
+        { id: "s1", referenceNumber: "Time off", status: "assigned", assignedTo: TECH, arrivalWindowStart: "a", arrivalWindowEnd: "b", timeOff: true },
+      ],
+      outsideAvailability: false,
+    };
+    const { d } = deps({ checkTechnicianWindow: vi.fn(async () => detail) });
+    const r = await runCreateRequest(d, input({ ...withTech, override: true }));
+    expect(r).toEqual({ ok: false, reason: "conflict", detail });
+    expect(d.resolveCustomer).not.toHaveBeenCalled();
+    expect(d.insertRequest).not.toHaveBeenCalled();
+    expect(d.place).not.toHaveBeenCalled();
   });
 
   it("customer refusals happen before the insert", async () => {

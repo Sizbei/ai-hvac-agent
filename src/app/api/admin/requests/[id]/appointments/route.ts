@@ -107,6 +107,12 @@ export async function POST(
           );
         case "conflict":
           return errorResponse("Couldn't add the visit. Try again.", "CONFLICT", 409);
+        case "time_off":
+          return errorResponse(
+            "One of those technicians is off during this window.",
+            "TIME_OFF",
+            409,
+          );
       }
     }
 

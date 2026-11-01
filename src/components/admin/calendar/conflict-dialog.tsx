@@ -67,6 +67,8 @@ export function ConflictDialog({
   onCancel,
 }: ConflictDialogProps) {
   const open = conflict !== null;
+  // Time off is never overridable: show what blocks the move, no override.
+  const timeOff = conflict?.conflicts.some((c) => c.timeOff) ?? false;
   return (
     <Dialog
       open={open}
@@ -86,7 +88,9 @@ export function ConflictDialog({
         {conflict && conflict.conflicts.length > 0 && (
           <div className="space-y-1.5">
             <p className="text-xs font-medium text-muted-foreground">
-              Overlapping job{conflict.conflicts.length === 1 ? '' : 's'}:
+              {timeOff
+                ? 'Blocked by:'
+                : `Overlapping job${conflict.conflicts.length === 1 ? '' : 's'}:`}
             </p>
             <ul className="space-y-1">
               {conflict.conflicts.map((job) => (
@@ -117,14 +121,16 @@ export function ConflictDialog({
           >
             Cancel
           </Button>
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={onOverride}
-            disabled={isSubmitting}
-          >
-            {isSubmitting ? 'Scheduling…' : 'Schedule anyway'}
-          </Button>
+          {!timeOff && (
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={onOverride}
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? 'Scheduling…' : 'Schedule anyway'}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

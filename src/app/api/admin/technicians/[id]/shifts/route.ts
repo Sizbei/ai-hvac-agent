@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
-import { listShifts, createShift } from "@/lib/admin/shift-queries";
-import { shiftInputSchema } from "@/lib/admin/shift-types";
+import { listShifts, createShift, createShifts } from "@/lib/admin/shift-queries";
+import { shiftBatchInputSchema, shiftInputSchema } from "@/lib/admin/shift-types";
 import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse, readJsonBody } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
@@ -74,6 +74,33 @@ export async function POST(
 
     const body = await readJsonBody(request);
     if (!body.ok) return errorResponse(DATES_ERROR, "VALIDATION_ERROR", 400);
+
+    // A body with `spans` is multi-day time off: one insert, all or nothing.
+    if (typeof body.data === "object" && body.data !== null && "spans" in body.data) {
+      const batch = shiftBatchInputSchema.safeParse(body.data);
+      if (!batch.success) return errorResponse(DATES_ERROR, "VALIDATION_ERROR", 400);
+      const created = await createShifts(session.organizationId, id, batch.data, session.userId);
+      if ("reason" in created) {
+        return errorResponse("Technician not found", "NOT_FOUND", 404);
+      }
+      await logAudit({
+        organizationId: session.organizationId,
+        userId: session.userId,
+        action: "create_shift",
+        entity: "technician_shifts",
+        entityId: created[0]?.id ?? id,
+        details: JSON.stringify({
+          technicianId: id,
+          kind: batch.data.kind,
+          removesCapacity: batch.data.removesCapacity,
+          count: created.length,
+        }),
+      }).catch((auditError: unknown) => {
+        logger.error({ error: auditError }, "Failed to audit shift creation");
+      });
+      return successResponse({ shifts: created }, 201);
+    }
+
     const parsed = shiftInputSchema.safeParse(body.data);
     if (!parsed.success) return errorResponse(DATES_ERROR, "VALIDATION_ERROR", 400);
 

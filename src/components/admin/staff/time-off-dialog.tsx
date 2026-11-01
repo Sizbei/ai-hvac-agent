@@ -20,7 +20,7 @@ import {
   type ShiftKind,
   type ShiftRecord,
 } from '@/lib/admin/shift-types';
-import { expandDailyShifts, firstUnsavedDay } from '@/lib/admin/time-off-expand';
+import { expandDailyShifts } from '@/lib/admin/time-off-expand';
 import {
   businessIsoDate,
   formatBusinessTime,
@@ -140,35 +140,25 @@ export function TimeOffDialog({ open, onClose, staff }: TimeOffDialogProps) {
     if (!staffId || spans.length === 0) return;
     setIsSaving(true);
     setError(null);
-    let saved = 0;
-    const failMessage = (): string =>
-      saved > 0
-        ? `Saved ${saved} of ${spans.length} days. Couldn't save the rest. Try again from ${firstUnsavedDay(startDate, saved)}.`
-        : SAVE_ERROR;
     try {
-      for (const span of spans) {
-        const res = await fetch(`/api/admin/technicians/${staffId}/shifts`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            kind,
-            ...(title.trim() ? { title: title.trim() } : {}),
-            startsAt: span.startsAt,
-            endsAt: span.endsAt,
-            removesCapacity,
-          }),
-        });
-        if (!res.ok) {
-          setError(failMessage());
-          if (saved > 0) setStartDate(firstUnsavedDay(startDate, saved));
-          return;
-        }
-        saved += 1;
+      // One POST for every day: the server saves all of them or none.
+      const res = await fetch(`/api/admin/technicians/${staffId}/shifts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          kind,
+          ...(title.trim() ? { title: title.trim() } : {}),
+          removesCapacity,
+          spans,
+        }),
+      });
+      if (!res.ok) {
+        setError(SAVE_ERROR);
+        return;
       }
       setTitle('');
     } catch {
-      setError(failMessage());
-      if (saved > 0) setStartDate(firstUnsavedDay(startDate, saved));
+      setError(SAVE_ERROR);
     } finally {
       setIsSaving(false);
       await loadShifts();

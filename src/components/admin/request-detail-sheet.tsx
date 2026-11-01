@@ -335,6 +335,7 @@ const VISIT_ERROR_COPY: Record<string, string> = {
   VISIT_CANCELLED: 'This visit is already cancelled.',
   IS_FIRST_VISIT: 'The first visit follows the request. Change the request instead.',
   TECHNICIAN_NOT_FOUND: 'One or more technicians aren’t active on your team.',
+  TIME_OFF: 'One of those technicians is off during this window.',
 };
 const VISIT_GENERIC_ERROR = 'Couldn’t save the visit. Try again.';
 
@@ -357,9 +358,15 @@ async function visitErrorFrom(res: Response): Promise<string> {
 function VisitsSection({
   requestId,
   technicians,
+  refreshKey,
+  terminal,
 }: {
   readonly requestId: string;
   readonly technicians: readonly TechnicianRecord[];
+  /** Changes when the request's status / technician / schedule changes, so visit #1 refetches. */
+  readonly refreshKey: string;
+  /** Completed or cancelled: no new visits. */
+  readonly terminal: boolean;
 }) {
   const [visits, setVisits] = useState<readonly AppointmentRecord[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -402,7 +409,7 @@ function VisitsSection({
     return () => {
       cancelled = true;
     };
-  }, [requestId, reload]);
+  }, [requestId, reload, refreshKey]);
 
   function openAdd(): void {
     setPick(null);
@@ -496,9 +503,11 @@ function VisitsSection({
         icon={CalendarClock}
         count={visits?.length}
         action={
-          <Button type="button" size="sm" variant="outline" onClick={openAdd}>
-            Add visit
-          </Button>
+          terminal ? undefined : (
+            <Button type="button" size="sm" variant="outline" onClick={openAdd}>
+              Add visit
+            </Button>
+          )
         }
       >
         {notice && (
@@ -522,7 +531,11 @@ function VisitsSection({
           <ul className="divide-y">
             {visits.map((a) => {
               const cancelled = a.cancelledAt !== null;
-              const names = a.assignments.map((x) => x.technicianName).join(', ');
+              // A live visit lists only technicians still on it; a cancelled one keeps its history.
+              const names = a.assignments
+                .filter((x) => cancelled || x.status !== 'cancelled')
+                .map((x) => x.technicianName)
+                .join(', ');
               return (
                 <li key={a.id} className="flex items-start justify-between gap-3 px-4 py-2.5 text-sm">
                   <div className={cn('min-w-0', cancelled && 'text-muted-foreground line-through')}>
@@ -1008,7 +1021,13 @@ export function RequestDetailSheet({
                 </div>
               </section>
 
-              <VisitsSection key={detail.id} requestId={detail.id} technicians={technicians} />
+              <VisitsSection
+                key={detail.id}
+                requestId={detail.id}
+                technicians={technicians}
+                refreshKey={[detail.status, detail.assignedTo, detail.arrivalWindowStart, detail.scheduledDate].join('|')}
+                terminal={detail.status === 'completed' || detail.status === 'cancelled'}
+              />
 
               <section>
                 <h3 className="text-sm font-semibold mb-2">Tags</h3>

@@ -3,7 +3,12 @@ import { db } from "@/lib/db";
 import { technicianShifts, users } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import type { ScheduledJob } from "./types";
-import { blocksToScheduledJobs, type ShiftInput, type ShiftRecord } from "./shift-types";
+import {
+  blocksToScheduledJobs,
+  type ShiftBatchInput,
+  type ShiftInput,
+  type ShiftRecord,
+} from "./shift-types";
 
 export function toShiftRecord(row: typeof technicianShifts.$inferSelect): ShiftRecord {
   return {
@@ -40,12 +45,7 @@ export async function listShifts(
   return rows.map(toShiftRecord);
 }
 
-export async function createShift(
-  organizationId: string,
-  technicianId: string,
-  input: ShiftInput,
-  createdBy: string,
-): Promise<ShiftRecord | { readonly reason: "technician_not_found" }> {
+async function isActiveTechnician(organizationId: string, technicianId: string): Promise<boolean> {
   const [tech] = await db
     .select({ id: users.id })
     .from(users)
@@ -56,7 +56,18 @@ export async function createShift(
         and(eq(users.id, technicianId), eq(users.role, "technician"), eq(users.isActive, true))!,
       ),
     );
-  if (!tech) return { reason: "technician_not_found" };
+  return tech !== undefined;
+}
+
+export async function createShift(
+  organizationId: string,
+  technicianId: string,
+  input: ShiftInput,
+  createdBy: string,
+): Promise<ShiftRecord | { readonly reason: "technician_not_found" }> {
+  if (!(await isActiveTechnician(organizationId, technicianId))) {
+    return { reason: "technician_not_found" };
+  }
 
   const [row] = await db
     .insert(technicianShifts)
@@ -73,6 +84,35 @@ export async function createShift(
     .returning();
   if (!row) throw new Error("Failed to create shift");
   return toShiftRecord(row);
+}
+
+/** Every span in ONE insert statement: all of them are saved or none. */
+export async function createShifts(
+  organizationId: string,
+  technicianId: string,
+  input: ShiftBatchInput,
+  createdBy: string,
+): Promise<readonly ShiftRecord[] | { readonly reason: "technician_not_found" }> {
+  if (!(await isActiveTechnician(organizationId, technicianId))) {
+    return { reason: "technician_not_found" };
+  }
+  const title = input.title || null;
+  const rows = await db
+    .insert(technicianShifts)
+    .values(
+      input.spans.map((span) => ({
+        organizationId,
+        technicianId,
+        kind: input.kind,
+        title,
+        startsAt: new Date(span.startsAt),
+        endsAt: new Date(span.endsAt),
+        removesCapacity: input.removesCapacity,
+        createdBy,
+      })),
+    )
+    .returning();
+  return rows.map(toShiftRecord);
 }
 
 export async function deleteShift(

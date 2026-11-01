@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { appointmentAssignments, appointments, serviceRequests, users } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { isUniqueViolation } from "@/lib/db/unique-violation";
+import { technicianTimeOffOverlapping } from "./shift-queries";
 import {
   nextAppointmentNumber,
   type AppointmentAssignmentRecord,
@@ -64,6 +65,20 @@ async function activeTechnicianIds(organizationId: string, ids: readonly string[
   return rows.map((r) => r.id);
 }
 
+/** True when any of `ids` has a capacity-removing shift overlapping [start, end). Time off is never overridable. */
+async function anyTimeOff(organizationId: string, ids: readonly string[], start: Date, end: Date): Promise<boolean> {
+  const blocks = await Promise.all(ids.map((id) => technicianTimeOffOverlapping(organizationId, id, start, end)));
+  return blocks.some((b) => b.length > 0);
+}
+
+/** Atomic twin of anyTimeOff for the write's WHERE: no capacity-removing shift for `ids` overlaps the window. */
+function noTimeOff(organizationId: string, ids: readonly string[], startIso: string, endIso: string): SQL {
+  // sql.param(...)::uuid[] renders ONE array parameter; a bare array would expand to ($1, $2).
+  return sql`NOT EXISTS (SELECT 1 FROM technician_shifts s WHERE s.organization_id = ${organizationId}::uuid
+    AND s.technician_id = ANY(${sql.param([...ids])}::uuid[]) AND s.removes_capacity
+    AND s.starts_at < ${endIso}::timestamptz AND s.ends_at > ${startIso}::timestamptz)`;
+}
+
 /** "THIS transaction wrote the appointment row" — gates the assignment writes in the same batch. */
 function landed(organizationId: string, appointmentId: string): SQL {
   return sql`EXISTS (SELECT 1 FROM ${appointments} p WHERE p.id = ${appointmentId}::uuid AND p.organization_id = ${organizationId}::uuid AND p.xmin = pg_current_xact_id()::xid)`;
@@ -91,7 +106,7 @@ export async function listAppointments(organizationId: string, requestId: string
 
 export type AddAppointmentResult =
   | AppointmentRecord
-  | { readonly reason: "request_not_found" | "request_cancelled" | "technician_not_found" | "conflict" };
+  | { readonly reason: "request_not_found" | "request_cancelled" | "technician_not_found" | "time_off" | "conflict" };
 
 export async function addAppointment(
   organizationId: string, requestId: string, input: AppointmentInput, actorUserId: string,
@@ -107,6 +122,7 @@ export async function addAppointment(
   if (found.length !== ordered.length) return { reason: "technician_not_found" };
   const start = new Date(input.arrivalWindowStart).toISOString();
   const end = new Date(input.arrivalWindowEnd).toISOString();
+  if (await anyTimeOff(organizationId, ordered, new Date(start), new Date(end))) return { reason: "time_off" };
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const existing = await db.select({ appointmentNumber: appointments.appointmentNumber }).from(appointments)
@@ -119,16 +135,19 @@ export async function addAppointment(
       // for this batch, after which its trigger cancels the new visit too.
       const [inserted] = await db.batch([
         db.execute(sql`INSERT INTO appointments (id, organization_id, service_request_id, appointment_number,
-            starts_at, ends_at, arrival_window_start, arrival_window_end, special_instructions)
+            scheduled_date, starts_at, ends_at, arrival_window_start, arrival_window_end, special_instructions)
           SELECT ${id}::uuid, r.organization_id, r.id, ${appointmentNumber}::smallint,
-            ${start}::timestamptz, ${end}::timestamptz, ${start}::timestamptz, ${end}::timestamptz, ${input.specialInstructions ?? null}::text
+            ${start}::timestamptz, ${start}::timestamptz, ${end}::timestamptz, ${start}::timestamptz, ${end}::timestamptz, ${input.specialInstructions ?? null}::text
           FROM service_requests r
           WHERE r.id = ${requestId}::uuid AND r.organization_id = ${organizationId}::uuid AND r.status <> 'cancelled'
+            AND ${noTimeOff(organizationId, ordered, start, end)}
           FOR SHARE
           RETURNING id`),
         insertAssignments(organizationId, id, ordered, actorUserId),
       ]);
       if (inserted.rows.length === 0) {
+        // Time off can land between the pre-check and the insert.
+        if (await anyTimeOff(organizationId, ordered, new Date(start), new Date(end))) return { reason: "time_off" };
         const now = await requestStatus(organizationId, requestId);
         return { reason: now === null ? "request_not_found" : "request_cancelled" };
       }
@@ -165,7 +184,7 @@ function casWhere(organizationId: string, requestId: string, appointmentId: stri
 
 export type UpdateAppointmentResult =
   | AppointmentRecord
-  | { readonly reason: MissReason | "technician_not_found" };
+  | { readonly reason: MissReason | "technician_not_found" | "time_off" };
 
 export async function updateAppointment(
   organizationId: string, requestId: string, appointmentId: string, patch: AppointmentPatch, actorUserId: string,
@@ -175,13 +194,14 @@ export async function updateAppointment(
   if (found.length !== ordered.length) return { reason: "technician_not_found" };
   const start = new Date(patch.arrivalWindowStart);
   const end = new Date(patch.arrivalWindowEnd);
+  if (await anyTimeOff(organizationId, ordered, start, end)) return { reason: "time_off" };
   // ONE batch: CAS update + assignment delete + assignment insert. The latter two
   // are gated on xmin = this transaction (not on version = v + 1): under READ
   // COMMITTED a loser whose CAS matched 0 rows would otherwise see the winner's
   // v + 1 and replace the winner's technicians.
   const [updated] = await db.batch([
     db.update(appointments).set({
-      startsAt: start, endsAt: end, arrivalWindowStart: start, arrivalWindowEnd: end,
+      scheduledDate: start, startsAt: start, endsAt: end, arrivalWindowStart: start, arrivalWindowEnd: end,
       specialInstructions: patch.specialInstructions ?? null,
       version: sql`${appointments.version} + 1`, updatedAt: new Date(),
     }).where(and(
@@ -190,12 +210,17 @@ export async function updateAppointment(
       isNull(appointments.cancelledAt),
       // A cancelled request re-cancels its visits; refuse rather than edit a lost visit.
       sql`EXISTS (SELECT 1 FROM ${serviceRequests} r WHERE r.id = ${appointments.serviceRequestId} AND r.organization_id = ${organizationId}::uuid AND r.status <> 'cancelled')`,
+      // Time off is never overridable, and it may land after the pre-check.
+      noTimeOff(organizationId, ordered, start.toISOString(), end.toISOString()),
     )).returning({ id: appointments.id }),
     db.delete(appointmentAssignments).where(withTenant(appointmentAssignments, organizationId,
       eq(appointmentAssignments.appointmentId, appointmentId), landed(organizationId, appointmentId))),
     insertAssignments(organizationId, appointmentId, ordered, actorUserId),
   ]);
-  if (updated.length === 0) return { reason: await classifyMiss(organizationId, requestId, appointmentId, true) };
+  if (updated.length === 0) {
+    if (await anyTimeOff(organizationId, ordered, start, end)) return { reason: "time_off" };
+    return { reason: await classifyMiss(organizationId, requestId, appointmentId, true) };
+  }
   const record = await getAppointment(organizationId, requestId, appointmentId);
   if (!record) return { reason: "not_found" };
   return record;

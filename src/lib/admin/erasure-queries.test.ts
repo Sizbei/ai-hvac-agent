@@ -123,6 +123,7 @@ vi.mock("@/lib/db/schema", () => {
     messages: t("messages"),
     attachments: t("attachments"),
     serviceRequests: t("serviceRequests"),
+    appointments: t("appointments"),
     serviceHistory: t("serviceHistory"),
     estimates: t("estimates"),
     communicationJobs: t("communicationJobs"),
@@ -271,6 +272,19 @@ describe("anonymizeCustomer", () => {
 
     const est = opFor("estimates");
     expect(est?.set).toMatchObject({ signatureName: null, signatureIp: null });
+  });
+
+  it("clears visit special instructions in the same batch", async () => {
+    seedExisting();
+    await anonymizeCustomer(ORG, CUST);
+
+    const appt = opFor("appointments");
+    expect(appt?.op).toBe("update");
+    expect(appt?.set).toEqual({ specialInstructions: null });
+    const batch = batchCalls.at(-1) ?? [];
+    expect(batch.filter((c) => c.table === "appointments")).toHaveLength(1);
+    // 21 statements before visits #2+ existed; the appointments scrub is the 22nd.
+    expect(batch).toHaveLength(22);
   });
 
   it("scrubs locations, sessions, comms, service history, and review feedback", async () => {

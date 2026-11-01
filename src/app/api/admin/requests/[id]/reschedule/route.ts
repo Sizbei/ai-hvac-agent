@@ -12,6 +12,7 @@ import {
   type ArrivalWindow,
 } from "@/lib/admin/arrival-window";
 import { logAudit } from "@/lib/admin/audit";
+import { hasTimeOff } from "@/lib/admin/shift-types";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
@@ -123,7 +124,16 @@ export async function POST(
           // HARD block (S4): the move overlaps an existing job and/or falls
           // outside the tech's hours. 409 + the conflict detail so the client can
           // show the inline warning and offer "schedule anyway" (override). No
-          // audit row — nothing was written.
+          // audit row — nothing was written. Time off is never overridable,
+          // so it gets its own code and the client hides "schedule anyway".
+          if (hasTimeOff(result.detail.conflicts)) {
+            return errorResponse(
+              "That technician is off during this window.",
+              "TIME_OFF",
+              409,
+              result.detail,
+            );
+          }
           return errorResponse(
             result.detail.outsideAvailability && result.detail.conflicts.length
               ? "This time overlaps another job and is outside the technician's hours."

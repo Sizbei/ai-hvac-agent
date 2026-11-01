@@ -266,6 +266,8 @@ export interface ScheduledJob {
   readonly assignedTo: string | null;
   readonly arrivalWindowStart: string | null;
   readonly arrivalWindowEnd: string | null;
+  /** True for a capacity-removing technician shift; such a clash is never overridable. */
+  readonly timeOff?: boolean;
 }
 
 // ─── Scheduling calendar (Stage 2: read-only calendar + unscheduled view) ────

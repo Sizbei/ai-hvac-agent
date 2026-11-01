@@ -15,6 +15,7 @@
  */
 import { arrivalWindowUtcForBusinessDate } from "@/lib/admin/calendar-time";
 import type { ScheduleConflictDetail } from "@/lib/admin/scheduling-queries";
+import { hasTimeOff } from "./shift-types";
 import {
   planSchedule,
   type CreateRequestInput,
@@ -133,9 +134,10 @@ export async function runCreateRequest<C extends { readonly id: string }>(
     if (!(await deps.verifyTechnician(plan.technicianId))) {
       return { ok: false, reason: "technician_not_found" };
     }
-    if (!input.override) {
-      const clash = await deps.checkTechnicianWindow(plan.technicianId, plan, window);
-      if (clash) return { ok: false, reason: "conflict", detail: clash };
+    // "Schedule anyway" overrides job clashes and availability, never time off.
+    const clash = await deps.checkTechnicianWindow(plan.technicianId, plan, window);
+    if (clash && (!input.override || hasTimeOff(clash.conflicts))) {
+      return { ok: false, reason: "conflict", detail: clash };
     }
   }
 
