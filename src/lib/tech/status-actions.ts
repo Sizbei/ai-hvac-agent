@@ -41,6 +41,8 @@ export function closeOutAllowedStatuses(): readonly RequestStatus[] {
   return requestStatusEnum.enumValues.filter((s) => canTransition(s, "completed"));
 }
 
+const CLOSE_OUT_STATUSES = closeOutAllowedStatuses();
+
 const refuse = (reason: Extract<Resolved, { kind: "refuse" }>["reason"]): Resolved => ({ kind: "refuse", reason });
 
 const isActiveLead = (i: ResolveInput): boolean => i.row.isLead && i.row.appointmentId === i.activeVisitId;
@@ -87,16 +89,15 @@ export function resolveTechAction(i: ResolveInput): Resolved {
 
   const target: RequestStatus = i.action === "pause" ? "on_hold" : i.action;
 
-  if (target === "completed") {
-    if (i.row.startedAt === null) return refuse("not_started_row");
-    if (activeLead && !closeOutAllowedStatuses().includes(i.requestStatus)) return refuse("request_not_started");
-  }
+  if (target === "completed" && i.row.startedAt === null) return refuse("not_started_row");
 
   const requestBehind = activeLead && followsRequest(target) && i.requestStatus !== target && canTransition(i.requestStatus, target);
 
   if (isNoop(i.row, target)) {
     return requestBehind ? { kind: "request_only", requestTo: target } : { kind: "noop" };
   }
+  // The stamped no-op above wins over this guard (replaying a finished close is a no-op).
+  if (target === "completed" && activeLead && !CLOSE_OUT_STATUSES.includes(i.requestStatus)) return refuse("request_not_started");
   // A row at the target with a missing stamp (trigger-mirrored) is allowed through.
   if (i.row.status !== target && !canTransition(i.row.status, target)) return refuse("invalid_transition");
 

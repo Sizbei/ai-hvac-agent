@@ -53,6 +53,12 @@ describe("resolveTechAction", () => {
     }
   });
 
+  it("refuses every action when cancelledAt is set though status is not cancelled", () => {
+    for (const a of TECH_ACTIONS) {
+      expect(resolveTechAction(input(a, { row: { status: "en_route", cancelledAt: T } }))).toEqual({ kind: "refuse", reason: "invalid_transition" });
+    }
+  });
+
   it("lead en_route writes row + request, no time entry", () => {
     expect(resolveTechAction(input("en_route"))).toEqual({
       kind: "write", assignmentTo: "en_route", stamp: "enRouteAt", requestTo: "en_route", timeEntry: "none",
@@ -130,6 +136,13 @@ describe("resolveTechAction", () => {
     it("lead completed row with stamp, request in_progress -> noop, never request_only", () => {
       expect(resolveTechAction(input("completed", { row: { status: "completed", startedAt: T, completedAt: T }, requestStatus: "in_progress" }))).toEqual({ kind: "noop" });
     });
+    it("active lead replaying completed after the request completed -> noop", () => {
+      expect(resolveTechAction(input("completed", { row: { status: "completed", startedAt: T, completedAt: T }, requestStatus: "completed" }))).toEqual({ kind: "noop" });
+    });
+    it("request_only for arrived and en_route targets", () => {
+      expect(resolveTechAction(input("arrived", { row: { status: "arrived", arrivedAt: T }, requestStatus: "en_route" }))).toEqual({ kind: "request_only", requestTo: "arrived" });
+      expect(resolveTechAction(input("en_route", { row: { status: "en_route", enRouteAt: T }, requestStatus: "scheduled" }))).toEqual({ kind: "request_only", requestTo: "en_route" });
+    });
     it("lead pause with row on_hold -> noop", () => {
       expect(resolveTechAction(input("pause", { row: { status: "on_hold", startedAt: T }, requestStatus: "on_hold" }))).toEqual({ kind: "noop" });
     });
@@ -170,6 +183,10 @@ describe("allowedActions", () => {
     const list = allowedActions({ ...base, row: row({ status: "completed", startedAt: T, completedAt: T }), requestStatus: "in_progress" });
     expect(list).toContain("close_out");
     expect(list).not.toContain("completed");
+  });
+
+  it("active lead with an open en_route row gets close_out", () => {
+    expect(allowedActions({ ...base, row: row({ status: "en_route", enRouteAt: T }), requestStatus: "en_route" })).toContain("close_out");
   });
 
   it("lead on a later visit keeps status buttons but not close_out/hold", () => {
