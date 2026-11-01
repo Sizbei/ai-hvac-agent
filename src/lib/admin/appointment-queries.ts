@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, gt, inArray, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, sql, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { appointmentAssignments, appointments, serviceRequests, users } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
@@ -98,7 +98,9 @@ export async function addAppointment(
 ): Promise<AddAppointmentResult> {
   const status = await requestStatus(organizationId, requestId);
   if (status === null) return { reason: "request_not_found" };
-  // The trigger re-cancels visits while the request is cancelled, so a new one would be lost.
+  // The trigger cancels visits only when a watched request column changes, so a
+  // visit added to an already-cancelled request would stay live on a dead
+  // request; refusing here is what keeps it from being silently lost.
   if (status === "cancelled") return { reason: "request_cancelled" };
   const ordered = [...new Set(input.technicianIds)]; // the caller's order decides the lead
   const found = await activeTechnicianIds(organizationId, ordered);
@@ -142,15 +144,16 @@ export async function addAppointment(
   return { reason: "conflict" };
 }
 
-type MissReason = "not_found" | "is_first_visit" | "request_cancelled" | "version_conflict";
+type MissReason = "not_found" | "is_first_visit" | "request_cancelled" | "visit_cancelled" | "version_conflict";
 
 /** Why a CAS matched no row. */
 async function classifyMiss(organizationId: string, requestId: string, appointmentId: string, checkCancelled: boolean): Promise<MissReason> {
-  const [row] = await db.select({ n: appointments.appointmentNumber }).from(appointments)
+  const [row] = await db.select({ n: appointments.appointmentNumber, cancelledAt: appointments.cancelledAt }).from(appointments)
     .where(withTenant(appointments, organizationId, eq(appointments.id, appointmentId), eq(appointments.serviceRequestId, requestId))).limit(1);
   if (!row) return "not_found";
   if (row.n === 1) return "is_first_visit";
   if (checkCancelled && (await requestStatus(organizationId, requestId)) === "cancelled") return "request_cancelled";
+  if (checkCancelled && row.cancelledAt !== null) return "visit_cancelled";
   return "version_conflict";
 }
 
@@ -183,8 +186,10 @@ export async function updateAppointment(
       version: sql`${appointments.version} + 1`, updatedAt: new Date(),
     }).where(and(
       casWhere(organizationId, requestId, appointmentId, patch.version),
+      // A cancelled visit stays cancelled: editing it would re-insert 'assigned' rows.
+      isNull(appointments.cancelledAt),
       // A cancelled request re-cancels its visits; refuse rather than edit a lost visit.
-      sql`EXISTS (SELECT 1 FROM ${serviceRequests} r WHERE r.id = ${appointments.serviceRequestId} AND r.status <> 'cancelled')`,
+      sql`EXISTS (SELECT 1 FROM ${serviceRequests} r WHERE r.id = ${appointments.serviceRequestId} AND r.organization_id = ${organizationId}::uuid AND r.status <> 'cancelled')`,
     )).returning({ id: appointments.id }),
     db.delete(appointmentAssignments).where(withTenant(appointmentAssignments, organizationId,
       eq(appointmentAssignments.appointmentId, appointmentId), landed(organizationId, appointmentId))),
@@ -217,7 +222,7 @@ export async function cancelAppointment(
   const [row] = updated;
   if (!row) {
     const reason = await classifyMiss(organizationId, requestId, appointmentId, false);
-    return { reason: reason === "request_cancelled" ? "version_conflict" : reason };
+    return { reason: reason === "request_cancelled" || reason === "visit_cancelled" ? "version_conflict" : reason };
   }
   return { ok: true, appointmentNumber: row.appointmentNumber };
 }

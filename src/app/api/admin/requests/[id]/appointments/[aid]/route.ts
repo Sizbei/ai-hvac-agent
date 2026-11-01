@@ -76,6 +76,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
           return errorResponse(...VERSION_CONFLICT);
         case "request_cancelled":
           return errorResponse("This request is cancelled.", "REQUEST_CANCELLED", 409);
+        case "visit_cancelled":
+          return errorResponse("This visit is cancelled.", "VISIT_CANCELLED", 409);
         case "technician_not_found":
           return errorResponse(
             "One or more technicians aren't active on your team.",
