@@ -229,3 +229,24 @@ visit-#1 helpers through an admin assignments endpoint (so a two-tech
 scenario is reachable before M2); the checkable before/after done-when;
 M3b: claim conditioned on the payment row not existing, manual refunds,
 mock gate everywhere, FP payments backfill method='other'.
+
+## M3a plan review — 2026-11-01
+
+Round 1 (two critics: feasibility vs code; logic/concurrency/authz): the
+plan predated spec round 4 → full rewrite (fixed batch order with xmin
+gating, active-lead fallback, hold ends the visit, admin paths, visit-#1
+helpers, ?visit= plumbing, mock strategy, task order). Round 2 (two fresh
+critics): 4 blockers + 17 majors, mostly overlapping — trigger step 4
+re-mirrored onto a hold-cancelled row (fixed: open rows only, never to
+terminal values); hold gated on the lead's xmin was impossible after the
+lead's done (fixed: post-condition NOT EXISTS open row; visit cancelled
+when nobody started); "whichever is behind" was unreachable through the
+noop rule (fixed: noop requires the stamp; request_only write); hold on a
+paused lead was a noop (fixed); bare OR in techCanReadSql (fixed:
+parentheses + render test); untyped CASE → text vs request_status (fixed:
+casts + live probes); time off / completed request / ended visit on helper
+add; admin completed now one batch that cancels untouched rows; list
+classification (overdue → today; past by completed_at/visit cancelled_at);
+reschedule/unschedule live in scheduling-queries.ts; lock order
+request→rows; labor formula unified; after() stays in the route. Rejected:
+none material. Round 3 pending.
