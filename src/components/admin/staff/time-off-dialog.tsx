@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { StaffRecord } from '@/lib/admin/types';
 import {
   Dialog,
@@ -20,7 +20,7 @@ import {
   type ShiftKind,
   type ShiftRecord,
 } from '@/lib/admin/shift-types';
-import { expandDailyShifts } from '@/lib/admin/time-off-expand';
+import { expandDailyShifts, firstUnsavedDay } from '@/lib/admin/time-off-expand';
 import {
   businessIsoDate,
   formatBusinessTime,
@@ -83,9 +83,11 @@ export function TimeOffDialog({ open, onClose, staff }: TimeOffDialogProps) {
   const [confirmId, setConfirmId] = useState<string | null>(null);
 
   const staffId = staff?.id ?? null;
+  const loadSeq = useRef(0);
 
   const loadShifts = useCallback(async (): Promise<void> => {
     if (!staffId) return;
+    const seq = ++loadSeq.current;
     const from = new Date();
     const to = new Date(from.getTime() + LOOKAHEAD_DAYS * DAY_MS);
     try {
@@ -93,16 +95,17 @@ export function TimeOffDialog({ open, onClose, staff }: TimeOffDialogProps) {
         `/api/admin/technicians/${staffId}/shifts?from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(to.toISOString())}`,
       );
       if (!res.ok) {
-        setListError(LOAD_ERROR);
+        if (seq === loadSeq.current) setListError(LOAD_ERROR);
         return;
       }
       const body = (await res.json()) as {
         data?: { shifts?: ShiftRecord[] };
       };
+      if (seq !== loadSeq.current) return;
       setShifts(body.data?.shifts ?? []);
       setListError(null);
     } catch {
-      setListError(LOAD_ERROR);
+      if (seq === loadSeq.current) setListError(LOAD_ERROR);
     }
   }, [staffId]);
 
@@ -120,6 +123,7 @@ export function TimeOffDialog({ open, onClose, staff }: TimeOffDialogProps) {
     setError(null);
     setConfirmId(null);
     setShifts([]);
+    setListError(null);
     void loadShifts();
   }, [open, loadShifts]);
 
@@ -136,6 +140,11 @@ export function TimeOffDialog({ open, onClose, staff }: TimeOffDialogProps) {
     if (!staffId || spans.length === 0) return;
     setIsSaving(true);
     setError(null);
+    let saved = 0;
+    const failMessage = (): string =>
+      saved > 0
+        ? `Saved ${saved} of ${spans.length} days. Couldn't save the rest. Try again from ${firstUnsavedDay(startDate, saved)}.`
+        : SAVE_ERROR;
     try {
       for (const span of spans) {
         const res = await fetch(`/api/admin/technicians/${staffId}/shifts`, {
@@ -150,13 +159,16 @@ export function TimeOffDialog({ open, onClose, staff }: TimeOffDialogProps) {
           }),
         });
         if (!res.ok) {
-          setError(SAVE_ERROR);
+          setError(failMessage());
+          if (saved > 0) setStartDate(firstUnsavedDay(startDate, saved));
           return;
         }
+        saved += 1;
       }
       setTitle('');
     } catch {
-      setError(SAVE_ERROR);
+      setError(failMessage());
+      if (saved > 0) setStartDate(firstUnsavedDay(startDate, saved));
     } finally {
       setIsSaving(false);
       await loadShifts();
@@ -273,17 +285,7 @@ export function TimeOffDialog({ open, onClose, staff }: TimeOffDialogProps) {
 
           {error && <p className="text-sm text-destructive">{error}</p>}
 
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>
-              Close
-            </Button>
-            <Button type="submit" disabled={!canSave}>
-              {isSaving ? 'Saving...' : 'Save'}
-            </Button>
-          </DialogFooter>
-        </form>
-
-        <div className="space-y-2 border-t border-border pt-3">
+          <div className="space-y-2 border-t border-border pt-3">
           <h3 className="text-sm font-medium">Upcoming</h3>
           {listError && <p className="text-sm text-destructive">{listError}</p>}
           {!listError && shifts.length === 0 && (
@@ -339,6 +341,17 @@ export function TimeOffDialog({ open, onClose, staff }: TimeOffDialogProps) {
             ))}
           </ul>
         </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>
+              Close
+            </Button>
+            <Button type="submit" disabled={!canSave}>
+              {isSaving ? 'Saving...' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </form>
+
       </DialogContent>
     </Dialog>
   );

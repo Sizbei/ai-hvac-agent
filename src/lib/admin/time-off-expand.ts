@@ -48,3 +48,9 @@ export function expandDailyShifts(
   }
   return spans;
 }
+
+/** The ISO day `savedCount` days after `startIso` (the first day not yet saved). */
+export function firstUnsavedDay(startIso: string, savedCount: number): string {
+  const ms = Date.parse(`${startIso}T00:00:00Z`) + savedCount * DAY_MS;
+  return new Date(ms).toISOString().slice(0, 10);
+}
