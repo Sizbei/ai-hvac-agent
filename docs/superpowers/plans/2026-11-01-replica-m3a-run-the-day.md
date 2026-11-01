@@ -239,13 +239,14 @@ BEGIN
     END IF;
   ELSIF NEW.assigned_to IS NOT NULL AND NEW.status <> 'cancelled' THEN
     -- 4. Status mirror for the lead, only until the tech app has written it.
-    -- Only an OPEN untouched row is mirrored, and never to a terminal value: a
-    -- row a hold has cancelled must stay cancelled, and request 'completed'
-    -- leaves rows alone (rule d).
+    -- Only a NON-TERMINAL untouched row is mirrored (pending included: a lead
+    -- row inserted while the request is pending must follow it to scheduled),
+    -- and never to a terminal value: a row a hold has cancelled must stay
+    -- cancelled, and request 'completed' leaves rows alone (rule d).
     IF NEW.status NOT IN ('completed','cancelled') THEN
       UPDATE appointment_assignments SET status = NEW.status
         WHERE appointment_id = v_appt_id AND technician_id = NEW.assigned_to AND is_lead
-          AND status IN ('assigned','scheduled','en_route','arrived','in_progress','on_hold')
+          AND status NOT IN ('completed','cancelled')
           AND en_route_at IS NULL AND arrived_at IS NULL
           AND started_at IS NULL AND completed_at IS NULL;
     END IF;
@@ -269,7 +270,11 @@ update service_requests set status = 'on_hold' where id = '<rid>';
 select status from appointment_assignments where technician_id = '<T1>' and appointment_id = '<A1>';   -- in_progress (not mirrored)
 update appointment_assignments set status = 'cancelled' where technician_id = '<T2>' and appointment_id = '<A1>';   -- stand-in for a hold on T2's untouched row
 update service_requests set status = 'arrived' where id = '<rid>';
-select status from appointment_assignments where technician_id = '<T2>' and appointment_id = '<A1>';   -- stays cancelled (step 4 only touches open rows)
+select status from appointment_assignments where technician_id = '<T2>' and appointment_id = '<A1>';   -- stays cancelled (step 4 only touches non-terminal rows)
+-- (a2) a pending lead row still follows the request (v1 behaviour kept)
+update appointment_assignments set status = 'pending', started_at = null where technician_id = '<T1>' and appointment_id = '<A1>';
+update service_requests set status = 'scheduled' where id = '<rid>';
+select status from appointment_assignments where technician_id = '<T1>' and appointment_id = '<A1>';   -- scheduled
 update appointments set cancelled_at = now() where id = '<A1>';   -- stand-in for a hold that ended the visit
 update service_requests set status = 'in_progress' where id = '<rid>';
 select cancelled_at is not null from appointments where id = '<A1>';   -- true (step 2 keeps it)
