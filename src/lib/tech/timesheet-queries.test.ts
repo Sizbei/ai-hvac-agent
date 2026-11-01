@@ -3,6 +3,9 @@ import {
   clockIn,
   clockOut,
   getActualLaborCostCents,
+  openGeneralEntry,
+  closeGeneralEntry,
+  getOpenGeneralEntry,
 } from "./timesheet-queries";
 import { db } from "@/lib/db";
 import { findReadableJob } from "@/lib/tech/ownership";
@@ -192,5 +195,71 @@ describe("getActualLaborCostCents", () => {
     mockSelectSeq([[]]);
     const total = await getActualLaborCostCents(ORG, JOB);
     expect(total).toBe(0);
+  });
+});
+
+describe("general clock", () => {
+  const NOW = new Date("2026-06-16T10:00:00.000Z");
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("opens a general entry with no request, manual method", async () => {
+    const valuesSpy = vi.fn(() => ({ returning: () => Promise.resolve([{ id: "g-1" }]) }));
+    vi.mocked(db.insert).mockReturnValue({ values: valuesSpy } as never);
+    expect(await openGeneralEntry(ORG, TECH)).toEqual({ ok: true, id: "g-1" });
+    expect(valuesSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: ORG,
+        technicianId: TECH,
+        kind: "general",
+        serviceRequestId: null,
+        clockInMethod: "manual",
+      }),
+    );
+  });
+
+  it("maps the open-general unique violation to already_open", async () => {
+    const err = Object.assign(new Error("dup"), { code: "23505", constraint: "tte_open_general_per_tech_idx" });
+    vi.mocked(db.insert).mockReturnValue({
+      values: () => ({ returning: () => Promise.reject(err) }),
+    } as never);
+    expect(await openGeneralEntry(ORG, TECH)).toEqual({ ok: false, reason: "already_open" });
+  });
+
+  it("rethrows other insert errors", async () => {
+    vi.mocked(db.insert).mockReturnValue({
+      values: () => ({ returning: () => Promise.reject(new Error("boom")) }),
+    } as never);
+    await expect(openGeneralEntry(ORG, TECH)).rejects.toThrow("boom");
+  });
+
+  it("getOpenGeneralEntry returns the open row or null", async () => {
+    const clockInAt = new Date("2026-06-16T09:00:00.000Z");
+    mockSelectSeq([[{ id: "g-1", clockInAt }]]);
+    expect(await getOpenGeneralEntry(ORG, TECH)).toEqual({ id: "g-1", clockInAt });
+    mockSelectSeq([[]]);
+    expect(await getOpenGeneralEntry(ORG, TECH)).toBeNull();
+  });
+
+  it("closes with minutes only: rate 0, cost left NULL", async () => {
+    mockSelectSeq([[{ id: "g-1", clockInAt: new Date("2026-06-16T08:30:30.000Z") }]]);
+    const setSpy = vi.fn(() => ({ where: () => ({}) }));
+    vi.mocked(db.update).mockReturnValue({ set: setSpy } as never);
+    vi.mocked(db.batch).mockResolvedValue([] as never);
+    const r = await closeGeneralEntry(ORG, TECH);
+    expect(r).toEqual({ ok: true, id: "g-1", minutes: 89 });
+    const set = (setSpy.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
+    expect(set.minutes).toBe(89);
+    expect(set.laborRateCents).toBe(0);
+    expect(set).not.toHaveProperty("laborCostCents");
+  });
+
+  it("returns no_open_entry when nothing is open", async () => {
+    mockSelectSeq([[]]);
+    expect(await closeGeneralEntry(ORG, TECH)).toEqual({ ok: false, reason: "no_open_entry" });
+    expect(db.batch).not.toHaveBeenCalled();
   });
 });

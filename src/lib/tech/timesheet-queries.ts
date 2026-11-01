@@ -17,6 +17,7 @@
  */
 import { asc, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { isUniqueViolation } from "@/lib/db/unique-violation";
 import { technicianTimeEntries, users } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { findReadableJob } from "@/lib/tech/ownership";
@@ -232,4 +233,98 @@ export async function getActualLaborCostCents(
 ): Promise<number> {
   const rows = await listTimeEntries(organizationId, serviceRequestId);
   return rollUpActualLaborCost(rows);
+}
+
+/* ------------------------------------------------------------------ */
+/* General clock: a technician's day clock with no job. Minutes only —  */
+/* no labor cost is derived, so job-cost, accounting and the on-site    */
+/* KPI never see it.                                                    */
+/* ------------------------------------------------------------------ */
+
+export type OpenGeneralResult =
+  | { readonly ok: true; readonly id: string }
+  | { readonly ok: false; readonly reason: "already_open" };
+
+/** Start the technician's general clock. The partial unique index is the guard. */
+export async function openGeneralEntry(
+  organizationId: string,
+  techUserId: string,
+): Promise<OpenGeneralResult> {
+  try {
+    const [created] = await db
+      .insert(technicianTimeEntries)
+      .values({
+        organizationId,
+        technicianId: techUserId,
+        kind: "general",
+        serviceRequestId: null,
+        clockInMethod: "manual",
+        clockInAt: new Date(),
+      })
+      .returning({ id: technicianTimeEntries.id });
+    if (!created) {
+      throw new Error("Failed to clock in");
+    }
+    return { ok: true, id: created.id };
+  } catch (error) {
+    if (isUniqueViolation(error, "tte_open_general_per_tech_idx")) {
+      return { ok: false, reason: "already_open" };
+    }
+    throw error;
+  }
+}
+
+/** The technician's open general entry, or null. */
+export async function getOpenGeneralEntry(
+  organizationId: string,
+  techUserId: string,
+): Promise<{ readonly id: string; readonly clockInAt: Date } | null> {
+  const [open] = await db
+    .select({
+      id: technicianTimeEntries.id,
+      clockInAt: technicianTimeEntries.clockInAt,
+    })
+    .from(technicianTimeEntries)
+    .where(
+      withTenant(
+        technicianTimeEntries,
+        organizationId,
+        eq(technicianTimeEntries.technicianId, techUserId),
+        eq(technicianTimeEntries.kind, "general"),
+        isNull(technicianTimeEntries.clockOutAt),
+      ),
+    )
+    .limit(1);
+  return open ?? null;
+}
+
+export type CloseGeneralResult =
+  | { readonly ok: true; readonly id: string; readonly minutes: number }
+  | { readonly ok: false; readonly reason: "no_open_entry" };
+
+/** Stop the general clock: sets minutes, leaves labor cost NULL and the rate 0. */
+export async function closeGeneralEntry(
+  organizationId: string,
+  techUserId: string,
+): Promise<CloseGeneralResult> {
+  const open = await getOpenGeneralEntry(organizationId, techUserId);
+  if (!open) {
+    return { ok: false, reason: "no_open_entry" };
+  }
+  const clockOutAt = new Date();
+  const minutes = minutesBetween(open.clockInAt, clockOutAt);
+  await db.batch([
+    db
+      .update(technicianTimeEntries)
+      .set({ clockOutAt, minutes, laborRateCents: 0, updatedAt: new Date() })
+      .where(
+        withTenant(
+          technicianTimeEntries,
+          organizationId,
+          eq(technicianTimeEntries.id, open.id),
+          isNull(technicianTimeEntries.clockOutAt),
+        ),
+      ),
+  ]);
+  return { ok: true, id: open.id, minutes };
 }

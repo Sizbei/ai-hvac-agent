@@ -243,6 +243,7 @@ export async function getOperationsMetrics(
         withTenant(
           technicianTimeEntries,
           organizationId,
+          eq(technicianTimeEntries.kind, "job"),
           isNotNull(technicianTimeEntries.minutes),
           gte(technicianTimeEntries.clockOutAt, fromDate),
           lt(technicianTimeEntries.clockOutAt, toDate_),

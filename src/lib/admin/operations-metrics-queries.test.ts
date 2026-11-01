@@ -118,6 +118,7 @@ vi.mock('@/lib/db/schema', () => ({
   technicianTimeEntries: {
     minutes: 'technicianTimeEntries.minutes',
     clockOutAt: 'technicianTimeEntries.clockOutAt',
+    kind: 'technicianTimeEntries.kind',
     organizationId: 'technicianTimeEntries.org',
   },
   invoices: {
@@ -298,6 +299,14 @@ describe('getOperationsMetrics', () => {
     const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO });
     expect(m.responseTimeSeconds.current).toBeNull();
     expect(m.responseTimeSeconds.previous).toBeNull();
+  });
+
+  it('on-site duration counts job entries only (general clock excluded)', async () => {
+    queueAll({});
+    await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO });
+    const onSiteWhere = JSON.stringify(captured[3]?.where ?? []);
+    expect(onSiteWhere).toContain('technicianTimeEntries.kind');
+    expect(onSiteWhere).toContain('job');
   });
 
   it('scopes response-time and first-response queries to native requests (synced FP/HCP excluded)', async () => {
