@@ -159,3 +159,53 @@ multiple primary contacts), ~10 minors — all applied. Convergence: round
 2 found no new design-level defects in M0b; the M0a findings are confined
 to Task 5a/6b code blocks. Further plan rounds are folded into the
 per-task reviews of subagent-driven development.
+
+## Spec round 3 — 2026-11-01 (M3 tech close-out loop, before planning)
+
+Three blind critics (status/roll-up/timesheets; money/idempotency/
+offline/security; scope/sequencing). Verdict: no sign-off; 7 blockers
+across lenses, ~25 majors. Revised the same day.
+
+### Established
+- The trigger's lead-status mirror would rewind per-tech progress; it must
+  mirror only while the lead row has no progress timestamp; request cancel
+  must close open assignments on every visit; a demoted completed lead
+  keeps `completed`.
+- Close-out must be ONE guarded UPDATE (no transactions on neon-http);
+  helpers never write request status; `cancelled`/`scheduled` are not tech
+  targets; the request id alone cannot identify the assignment (needs the
+  appointment id); "paused" is not an enum value (pause = own row on_hold).
+- Seven `assigned_to = me` ownership sites; reads + own-row writes open to
+  assignment rows; money stays with the active lead.
+- `MockPaymentProvider` always succeeds and marks invoices paid; the
+  portal pay button/route run through it today → no card payments in M3,
+  manual cash/check with `payments.method`, portal pay refuses on mock.
+- The only native invoice creator is from a sold estimate → M3b adds
+  invoice-from-job; the one-native-draft index moves from M4 into M3b.
+- `takePayment` mints a random payment id → derive from the idempotency
+  key; stuck `in_progress` keys need a 2-minute CAS takeover; TTL 7 days;
+  multipart routes claim before upload; status taps need no key.
+- The FieldPulse nightly sync overwrites status/assignee on synced rows →
+  M3 is native-jobs-only.
+- Three of the "14 must rows" had no scope (115, 122, 131); tech book-a-job
+  depends on M1 `leads` and is a should; S29 is guided flows, not forms.
+- General time entries need a partial unique index and `kind='job'` filters
+  in the on-site KPI, labor export and reporting; 4 of 6 proposed
+  time-entry columns serve a should row.
+- No client data layer exists (plain fetch); offline is a separate project.
+
+### Applied
+M3 split into M3a Run the day / M3b Collect / M3c Sell on site / M3d
+Forms + site view, each with a done-when; ownership rule + action→enum
+mapping + trigger changes written into F04; idempotency state machine
+rewritten; `payments.method`/`check_number` + draft index into M3b;
+time-entry columns trimmed to kind/appointment_id/clock_in_method with
+checks + index; forms flattened with encrypted values and a unique key;
+offline, video, card, tech book-a-job, templates/deposit/lock, required
+forms, GPS, en-route texts deferred with rows named.
+
+### Rejected
+- "Derive job time from request_status_events alone" — per-request, not
+  per-tech; cannot represent pauses; labor cost reads time entries.
+- "Record cash through takePayment with provider=mock" — indistinguishable
+  from fake card payments.

@@ -375,23 +375,123 @@ create table job_templates (
 );
 
 -- ---------------------------------------------------------------------------
--- M3  Tech close-out loop: forms, general timesheets, field equipment
+-- M3a  Run the day: per-tech progress, general time, trigger changes
 -- ---------------------------------------------------------------------------
 
-create table forms (
+-- technician_time_entries exists per job (clockIn/clockOut, labor cost,
+-- tte_open_per_tech_job_unique on (service_request_id, technician_id)
+-- WHERE clock_out_at IS NULL). Add general entries and the visit link.
+-- GPS / backdating / timesheet codes are a `should` row and are not added.
+alter table technician_time_entries
+  add column if not exists kind text not null default 'job',
+  add column if not exists appointment_id uuid references appointments(id) on delete set null,
+  add column if not exists clock_in_method text not null default 'manual';
+do $$ begin
+  alter table technician_time_entries add constraint tte_kind_check
+    check (kind in ('job','general'));
+  alter table technician_time_entries add constraint tte_clock_in_method_check
+    check (clock_in_method in ('auto','manual'));
+  -- a job entry always has a request; a general entry never does
+  alter table technician_time_entries add constraint tte_kind_request_check
+    check ((kind = 'job') = (service_request_id is not null));
+exception when duplicate_object then null; end $$;
+alter table technician_time_entries alter column service_request_id drop not null;
+-- NULL request ids never collide in tte_open_per_tech_job_unique:
+create unique index if not exists tte_open_general_per_tech_idx
+  on technician_time_entries (organization_id, technician_id)
+  where kind = 'general' and clock_out_at is null;
+-- Readers filter kind = 'job': the on-site KPI (operations-metrics), the
+-- labor journal (accounting-export), reporting; general entries carry no
+-- labor cost.
+
+-- Trigger changes to sync_request_appointment (CREATE OR REPLACE, same
+-- names): (a) step 4 mirrors request status onto the lead row only while
+-- en_route_at, arrived_at, started_at and completed_at are all NULL; (b)
+-- step 3a keeps a demoted lead's status when it is 'completed'; (c) when
+-- NEW.status = 'cancelled', every assignment on every visit of the request
+-- with status not in ('completed','cancelled') becomes 'cancelled'; (d)
+-- when NEW.status = 'completed' assignments are left as they are.
+-- Admin visit edits (updateAppointment) refuse with 409 when any
+-- assignment on the visit has a progress timestamp.
+
+-- ---------------------------------------------------------------------------
+-- M3b  Collect: manual payments, one native draft per request, idempotency
+-- ---------------------------------------------------------------------------
+
+-- payments today: provider ('mock'|'stripe'), provider_payment_id, is_deposit.
+-- A manual payment skips the provider entirely and is told apart by method.
+alter table payments
+  add column if not exists method text not null default 'card',
+  add column if not exists check_number text;
+do $$ begin
+  alter table payments add constraint payments_method_check
+    check (method in ('card','cash','check','other'));
+exception when duplicate_object then null; end $$;
+-- provider gains the value 'manual' (text column; no enum). The portal
+-- pay button and POST /api/portal/[token]/pay refuse while
+-- getPaymentProvider().name = 'mock' (no fake card payments, ever).
+
+-- Pulled forward from M4: one NATIVE DRAFT per request (synced and
+-- finalised invoices excluded) so a double-tapped create adopts the draft.
+create unique index if not exists invoices_one_native_draft_per_request_idx
+  on invoices (service_request_id)
+  where service_request_id is not null and state = 'draft'
+    and fieldpulse_invoice_id is null and hcp_invoice_id is null;
+
+-- Every money-moving tech POST carries an idempotency key. State machine:
+--   rate check → INSERT key (state 'in_progress') ON CONFLICT DO NOTHING RETURNING
+--   winner  → write with entity ids = uuid_v5(org|user|route|key) and
+--             ON CONFLICT (id) DO NOTHING → UPDATE state='done', response
+--   loser   → done + same hash: replay stored status/body (ids/enums only)
+--           → different hash: 422
+--           → in_progress younger than 2 min: 409 + Retry-After
+--           → in_progress older than 2 min: CAS takeover + re-run
+-- TTL 7 days (purged by the cleanup cron); multipart routes hash
+-- (route, job id, sha256(file), name) and claim before the upload.
+create table if not exists idempotency_keys (
+  organization_id uuid not null references organizations(id) on delete cascade,
+  user_id uuid not null references users(id) on delete cascade,
+  route text not null,
+  key text not null,
+  request_hash text not null,
+  state text not null default 'in_progress',
+  response_status smallint,
+  response_body jsonb,                     -- ids/enums only
+  created_at timestamptz not null default now(),
+  constraint idempotency_keys_pkey primary key (organization_id, user_id, route, key),
+  constraint idempotency_keys_state_check check (state in ('in_progress','done'))
+);
+create index if not exists idempotency_keys_created_idx on idempotency_keys (created_at);
+
+-- Erase (same PR): delete the R2 objects behind service_requests.signature_url
+-- and any invoice signature for the customer's requests (today only
+-- attachments.storage_key is collected).
+
+-- ---------------------------------------------------------------------------
+-- M3c  Sell on site: no new tables. Estimate accept = a markEstimateSold
+--      variant (signer name + signature key, actor tech); sold lines →
+--      draft invoice lines (exactly once: keyed on estimate option id).
+--      Equipment add/replace uses customer_equipment.replaced_by_equipment_id
+--      / retired_at, which exist.
+-- ---------------------------------------------------------------------------
+
+-- ---------------------------------------------------------------------------
+-- M3d  Forms + site view
+-- ---------------------------------------------------------------------------
+
+create table if not exists forms (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references organizations(id) on delete cascade,
   name text not null,
   description text,
-  pages jsonb not null default '[]',       -- [{title, fields:[{id,type,label,required,internal,pull_from}]}]
-  required_for_job_type_ids uuid[] not null default '{}',
+  fields jsonb not null default '[]',      -- [{id,type,label,required,internal}] flat; no pages, no pull_from
   active boolean not null default true,
   version integer not null default 1,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  unique (organization_id, name)
+  constraint forms_org_name_unique unique (organization_id, name)
 );
-create table form_submissions (
+create table if not exists form_submissions (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references organizations(id) on delete cascade,
   form_id uuid not null references forms(id) on delete restrict,
@@ -399,44 +499,20 @@ create table form_submissions (
   service_request_id uuid not null references service_requests(id) on delete cascade,
   appointment_id uuid references appointments(id) on delete set null,
   submitted_by uuid references users(id) on delete set null,
-  values jsonb not null default '{}',
-  status text not null default 'draft' check (status in ('draft','submitted')),
+  values_encrypted text not null,          -- free text can hold PII: AES-GCM like customers; erased with the customer
+  status text not null default 'draft',
   submitted_at timestamptz,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint form_submissions_status_check check (status in ('draft','submitted')),
+  -- a replayed PUT upserts instead of duplicating
+  constraint form_submissions_request_visit_form_unique
+    unique nulls not distinct (service_request_id, appointment_id, form_id)
 );
-create index on form_submissions (organization_id, service_request_id);
-
--- technician_time_entries exists per job. Add general time + status stamps.
-alter table technician_time_entries
-  alter column service_request_id drop not null,   -- 'general' entries have no job
-  add column kind text not null default 'job' check (kind in ('job','general')),
-  add column appointment_id uuid references appointments(id) on delete set null,
-  add column clock_in_method text check (clock_in_method in ('auto','manual')),
-  add column clock_in_lat double precision, add column clock_in_lng double precision,
-  add column is_backdated boolean not null default false,
-  add column timesheet_code text;
-
--- offline: a client-side queue, no server table. Every tech POST carries an
--- idempotency key. Protocol: (1) INSERT the key with state 'in_progress'
--- (on conflict do nothing; a loser gets the stored response, or 409 while
--- in progress); (2) do the write; (3) UPDATE the row with the response.
--- A replay with the same key but a different request_hash gets 422. The
--- stored response holds ids and statuses only (no PII); rows expire after
--- 24h via the cleanup cron.
-create table idempotency_keys (
-  organization_id uuid not null references organizations(id) on delete cascade,
-  user_id uuid not null references users(id) on delete cascade,
-  route text not null,
-  key text not null,
-  request_hash text not null,
-  state text not null default 'in_progress' check (state in ('in_progress','done')),
-  response_status smallint,
-  response_body jsonb,                     -- ids/enums only
-  created_at timestamptz not null default now(),
-  constraint idempotency_keys_pkey primary key (organization_id, user_id, route, key)
-);
-create index idempotency_keys_created_idx on idempotency_keys (created_at);
+create index if not exists form_submissions_org_request_idx
+  on form_submissions (organization_id, service_request_id);
+-- required_for_job_type_ids and "required forms block close-out" are a
+-- `should` row and are not in M3.
 
 -- ---------------------------------------------------------------------------
 -- M4  Money builder: invoice/estimate editing, templates, discounts, tax zones,
@@ -506,10 +582,7 @@ alter table invoice_line_items
 -- FP/HCP invoices and finalised invoices are excluded, so estimate-to-invoice,
 -- deposit + final invoices and the mirrors keep working). The
 -- estimate-to-invoice path ADOPTS the draft when one exists.
-create unique index invoices_one_native_draft_per_request_idx
-  on invoices (service_request_id)
-  where service_request_id is not null and state = 'draft'
-    and fieldpulse_invoice_id is null and hcp_invoice_id is null;
+-- invoices_one_native_draft_per_request_idx: pulled forward into M3b.
 
 create table discounts_fees (
   id uuid primary key default gen_random_uuid(),

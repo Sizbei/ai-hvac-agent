@@ -55,9 +55,11 @@ Three modelling decisions carry the whole plan:
    `arrived`; per-technician progress on `appointment_assignments.status`
    uses the same enum. No display-status layer: `status_workflows` and
    guided flows are `should` rows (features.csv 57, 128) and move to M6+.
-   Roll-up rule for multi-tech visits (M3): the request becomes
-   `completed` only when every assignment is `completed` or `cancelled`;
-   the lead's status mirrors the request until M3 writes per-tech rows.
+   Roll-up rule for multi-tech visits (M3a): close-out is one guarded
+   UPDATE that completes the request only when no assignment on a
+   non-cancelled visit is still open; the trigger mirrors request status
+   onto the lead row only until that row has a progress timestamp, then
+   the tech app owns it (full rules in F04).
    New edges in `TRANSITIONS`: scheduled/assigned/on_hold → en_route;
    en_route → arrived, in_progress, scheduled, on_hold, cancelled;
    arrived → in_progress, on_hold, cancelled (no arrived → completed, so
@@ -141,18 +143,77 @@ technician JWT; `token` = a hashed single-purpose token; `cron` = bearer
 | GET/PUT /api/admin/settings/capacity | per-day window adjustments | admin | day, window, delta, threshold | rows |
 | POST /api/admin/dispatch/mass-reschedule | move a tech's day | admin | technicianId, date, deltaMinutes | count |
 
-### F04 Tech loop (M3)
+### F04 Tech loop (M3a–M3d)
+
+M3 applies to NATIVE requests only (`fieldpulse_job_id IS NULL AND
+hcp_job_id IS NULL`): the nightly FieldPulse sync overwrites status and
+assignee on synced rows and the money flow already refuses synced
+invoices. The tech app shows a "Managed in FieldPulse" notice on synced
+jobs and hides close-out, invoice and payment for them.
+
+**Ownership rule (M3a, replaces "assigned_to only").** A technician can
+READ a request when they hold any assignment on a non-cancelled visit of
+it. A technician WRITES only their own assignment row (progress, pause,
+done), plus notes, photos, materials and forms on jobs they can read. The
+REQUEST status is written only by the **active lead**: the `is_lead` row
+on the active visit, where the active visit is the earliest non-cancelled
+visit that still has an open assignment. Helpers never change request
+status and never send `cancelled` or `scheduled` (those are not tech
+targets at all). Money (invoice create/finalize, payments, estimate
+accept) stays with the active lead.
+
+**Tech actions → enum values.** `en_route`, `arrived`, `in_progress`
+(working), `on_hold` as *pause* (own row only) or *hold* (lead: request +
+every open assignment on the visit, with `holdReason` + `followUpDate`),
+`completed` as *done* (own row only), and `close_out` (lead: one guarded
+UPDATE that completes the request). There is no `paused` value.
+
+**Trigger change (M3a migration).** `sync_request_appointment` (a) mirrors
+request status onto the lead row ONLY while that row has no progress
+timestamp (the tech app owns it after the first tap); (b) keeps a demoted
+lead's `completed` status instead of overwriting it with `cancelled`; (c)
+on request `cancelled`, sets every open assignment on every visit of the
+request to `cancelled`; (d) on request `completed` leaves assignments as
+they are.
 
 | method path | does | who | input | output |
 | --- | --- | --- | --- | --- |
-| POST /api/tech/jobs/[id]/status | extended: working, paused, hold(reason), done (per tech; the request completes only when every assignment is done or cancelled), close_out | tech | status, reason, idempotencyKey | job + fired triggers |
-| GET /api/tech/forms, GET/PUT /api/tech/jobs/[id]/forms/[formId] | fill a form | tech | values | submission |
-| POST /api/tech/jobs/[id]/equipment | add/replace equipment at the location | tech | fields, replacesId | equipment |
-| GET/POST /api/tech/jobs/[id]/estimates, POST …/estimates/[eid]/present, /sign | build + present + accept | tech | template, options, signature | estimate |
-| GET/POST /api/tech/jobs/[id]/invoice, POST …/invoice/lines, /finalize, /sign, /payments | invoice + collect | tech | lines, signature, payment (card via Stripe PaymentIntent, manual) | invoice |
-| POST /api/tech/time | general clock in/out | tech | kind, at, lat/lng | entry |
-| POST /api/tech/book | tech-generated job or lead | tech | customer, summary, leaveUnassigned | request or lead |
-| GET /api/tech/sync | offline bundle: today's jobs, pricebook top-N, forms | tech | since | bundle (ETag) |
+| GET /api/tech/jobs?range=today\|upcoming\|past | the tech's visits (assignment rows joined to appointments), with the visit's window; past = completed/cancelled rows, 30 days | tech | range | visits |
+| GET /api/tech/jobs/[id] | job detail incl. the caller's assignment, the active lead flag, `allowedActions` computed from the assignment status, the close-out blockers | tech | — | job |
+| POST /api/tech/jobs/[id]/status | `{ appointmentId, action, holdReason?, followUpDate? }`; one `db.batch`: CAS the assignment row (old status → new, stamp `*_at` with COALESCE), then, if the caller is the active lead and the action changes request status, `updateRequestStatus` (records the event with actor = tech); opens/closes the auto job time entry. An action whose target equals the current status is a no-op 200 (replay-safe). `close_out` = `UPDATE service_requests SET status='completed' WHERE id=$1 AND status='in_progress' AND NOT EXISTS (open assignment on a non-cancelled visit) [M3d: AND NOT EXISTS (required form not submitted)]`; 0 rows → 409 with the blocker list; the review request fires only when the row changed | tech | see left | assignment + request status + blockers |
+| POST /api/tech/time, GET /api/tech/time | general clock in/out (`kind = 'general'`, one open entry per tech enforced by a partial unique index) | tech | action | entry |
+| GET /api/admin/timesheets (S25, minimal) | entries per tech per day incl. general | admin | from, to | rows |
+| **M3b** POST /api/tech/jobs/[id]/invoice | adopt or create the single native draft for the request (`invoices_one_native_draft_per_request_idx` pulled into M3b); lines seeded from the job's materials; 409 when a FP/HCP invoice exists | lead | idempotencyKey | invoice (no cost fields) |
+| POST …/invoice/lines, DELETE …/lines/[lid] | `{ pricebookItemId, quantity }` while `draft`; the server snapshots name/price/cost; totals recomputed in the same batch | lead | idempotencyKey | invoice |
+| POST …/invoice/finalize | CAS `draft → open` (freezes lines) | lead | idempotencyKey | invoice |
+| POST …/invoice/payments | `{ method: 'cash'\|'check', amountCents, checkNumber? }` against `state = 'open'` only, through `recordManualPayment` (atomic balance claim, no provider call, `provider = 'manual'`, `payments.method`); payment id derived from the idempotency key (uuid v5) so a replay reuses the row | lead | idempotencyKey | payment + invoice |
+| POST …/invoice/pay-link | SMS/email the portal link (tech version of the admin pay-link) | lead | channel | sent |
+| **M3c** POST /api/tech/jobs/[id]/estimates, POST …/estimates/[eid]/present, POST …/sign | build options from the pricebook (no templates, no deposit), present on device, accept with signer name + signature via a `markEstimateSold` variant (actor tech), then sold lines append to the draft invoice exactly once | lead | options; signature | estimate |
+| POST /api/tech/jobs/[id]/equipment | add / replace equipment at the location (`replaced_by_equipment_id`, `retired_at`) | tech | fields, replacesId | equipment |
+| **M3d** GET /api/tech/forms, GET/PUT /api/tech/jobs/[id]/forms/[formId] | fill a form; PUT upserts on `(service_request_id, appointment_id, form_id)` | tech | values | submission |
+| GET /api/tech/jobs/[id]/location-info | past jobs at the location, open estimates, membership | tech | — | info |
+
+**Idempotency (M3b onward, `idempotency_keys`).** Rate check first; then
+`INSERT … ON CONFLICT DO NOTHING RETURNING`. Winner: run the write with
+entity ids derived from `uuidv5(org|user|route|key)` and `ON CONFLICT (id)
+DO NOTHING`, then `UPDATE state='done', response`. Loser: `done` + same
+hash → replay the stored status/body (ids and enums only; the client
+re-GETs the job); different hash → 422; `in_progress` younger than 2
+minutes → 409 with Retry-After; older → CAS takeover and re-run (safe
+because ids are derived). TTL 7 days (longer than the 24h tech session);
+the client drops queued items older than 72h. Multipart routes (signature,
+photo) hash `(route, jobId, sha256(file), name)` and claim the key BEFORE
+the upload. Status taps need no key: "already at target" is a no-op.
+
+**Deferred out of M3** (with the row left open): offline queue + `GET
+/api/tech/sync` + cached pricebook (row 124; size L, nothing exists; a
+later M3e after M4); video / direct-to-storage uploads (row 122 stays
+partial; photos + PDFs work); sold-not-booked "later" (M4); card payment
+in the field (M4 Stripe); tech book-a-job / lead (row 119 is a should and
+`leads` is M1); estimate templates, deposit, finalize lock (M4); "schedule
+another visit" from the field (should); required-forms-block-close-out and
+guided flows (should); GPS/backdating/timesheet codes (should); en-route /
+arrived customer texts (M6, with a ledger key `enroute:{appointmentId}`).
 
 ### F05 Estimates, F07 Invoices and payments (M4)
 
@@ -276,8 +337,11 @@ Jobs (crons): `materialize-service-events` daily, `recurring-billing` daily,
   every non-chat creation path (office, tech book, lead convert, agreement
   bulk book) inserts a stand-in `customer_sessions` row with a prefixed
   token (`admin-`, `mvisit-`, `fp-import-`, and new `tech-`, `lead-`,
-  `agreement-`) and the shared predicate keeps them out of conversations
-  and analytics.
+  `agreement-`); `notStandInSession` in `stand-in-session.ts` hard-codes
+  three LIKE patterns today and must be rebuilt as an OR over the whole
+  prefix array (with a test) before a fourth prefix is added. The cleanup
+  cron's 90-day `customer_sessions` delete must also exclude stand-ins
+  (requests reference them without a cascade).
 - **Status enum readers.** Adding `en_route`/`arrived` touches 25
   hard-coded status lists, not one. M0a adds shared constants to
   `src/lib/admin/request-status.ts` (`OPEN` = in flight + pending,
@@ -355,15 +419,65 @@ until a tech can finish and collect on a job here.
    admin sheet shows the same, and the AI account reply describes it
    correctly; a technician on time off is skipped by availability, the
    conflict check, placement and auto-dispatch.
-4. **M3 Tech close-out loop.** S38 en route → arrived → working → paused /
-   hold → done per tech (roll-up rule) → close-out sheet; forms (S29
-   config + fill); equipment from the field; S39 present estimate; S40
-   invoice + payment on the existing payment seam (mock until M4's Stripe
-   adapter); general timeclock (S25); offline autosave + replay with
-   idempotency keys; tech book-a-job (S41). Must-haves closed: 14.
-   Done when: a tech goes en route → arrived → working → done, gets a
-   signature, records a payment and closes out from the phone with no
-   office action, and a replayed request creates nothing twice.
+4. **M3 Tech close-out loop, in four shippable loops** (native jobs only;
+   see F04 for the ownership rule, the action → enum mapping and the
+   trigger change). Must-haves: 12 closed, 122 and 133 partial, 124
+   deferred.
+   - **M3a Run the day.** Migration: `technician_time_entries.kind`
+     (`job|general`), nullable `service_request_id` with a check, 
+     `appointment_id`, partial unique "one open general entry per tech";
+     trigger changes (a)–(d). Ownership helper replacing the seven
+     `assigned_to = me` sites; `POST …/status` redesigned (appointment id,
+     action, hold reason, close-out guard, review fires once); auto job time
+     entries opened on `in_progress`/`arrived` and closed on hold/pause/done;
+     general clock API + `kind = 'job'` filters in the on-site KPI, the
+     labor export and reporting; `/tech/jobs` tabs today / upcoming / past;
+     S38 close-out sheet (Done / Pause / Hold with reason; blocked list);
+     clock button; minimal admin timesheets list. Admin edits of a visit
+     with progress → 409. Must-haves closed: 115, 118, 120, 137, 138.
+     Adversarial review before merge (authorization + roll-up).
+     Done when: on a native two-tech visit, tech A taps en route → arrived
+     → working → done while the request stays `in_progress`; tech B taps
+     done and close-out completes the request with one review request and
+     all eight `*_at` stamps set; a helper's taps never change the request
+     status; a helper cannot send cancelled/scheduled; hold stores the
+     reason on the request; cancelling the request from admin leaves no
+     open assignment on any visit; a general clock-in sent twice leaves
+     one open entry and never appears in on-site minutes or labor cost; a
+     FieldPulse-synced job refuses close-out; the calendar, dispatch and
+     admin outputs are unchanged for single-tech jobs.
+   - **M3b Collect.** Migration: `payments.method` + `check_number`,
+     `invoices_one_native_draft_per_request_idx` (pulled from M4),
+     `idempotency_keys`. `createInvoiceFromJob` (materials → lines),
+     `recordManualPayment`, the idempotency helper, the invoice/lines/
+     finalize/payments/pay-link tech routes, S40 invoice view with the job
+     signature and a Cash / Check payment sheet; the portal pay button and
+     `/pay` route refuse while the provider is the mock; erase deletes
+     signature objects in R2. Must-haves closed: 134, 135 (manual).
+     Adversarial review (money).
+     Done when: a tech creates an invoice from the job's materials, the
+     customer signs on the phone, the tech records a check payment, the
+     invoice reads paid with no office action; replaying invoice-create
+     and payment with the same key creates one of each; a different body
+     with the same key gets 422; no card option appears on the mock.
+   - **M3c Sell on site.** Tech estimates with options from the pricebook,
+     present + sign (`markEstimateSold` variant, signer + signature), sold
+     lines appended to the draft invoice exactly once; equipment add /
+     replace from the field. Must-haves closed: 129, 132, 133 (now).
+     Adversarial review (estimate → invoice money path).
+     Done when: a two-option estimate is built, the customer picks and
+     signs on the device, the estimate is sold and its lines are on the
+     draft invoice once even when signed twice; a replaced unit shows
+     `retired_at` and `replaced_by`.
+   - **M3d Forms + site view.** `forms` (flat `fields` jsonb) +
+     `form_submissions` (unique per request/visit/form; values encrypted;
+     erased), an admin forms builder under Settings, tech fill with draft
+     autosave, the location-info tab, a photo quality toggle. Must-haves
+     closed: 125, 131, 122 (photos/files).
+     Done when: an admin creates a checklist, the tech fills half,
+     reloads, sees the draft, submits; the submission shows on the admin
+     job and is anonymised by erase; the location tab lists past jobs,
+     open estimates and the membership.
 5. **M2 Dispatch, as deltas to `/admin/calendar`.** The dnd-kit day view
    (`interactive-scheduling-calendar.tsx` DayLane) already covers the
    timeline, status colours, tray and drag. Add: arrival-window prompt in
