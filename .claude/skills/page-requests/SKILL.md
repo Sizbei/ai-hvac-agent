@@ -81,6 +81,29 @@ requestId, referenceNumber, schedule: none | placed | failed }`. 400 validation
 - Dialog: `<fieldset>`/form inside the grid `DialogContent` need `min-w-0` or
   the 14 day chips widen the dialog past the viewport.
 
+**Statuses (M0a):** `request_status` includes `en_route` and `arrived`
+(migration 0048). Shared lists live in `src/lib/admin/request-status.ts`
+(`IN_FLIGHT_STATUSES`, `OPEN_STATUSES`, `ON_SITE_STATUSES`,
+`NOT_STARTED_STATUSES`, `UNASSIGNED_OPEN_STATUSES`, `NEEDS_PLACEMENT_STATUSES`,
+`TERMINAL_STATUSES`) — import these, never hand-write status arrays.
+Transitions: scheduled/assigned/on_hold → `en_route` → `arrived` →
+`in_progress` (no `arrived` → `completed`). `PATCH /api/admin/requests/[id]`
+accepts both new values. Dashboard tiles fold en_route/arrived into "in
+progress"; the response-time KPI stops at arrival.
+
+**Visits (M0a):** `appointments` + `appointment_assignments` (migration 0049).
+Visit #1 is mirrored from the request by two triggers
+(`service_requests_sync_appointment_ins/_upd`) and backfilled — never write
+visit #1 directly. Visits #2+ go through `GET/POST
+/api/admin/requests/[id]/appointments` and `PATCH/DELETE …/[aid]` (route files
+under `src/app/api/admin/requests/[id]/appointments/`; queries
+`src/lib/admin/appointment-queries.ts`, types `appointment-types.ts`). PATCH
+is CAS on `version`: 409 `VERSION_CONFLICT`; other errors `IS_FIRST_VISIT`,
+`REQUEST_CANCELLED`, `VISIT_CANCELLED`. The detail sheet has a "Visits"
+section using the shared `src/components/admin/window-picker.tsx`. Tech-app
+ownership stays `service_requests.assigned_to`; the calendar does not render
+visits #2+ yet (M2).
+
 **Invariants:**
 - `PER_PAGE = 50`; limit is enforced server-side too (max 100). The pager uses
   `safePage = Math.min(page, totalPages)` so an out-of-bounds page never renders.

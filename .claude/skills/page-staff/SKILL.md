@@ -18,6 +18,14 @@ passwords, and generate tokenized invite links for new admins or technicians.
 last-admin guard trigger `drizzle/0044_last_admin_guard.sql` ·
 table `users`, `staff_invites`
 
+**Time off (M0a):** each technician row has a "Time off" action opening
+`src/components/admin/staff/time-off-dialog.tsx` (multi-day ranges expanded to
+one shift per day by `src/lib/admin/time-off-expand.ts`). It writes
+`technician_shifts` (kinds `on_call` / `time_off` / `non_job`; no repeat rule)
+via `GET/POST /api/admin/technicians/[id]/shifts` and `DELETE …/shifts/[sid]`
+(queries `src/lib/admin/shift-queries.ts`, types `shift-types.ts`). Only
+`time_off` removes capacity; see page-calendar for where it is subtracted.
+
 **Data flow:** `useAdminStaff` fetches `/api/admin/staff`; `useAdminInvites` fetches
 `/api/admin/invites` (pending only). Both are plain fetch-on-mount with manual
 `refetch`. No SWR cache — staff lists are small and infrequently changed.

@@ -66,6 +66,11 @@ error copy ("Couldn't save X. Please try again."), never err.message or
 - Demo account (admin@demo-hvac.com): blocked from GDPR erase
   (super_admin gate) and outbound SMS (`isDemoAccount` in
   `src/lib/auth/authz.ts`) — deliberate, do not "fix".
+- Request status lists (open / in-flight / on-site / terminal …) are
+  constants in `src/lib/admin/request-status.ts`; import them, don't inline
+  arrays. `en_route`/`arrived` colors live in `status-colors.ts`.
+- Time off (`technician_shifts`, kind `time_off`) is never overridable: the
+  schedule-conflict `override` flag does not bypass it (409 `TIME_OFF`).
 - Money: synced invoices (fieldpulse_invoice_id / HCP source set) are
   read-only in money flows; money mutations are atomic/CAS-guarded.
 - neon-http: `db.transaction()` throws — use `db.batch()` (also 1 HTTP

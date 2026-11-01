@@ -55,6 +55,15 @@ so dnd-kit doesn't load for month/agenda views.
   cap push a brand-new emergency out of the very panel dispatchers place jobs
   from. Never revert to a bare `orderBy(asc(createdAt))` here.
 
+**Shifts (M0a):** `technician_shifts` time off removes capacity: it is
+subtracted in `getOpenAvailability` (via `SchedulingSource.getCapacityBlocks`),
+`checkScheduleConflict`, `placeAndAssignRequest`, `assignTechnician` /
+`reassignTechnician` / `scheduleRequest` (409 `TIME_OFF`),
+`autoAssignBookedRequest` and `suggestTechnicians`. HCP/FieldPulse scheduling
+sources ignore shifts. The calendar still renders requests only; visits #2+
+(`appointments`) are rendered in M2. Known gap: the conflict dialog still
+offers "Schedule anyway" for a time-off conflict (server refuses it).
+
 **Gotchas:**
 - `onStatus` callback surfaces a transient `CalendarStatus` banner (warning or
   error) from `InteractiveSchedulingCalendar` after a reschedule — a rollback

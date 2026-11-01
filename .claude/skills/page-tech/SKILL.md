@@ -63,6 +63,12 @@ server-side from the pricebook at add time — client-sent cost values are ignor
   tap. Non-terminal targets (`scheduled`, `in_progress`, `on_hold`) still
   advance on first tap. `isTerminalStatus`/`buildStatusConfirmCopy` are pure —
   keep new terminal statuses added there, not hardcoded in the component.
+- Travel taps: "On my way" (`en_route`) and "I've arrived" (`arrived`) post
+  to the same `POST /api/tech/jobs/[id]/status` route; wording comes from
+  `techStatusLabel` in `tech-status-confirm.ts`. Chain: scheduled/assigned/
+  on_hold → en_route → arrived → in_progress; there is no arrived →
+  completed. Ownership is still `assigned_to` (visit assignment rows do not
+  grant tech access). Both are non-terminal, so no confirm step.
 - `/api/auth/tech/login` starts with the same-origin + JSON content-type
   guard (`isSameOriginRequest` / `hasJsonContentType`) before any DB read or
   session mint — see page-auth for the shared pattern.

@@ -61,7 +61,7 @@ Job hold with reasons,jobs,must,yes,yes,ST; hold_reason enum + followUpDate on /
 Job cancel with reasons and memo (and uncancel),jobs,must,yes,partial,ST; cancelled status via PATCH /api/admin/requests/[id] - no cancel reason
 Job history event log,jobs,must,yes,yes,FP+ST; request_status_events timeline
 History filter tabs (events / calls / notes / files / email),jobs,should,yes,no,ST
-Multi-visit and multi-day jobs,jobs,must,yes,no,FP+ST; FP is_multiday_job stored read-only
+Multi-visit and multi-day jobs,jobs,must,yes,partial,FP+ST; visits via API + detail sheet; calendar rendering is M2
 Appointment special instructions,jobs,must,yes,yes,ST; access notes intake field on service_requests
 Appointment AI summaries,jobs,could,yes,no,ST
 Job media gallery,jobs,must,yes,yes,ST; attachments-section + /api/admin/attachments
@@ -82,8 +82,8 @@ Capacity by open vs total hours per slot,scheduling,must,yes,partial,ST; capacit
 Capacity planning board with buffers / overrides / booking-% warning,scheduling,should,yes,no,ST
 Job type default duration,scheduling,must,yes,yes,ST; job_types.default_duration_minutes feeds estimatedDurationMinutes on office bookings
 Find-availability slot and tech suggester,scheduling,should,yes,partial,FP+ST; /api/admin/dispatch/suggest ranks techs; S07 dialog shows open-window counts per day via /api/admin/requests/availability - no combined slot+tech ranking
-Technician shifts (normal / on-call / time-off) with repeat,scheduling,must,yes,partial,FP+ST; technician_availability weekly hours - no admin edit UI or on-call/time-off
-Non-job events (meetings / PTO) that remove capacity,scheduling,must,yes,no,ST
+Technician shifts (normal / on-call / time-off) with repeat,scheduling,must,yes,partial,FP+ST; on-call / time-off / non-job rows; no repeat rule
+Non-job events (meetings / PTO) that remove capacity,scheduling,must,yes,yes,ST; time off removes capacity in availability; conflicts; placement; auto-dispatch
 Adaptive capacity rules in natural language,scheduling,could,addon,no,ST
 Dispatch board timeline by technician,dispatch,must,yes,yes,FP+ST; /admin/calendar technician lanes + /admin/dispatch
 Weekly dispatch board,dispatch,should,yes,yes,ST; /admin/calendar week view
@@ -95,7 +95,7 @@ Holding area visual matching,dispatch,could,yes,no,ST
 Drag-drop schedule and assign,dispatch,must,yes,yes,FP+ST; dnd-kit /admin/calendar + /api/admin/requests/[id]/assign
 Edit arrival window prompt on move,dispatch,must,yes,partial,ST; calendar drag reschedules - no window prompt
 Block reassign of working or done jobs,dispatch,must,yes,no,ST
-Multi-technician and team assignment with team grouping,dispatch,must,yes,no,FP+ST; single assignee per request
+Multi-technician and team assignment with team grouping,dispatch,must,yes,partial,FP+ST; assignment rows + visits API; lane UI and guard in M2
 Technician skills with skill filter and skill-based availability,dispatch,should,yes,no,FP+ST; skillJobsCompleted history proxy only
 Zones on technicians and locations,dispatch,should,yes,partial,ST; customer_locations.zone column only - no zone routing
 Late / alert outline on cards,dispatch,should,yes,partial,ST; /api/cron/delay-sweep SMS alerts - no card outline
@@ -114,7 +114,7 @@ ML auto-dispatch by predicted job value,dispatch,could,addon,skip,ST; needs cros
 Fleet telematics hardware and dashcams,dispatch,could,addon,skip,FP+ST; fleet hardware reseller partnership
 Tech app schedule (today / upcoming / past),tech-app,must,yes,partial,FP+ST; /tech/jobs assigned list - no calendar or map view
 Mobile job status updates,tech-app,must,yes,yes,FP; /api/tech/jobs/[id]/status
-En route / arrived / working statuses,tech-app,must,yes,no,ST; status enum lacks en-route and arrived
+En route / arrived / working statuses,tech-app,must,yes,yes,ST; en_route and arrived statuses; tech taps; FP and HCP mapping
 Pause or hold job with reason from field,tech-app,must,yes,partial,ST; on_hold via /api/tech/jobs/[id]/status - no reason or reschedule from field
 Tech schedules follow-up or books a lead from field,tech-app,should,yes,no,ST
 Mark myself done vs close out job,tech-app,must,yes,partial,ST; single completed status - no per-tech done

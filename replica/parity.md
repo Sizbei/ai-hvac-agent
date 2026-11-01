@@ -1,8 +1,8 @@
-## Parity: 42.2 / 100
+## Parity: 43.7 / 100
 
-features 42.2  (275 counted, must-haves 43 of 111 done)
+features 43.7  (275 counted, must-haves 45 of 111 done)
 
-Not shippable yet: 68 must-have features are not done.
+Not shippable yet: 66 must-have features are not done.
 
 ## By area, weakest first
 - integrations                  22.7  (8 features)
@@ -11,36 +11,32 @@ Not shippable yet: 68 must-have features are not done.
 - team-settings                 28.3  (11 features)
 - invoicing                     30.0  (17 features)
 - platform                      30.0  (2 features)
-- tech-app                      30.6  (29 features)
 - pricebook                     31.0  (14 features)
+- tech-app                      34.7  (29 features)
 - memberships                   37.5  (18 features)
 - intake                        39.5  (16 features)
 - marketing                     42.9  (4 features)
 - comms                         46.3  (11 features)
-- dispatch                      46.9  (25 features)
 - estimates                     49.0  (22 features)
 - crm                           50.0  (29 features)
+- dispatch                      50.0  (25 features)
 - payments                      52.9  (7 features)
-- jobs                          54.2  (26 features)
+- jobs                          56.7  (26 features)
 - reporting                     56.7  (8 features)
-- scheduling                    59.1  (13 features)
+- scheduling                    68.2  (13 features)
 
 ## Missing, in build order
 - [must] dispatch: Block reassign of working or done jobs, no  (ST)
-- [must] dispatch: Multi-technician and team assignment with team grouping, no  (FP+ST; single assignee per request)
 - [must] estimates: Estimate and proposal templates, no  (ST)
 - [must] estimates: Sold-estimate queue to book (incl. partial items), no  (ST)
 - [must] intake: Close call with call reason (lead / non-lead), no  (ST)
 - [must] intake: Convert existing lead to job, no  (ST; no lead entity)
 - [must] intake: Inbound call screen with call bubbles for CSRs, no  (ST; AI voice agent only - no CSR call-handling screen)
 - [must] invoicing: Invoice auto-created at booking, no  (ST; invoices only from estimates)
-- [must] jobs: Multi-visit and multi-day jobs, no  (FP+ST; FP is_multiday_job stored read-only)
 - [must] jobs: Sold-by attribution, no  (ST)
 - [must] memberships: Recurring membership billing (monthly to annual), no  (FP+ST; billing mocked - providerSubscriptionId placeholder)
 - [must] pricebook: Discounts and fees, no  (ST)
-- [must] scheduling: Non-job events (meetings / PTO) that remove capacity, no  (ST)
 - [must] team-settings: Business units (trades / divisions / invoice header / tax default), no  (ST; single org = single business)
-- [must] tech-app: En route / arrived / working statuses, no  (ST; status enum lacks en-route and arrived)
 - [must] tech-app: Equipment add / replace from field, no  (ST; equipment registry not exposed in tech routes)
 - [must] tech-app: Job forms and checklists, no  (FP+ST; FP forms are an add-on)
 - [must] tech-app: Offline mode with cached jobs and pricebook, no  (FP+ST)
@@ -60,6 +56,7 @@ Not shippable yet: 68 must-have features are not done.
 - [must] customer-portal: Customer portal (jobs / estimates / invoices / equipment / memberships), partial  (FP+ST; /portal/[token] - no equipment or membership view)
 - [must] customer-portal: Pay invoices online in portal (full or partial), partial  (FP+ST; /api/portal/[token]/pay MOCK provider)
 - [must] dispatch: Edit arrival window prompt on move, partial  (ST; calendar drag reschedules - no window prompt)
+- [must] dispatch: Multi-technician and team assignment with team grouping, partial  (FP+ST; assignment rows + visits API; lane UI and guard in M2)
 - [must] estimates: Log follow-up with templates and next date, partial  (ST; Log follow-up link to follow_ups - no templates)
 - [must] estimates: Unsold estimates / opportunities queue with status, partial  (ST; /admin/estimates stale KPIs - no follow-up queue or opportunity status)
 - [must] intake: Bookings inbox for web and partner leads, partial  (ST; /admin/requests receives chat/widget bookings - no partner-lead inbox)
@@ -72,6 +69,7 @@ Not shippable yet: 68 must-have features are not done.
 - [must] invoicing: Tax zones with multiple and automatic rates, partial  (FP+ST; tax_rates single default - no zones)
 - [must] jobs: Job cancel with reasons and memo (and uncancel), partial  (ST; cancelled status via PATCH /api/admin/requests/[id] - no cancel reason)
 - [must] jobs: Job tags with color and dispatch visibility, partial  (ST; tags + colour + visible_on_board flag shipped; board rendering is M2; picker in New request dialog, read-only row on the sheet)
+- [must] jobs: Multi-visit and multi-day jobs, partial  (FP+ST; visits via API + detail sheet; calendar rendering is M2)
 - [must] jobs: Recurring jobs with edit scope, partial  (FP; membership visits only - no generic recurring series)
 - [must] memberships: Bulk book recurring events into jobs, partial  (ST; cron creates requests - no bulk booking UI)
 - [must] memberships: Membership discounts per SKU / category, partial  (ST; memberPriceCents per item - no category discount rules)
@@ -84,7 +82,7 @@ Not shippable yet: 68 must-have features are not done.
 - [must] pricebook: Pricebook category tree, partial  (ST; pricebook_categories table - no category UI)
 - [must] scheduling: Business hours, partial  (ST; businessInfo + afterHoursConfig - no holiday calendar)
 - [must] scheduling: Capacity by open vs total hours per slot, partial  (ST; capacity_reservations slot counts - no hours-based capacity)
-- [must] scheduling: Technician shifts (normal / on-call / time-off) with repeat, partial  (FP+ST; technician_availability weekly hours - no admin edit UI or on-call/time-off)
+- [must] scheduling: Technician shifts (normal / on-call / time-off) with repeat, partial  (FP+ST; on-call / time-off / non-job rows; no repeat rule)
 - [must] team-settings: Roles with granular permissions, partial  (FP+ST; super_admin/admin/technician only)
 - [must] tech-app: Invoice presentation and signature on site, partial  (ST; /api/tech/jobs/[id]/signature job sign-off - no invoice presentation)
 - [must] tech-app: Job timesheets from status timestamps, partial  (ST; request_status_events exist - timesheets are separate entries)
