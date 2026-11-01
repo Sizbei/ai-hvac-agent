@@ -249,4 +249,15 @@ add; admin completed now one batch that cancels untouched rows; list
 classification (overdue → today; past by completed_at/visit cancelled_at);
 reschedule/unschedule live in scheduling-queries.ts; lock order
 request→rows; labor formula unified; after() stays in the route. Rejected:
-none material. Round 3 pending.
+none material. Round 3 (one critic, combined lens on the changed rules): 1
+blocker (request_only also fired for completed/pause → limited to
+en_route/arrived/in_progress), 2 majors (trigger step 2 cleared a visit's
+cancelled_at on any status change → kept unless leaving 'cancelled', plus
+VISIT_ENDED on request-level writes to an ended #1; step 3's ON CONFLICT
+revived a hold-cancelled row → cancelled stays cancelled, probes (a)/(b)
+rewritten), 8 minors applied (hold locks the visit row, statement 1 gated
+on a holdable native request and no stale $from, helper add as a locked
+batch, exports from appointment-queries, admin complete records the event
+and returns currentStatus, interface name fixes, FOR NO KEY UPDATE).
+Verdict: converged-enough — each round narrower; the SDD task reviews are
+the net for what implementation surfaces.
