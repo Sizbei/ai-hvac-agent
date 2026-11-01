@@ -43,7 +43,27 @@ import type {
   TechnicianRecord,
   RequestNote,
 } from '@/lib/admin/types';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { CalendarClock, ChevronDown, ChevronRight } from 'lucide-react';
+import { SectionCard } from '@/components/admin/ui/section-card';
+import { ConfirmDialog } from '@/components/admin/confirm-dialog';
+import { WindowPicker, useAvailability, type WindowPickerValue } from '@/components/admin/window-picker';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { MAX_TECHNICIANS_PER_VISIT, type AppointmentRecord } from '@/lib/admin/appointment-types';
+import { WINDOW_LABELS, firstOpenDay, formatIsoDayShort } from '@/lib/admin/create-request';
+import {
+  arrivalWindowUtcForBusinessDate,
+  businessIsoDate,
+  formatBusinessTime,
+  windowRowOfInstant,
+} from '@/lib/admin/calendar-time';
+import { cn } from '@/lib/utils';
 import { humanizeSeconds } from '@/lib/admin/duration-format';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
@@ -304,6 +324,316 @@ function TranscriptBubble({
         </p>
       </div>
     </div>
+  );
+}
+
+// ── Visits ─────────────────────────────────────────────────────────────────
+
+const VISIT_ERROR_COPY: Record<string, string> = {
+  VERSION_CONFLICT: 'This visit changed. Reload and try again.',
+  REQUEST_CANCELLED: 'This request is cancelled.',
+  VISIT_CANCELLED: 'This visit is already cancelled.',
+  IS_FIRST_VISIT: 'The first visit follows the request. Change the request instead.',
+  TECHNICIAN_NOT_FOUND: 'One or more technicians aren’t active on your team.',
+};
+const VISIT_GENERIC_ERROR = 'Couldn’t save the visit. Try again.';
+
+function visitWhen(a: AppointmentRecord): string {
+  if (!a.arrivalWindowStart) {
+    return a.scheduledDate ? formatIsoDayShort(a.scheduledDate.slice(0, 10)) : 'Not scheduled';
+  }
+  const start = new Date(a.arrivalWindowStart);
+  const day = formatIsoDayShort(businessIsoDate(start));
+  const row = windowRowOfInstant(start);
+  return `${day} ${row ? WINDOW_LABELS[row] : formatBusinessTime(start)}`;
+}
+
+async function visitErrorFrom(res: Response): Promise<string> {
+  const body = await res.json().catch(() => null);
+  const code = body?.error?.code as string | undefined;
+  return (code && VISIT_ERROR_COPY[code]) || VISIT_GENERIC_ERROR;
+}
+
+function VisitsSection({
+  requestId,
+  technicians,
+}: {
+  readonly requestId: string;
+  readonly technicians: readonly TechnicianRecord[];
+}) {
+  const [visits, setVisits] = useState<readonly AppointmentRecord[] | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const [addOpen, setAddOpen] = useState(false);
+  const [pick, setPick] = useState<WindowPickerValue | null>(null);
+  const [techIds, setTechIds] = useState<readonly string[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+  const availability = useAvailability(addOpen);
+
+  const [cancelTarget, setCancelTarget] = useState<AppointmentRecord | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+
+  // Bumping `reload` refetches; the effect's own flag drops stale responses.
+  const [reload, setReload] = useState(0);
+  const load = useCallback(async (): Promise<void> => {
+    setReload((n) => n + 1);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/admin/requests/${requestId}/appointments`);
+        const body = await res.json().catch(() => null);
+        if (cancelled) return;
+        if (res.ok && body?.success) {
+          setVisits(body.data.appointments as AppointmentRecord[]);
+          setLoadFailed(false);
+        } else {
+          setLoadFailed(true);
+        }
+      } catch {
+        if (!cancelled) setLoadFailed(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [requestId, reload]);
+
+  function openAdd(): void {
+    setPick(null);
+    setTechIds([]);
+    setAddError(null);
+    setAddOpen(true);
+  }
+
+  function toggleTech(id: string): void {
+    setTechIds((cur) =>
+      cur.includes(id)
+        ? cur.filter((t) => t !== id)
+        : cur.length >= MAX_TECHNICIANS_PER_VISIT
+          ? cur
+          : [...cur, id],
+    );
+  }
+
+  const chosenDay =
+    pick?.isoDay || firstOpenDay(availability.days, availability.windows);
+  const canSave = !!pick?.window && !!chosenDay && techIds.length > 0 && !saving;
+
+  async function saveVisit(): Promise<void> {
+    if (!pick?.window || !chosenDay || techIds.length === 0) return;
+    const { start, end } = arrivalWindowUtcForBusinessDate(chosenDay, pick.window as ArrivalWindow);
+    setSaving(true);
+    setAddError(null);
+    try {
+      const res = await fetch(`/api/admin/requests/${requestId}/appointments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          arrivalWindowStart: start.toISOString(),
+          arrivalWindowEnd: end.toISOString(),
+          technicianIds: techIds,
+        }),
+      });
+      if (!res.ok) {
+        setAddError(await visitErrorFrom(res));
+        return;
+      }
+      setAddOpen(false);
+      setNotice(null);
+      await load();
+    } catch {
+      setAddError('Could not connect to server.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function cancelVisit(): Promise<void> {
+    if (!cancelTarget) return;
+    setCancelling(true);
+    setCancelError(null);
+    try {
+      const res = await fetch(
+        `/api/admin/requests/${requestId}/appointments/${cancelTarget.id}`,
+        {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ version: cancelTarget.version }),
+        },
+      );
+      if (!res.ok) {
+        const msg = await visitErrorFrom(res);
+        // A stale version means the row moved on: reload it and say so.
+        if (res.status === 409) {
+          setCancelTarget(null);
+          setNotice(msg);
+          await load();
+        } else {
+          setCancelError(msg);
+        }
+        return;
+      }
+      setCancelTarget(null);
+      setNotice(null);
+      await load();
+    } catch {
+      setCancelError('Could not connect to server.');
+    } finally {
+      setCancelling(false);
+    }
+  }
+
+  return (
+    <>
+      <SectionCard
+        title="Visits"
+        icon={CalendarClock}
+        count={visits?.length}
+        action={
+          <Button type="button" size="sm" variant="outline" onClick={openAdd}>
+            Add visit
+          </Button>
+        }
+      >
+        {notice && (
+          <p role="alert" className="border-b px-4 py-2 text-sm text-warning-strong">
+            {notice}
+          </p>
+        )}
+        {visits === null && !loadFailed ? (
+          <div className="space-y-2 p-4">
+            <Skeleton className="h-4 w-3/4" />
+            <Skeleton className="h-4 w-1/2" />
+          </div>
+        ) : loadFailed && visits === null ? (
+          <p role="alert" className="p-4 text-sm text-destructive">
+            Couldn’t load visits.{' '}
+            <button type="button" className="underline" onClick={() => void load()}>
+              Try again
+            </button>
+          </p>
+        ) : visits && visits.length > 0 ? (
+          <ul className="divide-y">
+            {visits.map((a) => {
+              const cancelled = a.cancelledAt !== null;
+              const names = a.assignments.map((x) => x.technicianName).join(', ');
+              return (
+                <li key={a.id} className="flex items-start justify-between gap-3 px-4 py-2.5 text-sm">
+                  <div className={cn('min-w-0', cancelled && 'text-muted-foreground line-through')}>
+                    <p className="font-medium">
+                      <span className="font-mono tabular-nums">#{a.appointmentNumber}</span>
+                      {' · '}
+                      {visitWhen(a)}
+                      {a.appointmentNumber === 1 && (
+                        <span className="font-normal text-muted-foreground"> (from the request)</span>
+                      )}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {names || 'No technician'} · {cancelled ? 'Cancelled' : a.isConfirmed ? 'Confirmed' : 'Not confirmed'}
+                    </p>
+                  </div>
+                  {a.appointmentNumber > 1 && !cancelled && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        setCancelError(null);
+                        setCancelTarget(a);
+                      }}
+                    >
+                      Cancel visit
+                    </Button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <p className="p-4 text-sm text-muted-foreground">No visits yet.</p>
+        )}
+      </SectionCard>
+
+      <Dialog open={addOpen} onOpenChange={(o) => { if (!saving) setAddOpen(o); }}>
+        <DialogContent className="max-h-[90vh] min-w-0 overflow-y-auto sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Add visit</DialogTitle>
+            <DialogDescription>
+              Pick an arrival window and who is going. The first technician leads.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="min-w-0 space-y-3">
+            <WindowPicker
+              value={pick}
+              onChange={setPick}
+              days={availability.days}
+              availability={availability.windows}
+              isLoading={availability.isLoading}
+              failed={availability.failed}
+              idPrefix="av"
+              emptyHint={null}
+            />
+            <div className="space-y-1.5">
+              <p id="av-techs-label" className="text-sm font-medium">Technicians</p>
+              <div role="group" aria-labelledby="av-techs-label" className="flex flex-wrap gap-1.5">
+                {technicians.filter((t) => t.isActive).map((t) => {
+                  const idx = techIds.indexOf(t.id);
+                  const on = idx >= 0;
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() => toggleTech(t.id)}
+                      className={cn(
+                        'rounded-md border px-2.5 py-1.5 text-xs focus-visible:outline-2 focus-visible:outline-ring',
+                        on ? 'border-primary bg-primary/10 font-medium' : 'hover:bg-accent',
+                      )}
+                    >
+                      {t.name}
+                      {idx === 0 && <span className="ml-1 text-muted-foreground">(lead)</span>}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Up to {MAX_TECHNICIANS_PER_VISIT}. {techIds.length === 0 ? 'Pick at least one.' : `${techIds.length} selected.`}
+              </p>
+            </div>
+            {addError && (
+              <p role="alert" className="text-sm text-danger">{addError}</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setAddOpen(false)} disabled={saving}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={() => void saveVisit()} disabled={!canSave}>
+              {saving ? 'Adding…' : 'Add visit'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmDialog
+        open={cancelTarget !== null}
+        onOpenChange={(o) => { if (!o && !cancelling) setCancelTarget(null); }}
+        title={cancelTarget ? `Cancel visit #${cancelTarget.appointmentNumber}?` : 'Cancel visit?'}
+        description="The visit is marked cancelled and its technicians are released. The request itself stays open."
+        confirmLabel="Cancel visit"
+        confirmingLabel="Cancelling…"
+        cancelLabel="Keep visit"
+        isConfirming={cancelling}
+        error={cancelError}
+        onConfirm={() => void cancelVisit()}
+      />
+    </>
   );
 }
 
@@ -677,6 +1007,8 @@ export function RequestDetailSheet({
                   {detail.address && <InfoRow label="Address" value={detail.address} />}
                 </div>
               </section>
+
+              <VisitsSection key={detail.id} requestId={detail.id} technicians={technicians} />
 
               <section>
                 <h3 className="text-sm font-semibold mb-2">Tags</h3>

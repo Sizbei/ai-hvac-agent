@@ -22,27 +22,23 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { WindowPicker, useAvailability } from '@/components/admin/window-picker';
 import { TagChipPicker } from '@/components/admin/tag-chip-picker';
 import { useAdminTechnicians } from '@/hooks/use-admin-technicians';
 import { issueTypeValues, jobTypeValues, urgencyValues } from '@/lib/ai/extraction-schema';
 import {
-  BOOKABLE_WINDOWS,
   DESCRIPTION_MAX,
   ISSUE_TYPE_LABELS,
   JOB_TYPE_LABELS,
   URGENCY_LABELS,
-  WINDOW_LABELS,
   buildCreateRequestPayload,
   firstOpenDay,
-  formatIsoDayShort,
-  windowAvailability,
   type CreateRequestDraft,
 } from '@/lib/admin/create-request';
 import type { CustomerListRecord } from '@/lib/admin/crm-types';
 import type { ContactRecord } from '@/lib/admin/contact-types';
 import type { JobTypeRecord } from '@/lib/admin/job-type-types';
 import type { CustomerLocation } from '@/lib/admin/location-queries';
-import type { OpenWindow } from '@/lib/admin/types';
 import { cn } from '@/lib/utils';
 
 interface RequestCreateDialogProps {
@@ -54,10 +50,8 @@ interface RequestCreateDialogProps {
 
 type FieldErrors = Partial<Record<'customer' | 'address' | 'issueType' | 'description', string>>;
 
-const UNASSIGNED = '__unassigned__';
 const NO_CONTACT = '__no_contact__';
 const SEARCH_LIMIT = 5;
-const AVAILABILITY_DAYS = 14;
 
 const EMPTY_DRAFT: CreateRequestDraft = {
   customerId: null,
@@ -197,43 +191,6 @@ function useCustomerExtras(
   return { contacts: fresh?.contacts ?? [], locations: fresh?.locations ?? [] };
 }
 
-/** Open bands for the next fortnight, fetched once the schedule panel opens. */
-function useAvailability(enabled: boolean) {
-  const [days, setDays] = useState<readonly string[]>([]);
-  const [windows, setWindows] = useState<readonly OpenWindow[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    if (!enabled) return;
-    let cancelled = false;
-    void (async () => {
-      setIsLoading(true);
-      setFailed(false);
-      try {
-        const res = await fetch(`/api/admin/requests/availability?days=${AVAILABILITY_DAYS}`);
-        const body = await res.json().catch(() => null);
-        if (cancelled) return;
-        if (res.ok && body?.success) {
-          setDays(body.data.days as string[]);
-          setWindows(body.data.windows as OpenWindow[]);
-        } else {
-          setFailed(true);
-        }
-      } catch {
-        if (!cancelled) setFailed(true);
-      } finally {
-        if (!cancelled) setIsLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [enabled]);
-
-  return { days, windows, isLoading, failed };
-}
-
 function FieldError({ id, message }: { readonly id: string; readonly message?: string }) {
   if (!message) return null;
   return (
@@ -298,13 +255,6 @@ export function RequestCreateDialog({ open, onOpenChange, onCreated }: RequestCr
   );
   const { technicians } = useAdminTechnicians();
   const activeTechs = useMemo(() => technicians.filter((t) => t.isActive), [technicians]);
-  const techItems = useMemo(
-    () => [
-      { value: UNASSIGNED, label: 'Unassigned' },
-      ...activeTechs.map((t) => ({ value: t.id, label: t.name })),
-    ],
-    [activeTechs],
-  );
 
   // Until the dispatcher picks a day, default to the first day with an opening.
   const selectedDay = draft.isoDay || firstOpenDay(availability.days, availability.windows);
@@ -760,105 +710,15 @@ export function RequestCreateDialog({ open, onOpenChange, onCreated }: RequestCr
 
               {draft.scheduleOpen && (
                 <div id="nr-schedule-panel" className="space-y-3 rounded-md border p-3">
-                  {availability.isLoading && availability.days.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">Loading availability…</p>
-                  ) : availability.failed ? (
-                    <p className="text-sm text-danger">Couldn’t load availability. Please try again.</p>
-                  ) : (
-                    <>
-                      <div className="space-y-1.5">
-                        <p id="nr-day-label" className="text-sm font-medium">Day</p>
-                        <div
-                          role="radiogroup"
-                          aria-labelledby="nr-day-label"
-                          className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1"
-                        >
-                          {availability.days.map((d) => {
-                            const open = availability.windows.some((w) => w.day === d && w.available > 0);
-                            const selected = selectedDay === d;
-                            return (
-                              <button
-                                key={d}
-                                type="button"
-                                role="radio"
-                                aria-checked={selected}
-                                onClick={() => patch({ isoDay: d, window: '' })}
-                                className={cn(
-                                  'shrink-0 rounded-md border px-2.5 py-1.5 text-xs tabular-nums focus-visible:outline-2 focus-visible:outline-ring',
-                                  selected
-                                    ? 'border-primary bg-primary text-primary-foreground'
-                                    : open
-                                      ? 'hover:bg-accent'
-                                      : 'text-muted-foreground',
-                                )}
-                              >
-                                {formatIsoDayShort(d)}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <p id="nr-window-label" className="text-sm font-medium">Arrival window</p>
-                        <div role="radiogroup" aria-labelledby="nr-window-label" className="grid gap-1.5 sm:grid-cols-3">
-                          {BOOKABLE_WINDOWS.map((w) => {
-                            const counts = windowAvailability(availability.windows, selectedDay, w);
-                            const selected = draft.window === w;
-                            return (
-                              <button
-                                key={w}
-                                type="button"
-                                role="radio"
-                                aria-checked={selected}
-                                disabled={!selectedDay}
-                                onClick={() => patch({ window: w })}
-                                className={cn(
-                                  'flex flex-col items-start rounded-md border px-2.5 py-1.5 text-left text-xs focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50',
-                                  selected ? 'border-primary bg-primary/10' : 'hover:bg-accent',
-                                )}
-                              >
-                                <span className="font-medium text-foreground">{WINDOW_LABELS[w]}</span>
-                                <span
-                                  className={cn(
-                                    'tabular-nums',
-                                    counts.available > 0 ? 'text-muted-foreground' : 'text-warning',
-                                  )}
-                                >
-                                  {counts.capacity === 0
-                                    ? 'No technicians working'
-                                    : `${counts.available} of ${counts.capacity} open`}
-                                </span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <Label id="nr-tech-label">Technician</Label>
-                        <Select
-                          items={techItems}
-                          value={draft.technicianId || UNASSIGNED}
-                          onValueChange={(v) => patch({ technicianId: !v || v === UNASSIGNED ? '' : v })}
-                        >
-                          <SelectTrigger className="w-full sm:w-64" aria-labelledby="nr-tech-label">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {techItems.map((o) => (
-                              <SelectItem key={o.value} value={o.value}>
-                                {o.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      {!draft.window && (
-                        <p className="text-xs text-muted-foreground">Pick a window to schedule, or leave it unscheduled.</p>
-                      )}
-                    </>
-                  )}
+                  <WindowPicker
+                    value={{ isoDay: selectedDay, window: draft.window, technicianId: draft.technicianId }}
+                    onChange={(v) => patch({ isoDay: v.isoDay, window: v.window, technicianId: v.technicianId })}
+                    days={availability.days}
+                    availability={availability.windows}
+                    technicians={activeTechs}
+                    isLoading={availability.isLoading}
+                    failed={availability.failed}
+                  />
                 </div>
               )}
             </fieldset>
