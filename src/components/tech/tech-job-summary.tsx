@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatArrivalWindow } from '@/lib/admin/arrival-window';
-import { buildStatusConfirmCopy, isTerminalStatus } from '@/components/tech/tech-status-confirm';
+import { buildStatusConfirmCopy, isTerminalStatus, techStatusLabel } from '@/components/tech/tech-status-confirm';
 
 interface TechJobSummary {
   readonly id: string;
@@ -256,7 +256,7 @@ export function TechJobSummary({
                   disabled={advancing !== null}
                   onClick={() => handleStatusTap(s)}
                 >
-                  {advancing === s ? 'Saving…' : humanize(s)}
+                  {advancing === s ? 'Saving…' : techStatusLabel(s)}
                 </Button>
               ))
             )}

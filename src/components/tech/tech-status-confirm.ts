@@ -34,3 +34,17 @@ export function buildStatusConfirmCopy(status: string): StatusConfirmCopy {
     cancelLabel: 'No, go back',
   };
 }
+
+const TECH_STATUS_LABELS: Record<string, string> = {
+  en_route: 'On my way',
+  arrived: "I've arrived",
+};
+
+/** Button wording for a manual status target: field phrasing for the travel
+ * taps, humanized sentence case for everything else. */
+export function techStatusLabel(status: string): string {
+  return (
+    TECH_STATUS_LABELS[status] ??
+    status.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase())
+  );
+}
