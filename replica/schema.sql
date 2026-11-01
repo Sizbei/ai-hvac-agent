@@ -386,15 +386,14 @@ alter table technician_time_entries
   add column if not exists kind text not null default 'job',
   add column if not exists appointment_id uuid references appointments(id) on delete set null,
   add column if not exists clock_in_method text not null default 'manual';
-do $$ begin
-  alter table technician_time_entries add constraint tte_kind_check
-    check (kind in ('job','general'));
-  alter table technician_time_entries add constraint tte_clock_in_method_check
-    check (clock_in_method in ('auto','manual'));
-  -- a job entry always has a request; a general entry never does
-  alter table technician_time_entries add constraint tte_kind_request_check
-    check ((kind = 'job') = (service_request_id is not null));
-exception when duplicate_object then null; end $$;
+-- one DO block per constraint (a shared block would skip the rest after one duplicate)
+do $$ begin alter table technician_time_entries add constraint tte_kind_check
+  check (kind in ('job','general')); exception when duplicate_object then null; end $$;
+do $$ begin alter table technician_time_entries add constraint tte_clock_in_method_check
+  check (clock_in_method in ('auto','manual')); exception when duplicate_object then null; end $$;
+-- a job entry always has a request; a general entry never does
+do $$ begin alter table technician_time_entries add constraint tte_kind_request_check
+  check ((kind = 'job') = (service_request_id is not null)); exception when duplicate_object then null; end $$;
 alter table technician_time_entries alter column service_request_id drop not null;
 -- NULL request ids never collide in tte_open_per_tech_job_unique:
 create unique index if not exists tte_open_general_per_tech_idx
@@ -406,13 +405,18 @@ create unique index if not exists tte_open_general_per_tech_idx
 
 -- Trigger changes to sync_request_appointment (CREATE OR REPLACE, same
 -- names): (a) step 4 mirrors request status onto the lead row only while
--- en_route_at, arrived_at, started_at and completed_at are all NULL; (b)
--- step 3a keeps a demoted lead's status when it is 'completed'; (c) when
--- NEW.status = 'cancelled', every assignment on every visit of the request
--- with status not in ('completed','cancelled') becomes 'cancelled'; (d)
--- when NEW.status = 'completed' assignments are left as they are.
--- Admin visit edits (updateAppointment) refuse with 409 when any
--- assignment on the visit has a progress timestamp.
+-- en_route_at, arrived_at, started_at and completed_at are all NULL, and
+-- step 3's ON CONFLICT keeps a row's status when it has progress; (b) a
+-- demoted lead keeps 'completed' (steps 1 and 3); (c) when NEW.status =
+-- 'cancelled', every assignment on every visit of the request with status
+-- not in ('completed','cancelled') becomes 'cancelled' and every open
+-- kind='job' time entry on the request is closed (minutes; labor from
+-- users.labor_rate_cents); (d) when NEW.status = 'completed' assignments
+-- are left as they are. Admin edits that would rewrite a visit with
+-- progress (updateAppointment for #2+, reschedule/assign/unschedule for
+-- #1) refuse with 409 HAS_PROGRESS. Admin hold applies the hold rule to
+-- the active visit; admin completed with open progressed rows → 409.
+-- Hold rule, auto-entry ON CONFLICT and the close-out predicate: F04.
 
 -- ---------------------------------------------------------------------------
 -- M3b  Collect: manual payments, one native draft per request, idempotency

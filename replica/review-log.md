@@ -209,3 +209,23 @@ forms, GPS, en-route texts deferred with rows named.
   per-tech; cannot represent pauses; labor cost reads time entries.
 - "Record cash through takePayment with provider=mock" — indistinguishable
   from fake card payments.
+
+## Spec round 4 — 2026-11-01 (revised M3 sections)
+
+One blind critic. 3 blockers (no active lead once every row is completed;
+a hold pinned the active visit; manual-payment re-run after a takeover
+double-credits), 9 majors (updateRequestStatus cannot sit in a batch →
+inline guarded request UPDATE with the xmin pattern; close-out side
+effects; no-op ambiguity; step-3 ON CONFLICT rewind; admin hold/complete
+no longer mirrored; visit-#1 edit path; cancel leaves time entries open;
+manual refunds through the mock; mock gate only on the portal). Applied as
+the critic's exact rules: open-assignment definition; active visit falls
+back to the latest; the active lead stays authorised after done; hold ends
+the visit (progressed rows complete, untouched rows cancel, entries close;
+resume = new visit); fixed batch order with xmin gating; close-out batch +
+blockers incl. request_not_started; admin paths; trigger (a)–(d) extended
+incl. closing time entries on cancel; auto-entry ON CONFLICT adoption;
+visit-#1 helpers through an admin assignments endpoint (so a two-tech
+scenario is reachable before M2); the checkable before/after done-when;
+M3b: claim conditioned on the payment row not existing, manual refunds,
+mock gate everywhere, FP payments backfill method='other'.

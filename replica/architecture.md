@@ -154,36 +154,85 @@ jobs and hides close-out, invoice and payment for them.
 **Ownership rule (M3a, replaces "assigned_to only").** A technician can
 READ a request when they hold any assignment on a non-cancelled visit of
 it. A technician WRITES only their own assignment row (progress, pause,
-done), plus notes, photos, materials and forms on jobs they can read. The
-REQUEST status is written only by the **active lead**: the `is_lead` row
-on the active visit, where the active visit is the earliest non-cancelled
-visit that still has an open assignment. Helpers never change request
-status and never send `cancelled` or `scheduled` (those are not tech
-targets at all). Money (invoice create/finalize, payments, estimate
-accept) stays with the active lead.
+done), plus notes, photos, materials and forms on jobs they can read.
+**Open assignment** = status in (assigned, scheduled, en_route, arrived,
+in_progress, on_hold). **Active visit** = the earliest non-cancelled
+visit with an open assignment; if none, the latest non-cancelled visit.
+**Active lead** = the `is_lead` row on the active visit, authorised even
+when that row is already `completed` (so the lead can close out after
+their own done). The REQUEST status is written only by the active lead.
+Helpers never change request status and never send `cancelled` or
+`scheduled` (not tech targets). Money (invoice create/finalize, payments,
+estimate accept) stays with the active lead. Visit #1 can carry helpers
+in M3a through an admin endpoint that inserts a non-lead row (refused once
+that technician has progress) and removes a row without progress.
 
 **Tech actions → enum values.** `en_route`, `arrived`, `in_progress`
-(working), `on_hold` as *pause* (own row only) or *hold* (lead: request +
-every open assignment on the visit, with `holdReason` + `followUpDate`),
-`completed` as *done* (own row only), and `close_out` (lead: one guarded
-UPDATE that completes the request). There is no `paused` value.
+(working), `pause` (own row → `on_hold`; blocks close-out), `completed`
+(done, own row only), `on_hold` as **hold = the visit ends for now**
+(active lead only: the request goes `on_hold` with `holdReason` +
+`followUpDate`; every open row on the visit with progress becomes
+`completed`, without progress becomes `cancelled`; open auto time
+entries on the visit close; resuming is a new visit from the office),
+and `close_out` (active lead only). There is no `paused` value.
 
-**Trigger change (M3a migration).** `sync_request_appointment` (a) mirrors
-request status onto the lead row ONLY while that row has no progress
-timestamp (the tech app owns it after the first tap); (b) keeps a demoted
-lead's `completed` status instead of overwriting it with `cancelled`; (c)
-on request `cancelled`, sets every open assignment on every visit of the
-request to `cancelled`; (d) on request `completed` leaves assignments as
-they are.
+**One batch per tap, fixed order.** (1) the caller's assignment CAS
+`WHERE status = $expected`, stamping the matching `*_at` with COALESCE;
+(2) for the active lead only, an inline guarded request UPDATE (`status`,
+`completed_at`, `hold_reason`, `follow_up_date`) `WHERE id = $1 AND status
+= $from AND EXISTS (the assignment row with xmin = pg_current_xact_id()::xid)`
+— never `updateRequestStatus` inside the batch (it is multi-statement);
+(3) the auto time-entry statement. `recordStatusEvent` (actor = tech) and
+the review request run after the batch, only when the request UPDATE
+returned a row. No-op rule: own-row taps compare against the row,
+request transitions against the request; a lead tap does whichever is
+behind; `close_out` on an already-completed request → 200 `changed:
+false`. If the row lands but the request CAS misses → 200 with
+`requestBehind: true`. A stale own-row CAS (double tap) → re-read; at
+target → 200 no-op, else 409.
+
+**Close-out** is one batch: [own row → `completed` if open] then `UPDATE
+service_requests SET status='completed', completed_at=now(),
+hold_reason=NULL, follow_up_date=NULL WHERE id=$1 AND status IN
+('in_progress','on_hold') AND fieldpulse_job_id IS NULL AND hcp_job_id IS
+NULL AND NOT EXISTS (open row on a non-cancelled visit)`. 0 rows → re-read:
+already completed → 200 no-op; else 409 with blockers (open rows with
+technician names; `request_not_started` when the request is
+assigned/en_route/arrived — the lead must tap working first).
+
+**Admin paths (M3a).** Admin `completed` on a native request with open
+rows that have progress → 409 with the same blockers. Admin `on_hold`
+applies the hold rule to the active visit. Request-level schedule and
+assignment writes that would rewrite visit #1 (reschedule, assign,
+unschedule) → 409 `HAS_PROGRESS` once any row on #1 has progress, the
+same as `updateAppointment` for visits #2+.
+
+**Trigger change (M3a migration, `sync_request_appointment` v2).** (a)
+step 4 mirrors request status onto the lead row ONLY while that row has
+no progress timestamp, and step 3's `ON CONFLICT` keeps a row's status
+when it has progress; (b) a demoted lead keeps `completed` (steps 1 and
+3); (c) request `cancelled` → every open assignment on every visit
+becomes `cancelled` AND every open `kind='job'` time entry on the request
+is closed (minutes + labor from `users.labor_rate_cents`); (d) request
+`completed` leaves assignments as they are (the close-out guard has
+already proven they are closed). `cancelAppointment` also closes the open
+job entries of its visit.
+
+**Auto time entries.** `arrived` / `in_progress` open a job entry with
+`INSERT … ON CONFLICT (service_request_id, technician_id) WHERE
+clock_out_at IS NULL DO NOTHING` (an open manual entry is adopted);
+done / pause / hold close whatever job entry is open for that technician
+and request.
 
 | method path | does | who | input | output |
 | --- | --- | --- | --- | --- |
 | GET /api/tech/jobs?range=today\|upcoming\|past | the tech's visits (assignment rows joined to appointments), with the visit's window; past = completed/cancelled rows, 30 days | tech | range | visits |
 | GET /api/tech/jobs/[id] | job detail incl. the caller's assignment, the active lead flag, `allowedActions` computed from the assignment status, the close-out blockers | tech | — | job |
-| POST /api/tech/jobs/[id]/status | `{ appointmentId, action, holdReason?, followUpDate? }`; one `db.batch`: CAS the assignment row (old status → new, stamp `*_at` with COALESCE), then, if the caller is the active lead and the action changes request status, `updateRequestStatus` (records the event with actor = tech); opens/closes the auto job time entry. An action whose target equals the current status is a no-op 200 (replay-safe). `close_out` = `UPDATE service_requests SET status='completed' WHERE id=$1 AND status='in_progress' AND NOT EXISTS (open assignment on a non-cancelled visit) [M3d: AND NOT EXISTS (required form not submitted)]`; 0 rows → 409 with the blocker list; the review request fires only when the row changed | tech | see left | assignment + request status + blockers |
+| POST /api/tech/jobs/[id]/status | `{ appointmentId, action, expectedStatus?, holdReason?, followUpDate? }`; the batch, no-op, hold and close-out rules above; the review request fires only when close-out changed the row | tech | see left | assignment + request status + blockers + `requestBehind` |
+| POST /api/admin/requests/[id]/appointments/[aid]/assignments, DELETE …/assignments/[tid] | add a non-lead technician to a visit (incl. visit #1); remove a row without progress | admin | technicianId | assignments |
 | POST /api/tech/time, GET /api/tech/time | general clock in/out (`kind = 'general'`, one open entry per tech enforced by a partial unique index) | tech | action | entry |
 | GET /api/admin/timesheets (S25, minimal) | entries per tech per day incl. general | admin | from, to | rows |
-| **M3b** POST /api/tech/jobs/[id]/invoice | adopt or create the single native draft for the request (`invoices_one_native_draft_per_request_idx` pulled into M3b); lines seeded from the job's materials; 409 when a FP/HCP invoice exists | lead | idempotencyKey | invoice (no cost fields) |
+| **M3b** (money rules: `recordManualPayment` = one batch [invoice claim `… AND NOT EXISTS (SELECT 1 FROM payments WHERE id = $pid)`] then [INSERT payment `status='succeeded'`, `provider='manual'`, id = uuid v5 of the key, gated on the invoice xmin]; `refundPayment` on `provider='manual'` records without a provider call; the mock gate (`getPaymentProvider().name === 'mock'`) also covers the admin payments route and membership charges, not only the portal; FieldPulse-mirrored payments backfill `method='other'`) POST /api/tech/jobs/[id]/invoice | adopt or create the single native draft for the request (`invoices_one_native_draft_per_request_idx` pulled into M3b); lines seeded from the job's materials; 409 when a FP/HCP invoice exists | lead | idempotencyKey | invoice (no cost fields) |
 | POST …/invoice/lines, DELETE …/lines/[lid] | `{ pricebookItemId, quantity }` while `draft`; the server snapshots name/price/cost; totals recomputed in the same batch | lead | idempotencyKey | invoice |
 | POST …/invoice/finalize | CAS `draft → open` (freezes lines) | lead | idempotencyKey | invoice |
 | POST …/invoice/payments | `{ method: 'cash'\|'check', amountCents, checkNumber? }` against `state = 'open'` only, through `recordManualPayment` (atomic balance claim, no provider call, `provider = 'manual'`, `payments.method`); payment id derived from the idempotency key (uuid v5) so a replay reuses the row | lead | idempotencyKey | payment + invoice |
@@ -436,16 +485,24 @@ until a tech can finish and collect on a job here.
      clock button; minimal admin timesheets list. Admin edits of a visit
      with progress → 409. Must-haves closed: 115, 118, 120, 137, 138.
      Adversarial review before merge (authorization + roll-up).
-     Done when: on a native two-tech visit, tech A taps en route → arrived
-     → working → done while the request stays `in_progress`; tech B taps
-     done and close-out completes the request with one review request and
-     all eight `*_at` stamps set; a helper's taps never change the request
-     status; a helper cannot send cancelled/scheduled; hold stores the
-     reason on the request; cancelling the request from admin leaves no
-     open assignment on any visit; a general clock-in sent twice leaves
-     one open entry and never appears in on-site minutes or labor cost; a
-     FieldPulse-synced job refuses close-out; the calendar, dispatch and
-     admin outputs are unchanged for single-tech jobs.
+     Done when: on a native request whose visit #1 has lead A
+     (`assigned_to`) and helper B (added through the admin assignments
+     endpoint), A taps en route → arrived → working, B taps en route →
+     arrived → working; A taps done while the request stays
+     `in_progress`; A's close-out returns 409 naming B; B taps done; A's
+     close-out completes the request with one review request, one
+     completed status event by A, and all eight `*_at` stamps set; B's
+     taps never change the request status or add a status event; B
+     cannot send cancelled/scheduled (400) or close_out (403); a lead hold
+     with `awaiting_parts` stores the reason, completes A's row, cancels
+     an untouched helper row and closes the open auto entries; admin
+     cancel leaves no open assignment and no open job time entry; a
+     general clock-in sent twice leaves one open entry with no labor
+     cost, invisible to on-site minutes and the labor export; a synced
+     FieldPulse job refuses every tech write with 409; for a single-tech
+     native job the JSON of `GET /api/admin/calendar?date=D` and `GET
+     /api/admin/requests/[id]` is identical before and after the
+     migration.
    - **M3b Collect.** Migration: `payments.method` + `check_number`,
      `invoices_one_native_draft_per_request_idx` (pulled from M4),
      `idempotency_keys`. `createInvoiceFromJob` (materials → lines),
