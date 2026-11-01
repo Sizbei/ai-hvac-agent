@@ -24,7 +24,16 @@ import {
   MANUAL_TARGET_STATUSES,
   HOLD_REASONS,
   type HoldReason,
+  type RequestStatus,
 } from "@/lib/admin/request-status";
+import { visitOneRefusalResponse } from "@/lib/admin/visit-one-guard";
+import { findActiveVisit } from "@/lib/tech/ownership";
+import {
+  completeRequestFromAdmin,
+  holdVisit,
+  isDeadlock,
+  readRequestState,
+} from "@/lib/tech/status-writes";
 import {
   ARRIVAL_WINDOWS,
   type ArrivalWindow,
@@ -173,21 +182,65 @@ export async function PATCH(
                 : null,
             }
           : undefined;
-      const result = await updateRequestStatus(
-        session.organizationId,
-        id,
-        parsed.data.status as (typeof MANUAL_TARGET_STATUSES)[number],
-        holdDetails,
-      );
-      if (!result.ok) {
-        if (result.reason === "request_not_found") {
-          return errorResponse("Request not found", "NOT_FOUND", 404);
-        }
-        return errorResponse(
-          `Cannot change status to '${parsed.data.status}' from '${result.currentStatus}'`,
+      const target = parsed.data.status as (typeof MANUAL_TARGET_STATUSES)[number];
+      const invalid = (from: string) =>
+        errorResponse(
+          `Cannot change status to '${target}' from '${from}'`,
           "INVALID_TRANSITION",
           409,
         );
+      // A NATIVE request's hold and completion follow the technician rules
+      // (the hold ends the active visit; completion refuses while a technician
+      // is still working). Synced requests keep updateRequestStatus.
+      const state =
+        target === "on_hold" || target === "completed"
+          ? await readRequestState(session.organizationId, id)
+          : null;
+      let result: { readonly ok: true; readonly status: RequestStatus };
+      if (state?.native && target === "on_hold") {
+        const active = await findActiveVisit(session.organizationId, id);
+        const held = await holdVisit({
+          organizationId: session.organizationId,
+          actorUserId: session.userId,
+          requestId: id,
+          appointmentId: active?.appointmentId ?? null,
+          holdReason: holdDetails?.reason ?? null,
+          followUpDate: holdDetails?.followUpDate ?? null,
+          requestStatus: state.status,
+        });
+        if (!held.ok) {
+          return held.reason === "stale"
+            ? errorResponse("This job changed. Refresh and try again.", "STALE", 409)
+            : invalid(state.status);
+        }
+        result = { ok: true, status: "on_hold" };
+      } else if (state?.native && target === "completed") {
+        const done = await completeRequestFromAdmin({
+          organizationId: session.organizationId,
+          actorUserId: session.userId,
+          requestId: id,
+        });
+        if (!done.ok) {
+          // Blockers carry technician names: response body only, never audit.
+          return done.reason === "blocked"
+            ? errorResponse("A technician is still working this job.", "CLOSE_OUT_BLOCKED", 409, { blockers: done.blockers })
+            : invalid(done.currentStatus);
+        }
+        result = { ok: true, status: "completed" };
+      } else {
+        const updated = await updateRequestStatus(
+          session.organizationId,
+          id,
+          target,
+          holdDetails,
+        );
+        if (!updated.ok) {
+          if (updated.reason === "request_not_found") {
+            return errorResponse("Request not found", "NOT_FOUND", 404);
+          }
+          return invalid(updated.currentStatus);
+        }
+        result = updated;
       }
       await logAudit({
         organizationId: session.organizationId,
@@ -263,7 +316,10 @@ export async function PATCH(
             409,
           );
         }
-        return errorResponse("Request not found", "NOT_FOUND", 404);
+        if (result.reason === "request_not_found") {
+          return errorResponse("Request not found", "NOT_FOUND", 404);
+        }
+        return visitOneRefusalResponse(result.reason);
       }
       await logAudit({
         organizationId: session.organizationId,
@@ -310,6 +366,9 @@ export async function PATCH(
 
     return successResponse(detail);
   } catch (error: unknown) {
+    if (isDeadlock(error)) {
+      return errorResponse("This job changed. Refresh and try again.", "STALE", 409);
+    }
     logger.error({ error }, "Failed to update request");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);
   }

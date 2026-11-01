@@ -44,9 +44,11 @@ function directionsUrl(address: string): string {
  */
 export function TechJobSummary({
   id,
+  appointmentId,
   onStatusChanged,
 }: {
   readonly id: string;
+  readonly appointmentId?: string;
   readonly onStatusChanged?: () => void;
 }) {
   const [job, setJob] = useState<TechJobSummary | null>(null);
@@ -60,7 +62,8 @@ export function TechJobSummary({
 
   const load = useCallback(async (): Promise<void> => {
     try {
-      const res = await fetch(`/api/tech/jobs/${id}`);
+      const query = appointmentId ? `?appointmentId=${encodeURIComponent(appointmentId)}` : '';
+      const res = await fetch(`/api/tech/jobs/${id}${query}`);
       const body = await res.json().catch(() => ({ success: false }));
       if (res.ok && body.success) {
         setJob(body.data);
@@ -73,7 +76,7 @@ export function TechJobSummary({
     } finally {
       setIsLoading(false);
     }
-  }, [id]);
+  }, [id, appointmentId]);
 
   useEffect(() => {
     void load();
@@ -87,7 +90,7 @@ export function TechJobSummary({
         const res = await fetch(`/api/tech/jobs/${id}/status`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status }),
+          body: JSON.stringify(appointmentId ? { status, appointmentId } : { status }),
         });
         if (res.ok) {
           await load();
@@ -102,7 +105,7 @@ export function TechJobSummary({
         setAdvancing(null);
       }
     },
-    [id, load, onStatusChanged],
+    [id, appointmentId, load, onStatusChanged],
   );
 
   // Cancelled/completed require an explicit second tap before the POST

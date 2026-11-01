@@ -49,6 +49,7 @@ import {
 } from "./request-status";
 import { recordStatusEvent, type ActorType } from "./status-events";
 import { stampDispatchOverride } from "./dispatch-override";
+import { classifyVisitOne, visitOneGuardSql, type VisitOneRefusal } from "./visit-one-guard";
 import { releaseReservationsForRequest } from "./capacity-reservation-queries";
 
 export type HoldReason = (typeof holdReasonEnum.enumValues)[number];
@@ -459,7 +460,8 @@ export type AssignTechnicianResult =
       readonly reason: "request_not_assignable";
       readonly currentStatus: AdminRequest["status"];
     }
-  | { readonly ok: false; readonly reason: "time_off" };
+  | { readonly ok: false; readonly reason: "time_off" }
+  | { readonly ok: false; readonly reason: VisitOneRefusal };
 
 /** True when the technician has a capacity-removing shift overlapping the
  * request's arrival window. A request with no window cannot clash. Time off is
@@ -549,21 +551,28 @@ export async function assignTechnician(
         and(
           eq(serviceRequests.id, requestId),
           inArray(serviceRequests.status, [...ASSIGNABLE_STATUSES]),
+          // Visit #1 mirrors the lead: never rewrite a started or ended visit.
+          visitOneGuardSql(),
         )!,
       ),
     )
     .returning();
 
   if (!updated) {
-    // Either the request doesn't exist (in this org) or it's in a
-    // non-assignable state. Reuse the pre-read `before` to disambiguate.
+    // Either the request doesn't exist (in this org), it's in a
+    // non-assignable state (the CAS miss, checked first), or visit #1 refuses.
     if (!before) {
       return { ok: false, reason: "request_not_found" };
+    }
+    const now = await classifyVisitOne(organizationId, requestId);
+    const currentStatus = now?.status ?? before.status;
+    if (now?.refusal && (ASSIGNABLE_STATUSES as readonly string[]).includes(currentStatus)) {
+      return { ok: false, reason: now.refusal };
     }
     return {
       ok: false,
       reason: "request_not_assignable",
-      currentStatus: before.status,
+      currentStatus,
     };
   }
 
@@ -617,7 +626,8 @@ export type ReassignTechnicianResult =
       readonly reason: "request_not_reassignable";
       readonly currentStatus: AdminRequest["status"];
     }
-  | { readonly ok: false; readonly reason: "time_off" };
+  | { readonly ok: false; readonly reason: "time_off" }
+  | { readonly ok: false; readonly reason: VisitOneRefusal };
 
 /**
  * Move an in-flight request to a different technician WITHOUT resetting its
@@ -689,25 +699,21 @@ export async function reassignTechnician(
         and(
           eq(serviceRequests.id, requestId),
           inArray(serviceRequests.status, [...REASSIGNABLE_STATUSES]),
+          visitOneGuardSql(),
         )!,
       ),
     )
     .returning();
 
   if (!updated) {
-    const [existing] = await db
-      .select({ status: serviceRequests.status })
-      .from(serviceRequests)
-      .where(
-        withTenant(
-          serviceRequests,
-          organizationId,
-          eq(serviceRequests.id, requestId),
-        ),
-      );
+    const existing = await classifyVisitOne(organizationId, requestId);
 
     if (!existing) {
       return { ok: false, reason: "request_not_found" };
+    }
+    // CAS miss first: a status that is no longer reassignable wins.
+    if (existing.refusal && (REASSIGNABLE_STATUSES as readonly string[]).includes(existing.status)) {
+      return { ok: false, reason: existing.refusal };
     }
     return {
       ok: false,
@@ -867,7 +873,8 @@ export type ScheduleRequestResult =
       readonly arrivalWindowEnd: string | null;
     }
   | { readonly ok: false; readonly reason: "request_not_found" }
-  | { readonly ok: false; readonly reason: "time_off" };
+  | { readonly ok: false; readonly reason: "time_off" }
+  | { readonly ok: false; readonly reason: VisitOneRefusal };
 
 /**
  * Sets (or clears, with `null`) a request's scheduled service date and optional
@@ -930,7 +937,7 @@ export async function scheduleRequest(
       withTenant(
         serviceRequests,
         organizationId,
-        eq(serviceRequests.id, requestId),
+        and(eq(serviceRequests.id, requestId), visitOneGuardSql())!,
       ),
     )
     .returning({
@@ -940,6 +947,8 @@ export async function scheduleRequest(
     });
 
   if (!updated) {
+    const now = await classifyVisitOne(organizationId, requestId);
+    if (now?.refusal) return { ok: false, reason: now.refusal };
     return { ok: false, reason: "request_not_found" };
   }
 

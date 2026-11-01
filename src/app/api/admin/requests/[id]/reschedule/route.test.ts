@@ -124,4 +124,17 @@ describe("POST reschedule — HCP wiring", () => {
 
     expect(pushJobToHcp).not.toHaveBeenCalled();
   });
+
+  it("409 HAS_PROGRESS when a technician already started visit #1", async () => {
+    getAdminSession.mockResolvedValue({ organizationId: "org-1", userId: "user-1" });
+    placeAndAssignRequest.mockResolvedValue({ ok: false, reason: "has_progress" });
+    const res = await POST(
+      makeRequest({ date: "2026-07-01", arrivalWindow: "morning" }),
+      { params: Promise.resolve({ id: VALID_ID }) },
+    );
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error).toMatchObject({ code: "HAS_PROGRESS", message: "A technician has already started this visit." });
+    expect(pushJobToHcp).not.toHaveBeenCalled();
+  });
 });

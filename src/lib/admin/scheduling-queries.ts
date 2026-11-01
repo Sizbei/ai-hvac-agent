@@ -58,6 +58,7 @@ import {
 import { releaseReservationsForRequest } from "./capacity-reservation-queries";
 import { notifyCustomerOfAssignment } from "./notify-assignment";
 import { stampDispatchOverride } from "./dispatch-override";
+import { classifyVisitOne, visitOneGuardSql, type VisitOneRefusal } from "./visit-one-guard";
 import { isWindowWithinAvailability } from "./availability-coverage";
 import {
   listCapacityBlocks,
@@ -532,6 +533,7 @@ export type PlaceAndAssignResult =
       readonly currentStatus: RequestStatus;
     }
   | { readonly ok: false; readonly reason: "technician_not_found" }
+  | { readonly ok: false; readonly reason: VisitOneRefusal }
   | {
       readonly ok: false;
       readonly reason: "conflict";
@@ -784,6 +786,8 @@ export async function placeAndAssignRequest(
             : undefined,
           noDoubleBookGuard,
           noTimeOffGuard,
+          // Visit #1 mirrors the window/lead: never rewrite a started or ended visit.
+          visitOneGuardSql(),
         )!,
       ),
     )
@@ -818,6 +822,11 @@ export async function placeAndAssignRequest(
           detail: { conflicts, outsideAvailability: false },
         };
       }
+    }
+    // CAS miss first: a moved status stays request_not_found.
+    const now = await classifyVisitOne(organizationId, requestId);
+    if (now?.refusal && now.status === currentStatus) {
+      return { ok: false, reason: now.refusal };
     }
     return { ok: false, reason: "request_not_found" };
   }
@@ -914,6 +923,7 @@ export async function unscheduleRequest(
       readonly reason: "request_not_found" | "request_terminal";
       readonly currentStatus?: string;
     }
+  | { readonly ok: false; readonly reason: VisitOneRefusal }
 > {
   const [existing] = await db
     .select({ status: serviceRequests.status })
@@ -943,12 +953,17 @@ export async function unscheduleRequest(
         and(
           eq(serviceRequests.id, requestId),
           eq(serviceRequests.status, existing.status),
+          visitOneGuardSql(),
         )!,
       ),
     )
     .returning({ id: serviceRequests.id });
 
-  if (!updated) return { ok: false, reason: "request_not_found" };
+  if (!updated) {
+    const now = await classifyVisitOne(organizationId, requestId);
+    if (now?.refusal && now.status === existing.status) return { ok: false, reason: now.refusal };
+    return { ok: false, reason: "request_not_found" };
+  }
   // Back to the unscheduled pile → its confirm-time capacity hold no longer
   // applies; free it so the band re-opens. Best-effort.
   await releaseReservationsForRequest(organizationId, requestId);

@@ -1,6 +1,7 @@
 import { NextRequest, after } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
 import { placeAndAssignRequest } from "@/lib/admin/scheduling-queries";
+import { visitOneRefusalResponse } from "@/lib/admin/visit-one-guard";
 import { syncRequestToCalendar } from "@/lib/integrations/google-calendar/sync";
 import { pushJobToHcp } from "@/lib/integrations/housecall-pro/job-sync";
 import {
@@ -114,6 +115,9 @@ export async function POST(
             "TECHNICIAN_NOT_FOUND",
             404,
           );
+        case "has_progress":
+        case "visit_ended":
+          return visitOneRefusalResponse(result.reason);
         case "request_terminal":
           return errorResponse(
             `Request cannot be rescheduled while it is '${result.currentStatus}'`,

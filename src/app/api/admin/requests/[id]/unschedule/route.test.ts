@@ -69,4 +69,14 @@ describe("POST unschedule", () => {
     const res = await POST(req(), ctx(VALID_ID) as never);
     expect(res.status).toBe(409);
   });
+
+  it("409 HAS_PROGRESS / VISIT_ENDED when visit #1 refuses", async () => {
+    (getAdminSession as unknown as Mock).mockResolvedValue({ userId: "u", organizationId: "o" });
+    for (const [reason, code] of [["has_progress", "HAS_PROGRESS"], ["visit_ended", "VISIT_ENDED"]]) {
+      (unscheduleRequest as unknown as Mock).mockResolvedValue({ ok: false, reason });
+      const res = await POST(req(), ctx(VALID_ID) as never);
+      expect(res.status).toBe(409);
+      expect((await res.json()).error.code).toBe(code);
+    }
+  });
 });

@@ -8,7 +8,7 @@ import { getTechSession } from "@/lib/auth/tech-session";
 import { getTechJobSummary } from "@/lib/tech/field-queries";
 
 const ctx = (id: string) => ({ params: Promise.resolve({ id }) });
-const req = () => new Request("http://t/api") as never;
+const req = (url = "http://t/api") => new Request(url) as never;
 const VALID_ID = "11111111-1111-1111-1111-111111111111";
 
 beforeEach(() => vi.clearAllMocks());
@@ -55,6 +55,22 @@ describe("GET /api/tech/jobs/[id]", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data.referenceNumber).toBe("HVAC-1");
-    expect(getTechJobSummary).toHaveBeenCalledWith("o", "u", VALID_ID);
+    expect(getTechJobSummary).toHaveBeenCalledWith("o", "u", VALID_ID, undefined);
+  });
+
+  it("passes ?appointmentId= through to the summary", async () => {
+    (getTechSession as unknown as Mock).mockResolvedValue({ userId: "u", organizationId: "o" });
+    (getTechJobSummary as unknown as Mock).mockResolvedValue({ id: VALID_ID });
+    const visit = "22222222-2222-2222-2222-222222222222";
+    const res = await GET(req(`http://t/api?appointmentId=${visit}`), ctx(VALID_ID) as never);
+    expect(res.status).toBe(200);
+    expect(getTechJobSummary).toHaveBeenCalledWith("o", "u", VALID_ID, visit);
+  });
+
+  it("400 on a malformed appointmentId", async () => {
+    (getTechSession as unknown as Mock).mockResolvedValue({ userId: "u", organizationId: "o" });
+    const res = await GET(req("http://t/api?appointmentId=nope"), ctx(VALID_ID) as never);
+    expect(res.status).toBe(400);
+    expect(getTechJobSummary).not.toHaveBeenCalled();
   });
 });

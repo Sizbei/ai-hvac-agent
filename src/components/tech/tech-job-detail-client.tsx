@@ -75,7 +75,13 @@ function isToday(iso: string): boolean {
   );
 }
 
-export function TechJobDetailClient({ id }: { readonly id: string }) {
+export function TechJobDetailClient({
+  id,
+  appointmentId,
+}: {
+  readonly id: string;
+  readonly appointmentId?: string;
+}) {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   // A load failure must NOT masquerade as an empty job (no materials / not
@@ -474,7 +480,7 @@ export function TechJobDetailClient({ id }: { readonly id: string }) {
       </Link>
 
       {/* All info the tech needs on-site + status controls. */}
-      <TechJobSummary id={id} onStatusChanged={() => void loadTimeline()} />
+      <TechJobSummary id={id} appointmentId={appointmentId} onStatusChanged={() => void loadTimeline()} />
 
       {loadError && (
         <div

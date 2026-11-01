@@ -1,6 +1,7 @@
 import { NextRequest, after } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
 import { unscheduleRequest } from "@/lib/admin/scheduling-queries";
+import { visitOneRefusalResponse } from "@/lib/admin/visit-one-guard";
 import { syncRequestToCalendar } from "@/lib/integrations/google-calendar/sync";
 import { pushJobToHcp } from "@/lib/integrations/housecall-pro/job-sync";
 import { logAudit } from "@/lib/admin/audit";
@@ -44,11 +45,14 @@ export async function POST(
       if (result.reason === "request_not_found") {
         return errorResponse("Request not found", "NOT_FOUND", 404);
       }
-      return errorResponse(
-        `Request cannot be unscheduled while it is '${result.currentStatus}'`,
-        "REQUEST_TERMINAL",
-        409,
-      );
+      if (result.reason === "request_terminal") {
+        return errorResponse(
+          `Request cannot be unscheduled while it is '${result.currentStatus}'`,
+          "REQUEST_TERMINAL",
+          409,
+        );
+      }
+      return visitOneRefusalResponse(result.reason);
     }
 
     await logAudit({

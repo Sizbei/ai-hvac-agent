@@ -16,7 +16,7 @@ const UUID_REGEX =
  * job that isn't theirs returns 404 (not 403 — don't confirm it exists).
  */
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
@@ -30,10 +30,17 @@ export async function GET(
       return errorResponse("Invalid request ID format", "INVALID_ID", 400);
     }
 
+    // ?appointmentId= picks one of the caller's visits on this job.
+    const appointmentId = new URL(request.url).searchParams.get("appointmentId") ?? undefined;
+    if (appointmentId !== undefined && !UUID_REGEX.test(appointmentId)) {
+      return errorResponse("Invalid visit ID format", "INVALID_ID", 400);
+    }
+
     const summary = await getTechJobSummary(
       session.organizationId,
       session.userId,
       id,
+      appointmentId,
     );
     if (!summary) {
       return errorResponse("Job not found", "NOT_FOUND", 404);

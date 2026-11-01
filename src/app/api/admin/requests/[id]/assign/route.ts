@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
 import { assignTechnician, reassignTechnician } from "@/lib/admin/queries";
 import { logAudit } from "@/lib/admin/audit";
+import { visitOneRefusalResponse } from "@/lib/admin/visit-one-guard";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
@@ -80,7 +81,9 @@ export async function POST(
             "That technician is off during this window.",
             "TIME_OFF",
             409,
-          );
+          );        case "has_progress":
+        case "visit_ended":
+          return visitOneRefusalResponse(result.reason);
       }
     }
 
@@ -170,7 +173,9 @@ export async function PATCH(
             "That technician is off during this window.",
             "TIME_OFF",
             409,
-          );
+          );        case "has_progress":
+        case "visit_ended":
+          return visitOneRefusalResponse(result.reason);
       }
     }
 

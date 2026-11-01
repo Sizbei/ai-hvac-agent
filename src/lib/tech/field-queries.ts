@@ -22,7 +22,16 @@ import {
   serviceRequests,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
-import { findReadableJob, techCanReadSql } from "@/lib/tech/ownership";
+import {
+  findAllAssignments,
+  findReadableJob,
+  pickActiveAssignment,
+  pickActiveVisit,
+  techCanReadSql,
+  type TechAssignmentRow,
+} from "@/lib/tech/ownership";
+import { allowedActions, type Blocker, type TechAction } from "@/lib/tech/status-actions";
+import { closeOutBlockers } from "@/lib/tech/status-writes";
 import { decrypt } from "@/lib/crypto";
 import {
   allowedTransitions,
@@ -61,8 +70,15 @@ export interface TechJobSummary {
   readonly customerPhone: string | null;
   readonly address: string | null;
   readonly accessNotes: string | null;
-  /** Manual next-statuses the tech may advance to (FSM ∩ manual targets). */
+  /** Legacy buttons until Task 6: from the caller's ROW status, minus scheduled/cancelled. */
   readonly allowedNextStatuses: readonly string[];
+  /** The caller's row this summary is about (null for a legacy assigned_to-only reader). */
+  readonly assignment: TechAssignmentRow | null;
+  readonly isActiveLead: boolean;
+  readonly allowedActions: readonly TechAction[];
+  readonly blockers: readonly Blocker[];
+  readonly native: boolean;
+  readonly requestStatus: RequestStatus;
 }
 
 /**
@@ -75,6 +91,7 @@ export async function getTechJobSummary(
   organizationId: string,
   techUserId: string,
   serviceRequestId: string,
+  appointmentId?: string,
 ): Promise<TechJobSummary | null> {
   const [row] = await db
     .select({
@@ -92,6 +109,8 @@ export async function getTechJobSummary(
       customerPhoneEncrypted: serviceRequests.customerPhoneEncrypted,
       addressEncrypted: serviceRequests.addressEncrypted,
       accessNotes: serviceRequests.accessNotes,
+      fieldpulseJobId: serviceRequests.fieldpulseJobId,
+      hcpJobId: serviceRequests.hcpJobId,
     })
     .from(serviceRequests)
     .where(
@@ -108,10 +127,31 @@ export async function getTechJobSummary(
 
   if (!row) return null;
 
+  const all = await findAllAssignments(organizationId, serviceRequestId);
+  const active = pickActiveVisit(all);
+  const activeVisitId = active?.appointmentId ?? null;
+  const mine = all.filter((r) => r.technicianId === techUserId);
+  const assignment = appointmentId
+    ? (mine.find((r) => r.appointmentId === appointmentId) ?? null)
+    : pickActiveAssignment(mine, activeVisitId);
+  // A ?visit= that is not one of the caller's visits on this job is not theirs.
+  if (appointmentId && !assignment) return null;
+
+  const requestStatus = row.status;
+  const native = row.fieldpulseJobId === null && row.hcpJobId === null;
+  const isActiveLead = assignment !== null && assignment.isLead && assignment.appointmentId === activeVisitId;
+  const actions = assignment
+    ? allowedActions({ row: assignment, requestStatus, activeVisitId, activeLeadId: active?.leadTechnicianId ?? null, native })
+    : [];
+  const blockers: readonly Blocker[] = !native
+    ? [{ kind: "managed_externally" }]
+    : assignment?.isLead
+      ? await closeOutBlockers(organizationId, serviceRequestId, { technicianId: techUserId, appointmentId: assignment.appointmentId })
+      : [];
+
   const manual = MANUAL_TARGET_STATUSES as readonly RequestStatus[];
-  const allowedNextStatuses = allowedTransitions(
-    row.status as RequestStatus,
-  ).filter((s) => manual.includes(s));
+  const allowedNextStatuses = allowedTransitions(assignment?.status ?? requestStatus)
+    .filter((s) => manual.includes(s) && s !== "scheduled" && s !== "cancelled");
 
   return {
     id: row.id,
@@ -129,6 +169,12 @@ export async function getTechJobSummary(
     address: safeDecrypt(row.addressEncrypted),
     accessNotes: row.accessNotes,
     allowedNextStatuses,
+    assignment,
+    isActiveLead,
+    allowedActions: actions,
+    blockers,
+    native,
+    requestStatus,
   };
 }
 
