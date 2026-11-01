@@ -12,7 +12,7 @@
  * ignored), like the estimate picker; a manual (off-catalog) material defaults
  * its costs to 0.
  */
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   attachments,
@@ -22,6 +22,7 @@ import {
   serviceRequests,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
+import { findReadableJob, techCanReadSql } from "@/lib/tech/ownership";
 import { decrypt } from "@/lib/crypto";
 import {
   allowedTransitions,
@@ -99,7 +100,7 @@ export async function getTechJobSummary(
         organizationId,
         and(
           eq(serviceRequests.id, serviceRequestId),
-          eq(serviceRequests.assignedTo, techUserId),
+          techCanReadSql(organizationId, techUserId),
         )!,
       ),
     )
@@ -154,21 +155,7 @@ async function findOwnedJob(
   techUserId: string,
   serviceRequestId: string,
 ): Promise<string | null> {
-  const [owned] = await db
-    .select({ id: serviceRequests.id })
-    .from(serviceRequests)
-    .where(
-      withTenant(
-        serviceRequests,
-        organizationId,
-        and(
-          eq(serviceRequests.id, serviceRequestId),
-          eq(serviceRequests.assignedTo, techUserId),
-        )!,
-      ),
-    )
-    .limit(1);
-  return owned?.id ?? null;
+  return (await findReadableJob(organizationId, techUserId, serviceRequestId))?.id ?? null;
 }
 
 export interface JobMaterialRow {
@@ -396,7 +383,8 @@ export async function recordSignature(
         organizationId,
         and(
           eq(serviceRequests.id, serviceRequestId),
-          eq(serviceRequests.assignedTo, techUserId),
+          // In-write guard: only an active lead row on a live visit may sign.
+          sql`EXISTS (SELECT 1 FROM appointment_assignments a JOIN appointments p ON p.id = a.appointment_id WHERE p.service_request_id = ${serviceRequests.id} AND a.organization_id = ${organizationId} AND a.technician_id = ${techUserId} AND a.is_lead AND a.status <> 'cancelled' AND p.cancelled_at IS NULL)`,
         )!,
       ),
     )

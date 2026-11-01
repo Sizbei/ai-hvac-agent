@@ -32,12 +32,18 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 vi.mock("@/lib/db/tenant", () => ({ withTenant: () => ({}) }));
+vi.mock("@/lib/tech/ownership", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/tech/ownership")>()),
+  findReadableJob: vi.fn(),
+  findActiveVisit: vi.fn(),
+}));
 
 import {
   isValidCoordinate,
   recordTechnicianLocation,
   getLatestTechnicianLocations,
 } from "./location-queries";
+import { findReadableJob } from "@/lib/tech/ownership";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -82,6 +88,21 @@ describe("recordTechnicianLocation", () => {
     const r = await recordTechnicianLocation("o", "t", fix);
     expect(r).toEqual({ ok: true });
     expect(insertValues).toHaveBeenCalledOnce();
+  });
+
+  it("links the fix to a request the tech can read", async () => {
+    consentRows.current = [{ enabled: true }];
+    vi.mocked(findReadableJob).mockResolvedValue({ id: "req-1", customerId: null, native: true, status: "en_route" });
+    await recordTechnicianLocation("o", "t", { ...fix, serviceRequestId: "req-1" });
+    expect(insertValues).toHaveBeenCalledWith(expect.objectContaining({ serviceRequestId: "req-1" }));
+  });
+
+  it("stores the fix unlinked (no error) when the request is not readable by the tech", async () => {
+    consentRows.current = [{ enabled: true }];
+    vi.mocked(findReadableJob).mockResolvedValue(null);
+    const r = await recordTechnicianLocation("o", "t", { ...fix, serviceRequestId: "req-x" });
+    expect(r).toEqual({ ok: true });
+    expect(insertValues).toHaveBeenCalledWith(expect.objectContaining({ serviceRequestId: null }));
   });
 });
 

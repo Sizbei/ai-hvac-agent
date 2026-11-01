@@ -59,20 +59,20 @@ async function requestStatus(organizationId: string, requestId: string): Promise
 }
 
 /** The subset of `ids` that are active technicians in the org (copy of reassignTechnician's check). */
-async function activeTechnicianIds(organizationId: string, ids: readonly string[]): Promise<readonly string[]> {
+export async function activeTechnicianIds(organizationId: string, ids: readonly string[]): Promise<readonly string[]> {
   const rows = await db.select({ id: users.id }).from(users)
     .where(withTenant(users, organizationId, inArray(users.id, [...ids]), eq(users.role, "technician"), eq(users.isActive, true)));
   return rows.map((r) => r.id);
 }
 
 /** True when any of `ids` has a capacity-removing shift overlapping [start, end). Time off is never overridable. */
-async function anyTimeOff(organizationId: string, ids: readonly string[], start: Date, end: Date): Promise<boolean> {
+export async function anyTimeOff(organizationId: string, ids: readonly string[], start: Date, end: Date): Promise<boolean> {
   const blocks = await Promise.all(ids.map((id) => technicianTimeOffOverlapping(organizationId, id, start, end)));
   return blocks.some((b) => b.length > 0);
 }
 
 /** Atomic twin of anyTimeOff for the write's WHERE: no capacity-removing shift for `ids` overlaps the window. */
-function noTimeOff(organizationId: string, ids: readonly string[], startIso: string, endIso: string): SQL {
+export function noTimeOff(organizationId: string, ids: readonly string[], startIso: string, endIso: string): SQL {
   // sql.param(...)::uuid[] renders ONE array parameter; a bare array would expand to ($1, $2).
   return sql`NOT EXISTS (SELECT 1 FROM technician_shifts s WHERE s.organization_id = ${organizationId}::uuid
     AND s.technician_id = ANY(${sql.param([...ids])}::uuid[]) AND s.removes_capacity
@@ -92,7 +92,7 @@ function insertAssignments(organizationId: string, appointmentId: string, ordere
     FROM unnest(${sql.param([...ordered])}::uuid[]) WITH ORDINALITY AS t(id, ord) WHERE ${landed(organizationId, appointmentId)}`);
 }
 
-async function getAppointment(organizationId: string, requestId: string, appointmentId: string): Promise<AppointmentRecord | null> {
+export async function getAppointment(organizationId: string, requestId: string, appointmentId: string): Promise<AppointmentRecord | null> {
   const [record] = await loadAppointments(organizationId,
     and(eq(appointments.id, appointmentId), eq(appointments.serviceRequestId, requestId))!);
   return record ?? null;

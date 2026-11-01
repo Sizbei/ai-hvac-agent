@@ -5,6 +5,7 @@ import {
   getActualLaborCostCents,
 } from "./timesheet-queries";
 import { db } from "@/lib/db";
+import { findReadableJob } from "@/lib/tech/ownership";
 
 vi.mock("@/lib/db", () => ({
   db: {
@@ -23,9 +24,22 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
+vi.mock("@/lib/tech/ownership", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/tech/ownership")>()),
+  findReadableJob: vi.fn(),
+  findActiveVisit: vi.fn(),
+}));
+
 const ORG = "org-1";
 const TECH = "tech-1";
 const JOB = "job-1";
+
+/** Whether the technician can read/act on the job (the ownership module's answer). */
+function owned(yes: boolean): void {
+  vi.mocked(findReadableJob).mockResolvedValue(
+    yes ? { id: JOB, customerId: null, native: true, status: "assigned" } : null,
+  );
+}
 
 /**
  * Sequence db.select results. Each call returns a chain whose where() is BOTH
@@ -54,7 +68,8 @@ beforeEach(() => vi.clearAllMocks());
 describe("clockIn", () => {
   it("inserts an open entry when the tech owns the job and has none open", async () => {
     // 1) ownership guard -> owned; 2) open-entry check -> none
-    mockSelectSeq([[{ id: JOB }], []]);
+    owned(true);
+    mockSelectSeq([[]]);
     const valuesSpy = vi.fn(() => ({
       returning: () => Promise.resolve([{ id: "tte-1" }]),
     }));
@@ -72,8 +87,8 @@ describe("clockIn", () => {
   });
 
   it("rejects a job not assigned to the tech (guard) before any write", async () => {
-    // ownership guard returns no rows -> not owned
-    mockSelectSeq([[]]);
+    // ownership guard returns no job -> not owned
+    owned(false);
     const r = await clockIn(ORG, TECH, JOB);
     expect(r).toEqual({ ok: false, reason: "not_owned" });
     expect(db.insert).not.toHaveBeenCalled();
@@ -81,7 +96,8 @@ describe("clockIn", () => {
 
   it("rejects a double clock-in (an open entry already exists)", async () => {
     // 1) ownership guard -> owned; 2) open-entry check -> one already open
-    mockSelectSeq([[{ id: JOB }], [{ id: "tte-open" }]]);
+    owned(true);
+    mockSelectSeq([[{ id: "tte-open" }]]);
     const r = await clockIn(ORG, TECH, JOB);
     expect(r).toEqual({ ok: false, reason: "already_open" });
     expect(db.insert).not.toHaveBeenCalled();
@@ -106,8 +122,8 @@ describe("clockOut", () => {
     // 1) ownership guard -> owned
     // 2) open entry lookup -> the open entry
     // 3) user rate snapshot -> $60/hr = 6000 cents/hr
+    owned(true);
     mockSelectSeq([
-      [{ id: JOB }],
       [{ id: "tte-1", clockInAt }],
       [{ laborRateCents: 6000 }],
     ]);
@@ -126,8 +142,8 @@ describe("clockOut", () => {
 
   it("treats a NULL/absent user rate as 0 (no labor cost)", async () => {
     const clockInAt = new Date(NOW.getTime() - 45 * 60000);
+    owned(true);
     mockSelectSeq([
-      [{ id: JOB }],
       [{ id: "tte-2", clockInAt }],
       [{ laborRateCents: null }],
     ]);
@@ -143,7 +159,7 @@ describe("clockOut", () => {
   });
 
   it("rejects a job not assigned to the tech (guard) before any write", async () => {
-    mockSelectSeq([[]]);
+    owned(false);
     const r = await clockOut(ORG, TECH, JOB);
     expect(r).toEqual({ ok: false, reason: "not_owned" });
     expect(db.batch).not.toHaveBeenCalled();
@@ -151,7 +167,8 @@ describe("clockOut", () => {
 
   it("returns no_open_entry when the tech isn't clocked in", async () => {
     // 1) ownership guard -> owned; 2) open entry lookup -> none
-    mockSelectSeq([[{ id: JOB }], []]);
+    owned(true);
+    mockSelectSeq([[]]);
     const r = await clockOut(ORG, TECH, JOB);
     expect(r).toEqual({ ok: false, reason: "no_open_entry" });
     expect(db.batch).not.toHaveBeenCalled();

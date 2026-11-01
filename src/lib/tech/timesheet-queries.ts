@@ -15,10 +15,11 @@
  * the clock-out (which reads the open entry + the rate, then writes) uses a
  * single guarded UPDATE.
  */
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { asc, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { serviceRequests, technicianTimeEntries, users } from "@/lib/db/schema";
+import { technicianTimeEntries, users } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
+import { findReadableJob } from "@/lib/tech/ownership";
 import { rollUpActualLaborCost } from "@/lib/admin/margin";
 
 /**
@@ -31,21 +32,7 @@ async function findOwnedJob(
   techUserId: string,
   serviceRequestId: string,
 ): Promise<string | null> {
-  const [owned] = await db
-    .select({ id: serviceRequests.id })
-    .from(serviceRequests)
-    .where(
-      withTenant(
-        serviceRequests,
-        organizationId,
-        and(
-          eq(serviceRequests.id, serviceRequestId),
-          eq(serviceRequests.assignedTo, techUserId),
-        )!,
-      ),
-    )
-    .limit(1);
-  return owned?.id ?? null;
+  return (await findReadableJob(organizationId, techUserId, serviceRequestId))?.id ?? null;
 }
 
 export interface TimeEntryRow {

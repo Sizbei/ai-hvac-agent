@@ -8,12 +8,9 @@
  */
 import { NextRequest } from "next/server";
 import { after } from "next/server";
-import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { getTechSession } from "@/lib/auth/tech-session";
-import { db } from "@/lib/db";
-import { serviceRequests } from "@/lib/db/schema";
-import { withTenant } from "@/lib/db/tenant";
+import { findReadableJob } from "@/lib/tech/ownership";
 import { updateRequestStatus } from "@/lib/admin/queries";
 import { createReviewRequest } from "@/lib/reviews/review-queries";
 import { MANUAL_TARGET_STATUSES } from "@/lib/admin/request-status";
@@ -48,20 +45,7 @@ export async function POST(
     }
 
     // A tech may only advance a job assigned to THEM (org-scoped + assignee-scoped).
-    const [owned] = await db
-      .select({ id: serviceRequests.id, customerId: serviceRequests.customerId })
-      .from(serviceRequests)
-      .where(
-        withTenant(
-          serviceRequests,
-          session.organizationId,
-          and(
-            eq(serviceRequests.id, id),
-            eq(serviceRequests.assignedTo, session.userId),
-          )!,
-        ),
-      )
-      .limit(1);
+    const owned = await findReadableJob(session.organizationId, session.userId, id);
     if (!owned) {
       return errorResponse("Job not found or not assigned to you", "NOT_FOUND", 404);
     }

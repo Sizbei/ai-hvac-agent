@@ -5,11 +5,12 @@
  * address decrypted (the tech needs it to drive there). Reuses the JWT admin
  * session (technician role). Tenant-scoped to the tech's org.
  */
-import { and, eq, inArray, asc } from "drizzle-orm";
+import { and, inArray, asc } from "drizzle-orm";
 import { getTechSession } from "@/lib/auth/tech-session";
 import { db } from "@/lib/db";
 import { serviceRequests } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
+import { techCanReadSql } from "@/lib/tech/ownership";
 import { decrypt } from "@/lib/crypto";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { logger } from "@/lib/logger";
@@ -54,7 +55,7 @@ export async function GET() {
           serviceRequests,
           session.organizationId,
           and(
-            eq(serviceRequests.assignedTo, session.userId),
+            techCanReadSql(session.organizationId, session.userId),
             inArray(serviceRequests.status, [...IN_FLIGHT_STATUSES]),
           )!,
         ),

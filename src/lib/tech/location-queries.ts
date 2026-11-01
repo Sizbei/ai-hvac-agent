@@ -8,14 +8,14 @@
  * position isn't the same PII shape as an encrypted address). Every read/write is
  * org + technician scoped.
  */
-import { and, desc, eq, gte, inArray } from "drizzle-orm";
+import { desc, eq, gte, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   technicianLocations,
   users,
-  serviceRequests,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
+import { findReadableJob } from "@/lib/tech/ownership";
 
 export interface LocationFixInput {
   readonly latitude: number;
@@ -71,21 +71,8 @@ export async function recordTechnicianLocation(
   // Fall back to null (an unlinked fix is fine; no error returned to client).
   let linkedRequestId: string | null = null;
   if (input.serviceRequestId) {
-    const [req] = await db
-      .select({ id: serviceRequests.id })
-      .from(serviceRequests)
-      .where(
-        withTenant(
-          serviceRequests,
-          organizationId,
-          and(
-            eq(serviceRequests.id, input.serviceRequestId),
-            eq(serviceRequests.assignedTo, technicianId),
-          )!,
-        ),
-      )
-      .limit(1);
-    linkedRequestId = req?.id ?? null;
+    const readable = await findReadableJob(organizationId, technicianId, input.serviceRequestId);
+    linkedRequestId = readable?.id ?? null;
   }
 
   await db.insert(technicianLocations).values({

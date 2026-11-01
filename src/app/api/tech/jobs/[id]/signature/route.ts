@@ -18,6 +18,7 @@ import {
   generateStorageKey,
   MAX_FILE_SIZE,
 } from "@/lib/storage/r2-client";
+import { findActiveVisit } from "@/lib/tech/ownership";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { logger } from "@/lib/logger";
@@ -73,6 +74,13 @@ export async function POST(
         "NOT_FOUND",
         404,
       );
+    }
+
+    // Only the active visit's lead may capture the signature. Checked before the
+    // upload; recordSignature re-asserts a lead row in the write itself.
+    const active = await findActiveVisit(session.organizationId, id);
+    if (active?.leadTechnicianId !== session.userId) {
+      return errorResponse("Only the lead technician can do that.", "NOT_LEAD", 403);
     }
 
     const storageKey = generateStorageKey(session.organizationId, id, file.name);

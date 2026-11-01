@@ -10,6 +10,7 @@ import {
   isJobOwnedByTech,
 } from "./field-queries";
 import { db } from "@/lib/db";
+import { findReadableJob } from "@/lib/tech/ownership";
 import { getPricebookItemById } from "@/lib/admin/pricebook-queries";
 import { adjustStock } from "@/lib/admin/inventory-queries";
 
@@ -28,6 +29,12 @@ vi.mock("@/lib/admin/pricebook-queries", () => ({
 
 vi.mock("@/lib/admin/inventory-queries", () => ({
   adjustStock: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@/lib/tech/ownership", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/tech/ownership")>()),
+  findReadableJob: vi.fn(),
+  findActiveVisit: vi.fn(),
 }));
 
 const ORG = "org-1";
@@ -55,6 +62,13 @@ function mockSelectSeq(results: unknown[][]): void {
   });
 }
 
+/** Whether the technician can read/act on the job (the ownership module's answer). */
+function owned(yes: boolean): void {
+  vi.mocked(findReadableJob).mockResolvedValue(
+    yes ? { id: JOB, customerId: null, native: true, status: "assigned" } : null,
+  );
+}
+
 /** Mock db.update(...).set(...).where(...).returning() → rows. */
 function mockUpdateReturning(rows: unknown[]): void {
   vi.mocked(db.update).mockReturnValue({
@@ -67,7 +81,7 @@ beforeEach(() => vi.clearAllMocks());
 describe("addJobMaterial — catalog line", () => {
   it("snapshots cost/price from the pricebook item and ignores client costs", async () => {
     // 1) ownership guard -> owned job
-    mockSelectSeq([[{ id: JOB }]]);
+    owned(true);
     vi.mocked(getPricebookItemById).mockResolvedValue({
       id: "pb-1",
       organizationId: ORG,
@@ -117,7 +131,7 @@ describe("addJobMaterial — catalog line", () => {
   });
 
   it("still records the material when the stock decrement fails (best-effort)", async () => {
-    mockSelectSeq([[{ id: JOB }]]);
+    owned(true);
     vi.mocked(getPricebookItemById).mockResolvedValue({
       id: "pb-1",
       organizationId: ORG,
@@ -150,7 +164,7 @@ describe("addJobMaterial — catalog line", () => {
   });
 
   it("returns item_not_found when the pricebook item is missing", async () => {
-    mockSelectSeq([[{ id: JOB }]]);
+    owned(true);
     vi.mocked(getPricebookItemById).mockResolvedValue(null);
     const r = await addJobMaterial(ORG, TECH, JOB, {
       pricebookItemId: "pb-x",
@@ -162,7 +176,7 @@ describe("addJobMaterial — catalog line", () => {
 
 describe("addJobMaterial — manual line", () => {
   it("defaults costs to 0 and never reads the pricebook", async () => {
-    mockSelectSeq([[{ id: JOB }]]);
+    owned(true);
     const valuesSpy = vi.fn(() => ({
       returning: () => Promise.resolve([{ id: "mat-2" }]),
     }));
@@ -189,7 +203,7 @@ describe("addJobMaterial — manual line", () => {
   });
 
   it("rejects a manual line with no description", async () => {
-    mockSelectSeq([[{ id: JOB }]]);
+    owned(true);
     const r = await addJobMaterial(ORG, TECH, JOB, { quantity: 1 });
     expect(r).toEqual({ ok: false, reason: "invalid_input" });
   });
@@ -207,7 +221,7 @@ describe("addJobMaterial — manual line", () => {
 describe("assignee guard", () => {
   it("a tech cannot add a material to a job not assigned to them", async () => {
     // ownership guard returns no rows -> not owned
-    mockSelectSeq([[]]);
+    owned(false);
     const r = await addJobMaterial(ORG, TECH, JOB, {
       description: "x",
       quantity: 1,
@@ -218,14 +232,16 @@ describe("assignee guard", () => {
 
   it("a tech cannot remove a material on a job not assigned to them", async () => {
     // 1) material lookup -> found on JOB; 2) ownership guard -> not owned
-    mockSelectSeq([[{ serviceRequestId: JOB }], []]);
+    mockSelectSeq([[{ serviceRequestId: JOB }]]);
+    owned(false);
     const r = await removeJobMaterial(ORG, TECH, "mat-9");
     expect(r).toEqual({ ok: false, reason: "not_owned" });
     expect(db.delete).not.toHaveBeenCalled();
   });
 
   it("removes a material the tech owns", async () => {
-    mockSelectSeq([[{ serviceRequestId: JOB }], [{ id: JOB }]]);
+    mockSelectSeq([[{ serviceRequestId: JOB }]]);
+    owned(true);
     vi.mocked(db.delete).mockReturnValue({
       where: () => Promise.resolve(undefined),
     } as never);
@@ -259,8 +275,9 @@ describe("getJobTimelineForTech", () => {
   it("returns the ordered, PII-free status timeline for an owned job", async () => {
     const at1 = new Date("2026-06-24T10:00:00.000Z");
     const at2 = new Date("2026-06-24T12:30:00.000Z");
+    owned(true);
     mockSelectSeq([
-      [{ id: JOB }], // ownership guard → owned
+      
       [
         { fromStatus: null, toStatus: "pending", actorType: "ai", at: at1 },
         { fromStatus: "pending", toStatus: "assigned", actorType: "system", at: at2 },
@@ -277,13 +294,14 @@ describe("getJobTimelineForTech", () => {
   });
 
   it("refuses a job not assigned to the tech (not_owned)", async () => {
-    mockSelectSeq([[]]); // ownership guard misses
+    owned(false); // ownership guard misses
     const res = await getJobTimelineForTech(ORG, "other-tech", JOB);
     expect(res).toEqual({ ok: false, reason: "not_owned" });
   });
 
   it("returns an empty timeline for an owned job with no events", async () => {
-    mockSelectSeq([[{ id: JOB }], []]);
+    owned(true);
+    mockSelectSeq([[]]);
     const res = await getJobTimelineForTech(ORG, TECH, JOB);
     expect(res).toEqual({ ok: true, timeline: [] });
   });
@@ -298,7 +316,7 @@ describe("addJobPhoto", () => {
   };
 
   it("records the attachment for an owned job (linked to the service request)", async () => {
-    mockSelectSeq([[{ id: JOB }]]); // ownership guard → owned
+    owned(true); // ownership guard → owned
     const valuesSpy = vi.fn(() => ({
       returning: () => Promise.resolve([{ id: "att-1" }]),
     }));
@@ -319,7 +337,7 @@ describe("addJobPhoto", () => {
   });
 
   it("refuses a job not assigned to the tech (not_owned, no insert)", async () => {
-    mockSelectSeq([[]]); // ownership guard misses
+    owned(false); // ownership guard misses
     const r = await addJobPhoto(ORG, "other-tech", JOB, photo);
     expect(r).toEqual({ ok: false, reason: "not_owned" });
     expect(db.insert).not.toHaveBeenCalled();
@@ -330,21 +348,21 @@ describe("recordSignature", () => {
   const SIG = { signatureUrl: "https://r2/sig.png", signatureName: "Jane Doe" };
 
   it("persists the signature for the owning tech", async () => {
-    mockSelectSeq([[{ id: JOB }]]); // findOwnedJob → owned
+    owned(true); // findOwnedJob → owned
     mockUpdateReturning([{ id: JOB }]); // guarded UPDATE hits the row
     const r = await recordSignature(ORG, TECH, JOB, SIG);
     expect(r).toEqual({ ok: true });
   });
 
   it("refuses a job not assigned to the tech (not_owned, no write)", async () => {
-    mockSelectSeq([[]]); // findOwnedJob → none
+    owned(false); // findOwnedJob → none
     const r = await recordSignature(ORG, TECH, JOB, SIG);
     expect(r).toEqual({ ok: false, reason: "not_owned" });
     expect(vi.mocked(db.update)).not.toHaveBeenCalled();
   });
 
   it("refuses if the job is reassigned between the ownership check and the write (TOCTOU)", async () => {
-    mockSelectSeq([[{ id: JOB }]]); // owned at read time…
+    owned(true); // owned at read time…
     mockUpdateReturning([]); // …but the assignee-guarded UPDATE matches 0 rows
     const r = await recordSignature(ORG, TECH, JOB, SIG);
     expect(r).toEqual({ ok: false, reason: "not_owned" });
@@ -365,11 +383,11 @@ describe("listJobPhotos", () => {
 
 describe("isJobOwnedByTech", () => {
   it("true when the ownership read returns the job", async () => {
-    mockSelectSeq([[{ id: JOB }]]);
+    owned(true);
     expect(await isJobOwnedByTech(ORG, TECH, JOB)).toBe(true);
   });
   it("false when the job is not assigned to this tech / not in org", async () => {
-    mockSelectSeq([[]]);
+    owned(false);
     expect(await isJobOwnedByTech(ORG, TECH, JOB)).toBe(false);
   });
 });
