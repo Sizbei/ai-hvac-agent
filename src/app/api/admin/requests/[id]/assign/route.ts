@@ -81,7 +81,8 @@ export async function POST(
             "That technician is off during this window.",
             "TIME_OFF",
             409,
-          );        case "has_progress":
+          );
+        case "has_progress":
         case "visit_ended":
           return visitOneRefusalResponse(result.reason);
       }
@@ -173,7 +174,8 @@ export async function PATCH(
             "That technician is off during this window.",
             "TIME_OFF",
             409,
-          );        case "has_progress":
+          );
+        case "has_progress":
         case "visit_ended":
           return visitOneRefusalResponse(result.reason);
       }

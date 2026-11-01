@@ -23,9 +23,21 @@ const progressed = () => sql<boolean>`EXISTS (SELECT 1 FROM appointment_assignme
 
 const ended = () => sql<boolean>`EXISTS (SELECT 1 FROM appointments p WHERE p.service_request_id = "service_requests"."id" AND p.appointment_number = 1 AND p.cancelled_at IS NOT NULL)`;
 
+/**
+ * Run a guarded service_requests UPDATE after locking the request row, in one
+ * batch. Under READ COMMITTED a lone UPDATE that waits on the row lock
+ * re-checks only the target row; its NOT EXISTS subqueries keep the snapshot
+ * taken before the wait. Locking first gives the UPDATE a fresh snapshot.
+ */
+export async function lockedUpdate<T>(organizationId: string, requestId: string, update: T): Promise<Awaited<T>> {
+  const lock = db.execute(sql`SELECT 1 FROM service_requests WHERE id = ${requestId}::uuid AND organization_id = ${organizationId}::uuid FOR NO KEY UPDATE`);
+  const results = (await db.batch([lock, update] as never)) as unknown as readonly unknown[];
+  return results[1] as Awaited<T>;
+}
+
 /** Both guards for a service_requests UPDATE. Parenthesised: it contains OR. */
 export function visitOneGuardSql(): SQL {
-  return sql`(NOT ${progressed()} AND ("service_requests"."status" = 'cancelled' OR NOT ${ended()}))`;
+  return sql`(NOT ${progressed()} AND ("service_requests"."status" = 'cancelled'::request_status OR NOT ${ended()}))`;
 }
 
 /** Re-read after a 0-row update: the request's status and which visit #1 guard (if any) refuses it. */

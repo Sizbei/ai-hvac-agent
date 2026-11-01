@@ -66,6 +66,8 @@ let updateResolution: unknown = [];
 // getDashboardOverview batches its four queries (neon-http: 1 round-trip)
 // instead of Promise.all-ing them.
 let batchCallArgs: unknown[][] = [];
+// db.execute(sql) arguments (the request lock in front of guarded UPDATEs).
+const executeCalls: unknown[] = [];
 
 vi.mock('@/lib/db', () => ({
   db: {
@@ -78,6 +80,10 @@ vi.mock('@/lib/db', () => ({
     },
     insert: (..._args: unknown[]) => createChainableMock(insertResolution),
     update: (..._args: unknown[]) => createChainableMock(updateResolution),
+    execute: (q: unknown) => {
+      executeCalls.push(q);
+      return { __lock: q };
+    },
     // Each statement passed in is itself one of the thenable proxies returned
     // by db.select() above — resolving it via its own `.then` mirrors real
     // db.batch() returning each statement's rows in the same array order.
@@ -217,6 +223,13 @@ vi.mock('@/lib/db/schema', () => ({
 }));
 
 // Import the module under test AFTER mocks are set up
+// Marker for the visit-#1 guard so tests can find it in the guarded WHERE.
+vi.mock('./visit-one-guard', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./visit-one-guard')>()),
+  visitOneGuardSql: () => 'VISIT_ONE_GUARD',
+}));
+
+import { and } from 'drizzle-orm';
 import {
   getRequests,
   getRequestById,
@@ -245,6 +258,7 @@ beforeEach(() => {
   insertResolution = [];
   updateResolution = [];
   batchCallArgs = [];
+  executeCalls.length = 0;
 });
 
 describe('getRequests', () => {
@@ -1733,5 +1747,38 @@ describe('addRequestNote', () => {
     if (result.ok) {
       expect(result.note.authorName).toBeNull();
     }
+  });
+});
+
+// Lock-first: the guarded UPDATE runs in one batch after
+// SELECT ... FOR NO KEY UPDATE, so its NOT EXISTS sees a post-lock snapshot.
+describe('visit-#1 guarded writers lock the request first', () => {
+  const lockText = (q: unknown) => ((q as { __lock: unknown[] }).__lock[0] as readonly string[]).join('?');
+  const guardInWhere = () => vi.mocked(and).mock.calls.some((c) => (c as unknown[]).includes('VISIT_ONE_GUARD'));
+  const row = { id: 'req-1', status: 'assigned', issueType: 'x', urgency: 'high', description: null, referenceNumber: 'R', customerNameEncrypted: null, createdAt: new Date(), updatedAt: new Date() };
+
+  beforeEach(() => vi.mocked(and).mockClear());
+
+  for (const [name, run] of [
+    ['assignTechnician', () => assignTechnician(ORG_ID, 'req-1', 'tech-1')],
+    ['reassignTechnician', () => reassignTechnician(ORG_ID, 'req-1', 'tech-1')],
+  ] as const) {
+    it(`${name}: [lock, guarded update]`, async () => {
+      selectResolutions = [[{ id: 'tech-1', name: 'T' }], [{ status: 'assigned' }]];
+      updateResolution = [row];
+      expect((await run()).ok).toBe(true);
+      expect(batchCallArgs).toHaveLength(1);
+      expect(batchCallArgs[0]).toHaveLength(2);
+      expect(lockText(batchCallArgs[0]![0])).toMatch(/SELECT 1 FROM service_requests WHERE id = \?::uuid AND organization_id = \?::uuid FOR NO KEY UPDATE/);
+      expect(guardInWhere()).toBe(true);
+    });
+  }
+
+  it('scheduleRequest: [lock, guarded update]', async () => {
+    updateResolution = [{ scheduledDate: null, arrivalWindowStart: null, arrivalWindowEnd: null }];
+    expect((await scheduleRequest(ORG_ID, 'req-1', null)).ok).toBe(true);
+    expect(batchCallArgs[0]).toHaveLength(2);
+    expect(lockText(batchCallArgs[0]![0])).toContain('FOR NO KEY UPDATE');
+    expect(guardInWhere()).toBe(true);
   });
 });

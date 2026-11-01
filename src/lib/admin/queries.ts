@@ -49,7 +49,7 @@ import {
 } from "./request-status";
 import { recordStatusEvent, type ActorType } from "./status-events";
 import { stampDispatchOverride } from "./dispatch-override";
-import { classifyVisitOne, visitOneGuardSql, type VisitOneRefusal } from "./visit-one-guard";
+import { classifyVisitOne, lockedUpdate, visitOneGuardSql, type VisitOneRefusal } from "./visit-one-guard";
 import { releaseReservationsForRequest } from "./capacity-reservation-queries";
 
 export type HoldReason = (typeof holdReasonEnum.enumValues)[number];
@@ -537,7 +537,7 @@ export async function assignTechnician(
   // Only flip to "assigned" from an assignable state. Guarding the status in
   // the WHERE clause also closes the lost-update race between two dispatchers:
   // the second UPDATE matches zero rows once the first has moved it on.
-  const [updated] = await db
+  const [updated] = await lockedUpdate(organizationId, requestId, db
     .update(serviceRequests)
     .set({
       assignedTo: technicianId,
@@ -556,7 +556,7 @@ export async function assignTechnician(
         )!,
       ),
     )
-    .returning();
+    .returning());
 
   if (!updated) {
     // Either the request doesn't exist (in this org), it's in a
@@ -686,7 +686,7 @@ export async function reassignTechnician(
 
   // Change the assignee only; status is deliberately left untouched. Guard on
   // the reassignable states so a terminal/pending request matches zero rows.
-  const [updated] = await db
+  const [updated] = await lockedUpdate(organizationId, requestId, db
     .update(serviceRequests)
     .set({
       assignedTo: technicianId,
@@ -703,7 +703,7 @@ export async function reassignTechnician(
         )!,
       ),
     )
-    .returning();
+    .returning());
 
   if (!updated) {
     const existing = await classifyVisitOne(organizationId, requestId);
@@ -930,7 +930,7 @@ export async function scheduleRequest(
     patch.arrivalWindowEnd = arrivalWindow?.end ?? null;
   }
 
-  const [updated] = await db
+  const [updated] = await lockedUpdate(organizationId, requestId, db
     .update(serviceRequests)
     .set(patch)
     .where(
@@ -944,7 +944,7 @@ export async function scheduleRequest(
       scheduledDate: serviceRequests.scheduledDate,
       arrivalWindowStart: serviceRequests.arrivalWindowStart,
       arrivalWindowEnd: serviceRequests.arrivalWindowEnd,
-    });
+    }));
 
   if (!updated) {
     const now = await classifyVisitOne(organizationId, requestId);

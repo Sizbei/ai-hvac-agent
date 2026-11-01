@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { PgDialect } from "drizzle-orm/pg-core";
 
-const { selectQueue } = vi.hoisted(() => ({ selectQueue: [] as unknown[][] }));
+const { selectQueue, batch } = vi.hoisted(() => ({ selectQueue: [] as unknown[][], batch: vi.fn() }));
 vi.mock("@/lib/db", () => {
   const chain = () => {
     const rows = Promise.resolve(selectQueue.shift() ?? []);
@@ -12,10 +12,11 @@ vi.mock("@/lib/db", () => {
     };
     return node;
   };
-  return { db: { select: () => chain() } };
+  return { db: { select: () => chain(), execute: (q: unknown) => q, batch } };
 });
 
-import { classifyVisitOne, visitOneGuardSql } from "./visit-one-guard";
+import type { SQL } from "drizzle-orm";
+import { classifyVisitOne, lockedUpdate, visitOneGuardSql } from "./visit-one-guard";
 
 beforeEach(() => {
   selectQueue.length = 0;
@@ -29,7 +30,7 @@ describe("visitOneGuardSql", () => {
     // Never a bare column: inside the subqueries it would be ambiguous or bind to the inner table.
     expect(text).not.toMatch(/= "id"/);
     expect(text).toContain("p.service_request_id = \"service_requests\".\"id\" AND p.appointment_number = 1 AND (a.en_route_at IS NOT NULL OR a.arrived_at IS NOT NULL OR a.started_at IS NOT NULL OR a.completed_at IS NOT NULL)");
-    expect(text).toContain("(\"service_requests\".\"status\" = 'cancelled' OR NOT EXISTS (SELECT 1 FROM appointments p WHERE p.service_request_id = \"service_requests\".\"id\" AND p.appointment_number = 1 AND p.cancelled_at IS NOT NULL))");
+    expect(text).toContain("(\"service_requests\".\"status\" = 'cancelled'::request_status OR NOT EXISTS (SELECT 1 FROM appointments p WHERE p.service_request_id = \"service_requests\".\"id\" AND p.appointment_number = 1 AND p.cancelled_at IS NOT NULL))");
   });
 });
 
@@ -45,5 +46,18 @@ describe("classifyVisitOne", () => {
     expect(await classifyVisitOne("o", "r")).toEqual({ status: "on_hold", refusal: "visit_ended" });
     expect(await classifyVisitOne("o", "r")).toEqual({ status: "cancelled", refusal: null });
     expect(await classifyVisitOne("o", "r")).toBeNull();
+  });
+});
+
+describe("lockedUpdate", () => {
+  it("batches the request lock in front of the update and returns the update's rows", async () => {
+    batch.mockResolvedValue([{ rows: [] }, [{ id: "r" }]]);
+    const update = { marker: "update" };
+    expect(await lockedUpdate("o", "r", update)).toEqual([{ id: "r" }]);
+    const [lock, second] = batch.mock.calls[0]![0] as [SQL, unknown];
+    expect(new PgDialect().sqlToQuery(lock).sql).toBe(
+      "SELECT 1 FROM service_requests WHERE id = $1::uuid AND organization_id = $2::uuid FOR NO KEY UPDATE",
+    );
+    expect(second).toBe(update);
   });
 });

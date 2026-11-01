@@ -185,7 +185,7 @@ export async function POST(
           );
         }
         return successResponse({
-          assignmentStatus: "completed", requestStatus: "completed", requestBehind: false,
+          assignmentStatus: result.assignmentStatus, requestStatus: "completed", requestBehind: false,
           allowedActions: [], blockers: [], changed: result.changed,
         });
       }

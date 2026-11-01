@@ -58,7 +58,7 @@ import {
 import { releaseReservationsForRequest } from "./capacity-reservation-queries";
 import { notifyCustomerOfAssignment } from "./notify-assignment";
 import { stampDispatchOverride } from "./dispatch-override";
-import { classifyVisitOne, visitOneGuardSql, type VisitOneRefusal } from "./visit-one-guard";
+import { classifyVisitOne, lockedUpdate, visitOneGuardSql, type VisitOneRefusal } from "./visit-one-guard";
 import { isWindowWithinAvailability } from "./availability-coverage";
 import {
   listCapacityBlocks,
@@ -768,7 +768,7 @@ export async function placeAndAssignRequest(
       )`
     : undefined;
 
-  const [updated] = await db
+  const [updated] = await lockedUpdate(organizationId, requestId, db
     .update(serviceRequests)
     .set(setValues)
     .where(
@@ -797,7 +797,7 @@ export async function placeAndAssignRequest(
       scheduledDate: serviceRequests.scheduledDate,
       arrivalWindowStart: serviceRequests.arrivalWindowStart,
       arrivalWindowEnd: serviceRequests.arrivalWindowEnd,
-    });
+    }));
 
   if (!updated) {
     // The guarded UPDATE matched nothing. Disambiguate: a concurrent overlapping
@@ -936,7 +936,7 @@ export async function unscheduleRequest(
     return { ok: false, reason: "request_terminal", currentStatus: existing.status };
   }
 
-  const [updated] = await db
+  const [updated] = await lockedUpdate(organizationId, requestId, db
     .update(serviceRequests)
     .set({
       status: "pending",
@@ -957,7 +957,7 @@ export async function unscheduleRequest(
         )!,
       ),
     )
-    .returning({ id: serviceRequests.id });
+    .returning({ id: serviceRequests.id }));
 
   if (!updated) {
     const now = await classifyVisitOne(organizationId, requestId);

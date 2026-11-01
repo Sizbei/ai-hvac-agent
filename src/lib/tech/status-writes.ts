@@ -23,8 +23,10 @@ type BatchResult = { rows: Record<string, unknown>[] };
 const STAMP_COLUMN: Record<Stamp, string> = {
   enRouteAt: "en_route_at", arrivedAt: "arrived_at", startedAt: "started_at", completedAt: "completed_at",
 };
-const OPEN_IN = sql.raw(`(${OPEN_ASSIGNMENT_STATUSES.map((s) => `'${s}'`).join(", ")})`);
-const HOLDABLE_IN = sql.raw("('scheduled', 'assigned', 'en_route', 'arrived', 'in_progress')");
+const statusList = (list: readonly string[]) => sql.raw(`(${list.map((s) => `'${s}'::request_status`).join(", ")})`);
+const OPEN_IN = statusList(OPEN_ASSIGNMENT_STATUSES);
+const HOLDABLE_IN = statusList(["scheduled", "assigned", "en_route", "arrived", "in_progress"]);
+const CLOSABLE_IN = statusList(["in_progress", "on_hold"]);
 const NATIVE = sql.raw("fieldpulse_job_id IS NULL AND hcp_job_id IS NULL");
 const S_NATIVE = sql.raw("s.fieldpulse_job_id IS NULL AND s.hcp_job_id IS NULL");
 const ROW_PROGRESS = sql.raw("(en_route_at IS NOT NULL OR arrived_at IS NOT NULL OR started_at IS NOT NULL OR completed_at IS NOT NULL)");
@@ -91,7 +93,11 @@ export async function applyTechAction(p: {
   const aid = row.assignmentId;
   const laterVisitLead = row.isLead && row.appointmentId !== p.activeVisitId;
   const requestTo = resolved.requestTo;
-  const requestUpdate = (gate: SQL) => db.execute(sql`UPDATE service_requests SET status = ${requestTo}::request_status, completed_at = NULL, hold_reason = NULL, follow_up_date = NULL, updated_at = now() WHERE id = ${rid}::uuid AND organization_id = ${org}::uuid AND status = ${p.requestStatus}::request_status AND ${NATIVE} AND ${gate} RETURNING status`);
+  const requestUpdate = (gate: SQL) => db.execute(sql`UPDATE service_requests
+    SET status = ${requestTo}::request_status, completed_at = NULL, hold_reason = NULL, follow_up_date = NULL, updated_at = now()
+    WHERE id = ${rid}::uuid AND organization_id = ${org}::uuid AND status = ${p.requestStatus}::request_status
+      AND ${NATIVE} AND ${gate}
+    RETURNING status`);
 
   try {
     if (resolved.kind === "request_only") {
@@ -108,7 +114,9 @@ export async function applyTechAction(p: {
     const stampSet = resolved.stamp ? sql`, ${sql.raw(STAMP_COLUMN[resolved.stamp])} = COALESCE(${sql.raw(STAMP_COLUMN[resolved.stamp])}, now())` : sql``;
     const items: unknown[] = [
       lockRequest(org, rid),
-      db.execute(sql`UPDATE appointment_assignments SET status = ${to}::request_status${stampSet} WHERE id = ${aid}::uuid AND organization_id = ${org}::uuid AND status = ${row.status}::request_status RETURNING id`),
+      db.execute(sql`UPDATE appointment_assignments SET status = ${to}::request_status${stampSet}
+        WHERE id = ${aid}::uuid AND organization_id = ${org}::uuid AND status = ${row.status}::request_status
+        RETURNING id`),
     ];
     if (requestTo) items.push(requestUpdate(rowLanded(aid)));
     if (resolved.timeEntry === "open") {
@@ -146,20 +154,35 @@ export async function holdVisit(p: {
   if (!canTransition(p.requestStatus, "on_hold")) return { ok: false, reason: "invalid_transition" };
   const { organizationId: org, requestId: rid, appointmentId: appt } = p;
   const rowGate = appt ? sql` AND ${noOpenRowOnVisit(appt)}` : sql``;
-  const holdRequest = db.execute(sql`WITH prev AS (SELECT status FROM service_requests WHERE id = ${rid}::uuid AND organization_id = ${org}::uuid) UPDATE service_requests s SET status = 'on_hold'::request_status, hold_reason = ${p.holdReason}::hold_reason, follow_up_date = ${p.followUpDate?.toISOString() ?? null}::timestamptz, updated_at = now() FROM prev WHERE s.id = ${rid}::uuid AND s.organization_id = ${org}::uuid AND s.status IN ${HOLDABLE_IN} AND ${S_NATIVE}${rowGate} RETURNING prev.status AS from_status`);
+  const holdRequest = db.execute(sql`WITH prev AS (SELECT status FROM service_requests WHERE id = ${rid}::uuid AND organization_id = ${org}::uuid)
+    UPDATE service_requests s SET status = 'on_hold'::request_status, hold_reason = ${p.holdReason}::hold_reason,
+      follow_up_date = ${p.followUpDate?.toISOString() ?? null}::timestamptz, updated_at = now()
+    FROM prev
+    WHERE s.id = ${rid}::uuid AND s.organization_id = ${org}::uuid AND s.status IN ${HOLDABLE_IN} AND ${S_NATIVE}${rowGate}
+    RETURNING prev.status AS from_status`);
 
   const items: unknown[] = [lockRequest(org, rid)];
   if (appt) {
     items.push(
       db.execute(sql`SELECT 1 FROM appointments WHERE id = ${appt}::uuid AND organization_id = ${org}::uuid FOR NO KEY UPDATE`),
-      db.execute(sql`UPDATE appointment_assignments SET status = CASE WHEN ${ROW_PROGRESS} THEN 'completed'::request_status ELSE 'cancelled'::request_status END, completed_at = CASE WHEN ${ROW_PROGRESS} THEN COALESCE(completed_at, now()) ELSE completed_at END WHERE appointment_id = ${appt}::uuid AND organization_id = ${org}::uuid AND status IN ${OPEN_IN} AND EXISTS (SELECT 1 FROM service_requests r WHERE r.id = ${rid}::uuid AND r.status IN ${HOLDABLE_IN} AND r.fieldpulse_job_id IS NULL AND r.hcp_job_id IS NULL) RETURNING id, technician_id`),
+      db.execute(sql`UPDATE appointment_assignments
+        SET status = CASE WHEN ${ROW_PROGRESS} THEN 'completed'::request_status ELSE 'cancelled'::request_status END,
+          completed_at = CASE WHEN ${ROW_PROGRESS} THEN COALESCE(completed_at, now()) ELSE completed_at END
+        WHERE appointment_id = ${appt}::uuid AND organization_id = ${org}::uuid AND status IN ${OPEN_IN}
+          AND EXISTS (SELECT 1 FROM service_requests r WHERE r.id = ${rid}::uuid AND r.status IN ${HOLDABLE_IN}
+            AND r.fieldpulse_job_id IS NULL AND r.hcp_job_id IS NULL)
+        RETURNING id, technician_id`),
       holdRequest,
       db.execute(closeJobEntriesSql({
         organizationId: org, requestId: rid,
-        // every technician on the visit, read inside the transaction
-        gate: sql`t.technician_id IN (SELECT a.technician_id FROM appointment_assignments a WHERE a.appointment_id = ${appt}::uuid) AND ${noOpenRowOnVisit(appt)}`,
+        // technicians who worked this visit (not rows cancelled untouched), read inside the transaction
+        gate: sql`t.technician_id IN (SELECT a.technician_id FROM appointment_assignments a
+            WHERE a.appointment_id = ${appt}::uuid AND (a.status <> 'cancelled'::request_status OR ${A_PROGRESS}))
+          AND ${noOpenRowOnVisit(appt)}`,
       })),
-      db.execute(sql`UPDATE appointments SET cancelled_at = now(), version = version + 1, updated_at = now() WHERE id = ${appt}::uuid AND organization_id = ${org}::uuid AND cancelled_at IS NULL AND NOT EXISTS (SELECT 1 FROM appointment_assignments a WHERE a.appointment_id = ${appt}::uuid AND a.status <> 'cancelled')`),
+      db.execute(sql`UPDATE appointments SET cancelled_at = now(), version = version + 1, updated_at = now()
+        WHERE id = ${appt}::uuid AND organization_id = ${org}::uuid AND cancelled_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM appointment_assignments a WHERE a.appointment_id = ${appt}::uuid AND a.status <> 'cancelled'::request_status)`),
     );
   } else {
     items.push(holdRequest);
@@ -181,33 +204,42 @@ export async function holdVisit(p: {
 }
 
 const completeRequest = (org: string, rid: string, guard: SQL) =>
-  db.execute(sql`WITH prev AS (SELECT status FROM service_requests WHERE id = ${rid}::uuid AND organization_id = ${org}::uuid FOR NO KEY UPDATE) UPDATE service_requests s SET status = 'completed'::request_status, completed_at = now(), hold_reason = NULL, follow_up_date = NULL, updated_at = now() FROM prev WHERE s.id = ${rid}::uuid AND s.organization_id = ${org}::uuid AND s.status IN ('in_progress', 'on_hold') AND ${S_NATIVE} AND ${guard} RETURNING prev.status AS from_status`);
+  db.execute(sql`WITH prev AS (SELECT status FROM service_requests WHERE id = ${rid}::uuid AND organization_id = ${org}::uuid FOR NO KEY UPDATE)
+    UPDATE service_requests s SET status = 'completed'::request_status, completed_at = now(), hold_reason = NULL,
+      follow_up_date = NULL, updated_at = now()
+    FROM prev
+    WHERE s.id = ${rid}::uuid AND s.organization_id = ${org}::uuid AND s.status IN ${CLOSABLE_IN} AND ${S_NATIVE} AND ${guard}
+    RETURNING prev.status AS from_status`);
 
 const openRowsOnLiveVisits = (rid: string, extra: SQL = sql``) =>
-  sql`NOT EXISTS (SELECT 1 FROM appointment_assignments a JOIN appointments p ON p.id = a.appointment_id WHERE p.service_request_id = ${rid}::uuid AND p.cancelled_at IS NULL AND a.status IN ${OPEN_IN}${extra})`;
+  sql`NOT EXISTS (SELECT 1 FROM appointment_assignments a JOIN appointments p ON p.id = a.appointment_id
+    WHERE p.service_request_id = ${rid}::uuid AND p.cancelled_at IS NULL AND a.status IN ${OPEN_IN}${extra})`;
 
 export async function closeOutRequest(p: {
   organizationId: string; techUserId: string; requestId: string; row: TechAssignmentRow;
-}): Promise<{ ok: true; changed: boolean } | { ok: false; assignmentStatus: RequestStatus; blockers: Blocker[] }> {
+}): Promise<{ ok: true; changed: boolean; assignmentStatus: RequestStatus } | { ok: false; assignmentStatus: RequestStatus; blockers: Blocker[] }> {
   const { organizationId: org, requestId: rid } = p;
   const aid = p.row.assignmentId;
   const results = await runBatch([
     lockRequest(org, rid),
-    db.execute(sql`UPDATE appointment_assignments SET status = 'completed'::request_status, completed_at = COALESCE(completed_at, now()) WHERE id = ${aid}::uuid AND organization_id = ${org}::uuid AND status IN ${OPEN_IN} AND started_at IS NOT NULL AND EXISTS (SELECT 1 FROM service_requests r WHERE r.id = ${rid}::uuid AND r.status IN ('in_progress', 'on_hold')) RETURNING id`),
+    db.execute(sql`UPDATE appointment_assignments SET status = 'completed'::request_status, completed_at = COALESCE(completed_at, now())
+      WHERE id = ${aid}::uuid AND organization_id = ${org}::uuid AND status IN ${OPEN_IN} AND started_at IS NOT NULL
+        AND EXISTS (SELECT 1 FROM service_requests r WHERE r.id = ${rid}::uuid AND r.status IN ${CLOSABLE_IN})
+      RETURNING id`),
     completeRequest(org, rid, openRowsOnLiveVisits(rid)),
     db.execute(closeJobEntriesSql({
       organizationId: org, requestId: rid, technicianIds: [p.techUserId],
-      gate: sql`EXISTS (SELECT 1 FROM appointment_assignments a WHERE a.id = ${aid}::uuid AND a.status = 'completed')`,
+      gate: sql`EXISTS (SELECT 1 FROM appointment_assignments a WHERE a.id = ${aid}::uuid AND a.status = 'completed'::request_status)`,
     })),
   ]);
   const done = results[2]!.rows[0] as { from_status: RequestStatus } | undefined;
   if (done) {
     await event(org, rid, done.from_status, "completed", p.techUserId);
-    return { ok: true, changed: true };
+    return { ok: true, changed: true, assignmentStatus: "completed" };
   }
   const now = await readRequestState(org, rid);
-  if (now?.status === "completed") return { ok: true, changed: false };
   const mine = await readRow(org, aid);
+  if (now?.status === "completed") return { ok: true, changed: false, assignmentStatus: mine?.status ?? p.row.status };
   return {
     ok: false,
     assignmentStatus: mine?.status ?? p.row.status,
@@ -227,7 +259,9 @@ export async function completeRequestFromAdmin(p: {
     lockRequest(org, rid),
     completeRequest(org, rid, openRowsOnLiveVisits(rid, sql` AND ${A_PROGRESS}`)),
     // untouched rows are cancelled so no open row survives on a completed request
-    db.execute(sql`UPDATE appointment_assignments a SET status = 'cancelled'::request_status FROM appointments p WHERE p.id = a.appointment_id AND p.service_request_id = ${rid}::uuid AND a.organization_id = ${org}::uuid AND a.status IN ${OPEN_IN} AND ${requestLanded(rid)}`),
+    db.execute(sql`UPDATE appointment_assignments a SET status = 'cancelled'::request_status FROM appointments p
+      WHERE p.id = a.appointment_id AND p.service_request_id = ${rid}::uuid AND a.organization_id = ${org}::uuid
+        AND a.status IN ${OPEN_IN} AND ${requestLanded(rid)}`),
     db.execute(closeJobEntriesSql({ organizationId: org, requestId: rid, gate: requestLanded(rid) })),
   ]);
   const done = results[1]!.rows[0] as { from_status: RequestStatus } | undefined;

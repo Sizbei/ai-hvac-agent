@@ -60,6 +60,7 @@ vi.mock("@/lib/db", () => ({
         return chain([]);
       },
     }),
+    execute: (q: unknown) => ({ __lock: q }),
     batch: (...args: unknown[]) => batchMock(...args),
   },
 }));
@@ -215,7 +216,14 @@ vi.mock("./shift-queries", () => ({
   listCapacityBlocks: capacityBlocksMock,
 }));
 
+// Marker for the visit-#1 guard so tests can find it in the guarded WHERE.
+vi.mock("./visit-one-guard", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./visit-one-guard")>()),
+  visitOneGuardSql: () => "VISIT_ONE_GUARD",
+}));
+
 import {
+  unscheduleRequest,
   getTechnicianAvailability,
   setTechnicianAvailability,
   InvalidAvailabilitySlotError,
@@ -245,7 +253,10 @@ beforeEach(() => {
   whereCalls.length = 0;
   insertMock.mockClear();
   batchMock.mockClear();
-  batchMock.mockResolvedValue([]);
+  // Pass-through: each statement resolves to its own queued rows, like db.batch.
+  batchMock.mockImplementation(async (qs: unknown) =>
+    Promise.all((qs as unknown[]).map((q) => Promise.resolve(q))),
+  );
   loggerInfo.mockClear();
   vi.mocked(recordStatusEvent).mockClear();
   timeOffMock.mockReset();
@@ -1109,5 +1120,31 @@ describe("autoAssignBookedRequest (scored vs first-fit)", () => {
     const result = await autoAssignBookedRequest(ORG, REQ, HELD);
     expect(result).toEqual({ assigned: true, technicianId: T1 });
     expect(insertMock).not.toHaveBeenCalled(); // shadow failure → nothing recorded
+  });
+});
+
+describe("visit-#1 guarded writers lock the request first", () => {
+  const isLockThenUpdate = () => {
+    expect(batchMock).toHaveBeenCalledTimes(1);
+    const statements = batchMock.mock.calls[0]![0] as unknown[];
+    expect(statements).toHaveLength(2);
+    expect(statements[0]).toHaveProperty("__lock");
+    expect(JSON.stringify(whereCalls)).toContain("VISIT_ONE_GUARD");
+  };
+
+  it("placeAndAssignRequest: [lock, guarded update]", async () => {
+    selectQueue.push([{ status: "scheduled", assignedTo: null }]);
+    updateQueue.push([{ status: "scheduled", assignedTo: null, scheduledDate: new Date(), arrivalWindowStart: new Date(), arrivalWindowEnd: new Date() }]);
+    const window = { start: new Date("2026-07-01T12:00:00.000Z"), end: new Date("2026-07-01T16:00:00.000Z") };
+    const result = await placeAndAssignRequest(ORG, REQ, window, { isoDay: "2026-07-01", window: "morning" });
+    expect(result.ok).toBe(true);
+    isLockThenUpdate();
+  });
+
+  it("unscheduleRequest: [lock, guarded update]", async () => {
+    selectQueue.push([{ status: "assigned" }]);
+    updateQueue.push([{ id: REQ }]);
+    expect(await unscheduleRequest(ORG, REQ)).toEqual({ ok: true });
+    isLockThenUpdate();
   });
 });

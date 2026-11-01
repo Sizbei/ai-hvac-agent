@@ -112,7 +112,7 @@ describe("POST /api/tech/jobs/[id]/status", () => {
 
   it("legacy completed from the active lead with nobody else open is a close-out, and asks for a review once", async () => {
     as(T1, [row()], [row(), row({ assignmentId: "row-2", isLead: false, technicianId: T2, status: "completed" })]);
-    (closeOutRequest as unknown as Mock).mockResolvedValue({ ok: true, changed: true });
+    (closeOutRequest as unknown as Mock).mockResolvedValue({ ok: true, changed: true, assignmentStatus: "completed" });
     const res = await post({ status: "completed" });
     expect(res.status).toBe(200);
     expect((await res.json()).data).toMatchObject({ assignmentStatus: "completed", requestStatus: "completed", changed: true });
@@ -129,7 +129,7 @@ describe("POST /api/tech/jobs/[id]/status", () => {
 
   it("a close-out that changed nothing asks for no review", async () => {
     as(T1, [row({ status: "completed", completedAt: new Date() })], [row({ status: "completed", completedAt: new Date() })], "completed");
-    (closeOutRequest as unknown as Mock).mockResolvedValue({ ok: true, changed: false });
+    (closeOutRequest as unknown as Mock).mockResolvedValue({ ok: true, changed: false, assignmentStatus: "completed" });
     const res = await post({ action: "close_out" });
     expect(res.status).toBe(200);
     expect((await res.json()).data.changed).toBe(false);

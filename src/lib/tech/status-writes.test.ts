@@ -47,7 +47,7 @@ const A2 = "88888888-8888-4888-8888-888888888888";
 
 const dialect = new PgDialect();
 const render = (q: unknown): string => dialect.sqlToQuery(q as SQL).sql;
-const statements = (): string[] => (batch.mock.calls[0]![0] as unknown[]).map(render);
+const statements = (): string[] => (batch.mock.calls[0]![0] as unknown[]).map((q) => render(q).replace(/\s+/g, " "));
 
 const row = (over: Partial<TechAssignmentRow> = {}): TechAssignmentRow => ({
   assignmentId: ROW1, appointmentId: A1, appointmentNumber: 1, isLead: true, status: "arrived",
@@ -192,13 +192,13 @@ describe("closeOutRequest", () => {
 
   it("lock, my row done, guarded request completion, my entry closed after my done", async () => {
     batch.mockResolvedValue(res([], [{ id: ROW1 }], [{ from_status: "in_progress" }], []));
-    expect(await closeOutRequest(input)).toEqual({ ok: true, changed: true });
+    expect(await closeOutRequest(input)).toEqual({ ok: true, changed: true, assignmentStatus: "completed" });
     const s = statements();
     expect(s).toHaveLength(4);
     expect(s[0]).toContain("FOR NO KEY UPDATE");
     expect(s[1]).toMatch(/SET status = 'completed'::request_status, completed_at = COALESCE\(completed_at, now\(\)\)/);
     expect(s[1]).toContain("started_at IS NOT NULL");
-    expect(s[1]).toContain("r.status IN ('in_progress', 'on_hold')");
+    expect(s[1]).toContain("r.status IN ('in_progress'::request_status, 'on_hold'::request_status)");
     expect(s[2]).toMatch(/^WITH prev AS \(SELECT status FROM service_requests WHERE id = \$1::uuid AND organization_id = \$2::uuid FOR NO KEY UPDATE\)/);
     expect(s[2]).toContain("completed_at = now()");
     expect(s[2]).toContain("hold_reason = NULL");
@@ -206,14 +206,14 @@ describe("closeOutRequest", () => {
     expect(s[2]).toContain("p.cancelled_at IS NULL");
     expect(s[2]).toContain("RETURNING prev.status AS from_status");
     expect(s[3]).toMatch(/^UPDATE technician_time_entries/);
-    expect(s[3]).toContain("a.status = 'completed'");
+    expect(s[3]).toContain("a.status = 'completed'::request_status");
     expect(recordStatusEvent).toHaveBeenCalledWith(expect.objectContaining({ fromStatus: "in_progress", toStatus: "completed", actorId: T1 }));
   });
 
   it("already completed by a concurrent close-out: changed false, no event", async () => {
     batch.mockResolvedValue(res([], [], [], []));
-    selectQueue.push([{ status: "completed", native: true }]);
-    expect(await closeOutRequest(input)).toEqual({ ok: true, changed: false });
+    selectQueue.push([{ status: "completed", native: true }], [{ status: "completed" }]);
+    expect(await closeOutRequest(input)).toEqual({ ok: true, changed: false, assignmentStatus: "completed" });
     expect(recordStatusEvent).not.toHaveBeenCalled();
   });
 
@@ -288,10 +288,16 @@ describe("holdVisit", () => {
     expect(s[3]).toContain("SET status = 'on_hold'::request_status, hold_reason = $");
     expect(s[3]).toContain("NOT EXISTS (SELECT 1 FROM appointment_assignments a WHERE a.appointment_id = $");
     expect(s[3]).toContain("RETURNING prev.status AS from_status");
+    // no expected-status CAS on the request: the lock serialises writers
+    expect(s[3]).not.toMatch(/s\.status = \$/);
     expect(s[4]).toMatch(/^UPDATE technician_time_entries/);
     expect(s[4]).toContain("NOT EXISTS");
+    // entries close for technicians who worked this visit, not rows cancelled untouched
+    expect(s[4]).toContain("t.technician_id IN (SELECT a.technician_id FROM appointment_assignments a");
+    expect(s[4]).toContain("(a.status <> 'cancelled'::request_status OR (a.en_route_at IS NOT NULL OR");
     expect(s[5]).toMatch(/^UPDATE appointments SET cancelled_at = now\(\), version = version \+ 1, updated_at = now\(\)/);
-    expect(s[5]).toContain("a.status <> 'cancelled'");
+    expect(s[5]).toContain("a.status <> 'cancelled'::request_status");
+    expect(s[2]).toContain("status IN ('assigned'::request_status,");
     expect(recordStatusEvent).toHaveBeenCalledWith(expect.objectContaining({ fromStatus: "in_progress", toStatus: "on_hold", actorId: T1 }));
   });
 
