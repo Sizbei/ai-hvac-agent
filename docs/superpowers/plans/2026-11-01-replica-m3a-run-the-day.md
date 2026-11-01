@@ -2,35 +2,36 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Prerequisite:** M0a merged (`drizzle/0049_appointments_shifts.sql`, `appointment_assignments` with per-tech `status` + four `*_at` columns, `technician_shifts`; HEAD ≥ `41ff718`).
+**Prerequisite:** M0a merged (HEAD ≥ `41ff718`: `drizzle/0049_appointments_shifts.sql`, `appointment_assignments` with per-tech `status` + `enRouteAt/arrivedAt/startedAt/completedAt`, `technician_shifts`, the visits API in `src/lib/admin/appointment-queries.ts` with `landed()` / `insertAssignments()` / `classifyMiss()`). Spec at commit `35a7d7d` or later (round 4).
 
-**Goal:** A technician runs a native job from the phone with per-technician progress: en route → arrived → working → pause / hold with reason → done per technician → close-out that completes the request once every technician is done; job time is tracked automatically from those taps, a general clock exists, and the tech's list shows today / upcoming / past visits.
+**Goal:** A technician runs a native job from the phone with per-technician progress (en route → arrived → working → pause / hold with reason → done per technician → close-out that completes the request once every technician is done), job time is tracked from those taps, a general clock exists, and the tech list shows today / upcoming / past visits.
 
-**Architecture:** Ownership moves from `service_requests.assigned_to = me` to assignment rows: any assignment on a non-cancelled visit grants read access; a tech writes only their own assignment row; only the **active lead** (the `is_lead` row on the earliest non-cancelled visit that still has an open assignment) changes the request status. Each tap is one `db.batch` (assignment CAS + optional request status update + auto time entry). Close-out is one guarded UPDATE. The 0049 trigger is replaced in place so it mirrors request status onto the lead row only until that row has a progress timestamp, keeps a demoted lead's `completed`, and cancels open assignments on every visit when the request is cancelled. M3a is native-jobs-only (`fieldpulse_job_id IS NULL AND hcp_job_id IS NULL`).
+**Architecture:** Ownership moves from `service_requests.assigned_to = me` to assignment rows. **Open assignment** = status in (assigned, scheduled, en_route, arrived, in_progress, on_hold). **Active visit** = the earliest non-cancelled visit with an open assignment, else the latest non-cancelled visit. **Active lead** = the `is_lead` row on the active visit (authorised even when that row is `completed`). Only the active lead writes the request status; helpers write only their own row. Every tap is ONE `db.batch` in a fixed order — [own-row CAS] → [xmin-gated inline request UPDATE, lead only] → [xmin-gated time-entry statement] — and `recordStatusEvent` + the review request run after the batch only when the request UPDATE returned a row. `updateRequestStatus` is never called on the tech path. Hold ends the visit (progressed rows → `completed`, untouched rows → `cancelled`, the visit's job time entries close, the request → `on_hold` with reason; resuming is a new visit from the office). Close-out is one batch ([own row → completed, gated on the request being in_progress/on_hold] → [guarded request UPDATE that sets `completed_at`, clears hold fields and refuses while any non-cancelled visit has an open row]). The 0049 trigger is replaced in place (mirror only until progress; keep `completed` on demote; cancel closes open assignments AND open job time entries). Admin paths follow the same rules through the app layer, never through new trigger logic. M3a is native-jobs-only.
 
-**Tech Stack:** Next.js 16, TypeScript, Drizzle 0.45.2 on Neon (neon-http, `db.batch()`), plpgsql, zod 4, vitest (pure helpers, mocked `@/lib/db`), Tailwind + `src/components/ui/*`.
+**Tech Stack:** Next.js 16, TypeScript, Drizzle 0.45.2 on Neon (neon-http: `db.batch()` = one implicit transaction; separate calls are not), plpgsql, zod 4, vitest (pure helpers; `db.batch` mocked), Tailwind + `src/components/ui/*` (`sheet.tsx` has `side="bottom"`).
 
-**Spec:** `replica/architecture.md` ("### F04 Tech loop (M3a–M3d)": ownership rule, action → enum mapping, trigger change, route table, deferred list; build-order item 4 "M3a Run the day" with its done-when) and `replica/schema.sql` section "M3a". Companion: `replica/review-log.md` "Spec round 3", `replica/design/components.md` ("Close-out sheet", "Status bar with time-in-status").
+**Spec:** `replica/architecture.md` "### F04 Tech loop (M3a–M3d)" (ownership, actions, batch order, close-out, admin paths, trigger v2, auto entries, route table, deferred list) and build-order item 4 "M3a Run the day" with its done-when; `replica/schema.sql` section "M3a"; `replica/review-log.md` "Spec round 4". Design: `replica/design/components.md` "Close-out sheet".
 
 ## Global Constraints
 
-All of the M0b/M0a Global Constraints apply (gates tsc 0 / eslint 0 errors / `npx vitest run` never below the live baseline — 4562 passed, 1 skipped on `41ff718`; mocked pure tests; `isUniqueViolation` from `@/lib/db/unique-violation`; `readJsonBody`; `withTenant` variadic; audit details ids/enums only; copy canon: "request", "technician", sentence case, "Couldn't … Please try again.", never `err.message`; migration conventions + the six-step drizzle recipe; DB probes via a temporary `probe.mts` at the repo root with `config({ path: ".env.local" })`; explicit `git add`; attribution `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`; skills `page-tech`, `page-staff`, `page-requests`, `admin-pages` read before editing those pages; `node scripts/agent/verify-skills.mjs` → 0 missing). Plus:
+Everything in the M0b/M0a plans' Global Constraints applies (gates tsc 0 / eslint 0 errors / `npx vitest run` never below the live baseline — 4562 passed, 1 skipped at `41ff718`; pure mocked tests; `isUniqueViolation` from `@/lib/db/unique-violation`; `readJsonBody` for every body; `withTenant` variadic; audit details ids/enums; copy canon — "request", "technician", sentence case, "Couldn't … Please try again.", never `err.message`; migration conventions + the six-step drizzle recipe; DB probes through a temporary `probe.mts` at the repo root with `config({ path: ".env.local" })`; explicit `git add`; attribution `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`; read `page-tech`, `page-staff`, `page-requests`, `admin-pages` skills before editing those pages; `node scripts/agent/verify-skills.mjs` → 0 missing). Plus:
 
-- **Native jobs only.** Every M3a tech write refuses a request with `fieldpulse_job_id IS NOT NULL OR hcp_job_id IS NOT NULL` → 409 `MANAGED_EXTERNALLY` "This job is managed in FieldPulse." Reads still work.
-- **Tech targets** are exactly `en_route`, `arrived`, `in_progress`, `on_hold`, `completed` plus the actions `pause` and `close_out`. `cancelled` and `scheduled` are never accepted from a tech (400).
-- **Helpers never change request status** and never produce a `request_status_events` row. Only the active lead does, through `updateRequestStatus` (actor type `human`, actorId = tech).
-- **Replay safety without keys:** an action whose target equals the assignment's current status is a 200 no-op; `close_out` on a request already `completed` is a 200 no-op; neither fires side effects.
-- **One batch per tap**, statement order: assignment CAS first, then the request update (so the trigger sees the progress timestamp and does not mirror), then the time-entry statement.
-- **Tech sessions:** `TECH=$(npx tsx scripts/agent/mint-tech-session.mjs)` signs the FIRST active technician of the default org (no arguments); for a second technician, set the env var the script honours if it has one, otherwise create a test session the same way the script does (read it). Admin: `TOKEN=$(npx tsx scripts/agent/mint-admin-session.mjs)`. Dev server on `http://localhost:3000`.
-- Two-technician visits can only exist on visits #2+ until M2 (visit #1's crew is the request's `assigned_to`); seed multi-tech scenarios by adding a visit #2 through `POST /api/admin/requests/[id]/appointments` with two technician ids.
+- **Native jobs only** for every tech write and the admin hold/complete rules: `fieldpulse_job_id IS NULL AND hcp_job_id IS NULL`; otherwise 409 `MANAGED_EXTERNALLY` "This job is managed in FieldPulse." Reads work on synced jobs.
+- **Tech targets**: `en_route`, `arrived`, `in_progress`, `pause`, `on_hold` (hold), `completed` (done), `close_out`. `cancelled`/`scheduled` → 400.
+- **Done requires `started_at IS NOT NULL`** on the row (a helper cannot pause-then-done without arriving/working). The lead's done and close-out are refused with `request_not_started` unless the request is `in_progress` or `on_hold` (derive the allowed set from `canTransition(s, "completed")`).
+- **Replay/stale**: an own-row tap whose target equals the row's status → 200 no-op (no side effects); a stale CAS (0 rows) → re-read: at target → 200 no-op, else 409 `STALE`; close-out on an already-completed request → 200 `{ changed: false }`; a lead tap sends the request UPDATE only when `requestStatus !== requestTo` ("whichever is behind").
+- **`appointmentId` lookup** is always scoped by the URL's request and the caller: `findTechAssignments(org, me, requestId)` then pick by id → 404 for another request, another technician's row or a cancelled visit. Legacy `{ status }` bodies (the current UI) resolve to `pickActiveAssignment` until Task 6 ships the new UI.
+- **Read access** = any assignment on a non-cancelled visit whose row is not `cancelled` OR has a progress timestamp (a reassigned-away lead with no progress loses access).
+- **Tech sessions**: `TECH=$(npx tsx scripts/agent/mint-tech-session.mjs)` signs `SELECT … FROM users WHERE role='technician' AND is_active LIMIT 1` with no org filter and no override. For a second technician, copy the script's signing code into a temporary `mint-tech-T.mts` that takes a user id, and confirm both technicians are in the admin token's org. Admin: `TOKEN=$(npx tsx scripts/agent/mint-admin-session.mjs)`. Dev server on `http://localhost:3000`.
+- **Order of tasks is fixed**: 1 → 2 → 3 → 4a → 4b → 5 → 6 → 7 → 8.
 
 ## Review Focus
 
-1. A helper on visit #2 sends `{ action: "close_out" }` or `{ action: "completed" }` → the request status does not change; the helper's own row becomes `completed` on `completed`; `close_out` → 403 `NOT_LEAD`. (Task 3 probes.)
-2. The lead taps `close_out` while a helper is still `in_progress` → 409 with `blockers: [{ kind: "technician_open", technicianName }]`, no status event, no review request; after the helper's `completed`, `close_out` → 200 once; a second `close_out` → 200 no-op with no second review request. (Task 3 probes.)
-3. Admin cancels the request while two technicians have open assignments on visit #2 → both rows become `cancelled`; the tech list no longer shows the visit under "today". (Task 1 probe.)
-4. A general clock-in sent twice → one open entry; closing it writes `minutes` but `laborCostCents` NULL; the on-site KPI and the labor export ignore it. (Task 5 tests + probe.)
-5. The office `updateAppointment` on a visit whose assignment has `started_at` → 409 `HAS_PROGRESS`. (Task 9 test + probe.)
+1. Helper B on visit #1 sends `close_out` → 403 `NOT_LEAD`; sends `on_hold` (hold) → 403; sends `cancelled` → 400; sends `completed` after working → B's row `completed`, request status unchanged, no status event. (Task 4b probes.)
+2. Lead A: done while B is `in_progress` → A's row `completed`, request stays `in_progress`; A `close_out` → 409 `CLOSE_OUT_BLOCKED` with `{ kind: "technician_open", technicianName: "B…" }`, no event, no review request; after B's done, A `close_out` → 200 `changed: true`, `completed_at` set, `hold_reason` NULL, exactly one `completed` event by A, one review request; A `close_out` again → 200 `changed: false`; two concurrent `close_out` → one `completed` event. (Task 4b probes.)
+3. Admin cancels a request with two open rows and two open auto entries → every row `completed`/`cancelled`, every job entry closed with `minutes`; admin `on_hold` on a request whose lead is `in_progress` → the hold rule (lead row `completed`, untouched helper row `cancelled`, entries closed, request `on_hold` with reason). (Tasks 1 and 4b probes.)
+4. General clock-in twice → one open entry; close → `minutes` set, `labor_cost_cents` NULL; the on-site KPI average excludes it. (Task 3.)
+5. `updateAppointment` on a visit with a progressed row → 409 `HAS_PROGRESS`; reschedule / assign / unschedule of a request whose visit #1 has progress → 409 `HAS_PROGRESS`; `addAppointment` on a `completed` request → 409. (Task 8.)
 
 ---
 
@@ -38,55 +39,57 @@ All of the M0b/M0a Global Constraints apply (gates tsc 0 / eslint 0 errors / `np
 
 | file | responsibility |
 | --- | --- |
-| `drizzle/0050_m3a_run_the_day.sql` (+ journal, snapshot) | time-entry columns/checks/index; trigger function v2 |
-| `src/lib/db/schema.ts` | `technicianTimeEntries.kind/appointmentId/clockInMethod`, nullable `serviceRequestId`, checks, partial index |
-| `src/lib/tech/ownership.ts` (+ test) | `pickActiveAssignment` (pure), `findTechAssignments`, `findReadableJob`, `findActiveLead` |
-| `src/lib/tech/field-queries.ts`, `timesheet-queries.ts`, `location-queries.ts`, `src/app/api/tech/jobs/route.ts`, `…/[id]/status/route.ts` | the seven ownership sites moved to the helper |
-| `src/lib/tech/status-actions.ts` (+ test) | pure action resolution: `TECH_ACTIONS`, `resolveTechAction` |
-| `src/lib/tech/status-writes.ts` | `applyTechAction` (batch), `closeOutRequest` (guarded update + blockers) |
-| `src/app/api/tech/jobs/[id]/status/route.ts` | new body, errors, review once |
-| `src/lib/tech/timesheet-queries.ts` (+ test) | auto entries (`clockInMethod: 'auto'`, `appointmentId`), `openGeneralEntry`/`closeGeneralEntry` |
+| `drizzle/0050_m3a_run_the_day.sql` (+ journal, snapshot) | time-entry columns/checks/index; trigger v2 incl. closing entries on cancel |
+| `src/lib/db/schema.ts` | `technicianTimeEntries` changes |
+| `src/lib/tech/ownership.ts` (+ test) | `OPEN_ASSIGNMENT_STATUSES`, `pickActiveVisit`, `pickActiveAssignment`, `findTechAssignments`, `findReadableJob`, `findActiveVisit`, `techCanReadSql` |
+| `src/lib/tech/field-queries.ts`, `timesheet-queries.ts`, `location-queries.ts`, `src/app/api/tech/jobs/route.ts`, `…/[id]/status/route.ts` (+ their tests) | the seven ownership sites |
+| `src/lib/admin/assignment-queries.ts` (+ test), `src/app/api/admin/requests/[id]/appointments/[aid]/assignments/route.ts`, `…/assignments/[tid]/route.ts` | visit helpers (incl. visit #1) |
+| `src/lib/tech/time-entry-sql.ts` (+ test) | pure SQL builders: `openJobEntrySql`, `closeJobEntriesSql`, `closeRequestEntriesSql`; `openGeneralEntry`, `closeGeneralEntry` in `timesheet-queries.ts` |
 | `src/app/api/tech/time/route.ts` | general clock |
-| `src/lib/admin/operations-metrics-queries.ts`, `accounting-export.ts`, `reporting-queries.ts` (+ tests) | `kind = 'job'` filters |
-| `src/app/api/tech/jobs/route.ts`, `src/components/tech/tech-jobs-list-client.tsx` | `?range=`, tabs, clock button |
-| `src/lib/tech/field-queries.ts` `getTechJobSummary`, `src/components/tech/tech-job-summary.tsx`, `src/components/tech/close-out-sheet.tsx` | actions, blockers, synced notice, close-out sheet |
-| `src/app/api/admin/timesheets/route.ts`, `src/components/admin/staff/timesheets-dialog.tsx`, `staff-table.tsx` | minimal S25 |
-| `src/lib/admin/appointment-queries.ts` (+ test) | `HAS_PROGRESS` guard |
+| `src/lib/admin/operations-metrics-queries.ts` (+ test) | `kind = 'job'` filter (accounting/reporting are already safe; see Task 3) |
+| `src/lib/tech/status-actions.ts` (+ test) | pure: `TECH_ACTIONS`, `resolveTechAction`, `allowedActions`, `Blocker` |
+| `src/lib/tech/status-writes.ts` (+ test with mocked `db.batch`) | `applyTechAction`, `holdVisit`, `closeOutRequest`, `closeOutBlockers` |
+| `src/app/api/tech/jobs/[id]/status/route.ts`, `src/app/api/tech/jobs/[id]/route.ts`, `src/app/tech/jobs/[id]/page.tsx` | new body; `?visit=` plumbing |
+| `src/app/api/admin/requests/[id]/route.ts`, `src/lib/admin/queries.ts` | admin hold rule, admin complete 409, `HAS_PROGRESS` on schedule/assign/unschedule |
+| `src/lib/tech/visit-range.ts` (+ test), `src/app/api/tech/jobs/route.ts`, `src/components/tech/tech-jobs-list-client.tsx` | `?range=` |
+| `src/components/tech/close-out-sheet.tsx`, `tech-job-summary.tsx`, `tech-status-confirm.ts` (+ test), `tech-job-detail-client.tsx`, `src/lib/tech/field-queries.ts` (`getTechJobSummary`) | sheet + actions |
+| `src/app/api/admin/timesheets/route.ts`, `src/components/admin/staff/timesheets-dialog.tsx`, `staff-table.tsx`, `src/app/admin/(dashboard)/staff/page.tsx` | minimal S25 |
+| `src/lib/admin/appointment-queries.ts` (+ test), `…/appointments/[aid]/route.ts`, `…/appointments/route.ts` | `HAS_PROGRESS`, refuse completed, close entries on cancel |
 | skills, `replica/features.csv`, `parity.md`, `build-log.md` | docs |
 
 ---
 
-### Task 1: Migration 0050 — time-entry columns + trigger v2
+### Task 1: Migration 0050 — time-entry columns + trigger v2 (+ before/after capture)
 
-**Files:**
-- Modify: `src/lib/db/schema.ts` (`technicianTimeEntries`)
-- Create via the drizzle recipe (`--name m3a_run_the_day`): `drizzle/0050_m3a_run_the_day.sql`, `drizzle/meta/0050_snapshot.json`; modify `_journal.json`
+**Files:** `src/lib/db/schema.ts`; via the drizzle recipe (`--name m3a_run_the_day`): `drizzle/0050_m3a_run_the_day.sql`, `drizzle/meta/0050_snapshot.json`, `_journal.json`.
 
-**Interfaces:** `technicianTimeEntries.kind: "job" | "general"` (default `"job"`), `appointmentId: uuid | null`, `clockInMethod: "auto" | "manual"` (default `"manual"`), `serviceRequestId` nullable; new constraints `tte_kind_check`, `tte_clock_in_method_check`, `tte_kind_request_check`, partial unique `tte_open_general_per_tech_idx`. Trigger function `sync_request_appointment` v2 (same trigger names).
+**Interfaces:** `technicianTimeEntries.kind` (`"job" | "general"`, default `"job"`), `appointmentId` (nullable), `clockInMethod` (`"auto" | "manual"`, default `"manual"`), `serviceRequestId` nullable; constraints `tte_kind_check`, `tte_clock_in_method_check`, `tte_kind_request_check`; partial unique `tte_open_general_per_tech_idx`. Trigger function `sync_request_appointment` v2 (trigger names unchanged).
 
-- [ ] **Step 1: `schema.ts`** — in `technicianTimeEntries`: make `serviceRequestId` nullable (drop `.notNull()`), add
+- [ ] **Step 0: "Before" capture** on dev for one single-tech native request R with a window today: `curl … "/api/admin/calendar?date=$D&view=day"` and `curl … "/api/admin/requests/$R"` saved to the scratchpad `m3a/` folder.
+
+- [ ] **Step 1: `schema.ts`** — in `technicianTimeEntries` drop `.notNull()` from `serviceRequestId`; add
 ```ts
     // M3a: 'job' entries belong to a request (and optionally a visit); 'general'
-    // entries are a tech's clock with no job. A job entry opened by a status tap
-    // has clockInMethod 'auto'.
+    // entries are a technician's clock with no job. Status taps open 'auto' entries.
     kind: text("kind").notNull().default("job"),
     appointmentId: uuid("appointment_id").references(() => appointments.id, { onDelete: "set null" }),
     clockInMethod: text("clock_in_method").notNull().default("manual"),
 ```
-and to the table extras:
+and to the extras:
 ```ts
     check("tte_kind_check", sql`${table.kind} IN ('job','general')`),
     check("tte_clock_in_method_check", sql`${table.clockInMethod} IN ('auto','manual')`),
     check("tte_kind_request_check", sql`(${table.kind} = 'job') = (${table.serviceRequestId} IS NOT NULL)`),
     uniqueIndex("tte_open_general_per_tech_idx").on(table.organizationId, table.technicianId).where(sql`${table.kind} = 'general' AND ${table.clockOutAt} IS NULL`),
 ```
-(`appointments` is declared after `technicianTimeEntries` in the file; the thunk is fine.)
+(`appointments` is declared earlier in the file; `check`/`uniqueIndex` are already imported.)
 
-- [ ] **Step 2: Generate** (`npx drizzle-kit generate --name m3a_run_the_day`), compare objects, then overwrite the SQL with:
+- [ ] **Step 2: Generate**, compare objects, overwrite the SQL with:
 
 ```sql
 -- M3a run the day: general time entries + visit link, and trigger v2 so the
--- tech app owns a lead row once it has progress. Idempotent throughout.
+-- tech app owns a lead row once it has progress. Idempotent throughout
+-- (one DO block per constraint so a partial re-run adds the rest).
 ALTER TABLE "technician_time_entries" ALTER COLUMN "service_request_id" DROP NOT NULL;
 --> statement-breakpoint
 ALTER TABLE "technician_time_entries" ADD COLUMN IF NOT EXISTS "kind" text DEFAULT 'job' NOT NULL;
@@ -113,13 +116,10 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 --> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "tte_open_general_per_tech_idx" ON "technician_time_entries" USING btree ("organization_id","technician_id") WHERE "technician_time_entries"."kind" = 'general' AND "technician_time_entries"."clock_out_at" IS NULL;
 --> statement-breakpoint
--- Trigger v2 (same trigger names; CREATE OR REPLACE swaps the body):
---   (a) step 4 mirrors request status onto the lead row ONLY while that row
---       has no progress timestamp;
---   (b) a demoted lead keeps 'completed' instead of becoming 'cancelled';
---   (c) request cancelled -> every open assignment on every visit of the
---       request becomes 'cancelled';
---   (d) request completed -> assignments untouched.
+-- Trigger v2 (same trigger names; CREATE OR REPLACE swaps the body). Changes
+-- vs 0049: step 0 also cancels open assignments and closes open job time
+-- entries; steps 1 and 3 keep 'completed' on demote; step 3's ON CONFLICT and
+-- step 4 never overwrite a row that has progress.
 CREATE OR REPLACE FUNCTION sync_request_appointment()
 RETURNS TRIGGER AS $$
 DECLARE
@@ -130,7 +130,8 @@ DECLARE
 BEGIN
   v_old_assigned := CASE WHEN TG_OP = 'UPDATE' THEN OLD.assigned_to ELSE NULL END;
 
-  -- 0. Cancelling the request cancels every visit and every open assignment.
+  -- 0. Cancelling the request cancels every visit, every open assignment and
+  --    closes every open job time entry on the request.
   IF NEW.status = 'cancelled' THEN
     UPDATE appointments SET cancelled_at = COALESCE(cancelled_at, now()),
         version = version + 1, updated_at = now()
@@ -139,10 +140,19 @@ BEGIN
       FROM appointments p
       WHERE a.appointment_id = p.id AND p.service_request_id = NEW.id
         AND a.status NOT IN ('completed','cancelled');
+    UPDATE technician_time_entries t
+      SET clock_out_at = now(),
+          minutes = GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (now() - t.clock_in_at)) / 60))::int,
+          labor_rate_cents = COALESCE(u.labor_rate_cents, 0),
+          labor_cost_cents = ROUND(GREATEST(0, EXTRACT(EPOCH FROM (now() - t.clock_in_at)) / 3600) * COALESCE(u.labor_rate_cents, 0))::int,
+          updated_at = now()
+      FROM users u
+      WHERE u.id = t.technician_id AND t.service_request_id = NEW.id
+        AND t.kind = 'job' AND t.clock_out_at IS NULL;
   END IF;
 
   -- 1. Nothing to mirror: delete #1 when it has no progress, else null its
-  --    times and demote the lead.
+  --    times and demote the lead (keeping 'completed').
   IF NEW.scheduled_date IS NULL AND NEW.arrival_window_start IS NULL
      AND NEW.arrival_window_end IS NULL AND NEW.assigned_to IS NULL THEN
     SELECT id INTO v_appt_id FROM appointments
@@ -228,176 +238,194 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 ```
-The trigger definitions (`service_requests_sync_appointment_ins` / `_upd`) are unchanged and not repeated.
+(The two trigger definitions are unchanged and not repeated.)
 
-- [ ] **Step 3:** `npx drizzle-kit generate` → "No schema changes". `npm run db:migrate` twice on dev.
+- [ ] **Step 3:** `npx drizzle-kit generate` → "No schema changes"; `npm run db:migrate` twice.
 
-- [ ] **Step 4: Probes** (DB probe + a throwaway request via `POST /api/admin/requests`, two technician ids T1/T2 from the default org):
+- [ ] **Step 4: "After" capture + diff** of the two Step 0 responses → identical.
+
+- [ ] **Step 5: Trigger probes** (throwaway native request via `POST /api/admin/requests` with `customerId` and `schedule` so visit #1 exists with lead T1; a second technician T2 added to visit #1 is Task 2 — here use SQL `insert into appointment_assignments (…) values (… is_lead false …)`):
 ```sql
 -- (a) mirror stops after progress
-update service_requests set assigned_to = '<T1>' where id = '<rid>';            -- lead row status pending
-update appointment_assignments set started_at = now(), status = 'in_progress' where technician_id = '<T1>' and appointment_id = (select id from appointments where service_request_id = '<rid>' and appointment_number = 1);
-update service_requests set status = 'on_hold' where id = '<rid>';              -- admin hold
-select status from appointment_assignments where technician_id = '<T1>' and appointment_id = (select id from appointments where service_request_id = '<rid>' and appointment_number = 1);   -- still in_progress
+update appointment_assignments set started_at = now(), status = 'in_progress' where technician_id = '<T1>' and appointment_id = '<A1>';
+update service_requests set status = 'on_hold' where id = '<rid>';
+select status from appointment_assignments where technician_id = '<T1>' and appointment_id = '<A1>';   -- in_progress (not mirrored)
 -- (b) demoted completed lead keeps completed
-update appointment_assignments set status = 'completed', completed_at = now() where technician_id = '<T1>' and appointment_id = (select id from appointments where service_request_id = '<rid>' and appointment_number = 1);
+update appointment_assignments set status = 'completed', completed_at = now() where technician_id = '<T1>' and appointment_id = '<A1>';
 update service_requests set assigned_to = '<T2>' where id = '<rid>';
-select technician_id = '<T1>' as is_t1, is_lead, status from appointment_assignments where appointment_id = (select id from appointments where service_request_id = '<rid>' and appointment_number = 1) order by is_lead desc;   -- T1 row: is_lead false, status completed
--- (c) cancel closes open assignments on all visits (add visit #2 with T1+T2 via the admin API first)
+select technician_id = '<T1>' as is_t1, is_lead, status from appointment_assignments where appointment_id = '<A1>';   -- T1: false, completed; T2: true (status kept if it had progress)
+-- (c) cancel closes open assignments and open job entries (Review Focus 3, first half)
+insert into technician_time_entries (organization_id, service_request_id, technician_id, kind, clock_in_method, appointment_id) values ('<org>','<rid>','<T2>','job','auto','<A1>');
 update service_requests set status = 'cancelled' where id = '<rid>';
-select a.status from appointment_assignments a join appointments p on p.id = a.appointment_id where p.service_request_id = '<rid>';   -- every row completed or cancelled
+select status from appointment_assignments where appointment_id = '<A1>';                       -- completed / cancelled only
+select clock_out_at is not null, minutes from technician_time_entries where service_request_id = '<rid>';   -- true, >= 0
 ```
-Clean up the throwaway request (+ status events + stand-in session).
+Clean up (request, events, stand-in session, entries cascade).
 
-- [ ] **Step 5: Gates + commit** (`git add drizzle/0050_m3a_run_the_day.sql drizzle/meta/_journal.json drizzle/meta/0050_snapshot.json src/lib/db/schema.ts`), message `feat(db): general time entries and trigger v2 — the tech app owns a lead row once it has progress`.
+- [ ] **Step 6: Gates + commit** (`git add drizzle/0050_m3a_run_the_day.sql drizzle/meta/_journal.json drizzle/meta/0050_snapshot.json src/lib/db/schema.ts`): `feat(db): general time entries and trigger v2 — the tech app owns a lead row once it has progress`.
 
 ---
 
-### Task 2: Ownership helper and the seven sites
+### Task 2: Ownership module, the seven sites, and visit helpers
 
 **Files:**
 - Create: `src/lib/tech/ownership.ts`, `src/lib/tech/ownership.test.ts`
-- Modify: `src/lib/tech/field-queries.ts` (`getTechJobSummary` ~95–110, `findOwnedJob` ~150–172, the signature UPDATE ~399), `src/lib/tech/timesheet-queries.ts` (~43 via `findOwnedJob`), `src/lib/tech/location-queries.ts` (~83), `src/app/api/tech/jobs/route.ts` (~57; Task 6 rewrites the list fully — here only switch the predicate), `src/app/api/tech/jobs/[id]/status/route.ts` (~60; Task 3 rewrites the route — here only switch the predicate)
+- Create: `src/lib/admin/assignment-queries.ts`, `src/lib/admin/assignment-queries.test.ts`, `src/app/api/admin/requests/[id]/appointments/[aid]/assignments/route.ts` (POST), `…/assignments/[tid]/route.ts` (DELETE)
+- Modify: `src/lib/tech/field-queries.ts` (`getTechJobSummary` ~78–105 and `findOwnedJob` ~150–172 and the signature UPDATE ~399), `src/lib/tech/timesheet-queries.ts` (~43), `src/lib/tech/location-queries.ts` (~73–89: link null silently, never 404), `src/app/api/tech/jobs/route.ts` (~51–62: the set query uses `techCanReadSql`), `src/app/api/tech/jobs/[id]/status/route.ts` (~52–66: needs `customerId`); their tests `field-queries.test.ts`, `timesheet-queries.test.ts`, `location-queries.test.ts`: `vi.mock("@/lib/tech/ownership", () => ({ findReadableJob: vi.fn() }))` and drop the first queued select result; test `ownership.ts` on its own.
 
-**Interfaces (all exported from `ownership.ts`):**
+**Interfaces (`ownership.ts`):**
 ```ts
-export interface TechAssignmentRow { assignmentId: string; appointmentId: string; appointmentNumber: number; isLead: boolean; status: RequestStatus; cancelledAt: Date | null; enRouteAt: Date | null; arrivedAt: Date | null; startedAt: Date | null; completedAt: Date | null }
-export const OPEN_ASSIGNMENT_STATUSES = ["pending","assigned","scheduled","en_route","arrived","in_progress","on_hold"] as const;  // = not completed/cancelled
-/** Pure. The caller's assignment to act on: the earliest non-cancelled visit with an open assignment of the caller; else the latest non-cancelled visit the caller is on; else null. */
-export function pickActiveAssignment(rows: readonly TechAssignmentRow[]): TechAssignmentRow | null
-/** Pure. The active visit of the request: the earliest non-cancelled visit that still has ANY open assignment. */
-export function pickActiveVisit(rows: readonly { appointmentId: string; appointmentNumber: number; cancelledAt: Date | null; status: RequestStatus }[]): string | null
-export async function findTechAssignments(organizationId: string, techUserId: string, requestId: string): Promise<readonly TechAssignmentRow[]>   // the caller's rows on non-cancelled visits, ordered by appointmentNumber
-export async function findReadableJob(organizationId: string, techUserId: string, requestId: string): Promise<{ id: string; native: boolean } | null>   // any assignment on a non-cancelled visit OR assigned_to (belt and braces during M3a)
-export async function findActiveLead(organizationId: string, requestId: string): Promise<{ technicianId: string; appointmentId: string } | null>   // the is_lead row on pickActiveVisit
+export const OPEN_ASSIGNMENT_STATUSES = ["assigned","scheduled","en_route","arrived","in_progress","on_hold"] as const;
+export interface TechAssignmentRow { assignmentId: string; appointmentId: string; appointmentNumber: number; isLead: boolean; status: RequestStatus; cancelledAt: Date | null; enRouteAt: Date | null; arrivedAt: Date | null; startedAt: Date | null; completedAt: Date | null; technicianId: string }
+export function hasProgress(r: Pick<TechAssignmentRow,"enRouteAt"|"arrivedAt"|"startedAt"|"completedAt">): boolean
+export function isOpen(status: RequestStatus): boolean
+/** Pure. Earliest non-cancelled visit with an open row; else the latest non-cancelled visit; null when none. Input: every assignment row of the request (all technicians). */
+export function pickActiveVisit(rows: readonly TechAssignmentRow[]): { appointmentId: string; leadTechnicianId: string | null } | null
+/** Pure. The caller's row to act on: their row on the active visit if any; else their earliest open row; else their latest non-cancelled row. */
+export function pickActiveAssignment(mine: readonly TechAssignmentRow[], activeVisitId: string | null): TechAssignmentRow | null
+export async function findAllAssignments(organizationId: string, requestId: string): Promise<readonly TechAssignmentRow[]>   // all technicians, non-cancelled visits, ordered by appointmentNumber
+export async function findTechAssignments(organizationId: string, techUserId: string, requestId: string): Promise<readonly TechAssignmentRow[]>
+export async function findReadableJob(organizationId: string, techUserId: string, requestId: string): Promise<{ id: string; customerId: string | null; native: boolean; status: RequestStatus } | null>   // read rule: a non-cancelled-visit row that is not cancelled or has progress; OR assigned_to = me
+export function techCanReadSql(organizationId: string, techUserId: string): SQL   // EXISTS fragment for set queries over service_requests
 ```
+`assignment-queries.ts`: `addVisitTechnician(org, requestId, appointmentId, technicianId, actorUserId) → AppointmentRecord | { reason: "not_found" | "technician_not_found" | "already_assigned" | "visit_cancelled" | "request_cancelled" }` (INSERT non-lead row `status = 'assigned'` via `ON CONFLICT (appointment_id, technician_id) DO NOTHING`; works on visit #1 too), `removeVisitTechnician(org, requestId, appointmentId, technicianId) → { ok: true } | { reason: "not_found" | "has_progress" | "is_lead" }` (DELETE only when no progress and not the lead). Routes in the faqs shape; audits `add_visit_technician` / `remove_visit_technician` with ids only.
 
-- [ ] **Step 1: Failing tests** for the pure functions: `pickActiveAssignment` — (i) one open row → it; (ii) visit #1 completed + visit #2 assigned → #2; (iii) all completed → the latest non-cancelled; (iv) cancelled visits ignored; `pickActiveVisit` — same cases returning the appointment id; `OPEN_ASSIGNMENT_STATUSES` excludes completed/cancelled.
-- [ ] **Step 2: Implement** (queries: `appointmentAssignments` ⋈ `appointments` under `withTenant`, `isNull(appointments.cancelledAt)`, `eq(technicianId, me)`; `findReadableJob` also returns `native: isNull(fieldpulseJobId) && isNull(hcpJobId)` from the request row).
-- [ ] **Step 3: Replace the seven sites** — every `eq(serviceRequests.assignedTo, techUserId)` ownership check becomes `findReadableJob(...)` (404 when null); the signature UPDATE's inline re-check becomes `EXISTS (assignment on a non-cancelled visit for me) OR assigned_to = me`. Keep behaviour otherwise identical. Existing tests that assert the old predicate (`field-queries.test.ts`, `timesheet-queries.test.ts`, `location-queries.test.ts`): update their mocks for the new select shape; keep assertions meaningful.
-- [ ] **Step 4: Probe** — a technician on visit #2 only (added via the admin visits API) can `GET /api/tech/jobs/<id>` (200) and `POST …/note` (201); a technician on no visit gets 404.
-- [ ] **Step 5: Gates + commit** `feat(tech): job ownership follows visit assignments`.
+- [ ] **Step 1: Failing tests** — `pickActiveVisit`: (i) one open row → that visit; (ii) #1 completed, #2 assigned → #2; (iii) all completed → the latest non-cancelled; (iv) cancelled visits ignored; (v) #1 has a paused (`on_hold`) helper, #2 in progress → #1 (earliest open; the `earlier_visit_open` blocker surfaces in Task 4a); `pickActiveAssignment`: on the active visit → that row; not on it → earliest open; none open → latest; `isOpen`/`OPEN_ASSIGNMENT_STATUSES` exclude pending/completed/cancelled; `hasProgress`.
+- [ ] **Step 2: Implement** the queries: `appointmentAssignments` ⋈ `appointments` (`eq(appointments.id, appointmentAssignments.appointmentId)`) under `withTenant(appointmentAssignments, org, …)`, `isNull(appointments.cancelledAt)`, ordered by `appointments.appointmentNumber`; `techCanReadSql` = `sql\`EXISTS (SELECT 1 FROM appointment_assignments a JOIN appointments p ON p.id = a.appointment_id WHERE p.service_request_id = ${serviceRequests.id} AND a.organization_id = ${org} AND a.technician_id = ${tech} AND p.cancelled_at IS NULL AND (a.status <> 'cancelled' OR a.en_route_at IS NOT NULL OR a.arrived_at IS NOT NULL OR a.started_at IS NOT NULL OR a.completed_at IS NOT NULL)) OR ${serviceRequests.assignedTo} = ${tech}\``.
+- [ ] **Step 3: Replace the seven sites** (behaviour otherwise identical; the signature stays with the ACTIVE LEAD: `recordSignature` checks `findActiveVisit(...).leadTechnicianId === me`).
+- [ ] **Step 4: Visit helpers** (queries + routes).
+- [ ] **Step 5: Probes**: add T2 to visit #1 of a throwaway request via `POST /api/admin/requests/<rid>/appointments/<A1>/assignments {"technicianId":"<T2>"}` → 201; T2 `GET /api/tech/jobs/<rid>` → 200 and `POST …/note` → 201; a technician on no visit → 404; `DELETE …/assignments/<T2>` → 200; after T2 has progress (SQL) → 409 `HAS_PROGRESS`.
+- [ ] **Step 6: Gates + commit** `feat(tech): job ownership follows visit assignments; visit helpers on any visit`.
 
 ---
 
-### Task 3: Tech status actions — pure resolution, batch write, close-out
+### Task 3: Time-entry SQL builders, general clock, KPI filter
 
 **Files:**
-- Create: `src/lib/tech/status-actions.ts`, `src/lib/tech/status-actions.test.ts`, `src/lib/tech/status-writes.ts`
-- Modify: `src/app/api/tech/jobs/[id]/status/route.ts`, `src/lib/tech/field-queries.ts` (`getTechJobSummary` returns `assignment`, `isActiveLead`, `allowedActions`, `blockers`, `native`)
+- Create: `src/lib/tech/time-entry-sql.ts`, `src/lib/tech/time-entry-sql.test.ts`
+- Modify: `src/lib/tech/timesheet-queries.ts` (+ test): `openGeneralEntry`, `closeGeneralEntry`, `getOpenGeneralEntry`
+- Create: `src/app/api/tech/time/route.ts` (GET open entry; POST `{ action: "in" | "out" }`)
+- Modify: `src/lib/admin/operations-metrics-queries.ts` (~236–249) + test: add `eq(technicianTimeEntries.kind, "job")`. (`accounting-export.ts` already requires `laborCostCents IS NOT NULL` and `reporting-queries.ts` inner-joins on the request id, so general entries never reach them — say so in the commit; no change there.)
+
+**Interfaces (`time-entry-sql.ts`, pure builders returning `SQL`):**
+```ts
+/** Open an auto job entry for (request, tech) unless one is already open; gated on the caller's assignment row having been written in this transaction. */
+export function openJobEntrySql(p: { organizationId; requestId; techUserId; appointmentId; gateAssignmentId }): SQL
+// INSERT INTO technician_time_entries (organization_id, service_request_id, technician_id, appointment_id, kind, clock_in_method, clock_in_at)
+// SELECT $org::uuid, $rid::uuid, $tech::uuid, $appt::uuid, 'job', 'auto', now()
+// WHERE EXISTS (SELECT 1 FROM appointment_assignments a WHERE a.id = $gate::uuid AND a.xmin = pg_current_xact_id()::xid)
+// ON CONFLICT (service_request_id, technician_id) WHERE clock_out_at IS NULL DO NOTHING
+/** Close the open job entry/entries for the given technicians on the request (minutes + labor in SQL). */
+export function closeJobEntriesSql(p: { organizationId; requestId; technicianIds: readonly string[]; gateAssignmentId?: string }): SQL
+// UPDATE technician_time_entries t SET clock_out_at = now(), minutes = GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (now() - t.clock_in_at))/60))::int,
+//   labor_rate_cents = COALESCE(u.labor_rate_cents,0), labor_cost_cents = ROUND(GREATEST(0, EXTRACT(EPOCH FROM (now() - t.clock_in_at))/3600) * COALESCE(u.labor_rate_cents,0))::int, updated_at = now()
+// FROM users u WHERE u.id = t.technician_id AND t.organization_id = $org AND t.service_request_id = $rid AND t.technician_id = ANY($ids::uuid[]) AND t.kind = 'job' AND t.clock_out_at IS NULL [AND EXISTS (gate)]
+export function closeRequestEntriesSql(p: { organizationId; requestId }): SQL   // every technician; used by cancelAppointment (scoped to its visit's technicians) and hold
+```
+Use `sql.param([...ids])::uuid[]` for arrays. Tests render with `PgDialect.sqlToQuery` (pattern in `appointment-queries.test.ts`) and assert the `ON CONFLICT (service_request_id, technician_id) WHERE clock_out_at IS NULL DO NOTHING` text, the single array param, and the `pg_current_xact_id` gate.
+
+General clock: `openGeneralEntry(org, tech)` inserts `kind='general'`, `serviceRequestId: null`, `clockInMethod: 'manual'`; `isUniqueViolation(error, "tte_open_general_per_tech_idx")` → `{ reason: "already_open" }`; `closeGeneralEntry` sets `minutes`, leaves `laborCostCents` NULL and `laborRateCents` 0. Route: 201 / 409 `ALREADY_OPEN` "You're already clocked in." / 200 with `minutes` / 404 when nothing is open.
+
+- [ ] Steps: failing tests (builders + general entry mapping) → implement → probe (Review Focus 4: twice `in` → 201, 409; `out` → 200 `minutes`; DB `labor_cost_cents IS NULL`; `GET /api/admin/operations-metrics` on-site average unchanged before/after) → gates → commit `feat(tech): time-entry SQL builders, general clock, job-only on-site KPI`.
+
+---
+
+### Task 4a: Pure status actions
+
+**Files:** `src/lib/tech/status-actions.ts`, `src/lib/tech/status-actions.test.ts`
 
 **Interfaces:**
 ```ts
-// status-actions.ts (pure)
 export const TECH_ACTIONS = ["en_route","arrived","in_progress","pause","on_hold","completed","close_out"] as const;
 export type TechAction = (typeof TECH_ACTIONS)[number];
-export interface ResolveInput { action: TechAction; assignmentStatus: RequestStatus; requestStatus: RequestStatus; isActiveLead: boolean; native: boolean; hasOpenJobEntry: boolean }
+export type Blocker =
+  | { kind: "technician_open"; technicianName: string; technicianId: string; appointmentNumber: number }
+  | { kind: "visit_planned"; appointmentNumber: number; date: string | null }        // untouched rows on a LATER visit → use Hold
+  | { kind: "earlier_visit_open"; technicianName: string; appointmentNumber: number } // the caller's visit is later than the active visit
+  | { kind: "request_not_started"; status: RequestStatus }
+  | { kind: "not_lead" }
+  | { kind: "managed_externally" };
+export interface ResolveInput { action: TechAction; row: TechAssignmentRow; requestStatus: RequestStatus; activeVisitId: string | null; activeLeadId: string | null; native: boolean; hasOpenJobEntry: boolean }
 export type Resolved =
   | { kind: "noop" }
-  | { kind: "refuse"; reason: "not_lead" | "invalid_transition" | "managed_externally" | "not_tech_target" }
-  | { kind: "write"; assignmentTo: RequestStatus; stamp: "enRouteAt"|"arrivedAt"|"startedAt"|"completedAt"|null; requestTo: RequestStatus | null; holdScope: "none"|"visit"; timeEntry: "open"|"close"|"none" }
+  | { kind: "refuse"; reason: "not_lead" | "invalid_transition" | "managed_externally" | "not_tech_target" | "request_not_started" | "not_started_row" }
+  | { kind: "write"; assignmentTo: RequestStatus; stamp: "enRouteAt"|"arrivedAt"|"startedAt"|"completedAt"|null; requestTo: RequestStatus | null; timeEntry: "open"|"close"|"none" }
+  | { kind: "hold" }        // lead hold: the visit ends (Task 4b holdVisit)
   | { kind: "close_out" };
 export function resolveTechAction(i: ResolveInput): Resolved
 export function allowedActions(i: Omit<ResolveInput,"action">): readonly TechAction[]
+export function closeOutAllowedStatuses(): readonly RequestStatus[]   // every s with canTransition(s, "completed") = in_progress, on_hold
 ```
-Rules (`resolveTechAction`): `native === false` → refuse `managed_externally` for any action; `en_route`/`arrived`/`in_progress`/`completed`: target = the action; `pause` → target `on_hold`, scope none; `on_hold` (hold) → lead only (else `not_lead`), target `on_hold`, scope visit; `close_out` → lead only, `{ kind: "close_out" }`; target equal to `assignmentStatus` → noop; transition checked with `canTransition(assignmentStatus, target)` else `invalid_transition`; `requestTo` = target when `isActiveLead` and the action is not `pause` and not `completed`, else null (a lead's `completed` only completes their row; the request completes on `close_out`); stamps: en_route→`enRouteAt`, arrived→`arrivedAt`, in_progress→`startedAt`, completed→`completedAt`; `timeEntry`: `open` when target ∈ {`arrived`,`in_progress`} and `!hasOpenJobEntry`; `close` when target ∈ {`on_hold`,`completed`} and `hasOpenJobEntry`; else none.
+Rules: `isActiveLead = i.row.isLead && i.row.appointmentId === i.activeVisitId`; non-native → refuse `managed_externally`; `en_route|arrived|in_progress|completed` → `assignmentTo` = action, stamp per action; `completed` additionally requires `row.startedAt !== null` (else `not_started_row`); for the active lead, `completed` requires `requestStatus ∈ closeOutAllowedStatuses()` (else `request_not_started`); `pause` → `assignmentTo on_hold`, no request change; `on_hold` (hold) → lead only → `{ kind: "hold" }`; `close_out` → lead only; non-lead `close_out`/`on_hold` → `not_lead`; target equal to `row.status` → `noop` (except `close_out`, which the writer decides); otherwise `canTransition(row.status, target)` else `invalid_transition`; `requestTo` = target when `isActiveLead` and action ∈ {en_route, arrived, in_progress} and `requestStatus !== target` and `canTransition(requestStatus, target)`; else null (a lead whose visit is later than the active visit gets `requestTo: null` — the writer adds the `earlier_visit_open` blocker); `timeEntry`: `open` when target ∈ {arrived, in_progress} and `!hasOpenJobEntry`; `close` when target ∈ {on_hold, completed} and `hasOpenJobEntry`; else `none`. `allowedActions` filters `TECH_ACTIONS` through `resolveTechAction` ≠ refuse/noop, plus `close_out` for the active lead when their row is `completed` or open.
 
+- [ ] Steps: failing tests pinning every rule above (helper completed → requestTo null; helper hold → not_lead; lead hold → hold; lead completed with request `arrived` → `request_not_started`; completed without startedAt → `not_started_row`; non-native; noop; invalid_transition `pending→arrived`; time-entry matrix; lead on a later visit → write with requestTo null; `allowedActions` for a completed lead row includes `close_out`) → implement → gates → commit `feat(tech): pure status action resolution`.
+
+---
+
+### Task 4b: Batch writer, hold, close-out, routes, admin paths
+
+**Files:**
+- Create: `src/lib/tech/status-writes.ts`, `src/lib/tech/status-writes.test.ts` (mock `db.batch`: assert statement count/order and that statements 2–3 contain `pg_current_xact_id`)
+- Modify: `src/app/api/tech/jobs/[id]/status/route.ts`; `src/app/api/tech/jobs/[id]/route.ts` + `src/app/tech/jobs/[id]/page.tsx` (`?visit=` → `?appointmentId=` → `getTechJobSummary(org, tech, id, appointmentId?)`; update `route.test.ts`); `src/lib/tech/field-queries.ts` `getTechJobSummary` (returns `assignment`, `isActiveLead`, `allowedActions`, `blockers`, `native`, `requestStatus`, keeps `allowedNextStatuses` for the old UI until Task 6)
+- Modify: `src/app/api/admin/requests/[id]/route.ts` (status branch ~165–176) + `src/lib/admin/queries.ts`: admin `on_hold` on a native request → `holdVisit` (same batch as the lead); admin `completed` with open progressed rows → 409 `CLOSE_OUT_BLOCKED` + blockers; `scheduleRequest`, `assignTechnician`, `reassignTechnician`, and the `reschedule`/`unschedule` routes → 409 `HAS_PROGRESS` when visit #1 has a progressed row.
+
+**Interfaces (`status-writes.ts`):**
 ```ts
-// status-writes.ts
-export async function applyTechAction(params: { organizationId; techUserId; requestId; assignment: TechAssignmentRow; resolved: Extract<Resolved,{kind:"write"}>; holdReason?: HoldReason | null; followUpDate?: Date | null }): Promise<{ ok: true; assignmentStatus; requestStatus } | { ok: false; reason: "stale" | "invalid_transition" }>
-export async function closeOutRequest(params: { organizationId; techUserId; requestId }): Promise<{ ok: true; changed: boolean } | { ok: false; blockers: Blocker[] }>
-export type Blocker = { kind: "technician_open"; technicianName: string } | { kind: "request_status"; status: RequestStatus } | { kind: "not_lead" }
+export async function applyTechAction(p: { organizationId; techUserId; requestId; row: TechAssignmentRow; resolved: Extract<Resolved,{kind:"write"}>; requestStatus: RequestStatus }): Promise<{ ok: true; assignmentStatus: RequestStatus; requestStatus: RequestStatus; requestBehind: boolean } | { ok: false; reason: "stale" }>
+export async function holdVisit(p: { organizationId; actorUserId; actorType: "human"; requestId; appointmentId; holdReason: HoldReason; followUpDate: Date | null; requestStatus: RequestStatus; leadAssignmentId: string }): Promise<{ ok: true } | { ok: false; reason: "stale" }>
+export async function closeOutRequest(p: { organizationId; techUserId; requestId; row: TechAssignmentRow }): Promise<{ ok: true; changed: boolean } | { ok: false; blockers: Blocker[] }>
+export async function closeOutBlockers(organizationId: string, requestId: string, caller?: { technicianId; appointmentId }): Promise<Blocker[]>
 ```
-`applyTechAction` = one `db.batch`: (1) `UPDATE appointment_assignments SET status = $to, <stamp> = COALESCE(<stamp>, now()) WHERE id = $assignmentId AND organization_id = $org AND status = $from` (CAS; 0 rows → `stale`); (2) when `requestTo`: `updateRequestStatus(org, requestId, requestTo, holdDetails, { actorType: "human", actorId: techUserId })` — NOTE this function performs its own read + CAS + event and is not a batch item; call it AFTER the batch, and if it returns `invalid_transition` log and continue (the assignment write is the source of per-tech truth; the request may legitimately already be at that status because another lead-equivalent action happened); (3) when `holdScope === "visit"`: `UPDATE appointment_assignments SET status='on_hold' WHERE appointment_id = $appt AND status NOT IN ('completed','cancelled')`; (4) time entry: `open` → `clockInAuto(org, tech, requestId, appointmentId)`; `close` → `clockOut(org, tech, requestId)` (Task 4 adds the auto variant; in this task call the existing `clockIn`/`clockOut` and let Task 4 switch it — or implement Task 4 first; the controller orders Task 4 before this one's integration step if needed).
-`closeOutRequest`: if the caller is not the active lead → `{ ok: false, blockers: [{ kind: "not_lead" }] }`; then
-```sql
-UPDATE service_requests SET status = 'completed', updated_at = now()
-WHERE id = $1 AND organization_id = $2 AND status IN ('in_progress','arrived','on_hold')
-  AND fieldpulse_job_id IS NULL AND hcp_job_id IS NULL
-  AND NOT EXISTS (
-    SELECT 1 FROM appointment_assignments a JOIN appointments p ON p.id = a.appointment_id
-    WHERE p.service_request_id = $1 AND p.cancelled_at IS NULL
-      AND a.status NOT IN ('completed','cancelled'))
-RETURNING id
-```
-0 rows → re-read: already `completed` → `{ ok: true, changed: false }`; else compute blockers (open assignments with technician names; `request_status` when the status is not in the allowed set) → `{ ok: false, blockers }`. On `changed: true`: `recordStatusEvent` (from → completed, actor tech), close any open job time entry of the caller, and the review request (`createReviewRequest`, already idempotent by ledger) via `after()`.
+`applyTechAction` batch (in order): (1) `UPDATE appointment_assignments SET status = $to, <stamp> = COALESCE(<stamp>, now()) WHERE id = $aid AND organization_id = $org AND status = $expected RETURNING id`; (2) only when `requestTo`: `UPDATE service_requests SET status = $to, completed_at = NULL, hold_reason = NULL, follow_up_date = NULL, updated_at = now() WHERE id = $rid AND organization_id = $org AND status = $from AND fieldpulse_job_id IS NULL AND hcp_job_id IS NULL AND EXISTS (SELECT 1 FROM appointment_assignments a WHERE a.id = $aid AND a.xmin = pg_current_xact_id()::xid) RETURNING status`; (3) `openJobEntrySql` / `closeJobEntriesSql({ technicianIds: [me], gateAssignmentId })` / nothing. After the batch: statement 1 returned 0 rows → re-read the row: at target → `{ ok: true, …, requestBehind }` no-op; else `stale`. Statement 2 returned a row → `recordStatusEvent({ fromStatus: $from, toStatus, actorType: "human", actorId: me })`; `requestBehind = Boolean(requestTo) && !updatedRequest`.
+`holdVisit` batch: (1) `UPDATE appointment_assignments SET status = CASE WHEN (en_route_at IS NOT NULL OR arrived_at IS NOT NULL OR started_at IS NOT NULL OR completed_at IS NOT NULL) THEN 'completed' ELSE 'cancelled' END, completed_at = CASE WHEN … progress … THEN COALESCE(completed_at, now()) ELSE completed_at END WHERE appointment_id = $appt AND organization_id = $org AND status IN (open) RETURNING id, technician_id`; (2) `UPDATE service_requests SET status='on_hold', hold_reason=$r, follow_up_date=$d, updated_at=now() WHERE id=$rid AND organization_id=$org AND status=$from AND fieldpulse_job_id IS NULL AND hcp_job_id IS NULL AND EXISTS (SELECT 1 FROM appointment_assignments a WHERE a.id = $lead AND a.xmin = pg_current_xact_id()::xid) RETURNING status`; (3) `closeJobEntriesSql({ technicianIds: <all technicians on the visit>, gateAssignmentId: $lead })`. After: event `from → on_hold` when (2) returned a row. Admin hold = the same function with `actorUserId` = admin (actorType human), `leadAssignmentId` = the active visit's lead row (if the active visit has no lead row, gate on the first row updated).
+`closeOutRequest` batch: (1) `UPDATE appointment_assignments SET status='completed', completed_at=COALESCE(completed_at, now()) WHERE id=$aid AND organization_id=$org AND status IN (open) AND started_at IS NOT NULL AND EXISTS (SELECT 1 FROM service_requests r WHERE r.id=$rid AND r.status IN ('in_progress','on_hold'))`; (2) `WITH prev AS (SELECT status FROM service_requests WHERE id=$rid AND organization_id=$org FOR UPDATE) UPDATE service_requests s SET status='completed', completed_at=now(), hold_reason=NULL, follow_up_date=NULL, updated_at=now() FROM prev WHERE s.id=$rid AND s.status IN ('in_progress','on_hold') AND s.fieldpulse_job_id IS NULL AND s.hcp_job_id IS NULL AND NOT EXISTS (SELECT 1 FROM appointment_assignments a JOIN appointments p ON p.id=a.appointment_id WHERE p.service_request_id=$rid AND p.cancelled_at IS NULL AND a.status IN (open)) RETURNING prev.status AS from_status`; (3) `closeJobEntriesSql({ technicianIds: [me] })`. After: (2) returned → `recordStatusEvent(from → completed, actor me)` + `after(() => createReviewRequest(org, rid, customerId))` → `{ changed: true }`; (2) empty → re-read: `completed` → `{ changed: false }`; else `{ ok: false, blockers: await closeOutBlockers(...) }` (open rows with names; `visit_planned` for untouched rows on later visits; `request_not_started` when the request is assigned/en_route/arrived).
+Pre-checks before any batch: `findReadableJob` (404), native (409 `MANAGED_EXTERNALLY`), the row by `appointmentId` from `findTechAssignments` (404), `findAllAssignments` → `pickActiveVisit`, `isActiveLead`.
 
-- [ ] **Step 1: Failing tests** for `resolveTechAction`/`allowedActions` covering: helper `completed` → write with `requestTo: null`; helper `on_hold` → refuse `not_lead`; lead `on_hold` → write scope visit + requestTo; lead `completed` → requestTo null; `close_out` by helper → refuse; non-native → `managed_externally`; `en_route` when already `en_route` → noop; `arrived` from `pending` → `invalid_transition` (check `canTransition`); time-entry open/close matrix.
-- [ ] **Step 2: Implement** the three files; the route body `z.object({ appointmentId: z.uuid().optional(), action: z.enum(TECH_ACTIONS).optional(), status: z.enum([...]).optional(), holdReason: z.enum(HOLD_REASONS).optional(), followUpDate: z.iso.date().optional() })` — legacy `{ status }` (the current UI) maps to `action = status` with `appointmentId` = `pickActiveAssignment(...)`; when `appointmentId` is given, the caller's row on that visit must exist (404). Responses: 200 `{ assignmentStatus, requestStatus, allowedActions, blockers }`; 403 `NOT_LEAD` "Only the lead technician can do that."; 409 `INVALID_TRANSITION` (existing copy), 409 `MANAGED_EXTERNALLY`, 409 `CLOSE_OUT_BLOCKED` with `blockers`; 400 for `cancelled`/`scheduled`.
-- [ ] **Step 3: Probes (Review Focus 1–2)** on a throwaway native request with visit #2 holding T1 (lead) and T2: T2 `close_out` → 403; T1 `en_route` → request `en_route` + one event; T2 `en_route` → T2 row `en_route`, request unchanged, event count unchanged; both `arrived`, both `in_progress`; T1 `completed` → T1 row completed, request still `in_progress`; T1 `close_out` → 409 with `technician_open` T2; T2 `completed`; T1 `close_out` → 200 `changed: true`, request `completed`, exactly one review request row; T1 `close_out` again → 200 no-op, still one review request. Clean up.
-- [ ] **Step 4: Gates + commit** `feat(tech): per-technician status actions with lead-only close-out`.
+Route body: `z.object({ appointmentId: z.uuid().optional(), action: z.enum(TECH_ACTIONS).optional(), status: z.enum([...]).optional(), expectedStatus: z.enum(requestStatusEnum.enumValues).optional(), holdReason: z.enum(HOLD_REASONS).optional(), followUpDate: z.string().datetime().optional() })` via `readJsonBody`; legacy `{ status }` → `action = status` (`completed` from the active lead with no other open row → `close_out`); `expectedStatus` when given replaces the read status in the CAS. Responses: 200 `{ assignmentStatus, requestStatus, requestBehind, allowedActions, blockers, changed? }`; 400 `NOT_TECH_TARGET` for cancelled/scheduled; 403 `NOT_LEAD` "Only the lead technician can do that."; 409 `INVALID_TRANSITION` (existing copy), `MANAGED_EXTERNALLY`, `STALE` "This job changed. Refresh and try again.", `CLOSE_OUT_BLOCKED` (+ blockers), `REQUEST_NOT_STARTED` "Tap Working before marking done."
+
+- [ ] **Step 1: Failing tests** (`status-writes.test.ts` with `db.batch` mocked to capture statements): `applyTechAction` for a lead `en_route` → 3 statements, statement 2 contains `pg_current_xact_id` and `status = 'en_route'`, statement 3 is the `INSERT … ON CONFLICT … DO NOTHING`? (no — `en_route` opens nothing; use `in_progress`), a helper → 2 statements and no request UPDATE; `closeOutRequest` → the NOT EXISTS predicate and `completed_at = now()` in statement 2; `holdVisit` → the CASE statement and the request UPDATE with `hold_reason`.
+- [ ] **Step 2: Implement** writer + route + `getTechJobSummary` fields + the admin paths.
+- [ ] **Step 3: Probes (Review Focus 1–3)** on a throwaway native request R scheduled today with lead T1 (`assigned_to`) and helper T2 added via the Task 2 endpoint; tokens for T1 and T2: T2 `close_out` → 403; T2 `cancelled` → 400; T1 `en_route` → request `en_route`, 1 event; T2 `en_route` → T2 row en_route, request unchanged, still 1 event; both `arrived`, both `in_progress` (request `in_progress`; auto entries open for both: `clock_in_method='auto'`); T1 `completed` → T1 row completed + entry closed, request `in_progress`; T1 `close_out` → 409 with `technician_open` T2 and no new event/review; T2 `completed`; `Promise.all` of two T1 `close_out` → one 200 `changed:true` + one 200 `changed:false` (or both 200 with exactly one `changed:true`), `completed_at` set, `hold_reason` NULL, exactly one `completed` event, one review request; double `in_progress` tap in `Promise.all` on a fresh request → one write, one no-op, one open entry. Hold: new request, T1 `in_progress`, T2 untouched; T1 `{ action: "on_hold", holdReason: "awaiting_parts" }` → request `on_hold` + reason, T1 row `completed`, T2 row `cancelled`, entries closed. Admin: `PATCH /api/admin/requests/<R>` `{"status":"on_hold","holdReason":"awaiting_parts"}` on a request with a working lead → same outcome; `{"status":"completed"}` with a working lead → 409 `CLOSE_OUT_BLOCKED`; `POST …/reschedule` on a request whose visit #1 has progress → 409 `HAS_PROGRESS`. Clean up all throwaway data.
+- [ ] **Step 4: Gates + commit** `feat(tech): per-technician status taps, hold ends the visit, lead-only close-out; admin paths follow the same rules`.
 
 ---
 
-### Task 4: Auto job time entries
+### Task 5: The tech list by visit — today / upcoming / past
 
-**Files:**
-- Modify: `src/lib/tech/timesheet-queries.ts` (+ `timesheet-queries.test.ts`): `clockIn` gains an options arg `{ appointmentId?: string | null; method?: "auto" | "manual" }`; add `hasOpenJobEntry(org, tech, requestId)`; `clockOut` unchanged in behaviour (closes the open entry whatever its method); `src/lib/tech/status-writes.ts` wires `open` → `clockIn(..., { appointmentId, method: "auto" })` and `close` → `clockOut`.
+**Files:** `src/lib/tech/visit-range.ts` (+ test: `classifyVisit(row, businessTodayIso) → "today" | "upcoming" | "past" | "hidden"`), `src/app/api/tech/jobs/route.ts`, `src/components/tech/tech-jobs-list-client.tsx`.
 
-Rules: one open job entry per (request, technician) remains the invariant (`tte_open_per_tech_job_unique`); a manual entry already open counts as open (the tap does not open a second one); `clockOut` on `completed`/`on_hold` closes whichever is open; a tech who never tapped working and clocks out manually keeps today's behaviour.
+Query: `appointmentAssignments` ⋈ `appointments` ⋈ `serviceRequests` under `withTenant(appointmentAssignments, org, eq(technicianId, me))`; non-cancelled visits for today/upcoming, plus rows `completed`/`cancelled` in the last 30 days for past; visit window = `COALESCE(appointments.starts_at, service_requests.arrival_window_start)` / end likewise; `scheduledDate = COALESCE(appointments.scheduled_date, service_requests.scheduled_date)`; `today` = the window/date on the business day (`businessTodayIso` from `src/lib/admin/availability-queries.ts:90`; the pure test takes the ISO string as an argument) OR an open row with no date; `upcoming` = later; response rows gain `appointmentId`, `appointmentNumber`, `assignmentStatus`, `isLead`; decrypt address/name as today. Client: three tabs; the card links to `/tech/jobs/<id>?visit=<appointmentId>`; Review Focus 3's "the visit no longer shows under today after cancel" is probed here.
 
-- [ ] **Step 1: Failing tests**: `clockIn` passes `kind: 'job'`, `clockInMethod`, `appointmentId` into the insert; `hasOpenJobEntry` true/false; (the status-actions matrix already covers open/close decisions).
-- [ ] **Step 2: Implement; Step 3: Probe**: T1 `in_progress` → one open entry with `clock_in_method='auto'` and `appointment_id` set; T1 `pause` → closed with `minutes`; T1 `in_progress` again → a second entry opens; `completed` → closed.
-- [ ] **Step 4: Gates + commit** `feat(tech): job time entries open and close from status taps`.
+- [ ] Steps: tests → implement → probe each range → `node scripts/agent/screenshot-page.mjs /tech/jobs 390 /tmp/tech-list.png --tech` and look → gates → commit `feat(tech): visits list with today, upcoming and past`.
 
 ---
 
-### Task 5: General clock + reader filters
+### Task 6: Close-out sheet and actions in the job summary
 
-**Files:**
-- Create: `src/app/api/tech/time/route.ts` (GET current open general entry; POST `{ action: "in" | "out" }`)
-- Modify: `src/lib/tech/timesheet-queries.ts` (+ test): `openGeneralEntry(org, tech)` (insert `kind='general'`, `serviceRequestId: null`, `clockInMethod:'manual'`; `isUniqueViolation(error, "tte_open_general_per_tech_idx")` → `{ reason: "already_open" }`), `closeGeneralEntry(org, tech)` (closes the open general entry: `minutes` set, `laborCostCents` NULL, `laborRateCents` 0), `getOpenGeneralEntry`.
-- Modify: `src/lib/admin/operations-metrics-queries.ts` (~236–249: add `eq(technicianTimeEntries.kind, "job")`), `src/lib/admin/accounting-export.ts` (~215–232: same), `src/lib/admin/reporting-queries.ts` (~709–718: same) + their tests (mocks gain `kind`; assert the filter is present where the existing tests inspect conditions).
+**Files:** `src/components/tech/close-out-sheet.tsx` (`Sheet side="bottom"` from `src/components/ui/sheet.tsx`: large buttons Done / Pause / Hold (reason select from `HOLD_REASONS` + optional follow-up date; copy explains the visit ends) / Close out (active lead only); blocked state lists `blockers` in plain words — "Ben is still working", "Visit #2 on Nov 12 is planned — put this job on hold", "Tap Working first"), `tech-job-summary.tsx` (buttons from `allowedActions` via `techStatusLabel` + "Pause", "Hold", "Close out"; "Managed in FieldPulse" notice when `!native`; drop `allowedNextStatuses`), `tech-status-confirm.ts` (+ test), `tech-job-detail-client.tsx` (refresh after an action; `requestBehind` notice "Your status is saved; the request is waiting on an earlier visit").
 
-- [ ] **Step 1: Failing tests** (pure where possible): `closeGeneralEntry` computes `minutes` and leaves `laborCostCents` null; `openGeneralEntry` maps the named unique violation to `already_open`.
-- [ ] **Step 2: Implement; Step 3: Probe (Review Focus 4)**: `POST /api/tech/time {"action":"in"}` twice → 201 then 409 `ALREADY_OPEN`; `{"action":"out"}` → 200 with `minutes`; DB: `labor_cost_cents IS NULL`; `GET /api/admin/operations-metrics?…` on-site average unchanged by the entry (compare before/after).
-- [ ] **Step 4: Gates + commit** `feat(tech): general clock in and out; job-only filters on labor readers`.
+- [ ] Steps: label tests → implement → Playwright at 390 as T1 on a working job: open the sheet, screenshot; Hold with a reason, screenshot; look at both → gates → commit `feat(tech): close-out sheet with done, pause, hold and close out`.
 
 ---
 
-### Task 6: The tech list by visit — today / upcoming / past
+### Task 7: Clock button + minimal admin timesheets
 
-**Files:**
-- Modify: `src/app/api/tech/jobs/route.ts` (`?range=today|upcoming|past`, default `today`): rows = the caller's assignment rows ⋈ `appointments` (non-cancelled for today/upcoming) ⋈ `serviceRequests`; the visit's `startsAt/endsAt/arrivalWindow*` (fallback to the request's for visit #1); `today` = visits whose window/scheduled date falls on the business day (Eastern) OR open assignments with no date; `upcoming` = later dates; `past` = assignment `completed`/`cancelled` within 30 days; response gains `appointmentId`, `appointmentNumber`, `assignmentStatus`, `isLead`.
-- Modify: `src/components/tech/tech-jobs-list-client.tsx`: three tabs, the card shows the visit window and the caller's status, `href` to `/tech/jobs/<id>?visit=<appointmentId>`.
-- Pure helper `src/lib/tech/visit-range.ts` (+ test): `classifyVisit(row, businessTodayIso)` → `"today" | "upcoming" | "past" | "hidden"`.
+**Files:** `tech-jobs-list-client.tsx` (Clock in / Clock out header button on `/api/tech/time`), `src/app/api/admin/timesheets/route.ts` (GET `?technicianId=&from=&to=` → `{ entries: [{ id, kind, clockInAt, clockOutAt, minutes, laborCostCents, referenceNumber | null, appointmentNumber | null, clockInMethod }] }` ordered by `clockInAt` desc, ≤ 500 rows, UUID + range checks, `adminRead` limit), `src/components/admin/staff/timesheets-dialog.tsx` (date range, grouped by business day, general rows labelled "General"), `staff-table.tsx` + `src/app/admin/(dashboard)/staff/page.tsx` (row action "Timesheets" wired like "Time off").
 
-- [ ] Steps: failing tests for `classifyVisit`; implement; probe each range with the throwaway request (visit #1 today, visit #2 in a week, a completed one); screenshot `/tech/jobs` at 390 with `--tech` and look at it; gates; commit `feat(tech): visits list with today, upcoming and past`.
+- [ ] Steps: implement → probe GET → screenshot 1440 → gates → commit `feat(staff): technician timesheets with general time`.
 
 ---
 
-### Task 7: Close-out sheet and actions in the job summary
+### Task 8: Visit-edit guards + docs
 
-**Files:**
-- Create: `src/components/tech/close-out-sheet.tsx` (spec "Close-out sheet": four large buttons — Done, Pause, Hold (reason select from `HOLD_REASONS` + optional follow-up date), Close out (lead only); blocked state lists `blockers` above greyed buttons)
-- Modify: `src/components/tech/tech-job-summary.tsx` (buttons from `allowedActions`; labels via `techStatusLabel` + `"Pause"`, `"Hold"`, `"Close out"`; opens the sheet for Done/Pause/Hold/Close out; "Managed in FieldPulse" notice when `!native`), `src/components/tech/tech-status-confirm.ts` (+ test: labels for the new actions), `src/components/tech/tech-job-detail-client.tsx` (pass `visit` query param through; refresh after an action), `src/lib/tech/field-queries.ts` `getTechJobSummary` (already returns `allowedActions` + `blockers` from Task 3).
+**Files:** `src/lib/admin/appointment-queries.ts` (+ test): `updateAppointment` → `{ reason: "has_progress" }` (add to `UpdateAppointmentResult` only; `classifyMiss` checks progress behind a flag; `case "has_progress"` → 409 `HAS_PROGRESS` "A technician has already started this visit." in `[aid]/route.ts`) and the CAS gains `AND NOT EXISTS (progressed row)`; `addAppointment` refuses `completed` requests (`{ reason: "request_completed" }` → 409 `REQUEST_COMPLETED` "This request is already completed."); `cancelAppointment` adds `closeJobEntriesSql` for the visit's technicians to its batch. Docs: `page-tech` (ownership, actions, hold semantics, close-out, time), `page-staff` (timesheets), `page-requests` (`HAS_PROGRESS`, `REQUEST_COMPLETED`, admin hold/complete rules, visit helpers), `admin-pages`; `replica/features.csv` rows 115, 118, 120, 137, 138 → `yes`; `parity.md`; `build-log.md` S37/S38/S25 lines.
 
-- [ ] Steps: pure label tests; implement; Playwright at 390: open a job as T1 at `in_progress`, open the sheet, screenshot (`/tmp/closeout-390.png`), tap Hold with a reason, screenshot the result; look at both; gates; commit `feat(tech): close-out sheet with done, pause, hold and close out`.
-
----
-
-### Task 8: Clock button + minimal admin timesheets
-
-**Files:**
-- Modify: `src/components/tech/tech-jobs-list-client.tsx` (a "Clock in" / "Clock out" button in the header using `/api/tech/time`)
-- Create: `src/app/api/admin/timesheets/route.ts` (GET `?technicianId=&from=&to=` → entries incl. kind, request reference, minutes, labor cost), `src/components/admin/staff/timesheets-dialog.tsx`; modify `src/components/admin/staff-table.tsx` (row action "Timesheets" on technician rows). Read `page-staff` skill.
-
-- [ ] Steps: implement; probe GET; screenshot the dialog at 1440; gates; commit `feat(staff): technician timesheets with general time`.
-
----
-
-### Task 9: Visit-edit guard + docs
-
-**Files:**
-- Modify: `src/lib/admin/appointment-queries.ts` `updateAppointment` (+ test): before the batch, if any assignment on the visit has a progress timestamp → `{ reason: "has_progress" }` → 409 `HAS_PROGRESS` "A technician has already started this visit." in the `[aid]` route; also add `AND NOT EXISTS (progress)` to the CAS.
-- Docs: `.claude/skills/page-tech/SKILL.md` (ownership rule, actions, close-out, time), `page-staff/SKILL.md` (timesheets), `page-requests/SKILL.md` (HAS_PROGRESS), `admin-pages/SKILL.md`; `replica/features.csv` rows 115, 118, 120, 137, 138 → `yes` with notes; `parity.md` regenerated; `build-log.md` S37/S38/S25 lines.
-
-- [ ] Steps: failing test; implement; probe (Review Focus 5); docs; `verify-skills` 0 missing; gates; commit `feat(requests): visits with technician progress cannot be edited; M3a docs and parity`.
+- [ ] Steps: failing test → implement → probe (Review Focus 5) → docs → `verify-skills` 0 missing → gates → commit `feat(requests): visits with progress are locked; M3a docs and parity`.
 
 ---
 
 ## Self-review notes
 
-- Spec coverage: migration + trigger v2 (T1), ownership (T2), actions/close-out (T3), auto time (T4), general clock + filters (T5), list ranges (T6), sheet (T7), clock button + S25 (T8), visit guard + docs (T9). Deferred per spec: en-route texts, required-forms blocker, GPS/backdating, offline.
-- Order note: Task 3 calls `clockIn` with options that Task 4 adds; the controller may run Task 4 before Task 3's integration, or Task 3 implements the minimal options and Task 4 completes them.
-- Review Focus pins: 1–2 → T3 step 3; 3 → T1 step 4(c); 4 → T5 step 3; 5 → T9.
+- Spec coverage: migration + trigger v2 incl. entries (T1), ownership + visit helpers (T2), time SQL + general clock + KPI filter (T3), pure actions (T4a), writer/hold/close-out/routes/admin paths (T4b), list ranges (T5), sheet (T6), clock + S25 (T7), guards + docs (T8). Deferred per spec: en-route texts, required forms, GPS/backdating, offline, trigger step 4b (rejected: admin paths go through the app layer).
+- Review Focus pins: 1–2 → T4b step 3; 3 → T1 step 5(c) + T4b step 3 (admin hold); 4 → T3; 5 → T8.
+- Cross-task names: `TechAssignmentRow`, `pickActiveVisit`, `pickActiveAssignment`, `findReadableJob`, `techCanReadSql`, `openJobEntrySql`, `closeJobEntriesSql`, `resolveTechAction`, `allowedActions`, `Blocker`, `applyTechAction`, `holdVisit`, `closeOutRequest`, `closeOutBlockers` — each defined once (T2, T3, T4a, T4b) and consumed by name.
