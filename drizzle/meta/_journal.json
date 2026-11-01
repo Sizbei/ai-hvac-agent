@@ -351,6 +351,13 @@
       "when": 1793491186003,
       "tag": "0049_appointments_shifts",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1793509023715,
+      "tag": "0050_m3a_run_the_day",
+      "breakpoints": true
     }
   ]
 }

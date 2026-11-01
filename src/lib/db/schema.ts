@@ -2557,7 +2557,6 @@ export const technicianTimeEntries = pgTable(
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
     serviceRequestId: uuid("service_request_id")
-      .notNull()
       .references(() => serviceRequests.id, { onDelete: "cascade" }),
     technicianId: uuid("technician_id")
       .notNull()
@@ -2575,6 +2574,11 @@ export const technicianTimeEntries = pgTable(
     // round(minutes / 60 * laborRateCents). NULL while open.
     laborCostCents: integer("labor_cost_cents"),
     note: text("note"),
+    // M3a: 'job' entries belong to a request (and optionally a visit); 'general'
+    // entries are a technician's clock with no job. Status taps open 'auto' entries.
+    kind: text("kind").notNull().default("job"),
+    appointmentId: uuid("appointment_id").references(() => appointments.id, { onDelete: "set null" }),
+    clockInMethod: text("clock_in_method").notNull().default("manual"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -2591,6 +2595,10 @@ export const technicianTimeEntries = pgTable(
     uniqueIndex("tte_open_per_tech_job_unique")
       .on(table.serviceRequestId, table.technicianId)
       .where(sql`${table.clockOutAt} IS NULL`),
+    check("tte_kind_check", sql`${table.kind} IN ('job','general')`),
+    check("tte_clock_in_method_check", sql`${table.clockInMethod} IN ('auto','manual')`),
+    check("tte_kind_request_check", sql`(${table.kind} = 'job') = (${table.serviceRequestId} IS NOT NULL)`),
+    uniqueIndex("tte_open_general_per_tech_idx").on(table.organizationId, table.technicianId).where(sql`${table.kind} = 'general' AND ${table.clockOutAt} IS NULL`),
   ],
 );
 
