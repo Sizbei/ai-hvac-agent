@@ -166,3 +166,30 @@ in an effect, pure modules never import db/server-only, `IconChip` discriminated
 `revealedType` in the embed panel, transition from-state, both staff dialog titles, rollback
 copy quoted, file-map names fixed, baseline hash a34d3b2 (352 files, 4782/1). Verdict:
 converged-enough; execution starts.
+
+## Final code review — 2026-11-04 (three lenses on a182d7b..312e114)
+
+Authorization/tenancy/security: ready to merge; no Critical/Important (every subquery
+and upsert scoped by the session org; strict PATCH schema; demo never written; audit keys
+only; parameterised SQL; FROZEN AI text untouched). Minors: PATCH rate limit after body
+parsing; `Object.hasOwn` on the settings tab map; relative copy link when
+`NEXT_PUBLIC_APP_URL` is unset; `embedCopied` enforced client-side only (noted).
+
+Data/concurrency/store: upserts correct under every interleaving traced (old wins; no lost
+update); store contract holds (no overlapping fetches, cached snapshot, refcounted
+listener); migration 0051 idempotent with "No schema changes". Important: the demo org was
+dismissed for good (0051 + the legacy fold) → read-time exclusion for `DEMO_ORG_ID`.
+Minors: grandfathering ran on every stamp-less GET (spec: first GET only) → write-once
+`firstSeenAt`; PATCH audit failure 500s a committed write → logged instead; integration
+concurrency only on the UPDATE path; cleanup not per-org.
+
+Spec parity/UX: every §9 clause reached with verbatim copy; Important: sidebar digit
+~2.3:1 on the navy rail → rail dim token at 11 px; the "from FieldPulse" note also fired
+for Housecall Pro technicians → `fieldpulse_id IS NOT NULL`; integration (g) and (h)
+weaker than §9.9/§9.10 → rewritten; the home card flashed a skeleton for grandfathered
+orgs → placement context from the shell. Minors: dead `extraLine`; done outranks the
+invite banner; `SectionCard` collapsible typed without `action`.
+
+Rulings: one fix wave (A–H in the ledger); parked for a follow-up chore: a note explaining
+why a step re-opened (copy undefined), corrupt-stamp healing, an insert-path concurrency
+case.
