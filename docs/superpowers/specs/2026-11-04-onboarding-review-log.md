@@ -95,3 +95,35 @@ Rejected:
   admin page.
 - "Exclude appointment_assignments stamps from historical evidence" — accepted in effect:
   evidence uses tech-only tables (time entries, locations) and `google_id`.
+
+## Round 3 — 2026-11-04 (v3 → v4 FINAL)
+
+Two fresh critics (feasibility+data; UX+copy). 0 blockers, 10 majors, 21 minors — all
+contained. Verdict: converged-enough (no blockers in two rounds; majors narrowing).
+
+Established and applied:
+- Nav placement decided server-side from the existing layout org query (left join to
+  `organization_settings`) → no jump; `localStorage` cache dropped (reopened the round-2
+  rejection on new evidence: the layout already queries the org on every page).
+- Email prefill on `/tech-login` dropped (the form does not read it; keeps staff emails
+  out of URLs). Copy-link feedback ("Copied" 1.5 s), visible mono URL, instruction split
+  with the Google clause only when OIDC is enabled.
+- `add_technician` no longer satisfied by the sign-in flag (so it can re-open); why line
+  "They see the requests assigned to them…"; invite waiting note + banner; FieldPulse
+  path (hero note, "Set a password in Staff", Reset password refresh); needs-attention step
+  renders in the hero slot above the finished block; demo derives `tech_sign_in` done and
+  keeps × in `sessionStorage`.
+- Settings saves refresh the store (banner flips there too); phone-only note; `hrefLabel`
+  verb phrases; estimate labels; phase meta counts required only; "Optional" group with
+  "Go further"; finished wins verbatim; dismissed/finished subtitle and note; card rows
+  carry the Optional badge; sr labels (singular / needs attention).
+- `company_name` seeded with `left(name,120)` (120-char settings cap); scheduleOpen applied
+  inside the dialog's `reset()`; stamp statement sent iff `$keys` OR `$top` non-empty with
+  the guard extended for `$topKeys`; top-level `OLD` typeof guard; demo check =
+  `DEMO_ORG_ID` on both paths; 0051 tightened guard + statement-breakpoint; integration
+  harness details (mock server-only, parse .env.local, refuse prod host); `$type` widened;
+  `global-search` builds its list inside the component.
+- Accepted as lenient (stated): a demoted former admin with `google_id` satisfies
+  `add_technician`/`tech_sign_in`.
+
+Rejected: none material.
