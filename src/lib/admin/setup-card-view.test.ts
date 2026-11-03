@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { BANNER_DONE, bannerText, cardFinished, cardHidden } from "./setup-card-view";
+import { BANNER_DONE, bannerText, cardFinished, cardHidden, cardLoadingView } from "./setup-card-view";
 import { STEP_DEFS, type DerivedStep, type OnboardingPayload } from "./onboarding-steps";
 
 function step(id: string, extra: Partial<DerivedStep> = {}): DerivedStep {
@@ -91,5 +91,22 @@ describe("bannerText", () => {
     expect(bannerText(step("phone_hours", { note: "Add both a phone number and hours." }), null)).toBe(
       "Setup guide: Add your business phone and hours",
     );
+  });
+});
+
+describe("cardLoadingView", () => {
+  it("renders nothing after an error without data, even when slow", () => {
+    expect(cardLoadingView(null, true, false)).toBe("nothing");
+    expect(cardLoadingView(null, true, true)).toBe("nothing");
+  });
+
+  it("renders nothing before 300 ms, then a skeleton", () => {
+    expect(cardLoadingView(null, false, false)).toBe("nothing");
+    expect(cardLoadingView(null, false, true)).toBe("skeleton");
+  });
+
+  it("renders the card whenever data is present, errors included", () => {
+    expect(cardLoadingView(payload(), false, false)).toBe("card");
+    expect(cardLoadingView(payload(), true, true)).toBe("card");
   });
 });

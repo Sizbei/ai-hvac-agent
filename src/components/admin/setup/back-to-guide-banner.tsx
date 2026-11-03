@@ -34,8 +34,8 @@ export function BackToGuideBanner({ stepId, event }: BackToGuideBannerProps) {
         <Check
           aria-hidden="true"
           className={cn(
-            'inline-block size-3.5 align-[-2px] transition-opacity duration-[120ms]',
-            done ? 'mr-1 opacity-100' : 'w-0 opacity-0',
+            'mr-1 inline-block size-3.5 align-[-2px] transition-opacity duration-[120ms]',
+            done ? 'opacity-100' : 'opacity-0',
           )}
         />
         {text} ·{' '}

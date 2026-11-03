@@ -14,6 +14,7 @@ import { nextRows } from '@/lib/admin/setup-view';
 import {
   cardFinished,
   cardHidden,
+  cardLoadingView,
   readDemoFlags,
   writeDemoFlags,
   type CardSessionFlags,
@@ -53,7 +54,7 @@ function MoreRow({ step }: { step: DerivedStep }) {
 
 /** Home "Setup guide" card (spec §2, §8): progress, Up next, two more rows, dismiss. */
 export function SetupCard() {
-  const { data } = useOnboarding();
+  const { data, error } = useOnboarding();
   const [flags, setFlags] = useState<CardSessionFlags>({});
   const [hidden, setHidden] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -67,8 +68,9 @@ export function SetupCard() {
     return () => clearTimeout(t);
   }, []);
 
-  if (!data) {
-    if (!slow) return null;
+  const view = cardLoadingView(data, error, slow);
+  if (view === 'nothing') return null;
+  if (view === 'skeleton' || !data) {
     return (
       <SectionCard title="Setup guide">
         <div className="flex flex-col gap-2" aria-hidden="true">

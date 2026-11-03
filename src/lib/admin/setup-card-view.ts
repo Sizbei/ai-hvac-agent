@@ -26,6 +26,18 @@ export function cardHidden(
   return payload.demo && (flags.dismissed === true || flags.completedSeen === true);
 }
 
+export type CardLoadingView = "nothing" | "skeleton" | "card";
+
+/** Under 300 ms nothing; then a skeleton; nothing at all after an error without data. */
+export function cardLoadingView(
+  data: OnboardingPayload | null,
+  error: boolean,
+  slow: boolean,
+): CardLoadingView {
+  if (data) return "card";
+  return slow && !error ? "skeleton" : "nothing";
+}
+
 /** The unacknowledged finishing moment (spec §4 "Finishing moment"). */
 export function cardFinished(payload: OnboardingPayload): boolean {
   const { requiredDone, requiredTotal } = payload.progress;

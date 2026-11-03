@@ -60,10 +60,11 @@ export default function SettingsPage() {
   const [bannerEvent, setBannerEvent] = useState<BannerEvent>(null);
   const setupStep = fromSetup ? SETUP_STEP_BY_TAB[initialTab] : undefined;
 
-  // Setup-guide tabs: a successful save refreshes the guide so the banner can flip.
-  async function saveFromSetup(update: OrgConfigUpdate): Promise<boolean> {
+  // Setup-guide tabs: a successful save refreshes the guide so the banner can
+  // flip; the 'saved' event only counts on the tab the banner belongs to.
+  async function saveFromSetup(tab: string, update: OrgConfigUpdate): Promise<boolean> {
     const ok = await settings.saveConfig(update);
-    if (ok && fromSetup) {
+    if (ok && fromSetup && tab === initialTab) {
       setBannerEvent('saved');
       void refreshOnboarding({ force: true });
     }
@@ -141,7 +142,7 @@ export default function SettingsPage() {
           </TabsList>
 
           <TabsContent value="branding" className="mt-6">
-            <BrandingPanel config={settings.config} onSave={saveFromSetup} />
+            <BrandingPanel config={settings.config} onSave={(u) => saveFromSetup('branding', u)} />
           </TabsContent>
           <TabsContent value="services" className="mt-6">
             <ServicesPanel config={settings.config} onSave={settings.saveConfig} />
@@ -155,7 +156,7 @@ export default function SettingsPage() {
           <TabsContent value="business" className="mt-6">
             <BusinessInfoPanel
               config={settings.config}
-              onSave={saveFromSetup}
+              onSave={(u) => saveFromSetup('business', u)}
             />
           </TabsContent>
           <TabsContent value="faqs" className="mt-6">
@@ -167,7 +168,7 @@ export default function SettingsPage() {
             />
           </TabsContent>
           <TabsContent value="embed" className="mt-6">
-            <EmbedPanel config={settings.config} onSave={saveFromSetup} />
+            <EmbedPanel config={settings.config} onSave={(u) => saveFromSetup('embed', u)} />
           </TabsContent>
           <TabsContent value="limits" className="mt-6">
             <ConversationLimitsPanel
