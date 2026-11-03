@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   Check,
   Copy,
@@ -24,6 +24,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useWidgetKeys } from '@/hooks/use-widget-keys';
+import { adminFetch } from '@/lib/admin/admin-fetch';
 import type { OrgConfig, OrgConfigUpdate } from '@/lib/admin/org-config-types';
 
 interface EmbedPanelProps {
@@ -31,7 +32,15 @@ interface EmbedPanelProps {
   readonly onSave: (update: OrgConfigUpdate) => Promise<boolean>;
 }
 
-function CopyButton({ value, label }: { value: string; label?: string }) {
+function CopyButton({
+  value,
+  label,
+  onCopied,
+}: {
+  value: string;
+  label?: string;
+  onCopied?: () => void;
+}) {
   const [copied, setCopied] = useState(false);
   return (
     <Button
@@ -39,7 +48,7 @@ function CopyButton({ value, label }: { value: string; label?: string }) {
       variant="outline"
       size="sm"
       onClick={() => {
-        void navigator.clipboard.writeText(value);
+        void navigator.clipboard.writeText(value).then(() => onCopied?.());
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);
       }}
@@ -56,6 +65,10 @@ export function EmbedPanel({ config, onSave }: EmbedPanelProps) {
   const [creating, setCreating] = useState(false);
   // The plaintext key is shown exactly once, right after creation.
   const [revealed, setRevealed] = useState<string | null>(null);
+  const [revealedType, setRevealedType] = useState<
+    'publishable' | 'secret' | null
+  >(null);
+  const embedCopySent = useRef(false);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   // Origins
@@ -73,11 +86,28 @@ export function EmbedPanel({ config, onSave }: EmbedPanelProps) {
   async function handleCreate(type: 'publishable' | 'secret'): Promise<void> {
     setCreating(true);
     setRevealed(null);
+    setRevealedType(null);
     const result = await createKey(type, label);
     setCreating(false);
     if (result) {
       setRevealed(result.plaintext);
+      setRevealedType(type);
       setLabel('');
+    }
+  }
+
+  // Setup guide signal: the owner copied a publishable key (once per mount).
+  async function handleRevealedCopied(): Promise<void> {
+    if (revealedType !== 'publishable' || embedCopySent.current) return;
+    embedCopySent.current = true;
+    try {
+      await adminFetch('/api/admin/onboarding', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ flags: { embedCopied: true } }),
+      });
+    } catch {
+      // Best effort: the signal is non-critical.
     }
   }
 
@@ -158,7 +188,10 @@ export function EmbedPanel({ config, onSave }: EmbedPanelProps) {
                   <code className="flex-1 truncate rounded bg-muted px-2 py-1 text-xs">
                     {revealed}
                   </code>
-                  <CopyButton value={revealed} />
+                  <CopyButton
+                    value={revealed}
+                    onCopied={() => void handleRevealedCopied()}
+                  />
                 </div>
               </AlertDescription>
             </Alert>

@@ -1,6 +1,11 @@
 import "server-only";
 
 import { cookies } from "next/headers";
+import { after } from "next/server";
+import { db } from "@/lib/db";
+import { logger } from "@/lib/logger";
+import { DEMO_ORG_ID } from "@/lib/tenancy/organization";
+import { flagsStatementSql } from "@/lib/admin/onboarding-sql";
 import { signTechToken, verifyTechToken } from "./tech-config";
 import { isSessionUserCurrent } from "./session-revocation";
 import type { TechSessionPayload } from "./tech-config";
@@ -28,6 +33,26 @@ export async function createTechSession(
     sameSite: "lax",
     maxAge: TECH_SESSION_MAX_AGE,
     path: "/",
+  });
+
+  // Setup guide: stamp the first technician sign-in (set-once, guarded in SQL).
+  after(async () => {
+    if (payload.organizationId === DEMO_ORG_ID) return;
+    try {
+      await db.execute(
+        flagsStatementSql({
+          organizationId: payload.organizationId,
+          flags: { techSignedInAt: new Date().toISOString() },
+          top: {},
+          guardTechSignedIn: true,
+        }),
+      );
+    } catch (error) {
+      logger.warn(
+        { error, organizationId: payload.organizationId },
+        "onboarding techSignedInAt write failed",
+      );
+    }
   });
 }
 

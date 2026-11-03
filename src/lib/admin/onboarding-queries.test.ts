@@ -1,231 +1,222 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { PgDialect } from "drizzle-orm/pg-core";
+import type { SQL } from "drizzle-orm";
 
-vi.mock('server-only', () => ({}));
+vi.mock("server-only", () => ({}));
 
-vi.mock('drizzle-orm', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('drizzle-orm')>()),
-  eq: (...a: unknown[]) => ['eq', ...a],
-  and: (...a: unknown[]) => ['and', ...a],
-  count: () => ['count'],
-}));
+const executed: SQL[] = [];
+const queue: Array<{ rows: unknown[] } | Error> = [];
 
-vi.mock('@/lib/db/schema', () => ({
-  organizationSettings: {
-    organizationId: 'os.org',
-    companyName: 'os.companyName',
-    businessInfo: 'os.businessInfo',
-    onboardingState: 'os.onboardingState',
-  },
-  pricebookItems: {
-    organizationId: 'pi.org',
-    active: 'pi.active',
-  },
-  staffInvites: { organizationId: 'i.org' },
-  users: { organizationId: 'u.org', isActive: 'u.isActive' },
-}));
-
-// Queue-driven select results, consumed in the query order of getOnboardingState:
-//   1. settings row, 2. pricebook count, 3. invite count, 4. active-user count.
-const selectQueue: unknown[][] = [];
-const updateCalls: { set: unknown }[] = [];
-
-function selectResult(): unknown {
-  const result = selectQueue.shift() ?? [];
-  // Support: .from().where() awaited directly (count queries),
-  // .from().where().limit() (settings row), and .from() awaited (rare).
-  const whereResult = {
-    limit: () => Promise.resolve(result),
-    then: (resolve: (v: unknown) => void) => resolve(result),
-  };
-  return {
-    where: () => whereResult,
-    limit: () => Promise.resolve(result),
-    then: (resolve: (v: unknown) => void) => resolve(result),
-  };
-}
-
-vi.mock('@/lib/db', () => ({
+vi.mock("@/lib/db", () => ({
   db: {
-    select: () => ({ from: () => selectResult() }),
-    update: () => ({
-      set: (set: unknown) => {
-        updateCalls.push({ set });
-        return { where: () => Promise.resolve([]) };
-      },
+    execute: vi.fn(async (q: SQL) => {
+      executed.push(q);
+      const next = queue.shift() ?? { rows: [] };
+      if (next instanceof Error) throw next;
+      return next;
     }),
   },
 }));
 
-import {
-  getOnboardingState,
-  updateOnboardingFlags,
-} from './onboarding-queries';
+const warn = vi.fn();
+vi.mock("@/lib/logger", () => ({ logger: { warn: (...a: unknown[]) => warn(...a) } }));
 
-const ORG = 'org-1';
+import { getOnboarding, patchOnboarding } from "./onboarding-queries";
 
-/** Push the 4 selects getOnboardingState issues, in order. */
-function queueState(opts: {
-  settings?: Record<string, unknown> | null;
-  pricebookCount?: number;
-  inviteCount?: number;
-  activeUserCount?: number;
-}) {
-  selectQueue.push(opts.settings === null ? [] : [opts.settings ?? {}]);
-  selectQueue.push([{ value: opts.pricebookCount ?? 0 }]);
-  selectQueue.push([{ value: opts.inviteCount ?? 0 }]);
-  selectQueue.push([{ value: opts.activeUserCount ?? 0 }]);
+const ORG = "11111111-1111-1111-1111-111111111111";
+const NOW = new Date("2026-11-04T12:00:00.000Z");
+const NOW_ISO = NOW.toISOString();
+const OPTS = { demo: false, googleEnabled: false, appUrl: "https://app.example.com/", now: NOW };
+const render = (q: SQL) => new PgDialect().sqlToQuery(q);
+const flat = (q: SQL) => render(q).sql.replace(/\s+/g, " ");
+
+function row(p: Record<string, unknown> = {}) {
+  return {
+    company_name: "Acme",
+    phone: false,
+    business_hours: false,
+    logo_url: false,
+    technician_ready: false,
+    fp_passwordless: 0,
+    pending_invite: false,
+    pricebook: false,
+    any_request: false,
+    booked_assigned: false,
+    tech_signed_in_evidence: false,
+    widget_key: false,
+    allowed_origins: false,
+    integration_connected: false,
+    completed_request: false,
+    org_created_at: "2026-11-01T00:00:00.000Z",
+    onboarding_state: null,
+    ...p,
+  };
 }
 
+const stepOf = (p: Awaited<ReturnType<typeof getOnboarding>>, id: string) =>
+  p.steps.find((s) => s.id === id)!;
+
 beforeEach(() => {
-  selectQueue.length = 0;
-  updateCalls.length = 0;
+  executed.length = 0;
+  queue.length = 0;
+  warn.mockReset();
 });
 
-describe('getOnboardingState — account_created', () => {
-  it('is always done', async () => {
-    queueState({});
-    const state = await getOnboardingState(ORG);
-    const step = state.steps.find((s) => s.id === 'account_created');
-    expect(step?.done).toBe(true);
-  });
-});
-
-describe('getOnboardingState — business_details', () => {
-  it('done when businessInfo.phone is non-empty', async () => {
-    queueState({ settings: { businessInfo: { phone: '555-1234' } } });
-    const state = await getOnboardingState(ORG);
-    expect(state.steps.find((s) => s.id === 'business_details')?.done).toBe(
-      true,
-    );
+describe("getOnboarding", () => {
+  it("sends one statement when nothing needs a stamp", async () => {
+    queue.push({ rows: [row()] });
+    const p = await getOnboarding(ORG, OPTS);
+    expect(executed).toHaveLength(1);
+    expect(flat(executed[0])).toContain("AS tech_signed_in_evidence");
+    expect(render(executed[0]).params).toContain(ORG);
+    expect(p.progress).toEqual({ requiredDone: 0, requiredTotal: 4, optionalDone: 0, optionalTotal: 4 });
+    expect(p.upNext).toBe("phone_hours");
+    expect(p.dismissedAt).toBeNull();
+    expect(p.completedSeenAt).toBeNull();
+    expect(p.demo).toBe(false);
+    expect(stepOf(p, "tech_sign_in").copyValue).toBe("https://app.example.com/tech-login");
   });
 
-  it('done when companyName is non-empty', async () => {
-    queueState({ settings: { companyName: 'Acme', businessInfo: {} } });
-    const state = await getOnboardingState(ORG);
-    expect(state.steps.find((s) => s.id === 'business_details')?.done).toBe(
-      true,
-    );
-  });
-
-  it('not done when both phone and companyName are empty/missing', async () => {
-    queueState({ settings: { companyName: '  ', businessInfo: {} } });
-    const state = await getOnboardingState(ORG);
-    expect(state.steps.find((s) => s.id === 'business_details')?.done).toBe(
-      false,
-    );
-  });
-});
-
-describe('getOnboardingState — pricebook', () => {
-  it('done when ≥1 active pricebook item', async () => {
-    queueState({ pricebookCount: 1 });
-    const state = await getOnboardingState(ORG);
-    expect(state.steps.find((s) => s.id === 'pricebook')?.done).toBe(true);
-  });
-
-  it('not done when zero active items', async () => {
-    queueState({ pricebookCount: 0 });
-    const state = await getOnboardingState(ORG);
-    expect(state.steps.find((s) => s.id === 'pricebook')?.done).toBe(false);
-  });
-});
-
-describe('getOnboardingState — service_hours', () => {
-  it('done when businessInfo.businessHours is present + non-empty', async () => {
-    queueState({
-      settings: { businessInfo: { businessHours: 'Mon–Fri 8–5' } },
+  it("maps every column to its signal", async () => {
+    queue.push({
+      rows: [
+        row({
+          phone: true, business_hours: true, logo_url: true, technician_ready: true,
+          pricebook: true, booked_assigned: true, any_request: true, tech_signed_in_evidence: true,
+          widget_key: true, allowed_origins: true, integration_connected: true,
+          onboarding_state: {
+            firstCompleted: Object.fromEntries(
+              ["phone_hours", "brand", "add_technician", "pricebook", "book_first_request", "tech_sign_in", "chat_widget", "integrations"].map((k) => [k, "2026-10-01T00:00:00.000Z"]),
+            ),
+          },
+        }),
+      ],
     });
-    const state = await getOnboardingState(ORG);
-    expect(state.steps.find((s) => s.id === 'service_hours')?.done).toBe(true);
+    const p = await getOnboarding(ORG, OPTS);
+    expect(executed).toHaveLength(1);
+    expect(p.progress).toEqual({ requiredDone: 4, requiredTotal: 4, optionalDone: 4, optionalTotal: 4 });
+    expect(p.steps.every((s) => s.done && !s.needsAttention)).toBe(true);
   });
 
-  it('not done when businessHours is missing or blank', async () => {
-    queueState({ settings: { businessInfo: { businessHours: '' } } });
-    const state = await getOnboardingState(ORG);
-    expect(state.steps.find((s) => s.id === 'service_hours')?.done).toBe(false);
+  it("reads fp_passwordless as a number (string from the driver)", async () => {
+    queue.push({ rows: [row({ fp_passwordless: "2", onboarding_state: { firstCompleted: { brand: "2026-10-01T00:00:00.000Z" } } })] });
+    const p = await getOnboarding(ORG, OPTS);
+    expect(stepOf(p, "add_technician").note).toBe("2 technicians from FieldPulse can't sign in yet. Use Reset password in Staff.");
+    expect(stepOf(p, "add_technician").hrefLabel).toBe("Set a password in Staff");
+  });
+
+  it("sends a second statement with the new stamps and reports the step done", async () => {
+    queue.push({ rows: [row({ phone: true, business_hours: true, onboarding_state: { firstCompleted: { brand: "2026-10-01T00:00:00.000Z" } } })] }, { rows: [] });
+    const p = await getOnboarding(ORG, OPTS);
+    expect(executed).toHaveLength(2);
+    const q = render(executed[1]);
+    expect(q.sql).toContain("RETURNING onboarding_state");
+    expect(q.params).toContain(JSON.stringify({ phone_hours: NOW_ISO }));
+    expect(q.params).toContain(JSON.stringify({}));
+    expect(q.params).toContainEqual(["phone_hours"]);
+    expect(stepOf(p, "phone_hours").done).toBe(true);
+    expect(p.progress.requiredDone).toBe(1);
+    expect(p.upNext).toBe("add_technician");
+  });
+
+  it("grandfathers an old org: dismissedAt in the payload comes from top", async () => {
+    queue.push({ rows: [row({ org_created_at: "2026-09-01T00:00:00.000Z", completed_request: true })] }, { rows: [] });
+    const p = await getOnboarding(ORG, OPTS);
+    expect(executed).toHaveLength(2);
+    expect(render(executed[1]).params).toContain(JSON.stringify({ dismissedAt: NOW_ISO }));
+    expect(p.dismissedAt).toBe(NOW_ISO);
+    expect(p.completedSeenAt).toBeNull();
+  });
+
+  it("grandfathers a finished org with completedSeenAt", async () => {
+    queue.push({
+      rows: [row({ phone: true, business_hours: true, technician_ready: true, booked_assigned: true, tech_signed_in_evidence: true })],
+    }, { rows: [] });
+    const p = await getOnboarding(ORG, OPTS);
+    expect(executed).toHaveLength(2);
+    const params = render(executed[1]).params;
+    expect(params).toContain(JSON.stringify({ completedSeenAt: NOW_ISO }));
+    expect(params).toContainEqual(["completedSeenAt"]);
+    expect(p.completedSeenAt).toBe(NOW_ISO);
+  });
+
+  it("keeps the stored dismissedAt over a fresh top value", async () => {
+    queue.push({ rows: [row({ onboarding_state: { dismissedAt: "2026-10-02T00:00:00.000Z", completedSeenAt: "2026-10-03T00:00:00.000Z" } })] });
+    const p = await getOnboarding(ORG, OPTS);
+    expect(p.dismissedAt).toBe("2026-10-02T00:00:00.000Z");
+    expect(p.completedSeenAt).toBe("2026-10-03T00:00:00.000Z");
+  });
+
+  it("sends one statement for the demo org even with stamps due", async () => {
+    queue.push({ rows: [row({ phone: true, business_hours: true, org_created_at: "2026-01-01T00:00:00.000Z", completed_request: true })] });
+    const p = await getOnboarding(ORG, { ...OPTS, demo: true });
+    expect(executed).toHaveLength(1);
+    expect(p.demo).toBe(true);
+    expect(stepOf(p, "tech_sign_in").done).toBe(true);
+    expect(stepOf(p, "phone_hours").done).toBe(true);
+    expect(p.dismissedAt).toBeNull();
+  });
+
+  it("still returns the payload when the stamp statement throws", async () => {
+    queue.push({ rows: [row({ phone: true, business_hours: true })] }, new Error("boom"));
+    const p = await getOnboarding(ORG, OPTS);
+    expect(executed).toHaveLength(2);
+    expect(stepOf(p, "phone_hours").done).toBe(true);
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("tolerates a missing settings row (NULL columns)", async () => {
+    queue.push({ rows: [row({ company_name: null, onboarding_state: null, org_created_at: null })] });
+    const p = await getOnboarding(ORG, OPTS);
+    expect(p.progress.requiredDone).toBe(0);
+    expect(executed).toHaveLength(1);
   });
 });
 
-describe('getOnboardingState — embed_widget', () => {
-  it('done when onboardingState.embedViewed is true', async () => {
-    queueState({ settings: { businessInfo: {}, onboardingState: { embedViewed: true } } });
-    const state = await getOnboardingState(ORG);
-    expect(state.steps.find((s) => s.id === 'embed_widget')?.done).toBe(true);
-  });
-
-  it('not done when embedViewed is unset', async () => {
-    queueState({ settings: { businessInfo: {} } });
-    const state = await getOnboardingState(ORG);
-    expect(state.steps.find((s) => s.id === 'embed_widget')?.done).toBe(false);
-  });
-});
-
-describe('getOnboardingState — invite_team', () => {
-  it('done when ≥1 staff invite exists', async () => {
-    queueState({ inviteCount: 1, activeUserCount: 1 });
-    const state = await getOnboardingState(ORG);
-    expect(state.steps.find((s) => s.id === 'invite_team')?.done).toBe(true);
-  });
-
-  it('done when ≥2 active users', async () => {
-    queueState({ inviteCount: 0, activeUserCount: 2 });
-    const state = await getOnboardingState(ORG);
-    expect(state.steps.find((s) => s.id === 'invite_team')?.done).toBe(true);
-  });
-
-  it('not done with 0 invites and 1 active user (just the owner)', async () => {
-    queueState({ inviteCount: 0, activeUserCount: 1 });
-    const state = await getOnboardingState(ORG);
-    expect(state.steps.find((s) => s.id === 'invite_team')?.done).toBe(false);
-  });
-});
-
-describe('getOnboardingState — aggregates + dismissed', () => {
-  it('reports dismissed and never marks allComplete when steps remain', async () => {
-    queueState({ settings: { businessInfo: {}, onboardingState: { dismissed: true } } });
-    const state = await getOnboardingState(ORG);
-    expect(state.dismissed).toBe(true);
-    expect(state.totalCount).toBe(6);
-    // Only account_created is done by default.
-    expect(state.completedCount).toBe(1);
-    expect(state.allComplete).toBe(false);
-  });
-
-  it('allComplete when every step is satisfied', async () => {
-    queueState({
-      settings: {
-        companyName: 'Acme',
-        businessInfo: { phone: '555', businessHours: '8–5' },
-        onboardingState: { embedViewed: true },
-      },
-      pricebookCount: 3,
-      inviteCount: 2,
-      activeUserCount: 4,
+describe("patchOnboarding", () => {
+  it("demo: one SELECT, no upsert, the body applied onto the parsed state", async () => {
+    queue.push({ rows: [{ onboarding_state: { dismissedAt: "2026-10-02T00:00:00.000Z", flags: {} } }] });
+    const s = await patchOnboarding(
+      ORG,
+      { dismissed: true, completedSeen: true, flags: { embedCopied: true } },
+      { demo: true, now: NOW },
+    );
+    expect(executed).toHaveLength(1);
+    const q = render(executed[0]);
+    expect(q.sql.replace(/\s+/g, " ")).toBe("SELECT onboarding_state FROM organization_settings WHERE organization_id = $1");
+    expect(q.params).toEqual([ORG]);
+    expect(s).toEqual({
+      dismissedAt: "2026-10-02T00:00:00.000Z",
+      completedSeenAt: NOW_ISO,
+      firstCompleted: {},
+      flags: { embedCopied: true },
     });
-    const state = await getOnboardingState(ORG);
-    expect(state.completedCount).toBe(6);
-    expect(state.allComplete).toBe(true);
   });
 
-  it('degrades safely when the settings row is missing', async () => {
-    queueState({ settings: null });
-    const state = await getOnboardingState(ORG);
-    // account_created done; everything else not.
-    expect(state.completedCount).toBe(1);
-    expect(state.dismissed).toBe(false);
+  it("demo with no settings row returns the body applied onto an empty state", async () => {
+    queue.push({ rows: [] });
+    const s = await patchOnboarding(ORG, { dismissed: true }, { demo: true, now: NOW });
+    expect(s).toEqual({ dismissedAt: NOW_ISO, firstCompleted: {}, flags: {} });
   });
-});
 
-describe('updateOnboardingFlags', () => {
-  it('merges the update onto the stored flags', async () => {
-    // current onboardingState read
-    selectQueue.push([{ onboardingState: { embedViewed: true } }]);
-    await updateOnboardingFlags(ORG, { dismissed: true });
-    expect(updateCalls).toHaveLength(1);
-    const set = updateCalls[0]!.set as { onboardingState: unknown };
-    expect(set.onboardingState).toEqual({
-      embedViewed: true,
-      dismissed: true,
-    });
+  it("builds the flags statement with top and parses RETURNING", async () => {
+    queue.push({ rows: [{ onboarding_state: { dismissedAt: NOW_ISO, flags: { embedCopied: true } } }] });
+    const s = await patchOnboarding(ORG, { dismissed: true, flags: { embedCopied: true } }, { demo: false, now: NOW });
+    expect(executed).toHaveLength(1);
+    const q = render(executed[0]);
+    expect(q.sql).toContain("INSERT INTO organization_settings");
+    expect(q.sql).not.toContain("techSignedInAt");
+    expect(q.params).toContain(ORG);
+    expect(q.params).toContain(JSON.stringify({ dismissedAt: NOW_ISO }));
+    expect(q.params).toContain(JSON.stringify({ embedCopied: true }));
+    expect(s).toEqual({ dismissedAt: NOW_ISO, firstCompleted: {}, flags: { embedCopied: true } });
+  });
+
+  it("completedSeen only: empty flags, completedSeenAt in top", async () => {
+    queue.push({ rows: [{ onboarding_state: { completedSeenAt: NOW_ISO } }] });
+    await patchOnboarding(ORG, { completedSeen: true }, { demo: false, now: NOW });
+    const params = render(executed[0]).params;
+    expect(params).toContain(JSON.stringify({ completedSeenAt: NOW_ISO }));
+    expect(params).toContain(JSON.stringify({}));
   });
 });
