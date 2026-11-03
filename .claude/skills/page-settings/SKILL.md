@@ -90,3 +90,9 @@ single global form). FAQs use separate create/update/delete helpers.
 src/app/api/admin/integrations/google src/app/api/admin/integrations/housecall`
 · visual via the admin-pages recipe at `/admin/settings` · check each tab
 renders without console errors.
+
+**Setup guide:** `?tab=…&from=setup` shows a `BackToGuideBanner` on the branding,
+business and embed tabs. The page wraps those panels' `onSave` (`saveFromSetup`):
+a successful save on the banner's own tab sets the banner to "Done" and calls
+`refreshOnboarding({ force: true })`. The embed panel also PATCHes
+`flags.embedCopied` when a revealed publishable key is copied. See page-setup.

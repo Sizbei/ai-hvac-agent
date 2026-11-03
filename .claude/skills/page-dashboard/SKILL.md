@@ -16,7 +16,7 @@ components `src/components/admin/dashboard/dashboard-greeting.tsx`
 · `src/components/admin/dashboard/dashboard-stat-cards.tsx`
 · `src/components/admin/dashboard/dashboard-list-card.tsx`
 · `src/components/admin/dashboard/recent-conversations-card.tsx`
-· `src/components/admin/onboarding/onboarding-checklist.tsx`
+· `src/components/admin/onboarding/setup-card.tsx`
 · `src/components/admin/request-detail-sheet.tsx`
 · tables `serviceRequests`, `users`
 
@@ -65,3 +65,8 @@ without either awaiting inside the batch array).
 
 **Verify changes:** `npx vitest run src/lib/admin/queries.test.ts` (covers
 getDashboardStats and related helpers). Visual via the admin-pages skill recipe.
+
+**Setup card:** `setup-card.tsx` (data from the onboarding store, see page-setup)
+replaces the old checklist. It shows progress and Up next, hides on
+`dismissedAt`/`completedSeenAt`, and for the demo org keeps its dismiss in
+`sessionStorage` only.

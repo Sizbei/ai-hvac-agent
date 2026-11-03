@@ -84,3 +84,13 @@ error copy ("Couldn't save X. Please try again."), never err.message or
 - FROZEN safety text in `src/lib/ai` prompts and the guardrail regexes in
   `src/lib/ai/output-guardrail.ts` must not be touched (chat streaming's
   safety proof depends on the regex shape — see page-chat skill).
+
+## Setup guide recipes
+
+- Deep link that opens a dialog: `useOpenFromParam(key, allowedValues, open)` from
+  `src/hooks/use-open-from-param.ts`. Declare it BEFORE `useUrlFilterSync` so it
+  reads the URL before that hook rewrites it. It returns `{ fromSetup }` for the
+  `BackToGuideBanner`. Only whitelisted values open anything.
+- Throwaway orgs for probes/screenshots are SQL-only: `createOrgCore` via a
+  temporary `probe.mts` under `NODE_OPTIONS=--conditions=react-server`, rows by
+  SQL, one `DELETE FROM organizations`. Full recipe in page-setup.

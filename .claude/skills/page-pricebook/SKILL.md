@@ -46,3 +46,7 @@ Search is debounced 300ms. Filters persist to URL (?q=&type=&sort=&inactive=&lab
 
 **Verify changes:** `npx vitest run src/lib/admin/pricebook-list-helpers.test.ts
 src/lib/admin/pricebook-queries.test.ts` · visual via admin-pages recipe.
+
+**Setup guide:** `?new=1&from=setup` opens the add-item dialog and shows the
+`pricebook` banner; saving sets it to "Done" and refreshes the guide. See
+page-setup.

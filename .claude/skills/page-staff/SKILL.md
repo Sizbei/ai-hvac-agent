@@ -66,3 +66,9 @@ written by the tech app (`/api/tech/time`, status taps), never here.
 
 **Verify changes:** `npx vitest run src/lib/admin/invites.test.ts` ·
 visual via the admin-pages recipe at `/admin/staff`.
+
+**Setup guide deep links:** `?new=technician` opens the technician form,
+`?new=invite` opens the invite dialog (both with `from=setup`, via
+`useOpenFromParam`). The page shows `BackToGuideBanner` for `add_technician`;
+the invite dialog's `onSuccess(role)` sets the "invite" banner event only for
+the technician role. The form dialog title is "Add staff member" (create) or "Edit staff member". See page-setup.

@@ -156,3 +156,8 @@ visits #2+ yet (M2).
 · `src/lib/admin/url-filters.test.ts`. Visual: admin-pages recipe; apply a
 status filter and confirm the URL updates; navigate away and back, confirm
 filters restore.
+
+**Setup guide:** `?new=1&from=setup` opens the New request dialog with the
+schedule panel already open (`initialScheduleOpen` on `request-create-dialog.tsx`,
+set only for the deep-link open) and shows the `book_first_request` banner. See
+page-setup.

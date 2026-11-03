@@ -139,3 +139,10 @@ server-side from the pricebook at add time — client-sent cost values are ignor
 - `npx vitest run src/components/tech/tech-status-confirm.test.ts`
 - `npx vitest run src/lib/tech/ownership.test.ts src/lib/tech/status-actions.test.ts src/lib/tech/status-writes.test.ts src/lib/tech/time-entry-sql.test.ts src/lib/tech/visit-range.test.ts`
 - Gate: `npx tsc --noEmit`
+
+**Setup guide hook:** `createTechSession` (`src/lib/auth/tech-session.ts`) writes
+`flags.techSignedInAt` write-once via `after()` (`flagsStatementSql` with
+`guardTechSignedIn`), skipped for the demo org; failures only log. That flag is
+what completes the `tech_sign_in` step. `scripts/agent/mint-tech-session.mjs`
+signs the cookie directly and BYPASSES this hook, so a minted session never
+completes the step. See page-setup.
