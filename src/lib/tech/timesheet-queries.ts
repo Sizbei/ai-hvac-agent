@@ -5,9 +5,8 @@
  * tech's snapshotted hourly rate) rolls into the admin invoice's actual-vs-
  * estimated margin (margin = revenue − actual materials − actual labor).
  *
- * Every clock mutation is scoped to BOTH the assigned tech (assignedTo ==
- * techUserId) AND the org (withTenant) — a tech may only clock their OWN job.
- * The assignee+tenant guard mirrors src/lib/tech/field-queries.ts exactly.
+ * Every clock mutation is scoped to the org (withTenant) and guarded by the
+ * ownership rule in src/lib/tech/ownership.ts.
  *
  * Money is integer cents; minutes are integers. The labor RATE is snapshotted
  * from the user's labor_rate_cents AT CLOCK-OUT (fallback 0) so a later rate
@@ -300,7 +299,7 @@ export async function getOpenGeneralEntry(
 
 export type CloseGeneralResult =
   | { readonly ok: true; readonly id: string; readonly minutes: number }
-  | { readonly ok: false; readonly reason: "no_open_entry" };
+  | { readonly ok: false; readonly reason: "no_open_entry" | "not_open" };
 
 /** Stop the general clock: sets minutes, leaves labor cost NULL and the rate 0. */
 export async function closeGeneralEntry(
@@ -313,7 +312,7 @@ export async function closeGeneralEntry(
   }
   const clockOutAt = new Date();
   const minutes = minutesBetween(open.clockInAt, clockOutAt);
-  await db.batch([
+  const [updated] = await db.batch([
     db
       .update(technicianTimeEntries)
       .set({ clockOutAt, minutes, laborRateCents: 0, updatedAt: new Date() })
@@ -324,7 +323,10 @@ export async function closeGeneralEntry(
           eq(technicianTimeEntries.id, open.id),
           isNull(technicianTimeEntries.clockOutAt),
         ),
-      ),
+      )
+      .returning({ id: technicianTimeEntries.id }),
   ]);
+  // 0 rows: a concurrent clock-out won the guarded UPDATE.
+  if (updated.length === 0) return { ok: false, reason: "not_open" };
   return { ok: true, id: open.id, minutes };
 }

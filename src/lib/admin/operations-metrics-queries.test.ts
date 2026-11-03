@@ -304,9 +304,11 @@ describe('getOperationsMetrics', () => {
   it('on-site duration counts job entries only (general clock excluded)', async () => {
     queueAll({});
     await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO });
-    const onSiteWhere = JSON.stringify(captured[3]?.where ?? []);
-    expect(onSiteWhere).toContain('technicianTimeEntries.kind');
-    expect(onSiteWhere).toContain('job');
+    const where = (captured[3]?.where ?? []).flat() as { kind?: string; args?: unknown[] }[];
+    const kindEq = where.find(
+      (w) => w?.kind === 'eq' && w.args?.[0] === 'technicianTimeEntries.kind',
+    );
+    expect(kindEq?.args?.[1]).toBe('job');
   });
 
   it('scopes response-time and first-response queries to native requests (synced FP/HCP excluded)', async () => {

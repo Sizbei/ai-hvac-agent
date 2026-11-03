@@ -25,7 +25,7 @@ export function openJobEntrySql(p: {
 
 const MINUTES = sql`GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (now() - t.clock_in_at)) / 60))`;
 
-/** Close the open job entries on the request for the given technicians (all technicians when omitted); `gate` is any boolean SQL the caller supplies. */
+/** Close the open job entries on the request for the given technicians (all technicians when omitted; an empty `technicianIds: []` closes nobody); `gate` is any boolean SQL the caller supplies. */
 export function closeJobEntriesSql(p: {
   organizationId: string;
   requestId: string;

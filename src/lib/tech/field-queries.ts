@@ -3,9 +3,8 @@
  *
  * A technician on-site records the MATERIALS they actually used, posts on-site
  * NOTES, and captures the customer's E-SIGNATURE at sign-off. Every mutation is
- * scoped to BOTH the assigned tech (assignedTo == techUserId) AND the org
- * (withTenant) — a tech may only touch their OWN job. The assignee+tenant guard
- * mirrors src/app/api/tech/jobs/[id]/status/route.ts exactly.
+ * scoped to the org (withTenant) and guarded by the ownership rule in
+ * src/lib/tech/ownership.ts.
  *
  * Money is integer cents. For a catalog material the unit cost/price are
  * SNAPSHOTTED server-side from the pricebook item (client-sent costs are
@@ -419,7 +418,7 @@ export async function recordSignature(
         and(
           eq(serviceRequests.id, serviceRequestId),
           // In-write guard: only an active lead row on a live visit may sign.
-          sql`EXISTS (SELECT 1 FROM appointment_assignments a JOIN appointments p ON p.id = a.appointment_id WHERE p.service_request_id = ${serviceRequests.id} AND a.organization_id = ${organizationId} AND a.technician_id = ${techUserId} AND a.is_lead AND a.status <> 'cancelled' AND p.cancelled_at IS NULL)`,
+          sql`EXISTS (SELECT 1 FROM appointment_assignments a JOIN appointments p ON p.id = a.appointment_id WHERE p.service_request_id = ${serviceRequests.id} AND a.organization_id = ${organizationId} AND a.technician_id = ${techUserId} AND a.is_lead AND a.status <> 'cancelled'::request_status AND p.cancelled_at IS NULL)`,
         )!,
       ),
     )

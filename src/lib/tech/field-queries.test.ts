@@ -277,7 +277,6 @@ describe("getJobTimelineForTech", () => {
     const at2 = new Date("2026-06-24T12:30:00.000Z");
     owned(true);
     mockSelectSeq([
-      
       [
         { fromStatus: null, toStatus: "pending", actorType: "ai", at: at1 },
         { fromStatus: "pending", toStatus: "assigned", actorType: "system", at: at2 },

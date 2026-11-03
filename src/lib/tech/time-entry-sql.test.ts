@@ -19,7 +19,10 @@ describe("openJobEntrySql", () => {
   });
 
   it("gates on the assignment row written in this transaction", () => {
-    expect(flat(q.sql)).toContain("a.xmin = pg_current_xact_id()::xid");
+    const text = flat(q.sql);
+    expect(text).toContain("a.xmin = pg_current_xact_id()::xid");
+    expect(text).toContain("a.id = $5::uuid");
+    expect(text).toMatch(/SELECT [^W]*WHERE EXISTS \(SELECT 1 FROM appointment_assignments a WHERE a\.id = \$5::uuid AND a\.xmin = pg_current_xact_id\(\)::xid\)/);
     expect(q.params).toEqual(["o", "r", "t", "a", "g"]);
   });
 });
@@ -36,6 +39,11 @@ describe("closeJobEntriesSql", () => {
     const q = render(closeJobEntriesSql({ organizationId: "o", requestId: "r" }));
     expect(q.sql).not.toContain("technician_id = ANY");
     expect(q.params).toEqual(["o", "r"]);
+  });
+
+  it("an empty technicianIds list still renders the filter (closes nobody, unlike omitted)", () => {
+    const q = render(closeJobEntriesSql({ organizationId: "o", requestId: "r", technicianIds: [] }));
+    expect(flat(q.sql)).toContain("t.technician_id = ANY($3::uuid[])");
   });
 
   it("binds technician ids as exactly one array param", () => {

@@ -131,6 +131,11 @@ describe("pickActiveAssignment", () => {
 });
 
 describe("techCanReadSql", () => {
+  it("casts the cancelled literal to request_status", () => {
+    const { sql: text } = new PgDialect().sqlToQuery(techCanReadSql("org-1", "tech-1"));
+    expect(text).toContain("a.status <> 'cancelled'::request_status");
+  });
+
   it("is enclosed in its own parentheses so and() cannot split the OR", () => {
     const frag = and(techCanReadSql("org-1", "tech-1"), inArray(serviceRequests.status, ["scheduled", "assigned"]))!;
     const { sql: text } = new PgDialect().sqlToQuery(frag);

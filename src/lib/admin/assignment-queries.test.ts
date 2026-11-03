@@ -84,14 +84,25 @@ describe("addVisitTechnician", () => {
     expect(insert).toContain("cancelled_at IS NULL");
   });
 
-  it("checks time off over the visit window; date-only visits use the business day", async () => {
-    m.getAppointment.mockResolvedValueOnce(visit({ startsAt: null, endsAt: null, scheduledDate: "2026-11-02T15:00:00.000Z" }));
+  it("reads the time-off window from the appointments row inside the INSERT", async () => {
+    m.getAppointment.mockResolvedValueOnce(visit()).mockResolvedValueOnce(visit());
     m.batch.mockResolvedValueOnce([{ rows: [] }, { rows: [{ id: "row" }] }]);
-    m.getAppointment.mockResolvedValueOnce(visit());
     await addVisitTechnician(ORG, RID, AID, TID, ACTOR);
-    const [, , start, end] = m.noTimeOff.mock.calls[0];
-    expect(start).toBe("2026-11-02T05:00:00.000Z"); // business midnight (EST after Nov 1 fall-back)
-    expect(end).toBe("2026-11-03T05:00:00.000Z");
+    const insert = new PgDialect().sqlToQuery(m.executed[1] as SQL).sql.replace(/\s+/g, " ");
+    expect(insert).toContain("FROM appointments p JOIN technician_shifts s");
+    expect(insert).toContain("COALESCE(p.starts_at, p.arrival_window_start,");
+    expect(insert).toContain("COALESCE(p.ends_at, p.arrival_window_end,");
+    expect(insert).toContain("p.scheduled_date AT TIME ZONE $");
+    expect(insert).toContain("s.removes_capacity");
+    expect(m.noTimeOff).not.toHaveBeenCalled();
+  });
+
+  it("wraps the open-assignment OR group in parentheses", async () => {
+    m.getAppointment.mockResolvedValueOnce(visit()).mockResolvedValueOnce(visit());
+    m.batch.mockResolvedValueOnce([{ rows: [] }, { rows: [{ id: "row" }] }]);
+    await addVisitTechnician(ORG, RID, AID, TID, ACTOR);
+    const insert = new PgDialect().sqlToQuery(m.executed[1] as SQL).sql.replace(/\s+/g, " ");
+    expect(insert).toMatch(/AND \(NOT EXISTS \(SELECT 1 FROM appointment_assignments x WHERE x\.appointment_id = \$\d+::uuid\) OR EXISTS \(SELECT 1 FROM appointment_assignments x WHERE x\.appointment_id = \$\d+::uuid AND x\.status IN \([^)]*\)\)\) AND NOT EXISTS/);
   });
 
   describe("classifies a 0-row insert", () => {
@@ -117,6 +128,10 @@ describe("addVisitTechnician", () => {
     });
     it("visit_cancelled", async () => {
       expect(await miss({ cancelledAt: "2026-11-01T00:00:00.000Z" })).toEqual({ reason: "visit_cancelled" });
+    });
+    it("managed_externally for a FieldPulse or Housecall Pro request", async () => {
+      expect(await miss({}, { fp: "fp-1" })).toEqual({ reason: "managed_externally" });
+      expect(await miss({}, { hcp: "hcp-1" })).toEqual({ reason: "managed_externally" });
     });
     it("time_off", async () => {
       m.anyTimeOff.mockResolvedValueOnce(true);

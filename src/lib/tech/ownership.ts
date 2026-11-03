@@ -154,5 +154,5 @@ export async function findReadableJob(
 
 /** EXISTS fragment for set queries over service_requests. Outer parentheses are mandatory (it contains OR). */
 export function techCanReadSql(organizationId: string, techUserId: string): SQL {
-  return sql`(EXISTS (SELECT 1 FROM appointment_assignments a JOIN appointments p ON p.id = a.appointment_id WHERE p.service_request_id = ${serviceRequests.id} AND a.organization_id = ${organizationId} AND a.technician_id = ${techUserId} AND p.cancelled_at IS NULL AND (a.status <> 'cancelled' OR a.en_route_at IS NOT NULL OR a.arrived_at IS NOT NULL OR a.started_at IS NOT NULL OR a.completed_at IS NOT NULL)) OR ${serviceRequests.assignedTo} = ${techUserId})`;
+  return sql`(EXISTS (SELECT 1 FROM appointment_assignments a JOIN appointments p ON p.id = a.appointment_id WHERE p.service_request_id = ${serviceRequests.id} AND a.organization_id = ${organizationId} AND a.technician_id = ${techUserId} AND p.cancelled_at IS NULL AND (a.status <> 'cancelled'::request_status OR a.en_route_at IS NOT NULL OR a.arrived_at IS NOT NULL OR a.started_at IS NOT NULL OR a.completed_at IS NOT NULL)) OR ${serviceRequests.assignedTo} = ${techUserId})`;
 }

@@ -51,6 +51,8 @@ export async function POST(request: NextRequest, { params }: Params) {
           return errorResponse("This request is cancelled.", "REQUEST_CANCELLED", 409);
         case "request_completed":
           return errorResponse("This request is completed.", "REQUEST_COMPLETED", 409);
+        case "managed_externally":
+          return errorResponse("This job is managed in FieldPulse.", "MANAGED_EXTERNALLY", 409);
         case "time_off":
           return errorResponse("That technician is off during this visit.", "TIME_OFF", 409);
       }

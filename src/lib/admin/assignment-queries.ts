@@ -1,11 +1,11 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, sql, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { appointmentAssignments, appointments, serviceRequests } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { OPEN_ASSIGNMENT_STATUSES } from "@/lib/tech/ownership";
-import { activeTechnicianIds, anyTimeOff, getAppointment, noTimeOff } from "./appointment-queries";
+import { activeTechnicianIds, anyTimeOff, getAppointment } from "./appointment-queries";
 import type { AppointmentRecord } from "./appointment-types";
-import { businessDayBounds, businessIsoDate } from "./calendar-time";
+import { BUSINESS_TIME_ZONE, businessDayBounds, businessIsoDate } from "./calendar-time";
 
 // Helpers on ANY visit (including #1): add or remove a technician on a visit.
 // Visit #1's lead is owned by the request->visit trigger; these writes only
@@ -16,7 +16,7 @@ export type AddVisitTechnicianResult =
   | {
       readonly reason:
         | "not_found" | "technician_not_found" | "already_assigned" | "visit_cancelled"
-        | "visit_ended" | "request_cancelled" | "request_completed" | "time_off";
+        | "visit_ended" | "request_cancelled" | "request_completed" | "time_off" | "managed_externally";
     };
 
 export type RemoveVisitTechnicianResult =
@@ -36,6 +36,21 @@ function visitWindow(visit: Visit): { start: Date; end: Date } | null {
   return null;
 }
 
+/**
+ * In-write twin of noTimeOff: the window is read from the appointments row `p`
+ * inside the same statement (span, else arrival window, else the business day),
+ * so a concurrent visit move cannot slip past a JS-side pre-read. No window
+ * (all NULL) means no check.
+ */
+export function noTimeOffForVisit(organizationId: string, technicianId: string, appointmentId: string): SQL {
+  const day = sql`((p.scheduled_date AT TIME ZONE ${BUSINESS_TIME_ZONE})::date)`;
+  const start = sql`COALESCE(p.starts_at, p.arrival_window_start, (${day})::timestamp AT TIME ZONE ${BUSINESS_TIME_ZONE})`;
+  const end = sql`COALESCE(p.ends_at, p.arrival_window_end, (${day} + 1)::timestamp AT TIME ZONE ${BUSINESS_TIME_ZONE})`;
+  return sql`NOT EXISTS (SELECT 1 FROM appointments p JOIN technician_shifts s ON s.organization_id = ${organizationId}::uuid
+    WHERE p.id = ${appointmentId}::uuid AND s.technician_id = ${technicianId}::uuid AND s.removes_capacity
+      AND s.starts_at < ${end} AND s.ends_at > ${start})`;
+}
+
 // Constants, not user input: inlined with enum casts so the IN list is typed.
 const OPEN_LIST = sql.raw(OPEN_ASSIGNMENT_STATUSES.map((s) => `'${s}'::request_status`).join(", "));
 
@@ -52,9 +67,6 @@ export async function addVisitTechnician(
     return { reason: "technician_not_found" };
   }
   const window = visitWindow(visit);
-  const timeOffOk = window
-    ? noTimeOff(organizationId, [technicianId], window.start.toISOString(), window.end.toISOString())
-    : sql`TRUE`;
 
   // The request row is locked FOR SHARE first (a concurrent cancel/complete either
   // commits before the INSERT's checks run, or waits for this batch); the checks
@@ -70,7 +82,7 @@ export async function addVisitTechnician(
         AND (NOT EXISTS (SELECT 1 FROM appointment_assignments x WHERE x.appointment_id = ${appointmentId}::uuid)
           OR EXISTS (SELECT 1 FROM appointment_assignments x WHERE x.appointment_id = ${appointmentId}::uuid
             AND x.status IN (${OPEN_LIST})))
-        AND ${timeOffOk}
+        AND ${noTimeOffForVisit(organizationId, technicianId, appointmentId)}
       ON CONFLICT (appointment_id, technician_id) DO NOTHING
       RETURNING id`),
   ]);
@@ -95,7 +107,7 @@ async function classifyAddMiss(
   if (visit.cancelledAt !== null) return { reason: "visit_cancelled" };
   if (req.status === "cancelled") return { reason: "request_cancelled" };
   if (req.status === "completed") return { reason: "request_completed" };
-  if (req.fp !== null || req.hcp !== null) return { reason: "not_found" };
+  if (req.fp !== null || req.hcp !== null) return { reason: "managed_externally" };
   if (visit.assignments.some((a) => a.technicianId === technicianId)) return { reason: "already_assigned" };
   const hasOpen = visit.assignments.some((a) => (OPEN_ASSIGNMENT_STATUSES as readonly string[]).includes(a.status));
   if (visit.assignments.length > 0 && !hasOpen) return { reason: "visit_ended" };
