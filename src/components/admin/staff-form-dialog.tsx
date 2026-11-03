@@ -223,7 +223,7 @@ export function StaffFormDialog({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>
-            {isEditMode ? 'Edit Staff Member' : 'Add Staff Member'}
+            {isEditMode ? 'Edit staff member' : 'Add staff member'}
           </DialogTitle>
           <DialogDescription>
             {isEditMode

@@ -26,8 +26,8 @@ type InviteRole = 'admin' | 'technician';
 interface InviteDialogProps {
   readonly open: boolean;
   readonly onClose: () => void;
-  /** Called after a successful create so the parent can refetch the list. */
-  readonly onSuccess: () => void;
+  /** Called after a successful create (with the invited role) so the parent can refetch the list. */
+  readonly onSuccess: (role: InviteRole) => void;
   /** Gates the Admin role option — only a super_admin may invite an admin. */
   readonly canInviteAdmins: boolean;
 }
@@ -79,7 +79,7 @@ export function InviteDialog({
         return;
       }
       setInviteUrl(body.data.url as string);
-      onSuccess();
+      onSuccess(role);
     } catch {
       setError('Could not connect to server. Please try again.');
     } finally {

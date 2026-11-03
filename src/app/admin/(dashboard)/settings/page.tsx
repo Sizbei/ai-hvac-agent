@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
   AlertCircle,
@@ -38,11 +38,37 @@ import { JobTypesPanel } from '@/components/admin/settings/job-types-panel';
 import { BillingLinkPanel } from '@/components/admin/settings/billing-link-panel';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
+import { BackToGuideBanner } from '@/components/admin/setup/back-to-guide-banner';
+import { useFromSetup } from '@/hooks/use-open-from-param';
+import { refreshOnboarding } from '@/lib/admin/onboarding-store';
+import type { BannerEvent } from '@/lib/admin/setup-card-view';
+import type { StepId } from '@/lib/admin/onboarding-state';
+import type { OrgConfigUpdate } from '@/lib/admin/org-config-types';
+
+/** The setup step a deep-linked tab belongs to (spec §3). */
+const SETUP_STEP_BY_TAB: Readonly<Record<string, StepId>> = {
+  business: 'phone_hours',
+  branding: 'brand',
+  embed: 'chat_widget',
+};
 
 export default function SettingsPage() {
   useEffect(() => { document.title = 'Settings · Spears Admin'; }, []);
   const settings = useOrgSettings();
   const initialTab = useSearchParams().get('tab') ?? 'branding';
+  const fromSetup = useFromSetup();
+  const [bannerEvent, setBannerEvent] = useState<BannerEvent>(null);
+  const setupStep = fromSetup ? SETUP_STEP_BY_TAB[initialTab] : undefined;
+
+  // Setup-guide tabs: a successful save refreshes the guide so the banner can flip.
+  async function saveFromSetup(update: OrgConfigUpdate): Promise<boolean> {
+    const ok = await settings.saveConfig(update);
+    if (ok && fromSetup) {
+      setBannerEvent('saved');
+      void refreshOnboarding({ force: true });
+    }
+    return ok;
+  }
 
   return (
     <PageShell narrow>
@@ -50,6 +76,8 @@ export default function SettingsPage() {
         title="Settings"
         subtitle="Customize how your AI assistant looks and behaves, which services it offers, and the answers it gives."
       />
+
+      {setupStep && <BackToGuideBanner stepId={setupStep} event={bannerEvent} />}
 
       {settings.error && (
         <Alert variant="destructive">
@@ -113,7 +141,7 @@ export default function SettingsPage() {
           </TabsList>
 
           <TabsContent value="branding" className="mt-6">
-            <BrandingPanel config={settings.config} onSave={settings.saveConfig} />
+            <BrandingPanel config={settings.config} onSave={saveFromSetup} />
           </TabsContent>
           <TabsContent value="services" className="mt-6">
             <ServicesPanel config={settings.config} onSave={settings.saveConfig} />
@@ -127,7 +155,7 @@ export default function SettingsPage() {
           <TabsContent value="business" className="mt-6">
             <BusinessInfoPanel
               config={settings.config}
-              onSave={settings.saveConfig}
+              onSave={saveFromSetup}
             />
           </TabsContent>
           <TabsContent value="faqs" className="mt-6">
@@ -139,7 +167,7 @@ export default function SettingsPage() {
             />
           </TabsContent>
           <TabsContent value="embed" className="mt-6">
-            <EmbedPanel config={settings.config} onSave={settings.saveConfig} />
+            <EmbedPanel config={settings.config} onSave={saveFromSetup} />
           </TabsContent>
           <TabsContent value="limits" className="mt-6">
             <ConversationLimitsPanel

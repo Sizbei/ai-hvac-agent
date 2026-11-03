@@ -9,7 +9,7 @@ import { DashboardStatCards } from '@/components/admin/dashboard/dashboard-stat-
 import { DashboardListCard } from '@/components/admin/dashboard/dashboard-list-card';
 import { RecentConversationsCard } from '@/components/admin/dashboard/recent-conversations-card';
 import { RequestDetailSheet } from '@/components/admin/request-detail-sheet';
-import { OnboardingChecklist } from '@/components/admin/onboarding/onboarding-checklist';
+import { SetupCard } from '@/components/admin/onboarding/setup-card';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
@@ -27,7 +27,7 @@ export default function AdminDashboardPage() {
     <PageShell>
       <DashboardGreeting />
 
-      <OnboardingChecklist />
+      <SetupCard />
 
       {error && (
         <Alert variant="destructive">

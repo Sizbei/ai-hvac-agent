@@ -25,6 +25,7 @@ import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useWidgetKeys } from '@/hooks/use-widget-keys';
 import { adminFetch } from '@/lib/admin/admin-fetch';
+import { invalidateOnboarding } from '@/lib/admin/onboarding-store';
 import type { OrgConfig, OrgConfigUpdate } from '@/lib/admin/org-config-types';
 
 interface EmbedPanelProps {
@@ -93,6 +94,7 @@ export function EmbedPanel({ config, onSave }: EmbedPanelProps) {
       setRevealed(result.plaintext);
       setRevealedType(type);
       setLabel('');
+      if (type === 'publishable') invalidateOnboarding();
     }
   }
 
@@ -109,6 +111,7 @@ export function EmbedPanel({ config, onSave }: EmbedPanelProps) {
     } catch {
       // Best effort: the signal is non-critical.
     }
+    invalidateOnboarding();
   }
 
   async function handleRevoke(id: string): Promise<void> {

@@ -46,6 +46,8 @@ interface RequestCreateDialogProps {
   readonly onOpenChange: (open: boolean) => void;
   /** Called with the new request's id once it is saved. */
   readonly onCreated: (requestId: string) => void;
+  /** Expand the schedule panel when the dialog opens (setup-guide deep link). */
+  readonly initialScheduleOpen?: boolean;
 }
 
 type FieldErrors = Partial<Record<'customer' | 'address' | 'issueType' | 'description', string>>;
@@ -200,7 +202,12 @@ function FieldError({ id, message }: { readonly id: string; readonly message?: s
   );
 }
 
-export function RequestCreateDialog({ open, onOpenChange, onCreated }: RequestCreateDialogProps) {
+export function RequestCreateDialog({
+  open,
+  onOpenChange,
+  onCreated,
+  initialScheduleOpen,
+}: RequestCreateDialogProps) {
   const [draft, setDraft] = useState<CreateRequestDraft>(EMPTY_DRAFT);
   const [pickedCustomer, setPickedCustomer] = useState<CustomerListRecord | null>(null);
   const [newCustomerMode, setNewCustomerMode] = useState(false);
@@ -266,7 +273,7 @@ export function RequestCreateDialog({ open, onOpenChange, onCreated }: RequestCr
   }
 
   function reset(): void {
-    setDraft(EMPTY_DRAFT);
+    setDraft({ ...EMPTY_DRAFT, scheduleOpen: initialScheduleOpen ?? false });
     setPickedCustomer(null);
     setNewCustomerMode(false);
     setSearchInput('');

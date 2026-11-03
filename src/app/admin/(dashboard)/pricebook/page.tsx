@@ -4,6 +4,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Plus, AlertCircle, Search } from 'lucide-react';
 import { usePricebook, useTaxRates, type PricebookSortKey } from '@/hooks/use-pricebook';
 import { useUrlFilterSync } from '@/hooks/use-url-filter-sync';
+import { BackToGuideBanner } from '@/components/admin/setup/back-to-guide-banner';
+import { useOpenFromParam } from '@/hooks/use-open-from-param';
+import { refreshOnboarding } from '@/lib/admin/onboarding-store';
+import type { BannerEvent } from '@/lib/admin/setup-card-view';
 import { PricebookTable } from '@/components/admin/pricebook/pricebook-table';
 import { PricebookFormDialog } from '@/components/admin/pricebook/pricebook-form-dialog';
 import { TaxRatesPanel } from '@/components/admin/pricebook/tax-rates-panel';
@@ -25,6 +29,7 @@ import { Pager } from '@/components/admin/ui/pager';
 import type { PricebookItem } from '@/hooks/use-pricebook';
 
 const ALL_TYPES = 'all';
+const OPEN_VALUES = ['1'] as const;
 const PER_PAGE = 50;
 
 const PRICEBOOK_SORT_OPTIONS: ReadonlyArray<{ value: PricebookSortKey; label: string }> = [
@@ -48,6 +53,11 @@ export default function PricebookPage() {
   const [deactivateError, setDeactivateError] = useState<string | null>(null);
   const [pendingDeactivate, setPendingDeactivate] = useState<PricebookItem | null>(null);
   const [isConfirming, setIsConfirming] = useState(false);
+  const [bannerEvent, setBannerEvent] = useState<BannerEvent>(null);
+
+  // Setup-guide deep link (`?new=1`): declared before useUrlFilterSync so it
+  // reads the URL before that hook's write effect replaces it.
+  const { fromSetup } = useOpenFromParam('new', OPEN_VALUES, () => handleAddClick());
 
   // Persist filters to the URL (shareable links + survives refresh). Page is
   // intentionally NOT persisted. Defaults map to '' so they're dropped from the URL.
@@ -161,6 +171,8 @@ export default function PricebookPage() {
         }
       />
 
+      {fromSetup && <BackToGuideBanner stepId="pricebook" event={bannerEvent} />}
+
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 sm:max-w-md">
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -256,7 +268,13 @@ export default function PricebookPage() {
       <PricebookFormDialog
         open={formOpen}
         onClose={() => setFormOpen(false)}
-        onSuccess={() => void refetch()}
+        onSuccess={() => {
+          void refetch();
+          if (fromSetup) {
+            setBannerEvent('saved');
+            void refreshOnboarding({ force: true });
+          }
+        }}
         editing={editing}
       />
 

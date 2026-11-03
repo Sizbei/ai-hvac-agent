@@ -2,6 +2,10 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useUrlFilterSync } from '@/hooks/use-url-filter-sync';
+import { BackToGuideBanner } from '@/components/admin/setup/back-to-guide-banner';
+import { useOpenFromParam } from '@/hooks/use-open-from-param';
+import { refreshOnboarding } from '@/lib/admin/onboarding-store';
+import type { BannerEvent } from '@/lib/admin/setup-card-view';
 import { AlertCircle, Plus, Search } from 'lucide-react';
 import { useAdminRequests } from '@/hooks/use-admin-requests';
 import { RequestFilters } from '@/components/admin/request-filters';
@@ -17,6 +21,7 @@ import { Pager } from '@/components/admin/ui/pager';
 import type { RequestSortKey } from '@/lib/admin/types';
 
 const PER_PAGE = 50;
+const OPEN_VALUES = ['1'] as const;
 
 export default function AdminRequestsPage() {
   const [statusFilter, setStatusFilter] = useState<string>('');
@@ -29,6 +34,16 @@ export default function AdminRequestsPage() {
   const [page, setPage] = useState<number>(1);
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [presetSchedule, setPresetSchedule] = useState(false);
+  const [bannerEvent, setBannerEvent] = useState<BannerEvent>(null);
+
+  // Setup-guide deep link (`?new=1`): declared before useUrlFilterSync so it
+  // reads the URL before that hook's write effect replaces it. Opens the New
+  // request dialog with the schedule panel expanded.
+  const { fromSetup } = useOpenFromParam('new', OPEN_VALUES, () => {
+    setPresetSchedule(true);
+    setCreateOpen(true);
+  });
 
   useEffect(() => { document.title = 'Requests · Spears Admin'; }, []);
 
@@ -97,6 +112,8 @@ export default function AdminRequestsPage() {
         }
       />
 
+      {fromSetup && <BackToGuideBanner stepId="book_first_request" event={bannerEvent} />}
+
       {error && (
         <Alert variant="destructive">
           <AlertCircle className="size-4" />
@@ -157,10 +174,18 @@ export default function AdminRequestsPage() {
 
       <RequestCreateDialog
         open={createOpen}
-        onOpenChange={setCreateOpen}
+        initialScheduleOpen={presetSchedule}
+        onOpenChange={(open) => {
+          setCreateOpen(open);
+          if (!open) setPresetSchedule(false);
+        }}
         onCreated={(id) => {
           void refetch();
           setSelectedRequestId(id);
+          if (fromSetup) {
+            setBannerEvent('saved');
+            void refreshOnboarding({ force: true });
+          }
         }}
       />
 

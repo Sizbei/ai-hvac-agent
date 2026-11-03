@@ -17,6 +17,12 @@ import type { StaffRecord } from '@/lib/admin/types';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 import { SectionDivider } from '@/components/admin/ui/section-divider';
+import { BackToGuideBanner } from '@/components/admin/setup/back-to-guide-banner';
+import { useOpenFromParam } from '@/hooks/use-open-from-param';
+import { refreshOnboarding } from '@/lib/admin/onboarding-store';
+import type { BannerEvent } from '@/lib/admin/setup-card-view';
+
+const STAFF_OPEN_VALUES = ['technician', 'invite'] as const;
 
 export default function StaffPage() {
   useEffect(() => { document.title = 'Staff · Spears Admin'; }, []);
@@ -38,6 +44,17 @@ export default function StaffPage() {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [timeOffTarget, setTimeOffTarget] = useState<StaffRecord | null>(null);
   const [timesheetsTarget, setTimesheetsTarget] = useState<StaffRecord | null>(null);
+  const [bannerEvent, setBannerEvent] = useState<BannerEvent>(null);
+  const { fromSetup } = useOpenFromParam('new', STAFF_OPEN_VALUES, (v) => {
+    if (v === 'technician') handleAddClick();
+    else setInviteOpen(true);
+  });
+
+  function noteSetupEvent(event: Exclude<BannerEvent, null>): void {
+    if (!fromSetup) return;
+    setBannerEvent(event);
+    void refreshOnboarding({ force: true });
+  }
 
   function handleAddClick(): void {
     setEditing(null);
@@ -56,6 +73,12 @@ export default function StaffPage() {
 
   function handleSuccess(): void {
     void refetch();
+    noteSetupEvent('saved');
+  }
+
+  function handleInviteSuccess(role: 'admin' | 'technician'): void {
+    void refetchInvites();
+    if (role === 'technician') noteSetupEvent('invite');
   }
 
   return (
@@ -76,6 +99,8 @@ export default function StaffPage() {
           </>
         }
       />
+
+      {fromSetup && <BackToGuideBanner stepId="add_technician" event={bannerEvent} />}
 
       {error && (
         <Alert variant="destructive">
@@ -105,7 +130,7 @@ export default function StaffPage() {
       <InviteDialog
         open={inviteOpen}
         onClose={() => setInviteOpen(false)}
-        onSuccess={() => void refetchInvites()}
+        onSuccess={handleInviteSuccess}
         canInviteAdmins={canManageAdmins}
       />
 
