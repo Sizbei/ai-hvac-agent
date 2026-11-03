@@ -312,20 +312,18 @@ export async function closeGeneralEntry(
   }
   const clockOutAt = new Date();
   const minutes = minutesBetween(open.clockInAt, clockOutAt);
-  const [updated] = await db.batch([
-    db
-      .update(technicianTimeEntries)
-      .set({ clockOutAt, minutes, laborRateCents: 0, updatedAt: new Date() })
-      .where(
-        withTenant(
-          technicianTimeEntries,
-          organizationId,
-          eq(technicianTimeEntries.id, open.id),
-          isNull(technicianTimeEntries.clockOutAt),
-        ),
-      )
-      .returning({ id: technicianTimeEntries.id }),
-  ]);
+  const updated = await db
+    .update(technicianTimeEntries)
+    .set({ clockOutAt, minutes, laborRateCents: 0, updatedAt: new Date() })
+    .where(
+      withTenant(
+        technicianTimeEntries,
+        organizationId,
+        eq(technicianTimeEntries.id, open.id),
+        isNull(technicianTimeEntries.clockOutAt),
+      ),
+    )
+    .returning({ id: technicianTimeEntries.id });
   // 0 rows: a concurrent clock-out won the guarded UPDATE.
   if (updated.length === 0) return { ok: false, reason: "not_open" };
   return { ok: true, id: open.id, minutes };

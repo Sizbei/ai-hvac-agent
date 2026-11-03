@@ -5,19 +5,20 @@
  * (one batch each); the rules live in status-actions.ts (pure).
  *
  * Pre-checks: readable job (404) → native (409) → the caller's row (404) →
- * every row → active visit → resolve.
+ * expectedStatus vs the server-read row (409 STALE) → every row → active
+ * visit → resolve. The CAS always uses the server-read row.
  */
 import { NextRequest, after } from "next/server";
 import { z } from "zod";
 import { getTechSession } from "@/lib/auth/tech-session";
 import {
-  findAllAssignments, findReadableJob, findTechAssignments, hasProgress, isOpen,
-  pickActiveAssignment, pickActiveVisit, type TechAssignmentRow,
+  findAllAssignments, findReadableJob, findTechAssignments, hasOtherOpenRows, hasProgress, isOpen,
+  pickActiveVisit, type TechAssignmentRow,
 } from "@/lib/tech/ownership";
-import { allowedActions, resolveTechAction, TECH_ACTIONS, type Blocker, type TechAction } from "@/lib/tech/status-actions";
+import { allowedActions, resolveTechAction, TECH_ACTIONS, type Blocker } from "@/lib/tech/status-actions";
 import { applyTechAction, closeOutBlockers, closeOutRequest, holdVisit, isDeadlock } from "@/lib/tech/status-writes";
 import { createReviewRequest } from "@/lib/reviews/review-queries";
-import { HOLD_REASONS, MANUAL_TARGET_STATUSES, type RequestStatus } from "@/lib/admin/request-status";
+import { HOLD_REASONS, type RequestStatus } from "@/lib/admin/request-status";
 import { requestStatusEnum } from "@/lib/db/schema";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { successResponse, errorResponse, readJsonBody } from "@/lib/api-response";
@@ -26,10 +27,8 @@ import { logger } from "@/lib/logger";
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const bodySchema = z.object({
-  appointmentId: z.uuid().optional(),
-  action: z.enum(TECH_ACTIONS).optional(),
-  // Legacy body (the current UI until Task 6).
-  status: z.enum(MANUAL_TARGET_STATUSES).optional(),
+  appointmentId: z.uuid(),
+  action: z.enum(TECH_ACTIONS),
   expectedStatus: z.enum(requestStatusEnum.enumValues).optional(),
   holdReason: z.enum(HOLD_REASONS).optional(),
   followUpDate: z.string().datetime().optional(),
@@ -37,17 +36,9 @@ const bodySchema = z.object({
 
 const STALE = () => errorResponse("This job changed. Refresh and try again.", "STALE", 409);
 const NOT_STARTED = () => errorResponse("Tap Working before marking done.", "REQUEST_NOT_STARTED", 409);
-
-/** Legacy `{ status }`: on_hold is a pause; done from the active lead with nobody else open is a close-out. */
-function legacyAction(status: RequestStatus, row: TechAssignmentRow, all: readonly TechAssignmentRow[], activeVisitId: string | null): TechAction {
-  if (status === "on_hold") return "pause";
-  if (status === "completed") {
-    const activeLead = row.isLead && row.appointmentId === activeVisitId;
-    const othersOpen = all.some((r) => r.assignmentId !== row.assignmentId && isOpen(r.status));
-    return activeLead && !othersOpen ? "close_out" : "completed";
-  }
-  return status as TechAction;
-}
+const NOT_YOURS = () => errorResponse("This job isn't yours to update.", "NOT_FOUND", 404);
+const INVALID_TRANSITION = () =>
+  errorResponse("That change isn't allowed right now. Refresh and try again.", "INVALID_TRANSITION", 409);
 
 export async function POST(
   request: NextRequest,
@@ -64,7 +55,7 @@ export async function POST(
       RATE_LIMITS.adminMutation.windowMs,
     );
     if (!rate.allowed) {
-      return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
+      return errorResponse("Too many requests. Wait a moment and try again.", "RATE_LIMITED", 429);
     }
 
     const { id } = await params;
@@ -73,13 +64,10 @@ export async function POST(
     }
     const body = await readJsonBody(request);
     const parsed = body.ok ? bodySchema.safeParse(body.data) : null;
-    if (!parsed?.success || (!parsed.data.action && !parsed.data.status)) {
-      return errorResponse("Invalid status", "INVALID_INPUT", 400);
+    if (!parsed?.success) {
+      return errorResponse("That isn't a technician action.", "INVALID_INPUT", 400);
     }
     const input = parsed.data;
-    if (!input.action && (input.status === "cancelled" || input.status === "scheduled")) {
-      return errorResponse("Technicians can't set that status.", "NOT_TECH_TARGET", 400);
-    }
     if (input.action === "on_hold" && !input.holdReason) {
       return errorResponse("Pick a reason for the hold.", "INVALID_INPUT", 400);
     }
@@ -87,24 +75,20 @@ export async function POST(
     const org = session.organizationId;
     const me = session.userId;
     const job = await findReadableJob(org, me, id);
-    if (!job) {
-      return errorResponse("Job not found or not assigned to you", "NOT_FOUND", 404);
-    }
+    if (!job) return NOT_YOURS();
     if (!job.native) {
       return errorResponse("This job is managed in FieldPulse.", "MANAGED_EXTERNALLY", 409);
     }
     const [mine, all] = await Promise.all([findTechAssignments(org, me, id), findAllAssignments(org, id)]);
     const active = pickActiveVisit(all);
     const activeVisitId = active?.appointmentId ?? null;
-    const row = input.appointmentId
-      ? mine.find((r) => r.appointmentId === input.appointmentId)
-      : pickActiveAssignment(mine, activeVisitId);
-    if (!row) {
-      return errorResponse("Job not found or not assigned to you", "NOT_FOUND", 404);
-    }
+    const row = mine.find((r) => r.appointmentId === input.appointmentId);
+    if (!row) return NOT_YOURS();
+    // expectedStatus never widens the CAS: a mismatch is stale, the write uses the server-read row.
+    if (input.expectedStatus && input.expectedStatus !== row.status) return STALE();
 
-    const action = input.action ?? legacyAction(input.status!, row, all, activeVisitId);
-    const base = { requestStatus: job.status, activeVisitId, activeLeadId: active?.leadTechnicianId ?? null, native: true };
+    const action = input.action;
+    const base = { requestStatus: job.status, activeVisitId, otherOpenRows: hasOtherOpenRows(all, row.assignmentId), native: true };
     const resolved = resolveTechAction({ ...base, action, row });
 
     // 200 body: the caller's row and request after the write.
@@ -127,21 +111,17 @@ export async function POST(
             return errorResponse("Only the lead technician can do that.", "NOT_LEAD", 403);
           case "managed_externally":
             return errorResponse("This job is managed in FieldPulse.", "MANAGED_EXTERNALLY", 409);
-          case "not_tech_target":
-            return errorResponse("Technicians can't set that status.", "NOT_TECH_TARGET", 400);
           case "request_not_started":
           case "not_started_row":
             return NOT_STARTED();
           case "invalid_transition":
-            return errorResponse("That status change isn't allowed from the current state", "INVALID_TRANSITION", 409);
+            return INVALID_TRANSITION();
         }
-        break;
       case "noop":
         return respond(row, job.status, row.isLead && row.appointmentId !== activeVisitId);
       case "write":
       case "request_only": {
-        const casRow = input.expectedStatus ? { ...row, status: input.expectedStatus } : row;
-        const result = await applyTechAction({ organizationId: org, techUserId: me, requestId: id, row: casRow, resolved, requestStatus: job.status, activeVisitId });
+        const result = await applyTechAction({ organizationId: org, techUserId: me, requestId: id, row, resolved, requestStatus: job.status, activeVisitId });
         if (!result.ok) return STALE();
         const stamp = resolved.kind === "write" ? resolved.stamp : null;
         const rowAfter = { ...row, status: result.assignmentStatus, ...(stamp ? { [stamp]: row[stamp] ?? new Date() } : {}) };
@@ -154,11 +134,10 @@ export async function POST(
           holdReason: input.holdReason ?? null,
           followUpDate: input.followUpDate ? new Date(input.followUpDate) : null,
           requestStatus: job.status,
+          leadAssignmentId: row.assignmentId,
         });
         if (!result.ok) {
-          return result.reason === "stale"
-            ? STALE()
-            : errorResponse("That status change isn't allowed from the current state", "INVALID_TRANSITION", 409);
+          return result.reason === "stale" ? STALE() : INVALID_TRANSITION();
         }
         const ended: RequestStatus = isOpen(row.status) ? (hasProgress(row) ? "completed" : "cancelled") : row.status;
         logger.info({ serviceRequestId: id, technicianId: me, action }, "Technician put the visit on hold");
@@ -190,7 +169,6 @@ export async function POST(
         });
       }
     }
-    return errorResponse("That status change isn't allowed from the current state", "INVALID_TRANSITION", 409);
   } catch (error) {
     if (isDeadlock(error)) return STALE();
     logger.error({ error }, "Failed to advance job status");

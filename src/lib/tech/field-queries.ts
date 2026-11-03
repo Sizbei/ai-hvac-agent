@@ -24,6 +24,8 @@ import { withTenant } from "@/lib/db/tenant";
 import {
   findAllAssignments,
   findReadableJob,
+  hasOtherOpenRows,
+  OPEN_ASSIGNMENT_STATUSES,
   pickActiveAssignment,
   pickActiveVisit,
   techCanReadSql,
@@ -32,7 +34,6 @@ import {
 import { allowedActions, type Blocker, type TechAction } from "@/lib/tech/status-actions";
 import { closeOutBlockers } from "@/lib/tech/status-writes";
 import { decrypt } from "@/lib/crypto";
-import type { RequestStatus } from "@/lib/admin/request-status";
 import { getPricebookItemById } from "@/lib/admin/pricebook-queries";
 import { adjustStock } from "@/lib/admin/inventory-queries";
 import { rollUpActualMaterialsCost } from "@/lib/admin/margin";
@@ -67,11 +68,9 @@ export interface TechJobSummary {
   readonly accessNotes: string | null;
   /** The caller's row this summary is about (null for a legacy assigned_to-only reader). */
   readonly assignment: TechAssignmentRow | null;
-  readonly isActiveLead: boolean;
   readonly allowedActions: readonly TechAction[];
   readonly blockers: readonly Blocker[];
   readonly native: boolean;
-  readonly requestStatus: RequestStatus;
 }
 
 /**
@@ -130,11 +129,12 @@ export async function getTechJobSummary(
   // A ?visit= that is not one of the caller's visits on this job is not theirs.
   if (appointmentId && !assignment) return null;
 
-  const requestStatus = row.status;
   const native = row.fieldpulseJobId === null && row.hcpJobId === null;
-  const isActiveLead = assignment !== null && assignment.isLead && assignment.appointmentId === activeVisitId;
   const actions = assignment
-    ? allowedActions({ row: assignment, requestStatus, activeVisitId, activeLeadId: active?.leadTechnicianId ?? null, native })
+    ? allowedActions({
+        row: assignment, requestStatus: row.status, activeVisitId,
+        otherOpenRows: hasOtherOpenRows(all, assignment.assignmentId), native,
+      })
     : [];
   const blockers: readonly Blocker[] = !native
     ? [{ kind: "managed_externally" }]
@@ -158,11 +158,9 @@ export async function getTechJobSummary(
     address: safeDecrypt(row.addressEncrypted),
     accessNotes: row.accessNotes,
     assignment,
-    isActiveLead,
     allowedActions: actions,
     blockers,
     native,
-    requestStatus,
   };
 }
 
@@ -379,6 +377,9 @@ export async function getActualMaterialsCostCents(
   return rollUpActualMaterialsCost(rows);
 }
 
+// Constants, not user input: inlined with enum casts so the IN list is typed.
+const SIGNABLE_IN = sql.raw(`(${[...OPEN_ASSIGNMENT_STATUSES, "completed"].map((st) => `'${st}'::request_status`).join(", ")})`);
+
 export type RecordSignatureResult =
   | { readonly ok: true }
   | { readonly ok: false; readonly reason: "not_owned" };
@@ -417,8 +418,8 @@ export async function recordSignature(
         organizationId,
         and(
           eq(serviceRequests.id, serviceRequestId),
-          // In-write guard: only an active lead row on a live visit may sign.
-          sql`EXISTS (SELECT 1 FROM appointment_assignments a JOIN appointments p ON p.id = a.appointment_id WHERE p.service_request_id = ${serviceRequests.id} AND a.organization_id = ${organizationId} AND a.technician_id = ${techUserId} AND a.is_lead AND a.status <> 'cancelled'::request_status AND p.cancelled_at IS NULL)`,
+          // In-write guard: a lead row that is not cancelled (open or completed) on a live visit.
+          sql`EXISTS (SELECT 1 FROM appointment_assignments a JOIN appointments p ON p.id = a.appointment_id WHERE p.service_request_id = ${serviceRequests.id} AND a.organization_id = ${organizationId} AND a.technician_id = ${techUserId} AND a.is_lead AND a.status IN ${SIGNABLE_IN} AND p.cancelled_at IS NULL)`,
         )!,
       ),
     )

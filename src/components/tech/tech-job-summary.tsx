@@ -127,6 +127,8 @@ export function TechJobSummary({
           onStatusChanged?.();
         } else {
           const message = body?.error?.message ?? "Couldn't update this request. Please try again.";
+          // The job moved under us: refresh so the buttons match what the server allows now.
+          if (body?.error?.code === 'STALE') await load();
           const refused = body?.error?.details?.blockers;
           const blockedNow =
             body?.error?.code === 'CLOSE_OUT_BLOCKED' && Array.isArray(refused)
@@ -259,7 +261,10 @@ export function TechJobSummary({
           <>
             {showRequestBehind(job.blockers, requestBehind) && (
               <p className="rounded-md border border-warning-border bg-warning-light px-3 py-2.5 text-[15px]">
-                Your status is saved; the request is waiting on an earlier visit.
+                {/* "saved" only when the last response said so; on load it is just waiting. */}
+                {requestBehind
+                  ? 'Your status is saved; the request is waiting on an earlier visit.'
+                  : 'Waiting on an earlier visit.'}
               </p>
             )}
             {actions.length > 0 && (

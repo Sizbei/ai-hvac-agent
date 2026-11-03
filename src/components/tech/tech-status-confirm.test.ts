@@ -2,57 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
   actionNeedsSheet,
   buildActionSheetCopy,
-  buildStatusConfirmCopy,
   describeBlocker,
   holdReasonLabel,
-  isTerminalStatus,
+  labelAssignmentStatus,
   relevantBlockers,
   showRequestBehind,
   techStatusLabel,
 } from './tech-status-confirm';
 import type { Blocker } from '@/lib/tech/status-actions';
-
-describe('isTerminalStatus', () => {
-  it('is true for cancelled', () => {
-    expect(isTerminalStatus('cancelled')).toBe(true);
-  });
-
-  it('is true for completed', () => {
-    expect(isTerminalStatus('completed')).toBe(true);
-  });
-
-  it('is false for the non-terminal manual targets', () => {
-    expect(isTerminalStatus('scheduled')).toBe(false);
-    expect(isTerminalStatus('in_progress')).toBe(false);
-    expect(isTerminalStatus('on_hold')).toBe(false);
-  });
-
-  it('is false for an unrecognized status', () => {
-    expect(isTerminalStatus('pending')).toBe(false);
-    expect(isTerminalStatus('assigned')).toBe(false);
-  });
-});
-
-describe('buildStatusConfirmCopy', () => {
-  it('builds copy for cancelled', () => {
-    const copy = buildStatusConfirmCopy('cancelled');
-    expect(copy.question).toBe("Mark this request cancelled? This can't be undone.");
-    expect(copy.confirmLabel).toBe('Yes, mark cancelled');
-    expect(copy.cancelLabel).toBe('No, go back');
-  });
-
-  it('builds copy for completed', () => {
-    const copy = buildStatusConfirmCopy('completed');
-    expect(copy.question).toBe("Mark this request completed? This can't be undone.");
-    expect(copy.confirmLabel).toBe('Yes, mark completed');
-    expect(copy.cancelLabel).toBe('No, go back');
-  });
-
-  it('humanizes a snake_case status', () => {
-    const copy = buildStatusConfirmCopy('on_hold');
-    expect(copy.question).toContain('on hold');
-  });
-});
 
 describe('techStatusLabel', () => {
   it('gives field wording to the new taps and keeps humanized defaults', () => {
@@ -60,11 +17,6 @@ describe('techStatusLabel', () => {
     expect(techStatusLabel('arrived')).toBe("I've arrived");
     expect(techStatusLabel('in_progress')).toBe('In progress');
     expect(techStatusLabel('completed')).toBe('Done');
-  });
-
-  it('does not route the new taps through the terminal confirm gate', () => {
-    expect(isTerminalStatus('en_route')).toBe(false);
-    expect(isTerminalStatus('arrived')).toBe(false);
   });
 });
 
@@ -85,9 +37,10 @@ describe('actionNeedsSheet', () => {
 
 describe('describeBlocker', () => {
   const cases: [Blocker, string][] = [
-    [{ kind: 'technician_open', technicianName: 'Ben', technicianId: 't', appointmentNumber: 1 }, 'Ben is still working'],
-    [{ kind: 'visit_planned', appointmentNumber: 2, date: '2026-11-12T15:00:00.000Z' }, 'Visit #2 on Nov 12 is planned — put this job on hold'],
-    [{ kind: 'visit_planned', appointmentNumber: 3, date: null }, 'Visit #3 is planned — put this job on hold'],
+    [{ kind: 'technician_open', technicianName: 'Ben', technicianId: 't', appointmentNumber: 1, started: true }, 'Ben is still working'],
+    [{ kind: 'technician_open', technicianName: 'Ben', technicianId: 't', appointmentNumber: 1, started: false }, "Ben hasn't started yet"],
+    [{ kind: 'visit_planned', appointmentNumber: 2, date: '2026-11-12T15:00:00.000Z' }, 'Visit #2 on Nov 12 is planned — put this request on hold'],
+    [{ kind: 'visit_planned', appointmentNumber: 3, date: null }, 'Visit #3 is planned — put this request on hold'],
     [{ kind: 'earlier_visit_open', technicianName: 'Ben', appointmentNumber: 1 }, 'Waiting on an earlier visit (Ben, visit #1)'],
     [{ kind: 'request_not_started', status: 'scheduled' }, 'Tap Working first'],
     [{ kind: 'not_lead' }, 'Only the lead technician can close out this request'],
@@ -115,6 +68,12 @@ describe('buildActionSheetCopy', () => {
   it('explains that holding ends the visit', () => {
     expect(buildActionSheetCopy('on_hold').description).toMatch(/ends this visit/i);
   });
+  it('the hold sheet says request, not job', () => {
+    const c = buildActionSheetCopy('on_hold');
+    expect(c.title).toBe('Put this request on hold?');
+    expect(c.confirmLabel).toBe('Hold request');
+    expect(`${c.title} ${c.description} ${c.confirmLabel}`).not.toMatch(/\bjob\b/i);
+  });
   it('has a title and confirm label for every sheet action', () => {
     for (const a of ['completed', 'pause', 'on_hold', 'close_out'] as const) {
       const c = buildActionSheetCopy(a);
@@ -138,5 +97,14 @@ describe('showRequestBehind', () => {
   });
   it('hides once the earlier visit closes and no response flag remains', () => {
     expect(showRequestBehind([{ kind: 'not_lead' }], false)).toBe(false);
+  });
+});
+
+describe('labelAssignmentStatus', () => {
+  it('humanizes the enum in sentence case', () => {
+    expect(labelAssignmentStatus('in_progress')).toBe('In progress');
+    expect(labelAssignmentStatus('on_hold')).toBe('On hold');
+    expect(labelAssignmentStatus('en_route')).toBe('En route');
+    expect(labelAssignmentStatus('completed')).toBe('Completed');
   });
 });

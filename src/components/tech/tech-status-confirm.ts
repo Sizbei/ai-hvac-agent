@@ -1,41 +1,10 @@
 /**
- * Pure helpers for the "confirm before a terminal status change" gate
- * (Rtech-4). A technician tapping Cancelled/Completed must pass an explicit
- * second confirmation step before the status POST fires; Scheduled/
- * In progress/On hold keep advancing immediately, same as before.
+ * Pure copy helpers for the technician job screen: button labels, the bottom
+ * sheet for Done / Pause / Hold / Close out, close-out blockers and the
+ * assignment status badge.
  */
 
 import type { Blocker } from '@/lib/tech/status-actions';
-
-const TERMINAL_STATUSES = new Set(['cancelled', 'completed']);
-
-/** True for the two destructive/terminal manual targets — no further manual
- * transition exists once reached (see `TRANSITIONS` /
- * `MANUAL_TARGET_STATUSES` in `src/lib/admin/request-status.ts`). */
-export function isTerminalStatus(status: string): boolean {
-  return TERMINAL_STATUSES.has(status);
-}
-
-export interface StatusConfirmCopy {
-  readonly question: string;
-  readonly confirmLabel: string;
-  readonly cancelLabel: string;
-}
-
-function humanizeLower(status: string): string {
-  return status.replace(/_/g, ' ');
-}
-
-/** Confirm-step copy for a terminal status target. Sentence case, "request"
- * (not "job"), and states plainly that the change can't be undone. */
-export function buildStatusConfirmCopy(status: string): StatusConfirmCopy {
-  const label = humanizeLower(status);
-  return {
-    question: `Mark this request ${label}? This can't be undone.`,
-    confirmLabel: `Yes, mark ${label}`,
-    cancelLabel: 'No, go back',
-  };
-}
 
 const TECH_STATUS_LABELS: Record<string, string> = {
   en_route: 'On my way',
@@ -82,9 +51,9 @@ const SHEET_COPY: Record<SheetAction, ActionSheetCopy> = {
     confirmLabel: 'Pause',
   },
   on_hold: {
-    title: 'Put this job on hold?',
+    title: 'Put this request on hold?',
     description: 'Holding ends this visit. The office will plan the next one.',
-    confirmLabel: 'Hold job',
+    confirmLabel: 'Hold request',
   },
   close_out: {
     title: 'Close out this request?',
@@ -95,6 +64,11 @@ const SHEET_COPY: Record<SheetAction, ActionSheetCopy> = {
 
 export function buildActionSheetCopy(action: SheetAction): ActionSheetCopy {
   return SHEET_COPY[action];
+}
+
+/** Assignment status badge: "in_progress" -> "In progress", "en_route" -> "En route". */
+export function labelAssignmentStatus(status: string): string {
+  return status.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
 }
 
 /** "awaiting_parts" -> "Awaiting parts". */
@@ -115,11 +89,11 @@ function shortDate(iso: string): string {
 export function describeBlocker(b: Blocker): string {
   switch (b.kind) {
     case 'technician_open':
-      return `${b.technicianName} is still working`;
+      return b.started ? `${b.technicianName} is still working` : `${b.technicianName} hasn't started yet`;
     case 'visit_planned':
       return b.date
-        ? `Visit #${b.appointmentNumber} on ${shortDate(b.date)} is planned — put this job on hold`
-        : `Visit #${b.appointmentNumber} is planned — put this job on hold`;
+        ? `Visit #${b.appointmentNumber} on ${shortDate(b.date)} is planned — put this request on hold`
+        : `Visit #${b.appointmentNumber} is planned — put this request on hold`;
     case 'earlier_visit_open':
       return `Waiting on an earlier visit (${b.technicianName}, visit #${b.appointmentNumber})`;
     case 'request_not_started':

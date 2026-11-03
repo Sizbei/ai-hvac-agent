@@ -24,6 +24,7 @@ import {
   OPEN_ASSIGNMENT_STATUSES,
   findActiveVisit,
   findReadableJob,
+  hasOtherOpenRows,
   hasProgress,
   isOpen,
   pickActiveAssignment,
@@ -58,6 +59,15 @@ describe("hasProgress", () => {
   it("is false with no timestamps", () => expect(hasProgress(none)).toBe(false));
   it.each(["enRouteAt", "arrivedAt", "startedAt", "completedAt"] as const)("is true with %s", (k) => {
     expect(hasProgress({ ...none, [k]: new Date() })).toBe(true);
+  });
+});
+
+describe("hasOtherOpenRows", () => {
+  it("ignores the caller's own row and finished rows; sees another open row on any visit", () => {
+    const mine = row({ appointmentNumber: 1, status: "in_progress" });
+    const done = row({ appointmentNumber: 1, status: "completed" });
+    expect(hasOtherOpenRows([mine, done], mine.assignmentId)).toBe(false);
+    expect(hasOtherOpenRows([mine, done, row({ appointmentNumber: 2, status: "assigned" })], mine.assignmentId)).toBe(true);
   });
 });
 

@@ -31,7 +31,7 @@ function row(over: Partial<TechAssignmentRow> = {}): TechAssignmentRow {
 
 function input(action: TechAction, over: Partial<Omit<ResolveInput, "row">> & { row?: Partial<TechAssignmentRow> } = {}): ResolveInput {
   const { row: r, ...rest } = over;
-  return { action, row: row(r), requestStatus: "scheduled", activeVisitId: "v1", activeLeadId: "t1", native: true, ...rest };
+  return { action, row: row(r), requestStatus: "scheduled", activeVisitId: "v1", otherOpenRows: true, native: true, ...rest };
 }
 
 describe("closeOutAllowedStatuses", () => {
@@ -76,6 +76,13 @@ describe("resolveTechAction", () => {
     expect(done).toMatchObject({ kind: "write", stamp: "completedAt", timeEntry: "close" });
   });
 
+  it("pause only once on site: arrived and in_progress rows", () => {
+    expect(resolveTechAction(input("pause", { row: { status: "arrived", arrivedAt: T }, requestStatus: "arrived" }))).toMatchObject({ kind: "write", assignmentTo: "on_hold" });
+    for (const status of ["assigned", "scheduled", "en_route"] as const) {
+      expect(resolveTechAction(input("pause", { row: { status, enRouteAt: status === "en_route" ? T : null } }))).toEqual({ kind: "refuse", reason: "invalid_transition" });
+    }
+  });
+
   it("invalid transition pending -> arrived", () => {
     expect(resolveTechAction(input("arrived", { row: { status: "pending" } }))).toEqual({ kind: "refuse", reason: "invalid_transition" });
   });
@@ -98,9 +105,21 @@ describe("resolveTechAction", () => {
     it("hold with request pending -> invalid_transition", () => {
       expect(resolveTechAction(input("on_hold", { requestStatus: "pending" }))).toEqual({ kind: "refuse", reason: "invalid_transition" });
     });
-    it("active lead close_out -> close_out regardless of row status", () => {
+    it("active lead close_out -> close_out regardless of row status, once the request is in progress or on hold", () => {
       for (const status of ["completed", "on_hold", "in_progress"] as const) {
-        expect(resolveTechAction(input("close_out", { row: { status } }))).toEqual({ kind: "close_out" });
+        for (const requestStatus of ["in_progress", "on_hold"] as const) {
+          expect(resolveTechAction(input("close_out", { row: { status }, requestStatus }))).toEqual({ kind: "close_out" });
+        }
+      }
+    });
+    it("close_out before the request is in progress -> request_not_started", () => {
+      for (const requestStatus of ["scheduled", "en_route", "arrived"] as const) {
+        expect(resolveTechAction(input("close_out", { row: { status: "arrived", arrivedAt: T }, requestStatus }))).toEqual({ kind: "refuse", reason: "request_not_started" });
+      }
+    });
+    it("close_out on a completed or cancelled request -> invalid_transition", () => {
+      for (const requestStatus of ["completed", "cancelled"] as const) {
+        expect(resolveTechAction(input("close_out", { row: { status: "completed", startedAt: T, completedAt: T }, requestStatus }))).toEqual({ kind: "refuse", reason: "invalid_transition" });
       }
     });
   });
@@ -185,8 +204,41 @@ describe("allowedActions", () => {
     expect(list).not.toContain("completed");
   });
 
-  it("active lead with an open en_route row gets close_out", () => {
-    expect(allowedActions({ ...base, row: row({ status: "en_route", enRouteAt: T }), requestStatus: "en_route" })).toContain("close_out");
+  it("active lead before the request is in progress gets no close_out", () => {
+    expect(allowedActions({ ...base, row: row({ status: "en_route", enRouteAt: T }), requestStatus: "en_route" })).not.toContain("close_out");
+  });
+
+  it("completed request: no close_out", () => {
+    const list = allowedActions({ ...base, row: row({ status: "completed", startedAt: T, completedAt: T }), requestStatus: "completed" });
+    expect(list).not.toContain("close_out");
+  });
+
+  it("assigned row: no pause, no close_out", () => {
+    const list = allowedActions({ ...base, row: row({ status: "assigned" }), requestStatus: "assigned" });
+    expect(list).not.toContain("pause");
+    expect(list).not.toContain("close_out");
+    expect(list).toContain("en_route");
+  });
+
+  it("arrived row: pause offered", () => {
+    expect(allowedActions({ ...base, row: row({ status: "arrived", arrivedAt: T }), requestStatus: "arrived" })).toContain("pause");
+  });
+
+  it("solo active lead (no other open row) sees close_out, not done", () => {
+    const list = allowedActions({ ...base, otherOpenRows: false, row: row({ status: "in_progress", startedAt: T }), requestStatus: "in_progress" });
+    expect(list).toContain("close_out");
+    expect(list).not.toContain("completed");
+  });
+
+  it("active lead with another open row sees both done and close_out", () => {
+    const list = allowedActions({ ...base, otherOpenRows: true, row: row({ status: "in_progress", startedAt: T }), requestStatus: "in_progress" });
+    expect(list).toContain("close_out");
+    expect(list).toContain("completed");
+  });
+
+  it("a helper keeps done whatever otherOpenRows says", () => {
+    const list = allowedActions({ ...base, otherOpenRows: false, row: row({ isLead: false, status: "in_progress", startedAt: T }), requestStatus: "in_progress" });
+    expect(list).toContain("completed");
   });
 
   it("lead on a later visit keeps status buttons but not close_out/hold", () => {

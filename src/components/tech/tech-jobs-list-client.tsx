@@ -7,6 +7,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { SegmentedControl } from '@/components/ui/segmented-control';
 import type { VisitRange } from '@/lib/tech/visit-range';
+import { labelAssignmentStatus } from '@/components/tech/tech-status-confirm';
 
 /** Card-shaped skeleton matching the 3-line job card anatomy. */
 function JobCardSkeleton() {
@@ -215,10 +216,8 @@ export function TechJobsListClient() {
                     {job.referenceNumber}
                     {job.appointmentNumber > 1 && ` · Visit ${job.appointmentNumber}`}
                   </span>
-                  {/* raw enum value (no humanize here) — left as-is, so no
-                    * uppercase transform: it would render "IN_PROGRESS". */}
                   <span className="rounded-[3px] border border-border bg-surface-raised px-2 py-0.5 text-[11px] font-medium tracking-[0.02em] text-muted-foreground">
-                    {job.assignmentStatus}
+                    {labelAssignmentStatus(job.assignmentStatus)}
                   </span>
                 </div>
                 <p className="mt-1.5 text-[15px] font-medium">

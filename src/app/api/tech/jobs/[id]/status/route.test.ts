@@ -46,8 +46,9 @@ const row = (over: Partial<TechAssignmentRow> = {}): TechAssignmentRow => ({
 const helper = row({ assignmentId: "row-2", isLead: false, technicianId: T2 });
 
 const ctx = { params: Promise.resolve({ id: RID }) };
-const post = (body: unknown) =>
-  POST(new Request("http://t/api", { method: "POST", body: JSON.stringify(body) }) as never, ctx as never);
+// Every body carries the caller's visit unless the test supplies its own.
+const post = (body: Record<string, unknown>) =>
+  POST(new Request("http://t/api", { method: "POST", body: JSON.stringify({ appointmentId: A1, ...body }) }) as never, ctx as never);
 const code = async (res: Response) => ((await res.json()) as { error?: { code?: string } }).error?.code;
 
 function as(me: string, mine: readonly TechAssignmentRow[], all: readonly TechAssignmentRow[], status = "in_progress", native = true) {
@@ -60,13 +61,23 @@ function as(me: string, mine: readonly TechAssignmentRow[], all: readonly TechAs
 beforeEach(() => vi.clearAllMocks());
 
 describe("POST /api/tech/jobs/[id]/status", () => {
-  it("400 NOT_TECH_TARGET for cancelled and scheduled", async () => {
+  it("400 INVALID_INPUT for cancelled and scheduled (not technician actions)", async () => {
     as(T1, [row()], [row()]);
-    for (const status of ["cancelled", "scheduled"]) {
-      const res = await post({ status });
+    for (const action of ["cancelled", "scheduled"]) {
+      const res = await post({ action });
       expect(res.status).toBe(400);
-      expect(await code(res)).toBe("NOT_TECH_TARGET");
+      const body = await res.json();
+      expect(body.error.code).toBe("INVALID_INPUT");
+      expect(body.error.message).toBe("That isn't a technician action.");
     }
+  });
+
+  it("400 for the retired { status } body and for a missing appointmentId", async () => {
+    as(T1, [row()], [row()]);
+    expect((await post({ status: "in_progress" })).status).toBe(400);
+    const res = await POST(new Request("http://t/api", { method: "POST", body: JSON.stringify({ action: "en_route" }) }) as never, ctx as never);
+    expect(res.status).toBe(400);
+    expect(applyTechAction).not.toHaveBeenCalled();
   });
 
   it("400 for a hold without a reason", async () => {
@@ -79,7 +90,9 @@ describe("POST /api/tech/jobs/[id]/status", () => {
   it("404 when the job is not readable", async () => {
     as(T1, [], []);
     (findReadableJob as unknown as Mock).mockResolvedValue(null);
-    expect((await post({ action: "en_route" })).status).toBe(404);
+    const res = await post({ action: "en_route" });
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.message).toBe("This job isn't yours to update.");
   });
 
   it("409 MANAGED_EXTERNALLY on a synced job", async () => {
@@ -102,33 +115,51 @@ describe("POST /api/tech/jobs/[id]/status", () => {
     expect(closeOutRequest).not.toHaveBeenCalled();
   });
 
-  it("legacy on_hold maps to pause", async () => {
+  it("a helper's pause writes the row on hold", async () => {
     as(T2, [helper], [row(), helper]);
     (applyTechAction as unknown as Mock).mockResolvedValue({ ok: true, assignmentStatus: "on_hold", requestStatus: "in_progress", requestBehind: false });
-    const res = await post({ status: "on_hold" });
+    const res = await post({ action: "pause" });
     expect(res.status).toBe(200);
     expect((applyTechAction as unknown as Mock).mock.calls[0]![0].resolved).toMatchObject({ kind: "write", assignmentTo: "on_hold" });
   });
 
-  it("legacy completed from the active lead with nobody else open is a close-out, and asks for a review once", async () => {
+  it("the active lead's close-out with nobody else open asks for a review once", async () => {
     as(T1, [row()], [row(), row({ assignmentId: "row-2", isLead: false, technicianId: T2, status: "completed" })]);
     (closeOutRequest as unknown as Mock).mockResolvedValue({ ok: true, changed: true, assignmentStatus: "completed" });
-    const res = await post({ status: "completed" });
+    const res = await post({ action: "close_out" });
     expect(res.status).toBe(200);
     expect((await res.json()).data).toMatchObject({ assignmentStatus: "completed", requestStatus: "completed", changed: true });
     expect(after).toHaveBeenCalledTimes(1);
   });
 
-  it("legacy completed from the lead while a helper is open is the lead's own done", async () => {
+  it("the lead's done while a helper is open is the lead's own done", async () => {
     as(T1, [row()], [row(), helper]);
     (applyTechAction as unknown as Mock).mockResolvedValue({ ok: true, assignmentStatus: "completed", requestStatus: "in_progress", requestBehind: false });
-    expect((await post({ status: "completed" })).status).toBe(200);
+    expect((await post({ action: "completed" })).status).toBe(200);
     expect(closeOutRequest).not.toHaveBeenCalled();
     expect((applyTechAction as unknown as Mock).mock.calls[0]![0].resolved).toMatchObject({ assignmentTo: "completed", timeEntry: "close" });
   });
 
-  it("a close-out that changed nothing asks for no review", async () => {
+  it("a solo active lead's response offers close_out, not done", async () => {
+    as(T1, [row({ status: "arrived", startedAt: null })], [row({ status: "arrived", startedAt: null })], "arrived");
+    (applyTechAction as unknown as Mock).mockResolvedValue({ ok: true, assignmentStatus: "in_progress", requestStatus: "in_progress", requestBehind: false });
+    const res = await post({ action: "in_progress" });
+    expect(res.status).toBe(200);
+    const actions = (await res.json()).data.allowedActions as string[];
+    expect(actions).toContain("close_out");
+    expect(actions).not.toContain("completed");
+  });
+
+  it("close-out on a request that is already completed is refused before any write", async () => {
     as(T1, [row({ status: "completed", completedAt: new Date() })], [row({ status: "completed", completedAt: new Date() })], "completed");
+    const res = await post({ action: "close_out" });
+    expect(res.status).toBe(409);
+    expect(await code(res)).toBe("INVALID_TRANSITION");
+    expect(closeOutRequest).not.toHaveBeenCalled();
+  });
+
+  it("a close-out that changed nothing (raced) asks for no review", async () => {
+    as(T1, [row()], [row()]);
     (closeOutRequest as unknown as Mock).mockResolvedValue({ ok: true, changed: false, assignmentStatus: "completed" });
     const res = await post({ action: "close_out" });
     expect(res.status).toBe(200);
@@ -148,8 +179,8 @@ describe("POST /api/tech/jobs/[id]/status", () => {
     expect(after).not.toHaveBeenCalled();
   });
 
-  it("409 REQUEST_NOT_STARTED when only the request's state blocks", async () => {
-    as(T1, [row({ status: "arrived", startedAt: null })], [row({ status: "arrived", startedAt: null })], "arrived");
+  it("409 REQUEST_NOT_STARTED from the writer when only the request's state blocks", async () => {
+    as(T1, [row()], [row()]);
     (closeOutRequest as unknown as Mock).mockResolvedValue({ ok: false, assignmentStatus: "arrived", blockers: [{ kind: "request_not_started", status: "arrived" }] });
     const res = await post({ action: "close_out" });
     expect(res.status).toBe(409);
@@ -164,18 +195,28 @@ describe("POST /api/tech/jobs/[id]/status", () => {
     expect(await code(res)).toBe("STALE");
   });
 
-  it("expectedStatus replaces the read status in the CAS", async () => {
+  it("409 STALE when expectedStatus differs from the server-read row, before any write", async () => {
     as(T2, [row({ isLead: false, technicianId: T2, status: "arrived", startedAt: null })], [row()]);
-    (applyTechAction as unknown as Mock).mockResolvedValue({ ok: true, assignmentStatus: "in_progress", requestStatus: "in_progress", requestBehind: false });
-    await post({ action: "in_progress", expectedStatus: "en_route" });
-    expect((applyTechAction as unknown as Mock).mock.calls[0]![0].row.status).toBe("en_route");
+    const res = await post({ action: "in_progress", expectedStatus: "en_route" });
+    expect(res.status).toBe(409);
+    expect(await code(res)).toBe("STALE");
+    expect(applyTechAction).not.toHaveBeenCalled();
   });
 
-  it("409 INVALID_TRANSITION for an illegal step", async () => {
+  it("a matching expectedStatus writes with the server-read row", async () => {
+    as(T2, [row({ isLead: false, technicianId: T2, status: "arrived", startedAt: null })], [row()]);
+    (applyTechAction as unknown as Mock).mockResolvedValue({ ok: true, assignmentStatus: "in_progress", requestStatus: "in_progress", requestBehind: false });
+    expect((await post({ action: "in_progress", expectedStatus: "arrived" })).status).toBe(200);
+    expect((applyTechAction as unknown as Mock).mock.calls[0]![0].row.status).toBe("arrived");
+  });
+
+  it("409 INVALID_TRANSITION for an illegal step, with a remedy", async () => {
     as(T2, [row({ isLead: false, technicianId: T2, status: "assigned", enRouteAt: null, arrivedAt: null, startedAt: null })], [row()]);
     const res = await post({ action: "arrived" });
     expect(res.status).toBe(409);
-    expect(await code(res)).toBe("INVALID_TRANSITION");
+    const body = await res.json();
+    expect(body.error.code).toBe("INVALID_TRANSITION");
+    expect(body.error.message).toBe("That change isn't allowed right now. Refresh and try again.");
   });
 
   it("the active lead's hold goes to holdVisit with the reason", async () => {

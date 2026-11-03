@@ -43,6 +43,11 @@ export function isOpen(status: RequestStatus): boolean {
   return (OPEN_ASSIGNMENT_STATUSES as readonly string[]).includes(status);
 }
 
+/** Some row other than `assignmentId` is still open (rows = every row on the request's live visits). */
+export function hasOtherOpenRows(rows: readonly TechAssignmentRow[], assignmentId: string): boolean {
+  return rows.some((r) => r.assignmentId !== assignmentId && r.cancelledAt === null && isOpen(r.status));
+}
+
 const byNumber = (a: TechAssignmentRow, b: TechAssignmentRow): number => a.appointmentNumber - b.appointmentNumber;
 
 /**

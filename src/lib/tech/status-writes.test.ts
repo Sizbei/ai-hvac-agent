@@ -80,6 +80,8 @@ describe("applyTechAction", () => {
     expect(s[2]).toMatch(/UPDATE service_requests SET status = \$\d+::request_status, completed_at = NULL, hold_reason = NULL, follow_up_date = NULL/);
     expect(s[2]).toMatch(/fieldpulse_job_id IS NULL AND hcp_job_id IS NULL/);
     expect(s[2]).toContain("pg_current_xact_id");
+    // write-time lead re-check
+    expect(s[2]).toMatch(/EXISTS \(SELECT 1 FROM appointment_assignments a WHERE a\.id = \$\d+::uuid AND a\.is_lead\)/);
     expect(s[3]).toContain("ON CONFLICT (service_request_id, technician_id) WHERE clock_out_at IS NULL DO NOTHING");
     expect(s[3]).toContain("pg_current_xact_id");
     expect(out).toEqual({ ok: true, assignmentStatus: "in_progress", requestStatus: "in_progress", requestBehind: false });
@@ -164,6 +166,7 @@ describe("applyTechAction", () => {
     expect(s[1]).toMatch(/UPDATE service_requests SET status/);
     expect(s[1]).toMatch(/a\.status = \$\d+::request_status/);
     expect(s[1]).not.toContain("pg_current_xact_id");
+    expect(s[1]).toMatch(/EXISTS \(SELECT 1 FROM appointment_assignments a WHERE a\.id = \$\d+::uuid AND a\.is_lead\)/);
     expect(out).toEqual({ ok: true, assignmentStatus: "in_progress", requestStatus: "in_progress", requestBehind: false });
     expect(recordStatusEvent).toHaveBeenCalledTimes(1);
   });
@@ -205,6 +208,7 @@ describe("closeOutRequest", () => {
     expect(s[2]).toContain("NOT EXISTS (SELECT 1 FROM appointment_assignments a JOIN appointments p ON p.id = a.appointment_id WHERE p.service_request_id = $");
     expect(s[2]).toContain("p.cancelled_at IS NULL");
     expect(s[2]).toContain("RETURNING prev.status AS from_status");
+    expect(s[2]).toMatch(/EXISTS \(SELECT 1 FROM appointment_assignments a WHERE a\.id = \$\d+::uuid AND a\.is_lead\)/);
     expect(s[3]).toMatch(/^UPDATE technician_time_entries/);
     expect(s[3]).toContain("a.status = 'completed'::request_status");
     expect(recordStatusEvent).toHaveBeenCalledWith(expect.objectContaining({ fromStatus: "in_progress", toStatus: "completed", actorId: T1 }));
@@ -230,7 +234,7 @@ describe("closeOutRequest", () => {
     );
     expect(await closeOutRequest(input)).toEqual({
       ok: false, assignmentStatus: "completed",
-      blockers: [{ kind: "technician_open", technicianName: "Bo", technicianId: T2, appointmentNumber: 1 }],
+      blockers: [{ kind: "technician_open", technicianName: "Bo", technicianId: T2, appointmentNumber: 1, started: true }],
     });
     expect(recordStatusEvent).not.toHaveBeenCalled();
   });
@@ -255,6 +259,18 @@ describe("closeOutBlockers", () => {
     ]);
   });
 
+  it("another technician's open row says whether they have started", async () => {
+    selectQueue.push([{ status: "in_progress" }], [
+      r({ assignmentId: ROW1, technicianId: T1, technicianName: "Ann", status: "in_progress", startedAt: new Date() }),
+      r({ status: "en_route", enRouteAt: new Date() }),
+      r({ assignmentId: "x", technicianId: "t3", technicianName: "Cy", status: "in_progress", startedAt: new Date() }),
+    ]);
+    expect(await closeOutBlockers(ORG, REQ, { technicianId: T1, appointmentId: A1 })).toEqual([
+      { kind: "technician_open", technicianName: "Bo", technicianId: T2, appointmentNumber: 1, started: false },
+      { kind: "technician_open", technicianName: "Cy", technicianId: "t3", appointmentNumber: 1, started: true },
+    ]);
+  });
+
   it("my own started open row is not a blocker (close-out completes it)", async () => {
     selectQueue.push([{ status: "in_progress" }], [
       r({ assignmentId: ROW1, technicianId: T1, technicianName: "Ann", status: "in_progress", startedAt: new Date() }),
@@ -267,11 +283,27 @@ describe("holdVisit", () => {
   const input = {
     organizationId: ORG, actorUserId: T1, requestId: REQ, appointmentId: A1,
     holdReason: "awaiting_parts" as const, followUpDate: null, requestStatus: "in_progress" as const,
+    leadAssignmentId: ROW1,
   };
+  const LEAD_GATE = /EXISTS \(SELECT 1 FROM appointment_assignments a WHERE a\.id = \$\d+::uuid AND a\.is_lead\)/;
 
   it("refuses a request that cannot go on hold without writing", async () => {
     expect(await holdVisit({ ...input, requestStatus: "pending" })).toEqual({ ok: false, reason: "invalid_transition" });
     expect(batch).not.toHaveBeenCalled();
+  });
+
+  it("a replay on a request already on hold is ok without writing", async () => {
+    expect(await holdVisit({ ...input, requestStatus: "on_hold" })).toEqual({ ok: true });
+    expect(batch).not.toHaveBeenCalled();
+    expect(recordStatusEvent).not.toHaveBeenCalled();
+  });
+
+  it("an admin hold (no lead assignment) carries no lead re-check", async () => {
+    batch.mockResolvedValue(res([], [], [], [{ from_status: "in_progress" }], [], []));
+    const { leadAssignmentId: _l, ...admin } = input;
+    void _l;
+    await holdVisit(admin);
+    expect(statements()[3]).not.toMatch(LEAD_GATE);
   });
 
   it("locks request then visit, ends the rows, holds the request, closes entries, ends an untouched visit", async () => {
@@ -288,6 +320,9 @@ describe("holdVisit", () => {
     expect(s[3]).toContain("SET status = 'on_hold'::request_status, hold_reason = $");
     expect(s[3]).toContain("NOT EXISTS (SELECT 1 FROM appointment_assignments a WHERE a.appointment_id = $");
     expect(s[3]).toContain("RETURNING prev.status AS from_status");
+    // write-time lead re-check on the request UPDATE (and on ending the rows)
+    expect(s[3]).toMatch(LEAD_GATE);
+    expect(s[2]).toMatch(LEAD_GATE);
     // no expected-status CAS on the request: the lock serialises writers
     expect(s[3]).not.toMatch(/s\.status = \$/);
     expect(s[4]).toMatch(/^UPDATE technician_time_entries/);
@@ -347,9 +382,16 @@ describe("completeRequestFromAdmin", () => {
     ]);
     expect(await completeRequestFromAdmin(input)).toEqual({
       ok: false, reason: "blocked",
-      blockers: [{ kind: "technician_open", technicianName: "Ann", technicianId: T1, appointmentNumber: 1 }],
+      blockers: [{ kind: "technician_open", technicianName: "Ann", technicianId: T1, appointmentNumber: 1, started: true }],
     });
     selectQueue.push([{ status: "assigned", native: true }]);
     expect(await completeRequestFromAdmin(input)).toEqual({ ok: false, reason: "invalid_transition", currentStatus: "assigned" });
+  });
+
+  it("0 rows on a request that is already completed: ok, changed false, no event", async () => {
+    batch.mockResolvedValue(res([], [], [], []));
+    selectQueue.push([{ status: "completed", native: true }]);
+    expect(await completeRequestFromAdmin(input)).toEqual({ ok: true, changed: false });
+    expect(recordStatusEvent).not.toHaveBeenCalled();
   });
 });

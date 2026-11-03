@@ -246,10 +246,10 @@ describe("general clock", () => {
 
   it("closes with minutes only: rate 0, cost left NULL", async () => {
     mockSelectSeq([[{ id: "g-1", clockInAt: new Date("2026-06-16T08:30:30.000Z") }]]);
-    const setSpy = vi.fn(() => ({ where: () => ({ returning: () => ({}) }) }));
+    const setSpy = vi.fn(() => ({ where: () => ({ returning: () => Promise.resolve([{ id: "g-1" }]) }) }));
     vi.mocked(db.update).mockReturnValue({ set: setSpy } as never);
-    vi.mocked(db.batch).mockResolvedValue([[{ id: "g-1" }]] as never);
     const r = await closeGeneralEntry(ORG, TECH);
+    expect(db.batch).not.toHaveBeenCalled();
     expect(r).toEqual({ ok: true, id: "g-1", minutes: 89 });
     const set = (setSpy.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
     expect(set.minutes).toBe(89);
@@ -259,14 +259,13 @@ describe("general clock", () => {
 
   it("returns not_open when a concurrent clock-out won the guarded update", async () => {
     mockSelectSeq([[{ id: "g-1", clockInAt: new Date("2026-06-16T08:30:30.000Z") }]]);
-    vi.mocked(db.update).mockReturnValue({ set: () => ({ where: () => ({ returning: () => ({}) }) }) } as never);
-    vi.mocked(db.batch).mockResolvedValue([[]] as never);
+    vi.mocked(db.update).mockReturnValue({ set: () => ({ where: () => ({ returning: () => Promise.resolve([]) }) }) } as never);
     expect(await closeGeneralEntry(ORG, TECH)).toEqual({ ok: false, reason: "not_open" });
   });
 
   it("returns no_open_entry when nothing is open", async () => {
     mockSelectSeq([[]]);
     expect(await closeGeneralEntry(ORG, TECH)).toEqual({ ok: false, reason: "no_open_entry" });
-    expect(db.batch).not.toHaveBeenCalled();
+    expect(db.update).not.toHaveBeenCalled();
   });
 });

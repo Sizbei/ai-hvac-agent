@@ -42,6 +42,10 @@ const rowLanded = (aid: string): SQL =>
 const requestLanded = (rid: string): SQL =>
   sql`EXISTS (SELECT 1 FROM service_requests r WHERE r.id = ${rid}::uuid AND r.xmin = pg_current_xact_id()::xid)`;
 
+/** Write-time lead re-check: the caller's row is (still) the lead row. */
+const stillLead = (aid: string): SQL =>
+  sql`EXISTS (SELECT 1 FROM appointment_assignments a WHERE a.id = ${aid}::uuid AND a.is_lead)`;
+
 const noOpenRowOnVisit = (appt: string): SQL =>
   sql`NOT EXISTS (SELECT 1 FROM appointment_assignments a WHERE a.appointment_id = ${appt}::uuid AND a.status IN ${OPEN_IN})`;
 
@@ -96,7 +100,7 @@ export async function applyTechAction(p: {
   const requestUpdate = (gate: SQL) => db.execute(sql`UPDATE service_requests
     SET status = ${requestTo}::request_status, completed_at = NULL, hold_reason = NULL, follow_up_date = NULL, updated_at = now()
     WHERE id = ${rid}::uuid AND organization_id = ${org}::uuid AND status = ${p.requestStatus}::request_status
-      AND ${NATIVE} AND ${gate}
+      AND ${NATIVE} AND ${gate} AND ${stillLead(aid)}
     RETURNING status`);
 
   try {
@@ -150,15 +154,20 @@ export async function applyTechAction(p: {
 export async function holdVisit(p: {
   organizationId: string; actorUserId: string; requestId: string; appointmentId: string | null;
   holdReason: HoldReason | null; followUpDate: Date | null; requestStatus: RequestStatus;
+  /** A technician's hold: their assignment row, re-checked as the lead inside the write. */
+  leadAssignmentId?: string;
 }): Promise<{ ok: true } | { ok: false; reason: "stale" | "invalid_transition" }> {
+  // A replayed hold (request already on hold) is idempotent.
+  if (p.requestStatus === "on_hold") return { ok: true };
   if (!canTransition(p.requestStatus, "on_hold")) return { ok: false, reason: "invalid_transition" };
   const { organizationId: org, requestId: rid, appointmentId: appt } = p;
+  const leadGate = p.leadAssignmentId ? sql` AND ${stillLead(p.leadAssignmentId)}` : sql``;
   const rowGate = appt ? sql` AND ${noOpenRowOnVisit(appt)}` : sql``;
   const holdRequest = db.execute(sql`WITH prev AS (SELECT status FROM service_requests WHERE id = ${rid}::uuid AND organization_id = ${org}::uuid)
     UPDATE service_requests s SET status = 'on_hold'::request_status, hold_reason = ${p.holdReason}::hold_reason,
       follow_up_date = ${p.followUpDate?.toISOString() ?? null}::timestamptz, updated_at = now()
     FROM prev
-    WHERE s.id = ${rid}::uuid AND s.organization_id = ${org}::uuid AND s.status IN ${HOLDABLE_IN} AND ${S_NATIVE}${rowGate}
+    WHERE s.id = ${rid}::uuid AND s.organization_id = ${org}::uuid AND s.status IN ${HOLDABLE_IN} AND ${S_NATIVE}${rowGate}${leadGate}
     RETURNING prev.status AS from_status`);
 
   const items: unknown[] = [lockRequest(org, rid)];
@@ -170,7 +179,7 @@ export async function holdVisit(p: {
           completed_at = CASE WHEN ${ROW_PROGRESS} THEN COALESCE(completed_at, now()) ELSE completed_at END
         WHERE appointment_id = ${appt}::uuid AND organization_id = ${org}::uuid AND status IN ${OPEN_IN}
           AND EXISTS (SELECT 1 FROM service_requests r WHERE r.id = ${rid}::uuid AND r.status IN ${HOLDABLE_IN}
-            AND r.fieldpulse_job_id IS NULL AND r.hcp_job_id IS NULL)
+            AND r.fieldpulse_job_id IS NULL AND r.hcp_job_id IS NULL)${leadGate}
         RETURNING id, technician_id`),
       holdRequest,
       db.execute(closeJobEntriesSql({
@@ -226,7 +235,7 @@ export async function closeOutRequest(p: {
       WHERE id = ${aid}::uuid AND organization_id = ${org}::uuid AND status IN ${OPEN_IN} AND started_at IS NOT NULL
         AND EXISTS (SELECT 1 FROM service_requests r WHERE r.id = ${rid}::uuid AND r.status IN ${CLOSABLE_IN})
       RETURNING id`),
-    completeRequest(org, rid, openRowsOnLiveVisits(rid)),
+    completeRequest(org, rid, sql`${openRowsOnLiveVisits(rid)} AND ${stillLead(aid)}`),
     db.execute(closeJobEntriesSql({
       organizationId: org, requestId: rid, technicianIds: [p.techUserId],
       gate: sql`EXISTS (SELECT 1 FROM appointment_assignments a WHERE a.id = ${aid}::uuid AND a.status = 'completed'::request_status)`,
@@ -271,10 +280,12 @@ export async function completeRequestFromAdmin(p: {
   }
   const now = await readRequestState(org, rid);
   const status = now?.status ?? "pending";
+  // Already completed (a replay, or another close-out won): nothing to do.
+  if (status === "completed") return { ok: true, changed: false };
   if (status !== "in_progress" && status !== "on_hold") return { ok: false, reason: "invalid_transition", currentStatus: status };
   const blockers: Blocker[] = (await loadVisitRows(org, rid))
     .filter((r) => isOpen(r.status) && hasProgress(r))
-    .map((r) => ({ kind: "technician_open", technicianName: r.technicianName, technicianId: r.technicianId, appointmentNumber: r.appointmentNumber }));
+    .map((r) => ({ kind: "technician_open", technicianName: r.technicianName, technicianId: r.technicianId, appointmentNumber: r.appointmentNumber, started: r.startedAt !== null }));
   return { ok: false, reason: "blocked", blockers };
 }
 
@@ -331,7 +342,7 @@ export async function closeOutBlockers(
       planned.add(r.appointmentNumber);
       out.push({ kind: "visit_planned", appointmentNumber: r.appointmentNumber, date: (r.windowStart ?? r.scheduledDate)?.toISOString() ?? null });
     } else {
-      out.push({ kind: "technician_open", technicianName: r.technicianName, technicianId: r.technicianId, appointmentNumber: r.appointmentNumber });
+      out.push({ kind: "technician_open", technicianName: r.technicianName, technicianId: r.technicianId, appointmentNumber: r.appointmentNumber, started: r.startedAt !== null });
     }
   }
   return out;

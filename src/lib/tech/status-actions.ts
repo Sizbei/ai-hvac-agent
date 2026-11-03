@@ -10,7 +10,7 @@ export const TECH_ACTIONS = ["en_route", "arrived", "in_progress", "pause", "on_
 export type TechAction = (typeof TECH_ACTIONS)[number];
 
 export type Blocker =
-  | { kind: "technician_open"; technicianName: string; technicianId: string; appointmentNumber: number }
+  | { kind: "technician_open"; technicianName: string; technicianId: string; appointmentNumber: number; started: boolean }
   | { kind: "visit_planned"; appointmentNumber: number; date: string | null }
   | { kind: "earlier_visit_open"; technicianName: string; appointmentNumber: number }
   | { kind: "request_not_started"; status: RequestStatus }
@@ -22,7 +22,8 @@ export interface ResolveInput {
   row: TechAssignmentRow;
   requestStatus: RequestStatus;
   activeVisitId: string | null;
-  activeLeadId: string | null;
+  /** Another technician's (or another visit's) row is still open on a live visit of the request. */
+  otherOpenRows: boolean;
   native: boolean;
 }
 
@@ -30,7 +31,7 @@ type Stamp = "enRouteAt" | "arrivedAt" | "startedAt" | "completedAt";
 
 export type Resolved =
   | { kind: "noop" }
-  | { kind: "refuse"; reason: "not_lead" | "invalid_transition" | "managed_externally" | "not_tech_target" | "request_not_started" | "not_started_row" }
+  | { kind: "refuse"; reason: "not_lead" | "invalid_transition" | "managed_externally" | "request_not_started" | "not_started_row" }
   | { kind: "write"; assignmentTo: RequestStatus; stamp: Stamp | null; requestTo: RequestStatus | null; timeEntry: "open" | "close" | "none" }
   | { kind: "hold" }
   | { kind: "request_only"; requestTo: RequestStatus }
@@ -45,7 +46,7 @@ const CLOSE_OUT_STATUSES = closeOutAllowedStatuses();
 
 const refuse = (reason: Extract<Resolved, { kind: "refuse" }>["reason"]): Resolved => ({ kind: "refuse", reason });
 
-const isActiveLead = (i: ResolveInput): boolean => i.row.isLead && i.row.appointmentId === i.activeVisitId;
+const isActiveLead = (i: Pick<ResolveInput, "row" | "activeVisitId">): boolean => i.row.isLead && i.row.appointmentId === i.activeVisitId;
 
 const STAMP_BY_TARGET: Partial<Record<RequestStatus, Stamp>> = {
   en_route: "enRouteAt",
@@ -68,6 +69,14 @@ function isNoop(row: TechAssignmentRow, target: RequestStatus): boolean {
 const REQUEST_FOLLOWS = ["en_route", "arrived", "in_progress"] as const;
 const followsRequest = (t: RequestStatus): boolean => (REQUEST_FOLLOWS as readonly string[]).includes(t);
 
+/** Pause is for a technician on site: only an arrived or working row. */
+const PAUSABLE: readonly RequestStatus[] = ["arrived", "in_progress"];
+
+function closeOut(i: ResolveInput): Resolved {
+  if (i.requestStatus === "completed" || i.requestStatus === "cancelled") return refuse("invalid_transition");
+  return CLOSE_OUT_STATUSES.includes(i.requestStatus) ? { kind: "close_out" } : refuse("request_not_started");
+}
+
 function timeEntryFor(target: RequestStatus): "open" | "close" | "none" {
   if (target === "arrived" || target === "in_progress") return "open";
   if (target === "on_hold" || target === "completed") return "close";
@@ -81,7 +90,7 @@ export function resolveTechAction(i: ResolveInput): Resolved {
 
   const activeLead = isActiveLead(i);
 
-  if (i.action === "close_out") return activeLead ? { kind: "close_out" } : refuse("not_lead");
+  if (i.action === "close_out") return activeLead ? closeOut(i) : refuse("not_lead");
   if (i.action === "on_hold") {
     if (!activeLead) return refuse("not_lead");
     return canTransition(i.requestStatus, "on_hold") ? { kind: "hold" } : refuse("invalid_transition");
@@ -96,6 +105,7 @@ export function resolveTechAction(i: ResolveInput): Resolved {
   if (isNoop(i.row, target)) {
     return requestBehind ? { kind: "request_only", requestTo: target } : { kind: "noop" };
   }
+  if (i.action === "pause" && !PAUSABLE.includes(i.row.status)) return refuse("invalid_transition");
   // The stamped no-op above wins over this guard (replaying a finished close is a no-op).
   if (target === "completed" && activeLead && !CLOSE_OUT_STATUSES.includes(i.requestStatus)) return refuse("request_not_started");
   // A row at the target with a missing stamp (trigger-mirrored) is allowed through.
@@ -110,8 +120,15 @@ export function resolveTechAction(i: ResolveInput): Resolved {
   };
 }
 
+/**
+ * The buttons to show. A solo active lead (no other open row on any live
+ * visit) is offered Close out instead of Done: close-out completes their own
+ * row too.
+ */
 export function allowedActions(i: Omit<ResolveInput, "action">): readonly TechAction[] {
+  const soloLead = isActiveLead(i) && !i.otherOpenRows;
   return TECH_ACTIONS.filter((action) => {
+    if (action === "completed" && soloLead) return false;
     const r = resolveTechAction({ ...i, action });
     return r.kind !== "refuse" && r.kind !== "noop";
   });

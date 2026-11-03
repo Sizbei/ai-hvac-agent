@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { PgDialect } from "drizzle-orm/pg-core";
+import type { SQL } from "drizzle-orm";
 import {
   addJobMaterial,
   removeJobMaterial,
@@ -358,6 +360,20 @@ describe("recordSignature", () => {
     const r = await recordSignature(ORG, TECH, JOB, SIG);
     expect(r).toEqual({ ok: false, reason: "not_owned" });
     expect(vi.mocked(db.update)).not.toHaveBeenCalled();
+  });
+
+  it("signs only from a lead row that is not cancelled on a live visit (open statuses + completed)", async () => {
+    owned(true);
+    let where: unknown;
+    vi.mocked(db.update).mockReturnValue({
+      set: () => ({ where: (w: unknown) => { where = w; return { returning: () => Promise.resolve([{ id: JOB }]) }; } }),
+    } as never);
+    await recordSignature(ORG, TECH, JOB, SIG);
+    const text = new PgDialect().sqlToQuery(where as SQL).sql.replace(/\s+/g, " ");
+    expect(text).toContain("a.is_lead");
+    expect(text).toContain("p.cancelled_at IS NULL");
+    expect(text).toContain("a.status IN ('assigned'::request_status, 'scheduled'::request_status, 'en_route'::request_status, 'arrived'::request_status, 'in_progress'::request_status, 'on_hold'::request_status, 'completed'::request_status)");
+    expect(text).not.toContain("a.status <> 'cancelled'");
   });
 
   it("refuses if the job is reassigned between the ownership check and the write (TOCTOU)", async () => {
