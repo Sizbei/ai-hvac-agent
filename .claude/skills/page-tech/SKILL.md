@@ -17,7 +17,7 @@ jobs list page `src/app/tech/jobs/page.tsx` · jobs list client
 `src/components/tech/tech-jobs-list-client.tsx` ·
 job detail page `src/app/tech/jobs/[id]/page.tsx` · job detail client
 `src/components/tech/tech-job-detail-client.tsx` · job summary
-`src/components/tech/tech-job-summary.tsx` · terminal-status confirm helpers
+`src/components/tech/tech-job-summary.tsx` · action-sheet and label helpers
 `src/components/tech/tech-status-confirm.ts` ·
 field queries `src/lib/tech/field-queries.ts` ·
 location queries `src/lib/tech/location-queries.ts` ·
@@ -57,11 +57,21 @@ server-side from the pricebook at add time — client-sent cost values are ignor
   `hold_reason` and optional `followUpDate`, open rows are closed; `completed`
   (done) marks only the caller done (needs `startedAt`); `close_out` is
   lead-only and completes the request (`completeRequestFromAdmin`), cancelling
-  untouched rows. Body: `POST /api/tech/jobs/[id]/status`
-  `{ appointmentId, action, holdReason?, followUpDate?, expectedStatus? }`.
-  Codes: 400 `NOT_TECH_TARGET`, 403 `NOT_LEAD`, 409 `INVALID_TRANSITION`,
-  `MANAGED_EXTERNALLY` (FieldPulse/HCP-owned jobs are read-only here),
-  `STALE` (expectedStatus mismatch), `CLOSE_OUT_BLOCKED`, `REQUEST_NOT_STARTED`.
+  untouched rows. Pause is offered only once on site (row `arrived` or
+  `in_progress`). Close out is offered only while the request is
+  `in_progress` or `on_hold` (`closeOutAllowedStatuses`); a completed or
+  cancelled request refuses it. A solo active lead (no other open row on
+  any live visit, `otherOpenRows` in `ResolveInput`) sees Close out, not
+  Done. Body: `POST /api/tech/jobs/[id]/status`
+  `{ appointmentId, action, holdReason?, followUpDate?, expectedStatus? }`
+  — `appointmentId` and `action` are required; there is no legacy
+  `{ status }` body. Codes: 400 `INVALID_INPUT` "That isn't a technician
+  action." (cancelled/scheduled included), 403 `NOT_LEAD`, 409
+  `INVALID_TRANSITION`, `MANAGED_EXTERNALLY` (FieldPulse/HCP-owned jobs are
+  read-only here), `STALE` (expectedStatus differs from the server-read row,
+  or the write lost a race; the CAS always uses the server-read row),
+  `CLOSE_OUT_BLOCKED`, `REQUEST_NOT_STARTED`. Lead-only request writes
+  (tap, hold, close-out) re-check `is_lead` inside the write.
 - **Close-out blockers** (`Blocker` in `status-actions.ts`): another technician
   still open, a planned visit, an earlier visit open, request not started, not
   the lead. `close-out-sheet.tsx` lists them; it forgets stale blockers when
@@ -93,13 +103,10 @@ server-side from the pricebook at add time — client-sent cost values are ignor
 - Interactive controls (buttons, the remove-material tap target) are `h-11` /
   `min-h-11 min-w-11` (44×44px) — this is a mobile app used one-handed at a
   customer's furnace, not a desktop density.
-- Tapping a terminal status target (`cancelled`, `completed`) in
-  `TechJobSummary` does NOT fire the status POST immediately — it opens an
-  inline confirm (`role="alertdialog"`, copy from `tech-status-confirm.ts`'s
-  `buildStatusConfirmCopy`) and only advances on the explicit "Yes, mark …"
-  tap. Non-terminal targets (`scheduled`, `in_progress`, `on_hold`) still
-  advance on first tap. `isTerminalStatus`/`buildStatusConfirmCopy` are pure —
-  keep new terminal statuses added there, not hardcoded in the component.
+- Done, Pause, Hold and Close out open the bottom sheet
+  (`close-out-sheet.tsx`, copy from `buildActionSheetCopy` in
+  `tech-status-confirm.ts`) and only post on its confirm; the travel and
+  Working taps post on first tap (`actionNeedsSheet`).
 - Travel taps: "On my way" (`en_route`) and "I've arrived" (`arrived`) post
   to the same `POST /api/tech/jobs/[id]/status` route; wording comes from
   `techStatusLabel` in `tech-status-confirm.ts`. Chain: scheduled/assigned/
@@ -116,9 +123,9 @@ server-side from the pricebook at add time — client-sent cost values are ignor
 - The tech portal has no admin-pages design system dependency — it uses base shadcn
   primitives (`Card`, `CardContent`, `Button`, `Input`, `Skeleton`); do not import
   admin-ui primitives here.
-- `buildStatusConfirmCopy` / `isTerminalStatus` in `tech-status-confirm.ts` are
-  now unused by the UI (the close-out sheet replaced the confirm); leave or
-  remove deliberately. The status badge still shows the raw enum label.
+- The list's status badge is humanized by `labelAssignmentStatus`
+  ("In progress", "En route"). A 409 `STALE` reloads the summary so the
+  buttons match the server.
 - Dev org is FieldPulse-connected: never create throwaway requests through the
   API to test taps (see admin-pages).
 - Photos are uploaded to R2 via `/api/upload`; signature is captured as a data-URI

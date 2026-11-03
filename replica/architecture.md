@@ -499,7 +499,9 @@ until a tech can finish and collect on a job here.
      cancel leaves no open assignment and no open job time entry; a
      general clock-in sent twice leaves one open entry with no labor
      cost, invisible to on-site minutes and the labor export; a synced
-     FieldPulse job refuses every tech write with 409; for a single-tech
+     FieldPulse job refuses every tech status write and the signature
+     with 409 (notes, photos, materials and manual job time stay
+     allowed on readable jobs); for a single-tech
      native job the JSON of `GET /api/admin/calendar?date=D` and `GET
      /api/admin/requests/[id]` is identical before and after the
      migration.

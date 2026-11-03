@@ -113,12 +113,15 @@ visits #2+ yet (M2).
   (`src/lib/admin/visit-one-guard.ts`) and `PATCH` of any visit refuse with 409
   `HAS_PROGRESS`; a visit ended by a hold refuses with 409 `VISIT_ENDED` (use
   the Visits section). Adding a visit to a completed request: 409
-  `REQUEST_COMPLETED`. Cancelling a visit closes its technicians' job time.
+  `REQUEST_COMPLETED`. Cancelling a visit closes the job time opened on that
+  visit (other visits' entries stay open). Visit edit/cancel batches lock the
+  request first (request -> visit -> rows).
 - Visit helpers: `POST …/appointments/[aid]/assignments` and `DELETE
   …/assignments/[tid]` (`src/app/api/admin/requests/[id]/appointments/[aid]/assignments/`,
   queries `src/lib/admin/assignment-queries.ts`) add/remove non-lead helpers on
   any visit incl. #1. 409 codes: `TIME_OFF`, `VISIT_ENDED`, `REQUEST_COMPLETED`,
-  `ALREADY_ASSIGNED`, `HAS_PROGRESS`, `IS_LEAD`, `MANAGED_EXTERNALLY`. Tech
+  `ALREADY_ASSIGNED`, `HAS_PROGRESS`, `IS_LEAD`, `MANAGED_EXTERNALLY`,
+  `REQUEST_CANCELLED` (remove refuses on a synced, completed or cancelled request too). Tech
   ownership is now the assignment-row rule (page-tech), not `assigned_to` alone.
 
 **Invariants:**
