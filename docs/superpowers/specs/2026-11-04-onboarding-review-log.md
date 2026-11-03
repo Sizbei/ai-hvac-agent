@@ -127,3 +127,11 @@ Established and applied:
   `add_technician`/`tech_sign_in`.
 
 Rejected: none material.
+
+## Plan review round 1 ruling — 2026-11-04
+
+The plan critic showed that `book_first_request`'s "active technician" check made both
+live steps re-open when the only technician is deactivated (digit 2, no sr string),
+contradicting acceptance 8. Ruling: the booking rule checks the technician ROLE only
+(`is_active` dropped); a deactivated technician re-opens `add_technician` alone. Spec v4
+amended in place.
