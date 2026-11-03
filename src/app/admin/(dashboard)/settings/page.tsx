@@ -64,9 +64,9 @@ export default function SettingsPage() {
   // flip; the 'saved' event only counts on the tab the banner belongs to.
   async function saveFromSetup(tab: string, update: OrgConfigUpdate): Promise<boolean> {
     const ok = await settings.saveConfig(update);
-    if (ok && fromSetup && tab === initialTab) {
-      setBannerEvent('saved');
+    if (ok && fromSetup) {
       void refreshOnboarding({ force: true });
+      if (tab === initialTab) setBannerEvent('saved');
     }
     return ok;
   }
