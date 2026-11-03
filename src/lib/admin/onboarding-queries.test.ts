@@ -63,8 +63,8 @@ beforeEach(() => {
 });
 
 describe("getOnboarding", () => {
-  it("sends one statement when nothing needs a stamp", async () => {
-    queue.push({ rows: [row()] });
+  it("sends one statement when nothing needs a stamp and firstSeenAt is stored", async () => {
+    queue.push({ rows: [row({ onboarding_state: { firstSeenAt: "2026-11-01T00:00:00.000Z" } })] });
     const p = await getOnboarding(ORG, OPTS);
     expect(executed).toHaveLength(1);
     expect(flat(executed[0])).toContain("AS tech_signed_in_evidence");
@@ -77,6 +77,17 @@ describe("getOnboarding", () => {
     expect(stepOf(p, "tech_sign_in").copyValue).toBe("https://app.example.com/tech-login");
   });
 
+  it("first GET with nothing to stamp writes firstSeenAt only ($top-only, empty $keys)", async () => {
+    queue.push({ rows: [row()] }, { rows: [] });
+    const p = await getOnboarding(ORG, OPTS);
+    expect(executed).toHaveLength(2);
+    const params = render(executed[1]).params;
+    expect(params).toContain(JSON.stringify({ firstSeenAt: NOW_ISO }));
+    expect(params.filter((x) => Array.isArray(x))).toEqual([[], ["firstSeenAt"]]);
+    expect(p.dismissedAt).toBeNull();
+    expect(p).not.toHaveProperty("firstSeenAt");
+  });
+
   it("maps every column to its signal", async () => {
     queue.push({
       rows: [
@@ -85,6 +96,7 @@ describe("getOnboarding", () => {
           pricebook: true, booked_assigned: true, any_request: true, tech_signed_in_evidence: true,
           widget_key: true, allowed_origins: true, integration_connected: true,
           onboarding_state: {
+            firstSeenAt: "2026-10-01T00:00:00.000Z",
             firstCompleted: Object.fromEntries(
               ["phone_hours", "brand", "add_technician", "pricebook", "book_first_request", "tech_sign_in", "chat_widget", "integrations"].map((k) => [k, "2026-10-01T00:00:00.000Z"]),
             ),
@@ -112,7 +124,7 @@ describe("getOnboarding", () => {
     const q = render(executed[1]);
     expect(q.sql).toContain("RETURNING onboarding_state");
     expect(q.params).toContain(JSON.stringify({ phone_hours: NOW_ISO }));
-    expect(q.params).toContain(JSON.stringify({}));
+    expect(q.params).toContain(JSON.stringify({ firstSeenAt: NOW_ISO }));
     expect(q.params).toContainEqual(["phone_hours"]);
     expect(stepOf(p, "phone_hours").done).toBe(true);
     expect(p.progress.requiredDone).toBe(1);
@@ -123,8 +135,20 @@ describe("getOnboarding", () => {
     queue.push({ rows: [row({ org_created_at: "2026-09-01T00:00:00.000Z", completed_request: true })] }, { rows: [] });
     const p = await getOnboarding(ORG, OPTS);
     expect(executed).toHaveLength(2);
-    expect(render(executed[1]).params).toContain(JSON.stringify({ dismissedAt: NOW_ISO }));
+    const params = render(executed[1]).params;
+    expect(params).toContain(JSON.stringify({ firstSeenAt: NOW_ISO, dismissedAt: NOW_ISO }));
+    expect(params).toContainEqual(["firstSeenAt", "dismissedAt"]);
     expect(p.dismissedAt).toBe(NOW_ISO);
+    expect(p.completedSeenAt).toBeNull();
+  });
+
+  it("second GET (firstSeenAt stored, still no stamps): no grandfather write", async () => {
+    queue.push({
+      rows: [row({ org_created_at: "2026-09-01T00:00:00.000Z", completed_request: true, onboarding_state: { firstSeenAt: "2026-10-01T00:00:00.000Z" } })],
+    });
+    const p = await getOnboarding(ORG, OPTS);
+    expect(executed).toHaveLength(1);
+    expect(p.dismissedAt).toBeNull();
     expect(p.completedSeenAt).toBeNull();
   });
 
@@ -135,8 +159,8 @@ describe("getOnboarding", () => {
     const p = await getOnboarding(ORG, OPTS);
     expect(executed).toHaveLength(2);
     const params = render(executed[1]).params;
-    expect(params).toContain(JSON.stringify({ completedSeenAt: NOW_ISO }));
-    expect(params).toContainEqual(["completedSeenAt"]);
+    expect(params).toContain(JSON.stringify({ firstSeenAt: NOW_ISO, completedSeenAt: NOW_ISO }));
+    expect(params).toContainEqual(["firstSeenAt", "completedSeenAt"]);
     expect(p.completedSeenAt).toBe(NOW_ISO);
   });
 
@@ -157,6 +181,16 @@ describe("getOnboarding", () => {
     expect(p.dismissedAt).toBeNull();
   });
 
+  it("demo: stored dismissal fields never reach the payload (read-time rule)", async () => {
+    queue.push({
+      rows: [row({ onboarding_state: { dismissed: true, dismissedAt: "2026-10-02T00:00:00.000Z", completedSeenAt: "2026-10-03T00:00:00.000Z" } })],
+    });
+    const p = await getOnboarding(ORG, { ...OPTS, demo: true });
+    expect(executed).toHaveLength(1);
+    expect(p.dismissedAt).toBeNull();
+    expect(p.completedSeenAt).toBeNull();
+  });
+
   it("still returns the payload when the stamp statement throws", async () => {
     queue.push({ rows: [row({ phone: true, business_hours: true })] }, new Error("boom"));
     const p = await getOnboarding(ORG, OPTS);
@@ -166,10 +200,12 @@ describe("getOnboarding", () => {
   });
 
   it("tolerates a missing settings row (NULL columns)", async () => {
-    queue.push({ rows: [row({ company_name: null, onboarding_state: null, org_created_at: null })] });
+    queue.push({ rows: [row({ company_name: null, onboarding_state: null, org_created_at: null })] }, { rows: [] });
     const p = await getOnboarding(ORG, OPTS);
     expect(p.progress.requiredDone).toBe(0);
-    expect(executed).toHaveLength(1);
+    // only the write-once firstSeenAt; the upsert is row-less safe
+    expect(executed).toHaveLength(2);
+    expect(render(executed[1]).params).toContain(JSON.stringify({ firstSeenAt: NOW_ISO }));
   });
 });
 

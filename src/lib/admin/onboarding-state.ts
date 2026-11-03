@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { SetupPlacement } from "@/components/admin/nav-items";
 
 /**
  * Setup-guide state types + parser. Imports only zod: safe for client code
@@ -19,6 +20,8 @@ export const STEP_IDS = [
 export type StepId = (typeof STEP_IDS)[number];
 
 export interface OnboardingState {
+  /** Write-once: set by the first GET; grandfathering runs only before it exists. */
+  firstSeenAt?: string;
   dismissedAt?: string;
   completedSeenAt?: string;
   firstCompleted: Partial<Record<StepId, string>>;
@@ -68,6 +71,7 @@ const flagsSchema = z
   .catch(undefined);
 
 const stateSchema = z.object({
+  firstSeenAt: isoDate,
   dismissedAt: isoDate,
   completedSeenAt: isoDate,
   firstCompleted: firstCompletedSchema,
@@ -98,9 +102,20 @@ export function parseOnboardingState(raw: unknown): OnboardingState {
   }
 
   const state: OnboardingState = { firstCompleted, flags };
+  if (s.firstSeenAt) state.firstSeenAt = s.firstSeenAt;
   const dismissedAt =
     s.dismissedAt ?? (s.dismissed === true ? LEGACY_ISO : undefined);
   if (dismissedAt) state.dismissedAt = dismissedAt;
   if (s.completedSeenAt) state.completedSeenAt = s.completedSeenAt;
   return state;
+}
+
+/**
+ * Setup nav placement (spec §2): second in Operations while the guide is
+ * neither dismissed nor finished-and-seen, else last in Integrations. The demo
+ * org ignores stored acknowledgements (they live in sessionStorage there).
+ */
+export function placementFor(state: OnboardingState, isDemo: boolean): SetupPlacement {
+  if (isDemo) return "operations";
+  return state.dismissedAt || state.completedSeenAt ? "integrations" : "operations";
 }

@@ -18,7 +18,7 @@ export function onboardingSelectSql(organizationId: string): SQL {
   COALESCE((SELECT business_info->>'businessHours' <> '' FROM organization_settings WHERE organization_id = ${o}), false) AS business_hours,
   COALESCE((SELECT logo_url IS NOT NULL FROM organization_settings WHERE organization_id = ${o}), false) AS logo_url,
   EXISTS (SELECT 1 FROM users WHERE organization_id = ${o} AND role = 'technician' AND is_active AND (password_hash IS NOT NULL OR google_id IS NOT NULL)) AS technician_ready,
-  (SELECT count(*) FROM users WHERE organization_id = ${o} AND role = 'technician' AND is_active AND password_hash IS NULL AND google_id IS NULL)::int AS fp_passwordless,
+  (SELECT count(*) FROM users WHERE organization_id = ${o} AND role = 'technician' AND is_active AND password_hash IS NULL AND google_id IS NULL AND fieldpulse_user_id IS NOT NULL)::int AS fp_passwordless,
   EXISTS (SELECT 1 FROM staff_invites WHERE organization_id = ${o} AND role = 'technician' AND revoked_at IS NULL AND accepted_at IS NULL AND expires_at > now()) AS pending_invite,
   EXISTS (SELECT 1 FROM pricebook_items WHERE organization_id = ${o} AND active) AS pricebook,
   EXISTS (SELECT 1 FROM service_requests WHERE organization_id = ${o}) AS any_request,
@@ -39,7 +39,7 @@ export function onboardingSelectSql(organizationId: string): SQL {
   (SELECT onboarding_state FROM organization_settings WHERE organization_id = ${o}) AS onboarding_state`;
 }
 
-type Top = { dismissedAt?: string; completedSeenAt?: string };
+type Top = { firstSeenAt?: string; dismissedAt?: string; completedSeenAt?: string };
 
 /** Drop undefined values so the JSON and the `?&` key arrays always agree. */
 function definedOnly<T extends object>(obj: T): Record<string, unknown> {
@@ -50,7 +50,8 @@ function definedOnly<T extends object>(obj: T): Record<string, unknown> {
 
 /**
  * First-completion stamps. `newStamps` = only ids not yet stamped; `top` =
- * grandfathering keys. Old values win everywhere (write-once).
+ * `firstSeenAt` (first GET) plus grandfathering keys. Old values win
+ * everywhere (write-once).
  */
 export function stampStatementSql(p: {
   organizationId: string;

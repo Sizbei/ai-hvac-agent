@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseOnboardingState, LEGACY_ISO } from "./onboarding-state";
+import { parseOnboardingState, placementFor, LEGACY_ISO } from "./onboarding-state";
 
 describe("parseOnboardingState", () => {
   it("folds legacy dismissed + embedViewed", () => {
@@ -47,13 +47,44 @@ describe("parseOnboardingState", () => {
     expect(parseOnboardingState(raw)).toEqual({ firstCompleted: {}, flags: {} });
   });
 
+  it("keeps a valid firstSeenAt and drops a malformed one", () => {
+    expect(parseOnboardingState({ firstSeenAt: "2026-11-01T00:00:00.000Z" }).firstSeenAt).toBe(
+      "2026-11-01T00:00:00.000Z",
+    );
+    const bad = parseOnboardingState({ firstSeenAt: "nope" });
+    expect("firstSeenAt" in bad).toBe(false);
+    expect(parseOnboardingState({ firstSeenAt: 5 })).toEqual({ firstCompleted: {}, flags: {} });
+  });
+
   it("round-trips a valid v2 state", () => {
     const v2 = {
+      firstSeenAt: "2026-10-31T00:00:00.000Z",
       dismissedAt: "2026-11-01T00:00:00.000Z",
       completedSeenAt: "2026-11-02T00:00:00.000Z",
       firstCompleted: { phone_hours: "2026-11-01T01:00:00.000Z", tech_sign_in: "2026-11-01T02:00:00.000Z" },
       flags: { embedCopied: true, techSignedInAt: "2026-11-01T02:00:00.000Z" },
     };
     expect(parseOnboardingState(v2)).toEqual(v2);
+  });
+});
+
+describe("placementFor", () => {
+  const T = "2026-11-01T00:00:00.000Z";
+  const st = (p: Record<string, unknown>) => parseOnboardingState(p);
+
+  it("operations while neither dismissed nor finished-and-seen", () => {
+    expect(placementFor(st({}), false)).toBe("operations");
+    expect(placementFor(st({ firstSeenAt: T, firstCompleted: { brand: T } }), false)).toBe("operations");
+  });
+
+  it("integrations after dismissedAt, completedSeenAt or a legacy dismissed", () => {
+    expect(placementFor(st({ dismissedAt: T }), false)).toBe("integrations");
+    expect(placementFor(st({ completedSeenAt: T }), false)).toBe("integrations");
+    expect(placementFor(st({ dismissed: true }), false)).toBe("integrations");
+  });
+
+  it("demo org is always operations, whatever is stored", () => {
+    expect(placementFor(st({ dismissedAt: T, completedSeenAt: T, dismissed: true }), true)).toBe("operations");
+    expect(placementFor(st({}), true)).toBe("operations");
   });
 });

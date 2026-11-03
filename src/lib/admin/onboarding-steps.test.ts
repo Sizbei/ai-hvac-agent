@@ -212,8 +212,16 @@ describe("deriveSteps — tech_sign_in action", () => {
     expect(ts("https://app.example.com").copyValue).toBe("https://app.example.com/tech-login");
     expect(ts("https://app.example.com/").copyValue).toBe("https://app.example.com/tech-login");
     expect(ts("https://app.example.com///").copyValue).toBe("https://app.example.com/tech-login");
-    expect(ts("").copyValue).toBe("/tech-login");
     expect(ts("https://app.example.com").action).toBe("copy_sign_in_link");
+  });
+
+  it("without an app URL: no action or copy value, the instruction only", () => {
+    const s = ts("");
+    expect(s).not.toHaveProperty("action");
+    expect(s).not.toHaveProperty("copyValue");
+    expect(s.instruction).toBe(
+      "Open it on the technician's phone and sign in with their email and password.",
+    );
   });
 
   it("adds the Google clause only when Google is enabled", () => {
@@ -351,6 +359,11 @@ describe("grandfatherDecision", () => {
   it("has stamps → nothing", () => {
     expect(g({ ...REQUIRED, state: state({ firstCompleted: { phone_hours: OLD } }) })).toEqual({});
     expect(g({ orgCreatedAt: OLD, completedRequest: true, state: state({ firstCompleted: { brand: OLD } }) })).toEqual({});
+  });
+
+  it("not the first GET (firstSeenAt stored) → nothing, even with no stamps", () => {
+    expect(g({ ...REQUIRED, state: state({ firstSeenAt: OLD }) })).toEqual({});
+    expect(g({ orgCreatedAt: OLD, completedRequest: true, state: state({ firstSeenAt: OLD }) })).toEqual({});
   });
 
   it("demo → nothing", () => {

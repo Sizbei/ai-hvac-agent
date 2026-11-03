@@ -137,14 +137,16 @@ function toDerivedStep(
     ...(secondaryHref && !fpSwitch ? { secondaryHref, secondaryLabel } : {}),
     ...flags,
     ...(note ? { note } : {}),
-    ...(def.id === "tech_sign_in"
-      ? {
-          action: "copy_sign_in_link" as const,
-          copyValue: `${opts.appUrl.replace(/\/+$/, "")}/tech-login`,
-          instruction: SIGN_IN_INSTRUCTION + (opts.googleEnabled ? SIGN_IN_GOOGLE_CLAUSE : ""),
-        }
-      : {}),
+    ...(def.id === "tech_sign_in" ? signInAction(opts) : {}),
   };
+}
+
+/** Without an app URL there is nothing to copy: the instruction only. */
+function signInAction(opts: DeriveOptions): Pick<DerivedStep, "action" | "copyValue" | "instruction"> {
+  const instruction = SIGN_IN_INSTRUCTION + (opts.googleEnabled ? SIGN_IN_GOOGLE_CLAUSE : "");
+  const base = opts.appUrl.replace(/\/+$/, "");
+  if (!base) return { instruction };
+  return { action: "copy_sign_in_link", copyValue: `${base}/tech-login`, instruction };
 }
 
 /** First not-done required step in order, else first not-done optional. */
@@ -178,9 +180,9 @@ export function deriveSteps(s: Signals, opts: DeriveOptions): Derived {
 }
 
 /**
- * Grandfathering for orgs that predate the guide (spec §4): only while the
- * state has no stamps yet and never for the demo org. Keys already present in
- * the state are omitted.
+ * Grandfathering for orgs that predate the guide (spec §4): only on the first
+ * GET (no `firstSeenAt` stored yet), while the state has no stamps, and never
+ * for the demo org. Keys already present in the state are omitted.
  */
 export function grandfatherDecision(
   s: Signals,
@@ -188,7 +190,9 @@ export function grandfatherDecision(
   now: Date,
   opts: { demo?: boolean } = {},
 ): { dismissedAt?: string; completedSeenAt?: string } {
-  if (opts.demo || Object.keys(s.state.firstCompleted).length > 0) return {};
+  if (opts.demo || s.state.firstSeenAt || Object.keys(s.state.firstCompleted).length > 0) {
+    return {};
+  }
   const nowIso = now.toISOString();
   if (d.progress.requiredDone === d.progress.requiredTotal) {
     return s.state.completedSeenAt ? {} : { completedSeenAt: nowIso };

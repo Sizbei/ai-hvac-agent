@@ -3,7 +3,8 @@ import { eq } from 'drizzle-orm';
 import { getAdminSession } from '@/lib/auth/session';
 import { db } from '@/lib/db';
 import { organizations, organizationSettings } from '@/lib/db/schema';
-import { parseOnboardingState } from '@/lib/admin/onboarding-state';
+import { parseOnboardingState, placementFor } from '@/lib/admin/onboarding-state';
+import { DEMO_ORG_ID } from '@/lib/tenancy/organization';
 import type { SetupPlacement } from '@/components/admin/nav-items';
 import { isOrgActive } from '@/lib/billing/entitlements';
 import { DashboardShell } from '@/components/admin/dashboard-shell';
@@ -64,11 +65,13 @@ async function loadBillingState(
 }
 
 /**
- * Setup nav placement (spec §2): second in Operations while the guide is
- * neither dismissed nor finished-and-seen, else last in Integrations. Degrades
- * to the quieter Integrations slot on error.
+ * Setup nav placement (spec §2, `placementFor`): second in Operations while
+ * the guide is neither dismissed nor finished-and-seen, else last in
+ * Integrations; the demo org is always Operations. Degrades to the quieter
+ * Integrations slot on error.
  */
 async function loadSetupPlacement(organizationId: string): Promise<SetupPlacement> {
+  if (organizationId === DEMO_ORG_ID) return 'operations';
   try {
     const [row] = await db
       .select({ onboardingState: organizationSettings.onboardingState })
@@ -81,8 +84,7 @@ async function loadSetupPlacement(organizationId: string): Promise<SetupPlacemen
       .limit(1);
     if (!row) return 'integrations';
     // parseOnboardingState folds legacy `dismissed: true` into dismissedAt.
-    const state = parseOnboardingState(row.onboardingState);
-    return state.dismissedAt || state.completedSeenAt ? 'integrations' : 'operations';
+    return placementFor(parseOnboardingState(row.onboardingState), false);
   } catch {
     return 'integrations';
   }

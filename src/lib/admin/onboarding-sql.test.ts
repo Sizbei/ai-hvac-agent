@@ -72,6 +72,13 @@ describe("onboardingSelectSql", () => {
     expect(flat).toContain("assigned_to");
   });
 
+  it("fp_passwordless counts only FieldPulse-synced technicians", () => {
+    const frag = flat.slice(flat.lastIndexOf("(SELECT count(*)", flat.indexOf(" AS fp_passwordless")), flat.indexOf(" AS fp_passwordless"));
+    expect(frag).toContain("password_hash IS NULL AND google_id IS NULL");
+    expect(frag).toContain("fieldpulse_user_id IS NOT NULL");
+    expect(frag).not.toContain("housecall_pro_user_id");
+  });
+
   it("role-only technician check in booked_assigned (no is_active)", () => {
     const booked = flat.slice(flat.indexOf("appointment_assignments"), flat.indexOf(" AS booked_assigned"));
     expect(booked).toContain("role = 'technician'");
@@ -84,7 +91,7 @@ describe("stampStatementSql", () => {
     stampStatementSql({
       organizationId: ORG,
       newStamps: { phone_hours: "2026-11-01T00:00:00.000Z", brand: "2026-11-01T00:00:00.000Z" },
-      top: { completedSeenAt: "2026-11-01T00:00:00.000Z" },
+      top: { firstSeenAt: "2026-11-01T00:00:00.000Z", completedSeenAt: "2026-11-01T00:00:00.000Z" },
     }),
   );
   const flat = q.sql.replace(/\s+/g, " ");
@@ -99,10 +106,12 @@ describe("stampStatementSql", () => {
 
   it("binds json strings and two text arrays", () => {
     expect(q.params).toContain(ORG);
-    expect(q.params).toContain(JSON.stringify({ completedSeenAt: "2026-11-01T00:00:00.000Z" }));
+    expect(q.params).toContain(
+      JSON.stringify({ firstSeenAt: "2026-11-01T00:00:00.000Z", completedSeenAt: "2026-11-01T00:00:00.000Z" }),
+    );
     expect(q.params).toContain(JSON.stringify({ phone_hours: "2026-11-01T00:00:00.000Z", brand: "2026-11-01T00:00:00.000Z" }));
     const arrays = q.params.filter((p) => Array.isArray(p));
-    expect(arrays).toEqual([["phone_hours", "brand"], ["completedSeenAt"]]);
+    expect(arrays).toEqual([["phone_hours", "brand"], ["firstSeenAt", "completedSeenAt"]]);
   });
 
   it("puts $top and $new on the LEFT so old values win", () => {
@@ -132,6 +141,14 @@ describe("stampStatementSql", () => {
     );
     expect(g.sql).toContain("ON CONFLICT (organization_id)");
     expect(g.params).toContain("{}");
+  });
+
+  it("firstSeenAt-only top: guarded by its own key so it is written once", () => {
+    const f = render(
+      stampStatementSql({ organizationId: ORG, newStamps: {}, top: { firstSeenAt: "2026-11-01T00:00:00.000Z" } }),
+    );
+    expect(f.params).toContain(JSON.stringify({ firstSeenAt: "2026-11-01T00:00:00.000Z" }));
+    expect(f.params.filter((p) => Array.isArray(p))).toEqual([[], ["firstSeenAt"]]);
   });
 });
 

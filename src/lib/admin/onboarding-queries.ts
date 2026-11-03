@@ -46,9 +46,20 @@ function signalsFromRow(row: Row): Signals {
 }
 
 /**
- * GET: one SELECT, then the stamp statement iff there are new stamps or
- * grandfathering keys (never for the demo org). The payload is built from the
- * SELECT copy merged in memory, never from RETURNING.
+ * Demo read-time rule (spec §2): stored acknowledgements never hide the demo
+ * guide (its × lives in sessionStorage), even if a row carries them.
+ */
+function demoSafe(state: StateV2, demo: boolean): StateV2 {
+  if (!demo) return state;
+  const { dismissedAt: _d, completedSeenAt: _c, ...rest } = state;
+  return rest;
+}
+
+/**
+ * GET: one SELECT, then the stamp statement iff there are new stamps or `$top`
+ * keys (the write-once `firstSeenAt` on the first GET, plus grandfathering);
+ * never for the demo org. The payload is built from the SELECT copy merged in
+ * memory, never from RETURNING.
  */
 export async function getOnboarding(
   organizationId: string,
@@ -56,14 +67,18 @@ export async function getOnboarding(
 ): Promise<OnboardingPayload> {
   const now = opts.now ?? new Date();
   const res = await db.execute(onboardingSelectSql(organizationId));
-  const signals = signalsFromRow((res.rows[0] ?? {}) as Row);
+  const raw = signalsFromRow((res.rows[0] ?? {}) as Row);
+  const signals: Signals = { ...raw, state: demoSafe(raw.state, opts.demo) };
   const derived = deriveSteps(signals, {
     now,
     demo: opts.demo,
     googleEnabled: opts.googleEnabled,
     appUrl: opts.appUrl,
   });
-  const top = grandfatherDecision(signals, derived, now, { demo: opts.demo });
+  const top = {
+    ...(signals.state.firstSeenAt ? {} : { firstSeenAt: now.toISOString() }),
+    ...grandfatherDecision(signals, derived, now, { demo: opts.demo }),
+  };
   const needsWrite =
     Object.keys(derived.newStamps).length > 0 || Object.keys(top).length > 0;
 
