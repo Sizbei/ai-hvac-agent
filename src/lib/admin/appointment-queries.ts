@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { appointmentAssignments, appointments, serviceRequests, users } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { isUniqueViolation } from "@/lib/db/unique-violation";
+import { closeJobEntriesSql } from "@/lib/tech/time-entry-sql";
 import { technicianTimeOffOverlapping } from "./shift-queries";
 import {
   nextAppointmentNumber,
@@ -106,7 +107,7 @@ export async function listAppointments(organizationId: string, requestId: string
 
 export type AddAppointmentResult =
   | AppointmentRecord
-  | { readonly reason: "request_not_found" | "request_cancelled" | "technician_not_found" | "time_off" | "conflict" };
+  | { readonly reason: "request_not_found" | "request_cancelled" | "request_completed" | "technician_not_found" | "time_off" | "conflict" };
 
 export async function addAppointment(
   organizationId: string, requestId: string, input: AppointmentInput, actorUserId: string,
@@ -117,6 +118,8 @@ export async function addAppointment(
   // visit added to an already-cancelled request would stay live on a dead
   // request; refusing here is what keeps it from being silently lost.
   if (status === "cancelled") return { reason: "request_cancelled" };
+  // A completed request is closed out; a new visit would be unreachable work.
+  if (status === "completed") return { reason: "request_completed" };
   const ordered = [...new Set(input.technicianIds)]; // the caller's order decides the lead
   const found = await activeTechnicianIds(organizationId, ordered);
   if (found.length !== ordered.length) return { reason: "technician_not_found" };
@@ -139,7 +142,7 @@ export async function addAppointment(
           SELECT ${id}::uuid, r.organization_id, r.id, ${appointmentNumber}::smallint,
             ${start}::timestamptz, ${start}::timestamptz, ${end}::timestamptz, ${start}::timestamptz, ${end}::timestamptz, ${input.specialInstructions ?? null}::text
           FROM service_requests r
-          WHERE r.id = ${requestId}::uuid AND r.organization_id = ${organizationId}::uuid AND r.status <> 'cancelled'
+          WHERE r.id = ${requestId}::uuid AND r.organization_id = ${organizationId}::uuid AND r.status NOT IN ('cancelled'::request_status, 'completed'::request_status)
             AND ${noTimeOff(organizationId, ordered, start, end)}
           FOR SHARE
           RETURNING id`),
@@ -149,7 +152,8 @@ export async function addAppointment(
         // Time off can land between the pre-check and the insert.
         if (await anyTimeOff(organizationId, ordered, new Date(start), new Date(end))) return { reason: "time_off" };
         const now = await requestStatus(organizationId, requestId);
-        return { reason: now === null ? "request_not_found" : "request_cancelled" };
+        if (now === null) return { reason: "request_not_found" };
+        return { reason: now === "completed" ? "request_completed" : "request_cancelled" };
       }
       const record = await getAppointment(organizationId, requestId, id);
       if (!record) throw new Error("Visit vanished after insert");
@@ -163,16 +167,38 @@ export async function addAppointment(
   return { reason: "conflict" };
 }
 
+/** Some technician has stamped progress on this visit (en route / arrived / started / completed). */
+const PROGRESSED = sql`(a.en_route_at IS NOT NULL OR a.arrived_at IS NOT NULL OR a.started_at IS NOT NULL OR a.completed_at IS NOT NULL)`;
+
+function visitProgressed(organizationId: string, appointmentId: SQL | string): SQL {
+  return sql`EXISTS (SELECT 1 FROM appointment_assignments a WHERE a.appointment_id = ${appointmentId} AND a.organization_id = ${organizationId}::uuid AND ${PROGRESSED})`;
+}
+
 type MissReason = "not_found" | "is_first_visit" | "request_cancelled" | "visit_cancelled" | "version_conflict";
 
 /** Why a CAS matched no row. */
-async function classifyMiss(organizationId: string, requestId: string, appointmentId: string, checkCancelled: boolean): Promise<MissReason> {
-  const [row] = await db.select({ n: appointments.appointmentNumber, cancelledAt: appointments.cancelledAt }).from(appointments)
+async function classifyMiss(organizationId: string, requestId: string, appointmentId: string, checkCancelled: boolean): Promise<MissReason>;
+async function classifyMiss(
+  organizationId: string, requestId: string, appointmentId: string, checkCancelled: boolean, progressCheck: { readonly version: number },
+): Promise<MissReason | "has_progress">;
+async function classifyMiss(
+  organizationId: string, requestId: string, appointmentId: string, checkCancelled: boolean, progressCheck?: { readonly version: number },
+): Promise<MissReason | "has_progress"> {
+  const [row] = await db.select({ n: appointments.appointmentNumber, cancelledAt: appointments.cancelledAt, version: appointments.version }).from(appointments)
     .where(withTenant(appointments, organizationId, eq(appointments.id, appointmentId), eq(appointments.serviceRequestId, requestId))).limit(1);
   if (!row) return "not_found";
   if (row.n === 1) return "is_first_visit";
   if (checkCancelled && (await requestStatus(organizationId, requestId)) === "cancelled") return "request_cancelled";
   if (checkCancelled && row.cancelledAt !== null) return "visit_cancelled";
+  if (progressCheck) {
+    // A stale version is a version conflict first; progress only explains a miss on a current version.
+    if (row.version !== progressCheck.version) return "version_conflict";
+    const [hit] = await db.select({ id: appointmentAssignments.id }).from(appointmentAssignments)
+      .where(withTenant(appointmentAssignments, organizationId, eq(appointmentAssignments.appointmentId, appointmentId),
+        sql`(${appointmentAssignments.enRouteAt} IS NOT NULL OR ${appointmentAssignments.arrivedAt} IS NOT NULL OR ${appointmentAssignments.startedAt} IS NOT NULL OR ${appointmentAssignments.completedAt} IS NOT NULL)`))
+      .limit(1);
+    if (hit) return "has_progress";
+  }
   return "version_conflict";
 }
 
@@ -184,7 +210,7 @@ function casWhere(organizationId: string, requestId: string, appointmentId: stri
 
 export type UpdateAppointmentResult =
   | AppointmentRecord
-  | { readonly reason: MissReason | "technician_not_found" | "time_off" };
+  | { readonly reason: MissReason | "has_progress" | "technician_not_found" | "time_off" };
 
 export async function updateAppointment(
   organizationId: string, requestId: string, appointmentId: string, patch: AppointmentPatch, actorUserId: string,
@@ -212,6 +238,8 @@ export async function updateAppointment(
       sql`EXISTS (SELECT 1 FROM ${serviceRequests} r WHERE r.id = ${appointments.serviceRequestId} AND r.organization_id = ${organizationId}::uuid AND r.status <> 'cancelled')`,
       // Time off is never overridable, and it may land after the pre-check.
       noTimeOff(organizationId, ordered, start.toISOString(), end.toISOString()),
+      // A technician who has started the visit locks it; atomic with the write.
+      sql`NOT ${visitProgressed(organizationId, sql`${appointments.id}`)}`,
     )).returning({ id: appointments.id }),
     db.delete(appointmentAssignments).where(withTenant(appointmentAssignments, organizationId,
       eq(appointmentAssignments.appointmentId, appointmentId), landed(organizationId, appointmentId))),
@@ -219,7 +247,7 @@ export async function updateAppointment(
   ]);
   if (updated.length === 0) {
     if (await anyTimeOff(organizationId, ordered, start, end)) return { reason: "time_off" };
-    return { reason: await classifyMiss(organizationId, requestId, appointmentId, true) };
+    return { reason: await classifyMiss(organizationId, requestId, appointmentId, true, { version: patch.version }) };
   }
   const record = await getAppointment(organizationId, requestId, appointmentId);
   if (!record) return { reason: "not_found" };
@@ -234,15 +262,22 @@ export type CancelAppointmentResult =
 export async function cancelAppointment(
   organizationId: string, requestId: string, appointmentId: string, version: number,
 ): Promise<CancelAppointmentResult> {
+  const techRows = await db.select({ technicianId: appointmentAssignments.technicianId }).from(appointmentAssignments)
+    .where(withTenant(appointmentAssignments, organizationId, eq(appointmentAssignments.appointmentId, appointmentId)));
+  const technicianIds = techRows.map((r) => r.technicianId);
   const [updated] = await db.batch([
     db.update(appointments).set({
       cancelledAt: sql`COALESCE(${appointments.cancelledAt}, now())`,
       version: sql`${appointments.version} + 1`, updatedAt: new Date(),
     }).where(casWhere(organizationId, requestId, appointmentId, version))
       .returning({ id: appointments.id, appointmentNumber: appointments.appointmentNumber }),
+    // Finished/cancelled rows keep their status; only open rows become cancelled.
     db.update(appointmentAssignments).set({ status: "cancelled" })
       .where(withTenant(appointmentAssignments, organizationId,
-        eq(appointmentAssignments.appointmentId, appointmentId), landed(organizationId, appointmentId))),
+        eq(appointmentAssignments.appointmentId, appointmentId), landed(organizationId, appointmentId),
+        sql`${appointmentAssignments.status} NOT IN ('completed'::request_status, 'cancelled'::request_status)`)),
+    // The visit is gone, so its technicians' auto job time stops with it.
+    db.execute(closeJobEntriesSql({ organizationId, requestId, technicianIds, gate: landed(organizationId, appointmentId) })),
   ]);
   const [row] = updated;
   if (!row) {

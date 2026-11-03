@@ -99,6 +99,8 @@ export async function POST(
           return errorResponse("Request not found", "NOT_FOUND", 404);
         case "request_cancelled":
           return errorResponse("This request is cancelled.", "REQUEST_CANCELLED", 409);
+        case "request_completed":
+          return errorResponse("This request is already completed.", "REQUEST_COMPLETED", 409);
         case "technician_not_found":
           return errorResponse(
             "One or more technicians aren't active on your team.",
