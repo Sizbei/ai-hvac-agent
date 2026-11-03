@@ -49,7 +49,6 @@ describe("GET /api/tech/jobs/[id]", () => {
       id: VALID_ID,
       referenceNumber: "HVAC-1",
       status: "scheduled",
-      allowedNextStatuses: ["in_progress"],
     });
     const res = await GET(req(), ctx(VALID_ID) as never);
     expect(res.status).toBe(200);

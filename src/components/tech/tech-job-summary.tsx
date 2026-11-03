@@ -6,7 +6,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatArrivalWindow } from '@/lib/admin/arrival-window';
-import { buildStatusConfirmCopy, isTerminalStatus, techStatusLabel } from '@/components/tech/tech-status-confirm';
+import { CloseOutSheet, type SheetConfirmOptions } from '@/components/tech/close-out-sheet';
+import {
+  actionNeedsSheet,
+  relevantBlockers,
+  techStatusLabel,
+  type SheetAction,
+} from '@/components/tech/tech-status-confirm';
+import type { Blocker, TechAction } from '@/lib/tech/status-actions';
 
 interface TechJobSummary {
   readonly id: string;
@@ -23,8 +30,17 @@ interface TechJobSummary {
   readonly customerPhone: string | null;
   readonly address: string | null;
   readonly accessNotes: string | null;
-  readonly allowedNextStatuses: readonly string[];
+  readonly assignment: { readonly appointmentId: string } | null;
+  readonly allowedActions: readonly TechAction[];
+  readonly blockers: readonly Blocker[];
+  readonly native: boolean;
 }
+
+interface ActionResult {
+  readonly requestBehind?: boolean;
+}
+
+const ACTION_ORDER: readonly TechAction[] = ['en_route', 'arrived', 'in_progress', 'completed', 'pause', 'on_hold', 'close_out'];
 
 function humanize(s: string): string {
   const spaced = s.replace(/_/g, ' ');
@@ -55,10 +71,12 @@ export function TechJobSummary({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [advancing, setAdvancing] = useState<string | null>(null);
-  // Set while a terminal status (cancelled/completed) is awaiting the
-  // technician's explicit second confirmation — the POST does not fire until
-  // they tap the confirm button. (Rtech-4)
-  const [pendingConfirm, setPendingConfirm] = useState<string | null>(null);
+  const [sheetAction, setSheetAction] = useState<SheetAction | null>(null);
+  const [sheetError, setSheetError] = useState<string | null>(null);
+  // Set after a lead's tap when the request itself is still waiting on an earlier visit.
+  const [requestBehind, setRequestBehind] = useState(false);
+  // Blockers the server reported on a refused close-out (fresher than the load).
+  const [serverBlockers, setServerBlockers] = useState<readonly Blocker[] | null>(null);
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -83,39 +101,51 @@ export function TechJobSummary({
   }, [load]);
 
   const advance = useCallback(
-    async (status: string): Promise<void> => {
-      setAdvancing(status);
+    async (action: TechAction, options: SheetConfirmOptions = {}): Promise<void> => {
+      if (!job?.assignment) return;
+      const viaSheet = actionNeedsSheet(action);
+      setAdvancing(action);
       setError(null);
+      setSheetError(null);
       try {
         const res = await fetch(`/api/tech/jobs/${id}/status`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(appointmentId ? { status, appointmentId } : { status }),
+          body: JSON.stringify({ appointmentId: job.assignment.appointmentId, action, ...options }),
         });
+        const body = await res.json().catch(() => ({}));
         if (res.ok) {
+          const data: ActionResult = body?.data ?? {};
+          setRequestBehind(data.requestBehind === true);
+          setServerBlockers(null);
+          setSheetAction(null);
           await load();
           onStatusChanged?.();
         } else {
-          const body = await res.json().catch(() => ({}));
-          setError(body?.error?.message ?? "Couldn't update status.");
+          const message = body?.error?.message ?? "Couldn't update this request. Please try again.";
+          const refused = body?.error?.details?.blockers;
+          if (body?.error?.code === 'CLOSE_OUT_BLOCKED' && Array.isArray(refused)) setServerBlockers(refused);
+          if (viaSheet && body?.error?.code !== 'CLOSE_OUT_BLOCKED') setSheetError(message);
+          else if (!viaSheet) setError(message);
         }
       } catch {
-        setError('Could not connect to server.');
+        const message = "Couldn't reach the server. Please try again.";
+        if (viaSheet) setSheetError(message);
+        else setError(message);
       } finally {
         setAdvancing(null);
       }
     },
-    [id, appointmentId, load, onStatusChanged],
+    [id, job, load, onStatusChanged],
   );
 
-  // Cancelled/completed require an explicit second tap before the POST
-  // fires; the other manual targets advance immediately, as before.
-  const handleStatusTap = useCallback(
-    (status: string): void => {
-      if (isTerminalStatus(status)) {
-        setPendingConfirm(status);
+  const handleTap = useCallback(
+    (action: TechAction): void => {
+      if (actionNeedsSheet(action)) {
+        setSheetError(null);
+        setSheetAction(action as SheetAction);
       } else {
-        void advance(status);
+        void advance(action);
       }
     },
     [advance],
@@ -134,6 +164,7 @@ export function TechJobSummary({
     );
   }
 
+  const actions = ACTION_ORDER.filter((a) => job.allowedActions.includes(a));
   const windowLabel = formatArrivalWindow(
     job.arrivalWindowStart,
     job.arrivalWindowEnd,
@@ -211,60 +242,44 @@ export function TechJobSummary({
           </p>
         )}
 
-        {/* Advance status */}
-        {job.allowedNextStatuses.length > 0 && (
-          <div className="flex flex-wrap gap-2 border-t pt-3">
-            {pendingConfirm ? (
-              <div
-                role="alertdialog"
-                aria-label={buildStatusConfirmCopy(pendingConfirm).question}
-                className="w-full space-y-2 rounded-md border border-danger-border bg-danger-light p-3"
-              >
-                <p className="text-[15px] font-medium text-danger-strong">
-                  {buildStatusConfirmCopy(pendingConfirm).question}
-                </p>
-                <div className="flex gap-2">
-                  <Button
-                    variant="destructive"
-                    /* solid danger: the tinted default would vanish on the
-                     * danger-light confirm panel it sits inside */
-                    className="h-11 flex-1 rounded-xl bg-danger text-[15px] text-danger-foreground hover:bg-danger-strong"
-                    disabled={advancing !== null}
-                    onClick={() => {
-                      const status = pendingConfirm;
-                      setPendingConfirm(null);
-                      void advance(status);
-                    }}
-                  >
-                    {advancing === pendingConfirm
-                      ? 'Saving…'
-                      : buildStatusConfirmCopy(pendingConfirm).confirmLabel}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="h-11 flex-1 rounded-xl text-[15px]"
-                    disabled={advancing !== null}
-                    onClick={() => setPendingConfirm(null)}
-                  >
-                    {buildStatusConfirmCopy(pendingConfirm).cancelLabel}
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              job.allowedNextStatuses.map((s) => (
-                <Button
-                  key={s}
-                  variant={isTerminalStatus(s) ? 'destructive' : 'default'}
-                  className="h-11 rounded-xl px-4 text-[15px]"
-                  disabled={advancing !== null}
-                  onClick={() => handleStatusTap(s)}
-                >
-                  {advancing === s ? 'Saving…' : techStatusLabel(s)}
-                </Button>
-              ))
+        {/* Actions */}
+        {!job.native ? (
+          <p className="rounded-md border border-border bg-surface-raised px-3 py-2.5 text-[15px] text-muted-foreground">
+            Managed in FieldPulse. Update this job there.
+          </p>
+        ) : (
+          <>
+            {requestBehind && (
+              <p className="rounded-md border border-warning-border bg-warning-light px-3 py-2.5 text-[15px]">
+                Your status is saved; the request is waiting on an earlier visit.
+              </p>
             )}
-          </div>
+            {actions.length > 0 && (
+              <div className="grid grid-cols-2 gap-2 border-t pt-3">
+                {actions.map((a, i) => (
+                  <Button
+                    key={a}
+                    variant={a === 'close_out' ? 'destructive' : actionNeedsSheet(a) ? 'outline' : 'default'}
+                    className={`h-12 rounded-xl px-4 text-[16px] ${actions.length % 2 === 1 && i === 0 ? 'col-span-2' : ''}`}
+                    disabled={advancing !== null}
+                    onClick={() => handleTap(a)}
+                  >
+                    {advancing === a ? 'Saving…' : techStatusLabel(a)}
+                  </Button>
+                ))}
+              </div>
+            )}
+          </>
         )}
+
+        <CloseOutSheet
+          action={sheetAction}
+          blockers={relevantBlockers(serverBlockers ?? job.blockers)}
+          pending={advancing !== null}
+          error={sheetError}
+          onConfirm={(a, options) => void advance(a, options)}
+          onClose={() => { setSheetAction(null); setSheetError(null); }}
+        />
 
         {error && <p className="text-[13px] text-danger-strong">{error}</p>}
       </CardContent>

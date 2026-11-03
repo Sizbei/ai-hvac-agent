@@ -33,11 +33,7 @@ import {
 import { allowedActions, type Blocker, type TechAction } from "@/lib/tech/status-actions";
 import { closeOutBlockers } from "@/lib/tech/status-writes";
 import { decrypt } from "@/lib/crypto";
-import {
-  allowedTransitions,
-  MANUAL_TARGET_STATUSES,
-  type RequestStatus,
-} from "@/lib/admin/request-status";
+import type { RequestStatus } from "@/lib/admin/request-status";
 import { getPricebookItemById } from "@/lib/admin/pricebook-queries";
 import { adjustStock } from "@/lib/admin/inventory-queries";
 import { rollUpActualMaterialsCost } from "@/lib/admin/margin";
@@ -70,8 +66,6 @@ export interface TechJobSummary {
   readonly customerPhone: string | null;
   readonly address: string | null;
   readonly accessNotes: string | null;
-  /** Legacy buttons until Task 6: from the caller's ROW status, minus scheduled/cancelled. */
-  readonly allowedNextStatuses: readonly string[];
   /** The caller's row this summary is about (null for a legacy assigned_to-only reader). */
   readonly assignment: TechAssignmentRow | null;
   readonly isActiveLead: boolean;
@@ -149,10 +143,6 @@ export async function getTechJobSummary(
       ? await closeOutBlockers(organizationId, serviceRequestId, { technicianId: techUserId, appointmentId: assignment.appointmentId })
       : [];
 
-  const manual = MANUAL_TARGET_STATUSES as readonly RequestStatus[];
-  const allowedNextStatuses = allowedTransitions(assignment?.status ?? requestStatus)
-    .filter((s) => manual.includes(s) && s !== "scheduled" && s !== "cancelled");
-
   return {
     id: row.id,
     referenceNumber: row.referenceNumber,
@@ -168,7 +158,6 @@ export async function getTechJobSummary(
     customerPhone: safeDecrypt(row.customerPhoneEncrypted),
     address: safeDecrypt(row.addressEncrypted),
     accessNotes: row.accessNotes,
-    allowedNextStatuses,
     assignment,
     isActiveLead,
     allowedActions: actions,
