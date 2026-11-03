@@ -80,6 +80,11 @@ export function noTimeOff(organizationId: string, ids: readonly string[], startI
     AND s.starts_at < ${endIso}::timestamptz AND s.ends_at > ${startIso}::timestamptz)`;
 }
 
+/** Lock order request -> visit -> rows: every visit batch starts here (serialises with helper add's FOR SHARE and the tech writes). */
+function lockRequest(organizationId: string, requestId: string) {
+  return db.execute(sql`SELECT 1 FROM service_requests WHERE id = ${requestId}::uuid AND organization_id = ${organizationId}::uuid FOR NO KEY UPDATE`);
+}
+
 /** "THIS transaction wrote the appointment row" — gates the assignment writes in the same batch. */
 function landed(organizationId: string, appointmentId: string): SQL {
   return sql`EXISTS (SELECT 1 FROM ${appointments} p WHERE p.id = ${appointmentId}::uuid AND p.organization_id = ${organizationId}::uuid AND p.xmin = pg_current_xact_id()::xid)`;
@@ -221,11 +226,12 @@ export async function updateAppointment(
   const start = new Date(patch.arrivalWindowStart);
   const end = new Date(patch.arrivalWindowEnd);
   if (await anyTimeOff(organizationId, ordered, start, end)) return { reason: "time_off" };
-  // ONE batch: CAS update + assignment delete + assignment insert. The latter two
+  // ONE batch: request lock + CAS update + assignment delete + assignment insert. The latter two
   // are gated on xmin = this transaction (not on version = v + 1): under READ
   // COMMITTED a loser whose CAS matched 0 rows would otherwise see the winner's
   // v + 1 and replace the winner's technicians.
-  const [updated] = await db.batch([
+  const [, updated] = await db.batch([
+    lockRequest(organizationId, requestId),
     db.update(appointments).set({
       scheduledDate: start, startsAt: start, endsAt: end, arrivalWindowStart: start, arrivalWindowEnd: end,
       specialInstructions: patch.specialInstructions ?? null,
@@ -241,8 +247,10 @@ export async function updateAppointment(
       // A technician who has started the visit locks it; atomic with the write.
       sql`NOT ${visitProgressed(organizationId, sql`${appointments.id}`)}`,
     )).returning({ id: appointments.id }),
+    // Belt-and-braces: a row that gained progress is never deleted (the CAS above already misses then).
     db.delete(appointmentAssignments).where(withTenant(appointmentAssignments, organizationId,
-      eq(appointmentAssignments.appointmentId, appointmentId), landed(organizationId, appointmentId))),
+      eq(appointmentAssignments.appointmentId, appointmentId), landed(organizationId, appointmentId),
+      sql`NOT (${appointmentAssignments.enRouteAt} IS NOT NULL OR ${appointmentAssignments.arrivedAt} IS NOT NULL OR ${appointmentAssignments.startedAt} IS NOT NULL OR ${appointmentAssignments.completedAt} IS NOT NULL)`)),
     insertAssignments(organizationId, appointmentId, ordered, actorUserId),
   ]);
   if (updated.length === 0) {
@@ -262,10 +270,8 @@ export type CancelAppointmentResult =
 export async function cancelAppointment(
   organizationId: string, requestId: string, appointmentId: string, version: number,
 ): Promise<CancelAppointmentResult> {
-  const techRows = await db.select({ technicianId: appointmentAssignments.technicianId }).from(appointmentAssignments)
-    .where(withTenant(appointmentAssignments, organizationId, eq(appointmentAssignments.appointmentId, appointmentId)));
-  const technicianIds = techRows.map((r) => r.technicianId);
-  const [updated] = await db.batch([
+  const [, updated] = await db.batch([
+    lockRequest(organizationId, requestId),
     db.update(appointments).set({
       cancelledAt: sql`COALESCE(${appointments.cancelledAt}, now())`,
       version: sql`${appointments.version} + 1`, updatedAt: new Date(),
@@ -276,8 +282,8 @@ export async function cancelAppointment(
       .where(withTenant(appointmentAssignments, organizationId,
         eq(appointmentAssignments.appointmentId, appointmentId), landed(organizationId, appointmentId),
         sql`${appointmentAssignments.status} NOT IN ('completed'::request_status, 'cancelled'::request_status)`)),
-    // The visit is gone, so its technicians' auto job time stops with it.
-    db.execute(closeJobEntriesSql({ organizationId, requestId, technicianIds, gate: landed(organizationId, appointmentId) })),
+    // The visit is gone, so the job time opened on it stops with it (other visits' entries stay open).
+    db.execute(closeJobEntriesSql({ organizationId, requestId, appointmentId, gate: landed(organizationId, appointmentId) })),
   ]);
   const [row] = updated;
   if (!row) {

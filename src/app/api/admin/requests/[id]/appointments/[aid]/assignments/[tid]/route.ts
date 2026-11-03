@@ -9,7 +9,7 @@ import { logger } from "@/lib/logger";
 
 type Params = { params: Promise<{ id: string; aid: string; tid: string }> };
 
-/** Remove a helper from a visit. Refused for the lead and for anyone with progress. */
+/** Remove a helper from a visit. Refused for the lead, for anyone with progress, and on a synced, completed or cancelled request. */
 export async function DELETE(_request: NextRequest, { params }: Params) {
   try {
     const session = await getAdminSession();
@@ -35,6 +35,12 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
           return errorResponse("That technician has already started on this visit.", "HAS_PROGRESS", 409);
         case "is_lead":
           return errorResponse("Change the lead from the visit instead.", "IS_LEAD", 409);
+        case "managed_externally":
+          return errorResponse("This job is managed in FieldPulse.", "MANAGED_EXTERNALLY", 409);
+        case "request_completed":
+          return errorResponse("This request is completed.", "REQUEST_COMPLETED", 409);
+        case "request_cancelled":
+          return errorResponse("This request is cancelled.", "REQUEST_CANCELLED", 409);
       }
     }
 

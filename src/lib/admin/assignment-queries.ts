@@ -21,7 +21,11 @@ export type AddVisitTechnicianResult =
 
 export type RemoveVisitTechnicianResult =
   | { readonly ok: true }
-  | { readonly reason: "not_found" | "has_progress" | "is_lead" };
+  | {
+      readonly reason:
+        | "not_found" | "has_progress" | "is_lead"
+        | "managed_externally" | "request_completed" | "request_cancelled";
+    };
 
 type Visit = AppointmentRecord;
 
@@ -129,8 +133,20 @@ export async function removeVisitTechnician(
       AND p.organization_id = ${organizationId}::uuid AND a.organization_id = ${organizationId}::uuid
       AND a.technician_id = ${technicianId}::uuid AND NOT a.is_lead
       AND a.en_route_at IS NULL AND a.arrived_at IS NULL AND a.started_at IS NULL AND a.completed_at IS NULL
+      AND EXISTS (SELECT 1 FROM service_requests r WHERE r.id = p.service_request_id
+        AND r.fieldpulse_job_id IS NULL AND r.hcp_job_id IS NULL AND r.status NOT IN ('completed'::request_status, 'cancelled'::request_status))
     RETURNING a.id`);
   if (deleted.rows.length > 0) return { ok: true };
+
+  // Why the guarded DELETE matched nothing (re-read after the fact, request first like add).
+  const [req] = await db.select({
+    status: serviceRequests.status, fp: serviceRequests.fieldpulseJobId, hcp: serviceRequests.hcpJobId,
+  }).from(serviceRequests)
+    .where(withTenant(serviceRequests, organizationId, eq(serviceRequests.id, requestId))).limit(1);
+  if (!req) return { reason: "not_found" };
+  if (req.fp !== null || req.hcp !== null) return { reason: "managed_externally" };
+  if (req.status === "completed") return { reason: "request_completed" };
+  if (req.status === "cancelled") return { reason: "request_cancelled" };
 
   const [row] = await db.select({ isLead: appointmentAssignments.isLead }).from(appointmentAssignments)
     .innerJoin(appointments, eq(appointments.id, appointmentAssignments.appointmentId))

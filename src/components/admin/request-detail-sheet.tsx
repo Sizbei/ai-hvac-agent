@@ -336,6 +336,9 @@ const VISIT_ERROR_COPY: Record<string, string> = {
   IS_FIRST_VISIT: 'The first visit follows the request. Change the request instead.',
   TECHNICIAN_NOT_FOUND: 'One or more technicians aren’t active on your team.',
   TIME_OFF: 'One of those technicians is off during this window.',
+  HAS_PROGRESS: 'A technician has already started this visit.',
+  REQUEST_COMPLETED: 'This request is already completed.',
+  VISIT_ENDED: 'This visit has ended. Add a new visit instead.',
 };
 const VISIT_GENERIC_ERROR = 'Couldn’t save the visit. Try again.';
 

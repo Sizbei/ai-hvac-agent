@@ -141,26 +141,45 @@ describe("addVisitTechnician", () => {
 });
 
 describe("removeVisitTechnician", () => {
-  it("deletes a helper with no progress", async () => {
+  it("deletes a helper with no progress, only on a native open request", async () => {
     m.execute.mockResolvedValueOnce({ rows: [{ id: "a" }] });
     expect(await removeVisitTechnician(ORG, RID, AID, TID)).toEqual({ ok: true });
-    const text = new PgDialect().sqlToQuery(m.executed[0] as SQL).sql;
+    const text = new PgDialect().sqlToQuery(m.executed[0] as SQL).sql.replace(/\s+/g, " ");
     expect(text).toContain("NOT a.is_lead");
     expect(text).toContain("a.started_at IS NULL");
+    expect(text).toContain("EXISTS (SELECT 1 FROM service_requests r WHERE r.id = p.service_request_id AND r.fieldpulse_job_id IS NULL AND r.hcp_job_id IS NULL AND r.status NOT IN ('completed'::request_status, 'cancelled'::request_status))");
   });
   it("not_found when the technician has no row on the visit", async () => {
+    m.execute.mockResolvedValueOnce({ rows: [] });
+    m.selectQueue.push([reqRow()], []);
+    expect(await removeVisitTechnician(ORG, RID, AID, TID)).toEqual({ reason: "not_found" });
+  });
+  it("not_found when the request is not in the org", async () => {
     m.execute.mockResolvedValueOnce({ rows: [] });
     m.selectQueue.push([]);
     expect(await removeVisitTechnician(ORG, RID, AID, TID)).toEqual({ reason: "not_found" });
   });
+  it("managed_externally for a synced request", async () => {
+    m.execute.mockResolvedValueOnce({ rows: [] });
+    m.selectQueue.push([reqRow({ fp: "fp-1" })]);
+    expect(await removeVisitTechnician(ORG, RID, AID, TID)).toEqual({ reason: "managed_externally" });
+  });
+  it("request_completed and request_cancelled", async () => {
+    m.execute.mockResolvedValueOnce({ rows: [] });
+    m.selectQueue.push([reqRow({ status: "completed" })]);
+    expect(await removeVisitTechnician(ORG, RID, AID, TID)).toEqual({ reason: "request_completed" });
+    m.execute.mockResolvedValueOnce({ rows: [] });
+    m.selectQueue.push([reqRow({ status: "cancelled" })]);
+    expect(await removeVisitTechnician(ORG, RID, AID, TID)).toEqual({ reason: "request_cancelled" });
+  });
   it("is_lead", async () => {
     m.execute.mockResolvedValueOnce({ rows: [] });
-    m.selectQueue.push([{ isLead: true, enRouteAt: null, arrivedAt: null, startedAt: null, completedAt: null }]);
+    m.selectQueue.push([reqRow()], [{ isLead: true, enRouteAt: null, arrivedAt: null, startedAt: null, completedAt: null }]);
     expect(await removeVisitTechnician(ORG, RID, AID, TID)).toEqual({ reason: "is_lead" });
   });
   it("has_progress", async () => {
     m.execute.mockResolvedValueOnce({ rows: [] });
-    m.selectQueue.push([{ isLead: false, enRouteAt: new Date(), arrivedAt: null, startedAt: null, completedAt: null }]);
+    m.selectQueue.push([reqRow()], [{ isLead: false, enRouteAt: new Date(), arrivedAt: null, startedAt: null, completedAt: null }]);
     expect(await removeVisitTechnician(ORG, RID, AID, TID)).toEqual({ reason: "has_progress" });
   });
 });

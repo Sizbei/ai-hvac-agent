@@ -4,9 +4,10 @@ import type { SQL } from "drizzle-orm";
 
 // Pure test: @/lib/db is mocked. Each db.select(...) chain resolves to the
 // next queued row set; db.execute records the raw SQL it was given.
-const { selectQueue, executed, updates, batch, timeOff } = vi.hoisted(() => ({
+const { selectQueue, executed, updates, deletes, batch, timeOff } = vi.hoisted(() => ({
   selectQueue: [] as unknown[][],
   updates: [] as { set: unknown; where: unknown }[],
+  deletes: [] as unknown[],
   executed: [] as unknown[],
   batch: vi.fn(),
   timeOff: vi.fn(),
@@ -40,7 +41,7 @@ vi.mock("@/lib/db", () => {
           },
         }),
       }),
-      delete: () => ({ where: () => ({ kind: "delete" }) }),
+      delete: () => ({ where: (where: unknown) => { deletes.push(where); return { kind: "delete" }; } }),
       batch,
     },
   };
@@ -65,6 +66,7 @@ beforeEach(() => {
   selectQueue.length = 0;
   executed.length = 0;
   updates.length = 0;
+  deletes.length = 0;
   batch.mockReset();
   timeOff.mockReset();
 });
@@ -110,7 +112,7 @@ describe("updateAppointment — progress lock", () => {
   it("puts the progress predicate in the CAS", async () => {
     selectQueue.push([{ id: T1 }, { id: T2 }]);
     timeOff.mockResolvedValue([]);
-    batch.mockResolvedValue([[], {}, {}]);
+    batch.mockResolvedValue([{ rows: [] }, [], {}, {}]);
     selectQueue.push([{ n: 2, cancelledAt: null, version: 0 }], [{ status: "scheduled" }], [{ id: "a1" }]);
     await updateAppointment(ORG, REQ, AID, { ...input, version: 0 }, T1);
     const { sql } = render(updates[0].where);
@@ -120,7 +122,7 @@ describe("updateAppointment — progress lock", () => {
   it("reports has_progress when the CAS misses on a current version with a progressed row", async () => {
     selectQueue.push([{ id: T1 }, { id: T2 }]);
     timeOff.mockResolvedValue([]);
-    batch.mockResolvedValue([[], {}, {}]);
+    batch.mockResolvedValue([{ rows: [] }, [], {}, {}]);
     selectQueue.push([{ n: 2, cancelledAt: null, version: 0 }], [{ status: "scheduled" }], [{ id: "a1" }]);
     expect(await updateAppointment(ORG, REQ, AID, { ...input, version: 0 }, T1)).toEqual({ reason: "has_progress" });
   });
@@ -128,9 +130,25 @@ describe("updateAppointment — progress lock", () => {
   it("reports version_conflict for a stale version even when progress exists", async () => {
     selectQueue.push([{ id: T1 }, { id: T2 }]);
     timeOff.mockResolvedValue([]);
-    batch.mockResolvedValue([[], {}, {}]);
+    batch.mockResolvedValue([{ rows: [] }, [], {}, {}]);
     selectQueue.push([{ n: 2, cancelledAt: null, version: 3 }], [{ status: "scheduled" }], [{ id: "a1" }]);
     expect(await updateAppointment(ORG, REQ, AID, { ...input, version: 0 }, T1)).toEqual({ reason: "version_conflict" });
+  });
+});
+
+describe("updateAppointment — lock order and progressed rows", () => {
+  it("locks the request first, and never deletes a row that gained progress", async () => {
+    selectQueue.push([{ id: T1 }, { id: T2 }]);
+    timeOff.mockResolvedValue([]);
+    batch.mockResolvedValue([{ rows: [] }, [{ id: AID }], {}, {}]);
+    selectQueue.push([], []);
+    await updateAppointment(ORG, REQ, AID, { ...input, version: 0 }, T1);
+    const items = batch.mock.calls[0]![0] as unknown[];
+    expect(items).toHaveLength(4);
+    expect(items[0]).toEqual({ kind: "execute" });
+    expect(render(executed[0]).sql).toMatch(/^SELECT 1 FROM service_requests WHERE id = \$1::uuid AND organization_id = \$2::uuid FOR NO KEY UPDATE$/);
+    const del = render(deletes[0]).sql;
+    expect(del).toMatch(/and NOT \("appointment_assignments"\."en_route_at" IS NOT NULL OR "appointment_assignments"\."arrived_at" IS NOT NULL OR "appointment_assignments"\."started_at" IS NOT NULL OR "appointment_assignments"\."completed_at" IS NOT NULL\)\)$/);
   });
 });
 
@@ -143,16 +161,20 @@ describe("addAppointment — completed request", () => {
 });
 
 describe("cancelAppointment — job time and finished rows", () => {
-  it("closes the visit technicians' job entries gated on the appointment write, and spares finished rows", async () => {
-    selectQueue.push([{ technicianId: T1 }, { technicianId: T2 }]);
-    batch.mockResolvedValue([[{ id: AID, appointmentNumber: 2 }], {}, {}]);
+  it("locks the request first, closes only this visit's job entries gated on the appointment write, and spares finished rows", async () => {
+    batch.mockResolvedValue([{ rows: [] }, [{ id: AID, appointmentNumber: 2 }], {}, {}]);
     expect(await cancelAppointment(ORG, REQ, AID, 0)).toEqual({ ok: true, appointmentNumber: 2 });
+    const items = batch.mock.calls[0]![0] as unknown[];
+    expect(items).toHaveLength(4);
+    expect(items[0]).toEqual({ kind: "execute" });
+    expect(render(executed[0]).sql).toMatch(/^SELECT 1 FROM service_requests WHERE id = \$1::uuid AND organization_id = \$2::uuid FOR NO KEY UPDATE$/);
     const assignUpdate = render(updates[1].where).sql;
     expect(assignUpdate).toMatch(/"status" NOT IN \('completed'::request_status, 'cancelled'::request_status\)/);
-    const close = render(executed[0]);
+    const close = render(executed[1]);
     expect(close.sql).toMatch(/UPDATE technician_time_entries t SET clock_out_at = now\(\)/);
-    expect(close.sql).toMatch(/t\.technician_id = ANY\(\$\d+::uuid\[\]\)/);
+    expect(close.sql).toMatch(/AND t\.appointment_id = \$\d+::uuid/);
+    expect(close.sql).not.toContain("ANY(");
     expect(close.sql).toMatch(/AND \(EXISTS \(SELECT 1 FROM "appointments" p WHERE .*p\.xmin = pg_current_xact_id\(\)::xid\)\)/);
-    expect(close.params).toContainEqual([T1, T2]);
+    expect(close.params).toContain(AID);
   });
 });

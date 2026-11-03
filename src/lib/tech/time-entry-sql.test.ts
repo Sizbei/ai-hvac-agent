@@ -56,4 +56,15 @@ describe("closeJobEntriesSql", () => {
     const q = render(closeJobEntriesSql({ organizationId: "o", requestId: "r", gate: sql`EXISTS (SELECT 1 FROM x)` }));
     expect(flat(q.sql)).toContain("AND (EXISTS (SELECT 1 FROM x))");
   });
+
+  it("scopes to one visit when appointmentId is given", () => {
+    const q = render(closeJobEntriesSql({ organizationId: "o", requestId: "r", appointmentId: "v3" }));
+    expect(flat(q.sql)).toContain("AND t.appointment_id = $3::uuid");
+    expect(q.sql).not.toContain("ANY(");
+    expect(q.params).toEqual(["o", "r", "v3"]);
+  });
+
+  it("omits the visit filter when appointmentId is not given", () => {
+    expect(render(closeJobEntriesSql({ organizationId: "o", requestId: "r" })).sql).not.toContain("appointment_id");
+  });
 });

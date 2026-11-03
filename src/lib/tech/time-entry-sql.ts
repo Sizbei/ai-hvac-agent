@@ -25,17 +25,24 @@ export function openJobEntrySql(p: {
 
 const MINUTES = sql`GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (now() - t.clock_in_at)) / 60))`;
 
-/** Close the open job entries on the request for the given technicians (all technicians when omitted; an empty `technicianIds: []` closes nobody); `gate` is any boolean SQL the caller supplies. */
+/**
+ * Close the open job entries on the request.
+ * - `technicianIds`: only these technicians (all when omitted; an empty `[]` closes nobody).
+ * - `appointmentId`: only entries opened on that visit (all visits when omitted).
+ * - `gate`: any boolean SQL the caller supplies.
+ */
 export function closeJobEntriesSql(p: {
   organizationId: string;
   requestId: string;
   technicianIds?: readonly string[];
+  appointmentId?: string;
   gate?: SQL;
 }): SQL {
   // sql.param(...)::uuid[] renders ONE array parameter; a bare array would expand to ($1, $2).
   const techFilter = p.technicianIds
     ? sql` AND t.technician_id = ANY(${sql.param([...p.technicianIds])}::uuid[])`
     : sql``;
+  const visitFilter = p.appointmentId ? sql` AND t.appointment_id = ${p.appointmentId}::uuid` : sql``;
   const gate = p.gate ? sql` AND (${p.gate})` : sql``;
   return sql`UPDATE technician_time_entries t SET clock_out_at = now(),
       minutes = ${MINUTES}::int,
@@ -43,6 +50,6 @@ export function closeJobEntriesSql(p: {
       labor_cost_cents = ROUND(${MINUTES} / 60.0 * COALESCE(u.labor_rate_cents, 0))::int,
       updated_at = now()
     FROM users u
-    WHERE u.id = t.technician_id AND t.organization_id = ${p.organizationId}::uuid AND t.service_request_id = ${p.requestId}::uuid${techFilter}
+    WHERE u.id = t.technician_id AND t.organization_id = ${p.organizationId}::uuid AND t.service_request_id = ${p.requestId}::uuid${techFilter}${visitFilter}
       AND t.kind = 'job' AND t.clock_out_at IS NULL${gate}`;
 }
