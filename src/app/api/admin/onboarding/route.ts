@@ -66,15 +66,6 @@ export async function PATCH(request: NextRequest) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
 
-    const parsedBody = await readJsonBody(request);
-    if (!parsedBody.ok) {
-      return errorResponse("Invalid request body", "VALIDATION_ERROR", 400);
-    }
-    const parsed = patchSchema.safeParse(parsedBody.data);
-    if (!parsed.success) {
-      return errorResponse("Invalid request body", "VALIDATION_ERROR", 400);
-    }
-
     const rateCheck = slidingWindow(
       `admin:onboarding-patch:${session.userId}`,
       RATE_LIMITS.adminMutation.maxRequests,
@@ -82,6 +73,15 @@ export async function PATCH(request: NextRequest) {
     );
     if (!rateCheck.allowed) {
       return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
+    }
+
+    const parsedBody = await readJsonBody(request);
+    if (!parsedBody.ok) {
+      return errorResponse("Invalid request body", "VALIDATION_ERROR", 400);
+    }
+    const parsed = patchSchema.safeParse(parsedBody.data);
+    if (!parsed.success) {
+      return errorResponse("Invalid request body", "VALIDATION_ERROR", 400);
     }
 
     const body = parsed.data;
@@ -95,14 +95,22 @@ export async function PATCH(request: NextRequest) {
         ...(body.completedSeen ? ["completedSeen"] : []),
         ...(body.flags?.embedCopied ? ["flags.embedCopied"] : []),
       ];
-      await logAudit({
-        organizationId: orgId,
-        userId: session.userId,
-        action: "onboarding_updated",
-        entity: "organization_settings",
-        entityId: orgId,
-        details: JSON.stringify({ keys }),
-      });
+      // The write has committed: an audit failure is logged, never a 500.
+      try {
+        await logAudit({
+          organizationId: orgId,
+          userId: session.userId,
+          action: "onboarding_updated",
+          entity: "organization_settings",
+          entityId: orgId,
+          details: JSON.stringify({ keys }),
+        });
+      } catch (auditError: unknown) {
+        logger.error(
+          { error: auditError, organizationId: orgId },
+          "Onboarding audit write failed after a committed update",
+        );
+      }
     }
 
     return successResponse(state);

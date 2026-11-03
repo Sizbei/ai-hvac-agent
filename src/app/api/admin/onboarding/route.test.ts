@@ -32,8 +32,9 @@ vi.mock("@/lib/rate-limit", () => ({
   },
 }));
 
+const loggerError = vi.fn();
 vi.mock("@/lib/logger", () => ({
-  logger: { error: vi.fn(), info: vi.fn(), warn: vi.fn() },
+  logger: { error: (...a: unknown[]) => loggerError(...a), info: vi.fn(), warn: vi.fn() },
 }));
 
 import { NextRequest } from "next/server";
@@ -62,7 +63,8 @@ beforeEach(() => {
   getAdminSession.mockReset();
   getOnboarding.mockReset().mockResolvedValue(PAYLOAD);
   patchOnboarding.mockReset().mockResolvedValue({ flags: {} });
-  logAudit.mockClear();
+  logAudit.mockReset().mockResolvedValue(undefined);
+  loggerError.mockReset();
   slidingWindow.mockReset().mockReturnValue({ allowed: true });
 });
 
@@ -146,6 +148,24 @@ describe("PATCH /api/admin/onboarding", () => {
     slidingWindow.mockReturnValue({ allowed: false });
     const res = await PATCH(patchReq({ dismissed: true }));
     expect(res.status).toBe(429);
+  });
+
+  it("checks the rate limit before reading the body", async () => {
+    getAdminSession.mockResolvedValue(SESSION);
+    slidingWindow.mockReturnValue({ allowed: false });
+    const res = await PATCH(patchReq("{not json"));
+    expect(res.status).toBe(429);
+    expect(patchOnboarding).not.toHaveBeenCalled();
+  });
+
+  it("an audit failure after the committed write still returns 200 and is logged", async () => {
+    getAdminSession.mockResolvedValue(SESSION);
+    patchOnboarding.mockResolvedValue({ dismissedAt: "t" });
+    logAudit.mockRejectedValue(new Error("audit down"));
+    const res = await PATCH(patchReq({ dismissed: true }));
+    expect(res.status).toBe(200);
+    expect((await res.json()).data).toEqual({ dismissedAt: "t" });
+    expect(loggerError).toHaveBeenCalledTimes(1);
   });
 
   it("200 for dismissed, audits field names only", async () => {
