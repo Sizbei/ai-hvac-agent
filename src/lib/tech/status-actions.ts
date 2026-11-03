@@ -73,7 +73,9 @@ const followsRequest = (t: RequestStatus): boolean => (REQUEST_FOLLOWS as readon
 const PAUSABLE: readonly RequestStatus[] = ["arrived", "in_progress"];
 
 function closeOut(i: ResolveInput): Resolved {
-  if (i.requestStatus === "completed" || i.requestStatus === "cancelled") return refuse("invalid_transition");
+  // Replaying a close-out on a completed request is a no-op (200, changed false).
+  if (i.requestStatus === "completed") return { kind: "noop" };
+  if (i.requestStatus === "cancelled") return refuse("invalid_transition");
   return CLOSE_OUT_STATUSES.includes(i.requestStatus) ? { kind: "close_out" } : refuse("request_not_started");
 }
 

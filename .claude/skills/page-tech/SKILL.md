@@ -59,8 +59,9 @@ server-side from the pricebook at add time — client-sent cost values are ignor
   lead-only and completes the request (`completeRequestFromAdmin`), cancelling
   untouched rows. Pause is offered only once on site (row `arrived` or
   `in_progress`). Close out is offered only while the request is
-  `in_progress` or `on_hold` (`closeOutAllowedStatuses`); a completed or
-  cancelled request refuses it. A solo active lead (no other open row on
+  `in_progress` or `on_hold` (`closeOutAllowedStatuses`); a replay on a
+  completed request is a 200 no-op (`changed: false`), a cancelled request
+  refuses it. A solo active lead (no other open row on
   any live visit, `otherOpenRows` in `ResolveInput`) sees Close out, not
   Done. Body: `POST /api/tech/jobs/[id]/status`
   `{ appointmentId, action, holdReason?, followUpDate?, expectedStatus? }`

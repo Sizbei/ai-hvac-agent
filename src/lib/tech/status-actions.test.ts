@@ -117,9 +117,15 @@ describe("resolveTechAction", () => {
         expect(resolveTechAction(input("close_out", { row: { status: "arrived", arrivedAt: T }, requestStatus }))).toEqual({ kind: "refuse", reason: "request_not_started" });
       }
     });
-    it("close_out on a completed or cancelled request -> invalid_transition", () => {
-      for (const requestStatus of ["completed", "cancelled"] as const) {
-        expect(resolveTechAction(input("close_out", { row: { status: "completed", startedAt: T, completedAt: T }, requestStatus }))).toEqual({ kind: "refuse", reason: "invalid_transition" });
+    it("close_out replayed on a completed request -> noop", () => {
+      expect(resolveTechAction(input("close_out", { row: { status: "completed", startedAt: T, completedAt: T }, requestStatus: "completed" }))).toEqual({ kind: "noop" });
+    });
+    it("close_out on a cancelled request -> invalid_transition", () => {
+      expect(resolveTechAction(input("close_out", { row: { status: "completed", startedAt: T, completedAt: T }, requestStatus: "cancelled" }))).toEqual({ kind: "refuse", reason: "invalid_transition" });
+    });
+    it("close_out before the request is in progress -> request_not_started (pending through arrived)", () => {
+      for (const requestStatus of ["pending", "assigned"] as const) {
+        expect(resolveTechAction(input("close_out", { requestStatus }))).toEqual({ kind: "refuse", reason: "request_not_started" });
       }
     });
   });

@@ -150,12 +150,13 @@ describe("POST /api/tech/jobs/[id]/status", () => {
     expect(actions).not.toContain("completed");
   });
 
-  it("close-out on a request that is already completed is refused before any write", async () => {
+  it("a replayed close-out on a completed request is a 200 no-op with changed false", async () => {
     as(T1, [row({ status: "completed", completedAt: new Date() })], [row({ status: "completed", completedAt: new Date() })], "completed");
     const res = await post({ action: "close_out" });
-    expect(res.status).toBe(409);
-    expect(await code(res)).toBe("INVALID_TRANSITION");
+    expect(res.status).toBe(200);
+    expect((await res.json()).data).toMatchObject({ assignmentStatus: "completed", requestStatus: "completed", changed: false, allowedActions: [] });
     expect(closeOutRequest).not.toHaveBeenCalled();
+    expect(after).not.toHaveBeenCalled();
   });
 
   it("a close-out that changed nothing (raced) asks for no review", async () => {

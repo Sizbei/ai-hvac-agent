@@ -118,6 +118,8 @@ export async function POST(
             return INVALID_TRANSITION();
         }
       case "noop":
+        // A replayed close-out on a completed request: nothing changed.
+        if (action === "close_out") return respond(row, job.status, false, false);
         return respond(row, job.status, row.isLead && row.appointmentId !== activeVisitId);
       case "write":
       case "request_only": {
