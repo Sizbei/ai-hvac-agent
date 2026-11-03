@@ -153,3 +153,16 @@ invites; `jsonb_typeof` guard on `allowed_origins`; legacy fold after validation
 epoch ISO; `stamped` stripped from the payload; audit entity named; mobile title from
 `navGroupsFor`; integration suite driven through the query module where possible, the
 two concurrency pairs through the builders (accepted deviation). Rejected: none.
+
+## Plan review round 2 — 2026-11-04 (plan v2 → v3; converged)
+
+One combined critic. 0 blockers, 5 majors (all verification procedure/wiring), 12 minors.
+Applied: exact throwaway-org recipe (`react-server` condition, `ownerUser` with a fake
+`googleId`, never `seed-org.mjs`), minimal "finished" SQL rows in an order that avoids
+grandfathering (phone+hours → GET → the rest; the trigger makes the visit), a fresh org per
+UI task, banner event plumbing per page (`bannerEvent` state; invite event gated on the
+technician role), `invalidateOnboarding` = forced refresh with subscribers, listener refcount
+in an effect, pure modules never import db/server-only, `IconChip` discriminated union,
+`revealedType` in the embed panel, transition from-state, both staff dialog titles, rollback
+copy quoted, file-map names fixed, baseline hash a34d3b2 (352 files, 4782/1). Verdict:
+converged-enough; execution starts.
