@@ -133,6 +133,9 @@ describe('showRequestBehind', () => {
   it('shows when the last response said behind', () => {
     expect(showRequestBehind([], true)).toBe(true);
   });
+  it('shows when both the blocker and the flag are present', () => {
+    expect(showRequestBehind([earlier], true)).toBe(true);
+  });
   it('hides once the earlier visit closes and no response flag remains', () => {
     expect(showRequestBehind([{ kind: 'not_lead' }], false)).toBe(false);
   });

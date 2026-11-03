@@ -119,10 +119,11 @@ export function TechJobSummary({
         const body = await res.json().catch(() => ({}));
         if (res.ok) {
           const data: ActionResult = body?.data ?? {};
-          setRequestBehind(data.requestBehind === true);
           setServerBlockers(null);
           setSheetAction(null);
           await load();
+          // After load(), which resets the flag: keep the response's flag until the next reload.
+          setRequestBehind(data.requestBehind === true);
           onStatusChanged?.();
         } else {
           const message = body?.error?.message ?? "Couldn't update this request. Please try again.";
