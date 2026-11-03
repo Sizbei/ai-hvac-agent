@@ -135,3 +135,21 @@ live steps re-open when the only technician is deactivated (digit 2, no sr strin
 contradicting acceptance 8. Ruling: the booking rule checks the technician ROLE only
 (`is_active` dropped); a deactivated technician re-opens `add_technician` alone. Spec v4
 amended in place.
+
+## Plan review round 1 — 2026-11-04 (plan v1 → v2)
+
+Two critics (feasibility vs code; logic/concurrency/ordering). 0 blockers, 13 majors,
+28 minors. Applied: sequential task order with `CopySignInLink` and the row helper moved
+to Task 4; no deploy between Tasks 3 and 6; throwaway orgs via `createOrgCore` (no side
+effects) for every non-demo probe/screenshot, `MINT_ORG_ID` pinned, `?preview=` dropped;
+the booking rule relaxed to role-only (spec ruling); `demo` in the payload; payload types
+in the pure module; the client store contract (sequence-tagged fetches, force chaining,
+cached snapshot, server snapshot, sidebar mount refresh, banner mount refresh) with node
+tests; `heroFor` split + `showFinished`; dialog preset only for the deep-link open;
+Settings wraps the three panels' `onSave`; embed copy only for publishable keys, once;
+demo PATCH = one SELECT + body applied; grandfather omits present keys; stamp failure is
+logged, not fatal; stronger tenancy render test; `accepted_at IS NULL` on pending
+invites; `jsonb_typeof` guard on `allowed_origins`; legacy fold after validation with an
+epoch ISO; `stamped` stripped from the payload; audit entity named; mobile title from
+`navGroupsFor`; integration suite driven through the query module where possible, the
+two concurrency pairs through the builders (accepted deviation). Rejected: none.
