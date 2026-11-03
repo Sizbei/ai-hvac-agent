@@ -3,6 +3,7 @@
  * banner (spec §2, §4). Types only from the onboarding modules.
  */
 import type { DerivedStep, OnboardingPayload } from "./onboarding-steps";
+import type { SetupPlacement } from "@/components/admin/nav-items";
 
 /** Demo org acknowledgements kept in `sessionStorage` (no write ever persists). */
 export interface CardSessionFlags {
@@ -28,12 +29,18 @@ export function cardHidden(
 
 export type CardLoadingView = "nothing" | "skeleton" | "card";
 
-/** Under 300 ms nothing; then a skeleton; nothing at all after an error without data. */
+/**
+ * Under 300 ms nothing; then a skeleton; nothing at all after an error without
+ * data. A dismissed or finished org (Integrations placement, decided by the
+ * server) never sees a skeleton flash.
+ */
 export function cardLoadingView(
   data: OnboardingPayload | null,
   error: boolean,
   slow: boolean,
+  placement: SetupPlacement,
 ): CardLoadingView {
+  if (placement !== "operations") return "nothing";
   if (data) return "card";
   return slow && !error ? "skeleton" : "nothing";
 }
@@ -44,11 +51,11 @@ export function cardFinished(payload: OnboardingPayload): boolean {
   return requiredDone === requiredTotal && payload.completedSeenAt == null;
 }
 
-/** Banner copy, precedence top-down: invite → done → saved with note → title. */
+/** Banner copy, precedence top-down: done → invite → saved with note → title. */
 export function bannerText(step: DerivedStep | undefined, event: BannerEvent): string {
+  if (step?.done) return BANNER_DONE;
   if (event === "invite") return BANNER_INVITE;
   if (!step) return "Setup guide";
-  if (step.done) return BANNER_DONE;
   if (event === "saved" && step.note) {
     return step.id === "book_first_request" ? BANNER_REQUEST_SAVED : `Saved. ${step.note}`;
   }

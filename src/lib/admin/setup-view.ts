@@ -2,6 +2,19 @@
  * Pure view helpers shared by the setup page and the home card.
  */
 import type { DerivedStep, OnboardingPayload } from "./onboarding-steps";
+import type { StepId } from "./onboarding-state";
+
+/** The setup step a deep-linked settings tab belongs to (spec §3). */
+const SETUP_STEP_BY_TAB: Readonly<Record<string, StepId>> = {
+  business: "phone_hours",
+  branding: "brand",
+  embed: "chat_widget",
+};
+
+/** Own keys only: `constructor`, `__proto__` and friends map to no step. */
+export function setupStepForTab(tab: string): StepId | undefined {
+  return Object.hasOwn(SETUP_STEP_BY_TAB, tab) ? SETUP_STEP_BY_TAB[tab] : undefined;
+}
 
 /**
  * The next `n` not-done steps in Up-next order (spec §4): required steps first

@@ -9,8 +9,6 @@ interface CopySignInLinkProps {
   readonly url: string;
   /** The step's instruction line. */
   readonly instruction: string;
-  /** Optional second muted line under the instruction. */
-  readonly extraLine?: string;
 }
 
 const COPIED_MS = 1_500;
@@ -21,7 +19,7 @@ const COPIED_MS = 1_500;
  * failed copy shows no confirmation. The bare URL stays selectable below the
  * button so it can be read aloud or copied by hand.
  */
-export function CopySignInLink({ url, instruction, extraLine }: CopySignInLinkProps) {
+export function CopySignInLink({ url, instruction }: CopySignInLinkProps) {
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -54,7 +52,6 @@ export function CopySignInLink({ url, instruction, extraLine }: CopySignInLinkPr
       </div>
       <p className="font-mono text-[12px] break-all text-foreground select-all">{url}</p>
       <p className="text-[13px] text-muted-foreground">{instruction}</p>
-      {extraLine && <p className="text-[13px] text-muted-foreground">{extraLine}</p>}
     </div>
   );
 }

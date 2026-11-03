@@ -42,15 +42,8 @@ import { BackToGuideBanner } from '@/components/admin/setup/back-to-guide-banner
 import { useFromSetup } from '@/hooks/use-open-from-param';
 import { refreshOnboarding } from '@/lib/admin/onboarding-store';
 import type { BannerEvent } from '@/lib/admin/setup-card-view';
-import type { StepId } from '@/lib/admin/onboarding-state';
+import { setupStepForTab } from '@/lib/admin/setup-view';
 import type { OrgConfigUpdate } from '@/lib/admin/org-config-types';
-
-/** The setup step a deep-linked tab belongs to (spec §3). */
-const SETUP_STEP_BY_TAB: Readonly<Record<string, StepId>> = {
-  business: 'phone_hours',
-  branding: 'brand',
-  embed: 'chat_widget',
-};
 
 export default function SettingsPage() {
   useEffect(() => { document.title = 'Settings · Spears Admin'; }, []);
@@ -58,7 +51,7 @@ export default function SettingsPage() {
   const initialTab = useSearchParams().get('tab') ?? 'branding';
   const fromSetup = useFromSetup();
   const [bannerEvent, setBannerEvent] = useState<BannerEvent>(null);
-  const setupStep = fromSetup ? SETUP_STEP_BY_TAB[initialTab] : undefined;
+  const setupStep = fromSetup ? setupStepForTab(initialTab) : undefined;
 
   // Setup-guide tabs: a successful save refreshes the guide so the banner can
   // flip; the 'saved' event only counts on the tab the banner belongs to.

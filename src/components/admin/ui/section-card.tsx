@@ -2,7 +2,7 @@ import { ChevronDown, type LucideIcon } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
-interface SectionCardProps {
+interface SectionCardBaseProps {
   /** Sentence-case card title, e.g. "Equipment history". */
   readonly title: string;
   /** Optional icon shown left of the title. */
@@ -11,16 +11,31 @@ interface SectionCardProps {
   readonly meta?: string;
   /** Optional numeric count shown as a mono figure next to the title. */
   readonly count?: number;
-  /** Right-aligned action slot (button, link, badge, etc.). */
-  readonly action?: React.ReactNode;
   readonly children: React.ReactNode;
   readonly className?: string;
   readonly contentClassName?: string;
-  /** Render as a native `<details>` whose header is the `<summary>`. */
-  readonly collapsible?: boolean;
-  /** Collapsible only: open state; re-applied whenever it changes, user toggles kept otherwise. */
+}
+
+/** Plain panel: may carry a right-aligned header action. */
+interface StaticSectionCardProps extends SectionCardBaseProps {
+  readonly collapsible?: false;
+  /** Right-aligned action slot (button, link, badge, etc.). */
+  readonly action?: React.ReactNode;
+  readonly open?: never;
+}
+
+/**
+ * Native `<details>` whose header is the `<summary>`. No `action`: a control
+ * inside a `<summary>` would toggle the panel.
+ */
+interface CollapsibleSectionCardProps extends SectionCardBaseProps {
+  readonly collapsible: true;
+  readonly action?: never;
+  /** Open state; re-applied whenever it changes, user toggles kept otherwise. */
   readonly open?: boolean;
 }
+
+type SectionCardProps = StaticSectionCardProps | CollapsibleSectionCardProps;
 
 const HEADER_CLASSES =
   "flex h-10 shrink-0 items-center gap-2 border-b border-border-strong bg-surface-sunken px-4";

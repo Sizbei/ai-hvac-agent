@@ -62,10 +62,10 @@ export function SetupStepRow({ row, justDone = false, heroId }: SetupStepRowProp
   const { step, number } = row;
   const from = useEnterFrom(justDone);
   const glyph = step.done ? 'done' : step.needsAttention ? 'attention' : 'todo';
-  const copyUrl =
-    step.action === 'copy_sign_in_link' && rowActionsFor(step, heroId).primary
-      ? step.copyValue
-      : undefined;
+  const primary = rowActionsFor(step, heroId).primary;
+  const copyUrl = step.action === 'copy_sign_in_link' && primary ? step.copyValue : undefined;
+  // No app URL: the step carries the instruction only (nothing to copy).
+  const instructionOnly = !copyUrl && primary ? step.instruction : undefined;
 
   return (
     <li
@@ -96,6 +96,7 @@ export function SetupStepRow({ row, justDone = false, heroId }: SetupStepRowProp
               <CopySignInLink url={copyUrl} instruction={step.instruction ?? ''} />
             </div>
           )}
+          {instructionOnly && <p className="pt-2 text-[13px] leading-5 text-muted-foreground">{instructionOnly}</p>}
         </div>
         <div className="mt-2 flex shrink-0 flex-wrap items-center gap-2 sm:mt-0 sm:justify-end">
           {!step.done && (

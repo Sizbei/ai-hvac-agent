@@ -173,7 +173,7 @@ export function Sidebar({
           {showBadge && !collapsed && isSetupDigit && (
             <span
               aria-label={badge.srLabel}
-              className="ml-auto font-mono text-[11px] font-medium tabular-nums text-muted-foreground"
+              className="ml-auto font-mono text-[11px] font-medium tabular-nums [color:var(--sidebar-foreground-dim)]"
             >
               {badge.label}
             </span>
@@ -192,7 +192,7 @@ export function Sidebar({
           {showBadge && collapsed && isSetupDigit && (
             <span
               aria-label={badge.srLabel}
-              className="absolute right-1 top-0.5 font-mono text-[10px] font-medium tabular-nums text-muted-foreground"
+              className="absolute right-1 top-0.5 font-mono text-[11px] font-medium tabular-nums [color:var(--sidebar-foreground-dim)]"
             >
               {badge.label}
             </span>

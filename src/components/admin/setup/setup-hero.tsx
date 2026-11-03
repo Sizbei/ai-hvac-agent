@@ -18,6 +18,9 @@ function HeroAction({ step }: { step: DerivedStep }) {
   if (step.action === 'copy_sign_in_link' && step.copyValue) {
     return <CopySignInLink url={step.copyValue} instruction={step.instruction ?? ''} />;
   }
+  if (step.instruction) {
+    return <p className="text-[13px] leading-5 text-muted-foreground">{step.instruction}</p>;
+  }
   if (!step.href) return null;
   return (
     <Button className="w-full sm:w-auto" render={<Link href={step.href} />}>

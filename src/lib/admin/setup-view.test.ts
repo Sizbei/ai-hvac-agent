@@ -9,6 +9,7 @@ import {
   phasesOf,
   rowActionsFor,
   showFinished,
+  setupStepForTab,
   subtitleFor,
 } from "./setup-view";
 import { STEP_DEFS, type DerivedStep, type OnboardingPayload } from "./onboarding-steps";
@@ -221,5 +222,19 @@ describe("rowActionsFor", () => {
       primary: false,
       secondary: false,
     });
+  });
+});
+
+describe("setupStepForTab", () => {
+  it("maps the three setup tabs", () => {
+    expect(setupStepForTab("business")).toBe("phone_hours");
+    expect(setupStepForTab("branding")).toBe("brand");
+    expect(setupStepForTab("embed")).toBe("chat_widget");
+  });
+
+  it("yields undefined for other tabs and prototype keys", () => {
+    for (const tab of ["team", "", "constructor", "__proto__", "toString", "hasOwnProperty"]) {
+      expect(setupStepForTab(tab)).toBeUndefined();
+    }
   });
 });

@@ -61,10 +61,11 @@ describe("bannerText", () => {
     expect(bannerText(undefined, "saved")).toBe("Setup guide");
   });
 
-  it("puts an invite first, even over done", () => {
+  it("shows the invite line while the step is open; done outranks it", () => {
     const text = "Invite created. This step completes when they accept it";
     expect(bannerText(step("add_technician"), "invite")).toBe(text);
-    expect(bannerText(step("add_technician", { done: true }), "invite")).toBe(text);
+    expect(bannerText(step("add_technician", { note: "Waiting for an invite to be accepted." }), "invite")).toBe(text);
+    expect(bannerText(step("add_technician", { done: true }), "invite")).toBe("Done");
     expect(bannerText(undefined, "invite")).toBe(text);
   });
 
@@ -95,18 +96,26 @@ describe("bannerText", () => {
 });
 
 describe("cardLoadingView", () => {
+  const OPS = "operations" as const;
+
   it("renders nothing after an error without data, even when slow", () => {
-    expect(cardLoadingView(null, true, false)).toBe("nothing");
-    expect(cardLoadingView(null, true, true)).toBe("nothing");
+    expect(cardLoadingView(null, true, false, OPS)).toBe("nothing");
+    expect(cardLoadingView(null, true, true, OPS)).toBe("nothing");
   });
 
   it("renders nothing before 300 ms, then a skeleton", () => {
-    expect(cardLoadingView(null, false, false)).toBe("nothing");
-    expect(cardLoadingView(null, false, true)).toBe("skeleton");
+    expect(cardLoadingView(null, false, false, OPS)).toBe("nothing");
+    expect(cardLoadingView(null, false, true, OPS)).toBe("skeleton");
   });
 
   it("renders the card whenever data is present, errors included", () => {
-    expect(cardLoadingView(payload(), false, false)).toBe("card");
-    expect(cardLoadingView(payload(), true, true)).toBe("card");
+    expect(cardLoadingView(payload(), false, false, OPS)).toBe("card");
+    expect(cardLoadingView(payload(), true, true, OPS)).toBe("card");
+  });
+
+  it("renders nothing at all for a dismissed or finished org (Integrations placement)", () => {
+    expect(cardLoadingView(null, false, true, "integrations")).toBe("nothing");
+    expect(cardLoadingView(null, false, false, "integrations")).toBe("nothing");
+    expect(cardLoadingView(payload(), false, true, "integrations")).toBe("nothing");
   });
 });

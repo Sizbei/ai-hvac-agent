@@ -8,6 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { SectionCard } from '@/components/admin/ui/section-card';
 import { ContextBadge } from '@/components/admin/ui/context-badge';
 import { CopySignInLink } from '@/components/admin/setup/copy-sign-in-link';
+import { useSetupPlacement } from '@/components/admin/setup-placement-context';
 import { refreshOnboarding, useOnboarding } from '@/lib/admin/onboarding-store';
 import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 import { nextRows } from '@/lib/admin/setup-view';
@@ -32,6 +33,8 @@ function UpNext({ step }: { step: DerivedStep }) {
       <p className="text-[13px] text-muted-foreground">{step.why}</p>
       {step.action === 'copy_sign_in_link' && step.copyValue ? (
         <CopySignInLink url={step.copyValue} instruction={step.instruction ?? ''} />
+      ) : step.instruction ? (
+        <p className="text-[13px] text-muted-foreground">{step.instruction}</p>
       ) : step.href ? (
         <div>
           <Button className="w-full sm:w-auto" render={<Link href={step.href} />}>
@@ -55,6 +58,7 @@ function MoreRow({ step }: { step: DerivedStep }) {
 /** Home "Setup guide" card (spec §2, §8): progress, Up next, two more rows, dismiss. */
 export function SetupCard() {
   const { data, error } = useOnboarding();
+  const placement = useSetupPlacement();
   const [flags, setFlags] = useState<CardSessionFlags>({});
   const [hidden, setHidden] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -68,7 +72,7 @@ export function SetupCard() {
     return () => clearTimeout(t);
   }, []);
 
-  const view = cardLoadingView(data, error, slow);
+  const view = cardLoadingView(data, error, slow, placement);
   if (view === 'nothing') return null;
   if (view === 'skeleton' || !data) {
     return (
