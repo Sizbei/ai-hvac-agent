@@ -7,6 +7,7 @@ import {
   optionalGroup,
   optionalMeta,
   phasesOf,
+  rowActionsFor,
   showFinished,
   subtitleFor,
 } from "./setup-view";
@@ -199,5 +200,26 @@ describe("justDone", () => {
     expect(justDone(null, payload(["phone_hours"]))).toEqual([]);
     expect(justDone(payload(["add_technician"]), payload([]))).toEqual([]);
     expect(justDone(payload(["phone_hours"]), payload(["phone_hours"]))).toEqual([]);
+  });
+});
+
+describe("rowActionsFor", () => {
+  const step = (id: string, done: string[] = []) => payload(done).steps.find((s) => s.id === id)!;
+
+  it("shows primary and secondary on a to-do row that is not the hero", () => {
+    expect(rowActionsFor(step("add_technician"), "phone_hours")).toEqual({ primary: true, secondary: true });
+  });
+
+  it("keeps the secondary link on the hero step's row, hiding only the primary", () => {
+    expect(rowActionsFor(step("add_technician"), "add_technician")).toEqual({ primary: false, secondary: true });
+    expect(rowActionsFor(step("pricebook"), "pricebook")).toEqual({ primary: false, secondary: true });
+  });
+
+  it("has no secondary for a step without one, and nothing on done rows", () => {
+    expect(rowActionsFor(step("phone_hours"), undefined)).toEqual({ primary: true, secondary: false });
+    expect(rowActionsFor(step("add_technician", ["add_technician"]), undefined)).toEqual({
+      primary: false,
+      secondary: false,
+    });
   });
 });

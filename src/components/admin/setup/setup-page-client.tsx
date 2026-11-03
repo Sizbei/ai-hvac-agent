@@ -18,6 +18,7 @@ import {
   heroFor,
   justDone,
   optionalGroup,
+  PHASE_TITLES,
   phasesOf,
   showFinished,
   subtitleFor,
@@ -29,13 +30,10 @@ const TITLE = 'Setup guide';
 function SetupSkeleton() {
   return (
     <div className="space-y-5" aria-hidden="true">
-      {[2, 3, 4].map((rows) => (
-        <div key={rows} className="overflow-hidden rounded-lg border border-border-strong bg-surface">
-          <div className="flex h-10 items-center border-b border-border-strong bg-surface-sunken px-4">
-            <Skeleton className="h-3.5 w-40" />
-          </div>
-          <div className="space-y-4 p-4">
-            {Array.from({ length: rows }, (_, i) => (
+      {([1, 2, 3] as const).map((phase) => (
+        <SectionCard key={phase} title={PHASE_TITLES[phase]}>
+          <div className="space-y-4">
+            {Array.from({ length: phase + 1 }, (_, i) => (
               <div key={i} className="flex gap-3">
                 <Skeleton className="size-6 shrink-0 rounded-md" />
                 <div className="flex-1 space-y-1.5">
@@ -45,7 +43,7 @@ function SetupSkeleton() {
               </div>
             ))}
           </div>
-        </div>
+        </SectionCard>
       ))}
     </div>
   );
@@ -92,7 +90,10 @@ export function SetupPageClient() {
   const [prev, setPrev] = useState<OnboardingPayload | null>(data);
   const [flippedIds, setFlippedIds] = useState<readonly string[]>([]);
   if (data !== prev) {
-    setFlippedIds(data ? justDone(prev, data) : []);
+    // Keep the last flip until another step flips, so a plain refresh does not
+    // snap a just-completed phase shut.
+    const next = data ? justDone(prev, data) : [];
+    if (next.length > 0) setFlippedIds(next);
     setPrev(data);
   }
   const flipped = useMemo(() => new Set(flippedIds), [flippedIds]);
@@ -140,7 +141,7 @@ export function SetupPageClient() {
             value={requiredDone}
             max={requiredTotal}
             label="Required setup steps done"
-            className="max-w-48"
+            className="min-w-0 max-w-48 flex-1"
           />
           <span className="shrink-0 font-mono text-[13px] tabular-nums text-foreground">
             {requiredDone} of {requiredTotal}

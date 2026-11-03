@@ -6,15 +6,15 @@ import { Button } from '@/components/ui/button';
 import { ContextBadge } from '@/components/admin/ui/context-badge';
 import { StepGlyph } from '@/components/admin/ui/step-glyph';
 import { CopySignInLink } from '@/components/admin/setup/copy-sign-in-link';
-import type { StepRow } from '@/lib/admin/setup-view';
+import { rowActionsFor, type StepRow } from '@/lib/admin/setup-view';
 import { cn } from '@/lib/utils';
 
 interface SetupStepRowProps {
   readonly row: StepRow;
   /** The step flipped to done since the last snapshot: run the enter transition. */
   readonly justDone?: boolean;
-  /** Show the step's own action (false when the hero already carries it). */
-  readonly showAction?: boolean;
+  /** Step id the hero shows; its row drops the repeated primary action. */
+  readonly heroId?: string;
 }
 
 /** Enter from-state for one frame so the opacity/translate transition runs. */
@@ -22,25 +22,34 @@ function useEnterFrom(active: boolean): boolean {
   const [from, setFrom] = useState(active);
   useEffect(() => {
     if (!from) return;
-    const id = requestAnimationFrame(() => setFrom(false));
-    return () => cancelAnimationFrame(id);
+    // Two frames: the first guarantees the from-state has been painted.
+    let inner = 0;
+    const outer = requestAnimationFrame(() => {
+      inner = requestAnimationFrame(() => setFrom(false));
+    });
+    return () => {
+      cancelAnimationFrame(outer);
+      cancelAnimationFrame(inner);
+    };
   }, [from]);
   return from;
 }
 
-function RowActions({ row, showAction }: { row: StepRow; showAction: boolean }) {
+const ROW_BUTTON = 'max-sm:min-h-11';
+
+function RowActions({ row, heroId }: { row: StepRow; heroId?: string }) {
   const { step } = row;
   if (step.done) return <span className="text-[13px] text-muted-foreground">Done</span>;
-  if (!showAction || step.action === 'copy_sign_in_link') return null;
+  const show = rowActionsFor(step, heroId);
   return (
     <>
-      {step.href && (
-        <Button variant="outline" size="sm" render={<Link href={step.href} />}>
+      {show.primary && step.href && (
+        <Button variant="outline" size="sm" className={ROW_BUTTON} render={<Link href={step.href} />}>
           {step.hrefLabel}
         </Button>
       )}
-      {step.secondaryHref && step.secondaryLabel && (
-        <Button variant="outline" size="sm" render={<Link href={step.secondaryHref} />}>
+      {show.secondary && step.secondaryHref && (
+        <Button variant="outline" size="sm" className={ROW_BUTTON} render={<Link href={step.secondaryHref} />}>
           {step.secondaryLabel}
         </Button>
       )}
@@ -49,12 +58,14 @@ function RowActions({ row, showAction }: { row: StepRow; showAction: boolean }) 
 }
 
 /** One setup-guide row: glyph, title, why, note, estimate and the step's link. */
-export function SetupStepRow({ row, justDone = false, showAction = true }: SetupStepRowProps) {
+export function SetupStepRow({ row, justDone = false, heroId }: SetupStepRowProps) {
   const { step, number } = row;
   const from = useEnterFrom(justDone);
   const glyph = step.done ? 'done' : step.needsAttention ? 'attention' : 'todo';
   const copyUrl =
-    showAction && !step.done && step.action === 'copy_sign_in_link' ? step.copyValue : undefined;
+    step.action === 'copy_sign_in_link' && rowActionsFor(step, heroId).primary
+      ? step.copyValue
+      : undefined;
 
   return (
     <li
@@ -90,7 +101,7 @@ export function SetupStepRow({ row, justDone = false, showAction = true }: Setup
           {!step.done && (
             <span className="font-mono text-[12px] tabular-nums text-muted-foreground">{step.estimateLabel}</span>
           )}
-          <RowActions row={row} showAction={showAction} />
+          <RowActions row={row} heroId={heroId} />
         </div>
       </div>
     </li>

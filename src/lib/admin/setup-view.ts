@@ -29,7 +29,7 @@ export interface PhaseGroup {
   readonly collapsed: boolean;
 }
 
-const PHASE_TITLES: Record<1 | 2 | 3, string> = {
+export const PHASE_TITLES: Record<1 | 2 | 3, string> = {
   1: "Set up your company",
   2: "Get your team and prices in",
   3: "Run your first request",
@@ -103,4 +103,19 @@ export function justDone(prev: OnboardingPayload | null, next: OnboardingPayload
   if (!prev) return [];
   const wasDone = new Map(prev.steps.map((s) => [s.id, s.done]));
   return next.steps.filter((s) => s.done && wasDone.get(s.id) === false).map((s) => s.id);
+}
+
+/**
+ * Which links a row shows. The hero repeats only the primary action, so the
+ * hero step's row hides the primary but keeps its secondary link (§3).
+ */
+export function rowActionsFor(
+  step: DerivedStep,
+  heroId: string | undefined,
+): { primary: boolean; secondary: boolean } {
+  if (step.done) return { primary: false, secondary: false };
+  return {
+    primary: step.id !== heroId,
+    secondary: Boolean(step.secondaryHref && step.secondaryLabel),
+  };
 }
