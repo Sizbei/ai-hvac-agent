@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Users, KeyRound, CalendarOff } from 'lucide-react';
+import { Users, KeyRound, CalendarOff, Clock } from 'lucide-react';
 import { SyncPill } from '@/components/admin/sync-pill';
 import { EmptyState } from '@/components/admin/ui/empty-state';
 import { SkeletonTable } from '@/components/admin/ui/skeleton-table';
@@ -23,6 +23,7 @@ interface StaffTableProps {
   readonly onEdit: (staff: StaffRecord) => void;
   readonly onResetPassword: (staff: StaffRecord) => void;
   readonly onTimeOff: (staff: StaffRecord) => void;
+  readonly onTimesheets: (staff: StaffRecord) => void;
 }
 
 function formatDate(dateString: string): string {
@@ -63,6 +64,7 @@ export function StaffTable({
   onEdit,
   onResetPassword,
   onTimeOff,
+  onTimesheets,
 }: StaffTableProps) {
   if (isLoading) {
     return <SkeletonTable rows={4} cols={6} />;
@@ -135,14 +137,24 @@ export function StaffTable({
               <TableCell>
                 <div className="flex justify-end gap-2">
                   {member.role === 'technician' && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => onTimeOff(member)}
-                    >
-                      <CalendarOff className="mr-1 size-3.5" />
-                      Time off
-                    </Button>
+                    <>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onTimesheets(member)}
+                      >
+                        <Clock className="mr-1 size-3.5" />
+                        Timesheets
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onTimeOff(member)}
+                      >
+                        <CalendarOff className="mr-1 size-3.5" />
+                        Time off
+                      </Button>
+                    </>
                   )}
                   <Button
                     variant="outline"

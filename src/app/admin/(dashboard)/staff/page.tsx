@@ -7,6 +7,7 @@ import { useAdminInvites } from '@/hooks/use-admin-invites';
 import { StaffTable } from '@/components/admin/staff-table';
 import { StaffFormDialog } from '@/components/admin/staff-form-dialog';
 import { StaffResetPasswordDialog } from '@/components/admin/staff-reset-password-dialog';
+import { TimesheetsDialog } from '@/components/admin/timesheets-dialog';
 import { TimeOffDialog } from '@/components/admin/staff/time-off-dialog';
 import { InviteDialog } from '@/components/admin/invite-dialog';
 import { PendingInvites } from '@/components/admin/pending-invites';
@@ -36,6 +37,7 @@ export default function StaffPage() {
   const [resetOpen, setResetOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [timeOffTarget, setTimeOffTarget] = useState<StaffRecord | null>(null);
+  const [timesheetsTarget, setTimesheetsTarget] = useState<StaffRecord | null>(null);
 
   function handleAddClick(): void {
     setEditing(null);
@@ -89,6 +91,7 @@ export default function StaffPage() {
         onEdit={handleEditClick}
         onResetPassword={handleResetClick}
         onTimeOff={setTimeOffTarget}
+        onTimesheets={setTimesheetsTarget}
       />
 
       <SectionDivider label="Pending invites" />
@@ -120,6 +123,11 @@ export default function StaffPage() {
         onClose={() => setResetOpen(false)}
         onSuccess={handleSuccess}
         staff={resetTarget}
+      />
+      <TimesheetsDialog
+        open={timesheetsTarget !== null}
+        onClose={() => setTimesheetsTarget(null)}
+        staff={timesheetsTarget}
       />
       <TimeOffDialog
         open={timeOffTarget !== null}

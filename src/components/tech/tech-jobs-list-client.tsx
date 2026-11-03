@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
 import { SegmentedControl } from '@/components/ui/segmented-control';
 import type { VisitRange } from '@/lib/tech/visit-range';
 
@@ -51,6 +52,104 @@ const EMPTY_COPY: Record<VisitRange, string> = {
   upcoming: 'No upcoming visits.',
   past: 'No past visits in the last 30 days.',
 };
+
+/** 3725 seconds -> "1:02:05"; under an hour -> "2:05". */
+function formatElapsed(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = String(Math.floor((total % 3600) / 60)).padStart(h > 0 ? 2 : 1, '0');
+  const sec = String(total % 60).padStart(2, '0');
+  return h > 0 ? `${h}:${m}:${sec}` : `${m}:${sec}`;
+}
+
+/** Day clock: a general clock-in with no job attached. */
+function ClockButton() {
+  // undefined = still loading, null = clocked out, string = clock-in instant.
+  const [clockInAt, setClockInAt] = useState<string | null | undefined>(undefined);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch('/api/tech/time');
+        if (cancelled) return;
+        if (res.status === 404) {
+          setClockInAt(null);
+          return;
+        }
+        const body = await res.json().catch(() => null);
+        setClockInAt(res.ok && body?.data?.clockInAt ? String(body.data.clockInAt) : null);
+      } catch {
+        if (!cancelled) setClockInAt(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!clockInAt) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [clockInAt]);
+
+  async function toggle(): Promise<void> {
+    const action = clockInAt ? 'out' : 'in';
+    setPending(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/tech/time', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      });
+      if (res.ok) {
+        setClockInAt(action === 'in' ? new Date().toISOString() : null);
+      } else if (res.status === 409 && action === 'in') {
+        // Already clocked in elsewhere: pick up the real start time.
+        const cur = await fetch('/api/tech/time');
+        const body = cur.ok ? await cur.json().catch(() => null) : null;
+        setClockInAt(body?.data?.clockInAt ? String(body.data.clockInAt) : new Date().toISOString());
+      } else if (res.status === 404 && action === 'out') {
+        setClockInAt(null);
+      } else {
+        setError(action === 'in' ? "Couldn't clock in. Please try again." : "Couldn't clock out. Please try again.");
+      }
+    } catch {
+      setError(action === 'in' ? "Couldn't clock in. Please try again." : "Couldn't clock out. Please try again.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  const clockedIn = typeof clockInAt === 'string';
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <div className="flex items-center gap-3">
+        {clockedIn && (
+          <span className="font-mono text-[15px] tabular-nums text-muted-foreground" aria-live="off">
+            {formatElapsed(now - new Date(clockInAt).getTime())}
+          </span>
+        )}
+        <Button
+          type="button"
+          size="sm"
+          variant={clockedIn ? 'outline' : 'default'}
+          disabled={pending || clockInAt === undefined}
+          onClick={() => void toggle()}
+          className="min-h-11"
+        >
+          {pending ? (clockedIn ? 'Clocking out…' : 'Clocking in…') : clockedIn ? 'Clock out' : 'Clock in'}
+        </Button>
+      </div>
+      {error && <p className="text-[13px] text-danger-strong">{error}</p>}
+    </div>
+  );
+}
 
 export function TechJobsListClient() {
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -151,6 +250,9 @@ export function TechJobsListClient() {
 
   return (
     <div className="space-y-4">
+      <div className="flex justify-end">
+        <ClockButton />
+      </div>
       <SegmentedControl
         aria-label="Visit range"
         options={TABS}
