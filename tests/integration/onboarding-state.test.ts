@@ -7,8 +7,8 @@ vi.mock("server-only", () => ({}));
 /**
  * Integration suite for the setup guide's stamps and flags. Runs against the
  * DEV database (`VITEST_INTEGRATION=1`); the two concurrency pairs are smoke
- * tests driven with the SQL builders directly. Creates two throwaway orgs and
- * deletes them (cascade) in afterAll.
+ * tests driven with the SQL builders directly. Creates four throwaway orgs and
+ * deletes each one (cascade) in afterAll, independently.
  */
 
 type Q = typeof import("@/lib/admin/onboarding-queries");
@@ -16,6 +16,7 @@ type S = typeof import("@/lib/admin/onboarding-sql");
 type Db = typeof import("@/lib/db");
 type Row = Record<string, unknown>;
 type StateJson = {
+  firstSeenAt?: string;
   dismissedAt?: string;
   completedSeenAt?: string;
   firstCompleted: Record<string, string>;
@@ -30,6 +31,8 @@ let s: S;
 let db: Db["db"];
 let sql: typeof import("drizzle-orm").sql;
 let orgA = "";
+let orgG = "";
+let orgA2 = "";
 let orgB = "";
 
 async function run(statement: ReturnType<typeof sql>): Promise<Row[]> {
@@ -66,6 +69,32 @@ async function seedRest(org: string, status = "pending") {
     sql`INSERT INTO service_requests (organization_id,session_id,assigned_to,issue_type,urgency,description,reference_number,scheduled_date,status) VALUES (${org},${sess},${tech},'no_heat','medium','Probe request','PRB-'||substr(md5(random()::text),1,8),now()+interval '1 day',${status}::request_status) RETURNING id`,
   ))[0].id;
   return { tech, sess, req };
+}
+
+/** Every source table the SELECT reads, "done", plus stamps and flags. */
+async function seedEverything(org: string) {
+  await setPhoneHours(org);
+  await db.execute(
+    sql`UPDATE organization_settings SET logo_url = 'https://example.com/logo.png' WHERE organization_id = ${org}`,
+  );
+  await q.getOnboarding(org, OPTS);
+  const { tech, req } = await seedRest(org);
+  await db.execute(
+    sql`INSERT INTO technician_time_entries (organization_id,technician_id,service_request_id) VALUES (${org},${tech},${req})`,
+  );
+  await db.execute(
+    sql`INSERT INTO pricebook_items (organization_id,type,name,price_cents,active) VALUES (${org},'service','Probe tune-up',9900,true)`,
+  );
+  await db.execute(
+    sql`INSERT INTO widget_keys (organization_id,key_hash,key_prefix,key_type,is_active) VALUES (${org},md5(random()::text)||md5(random()::text),'pk_probe','publishable',true)`,
+  );
+  await db.execute(
+    sql`INSERT INTO google_calendar_connections (organization_id,connected) VALUES (${org},true)`,
+  );
+  await q.getOnboarding(org, OPTS);
+  await db.execute(
+    s.flagsStatementSql({ organizationId: org, flags: { embedCopied: true, techSignedInAt: new Date().toISOString() }, top: {} }),
+  );
 }
 
 async function seedDone(org: string) {
@@ -110,12 +139,20 @@ beforeAll(async () => {
     return out.result.organizationId as string;
   };
   orgA = await make("A");
+  orgG = await make("G");
+  orgA2 = await make("A2");
   orgB = await make("B");
 }, 60_000);
 
 afterAll(async () => {
-  for (const id of [orgA, orgB]) {
-    if (id) await db.execute(sql`DELETE FROM organizations WHERE id = ${id}`);
+  // One try/catch per org: a failed delete can never leak the others.
+  for (const id of [orgA, orgG, orgA2, orgB]) {
+    if (!id) continue;
+    try {
+      await db.execute(sql`DELETE FROM organizations WHERE id = ${id}`);
+    } catch (error) {
+      console.error(`afterAll: could not delete probe org ${id}`, error);
+    }
   }
 }, 60_000);
 
@@ -128,6 +165,11 @@ describe("onboarding state (dev DB)", () => {
     expect(st.firstCompleted ?? {}).toEqual({});
     expect(st.dismissedAt).toBeUndefined();
     expect(st.completedSeenAt).toBeUndefined();
+    // the first GET writes the write-once firstSeenAt; a second GET keeps it
+    expect(st.firstSeenAt).toBeDefined();
+    await new Promise((r) => setTimeout(r, 20));
+    await q.getOnboarding(orgA, OPTS);
+    expect((await stateObj(orgA)).firstSeenAt).toBe(st.firstSeenAt);
   });
 
   it("(e) row-less: both statements create the settings row", async () => {
@@ -190,30 +232,50 @@ describe("onboarding state (dev DB)", () => {
     expect((await stateObj(orgA)).dismissedAt).toBe(first);
   });
 
-  it("(g) old org with a completed request is grandfathered (top-only write)", async () => {
+  it("(g) stamp-less old org with only a completed request: top-only grandfather write", async () => {
     await db.execute(
-      sql`UPDATE organizations SET created_at = now() - interval '20 days' WHERE id = ${orgB}`,
+      sql`UPDATE organizations SET created_at = now() - interval '20 days' WHERE id = ${orgG}`,
     );
-    await seedRest(orgB, "completed");
-    expect((await stateObj(orgB)).dismissedAt).toBeUndefined();
-    await q.getOnboarding(orgB, OPTS);
-    expect((await stateObj(orgB)).dismissedAt).toBeDefined();
+    const sess = (await run(
+      sql`INSERT INTO customer_sessions (organization_id,token) VALUES (${orgG},gen_random_uuid()::text) RETURNING id`,
+    ))[0].id;
+    await db.execute(
+      sql`INSERT INTO service_requests (organization_id,session_id,issue_type,urgency,description,reference_number,status) VALUES (${orgG},${sess},'no_heat','medium','Probe request','PRB-'||substr(md5(random()::text),1,8),'completed'::request_status)`,
+    );
+    const before = await stateObj(orgG);
+    expect(before.dismissedAt).toBeUndefined();
+    expect(before.firstSeenAt).toBeUndefined();
+    expect(before.firstCompleted ?? {}).toEqual({});
+
+    const p = await q.getOnboarding(orgG, OPTS);
+    expect(p.progress.requiredDone).toBe(0);
+    expect(p.dismissedAt).not.toBeNull();
+    const st = await stateObj(orgG);
+    expect(st.dismissedAt).toBe(p.dismissedAt);
+    expect(st.firstSeenAt).toBeDefined();
+    expect(st.firstCompleted).toEqual({});
+    expect(st.completedSeenAt).toBeUndefined();
   });
 
-  it("(h) tenancy: org A reads and writes leave org B byte-identical", async () => {
-    // B: add the "done" rows on top of the grandfathered request, plus stamps/flags.
-    await setPhoneHours(orgB);
-    await q.getOnboarding(orgB, OPTS);
-    await db.execute(
-      s.flagsStatementSql({ organizationId: orgB, flags: { embedCopied: true }, top: {} }),
+  it("(h) tenancy: a fresh org A2 reads 0/0 and its GET and PATCH leave org B byte-identical", async () => {
+    await seedEverything(orgB);
+    const pb = await q.getOnboarding(orgB, OPTS);
+    expect(pb.progress).toMatchObject({ requiredDone: 4, optionalDone: 4 });
+    const seeded = await stateObj(orgB);
+    expect(Object.keys(seeded.firstCompleted).sort()).toEqual(
+      ["add_technician", "book_first_request", "brand", "chat_widget", "integrations", "phone_hours", "pricebook", "tech_sign_in"],
     );
+    expect(seeded.flags.embedCopied).toBe(true);
+    expect(seeded.flags.techSignedInAt).toBeDefined();
     const before = await stateText(orgB);
     expect(before).toBeTruthy();
 
-    const p = await q.getOnboarding(orgA, OPTS);
-    await q.patchOnboarding(orgA, { completedSeen: true, flags: { embedCopied: true } }, { demo: false });
+    const p = await q.getOnboarding(orgA2, OPTS);
+    expect(p.progress.requiredDone).toBe(0);
+    expect(p.progress.optionalDone).toBe(0);
+    await q.patchOnboarding(orgA2, { dismissed: true, completedSeen: true, flags: { embedCopied: true } }, { demo: false });
+    expect((await stateObj(orgA2)).dismissedAt).toBeDefined();
 
     expect(await stateText(orgB)).toBe(before);
-    expect(p.progress.requiredDone).toBe(4);
   });
 });
