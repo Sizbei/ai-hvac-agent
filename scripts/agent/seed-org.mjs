@@ -244,7 +244,10 @@ await db
       paymentMethods: "Cash, check, all major cards, and financing",
       financingAvailable: true,
     },
-    onboardingState: { dismissed: true, embedViewed: true },
+    onboardingState: {
+      dismissedAt: new Date().toISOString(),
+      flags: { embedCopied: true },
+    },
     updatedAt: new Date(),
   })
   .where(eq(schema.organizationSettings.organizationId, orgId));

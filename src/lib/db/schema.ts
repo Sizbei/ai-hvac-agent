@@ -1207,10 +1207,15 @@ export const organizationSettings = pgTable("organization_settings", {
   aiModelId: text("ai_model_id"),
 
   // ── Onboarding checklist (self-serve signup) ──
-  // Stores ONLY the non-derivable onboarding flags: { dismissed?, embedViewed? }.
-  // All other checklist steps are derived from live data (see
-  // src/lib/admin/onboarding-queries.ts). NULL = nothing dismissed/viewed yet.
+  // Stores ONLY the non-derivable setup-guide state (see
+  // src/lib/admin/onboarding-state.ts); every step's completion is derived
+  // from live data. dismissed/embedViewed are legacy keys (read for one
+  // release). NULL = nothing recorded yet.
   onboardingState: jsonb("onboarding_state").$type<{
+    dismissedAt?: string;
+    completedSeenAt?: string;
+    firstCompleted?: Record<string, string>;
+    flags?: { embedCopied?: boolean; techSignedInAt?: string };
     dismissed?: boolean;
     embedViewed?: boolean;
   }>(),

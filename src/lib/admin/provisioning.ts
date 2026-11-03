@@ -226,7 +226,7 @@ export async function createOrgCore(
     });
     const settingsStmt = db
       .insert(organizationSettings)
-      .values({ organizationId });
+      .values({ organizationId, companyName: name.slice(0, 120) });
     // A non-empty tuple ordered [organizations, organizationSettings, users?]:
     // the org row exists by the time the FK-bearing inserts run.
     if (input.ownerUser && ownerUserId) {
