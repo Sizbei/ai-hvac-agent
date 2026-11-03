@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -21,9 +21,11 @@ import { BrandMark } from '@/components/admin/brand-mark';
 import { EnvBadge } from '@/components/admin/env-badge';
 // NAV_GROUPS lives in a shared module so the ⌘K search can offer page-navigation
 // from the same source of truth (no drift with the sidebar).
-import { NAV_GROUPS, type NavItem } from './nav-items';
+import { navGroupsFor, type NavItem, type SetupPlacement } from './nav-items';
 import { useUnscheduledCount } from '@/hooks/use-unscheduled-count';
-import { unscheduledBadge } from '@/lib/admin/unscheduled-badge';
+import { unscheduledBadge, type UnscheduledBadge } from '@/lib/admin/unscheduled-badge';
+import { refreshOnboarding, useOnboarding } from '@/lib/admin/onboarding-store';
+import { setupDigit } from '@/lib/admin/setup-digit';
 import { envName, parseEnvLinks } from '@/lib/admin/environment';
 import type { AdminRole } from '@/lib/auth/types';
 import { cn } from '@/lib/utils';
@@ -34,6 +36,8 @@ interface SidebarProps {
   readonly adminName: string;
   readonly adminEmail: string;
   readonly role: AdminRole;
+  /** Server-decided position of the Setup item (fixed for this page load). */
+  readonly setupPlacement: SetupPlacement;
   readonly isMobileOpen: boolean;
   readonly onMobileClose: () => void;
 }
@@ -54,6 +58,12 @@ const RAIL_ROW =
   'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground ' +
   'focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-sidebar-ring';
 
+/** Paths whose visit should re-read the setup guide (home card and guide page). */
+function isSetupRefreshPath(pathname: string): boolean {
+  const path = pathname.replace(/\/+$/, '');
+  return path === '/admin' || path === '/admin/setup';
+}
+
 /** Uppercase group label — the transform lives in the .u-label CSS class so the
  *  source strings stay sentence case (copy canon). */
 const GROUP_LABEL = 'u-label px-2.5 pb-1 [color:var(--sidebar-foreground-dim)]';
@@ -63,6 +73,7 @@ export function Sidebar({
   adminName,
   adminEmail,
   role,
+  setupPlacement,
   isMobileOpen,
   onMobileClose,
 }: SidebarProps) {
@@ -70,7 +81,16 @@ export function Sidebar({
   const [isMobile, setIsMobile] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const { count: unscheduledCount } = useUnscheduledCount();
-  const badge = unscheduledBadge(unscheduledCount);
+  const { data: onboarding } = useOnboarding();
+  const navGroups = navGroupsFor(setupPlacement);
+  // One entry per NavItem.badge kind; every kind shares the visible/label/srLabel shape.
+  const badges: Record<NonNullable<NavItem['badge']>, UnscheduledBadge> = useMemo(
+    () => ({
+      unscheduled: unscheduledBadge(unscheduledCount),
+      setup: setupDigit({ data: onboarding }),
+    }),
+    [unscheduledCount, onboarding],
+  );
   const envLinks =
     role === 'super_admin'
       ? parseEnvLinks(
@@ -90,6 +110,16 @@ export function Sidebar({
     window.addEventListener('resize', check);
     return () => window.removeEventListener('resize', check);
   }, []);
+
+  // Read the setup guide once on mount, and again on landing on the home page
+  // or the guide (the store throttles repeats and shares one request).
+  const setupRefreshedOnMount = useRef(false);
+  useEffect(() => {
+    if (!setupRefreshedOnMount.current || isSetupRefreshPath(pathname)) {
+      setupRefreshedOnMount.current = true;
+      void refreshOnboarding();
+    }
+  }, [pathname]);
 
   // Close mobile sidebar on route change
   useEffect(() => {
@@ -115,7 +145,9 @@ export function Sidebar({
     (item: NavItem, collapsed: boolean) => {
       const isActive = isItemActive(item);
       const Icon = item.icon;
-      const showBadge = item.badge === 'unscheduled' && badge.visible;
+      const badge = item.badge ? badges[item.badge] : null;
+      const showBadge = badge !== null && badge.visible;
+      const isSetupDigit = item.badge === 'setup';
       return (
         <Link
           href={item.href}
@@ -138,7 +170,15 @@ export function Sidebar({
             )}
           />
           {!collapsed && <span className="truncate">{item.label}</span>}
-          {showBadge && !collapsed && (
+          {showBadge && !collapsed && isSetupDigit && (
+            <span
+              aria-label={badge.srLabel}
+              className="ml-auto font-mono text-[11px] font-medium tabular-nums text-muted-foreground"
+            >
+              {badge.label}
+            </span>
+          )}
+          {showBadge && !collapsed && !isSetupDigit && (
             <span
               aria-label={badge.srLabel}
               className="ml-auto inline-flex items-center gap-1 font-mono text-[11px] font-medium tabular-nums text-warning"
@@ -149,7 +189,15 @@ export function Sidebar({
               {badge.label}
             </span>
           )}
-          {showBadge && collapsed && (
+          {showBadge && collapsed && isSetupDigit && (
+            <span
+              aria-label={badge.srLabel}
+              className="absolute right-1 top-0.5 font-mono text-[10px] font-medium tabular-nums text-muted-foreground"
+            >
+              {badge.label}
+            </span>
+          )}
+          {showBadge && collapsed && !isSetupDigit && (
             <span
               aria-label={badge.srLabel}
               className="absolute right-1.5 top-1.5 size-[6px] rotate-45 bg-warning"
@@ -158,7 +206,7 @@ export function Sidebar({
         </Link>
       );
     },
-    [badge, isItemActive],
+    [badges, isItemActive],
   );
 
   // Shared rail surface: a light sunken column separated from the canvas by a
@@ -224,7 +272,7 @@ export function Sidebar({
             </div>
 
             <nav className="flex-1 space-y-4 overflow-y-auto px-3 py-3">
-              {NAV_GROUPS.map((group) => (
+              {navGroups.map((group) => (
                 <div key={group.heading} className="space-y-0.5">
                   <p className={GROUP_LABEL}>{group.heading}</p>
                   {group.items.map((item) => (
@@ -333,7 +381,7 @@ export function Sidebar({
 
           {/* Nav */}
           <nav className="flex-1 space-y-4 overflow-y-auto px-3 py-3">
-            {NAV_GROUPS.map((group, groupIndex) => (
+            {navGroups.map((group, groupIndex) => (
               <div key={group.heading} className="space-y-0.5">
                 {!isCollapsed && <p className={GROUP_LABEL}>{group.heading}</p>}
                 {/* Collapsed: a short rule separates groups (not above the first). */}

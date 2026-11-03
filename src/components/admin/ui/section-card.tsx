@@ -7,6 +7,8 @@ interface SectionCardProps {
   readonly title: string;
   /** Optional icon shown left of the title. */
   readonly icon?: LucideIcon;
+  /** Optional short mono note in the header, before `count` (e.g. "2 of 4"). */
+  readonly meta?: string;
   /** Optional numeric count shown as a mono figure next to the title. */
   readonly count?: number;
   /** Right-aligned action slot (button, link, badge, etc.). */
@@ -28,6 +30,7 @@ interface SectionCardProps {
 export function SectionCard({
   title,
   icon: Icon,
+  meta,
   count,
   action,
   children,
@@ -54,6 +57,11 @@ export function SectionCard({
         <h2 className="min-w-0 truncate text-[15px] font-semibold leading-none text-foreground">
           {title}
         </h2>
+        {meta && (
+          <span className="shrink-0 font-mono text-[13px] leading-none tabular-nums text-muted-foreground">
+            {meta}
+          </span>
+        )}
         {count !== undefined && (
           <span className="font-mono text-[13px] leading-none tabular-nums text-muted-foreground">
             {count}

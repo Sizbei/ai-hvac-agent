@@ -7,7 +7,7 @@ import { AlertTriangle } from 'lucide-react';
 import { Sidebar } from '@/components/admin/sidebar';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { GlobalSearch } from '@/components/admin/global-search';
-import { NAV_GROUPS } from '@/components/admin/nav-items';
+import { navGroupsFor, type SetupPlacement } from '@/components/admin/nav-items';
 import type { AdminRole } from '@/lib/auth/types';
 
 interface DashboardShellProps {
@@ -18,14 +18,16 @@ interface DashboardShellProps {
   /** When true, the org's subscription is past_due/suspended — render the
    * non-dismissable billing banner above the content. */
   readonly billingAttention?: boolean;
+  /** Server-decided position of the Setup nav item for this page load. */
+  readonly setupPlacement: SetupPlacement;
   readonly children: React.ReactNode;
 }
 
 /** Derive a page label from the current pathname by exact-matching nav items.
  *  Falls back to undefined (no title shown) if no match is found. */
-function useMobileTitle(): string | undefined {
+function useMobileTitle(placement: SetupPlacement): string | undefined {
   const pathname = usePathname();
-  for (const group of NAV_GROUPS) {
+  for (const group of navGroupsFor(placement)) {
     for (const item of group.items) {
       const match = item.exact
         ? pathname === item.href
@@ -42,10 +44,11 @@ export function DashboardShell({
   adminEmail,
   role,
   billingAttention = false,
+  setupPlacement,
   children,
 }: DashboardShellProps) {
   const [isMobileOpen, setIsMobileOpen] = useState(false);
-  const mobileTitle = useMobileTitle();
+  const mobileTitle = useMobileTitle(setupPlacement);
 
   const handleMobileClose = useCallback(() => {
     setIsMobileOpen(false);
@@ -62,6 +65,7 @@ export function DashboardShell({
         adminName={adminName}
         adminEmail={adminEmail}
         role={role}
+        setupPlacement={setupPlacement}
         isMobileOpen={isMobileOpen}
         onMobileClose={handleMobileClose}
       />
@@ -85,7 +89,7 @@ export function DashboardShell({
             </Link>
           </div>
         )}
-        <GlobalSearch />
+        <GlobalSearch placement={setupPlacement} />
         <main className="flex-1 overflow-auto">{children}</main>
       </div>
     </div>

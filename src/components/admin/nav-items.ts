@@ -22,6 +22,7 @@ import {
   Gauge,
   Download,
   UsersRound,
+  ListChecks,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -31,8 +32,9 @@ export interface NavItem {
   /** Match the active state on the exact path only (for the index route, whose
    * href is a prefix of every other admin route). */
   readonly exact?: boolean;
-  /** When 'unscheduled', the item shows the unscheduled-jobs notification badge. */
-  readonly badge?: 'unscheduled';
+  /** Which notification badge the item shows: 'unscheduled' = unscheduled-jobs
+   * count; 'setup' = setup steps left. */
+  readonly badge?: 'unscheduled' | 'setup';
 }
 
 export interface NavGroup {
@@ -40,7 +42,8 @@ export interface NavGroup {
   readonly items: readonly NavItem[];
 }
 
-export const NAV_GROUPS: readonly NavGroup[] = [
+/** Every group without the Setup item; `navGroupsFor` places it. */
+const BASE_NAV_GROUPS: readonly NavGroup[] = [
   {
     heading: 'Operations',
     items: [
@@ -90,3 +93,40 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     ],
   },
 ] as const;
+
+/** Where the Setup item sits — decided server-side per page load (spec §2). */
+export type SetupPlacement = 'operations' | 'integrations';
+
+const SETUP_ITEM: NavItem = {
+  label: 'Setup',
+  href: '/admin/setup',
+  icon: ListChecks,
+  badge: 'setup',
+};
+
+function withSetup(placement: SetupPlacement): readonly NavGroup[] {
+  return BASE_NAV_GROUPS.map((group) => {
+    if (placement === 'operations' && group.heading === 'Operations') {
+      const [first, ...rest] = group.items;
+      return { ...group, items: [first, SETUP_ITEM, ...rest] };
+    }
+    if (placement === 'integrations' && group.heading === 'Integrations') {
+      return { ...group, items: [...group.items, SETUP_ITEM] };
+    }
+    return group;
+  });
+}
+
+const GROUPS_BY_PLACEMENT: Record<SetupPlacement, readonly NavGroup[]> = {
+  operations: withSetup('operations'),
+  integrations: withSetup('integrations'),
+};
+
+/**
+ * The nav groups for the sidebar, the mobile title and ⌘K search: Setup second
+ * in Operations (after Dashboard) or last in Integrations. Stable reference per
+ * placement so consumers can memoise on it.
+ */
+export function navGroupsFor(placement: SetupPlacement): readonly NavGroup[] {
+  return GROUPS_BY_PLACEMENT[placement];
+}

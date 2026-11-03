@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -9,12 +10,18 @@ export type IconChipIntent =
   | "info"
   | "neutral";
 
-interface IconChipProps {
-  readonly icon: LucideIcon;
+interface IconChipBase {
   readonly intent?: IconChipIntent;
   readonly size?: "sm" | "md";
   readonly className?: string;
 }
+
+/** Either a lucide glyph or short custom content (e.g. a step number). */
+type IconChipProps = IconChipBase &
+  (
+    | { readonly icon: LucideIcon; readonly children?: never }
+    | { readonly icon?: never; readonly children: ReactNode }
+  );
 
 /** Maps intent → token-based background + foreground classes. */
 const INTENT_CLASSES: Record<IconChipIntent, string> = {
@@ -35,11 +42,12 @@ const INTENT_CLASSES: Record<IconChipIntent, string> = {
  * `stat-card.tsx`).
  */
 export function IconChip({
-  icon: Icon,
   intent = "neutral",
   size = "md",
   className,
+  ...content
 }: IconChipProps) {
+  const Icon = content.icon;
   return (
     <span
       className={cn(
@@ -49,7 +57,7 @@ export function IconChip({
         className,
       )}
     >
-      <Icon aria-hidden="true" />
+      {Icon ? <Icon aria-hidden="true" /> : content.children}
     </span>
   );
 }

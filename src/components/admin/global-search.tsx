@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Search, Loader2, Users, Receipt, ClipboardList, FileText, Tags, CornerDownLeft } from 'lucide-react';
 import {
@@ -10,13 +10,8 @@ import {
 import { cn } from '@/lib/utils';
 import type { SearchResult } from '@/lib/admin/search-queries';
 import { SyncPill } from '@/components/admin/sync-pill';
-import { NAV_GROUPS } from '@/components/admin/nav-items';
+import { navGroupsFor, type SetupPlacement } from '@/components/admin/nav-items';
 import { filterCommands, type CommandItem } from '@/lib/admin/nav-search';
-
-/** Every admin destination, flattened — the ⌘K search matches these as "Pages". */
-const NAV_ITEMS: CommandItem[] = NAV_GROUPS.flatMap((g) =>
-  g.items.map((it) => ({ label: it.label, href: it.href, group: g.heading })),
-);
 
 const TYPE_LABELS: Record<SearchResult['type'], string> = {
   customer: 'Customers',
@@ -58,7 +53,20 @@ function groupResults(
   }));
 }
 
-export function GlobalSearch() {
+interface GlobalSearchProps {
+  /** Server-decided position of the Setup item (its group label in results). */
+  readonly placement: SetupPlacement;
+}
+
+export function GlobalSearch({ placement }: GlobalSearchProps) {
+  /** Every admin destination, flattened — the ⌘K search matches these as "Pages". */
+  const navCommands: CommandItem[] = useMemo(
+    () =>
+      navGroupsFor(placement).flatMap((g) =>
+        g.items.map((it) => ({ label: it.label, href: it.href, group: g.heading })),
+      ),
+    [placement],
+  );
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -140,7 +148,7 @@ export function GlobalSearch() {
   // results from the API. Both share one keyboard-navigable index.
   // When the query is empty, show up to 8 nav items as "Quick navigation".
   const isEmptyQuery = !query.trim();
-  const navItems = isEmptyQuery ? NAV_ITEMS.slice(0, 8) : filterCommands(query, NAV_ITEMS);
+  const navItems = isEmptyQuery ? navCommands.slice(0, 8) : filterCommands(query, navCommands);
   const navCount = navItems.length;
   const grouped = groupResults(results);
   const recordFlat = grouped.flatMap((g) => g.items);
