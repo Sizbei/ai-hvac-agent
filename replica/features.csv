@@ -112,12 +112,12 @@ Auto-dispatched flag on job,dispatch,could,addon,yes,ST; dispatch_decisions + au
 Dispatch shift extension window,dispatch,could,addon,no,ST
 ML auto-dispatch by predicted job value,dispatch,could,addon,skip,ST; needs cross-tenant ML job-value model
 Fleet telematics hardware and dashcams,dispatch,could,addon,skip,FP+ST; fleet hardware reseller partnership
-Tech app schedule (today / upcoming / past),tech-app,must,yes,partial,FP+ST; /tech/jobs assigned list - no calendar or map view
+Tech app schedule (today / upcoming / past),tech-app,must,yes,yes,FP+ST; /tech/jobs Today / Upcoming / Past tabs (?range=) - no calendar or map view
 Mobile job status updates,tech-app,must,yes,yes,FP; /api/tech/jobs/[id]/status
 En route / arrived / working statuses,tech-app,must,yes,yes,ST; en_route and arrived statuses; tech taps; FP and HCP mapping
-Pause or hold job with reason from field,tech-app,must,yes,partial,ST; on_hold via /api/tech/jobs/[id]/status - no reason or reschedule from field
+Pause or hold job with reason from field,tech-app,must,yes,yes,ST; hold ends the visit with a reason and optional follow-up date via POST /api/tech/jobs/[id]/status - no reschedule from the field
 Tech schedules follow-up or books a lead from field,tech-app,should,yes,no,ST
-Mark myself done vs close out job,tech-app,must,yes,partial,ST; single completed status - no per-tech done
+Mark myself done vs close out job,tech-app,must,yes,yes,ST; per-technician done on a visit; the lead closes out the request (close-out sheet)
 Navigate to job location,tech-app,must,yes,yes,FP; tech-job-summary.tsx Google Maps directions link
 Photos / video / files on job with quality setting,tech-app,must,yes,partial,FP+ST; /api/tech/jobs/[id]/photo - photos only
 Field vs internal notes and job comments with notify,tech-app,should,yes,partial,FP; /api/tech/jobs/[id]/note - no field/internal split or comments
@@ -134,8 +134,8 @@ Sold items onto invoice now or later,tech-app,must,yes,no,ST
 Invoice presentation and signature on site,tech-app,must,yes,partial,ST; /api/tech/jobs/[id]/signature job sign-off - no invoice presentation
 Take payment in the field,tech-app,must,yes,no,ST; nothing under /api/tech
 Tech scorecard in app,tech-app,should,yes,no,ST; scorecards are admin-only
-Timeclock and timesheets (general + per job),tech-app,must,yes,partial,FP+ST; /api/tech/jobs/[id]/timesheet per-job only - no general clock
-Job timesheets from status timestamps,tech-app,must,yes,partial,ST; request_status_events exist - timesheets are separate entries
+Timeclock and timesheets (general + per job),tech-app,must,yes,yes,"FP+ST; general clock (/api/tech/time) plus per-job time entries, Timesheets dialog in staff - no GPS or backdating"
+Job timesheets from status timestamps,tech-app,must,yes,yes,ST; status taps write time entries (auto) alongside manual ones - no GPS or backdating
 Timesheet extras (GPS geostamp / backdating / status prompts),tech-app,should,yes,no,FP
 Location tracking toggle,tech-app,should,yes,yes,ST; tech-location-tracker + /consent
 Tech app language and terminology options (Spanish / residential-commercial),tech-app,could,yes,no,FP+ST

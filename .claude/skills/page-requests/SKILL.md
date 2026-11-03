@@ -101,8 +101,25 @@ under `src/app/api/admin/requests/[id]/appointments/`; queries
 is CAS on `version`: 409 `VERSION_CONFLICT`; other errors `IS_FIRST_VISIT`,
 `REQUEST_CANCELLED`, `VISIT_CANCELLED`. The detail sheet has a "Visits"
 section using the shared `src/components/admin/window-picker.tsx`. Tech-app
-ownership stays `service_requests.assigned_to`; the calendar does not render
+ownership: see "Tech loop guards (M3a)"; the calendar does not render
 visits #2+ yet (M2).
+
+**Tech loop guards (M3a):** native requests only.
+- Admin `PATCH` status `on_hold` follows the tech hold rule (visit ends, open
+  rows close); native `completed` is a guarded batch that cancels untouched
+  assignment rows (`completeRequestFromAdmin`). FieldPulse/HCP jobs keep the old path.
+- Once a technician has progress (en route / arrived / started / done) on a
+  visit, schedule, assign, reassign and unschedule of visit #1
+  (`src/lib/admin/visit-one-guard.ts`) and `PATCH` of any visit refuse with 409
+  `HAS_PROGRESS`; a visit ended by a hold refuses with 409 `VISIT_ENDED` (use
+  the Visits section). Adding a visit to a completed request: 409
+  `REQUEST_COMPLETED`. Cancelling a visit closes its technicians' job time.
+- Visit helpers: `POST …/appointments/[aid]/assignments` and `DELETE
+  …/assignments/[tid]` (`src/app/api/admin/requests/[id]/appointments/[aid]/assignments/`,
+  queries `src/lib/admin/assignment-queries.ts`) add/remove non-lead helpers on
+  any visit incl. #1. 409 codes: `TIME_OFF`, `VISIT_ENDED`, `REQUEST_COMPLETED`,
+  `ALREADY_ASSIGNED`, `HAS_PROGRESS`, `IS_LEAD`, `MANAGED_EXTERNALLY`. Tech
+  ownership is now the assignment-row rule (page-tech), not `assigned_to` alone.
 
 **Invariants:**
 - `PER_PAGE = 50`; limit is enforced server-side too (max 100). The pager uses

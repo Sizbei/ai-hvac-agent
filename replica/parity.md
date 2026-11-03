@@ -1,8 +1,8 @@
-## Parity: 43.7 / 100
+## Parity: 44.9 / 100
 
-features 43.7  (275 counted, must-haves 45 of 111 done)
+features 44.9  (275 counted, must-haves 50 of 111 done)
 
-Not shippable yet: 66 must-have features are not done.
+Not shippable yet: 61 must-have features are not done.
 
 ## By area, weakest first
 - integrations                  22.7  (8 features)
@@ -12,10 +12,10 @@ Not shippable yet: 66 must-have features are not done.
 - invoicing                     30.0  (17 features)
 - platform                      30.0  (2 features)
 - pricebook                     31.0  (14 features)
-- tech-app                      34.7  (29 features)
 - memberships                   37.5  (18 features)
 - intake                        39.5  (16 features)
 - marketing                     42.9  (4 features)
+- tech-app                      45.1  (29 features)
 - comms                         46.3  (11 features)
 - estimates                     49.0  (22 features)
 - crm                           50.0  (29 features)
@@ -85,13 +85,8 @@ Not shippable yet: 66 must-have features are not done.
 - [must] scheduling: Technician shifts (normal / on-call / time-off) with repeat, partial  (FP+ST; on-call / time-off / non-job rows; no repeat rule)
 - [must] team-settings: Roles with granular permissions, partial  (FP+ST; super_admin/admin/technician only)
 - [must] tech-app: Invoice presentation and signature on site, partial  (ST; /api/tech/jobs/[id]/signature job sign-off - no invoice presentation)
-- [must] tech-app: Job timesheets from status timestamps, partial  (ST; request_status_events exist - timesheets are separate entries)
 - [must] tech-app: Location info tab (history / opportunities / recurring), partial  (ST; /tech/jobs/[id] summary only)
-- [must] tech-app: Mark myself done vs close out job, partial  (ST; single completed status - no per-tech done)
-- [must] tech-app: Pause or hold job with reason from field, partial  (ST; on_hold via /api/tech/jobs/[id]/status - no reason or reschedule from field)
 - [must] tech-app: Photos / video / files on job with quality setting, partial  (FP+ST; /api/tech/jobs/[id]/photo - photos only)
-- [must] tech-app: Tech app schedule (today / upcoming / past), partial  (FP+ST; /tech/jobs assigned list - no calendar or map view)
-- [must] tech-app: Timeclock and timesheets (general + per job), partial  (FP+ST; /api/tech/jobs/[id]/timesheet per-job only - no general clock)
 - [should] comms: Attach files to communications, no  (FP)
 - [should] comms: Call routing / IVR / sequential ring, no  (FP; buildable on Twilio)
 - [should] comms: Customer text-to-confirm appointment, no  (ST)

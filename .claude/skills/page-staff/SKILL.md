@@ -26,6 +26,14 @@ via `GET/POST /api/admin/technicians/[id]/shifts` and `DELETE …/shifts/[sid]`
 (queries `src/lib/admin/shift-queries.ts`, types `shift-types.ts`). Only
 `time_off` removes capacity; see page-calendar for where it is subtracted.
 
+**Timesheets (M3a):** each technician row has a "Timesheets" action opening
+`src/components/admin/timesheets-dialog.tsx` — a read-only list of a
+technician's time entries (general clock and per-job, auto vs manual) for a
+date range. API `GET /api/admin/timesheets?technicianId=&from=&to=`
+(`src/app/api/admin/timesheets/route.ts`; UUID + real ISO dates, max 92 days,
+tenant-scoped; queries `src/lib/admin/timesheet-admin-queries.ts`). Entries are
+written by the tech app (`/api/tech/time`, status taps), never here.
+
 **Data flow:** `useAdminStaff` fetches `/api/admin/staff`; `useAdminInvites` fetches
 `/api/admin/invites` (pending only). Both are plain fetch-on-mount with manual
 `refetch`. No SWR cache — staff lists are small and infrequently changed.

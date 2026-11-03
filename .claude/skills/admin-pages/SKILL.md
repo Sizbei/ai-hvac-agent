@@ -69,6 +69,10 @@ error copy ("Couldn't save X. Please try again."), never err.message or
 - Request status lists (open / in-flight / on-site / terminal …) are
   constants in `src/lib/admin/request-status.ts`; import them, don't inline
   arrays. `en_route`/`arrived` colors live in `status-colors.ts`.
+- Dev org is FieldPulse-connected: `POST /api/admin/requests` (and other
+  native-create paths) push REAL jobs to FieldPulse. Create throwaway
+  requests for testing with SQL only (`seed-org.mjs` or direct inserts), never
+  through the API.
 - Time off (`technician_shifts`, kind `time_off`) is never overridable: the
   schedule-conflict `override` flag does not bypass it (409 `TIME_OFF`).
 - Money: synced invoices (fieldpulse_invoice_id / HCP source set) are
