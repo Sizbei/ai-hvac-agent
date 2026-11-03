@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -37,6 +37,7 @@ interface Job {
   readonly appointmentId: string;
   readonly appointmentNumber: number;
   readonly isLead: boolean;
+  readonly assignmentStatus: string;
 }
 
 const TABS: ReadonlyArray<{ value: VisitRange; label: string }> = [
@@ -57,26 +58,31 @@ export function TechJobsListClient() {
   const [error, setError] = useState<string | null>(null);
   const [range, setRange] = useState<VisitRange>('today');
 
-  const load = useCallback(async (): Promise<void> => {
-    try {
-      const res = await fetch(`/api/tech/jobs?range=${range}`);
-      const body = await res.json().catch(() => ({ success: false }));
-      if (res.ok && body.success) {
-        setJobs(body.data.jobs);
-        setError(null);
-      } else {
-        setError('Failed to load jobs');
-      }
-    } catch {
-      setError('Could not connect to server.');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [range]);
-
   useEffect(() => {
-    void load();
-  }, [load]);
+    let cancelled = false;
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const res = await fetch(`/api/tech/jobs?range=${range}`, { signal: controller.signal });
+        const body = await res.json().catch(() => ({ success: false }));
+        if (cancelled) return;
+        if (res.ok && body.success) {
+          setJobs(body.data.jobs);
+          setError(null);
+        } else {
+          setError('Failed to load jobs');
+        }
+      } catch {
+        if (cancelled) return;
+        setError('Could not connect to server.');
+      }
+      if (!cancelled) setIsLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [range]);
 
   let content: React.ReactNode;
   if (isLoading) {
@@ -113,7 +119,7 @@ export function TechJobsListClient() {
                   {/* raw enum value (no humanize here) — left as-is, so no
                     * uppercase transform: it would render "IN_PROGRESS". */}
                   <span className="rounded-[3px] border border-border bg-surface-raised px-2 py-0.5 text-[11px] font-medium tracking-[0.02em] text-muted-foreground">
-                    {job.status}
+                    {job.assignmentStatus}
                   </span>
                 </div>
                 <p className="mt-1.5 text-[15px] font-medium">
@@ -150,6 +156,7 @@ export function TechJobsListClient() {
         options={TABS}
         value={range}
         onChange={(next) => {
+          if (next === range) return;
           setIsLoading(true);
           setRange(next);
         }}
