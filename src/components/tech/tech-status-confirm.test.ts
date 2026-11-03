@@ -7,6 +7,7 @@ import {
   holdReasonLabel,
   isTerminalStatus,
   relevantBlockers,
+  showRequestBehind,
   techStatusLabel,
 } from './tech-status-confirm';
 import type { Blocker } from '@/lib/tech/status-actions';
@@ -121,5 +122,18 @@ describe('buildActionSheetCopy', () => {
       expect(c.confirmLabel.length).toBeGreaterThan(0);
     }
     expect(buildActionSheetCopy('close_out').description).toMatch(/can't be undone/);
+  });
+});
+
+describe('showRequestBehind', () => {
+  const earlier: Blocker = { kind: 'earlier_visit_open', technicianName: 'Ben', appointmentNumber: 1 };
+  it('shows when an earlier visit is open, even after a reload', () => {
+    expect(showRequestBehind([earlier], false)).toBe(true);
+  });
+  it('shows when the last response said behind', () => {
+    expect(showRequestBehind([], true)).toBe(true);
+  });
+  it('hides once the earlier visit closes and no response flag remains', () => {
+    expect(showRequestBehind([{ kind: 'not_lead' }], false)).toBe(false);
   });
 });

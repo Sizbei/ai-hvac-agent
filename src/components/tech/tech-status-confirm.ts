@@ -58,11 +58,11 @@ export function techStatusLabel(status: string): string {
 const SHEET_ACTIONS = new Set(['completed', 'pause', 'on_hold', 'close_out']);
 
 /** Done / Pause / Hold / Close out open the sheet; the travel and Working taps post directly. */
-export function actionNeedsSheet(action: string): boolean {
+export type SheetAction = 'completed' | 'pause' | 'on_hold' | 'close_out';
+
+export function actionNeedsSheet(action: string): action is SheetAction {
   return SHEET_ACTIONS.has(action);
 }
-
-export type SheetAction = 'completed' | 'pause' | 'on_hold' | 'close_out';
 
 export interface ActionSheetCopy {
   readonly title: string;
@@ -129,4 +129,9 @@ export function describeBlocker(b: Blocker): string {
     case 'managed_externally':
       return 'Managed in FieldPulse';
   }
+}
+
+/** The request is waiting on an earlier visit: derived from loaded blockers, or the last response said so. */
+export function showRequestBehind(blockers: readonly Blocker[], lastResponseBehind: boolean): boolean {
+  return lastResponseBehind || blockers.some((b) => b.kind === 'earlier_visit_open');
 }

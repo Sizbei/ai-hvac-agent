@@ -22,6 +22,12 @@ export interface SheetConfirmOptions {
 const FIELD =
   'h-11 w-full rounded-xl border border-border-input bg-surface-raised px-3 text-[15px] text-foreground';
 
+function blockerKey(b: Blocker): string {
+  if (b.kind === 'technician_open') return `${b.kind}-${b.technicianId}-${b.appointmentNumber}`;
+  if (b.kind === 'earlier_visit_open' || b.kind === 'visit_planned') return `${b.kind}-${b.appointmentNumber}`;
+  return b.kind;
+}
+
 /**
  * Bottom sheet for the actions that end or pause work: Done, Pause, Hold and
  * Close out. Close out shows what is still in the way (instead of the confirm
@@ -44,6 +50,16 @@ export function CloseOutSheet({
 }) {
   const [reason, setReason] = useState<HoldReason>(HOLD_REASONS[0]);
   const [followUp, setFollowUp] = useState('');
+  // A fresh open starts from defaults, so a second hold is not pre-filled.
+  const [wasOpen, setWasOpen] = useState(false);
+  if ((action !== null) !== wasOpen) {
+    setWasOpen(action !== null);
+    if (action !== null) {
+      setReason(HOLD_REASONS[0]);
+      setFollowUp('');
+    }
+  }
+  const today = new Date().toLocaleDateString('en-CA');
 
   // Keep the last action's copy mounted while the sheet animates out.
   const [shown, setShown] = useState<SheetAction>('completed');
@@ -76,9 +92,9 @@ export function CloseOutSheet({
         <div className="space-y-3 px-4">
           {blocked.length > 0 && (
             <ul className="space-y-2" aria-label="What is still open">
-              {blocked.map((b, i) => (
+              {blocked.map((b) => (
                 <li
-                  key={i}
+                  key={blockerKey(b)}
                   className="rounded-md border border-warning-border bg-warning-light px-3 py-2.5 text-[15px] text-foreground"
                 >
                   {describeBlocker(b)}
@@ -99,7 +115,7 @@ export function CloseOutSheet({
               </label>
               <label className="block space-y-1.5">
                 <span className="text-[13px] font-medium text-muted-foreground">Follow up on (optional)</span>
-                <input type="date" className={FIELD} value={followUp} onChange={(e) => setFollowUp(e.target.value)} />
+                <input type="date" min={today} className={FIELD} value={followUp} onChange={(e) => setFollowUp(e.target.value)} />
               </label>
             </div>
           )}

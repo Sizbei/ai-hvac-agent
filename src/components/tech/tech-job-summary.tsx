@@ -9,6 +9,7 @@ import { formatArrivalWindow } from '@/lib/admin/arrival-window';
 import { CloseOutSheet, type SheetConfirmOptions } from '@/components/tech/close-out-sheet';
 import {
   actionNeedsSheet,
+  showRequestBehind,
   relevantBlockers,
   techStatusLabel,
   type SheetAction,
@@ -85,6 +86,8 @@ export function TechJobSummary({
       const body = await res.json().catch(() => ({ success: false }));
       if (res.ok && body.success) {
         setJob(body.data);
+        setServerBlockers(null);
+        setRequestBehind(false);
         setError(null);
       } else {
         setError("Couldn't load this job.");
@@ -124,9 +127,13 @@ export function TechJobSummary({
         } else {
           const message = body?.error?.message ?? "Couldn't update this request. Please try again.";
           const refused = body?.error?.details?.blockers;
-          if (body?.error?.code === 'CLOSE_OUT_BLOCKED' && Array.isArray(refused)) setServerBlockers(refused);
-          if (viaSheet && body?.error?.code !== 'CLOSE_OUT_BLOCKED') setSheetError(message);
-          else if (!viaSheet) setError(message);
+          const blockedNow =
+            body?.error?.code === 'CLOSE_OUT_BLOCKED' && Array.isArray(refused)
+              ? relevantBlockers(refused as Blocker[])
+              : [];
+          if (blockedNow.length > 0) setServerBlockers(blockedNow);
+          else if (viaSheet) setSheetError(message);
+          else setError(message);
         }
       } catch {
         const message = "Couldn't reach the server. Please try again.";
@@ -143,7 +150,7 @@ export function TechJobSummary({
     (action: TechAction): void => {
       if (actionNeedsSheet(action)) {
         setSheetError(null);
-        setSheetAction(action as SheetAction);
+        setSheetAction(action);
       } else {
         void advance(action);
       }
@@ -249,7 +256,7 @@ export function TechJobSummary({
           </p>
         ) : (
           <>
-            {requestBehind && (
+            {showRequestBehind(job.blockers, requestBehind) && (
               <p className="rounded-md border border-warning-border bg-warning-light px-3 py-2.5 text-[15px]">
                 Your status is saved; the request is waiting on an earlier visit.
               </p>
@@ -278,7 +285,7 @@ export function TechJobSummary({
           pending={advancing !== null}
           error={sheetError}
           onConfirm={(a, options) => void advance(a, options)}
-          onClose={() => { setSheetAction(null); setSheetError(null); }}
+          onClose={() => { setSheetAction(null); setSheetError(null); setServerBlockers(null); }}
         />
 
         {error && <p className="text-[13px] text-danger-strong">{error}</p>}
