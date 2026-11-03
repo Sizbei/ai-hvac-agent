@@ -51,3 +51,47 @@ Rejected:
 - "Partial index on pricebook_items(active)" — not needed; single probe is fine.
 - "ProgressBar should animate scaleX" — keep the shared primitive unchanged in this
   change (presentation-only guardrail); noted for the design backlog.
+
+## Round 2 — 2026-11-04 (v2 → v3)
+
+Three fresh critics. 0 blockers, 20 majors, 29 minors; strongly converging.
+
+Established and applied:
+- The signup business name only lands in `organizations.name` (live bug: messages fall
+  back to a default) → provisioning seeds `company_name`, 0051 backfills, the step is
+  dropped. `first_request` + `first_schedule` merged into `book_first_request` (the dialog
+  opens with the schedule panel expanded under `from=setup`). `tech_sign_in` moves last,
+  "varies", primary action "Copy sign-in link" (absolute `/tech-login`, email prefilled),
+  instruction about password vs Google for a second-email owner; secondary "Invite by link".
+  Required = 4 (`phone_hours`, `add_technician`, `book_first_request`, `tech_sign_in`).
+- `add_technician` counts `password_hash OR google_id` or the sign-in flag; the FieldPulse
+  note only without Google OIDC. `book_first_request` requires a non-cancelled assignment
+  by an active technician (or `assigned_to` an active technician).
+- `tech_sign_in` has historical evidence (time entries, location rows, technicians with
+  `google_id`) so grandfathering can reach `completedSeenAt`.
+- Needs-attention: verbatim definitions; the digit shows needs-attention steps after
+  `completedSeenAt`, never after `dismissedAt`; home card never returns.
+- Nav pre-load position fixed (end of Integrations; promoted to Operations second after
+  Dashboard once loaded; `localStorage` cache); `navGroupsFor(state)` shared by sidebar,
+  shell and ⌘K.
+- GET = two round trips (SELECT; stamp statement iff `$keys` non-empty); response built
+  from the SELECT copy, never `RETURNING`. Both statements are INSERT … ON CONFLICT upserts
+  that carry `$top`, old-wins (`$top` and old on the left of `||` where they must win),
+  `jsonb_typeof` guards, `sql.param` arrays, text params for jsonb.
+- Per-field `.catch(undefined)` parsing; lenient date parsing; 0051 writes ISO via
+  `to_char`, is ADDITIVE (legacy keys kept one release), idempotent guard.
+- `useOpenFromParam` reads the URL in an effect declared before `useUrlFilterSync` (no
+  hydration mismatch); dialog pages call `store.refresh()` on create success when
+  `from=setup`; whitelist incl. `new=invite`; banner on Staff/Pricebook/Requests/Settings.
+- Integration test named and allow-listed; manual run; statements tested via the module.
+- Demo: skip grandfathering; in-memory × for the session.
+- Copy: "Add your business phone and hours", "Add the chat widget to your website", why
+  lines drop "Optional…" (badge only), banner "Setup guide: <title> · Back to guide".
+- `embedCopied` set by the revealed-key copy only.
+
+Rejected:
+- "Read dismissed/completedSeenAt server-side in the layout for first paint" — the
+  localStorage cache + default position avoids the jump without a server fetch on every
+  admin page.
+- "Exclude appointment_assignments stamps from historical evidence" — accepted in effect:
+  evidence uses tech-only tables (time entries, locations) and `google_id`.
