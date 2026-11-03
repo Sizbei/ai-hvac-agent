@@ -46,16 +46,28 @@ describe("onboardingSelectSql", () => {
       if (!/\bFROM\b/.test(f)) continue;
       expect(f).toMatch(/(organization_id|\bid) = \$\d+/);
     }
-    expect(params.length).toBeGreaterThan(15);
-    expect(new Set(params)).toEqual(new Set([ORG]));
-    // exact count of org references == number of $n placeholders
-    expect((flat.match(/\$\d+/g) ?? []).length).toBe(params.length);
+    // exactly 25 org predicates in the builder, each bound to the org id
+    expect(params).toHaveLength(25);
+    expect(params.every((p) => p === ORG)).toBe(true);
+    expect((flat.match(/\$\d+/g) ?? []).length).toBe(25);
+  });
+
+  it("booked_assigned carries all five org predicates", () => {
+    const start = flat.indexOf("EXISTS (SELECT 1 FROM appointments a");
+    const end = flat.indexOf(" AS booked_assigned");
+    const booked = flat.slice(start, end);
+    expect(booked.match(/organization_id = \$\d+/g)).toHaveLength(5);
+    for (const alias of ["a", "aa", "u", "r"]) {
+      expect(booked).toContain(`${alias}.organization_id = $`);
+    }
+    expect(booked.match(/u\.organization_id = \$\d+/g)).toHaveLength(2);
   });
 
   it("scopes the organizations fragment by id and uses explicit casts", () => {
     expect(flat).toMatch(/FROM organizations WHERE id = \$\d+/);
-    expect(flat).toContain("jsonb_typeof(allowed_origins) = 'array'");
-    expect(flat).toContain("jsonb_array_length(allowed_origins) > 0");
+    expect(flat).toContain(
+      "CASE WHEN jsonb_typeof(allowed_origins) = 'array' THEN jsonb_array_length(allowed_origins) > 0 ELSE false END",
+    );
     expect(flat).toContain("::request_status");
     expect(flat).toContain("assigned_to");
   });
@@ -89,8 +101,29 @@ describe("stampStatementSql", () => {
     expect(q.params).toContain(ORG);
     expect(q.params).toContain(JSON.stringify({ completedSeenAt: "2026-11-01T00:00:00.000Z" }));
     expect(q.params).toContain(JSON.stringify({ phone_hours: "2026-11-01T00:00:00.000Z", brand: "2026-11-01T00:00:00.000Z" }));
-    const arrays = q.params.filter((p) => Array.isArray(p) || (typeof p === "string" && p.startsWith("{") && p.endsWith("}") && !p.includes(":")));
-    expect(arrays.length).toBeGreaterThanOrEqual(2);
+    const arrays = q.params.filter((p) => Array.isArray(p));
+    expect(arrays).toEqual([["phone_hours", "brand"], ["completedSeenAt"]]);
+  });
+
+  it("puts $top and $new on the LEFT so old values win", () => {
+    expect(flat).toMatch(
+      /\$\d+::jsonb \|\| CASE WHEN jsonb_typeof\(organization_settings\.onboarding_state\) = 'object' THEN organization_settings\.onboarding_state ELSE '\{\}'::jsonb END, '\{firstCompleted\}'/,
+    );
+    expect(flat).toMatch(
+      /\$\d+::jsonb \|\| CASE WHEN jsonb_typeof\(\(CASE .*?END\)->'firstCompleted'\) = 'object'/,
+    );
+  });
+
+  it("drops undefined values from the JSON and the key arrays", () => {
+    const u = render(
+      stampStatementSql({
+        organizationId: ORG,
+        newStamps: { brand: undefined },
+        top: { dismissedAt: undefined },
+      }),
+    );
+    expect(u.params.filter((p) => p === "{}")).toHaveLength(4);
+    expect(u.params.filter((p) => Array.isArray(p))).toEqual([[], []]);
   });
 
   it("renders for grandfather-only (empty newStamps)", () => {
@@ -111,6 +144,12 @@ describe("flagsStatementSql", () => {
     expect(flat).toContain("jsonb_set(");
     expect(flat).toContain("'{flags}'");
     expect(flat).not.toMatch(/\bWHERE\b/);
+    expect(flat).toMatch(
+      /\$\d+::jsonb \|\| CASE WHEN jsonb_typeof\(organization_settings\.onboarding_state\) = 'object' THEN organization_settings\.onboarding_state ELSE '\{\}'::jsonb END, '\{flags\}'/,
+    );
+    expect(flat).toMatch(
+      /\$\d+::jsonb \|\| CASE WHEN jsonb_typeof\(\(CASE .*?END\)->'flags'\) = 'object'/,
+    );
     expect(flat.trim().endsWith("RETURNING onboarding_state")).toBe(true);
   });
 

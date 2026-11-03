@@ -30,7 +30,7 @@ export function onboardingSelectSql(organizationId: string): SQL {
     OR EXISTS (SELECT 1 FROM technician_locations WHERE organization_id = ${o})
     OR EXISTS (SELECT 1 FROM users WHERE organization_id = ${o} AND google_id IS NOT NULL AND role = 'technician' AND is_active)) AS tech_signed_in_evidence,
   EXISTS (SELECT 1 FROM widget_keys WHERE organization_id = ${o} AND key_type = 'publishable' AND is_active AND revoked_at IS NULL) AS widget_key,
-  COALESCE((SELECT jsonb_typeof(allowed_origins) = 'array' AND jsonb_array_length(allowed_origins) > 0 FROM organization_settings WHERE organization_id = ${o}), false) AS allowed_origins,
+  COALESCE((SELECT CASE WHEN jsonb_typeof(allowed_origins) = 'array' THEN jsonb_array_length(allowed_origins) > 0 ELSE false END FROM organization_settings WHERE organization_id = ${o}), false) AS allowed_origins,
   (EXISTS (SELECT 1 FROM fieldpulse_connections WHERE organization_id = ${o} AND connected = true)
     OR EXISTS (SELECT 1 FROM housecall_pro_connections WHERE organization_id = ${o} AND connected = true)
     OR EXISTS (SELECT 1 FROM google_calendar_connections WHERE organization_id = ${o} AND connected = true)) AS integration_connected,
@@ -41,6 +41,13 @@ export function onboardingSelectSql(organizationId: string): SQL {
 
 type Top = { dismissedAt?: string; completedSeenAt?: string };
 
+/** Drop undefined values so the JSON and the `?&` key arrays always agree. */
+function definedOnly<T extends object>(obj: T): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([, v]) => v !== undefined),
+  );
+}
+
 /**
  * First-completion stamps. `newStamps` = only ids not yet stamped; `top` =
  * grandfathering keys. Old values win everywhere (write-once).
@@ -50,10 +57,12 @@ export function stampStatementSql(p: {
   newStamps: Partial<Record<StepId, string>>;
   top: Top;
 }): SQL {
-  const top = JSON.stringify(p.top);
-  const created = JSON.stringify(p.newStamps);
-  const keys = sql.param(Object.keys(p.newStamps));
-  const topKeys = sql.param(Object.keys(p.top));
+  const topObj = definedOnly(p.top);
+  const newObj = definedOnly(p.newStamps);
+  const top = JSON.stringify(topObj);
+  const created = JSON.stringify(newObj);
+  const keys = sql.param(Object.keys(newObj));
+  const topKeys = sql.param(Object.keys(topObj));
   return sql`INSERT INTO organization_settings (organization_id, onboarding_state)
 VALUES (${p.organizationId}, ${top}::jsonb || jsonb_build_object('firstCompleted', ${created}::jsonb))
 ON CONFLICT (organization_id) DO UPDATE SET onboarding_state = jsonb_set(
@@ -74,8 +83,8 @@ export function flagsStatementSql(p: {
   top: Top;
   guardTechSignedIn?: boolean;
 }): SQL {
-  const top = JSON.stringify(p.top);
-  const flags = JSON.stringify(p.flags);
+  const top = JSON.stringify(definedOnly(p.top));
+  const flags = JSON.stringify(definedOnly(p.flags));
   const guard = p.guardTechSignedIn
     ? sql`WHERE (${OLD}) #> '{flags,techSignedInAt}' IS NULL`
     : sql``;
