@@ -30,20 +30,25 @@ derived from real data on every read; nothing is ticked by hand.
 Steps flagged `live` (add technician, book first request) re-derive every read
 and can reopen (`needsAttention` when stamped but no longer true); others stay
 done once stamped. `add_technician` needs an active technician with a password
-or Google id (FieldPulse-imported passwordless ones show a note); `book_first_request`
+or Google id. The FieldPulse note counts only FieldPulse-synced technicians
+(`fieldpulse_user_id IS NOT NULL`) with neither a password nor a Google id;
+password-less Housecall Pro imports are not counted. `book_first_request`
 needs a booked appointment with a technician (role only, active not required);
 `tech_sign_in` is done by time entries, locations, a Google-linked technician or
-`flags.techSignedInAt`. Step copy is exact per spec §3/§4; do not reword.
+`flags.techSignedInAt`. Without `NEXT_PUBLIC_APP_URL` the step carries no
+`action`/`copyValue`; card, hero and row show the instruction only. Step copy is exact per spec §3/§4; do not reword.
 
 **Stamps and flags:** `organization_settings.onboarding_state` holds
-`firstCompleted` (write-once per step), `dismissedAt`, `completedSeenAt` and
-`flags` (`embedCopied`, `techSignedInAt`). GET = the SELECT, then the stamp upsert
-only if there are new stamps or grandfather keys (the payload is built from the
-SELECT copy, never RETURNING). Old values always win (`$new || OLD`). The two
+`firstSeenAt` (write-once, set by the first GET), `firstCompleted` (write-once
+per step), `dismissedAt`, `completedSeenAt` and `flags` (`embedCopied`,
+`techSignedInAt`). GET = the SELECT, then the stamp upsert only if there are new
+stamps or `$top` keys (`firstSeenAt` when absent, plus grandfather keys; all in
+`$topKeys`). The payload is built from the SELECT copy, never RETURNING. Old values always win (`$new || OLD`). The two
 upserts are single-statement and row-less safe; concurrent writers cannot lose
 keys. A failed stamp write is logged, not fatal.
 
-**Grandfathering:** only while no stamps exist. Required 4 of 4 sets
+**Grandfathering:** first GET only (no `firstSeenAt` stored yet) and only while
+no stamps exist. Required 4 of 4 sets
 `completedSeenAt` (hides the card); an org older than 14 days with a completed
 request gets `dismissedAt`. Ordering matters in tests and probes: do the GET after
 phone+hours BEFORE adding the rest, or the card is hidden by grandfathering.
@@ -51,7 +56,10 @@ phone+hours BEFORE adding the rest, or the card is hidden by grandfathering.
 **Demo org** (`organizationId === DEMO_ORG_ID`, the dev default org): everything
 derived, `tech_sign_in` always done, no stamp, no PATCH write, no flag write, no
 audit. PATCH applies the body in memory; the card's dismiss lives in
-`sessionStorage` (`readDemoFlags`/`writeDemoFlags`).
+`sessionStorage` (`readDemoFlags`/`writeDemoFlags`). Read-time rule: stored
+`dismissedAt`/`completedSeenAt` (migration 0051 wrote one onto the demo row) are
+stripped in `getOnboarding`, and `loadSetupPlacement` always returns
+`operations` for the demo org (`placementFor(state, isDemo)`).
 
 **Client store contract:** fetches are sequence-tagged (older responses dropped);
 `refreshOnboarding({ force: true })` during an in-flight fetch chains another;
@@ -69,7 +77,10 @@ values open anything; `from` must equal `setup`; both params are stripped with
 **Gotchas:**
 - Audit `details` = `JSON.stringify({ keys })` only. Never `err.message` in UI.
 - The nav placement (operations/integrations) is computed server-side in the
-  layout so the sidebar never flashes; the digit comes from the store.
+  layout so the sidebar never flashes; the digit comes from the store and uses
+  the rail's `--sidebar-foreground-dim` at 11 px. `DashboardShell` provides the
+  placement through `setup-placement-context.tsx` (`useSetupPlacement`); the home
+  card renders nothing (no skeleton) unless it is `operations`.
 - Throwaway-org recipe for screenshots and probes (never `seed-org.mjs`, never
   `POST /api/admin/requests` on dev, which is FieldPulse-connected): a temporary
   `probe.mts` run as `NODE_OPTIONS=--conditions=react-server npx tsx probe.mts`
