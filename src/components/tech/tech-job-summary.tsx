@@ -15,6 +15,7 @@ import {
   type SheetAction,
 } from '@/components/tech/tech-status-confirm';
 import type { Blocker, TechAction } from '@/lib/tech/status-actions';
+import { TechInvoiceCard } from '@/components/tech/invoice/tech-invoice-card';
 
 interface TechJobSummary {
   readonly id: string;
@@ -31,10 +32,11 @@ interface TechJobSummary {
   readonly customerPhone: string | null;
   readonly address: string | null;
   readonly accessNotes: string | null;
-  readonly assignment: { readonly appointmentId: string } | null;
+  readonly assignment: { readonly appointmentId: string; readonly isLead: boolean } | null;
   readonly allowedActions: readonly TechAction[];
   readonly blockers: readonly Blocker[];
   readonly native: boolean;
+  readonly invoiceSummary: { readonly id: string; readonly state: string; readonly balanceCents: number } | null;
 }
 
 interface ActionResult {
@@ -181,6 +183,7 @@ export function TechJobSummary({
   );
 
   return (
+    <>
     <Card>
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-2">
@@ -297,5 +300,13 @@ export function TechJobSummary({
         {error && <p className="text-[13px] text-danger-strong">{error}</p>}
       </CardContent>
     </Card>
+    <TechInvoiceCard
+      jobId={job.id}
+      native={job.native}
+      status={job.status}
+      isLead={job.assignment?.isLead ?? false}
+      invoiceSummary={job.invoiceSummary}
+    />
+    </>
   );
 }
