@@ -58,7 +58,7 @@ describe("synced-invoice money guards", () => {
       // separate SUM(refunds) select)
       .mockReturnValueOnce(
         limitChain([
-          { id: "pay-1", invoiceId: "inv-1", amountCents: 5000, amountRefundedCents: 0, status: "succeeded", providerPaymentId: "ch_1" },
+          { id: "pay-1", invoiceId: "inv-1", amountCents: 5000, amountRefundedCents: 0, status: "succeeded", providerPaymentId: "ch_1", provider: "stripe" },
         ]) as never,
       )
       // 2: the invoice — synced
@@ -80,7 +80,8 @@ describe("synced-invoice money guards", () => {
       // 1: the pending payment
       .mockReturnValueOnce(
         limitChain([
-          { id: "pay-1", invoiceId: "inv-1", amountCents: 5000, status: "pending" },
+          // a non-mock provider: a pending MOCK payment fails before getCharge (spec §5.7)
+          { id: "pay-1", invoiceId: "inv-1", amountCents: 5000, status: "pending", provider: "stripe" },
         ]) as never,
       )
       // 2: the invoice — synced

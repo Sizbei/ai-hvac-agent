@@ -38,7 +38,15 @@ interface ApiPayment {
   readonly status: string;
   readonly isDeposit: boolean;
   readonly createdAt: string;
+  readonly method: string;
+  readonly checkNumber: string | null;
+  readonly provider: string;
   readonly refunds: ApiRefund[];
+}
+interface ApiSignature {
+  readonly url: string | null;
+  readonly name: string | null;
+  readonly signedAt: string | null;
 }
 interface ApiInvoice {
   readonly id: string;
@@ -65,6 +73,12 @@ interface ApiInvoice {
   readonly technicianName: string | null;
   readonly serviceDate: string | null;
   readonly lastReminderSentAt: string | null;
+  readonly signature: ApiSignature;
+  readonly requestSignature: ApiSignature | null;
+}
+
+function hydrateSignature(s: ApiSignature): InvoiceDetailView['signature'] {
+  return { ...s, signedAt: s.signedAt ? new Date(s.signedAt) : null };
 }
 
 const REFUND_REASONS: ReadonlyArray<{ value: string; label: string }> = [
@@ -87,6 +101,8 @@ function hydrateInvoice(raw: ApiInvoice): InvoiceDetailView {
     dueDate: raw.dueDate ? new Date(raw.dueDate) : null,
     serviceDate: raw.serviceDate ? new Date(raw.serviceDate) : null,
     lastReminderSentAt: raw.lastReminderSentAt ? new Date(raw.lastReminderSentAt) : null,
+    signature: hydrateSignature(raw.signature),
+    requestSignature: raw.requestSignature ? hydrateSignature(raw.requestSignature) : null,
     payments: raw.payments.map((p) => ({
       ...p,
       createdAt: new Date(p.createdAt),

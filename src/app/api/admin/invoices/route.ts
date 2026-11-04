@@ -162,6 +162,12 @@ export async function POST(request: NextRequest) {
             "NO_SOLD_OPTION",
             400,
           );
+        case "request_has_draft":
+          return errorResponse(
+            "This request has a draft invoice in the field. Finalize or void it first.",
+            "INVOICE_ALREADY_EXISTS",
+            409,
+          );
         default:
           return errorResponse("Could not create invoice", "VALIDATION_ERROR", 400);
       }

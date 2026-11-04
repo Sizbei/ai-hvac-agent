@@ -31,6 +31,7 @@ import {
   rollUpActualLaborCost,
 } from "@/lib/admin/margin";
 import { getPaymentProvider, type PaymentProvider } from "@/lib/payments/provider";
+import { cardPaymentsEnabled } from "@/lib/payments/card-enabled";
 import { businessInfoSchema } from "@/lib/admin/org-config-types";
 import { invoiceRef } from "@/lib/admin/invoice-collectible";
 
@@ -50,7 +51,10 @@ export function overdueWhere(tbl: typeof invoices): SQL<unknown> {
 
 export type CreateInvoiceResult =
   | { readonly ok: true; readonly invoiceId: string }
-  | { readonly ok: false; readonly reason: "estimate_not_sold" | "no_sold_option" | "synced_read_only" };
+  | {
+      readonly ok: false;
+      readonly reason: "estimate_not_sold" | "no_sold_option" | "synced_read_only" | "request_has_draft";
+    };
 
 /**
  * Materialize an invoice from a SOLD estimate: snapshot the chosen option's line
@@ -129,6 +133,9 @@ export async function createInvoiceFromSoldEstimate(
     );
 
   const invoiceId = randomUUID();
+  if (est.serviceRequestId) {
+    return createRequestEstimateInvoice(organizationId, est.serviceRequestId, invoiceId, est, opt, lines);
+  }
   const invoiceInsert = db.insert(invoices).values({
     id: invoiceId,
     organizationId,
@@ -153,6 +160,59 @@ export async function createInvoiceFromSoldEstimate(
   }
 
   return { ok: true, invoiceId };
+}
+
+type EstimateLine = { name: string; quantity: number; unitPriceCents: number; costCents: number; lineTotalCents: number };
+
+/**
+ * Estimate-born invoice on a request (spec §5.8): ONE batch — L_req, then the
+ * INSERT refuses while the request has a NATIVE draft (a field invoice whose
+ * seeded materials could duplicate the estimate's lines); the lines land only
+ * when this transaction wrote the invoice (xmin gate).
+ */
+async function createRequestEstimateInvoice(
+  org: string,
+  rid: string,
+  inv: string,
+  est: { id: string; customerId: string | null },
+  opt: { subtotalCents: number; taxCents: number; totalCents: number },
+  lines: readonly EstimateLine[],
+): Promise<CreateInvoiceResult> {
+  // Lazy: the M3b writer module's import graph (tech field queries, inventory,
+  // status writes) stays off this widely-imported module's load path.
+  const { lockRequestSql, P_NATIVE } = await import("./invoice-field-writes");
+  const items: SQL[] = [
+    lockRequestSql(org, rid),
+    sql`INSERT INTO invoices (id, organization_id, service_request_id, customer_id, estimate_id, state, subtotal_cents, tax_cents, total_cents, amount_paid_cents)
+      SELECT ${inv}::uuid, ${org}::uuid, ${rid}::uuid, ${est.customerId}::uuid, ${est.id}::uuid, 'open'::invoice_state,
+        ${opt.subtotalCents}::int, ${opt.taxCents}::int, ${opt.totalCents}::int, 0
+      WHERE NOT EXISTS (SELECT 1 FROM invoices WHERE organization_id = ${org}::uuid AND service_request_id = ${rid}::uuid
+        AND state = 'draft'::invoice_state AND ${P_NATIVE})
+      ON CONFLICT DO NOTHING RETURNING id`,
+  ];
+  if (lines.length > 0) {
+    const values = sql.join(
+      lines.map(
+        (l) =>
+          sql`(${randomUUID()}::uuid, ${l.name}::text, ${l.quantity}::int, ${l.unitPriceCents}::int, ${l.costCents}::int, ${l.lineTotalCents}::int)`,
+      ),
+      sql`, `,
+    );
+    items.push(sql`INSERT INTO invoice_line_items (id, organization_id, invoice_id, name, quantity, unit_price_cents, cost_cents, line_total_cents)
+      SELECT v.id, ${org}::uuid, ${inv}::uuid, v.name, v.quantity, v.unit_price_cents, v.cost_cents, v.line_total_cents
+      FROM (VALUES ${values}) AS v(id, name, quantity, unit_price_cents, cost_cents, line_total_cents)
+      WHERE EXISTS (SELECT 1 FROM invoices WHERE id = ${inv}::uuid AND organization_id = ${org}::uuid AND xmin = pg_current_xact_id()::xid)`);
+  }
+  const out = (await db.batch(items.map((q) => db.execute(q)) as never)) as unknown as { rows: unknown[] }[];
+  if (out[1]!.rows.length > 0) return { ok: true, invoiceId: inv };
+  // No row: a concurrent create of THIS estimate won the per-estimate unique
+  // index (return it, like the early return), or the request has a draft.
+  const [raced] = await db
+    .select({ id: invoices.id })
+    .from(invoices)
+    .where(withTenant(invoices, org, eq(invoices.estimateId, est.id)))
+    .limit(1);
+  return raced ? { ok: true, invoiceId: raced.id } : { ok: false, reason: "request_has_draft" };
 }
 
 export type TakePaymentResult =
@@ -360,24 +420,29 @@ export async function takePayment(
 }
 
 export type RefundResultOut =
-  | { readonly ok: true; readonly refundId: string }
+  | { readonly ok: true; readonly refundId: string; readonly created: boolean }
   | {
       readonly ok: false;
       readonly reason:
         | "payment_not_found"
         | "not_refundable"
         | "exceeds_payment"
-        | "synced_read_only";
+        | "synced_read_only"
+        | "invalid_input"
+        | "refund_id_conflict"
+        | "stale";
     };
 
 /**
  * Refund (full or partial) a succeeded payment via the provider, record the
- * refund, and roll back the invoice's paid amount / state.
+ * refund, and roll back the invoice's paid amount / state. A MANUAL payment
+ * (cash/check/other) is "undo the recording": it delegates to
+ * `refundManualPayment` (one batch, replayable by `refundId`; spec §5.6).
  */
 export async function refundPayment(
   organizationId: string,
   paymentId: string,
-  params: { readonly amountCents: number; readonly reason?: string },
+  params: { readonly amountCents: number; readonly reason?: string; readonly refundId?: string },
   provider: PaymentProvider = getPaymentProvider(),
 ): Promise<RefundResultOut> {
   const [pay] = await db
@@ -388,11 +453,20 @@ export async function refundPayment(
       amountRefundedCents: payments.amountRefundedCents,
       status: payments.status,
       providerPaymentId: payments.providerPaymentId,
+      provider: payments.provider,
     })
     .from(payments)
     .where(withTenant(payments, organizationId, eq(payments.id, paymentId)))
     .limit(1);
   if (!pay) return { ok: false, reason: "payment_not_found" };
+  if (pay.provider === "manual") {
+    if (!params.refundId) return { ok: false, reason: "invalid_input" };
+    const { refundManualPayment } = await import("./invoice-payment-writes"); // lazy, see createRequestEstimateInvoice
+    return refundManualPayment(organizationId, paymentId, { refundId: params.refundId }, {
+      amountCents: params.amountCents,
+      reason: params.reason,
+    });
+  }
   // Only a SUCCEEDED charge can be refunded (never pending/failed/already-refunded).
   if (pay.status !== "succeeded") {
     return { ok: false, reason: "not_refundable" };
@@ -406,13 +480,10 @@ export async function refundPayment(
   }
   const fullyRefunded = alreadyRefunded + params.amountCents >= pay.amountCents;
 
-  // Read the invoice (tenant-scoped) BEFORE the provider call: we need to know
-  // whether it was fully paid, because a partial refund of a fully-paid invoice
-  // must NOT reopen it for charging (that would allow over-collection).
+  // Read the invoice (tenant-scoped) BEFORE the provider call for the synced
+  // guard. (The paid/open/refunded state is computed in SQL at write time.)
   const [inv] = await db
     .select({
-      amountPaidCents: invoices.amountPaidCents,
-      totalCents: invoices.totalCents,
       fieldpulseInvoiceId: invoices.fieldpulseInvoiceId,
       hcpInvoiceId: invoices.hcpInvoiceId,
     })
@@ -424,8 +495,6 @@ export async function refundPayment(
   if (inv?.fieldpulseInvoiceId || inv?.hcpInvoiceId) {
     return { ok: false, reason: "synced_read_only" };
   }
-  const wasFullyPaid = (inv?.amountPaidCents ?? 0) >= (inv?.totalCents ?? 0);
-  const newPaid = Math.max(0, (inv?.amountPaidCents ?? 0) - params.amountCents);
 
   // ATOMIC CLAIM before the provider refund — the authoritative over-refund
   // guard. One conditional write reserves this refund against the running total
@@ -510,13 +579,15 @@ export async function refundPayment(
         // Fully refunded -> "refunded". Partial refund of a fully-paid invoice
         // stays "paid" (NOT chargeable — prevents over-collection). Partial
         // refund of a partially-paid invoice stays "open" (a real balance remains).
-        state: newPaid <= 0 ? "refunded" : wasFullyPaid ? "paid" : "open",
+        // Evaluated in SQL on the row being updated: a JS literal from the
+        // pre-read could overwrite a concurrent manual payment's "paid" (§5.6).
+        state: sql`(CASE WHEN GREATEST(0, ${invoices.amountPaidCents} - ${params.amountCents}) <= 0 THEN 'refunded' WHEN GREATEST(0, ${invoices.amountPaidCents} - ${params.amountCents}) >= ${invoices.totalCents} OR ${invoices.state} = 'paid'::invoice_state THEN 'paid' ELSE 'open' END)::invoice_state`,
         updatedAt: new Date(),
       })
       .where(withTenant(invoices, organizationId, eq(invoices.id, pay.invoiceId))),
   ]);
 
-  return { ok: true, refundId };
+  return { ok: true, refundId, created: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -562,6 +633,8 @@ export async function listStuckPayments(
         organizationId,
         eq(payments.status, "pending"),
         lt(payments.createdAt, cutoff),
+        // Manual payments are never pending (spec §5.5); never "reconcile" them.
+        sql`${payments.provider} <> 'manual'`,
       ),
     )
     .orderBy(asc(payments.createdAt));
@@ -581,7 +654,8 @@ export type ReconcileResult =
  * - succeeded -> complete exactly what takePayment's success path does
  *   (payment->succeeded + recompute invoice amountPaidCents/state via db.batch),
  *   all tenant-scoped. Idempotent: re-reads and only writes while still 'pending'.
- * - failed -> mark the payment failed (no money moved).
+ * - failed (or a pending mock payment while cards are disabled) -> mark the
+ *   payment failed and un-claim the invoice credit, in ONE batch.
  * The provider is injectable for tests.
  */
 export async function reconcilePayment(
@@ -595,6 +669,7 @@ export async function reconcilePayment(
       invoiceId: payments.invoiceId,
       amountCents: payments.amountCents,
       status: payments.status,
+      provider: payments.provider,
     })
     .from(payments)
     .where(withTenant(payments, organizationId, eq(payments.id, paymentId)))
@@ -604,35 +679,21 @@ export async function reconcilePayment(
   // reconcile (or a late-landing original batch) already resolved it, no-op.
   if (pay.status !== "pending") return { ok: false, reason: "not_pending" };
 
-  // takePayment used paymentId as the createCharge idempotencyKey.
-  const charge = await provider.getCharge(paymentId);
-
-  if (charge.status === "failed") {
+  // The mock never moved money while cards are disabled, but the claim already
+  // credited the invoice — a permanent `noop` would leave a phantom credit, so a
+  // pending mock payment is a FAILED charge (spec §5.7). Otherwise ask the
+  // provider (takePayment used paymentId as the createCharge idempotencyKey).
+  const charge =
+    pay.provider === "mock" && !cardPaymentsEnabled() ? null : await provider.getCharge(paymentId);
+  if (charge === null || charge.status === "failed") {
     // The charge did NOT go through, but the invoice was credited at claim time
-    // (claim-before-charge). Un-claim (decrement) alongside failing the payment,
-    // gated by an atomic pending->failed CAS so a concurrent reconcile can't
-    // decrement twice. Only the winner of the CAS decrements.
-    const claimedFail = await db
-      .update(payments)
-      .set({ status: "failed", updatedAt: new Date() })
-      .where(
-        withTenant(
-          payments,
-          organizationId,
-          eq(payments.id, paymentId),
-          eq(payments.status, "pending"),
-        ),
-      )
-      .returning({ id: payments.id });
-    if (claimedFail.length > 0) {
-      await db
-        .update(invoices)
-        .set({
-          amountPaidCents: sql`GREATEST(0, ${invoices.amountPaidCents} - ${pay.amountCents})`,
-          updatedAt: new Date(),
-        })
-        .where(withTenant(invoices, organizationId, eq(invoices.id, pay.invoiceId)));
-    }
+    // (claim-before-charge). ONE batch: the pending->failed CAS, then the
+    // un-claim gated on THIS transaction having written the payment row, so a
+    // concurrent reconcile can't decrement twice.
+    await db.batch([
+      db.execute(failPendingPaymentSql(organizationId, paymentId)),
+      db.execute(unclaimInvoiceSql(organizationId, pay.invoiceId, paymentId, pay.amountCents)),
+    ]);
     return { ok: true, outcome: "failed_marked" };
   }
 
@@ -650,8 +711,7 @@ export async function reconcilePayment(
   // amount (that double-credited the invoice on every stranded payment).
   const [inv] = await db
     .select({
-      totalCents: invoices.totalCents,
-      amountPaidCents: invoices.amountPaidCents,
+      state: invoices.state,
       fieldpulseInvoiceId: invoices.fieldpulseInvoiceId,
       hcpInvoiceId: invoices.hcpInvoiceId,
     })
@@ -676,10 +736,6 @@ export async function reconcilePayment(
       .where(withTenant(payments, organizationId, eq(payments.id, paymentId)));
     return { ok: true, outcome: "completed", invoiceState: "unknown" };
   }
-
-  // State hint from the CURRENT paid amount (which already includes this
-  // payment's claim credit) — do NOT add pay.amountCents again.
-  const invoiceState = inv.amountPaidCents >= inv.totalCents ? "paid" : "open";
 
   // Compare-and-set claim: flip pending->succeeded ONLY while still 'pending', so
   // two concurrent reconciles (the manual button + the cron sweep) can't both
@@ -707,12 +763,42 @@ export async function reconcilePayment(
   // Refresh the display state ONLY — the money was already credited at claim
   // time in takePayment. Re-adding pay.amountCents here double-credited the
   // invoice (marking a partly-paid invoice fully paid + losing the balance).
-  await db
+  // The state is evaluated in SQL from the row's CURRENT paid amount (which
+  // already includes this payment's claim credit), and only over open/paid: a
+  // stale JS literal could overwrite a concurrent manual payment's "paid".
+  const [written] = await db
     .update(invoices)
-    .set({ state: invoiceState, updatedAt: new Date() })
-    .where(withTenant(invoices, organizationId, eq(invoices.id, pay.invoiceId)));
+    .set({
+      state: sql`(CASE WHEN ${invoices.amountPaidCents} >= ${invoices.totalCents} THEN 'paid' ELSE 'open' END)::invoice_state`,
+      updatedAt: new Date(),
+    })
+    .where(
+      withTenant(
+        invoices,
+        organizationId,
+        eq(invoices.id, pay.invoiceId),
+        sql`${invoices.state} IN ('open'::invoice_state, 'paid'::invoice_state)`,
+      ),
+    )
+    .returning({ state: invoices.state });
 
-  return { ok: true, outcome: "completed", invoiceState };
+  // 0 rows: the invoice left open/paid meanwhile — report the state it kept.
+  return { ok: true, outcome: "completed", invoiceState: written?.state ?? inv.state };
+}
+
+/** Reconcile failed branch, statement 1: the pending->failed CAS. */
+function failPendingPaymentSql(org: string, pid: string): SQL {
+  return sql`UPDATE payments SET status = 'failed'::payment_status, updated_at = now()
+    WHERE id = ${pid}::uuid AND organization_id = ${org}::uuid AND status = 'pending'::payment_status`;
+}
+
+/** Reconcile failed branch, statement 2: un-claim, only if statement 1 won. */
+function unclaimInvoiceSql(org: string, inv: string, pid: string, amt: number): SQL {
+  return sql`UPDATE invoices SET amount_paid_cents = GREATEST(0, amount_paid_cents - ${amt}::int),
+      state = (CASE WHEN GREATEST(0, amount_paid_cents - ${amt}::int) >= total_cents THEN 'paid' ELSE 'open' END)::invoice_state,
+      updated_at = now()
+    WHERE id = ${inv}::uuid AND organization_id = ${org}::uuid AND state IN ('open'::invoice_state, 'paid'::invoice_state)
+      AND EXISTS (SELECT 1 FROM payments WHERE id = ${pid}::uuid AND xmin = pg_current_xact_id()::xid)`;
 }
 
 export interface ReconcileSweepSummary {
@@ -842,8 +928,9 @@ export interface InvoiceListRow {
   readonly customerId: string | null;
   readonly serviceRequestId: string | null;
   readonly createdAt: Date;
-  /** When the invoice was issued in the source system (FP/HCP mirrors); null
-   * for native invoices — age math falls back to createdAt. */
+  /** When the invoice was issued: the source-system date for FP/HCP mirrors,
+   * set for field-finalized native invoices; otherwise null — age math falls
+   * back to createdAt. */
   readonly issuedAt: Date | null;
   /** Source-system due date; drives overdue when present. */
   readonly dueDate: Date | null;
@@ -1236,7 +1323,18 @@ export interface PaymentView {
   readonly status: string;
   readonly isDeposit: boolean;
   readonly createdAt: Date;
+  /** "card" | "cash" | "check" | "other". */
+  readonly method: string;
+  readonly checkNumber: string | null;
+  /** "mock" | "stripe" | "fieldpulse" | "manual". */
+  readonly provider: string;
   readonly refunds: RefundView[];
+}
+
+export interface SignatureView {
+  readonly url: string | null;
+  readonly name: string | null;
+  readonly signedAt: Date | null;
 }
 
 export interface InvoiceDetailView {
@@ -1250,8 +1348,9 @@ export interface InvoiceDetailView {
   readonly serviceRequestId: string | null;
   readonly estimateId: string | null;
   readonly createdAt: Date;
-  /** When the invoice was issued in the source system (FP/HCP mirrors); null
-   * for native invoices — age math falls back to createdAt. */
+  /** When the invoice was issued: the source-system date for FP/HCP mirrors,
+   * set for field-finalized native invoices; otherwise null — age math falls
+   * back to createdAt. */
   readonly issuedAt: Date | null;
   /** Source-system due date; drives overdue when present. */
   readonly dueDate: Date | null;
@@ -1281,6 +1380,10 @@ export interface InvoiceDetailView {
   readonly technicianName: string | null;
   readonly serviceDate: Date | null;
   readonly lastReminderSentAt: Date | null;
+  /** The INVOICE's own signature snapshot (taken at finalize). */
+  readonly signature: SignatureView;
+  /** The request's CURRENT signature — drafts only (not yet on the invoice); null otherwise. */
+  readonly requestSignature: SignatureView | null;
 }
 
 /**
@@ -1314,6 +1417,12 @@ export async function getInvoiceDetailById(
       technicianName: users.name,
       serviceDate: serviceRequests.scheduledDate,
       lastReminderSentAt: invoices.lastReminderSentAt,
+      signatureUrl: invoices.signatureUrl,
+      signatureName: invoices.signatureName,
+      signedAt: invoices.signedAt,
+      requestSignatureUrl: serviceRequests.signatureUrl,
+      requestSignatureName: serviceRequests.signatureName,
+      requestSignedAt: serviceRequests.signedAt,
     })
     .from(invoices)
     .leftJoin(customers, and(eq(customers.id, invoices.customerId), eq(customers.organizationId, organizationId)))
@@ -1350,6 +1459,9 @@ export async function getInvoiceDetailById(
       status: payments.status,
       isDeposit: payments.isDeposit,
       createdAt: payments.createdAt,
+      method: payments.method,
+      checkNumber: payments.checkNumber,
+      provider: payments.provider,
     })
     .from(payments)
     .where(withTenant(payments, organizationId, eq(payments.invoiceId, id)))
@@ -1445,10 +1557,21 @@ export async function getInvoiceDetailById(
     nameEncrypted,
     addressEncrypted,
     phoneEncrypted,
+    signatureUrl,
+    signatureName,
+    signedAt,
+    requestSignatureUrl,
+    requestSignatureName,
+    requestSignedAt,
     ...invRest
   } = inv;
   return {
     ...invRest,
+    signature: { url: signatureUrl ?? null, name: signatureName ?? null, signedAt: signedAt ?? null },
+    requestSignature:
+      inv.state === "draft"
+        ? { url: requestSignatureUrl ?? null, name: requestSignatureName ?? null, signedAt: requestSignedAt ?? null }
+        : null,
     syncedSource: deriveSyncedSource(fieldpulseInvoiceId, hcpInvoiceId),
     fieldpulseData: (fieldpulseData as Record<string, unknown> | null) ?? null,
     customerName: safeDecryptName(nameEncrypted),

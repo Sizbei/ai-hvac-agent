@@ -4,14 +4,25 @@ import {
   listInvoices,
   getInvoiceDetailById,
   reconcilePayment,
+  listStuckPayments,
 } from "./invoice-queries";
 import { db } from "@/lib/db";
 import { MockPaymentProvider } from "@/lib/payments/provider";
+import { PgDialect } from "drizzle-orm/pg-core";
+import type { SQL } from "drizzle-orm";
+
+// `cards.on` drives the mocked card gate (true = the pre-M3b behaviour under
+// test); `refundManualPayment` is Task 5's writer, mocked to assert delegation.
+const h = vi.hoisted(() => ({ cards: { on: true }, refundManualPayment: vi.fn() }));
+vi.mock("@/lib/payments/card-enabled", () => ({ cardPaymentsEnabled: () => h.cards.on }));
+vi.mock("./invoice-payment-writes", () => ({ refundManualPayment: h.refundManualPayment }));
 
 vi.mock("@/lib/db", () => ({
   db: {
     select: vi.fn(),
     insert: vi.fn(),
+    // Raw statements: a thenable carrying its SQL so db.batch can capture it.
+    execute: vi.fn((q: unknown) => ({ __sql: q, then: (ok: (v: unknown) => unknown) => Promise.resolve({ rows: [] }).then(ok) })),
     batch: vi.fn().mockResolvedValue([]),
     // update() is used to BUILD statements (passed to batch), directly in the
     // charge-failed/invoice-credit paths, AND for the reconcile CAS claim
@@ -31,6 +42,12 @@ vi.mock("@/lib/db", () => ({
 
 const ORG = "org-1";
 
+const dialect = new PgDialect();
+const renderQ = (q: unknown) => dialect.sqlToQuery(((q as { __sql?: unknown }).__sql ?? q) as SQL);
+const render = (q: unknown): string => renderQ(q).sql.replace(/\s+/g, " ").trim();
+/** The rendered statements of the Nth db.batch call. */
+const batchStmts = (n = 0): unknown[] => vi.mocked(db.batch).mock.calls[n]![0] as unknown as unknown[];
+
 function mockInvoice(
   row: { totalCents: number; amountPaidCents: number; state?: string } | null,
 ) {
@@ -48,7 +65,10 @@ function mockInvoice(
   } as never);
 }
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  h.cards.on = true;
+});
 
 describe("takePayment", () => {
   const provider = new MockPaymentProvider();
@@ -408,9 +428,9 @@ describe("createInvoiceFromSoldEstimate", () => {
     expect(db.batch).not.toHaveBeenCalled();
   });
 
-  it("creates an invoice (state 'open') from the sold option's snapshot on first call", async () => {
+  it("creates an invoice (state 'open') from the sold option's snapshot on first call (no request)", async () => {
     mockCreateSeq([
-      [{ id: "est-1", status: "sold", soldOptionId: "opt-1", customerId: "c", serviceRequestId: "r" }],
+      [{ id: "est-1", status: "sold", soldOptionId: "opt-1", customerId: "c", serviceRequestId: null }],
       [], // no existing invoice yet
       [{ subtotalCents: 9000, taxCents: 1000, totalCents: 10000 }], // option totals
       [{ name: "Repair", quantity: 1, unitPriceCents: 9000, costCents: 4000, lineTotalCents: 9000 }],
@@ -418,8 +438,58 @@ describe("createInvoiceFromSoldEstimate", () => {
     const r = await createInvoiceFromSoldEstimate(ORG, "est-1");
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.invoiceId).toBeTruthy();
-    // invoice insert + line-items insert batched atomically.
+    // invoice insert + line-items insert batched atomically; no request → no lock.
     expect(db.batch).toHaveBeenCalledTimes(1);
+    expect(db.execute).not.toHaveBeenCalled();
+  });
+
+  describe("with a service request (spec §5.8)", () => {
+    const EST = { id: "est-1", status: "sold", soldOptionId: "opt-1", customerId: "c", serviceRequestId: "req-1" };
+    const OPT = { subtotalCents: 9000, taxCents: 1000, totalCents: 10000 };
+    const LINE = { name: "Repair", quantity: 1, unitPriceCents: 9000, costCents: 4000, lineTotalCents: 9000 };
+
+    it("returns the existing estimate invoice FIRST, before any lock", async () => {
+      mockCreateSeq([[EST], [{ id: "inv-existing" }]]);
+      const r = await createInvoiceFromSoldEstimate(ORG, "est-1");
+      expect(r).toEqual({ ok: true, invoiceId: "inv-existing" });
+      expect(db.execute).not.toHaveBeenCalled();
+      expect(db.batch).not.toHaveBeenCalled();
+    });
+
+    it("locks the request, then inserts only when no native draft exists, lines gated on the invoice xmin", async () => {
+      mockCreateSeq([[EST], [], [OPT], [LINE]]);
+      vi.mocked(db.batch).mockResolvedValueOnce([{ rows: [] }, { rows: [{ id: "x" }] }, { rows: [] }] as never);
+      const r = await createInvoiceFromSoldEstimate(ORG, "est-1");
+      expect(r.ok).toBe(true);
+      const [lock, insert, lines] = batchStmts().map(render);
+      expect(batchStmts()).toHaveLength(3);
+      expect(lock).toContain("FROM service_requests WHERE id = $1::uuid AND organization_id = $2::uuid FOR NO KEY UPDATE");
+      expect(insert).toMatch(/^INSERT INTO invoices .* SELECT .*'open'::invoice_state/);
+      expect(insert).toContain(
+        "WHERE NOT EXISTS (SELECT 1 FROM invoices WHERE organization_id = $9::uuid AND service_request_id = $10::uuid AND state = 'draft'::invoice_state AND fieldpulse_invoice_id IS NULL AND hcp_invoice_id IS NULL) ON CONFLICT DO NOTHING RETURNING id",
+      );
+      expect(renderQ(batchStmts()[1]).params).toHaveLength(10);
+      expect(lines).toMatch(/^INSERT INTO invoice_line_items /);
+      expect(lines).toContain("WHERE EXISTS (SELECT 1 FROM invoices WHERE id = $");
+      expect(lines).toContain("xmin = pg_current_xact_id()::xid)");
+      // 1 line × (id, name, qty, price, cost, total) + org + invoice + (invoice, org) in the gate
+      expect(renderQ(batchStmts()[2]).params).toHaveLength(10);
+    });
+
+    it("refuses with request_has_draft when the INSERT returns no row", async () => {
+      mockCreateSeq([[EST], [], [OPT], [LINE], []]);
+      vi.mocked(db.batch).mockResolvedValueOnce([{ rows: [] }, { rows: [] }, { rows: [] }] as never);
+      const r = await createInvoiceFromSoldEstimate(ORG, "est-1");
+      expect(r).toEqual({ ok: false, reason: "request_has_draft" });
+    });
+
+    it("returns the estimate's invoice when a concurrent create won the estimate unique index", async () => {
+      mockCreateSeq([[EST], [], [OPT], [], [{ id: "inv-raced" }]]);
+      vi.mocked(db.batch).mockResolvedValueOnce([{ rows: [] }, { rows: [] }] as never);
+      const r = await createInvoiceFromSoldEstimate(ORG, "est-1");
+      expect(r).toEqual({ ok: true, invoiceId: "inv-raced" });
+      expect(batchStmts()).toHaveLength(2); // no lines → no lines INSERT
+    });
   });
 });
 
@@ -508,7 +578,8 @@ describe("money-loop flow (mocked db)", () => {
     );
     const refunded = await refundPayment(ORG, "pay-1", { amountCents: 4000 }, provider);
     expect(refunded.ok).toBe(true);
-    expect(states.find((s) => "state" in s)?.state).toBe("paid");
+    // The paid-stays-paid rule now lives in the SQL CASE (render-tested below).
+    expect(render(states.find((s) => "state" in s)?.state)).toContain("THEN 'paid'");
   });
 });
 
@@ -610,26 +681,52 @@ describe("refundPayment", () => {
     return states;
   }
 
-  it("keeps a fully-paid invoice 'paid' (NOT chargeable) after a PARTIAL refund — guards over-collection", async () => {
+  it("writes the invoice state as a SQL CASE on the row being updated — no JS literal (spec §5.6)", async () => {
     mockSelectSeq([
-      [{ id: "pay-1", invoiceId: "inv-1", amountCents: 10000, amountRefundedCents: 0, status: "succeeded", providerPaymentId: "mock_pay_x" }],
-      [{ amountPaidCents: 10000, totalCents: 10000 }], // invoice was FULLY paid
+      [{ id: "pay-1", invoiceId: "inv-1", amountCents: 10000, amountRefundedCents: 0, status: "succeeded", providerPaymentId: "mock_pay_x", provider: "mock" }],
+      [{ amountPaidCents: 10000, totalCents: 10000 }],
     ]);
     const states = captureUpdateStates();
     const r = await refundPayment("org-1", "pay-1", { amountCents: 4000 }, provider);
-    expect(r.ok).toBe(true);
-    const invoiceSet = states.find((s) => "state" in s);
-    expect(invoiceSet?.state).toBe("paid"); // pre-fix this regressed to "open"
+    expect(r).toEqual({ ok: true, refundId: expect.any(String), created: true });
+    const invoiceSet = states.find((s) => "state" in s && "amountPaidCents" in s);
+    expect(typeof invoiceSet?.state).not.toBe("string");
+    const q = renderQ(invoiceSet?.state);
+    expect(q.sql.replace(/\s+/g, " ")).toBe(
+      `(CASE WHEN GREATEST(0, "invoices"."amount_paid_cents" - $1) <= 0 THEN 'refunded' WHEN GREATEST(0, "invoices"."amount_paid_cents" - $2) >= "invoices"."total_cents" OR "invoices"."state" = 'paid'::invoice_state THEN 'paid' ELSE 'open' END)::invoice_state`,
+    );
+    // Only the amount is a parameter — the state is never a bound literal.
+    expect(q.params).toEqual([4000, 4000]);
   });
 
-  it("reopens a partially-paid invoice ('open') after a partial refund — a real balance remains", async () => {
-    mockSelectSeq([
-      [{ id: "pay-1", invoiceId: "inv-1", amountCents: 5000, amountRefundedCents: 0, status: "succeeded", providerPaymentId: "mock_pay_x" }],
-      [{ amountPaidCents: 5000, totalCents: 10000 }], // only partially paid
-    ]);
-    const states = captureUpdateStates();
-    await refundPayment("org-1", "pay-1", { amountCents: 2000 }, provider);
-    expect(states.find((s) => "state" in s)?.state).toBe("open");
+  describe("manual payments delegate to refundManualPayment (spec §5.6)", () => {
+    const MANUAL = { id: "pay-1", invoiceId: "inv-1", amountCents: 10000, amountRefundedCents: 0, status: "succeeded", providerPaymentId: null, provider: "manual" };
+
+    it("delegates with the refundId and maps created through; never calls the provider", async () => {
+      mockSelectSeq([[MANUAL]]);
+      h.refundManualPayment.mockResolvedValueOnce({ ok: true, refundId: "ref-1", created: false });
+      const refundSpy = vi.fn();
+      const r = await refundPayment("org-1", "pay-1", { amountCents: 4000, reason: "dup", refundId: "ref-1" }, { name: "mock", refund: refundSpy } as never);
+      expect(r).toEqual({ ok: true, refundId: "ref-1", created: false });
+      expect(h.refundManualPayment).toHaveBeenCalledWith("org-1", "pay-1", { refundId: "ref-1" }, { amountCents: 4000, reason: "dup" });
+      expect(refundSpy).not.toHaveBeenCalled();
+      expect(db.update).not.toHaveBeenCalled();
+    });
+
+    it("passes the writer's refusal through", async () => {
+      mockSelectSeq([[MANUAL]]);
+      h.refundManualPayment.mockResolvedValueOnce({ ok: false, reason: "refund_id_conflict" });
+      const r = await refundPayment("org-1", "pay-1", { amountCents: 4000, refundId: "ref-1" });
+      expect(r).toEqual({ ok: false, reason: "refund_id_conflict" });
+    });
+
+    it("refuses invalid_input without a refundId", async () => {
+      mockSelectSeq([[MANUAL]]);
+      const r = await refundPayment("org-1", "pay-1", { amountCents: 4000 });
+      expect(r).toEqual({ ok: false, reason: "invalid_input" });
+      expect(h.refundManualPayment).not.toHaveBeenCalled();
+      expect(db.update).not.toHaveBeenCalled();
+    });
   });
 
   it("rejects a zero or negative refund amount (exceeds_payment) before the provider", async () => {
@@ -821,6 +918,52 @@ describe("getInvoiceDetailById", () => {
       expect.objectContaining({ amountCents: 1000, reason: "customer_request" }),
     );
   });
+
+  const SIGNED = new Date("2026-11-01T15:00:00Z");
+  const header = (state: string) => ({
+    id: "inv-1", state, subtotalCents: 0, taxCents: 0, totalCents: 0, amountPaidCents: 0,
+    customerId: null, serviceRequestId: null, estimateId: null, createdAt: new Date("2026-01-01"),
+    signatureUrl: "https://r2/inv.png", signatureName: "Pat Doe", signedAt: SIGNED,
+    requestSignatureUrl: "https://r2/req.png", requestSignatureName: "Sam Roe", requestSignedAt: SIGNED,
+  });
+
+  it("exposes payment method, check number and provider (spec §3.3)", async () => {
+    mockReadSeq([
+      [header("open")],
+      [],
+      [{ id: "pay-1", amountCents: 4000, status: "succeeded", isDeposit: false, createdAt: new Date(), method: "check", checkNumber: "1042", provider: "manual" }],
+      [],
+    ]);
+    const result = await getInvoiceDetailById(ORG, "inv-1");
+    expect(result?.payments[0]).toEqual(expect.objectContaining({ method: "check", checkNumber: "1042", provider: "manual" }));
+  });
+
+  it("returns the invoice's own signature and no request signature once finalized", async () => {
+    mockReadSeq([[header("open")], [], []]);
+    const result = await getInvoiceDetailById(ORG, "inv-1");
+    expect(result?.signature).toEqual({ url: "https://r2/inv.png", name: "Pat Doe", signedAt: SIGNED });
+    expect(result?.requestSignature).toBeNull();
+    // the raw joined request columns stay server-side
+    expect(result).not.toHaveProperty("requestSignatureUrl");
+    expect(result).not.toHaveProperty("signatureUrl");
+  });
+
+  it("returns the request's current signature for a draft", async () => {
+    mockReadSeq([[header("draft")], [], []]);
+    const result = await getInvoiceDetailById(ORG, "inv-1");
+    expect(result?.requestSignature).toEqual({ url: "https://r2/req.png", name: "Sam Roe", signedAt: SIGNED });
+  });
+});
+
+describe("listStuckPayments", () => {
+  it("never lists manual payments (they are never pending)", async () => {
+    let whereArg: unknown;
+    vi.mocked(db.select).mockReturnValue({
+      from: () => ({ where: (w: unknown) => { whereArg = w; return { orderBy: () => Promise.resolve([]) }; } }),
+    } as never);
+    await listStuckPayments(ORG);
+    expect(render(whereArg)).toContain(`"payments"."provider" <> 'manual'`);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -828,34 +971,47 @@ describe("getInvoiceDetailById", () => {
 // ---------------------------------------------------------------------------
 
 describe("reconcilePayment", () => {
+  const PENDING = { id: "pay-1", invoiceId: "inv-1", amountCents: 10000, status: "pending", provider: "mock" };
+
+  /** db.update records set()/where() args; every RETURNING yields `returned`. */
+  function captureUpdates(returned: Record<string, unknown>[] = [{ id: "pay-1", state: "paid" }]) {
+    const sets: Record<string, unknown>[] = [];
+    const wheres: unknown[] = [];
+    vi.mocked(db.update).mockImplementation(
+      () =>
+        ({
+          set: (v: Record<string, unknown>) => {
+            sets.push(v);
+            return {
+              where: (w: unknown) => {
+                wheres.push(w);
+                return Object.assign(Promise.resolve(undefined), {
+                  returning: vi.fn().mockResolvedValue(returned),
+                });
+              },
+            };
+          },
+        }) as never,
+    );
+    return { sets, wheres };
+  }
+
   beforeEach(() => {
     vi.mocked(db.insert).mockReturnValue({
       values: vi.fn().mockResolvedValue(undefined),
     } as never);
     // Earlier describes override db.update (clearAllMocks doesn't reset impls);
-    // restore a returning-capable default (CAS claim WON = one row) so the
-    // reconcile success paths work. The lost-race test overrides this locally.
-    vi.mocked(db.update).mockImplementation(
-      () =>
-        ({
-          set: vi.fn(() => ({
-            where: vi.fn(() =>
-              Object.assign(Promise.resolve(undefined), {
-                returning: vi.fn().mockResolvedValue([{ id: "pay-1" }]),
-              }),
-            ),
-          })),
-        }) as never,
-    );
+    // restore a returning-capable default (CAS claim WON = one row).
+    captureUpdates();
   });
 
   it("completes a stranded 'pending' payment when the provider says succeeded", async () => {
     mockSelectSeq([
       // 1) the stuck payment (still pending)
-      [{ id: "pay-1", invoiceId: "inv-1", amountCents: 10000, status: "pending" }],
+      [PENDING],
       // 2) the invoice — already credited at claim time (claim-before-charge), so
       //    amountPaidCents ALREADY reflects this payment.
-      [{ totalCents: 10000, amountPaidCents: 10000 }],
+      [{ totalCents: 10000, amountPaidCents: 10000, state: "open" }],
     ]);
     const provider = new MockPaymentProvider(); // getCharge -> succeeded
     const r = await reconcilePayment(ORG, "pay-1", provider);
@@ -864,90 +1020,115 @@ describe("reconcilePayment", () => {
     expect(db.update).toHaveBeenCalled();
   });
 
-  it("leaves the invoice 'open' when a partial deposit is reconciled", async () => {
+  it("reports the state the SQL actually wrote (a partial deposit stays 'open')", async () => {
     mockSelectSeq([
-      [{ id: "pay-1", invoiceId: "inv-1", amountCents: 5000, status: "pending" }],
-      // Only the $50 deposit was credited (at claim time) against a $100 invoice.
-      [{ totalCents: 10000, amountPaidCents: 5000 }],
+      [{ ...PENDING, amountCents: 5000 }],
+      [{ totalCents: 10000, amountPaidCents: 5000, state: "open" }],
     ]);
+    captureUpdates([{ id: "pay-1", state: "open" }]);
     const r = await reconcilePayment(ORG, "pay-1", new MockPaymentProvider());
     expect(r).toEqual({ ok: true, outcome: "completed", invoiceState: "open" });
   });
 
-  it("no-ops (does NOT re-credit) when the CAS claim loses the race to a concurrent reconcile", async () => {
-    mockSelectSeq([
-      [{ id: "pay-1", invoiceId: "inv-1", amountCents: 10000, status: "pending" }],
-      [{ totalCents: 10000, amountPaidCents: 0 }],
-    ]);
-    // Simulate the concurrent winner: the CAS update matches 0 rows (already
-    // flipped to succeeded by the other reconcile), so .returning() is empty.
-    const invoiceSets: Record<string, unknown>[] = [];
+  it("writes the succeeded branch's invoice state as a SQL CASE, only over open/paid (spec §5.7)", async () => {
+    mockSelectSeq([[PENDING], [{ totalCents: 10000, amountPaidCents: 10000, state: "open" }]]);
+    const { sets, wheres } = captureUpdates();
+    await reconcilePayment(ORG, "pay-1", new MockPaymentProvider());
+    const i = sets.findIndex((v) => "state" in v);
+    expect(typeof sets[i]!.state).not.toBe("string");
+    expect(render(sets[i]!.state)).toBe(
+      `(CASE WHEN "invoices"."amount_paid_cents" >= "invoices"."total_cents" THEN 'paid' ELSE 'open' END)::invoice_state`,
+    );
+    expect(render(wheres[i])).toContain(`"invoices"."state" IN ('open'::invoice_state, 'paid'::invoice_state)`);
+  });
+
+  it("falls back to the read state when the invoice is no longer open/paid (0 rows)", async () => {
+    mockSelectSeq([[PENDING], [{ totalCents: 10000, amountPaidCents: 10000, state: "void" }]]);
+    let call = 0;
     vi.mocked(db.update).mockImplementation(
       () =>
         ({
-          set: (v: Record<string, unknown>) => {
-            invoiceSets.push(v);
-            return {
-              where: () =>
-                Object.assign(Promise.resolve(undefined), {
-                  returning: vi.fn().mockResolvedValue([]), // 0 rows -> lost
-                }),
-            };
-          },
+          set: () => ({
+            where: () =>
+              Object.assign(Promise.resolve(undefined), {
+                // CAS claim wins; the guarded invoice update matches nothing.
+                returning: vi.fn().mockResolvedValue(call++ === 0 ? [{ id: "pay-1" }] : []),
+              }),
+          }),
         }) as never,
     );
     const r = await reconcilePayment(ORG, "pay-1", new MockPaymentProvider());
+    expect(r).toEqual({ ok: true, outcome: "completed", invoiceState: "void" });
+  });
+
+  it("no-ops (does NOT re-credit) when the CAS claim loses the race to a concurrent reconcile", async () => {
+    mockSelectSeq([[PENDING], [{ totalCents: 10000, amountPaidCents: 0, state: "open" }]]);
+    // The concurrent winner already flipped the payment: .returning() is empty.
+    const { sets } = captureUpdates([]);
+    const r = await reconcilePayment(ORG, "pay-1", new MockPaymentProvider());
     expect(r).toEqual({ ok: true, outcome: "noop" });
-    // The invoice amountPaidCents update must NOT have run (no double-credit).
-    expect(invoiceSets.some((s) => "amountPaidCents" in s)).toBe(false);
+    // No invoice update ran (no double-credit, no state write).
+    expect(sets.some((v) => "amountPaidCents" in v || "state" in v)).toBe(false);
   });
 
   it("no-ops (not_pending) when the payment was already succeeded — idempotent", async () => {
-    mockSelectSeq([
-      [{ id: "pay-1", invoiceId: "inv-1", amountCents: 10000, status: "succeeded" }],
-    ]);
+    mockSelectSeq([[{ ...PENDING, status: "succeeded" }]]);
     const r = await reconcilePayment(ORG, "pay-1", new MockPaymentProvider());
     expect(r).toEqual({ ok: false, reason: "not_pending" });
     expect(db.batch).not.toHaveBeenCalled();
   });
 
-  it("un-credits the invoice when the provider says the charge failed (claim-before-charge)", async () => {
-    // The invoice was credited at claim time; a definitively-failed charge must
-    // decrement it back (else the invoice stays over-credited forever).
-    mockSelectSeq([
-      [{ id: "pay-1", invoiceId: "inv-1", amountCents: 10000, status: "pending" }],
-      [{ totalCents: 10000, amountPaidCents: 10000 }], // invoice (reconcile reads it before the CAS)
-    ]);
-    const sets: Record<string, unknown>[] = [];
-    vi.mocked(db.update).mockImplementation(
-      () =>
-        ({
-          set: (v: Record<string, unknown>) => {
-            sets.push(v);
-            return {
-              where: () =>
-                Object.assign(Promise.resolve(undefined), {
-                  returning: vi.fn().mockResolvedValue([{ id: "pay-1" }]),
-                }),
-            };
-          },
-        }) as never,
+  /** The failed branch's ONE batch (spec §5.7), for any provider. */
+  function expectFailedBatch(): void {
+    expect(db.batch).toHaveBeenCalledTimes(1);
+    expect(db.update).not.toHaveBeenCalled();
+    const [pay, inv] = batchStmts();
+    expect(batchStmts()).toHaveLength(2);
+    expect(render(pay)).toBe(
+      "UPDATE payments SET status = 'failed'::payment_status, updated_at = now() WHERE id = $1::uuid AND organization_id = $2::uuid AND status = 'pending'::payment_status",
     );
+    expect(renderQ(pay).params).toEqual(["pay-1", ORG]);
+    expect(render(inv)).toBe(
+      "UPDATE invoices SET amount_paid_cents = GREATEST(0, amount_paid_cents - $1::int), " +
+        "state = (CASE WHEN GREATEST(0, amount_paid_cents - $2::int) >= total_cents THEN 'paid' ELSE 'open' END)::invoice_state, updated_at = now() " +
+        "WHERE id = $3::uuid AND organization_id = $4::uuid AND state IN ('open'::invoice_state, 'paid'::invoice_state) " +
+        "AND EXISTS (SELECT 1 FROM payments WHERE id = $5::uuid AND xmin = pg_current_xact_id()::xid)",
+    );
+    expect(renderQ(inv).params).toEqual([10000, 10000, "inv-1", ORG, "pay-1"]);
+  }
+
+  it("un-credits the invoice in ONE batch when the provider says the charge failed (stripe)", async () => {
+    mockSelectSeq([[{ ...PENDING, provider: "stripe" }]]);
     const failingProvider = {
-      name: "mock",
+      name: "stripe",
       createCharge: vi.fn(),
       refund: vi.fn(),
-      getCharge: vi
-        .fn()
-        .mockResolvedValue({ providerPaymentId: "", status: "failed" }),
+      getCharge: vi.fn().mockResolvedValue({ providerPaymentId: "", status: "failed" }),
     };
     const r = await reconcilePayment(ORG, "pay-1", failingProvider as never);
     expect(r).toEqual({ ok: true, outcome: "failed_marked" });
-    // payment flipped to failed + invoice decremented (a SQL expression).
-    expect(sets.some((s) => s.status === "failed")).toBe(true);
-    const decrement = sets.find((s) => "amountPaidCents" in s);
-    expect(decrement).toBeDefined();
-    expect(typeof decrement?.amountPaidCents).not.toBe("number");
+    expectFailedBatch();
+  });
+
+  it("fails a pending MOCK payment without asking the provider while cards are disabled", async () => {
+    h.cards.on = false;
+    mockSelectSeq([[PENDING]]);
+    const provider = new MockPaymentProvider();
+    const getCharge = vi.spyOn(provider, "getCharge");
+    const r = await reconcilePayment(ORG, "pay-1", provider);
+    expect(r).toEqual({ ok: true, outcome: "failed_marked" });
+    expect(getCharge).not.toHaveBeenCalled();
+    expectFailedBatch();
+  });
+
+  it("still asks the provider for a non-mock payment while cards are disabled", async () => {
+    h.cards.on = false;
+    mockSelectSeq([[{ ...PENDING, provider: "stripe" }], [{ totalCents: 10000, amountPaidCents: 10000, state: "open" }]]);
+    const provider = new MockPaymentProvider();
+    const getCharge = vi.spyOn(provider, "getCharge");
+    const r = await reconcilePayment(ORG, "pay-1", provider);
+    expect(getCharge).toHaveBeenCalledWith("pay-1");
+    expect(r).toEqual({ ok: true, outcome: "completed", invoiceState: "paid" });
   });
 
   it("returns payment_not_found when the payment is missing", async () => {
@@ -956,36 +1137,19 @@ describe("reconcilePayment", () => {
     expect(r).toEqual({ ok: false, reason: "payment_not_found" });
   });
 
-  // The payment-status CAS stops a SECOND reconcile of the SAME payment, but two
-  // reconciles of DIFFERENT pending payments on the same invoice would still
-  // lost-update an absolute write. So the credit must be an atomic SQL increment.
   it("does NOT re-credit the invoice — the money was already credited at claim time (audit CRITICAL)", async () => {
     mockSelectSeq([
-      [{ id: "pay-1", invoiceId: "inv-1", amountCents: 5000, status: "pending" }],
+      [{ ...PENDING, amountCents: 5000 }],
       // Invoice already reflects the $50 claim credit.
-      [{ totalCents: 10000, amountPaidCents: 5000 }],
+      [{ totalCents: 10000, amountPaidCents: 5000, state: "open" }],
     ]);
-    const sets: Record<string, unknown>[] = [];
-    vi.mocked(db.update).mockImplementation(
-      () =>
-        ({
-          set: (v: Record<string, unknown>) => {
-            sets.push(v);
-            return {
-              where: () =>
-                Object.assign(Promise.resolve(undefined), {
-                  returning: vi.fn().mockResolvedValue([{ id: "pay-1" }]),
-                }),
-            };
-          },
-        }) as never,
-    );
+    const { sets } = captureUpdates();
     const r = await reconcilePayment(ORG, "pay-1", new MockPaymentProvider());
     expect(r.ok).toBe(true);
     // No invoice UPDATE may touch amountPaidCents — re-crediting a stranded
     // payment double-counted it (this was the CRITICAL audit finding).
-    expect(sets.some((s) => "amountPaidCents" in s)).toBe(false);
+    expect(sets.some((v) => "amountPaidCents" in v)).toBe(false);
     // The invoice update refreshes ONLY the display state.
-    expect(sets.some((s) => "state" in s)).toBe(true);
+    expect(sets.some((v) => "state" in v)).toBe(true);
   });
 });
