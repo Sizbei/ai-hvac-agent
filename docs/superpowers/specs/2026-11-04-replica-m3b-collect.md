@@ -471,7 +471,7 @@ Sections:
 - Accounting CSV: payment memo `Payment <id> (invoice <invoiceId>, <method>)`; header unchanged.
 - Portal: button hidden + route gate + phone line (§5.7). The admin invoice document renders the INVOICE's own signature snapshot (signed read URL) for open/paid/refunded/void invoices; for a draft it shows the request's current signature labelled "Job signature (not yet on the invoice)".
 - Aggregates: no change (they filter `status`/`fieldpulse_payment_id`, so manual payments count as collected); `listStuckPayments` adds `provider <> 'manual'`.
-- Probes make the minted technician the lead by SQL (`UPDATE appointment_assignments SET is_lead …` on the throwaway request); `mint-tech-session.mjs` is unchanged. Probe fetches send an `Origin` header (the same-origin guard denies a missing one).
+- `scripts/agent/mint-tech-session.mjs` honours `MINT_ORG_ID` (deviation from v3's "unchanged": without it every probe minted a technician from another org, usually the FieldPulse-connected default); probes insert a technician in the throwaway org by SQL and a request with `assigned_to` so the trigger makes the lead row; probe fetches send an `Origin` header (the same-origin guard denies a missing one); any probe that drains the communication queue first asserts zero pending jobs.
 
 ## 9. Erase (same PR)
 

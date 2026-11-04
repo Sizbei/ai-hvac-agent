@@ -407,3 +407,30 @@ removed from the pay-link sheet.
 Converged-enough: no blockers in round 3, the remaining majors were
 refinements of rules introduced in v3 and are applied; the plan review and
 the SDD task reviews are the net for what implementation surfaces.
+
+## M3b plan review — 2026-11-04
+
+Round 1 (two critics: spec coverage/feasibility; decomposition/tests/probes):
+no sign-off — 2 blockers (both: `mint-tech-session.mjs` ignores
+`MINT_ORG_ID`, so every throwaway-org probe and `--tech` screenshot would
+have minted a technician from another org — the FieldPulse-connected one; a
+Task 4 test mandated STALE on payments, contrary to spec ruling 10), 20
+majors. Plan rewritten as v2: eleven tasks with exclusive file ownership
+(Task 3 field-queries, Task 4 writers, Task 5 invoice-queries fixes, Task 6
+GET/view, Task 7 write routes, Task 8 pay link + signature, Task 9 office,
+Task 10 S40, Task 11 erase/integration/docs); Task 2 precedes Task 3/4
+(`materialLineId`, `cardPaymentsEnabled`); the stored idempotency value is
+the full response envelope with `toResponse`; pay-link failures after the
+queue insert are `SEND_FAILED` (stored, client re-keys); the reducer gains a
+`definitive_unstored` event; `recordSignature` sets `signed_at = now()` in
+SQL (app/DB clock skew would break the freshness compare); the by-id
+exception set is spelled out; the office path takes `L_req` from the
+invoice's request; `refundPayment` carries `refundId` in `params` (14 call
+sites pass `provider` 4th); the admin invoice GET route signs the snapshot
+URL; `invoiceAllowedActions` gains `native`/`externalInvoice`/`sign`;
+probes guard the communication queue (global drain) and write phones with
+`encrypt`; the drizzle-kit `generate` → overwrite → `generate --custom`
+recipe replaces the garbled snapshot step; tests assert load-bearing
+fragments and golden uuid vectors instead of verbatim statements; Review
+Focus #2 gets its integration case. Rejected: "attribution is Opus 5.5"
+(the critic's own model; this session is Fable 5.1).
