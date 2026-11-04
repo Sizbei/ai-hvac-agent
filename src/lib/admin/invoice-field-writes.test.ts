@@ -66,6 +66,7 @@ const LOCK_REQ = /^SELECT 1 FROM service_requests WHERE id = \$1::uuid AND organ
 const LOCK_INV = /^SELECT 1 FROM invoices WHERE id = \$1::uuid AND organization_id = \$2::uuid FOR NO KEY UPDATE$/;
 const XMIN = "xmin = pg_current_xact_id()::xid";
 const SIG_CASE = "CASE WHEN r.signed_at >= invoices.updated_at";
+const T_KEEPS_UPDATED_AT = "updated_at = CASE WHEN invoices.subtotal_cents <> s.sub THEN now() ELSE invoices.updated_at END";
 
 beforeEach(() => {
   readQueue.length = 0;
@@ -93,7 +94,7 @@ describe("shared SQL builders", () => {
     const t = renderQ(totalsSql(ORG, INV, 925, sql.raw("TRUE")));
     expect(t.params).toHaveLength(6);
     expect(t.sql).toContain("ROUND(s.sub * $1::int / 10000.0)::int");
-    expect(t.sql).toContain("updated_at = now()");
+    expect(t.sql.replace(/\s+/g, " ")).toContain(T_KEEPS_UPDATED_AT);
     expect(t.sql).toMatch(/FROM invoice_line_items WHERE invoice_id = \$\d::uuid AND organization_id = \$\d::uuid\) s/);
   });
 });
@@ -214,6 +215,7 @@ describe("addInvoiceLine", () => {
     expect(s[2]).toContain("i.state = 'draft'::invoice_state AND fieldpulse_invoice_id IS NULL AND hcp_invoice_id IS NULL");
     expect(s[2]).toMatch(/ON CONFLICT \(id\) DO NOTHING RETURNING id$/);
     expect(s[3]).toContain("invoices.state = 'draft'::invoice_state AND invoices.amount_paid_cents = 0");
+    expect(s[3]).toContain(T_KEEPS_UPDATED_AT);
     expect(s[4]).toMatch(/^SELECT state, EXISTS/);
     expect(renderQ((batch.mock.calls[0]![0] as unknown[])[2]).params).toContain(17800);
   });
@@ -262,6 +264,7 @@ describe("addInvoiceLine", () => {
     batch.mockResolvedValue(res([], [], [{ id: LINE }], [], [{ state: "draft", line_exists: true, already_billed: false }]));
     expect(await addInvoiceLine(OFFICE, INV, { lineId: LINE }, { pricebookItemId: ITEM, quantity: 1 })).toEqual({ ok: true, lineId: LINE });
     expect(params()).toEqual([2, 2, 11, 6, 5]);
+    expect(renderQ((batch.mock.calls[0]![0] as unknown[])[0]).params[0]).toBe(REQ);
     const s = stmts();
     expect(s[2]).toContain("WHERE (TRUE) AND EXISTS (SELECT 1 FROM invoices i WHERE i.id = $");
     expect(s[2]).toContain("AND TRUE AND i.state = 'draft'::invoice_state");
@@ -285,12 +288,16 @@ describe("removeInvoiceLine", () => {
     expect(s[2]).toMatch(/^DELETE FROM invoice_line_items WHERE id = \$1::uuid AND invoice_id = \$2::uuid AND organization_id = \$3::uuid AND \(EXISTS/);
     expect(s[2]).toContain("i.state = 'draft'::invoice_state AND fieldpulse_invoice_id IS NULL AND hcp_invoice_id IS NULL AND i.amount_paid_cents = 0) RETURNING id");
     expect(s[3]).toContain("invoices.amount_paid_cents = 0");
+    expect(s[3]).toContain(T_KEEPS_UPDATED_AT);
+    expect(s[4]).toMatch(/^SELECT state, amount_paid_cents FROM invoices/);
   });
 
   it("already gone, locked, not found, not lead", async () => {
-    batch.mockResolvedValueOnce(res([], [], [], [], [{ state: "draft" }], [{ still_lead: true }]));
+    batch.mockResolvedValueOnce(res([], [], [], [], [{ state: "draft", amount_paid_cents: 0 }], [{ still_lead: true }]));
     expect(await removeInvoiceLine(TECH, INV, LINE)).toEqual({ ok: true, removed: false });
     batch.mockResolvedValueOnce(res([], [], [], [], [{ state: "open" }], [{ still_lead: true }]));
+    expect(await removeInvoiceLine(TECH, INV, LINE)).toEqual({ ok: false, reason: "invoice_locked" });
+    batch.mockResolvedValueOnce(res([], [], [], [], [{ state: "draft", amount_paid_cents: 500 }], [{ still_lead: true }]));
     expect(await removeInvoiceLine(TECH, INV, LINE)).toEqual({ ok: false, reason: "invoice_locked" });
     batch.mockResolvedValueOnce(res([], [], [], [], [], [{ still_lead: true }]));
     expect(await removeInvoiceLine(TECH, INV, LINE)).toEqual({ ok: false, reason: "invoice_not_found" });
@@ -339,6 +346,7 @@ describe("finalizeInvoice", () => {
     batch.mockResolvedValue(res([], [], [{ state: "open" }], [{ state: "open", lines: "1" }]));
     expect(await finalizeInvoice(OFFICE, INV)).toEqual({ ok: true, state: "open", changed: true });
     expect(params()).toEqual([2, 2, 5, 4]);
+    expect(renderQ((batch.mock.calls[0]![0] as unknown[])[0]).params[0]).toBe(REQ);
     const s = stmts();
     expect(s[0]).toMatch(LOCK_REQ);
     expect(s[2]).toContain("AND TRUE AND invoices.state = 'draft'::invoice_state");

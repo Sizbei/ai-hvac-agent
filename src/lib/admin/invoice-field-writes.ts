@@ -51,12 +51,16 @@ export function stillLeadSql(org: string, rid: string, me: string): SQL {
       AND p.cancelled_at IS NULL AND a.technician_id = ${me}::uuid AND a.is_lead AND a.status IN ${SIGNABLE_IN})`;
 }
 
-/** T(gate): recompute the invoice totals from its lines; bumps updated_at. */
+/**
+ * T(gate): recompute the invoice totals from its lines. `updated_at` moves only
+ * when the subtotal changed, so a replay, a refused attempt or an already-gone
+ * removal never makes a fresh signature stale before finalize.
+ */
 export function totalsSql(org: string, inv: string, taxBps: number, gate: SQL): SQL {
   return sql`UPDATE invoices SET subtotal_cents = s.sub,
       tax_cents = ROUND(s.sub * ${taxBps}::int / 10000.0)::int,
       total_cents = s.sub + ROUND(s.sub * ${taxBps}::int / 10000.0)::int,
-      updated_at = now()
+      updated_at = CASE WHEN invoices.subtotal_cents <> s.sub THEN now() ELSE invoices.updated_at END
     FROM (SELECT COALESCE(SUM(line_total_cents), 0) AS sub FROM invoice_line_items WHERE invoice_id = ${inv}::uuid AND organization_id = ${org}::uuid) s
     WHERE invoices.id = ${inv}::uuid AND invoices.organization_id = ${org}::uuid AND ${gate}`;
 }
@@ -79,6 +83,7 @@ type Fail = { ok: false; reason: FieldReason };
 type InvoiceState = "draft" | "open" | "paid" | "refunded";
 
 const fail = (reason: FieldReason): Fail => ({ ok: false, reason });
+const LINE_COLUMNS = sql.raw("(id, organization_id, invoice_id, job_material_id, name, quantity, unit_price_cents, cost_cents, line_total_cents)");
 const XMIN_GATE = sql.raw("invoices.xmin = pg_current_xact_id()::xid");
 const LINE_GATE = sql.raw("invoices.state = 'draft'::invoice_state AND invoices.amount_paid_cents = 0");
 
@@ -115,6 +120,8 @@ async function resolveScope(actor: Actor, invoiceId: string): Promise<Scope | Fa
   return { org, rid: (inv.service_request_id as string | null) ?? null, lead: null, ridPred: () => sql.raw("TRUE") };
 }
 
+/** Index of the write statement: after L_inv, or after L_req + L_inv. */
+const writeAt = (s: Scope): number => (s.rid !== null ? 2 : 1);
 const leadOrAdmin = (s: Scope): SQL => s.lead ?? sql.raw("TRUE");
 const locks = (s: Scope, inv: string): SQL[] =>
   s.rid !== null ? [lockRequestSql(s.org, s.rid), lockInvoiceSql(s.org, inv)] : [lockInvoiceSql(s.org, inv)];
@@ -162,7 +169,7 @@ export async function createInvoiceFromJob(
       const price = Number(m.unit_price_cents);
       return sql`(${materialLineId(inv, m.id)}::uuid, ${m.id}::uuid, ${m.name}::text, ${qty}::int, ${price}::int, ${Number(m.unit_cost_cents)}::int, ${qty * price}::int)`;
     }), sql`, `);
-    items.push(sql`INSERT INTO invoice_line_items (id, organization_id, invoice_id, job_material_id, name, quantity, unit_price_cents, cost_cents, line_total_cents)
+    items.push(sql`INSERT INTO invoice_line_items ${LINE_COLUMNS}
       SELECT v.id, ${org}::uuid, ${inv}::uuid, v.job_material_id, v.name, v.quantity, v.unit_price_cents, v.cost_cents, v.line_total_cents
       FROM (VALUES ${values}) AS v(id, job_material_id, name, quantity, unit_price_cents, cost_cents, line_total_cents)
       WHERE EXISTS (SELECT 1 FROM invoices WHERE id = ${inv}::uuid AND organization_id = ${org}::uuid AND xmin = pg_current_xact_id()::xid)
@@ -227,7 +234,7 @@ export async function addInvoiceLine(
     : null;
   const rows = await runBatch([
     ...locks(scope, invoiceId),
-    sql`INSERT INTO invoice_line_items (id, organization_id, invoice_id, job_material_id, name, quantity, unit_price_cents, cost_cents, line_total_cents)
+    sql`INSERT INTO invoice_line_items ${LINE_COLUMNS}
       SELECT ${v.lineId}::uuid, ${org}::uuid, ${invoiceId}::uuid, ${v.jobMaterialId}::uuid, ${v.name}, ${v.quantity}::int, ${v.priceCents}::int, ${v.costCents}::int, ${v.quantity * v.priceCents}::int
       WHERE (${leadOrAdmin(scope)}) AND ${draftInvoiceExists(scope, invoiceId)}${billed ? sql` AND NOT ${billed}` : sql``}
       ON CONFLICT (id) DO NOTHING RETURNING id`,
@@ -239,7 +246,7 @@ export async function addInvoiceLine(
     ...leadTail(scope),
   ]);
   if (!Array.isArray(rows)) return rows;
-  const at = scope.rid !== null ? 2 : 1;
+  const at = writeAt(scope);
   if (rows[at]!.length > 0) return { ok: true, lineId: v.lineId };
   if (!stillLead(scope, rows)) return fail("not_lead");
   const inv = rows[at + 2]![0];
@@ -261,16 +268,16 @@ export async function removeInvoiceLine(
     sql`DELETE FROM invoice_line_items WHERE id = ${lineId}::uuid AND invoice_id = ${invoiceId}::uuid AND organization_id = ${org}::uuid
       AND (${leadOrAdmin(scope)}) AND ${draftInvoiceExists(scope, invoiceId, sql` AND i.amount_paid_cents = 0`)} RETURNING id`,
     totalsSql(org, invoiceId, await getDefaultTaxBps(org), LINE_GATE),
-    sql`SELECT state FROM invoices WHERE id = ${invoiceId}::uuid AND organization_id = ${org}::uuid AND ${scope.ridPred("service_request_id")}`,
+    sql`SELECT state, amount_paid_cents FROM invoices WHERE id = ${invoiceId}::uuid AND organization_id = ${org}::uuid AND ${scope.ridPred("service_request_id")}`,
     ...leadTail(scope),
   ]);
   if (!Array.isArray(rows)) return rows;
-  const at = scope.rid !== null ? 2 : 1;
+  const at = writeAt(scope);
   if (rows[at]!.length > 0) return { ok: true, removed: true };
   if (!stillLead(scope, rows)) return fail("not_lead");
   const inv = rows[at + 2]![0];
   if (!inv) return fail("invoice_not_found");
-  if (inv.state !== "draft") return fail("invoice_locked");
+  if (inv.state !== "draft" || Number(inv.amount_paid_cents) > 0) return fail("invoice_locked");
   return { ok: true, removed: false };
 }
 
@@ -311,7 +318,7 @@ export async function finalizeInvoice(
     ...leadTail(scope),
   ]);
   if (!Array.isArray(rows)) return rows;
-  const at = scope.rid !== null ? 2 : 1;
+  const at = writeAt(scope);
   if (rows[at]!.length > 0) return { ok: true, state: "open", changed: true };
   if (!stillLead(scope, rows)) return fail("not_lead");
   const inv = rows[at + 1]![0];
