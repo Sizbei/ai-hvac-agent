@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Link2, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -14,7 +14,14 @@ import { InfoBanner } from '@/components/admin/ui/info-banner';
 import { ErrorState } from '@/components/admin/ui/error-state';
 import { InvoiceStateBadge } from '@/components/admin/invoices/invoice-state-badge';
 import { AgeChip } from '@/components/admin/invoices/age-chip';
-import { InvoiceDocument, type OrgIdentity } from '@/components/admin/invoices/invoice-document';
+import {
+  InvoiceDocument,
+  type DocumentInvoice,
+  type OrgIdentity,
+} from '@/components/admin/invoices/invoice-document';
+import type { DocumentSignature, SignatureState } from '@/components/admin/invoices/invoice-signature-model';
+import { RecordPaymentCard } from '@/components/admin/invoices/record-payment-card';
+import { FinalizeButton } from '@/components/admin/invoices/finalize-button';
 import { InvoiceCollectionsSide } from '@/components/admin/invoices/invoice-collections-side';
 import { FinancingPanel } from '@/components/admin/financing/financing-panel';
 import { formatCentsExact, parseDollarsToCents } from '@/lib/admin/money-format';
@@ -23,6 +30,8 @@ import { deriveInvoicePresentation } from '@/lib/admin/invoice-presentation';
 import { isCollectible, invoiceRef } from '@/lib/admin/invoice-collectible';
 import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
 import { SyncPill } from '@/components/admin/sync-pill';
+import { mintKey } from '@/lib/http/idempotency-codes';
+import { paymentMethodSummary, refundSuccessCopy, shouldRemintToken } from '@/lib/admin/invoice-payment-copy';
 import type { InvoiceDetailView, InvoiceReminderView } from '@/lib/admin/invoice-queries';
 
 // Raw API response shape — dates arrive as ISO strings in JSON.
@@ -44,6 +53,7 @@ interface ApiPayment {
   readonly refunds: ApiRefund[];
 }
 interface ApiSignature {
+  readonly state: SignatureState;
   readonly url: string | null;
   readonly name: string | null;
   readonly signedAt: string | null;
@@ -77,7 +87,7 @@ interface ApiInvoice {
   readonly requestSignature: ApiSignature | null;
 }
 
-function hydrateSignature(s: ApiSignature): InvoiceDetailView['signature'] {
+function hydrateSignature(s: ApiSignature): DocumentSignature {
   return { ...s, signedAt: s.signedAt ? new Date(s.signedAt) : null };
 }
 
@@ -92,8 +102,8 @@ function formatDateTime(d: Date): string {
   return d.toLocaleString();
 }
 
-/** Convert the API JSON response (string dates) into the InvoiceDetailView shape (Date objects). */
-function hydrateInvoice(raw: ApiInvoice): InvoiceDetailView {
+/** Convert the API JSON response (string dates) into the client view (Date objects). */
+function hydrateInvoice(raw: ApiInvoice): DocumentInvoice {
   return {
     ...raw,
     createdAt: new Date(raw.createdAt),
@@ -121,17 +131,13 @@ export function InvoiceDetailClient({
   readonly id: string;
   readonly canRefund: boolean;
 }) {
-  const [invoice, setInvoice] = useState<InvoiceDetailView | null>(null);
+  const [invoice, setInvoice] = useState<DocumentInvoice | null>(null);
   const [org, setOrg] = useState<OrgIdentity | null>(null);
   const [reminders, setReminders] = useState<InvoiceReminderView[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Take-payment form
-  const [payAmount, setPayAmount] = useState('');
-  const [isDeposit, setIsDeposit] = useState(false);
-  const [isPaying, setIsPaying] = useState(false);
-  const [payError, setPayError] = useState<string | null>(null);
+  // Record-payment form (the card mints its own client token when it opens)
   const [showPaymentForm, setShowPaymentForm] = useState(false);
 
   // Refund: which payment is being refunded + form state
@@ -140,6 +146,12 @@ export function InvoiceDetailClient({
   const [refundReason, setRefundReason] = useState('customer_request');
   const [isRefunding, setIsRefunding] = useState(false);
   const [refundError, setRefundError] = useState<string | null>(null);
+  const [refundToken, setRefundToken] = useState(() => mintKey());
+  const [refundNotice, setRefundNotice] = useState<string | null>(null);
+
+  // Signed signature URLs expire; refetch on an image error, a bounded number
+  // of times so a permanently broken object can't loop.
+  const signatureRetries = useRef(0);
 
   // Send reminder
   const [isSendingReminder, setIsSendingReminder] = useState(false);
@@ -185,38 +197,8 @@ export function InvoiceDetailClient({
 
   // ── MONEY HANDLERS (PRESERVED VERBATIM) ──────────────────────────────────
 
-  const handleTakePayment = useCallback(async (): Promise<void> => {
-    const amountCents = parseDollarsToCents(payAmount);
-    if (amountCents < 1) {
-      setPayError('Enter an amount greater than zero.');
-      return;
-    }
-    setIsPaying(true);
-    setPayError(null);
-    try {
-      const res = await fetch(`/api/admin/invoices/${id}/payments`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amountCents, isDeposit }),
-      });
-      const body = await res.json().catch(() => ({ success: false }));
-      if (res.ok && body.success) {
-        setPayAmount('');
-        setIsDeposit(false);
-        setShowPaymentForm(false);
-        void load();
-      } else {
-        setPayError(body.error?.message ?? 'Failed to take payment');
-      }
-    } catch {
-      setPayError('Could not connect to server.');
-    } finally {
-      setIsPaying(false);
-    }
-  }, [id, payAmount, isDeposit, load]);
-
   const handleRefund = useCallback(
-    async (paymentId: string): Promise<void> => {
+    async (paymentId: string, provider: string): Promise<void> => {
       const amountCents = parseDollarsToCents(refundAmount);
       if (amountCents < 1) {
         setRefundError('Enter an amount greater than zero.');
@@ -228,16 +210,21 @@ export function InvoiceDetailClient({
         const res = await fetch(`/api/admin/payments/${paymentId}/refund`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ amountCents, reason: refundReason }),
+          body: JSON.stringify({ clientToken: refundToken, amountCents, reason: refundReason }),
         });
         const body = await res.json().catch(() => ({ success: false }));
-        if (res.ok && body.success) {
+        const ok = res.ok && body.success;
+        if (shouldRemintToken(ok, body.error?.code)) setRefundToken(mintKey());
+        if (ok) {
           setRefundFor(null);
           setRefundAmount('');
           setRefundReason('customer_request');
+          setRefundNotice(refundSuccessCopy(provider));
           void load();
+        } else if (body.error?.code === 'ID_CONFLICT') {
+          setRefundError('That refund token was already used. Try again.');
         } else {
-          setRefundError(body.error?.message ?? 'Failed to refund');
+          setRefundError(body.error?.message ?? "Couldn't record the refund. Please try again.");
         }
       } catch {
         setRefundError('Could not connect to server.');
@@ -245,8 +232,23 @@ export function InvoiceDetailClient({
         setIsRefunding(false);
       }
     },
-    [refundAmount, refundReason, load],
+    [refundAmount, refundReason, refundToken, load],
   );
+
+  const handleSignatureError = useCallback((): void => {
+    if (signatureRetries.current >= 2) return;
+    signatureRetries.current += 1;
+    void load();
+  }, [load]);
+
+  const handleRecorded = useCallback((): void => {
+    setShowPaymentForm(false);
+    void load();
+  }, [load]);
+
+  const handleFinalized = useCallback((): void => {
+    void load();
+  }, [load]);
 
   // ── COLLECTIONS HANDLERS ─────────────────────────────────────────────────
 
@@ -401,10 +403,14 @@ export function InvoiceDetailClient({
                 {copyLinkMsg ?? (isCopyingLink ? 'Generating…' : 'Copy pay link')}
               </Button>
             )}
-            {/* Take payment — native only; canTakePayment already checks syncedSource */}
+            {/* Finalize — native drafts only (a synced draft lives in its FSM) */}
+            {invoice.state === 'draft' && !invoice.syncedSource && (
+              <FinalizeButton invoiceId={invoice.id} onFinalized={handleFinalized} />
+            )}
+            {/* Record payment — native only; canTakePayment already checks syncedSource */}
             {canTakePayment && (
               <Button size="sm" onClick={() => setShowPaymentForm((v) => !v)}>
-                {showPaymentForm ? 'Hide form' : 'Take payment'}
+                {showPaymentForm ? 'Hide form' : 'Record payment'}
               </Button>
             )}
           </>
@@ -455,7 +461,11 @@ export function InvoiceDetailClient({
         {/* Left column */}
         <div className="min-w-0 space-y-6">
           {/* Invoice document (paper layout — line items, parties, totals) */}
-          <InvoiceDocument invoice={invoice} org={org ?? fallbackOrg} />
+          <InvoiceDocument
+            invoice={invoice}
+            org={org ?? fallbackOrg}
+            onSignatureError={handleSignatureError}
+          />
 
           {/* Internal margin readout (admin-only; subordinate styling). When the
               tech recorded actual field materials on the linked job, show the
@@ -517,51 +527,10 @@ export function InvoiceDetailClient({
             )}
           </SectionCard>
 
-          {/* Take payment — never for a read-only FSM-synced invoice (canTakePayment).
-              Toggled by the toolbar button above. */}
+          {/* Record payment — never for a read-only FSM-synced invoice (canTakePayment).
+              Toggled by the toolbar button above; mounting mints the client token. */}
           {canTakePayment && showPaymentForm && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Take payment</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="flex flex-wrap items-center gap-3">
-                  <div className="relative">
-                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                      $
-                    </span>
-                    <Input
-                      aria-label="Payment amount in dollars"
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      inputMode="decimal"
-                      placeholder="0.00"
-                      value={payAmount}
-                      onChange={(e) => setPayAmount(e.target.value)}
-                      className="w-40 pl-6"
-                    />
-                  </div>
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      className="size-4 rounded border-input"
-                      checked={isDeposit}
-                      onChange={(e) => setIsDeposit(e.target.checked)}
-                    />
-                    Deposit
-                  </label>
-                  <Button
-                    size="sm"
-                    disabled={isPaying || !payAmount}
-                    onClick={handleTakePayment}
-                  >
-                    {isPaying ? 'Charging…' : 'Charge'}
-                  </Button>
-                </div>
-                {payError && <p className="text-xs text-destructive">{payError}</p>}
-              </CardContent>
-            </Card>
+            <RecordPaymentCard invoiceId={invoice.id} onRecorded={handleRecorded} />
           )}
 
           {/* Financing (subordinate). Keyed to the invoice's estimate; only shown
@@ -581,6 +550,11 @@ export function InvoiceDetailClient({
               </CardTitle>
             </CardHeader>
             <CardContent>
+              {refundNotice && (
+                <p role="status" className="mb-3 text-sm text-foreground">
+                  {refundNotice}
+                </p>
+              )}
               {invoice.payments.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No payments yet.</p>
               ) : (
@@ -598,6 +572,9 @@ export function InvoiceDetailClient({
                             </span>
                             <span className="inline-flex h-5 items-center rounded-[3px] border border-border bg-surface-raised px-1.5 text-[11px] font-medium">
                               {p.status}
+                            </span>
+                            <span className="inline-flex h-5 items-center rounded-[3px] border border-border bg-surface-sunken px-1.5 text-[11px] font-medium tabular-nums">
+                              {paymentMethodSummary(p.method, p.checkNumber)}
                             </span>
                             {p.isDeposit && (
                               <span className="inline-flex h-5 items-center rounded-[3px] border border-info-border bg-info-light px-1.5 text-[11px] font-medium text-info-strong">
@@ -617,6 +594,7 @@ export function InvoiceDetailClient({
                                 setRefundAmount('');
                                 setRefundReason('customer_request');
                                 setRefundError(null);
+                                setRefundNotice(null);
                               }}
                             >
                               Refund
@@ -679,7 +657,7 @@ export function InvoiceDetailClient({
                               <Button
                                 size="sm"
                                 disabled={isRefunding || !refundAmount}
-                                onClick={() => void handleRefund(p.id)}
+                                onClick={() => void handleRefund(p.id, p.provider)}
                               >
                                 {isRefunding ? 'Refunding…' : 'Confirm refund'}
                               </Button>
@@ -692,7 +670,7 @@ export function InvoiceDetailClient({
                               </Button>
                             </div>
                             {refundError && (
-                              <p className="text-xs text-destructive">{refundError}</p>
+                              <p role="alert" className="text-xs text-destructive">{refundError}</p>
                             )}
                           </div>
                         )}

@@ -5,6 +5,13 @@ import {
 } from "@/lib/portal/portal-queries";
 import { formatCentsExact } from "@/lib/admin/money-format";
 import { BUSINESS_BASE_LOCATION } from "@/lib/config/business-location";
+import { cardPaymentsEnabled } from "@/lib/payments/card-enabled";
+import { getOrgConfig } from "@/lib/admin/org-config-queries";
+import {
+  portalPaymentNotice,
+  type PortalPaymentNotice,
+} from "@/lib/portal/portal-notice";
+import { logger } from "@/lib/logger";
 import { PayButton } from "./pay-button";
 
 // Arrival windows are stored anchored to the BUSINESS timezone; render them in it
@@ -99,12 +106,55 @@ function InvoiceStateBadge({ state }: { readonly state: string }) {
   );
 }
 
+/** The org's configured business phone (the same source message templates use), or null. */
+async function getOrgPhone(organizationId: string): Promise<string | null> {
+  try {
+    const config = await getOrgConfig(organizationId);
+    return config.businessInfo?.phone?.trim() || null;
+  } catch (error: unknown) {
+    logger.warn({ error }, "Portal org phone lookup failed");
+    return null;
+  }
+}
+
+function InPersonNotice({
+  payment,
+  phone,
+}: {
+  readonly payment: PortalPaymentNotice;
+  readonly phone: string | null;
+}) {
+  if (!payment.notice) return null;
+  if (!payment.tel || !phone) {
+    return (
+      <p className="mt-1 text-[13px] text-muted-foreground">{payment.notice}</p>
+    );
+  }
+  // Same sentence as payment.notice, with the phone as a tap-to-call link.
+  return (
+    <p className="mt-1 text-[13px] text-muted-foreground">
+      Pay your technician in person, or call{" "}
+      <a
+        href={payment.tel}
+        className="font-medium whitespace-nowrap text-link underline underline-offset-2"
+      >
+        {phone}
+      </a>
+      .
+    </p>
+  );
+}
+
 function InvoicesSection({
   token,
   invoices,
+  payment,
+  phone,
 }: {
   readonly token: string;
   readonly invoices: PortalData["invoices"];
+  readonly payment: PortalPaymentNotice;
+  readonly phone: string | null;
 }) {
   return (
     <Section title="Invoices">
@@ -133,8 +183,9 @@ function InvoicesSection({
                     {payable &&
                       ` · ${formatCentsExact(inv.balanceCents)} due`}
                   </p>
+                  {payable && <InPersonNotice payment={payment} phone={phone} />}
                 </div>
-                {payable && (
+                {payable && payment.showPayButton && (
                   <PayButton
                     token={token}
                     invoiceId={inv.id}
@@ -272,10 +323,14 @@ export default async function CustomerPortalPage({
     );
   }
 
-  const data = await getPortalData(
-    identity.organizationId,
-    identity.customerId,
-  );
+  const [data, phone] = await Promise.all([
+    getPortalData(identity.organizationId, identity.customerId),
+    getOrgPhone(identity.organizationId),
+  ]);
+  const payment = portalPaymentNotice({
+    cardEnabled: cardPaymentsEnabled(),
+    phone,
+  });
 
   return (
     <main className="min-h-screen bg-canvas">
@@ -292,7 +347,12 @@ export default async function CustomerPortalPage({
           </p>
         </header>
 
-        <InvoicesSection token={token} invoices={data.invoices} />
+        <InvoicesSection
+          token={token}
+          invoices={data.invoices}
+          payment={payment}
+          phone={phone}
+        />
         <EstimatesSection estimates={data.estimates} />
         <JobsSection jobs={data.jobs} />
         <HistorySection history={data.history} />

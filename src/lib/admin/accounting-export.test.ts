@@ -182,7 +182,8 @@ describe('getAccountingExport', () => {
   it('memos carry IDs only — no customer names, emails, or PII', async () => {
     queue({
       nativeInvoices: [{ id: 'inv-1', subtotalCents: 100, taxCents: 0, createdAt: FROM }],
-      nativePayments: [{ id: 'pay-1', invoiceId: 'inv-1', amountCents: 100, createdAt: FROM }],
+      nativePayments: [{ id: 'pay-1', invoiceId: 'inv-1', amountCents: 100, method: 'check', createdAt: FROM }],
+      syncedPayments: [{ id: 'pay-fp', invoiceId: 'inv-fp', amountCents: 100, method: 'card', createdAt: FROM }],
       refunds: [{ id: 'ref-1', paymentId: 'pay-1', amountCents: 50, createdAt: FROM }],
       labor: [{ id: 'tte-1', serviceRequestId: 'req-1', laborCostCents: 200, clockOutAt: FROM }],
     });
@@ -197,7 +198,10 @@ describe('getAccountingExport', () => {
     }
     expect(native.find((l) => l.type === 'invoice')!.memo).toBe('Invoice inv-1');
     expect(native.find((l) => l.type === 'payment')!.memo).toBe(
-      'Payment pay-1 (invoice inv-1)',
+      'Payment pay-1 (invoice inv-1, check)',
+    );
+    expect(result.synced.find((l) => l.type === 'payment')!.memo).toBe(
+      'Payment pay-fp (invoice inv-fp, card)',
     );
     expect(native.find((l) => l.type === 'refund')!.memo).toBe(
       'Refund ref-1 (payment pay-1)',

@@ -13,7 +13,7 @@
  * tenant breach.
  *
  * PII: memos carry NON-SENSITIVE ids only (invoice/payment/refund/time-entry
- * ids) — never customer names, emails, addresses, or free-text. The exported
+ * ids, plus the payment method enum) — never customer names, emails, addresses, or free-text. The exported
  * FILE does contain amounts, so the route that serves it is super_admin-gated.
  */
 import { and, or, eq, gte, lte, isNotNull, isNull, sql } from "drizzle-orm";
@@ -157,6 +157,7 @@ export async function getAccountingExport(
         id: payments.id,
         invoiceId: payments.invoiceId,
         amountCents: payments.amountCents,
+        method: payments.method,
         createdAt: payments.createdAt,
       })
       .from(payments)
@@ -177,6 +178,7 @@ export async function getAccountingExport(
         id: payments.id,
         invoiceId: payments.invoiceId,
         amountCents: payments.amountCents,
+        method: payments.method,
         createdAt: payments.createdAt,
       })
       .from(payments)
@@ -268,7 +270,7 @@ export async function getAccountingExport(
       date: isoDate(pay.createdAt),
       type: "payment",
       account: "Undeposited Funds",
-      memo: `Payment ${pay.id} (invoice ${pay.invoiceId})`,
+      memo: `Payment ${pay.id} (invoice ${pay.invoiceId}, ${pay.method})`,
       amountDollars: centsToDollars(pay.amountCents),
     });
   }
@@ -278,7 +280,7 @@ export async function getAccountingExport(
       date: isoDate(pay.createdAt),
       type: "payment",
       account: "Undeposited Funds",
-      memo: `Payment ${pay.id} (invoice ${pay.invoiceId})`,
+      memo: `Payment ${pay.id} (invoice ${pay.invoiceId}, ${pay.method})`,
       amountDollars: centsToDollars(pay.amountCents),
       // HCP never writes to `payments` (no HCP payment mirror) — every synced
       // payment row is FieldPulse-sourced.

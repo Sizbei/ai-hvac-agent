@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import type { InvoiceDetailView } from '@/lib/admin/invoice-queries';
 import { invoiceDocModel } from './invoice-document-model';
+import { signatureBlock, type DocumentSignature } from './invoice-signature-model';
 
 export interface OrgIdentity {
   readonly companyName: string;
@@ -12,9 +13,17 @@ export interface OrgIdentity {
   readonly phone: string | null;
 }
 
+/** The detail view as the client holds it: signatures carry their read state. */
+export type DocumentInvoice = Omit<InvoiceDetailView, 'signature' | 'requestSignature'> & {
+  readonly signature: DocumentSignature;
+  readonly requestSignature: DocumentSignature | null;
+};
+
 interface Props {
-  readonly invoice: InvoiceDetailView;
+  readonly invoice: DocumentInvoice;
   readonly org: OrgIdentity;
+  /** Signed read URLs expire; the parent refetches the detail for a fresh one. */
+  readonly onSignatureError?: () => void;
 }
 
 function fmt(d: Date): string {
@@ -26,8 +35,9 @@ function fmt(d: Date): string {
  * display logic; renders logo lockup, meta box, parties, line-item table,
  * notes, and totals. No data fetching or event handlers.
  */
-export function InvoiceDocument({ invoice, org }: Props) {
+export function InvoiceDocument({ invoice, org, onSignatureError }: Props) {
   const m = invoiceDocModel(invoice);
+  const sig = signatureBlock(invoice);
 
   // The sheet is pinned to --surface-raised (pure white): this is paper, and it
   // must keep reading as paper against the warm canvas.
@@ -194,6 +204,34 @@ export function InvoiceDocument({ invoice, org }: Props) {
             </div>
           </div>
         </div>
+
+        {/* ── signature ── */}
+        {sig && (
+          <div className="mt-8 max-w-xs">
+            <PartyLabel>{sig.label}</PartyLabel>
+            {sig.kind === 'image' ? (
+              <>
+                {/* Signed, short-lived storage URL — next/image can't optimise it. */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={sig.url}
+                  alt={sig.name ? `Signature of ${sig.name}` : 'Customer signature'}
+                  className="h-20 w-auto max-w-full object-contain"
+                  onError={onSignatureError}
+                />
+                {(sig.name || sig.signedAt) && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {sig.name}
+                    {sig.name && sig.signedAt && ' · '}
+                    {sig.signedAt && fmt(sig.signedAt)}
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="text-xs text-muted-foreground">{sig.note}</p>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

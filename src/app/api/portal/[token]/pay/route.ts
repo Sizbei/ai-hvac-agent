@@ -10,6 +10,7 @@ import { slidingWindow } from "@/lib/rate-limit";
 import { db } from "@/lib/db";
 import { auditLog } from "@/lib/db/schema";
 import { logger } from "@/lib/logger";
+import { cardPaymentsEnabled } from "@/lib/payments/card-enabled";
 
 // PUBLIC endpoint — authorized BY THE PORTAL TOKEN in the path, NOT an admin
 // session. proxy.ts only session-gates /api/admin/*, so /api/portal/* passes
@@ -33,6 +34,16 @@ export async function POST(
     const rateCheck = slidingWindow(`portal-pay:${ip}`, 10, 60_000);
     if (!rateCheck.allowed) {
       return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
+    }
+
+    // Card gate (spec §5.7): the mock provider never moves money, so refuse
+    // before the token resolves — no token information is needed to say no.
+    if (!cardPaymentsEnabled()) {
+      return errorResponse(
+        "Online payment isn't available yet.",
+        "CARD_PAYMENTS_UNAVAILABLE",
+        409,
+      );
     }
 
     const { token } = await params;

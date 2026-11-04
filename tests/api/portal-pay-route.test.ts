@@ -7,12 +7,23 @@ import { NextRequest } from "next/server";
  * switch does NOT handle must NEVER fall through to the success response — that
  * would tell a customer "paid: true" for a payment that did not happen.
  */
-const { mockResolvePortalToken, mockPayPortalInvoice, mockAuditInsert } =
-  vi.hoisted(() => ({
-    mockResolvePortalToken: vi.fn(),
-    mockPayPortalInvoice: vi.fn(),
-    mockAuditInsert: vi.fn(),
-  }));
+const {
+  mockResolvePortalToken,
+  mockPayPortalInvoice,
+  mockAuditInsert,
+  mockCardPaymentsEnabled,
+} = vi.hoisted(() => ({
+  mockResolvePortalToken: vi.fn(),
+  mockPayPortalInvoice: vi.fn(),
+  mockAuditInsert: vi.fn(),
+  mockCardPaymentsEnabled: vi.fn(),
+}));
+
+// The token-path cases need a non-mock provider to keep their coverage; the
+// gate case flips this to false.
+vi.mock("@/lib/payments/card-enabled", () => ({
+  cardPaymentsEnabled: () => mockCardPaymentsEnabled(),
+}));
 
 vi.mock("@/lib/portal/portal-queries", () => ({
   resolvePortalToken: (...a: unknown[]) => mockResolvePortalToken(...a),
@@ -48,6 +59,23 @@ beforeEach(() => {
     customerId: CUST,
   });
   mockAuditInsert.mockResolvedValue(undefined);
+  mockCardPaymentsEnabled.mockReturnValue(true);
+});
+
+describe("POST /api/portal/[token]/pay — card gate", () => {
+  it("refuses with 409 CARD_PAYMENTS_UNAVAILABLE before the token resolves", async () => {
+    mockCardPaymentsEnabled.mockReturnValue(false);
+    const res = await payPOST(payReq(1000), {
+      params: Promise.resolve({ token: "tok-1" }),
+    });
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe("CARD_PAYMENTS_UNAVAILABLE");
+    expect(body.error.message).toBe("Online payment isn't available yet.");
+    expect(mockResolvePortalToken).not.toHaveBeenCalled();
+    expect(mockPayPortalInvoice).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST /api/portal/[token]/pay — rejection handling", () => {
