@@ -1,7 +1,7 @@
 # Replica M3b — Collect (field invoice, manual payment, idempotency)
 
-Status: v3 (after spec review rounds 1–2: 5 critics; see `replica/review-log.md`
-"Spec round 5" and "Spec round 6"). Parent:
+Status: v4 FINAL (spec review rounds 1–3, 6 critics, converged; see
+`replica/review-log.md` "Spec round 5", "Spec round 6", "Spec round 7"). Parent:
 `replica/architecture.md` "F04 Tech loop" M3b rows + build-order item 4 "M3b
 Collect"; `replica/schema.sql` section "M3b"; `replica/review-log.md` spec rounds
 3–4 (established facts carried forward). Design: `replica/design/components.md`
@@ -143,7 +143,7 @@ Route error logs carry codes and ids only, never SQL parameters.
 1. Rate check happens in the route before this.
 2. Claim: `INSERT … (…, request_hash, state='in_progress', attempt_id=$mine) ON CONFLICT DO NOTHING RETURNING key`.
 3. **Winner:** `result = await run(ids)`.
-   - `status` 2xx, or a DETERMINISTIC 4xx (`INVOICE_LOCKED`, `NO_LINES`, `ITEM_NOT_FOUND`, `INVOICE_VOIDED`, 400 validation) → `UPDATE … SET state='done', response_status, response_body WHERE (pk) AND state='in_progress' AND attempt_id=$mine`; return `result`.
+   - `status` 2xx, or a DETERMINISTIC 4xx — the exported constant `STORED_CODES = {INVOICE_LOCKED, NO_LINES, ALREADY_BILLED, ITEM_NOT_FOUND, INVOICE_VOIDED, INVALID_INPUT, VALIDATION_ERROR}` in a dependency-free module shared with the client reducer (§7.5) → `UPDATE … SET state='done', response_status, response_body WHERE (pk) AND state='in_progress' AND attempt_id=$mine`; return `result`.
    - Any other outcome (409 `STALE`, state-dependent refusals such as `EXCEEDS_BALANCE`, `NOT_LEAD`, `INVOICE_NOT_CHARGEABLE`, `COOLDOWN`, `NO_CONTACT`, any 5xx, or `run` throws) → `DELETE … WHERE (pk) AND attempt_id=$mine` (best effort), return/rethrow. A retry with the same key re-runs; derived ids make that safe, and a refusal that depended on state is re-evaluated.
    - Pay-link exception: its side effect (a queued message) cannot be undone, so a throw after the queue step stores `done` with status 500; the client treats a stored 500 from pay-link as "spent" and mints a new key on the next deliberate Send (§7.6).
 4. **Loser:** `SELECT state, request_hash, response_status, response_body, created_at, attempt_id`:
@@ -192,7 +192,9 @@ for manual rows (so a deposit-then-final or a re-bill never seeds an item twice)
 
 Adopt rule: the request's newest native invoice with `P_live` is THE invoice. An
 estimate-born `open` invoice is adopted too, unseeded, shown as "From estimate":
-the field can present it, sign it and record payment, but cannot add lines
+the field can present it and record payment (its signature block shows the
+estimate's acceptance — `signature.state = 'estimate'` with the estimate's
+`signed_at`/`signature_name` — since finalize never runs on it), but cannot add lines
 (ruling: materials on a job with a sold estimate are billed by the office; the
 GET omits `materialsNotOnInvoice` for non-draft invoices). Any OTHER open native
 invoice on the request is listed in `otherOpen` (id, total, balance) and shown as
@@ -230,7 +232,7 @@ body also carries `invoiceId` (§6.2) and the writer requires
 Batch: `L_req`; `L_inv`;
 `INSERT INTO invoice_line_items (…) SELECT … WHERE ($stillLead) AND EXISTS (SELECT 1 FROM invoices i WHERE i.id=$invoiceId AND i.organization_id=$org AND i.service_request_id=$rid AND i.state='draft'::invoice_state AND P_native) ON CONFLICT (id) DO NOTHING RETURNING id`;
 `T(state = 'draft'::invoice_state AND amount_paid_cents = 0)`; `SELECT state FROM invoices WHERE id=$invoiceId AND organization_id=$org`; `SELECT ($stillLead)`.
-Outcome: inserted → `{ ok: true, lineId }`; not inserted and the line exists → `{ ok: true, lineId, replayed: true }`; not inserted, state ≠ draft → `invoice_locked`; invoice missing → `invoice_not_found`; `still_lead` false → `not_lead`. The invoice lock (`L_inv`) serialises line edits against any payment or finalize on the same row, so the totals UPDATE always sees the state the INSERT saw.
+Outcome: inserted → `{ ok: true, lineId }`; not inserted and the line exists → `{ ok: true, lineId, replayed: true }`; not inserted, draft intact, `jobMaterialId` already linked on another non-void invoice → `already_billed`; not inserted, state ≠ draft → `invoice_locked`; invoice missing → `invoice_not_found`; `still_lead` false → `not_lead`. The invoice lock (`L_inv`) serialises line edits against any payment or finalize on the same row, so the totals UPDATE always sees the state the INSERT saw.
 
 ### 5.3 `removeInvoiceLine` (draft only)
 
@@ -242,37 +244,41 @@ Key required (uniform client behaviour; CORS preflight on every money write).
 Rules: at least one line (`no_lines`); a $0 total finalizes to `open` with a zero
 balance (still voidable by the office; it never appears in collections because
 `total > paid` is false; the field shows "Nothing to collect"). Finalize
-SNAPSHOTS the request's signature onto the invoice in the same statement: the
-invoice's `signature_url/signature_name/signed_at` are the evidence of what was
-approved and are never written again; the request's own signature stays
-re-capturable (job sign-off) and a later invoice snapshots whatever is current
-then.
+SNAPSHOTS the request's signature onto the invoice in the same statement — but
+ONLY a signature that is newer than the invoice's last change
+(`r.signed_at >= invoices.updated_at`; `T` bumps `updated_at` on every line
+edit), so a morning sign-off or a signature given before a line was added is
+never frozen as approval of a different total; otherwise the snapshot columns
+stay NULL and the invoice reads "No signature". The invoice's
+`signature_url/signature_name/signed_at` are never written again; the request's
+own signature stays re-capturable (job sign-off) and a later invoice snapshots
+whatever is current and fresh then.
 Batch: `L_req`; `L_inv`;
-`UPDATE invoices SET state='open'::invoice_state, issued_at=now(), signature_url=r.signature_url, signature_name=r.signature_name, signed_at=r.signed_at, updated_at=now() FROM service_requests r WHERE r.id=invoices.service_request_id AND r.organization_id=$org AND invoices.id=$invoiceId AND invoices.organization_id=$org AND invoices.service_request_id=$rid AND invoices.state='draft'::invoice_state AND P_native AND ($leadOrAdmin) AND EXISTS (SELECT 1 FROM invoice_line_items WHERE invoice_id=$invoiceId AND organization_id=$org) RETURNING state` (`$leadOrAdmin` = `$stillLead` for the tech route, `TRUE` for the admin finalize route);
+`UPDATE invoices SET state='open'::invoice_state, issued_at=now(), signature_url = CASE WHEN r.signed_at >= invoices.updated_at THEN r.signature_url END, signature_name = CASE WHEN r.signed_at >= invoices.updated_at THEN r.signature_name END, signed_at = CASE WHEN r.signed_at >= invoices.updated_at THEN r.signed_at END, updated_at=now() FROM service_requests r WHERE r.id=invoices.service_request_id AND r.organization_id=$org AND invoices.id=$invoiceId AND invoices.organization_id=$org AND invoices.service_request_id=$rid AND invoices.state='draft'::invoice_state AND P_native AND ($leadOrAdmin) AND EXISTS (SELECT 1 FROM invoice_line_items WHERE invoice_id=$invoiceId AND organization_id=$org) RETURNING state` (`$leadOrAdmin` = `$stillLead` for the tech route, `TRUE` for the admin finalize route, whose `$rid` is the invoice's own `service_request_id`; a request-less draft — none exist today, invoices from estimates carry the estimate's request — uses the same statement with the join made optional: `FROM invoices i LEFT JOIN service_requests r …` written as scalar subqueries `(SELECT r.signature_url FROM service_requests r WHERE r.id = invoices.service_request_id AND r.organization_id=$org AND r.signed_at >= invoices.updated_at)`; `L_req` is skipped when `service_request_id` is null; no `still_lead` SELECT on the admin path);
 `SELECT state, (SELECT COUNT(*) FROM invoice_line_items WHERE invoice_id=$invoiceId AND organization_id=$org) AS lines FROM invoices WHERE id=$invoiceId AND organization_id=$org`; `SELECT ($stillLead)`.
 Outcome: CAS row → `{ ok: true, state: 'open', changed: true }`; no row and state ∈ {open, paid, refunded} → `{ ok: true, state, changed: false }`; draft with 0 lines → `no_lines`; void → `invoice_locked`; missing → `invoice_not_found`; not lead → `not_lead`. `due_date` stays NULL (M4 terms; the overdue heuristic's 30-day fallback applies, like every native invoice today).
 
 ### 5.5 `recordManualPayment` — the money rule
 
-Input `{ method: 'cash' | 'check' | 'other', amountCents ≥ 1, checkNumber? (1–32, only with check), isDeposit }`, `paymentId` (tech: `derivedId(scope,'payment')`; admin: `uuidv5(`${org}|${invoiceId}|payment|${clientToken}`, M3B_NAMESPACE)` from the dialog's token — ids are always server-derived and org-scoped, never client-chosen), `recordedBy`. The field route allows `cash`/`check` and `isDeposit = false`; the admin route also `other` and passes `isDeposit` through.
+Input `{ method: 'cash' | 'check' | 'other', amountCents ≥ 1, checkNumber? (1–32, only with check), isDeposit }`, `paymentId` (tech: `derivedId(scope,'payment')`; admin: `uuidv5(`${org}|payment|${clientToken}`, M3B_NAMESPACE)` from the dialog's token — org-scoped, NOT invoice-scoped, so a token reused on another invoice derives the SAME id and is caught by the match rule below; ids are always server-derived, never client-chosen), `recordedBy`. The field route allows `cash`/`check` and `isDeposit = false`; the admin route also `other` and passes `isDeposit` through.
 Preconditions (read): invoice exists, tenant, native (`synced_read_only`), state `open` (`invoice_not_chargeable` — a draft is never payable by cash or check, field or office, so the customer signs what they pay and line edits can never race a credit), `amountCents ≤ total − paid` (`exceeds_balance`).
 Batch: `L_req` (when the invoice has a request; else skipped); `L_inv`;
 claim `UPDATE invoices SET amount_paid_cents = amount_paid_cents + $amt, updated_at = now() WHERE id=$invoiceId AND organization_id=$org AND ($ridPredicate) AND state='open'::invoice_state AND P_native AND amount_paid_cents + $amt <= total_cents AND NOT EXISTS (SELECT 1 FROM payments WHERE id=$paymentId) AND ($leadOrAdmin) RETURNING amount_paid_cents, total_cents` (`$ridPredicate` = `service_request_id=$rid` on the tech path, `TRUE` for the office; `$leadOrAdmin` = `$stillLead` for the tech, `TRUE` for the admin path; the NOT EXISTS is global by id — the documented exception);
 `INSERT INTO payments (id, organization_id, invoice_id, provider, provider_payment_id, amount_cents, status, is_deposit, method, check_number, recorded_by) SELECT $paymentId, $org, $invoiceId, 'manual', NULL, $amt, 'succeeded'::payment_status, $isDeposit, $method, $checkNumber, $by WHERE EXISTS (SELECT 1 FROM invoices WHERE id=$invoiceId AND organization_id=$org AND xmin = pg_current_xact_id()::xid) ON CONFLICT (id) DO NOTHING`;
 `UPDATE invoices SET state = (CASE WHEN amount_paid_cents >= total_cents THEN 'paid' ELSE 'open' END)::invoice_state, updated_at = now() WHERE id=$invoiceId AND organization_id=$org AND EXISTS (SELECT 1 FROM payments WHERE id=$paymentId AND xmin = pg_current_xact_id()::xid) RETURNING state` (gated on the PAYMENT row being this transaction's — never on the invoice xmin, which the claim alone would satisfy);
-`SELECT id, invoice_id, amount_cents, method FROM payments WHERE id=$paymentId`; `SELECT state FROM invoices WHERE id=$invoiceId AND organization_id=$org`; `SELECT ($stillLead)`.
-Outcome: claim row → `{ ok: true, paymentId, invoiceState, created: true }`; claim empty and the payment row exists with the same `invoice_id`, `amount_cents`, `method` → `{ ok: true, paymentId, invoiceState, created: false }` (the first run landed); exists but differs → `payment_id_conflict` (409; the office dialog mints a new token); claim empty, no payment row: not lead → `not_lead`; state open → `exceeds_balance`; else `invoice_not_chargeable`. The claim's global NOT EXISTS runs in the same transaction, so the payment INSERT can be skipped only by a concurrent insert of the same derived id between the two statements, which the org-scoped derivation makes impossible in practice; the INSERT carries `RETURNING id` and the writer logs an invariant violation (ids only) if the claim returned a row and the INSERT did not.
+`SELECT id, invoice_id, amount_cents, method, check_number, is_deposit FROM payments WHERE id=$paymentId`; `SELECT state FROM invoices WHERE id=$invoiceId AND organization_id=$org`; `SELECT ($stillLead)`.
+Outcome: claim row → `{ ok: true, paymentId, invoiceState, created: true }`; claim empty and the payment row exists with the same `invoice_id`, `amount_cents`, `method`, `check_number`, `is_deposit` → `{ ok: true, paymentId, invoiceState, created: false }` (the first run landed); exists but differs in any of those → `payment_id_conflict` (409; the office dialog mints a new token); claim empty, no payment row: not lead → `not_lead`; state open → `exceeds_balance`; else `invoice_not_chargeable`. The claim's global NOT EXISTS runs in the same transaction, so the payment INSERT can be skipped only by a concurrent insert of the same derived id between the two statements, which the org-scoped derivation makes impossible in practice; the INSERT carries `RETURNING id` and the writer logs an invariant violation (ids only) if the claim returned a row and the INSERT did not.
 Why the NOT EXISTS: a re-run after a crash between the first run's commit and its `done` row must not credit twice; the payment row proves the credit happened (review-log round 4). Manual payments are never `pending`; `listStuckPayments` adds `provider <> 'manual'`. The receipt is sent by whichever attempt observed `created: true` (in its own `after()`), independent of the key row.
 
 ### 5.6 `refundPayment` on a manual payment (one batch, SQL state)
 
 For `pay.provider === 'manual'` the existing two-phase path (claim, provider call,
-batch) is replaced by ONE batch with `refundId = uuidv5(`${org}|${paymentId}|refund|${clientToken}`)` (admin dialog token):
+batch) is replaced by ONE batch with `refundId = uuidv5(`${org}|refund|${clientToken}`)` (admin dialog token; org-scoped, not payment-scoped, same reasoning as payments):
 `L_req` (if any) → `L_inv` → `SELECT 1 FROM payments WHERE id=$pid AND organization_id=$org FOR NO KEY UPDATE` →
 claim `UPDATE payments SET amount_refunded_cents = amount_refunded_cents + $amt, status = (CASE WHEN amount_refunded_cents + $amt >= amount_cents THEN 'refunded' ELSE 'succeeded' END)::payment_status, updated_at=now() WHERE id=$pid AND organization_id=$org AND provider='manual' AND status='succeeded'::payment_status AND amount_refunded_cents + $amt <= amount_cents AND NOT EXISTS (SELECT 1 FROM refunds WHERE id=$refundId) RETURNING id` →
 `INSERT INTO refunds (id, organization_id, payment_id, amount_cents, reason, provider_refund_id) SELECT $refundId, $org, $pid, $amt, $reason, NULL WHERE EXISTS (SELECT 1 FROM payments WHERE id=$pid AND organization_id=$org AND xmin = pg_current_xact_id()::xid) ON CONFLICT (id) DO NOTHING RETURNING id` →
 `UPDATE invoices SET amount_paid_cents = GREATEST(0, amount_paid_cents - $amt), state = (CASE WHEN GREATEST(0, amount_paid_cents - $amt) >= total_cents THEN 'paid' ELSE 'open' END)::invoice_state, updated_at=now() WHERE id=$inv AND organization_id=$org AND EXISTS (SELECT 1 FROM refunds WHERE id=$refundId AND xmin = pg_current_xact_id()::xid)` →
-final SELECTs (`SELECT payment_id, amount_cents FROM refunds WHERE id=$refundId`; invoice state). Replay only when the refund row matches `payment_id` and `amount_cents`, else `refund_id_conflict` (409).
+final SELECTs (`SELECT payment_id, amount_cents FROM refunds WHERE id=$refundId`; invoice state). Replay only when the refund row matches `payment_id`, `amount_cents` and `reason`, else `refund_id_conflict` (409).
 Ruling: a manual refund is "undo the recording" — the invoice returns to `open`
 whenever a balance remains and never becomes `refunded` (the office voids a
 fully-refunded, now `open` $0-paid invoice with the existing void action). Card
@@ -290,7 +296,7 @@ parameter makes a "provider undefined" check dead code):
 - `POST /api/portal/[token]/pay` → 409 `CARD_PAYMENTS_UNAVAILABLE` "Online payment isn't available yet." after the rate check and before the token resolves (no token information is needed to refuse). The portal page hides Pay now and shows "Pay your technician in person{, or call <phone>}." with the org's phone as a `tel:` link when one is configured.
 - `POST /api/admin/invoices/[id]/payments` with `method: 'card'` → 409 `CARD_PAYMENTS_UNAVAILABLE`; the admin dialog's method control shows Cash / Check / Other (no Card in M3b; M4 adds it behind the flag).
 - `enrollCustomer({ chargeFirstPeriod: true })` → the membership route refuses 409 `CARD_PAYMENTS_UNAVAILABLE` before calling it (no form control exists; API-only gate).
-- `reconcilePayment`: a `pending` payment whose `provider` is `mock` while cards are disabled is treated as a FAILED charge (the existing pending → failed CAS plus the un-claim, since the mock never moved money and the claim already credited the invoice — a permanent `noop` would leave a phantom credit); and its invoice state write becomes SQL: `state = (CASE WHEN amount_paid_cents >= total_cents THEN 'paid' ELSE 'open' END)::invoice_state WHERE … AND state IN ('open'::invoice_state,'paid'::invoice_state)` (a stale JS literal could overwrite a concurrent manual payment's `paid`).
+- `reconcilePayment`: the SELECT also reads `provider`; BEFORE `getCharge`, a `pending` payment whose `provider` is `mock` while cards are disabled is treated as a FAILED charge in ONE batch (the mock never moved money and the claim already credited the invoice — a permanent `noop` would leave a phantom credit): `UPDATE payments SET status='failed'::payment_status, updated_at=now() WHERE id=$pid AND organization_id=$org AND status='pending'::payment_status` then `UPDATE invoices SET amount_paid_cents = GREATEST(0, amount_paid_cents - $amt), state = (CASE WHEN GREATEST(0, amount_paid_cents - $amt) >= total_cents THEN 'paid' ELSE 'open' END)::invoice_state, updated_at=now() WHERE id=$inv AND organization_id=$org AND state IN ('open'::invoice_state,'paid'::invoice_state) AND EXISTS (SELECT 1 FROM payments WHERE id=$pid AND xmin = pg_current_xact_id()::xid)` (the existing two-statement failed branch is replaced by this batch for every provider); and the succeeded branch's invoice state write becomes SQL: `state = (CASE WHEN amount_paid_cents >= total_cents THEN 'paid' ELSE 'open' END)::invoice_state WHERE … AND state IN ('open'::invoice_state,'paid'::invoice_state)` (a stale JS literal could overwrite a concurrent manual payment's `paid`).
 - `integrations-status` keeps reporting `mock`; `seed-org.mjs` keeps writing `provider='mock'` rows (fictional history, not a charge path).
 Tests to update for the route gates: `tests/api/portal-pay-route.test.ts`, `tests/api/money-routes.test.ts` (the payments schema now requires `method`), `src/lib/portal/portal-queries.test.ts` is unaffected (no in-function gate).
 
@@ -330,9 +336,13 @@ In order: tech session (401) → `isSameOriginRequest` on writes (403 `FORBIDDEN
 | GET /api/tech/pricebook?scope=invoice&q= | — | active items of every type, server search (name/sku/description), `q` ≥ 2 chars, limit 50, `{ id, name, type, priceCents, sku }`, rate-limited `tech:pricebook:${userId}` (`adminRead`) | 200 |
 
 Every write names the invoice it targets (`invoiceId` in the body, so it is part
-of the request hash); the route resolves the request's newest live invoice and
-answers 409 `STALE` when the named one is not it (the office voided it, or a
-newer one exists). The existing `GET /api/tech/pricebook` (materials picker) is unchanged, and
+of the request hash). Lines and finalize require it to be the request's newest
+live invoice (else 409 `STALE`: the office voided it, or a newer one exists);
+payments and pay-link accept ANY non-void native invoice of the request (so an
+older open invoice listed in `otherOpen` can still be collected) and let the
+writer refuse (`invoice_not_chargeable`). Both checks run INSIDE the
+idempotency `run`, after the replay lookup — a retry of the payment that just
+flipped the invoice to `paid` replays `created: true` instead of meeting STALE. The existing `GET /api/tech/pricebook` (materials picker) is unchanged, and
 `addJobMaterial` now rejects `type = 'service'` items server-side (`item_not_found`)
 since service ids reach the client through the invoice search.
 
@@ -343,11 +353,11 @@ since service ids reach the client through the invoice search.
                     issuedAt, fromEstimate: boolean,
                     lines: [{ id, name, quantity, unitPriceCents, lineTotalCents }],      // lead only; ordered created_at, id
                     payments: [{ id, method, checkNumber, amountCents, status, createdAt }], // lead only
-                    signature: { state: 'none'|'present'|'erased'|'unavailable', signedAt, signatureName, url } }, // the INVOICE's snapshot once open/paid; while draft, the request's current signature
+                    signature: { state: 'none'|'present'|'erased'|'unavailable'|'estimate', signedAt, signatureName, url, fresh: boolean } }, // the INVOICE's snapshot once open/paid; while draft, the request's current signature with fresh = signedAt >= invoice.updatedAt (the approval sheet shows the pad unless fresh)
   otherOpen: [{ id, totalCents, balanceCents }],                   // other open native invoices on the request
   history: null | { id, state, totalCents },                       // newest paid/refunded/void when no live invoice
   materialsNotOnInvoice: [{ id, name, quantity, unitPriceCents }], // lead only, draft only
-  pendingWrite: boolean,                                           // an in_progress key younger than 2 min for this user on any invoice route of this job
+  pendingWrite: boolean,                                           // EXISTS an in_progress key younger than 2 min for (org, user) whose route LIKE '/api/tech/jobs/<rid>/%' (invoice AND signature routes; PK-prefix lookup)
   customerHasPhone,                                                 // boolean, no value
   isLead, onSite, externalInvoice,
   allowed: ('create'|'add_line'|'remove_line'|'finalize'|'record_payment'|'pay_link'|'sign')[] }
@@ -372,6 +382,7 @@ try/catch (`getStorageClient()` throws without R2 env) → `state: 'unavailable'
 | `invoice_voided` | 409 `INVOICE_VOIDED` | The office voided that invoice. Create a new one. |
 | `invoice_locked` | 409 `INVOICE_LOCKED` | This invoice is finalized. Changes need the office. |
 | `no_lines` | 409 `NO_LINES` | Add at least one item first. |
+| `already_billed` | 409 `ALREADY_BILLED` | That material is already on an invoice. |
 | `item_not_found` | 404 `ITEM_NOT_FOUND` | That item isn't available. |
 | `invoice_not_chargeable` | 409 `INVOICE_NOT_CHARGEABLE` | This invoice can't take a payment right now. |
 | `exceeds_balance` | 422 `EXCEEDS_BALANCE` | That's more than the balance due. |
@@ -395,11 +406,12 @@ invoice {{invoiceNumber}} ({{amount}}) is ready to view: {{payLink}}"), a null
 `customer_id` or no phone → `no_contact`, a missing template → `no_template`, the
 demo org (`organizationId === DEMO_ORG_ID`, from `@/lib/tenancy/organization`;
 `isDemoAccount` is an email check on an admin session and does not apply to
-technicians) → `demo_restricted`, and ORDER: (1) claim the per-invoice 2-minute
-cooldown `UPDATE invoices SET pay_link_sent_at = now() WHERE id=$i AND organization_id=$org AND (pay_link_sent_at IS NULL OR pay_link_sent_at < now() - interval '2 minutes') RETURNING pay_link_sent_at AS claimed`
+technicians) → `demo_restricted`, and ORDER: (1) read `$previous = pay_link_sent_at`, then claim the per-invoice
+2-minute cooldown with a JS timestamp `$now`: `UPDATE invoices SET pay_link_sent_at = $now WHERE id=$i AND organization_id=$org AND (pay_link_sent_at IS NULL OR pay_link_sent_at < $now - interval '2 minutes') RETURNING id`
 (0 rows → `cooldown`, BEFORE any token mint so a refused tap never rotates the
-link just sent), (2) mint the portal token, (3) queue. A definite failure in (2)
-or before the queue insert releases the claim with `SET pay_link_sent_at = $previous WHERE pay_link_sent_at = $claimed`;
+link just sent; the same pattern `sendInvoiceReminder` uses), (2) mint the
+portal token, (3) queue. A definite failure in (2) or before the queue insert
+releases the claim with `SET pay_link_sent_at = $previous WHERE pay_link_sent_at = $now`;
 a failure after the insert does not. No touch of `last_reminder_sent_at`.
 The link is sent regardless of the provider: the portal shows the invoice and,
 while the mock is active, "Pay your technician in person" (§5.7); the SMS copy says
@@ -415,9 +427,10 @@ per intent so a retry hashes the same bytes, and mints a new key when the pad is
 redrawn) → upload → `recordSignature` (unchanged guard). The request's signature
 is always re-capturable: it is the job sign-off. The evidence that matters for
 money is the snapshot finalize copies onto the invoice (§5.4), which no route
-writes afterwards. A re-capture deletes the previous R2 object in `after()`
-unless an invoice snapshot references the same URL (checked by
-`EXISTS (SELECT 1 FROM invoices WHERE organization_id=$org AND signature_url=$old)`).
+writes afterwards. `recordSignature` returns the previous URL atomically
+(`UPDATE service_requests … FROM (SELECT id, signature_url AS old FROM service_requests WHERE id=$rid AND organization_id=$org FOR UPDATE) o WHERE service_requests.id = o.id … RETURNING o.old`),
+and the route deletes that object in `after()` unless an invoice snapshot
+references it (`EXISTS (SELECT 1 FROM invoices WHERE organization_id=$org AND signature_url=$old)`).
 `getTechJobSummary` exposes `signedAt`; the job detail page shows the existing
 signature with "Sign again" instead of a bare pad.
 
@@ -447,16 +460,16 @@ Sections:
 2. **No invoice yet**: "Start from the N materials on this job." + "Create invoice" (h-12). History line when `history` is present ("Previous invoice: Paid $x").
 3. **Draft**: lines (`name · qty × unit · total`), 44 px remove per row; "Add item" bottom sheet (search ≥ 2 chars, 300 ms debounce, 44 px result rows with price, quantity stepper 1–999, "Add" keeps the sheet open for the next item); "Materials not on this invoice" rows with "Add"; totals (subtotal, tax with rate, total).
    **Customer approval** (h-12 primary, draft with ≥ 1 line): one bottom sheet with the signature pad, printed name, the total, and "Approve and finalize" → the client posts the SIGNATURE first (the request-level capture, its own key and Blob), then finalize (which snapshots it onto the invoice). If the signature step fails, nothing is finalized and the sheet shows the error with "Try again"; if finalize fails after the signature landed, the invoice is still a draft carrying the fresh job signature and "Approve and finalize" retries only finalize (the sheet shows the captured signature instead of the pad). $0 draft: sheet copy "Nothing to collect. This closes the invoice at $0 and locks the lines."
-4. **Open / Paid**: lines read-only, totals, "Balance due $x" / "Paid"; signature block (the invoice's snapshot: image + name + time; "No signature" when it was finalized without one, "Signature removed" when erased, "Signature unavailable" when R2 is unreachable); payments list ("Cash", "Check #1234", amount, time); **Record payment** (open, balance > 0): bottom sheet with a Cash | Check segmented control (Card absent), amount defaulting to the balance (`parseDollarsToCents`, max = balance with an inline error), check number (Check only, optional), "Record $x"; processing disables the sheet; success closes it, re-fetches, and shows "Payment recorded. A receipt is texted if the customer accepts texts." when `customerHasPhone`. **Send pay link** (open, balance > 0, a contact exists): secondary h-11 → SMS / Email (only channels on file) → "Send".
-5. Keys: a pure reducer `nextKeyState(state, event)` (tested in node) behind a thin `useIdempotencyKey` hook. States: `idle` → `armed(key, bodyHash)` when a sheet opens or a primary action is first tapped → `sent` → `resolved` (2xx or a deterministic 4xx: the key is spent) / `unknown` (network error, 5xx, `IN_PROGRESS`). Rules: the same key is reused for every retry while `armed`/`unknown`; **a changed body never gets a new key while the previous intent is `unknown`** — the client first re-sends the OLD body with the OLD key until the answer is definitive (a `done` replay shows the result; a 4xx spends the key; `IN_PROGRESS` keeps waiting), and only then mints a new key for the new body. The GET's `pendingWrite` shows "Still saving your last tap…" and disables primary actions while true.
+4. **Open / Paid**: lines read-only, totals, "Balance due $x" / "Paid"; signature block (the invoice's snapshot: image + name + time; "No signature" when it was finalized without one, "Signature removed" when erased, "Signature unavailable" when R2 is unreachable); payments list ("Cash", "Check #1234", amount, time); **Record payment** (open, balance > 0): bottom sheet with a Cash | Check segmented control (Card absent), amount defaulting to the balance (`parseDollarsToCents`, max = balance with an inline error), check number (Check only, optional), "Record $x"; processing disables the sheet; success closes it, re-fetches, and shows "Payment recorded. A receipt is texted if the customer accepts texts." when `customerHasPhone`. **Send pay link** (open, balance > 0, `customerHasPhone`): secondary h-11 → confirmation sheet "Text the invoice link to the customer?" → "Send".
+5. Keys: a pure reducer `nextKeyState(state, event)` (tested in node) behind a thin `useIdempotencyKey` hook. States: `idle` → `armed(key, bodyHash)` when a sheet opens or a primary action is first tapped → `sent` → `resolved` (2xx or a deterministic 4xx: the key is spent) / `unknown` (network error, 5xx, `IN_PROGRESS`). Rules: the same key is reused for every retry while `armed`/`unknown`; **a changed body never gets a new key while the previous intent is `unknown`** — the client first re-sends the OLD body with the OLD key until the answer is definitive (a `done` replay shows the result; a 4xx spends the key; `IN_PROGRESS` keeps waiting), and only then mints a new key for the new body. The GET's `pendingWrite` shows "Still saving your last tap…" and disables primary actions while true. `unknown` intents (key, body hash, body) are persisted in `sessionStorage` per job so a reload cannot mint a fresh key while a request may still be in flight; the reducer rehydrates them on mount. The spent-vs-unknown decision uses the same `STORED_CODES` constant as the server (§4).
 6. Error handling: network error / 5xx → GET; if the state advanced (new invoice/line/payment/signature), show it and drop the intent; else "Try again" with the same key. 409 `IN_PROGRESS` → wait 2 s, GET, same rule (the server takes over after 2 minutes). 409 `STALE`/`INVOICE_LOCKED`/`INVOICE_VOIDED` → re-fetch and show the message. 422 `EXCEEDS_BALANCE` → re-fetch (the balance changed), new key. 422 `IDEMPOTENCY_KEY_REUSED` → re-fetch; when `details.storedStatus` is 2xx: "Your last change was already saved. Check the invoice and try again."; otherwise: "That tap didn't go through. Try again." with a new key. A stored 500 from pay-link → "Couldn't send the link. Try again." with a new key on the next tap. The signature image re-fetches the GET on `onError` (the signed URL expires after 15 minutes).
 
 ## 8. Admin and portal surfaces
 
-- Admin invoice detail: "Record payment" card with method (Cash / Check / Other), check number for Check, amount, deposit checkbox; the dialog mints a `clientToken = crypto.randomUUID()` when it opens (new token after a success or an `ID_CONFLICT`) and sends it; the server derives `paymentId` from it (§5.5), so a double-click or a browser retry records once. Draft invoices are not payable by cash/check (409 `INVOICE_NOT_CHARGEABLE` "Finalize the invoice first."); a new **Finalize** button on native drafts calls `POST /api/admin/invoices/[id]/finalize` (`finalizeInvoice` with `$leadOrAdmin = TRUE`, audit `invoice_finalized`) so a draft a technician left behind is never stranded; `card` on a draft keeps today's `takePayment` behaviour behind the gate; because `T` and line removal require `amount_paid_cents = 0`, lines freeze once any card deposit lands (relevant in M4). Payment rows show the method chip and check number. The refund dialog mints its token the same way; manual refunds use §5.6 and show the manual copy.
+- Admin invoice detail: "Record payment" card with method (Cash / Check / Other), check number for Check, amount, deposit checkbox; the dialog mints a `clientToken = crypto.randomUUID()` when it opens (new token after a success or an `ID_CONFLICT`) and sends it; the server derives `paymentId` from it (§5.5), so a double-click or a browser retry records once. Draft invoices are not payable by cash/check (409 `INVOICE_NOT_CHARGEABLE` "Finalize the invoice first."); a new **Finalize** button on native drafts calls `POST /api/admin/invoices/[id]/finalize` (admin session, `isUuid`, rate key `admin:invoice-finalize:${userId}`, `finalizeInvoice` with `$leadOrAdmin = TRUE` and `$rid` = the invoice's request, reason map `no_lines` → 409 `NO_LINES`, `invoice_locked` → 409 `INVOICE_LOCKED`, `invoice_not_found` → 404, `synced_read_only` → 409 `INVOICE_SYNCED_READ_ONLY`; audit `invoice_finalized`, underscore convention like `invoice_created`/`payment_taken`) so a draft a technician left behind is never stranded; `card` on a draft keeps today's `takePayment` behaviour behind the gate; because `T` and line removal require `amount_paid_cents = 0`, lines freeze once any card deposit lands (relevant in M4). Payment rows show the method chip and check number. The refund dialog mints its token the same way; manual refunds use §5.6 and show the manual copy.
 - Admin payments route schema: `{ clientToken: uuid, method: 'card'|'cash'|'check'|'other', amountCents, checkNumber?, isDeposit? }` via `readJsonBody`; audit `payment_recorded`. Test budget: `tests/api/money-routes.test.ts` (7 payment cases + 5 refund cases rewritten for the new bodies and the `recordManualPayment` mock), `tests/api/portal-pay-route.test.ts` (token-path cases now need a non-mock provider stub via a `cardPaymentsEnabled` mock to keep their coverage, plus one new gate case).
 - Accounting CSV: payment memo `Payment <id> (invoice <invoiceId>, <method>)`; header unchanged.
-- Portal: button hidden + route gate + phone line (§5.7). The admin invoice document renders the request's signature (signed read URL) when present.
+- Portal: button hidden + route gate + phone line (§5.7). The admin invoice document renders the INVOICE's own signature snapshot (signed read URL) for open/paid/refunded/void invoices; for a draft it shows the request's current signature labelled "Job signature (not yet on the invoice)".
 - Aggregates: no change (they filter `status`/`fieldpulse_payment_id`, so manual payments count as collected); `listStuckPayments` adds `provider <> 'manual'`.
 - Probes make the minted technician the lead by SQL (`UPDATE appointment_assignments SET is_lead …` on the throwaway request); `mint-tech-session.mjs` is unchanged. Probe fetches send an `Origin` header (the same-origin guard denies a missing one).
 
@@ -488,10 +501,10 @@ never matches — a verified defect).
 3. Manual refunds undo the recording (invoice back to `open` while a balance remains, never `refunded`); card refunds keep their semantics with the state computed in SQL.
 4. $0 drafts finalize to `open` (voidable), not `paid`.
 5. No due date in M3b; `issued_at` is set.
-6. The invoice carries its own signature snapshot from finalize (immutable evidence); the job-level signature is always re-capturable. The approval sheet signs first, then finalizes.
+6. The invoice carries its own signature snapshot from finalize — only a signature newer than the invoice's last change; otherwise "No signature" (immutable evidence); the job-level signature is always re-capturable. The approval sheet signs first, then finalizes.
 7. A key with a different hash is 422, stale or not; only 2xx and deterministic 4xx are stored; everything else deletes the row so a retry re-evaluates.
-8. Office money forms send a client token; the server derives org-scoped ids from it; a token reused for a different invoice/amount is `ID_CONFLICT`, never a silent success.
+8. Office money forms send a client token; the server derives org-scoped (not invoice-scoped) ids from it; a token reused for a different invoice, amount, method, check number or deposit flag is `ID_CONFLICT`, never a silent success.
 9. The pay link is SMS only, sent regardless of the provider; cooldown 2 minutes per invoice claimed BEFORE the token mint.
-10. Every tech write names its `invoiceId`; a stale target is 409 `STALE`.
+10. Every tech write names its `invoiceId`; lines/finalize require the newest live invoice (else 409 `STALE`); payments/pay-link accept any non-void native invoice of the request; replay precedes both checks.
 11. Materials are billed at most once per request across non-void invoices (`job_material_id` link); a sold-estimate job bills materials through the office.
 12. Tech copy says "job"; office copy says "request".

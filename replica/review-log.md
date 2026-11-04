@@ -374,3 +374,36 @@ the 0053 INSERT; `customer_id` guard on receipts; test budget listed.
 - "Adopt drafts only and let a native draft sit beside an estimate-born open
   invoice" — re-opens double billing; the office bills materials on
   sold-estimate jobs instead.
+
+## Spec round 7 — 2026-11-04 (M3b spec v3 → v4 FINAL)
+
+One fresh critic, combined lens on the v3 changes. Verdict: no sign-off; 0
+blockers, 5 majors, 7 minors — each round narrower (2+27 → 2+13 → 0+5).
+
+### Established
+- A finalize snapshot of a signature older than the invoice's last change is
+  not evidence → snapshot only when `signed_at >= invoices.updated_at`, else
+  NULL ("No signature"); the sheet shows the pad unless `signature.fresh`.
+- The admin document must render the invoice's snapshot, not the request's.
+- Reconcile's failed branch was two statements and never touched state → one
+  batch with the SQL CASE, for every provider; mock branch before `getCharge`.
+- A STALE check before replay defeats the retry it exists for → lines and
+  finalize require the newest live invoice, payments and pay-link accept any
+  non-void native invoice of the request; both run inside `run` after replay.
+- Invoice-scoped office ids could not catch a token reused on another
+  invoice → `uuidv5(org|payment|token)`; replay match includes check number
+  and deposit flag.
+
+### Applied
+All of the above plus `already_billed`; one shared `STORED_CODES` module;
+pay-link claim with a JS `$now` (same as the reminder) and release `WHERE
+pay_link_sent_at = $now`; `recordSignature` returns the previous URL
+atomically; estimate-born invoices show the estimate's acceptance; admin
+finalize route details (rate key, map, `$rid`); `pendingWrite` covers the
+signature route; `unknown` intents persist in `sessionStorage`; "Email"
+removed from the pay-link sheet.
+
+### Verdict
+Converged-enough: no blockers in round 3, the remaining majors were
+refinements of rules introduced in v3 and are applied; the plan review and
+the SDD task reviews are the net for what implementation surfaces.
