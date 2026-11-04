@@ -20,6 +20,16 @@ session for `canRefund`) · detail client
 `src/app/api/admin/invoices/[id]/pay-link/route.ts` · collectible helpers
 `src/lib/admin/invoice-collectible.ts` · queries `src/lib/admin/invoice-queries.ts`
 · reminder trigger `src/lib/communication/money-triggers.ts`
+· record payment card `src/components/admin/invoices/record-payment-card.tsx` ·
+finalize button `src/components/admin/invoices/finalize-button.tsx` · document
+`src/components/admin/invoices/invoice-document.tsx` + signature model
+`invoice-signature-model.ts` · copy helpers `src/lib/admin/invoice-payment-copy.ts`
+· payments API `src/app/api/admin/invoices/[id]/payments/route.ts` · finalize API
+`src/app/api/admin/invoices/[id]/finalize/route.ts` · refund API
+`src/app/api/admin/payments/[id]/refund/route.ts` · writers
+`src/lib/admin/invoice-field-writes.ts` (finalize) and
+`src/lib/admin/invoice-payment-writes.ts` (`recordManualPayment`,
+`refundManualPayment`)
 · tables `invoices` `payments` `invoice_line_items` (schema `src/lib/db/schema.ts`).
 
 **Data flow:** `useInvoices` fetches `/api/admin/invoices` with page, state,
@@ -68,6 +78,63 @@ polls `/api/admin/payments/reconcile` on mount (best-effort, never throws).
 - Compose `PageShell`, `PageHeader`, `Pager`, `SegmentedControl` from
   `src/components/admin/ui/`; status colors via `src/lib/admin/status-colors.ts`.
 
+**Collect (M3b) — office money controls:**
+- `payments.method` (`card|cash|check|other`, check constraint; FieldPulse
+  mirrors are `other`), `check_number` (only with `check`), `recorded_by`
+  (user, `ON DELETE SET NULL`). Rows show a method chip ("Check · #1042").
+  The accounting CSV memo is `Payment <id> (invoice <invoiceId>, <method>)`.
+- **Record payment** (`record-payment-card.tsx`): Cash / Check / Other (no
+  Card while the provider is the mock), amount, check number for Check,
+  Deposit. The form mints `clientToken = mintKey()` when it opens and sends
+  `{ clientToken, method, amountCents, checkNumber?, isDeposit? }`. The server
+  derives the payment id `officeId("payment", org, clientToken)`. This id is
+  org-scoped, not invoice-scoped, so a double-click or a retry records once,
+  and a token reused for another invoice/amount/method → 409 `ID_CONFLICT`
+  (never a silent success). The token is re-minted after a success or an
+  `ID_CONFLICT` (`shouldRemintToken`). Shown only when
+  `canRecordPayment` (state `open` + chargeable): drafts are never payable by
+  hand (server: 409 `INVOICE_NOT_CHARGEABLE` "Finalize the invoice first.").
+  201 when created, 200 on a replay (no audit/receipt). Audit
+  `payment_recorded` (ids + method + state only). Receipt + `processPendingJobs`
+  in `after()` only when the invoice has a customer.
+- **Card gate:** `method: 'card'` → 409 `CARD_PAYMENTS_UNAVAILABLE` "Online
+  payment isn't available yet." while `cardPaymentsEnabled()`
+  (`src/lib/payments/card-enabled.ts`, provider ≠ mock) is false. The same gate
+  covers the portal pay route and membership `chargeFirstPeriod`.
+- **Finalize** (native drafts, two-click confirm): `POST
+  /api/admin/invoices/[id]/finalize` → `finalizeInvoice` with the office actor
+  (lead check = TRUE, L_req = the invoice's request). 200 `{ invoiceId, state,
+  changed }`; `NO_LINES` / `INVOICE_LOCKED` / `INVOICE_SYNCED_READ_ONLY` 409;
+  audit `invoice_finalized` only when changed. This is how a draft a technician
+  left behind gets unstuck. A $0 draft finalizes to `open` (voidable), not
+  `paid`. No due date is set; `issued_at` is.
+- **Refunds:** the refund form mints its own token each time it opens (`refundId
+  = officeId("refund", …)`). `refundPayment` delegates `provider = 'manual'`
+  to `refundManualPayment`. A manual refund only RECORDS the refund, with no
+  provider call, and puts the invoice back to `open` while a balance remains:
+  a full manual refund leaves `open` with `amount_paid_cents = 0`, never
+  `refunded`. The payment row may read `refunded`. The success copy says
+  "Refund recorded. Return the money to the customer yourself."
+  (`refundSuccessCopy`). Card refunds keep their semantics, with the invoice
+  state computed in SQL.
+- **Signature in the document:** open/paid/refunded/void invoices render the
+  INVOICE's own snapshot ("Customer signature", 900 s signed URL). A draft
+  shows the request's current signature labelled "Job signature (not yet on
+  the invoice)". Other states: `erased` → "Signature removed";
+  `unavailable` → "Signature couldn't be loaded." (no R2 creds on dev);
+  `none` → nothing. An image `onError` refetches up to 2 times.
+- **Reconcile:** a pending `mock` payment while cards are disabled is a
+  FAILED charge. One batch marks it failed and un-claims the invoice credit
+  (gated on that write's xmin). Drafts are included and stay drafts; the
+  state otherwise follows `CASE WHEN paid >= total THEN 'paid' ELSE 'open'`.
+- `createInvoiceFromSoldEstimate` on a request refuses while the request has a
+  native field DRAFT (`request_has_draft`); it coexists with an open field
+  invoice. `listStuckPayments` skips `provider = 'manual'` (manual payments
+  are never pending).
+- Erasing a customer nulls `signature_url`/`signature_name` on their requests
+  AND invoices (`signed_at` kept) and deletes the R2 objects (see
+  `src/lib/admin/erasure-queries.ts`).
+
 **Gotchas:**
 - The SummaryBand is suppressed during initial load (`!isLoading`) to avoid the
   zero-data flash before stats arrive — do not remove the guard.
@@ -79,5 +146,8 @@ polls `/api/admin/payments/reconcile` on mount (best-effort, never throws).
 **Verify changes:** `npx vitest run src/lib/admin/invoice-collectible.test.ts
 src/lib/admin/invoice-list-pagination.test.ts src/lib/admin/invoice-queries.test.ts
 src/lib/admin/invoice-synced-guards.test.ts src/lib/admin/invoice-queries-list.test.ts
-src/lib/communication/send-invoice-reminder.test.ts`
+src/lib/communication/send-invoice-reminder.test.ts src/lib/admin/invoice-payment-copy.test.ts
+src/lib/admin/invoice-payment-writes.test.ts src/lib/admin/invoice-field-writes.test.ts
+src/components/admin/invoices/invoice-signature-model.test.ts
+tests/api/money-routes.test.ts tests/api/admin-invoice-finalize.test.ts`
 · visual via admin-pages recipe.

@@ -1,8 +1,8 @@
-## Parity: 44.9 / 100
+## Parity: 45.9 / 100
 
-features 44.9  (275 counted, must-haves 50 of 111 done)
+features 45.9  (275 counted, must-haves 53 of 111 done)
 
-Not shippable yet: 61 must-have features are not done.
+Not shippable yet: 58 must-have features are not done.
 
 ## By area, weakest first
 - integrations                  22.7  (8 features)
@@ -15,14 +15,14 @@ Not shippable yet: 61 must-have features are not done.
 - memberships                   37.5  (18 features)
 - intake                        39.5  (16 features)
 - marketing                     42.9  (4 features)
-- tech-app                      45.1  (29 features)
 - comms                         46.3  (11 features)
 - estimates                     49.0  (22 features)
 - crm                           50.0  (29 features)
 - dispatch                      50.0  (25 features)
-- payments                      52.9  (7 features)
+- tech-app                      51.4  (29 features)
 - jobs                          56.7  (26 features)
 - reporting                     56.7  (8 features)
+- payments                      61.8  (7 features)
 - scheduling                    68.2  (13 features)
 
 ## Missing, in build order
@@ -42,7 +42,6 @@ Not shippable yet: 61 must-have features are not done.
 - [must] tech-app: Offline mode with cached jobs and pricebook, no  (FP+ST)
 - [must] tech-app: Present estimate with options on site, no  (FP+ST; estimates are admin-only)
 - [must] tech-app: Sold items onto invoice now or later, no  (ST)
-- [must] tech-app: Take payment in the field, no  (ST; nothing under /api/tech)
 - [must] comms: Manual send to customer, partial  (FP; /admin/conversations SMS reply only)
 - [must] comms: On-the-way text with tracking link, partial  (FP+ST; technician_enroute template - no en-route action or tracking link)
 - [must] comms: Two-way SMS inbox, partial  (FP+ST; /admin/conversations - no polling and SMS-only reply)
@@ -64,7 +63,7 @@ Not shippable yet: 61 must-have features are not done.
 - [must] intake: Lead capture from non-booking contact, partial  (ST; /api/cron/booking-recovery recovers abandoned intakes - no lead entity)
 - [must] intake: Online booking widget / booking portal, partial  (FP+ST; /embed chat widget books - no standalone booking page)
 - [must] integrations: QuickBooks Online sync, partial  (FP+ST; /admin/accounting CSV/IIF export - no QBO API)
-- [must] invoicing: Invoice line items from pricebook, partial  (ST; lines copied from estimate - no invoice line editor)
+- [must] invoicing: Invoice line items from pricebook, partial  (ST; field draft lines from the pricebook and job materials (tech S40) - no office invoice line editor; estimate-born invoices copy estimate lines)
 - [must] invoicing: Partial payments and deposits, partial  (FP; /api/admin/invoices/[id]/payments partial + deposit flag - no progress billing)
 - [must] invoicing: Tax zones with multiple and automatic rates, partial  (FP+ST; tax_rates single default - no zones)
 - [must] jobs: Job cancel with reasons and memo (and uncancel), partial  (ST; cancelled status via PATCH /api/admin/requests/[id] - no cancel reason)
@@ -76,7 +75,6 @@ Not shippable yet: 61 must-have features are not done.
 - [must] memberships: Membership visit and renewal reminders, partial  (FP; visit jobs generated - no membership-renewal trigger)
 - [must] memberships: Recurring service types attached to location, partial  (ST; visitsPerYear per customer - no seasonal types or location link)
 - [must] payments: Online card and ACH payment, partial  (FP+ST; /api/portal/[token]/pay MOCK provider - Stripe adapter not built)
-- [must] payments: Record manual payments (cash / check / types), partial  (FP+ST; /api/admin/invoices/[id]/payments - method tracking unconfirmed)
 - [must] platform: Audit trail on records, partial  (ST; /admin/audit-log action-level - no per-record history)
 - [must] pricebook: Member price and add-on price, partial  (ST; memberPriceCents - no add-on price)
 - [must] pricebook: Pricebook category tree, partial  (ST; pricebook_categories table - no category UI)
@@ -84,7 +82,6 @@ Not shippable yet: 61 must-have features are not done.
 - [must] scheduling: Capacity by open vs total hours per slot, partial  (ST; capacity_reservations slot counts - no hours-based capacity)
 - [must] scheduling: Technician shifts (normal / on-call / time-off) with repeat, partial  (FP+ST; on-call / time-off / non-job rows; no repeat rule)
 - [must] team-settings: Roles with granular permissions, partial  (FP+ST; super_admin/admin/technician only)
-- [must] tech-app: Invoice presentation and signature on site, partial  (ST; /api/tech/jobs/[id]/signature job sign-off - no invoice presentation)
 - [must] tech-app: Location info tab (history / opportunities / recurring), partial  (ST; /tech/jobs/[id] summary only)
 - [must] tech-app: Photos / video / files on job with quality setting, partial  (FP+ST; /api/tech/jobs/[id]/photo - photos only)
 - [should] comms: Attach files to communications, no  (FP)

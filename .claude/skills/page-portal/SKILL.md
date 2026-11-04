@@ -76,9 +76,19 @@ Review checks `status === 'responded'` to show the already-recorded state.
   on FTC/Google ToS). Do not accidentally add logging of the feedback field.
 - The portal pay seam (`/api/portal/[token]/pay`) is a mock payment path — no real
   payment processor is wired; do not treat it as production billing.
+- **Pay gate (M3b):** while `cardPaymentsEnabled()` is false (the mock
+  provider) the pay route answers 409 `CARD_PAYMENTS_UNAVAILABLE` "Online
+  payment isn't available yet." right after the rate check, BEFORE
+  `resolvePortalToken`, so the gate never hits the token table. The page hides
+  Pay now and shows `portalPaymentNotice` (`src/lib/portal/portal-notice.ts`,
+  pure): "Pay your technician in person.", or "Pay your technician in person,
+  or call <phone>." with a `tel:` link (`telHref`) when the org's
+  `businessInfo.phone` is set. The technician's SMS pay link lands here, so it
+  says "view", never "pay".
 
 **Verify changes:**
 - `npx vitest run src/lib/portal/portal-queries.test.ts`
 - `npx vitest run src/lib/reviews/review-queries.test.ts`
 - `npx vitest run src/lib/analytics-path.test.ts`
+- `npx vitest run src/lib/portal/portal-notice.test.ts tests/api/portal-pay-route.test.ts`
 - Gate: `npx tsc --noEmit`

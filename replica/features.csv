@@ -131,8 +131,8 @@ Equipment barcode / serial capture,tech-app,should,yes,partial,ST; serial field 
 Location info tab (history / opportunities / recurring),tech-app,must,yes,partial,ST; /tech/jobs/[id] summary only
 Present estimate with options on site,tech-app,must,yes,no,FP+ST; estimates are admin-only
 Sold items onto invoice now or later,tech-app,must,yes,no,ST
-Invoice presentation and signature on site,tech-app,must,yes,partial,ST; /api/tech/jobs/[id]/signature job sign-off - no invoice presentation
-Take payment in the field,tech-app,must,yes,no,ST; nothing under /api/tech
+Invoice presentation and signature on site,tech-app,must,yes,yes,ST; S40 /tech/jobs/[id]/invoice - lines + totals on the phone and a customer approval sheet (signature then finalize; the invoice snapshots a fresh signature)
+Take payment in the field,tech-app,must,yes,yes,ST; manual cash/check via POST /api/tech/jobs/[id]/invoice/payments (idempotency key) + SMS pay link; card in the field is M4
 Tech scorecard in app,tech-app,should,yes,no,ST; scorecards are admin-only
 Timeclock and timesheets (general + per job),tech-app,must,yes,yes,"FP+ST; general clock (/api/tech/time) plus per-job time entries, Timesheets dialog in staff - no GPS or backdating"
 Job timesheets from status timestamps,tech-app,must,yes,yes,ST; status taps write time entries (auto) alongside manual ones - no GPS or backdating
@@ -165,7 +165,7 @@ Log follow-up with templates and next date,estimates,must,yes,partial,ST; Log fo
 Automated unsold-estimate follow-up (SMS / email / AI agent),estimates,should,addon,no,ST
 Convert estimate to invoice,invoicing,must,yes,yes,FP; POST /api/admin/invoices with estimateId
 Invoice auto-created at booking,invoicing,must,yes,no,ST; invoices only from estimates
-Invoice line items from pricebook,invoicing,must,yes,partial,ST; lines copied from estimate - no invoice line editor
+Invoice line items from pricebook,invoicing,must,yes,partial,ST; field draft lines from the pricebook and job materials (tech S40) - no office invoice line editor; estimate-born invoices copy estimate lines
 Invoice themes / company profiles / display toggles,invoicing,should,yes,no,FP
 Progress billing and automatic deposit invoices,invoicing,could,yes,no,FP
 Partial payments and deposits,invoicing,must,yes,partial,FP; /api/admin/invoices/[id]/payments partial + deposit flag - no progress billing
@@ -182,7 +182,7 @@ GL accounts / journal entries / AP bills / period close,invoicing,could,yes,no,S
 AI invoice anomaly review,invoicing,could,addon,no,ST
 Online card and ACH payment,payments,must,yes,partial,FP+ST; /api/portal/[token]/pay MOCK provider - Stripe adapter not built
 Pay link without login,payments,must,yes,yes,FP+ST; /api/admin/invoices/[id]/pay-link
-Record manual payments (cash / check / types),payments,must,yes,partial,FP+ST; /api/admin/invoices/[id]/payments - method tracking unconfirmed
+Record manual payments (cash / check / types),payments,must,yes,yes,FP+ST; payments.method (card/cash/check/other) + check_number + recorded_by; office Record payment with a client token and the tech payment route
 Refunds linked to payment,payments,must,yes,yes,FP+ST; /api/admin/payments/[id]/refund
 Saved payment method on file,payments,should,yes,no,FP+ST
 Failed card auto-retry,payments,should,yes,no,FP

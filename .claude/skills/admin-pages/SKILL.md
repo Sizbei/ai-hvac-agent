@@ -85,6 +85,45 @@ error copy ("Couldn't save X. Please try again."), never err.message or
   `src/lib/ai/output-guardrail.ts` must not be touched (chat streaming's
   safety proof depends on the regex shape — see page-chat skill).
 
+## Money writes (M3b recipes)
+
+- **Idempotency (tech money POSTs):** `withIdempotency(scope, hash, run)` in
+  `src/lib/http/idempotency.ts`. Scope = `(organization_id, user_id, route =
+  the literal request path, key)` from the `Idempotency-Key` header (1–64
+  `[A-Za-z0-9_-]`). The hash is `canonicalHash(body)` (an empty body is `{}`;
+  multipart uses `multipartHash`). Entity ids come from `ids.id(n)` =
+  `derivedId` (uuidv5 of `org|user|route|key|n`), so a re-run writes the same
+  rows (`ON CONFLICT (id) DO NOTHING`). The winner stores the FULL response
+  envelope when it is 2xx or a 4xx whose code is in `STORED_CODES`
+  (`idempotency-codes.ts`, shared with the client); otherwise it releases the
+  key. Same key + same hash → replay of the stored status (a replayed 201 is a
+  201). A different hash → 422 `IDEMPOTENCY_KEY_REUSED`. An `in_progress` key
+  younger than 2 minutes → 409 `IN_PROGRESS` with Retry-After; an older one is
+  taken over. Deviation from spec §4: `STORED_CODES` includes `SEND_FAILED`
+  (a pay-link SMS may already have gone out).
+- **Office client token:** office money forms (Record payment, Refund) mint a
+  `clientToken` when the form opens and send it. The server derives
+  `officeId("payment"|"refund", org, token)`, which is org-scoped and never
+  invoice-scoped. Writers read the by-id row FIRST: a full match →
+  `created: false`; any difference → 409 `ID_CONFLICT`.
+- **Mock gate:** while `cardPaymentsEnabled()` is false (provider = mock),
+  card paths refuse with 409 `CARD_PAYMENTS_UNAVAILABLE`: the portal pay route
+  (before token resolution), the admin payments route `method: 'card'`, and
+  membership `chargeFirstPeriod`. Never offer a Card option in UI on the mock.
+- **Queue-drain probe guard:** `processPendingJobs()` drains EVERY org's due
+  jobs through real Twilio. Before any probe or screenshot run that could
+  queue a message (a payment on an invoice with a customer, a pay link), run
+  `SELECT count(*) FROM communication_jobs WHERE status='pending' AND
+  scheduled_for <= now() + interval '15 minutes'` and ABORT unless it is 0.
+  Never drain on dev while real customers' jobs are pending. Cancel any job
+  the probe queued (`status='cancelled'`). Screenshot fixtures pay invoices
+  with a null `customer_id`.
+- **Tech sessions for probes:** `MINT_ORG_ID=<org> npx tsx
+  scripts/agent/mint-tech-session.mjs` pins the technician to that org
+  (without it you get whichever technician comes first, usually the
+  FieldPulse-connected default org). Assert the token's `organizationId`
+  before any fetch.
+
 ## Setup guide recipes
 
 - Deep link that opens a dialog: `useOpenFromParam(key, allowedValues, open)` from

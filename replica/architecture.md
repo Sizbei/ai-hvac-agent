@@ -232,11 +232,11 @@ and request.
 | POST /api/admin/requests/[id]/appointments/[aid]/assignments, DELETE …/assignments/[tid] | add a non-lead technician to a visit (incl. visit #1); remove a row without progress | admin | technicianId | assignments |
 | POST /api/tech/time, GET /api/tech/time | general clock in/out (`kind = 'general'`, one open entry per tech enforced by a partial unique index) | tech | action | entry |
 | GET /api/admin/timesheets (S25, minimal) | entries per tech per day incl. general | admin | from, to | rows |
-| **M3b** (money rules: `recordManualPayment` = one batch [invoice claim `… AND NOT EXISTS (SELECT 1 FROM payments WHERE id = $pid)`] then [INSERT payment `status='succeeded'`, `provider='manual'`, id = uuid v5 of the key, gated on the invoice xmin]; `refundPayment` on `provider='manual'` records without a provider call; the mock gate (`getPaymentProvider().name === 'mock'`) also covers the admin payments route and membership charges, not only the portal; FieldPulse-mirrored payments backfill `method='other'`) POST /api/tech/jobs/[id]/invoice | adopt or create the single native draft for the request (`invoices_one_native_draft_per_request_idx` pulled into M3b); lines seeded from the job's materials; 409 when a FP/HCP invoice exists | lead | idempotencyKey | invoice (no cost fields) |
+| **M3b** (SHIPPED 2026-11-04, see the M3b build-order entry for deviations; money rules: `recordManualPayment` = one batch [invoice claim `… AND NOT EXISTS (SELECT 1 FROM payments WHERE id = $pid)`] then [INSERT payment `status='succeeded'`, `provider='manual'`, id = uuid v5 of the key, gated on the invoice xmin]; `refundPayment` on `provider='manual'` records without a provider call; the mock gate (`getPaymentProvider().name === 'mock'`) also covers the admin payments route and membership charges, not only the portal; FieldPulse-mirrored payments backfill `method='other'`) POST /api/tech/jobs/[id]/invoice | adopt or create the single native draft for the request (`invoices_one_native_draft_per_request_idx` pulled into M3b); lines seeded from the job's materials; 409 when a FP/HCP invoice exists | lead | idempotencyKey | invoice (no cost fields) |
 | POST …/invoice/lines, DELETE …/lines/[lid] | `{ pricebookItemId, quantity }` while `draft`; the server snapshots name/price/cost; totals recomputed in the same batch | lead | idempotencyKey | invoice |
 | POST …/invoice/finalize | CAS `draft → open` (freezes lines) | lead | idempotencyKey | invoice |
 | POST …/invoice/payments | `{ method: 'cash'\|'check', amountCents, checkNumber? }` against `state = 'open'` only, through `recordManualPayment` (atomic balance claim, no provider call, `provider = 'manual'`, `payments.method`); payment id derived from the idempotency key (uuid v5) so a replay reuses the row | lead | idempotencyKey | payment + invoice |
-| POST …/invoice/pay-link | SMS/email the portal link (tech version of the admin pay-link) | lead | channel | sent |
+| POST …/invoice/pay-link | SMS/email the portal link (tech version of the admin pay-link); shipped SMS only, `{ invoiceId }`, 2-minute cooldown on `invoices.pay_link_sent_at` | lead | channel | sent |
 | **M3c** POST /api/tech/jobs/[id]/estimates, POST …/estimates/[eid]/present, POST …/sign | build options from the pricebook (no templates, no deposit), present on device, accept with signer name + signature via a `markEstimateSold` variant (actor tech), then sold lines append to the draft invoice exactly once | lead | options; signature | estimate |
 | POST /api/tech/jobs/[id]/equipment | add / replace equipment at the location (`replaced_by_equipment_id`, `retired_at`) | tech | fields, replacesId | equipment |
 | **M3d** GET /api/tech/forms, GET/PUT /api/tech/jobs/[id]/forms/[formId] | fill a form; PUT upserts on `(service_request_id, appointment_id, form_id)` | tech | values | submission |
@@ -519,6 +519,46 @@ until a tech can finish and collect on a job here.
      invoice reads paid with no office action; replaying invoice-create
      and payment with the same key creates one of each; a different body
      with the same key gets 422; no card option appears on the mock.
+     **SHIPPED 2026-11-04 (main, not deployed; parity 44.9 → 45.9; 134,
+     135 and 185 closed, 168 still partial).** Deviations from the plan
+     above and from spec §4–§5:
+     (1) the invoice carries its own signature snapshot
+     (`invoices.signature_url/name/signed_at`). Finalize copies the request
+     signature only when it is newer than the invoice's last change, and
+     nothing rewrites it afterwards. The approval sheet signs first, then
+     finalizes.
+     (2) Every tech write names its `invoiceId` in the body, so it is part
+     of the hash. Lines and finalize need the newest live invoice (else
+     409 `STALE`); payments and pay link accept any non-void native
+     invoice.
+     (3) The pay link is SMS only, with a 2-minute cooldown claimed on
+     `invoices.pay_link_sent_at` before the token mint (never
+     `last_reminder_sent_at`).
+     (4) Manual refunds record without a provider call and put the invoice
+     back to `open` (never `refunded`).
+     (5) $0 drafts finalize to `open`. There is no due date (`issued_at`
+     is set). An admin finalize route exists (`POST
+     /api/admin/invoices/[id]/finalize`).
+     (6) `STORED_CODES` includes `SEND_FAILED` ("The link may not have gone
+     out. Try again in 2 minutes.").
+     (7) The totals statement `T` keeps `updated_at` when a retry leaves
+     the subtotal unchanged, so a fresh signature survives a no-op.
+     (8) Reconcile's un-claim of a failed or mock-pending card payment
+     includes drafts and keeps them drafts.
+     (9) `scripts/agent/mint-tech-session.mjs` honours `MINT_ORG_ID`.
+     (10) Office money forms send a client token; ids are
+     `officeId(kind, org, token)` (org-scoped), and a reused token is
+     `ID_CONFLICT`.
+     (11) Materials are billed at most once per request across non-void
+     invoices (`invoice_line_items.job_material_id`). Sold-estimate jobs
+     bill materials through the office, and the estimate creator refuses
+     while the request has a field draft.
+     (12) Keys live 7 days (the cleanup cron deletes older rows). The
+     client keeps in-flight intents in `sessionStorage` per job rather than
+     in a 72 h queue, because there is no offline queue yet.
+     Erase now nulls and deletes the signature on both requests and
+     invoices, and `purgeOrganization` passes object keys (it used to pass
+     URLs).
    - **M3c Sell on site.** Tech estimates with options from the pricebook,
      present + sign (`markEstimateSold` variant, signer + signature), sold
      lines appended to the draft invoice exactly once; equipment add /

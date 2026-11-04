@@ -56,8 +56,8 @@ server-side from the pricebook at add time — client-sent cost values are ignor
   (hold) is lead-only and ENDS the visit — request goes `on_hold` with a
   `hold_reason` and optional `followUpDate`, open rows are closed; `completed`
   (done) marks only the caller done (needs `startedAt`); `close_out` is
-  lead-only and completes the request (`completeRequestFromAdmin`), cancelling
-  untouched rows. Pause is offered only once on site (row `arrived` or
+  lead-only and completes the request (`closeOutRequest` in
+  `status-writes.ts`), cancelling untouched rows. Pause is offered only once on site (row `arrived` or
   `in_progress`). Close out is offered only while the request is
   `in_progress` or `on_hold` (`closeOutAllowedStatuses`); a replay on a
   completed request is a 200 no-op (`changed: false`), a cancelled request
@@ -87,6 +87,104 @@ server-side from the pricebook at add time — client-sent cost values are ignor
   done; `clock_in_method` records `auto` (status tap) vs `manual`. SQL in
   `time-entry-sql.ts`; admins read them in the staff Timesheets dialog.
 - GPS geostamps, backdating, en-route texts, required forms, offline: not built.
+
+**Collect (M3b, S40 `/tech/jobs/[id]/invoice`):**
+- **Files:** page `src/app/tech/jobs/[id]/invoice/page.tsx` · components
+  `src/components/tech/invoice/` (`invoice-page-client.tsx`, `invoice-lines.tsx`,
+  `add-item-sheet.tsx`, `invoice-collect-buttons.tsx`, `approval-sheet.tsx`,
+  `record-payment-sheet.tsx`, `pay-link-sheet.tsx`, `invoice-record.tsx`,
+  `tech-invoice-card.tsx` (the job detail's Invoice card),
+  `use-invoice-writes.ts`, `post-json.ts`) · shared pad
+  `src/components/tech/signature-pad.tsx` · key hook
+  `src/hooks/use-idempotency-key.ts` · view + GET query
+  `src/lib/tech/invoice-view.ts`, `src/lib/tech/invoice-queries.ts` · write
+  gates `src/lib/tech/invoice-route-guards.ts` (`techWritePreamble`,
+  `resolveTarget`) · route plumbing `src/lib/tech/invoice-write-route.ts` ·
+  reason → code map `src/lib/tech/invoice-errors.ts` · allowed actions
+  `src/lib/tech/invoice-actions.ts` · pure client logic
+  `invoice-key-state.ts`, `invoice-intent-persist.ts`,
+  `invoice-client-errors.ts`, `invoice-view-diff.ts`, `invoice-page-copy.ts`,
+  `approval-flow.ts`, `record-payment-form.ts` (all `src/lib/tech/`) · writers
+  `src/lib/admin/invoice-field-writes.ts` (create/lines/finalize) and
+  `src/lib/admin/invoice-payment-writes.ts` · idempotency
+  `src/lib/http/idempotency.ts` + `idempotency-codes.ts` · pay link
+  `sendInvoicePayLink` in `src/lib/communication/money-triggers.ts`.
+- **Routes** (all under `src/app/api/tech/jobs/[id]/invoice/`): `GET`/`POST
+  route.ts` (view; adopt-or-create the draft, `{}` body), `POST lines/route.ts`
+  (`{ invoiceId, pricebookItemId, quantity }` or `{ invoiceId, jobMaterialId }`),
+  `DELETE lines/[lid]/route.ts?invoiceId=`, `POST finalize/route.ts`
+  (`{ invoiceId }`), `POST payments/route.ts` (`{ invoiceId, method:
+  'cash'|'check', amountCents, checkNumber? }`), `POST pay-link/route.ts`
+  (`{ invoiceId }`); plus `POST /api/tech/jobs/[id]/signature` (multipart, keyed)
+  and `GET /api/tech/pricebook?scope=invoice&q=` (every active type, q ≥ 2).
+  Every write names its `invoiceId` (it is part of the request hash).
+- **Gate order** (`techWritePreamble`): tech session 401 → same-origin 403 →
+  `isUuid` 400 → rate limit → readable job 404 → native 409
+  `MANAGED_EXTERNALLY` → active lead 403 `NOT_LEAD` (writes are lead-only;
+  writers re-check `stillLead` inside the batch) → on site: request status
+  ∈ {`arrived`, `in_progress`, `on_hold`, `completed`} else 409 `NOT_ON_SITE`
+  → body → `Idempotency-Key` → `withIdempotency` → target check → writer.
+- **GET contract:** `{ invoice, otherOpen, history, materialsNotOnInvoice,
+  pendingWrite, customerHasPhone, isLead, onSite, externalInvoice, allowed }`.
+  Never any cost field (a test asserts no key containing `cost`). Non-leads get
+  `invoice` reduced to `{ id, state, totalCents, balanceCents }`. While draft,
+  `invoice.signature` is the request's current signature with `fresh =
+  signedAt >= invoice.updatedAt`; once open/paid it is the invoice's own
+  snapshot (`none|present|erased|unavailable|estimate`). `pendingWrite` = an
+  `in_progress` key younger than 2 min on any `/api/tech/jobs/<rid>/…` route.
+  `allowed` comes from `invoiceAllowedActions`. Live = draft or open; with no
+  live invoice the newest paid/refunded/void one is `history` (a final-wave
+  ruling may render a paid invoice in full instead — check
+  `invoice-queries.ts`).
+- **Keys:** the client mints with `mintKey()` (`idempotency-codes.ts`) and
+  sends `Idempotency-Key` on every money POST. One reducer state per intent
+  (`nextKeyState`: `idle → armed → sent → idle | unknown`). A changed body
+  never gets a new key while the old intent is `unknown`: the OLD body is
+  re-sent with the OLD key first (`sendPlan` → `resend_stored`). Gate every
+  send on the phase RETURNED by the `edit` dispatch (a double tap in `sent`
+  is skipped, never re-sent). `sent`/`unknown` intents persist in
+  `sessionStorage` (`tech:invoice:<rid>:intents`) and are re-sent on mount
+  before the page unlocks. A 4xx whose code is in `STORED_CODES` (shared
+  with the server) spends the key. `classifyWriteError` decides
+  refetch/retry/new key; `intentLanded` decides whether a refetch shows that
+  an unknown write actually landed. Stored 409s map to
+  `show_message_refetch`, which keeps the spent key until the next edit.
+  This is harmless and accepted.
+- **Approval sheet order:** signature FIRST (the request-level capture, its own
+  key and held Blob), THEN finalize. Finalize snapshots the request signature
+  onto the invoice only when `signed_at >= invoices.updated_at` (signed after
+  the last line change); otherwise the invoice says "No signature". The
+  snapshot is never written again: a later "Sign again" changes the job
+  signature only. If the signature fails nothing is finalized ("Try again"
+  re-sends the same Blob + key). If finalize fails after the signature landed,
+  only finalize is retried. A $0 draft finalizes to `open`.
+- **Materials once:** create seeds lines from the job's materials that are not
+  yet on a non-void native invoice of the request (`invoice_line_items.
+  job_material_id`, ids `materialLineId(invoice, material)`). Adding a material
+  that is already billed → 409 `ALREADY_BILLED`, across invoices. A second
+  invoice after a paid one seeds only the unbilled materials. Sold-estimate
+  jobs bill materials through the office.
+- **Target scope:** lines and finalize need the request's newest live invoice,
+  else 409 `STALE`. Payments and pay link accept any non-void native invoice
+  of the request; the writer then refuses `INVOICE_NOT_CHARGEABLE`. Both
+  checks run inside the idempotency `run`, so a replay wins over STALE.
+- **Pay link:** SMS only (`invoice_sent` / `invoice_sent_sms`). A 2-minute
+  per-invoice cooldown is claimed on `invoices.pay_link_sent_at` BEFORE the
+  portal token is minted (409 `COOLDOWN`). A throw from the queue insert →
+  500 `SEND_FAILED` "The link may not have gone out. Try again in 2 minutes."
+  (stored, claim kept). The demo org → 403 `DEMO_RESTRICTED`. Receipts and
+  pay links call `processPendingJobs()` inside `after()`. A
+  committed-but-thrown insert waits for the daily cron (accepted).
+- **Probes:** mint tech sessions with `MINT_ORG_ID=<throwaway org> npx tsx
+  scripts/agent/mint-tech-session.mjs` and assert the token's
+  `organizationId` before any fetch. Send `Origin: http://localhost:3000`.
+  Insert the technician + request by SQL (`assigned_to`, status `arrived`).
+  Queue-drain guard: before anything that could queue a message, run
+  `SELECT count(*) FROM communication_jobs WHERE status='pending' AND
+  scheduled_for <= now() + interval '15 minutes'` and abort unless it is 0
+  (`processPendingJobs` drains every org through real Twilio). Integration
+  suite: `VITEST_INTEGRATION=1 npx vitest run
+  tests/integration/field-invoice.test.ts`.
 
 **Invariants:**
 - **Assignee + tenant guard** (legacy sub-routes): every mutation route checks BOTH
@@ -129,14 +227,23 @@ server-side from the pricebook at add time — client-sent cost values are ignor
   buttons match the server.
 - Dev org is FieldPulse-connected: never create throwaway requests through the
   API to test taps (see admin-pages).
-- Photos are uploaded to R2 via `/api/upload`; signature is captured as a data-URI
-  blob; both are stored as `attachments` rows linked to the service request.
+- Photos go through `POST /api/tech/jobs/[id]/photo` (validated, uploaded to
+  R2, metadata in `attachments` via `addJobPhoto`). The customer signature is
+  NOT an attachment: `POST /api/tech/jobs/[id]/signature` uploads the PNG and
+  `recordSignature` stores its public URL on `service_requests.signature_url`
+  (+ `signature_name`, `signed_at = now()` from the DB clock).
+- Dev has no R2 write credentials in `.env.local`: signature/photo uploads and
+  signed read URLs cannot run on dev (the invoice signature reads
+  `unavailable`). Prove those paths with mocked unit tests.
 
 **Verify changes:**
 - `npx vitest run src/app/api/tech/jobs/[id]/route.test.ts`
 - `npx vitest run src/lib/tech/field-queries.test.ts src/lib/tech/timesheet-queries.test.ts`
 - `npx vitest run src/app/api/auth/tech/login/route.test.ts src/app/api/auth/tech/logout/route.test.ts`
 - `npx vitest run src/components/tech/tech-status-confirm.test.ts`
+- `npx vitest run src/app/api/tech/jobs/[id]/invoice src/app/api/tech/jobs/[id]/signature src/app/api/tech/pricebook`
+- `npx vitest run src/lib/tech/invoice-*.test.ts src/lib/tech/approval-flow.test.ts src/lib/tech/record-payment-form.test.ts src/lib/admin/invoice-field-writes.test.ts src/lib/admin/invoice-payment-writes.test.ts src/lib/http/idempotency.test.ts`
+- Dev DB: `VITEST_INTEGRATION=1 npx vitest run tests/integration/field-invoice.test.ts`
 - `npx vitest run src/lib/tech/ownership.test.ts src/lib/tech/status-actions.test.ts src/lib/tech/status-writes.test.ts src/lib/tech/time-entry-sql.test.ts src/lib/tech/visit-range.test.ts`
 - Gate: `npx tsc --noEmit`
 
