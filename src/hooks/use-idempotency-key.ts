@@ -1,10 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { nextKeyState, type KeyEvent, type KeyState } from '@/lib/tech/invoice-key-state';
+import { IDLE, nextKeyState, type KeyEvent, type KeyState } from '@/lib/tech/invoice-key-state';
 import { INTENTS_STORAGE_KEY, parseIntents, persistOps, serializeIntents } from '@/lib/tech/invoice-intent-persist';
-
-const IDLE: KeyState = { phase: 'idle' };
 
 /** Read-modify-write this request's intent map. Storage can throw (private
  * mode, quota); persistence is then best effort and the in-memory state rules. */
@@ -28,6 +26,11 @@ function applyPersist(requestId: string, intentId: string, op: 'write' | 'clear'
  * returns (so `dispatch({ type: 'sent' })` is on disk before the caller's
  * fetch), and returns the new state so the caller can read the key at once.
  * `persist: false` for the signature intent (its body is a Blob).
+ *
+ * Send rule: callers gate on the EDIT dispatch's phase. Dispatch
+ * `edit(currentBody)` first and proceed only when the result is `armed` (first
+ * send) or `unknown` (re-send of the old body); a `sent` result means a request
+ * is already in flight (`sent + sent` is a no-op), so the tap must not POST.
  */
 export function useIdempotencyKey(opts: {
   intentId: string;

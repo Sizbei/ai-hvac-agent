@@ -37,7 +37,7 @@ export type WriteOutcome =
   | "already_saved_refetch"
   | "spent_new_key";
 
-const IDLE: KeyState = { phase: "idle" };
+export const IDLE: KeyState = { phase: "idle" };
 
 export function nextKeyState(s: KeyState, e: KeyEvent): KeyState {
   switch (e.type) {

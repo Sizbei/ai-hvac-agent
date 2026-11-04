@@ -63,6 +63,16 @@ describe("nextKeyState", () => {
     expect(nextKeyState(SENT, { type: "spent" })).toEqual(IDLE);
   });
 
+  it("unknown + spent and armed + definitive_unstored are unchanged", () => {
+    expect(nextKeyState(UNKNOWN, { type: "spent" })).toBe(UNKNOWN);
+    expect(nextKeyState(ARMED, { type: "definitive_unstored" })).toBe(ARMED);
+  });
+
+  it("sent + sent is a no-op that stays sent (callers gate on the edit result)", () => {
+    expect(nextKeyState(SENT, { type: "sent" })).toBe(SENT);
+    expect(nextKeyState(SENT, edit("h1", minter())).phase).toBe("sent");
+  });
+
   it("sent + unknown → unknown with the same key and body", () => {
     expect(nextKeyState(SENT, { type: "unknown" })).toEqual(UNKNOWN);
   });

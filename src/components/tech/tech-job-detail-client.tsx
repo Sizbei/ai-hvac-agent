@@ -425,7 +425,10 @@ export function TechJobDetailClient({
         sigDispatch({ type: 'dropped' });
         s = sigDispatch({ type: 'open', ...arm });
       }
-      sigDispatch({ type: 'edit', ...arm });
+      // Gate on the EDIT result: `sent + sent` is a no-op still in `sent`, so
+      // only armed (first send) or unknown (re-send) may go out.
+      const pre = sigDispatch({ type: 'edit', ...arm });
+      if (pre.phase !== 'armed' && pre.phase !== 'unknown') return;
       s = sigDispatch({ type: 'sent' });
       if (s.phase !== 'sent') return;
       const toSend = s.body as SignatureBody;
@@ -737,7 +740,11 @@ export function TechJobDetailClient({
               error={sigError}
             />
           )}
-          {sigSaved && <p className="text-[13px] text-muted-foreground">Signature saved.</p>}
+          {sigSaved && (
+            <p role="status" className="text-[13px] text-muted-foreground">
+              Signature saved.
+            </p>
+          )}
         </CardContent>
       </Card>
 

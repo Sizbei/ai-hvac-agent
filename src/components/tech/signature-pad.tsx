@@ -43,6 +43,8 @@ export function SignaturePad({ onCapture, disabled = false, initialName = '', er
   const [name, setName] = useState(initialName);
   const [held, setHeld] = useState<Blob | null>(null);
   const [busy, setBusy] = useState(false);
+  // Synchronous guard: a double-tap lands before the `busy` re-render.
+  const busyRef = useRef(false);
   const [captureError, setCaptureError] = useState<string | null>(null);
   const locked = disabled || busy;
 
@@ -105,21 +107,24 @@ export function SignaturePad({ onCapture, disabled = false, initialName = '', er
 
   const handleSave = async (): Promise<void> => {
     const trimmed = name.trim();
-    if (!trimmed) return;
-    setCaptureError(null);
-    let blob = held;
-    if (!blob) {
-      blob = await capture(trimmed);
-      if (!blob) {
-        setCaptureError("Couldn't capture the signature. Try again.");
-        return;
-      }
-      setHeld(blob);
-    }
+    if (!trimmed || busyRef.current) return;
+    // Busy BEFORE the capture, so a tap during toBlob cannot call onCapture twice.
+    busyRef.current = true;
     setBusy(true);
+    setCaptureError(null);
     try {
+      let blob = held;
+      if (!blob) {
+        blob = await capture(trimmed);
+        if (!blob) {
+          setCaptureError("Couldn't capture the signature. Try again.");
+          return;
+        }
+        setHeld(blob);
+      }
       await onCapture(blob, trimmed);
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };
