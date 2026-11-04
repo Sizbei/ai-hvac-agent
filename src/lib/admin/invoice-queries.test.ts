@@ -720,6 +720,15 @@ describe("refundPayment", () => {
       expect(r).toEqual({ ok: false, reason: "refund_id_conflict" });
     });
 
+    it("refuses a non-positive or fractional amount before delegating", async () => {
+      for (const amt of [0, -100, 1.5]) {
+        mockSelectSeq([[MANUAL]]);
+        const r = await refundPayment("org-1", "pay-1", { amountCents: amt, refundId: "ref-1" });
+        expect(r).toEqual({ ok: false, reason: "exceeds_payment" });
+      }
+      expect(h.refundManualPayment).not.toHaveBeenCalled();
+    });
+
     it("refuses invalid_input without a refundId", async () => {
       mockSelectSeq([[MANUAL]]);
       const r = await refundPayment("org-1", "pay-1", { amountCents: 4000 });
@@ -1090,8 +1099,8 @@ describe("reconcilePayment", () => {
     expect(renderQ(pay).params).toEqual(["pay-1", ORG]);
     expect(render(inv)).toBe(
       "UPDATE invoices SET amount_paid_cents = GREATEST(0, amount_paid_cents - $1::int), " +
-        "state = (CASE WHEN GREATEST(0, amount_paid_cents - $2::int) >= total_cents THEN 'paid' ELSE 'open' END)::invoice_state, updated_at = now() " +
-        "WHERE id = $3::uuid AND organization_id = $4::uuid AND state IN ('open'::invoice_state, 'paid'::invoice_state) " +
+        "state = (CASE WHEN state = 'draft'::invoice_state THEN state WHEN GREATEST(0, amount_paid_cents - $2::int) >= total_cents THEN 'paid' ELSE 'open' END)::invoice_state, updated_at = now() " +
+        "WHERE id = $3::uuid AND organization_id = $4::uuid AND state IN ('open'::invoice_state, 'paid'::invoice_state, 'draft'::invoice_state) " +
         "AND EXISTS (SELECT 1 FROM payments WHERE id = $5::uuid AND xmin = pg_current_xact_id()::xid)",
     );
     expect(renderQ(inv).params).toEqual([10000, 10000, "inv-1", ORG, "pay-1"]);
@@ -1119,6 +1128,15 @@ describe("reconcilePayment", () => {
     expect(r).toEqual({ ok: true, outcome: "failed_marked" });
     expect(getCharge).not.toHaveBeenCalled();
     expectFailedBatch();
+  });
+
+  it("un-claims a DRAFT too and keeps it a draft (ruling: card claims land on drafts)", async () => {
+    h.cards.on = false;
+    mockSelectSeq([[PENDING]]);
+    await reconcilePayment(ORG, "pay-1", new MockPaymentProvider());
+    const inv = render(batchStmts()[1]);
+    expect(inv).toContain("CASE WHEN state = 'draft'::invoice_state THEN state WHEN");
+    expect(inv).toContain("state IN ('open'::invoice_state, 'paid'::invoice_state, 'draft'::invoice_state)");
   });
 
   it("still asks the provider for a non-mock payment while cards are disabled", async () => {

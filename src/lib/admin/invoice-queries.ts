@@ -459,6 +459,11 @@ export async function refundPayment(
     .where(withTenant(payments, organizationId, eq(payments.id, paymentId)))
     .limit(1);
   if (!pay) return { ok: false, reason: "payment_not_found" };
+  // Amount guard BEFORE either path: a non-positive or fractional amount never
+  // reaches the manual writer or the provider.
+  if (!Number.isInteger(params.amountCents) || params.amountCents < 1) {
+    return { ok: false, reason: "exceeds_payment" };
+  }
   if (pay.provider === "manual") {
     if (!params.refundId) return { ok: false, reason: "invalid_input" };
     const { refundManualPayment } = await import("./invoice-payment-writes"); // lazy, see createRequestEstimateInvoice
@@ -792,12 +797,18 @@ function failPendingPaymentSql(org: string, pid: string): SQL {
     WHERE id = ${pid}::uuid AND organization_id = ${org}::uuid AND status = 'pending'::payment_status`;
 }
 
-/** Reconcile failed branch, statement 2: un-claim, only if statement 1 won. */
+/**
+ * Reconcile failed branch, statement 2: un-claim, only if statement 1 won.
+ * Deviation from spec §5.7 (orchestrator ruling): drafts are included and stay
+ * drafts — takePayment still claims card payments on drafts, and a phantom
+ * credit would freeze line edits (they require amount_paid_cents = 0).
+ */
 function unclaimInvoiceSql(org: string, inv: string, pid: string, amt: number): SQL {
   return sql`UPDATE invoices SET amount_paid_cents = GREATEST(0, amount_paid_cents - ${amt}::int),
-      state = (CASE WHEN GREATEST(0, amount_paid_cents - ${amt}::int) >= total_cents THEN 'paid' ELSE 'open' END)::invoice_state,
+      state = (CASE WHEN state = 'draft'::invoice_state THEN state WHEN GREATEST(0, amount_paid_cents - ${amt}::int) >= total_cents THEN 'paid' ELSE 'open' END)::invoice_state,
       updated_at = now()
-    WHERE id = ${inv}::uuid AND organization_id = ${org}::uuid AND state IN ('open'::invoice_state, 'paid'::invoice_state)
+    WHERE id = ${inv}::uuid AND organization_id = ${org}::uuid
+      AND state IN ('open'::invoice_state, 'paid'::invoice_state, 'draft'::invoice_state)
       AND EXISTS (SELECT 1 FROM payments WHERE id = ${pid}::uuid AND xmin = pg_current_xact_id()::xid)`;
 }
 
