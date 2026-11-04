@@ -434,3 +434,16 @@ recipe replaces the garbled snapshot step; tests assert load-bearing
 fragments and golden uuid vectors instead of verbatim statements; Review
 Focus #2 gets its integration case. Rejected: "attribution is Opus 5.5"
 (the critic's own model; this session is Fable 5.1).
+Round 2 (one fresh critic, combined): 2 blockers (Task 8 consumed Task 7's
+guards a wave early; the queue drain ran on every payment and the probe
+guard was keyed to "has a phone"), 7 majors (Task 3 before Task 4; replays
+return the stored status; pay-link `send_failed` is a return value from the
+queue call, not a flag; reducer gaps for `sent`/`unknown` + edit/open, a
+`dropped` event and an outcome→event table, persistence at `sent`;
+signature intents never persisted (Blob); Tasks 9 and 10 split). Plan v3:
+thirteen tasks, order 1 → 2 → 3 → 4 → (5 ∥ 6) → 7 → (8 ∥ 9 ∥ 10) → 11 → 12
+→ 13; guards moved to Task 6; the drain only inside the customer branch;
+every probe that could queue a message guards `pending AND scheduled_for <=
+now()`; `mintKey` fallback; `derivedIdInput` pinned as a string; office
+writers pre-read for `synced_read_only`; `materialsNotOnInvoice` filter;
+audit skipped on replay.
