@@ -31,7 +31,13 @@ import { isCollectible, invoiceRef } from '@/lib/admin/invoice-collectible';
 import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
 import { SyncPill } from '@/components/admin/sync-pill';
 import { mintKey } from '@/lib/http/idempotency-codes';
-import { paymentMethodSummary, refundSuccessCopy, shouldRemintToken } from '@/lib/admin/invoice-payment-copy';
+import {
+  canRecordPayment,
+  paymentMethodSummary,
+  refundErrorCopy,
+  refundSuccessCopy,
+  shouldRemintToken,
+} from '@/lib/admin/invoice-payment-copy';
 import type { InvoiceDetailView, InvoiceReminderView } from '@/lib/admin/invoice-queries';
 
 // Raw API response shape — dates arrive as ISO strings in JSON.
@@ -146,7 +152,7 @@ export function InvoiceDetailClient({
   const [refundReason, setRefundReason] = useState('customer_request');
   const [isRefunding, setIsRefunding] = useState(false);
   const [refundError, setRefundError] = useState<string | null>(null);
-  const [refundToken, setRefundToken] = useState(() => mintKey());
+  const [refundToken, setRefundToken] = useState('');
   const [refundNotice, setRefundNotice] = useState<string | null>(null);
 
   // Signed signature URLs expire; refetch on an image error, a bounded number
@@ -195,7 +201,7 @@ export function InvoiceDetailClient({
     void load();
   }, [load]);
 
-  // ── MONEY HANDLERS (PRESERVED VERBATIM) ──────────────────────────────────
+  // ── MONEY HANDLERS (refund; recording lives in RecordPaymentCard) ─────────
 
   const handleRefund = useCallback(
     async (paymentId: string, provider: string): Promise<void> => {
@@ -221,10 +227,8 @@ export function InvoiceDetailClient({
           setRefundReason('customer_request');
           setRefundNotice(refundSuccessCopy(provider));
           void load();
-        } else if (body.error?.code === 'ID_CONFLICT') {
-          setRefundError('That refund token was already used. Try again.');
         } else {
-          setRefundError(body.error?.message ?? "Couldn't record the refund. Please try again.");
+          setRefundError(refundErrorCopy(body.error?.code));
         }
       } catch {
         setRefundError('Could not connect to server.');
@@ -240,6 +244,10 @@ export function InvoiceDetailClient({
     signatureRetries.current += 1;
     void load();
   }, [load]);
+
+  const handleSignatureLoad = useCallback((): void => {
+    signatureRetries.current = 0;
+  }, []);
 
   const handleRecorded = useCallback((): void => {
     setShowPaymentForm(false);
@@ -336,6 +344,8 @@ export function InvoiceDetailClient({
   // there, so native pay/refund controls are hidden and a caveat is shown.
   const { balanceCents: balance, canTakePayment, sourceLabel } =
     deriveInvoicePresentation(invoice);
+  // Drafts are never payable by hand — Finalize is their only money action.
+  const showRecordPayment = canRecordPayment({ state: invoice.state, canTakePayment });
   // Margin is line revenue vs snapshotted line cost (excludes tax — tax is not
   // revenue). FieldPulse mirrors carry a header-level discount in spillover
   // that lines don't reflect — without it a fully-discounted invoice reads as
@@ -407,8 +417,8 @@ export function InvoiceDetailClient({
             {invoice.state === 'draft' && !invoice.syncedSource && (
               <FinalizeButton invoiceId={invoice.id} onFinalized={handleFinalized} />
             )}
-            {/* Record payment — native only; canTakePayment already checks syncedSource */}
-            {canTakePayment && (
+            {/* Record payment — native open invoices only (canRecordPayment) */}
+            {showRecordPayment && (
               <Button size="sm" onClick={() => setShowPaymentForm((v) => !v)}>
                 {showPaymentForm ? 'Hide form' : 'Record payment'}
               </Button>
@@ -465,6 +475,7 @@ export function InvoiceDetailClient({
             invoice={invoice}
             org={org ?? fallbackOrg}
             onSignatureError={handleSignatureError}
+            onSignatureLoad={handleSignatureLoad}
           />
 
           {/* Internal margin readout (admin-only; subordinate styling). When the
@@ -529,7 +540,7 @@ export function InvoiceDetailClient({
 
           {/* Record payment — never for a read-only FSM-synced invoice (canTakePayment).
               Toggled by the toolbar button above; mounting mints the client token. */}
-          {canTakePayment && showPaymentForm && (
+          {showRecordPayment && showPaymentForm && (
             <RecordPaymentCard invoiceId={invoice.id} onRecorded={handleRecorded} />
           )}
 
@@ -591,6 +602,7 @@ export function InvoiceDetailClient({
                               size="sm"
                               onClick={() => {
                                 setRefundFor(p.id);
+                                setRefundToken(mintKey());
                                 setRefundAmount('');
                                 setRefundReason('customer_request');
                                 setRefundError(null);

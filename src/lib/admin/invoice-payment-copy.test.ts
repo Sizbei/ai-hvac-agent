@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   RECORD_PAYMENT_METHODS,
   buildRecordPaymentBody,
+  canRecordPayment,
+  refundErrorCopy,
   finalizeErrorCopy,
   paymentMethodLabel,
   paymentMethodSummary,
@@ -24,6 +26,8 @@ describe("recordPaymentErrorCopy", () => {
     expect(recordPaymentErrorCopy("EXCEEDS_BALANCE")).toBe("That's more than the balance due.");
     expect(recordPaymentErrorCopy("INVOICE_NOT_CHARGEABLE")).toBe("Finalize the invoice first.");
     expect(recordPaymentErrorCopy("ID_CONFLICT")).toBe("That payment token was already used. Try again.");
+    expect(recordPaymentErrorCopy("STALE")).toBe("This invoice changed. Refresh and try again.");
+    expect(recordPaymentErrorCopy("INVOICE_SYNCED_READ_ONLY")).toBe("This invoice is managed in FieldPulse.");
   });
 
   it("falls back to generic copy for anything else, never the raw code", () => {
@@ -95,5 +99,31 @@ describe("buildRecordPaymentBody", () => {
     expect(
       buildRecordPaymentBody({ clientToken: TOKEN, method: "cash", amountCents: 500, checkNumber: "1042", isDeposit: false }),
     ).toEqual({ clientToken: TOKEN, method: "cash", amountCents: 500, isDeposit: false });
+  });
+});
+
+describe("canRecordPayment", () => {
+  it("allows a hand-recorded payment only on an open, chargeable invoice", () => {
+    expect(canRecordPayment({ state: "open", canTakePayment: true })).toBe(true);
+    expect(canRecordPayment({ state: "draft", canTakePayment: true })).toBe(false);
+    expect(canRecordPayment({ state: "paid", canTakePayment: false })).toBe(false);
+    expect(canRecordPayment({ state: "paid", canTakePayment: true })).toBe(false);
+    expect(canRecordPayment({ state: "open", canTakePayment: false })).toBe(false);
+  });
+});
+
+describe("refundErrorCopy", () => {
+  it("maps the refund route codes to human copy", () => {
+    expect(refundErrorCopy("ID_CONFLICT")).toBe("That refund token was already used. Try again.");
+    expect(refundErrorCopy("EXCEEDS_PAYMENT")).toBe("That's more than is left to refund on this payment.");
+    expect(refundErrorCopy("NOT_REFUNDABLE")).toBe("This payment can't be refunded.");
+    expect(refundErrorCopy("STALE")).toBe("This payment changed. Refresh and try again.");
+    expect(refundErrorCopy("INVOICE_SYNCED_READ_ONLY")).toBe("This invoice is managed in FieldPulse.");
+  });
+
+  it("falls back to generic copy", () => {
+    for (const code of [undefined, "INTERNAL_ERROR", "NOPE"]) {
+      expect(refundErrorCopy(code)).toBe("Couldn't record the refund. Please try again.");
+    }
   });
 });

@@ -24,6 +24,8 @@ interface Props {
   readonly org: OrgIdentity;
   /** Signed read URLs expire; the parent refetches the detail for a fresh one. */
   readonly onSignatureError?: () => void;
+  /** A successful load resets the parent's retry budget. */
+  readonly onSignatureLoad?: () => void;
 }
 
 function fmt(d: Date): string {
@@ -35,7 +37,7 @@ function fmt(d: Date): string {
  * display logic; renders logo lockup, meta box, parties, line-item table,
  * notes, and totals. No data fetching or event handlers.
  */
-export function InvoiceDocument({ invoice, org, onSignatureError }: Props) {
+export function InvoiceDocument({ invoice, org, onSignatureError, onSignatureLoad }: Props) {
   const m = invoiceDocModel(invoice);
   const sig = signatureBlock(invoice);
 
@@ -218,6 +220,7 @@ export function InvoiceDocument({ invoice, org, onSignatureError }: Props) {
                   alt={sig.name ? `Signature of ${sig.name}` : 'Customer signature'}
                   className="h-20 w-auto max-w-full object-contain"
                   onError={onSignatureError}
+                  onLoad={onSignatureLoad}
                 />
                 {(sig.name || sig.signedAt) && (
                   <p className="mt-1 text-xs text-muted-foreground">

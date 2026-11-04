@@ -17,10 +17,33 @@ const RECORD_ERRORS: Readonly<Record<string, string>> = {
   EXCEEDS_BALANCE: "That's more than the balance due.",
   INVOICE_NOT_CHARGEABLE: "Finalize the invoice first.",
   ID_CONFLICT: "That payment token was already used. Try again.",
+  STALE: "This invoice changed. Refresh and try again.",
+  INVOICE_SYNCED_READ_ONLY: "This invoice is managed in FieldPulse.",
 };
 
 export function recordPaymentErrorCopy(code: string | undefined): string {
   return (code && RECORD_ERRORS[code]) || "Couldn't record the payment. Please try again.";
+}
+
+const REFUND_ERRORS: Readonly<Record<string, string>> = {
+  ID_CONFLICT: "That refund token was already used. Try again.",
+  EXCEEDS_PAYMENT: "That's more than is left to refund on this payment.",
+  NOT_REFUNDABLE: "This payment can't be refunded.",
+  STALE: "This payment changed. Refresh and try again.",
+  INVOICE_SYNCED_READ_ONLY: "This invoice is managed in FieldPulse.",
+};
+
+export function refundErrorCopy(code: string | undefined): string {
+  return (code && REFUND_ERRORS[code]) || "Couldn't record the refund. Please try again.";
+}
+
+/**
+ * Hand-recorded payments (cash/check/other) only on an OPEN invoice: a draft is
+ * never payable by hand — Finalize is the only money action on a draft (spec §8).
+ * `canTakePayment` (deriveInvoicePresentation) still covers balance + synced.
+ */
+export function canRecordPayment(input: { state: string; canTakePayment: boolean }): boolean {
+  return input.state === "open" && input.canTakePayment;
 }
 
 const FINALIZE_ERRORS: Readonly<Record<string, string>> = {

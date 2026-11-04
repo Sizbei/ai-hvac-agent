@@ -130,17 +130,23 @@ function InPersonNotice({
       <p className="mt-1 text-[13px] text-muted-foreground">{payment.notice}</p>
     );
   }
-  // Same sentence as payment.notice, with the phone as a tap-to-call link.
+  // payment.notice ends "…, or call <phone>." — render that phone as a tap-to-call link.
+  const at = payment.notice.lastIndexOf(phone);
+  if (at < 0) {
+    return (
+      <p className="mt-1 text-[13px] text-muted-foreground">{payment.notice}</p>
+    );
+  }
   return (
     <p className="mt-1 text-[13px] text-muted-foreground">
-      Pay your technician in person, or call{" "}
+      {payment.notice.slice(0, at)}
       <a
         href={payment.tel}
         className="font-medium whitespace-nowrap text-link underline underline-offset-2"
       >
         {phone}
       </a>
-      .
+      {payment.notice.slice(at + phone.length)}
     </p>
   );
 }
