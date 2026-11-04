@@ -71,6 +71,32 @@ export interface TechJobSummary {
   readonly allowedActions: readonly TechAction[];
   readonly blockers: readonly Blocker[];
   readonly native: boolean;
+  /** When the customer signed on site (database clock), null if unsigned. */
+  readonly signedAt: Date | null;
+  /** The request's newest native non-void invoice, draft/open preferred. */
+  readonly invoiceSummary: TechInvoiceSummary | null;
+}
+
+export interface TechInvoiceSummary {
+  readonly id: string;
+  readonly state: "draft" | "open" | "paid" | "refunded";
+  readonly balanceCents: number;
+}
+
+/** Newest native (not FieldPulse/HCP-mirrored) non-void invoice on the request,
+ * an open draft/open one before a settled one; balance floored at 0. */
+async function findInvoiceSummary(
+  organizationId: string,
+  serviceRequestId: string,
+): Promise<TechInvoiceSummary | null> {
+  const { rows } = await db.execute(sql`SELECT id, state, GREATEST(0, total_cents - amount_paid_cents) AS balance_cents
+    FROM invoices
+    WHERE organization_id = ${organizationId}::uuid AND service_request_id = ${serviceRequestId}::uuid
+      AND state <> 'void'::invoice_state AND fieldpulse_invoice_id IS NULL AND hcp_invoice_id IS NULL
+    ORDER BY (state IN ('draft'::invoice_state, 'open'::invoice_state)) DESC, created_at DESC
+    LIMIT 1`);
+  const r = rows[0] as { id: string; state: TechInvoiceSummary["state"]; balance_cents: number | string } | undefined;
+  return r ? { id: r.id, state: r.state, balanceCents: Number(r.balance_cents) } : null;
 }
 
 /**
@@ -103,6 +129,7 @@ export async function getTechJobSummary(
       accessNotes: serviceRequests.accessNotes,
       fieldpulseJobId: serviceRequests.fieldpulseJobId,
       hcpJobId: serviceRequests.hcpJobId,
+      signedAt: serviceRequests.signedAt,
     })
     .from(serviceRequests)
     .where(
@@ -119,7 +146,10 @@ export async function getTechJobSummary(
 
   if (!row) return null;
 
-  const all = await findAllAssignments(organizationId, serviceRequestId);
+  const [all, invoiceSummary] = await Promise.all([
+    findAllAssignments(organizationId, serviceRequestId),
+    findInvoiceSummary(organizationId, serviceRequestId),
+  ]);
   const active = pickActiveVisit(all);
   const activeVisitId = active?.appointmentId ?? null;
   const mine = all.filter((r) => r.technicianId === techUserId);
@@ -161,6 +191,8 @@ export async function getTechJobSummary(
     allowedActions: actions,
     blockers,
     native,
+    signedAt: row.signedAt,
+    invoiceSummary,
   };
 }
 
@@ -246,7 +278,8 @@ export async function addJobMaterial(
     // Reject a missing OR soft-deleted (inactive) item — an inactive catalog row
     // must not be bookable as a job material even via a direct POST (the tech
     // pricebook picker already hides them).
-    if (!item || !item.active) {
+    // A service is billed on the invoice, never consumed as a material.
+    if (!item || !item.active || item.type === "service") {
       return { ok: false, reason: "item_not_found" };
     }
     pricebookItemId = item.id;
@@ -378,16 +411,21 @@ export async function getActualMaterialsCostCents(
 }
 
 // Constants, not user input: inlined with enum casts so the IN list is typed.
-const SIGNABLE_IN = sql.raw(`(${[...OPEN_ASSIGNMENT_STATUSES, "completed"].map((st) => `'${st}'::request_status`).join(", ")})`);
+export const SIGNABLE_IN = sql.raw(`(${[...OPEN_ASSIGNMENT_STATUSES, "completed"].map((st) => `'${st}'::request_status`).join(", ")})`);
 
 export type RecordSignatureResult =
-  | { readonly ok: true }
+  | { readonly ok: true; readonly previousUrl: string | null }
   | { readonly ok: false; readonly reason: "not_owned" };
 
 /**
  * Record the on-site customer e-signature on a job: the R2 URL of the stored PNG
  * + the customer's printed name + a signed-at timestamp. Assignee + tenant
  * guarded. NOTE: signatureName is PII — do NOT log it.
+ *
+ * ONE statement: the FOR UPDATE subquery reads the URL being replaced (returned
+ * as previousUrl so the caller can delete the old object), and signed_at comes
+ * from the DATABASE clock — finalize compares it with invoices.updated_at =
+ * now(), so a JS Date here would skew against it.
  */
 export async function recordSignature(
   organizationId: string,
@@ -402,32 +440,19 @@ export async function recordSignature(
 
   // Re-assert ownership IN the write (not just the read above): a job reassigned
   // between findOwnedJob and here must not receive this tech's signature — which
-  // includes the customer's signed name (PII). The assignee guard makes the
+  // includes the customer's signed name (PII). The lead EXISTS guard makes the
   // UPDATE a no-op in that race; 0 rows → treat as not_owned.
-  const [updated] = await db
-    .update(serviceRequests)
-    .set({
-      signatureUrl: input.signatureUrl,
-      signatureName: input.signatureName,
-      signedAt: new Date(),
-      updatedAt: new Date(),
-    })
-    .where(
-      withTenant(
-        serviceRequests,
-        organizationId,
-        and(
-          eq(serviceRequests.id, serviceRequestId),
-          // In-write guard: a lead row that is not cancelled (open or completed) on a live visit.
-          sql`EXISTS (SELECT 1 FROM appointment_assignments a JOIN appointments p ON p.id = a.appointment_id WHERE p.service_request_id = ${serviceRequests.id} AND a.organization_id = ${organizationId} AND a.technician_id = ${techUserId} AND a.is_lead AND a.status IN ${SIGNABLE_IN} AND p.cancelled_at IS NULL)`,
-        )!,
-      ),
-    )
-    .returning({ id: serviceRequests.id });
+  const { rows } = await db.execute(sql`UPDATE service_requests
+    SET signature_url = ${input.signatureUrl}, signature_name = ${input.signatureName}, signed_at = now(), updated_at = now()
+    FROM (SELECT id, signature_url AS old FROM service_requests WHERE id = ${serviceRequestId}::uuid AND organization_id = ${organizationId}::uuid FOR UPDATE) o
+    WHERE service_requests.id = o.id AND service_requests.organization_id = ${organizationId}::uuid
+      AND EXISTS (SELECT 1 FROM appointment_assignments a JOIN appointments p ON p.id = a.appointment_id WHERE p.service_request_id = service_requests.id AND a.organization_id = ${organizationId}::uuid AND a.technician_id = ${techUserId} AND a.is_lead AND a.status IN ${SIGNABLE_IN} AND p.cancelled_at IS NULL)
+    RETURNING o.old`);
+  const updated = rows[0] as { old: string | null } | undefined;
   if (!updated) {
     return { ok: false, reason: "not_owned" };
   }
-  return { ok: true };
+  return { ok: true, previousUrl: updated.old ?? null };
 }
 
 export type AddFieldNoteResult =

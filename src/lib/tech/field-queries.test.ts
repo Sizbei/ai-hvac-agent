@@ -10,9 +10,11 @@ import {
   listJobPhotos,
   recordSignature,
   isJobOwnedByTech,
+  getTechJobSummary,
+  SIGNABLE_IN,
 } from "./field-queries";
 import { db } from "@/lib/db";
-import { findReadableJob } from "@/lib/tech/ownership";
+import { findAllAssignments, findReadableJob } from "@/lib/tech/ownership";
 import { getPricebookItemById } from "@/lib/admin/pricebook-queries";
 import { adjustStock } from "@/lib/admin/inventory-queries";
 
@@ -22,6 +24,7 @@ vi.mock("@/lib/db", () => ({
     insert: vi.fn(),
     delete: vi.fn(),
     update: vi.fn(),
+    execute: vi.fn(),
   },
 }));
 
@@ -37,6 +40,7 @@ vi.mock("@/lib/tech/ownership", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/tech/ownership")>()),
   findReadableJob: vi.fn(),
   findActiveVisit: vi.fn(),
+  findAllAssignments: vi.fn(),
 }));
 
 const ORG = "org-1";
@@ -69,13 +73,6 @@ function owned(yes: boolean): void {
   vi.mocked(findReadableJob).mockResolvedValue(
     yes ? { id: JOB, customerId: null, native: true, status: "assigned" } : null,
   );
-}
-
-/** Mock db.update(...).set(...).where(...).returning() → rows. */
-function mockUpdateReturning(rows: unknown[]): void {
-  vi.mocked(db.update).mockReturnValue({
-    set: () => ({ where: () => ({ returning: () => Promise.resolve(rows) }) }),
-  } as never);
 }
 
 beforeEach(() => vi.clearAllMocks());
@@ -163,6 +160,20 @@ describe("addJobMaterial — catalog line", () => {
       quantity: 1,
     });
     expect(r).toEqual({ ok: true, id: "mat-1" });
+  });
+
+  it("returns item_not_found for a service item (services are not materials)", async () => {
+    owned(true);
+    vi.mocked(getPricebookItemById).mockResolvedValue({
+      id: "pb-svc", organizationId: ORG, type: "service", name: "Tune-up", sku: null,
+      description: null, categoryId: null, costCents: 0, markupPct: 0, priceCents: 9900,
+      memberPriceCents: null, hours: null, warranty: null, active: true, isLaborItem: false,
+      fieldpulseItemId: null, fieldpulseData: null,
+    });
+    const r = await addJobMaterial(ORG, TECH, JOB, { pricebookItemId: "pb-svc", quantity: 1 });
+    expect(r).toEqual({ ok: false, reason: "item_not_found" });
+    expect(db.insert).not.toHaveBeenCalled();
+    expect(adjustStock).not.toHaveBeenCalled();
   });
 
   it("returns item_not_found when the pricebook item is missing", async () => {
@@ -347,40 +358,156 @@ describe("addJobPhoto", () => {
 
 describe("recordSignature", () => {
   const SIG = { signatureUrl: "https://r2/sig.png", signatureName: "Jane Doe" };
+  const dialect = new PgDialect();
 
-  it("persists the signature for the owning tech", async () => {
-    owned(true); // findOwnedJob → owned
-    mockUpdateReturning([{ id: JOB }]); // guarded UPDATE hits the row
+  /** Capture the SQL handed to db.execute and resolve it with `rows`. */
+  function mockExecute(rows: unknown[]): { readonly q: () => { sql: string; params: unknown[] } } {
+    let captured: SQL | undefined;
+    vi.mocked(db.execute).mockImplementation(((q: SQL) => {
+      captured = q;
+      return Promise.resolve({ rows });
+    }) as never);
+    return {
+      q: () => {
+        const r = dialect.sqlToQuery(captured as SQL);
+        return { sql: r.sql.replace(/\s+/g, " "), params: r.params };
+      },
+    };
+  }
+
+  it("persists the signature and returns the previous URL", async () => {
+    owned(true);
+    mockExecute([{ old: "https://r2/old.png" }]);
     const r = await recordSignature(ORG, TECH, JOB, SIG);
-    expect(r).toEqual({ ok: true });
+    expect(r).toEqual({ ok: true, previousUrl: "https://r2/old.png" });
+  });
+
+  it("previousUrl is null for a first signature", async () => {
+    owned(true);
+    mockExecute([{ old: null }]);
+    const r = await recordSignature(ORG, TECH, JOB, SIG);
+    expect(r).toEqual({ ok: true, previousUrl: null });
   });
 
   it("refuses a job not assigned to the tech (not_owned, no write)", async () => {
-    owned(false); // findOwnedJob → none
+    owned(false);
     const r = await recordSignature(ORG, TECH, JOB, SIG);
     expect(r).toEqual({ ok: false, reason: "not_owned" });
-    expect(vi.mocked(db.update)).not.toHaveBeenCalled();
+    expect(db.execute).not.toHaveBeenCalled();
+    expect(db.update).not.toHaveBeenCalled();
+  });
+
+  it("is one statement: database-clock signed_at, FOR UPDATE old-URL read, RETURNING o.old", async () => {
+    owned(true);
+    const m = mockExecute([{ old: null }]);
+    await recordSignature(ORG, TECH, JOB, SIG);
+    expect(db.execute).toHaveBeenCalledTimes(1);
+    const { sql: text, params } = m.q();
+    expect(text).toContain("signed_at = now()");
+    expect(text).toContain("updated_at = now()");
+    expect(text).toContain("FROM (SELECT id, signature_url AS old FROM service_requests WHERE id = $");
+    expect(text).toContain("FOR UPDATE) o");
+    expect(text).toContain("WHERE service_requests.id = o.id");
+    expect(text).toContain("RETURNING o.old");
+    // No JS clock: no Date param bound anywhere (signed_at comes from now()).
+    expect(params.some((p) => p instanceof Date)).toBe(false);
+    // org on the subquery, the outer UPDATE and the EXISTS body.
+    expect(params.filter((p) => p === ORG)).toHaveLength(3);
+    expect(params).toEqual([SIG.signatureUrl, SIG.signatureName, JOB, ORG, ORG, ORG, TECH]);
+    expect((text.match(/organization_id = \$\d+::uuid/g) ?? [])).toHaveLength(3);
   });
 
   it("signs only from a lead row that is not cancelled on a live visit (open statuses + completed)", async () => {
     owned(true);
-    let where: unknown;
-    vi.mocked(db.update).mockReturnValue({
-      set: () => ({ where: (w: unknown) => { where = w; return { returning: () => Promise.resolve([{ id: JOB }]) }; } }),
-    } as never);
+    const m = mockExecute([{ old: null }]);
     await recordSignature(ORG, TECH, JOB, SIG);
-    const text = new PgDialect().sqlToQuery(where as SQL).sql.replace(/\s+/g, " ");
+    const { sql: text } = m.q();
     expect(text).toContain("a.is_lead");
     expect(text).toContain("p.cancelled_at IS NULL");
+    expect(text).toContain("p.service_request_id = service_requests.id");
     expect(text).toContain("a.status IN ('assigned'::request_status, 'scheduled'::request_status, 'en_route'::request_status, 'arrived'::request_status, 'in_progress'::request_status, 'on_hold'::request_status, 'completed'::request_status)");
     expect(text).not.toContain("a.status <> 'cancelled'");
   });
 
   it("refuses if the job is reassigned between the ownership check and the write (TOCTOU)", async () => {
-    owned(true); // owned at read time…
-    mockUpdateReturning([]); // …but the assignee-guarded UPDATE matches 0 rows
+    owned(true);
+    mockExecute([]);
     const r = await recordSignature(ORG, TECH, JOB, SIG);
     expect(r).toEqual({ ok: false, reason: "not_owned" });
+  });
+
+  it("exports SIGNABLE_IN as the raw enum-cast list", () => {
+    expect(dialect.sqlToQuery(SIGNABLE_IN).sql).toBe(
+      "('assigned'::request_status, 'scheduled'::request_status, 'en_route'::request_status, 'arrived'::request_status, 'in_progress'::request_status, 'on_hold'::request_status, 'completed'::request_status)",
+    );
+  });
+});
+
+describe("getTechJobSummary — signedAt + invoice summary", () => {
+  const dialect = new PgDialect();
+  const SIGNED = new Date("2026-11-04T15:00:00Z");
+  const baseRow = {
+    id: JOB, referenceNumber: "R-1", status: "in_progress", issueType: "no_heat",
+    systemType: null, urgency: "normal", description: null, scheduledDate: null,
+    arrivalWindowStart: null, arrivalWindowEnd: null, customerNameEncrypted: null,
+    customerPhoneEncrypted: null, addressEncrypted: null, accessNotes: null,
+    fieldpulseJobId: null, hcpJobId: null, signedAt: SIGNED,
+  };
+
+  function setup(row: unknown, invoiceRows: unknown[]): { fields: () => Record<string, unknown>; invoiceSql: () => { sql: string; params: unknown[] } } {
+    let fields: Record<string, unknown> = {};
+    vi.mocked(db.select).mockImplementation(((f: Record<string, unknown>) => {
+      fields = f;
+      return { from: () => ({ where: () => ({ limit: () => Promise.resolve(row ? [row] : []) }) }) };
+    }) as never);
+    let captured: SQL | undefined;
+    vi.mocked(db.execute).mockImplementation(((q: SQL) => {
+      captured = q;
+      return Promise.resolve({ rows: invoiceRows });
+    }) as never);
+    vi.mocked(findAllAssignments).mockResolvedValue([]);
+    return {
+      fields: () => fields,
+      invoiceSql: () => {
+        const r = dialect.sqlToQuery(captured as SQL);
+        return { sql: r.sql.replace(/\s+/g, " "), params: r.params };
+      },
+    };
+  }
+
+  it("selects signed_at and returns signedAt", async () => {
+    const s = setup(baseRow, []);
+    const out = await getTechJobSummary(ORG, TECH, JOB);
+    expect(Object.keys(s.fields())).toContain("signedAt");
+    expect(out?.signedAt).toEqual(SIGNED);
+    expect(out?.invoiceSummary).toBeNull();
+  });
+
+  it("returns the invoice summary with a numeric balance", async () => {
+    setup(baseRow, [{ id: "inv-1", state: "open", balance_cents: "4200" }]);
+    const out = await getTechJobSummary(ORG, TECH, JOB);
+    expect(out?.invoiceSummary).toEqual({ id: "inv-1", state: "open", balanceCents: 4200 });
+  });
+
+  it("the invoice query: native, non-void, org-scoped, draft/open first, balance floored at 0", async () => {
+    const s = setup(baseRow, []);
+    await getTechJobSummary(ORG, TECH, JOB);
+    const { sql: text, params } = s.invoiceSql();
+    expect(text).toContain("FROM invoices");
+    expect(text).toContain("state <> 'void'::invoice_state");
+    expect(text).toContain("fieldpulse_invoice_id IS NULL");
+    expect(text).toContain("hcp_invoice_id IS NULL");
+    expect(text).toContain("organization_id = $1::uuid");
+    expect(text).toContain("service_request_id = $2::uuid");
+    expect(text).toContain("GREATEST(0, total_cents - amount_paid_cents)");
+    expect(text).toContain("ORDER BY (state IN ('draft'::invoice_state, 'open'::invoice_state)) DESC, created_at DESC LIMIT 1");
+    expect(params).toEqual([ORG, JOB]);
+  });
+
+  it("returns null (and runs no invoice query) when the job is not readable", async () => {
+    setup(null, []);
+    expect(await getTechJobSummary(ORG, TECH, JOB)).toBeNull();
+    expect(db.execute).not.toHaveBeenCalled();
   });
 });
 
