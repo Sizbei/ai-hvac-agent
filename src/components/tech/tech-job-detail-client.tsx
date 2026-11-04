@@ -10,7 +10,11 @@ import { Textarea } from '@/components/ui/textarea';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { TechJobSummary } from '@/components/tech/tech-job-summary';
+import { SignaturePad } from '@/components/tech/signature-pad';
 import { mintKey } from '@/lib/http/idempotency-codes';
+import { useIdempotencyKey } from '@/hooks/use-idempotency-key';
+import { outcomeEvent, type WriteOutcome } from '@/lib/tech/invoice-key-state';
+import { classifyWriteError } from '@/lib/tech/invoice-client-errors';
 
 interface Material {
   readonly id: string;
@@ -66,6 +70,28 @@ function formatMinutes(mins: number): string {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
+/** "Nov 4, 2:05 PM" in the device's locale. */
+function formatSignedAt(iso: string): string {
+  return new Date(iso).toLocaleString([], {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+interface SignatureBody {
+  readonly blob: Blob;
+  readonly name: string;
+}
+
+/** Copy for a signature write that did not land (spec §7.6). */
+function signatureErrorCopy(outcome: WriteOutcome, message: string | undefined): string {
+  if (outcome === 'retry_same_key_after_refetch') return "Couldn't save the signature. Try again.";
+  if (outcome === 'wait_then_refetch') return 'Still saving your last tap. Try again in a moment.';
+  return message ?? "Couldn't save the signature. Try again.";
+}
+
 function isToday(iso: string): boolean {
   const d = new Date(iso);
   const now = new Date();
@@ -112,16 +138,17 @@ export function TechJobDetailClient({
   const [noteStatus, setNoteStatus] = useState<string | null>(null);
   const [isPostingNote, setIsPostingNote] = useState(false);
 
-  // Signature
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const drawingRef = useRef(false);
-  const hasDrawnRef = useRef(false);
-  const [sigName, setSigName] = useState('');
-  const [sigStatus, setSigStatus] = useState<string | null>(null);
-  const [isSigning, setIsSigning] = useState(false);
-  // One PNG + one Idempotency-Key per signing intent: a retry re-sends the same
-  // pair (the server replays); a redraw, a name edit or a success drops it.
-  const [heldSig, setHeldSig] = useState<{ blob: Blob; key: string } | null>(null);
+  // Signature: the pad holds one PNG per intent; this reducer holds its key. A
+  // retry re-sends the same Blob with the same key (the server replays); a new
+  // capture (redraw / name edit) mints a new key; a success spends it.
+  const { state: sigState, dispatch: sigDispatch } = useIdempotencyKey({ intentId: 'signature', requestId: id, persist: false });
+  const blobIds = useRef(new WeakMap<Blob, string>());
+  const [sigError, setSigError] = useState<string | undefined>(undefined);
+  const [sigSaved, setSigSaved] = useState(false);
+  // undefined = not loaded yet; null = unsigned.
+  const [signedAt, setSignedAt] = useState<string | null | undefined>(undefined);
+  const [signAgain, setSignAgain] = useState(false);
+  const [padKey, setPadKey] = useState(0);
 
   // Status timeline (read-only history of this job's transitions).
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
@@ -360,115 +387,98 @@ export function TechJobDetailClient({
     }
   }, [id, note]);
 
-  // ── Signature canvas (pointer-based; renders the typed-name fallback too) ──
-  const getCtx = () => canvasRef.current?.getContext('2d') ?? null;
-
-  const pointerPos = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current!;
-    const rect = canvas.getBoundingClientRect();
-    // The canvas is rendered w-full but its backing store is a fixed 320x140, so
-    // map the CSS-pixel pointer position into backing-store coordinates — without
-    // this scale the ink lands offset/stretched wherever displayed width != 320.
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    return {
-      x: (e.clientX - rect.left) * scaleX,
-      y: (e.clientY - rect.top) * scaleY,
-    };
-  };
-
-  const startDraw = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    const ctx = getCtx();
-    if (!ctx) return;
-    drawingRef.current = true;
-    hasDrawnRef.current = true;
-    setHeldSig(null);
-    const { x, y } = pointerPos(e);
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-  };
-
-  const moveDraw = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!drawingRef.current) return;
-    const ctx = getCtx();
-    if (!ctx) return;
-    const { x, y } = pointerPos(e);
-    ctx.lineWidth = 2;
-    ctx.lineCap = 'round';
-    ctx.strokeStyle = '#111';
-    ctx.lineTo(x, y);
-    ctx.stroke();
-  };
-
-  const endDraw = () => {
-    drawingRef.current = false;
-  };
-
-  const clearCanvas = () => {
-    const ctx = getCtx();
-    const canvas = canvasRef.current;
-    if (!ctx || !canvas) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    hasDrawnRef.current = false;
-    setHeldSig(null);
-  };
-
-  const handleSign = useCallback(async (): Promise<void> => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    if (!sigName.trim()) {
-      setSigStatus('Enter the customer name.');
-      return;
-    }
-    let held = heldSig;
-    if (!held) {
-      // Typed-name fallback: if nothing was drawn, render the name onto the canvas
-      // so we always submit a PNG.
-      if (!hasDrawnRef.current) {
-        const ctx = getCtx();
-        if (ctx) {
-          ctx.font = '28px cursive';
-          ctx.fillStyle = '#111';
-          ctx.fillText(sigName.trim(), 16, canvas.height / 2 + 10);
-        }
-      }
-
-      const blob = await new Promise<Blob | null>((resolve) =>
-        canvas.toBlob((b) => resolve(b), 'image/png'),
-      );
-      if (!blob) {
-        setSigStatus('Could not capture signature.');
-        return;
-      }
-      held = { blob, key: mintKey() };
-      setHeldSig(held);
-    }
-
-    setIsSigning(true);
-    setSigStatus(null);
+  /** The job's signedAt from the summary GET; undefined when it couldn't load. */
+  const loadSignedAt = useCallback(async (): Promise<string | null | undefined> => {
     try {
-      const form = new FormData();
-      form.append('file', new File([held.blob], 'signature.png', { type: 'image/png' }));
-      form.append('signatureName', sigName.trim());
-      const res = await fetch(`/api/tech/jobs/${id}/signature`, {
-        method: 'POST',
-        headers: { 'Idempotency-Key': held.key },
-        body: form,
-      });
-      if (res.ok) {
-        setSigStatus('Signature saved.');
-        clearCanvas();
-        setSigName('');
-      } else {
-        const body = await res.json().catch(() => ({}));
-        setSigStatus(body.error?.message ?? 'Failed to save signature.');
+      const res = await fetch(`/api/tech/jobs/${id}`);
+      const body = await res.json().catch(() => ({ success: false }));
+      if (res.ok && body.success) {
+        const value: string | null = body.data.signedAt ?? null;
+        setSignedAt(value);
+        return value;
       }
     } catch {
-      setSigStatus('Could not connect to server.');
-    } finally {
-      setIsSigning(false);
+      /* fall through: shown as unsigned */
     }
-  }, [id, sigName, heldSig]);
+    setSignedAt((prev) => (prev === undefined ? null : prev));
+    return undefined;
+  }, [id]);
+
+  useEffect(() => {
+    void loadSignedAt();
+  }, [loadSignedAt]);
+
+  const handleCapture = useCallback(
+    async (blob: Blob, name: string): Promise<void> => {
+      let blobId = blobIds.current.get(blob);
+      if (!blobId) {
+        blobId = mintKey();
+        blobIds.current.set(blob, blobId);
+      }
+      const bodyHash = `${blobId}|${name}`;
+      const body: SignatureBody = { blob, name };
+      const arm = { bodyHash, body, mint: mintKey };
+      let s = sigDispatch({ type: 'open', ...arm });
+      if (s.phase === 'unknown' && s.bodyHash !== bodyHash) {
+        // A new capture after an unanswered send: the job signature is always
+        // re-capturable, so drop the old intent rather than re-send it.
+        sigDispatch({ type: 'dropped' });
+        s = sigDispatch({ type: 'open', ...arm });
+      }
+      sigDispatch({ type: 'edit', ...arm });
+      s = sigDispatch({ type: 'sent' });
+      if (s.phase !== 'sent') return;
+      const toSend = s.body as SignatureBody;
+      const before = signedAt;
+      setSigError(undefined);
+      setSigSaved(false);
+
+      let status: number | null = null;
+      let code: string | null = null;
+      let details: { storedStatus?: number } | undefined;
+      let message: string | undefined;
+      try {
+        const form = new FormData();
+        form.append('file', new File([toSend.blob], 'signature.png', { type: 'image/png' }));
+        form.append('signatureName', toSend.name);
+        const res = await fetch(`/api/tech/jobs/${id}/signature`, {
+          method: 'POST',
+          headers: { 'Idempotency-Key': s.key },
+          body: form,
+        });
+        if (res.ok) {
+          sigDispatch({ type: 'spent' });
+          await loadSignedAt();
+          setSignAgain(false);
+          setPadKey((k) => k + 1);
+          setSigSaved(true);
+          return;
+        }
+        status = res.status;
+        const err = await res.json().catch(() => ({}));
+        code = err?.error?.code ?? null;
+        details = err?.error?.details;
+        message = err?.error?.message;
+      } catch {
+        /* network error: status stays null */
+      }
+
+      const outcome = classifyWriteError(status, code, details);
+      if (outcome === 'wait_then_refetch') await new Promise((r) => setTimeout(r, 2000));
+      const now = await loadSignedAt();
+      const advanced = typeof now === 'string' && now !== before;
+      const ev = outcomeEvent(outcome, advanced);
+      if (ev) sigDispatch({ type: ev });
+      if (advanced) {
+        setSignAgain(false);
+        setPadKey((k) => k + 1);
+        setSigSaved(true);
+        return;
+      }
+      setSigError(signatureErrorCopy(outcome, message));
+    },
+    [id, sigDispatch, signedAt, loadSignedAt],
+  );
 
   const filteredCatalog = search.trim()
     ? catalog.filter((c) =>
@@ -703,44 +713,31 @@ export function TechJobDetailClient({
           <CardTitle className="text-[17px]">Customer signature</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
-          <canvas
-            ref={canvasRef}
-            width={320}
-            height={140}
-            onPointerDown={startDraw}
-            onPointerMove={moveDraw}
-            onPointerUp={endDraw}
-            onPointerLeave={endDraw}
-            className="w-full touch-none rounded-xl border border-border-strong bg-surface-raised"
-          />
-          <Input
-            placeholder="Customer name"
-            value={sigName}
-            onChange={(e) => {
-              setSigName(e.target.value);
-              setHeldSig(null);
-            }}
-            className="h-11 rounded-xl text-[15px] md:text-[15px]"
-          />
-          <div className="flex items-center gap-2">
-            <Button
-              className="h-11 rounded-xl px-4 text-[15px]"
-              disabled={isSigning || !sigName.trim()}
-              onClick={() => void handleSign()}
-            >
-              {isSigning ? 'Saving…' : 'Save signature'}
-            </Button>
-            <Button
-              className="h-11 rounded-xl px-4 text-[15px]"
-              variant="ghost"
-              onClick={clearCanvas}
-            >
-              Clear
-            </Button>
-          </div>
-          {sigStatus && (
-            <p className="text-[13px] text-muted-foreground">{sigStatus}</p>
+          {signedAt === undefined ? (
+            <Skeleton className="h-[140px] w-full rounded-xl" />
+          ) : signedAt && !signAgain ? (
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[15px]">Signed {formatSignedAt(signedAt)}</p>
+              <Button
+                variant="outline"
+                className="h-11 rounded-xl px-4 text-[15px]"
+                onClick={() => {
+                  setSignAgain(true);
+                  setSigSaved(false);
+                }}
+              >
+                Sign again
+              </Button>
+            </div>
+          ) : (
+            <SignaturePad
+              key={padKey}
+              onCapture={handleCapture}
+              disabled={sigState.phase === 'sent'}
+              error={sigError}
+            />
           )}
+          {sigSaved && <p className="text-[13px] text-muted-foreground">Signature saved.</p>}
         </CardContent>
       </Card>
 
