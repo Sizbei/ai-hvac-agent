@@ -20,9 +20,7 @@ import { useInvoiceWrites, type InvoicePageApi, type WriteResult } from './use-i
 type Load = 'loading' | 'ok' | 'not_found' | 'external' | 'error';
 interface Header { readonly customerName: string | null; readonly referenceNumber: string | null }
 
-// The tech layout's `mx-auto max-w-md` box sits in a flex-col body, so it
-// shrinks to its content; pin this page to the box's full width (28rem - px-4).
-const PAGE = 'w-[calc(min(100vw,28rem)-2rem)] space-y-4';
+const PAGE = 'space-y-4';
 const NOTE = 'rounded-md border border-border bg-surface-raised px-3 py-2.5 text-[15px] text-muted-foreground';
 const PENDING_POLL_MS = 3000;
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -30,8 +28,8 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 /**
  * S40 — the technician's field invoice (spec §7). GETs on mount, after every
  * write and on `visibilitychange`; every write goes through `write()` (key
- * reducer → send → classify → refetch → landed?). Task 14 mounts its sheets
- * through `InvoiceCollectButtons` with the `InvoicePageApi`.
+ * reducer → send → classify → refetch → landed?). The approval, record payment
+ * and pay link sheets mount through `InvoiceCollectButtons` with the `InvoicePageApi`.
  */
 export function InvoicePageClient({ id, devOpenAddItem = false }: { readonly id: string; readonly devOpenAddItem?: boolean }) {
   const base = `/api/tech/jobs/${id}/invoice`;
@@ -41,7 +39,7 @@ export function InvoicePageClient({ id, devOpenAddItem = false }: { readonly id:
   const [refreshError, setRefreshError] = useState(false);
   const [header, setHeader] = useState<Header>({ customerName: null, referenceNumber: null });
   const [materialCount, setMaterialCount] = useState<number | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
   const [addOpen, setAddOpen] = useState(devOpenAddItem);
 
   const refetch = useCallback(async (): Promise<TechInvoiceView | null> => {
@@ -98,11 +96,22 @@ export function InvoicePageClient({ id, devOpenAddItem = false }: { readonly id:
   }, [view, refetch]);
 
   const report = useCallback((r: WriteResult): WriteResult => {
-    setMessage(r.status === 'done' || r.status === 'dropped' ? null : r.message);
+    // `pending` (the server still holds the tap) and `skipped` read as status, not as an error.
+    setMessage(
+      r.status === 'done' || r.status === 'dropped' || !r.message
+        ? null
+        : { text: r.message, error: r.status !== 'pending' && r.status !== 'skipped' },
+    );
     return r;
   }, []);
 
-  if (load === 'loading') return <Skeleton className="h-64 w-full" />;
+  if (load === 'loading') {
+    return (
+      <div className={PAGE}>
+        <Skeleton className="h-64 w-full" />
+      </div>
+    );
+  }
   const back = (
     <Link href={`/tech/jobs/${id}`} className="inline-flex min-h-11 items-center gap-1.5 text-[15px] text-link">
       <ArrowLeft className="size-4" /> Back to job
@@ -122,6 +131,8 @@ export function InvoicePageClient({ id, devOpenAddItem = false }: { readonly id:
   const inv = view.invoice;
   const full = fullInvoice(view);
   const locked = view.pendingWrite || recovering || busy !== null || unknownKinds.length > 0;
+  // The add-item sheet re-sends its own unknown add ("Try again"); only OTHER unknown intents lock it.
+  const addLocked = view.pendingWrite || recovering || unknownKinds.some((k) => k !== 'add_line');
   const can = (a: TechInvoiceView['allowed'][number]) => view.allowed.includes(a);
   const api: InvoicePageApi = { view, refetch, write };
 
@@ -135,7 +146,8 @@ export function InvoicePageClient({ id, devOpenAddItem = false }: { readonly id:
   const addItem = (item: PricebookHit, quantity: number): Promise<WriteResult> => {
     if (!full) return Promise.resolve({ status: 'skipped', message: null });
     const body = { invoiceId: full.id, pricebookItemId: item.id, quantity };
-    return write({ kind: 'add_line', pricebookItemId: item.id }, (key) => postJson(`${base}/lines`, body, key), body);
+    const intent = { kind: 'add_line', pricebookItemId: item.id, name: item.name, unitPriceCents: item.priceCents, quantity } as const;
+    return write(intent, (key) => postJson(`${base}/lines`, body, key), body);
   };
   const remove = (lineId: string) => {
     if (!full) return;
@@ -183,8 +195,19 @@ export function InvoicePageClient({ id, devOpenAddItem = false }: { readonly id:
           </Button>
         </div>
       )}
-      {message && <p role="alert" className="text-[15px] text-danger-strong">{message}</p>}
-      {refreshError && <p role="alert" className="text-[13px] text-danger-strong">Couldn&apos;t refresh the invoice. Pull down to retry.</p>}
+      {message && (
+        <p role={message.error ? 'alert' : 'status'} className={`text-[15px] ${message.error ? 'text-danger-strong' : 'text-muted-foreground'}`}>
+          {message.text}
+        </p>
+      )}
+      {refreshError && (
+        <div role="alert" className="flex items-center justify-between gap-3 text-[15px] text-danger-strong">
+          <span>Couldn&apos;t refresh the invoice.</span>
+          <Button variant="outline" className="h-11 shrink-0 rounded-xl px-4" onClick={() => void refetch()}>
+            Try again
+          </Button>
+        </div>
+      )}
 
       {view.externalInvoice ? (
         <p className={NOTE}>Invoice in FieldPulse.</p>
@@ -232,13 +255,14 @@ export function InvoicePageClient({ id, devOpenAddItem = false }: { readonly id:
                 <InvoicePayments payments={full.payments} />
               </>
             )}
-            {/* Task 14 mount point: approval / record payment / pay link sheets. */}
-            <InvoiceCollectButtons api={api} invoice={full} />
+            <InvoiceCollectButtons api={api} invoice={full} jobId={id} unknownKinds={unknownKinds}
+              onNotice={(text) => setMessage(text ? { text, error: false } : null)}
+            />
           </CardContent>
         </Card>
       )}
 
-      <AddItemSheet open={addOpen && !!full} onClose={() => setAddOpen(false)} onAdd={addItem} disabled={locked} />
+      <AddItemSheet open={addOpen && !!full} onClose={() => setAddOpen(false)} onAdd={addItem} onRetry={() => retry('add_line')} disabled={addLocked} />
     </div>
   );
 }

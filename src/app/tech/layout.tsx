@@ -18,7 +18,7 @@ export default async function TechLayout({
   }
 
   return (
-    <div className="mx-auto min-h-dvh max-w-md bg-canvas">
+    <div className="mx-auto min-h-dvh w-full max-w-md bg-canvas">
       <header className="sticky top-0 z-10 flex items-center justify-between border-b border-border-strong bg-surface px-4 py-3">
         <div>
           <h1 className="text-[15px] font-semibold tracking-tight">Field</h1>
