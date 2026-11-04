@@ -67,6 +67,9 @@ vi.mock("@/lib/db/schema", () => ({
     id: "tl.id",
     capturedAt: "tl.capturedAt",
   },
+  idempotencyKeys: {
+    createdAt: "ik.createdAt",
+  },
 }));
 
 vi.mock("drizzle-orm", () => ({
@@ -205,8 +208,8 @@ describe("GET /api/cron/cleanup", () => {
 
     expect(response.status).toBe(200);
     expect(body.data.purgedMessages).toBe(5);
-    // delete is called three times: messages, sessions, then the GPS-retention trim.
-    expect(mockDelete).toHaveBeenCalledTimes(3);
+    // delete is called four times: messages, sessions, the GPS-retention trim, then idempotency keys.
+    expect(mockDelete).toHaveBeenCalledTimes(4);
   });
 
   it("deletes sessions older than 90 days after their messages", async () => {

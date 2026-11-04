@@ -190,6 +190,15 @@ export const templateVariableSchemas = {
     companyName: "string",
     phoneNumber: "string",
   },
+  // M3b: texted when a field invoice is finalized — link to the portal page.
+  invoice_sent: {
+    customerName: "string",
+    amount: "string",
+    invoiceNumber: "string",
+    payLink: "string",
+    companyName: "string",
+    phoneNumber: "string",
+  },
 } as const;
 
 export type TemplateVariables = typeof templateVariableSchemas;
@@ -217,6 +226,7 @@ export const COMMUNICATION_TRIGGER_TYPES = [
   { value: "payment_receipt", label: "Payment receipt" },
   { value: "invoice_overdue", label: "Invoice overdue" },
   { value: "warranty_expiring", label: "Warranty expiring" },
+  { value: "invoice_sent", label: "Invoice ready" },
 ] as const;
 
 export type CommunicationTriggerType =
@@ -356,5 +366,8 @@ export const defaultSmsTemplates: Record<
   // Lead-gen warranty-expiry nudge — invites a check-up, NEVER quotes a price.
   warranty_expiring: {
     body: `{{companyName}}: Your {{equipment}} warranty expires {{expiryDate}} — reply to schedule a check-up. Questions? Call {{phoneNumber}}.`,
+  },
+  invoice_sent: {
+    body: `{{companyName}}: your invoice {{invoiceNumber}} ({{amount}}) is ready to view: {{payLink}}`,
   },
 } as const;

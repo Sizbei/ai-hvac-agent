@@ -123,6 +123,18 @@ describe("importPaymentsFromFieldpulse", () => {
     expect(counts.total).toBeNull();
   });
 
+  it("writes method other on insert and in onConflictDoUpdate (M3b)", async () => {
+    // The fixture's FP method is "check"; the native column stays "other"
+    // because FP gateway payments are not checks recorded here.
+    wireSelects([[], [{ fpId: "50000001", nativeId: "native-invoice-uuid" }]]);
+    const { values, onConflictDoUpdate } = wireInsert();
+
+    await importPaymentsFromFieldpulse(ORG, makeCounts(), makeClient([makePayment()]));
+
+    expect(values.mock.calls[0][0]).toMatchObject({ provider: "fieldpulse", method: "other" });
+    expect(onConflictDoUpdate.mock.calls[0][0].set).toMatchObject({ method: "other" });
+  });
+
   it("skips soft-deleted payments and counts them as skipped", async () => {
     const deleted = makePayment({ id: "80000002", deletedAt: "2026-06-01 00:00:00" });
     const active = makePayment({ id: "80000001" });

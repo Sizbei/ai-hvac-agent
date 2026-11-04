@@ -156,7 +156,7 @@ describe("PATCH /api/admin/communications/templates/[id] (DC-2)", () => {
     expect(COMMUNICATION_TRIGGER_TYPE_VALUES.slice().sort()).toEqual(
       communicationTriggerTypeEnum.enumValues.slice().sort(),
     );
-    expect(COMMUNICATION_TRIGGER_TYPE_VALUES).toHaveLength(15);
+    expect(COMMUNICATION_TRIGGER_TYPE_VALUES).toHaveLength(16);
 
     for (const triggerType of communicationTriggerTypeEnum.enumValues) {
       templateQueue.push(EXISTING_TEMPLATE);

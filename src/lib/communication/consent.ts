@@ -64,6 +64,8 @@ export const TRIGGER_RULES: Record<CommTrigger, TriggerRule> = {
   // Lead-gen warranty-expiry nudge — marketing-ish: gated by the marketing
   // preference (off by default) and quiet-hours-respecting.
   warranty_expiring: { toggle: "marketingMessages", quietHours: true },
+  // M3b: invoice link on finalize — transactional, same rule as estimate_sent.
+  invoice_sent: { toggle: "automatedConfirmations", quietHours: false },
 };
 
 /** Preference defaults when a customer has no preferences row yet — mirrors the

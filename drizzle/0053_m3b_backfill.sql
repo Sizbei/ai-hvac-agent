@@ -1,0 +1,5 @@
+-- M3b data backfill: FieldPulse payments are not card charges; seed the
+-- invoice_sent_sms template for every existing org. Idempotent.
+UPDATE "payments" SET "method" = 'other' WHERE "provider" = 'fieldpulse' AND "method" = 'card';
+--> statement-breakpoint
+INSERT INTO "communication_templates" ("organization_id","key","name","description","trigger_type","template_type","subject_template","body_template","variables","is_active","priority") SELECT o.id, 'invoice_sent_sms', 'Invoice ready (SMS)', 'Texts the customer a link to view a new invoice', 'invoice_sent'::communication_trigger_type, 'sms'::communication_template_type, NULL, '{{companyName}}: your invoice {{invoiceNumber}} ({{amount}}) is ready to view: {{payLink}}', '{"customerName":"Customer name","amount":"Invoice total (formatted dollars)","invoiceNumber":"Invoice reference","payLink":"Portal link","companyName":"Company name","phoneNumber":"Company phone"}'::jsonb, true, 50 FROM "organizations" o ON CONFLICT ("organization_id","key") DO NOTHING;

@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { sql, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { customerSessions, messages, technicianLocations } from "@/lib/db/schema";
+import { customerSessions, idempotencyKeys, messages, technicianLocations } from "@/lib/db/schema";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { logger } from "@/lib/logger";
 import { verifyCronAuth } from "@/lib/cron-auth";
@@ -11,6 +11,7 @@ interface CleanupSummary {
   readonly purgedSessions: number;
   readonly purgedMessages: number;
   readonly purgedLocationFixes: number;
+  readonly purgedIdempotencyKeys: number;
 }
 
 export async function GET(request: NextRequest) {
@@ -90,11 +91,19 @@ export async function GET(request: NextRequest) {
     const purgedLocationFixes =
       (locResult as { rowCount?: number } | undefined)?.rowCount ?? 0;
 
+    // Step 5: Purge tech-money idempotency keys past their 7-day replay window.
+    const idemResult = await db
+      .delete(idempotencyKeys)
+      .where(sql`${idempotencyKeys.createdAt} < NOW() - INTERVAL '7 days'`);
+    const purgedIdempotencyKeys =
+      (idemResult as { rowCount?: number } | undefined)?.rowCount ?? 0;
+
     const summary: CleanupSummary = {
       expiredSessions,
       purgedSessions,
       purgedMessages,
       purgedLocationFixes,
+      purgedIdempotencyKeys,
     };
 
     logger.info({ cleanup: summary }, "Session cleanup completed");

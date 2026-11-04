@@ -22,11 +22,20 @@ const { signTechToken } = await import("../../src/lib/auth/tech-config.ts");
 const { neon } = await import("@neondatabase/serverless");
 
 const sql = neon(process.env.DATABASE_URL);
+// Optional: scope the pick to one tenant (a throwaway org). Unset = unchanged.
+const orgId = process.env.MINT_ORG_ID || null;
 const [u] = await sql`
   SELECT id, email, name, role, organization_id
-  FROM users WHERE role = 'technician' AND is_active LIMIT 1`;
+  FROM users
+  WHERE role = 'technician' AND is_active
+    AND (${orgId}::uuid IS NULL OR organization_id = ${orgId}::uuid)
+  LIMIT 1`;
 if (!u) {
-  console.error("no active technician in the dev DB");
+  console.error(
+    orgId
+      ? `no active technician in org ${orgId}`
+      : "no active technician in the dev DB",
+  );
   process.exit(1);
 }
 console.log(

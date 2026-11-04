@@ -157,6 +157,7 @@ vi.mock('@/lib/db/schema', () => ({
   customerSessions: { id: 'customer_sessions.id', token: 'token', status: 'status', organizationId: 'org_id', updatedAt: 'updated_at', createdAt: 'created_at' },
   messages: { sessionId: 'session_id', organizationId: 'org_id', createdAt: 'created_at' },
   technicianLocations: { id: 'tl.id', capturedAt: 'tl.captured_at' },
+  idempotencyKeys: { createdAt: 'ik.created_at' },
   serviceRequests: { id: 'service_requests.id' },
   auditLog: {},
   users: { email: 'users.email' },

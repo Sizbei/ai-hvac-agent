@@ -12,7 +12,7 @@ import { and, eq } from "drizzle-orm";
 /**
  * Default templates for each trigger type
  */
-const defaultTemplates = [
+export const defaultTemplates = [
   {
     key: "appointment_scheduled_sms",
     name: "Appointment Scheduled (SMS)",
@@ -211,6 +211,24 @@ const defaultTemplates = [
     variables: {
       customerName: "Customer name",
       approvalUrl: "Tokenized approval link",
+      companyName: "Company name",
+      phoneNumber: "Company phone",
+    },
+    priority: 50,
+  },
+  {
+    key: "invoice_sent_sms",
+    name: "Invoice ready (SMS)",
+    description: "Texts the customer a link to view a new invoice",
+    triggerType: "invoice_sent",
+    templateType: "sms" as const,
+    subjectTemplate: null,
+    bodyTemplate: `{{companyName}}: your invoice {{invoiceNumber}} ({{amount}}) is ready to view: {{payLink}}`,
+    variables: {
+      customerName: "Customer name",
+      amount: "Invoice total (formatted dollars)",
+      invoiceNumber: "Invoice reference",
+      payLink: "Portal link",
       companyName: "Company name",
       phoneNumber: "Company phone",
     },

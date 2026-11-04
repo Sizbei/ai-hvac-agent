@@ -529,6 +529,7 @@ export function getEmailSubject(
     payment_receipt: `Payment Received - ${companyName}`,
     invoice_overdue: `Reminder: Your Invoice Is Still Open - ${companyName}`,
     warranty_expiring: `Your Warranty Is Expiring Soon - ${companyName}`,
+    invoice_sent: "Your invoice is ready",
   };
 
   return subjects[triggerType] || `Message from ${companyName}`;

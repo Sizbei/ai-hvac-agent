@@ -135,6 +135,8 @@ export async function importPaymentsFromFieldpulse(
           organizationId: orgId,
           invoiceId: resolvedInvoiceId,
           provider: "fieldpulse",
+          // FP gateway payments are not card charges taken here (M3b).
+          method: "other",
           providerPaymentId: null,
           fieldpulsePaymentId: payment.id,
           amountCents: payment.amountCents ?? 0,
@@ -148,6 +150,7 @@ export async function importPaymentsFromFieldpulse(
           target: [payments.organizationId, payments.fieldpulsePaymentId],
           targetWhere: sql`${payments.fieldpulsePaymentId} IS NOT NULL`,
           set: {
+            method: "other",
             amountCents: payment.amountCents ?? 0,
             status: mappedStatus,
             updatedAt: new Date(),

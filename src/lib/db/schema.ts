@@ -1862,6 +1862,8 @@ export const communicationTriggerTypeEnum = pgEnum("communication_trigger_type",
   // soon, inviting the customer to schedule a check-up. Marketing-ish — quiet
   // hours apply, gated by the marketingMessages preference (see TRIGGER_RULES).
   "warranty_expiring",
+  // M3b: texted when a field invoice is finalized (portal link). Transactional.
+  "invoice_sent",
 ]);
 
 // Review-request lifecycle: created (pending) -> ask sent (sent) -> customer
@@ -2985,6 +2987,13 @@ export const invoices = pgTable(
     // When a collections reminder was last sent for this invoice. Nullable
     // (never reminded). Powers the "Reminded 3d ago" chip and the send cooldown.
     lastReminderSentAt: timestamp("last_reminder_sent_at", { withTimezone: true }),
+    // M3b: pay-link cooldown claim column (never lastReminderSentAt).
+    payLinkSentAt: timestamp("pay_link_sent_at", { withTimezone: true }),
+    // M3b: the invoice's own signature evidence, copied from the request at
+    // finalize and never written afterwards.
+    signatureUrl: text("signature_url"),
+    signatureName: text("signature_name"),
+    signedAt: timestamp("signed_at", { withTimezone: true }),
     // Real-world invoice dates from the source system. For pull-mirrored
     // invoices (FieldPulse/HCP) issuedAt is when the invoice was created THERE
     // — createdAt is only when WE imported the row, which made every mirrored
@@ -3026,6 +3035,12 @@ export const invoices = pgTable(
       .where(sql`${table.customerId} IS NOT NULL`),
     // Perf 0042: org + state filter (AR rails, invoice state counts).
     index("invoices_org_state_idx").on(table.organizationId, table.state),
+    // M3b: at most one NATIVE draft per request (field create is idempotent).
+    uniqueIndex("invoices_one_native_draft_per_request_idx")
+      .on(table.serviceRequestId)
+      .where(
+        sql`${table.serviceRequestId} IS NOT NULL AND ${table.state} = 'draft' AND ${table.fieldpulseInvoiceId} IS NULL AND ${table.hcpInvoiceId} IS NULL`,
+      ),
   ],
 );
 
@@ -3046,6 +3061,13 @@ export const invoiceLineItems = pgTable(
     // Carried over from the estimate line snapshot for historical margin accuracy.
     costCents: integer("cost_cents").notNull().default(0),
     lineTotalCents: integer("line_total_cents").notNull().default(0),
+    // M3b: stable display order.
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    // M3b: set on lines seeded from / added from a job material, so a material
+    // is billed at most once across the request's non-void invoices.
+    jobMaterialId: uuid("job_material_id").references(() => jobMaterials.id, {
+      onDelete: "set null",
+    }),
   },
   (table) => [index("invoice_line_items_invoice_idx").on(table.invoiceId)],
 );
@@ -3061,7 +3083,7 @@ export const payments = pgTable(
     invoiceId: uuid("invoice_id")
       .notNull()
       .references(() => invoices.id, { onDelete: "cascade" }),
-    provider: text("provider").notNull(), // "mock" | "stripe"
+    provider: text("provider").notNull(), // "mock" | "stripe" | "fieldpulse" | "manual"
     providerPaymentId: text("provider_payment_id"),
     amountCents: integer("amount_cents").notNull(),
     // Running total refunded against this payment. Written by an ATOMIC claim
@@ -3071,10 +3093,20 @@ export const payments = pgTable(
     status: paymentStatusEnum("status").notNull().default("pending"),
     isDeposit: boolean("is_deposit").notNull().default(false),
     fieldpulsePaymentId: text("fieldpulse_payment_id"),
+    // M3b: how the money arrived. Manual (cash/check) payments are recorded by
+    // staff; FieldPulse imports are "other".
+    method: text("method").notNull().default("card"),
+    checkNumber: text("check_number"),
+    recordedBy: uuid("recorded_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
+    check("payments_method_check", sql`${table.method} IN ('card','cash','check','other')`),
+    check(
+      "payments_check_number_check",
+      sql`${table.checkNumber} IS NULL OR ${table.method} = 'check'`,
+    ),
     index("payments_invoice_idx").on(table.invoiceId),
     uniqueIndex("payments_provider_id_unique")
       .on(table.provider, table.providerPaymentId)
@@ -3105,6 +3137,36 @@ export const refunds = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [index("refunds_payment_idx").on(table.paymentId)],
+);
+
+// M3b: replay store for tech money POSTs (Idempotency-Key header). TTL 7 days,
+// purged by the daily cleanup cron. response_body holds ids/enums only.
+export const idempotencyKeys = pgTable(
+  "idempotency_keys",
+  {
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    route: text("route").notNull(),
+    key: text("key").notNull(),
+    requestHash: text("request_hash").notNull(),
+    state: text("state").notNull().default("in_progress"),
+    attemptId: uuid("attempt_id").notNull(),
+    responseStatus: smallint("response_status"),
+    responseBody: jsonb("response_body"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({
+      name: "idempotency_keys_pkey",
+      columns: [table.organizationId, table.userId, table.route, table.key],
+    }),
+    check("idempotency_keys_state_check", sql`${table.state} IN ('in_progress','done')`),
+    index("idempotency_keys_created_idx").on(table.createdAt),
+  ],
 );
 
 // 37. financing_applications — thin hand-off to a consumer lender.
