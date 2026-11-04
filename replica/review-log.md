@@ -447,3 +447,20 @@ every probe that could queue a message guards `pending AND scheduled_for <=
 now()`; `mintKey` fallback; `derivedIdInput` pinned as a string; office
 writers pre-read for `synced_read_only`; `materialsNotOnInvoice` filter;
 audit skipped on replay.
+Round 3 (one fresh critic, convergence): 0 blockers, 5 majors (a
+`stateAdvanced` heuristic that dropped the tech's own in-flight payment when
+the office recorded one — replaced by intent-specific `intentLanded`, never
+while `pendingWrite`; the body sent while an intent is `unknown` was
+unspecified — inputs read-only, every send dispatches `edit(currentBody)`;
+the payment writer's pre-reads refused a full-balance replay before the
+by-id match — by-id read first; Task 10 consumed Task 9's unpinned
+contracts in parallel — ordered after, Interfaces block added; Task 12 too
+big with untested flow logic — split, `approvalStep`/`persistOps` pure).
+Plan v4: fifteen tasks (writers split into A/B; S40 split into page +
+sheets), order 1 → 2 → 3 → 4 → 5 → (6 ∥ 7) → 8 → (9 ∥ 10) → 11 → 12 → 13 →
+14 → 15; `parseIntents` maps `sent` → `unknown`; the detail pad holds
+`{blob, key}`; `SEND_FAILED` copy and the `STORED_CODES` deviation recorded;
+15-minute queue-guard window; `reasonResult`; winners return their own
+result. Verdict: converged-enough — each round narrower (2+20 → 2+7 →
+0+5), the remaining majors were refinements of v3 rules and are applied;
+the SDD task reviews are the net for what implementation surfaces.
