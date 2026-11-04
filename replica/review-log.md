@@ -320,3 +320,57 @@ literal; `invoice_line_items.created_at`; `randomUUID` fallback; memoised
   the plaintext is in `payments.check_number` by design; no claim is made.
 - "Keep `cardPaymentsEnabled` in the GET/`allowed`" — constant-false
   scaffolding until M4; routes gate, UI omits Card.
+
+## Spec round 6 — 2026-11-04 (M3b spec v2 → v3)
+
+Two fresh critics (money/idempotency; feasibility/scope/UX). Verdict: no
+sign-off; 2 blockers (same root: ids a client can choose collide across
+invoices/orgs and report success with nothing recorded; the approval sheet
+discarded the customer's signature when the job was signed earlier), 13
+majors.
+
+### Established
+- Office entity ids are derived server-side from a client token
+  (`uuidv5(org|invoice|payment|token)`); the NOT EXISTS guard is global by id
+  (documented exception to the tenant rule); the state UPDATE is gated on the
+  NEW row's xmin; a replay must match invoice/amount/method or it is
+  `ID_CONFLICT`.
+- The signature lock rules contradicted the re-bill rulings → the invoice
+  snapshots the request's signature at finalize (immutable evidence); the
+  job-level signature is always re-capturable; the sheet signs first, then
+  finalizes.
+- A second invoice re-seeded every material → `invoice_line_items.job_material_id`
+  and "unbilled" seeding.
+- An adopted estimate-born open invoice cannot take lines → the field
+  presents/pays it; materials on sold-estimate jobs are billed by the office;
+  other open invoices are listed (`otherOpen`).
+- The office had no finalize → admin finalize route + button.
+- Writes did not name their invoice → `invoiceId` in every body, 409 STALE
+  when it is not the newest live one.
+- Re-keying a changed body while the first request may still be running
+  double-records → the client resolves the old key first (`nextKeyState`
+  reducer); the GET exposes `pendingWrite`.
+- Stored state-dependent 4xx replayed stale refusals → only 2xx and
+  deterministic 4xx are stored; `IDEMPOTENCY_KEY_REUSED` carries `storedStatus`.
+- The pay-link token was minted before the cooldown claim → claim first.
+- Pending mock payments as `noop` left a phantom credit → treated as failed.
+- The card refund path wrote a stale JS state → SQL CASE.
+- Estimate creator refuses only on a field DRAFT; estimate-id early return
+  stays first.
+- `isDemoAccount` is an admin-email check → `DEMO_ORG_ID` for the tech route.
+
+### Applied
+All of the above plus: tenant predicate on `appointment_assignments` in
+`stillLead`; `T` and line removal require `amount_paid_cents = 0`; `isDeposit`
+false on the tech path; `invoice_paid` history outcome on create retry;
+receipt sent by the attempt that observed `created: true`; signature Blob
+captured once per intent; `signatureState`; `taxBps` only on drafts; casts in
+the 0053 INSERT; `customer_id` guard on receipts; test budget listed.
+
+### Rejected (with reason)
+- Email pay-link channel, `mint-tech-session --user`, membership-form card
+  control: cut as scope (SMS meets row 135; probes set the lead by SQL; no
+  form control exists).
+- "Adopt drafts only and let a native draft sit beside an estimate-born open
+  invoice" — re-opens double billing; the office bills materials on
+  sold-estimate jobs instead.
