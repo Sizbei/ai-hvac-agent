@@ -261,3 +261,62 @@ batch, exports from appointment-queries, admin complete records the event
 and returns currentStatus, interface name fixes, FOR NO KEY UPDATE).
 Verdict: converged-enough — each round narrower; the SDD task reviews are
 the net for what implementation surfaces.
+
+## Spec round 5 — 2026-11-04 (M3b Collect spec, `docs/superpowers/specs/2026-11-04-replica-m3b-collect.md`)
+
+Three blind critics (money/concurrency/idempotency; feasibility vs code;
+scope/security/field UX). Verdict: no sign-off; 2 blockers, 27 majors, ~30
+minors. Revised to v2 the same day.
+
+### Established
+- A refund that leaves the invoice `refunded` strands the job (void refuses
+  non-open, the adopt rule refused to create) → manual refunds return the
+  invoice to `open` while a balance remains; adopt only draft/open.
+- Line edits on a draft race an office cash payment that silently flips
+  draft → open → manual payments require `open` everywhere; line writers lock
+  the invoice row after the request row.
+- A stale-key takeover with a different body replays the first body's
+  result as if it were the new one → different hash is 422, always.
+- Attempts need ownership (`attempt_id`) or a slow original overwrites the
+  takeover's `done`; STALE/5xx results must not be stored as `done`.
+- Office manual payments with random ids double-record on a double-click →
+  client-minted `paymentId`/`refundId`.
+- `reconcilePayment` auto-succeeds pending mock charges and writes a stale JS
+  invoice state; `createInvoiceFromSoldEstimate` can create a second
+  collectable invoice on a request → both fixed in M3b.
+- `takePayment`'s default parameter makes a "provider undefined" gate dead
+  code → gates live at the routes only.
+- $0 finalized to `paid` could never be voided → `open` with zero balance.
+- Receipts/pay links only queue; the admin route drains with
+  `processPendingJobs()` in `after()` → required for the tech routes.
+- `invoice_sent` needs the enum (own file), six registries, `seeds.ts` for new
+  orgs and a backfill file for existing orgs; the neon-http migrator runs
+  statements individually.
+- FieldPulse import must write `method='other'` or new mirrored payments
+  default to `card`.
+- The signature route uploads before writing and has no `signed_at` guard;
+  the architecture's multipart key claim was dropped → restored, plus the
+  finalized-lock rule and the native guard.
+- Non-leads reached customer name, signature URL and check numbers through
+  `findReadableJob` → reduced projection; cost fields explicitly excluded.
+- Happy path was ~17 taps → merged approval sheet (sign + finalize), auto-open
+  record sheet, remembered method: 6 taps.
+
+### Applied
+All of the above; tenant predicates on every subquery; `jobMaterialId` branch
+scoped to the request; `COALESCE` names; `still_lead` final SELECT; re-claim on
+a vanished key row; pay-link cooldown column + demo block + `no_template`;
+portal phone line; key on finalize + same-origin guard on money writes;
+separate read/write rate keys; pricebook search rate-limited; service items
+rejected in `addJobMaterial`; `mint-tech-session --user`; email subject
+literal; `invoice_line_items.created_at`; `randomUUID` fallback; memoised
+`cardPaymentsEnabled`; erase reads keys before the scrub.
+
+### Rejected (with reason)
+- "Admin clear-signature action" — void the unpaid invoice instead (scope).
+- "Reuse an unexpired portal token on resend" — token rotation per send is
+  the established reminder behaviour; a 2-minute cooldown bounds the churn.
+- "Store a per-row salt so the request hash cannot leak a check number" —
+  the plaintext is in `payments.check_number` by design; no claim is made.
+- "Keep `cardPaymentsEnabled` in the GET/`allowed`" — constant-false
+  scaffolding until M4; routes gate, UI omits Card.
