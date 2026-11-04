@@ -10,6 +10,7 @@ import {
 } from "@/lib/admin/membership-queries";
 import { listVisitsForMembership } from "@/lib/admin/membership-visit-queries";
 import { logAudit } from "@/lib/admin/audit";
+import { cardPaymentsEnabled } from "@/lib/payments/card-enabled";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
@@ -91,6 +92,10 @@ export async function POST(
     const parsed = enrollSchema.safeParse(await request.json());
     if (!parsed.success) {
       return errorResponse("Invalid enrollment", "VALIDATION_ERROR", 400);
+    }
+    // Card gate (spec §5.7): no first-period charge until a real provider is configured.
+    if (parsed.data.chargeFirstPeriod && !cardPaymentsEnabled()) {
+      return errorResponse("Online payment isn't available yet.", "CARD_PAYMENTS_UNAVAILABLE", 409);
     }
 
     const result = await enrollCustomer(

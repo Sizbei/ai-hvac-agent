@@ -3,6 +3,8 @@ import { z } from "zod";
 import { getAdminSession } from "@/lib/auth/session";
 import { isSuperAdmin } from "@/lib/auth/authz";
 import { refundPayment } from "@/lib/admin/invoice-queries";
+import { officeId } from "@/lib/http/idempotency";
+import { fieldError } from "@/lib/tech/invoice-errors";
 import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
@@ -12,6 +14,7 @@ import { isUuid } from "@/lib/validation/uuid";
 // Structured reason (a fixed enum) — NOT free text — so no unencrypted PII can
 // land in the refunds table or the audit log.
 const refundSchema = z.object({
+  clientToken: z.string().uuid(),
   amountCents: z.number().int().min(1),
   reason: z.enum(["duplicate", "customer_request", "defective", "other"]),
 });
@@ -53,6 +56,7 @@ export async function POST(
     const result = await refundPayment(session.organizationId, id, {
       amountCents: parsed.data.amountCents,
       reason: parsed.data.reason,
+      refundId: officeId("refund", session.organizationId, parsed.data.clientToken),
     });
 
     if (!result.ok) {
@@ -77,9 +81,20 @@ export async function POST(
             "INVOICE_SYNCED_READ_ONLY",
             409,
           );
-        default:
+        case "refund_id_conflict": {
+          const e = fieldError("refund_id_conflict");
+          return errorResponse(e.message, e.code, e.status);
+        }
+        case "stale":
+          return errorResponse("This payment changed. Refresh and try again.", "STALE", 409);
+        default: // invalid_input and anything unexpected
           return errorResponse("Could not refund payment", "VALIDATION_ERROR", 400);
       }
+    }
+
+    // A replay (created: false) already audited.
+    if (!result.created) {
+      return successResponse({ refundId: result.refundId, created: false }, 201);
     }
 
     // ids/enums only — no money values in audit details.
@@ -97,7 +112,7 @@ export async function POST(
       );
     });
 
-    return successResponse({ refundId: result.refundId }, 201);
+    return successResponse({ refundId: result.refundId, created: true }, 201);
   } catch (error: unknown) {
     logger.error({ error }, "Failed to refund payment");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);

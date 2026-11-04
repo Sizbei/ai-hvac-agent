@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 
 /**
@@ -11,6 +11,13 @@ const {
   mockGetAdminSession,
   mockTakePayment,
   mockRefundPayment,
+  mockRecordManualPayment,
+  mockCardPaymentsEnabled,
+  mockGetInvoiceDetailById,
+  mockGetInvoiceOrgIdentity,
+  mockListInvoiceReminders,
+  mockGetStorageClient,
+  mockGetSignedReadUrl,
   mockCreateEstimate,
   mockListEstimates,
   mockGetDefaultTaxBps,
@@ -25,6 +32,13 @@ const {
   mockGetAdminSession: vi.fn(),
   mockTakePayment: vi.fn(),
   mockRefundPayment: vi.fn(),
+  mockRecordManualPayment: vi.fn(),
+  mockCardPaymentsEnabled: vi.fn(),
+  mockGetInvoiceDetailById: vi.fn(),
+  mockGetInvoiceOrgIdentity: vi.fn(),
+  mockListInvoiceReminders: vi.fn(),
+  mockGetStorageClient: vi.fn(),
+  mockGetSignedReadUrl: vi.fn(),
   mockCreateEstimate: vi.fn(),
   mockListEstimates: vi.fn(),
   mockGetDefaultTaxBps: vi.fn(),
@@ -71,6 +85,18 @@ vi.mock("@/lib/auth/session", () => ({
 vi.mock("@/lib/admin/invoice-queries", () => ({
   takePayment: (...a: unknown[]) => mockTakePayment(...a),
   refundPayment: (...a: unknown[]) => mockRefundPayment(...a),
+  getInvoiceDetailById: (...a: unknown[]) => mockGetInvoiceDetailById(...a),
+  getInvoiceOrgIdentity: (...a: unknown[]) => mockGetInvoiceOrgIdentity(...a),
+  listInvoiceReminders: (...a: unknown[]) => mockListInvoiceReminders(...a),
+}));
+vi.mock("@/lib/admin/invoice-payment-writes", () => ({
+  recordManualPayment: (...a: unknown[]) => mockRecordManualPayment(...a),
+}));
+vi.mock("@/lib/payments/card-enabled", () => ({
+  cardPaymentsEnabled: () => mockCardPaymentsEnabled(),
+}));
+vi.mock("@/lib/storage/r2-client", () => ({
+  getStorageClient: () => mockGetStorageClient(),
 }));
 vi.mock("@/lib/admin/estimate-queries", () => ({
   listEstimates: (...a: unknown[]) => mockListEstimates(...a),
@@ -101,6 +127,7 @@ vi.mock("@/lib/auth/authz", () => ({
 
 import { POST as refundPOST } from "@/app/api/admin/payments/[id]/refund/route";
 import { POST as takePaymentPOST } from "@/app/api/admin/invoices/[id]/payments/route";
+import { GET as invoiceGET } from "@/app/api/admin/invoices/[id]/route";
 import { POST as estimatesPOST, GET as estimatesGET } from "@/app/api/admin/estimates/route";
 
 const ORG = "00000000-0000-0000-0000-000000000001";
@@ -130,6 +157,7 @@ beforeEach(() => {
   mockTriggerEstimateSent.mockResolvedValue(undefined);
   mockTriggerPaymentReceipt.mockResolvedValue(undefined);
   mockProcessPendingJobs.mockResolvedValue({ processed: 0, succeeded: 0, failed: 0 });
+  mockCardPaymentsEnabled.mockReturnValue(false);
   // Default invoice lookup in the receipt after() path returns a customer.
   mockDbSelect.mockReturnValue({
     from: () => ({
@@ -137,189 +165,345 @@ beforeEach(() => {
     }),
   });
 });
-
 const PAY_ID = "aaaaaaaa-0000-0000-0000-000000000001";
 const INV_ID = "bbbbbbbb-0000-0000-0000-000000000001";
 const PB_ID = "11111111-1111-4111-8111-1111111111c1";
+const TOKEN = "cccccccc-1111-4111-8111-000000000001";
+// officeId("payment"|"refund", ORG, TOKEN) — computed once with uuidv5 and pasted.
+const OFFICE_PAYMENT_ID = "3261497a-5247-5197-bd16-fd6a894feb3a";
+const OFFICE_REFUND_ID = "3bbf7525-e9e7-5bc0-9d76-069e217dadee";
 
-describe("POST /api/admin/payments/[id]/refund — role gate", () => {
+const refundBody = (over: Record<string, unknown> = {}) => ({
+  clientToken: TOKEN,
+  amountCents: 1000,
+  reason: "duplicate",
+  ...over,
+});
+
+function refund(body: unknown) {
+  return refundPOST(jsonReq(`/api/admin/payments/${PAY_ID}/refund`, body), {
+    params: Promise.resolve({ id: PAY_ID }),
+  });
+}
+
+describe("POST /api/admin/payments/[id]/refund", () => {
   it("returns 401 when there is no admin session", async () => {
     mockGetAdminSession.mockResolvedValue(null);
-    const res = await refundPOST(
-      jsonReq(`/api/admin/payments/${PAY_ID}/refund`, {
-        amountCents: 1000,
-        reason: "duplicate",
-      }),
-      { params: Promise.resolve({ id: PAY_ID }) },
-    );
+    const res = await refund(refundBody());
     expect(res.status).toBe(401);
     expect(mockRefundPayment).not.toHaveBeenCalled();
   });
 
   it("returns 403 for a non-super_admin (admin) session", async () => {
     mockGetAdminSession.mockResolvedValue(session("admin"));
-    const res = await refundPOST(
-      jsonReq(`/api/admin/payments/${PAY_ID}/refund`, {
-        amountCents: 1000,
-        reason: "duplicate",
-      }),
-      { params: Promise.resolve({ id: PAY_ID }) },
-    );
+    const res = await refund(refundBody());
     expect(res.status).toBe(403);
     expect(mockRefundPayment).not.toHaveBeenCalled();
   });
 
-  it("proceeds for a super_admin and awaits the params Promise", async () => {
+  it("requires a clientToken (400, no refund)", async () => {
     mockGetAdminSession.mockResolvedValue(session("super_admin"));
-    mockRefundPayment.mockResolvedValue({ ok: true, refundId: "ref-1" });
-    const res = await refundPOST(
-      jsonReq(`/api/admin/payments/${PAY_ID}/refund`, {
-        amountCents: 1000,
-        reason: "duplicate",
-      }),
-      { params: Promise.resolve({ id: PAY_ID }) },
-    );
+    const res = await refund({ amountCents: 1000, reason: "duplicate" });
+    expect(res.status).toBe(400);
+    expect(mockRefundPayment).not.toHaveBeenCalled();
+  });
+
+  it("derives the refund id from the org and the client token", async () => {
+    mockGetAdminSession.mockResolvedValue(session("super_admin"));
+    mockRefundPayment.mockResolvedValue({ ok: true, refundId: OFFICE_REFUND_ID, created: true });
+    const res = await refund(refundBody());
     expect(res.status).toBe(201);
-    // The id came from the awaited params Promise.
-    expect(mockRefundPayment).toHaveBeenCalledWith(
-      ORG,
-      PAY_ID,
-      expect.objectContaining({ amountCents: 1000, reason: "duplicate" }),
-    );
-  });
-
-  it("surfaces a read-only synced invoice as 409 (not 500) on refund", async () => {
-    mockGetAdminSession.mockResolvedValue(session("super_admin"));
-    mockRefundPayment.mockResolvedValue({ ok: false, reason: "synced_read_only" });
-    const res = await refundPOST(
-      jsonReq(`/api/admin/payments/${PAY_ID}/refund`, {
-        amountCents: 1000,
-        reason: "customer_request",
-      }),
-      { params: Promise.resolve({ id: PAY_ID }) },
-    );
-    expect(res.status).toBe(409);
+    expect(mockRefundPayment).toHaveBeenCalledWith(ORG, PAY_ID, {
+      amountCents: 1000,
+      reason: "duplicate",
+      refundId: OFFICE_REFUND_ID,
+    });
     const body = await res.json();
-    expect(body.success).toBe(false);
+    expect(body.data).toEqual({ refundId: OFFICE_REFUND_ID, created: true });
   });
 
-  it("audit details carry NO PII — only ids/cents/enum", async () => {
+  it.each([
+    ["refund_id_conflict", 409, "ID_CONFLICT"],
+    ["invalid_input", 400, "VALIDATION_ERROR"],
+    ["stale", 409, "STALE"],
+    ["synced_read_only", 409, "INVOICE_SYNCED_READ_ONLY"],
+  ])("maps %s to %i %s", async (reason, status, code) => {
     mockGetAdminSession.mockResolvedValue(session("super_admin"));
-    mockRefundPayment.mockResolvedValue({ ok: true, refundId: "ref-1" });
-    await refundPOST(
-      jsonReq(`/api/admin/payments/${PAY_ID}/refund`, {
-        amountCents: 1000,
-        reason: "customer_request",
-      }),
-      { params: Promise.resolve({ id: PAY_ID }) },
-    );
+    mockRefundPayment.mockResolvedValue({ ok: false, reason });
+    const res = await refund(refundBody());
+    expect(res.status).toBe(status);
+    const body = await res.json();
+    expect(body.error.code).toBe(code);
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  it("ID_CONFLICT carries the token-reuse copy", async () => {
+    mockGetAdminSession.mockResolvedValue(session("super_admin"));
+    mockRefundPayment.mockResolvedValue({ ok: false, reason: "refund_id_conflict" });
+    const body = await (await refund(refundBody())).json();
+    expect(body.error.message).toBe("That payment token was already used. Try again.");
+  });
+
+  it("audit details carry NO PII — only ids/enum; none on a replay", async () => {
+    mockGetAdminSession.mockResolvedValue(session("super_admin"));
+    mockRefundPayment.mockResolvedValue({ ok: true, refundId: "ref-1", created: true });
+    await refund(refundBody({ reason: "customer_request" }));
     expect(mockLogAudit).toHaveBeenCalledTimes(1);
     const details = mockLogAudit.mock.calls[0][0].details as string;
     expect(details).toBe("refundId:ref-1 reason:customer_request");
-    // No email / phone / free-text name patterns.
-    expect(details).not.toMatch(/@/);
-    expect(details).not.toMatch(/\b\d{3}[-.]\d{3}[-.]\d{4}\b/);
+
+    mockLogAudit.mockClear();
+    mockRefundPayment.mockResolvedValue({ ok: true, refundId: "ref-1", created: false });
+    const res = await refund(refundBody({ reason: "customer_request" }));
+    expect(res.status).toBe(201);
+    expect(mockLogAudit).not.toHaveBeenCalled();
   });
 });
 
-describe("POST /api/admin/invoices/[id]/payments — admin session required", () => {
+const payBody = (over: Record<string, unknown> = {}) => ({
+  clientToken: TOKEN,
+  method: "cash",
+  amountCents: 5000,
+  ...over,
+});
+
+function pay(body: unknown) {
+  return takePaymentPOST(jsonReq(`/api/admin/invoices/${INV_ID}/payments`, body), {
+    params: Promise.resolve({ id: INV_ID }),
+  });
+}
+
+describe("POST /api/admin/invoices/[id]/payments", () => {
   it("returns 401 when there is no admin session", async () => {
     mockGetAdminSession.mockResolvedValue(null);
-    const res = await takePaymentPOST(
-      jsonReq(`/api/admin/invoices/${INV_ID}/payments`, { amountCents: 5000 }),
-      { params: Promise.resolve({ id: INV_ID }) },
-    );
+    const res = await pay(payBody());
     expect(res.status).toBe(401);
+    expect(mockRecordManualPayment).not.toHaveBeenCalled();
+  });
+
+  it("refuses card while card payments are off (409, no charge)", async () => {
+    mockGetAdminSession.mockResolvedValue(session("admin"));
+    mockCardPaymentsEnabled.mockReturnValue(false);
+    const res = await pay(payBody({ method: "card" }));
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error).toMatchObject({
+      code: "CARD_PAYMENTS_UNAVAILABLE",
+      message: "Online payment isn't available yet.",
+    });
+    expect(mockTakePayment).not.toHaveBeenCalled();
+    expect(mockRecordManualPayment).not.toHaveBeenCalled();
+  });
+
+  it("charges card through takePayment when card payments are on", async () => {
+    mockGetAdminSession.mockResolvedValue(session("admin"));
+    mockCardPaymentsEnabled.mockReturnValue(true);
+    mockTakePayment.mockResolvedValue({ ok: true, paymentId: "pay-1", invoiceState: "paid" });
+    const res = await pay(payBody({ method: "card", isDeposit: true }));
+    expect(res.status).toBe(201);
+    expect(mockTakePayment).toHaveBeenCalledWith(ORG, INV_ID, { amountCents: 5000, isDeposit: true });
+    expect((await res.json()).data).toEqual({ paymentId: "pay-1", invoiceState: "paid", created: true });
+    expect(mockLogAudit.mock.calls[0][0]).toMatchObject({
+      action: "payment_recorded",
+      details: `paymentId:pay-1 invoiceId:${INV_ID} method:card invoiceState:paid`,
+    });
+  });
+
+  it("records cash with the server-derived id and the session user", async () => {
+    mockGetAdminSession.mockResolvedValue(session("admin"));
+    mockRecordManualPayment.mockResolvedValue({
+      ok: true, paymentId: OFFICE_PAYMENT_ID, invoiceState: "open", created: true,
+    });
+    const res = await pay(payBody());
+    expect(res.status).toBe(201);
+    expect(mockRecordManualPayment).toHaveBeenCalledWith(
+      { organizationId: ORG, requestId: null, techUserId: null },
+      INV_ID,
+      { paymentId: OFFICE_PAYMENT_ID },
+      { method: "cash", amountCents: 5000, checkNumber: undefined, isDeposit: false, recordedBy: USER },
+    );
+    expect((await res.json()).data).toEqual({
+      paymentId: OFFICE_PAYMENT_ID, invoiceState: "open", created: true,
+    });
+    expect(mockLogAudit).toHaveBeenCalledTimes(1);
+    expect(mockLogAudit.mock.calls[0][0]).toMatchObject({
+      action: "payment_recorded",
+      entity: "invoice",
+      entityId: INV_ID,
+      details: `paymentId:${OFFICE_PAYMENT_ID} invoiceId:${INV_ID} method:cash invoiceState:open`,
+    });
     expect(mockTakePayment).not.toHaveBeenCalled();
   });
 
-  it("proceeds for an admin session and awaits params", async () => {
+  it("passes a check number with method check", async () => {
     mockGetAdminSession.mockResolvedValue(session("admin"));
-    mockTakePayment.mockResolvedValue({
-      ok: true,
-      paymentId: "pay-1",
-      invoiceState: "paid",
+    mockRecordManualPayment.mockResolvedValue({
+      ok: true, paymentId: OFFICE_PAYMENT_ID, invoiceState: "paid", created: true,
     });
-    const res = await takePaymentPOST(
-      jsonReq(`/api/admin/invoices/${INV_ID}/payments`, { amountCents: 5000 }),
-      { params: Promise.resolve({ id: INV_ID }) },
-    );
+    const res = await pay(payBody({ method: "check", checkNumber: " 1234 ", isDeposit: true }));
     expect(res.status).toBe(201);
-    expect(mockTakePayment).toHaveBeenCalledWith(
-      ORG,
-      INV_ID,
-      expect.objectContaining({ amountCents: 5000 }),
-    );
+    expect(mockRecordManualPayment.mock.calls[0][3]).toEqual({
+      method: "check", amountCents: 5000, checkNumber: "1234", isDeposit: true, recordedBy: USER,
+    });
   });
 
-  it("surfaces a read-only synced invoice as 409 (not 500), with no receipt", async () => {
+  it.each([
+    [{ method: "cash", checkNumber: "1234" }],
+    [{ clientToken: "not-a-uuid" }],
+    [{ clientToken: undefined }],
+    [{ method: "venmo" }],
+    [{ amountCents: 0 }],
+  ])("rejects an invalid body %j with 400", async (over) => {
     mockGetAdminSession.mockResolvedValue(session("admin"));
-    mockTakePayment.mockResolvedValue({ ok: false, reason: "synced_read_only" });
-    const res = await takePaymentPOST(
-      jsonReq(`/api/admin/invoices/${INV_ID}/payments`, { amountCents: 5000 }),
-      { params: Promise.resolve({ id: INV_ID }) },
-    );
-    expect(res.status).toBe(409);
+    const res = await pay(payBody(over));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe("VALIDATION_ERROR");
+    expect(mockRecordManualPayment).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["invoice_not_found", 404, "NOT_FOUND", undefined],
+    ["synced_read_only", 409, "INVOICE_SYNCED_READ_ONLY", "This invoice is managed in FieldPulse."],
+    ["invoice_not_chargeable", 409, "INVOICE_NOT_CHARGEABLE", "Finalize the invoice first."],
+    ["exceeds_balance", 422, "EXCEEDS_BALANCE", "That's more than the balance due."],
+    ["payment_id_conflict", 409, "ID_CONFLICT", "That payment token was already used. Try again."],
+    ["stale", 409, "STALE", undefined],
+  ])("maps %s to %i %s with no audit or receipt", async (reason, status, code, message) => {
+    mockGetAdminSession.mockResolvedValue(session("admin"));
+    mockRecordManualPayment.mockResolvedValue({ ok: false, reason });
+    const res = await pay(payBody());
+    expect(res.status).toBe(status);
     const body = await res.json();
-    expect(body.success).toBe(false);
-    expect(body.error.code).toBe("INVOICE_SYNCED_READ_ONLY");
-    // A blocked charge must NOT enqueue a receipt.
-    await flushAfter();
-    expect(mockTriggerPaymentReceipt).not.toHaveBeenCalled();
+    expect(body.error.code).toBe(code);
+    if (message) expect(body.error.message).toBe(message);
+    expect(mockLogAudit).not.toHaveBeenCalled();
+    expect(capturedAfterCallbacks).toHaveLength(0);
   });
 
-  it("enqueues a payment_receipt and drains the queue on a successful payment", async () => {
+  it("sends the receipt and drains the queue in one after() on a new payment with a customer", async () => {
     mockGetAdminSession.mockResolvedValue(session("admin"));
-    mockTakePayment.mockResolvedValue({
-      ok: true,
-      paymentId: "pay-1",
-      invoiceState: "paid",
+    mockRecordManualPayment.mockResolvedValue({
+      ok: true, paymentId: OFFICE_PAYMENT_ID, invoiceState: "paid", created: true,
     });
-    const res = await takePaymentPOST(
-      jsonReq(`/api/admin/invoices/${INV_ID}/payments`, { amountCents: 5000 }),
-      { params: Promise.resolve({ id: INV_ID }) },
-    );
+    const res = await pay(payBody());
     expect(res.status).toBe(201);
-    // The receipt work runs in after() — flush it.
+    expect(capturedAfterCallbacks).toHaveLength(1);
     await flushAfter();
-    expect(mockTriggerPaymentReceipt).toHaveBeenCalledWith(
-      expect.objectContaining({
-        organizationId: ORG,
-        invoiceId: INV_ID,
-        customerId: "cust-1",
-        amountCents: 5000,
-      }),
-    );
+    expect(mockTriggerPaymentReceipt).toHaveBeenCalledWith({
+      organizationId: ORG, invoiceId: INV_ID, customerId: "cust-1", amountCents: 5000,
+    });
     expect(mockProcessPendingJobs).toHaveBeenCalledTimes(1);
   });
 
-  it("does NOT enqueue a receipt when the charge failed", async () => {
+  it("schedules no after() when the invoice has no customer", async () => {
     mockGetAdminSession.mockResolvedValue(session("admin"));
-    mockTakePayment.mockResolvedValue({ ok: false, reason: "charge_failed" });
-    const res = await takePaymentPOST(
-      jsonReq(`/api/admin/invoices/${INV_ID}/payments`, { amountCents: 5000 }),
-      { params: Promise.resolve({ id: INV_ID }) },
-    );
-    expect(res.status).toBe(402);
-    await flushAfter();
-    expect(mockTriggerPaymentReceipt).not.toHaveBeenCalled();
+    mockDbSelect.mockReturnValue({
+      from: () => ({ where: () => ({ limit: () => Promise.resolve([{ customerId: null }]) }) }),
+    });
+    mockRecordManualPayment.mockResolvedValue({
+      ok: true, paymentId: OFFICE_PAYMENT_ID, invoiceState: "paid", created: true,
+    });
+    const res = await pay(payBody());
+    expect(res.status).toBe(201);
+    expect(capturedAfterCallbacks).toHaveLength(0);
+  });
+
+  it("a replay (created: false) returns 200 with no audit and no receipt", async () => {
+    mockGetAdminSession.mockResolvedValue(session("admin"));
+    mockRecordManualPayment.mockResolvedValue({
+      ok: true, paymentId: OFFICE_PAYMENT_ID, invoiceState: "paid", created: false,
+    });
+    const res = await pay(payBody());
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.created).toBe(false);
+    expect(mockLogAudit).not.toHaveBeenCalled();
+    expect(capturedAfterCallbacks).toHaveLength(0);
   });
 
   it("a receipt failure does NOT fail the payment (best-effort)", async () => {
     mockGetAdminSession.mockResolvedValue(session("admin"));
-    mockTakePayment.mockResolvedValue({
-      ok: true,
-      paymentId: "pay-1",
-      invoiceState: "paid",
+    mockRecordManualPayment.mockResolvedValue({
+      ok: true, paymentId: OFFICE_PAYMENT_ID, invoiceState: "paid", created: true,
     });
     mockTriggerPaymentReceipt.mockRejectedValue(new Error("twilio down"));
-    const res = await takePaymentPOST(
-      jsonReq(`/api/admin/invoices/${INV_ID}/payments`, { amountCents: 5000 }),
-      { params: Promise.resolve({ id: INV_ID }) },
-    );
-    // Response already 201 before after() runs; the error is swallowed.
+    const res = await pay(payBody());
     expect(res.status).toBe(201);
     await expect(flushAfter()).resolves.toBeUndefined();
+    expect(mockProcessPendingJobs).not.toHaveBeenCalled();
+  });
+});
+
+const SIG_URL = "https://pub.example.com/signatures/org/req/sig.png";
+
+function detail(over: Record<string, unknown> = {}) {
+  return {
+    id: INV_ID,
+    payments: [{ id: PAY_ID, method: "check", checkNumber: "1234", provider: "manual", refunds: [] }],
+    signature: { url: SIG_URL, name: "Pat", signedAt: "2026-11-01T10:00:00.000Z" },
+    requestSignature: null,
+    ...over,
+  };
+}
+
+function getDetail() {
+  return invoiceGET(new NextRequest(`http://localhost:3000/api/admin/invoices/${INV_ID}`), {
+    params: Promise.resolve({ id: INV_ID }),
+  });
+}
+
+describe("GET /api/admin/invoices/[id] — signature URLs", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  beforeEach(() => {
+    vi.stubEnv("R2_PUBLIC_URL", "https://pub.example.com");
+    mockGetAdminSession.mockResolvedValue(session("admin"));
+    mockGetInvoiceOrgIdentity.mockResolvedValue({ name: "Org" });
+    mockListInvoiceReminders.mockResolvedValue([]);
+    mockGetSignedReadUrl.mockResolvedValue("https://signed.example.com/sig?x=1");
+    mockGetStorageClient.mockImplementation(() => ({ getSignedReadUrl: mockGetSignedReadUrl }));
+  });
+
+  it("replaces the stored URL with a 15-minute signed read URL", async () => {
+    mockGetInvoiceDetailById.mockResolvedValue(detail());
+    const body = await (await getDetail()).json();
+    expect(mockGetSignedReadUrl).toHaveBeenCalledWith("signatures/org/req/sig.png", 900);
+    expect(body.data.invoice.signature).toEqual({
+      state: "present",
+      url: "https://signed.example.com/sig?x=1",
+      name: "Pat",
+      signedAt: "2026-11-01T10:00:00.000Z",
+    });
+    expect(body.data.invoice.requestSignature).toBeNull();
+    expect(body.data.invoice.payments[0]).toMatchObject({
+      method: "check", checkNumber: "1234", provider: "manual",
+    });
+  });
+
+  it("reports none, erased and the draft's request signature", async () => {
+    mockGetInvoiceDetailById.mockResolvedValue(detail({
+      signature: { url: null, name: null, signedAt: null },
+      requestSignature: { url: null, name: "Pat", signedAt: "2026-11-01T10:00:00.000Z" },
+    }));
+    const body = await (await getDetail()).json();
+    expect(body.data.invoice.signature).toEqual({ state: "none", url: null, name: null, signedAt: null });
+    expect(body.data.invoice.requestSignature).toMatchObject({ state: "erased", url: null });
+    expect(mockGetSignedReadUrl).not.toHaveBeenCalled();
+  });
+
+  it("is unavailable (never a 500) when storage cannot sign", async () => {
+    mockGetStorageClient.mockImplementation(() => {
+      throw new Error("R2 not configured");
+    });
+    mockGetInvoiceDetailById.mockResolvedValue(detail({
+      requestSignature: { url: "https://elsewhere.example.com/x.png", name: "Pat", signedAt: "2026-11-01T10:00:00.000Z" },
+    }));
+    const res = await getDetail();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.invoice.signature).toMatchObject({ state: "unavailable", url: null, name: "Pat" });
+    expect(body.data.invoice.requestSignature).toMatchObject({ state: "unavailable", url: null });
   });
 });
 
