@@ -4,17 +4,46 @@
  * the admin projection's cost/markup internals). The client previously hit
  * /api/admin/pricebook, which always 401s for a tech session, so catalog
  * materials could never be added.
+ *
+ * `?scope=invoice&q=` is the field invoice's add-item search (spec §6.2):
+ * active items of EVERY type (services included), server search, q >= 2
+ * chars, limit 50, `{ id, name, type, priceCents, sku }`, rate-limited.
  */
+import type { NextRequest } from "next/server";
 import { getTechSession } from "@/lib/auth/tech-session";
 import { listPricebookItemsForAdmin } from "@/lib/admin/pricebook-queries";
+import { RATE_LIMITS, slidingWindow } from "@/lib/rate-limit";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { logger } from "@/lib/logger";
 
-export async function GET() {
+const INVOICE_SEARCH_LIMIT = 50;
+const INVOICE_SEARCH_MIN_CHARS = 2;
+
+async function invoiceSearch(organizationId: string, userId: string, q: string) {
+  const rate = slidingWindow(`tech:pricebook:${userId}`, RATE_LIMITS.adminRead.maxRequests, RATE_LIMITS.adminRead.windowMs);
+  if (!rate.allowed) {
+    return errorResponse("Too many requests. Wait a moment and try again.", "RATE_LIMITED", 429);
+  }
+  const search = q.trim();
+  if (search.length < INVOICE_SEARCH_MIN_CHARS) return successResponse({ items: [] });
+  const page = await listPricebookItemsForAdmin(organizationId, {
+    search,
+    includeInactive: false,
+    limit: INVOICE_SEARCH_LIMIT,
+  });
+  const items = page.items.map((i) => ({ id: i.id, name: i.name, type: i.type, priceCents: i.priceCents, sku: i.sku }));
+  return successResponse({ items });
+}
+
+export async function GET(request: NextRequest) {
   try {
     const session = await getTechSession();
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
+    }
+    const params = new URL(request.url).searchParams;
+    if (params.get("scope") === "invoice") {
+      return await invoiceSearch(session.organizationId, session.userId, params.get("q") ?? "");
     }
     // Fetch all physical goods by type — no pagination needed here since this
     // is a small picker and we filter server-side before returning.
