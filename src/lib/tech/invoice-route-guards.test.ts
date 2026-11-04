@@ -151,6 +151,18 @@ describe("resolveTarget", () => {
     expect(q.params).toEqual([INV, ORG, REQ]);
   });
 
+  const HEX = "abcdef12-3456-4abc-8def-abcdefabcdef";
+  it("newest: an uppercase id from the client is not stale", async () => {
+    h.execute.mockResolvedValue({ rows: [{ id: HEX }] });
+    expect(await resolveTarget(ORG, REQ, HEX.toUpperCase(), "newest")).toBe("ok");
+  });
+
+  it("any: the id is queried lowercased", async () => {
+    h.execute.mockResolvedValue({ rows: [{ id: HEX }] });
+    expect(await resolveTarget(ORG, REQ, HEX.toUpperCase(), "any")).toBe("ok");
+    expect(dialect.sqlToQuery(h.execute.mock.calls[0]![0] as SQL).params[0]).toBe(HEX);
+  });
+
   it("any: not_found otherwise", async () => {
     h.execute.mockResolvedValue({ rows: [] });
     expect(await resolveTarget(ORG, REQ, INV, "any")).toBe("not_found");

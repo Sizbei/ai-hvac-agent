@@ -49,16 +49,25 @@ describe("GET /api/tech/jobs/[id]/invoice", () => {
   });
 
   it("404 when the job isn't readable", async () => {
-    h.getTechInvoiceView.mockResolvedValue(null);
+    h.getTechInvoiceView.mockResolvedValue({ kind: "not_found" });
     const res = await GET(req(), ctx(ID));
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ success: false, error: { code: "NOT_FOUND", message: "This job isn't yours." } });
   });
 
+  it("409 MANAGED_EXTERNALLY for a FieldPulse/HCP job", async () => {
+    h.getTechInvoiceView.mockResolvedValue({ kind: "external" });
+    const res = await GET(req(), ctx(ID));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({
+      success: false, error: { code: "MANAGED_EXTERNALLY", message: "This job is managed in FieldPulse." },
+    });
+  });
+
   it("200 wraps the view in the success envelope, scoped by the session", async () => {
     const view = { invoice: null, otherOpen: [], history: null, materialsNotOnInvoice: [], pendingWrite: false,
       customerHasPhone: false, isLead: true, onSite: true, externalInvoice: false, allowed: ["create"] };
-    h.getTechInvoiceView.mockResolvedValue(view);
+    h.getTechInvoiceView.mockResolvedValue({ kind: "ok", view });
     const res = await GET(req(), ctx(ID));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ success: true, data: view });

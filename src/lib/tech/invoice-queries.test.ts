@@ -101,6 +101,12 @@ function asLead(lead = true) {
   h.findActiveVisit.mockResolvedValue({ appointmentId: "a", leadTechnicianId: lead ? ME : "someone-else" });
 }
 
+async function viewOf() {
+  const r = await getTechInvoiceView(ORG, ME, REQ);
+  if (r.kind !== "ok") throw new Error(`expected a view, got ${r.kind}`);
+  return r.view;
+}
+
 function hasCostKey(v: unknown): boolean {
   if (Array.isArray(v)) return v.some(hasCostKey);
   if (v && typeof v === "object") {
@@ -121,16 +127,47 @@ beforeEach(() => {
 });
 
 describe("getTechInvoiceView", () => {
-  it("returns null when the job is not readable, without querying further", async () => {
+  it("not_found when the job is not readable, without querying further", async () => {
     h.findReadableJob.mockResolvedValue(null);
-    expect(await getTechInvoiceView(ORG, ME, REQ)).toBeNull();
+    expect(await getTechInvoiceView(ORG, ME, REQ)).toEqual({ kind: "not_found" });
     expect(h.executed).toHaveLength(0);
+    expect(h.findActiveVisit).not.toHaveBeenCalled();
+  });
+
+  it("external for a FieldPulse/HCP job: no statement after findReadableJob", async () => {
+    h.findReadableJob.mockResolvedValue({ id: REQ, customerId: CUST, native: false, status: "in_progress" });
+    script({ invoice: invoiceRow() });
+    expect(await getTechInvoiceView(ORG, ME, REQ)).toEqual({ kind: "external" });
+    expect(h.executed).toHaveLength(0);
+    expect(h.findActiveVisit).not.toHaveBeenCalled();
+    expect(h.getDefaultTaxBps).not.toHaveBeenCalled();
+  });
+
+  it("customerHasPhone reads the INVOICE's customer once a live invoice exists", async () => {
+    const INV_CUST = "99999999-9999-4999-8999-999999999999";
+    script({ invoice: invoiceRow({ customer_id: INV_CUST }) });
+    await viewOf();
+    const phone = stmt(M.customer)!;
+    expect(phone.params).toEqual([INV_CUST, ORG]);
+  });
+
+  it("customerHasPhone is false for a live invoice with no customer, even if the request has one", async () => {
+    script({ invoice: invoiceRow({ customer_id: null }) });
+    const v = await viewOf();
+    expect(v.customerHasPhone).toBe(false);
+    expect(stmt(M.customer)).toBeUndefined();
+  });
+
+  it("customerHasPhone falls back to the request's customer when there is no live invoice", async () => {
+    script({ invoice: null });
+    await viewOf();
+    expect(stmt(M.customer)!.params).toEqual([CUST, ORG]);
   });
 
   it("non-lead: exactly { id, state, totalCents, balanceCents }, no materials, no actions", async () => {
     asLead(false);
     script({ invoice: invoiceRow({ signature_url: `${PUBLIC}/sig.png`, signed_at: "2026-11-04T10:00:00Z" }) });
-    const v = (await getTechInvoiceView(ORG, ME, REQ))!;
+    const v = (await viewOf());
     expect(v.invoice).toEqual({ id: INV, state: "draft", totalCents: 10700, balanceCents: 10700 });
     expect(v.materialsNotOnInvoice).toEqual([]);
     expect(v.allowed).toEqual([]);
@@ -142,7 +179,7 @@ describe("getTechInvoiceView", () => {
 
   it("lead view never carries a key containing 'cost' although the rows do", async () => {
     script({ invoice: invoiceRow() });
-    const v = await getTechInvoiceView(ORG, ME, REQ);
+    const v = await viewOf();
     expect(hasCostKey(v)).toBe(false);
     expect((v!.invoice as TechInvoice).lines).toEqual([
       { id: "l1", name: "Capacitor", quantity: 2, unitPriceCents: 5000, lineTotalCents: 10000 },
@@ -153,7 +190,7 @@ describe("getTechInvoiceView", () => {
 
   it("adopts the newest live native invoice and every statement carries the org param", async () => {
     script({ invoice: invoiceRow() });
-    await getTechInvoiceView(ORG, ME, REQ);
+    await viewOf();
     const adopted = stmt("FROM invoices WHERE")!;
     expect(adopted.sql).toContain("(state = 'draft'::invoice_state OR state = 'open'::invoice_state)");
     expect(adopted.sql).toContain("fieldpulse_invoice_id IS NULL AND hcp_invoice_id IS NULL");
@@ -166,7 +203,7 @@ describe("getTechInvoiceView", () => {
 
   it("materialsNotOnInvoice: created after the invoice and not linked on a non-void native invoice", async () => {
     script({ invoice: invoiceRow() });
-    await getTechInvoiceView(ORG, ME, REQ);
+    await viewOf();
     const m = stmt(M.materials)!.sql;
     expect(m).toMatch(/m\.created_at > \(SELECT i0\.created_at FROM invoices i0 WHERE i0\.id = \$\d+::uuid AND i0\.organization_id = \$\d+::uuid\)/);
     expect(m).toContain("AND NOT EXISTS (SELECT 1 FROM invoice_line_items l JOIN invoices i ON i.id = l.invoice_id WHERE l.job_material_id = m.id");
@@ -176,7 +213,7 @@ describe("getTechInvoiceView", () => {
 
   it("materialsNotOnInvoice is empty and not queried for an open invoice; taxBps null on open", async () => {
     script({ invoice: invoiceRow({ state: "open", issued_at: "2026-11-04T10:30:00Z" }) });
-    const v = (await getTechInvoiceView(ORG, ME, REQ))!;
+    const v = (await viewOf());
     expect(v.materialsNotOnInvoice).toEqual([]);
     expect(stmt(M.materials)).toBeUndefined();
     expect((v.invoice as TechInvoice).taxBps).toBeNull();
@@ -185,7 +222,7 @@ describe("getTechInvoiceView", () => {
 
   it("taxBps is the org default while draft", async () => {
     script({ invoice: invoiceRow() });
-    const v = (await getTechInvoiceView(ORG, ME, REQ))!;
+    const v = (await viewOf());
     expect((v.invoice as TechInvoice).taxBps).toBe(700);
   });
 
@@ -195,7 +232,7 @@ describe("getTechInvoiceView", () => {
         invoice: invoiceRow({ updated_at: "2026-11-04T10:00:00.000Z" }),
         meta: { signature_url: `${PUBLIC}/sigs/a.png`, signature_name: "Pat", signed_at: signedAt },
       });
-      return ((await getTechInvoiceView(ORG, ME, REQ))!.invoice as TechInvoice).signature;
+      return ((await viewOf()).invoice as TechInvoice).signature;
     };
     it("fresh when signedAt equals updatedAt", async () => {
       const s = await run("2026-11-04T10:00:00.000Z");
@@ -207,11 +244,11 @@ describe("getTechInvoiceView", () => {
     });
     it("not fresh when signedAt is before updatedAt; the sign action is offered", async () => {
       expect((await run("2026-11-04T09:59:59.000Z")).fresh).toBe(false);
-      expect((await getTechInvoiceView(ORG, ME, REQ))!.allowed).toContain("sign");
+      expect((await viewOf()).allowed).toContain("sign");
     });
     it("none when the request is unsigned", async () => {
       script({ invoice: invoiceRow() });
-      const s = ((await getTechInvoiceView(ORG, ME, REQ))!.invoice as TechInvoice).signature;
+      const s = ((await viewOf()).invoice as TechInvoice).signature;
       expect(s).toEqual({ state: "none", signedAt: null, signatureName: null, url: null, fresh: false });
     });
   });
@@ -222,31 +259,31 @@ describe("getTechInvoiceView", () => {
         invoice: invoiceRow({ state: "open", signature_url: `${PUBLIC}/sigs/inv.png`, signature_name: "Lee", signed_at: "2026-11-04T09:30:00Z" }),
         meta: { signature_url: `${PUBLIC}/sigs/req.png`, signature_name: "Other", signed_at: "2026-11-04T12:00:00Z" },
       });
-      const s = ((await getTechInvoiceView(ORG, ME, REQ))!.invoice as TechInvoice).signature;
+      const s = ((await viewOf()).invoice as TechInvoice).signature;
       expect(s.state).toBe("present");
       expect(s.signatureName).toBe("Lee");
       expect(h.getSignedReadUrl).toHaveBeenCalledWith("sigs/inv.png", expect.any(Number));
     });
     it("erased when signed_at is set and the url is gone", async () => {
       script({ invoice: invoiceRow({ state: "open", signed_at: "2026-11-04T09:30:00Z", signature_name: null }) });
-      const s = ((await getTechInvoiceView(ORG, ME, REQ))!.invoice as TechInvoice).signature;
+      const s = ((await viewOf()).invoice as TechInvoice).signature;
       expect(s).toMatchObject({ state: "erased", url: null });
     });
     it("unavailable when the storage client throws (no R2 env)", async () => {
       h.getStorageClient.mockImplementation(() => { throw new Error("R2 env missing"); });
       script({ invoice: invoiceRow({ state: "open", signature_url: `${PUBLIC}/sigs/inv.png`, signed_at: "2026-11-04T09:30:00Z" }) });
-      const s = ((await getTechInvoiceView(ORG, ME, REQ))!.invoice as TechInvoice).signature;
+      const s = ((await viewOf()).invoice as TechInvoice).signature;
       expect(s).toMatchObject({ state: "unavailable", url: null });
     });
     it("unavailable when signing rejects", async () => {
       h.getSignedReadUrl.mockRejectedValue(new Error("Failed to sign read URL"));
       script({ invoice: invoiceRow({ state: "open", signature_url: `${PUBLIC}/sigs/inv.png`, signed_at: "2026-11-04T09:30:00Z" }) });
-      const s = ((await getTechInvoiceView(ORG, ME, REQ))!.invoice as TechInvoice).signature;
+      const s = ((await viewOf()).invoice as TechInvoice).signature;
       expect(s.state).toBe("unavailable");
     });
     it("estimate-born: the estimate's acceptance", async () => {
       script({ invoice: invoiceRow({ state: "open", estimate_id: EST }) });
-      const v = (await getTechInvoiceView(ORG, ME, REQ))!;
+      const v = (await viewOf());
       const inv = v.invoice as TechInvoice;
       expect(inv.fromEstimate).toBe(true);
       expect(inv.signature).toMatchObject({ state: "estimate", signatureName: "Pat Doe", url: null });
@@ -256,7 +293,7 @@ describe("getTechInvoiceView", () => {
 
   it("pendingWrite: in-progress key for (org, user) on this job's routes younger than 2 minutes", async () => {
     script({ invoice: null, meta: { pending_write: true } });
-    const v = (await getTechInvoiceView(ORG, ME, REQ))!;
+    const v = (await viewOf());
     expect(v.pendingWrite).toBe(true);
     const meta = stmt(M.meta)!;
     expect(meta.sql).toMatch(/EXISTS \(SELECT 1 FROM idempotency_keys k WHERE k\.organization_id = \$\d+::uuid AND k\.user_id = \$\d+::uuid AND k\.route LIKE '\/api\/tech\/jobs\/' \|\| \$\d+::text \|\| '\/%' AND k\.state = 'in_progress' AND k\.created_at > now\(\) - interval '2 minutes'\)/);
@@ -265,7 +302,7 @@ describe("getTechInvoiceView", () => {
 
   it("otherOpen excludes the adopted invoice", async () => {
     script({ invoice: invoiceRow({ state: "open" }), otherOpen: [{ id: OTHER, total_cents: 8900, balance_cents: 8900 }] });
-    const v = (await getTechInvoiceView(ORG, ME, REQ))!;
+    const v = (await viewOf());
     expect(v.otherOpen).toEqual([{ id: OTHER, totalCents: 8900, balanceCents: 8900 }]);
     const q = stmt(M.otherOpen)!;
     expect(q.sql).toContain("state = 'open'::invoice_state");
@@ -275,7 +312,7 @@ describe("getTechInvoiceView", () => {
 
   it("no live invoice: history = newest paid/refunded/void; create offered on site", async () => {
     script({ invoice: null, history: { id: OTHER, state: "paid", total_cents: 5000 } });
-    const v = (await getTechInvoiceView(ORG, ME, REQ))!;
+    const v = (await viewOf());
     expect(v.invoice).toBeNull();
     expect(v.history).toEqual({ id: OTHER, state: "paid", totalCents: 5000 });
     expect(stmt(M.history)!.sql).toContain("ORDER BY created_at DESC, id DESC LIMIT 1");
@@ -286,7 +323,7 @@ describe("getTechInvoiceView", () => {
   it("externalInvoice and onSite flags; off-site lead gets no actions", async () => {
     h.findReadableJob.mockResolvedValue({ id: REQ, customerId: null, native: true, status: "scheduled" });
     script({ invoice: null, meta: { external_invoice: true } });
-    const v = (await getTechInvoiceView(ORG, ME, REQ))!;
+    const v = (await viewOf());
     expect(v).toMatchObject({ externalInvoice: true, onSite: false, isLead: true, allowed: [], customerHasPhone: false });
     expect(stmt(M.customer)).toBeUndefined();
     expect(stmt(M.meta)!.sql).toContain("(i.fieldpulse_invoice_id IS NOT NULL OR i.hcp_invoice_id IS NOT NULL)");
@@ -294,7 +331,7 @@ describe("getTechInvoiceView", () => {
 
   it("open invoice with a balance and a customer phone: record_payment and pay_link", async () => {
     script({ invoice: invoiceRow({ state: "open", amount_paid_cents: 500, balance_cents: 10200 }) });
-    const v = (await getTechInvoiceView(ORG, ME, REQ))!;
+    const v = (await viewOf());
     expect(v.allowed).toEqual(["record_payment", "pay_link"]);
     expect((v.invoice as TechInvoice).payments).toEqual([
       { id: "p1", method: "cash", checkNumber: null, amountCents: 500, status: "succeeded", createdAt: "2026-11-04T11:00:00.000Z" },

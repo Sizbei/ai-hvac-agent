@@ -173,15 +173,31 @@ async function fullInvoice(org: string, rid: string, inv: Row, meta: Row): Promi
 
 // ---------------------------------------------------------------- the view
 
+export type TechInvoiceViewResult =
+  | { kind: "not_found" }
+  | { kind: "external" }
+  | { kind: "ok"; view: TechInvoiceView };
+
+/** not_found = not readable by this technician; external = a FieldPulse/HCP job (spec §6.1, 409). */
 export async function getTechInvoiceView(
   organizationId: string,
   techUserId: string,
   requestId: string,
-): Promise<TechInvoiceView | null> {
+): Promise<TechInvoiceViewResult> {
   const org = organizationId;
   const rid = requestId;
   const job = await findReadableJob(org, techUserId, rid);
-  if (!job) return null;
+  if (!job) return { kind: "not_found" };
+  if (!job.native) return { kind: "external" };
+  return { kind: "ok", view: await buildView(org, techUserId, rid, job) };
+}
+
+async function buildView(
+  org: string,
+  techUserId: string,
+  rid: string,
+  job: { customerId: string | null; native: boolean; status: string },
+): Promise<TechInvoiceView> {
 
   const [visit, [adopted], [meta]] = await Promise.all([
     findActiveVisit(org, rid),
@@ -191,7 +207,8 @@ export async function getTechInvoiceView(
   const isLead = visit?.leadTechnicianId === techUserId;
   const onSite = ON_SITE.includes(job.status);
   const m: Row = meta ?? {};
-  const customerId = str(adopted?.customer_id) ?? job.customerId;
+  // The invoice's own customer once one exists (pay link refuses a null invoice customer, §6.4).
+  const customerId = adopted ? str(adopted.customer_id) : job.customerId;
 
   const [otherRows, historyRows, phoneRows] = await Promise.all([
     adopted ? rows(otherOpenSql(org, rid, String(adopted.id))) : Promise.resolve([] as Row[]),

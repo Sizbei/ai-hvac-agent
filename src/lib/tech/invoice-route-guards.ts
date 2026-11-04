@@ -60,14 +60,15 @@ export async function resolveTarget(
   invoiceId: string,
   mode: "newest" | "any",
 ): Promise<"ok" | "stale" | "not_found"> {
+  const target = invoiceId.toLowerCase(); // Postgres returns lowercase uuids
   if (mode === "newest") {
     const { rows } = await db.execute(sql`SELECT id FROM invoices
       WHERE organization_id = ${organizationId}::uuid AND service_request_id = ${requestId}::uuid AND ${P_LIVE} AND ${P_NATIVE}
       ORDER BY created_at DESC, id DESC LIMIT 1`);
-    return (rows[0] as { id?: string } | undefined)?.id === invoiceId ? "ok" : "stale";
+    return (rows[0] as { id?: string } | undefined)?.id === target ? "ok" : "stale";
   }
   const { rows } = await db.execute(sql`SELECT id FROM invoices
-    WHERE id = ${invoiceId}::uuid AND organization_id = ${organizationId}::uuid AND service_request_id = ${requestId}::uuid
+    WHERE id = ${target}::uuid AND organization_id = ${organizationId}::uuid AND service_request_id = ${requestId}::uuid
       AND state <> 'void'::invoice_state AND ${P_NATIVE}`);
   return rows.length > 0 ? "ok" : "not_found";
 }

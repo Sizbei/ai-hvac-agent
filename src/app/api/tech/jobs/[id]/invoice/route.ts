@@ -1,7 +1,7 @@
 /**
  * GET /api/tech/jobs/[id]/invoice — the field invoice screen (spec §6.2.1).
- * Tech session → UUID → read rate limit → the view (null = not readable → 404,
- * never confirming the job exists). Writes live in Task 8's POST handlers.
+ * Tech session → UUID → read rate limit → the view: not readable → 404 (never
+ * confirming the job exists), FieldPulse/HCP job → 409 MANAGED_EXTERNALLY. Writes live in Task 8's POST handlers.
  */
 import type { NextRequest } from "next/server";
 import { getTechSession } from "@/lib/auth/tech-session";
@@ -30,9 +30,12 @@ export async function GET(
     if (!rate.allowed) {
       return errorResponse("Too many requests. Wait a moment and try again.", "RATE_LIMITED", 429);
     }
-    const view = await getTechInvoiceView(session.organizationId, session.userId, id);
-    if (!view) return errorResponse("This job isn't yours.", "NOT_FOUND", 404);
-    return successResponse(view);
+    const result = await getTechInvoiceView(session.organizationId, session.userId, id);
+    if (result.kind === "not_found") return errorResponse("This job isn't yours.", "NOT_FOUND", 404);
+    if (result.kind === "external") {
+      return errorResponse("This job is managed in FieldPulse.", "MANAGED_EXTERNALLY", 409);
+    }
+    return successResponse(result.view);
   } catch (error) {
     logger.error({ error }, "Failed to load tech invoice view");
     return errorResponse("Something went wrong. Try again.", "INTERNAL_ERROR", 500);
