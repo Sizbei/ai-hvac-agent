@@ -32,11 +32,16 @@ export function AddItemSheet({
   onClose,
   onAdd,
   disabled,
+  onRetry,
 }: {
   readonly open: boolean;
   readonly onClose: () => void;
   readonly onAdd: (item: PricebookHit, quantity: number) => Promise<WriteResult>;
   readonly disabled: boolean;
+  /** "Try again" for an unknown add (re-sends the stored body, same key).
+   * Without it, the sheet re-sends the same item and quantity, which hashes to
+   * the same body and so reuses the same key. */
+  readonly onRetry?: () => Promise<WriteResult>;
 }) {
   const [q, setQ] = useState('');
   const [hits, setHits] = useState<readonly PricebookHit[]>([]);
@@ -44,6 +49,9 @@ export function AddItemSheet({
   const [searchError, setSearchError] = useState<string | null>(null);
   const [picked, setPicked] = useState<PricebookHit | null>(null);
   const [qty, setQty] = useState(1);
+  // The raw field text while focused; clamped to 1–999 on blur.
+  const [qtyText, setQtyText] = useState<string | null>(null);
+  const [canRetry, setCanRetry] = useState(false);
   const [adding, setAdding] = useState(false);
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
 
@@ -86,14 +94,17 @@ export function AddItemSheet({
     setQty(1);
     setMessage(null);
     setSearchError(null);
+    setCanRetry(false);
   }
 
-  async function add(): Promise<void> {
+  async function add(retrying = false): Promise<void> {
     if (!picked) return;
     setAdding(true);
     setMessage(null);
-    const r = await onAdd(picked, qty);
+    setCanRetry(false);
+    const r = retrying && onRetry ? await onRetry() : await onAdd(picked, qty);
     setAdding(false);
+    setCanRetry(r.status === 'retry');
     if (r.status === 'done') {
       setMessage({ text: `Added ${picked.name}.`, error: false });
       setPicked(null);
@@ -102,7 +113,7 @@ export function AddItemSheet({
       reset();
       onClose();
     } else if (r.message) {
-      setMessage({ text: r.message, error: true });
+      setMessage({ text: r.message, error: r.status !== 'pending' });
     }
   }
 
@@ -136,26 +147,35 @@ export function AddItemSheet({
                 <span className="shrink-0 font-mono text-[15px] tabular-nums">{formatCentsExact(picked.priceCents * qty)}</span>
               </div>
               <div className="flex items-center gap-2">
-                <Button variant="outline" className="size-11 rounded-xl" aria-label="Less" disabled={qty <= 1 || locked} onClick={() => setQty((n) => clampQty(n - 1))}>
+                <Button variant="outline" className="size-11 rounded-xl" aria-label="Less" disabled={qty <= 1 || locked || canRetry} onClick={() => setQty((n) => clampQty(n - 1))}>
                   <Minus className="size-5" />
                 </Button>
                 <Input
                   inputMode="numeric"
                   aria-label="Quantity"
-                  value={String(qty)}
-                  onChange={(e) => setQty(clampQty(Number(e.target.value.replace(/\D/g, ''))))}
+                  disabled={locked || canRetry}
+                  value={qtyText ?? String(qty)}
+                  onFocus={() => setQtyText(String(qty))}
+                  onChange={(e) => setQtyText(e.target.value.replace(/\D/g, '').slice(0, 3))}
+                  onBlur={() => { setQty(clampQty(Number(qtyText))); setQtyText(null); }}
                   className="h-11 w-16 rounded-xl text-center font-mono text-[16px] tabular-nums"
                 />
-                <Button variant="outline" className="size-11 rounded-xl" aria-label="More" disabled={qty >= MAX_QTY || locked} onClick={() => setQty((n) => clampQty(n + 1))}>
+                <Button variant="outline" className="size-11 rounded-xl" aria-label="More" disabled={qty >= MAX_QTY || locked || canRetry} onClick={() => setQty((n) => clampQty(n + 1))}>
                   <Plus className="size-5" />
                 </Button>
-                <Button variant="ghost" className="ml-auto h-11 rounded-xl px-3 text-[15px]" disabled={locked} onClick={() => setPicked(null)}>
+                <Button variant="ghost" className="ml-auto h-11 rounded-xl px-3 text-[15px]" disabled={locked || canRetry} onClick={() => setPicked(null)}>
                   Change
                 </Button>
               </div>
-              <Button className="h-12 w-full rounded-xl text-[16px]" disabled={locked} onClick={() => void add()}>
-                {adding ? 'Adding…' : 'Add'}
-              </Button>
+              {canRetry ? (
+                <Button className="h-12 w-full rounded-xl text-[16px]" disabled={locked} onClick={() => void add(true)}>
+                  {adding ? 'Adding…' : 'Try again'}
+                </Button>
+              ) : (
+                <Button className="h-12 w-full rounded-xl text-[16px]" disabled={locked} onClick={() => void add()}>
+                  {adding ? 'Adding…' : 'Add'}
+                </Button>
+              )}
             </div>
           ) : (
             <div className="min-h-0 overflow-y-auto">

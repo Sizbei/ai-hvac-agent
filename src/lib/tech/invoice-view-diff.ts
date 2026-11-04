@@ -4,15 +4,24 @@
  * whether the state advanced; if so the intent is dropped and the refetched
  * state shown, else "Try again" re-sends with the SAME key.
  *
- * The GET's lines carry no pricebook/material id, so add_line is judged by a
- * new line id (pricebook) or by the material leaving `materialsNotOnInvoice`.
+ * The GET's lines carry no pricebook/material id, so a pricebook add_line is
+ * judged by a NEW line matching the intent's name/unit price/quantity, and a
+ * material add by the material leaving `materialsNotOnInvoice`.
  */
 import type { TechInvoice, TechInvoiceView } from "./invoice-view";
-import type { KeyState } from "./invoice-key-state";
+import type { KeyState, OutcomeEventType, WriteOutcome } from "./invoice-key-state";
 
 export type Intent =
   | { kind: "create" }
-  | { kind: "add_line"; pricebookItemId?: string; jobMaterialId?: string }
+  | {
+      kind: "add_line";
+      pricebookItemId?: string;
+      jobMaterialId?: string;
+      /** The expected line (pricebook adds): a NEW line must match every field given. */
+      name?: string;
+      unitPriceCents?: number;
+      quantity?: number;
+    }
   | { kind: "remove_line"; lineId: string }
   | { kind: "finalize" }
   | { kind: "payment"; amountCents: number; method: string }
@@ -39,7 +48,13 @@ export function intentLanded(intent: Intent, before: TechInvoiceView, after: Tec
     case "add_line": {
       if (!a) return false;
       const had = ids(b?.lines);
-      const newLine = a.lines.some((l) => !had.has(l.id));
+      const newLine = a.lines.some(
+        (l) =>
+          !had.has(l.id) &&
+          (intent.name === undefined || l.name === intent.name) &&
+          (intent.unitPriceCents === undefined || l.unitPriceCents === intent.unitPriceCents) &&
+          (intent.quantity === undefined || l.quantity === intent.quantity),
+      );
       if (intent.jobMaterialId) {
         const id = intent.jobMaterialId;
         return (
@@ -79,4 +94,38 @@ export function sendPlan(pre: KeyState, bodyHash: string): "send" | "resend_stor
   if (pre.phase === "armed") return "send";
   if (pre.phase === "unknown") return pre.bodyHash === bodyHash ? "send" : "resend_stored";
   return "skip";
+}
+
+/**
+ * The result kind `write()` reports. pending = the server still holds the key
+ * (IN_PROGRESS) after the 2 s wait: not an error, just "Still saving".
+ */
+export type WriteStatus = "done" | "dropped" | "retry" | "pending" | "error" | "skipped";
+
+export function writeStatus(outcome: WriteOutcome, ev: OutcomeEventType | null): WriteStatus {
+  if (outcome === "success_refetch") return "done";
+  if (ev === "dropped") return "dropped";
+  if (ev === "unknown") return outcome === "wait_then_refetch" ? "pending" : "retry";
+  return "error";
+}
+
+/** Rebuild the intent of a persisted body (reload recovery / "Try again"). */
+export function intentFromBody(kind: IntentKind, body: unknown): Intent {
+  const b = (body ?? {}) as Record<string, unknown>;
+  const s = (k: string) => (typeof b[k] === "string" ? (b[k] as string) : undefined);
+  switch (kind) {
+    case "add_line": {
+      const base = { kind, pricebookItemId: s("pricebookItemId"), jobMaterialId: s("jobMaterialId") } as const;
+      return typeof b.quantity === "number" ? { ...base, quantity: b.quantity } : base;
+    }
+    case "remove_line":
+      return { kind, lineId: s("lineId") ?? "" };
+    case "payment":
+      return { kind, amountCents: Number(b.amountCents ?? 0), method: s("method") ?? "" };
+    case "create":
+    case "finalize":
+    case "pay_link":
+    case "signature":
+      return { kind };
+  }
 }

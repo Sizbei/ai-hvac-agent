@@ -7,18 +7,28 @@ import { classifyWriteError } from '@/lib/tech/invoice-client-errors';
 import { outcomeEvent, type KeyEvent, type KeyState } from '@/lib/tech/invoice-key-state';
 import { INTENTS_STORAGE_KEY, parseIntents } from '@/lib/tech/invoice-intent-persist';
 import { writeErrorCopy } from '@/lib/tech/invoice-page-copy';
-import { intentLanded, sendPlan, type Intent, type IntentKind } from '@/lib/tech/invoice-view-diff';
+import {
+  intentFromBody,
+  intentLanded,
+  sendPlan,
+  writeStatus,
+  type Intent,
+  type IntentKind,
+  type WriteStatus,
+} from '@/lib/tech/invoice-view-diff';
 import type { TechInvoiceView } from '@/lib/tech/invoice-view';
 import { sendStored, type SendResult } from './post-json';
 
 /**
  * done = the server accepted it (or a replay said so); dropped = the refetch
  * showed it landed; retry = still unknown, "Try again" re-sends with the SAME
- * key; error = definitive refusal (message shown); skipped = nothing sent
- * (a double tap while in flight, or a pending write).
+ * key; pending = the server still holds the key (IN_PROGRESS): show the
+ * message as status, not as an error; error = definitive refusal (message
+ * shown); skipped = nothing sent (a double tap while in flight, or a pending
+ * write).
  */
 export interface WriteResult {
-  readonly status: 'done' | 'dropped' | 'retry' | 'error' | 'skipped';
+  readonly status: WriteStatus;
   readonly message: string | null;
   readonly data?: unknown;
 }
@@ -33,21 +43,16 @@ export type WriteFn = (
 ) => Promise<WriteResult>;
 
 const PERSISTED: readonly IntentKind[] = ['create', 'add_line', 'remove_line', 'finalize', 'payment', 'pay_link'];
+const SIGNATURE_RETRY = 'Your last signature may not have saved. Try again.';
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-/** Rebuild the intent of a persisted body (reload recovery / "Try again"). */
-function intentFromBody(kind: IntentKind, body: unknown): Intent {
-  const b = (body ?? {}) as Record<string, unknown>;
-  const s = (k: string) => (typeof b[k] === 'string' ? (b[k] as string) : undefined);
-  switch (kind) {
-    case 'add_line':
-      return { kind, pricebookItemId: s('pricebookItemId'), jobMaterialId: s('jobMaterialId') };
-    case 'remove_line':
-      return { kind, lineId: s('lineId') ?? '' };
-    case 'payment':
-      return { kind, amountCents: Number(b.amountCents ?? 0), method: s('method') ?? '' };
-    default:
-      return { kind } as Intent;
+/** Whether a reload left in-flight intents to re-send (false on the server). */
+function hasStoredIntents(jobId: string): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return Object.keys(parseIntents(window.sessionStorage.getItem(INTENTS_STORAGE_KEY(jobId)))).length > 0;
+  } catch {
+    return false;
   }
 }
 
@@ -84,7 +89,7 @@ export function useInvoiceWrites(opts: {
   );
   const [busy, setBusy] = useState<IntentKind | null>(null);
   // True until any rehydrated `unknown` intent has been re-sent (edits wait).
-  const [recovering, setRecovering] = useState(true);
+  const [recovering, setRecovering] = useState(() => hasStoredIntents(jobId));
 
   const run = useCallback(
     async (kind: IntentKind, intent: Intent, sent: KeyState, doSend: (key: string) => Promise<SendResult>): Promise<WriteResult> => {
@@ -101,9 +106,7 @@ export function useInvoiceWrites(opts: {
         const ev = outcomeEvent(outcome, landed);
         if (ev) dispatchers[kind]({ type: ev });
         const message = writeErrorCopy(outcome, env, ev === 'dropped');
-        const status: WriteResult['status'] =
-          outcome === 'success_refetch' ? 'done' : ev === 'dropped' ? 'dropped' : ev === 'unknown' ? 'retry' : 'error';
-        return { status, message, data: env?.data };
+        return { status: writeStatus(outcome, ev), message, data: env?.data };
       } finally {
         setBusy(null);
       }
@@ -114,7 +117,9 @@ export function useInvoiceWrites(opts: {
   /** Re-send a stored intent with its OLD body and OLD key. */
   const retry = useCallback(
     async (kind: IntentKind): Promise<WriteResult> => {
-      if (kind === 'signature') return { status: 'skipped', message: null };
+      // The signature body (a Blob) is never stored: only the caller can re-send
+      // it, by calling write() again with the SAME bodyHash (same key).
+      if (kind === 'signature') return { status: 'retry', message: SIGNATURE_RETRY };
       const s = dispatchers[kind]({ type: 'sent' });
       if (s.phase !== 'sent') return { status: 'skipped', message: null };
       return run(kind, intentFromBody(kind, s.body), s, (key) =>
@@ -163,7 +168,7 @@ export function useInvoiceWrites(opts: {
     })();
   }, [jobId, retry]);
 
-  const unknownKinds = PERSISTED.filter((k) => states[k].phase === 'unknown');
+  const unknownKinds = [...PERSISTED, 'signature' as const].filter((k) => states[k].phase === 'unknown');
   const inFlight = (kind: IntentKind) => states[kind].phase === 'sent' || busy === kind;
   return { write, retry, busy, recovering, unknownKinds, inFlight };
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { intentLanded, sendPlan, type Intent } from "./invoice-view-diff";
+import { intentFromBody, intentLanded, sendPlan, writeStatus, type Intent } from "./invoice-view-diff";
 import type { TechInvoice, TechInvoiceView } from "./invoice-view";
 import type { KeyState } from "./invoice-key-state";
 
@@ -117,5 +117,44 @@ describe("sendPlan", () => {
   it("skips a double tap while the intent is in flight, and an idle intent", () => {
     expect(sendPlan({ phase: "sent", ...base }, "h1")).toBe("skip");
     expect(sendPlan({ phase: "idle" } as KeyState, "h1")).toBe("skip");
+  });
+});
+
+describe("add_line (pricebook) with the line's identity", () => {
+  const i: Intent = { kind: "add_line", pricebookItemId: "p1", name: "Capacitor", unitPriceCents: 500, quantity: 2 };
+  it("lands only when a NEW line matches name, unit price and quantity", () => {
+    expect(intentLanded(i, view(inv({ lines: [LINE] })), view(inv({ lines: [LINE, LINE2] })))).toBe(true);
+  });
+  it("does not land on some other new line", () => {
+    const other = { ...LINE2, quantity: 3, lineTotalCents: 1500 };
+    expect(intentLanded(i, view(inv({ lines: [LINE] })), view(inv({ lines: [LINE, other] })))).toBe(false);
+    expect(intentLanded(i, view(inv({ lines: [LINE2] })), view(inv({ lines: [LINE2] })))).toBe(false);
+  });
+});
+
+describe("writeStatus", () => {
+  it("maps outcome + event to the result kind", () => {
+    expect(writeStatus("success_refetch", "spent")).toBe("done");
+    expect(writeStatus("retry_same_key_after_refetch", "dropped")).toBe("dropped");
+    expect(writeStatus("retry_same_key_after_refetch", "unknown")).toBe("retry");
+    expect(writeStatus("wait_then_refetch", "unknown")).toBe("pending");
+    expect(writeStatus("wait_then_refetch", "dropped")).toBe("dropped");
+    expect(writeStatus("show_message_refetch", "definitive_unstored")).toBe("error");
+    expect(writeStatus("already_saved_refetch", "spent")).toBe("error");
+  });
+});
+
+describe("intentFromBody", () => {
+  it("rebuilds each persisted intent", () => {
+    expect(intentFromBody("create", {})).toEqual({ kind: "create" });
+    expect(intentFromBody("add_line", { invoiceId: "i", jobMaterialId: "m1" }))
+      .toEqual({ kind: "add_line", pricebookItemId: undefined, jobMaterialId: "m1" });
+    expect(intentFromBody("add_line", { invoiceId: "i", pricebookItemId: "p1", quantity: 2 }))
+      .toEqual({ kind: "add_line", pricebookItemId: "p1", jobMaterialId: undefined, quantity: 2 });
+    expect(intentFromBody("remove_line", { invoiceId: "i", lineId: "l1" })).toEqual({ kind: "remove_line", lineId: "l1" });
+    expect(intentFromBody("payment", { amountCents: 500, method: "cash" }))
+      .toEqual({ kind: "payment", amountCents: 500, method: "cash" });
+    expect(intentFromBody("finalize", { invoiceId: "i" })).toEqual({ kind: "finalize" });
+    expect(intentFromBody("pay_link", null)).toEqual({ kind: "pay_link" });
   });
 });

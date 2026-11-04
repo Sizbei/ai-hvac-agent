@@ -1,5 +1,6 @@
 'use client';
 
+import { useRef, useState } from 'react';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { paymentLabel, signatureCopy } from '@/lib/tech/invoice-page-copy';
 import type { TechInvoicePayment, TechInvoiceSignature } from '@/lib/tech/invoice-view';
@@ -11,7 +12,9 @@ function formatWhen(iso: string | null): string {
 
 /**
  * The invoice's signature (its snapshot once open/paid). The signed URL expires
- * after 15 minutes, so a failed image load re-fetches the GET (`onImageError`).
+ * after 15 minutes, so a failed image load re-fetches the GET (`onImageError`)
+ * — at most ONCE per `signedAt`: every GET mints a new URL, so a missing object
+ * or a 403 would otherwise loop. A second failure shows "Signature unavailable".
  */
 export function InvoiceSignature({
   signature,
@@ -20,18 +23,30 @@ export function InvoiceSignature({
   readonly signature: TechInvoiceSignature;
   readonly onImageError: () => void;
 }) {
-  const copy = signatureCopy(signature.state);
+  const refetchedFor = useRef<string | null>(null);
+  const [failedFor, setFailedFor] = useState<string | null>(null);
+  const sigKey = signature.signedAt ?? '';
+  const failed = failedFor === sigKey;
+  const copy = failed ? signatureCopy('unavailable') : signatureCopy(signature.state);
+  function imageFailed(): void {
+    if (refetchedFor.current === sigKey) {
+      setFailedFor(sigKey);
+      return;
+    }
+    refetchedFor.current = sigKey;
+    onImageError();
+  }
   return (
     <section aria-labelledby="sig-title" className="space-y-2 border-t pt-3">
       <h3 id="sig-title" className="text-[13px] font-semibold text-muted-foreground">Signature</h3>
-      {signature.state === 'present' && signature.url ? (
+      {signature.state === 'present' && signature.url && !failed ? (
         <div className="space-y-1">
           {/* eslint-disable-next-line @next/next/no-img-element -- short-lived signed R2 URL */}
           <img
             src={signature.url}
             alt={signature.signatureName ? `Signature of ${signature.signatureName}` : 'Customer signature'}
             className="h-24 w-full rounded-md border border-border bg-white object-contain"
-            onError={onImageError}
+            onError={imageFailed}
           />
           <p className="text-[15px]">
             {signature.signatureName ?? 'Customer'}
