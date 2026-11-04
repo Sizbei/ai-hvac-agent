@@ -30,6 +30,11 @@ export { invoiceRef } from "@/lib/admin/invoice-collectible";
 
 const DEFAULT_COMPANY_NAME = "Spears Services";
 
+/** Mirrors `DEMO_ORG_ID` in `@/lib/tenancy/organization` (asserted equal in
+ *  money-triggers.test.ts), hardcoded like consent.ts does so this module does
+ *  not pull that file's "server-only" + widget-key chain into every importer. */
+export const PAY_LINK_DEMO_ORG_ID = "00000000-0000-0000-0000-000000000001";
+
 interface CustomerContact {
   readonly phone: string | null;
   readonly email: string | null;
@@ -88,7 +93,7 @@ async function getOrgBrand(organizationId: string): Promise<OrgBrand> {
 /** Find the active SMS template for a trigger in an org, or null. */
 async function findActiveSmsTemplate(
   organizationId: string,
-  triggerType: "estimate_sent" | "payment_receipt" | "invoice_overdue",
+  triggerType: "estimate_sent" | "payment_receipt" | "invoice_overdue" | "invoice_sent",
 ): Promise<{ id: string } | null> {
   const tpl = await db.query.communicationTemplates.findFirst({
     where: and(
@@ -364,6 +369,102 @@ export async function sendInvoiceReminder(
       .where(withTenant(invoices, organizationId, eq(invoices.id, invoiceId)))
       .catch(() => {});
     throw error;
+  }
+  return { ok: true };
+}
+
+export type PayLinkResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly reason:
+      | "invoice_not_found" | "synced_read_only" | "invoice_not_chargeable" | "no_contact"
+      | "no_template" | "demo_restricted" | "cooldown" | "send_failed" };
+
+/**
+ * Text the customer the portal link for an open invoice (tech pay link, spec
+ * §6.4). SMS only; the copy says "view", never "pay". The 2-minute per-invoice
+ * cooldown is claimed with ONE JS `now` BEFORE the token mint, so a refused tap
+ * never rotates the link just sent. A failure between the claim and the queue
+ * call releases the claim (only while it is still ours) and rethrows; a throw
+ * FROM queueCommunicationJob keeps the claim and reports send_failed, because
+ * the insert may have committed and a retry must never double-send.
+ * Never touches last_reminder_sent_at (that is the office reminder's stamp).
+ */
+export async function sendInvoicePayLink(
+  organizationId: string,
+  invoiceId: string,
+): Promise<PayLinkResult> {
+  const [inv] = await db
+    .select({
+      id: invoices.id,
+      customerId: invoices.customerId,
+      totalCents: invoices.totalCents,
+      amountPaidCents: invoices.amountPaidCents,
+      state: invoices.state,
+      fieldpulseInvoiceId: invoices.fieldpulseInvoiceId,
+      hcpInvoiceId: invoices.hcpInvoiceId,
+      payLinkSentAt: invoices.payLinkSentAt,
+    })
+    .from(invoices)
+    .where(withTenant(invoices, organizationId, eq(invoices.id, invoiceId)))
+    .limit(1);
+
+  if (!inv) return { ok: false, reason: "invoice_not_found" };
+  if (inv.fieldpulseInvoiceId || inv.hcpInvoiceId) return { ok: false, reason: "synced_read_only" };
+  if (inv.state !== "open" || inv.totalCents - inv.amountPaidCents <= 0) {
+    return { ok: false, reason: "invoice_not_chargeable" };
+  }
+  if (!inv.customerId) return { ok: false, reason: "no_contact" };
+  if (organizationId === PAY_LINK_DEMO_ORG_ID) return { ok: false, reason: "demo_restricted" };
+
+  const contact = await getCustomerContact(organizationId, inv.customerId);
+  if (!contact?.phone) return { ok: false, reason: "no_contact" };
+  const template = await findActiveSmsTemplate(organizationId, "invoice_sent");
+  if (!template) return { ok: false, reason: "no_template" };
+  const brand = await getOrgBrand(organizationId);
+
+  // $previous was read with the invoice; the release below is gated on our own
+  // $now, so it can never clobber a newer claim.
+  const previous = inv.payLinkSentAt ? inv.payLinkSentAt.toISOString() : null;
+  const now = new Date().toISOString();
+  const { rows: claimed } = (await db.execute(sql`UPDATE invoices SET pay_link_sent_at = ${now}::timestamptz WHERE id = ${invoiceId}::uuid AND organization_id = ${organizationId}::uuid AND (pay_link_sent_at IS NULL OR pay_link_sent_at < ${now}::timestamptz - interval '2 minutes') RETURNING id`)) as unknown as { rows: unknown[] };
+  if (claimed.length === 0) return { ok: false, reason: "cooldown" };
+
+  let payLink: string;
+  try {
+    const token = await generatePortalToken(organizationId, inv.customerId);
+    if (!token) throw new Error("portal_token_unavailable");
+    const base = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ?? "";
+    payLink = `${base}/portal/${token}`;
+  } catch (error) {
+    await db
+      .execute(sql`UPDATE invoices SET pay_link_sent_at = ${previous}::timestamptz WHERE id = ${invoiceId}::uuid AND organization_id = ${organizationId}::uuid AND pay_link_sent_at = ${now}::timestamptz`)
+      .catch((releaseError: unknown) => {
+        logger.error({ error: releaseError, organizationId, invoiceId }, "Pay link claim release failed");
+      });
+    throw error;
+  }
+
+  try {
+    await queueCommunicationJob({
+      organizationId,
+      triggerType: "invoice_sent",
+      templateVariables: {
+        customerName: contact.name ?? "",
+        amount: formatCentsExact(inv.totalCents),
+        invoiceNumber: invoiceRef(invoiceId),
+        payLink,
+        companyName: brand.companyName,
+        phoneNumber: brand.phoneNumber,
+      },
+      priority: 50,
+      customerId: inv.customerId,
+      templateId: template.id,
+      channel: "sms" as never,
+      recipientPhone: contact.phone,
+    });
+  } catch (error) {
+    logger.error({ error, organizationId, invoiceId }, "Pay link enqueue failed; cooldown kept");
+    return { ok: false, reason: "send_failed" };
   }
   return { ok: true };
 }

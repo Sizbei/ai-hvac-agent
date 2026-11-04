@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { TechJobSummary } from '@/components/tech/tech-job-summary';
+import { mintKey } from '@/lib/http/idempotency-codes';
 
 interface Material {
   readonly id: string;
@@ -118,6 +119,9 @@ export function TechJobDetailClient({
   const [sigName, setSigName] = useState('');
   const [sigStatus, setSigStatus] = useState<string | null>(null);
   const [isSigning, setIsSigning] = useState(false);
+  // One PNG + one Idempotency-Key per signing intent: a retry re-sends the same
+  // pair (the server replays); a redraw, a name edit or a success drops it.
+  const [heldSig, setHeldSig] = useState<{ blob: Blob; key: string } | null>(null);
 
   // Status timeline (read-only history of this job's transitions).
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
@@ -378,6 +382,7 @@ export function TechJobDetailClient({
     if (!ctx) return;
     drawingRef.current = true;
     hasDrawnRef.current = true;
+    setHeldSig(null);
     const { x, y } = pointerPos(e);
     ctx.beginPath();
     ctx.moveTo(x, y);
@@ -405,6 +410,7 @@ export function TechJobDetailClient({
     if (!ctx || !canvas) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     hasDrawnRef.current = false;
+    setHeldSig(null);
   };
 
   const handleSign = useCallback(async (): Promise<void> => {
@@ -414,33 +420,39 @@ export function TechJobDetailClient({
       setSigStatus('Enter the customer name.');
       return;
     }
-    // Typed-name fallback: if nothing was drawn, render the name onto the canvas
-    // so we always submit a PNG.
-    if (!hasDrawnRef.current) {
-      const ctx = getCtx();
-      if (ctx) {
-        ctx.font = '28px cursive';
-        ctx.fillStyle = '#111';
-        ctx.fillText(sigName.trim(), 16, canvas.height / 2 + 10);
+    let held = heldSig;
+    if (!held) {
+      // Typed-name fallback: if nothing was drawn, render the name onto the canvas
+      // so we always submit a PNG.
+      if (!hasDrawnRef.current) {
+        const ctx = getCtx();
+        if (ctx) {
+          ctx.font = '28px cursive';
+          ctx.fillStyle = '#111';
+          ctx.fillText(sigName.trim(), 16, canvas.height / 2 + 10);
+        }
       }
-    }
 
-    const blob = await new Promise<Blob | null>((resolve) =>
-      canvas.toBlob((b) => resolve(b), 'image/png'),
-    );
-    if (!blob) {
-      setSigStatus('Could not capture signature.');
-      return;
+      const blob = await new Promise<Blob | null>((resolve) =>
+        canvas.toBlob((b) => resolve(b), 'image/png'),
+      );
+      if (!blob) {
+        setSigStatus('Could not capture signature.');
+        return;
+      }
+      held = { blob, key: mintKey() };
+      setHeldSig(held);
     }
 
     setIsSigning(true);
     setSigStatus(null);
     try {
       const form = new FormData();
-      form.append('file', new File([blob], 'signature.png', { type: 'image/png' }));
+      form.append('file', new File([held.blob], 'signature.png', { type: 'image/png' }));
       form.append('signatureName', sigName.trim());
       const res = await fetch(`/api/tech/jobs/${id}/signature`, {
         method: 'POST',
+        headers: { 'Idempotency-Key': held.key },
         body: form,
       });
       if (res.ok) {
@@ -456,7 +468,7 @@ export function TechJobDetailClient({
     } finally {
       setIsSigning(false);
     }
-  }, [id, sigName]);
+  }, [id, sigName, heldSig]);
 
   const filteredCatalog = search.trim()
     ? catalog.filter((c) =>
@@ -704,7 +716,10 @@ export function TechJobDetailClient({
           <Input
             placeholder="Customer name"
             value={sigName}
-            onChange={(e) => setSigName(e.target.value)}
+            onChange={(e) => {
+              setSigName(e.target.value);
+              setHeldSig(null);
+            }}
             className="h-11 rounded-xl text-[15px] md:text-[15px]"
           />
           <div className="flex items-center gap-2">
