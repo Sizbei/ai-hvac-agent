@@ -54,11 +54,13 @@ import {
   technicianTimeEntries,
   auditLog,
   platformAuditLog,
+  invoices,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { logAudit } from "@/lib/admin/audit";
 import { encrypt, decrypt } from "@/lib/crypto";
 import { getStorageClient } from "@/lib/storage/r2-client";
+import { storageKeyFromPublicUrl } from "@/lib/storage/storage-key";
 import { logger } from "@/lib/logger";
 
 /** Sentinel plaintext written into the two NOT NULL encrypted columns. */
@@ -71,6 +73,18 @@ function safeDecrypt(ciphertext: string | null): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Signature URLs → distinct R2 object keys. A null URL or one outside
+ * R2_PUBLIC_URL (foreign prefix) yields no key; the request and its invoice
+ * snapshot usually share one object, so keys are deduped.
+ */
+function signatureKeys(urls: readonly (string | null)[]): string[] {
+  const keys = urls
+    .map((url) => storageKeyFromPublicUrl(url))
+    .filter((key): key is string => key !== null);
+  return [...new Set(keys)];
 }
 
 /**
@@ -144,7 +158,7 @@ export async function anonymizeCustomer(
         ),
       ),
     db
-      .select({ id: serviceRequests.id })
+      .select({ id: serviceRequests.id, signatureUrl: serviceRequests.signatureUrl })
       .from(serviceRequests)
       .where(
         withTenant(
@@ -156,8 +170,28 @@ export async function anonymizeCustomer(
   ]);
 
   const sessionIds = sessionRows.map((r) => r.id);
-  const storageKeys = attachmentRows.map((r) => r.storageKey);
   const requestIds = requestRows.map((r) => r.id);
+
+  // Invoice signature snapshots (M3b): the customer's own invoices OR any
+  // invoice on the customer's requests (an estimate-born invoice may carry a
+  // different customer id). Read BEFORE the scrub so the objects can be deleted.
+  const invoiceSignatureMatch = or(
+    eq(invoices.customerId, customerId),
+    inArray(invoices.serviceRequestId, requestIds),
+  )!;
+  const invoiceSignatureRows = await db
+    .select({ signatureUrl: invoices.signatureUrl })
+    .from(invoices)
+    .where(withTenant(invoices, organizationId, invoiceSignatureMatch));
+
+  const attachmentKeys = attachmentRows.map((r) => r.storageKey);
+  const storageKeys = [
+    ...attachmentKeys,
+    ...signatureKeys([
+      ...requestRows.map((r) => r.signatureUrl),
+      ...invoiceSignatureRows.map((r) => r.signatureUrl),
+    ]),
+  ];
 
   const now = new Date();
 
@@ -253,6 +287,12 @@ export async function anonymizeCustomer(
           eq(serviceRequests.customerId, customerId),
         ),
       ),
+    // Invoices: scrub ONLY the signature snapshot (signed_at and every money
+    // column are kept). Same match as the pre-read above.
+    db
+      .update(invoices)
+      .set({ signatureUrl: null, signatureName: null })
+      .where(withTenant(invoices, organizationId, invoiceSignatureMatch)),
     // Visits #2+: special instructions are office free text that can carry PII.
     db
       .update(appointments)
@@ -425,7 +465,7 @@ export async function anonymizeCustomer(
       entityId: customerId,
       details: JSON.stringify({
         sessions: sessionIds.length,
-        attachmentsDeleted: storageKeys.length,
+        attachmentsDeleted: attachmentKeys.length,
       }),
     }),
   ]);
@@ -520,24 +560,32 @@ export async function purgeOrganization(
 
   if (!org) return false;
 
-  // Pre-read the org's R2 keys (attachment storage keys + service-request
-  // signature URLs) BEFORE the cascade removes the rows.
-  const [attachmentRows, signatureRows] = await Promise.all([
-    db
-      .select({ storageKey: attachments.storageKey })
-      .from(attachments)
-      .where(eq(attachments.organizationId, targetOrgId)),
-    db
-      .select({ signatureUrl: serviceRequests.signatureUrl })
-      .from(serviceRequests)
-      .where(eq(serviceRequests.organizationId, targetOrgId)),
-  ]);
+  // Pre-read the org's R2 keys (attachment storage keys + the signature URLs
+  // on requests AND invoices, mapped to object keys) BEFORE the cascade
+  // removes the rows.
+  const [attachmentRows, requestSignatureRows, invoiceSignatureRows] =
+    await Promise.all([
+      db
+        .select({ storageKey: attachments.storageKey })
+        .from(attachments)
+        .where(eq(attachments.organizationId, targetOrgId)),
+      db
+        .select({ signatureUrl: serviceRequests.signatureUrl })
+        .from(serviceRequests)
+        .where(eq(serviceRequests.organizationId, targetOrgId)),
+      db
+        .select({ signatureUrl: invoices.signatureUrl })
+        .from(invoices)
+        .where(eq(invoices.organizationId, targetOrgId)),
+    ]);
 
+  const signatureObjectKeys = signatureKeys([
+    ...requestSignatureRows.map((r) => r.signatureUrl),
+    ...invoiceSignatureRows.map((r) => r.signatureUrl),
+  ]);
   const storageKeys = [
     ...attachmentRows.map((r) => r.storageKey),
-    ...signatureRows
-      .map((r) => r.signatureUrl)
-      .filter((u): u is string => typeof u === "string" && u.length > 0),
+    ...signatureObjectKeys,
   ];
 
   // Evidence FIRST — this row outlives the org (no FK to organizations).
@@ -548,7 +596,7 @@ export async function purgeOrganization(
     targetOrgId,
     details: {
       attachments: attachmentRows.length,
-      signatures: signatureRows.length,
+      signatures: signatureObjectKeys.length,
     },
   });
 

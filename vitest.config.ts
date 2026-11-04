@@ -19,6 +19,8 @@ const INTEGRATION_SUITES = [
   "tests/api/tech-timeline.test.ts",
   // Setup guide stamps/flags against the dev DB (throwaway orgs; refuses prod).
   "tests/integration/onboarding-state.test.ts",
+  // M3b field invoices: writers + idempotency against the dev DB (throwaway org).
+  "tests/integration/field-invoice.test.ts",
 ];
 
 // `npm run test:integration` sets this to invert the selection: run ONLY the

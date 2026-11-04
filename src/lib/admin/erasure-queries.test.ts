@@ -136,6 +136,7 @@ vi.mock("@/lib/db/schema", () => {
     technicianTimeEntries: t("technicianTimeEntries"),
     auditLog: t("auditLog"),
     platformAuditLog: t("platformAuditLog"),
+    invoices: t("invoices"),
   };
 });
 
@@ -190,6 +191,8 @@ import {
 
 const ORG = "org-1";
 const CUST = "cust-1";
+const PUB = "https://pub.r2.test";
+process.env.R2_PUBLIC_URL = PUB;
 
 /** Find the captured op for a table inside the most recent batch. */
 function opFor(table: string): Captured | undefined {
@@ -212,7 +215,17 @@ describe("anonymizeCustomer", () => {
     selectQueue.push([{ id: CUST }]); // existence check
     selectQueue.push([{ id: "sess-1" }, { id: "sess-2" }]); // sessions
     selectQueue.push([{ storageKey: "k1" }, { storageKey: "k2" }]); // attachments
-    selectQueue.push([{ id: "req-1" }, { id: "req-2" }]); // service requests
+    selectQueue.push([
+      { id: "req-1", signatureUrl: `${PUB}/signatures/req-1.png` },
+      { id: "req-2", signatureUrl: null },
+    ]); // service requests
+    selectQueue.push([
+      // The invoice's snapshot copy of req-1's signature (same object).
+      { signatureUrl: `${PUB}/signatures/req-1.png` },
+      { signatureUrl: `${PUB}/signatures/inv-2.png` },
+      { signatureUrl: "https://elsewhere.example/signatures/x.png" },
+      { signatureUrl: null },
+    ]); // invoices (customer's own OR on the customer's requests)
   }
 
   it("returns false when the customer does not exist", async () => {
@@ -283,8 +296,9 @@ describe("anonymizeCustomer", () => {
     expect(appt?.set).toEqual({ specialInstructions: null });
     const batch = batchCalls.at(-1) ?? [];
     expect(batch.filter((c) => c.table === "appointments")).toHaveLength(1);
-    // 21 statements before visits #2+ existed; the appointments scrub is the 22nd.
-    expect(batch).toHaveLength(22);
+    // 21 statements before visits #2+ existed; the appointments scrub is the
+    // 22nd; the invoice signature scrub (M3b) is the 23rd.
+    expect(batch).toHaveLength(23);
   });
 
   it("scrubs locations, sessions, comms, service history, and review feedback", async () => {
@@ -364,12 +378,58 @@ describe("anonymizeCustomer", () => {
     expect(tte?.set).toMatchObject({ note: null });
   });
 
-  it("does NOT touch invoices/payments (financials are kept untouched)", async () => {
+  it("touches invoices ONLY to scrub the signature copy; payments/refunds untouched", async () => {
     seedExisting();
     await anonymizeCustomer(ORG, CUST);
-    expect(opFor("invoices")).toBeUndefined();
+    const inv = opFor("invoices");
+    expect(inv?.op).toBe("update");
+    // Exactly the two signature fields — money columns and signed_at are kept.
+    expect(inv?.set).toEqual({ signatureUrl: null, signatureName: null });
     expect(opFor("payments")).toBeUndefined();
     expect(opFor("refunds")).toBeUndefined();
+  });
+
+  it("scrubs the signature on BOTH tables and keeps signed_at on both", async () => {
+    seedExisting();
+    await anonymizeCustomer(ORG, CUST);
+    expect(opFor("serviceRequests")?.set).not.toHaveProperty("signedAt");
+    expect(opFor("invoices")?.set).not.toHaveProperty("signedAt");
+    expect(opFor("serviceRequests")?.set).toMatchObject({
+      signatureUrl: null,
+      signatureName: null,
+    });
+  });
+
+  it("reads invoice signatures on the customer's invoices OR the customer's requests", async () => {
+    seedExisting();
+    await anonymizeCustomer(ORG, CUST);
+    // Reads: existence, sessions, attachments, requests, invoices.
+    const [invoiceMatch] = selectWhereCalls[4] as TaggedCondition[];
+    expect(invoiceMatch.op).toBe("or");
+    expect(invoiceMatch.args).toHaveLength(2);
+    expect(invoiceMatch.args[0]).toMatchObject({
+      op: "eq",
+      args: ["invoices.customerId", CUST],
+    });
+    expect(invoiceMatch.args[1]).toEqual([
+      "invoices.serviceRequestId",
+      ["req-1", "req-2"],
+    ]);
+  });
+
+  it("schedules deletion of signature OBJECT KEYS (deduped), skipping foreign prefixes", async () => {
+    seedExisting();
+    await anonymizeCustomer(ORG, CUST);
+    await afterCallbacks[0]!();
+    const keys = deleteFile.mock.calls.map((c) => c[0]);
+    expect(keys).toEqual([
+      "k1",
+      "k2",
+      "signatures/req-1.png",
+      "signatures/inv-2.png",
+    ]);
+    // Never a full URL, never the foreign-prefix object.
+    expect(keys.some((k) => String(k).includes("://"))).toBe(false);
   });
 
   it("audits with counts only — NO name/email/phone in the details", async () => {
@@ -416,7 +476,8 @@ describe("purgeOrganization", () => {
   it("writes platform_audit_log BEFORE deleting the org", async () => {
     selectQueue.push([{ id: ORG }]); // org exists
     selectQueue.push([{ storageKey: "a1" }]); // attachments
-    selectQueue.push([{ signatureUrl: "s1" }]); // signatures
+    selectQueue.push([{ signatureUrl: `${PUB}/signatures/s1.png` }]); // request signatures
+    selectQueue.push([]); // invoice signatures
 
     await purgeOrganization(ORG, actor);
 
@@ -436,16 +497,25 @@ describe("purgeOrganization", () => {
     });
   });
 
-  it("schedules R2 cleanup of attachment keys + signature urls", async () => {
+  it("schedules R2 cleanup of attachment keys + signature KEYS from both tables", async () => {
     selectQueue.push([{ id: ORG }]);
     selectQueue.push([{ storageKey: "a1" }]);
-    selectQueue.push([{ signatureUrl: "s1" }]);
+    selectQueue.push([
+      { signatureUrl: `${PUB}/signatures/s1.png` },
+      { signatureUrl: "https://elsewhere.example/s9.png" },
+      { signatureUrl: null },
+    ]);
+    selectQueue.push([
+      { signatureUrl: `${PUB}/signatures/s1.png` }, // invoice snapshot copy
+      { signatureUrl: `${PUB}/signatures/inv.png` },
+    ]);
 
     await purgeOrganization(ORG, actor);
     expect(afterCallbacks).toHaveLength(1);
     await afterCallbacks[0]!();
-    expect(deleteFile).toHaveBeenCalledWith("a1");
-    expect(deleteFile).toHaveBeenCalledWith("s1");
+    const keys = deleteFile.mock.calls.map((c) => c[0]);
+    // REGRESSION: keys, not full URLs (a URL never matches an R2 object).
+    expect(keys).toEqual(["a1", "signatures/s1.png", "signatures/inv.png"]);
   });
 });
 
