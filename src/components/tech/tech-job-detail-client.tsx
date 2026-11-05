@@ -12,6 +12,7 @@ import { formatCentsExact } from '@/lib/admin/money-format';
 import { TechJobSummary } from '@/components/tech/tech-job-summary';
 import { SignaturePad } from '@/components/tech/signature-pad';
 import { JobTimeCard } from '@/components/tech/job-time-card';
+import { statusLabel, visitWhen } from '@/lib/tech/job-display';
 import { mintKey } from '@/lib/http/idempotency-codes';
 import { useIdempotencyKey } from '@/hooks/use-idempotency-key';
 import { outcomeEvent, type WriteOutcome } from '@/lib/tech/invoice-key-state';
@@ -47,12 +48,6 @@ interface PhotoRow {
   readonly size: number;
   readonly createdAt: string;
   readonly url: string | null;
-}
-
-/** "no_cool" / "in_progress" → "No cool" / "In progress". */
-function humanizeStatus(s: string): string {
-  const spaced = s.replace(/_/g, ' ');
-  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
 /** "Nov 4, 2:05 PM" in the device's locale. */
@@ -695,11 +690,11 @@ export function TechJobDetailClient({
                   className="flex items-baseline justify-between gap-3 text-[15px]"
                 >
                   <span>
-                    {e.fromStatus ? `${humanizeStatus(e.fromStatus)} → ` : ''}
-                    <span className="font-medium">{humanizeStatus(e.toStatus)}</span>
+                    {e.fromStatus ? `${statusLabel(e.fromStatus)} → ` : ''}
+                    <span className="font-medium">{statusLabel(e.toStatus)}</span>
                   </span>
-                  <span className="shrink-0 font-mono text-[13px] tabular-nums text-muted-foreground">
-                    {new Date(e.at).toLocaleString()}
+                  <span className="shrink-0 text-[13px] text-muted-foreground">
+                    {visitWhen(e.at, new Date())}
                   </span>
                 </li>
               ))}

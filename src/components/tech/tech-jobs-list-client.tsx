@@ -7,7 +7,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { SegmentedControl } from '@/components/ui/segmented-control';
 import type { VisitRange } from '@/lib/tech/visit-range';
-import { labelAssignmentStatus } from '@/components/tech/tech-status-confirm';
+import { issueLabel, overdueLabel, visitBadge, visitWhen } from '@/lib/tech/job-display';
 import { GuideCard } from '@/components/tech/guide-card';
 import { pickTodayFirst, type TodayFirst } from '@/lib/tech/guide-view';
 import { dayClockText } from '@/lib/tech/clock-display';
@@ -38,6 +38,7 @@ interface Job {
   readonly issueType: string;
   readonly urgency: string;
   readonly address: string | null;
+  readonly scheduledDate: string | null;
   readonly arrivalWindowStart: string | null;
   readonly appointmentId: string;
   readonly appointmentNumber: number;
@@ -159,6 +160,8 @@ export function TechJobsListClient({ guideHidden }: { readonly guideHidden: bool
   const [todayFirst, setTodayFirst] = useState<TodayFirst>('unknown');
   const [todaySettled, setTodaySettled] = useState(false);
   const groupRef = useRef<HTMLDivElement>(null);
+  // Fixed per page load: dates and the overdue cut read against it.
+  const [now] = useState(() => new Date());
 
   useEffect(() => {
     let cancelled = false;
@@ -215,7 +218,10 @@ export function TechJobsListClient({ guideHidden }: { readonly guideHidden: bool
   } else {
     content = (
     <ul className="space-y-3">
-      {jobs.map((job) => (
+      {jobs.map((job) => {
+        const when = visitWhen(job.arrivalWindowStart ?? job.scheduledDate, now);
+        const overdue = overdueLabel(job.scheduledDate ?? job.arrivalWindowStart, job.assignmentStatus, job.status, now);
+        return (
         <li key={job.appointmentId}>
           <Link href={`/tech/jobs/${job.id}?visit=${job.appointmentId}`}>
             <Card className="transition-colors active:bg-accent">
@@ -225,12 +231,19 @@ export function TechJobsListClient({ guideHidden }: { readonly guideHidden: bool
                     {job.referenceNumber}
                     {job.appointmentNumber > 1 && ` · Visit ${job.appointmentNumber}`}
                   </span>
-                  <span className="rounded-[3px] border border-border bg-surface-raised px-2 py-0.5 text-[11px] font-medium tracking-[0.02em] text-muted-foreground">
-                    {labelAssignmentStatus(job.assignmentStatus)}
+                  <span className="flex shrink-0 items-center gap-1.5">
+                    {overdue && (
+                      <span className="rounded-[3px] border border-warning-border bg-warning-light px-2 py-0.5 text-[11px] font-medium text-warning-strong">
+                        {overdue}
+                      </span>
+                    )}
+                    <span className="rounded-[3px] border border-border bg-surface-raised px-2 py-0.5 text-[11px] font-medium tracking-[0.02em] text-muted-foreground">
+                      {visitBadge(job.assignmentStatus, job.status)}
+                    </span>
                   </span>
                 </div>
                 <p className="mt-1.5 text-[15px] font-medium">
-                  {job.issueType}
+                  {issueLabel(job.issueType)}
                   {job.isLead && (
                     <span className="ml-2 rounded-[3px] border border-border px-1.5 py-0.5 align-middle text-[11px] font-medium text-muted-foreground">
                       Lead
@@ -242,16 +255,17 @@ export function TechJobsListClient({ guideHidden }: { readonly guideHidden: bool
                     {job.address}
                   </p>
                 )}
-                {job.arrivalWindowStart && (
-                  <p className="mt-1 font-mono text-[13px] tabular-nums text-muted-foreground">
-                    {new Date(job.arrivalWindowStart).toLocaleString()}
+                {when && (
+                  <p className="mt-1 text-[13px] text-muted-foreground">
+                    {when}
                   </p>
                 )}
               </CardContent>
             </Card>
           </Link>
         </li>
-      ))}
+        );
+      })}
     </ul>
     );
   }

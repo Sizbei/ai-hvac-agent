@@ -5,7 +5,7 @@ import { Phone, Navigation, Clock } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { formatArrivalWindow } from '@/lib/admin/arrival-window';
+import { issueLabel, visitWindow } from '@/lib/tech/job-display';
 import { CloseOutSheet, type SheetConfirmOptions } from '@/components/tech/close-out-sheet';
 import {
   actionNeedsSheet,
@@ -177,10 +177,7 @@ export function TechJobSummary({
   }
 
   const actions = ACTION_ORDER.filter((a) => job.allowedActions.includes(a));
-  const windowLabel = formatArrivalWindow(
-    job.arrivalWindowStart,
-    job.arrivalWindowEnd,
-  );
+  const windowLabel = visitWindow(job.arrivalWindowStart, job.arrivalWindowEnd, new Date());
 
   return (
     <>
@@ -226,7 +223,7 @@ export function TechJobSummary({
         {/* What */}
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="rounded-[3px] border border-border bg-surface-raised px-2 py-0.5 text-[13px] font-medium">
-            {humanize(job.issueType)}
+            {issueLabel(job.issueType)}
           </span>
           {job.systemType && (
             <span className="rounded-[3px] border border-border bg-surface-raised px-2 py-0.5 text-[13px]">

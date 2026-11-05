@@ -84,4 +84,13 @@ describe("GET /api/tech/jobs", () => {
     ]);
     expect((await ids("?range=past")).map((j) => j.id)).toEqual(["done-b", "done-a"]);
   });
+
+  it("returns the request status beside the visit status, so a held visit can read On hold", async () => {
+    orderBy.mockResolvedValue([
+      row("held", { status: "on_hold", assignmentStatus: "completed", completedAt: new Date("2026-11-02T15:00:00Z") }),
+    ]);
+    const jobs = await ids("?range=past");
+    expect(jobs[0]).toMatchObject({ id: "held", status: "on_hold", assignmentStatus: "completed" });
+    expect(jobs[0].scheduledDate).toBe("2026-11-03T15:00:00.000Z");
+  });
 });
