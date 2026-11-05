@@ -9,6 +9,10 @@ interface UseAdminConversationsOptions {
   readonly status?: string;
   readonly channel?: string;
   readonly search?: string;
+  /** Only conversations that need action (escalated, not handled). */
+  readonly needsAction?: boolean;
+  /** Include empty widget opens (no customer message, no request). */
+  readonly includeEmpty?: boolean;
   readonly page?: number;
   readonly limit?: number;
   /** Background poll interval in ms. Defaults to 10s; callers that don't need
@@ -20,6 +24,8 @@ interface UseAdminConversationsOptions {
 interface UseAdminConversationsResult {
   readonly conversations: readonly ConversationSummary[];
   readonly total: number;
+  /** Org-wide count of conversations that need action. */
+  readonly needsActionCount: number;
   readonly isLoading: boolean;
   readonly error: string | null;
   readonly refetch: () => Promise<void>;
@@ -28,7 +34,11 @@ interface UseAdminConversationsResult {
 interface ConversationsPayload {
   readonly conversations: readonly ConversationSummary[];
   readonly total: number;
+  readonly needsActionCount: number;
 }
+
+/** Human copy for a failed list load — never the server's error string. */
+export const CONVERSATIONS_LOAD_ERROR = "Couldn't load conversations. Please try again.";
 
 const conversationsCache = createSwrCache<ConversationsPayload>(30_000); // 30s TTL
 
@@ -43,14 +53,26 @@ const conversationsCache = createSwrCache<ConversationsPayload>(30_000); // 30s 
 export function useAdminConversations(
   options: UseAdminConversationsOptions = {},
 ): UseAdminConversationsResult {
-  const { status, channel, search, page = 1, limit = 20, intervalMs = 10_000 } = options;
+  const {
+    status,
+    channel,
+    search,
+    needsAction = false,
+    includeEmpty = false,
+    page = 1,
+    limit = 20,
+    intervalMs = 10_000,
+  } = options;
 
-  const key = `conversations:${status ?? ''}:${channel ?? ''}:${search ?? ''}:${page}:${limit}`;
+  const key = `conversations:${status ?? ''}:${channel ?? ''}:${search ?? ''}:${needsAction ? 1 : 0}:${includeEmpty ? 1 : 0}:${page}:${limit}`;
 
   const [conversations, setConversations] = useState<readonly ConversationSummary[]>(
     () => conversationsCache.get(key)?.data.conversations ?? [],
   );
   const [total, setTotal] = useState(() => conversationsCache.get(key)?.data.total ?? 0);
+  const [needsActionCount, setNeedsActionCount] = useState(
+    () => conversationsCache.get(key)?.data.needsActionCount ?? 0,
+  );
   const [isLoading, setIsLoading] = useState(() => conversationsCache.get(key) === null);
   const [error, setError] = useState<string | null>(null);
 
@@ -72,6 +94,7 @@ export function useAdminConversations(
     if (hasCachedData) {
       setConversations(cached.data.conversations);
       setTotal(cached.data.total);
+      setNeedsActionCount(cached.data.needsActionCount);
     } else {
       // Only show the loading skeleton when there's nothing to display yet
       setIsLoading(true);
@@ -82,6 +105,8 @@ export function useAdminConversations(
       if (status) params.set('status', status);
       if (channel) params.set('channel', channel);
       if (search) params.set('search', search);
+      if (needsAction) params.set('needsAction', '1');
+      if (includeEmpty) params.set('includeEmpty', '1');
       params.set('page', String(page));
       params.set('limit', String(limit));
 
@@ -90,11 +115,8 @@ export function useAdminConversations(
 
       if (run !== runRef.current) return;
       if (!res.ok) {
-        const body = await res.json().catch(() => ({
-          error: { message: 'Failed to fetch conversations' },
-        }));
         if (run === runRef.current && !hasCachedData) {
-          setError(body?.error?.message ?? 'Failed to fetch conversations');
+          setError(CONVERSATIONS_LOAD_ERROR);
         }
         return;
       }
@@ -104,6 +126,7 @@ export function useAdminConversations(
         data: {
           conversations: ConversationSummary[];
           total: number;
+          needsActionCount: number;
           page: number;
           limit: number;
         };
@@ -116,21 +139,23 @@ export function useAdminConversations(
           setConversations(body.data.conversations);
           setTotal(body.data.total);
         }
+        setNeedsActionCount(body.data.needsActionCount ?? 0);
         setError(null);
         conversationsCache.set(key, {
           conversations: body.data.conversations,
           total: body.data.total,
+          needsActionCount: body.data.needsActionCount ?? 0,
         });
       }
     } catch (err) {
       if (err instanceof AdminAuthRedirectError) return;
       if (run === runRef.current && !hasCachedData) {
-        setError('Could not connect to server. Please try again.');
+        setError(CONVERSATIONS_LOAD_ERROR);
       }
     } finally {
       if (run === runRef.current) setIsLoading(false);
     }
-  }, [key, status, channel, search, page, limit]);
+  }, [key, status, channel, search, needsAction, includeEmpty, page, limit]);
 
   // Idiomatic data fetch: setState runs only AFTER the awaited fetch resolves,
   // not synchronously during the effect, so this is not a render loop.
@@ -151,5 +176,5 @@ export function useAdminConversations(
 
   const refetch = useCallback(() => fetchConversations({ bust: true }), [fetchConversations]);
 
-  return { conversations, total, isLoading, error, refetch };
+  return { conversations, total, needsActionCount, isLoading, error, refetch };
 }

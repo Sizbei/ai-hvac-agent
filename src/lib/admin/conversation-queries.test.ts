@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ─── Hoisted mock state ─────────────────────────────────────────────
-const { selectQueue, batchMock, chain, deleteCalls, updateCalls } = vi.hoisted(() => {
+const { selectQueue, batchMock, chain, deleteCalls, updateCalls, updateQueue, insertCalls } = vi.hoisted(() => {
   const selectQueue: unknown[][] = [];
+  const updateQueue: unknown[][] = [];
+  const insertCalls: Array<{ table: unknown; values: unknown }> = [];
   const batchMock = vi.fn(async (..._args: unknown[]) => [] as unknown[]);
   const deleteCalls: unknown[] = [];
   const updateCalls: Array<{ table: unknown; values: unknown }> = [];
@@ -18,7 +20,7 @@ const { selectQueue, batchMock, chain, deleteCalls, updateCalls } = vi.hoisted((
     });
     return p;
   };
-  return { selectQueue, batchMock, chain, deleteCalls, updateCalls };
+  return { selectQueue, batchMock, chain, deleteCalls, updateCalls, updateQueue, insertCalls };
 });
 
 vi.mock('@/lib/db', () => ({
@@ -28,11 +30,16 @@ vi.mock('@/lib/db', () => ({
       deleteCalls.push(table);
       return chain([]);
     },
-    insert: () => chain([]),
+    insert: (table: unknown) => ({
+      values: (values: unknown) => {
+        insertCalls.push({ table, values });
+        return chain([]);
+      },
+    }),
     update: (table: unknown) => ({
       set: (values: unknown) => {
         updateCalls.push({ table, values });
-        return chain([]);
+        return chain(updateQueue.shift() ?? []);
       },
     }),
     batch: (...args: unknown[]) => batchMock(...args),
@@ -77,7 +84,11 @@ vi.mock('@/lib/db/schema', () => ({
   auditLog: { sessionId: 'audit.sid', organizationId: 'audit.org' },
 }));
 
-import { deleteConversation, getConversationById } from './conversation-queries';
+import {
+  deleteConversation,
+  getConversationById,
+  setConversationHandled,
+} from './conversation-queries';
 import { auditLog } from '@/lib/db/schema';
 
 const ORG = '00000000-0000-0000-0000-000000000001';
@@ -88,6 +99,8 @@ beforeEach(() => {
   batchMock.mockResolvedValue([]);
   deleteCalls.length = 0;
   updateCalls.length = 0;
+  updateQueue.length = 0;
+  insertCalls.length = 0;
 });
 
 describe('getConversationById', () => {
@@ -107,12 +120,43 @@ describe('getConversationById', () => {
       },
     ]); // session row
     selectQueue.push([]); // messages
-    selectQueue.push([]); // service request
+    batchMock.mockResolvedValueOnce([[], []]); // service request + reply audit rows
 
     const detail = await getConversationById(ORG, 's1');
     expect(detail).not.toBeNull();
     expect(detail?.channel).toBe('phone');
     expect(detail?.runningSummary).toBe('Caller reported no heat at 5 Oak St.');
+    expect(detail?.serviceRequestId).toBeNull();
+    expect(detail?.needsAction).toBe(false);
+  });
+
+  it('links the request and flags an unhandled escalation', async () => {
+    selectQueue.push([
+      {
+        id: 's1',
+        status: 'escalated',
+        channel: 'phone',
+        turnCount: 3,
+        tokensUsed: 100,
+        tokenBudget: 10000,
+        metadata: null,
+        runningSummary: null,
+        handledAt: null,
+        createdAt: new Date('2026-06-08T00:00:00Z'),
+        updatedAt: new Date('2026-06-08T00:05:00Z'),
+      },
+    ]);
+    selectQueue.push([]); // messages
+    batchMock.mockResolvedValueOnce([
+      [{ id: 'req-1', referenceNumber: 'HVAC-1' }],
+      [{ createdAt: new Date('2026-06-08T00:04:00Z') }],
+    ]);
+
+    const detail = await getConversationById(ORG, 's1');
+    expect(detail?.serviceRequestId).toBe('req-1');
+    expect(detail?.referenceNumber).toBe('HVAC-1');
+    expect(detail?.needsAction).toBe(true);
+    expect(detail?.staffReplyTimes).toEqual(['2026-06-08T00:04:00.000Z']);
   });
 
   it('returns null when the session is not in the org', async () => {
@@ -156,5 +200,43 @@ describe('deleteConversation', () => {
     expect(updateCalls).toHaveLength(1);
     expect(updateCalls[0].table).toBe(auditLog);
     expect(updateCalls[0].values).toEqual({ sessionId: null });
+  });
+});
+
+describe('setConversationHandled', () => {
+  it('returns null and writes no audit row when no escalated session matched', async () => {
+    updateQueue.push([]);
+    const result = await setConversationHandled(ORG, 's1', true, { userId: 'admin-1' });
+    expect(result).toBeNull();
+    expect(insertCalls).toHaveLength(0);
+  });
+
+  it('stamps handledAt and audits with ids only', async () => {
+    updateQueue.push([{ id: 's1' }]);
+    const result = await setConversationHandled(ORG, 's1', true, {
+      userId: 'admin-1',
+      ipAddress: '1.2.3.4',
+    });
+    expect(result?.handledAt).toEqual(expect.any(String));
+    expect((updateCalls[0].values as { handledAt: Date }).handledAt).toBeInstanceOf(Date);
+    expect(insertCalls).toHaveLength(1);
+    expect(insertCalls[0].table).toBe(auditLog);
+    expect(insertCalls[0].values).toEqual({
+      organizationId: ORG,
+      userId: 'admin-1',
+      actorType: 'human',
+      action: 'conversation_marked_handled',
+      entity: 'customer_sessions',
+      entityId: 's1',
+      ipAddress: '1.2.3.4',
+    });
+  });
+
+  it('reopens by clearing handledAt', async () => {
+    updateQueue.push([{ id: 's1' }]);
+    const result = await setConversationHandled(ORG, 's1', false, { userId: 'admin-1' });
+    expect(result).toEqual({ handledAt: null });
+    expect(updateCalls[0].values).toEqual({ handledAt: null });
+    expect((insertCalls[0].values as { action: string }).action).toBe('conversation_reopened');
   });
 });

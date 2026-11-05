@@ -25,11 +25,17 @@ import {
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { notStandInSession } from "./stand-in-session";
+import {
+  customerNameFromMetadata,
+  needsAction,
+  phoneDigitsQuery,
+} from "./conversation-display";
 import type {
   ConversationSummary,
   ConversationMessage,
   ConversationDetail,
   ConversationFilters,
+  ConversationListResult,
 } from "./conversation-types";
 
 const DEFAULT_PAGE = 1;
@@ -102,13 +108,54 @@ function parseMetadata(raw: string | null): Record<string, unknown> | null {
   }
 }
 
+/**
+ * Escalated and not handled since the customer last wrote. Mirrors the pure
+ * `needsAction` helper in conversation-display.ts.
+ */
+const needsActionSql = sql<boolean>`(
+  ${customerSessions.status} = 'escalated'
+  AND (
+    ${customerSessions.handledAt} IS NULL
+    OR EXISTS (
+      SELECT 1 FROM ${messages}
+      WHERE ${messages.sessionId} = ${customerSessions.id}
+        AND ${messages.organizationId} = ${customerSessions.organizationId}
+        AND ${messages.role} = 'user'
+        AND ${messages.createdAt} > ${customerSessions.handledAt}
+    )
+  )
+)`;
+
+/** Last message time, else the session's creation time — the inbox sort key. */
+const lastActivitySql = sql<Date | string>`coalesce(
+  (SELECT max(${messages.createdAt}) FROM ${messages}
+    WHERE ${messages.sessionId} = ${customerSessions.id}
+      AND ${messages.organizationId} = ${customerSessions.organizationId}),
+  ${customerSessions.createdAt}
+)`;
+
+/**
+ * Not an empty widget open: the customer said something, or the session has a
+ * request (e.g. a phone call whose transcript wasn't stored).
+ */
+const hasContentSql = sql`(
+  EXISTS (
+    SELECT 1 FROM ${messages}
+    WHERE ${messages.sessionId} = ${customerSessions.id}
+      AND ${messages.organizationId} = ${customerSessions.organizationId}
+      AND ${messages.role} = 'user'
+  )
+  OR EXISTS (
+    SELECT 1 FROM ${serviceRequests}
+    WHERE ${serviceRequests.sessionId} = ${customerSessions.id}
+      AND ${serviceRequests.organizationId} = ${customerSessions.organizationId}
+  )
+)`;
+
 export async function getConversations(
   organizationId: string,
   filters: ConversationFilters,
-): Promise<{
-  readonly conversations: readonly ConversationSummary[];
-  readonly total: number;
-}> {
+): Promise<ConversationListResult> {
   const page = Math.max(1, filters.page ?? DEFAULT_PAGE);
   const limit = Math.min(
     MAX_LIMIT,
@@ -126,6 +173,12 @@ export async function getConversations(
   if (filters.channel && isValidChannel(filters.channel)) {
     conditions.push(eq(customerSessions.channel, filters.channel));
   }
+  if (!filters.includeEmpty) {
+    conditions.push(hasContentSql);
+  }
+  if (filters.needsAction) {
+    conditions.push(needsActionSql);
+  }
 
   // Optional search: restrict to sessions whose id text-matches OR that have at
   // least one message whose content matches (case-insensitive substring).
@@ -135,15 +188,29 @@ export async function getConversations(
     // literally instead of becoming a wildcard that full-scans messages.content.
     const escaped = search.replace(/[\\%_]/g, (ch) => `\\${ch}`);
     const pattern = `%${escaped}%`;
+    // A phone-shaped search also matches the digits of the captured phone
+    // (metadata) and the SMS token, however the number was formatted.
+    const digits = phoneDigitsQuery(search);
+    const digitsMatch = digits
+      ? sql`OR regexp_replace(coalesce(${customerSessions.metadata}, '') || ' ' || ${customerSessions.token}, '[^0-9]', '', 'g') LIKE ${`%${digits}%`}`
+      : sql``;
     conditions.push(
       sql`(
         ${customerSessions.id}::text ILIKE ${pattern}
+        OR coalesce(${customerSessions.metadata}, '') ILIKE ${pattern}
+        OR EXISTS (
+          SELECT 1 FROM ${serviceRequests}
+          WHERE ${serviceRequests.sessionId} = ${customerSessions.id}
+            AND ${serviceRequests.organizationId} = ${customerSessions.organizationId}
+            AND ${serviceRequests.referenceNumber} ILIKE ${pattern}
+        )
         OR EXISTS (
           SELECT 1 FROM ${messages}
           WHERE ${messages.sessionId} = ${customerSessions.id}
             AND ${messages.organizationId} = ${customerSessions.organizationId}
             AND ${messages.content} ILIKE ${pattern}
         )
+        ${digitsMatch}
       )`,
     );
   }
@@ -154,9 +221,9 @@ export async function getConversations(
     ...conditions,
   );
 
-  // Stage 1: count + page can run concurrently (both hit the same where clause,
-  // neither depends on the other).
-  const [[countResult], sessionRows] = await Promise.all([
+  // Stage 1: count, page and the org-wide needs-action count run concurrently
+  // in one round trip (neither depends on the other).
+  const [[countResult], sessionRows, [needsActionResult]] = await db.batch([
     db
       .select({ value: count() })
       .from(customerSessions)
@@ -168,20 +235,35 @@ export async function getConversations(
         channel: customerSessions.channel,
         turnCount: customerSessions.turnCount,
         tokensUsed: customerSessions.tokensUsed,
+        metadata: customerSessions.metadata,
+        needsAction: needsActionSql,
         createdAt: customerSessions.createdAt,
         updatedAt: customerSessions.updatedAt,
       })
       .from(customerSessions)
       .where(whereClause)
-      .orderBy(desc(customerSessions.createdAt))
+      // Inbox order: most recent activity first, not session creation.
+      .orderBy(desc(lastActivitySql), desc(customerSessions.id))
       .limit(limit)
       .offset(offset),
+    db
+      .select({ value: count() })
+      .from(customerSessions)
+      .where(
+        withTenant(
+          customerSessions,
+          organizationId,
+          notStandInSession(customerSessions.token),
+          needsActionSql,
+        ),
+      ),
   ]);
 
   const total = countResult?.value ?? 0;
+  const needsActionCount = needsActionResult?.value ?? 0;
 
   if (sessionRows.length === 0) {
-    return { conversations: [], total };
+    return { conversations: [], total, needsActionCount };
   }
 
   const sessionIds = sessionRows.map((row) => row.id);
@@ -284,11 +366,14 @@ export async function getConversations(
         createdAt: row.createdAt.toISOString(),
         updatedAt: row.updatedAt.toISOString(),
         lastMessageAt: toIsoOrNull(lastMessageAt),
+        customerName: customerNameFromMetadata(parseMetadata(row.metadata)),
+        // The driver may hand a boolean expression back as a string.
+        needsAction: row.needsAction === true || String(row.needsAction) === "true",
       };
     },
   );
 
-  return { conversations, total };
+  return { conversations, total, needsActionCount };
 }
 
 export async function getConversationById(
@@ -309,6 +394,7 @@ export async function getConversationById(
       outcome: customerSessions.outcome,
       nextSteps: customerSessions.nextSteps,
       mode: customerSessions.mode,
+      handledAt: customerSessions.handledAt,
       createdAt: customerSessions.createdAt,
       updatedAt: customerSessions.updatedAt,
     })
@@ -347,20 +433,37 @@ export async function getConversationById(
     }),
   );
 
-  // Optional service request lookup for reference number + presence flag.
-  const [requestRow] = await db
-    .select({ referenceNumber: serviceRequests.referenceNumber })
-    .from(serviceRequests)
-    .where(
-      withTenant(
-        serviceRequests,
-        organizationId,
-        eq(serviceRequests.sessionId, sessionId),
+  // Optional service request lookup (reference number + id for the link), and
+  // the staff-reply audit rows that tell office replies apart from the AI's.
+  const [[requestRow], replyAuditRows] = await db.batch([
+    db
+      .select({ id: serviceRequests.id, referenceNumber: serviceRequests.referenceNumber })
+      .from(serviceRequests)
+      .where(
+        withTenant(
+          serviceRequests,
+          organizationId,
+          eq(serviceRequests.sessionId, sessionId),
+        ),
+      )
+      .limit(1),
+    db
+      .select({ createdAt: auditLog.createdAt })
+      .from(auditLog)
+      .where(
+        withTenant(
+          auditLog,
+          organizationId,
+          eq(auditLog.entity, "customer_sessions"),
+          eq(auditLog.entityId, sessionId),
+          eq(auditLog.action, "conversation_reply_sent"),
+        ),
       ),
-    )
-    .limit(1);
+  ]);
 
   const referenceNumber = requestRow?.referenceNumber ?? null;
+  const handledAt = sessionRow.handledAt ? sessionRow.handledAt.toISOString() : null;
+  const lastCustomerMessage = [...conversationMessages].reverse().find((m) => m.role === "user");
 
   return {
     id: sessionRow.id,
@@ -376,11 +479,62 @@ export async function getConversationById(
     nextSteps: sessionRow.nextSteps ?? null,
     mode: sessionRow.mode,
     referenceNumber,
+    serviceRequestId: requestRow?.id ?? null,
     hasServiceRequest: referenceNumber !== null,
+    handledAt,
+    needsAction: needsAction({
+      status: sessionRow.status,
+      handledAt,
+      lastCustomerMessageAt: lastCustomerMessage?.createdAt ?? null,
+    }),
     createdAt: sessionRow.createdAt.toISOString(),
     updatedAt: sessionRow.updatedAt.toISOString(),
     messages: conversationMessages,
+    staffReplyTimes: replyAuditRows.map((r) => r.createdAt.toISOString()),
   };
+}
+
+/**
+ * Mark an escalated conversation handled (clears "Needs action") or reopen it.
+ * Tenant-scoped; only escalated sessions can be marked. Returns the new
+ * handledAt (ISO or null), or `null` when no escalated session matched.
+ * Writes an audit row with ids only (no PII).
+ */
+export async function setConversationHandled(
+  organizationId: string,
+  sessionId: string,
+  handled: boolean,
+  actor: { readonly userId: string; readonly ipAddress?: string | null },
+): Promise<{ readonly handledAt: string | null } | null> {
+  const handledAt = handled ? new Date() : null;
+  const [updated] = await db
+    .update(customerSessions)
+    .set({ handledAt })
+    .where(
+      withTenant(
+        customerSessions,
+        organizationId,
+        eq(customerSessions.id, sessionId),
+        eq(customerSessions.status, "escalated"),
+      ),
+    )
+    .returning({ id: customerSessions.id });
+
+  if (!updated) {
+    return null;
+  }
+
+  await db.insert(auditLog).values({
+    organizationId,
+    userId: actor.userId,
+    actorType: "human",
+    action: handled ? "conversation_marked_handled" : "conversation_reopened",
+    entity: "customer_sessions",
+    entityId: sessionId,
+    ipAddress: actor.ipAddress ?? null,
+  });
+
+  return { handledAt: handledAt ? handledAt.toISOString() : null };
 }
 
 /**

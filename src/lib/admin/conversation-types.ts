@@ -23,6 +23,9 @@ export interface ConversationSummary {
   readonly createdAt: string; // ISO
   readonly updatedAt: string; // ISO
   readonly lastMessageAt: string | null; // ISO of most recent message, or null
+  readonly customerName: string | null; // metadata.customerName from intake
+  // Escalated and not marked handled since the customer last wrote.
+  readonly needsAction: boolean;
 }
 
 export interface ConversationMessage {
@@ -51,10 +54,23 @@ export interface ConversationDetail {
   // parsed from customerSessions.metadata JSON; null if absent/unparseable
   readonly metadata: Record<string, unknown> | null;
   readonly referenceNumber: string | null;
+  readonly serviceRequestId: string | null; // for the "Open request" link
   readonly hasServiceRequest: boolean;
+  readonly handledAt: string | null; // ISO; when "Needs action" was cleared
+  readonly needsAction: boolean;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly messages: readonly ConversationMessage[];
+  // ISO times of `conversation_reply_sent` audit rows (staff replies), used to
+  // label those assistant messages as the office, not the AI.
+  readonly staffReplyTimes: readonly string[];
+}
+
+export interface ConversationListResult {
+  readonly conversations: readonly ConversationSummary[];
+  readonly total: number;
+  // Org-wide count of conversations that need action (ignores list filters).
+  readonly needsActionCount: number;
 }
 
 export interface ConversationFilters {
@@ -62,6 +78,11 @@ export interface ConversationFilters {
   readonly channel?: string; // optional session_channel filter ("web" | "phone")
   // optional: case-insensitive substring match against message content OR session id
   readonly search?: string;
+  // Only conversations that need action (escalated, not handled).
+  readonly needsAction?: boolean;
+  // Include sessions with no customer message and no linked request (widget
+  // opens). Hidden by default.
+  readonly includeEmpty?: boolean;
   readonly page?: number;
   readonly limit?: number;
 }

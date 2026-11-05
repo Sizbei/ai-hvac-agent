@@ -450,6 +450,10 @@ export const customerSessions = pgTable(
     // Forward reference to `customers` (declared later in this file) — same
     // thunk-FK pattern as serviceRequests.customerId.
     customerId: uuid("customer_id").references(() => customers.id),
+    // When an office user marked an escalated conversation handled (cleared
+    // "Needs action" in the inbox). A customer message after this time makes
+    // it need action again. NULL = never handled. Who did it is in audit_log.
+    handledAt: timestamp("handled_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

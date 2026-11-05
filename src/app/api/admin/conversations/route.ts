@@ -25,6 +25,8 @@ export async function GET(request: NextRequest) {
     const status = url.searchParams.get("status") ?? undefined;
     const channel = url.searchParams.get("channel") ?? undefined;
     const search = url.searchParams.get("search") ?? undefined;
+    const needsAction = url.searchParams.get("needsAction") === "1";
+    const includeEmpty = url.searchParams.get("includeEmpty") === "1";
     const pageParam = url.searchParams.get("page");
     const limitParam = url.searchParams.get("limit");
 
@@ -37,6 +39,8 @@ export async function GET(request: NextRequest) {
       status,
       channel,
       search,
+      needsAction,
+      includeEmpty,
       page,
       limit,
     });
@@ -44,6 +48,7 @@ export async function GET(request: NextRequest) {
     return successResponse({
       conversations: result.conversations,
       total: result.total,
+      needsActionCount: result.needsActionCount,
       page,
       limit,
     });

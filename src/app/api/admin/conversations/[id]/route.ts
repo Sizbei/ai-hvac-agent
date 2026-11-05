@@ -1,11 +1,13 @@
 import { NextRequest } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
 import { isSuperAdmin } from "@/lib/auth/authz";
+import { z } from "zod";
 import {
   getConversationById,
   deleteConversation,
+  setConversationHandled,
 } from "@/lib/admin/conversation-queries";
-import { successResponse, errorResponse } from "@/lib/api-response";
+import { successResponse, errorResponse, readJsonBody } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
 import { clientIp } from "@/lib/http/client-ip";
@@ -85,6 +87,59 @@ export async function DELETE(
     return successResponse({ ok: true });
   } catch (error: unknown) {
     logger.error({ error }, "Failed to delete conversation");
+    return errorResponse("Internal server error", "INTERNAL_ERROR", 500);
+  }
+}
+
+const patchSchema = z.object({ handled: z.boolean() }).strict();
+
+/**
+ * Mark an escalated conversation handled (clears "Needs action") or reopen it.
+ * Any admin may do this — it is triage state, not a destructive action.
+ */
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const session = await getAdminSession();
+    if (!session) {
+      return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
+    }
+
+    const rateCheck = slidingWindow(
+      `admin:conversation-handled:${session.userId}`,
+      RATE_LIMITS.adminMutation.maxRequests,
+      RATE_LIMITS.adminMutation.windowMs,
+    );
+    if (!rateCheck.allowed) {
+      return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
+    }
+
+    const { id } = await params;
+    if (!UUID_REGEX.test(id)) {
+      return errorResponse("Invalid conversation ID format", "INVALID_ID", 400);
+    }
+
+    const body = await readJsonBody(request);
+    const parsed = body.ok ? patchSchema.safeParse(body.data) : null;
+    if (!parsed?.success) {
+      return errorResponse("Invalid request body", "VALIDATION_ERROR", 400);
+    }
+
+    const result = await setConversationHandled(
+      session.organizationId,
+      id,
+      parsed.data.handled,
+      { userId: session.userId, ipAddress: clientIp(request) },
+    );
+    if (!result) {
+      return errorResponse("Escalated conversation not found", "NOT_FOUND", 404);
+    }
+
+    return successResponse(result);
+  } catch (error: unknown) {
+    logger.error({ error }, "Failed to update conversation handled state");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);
   }
 }
