@@ -464,3 +464,24 @@ sheets), order 1 → 2 → 3 → 4 → 5 → (6 ∥ 7) → 8 → (9 ∥ 10) → 
 result. Verdict: converged-enough — each round narrower (2+20 → 2+7 →
 0+5), the remaining majors were refinements of v3 rules and are applied;
 the SDD task reviews are the net for what implementation surfaces.
+
+## M3b final review — 2026-11-05
+
+Three blind lenses (money/concurrency; security/tenancy/privacy; UX/client/
+copy) over a3c2b23..84b5ff3. Verdicts: money "Ready to push" (0 blockers, 2
+live minors, 5 latent card-path items for M4); security "Needs a fix wave"
+(1 major: Drizzle query errors carry SQL params into logs via
+`logger.error({ error })` — signature names, the portal pay link); UX
+"Needs a fix wave" (4 majors: a late-landing signature left a stuck banner;
+the paid-view ruling needed client work; the office form could double-record
+after a network error; the approval pad's "Save signature" label). ONE fix
+wave in three parallel commits (a2f59c6 admin/docs, c5aedad tech client,
+54fe27a server), then a combined re-review (two small new defects: docs
+described `history` wrongly; the clients did not pre-validate the new
+check-number pattern) fixed by the controller. Final: tsc 0, eslint 0
+errors, 5556 passed / 1 skipped, `next build` OK, drizzle "No schema
+changes", verify-skills 0 missing. Parked for M4 (card paths, inactive
+while `cardPaymentsEnabled()` is false): `takePayment` un-claim state CASE,
+card on draft, card refund token, card/manual refund-state divergence;
+accepted: takeover re-run loses the receipt/audit; pay-link ≤ 1 per 5 min
+per invoice; the shared-file erase edge.
