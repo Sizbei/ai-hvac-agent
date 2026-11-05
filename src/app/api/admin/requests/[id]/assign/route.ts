@@ -3,6 +3,7 @@ import { getAdminSession } from "@/lib/auth/session";
 import { assignTechnician, reassignTechnician } from "@/lib/admin/queries";
 import { logAudit } from "@/lib/admin/audit";
 import { visitOneRefusalResponse } from "@/lib/admin/visit-one-guard";
+import { requestStatusLabel } from "@/lib/admin/request-status";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
@@ -72,7 +73,7 @@ export async function POST(
           return errorResponse("Request not found", "NOT_FOUND", 404);
         case "request_not_assignable":
           return errorResponse(
-            `Request cannot be assigned while it is '${result.currentStatus}'`,
+            `This request can’t be assigned while it is ${requestStatusLabel(result.currentStatus).toLowerCase()}.`,
             "REQUEST_NOT_ASSIGNABLE",
             409,
           );
@@ -165,7 +166,7 @@ export async function PATCH(
           return errorResponse("Request not found", "NOT_FOUND", 404);
         case "request_not_reassignable":
           return errorResponse(
-            `Request cannot be reassigned while it is '${result.currentStatus}'`,
+            `This request can’t be reassigned while it is ${requestStatusLabel(result.currentStatus).toLowerCase()}.`,
             "REQUEST_NOT_REASSIGNABLE",
             409,
           );

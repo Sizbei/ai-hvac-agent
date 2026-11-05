@@ -62,6 +62,17 @@ export const UNASSIGNED_OPEN_STATUSES = ["pending", "scheduled"] as const satisf
 /** Can sit in the unscheduled sidebar when it has no arrival window. */
 export const NEEDS_PLACEMENT_STATUSES = ["pending", "scheduled", "assigned", "en_route", "arrived", "in_progress"] as const satisfies readonly RequestStatus[];
 export const TERMINAL_STATUSES = ["completed", "cancelled"] as const satisfies readonly RequestStatus[];
+/** A request whose technician can be swapped without resetting its stage: any
+ * in-flight status, so the request sheet matches calendar drag (a "scheduled"
+ * request with a technician is reassignable). Once a technician has real
+ * progress on visit #1 the visit-one guard still refuses (409 HAS_PROGRESS). */
+export const REASSIGNABLE_STATUSES = IN_FLIGHT_STATUSES;
+
+/** "in_progress" -> "In progress". Sentence case for copy and error messages. */
+export function requestStatusLabel(status: string): string {
+  const spaced = status.replace(/_/g, " ").trim();
+  return spaced ? spaced.charAt(0).toUpperCase() + spaced.slice(1) : "Unknown";
+}
 
 export function canTransition(
   from: RequestStatus,

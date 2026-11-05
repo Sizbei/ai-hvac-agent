@@ -43,6 +43,7 @@ import { decrypt } from "@/lib/crypto";
 import {
   canTransition,
   OPEN_STATUSES,
+  REASSIGNABLE_STATUSES,
   TERMINAL_STATUSES,
   UNASSIGNED_OPEN_STATUSES,
   type RequestStatus,
@@ -446,10 +447,9 @@ export async function getRequestById(
  * assignable. */
 const ASSIGNABLE_STATUSES = ["pending", "scheduled", "assigned"] as const;
 
-/** Statuses from which a REASSIGNMENT (changing the assignee without resetting
- * the lifecycle) is allowed: a request that already has work in flight or
- * paused (on_hold) — reassign without discarding the lifecycle stage. */
-const REASSIGNABLE_STATUSES = ["assigned", "en_route", "arrived", "in_progress", "on_hold"] as const;
+// REASSIGNABLE_STATUSES (request-status.ts): statuses from which a
+// REASSIGNMENT (changing the assignee without resetting the lifecycle) is
+// allowed — any in-flight status, including "scheduled" (calendar drag parity).
 
 export type AssignTechnicianResult =
   | { readonly ok: true; readonly request: AdminRequest }
@@ -633,7 +633,7 @@ export type ReassignTechnicianResult =
  * Move an in-flight request to a different technician WITHOUT resetting its
  * lifecycle. Unlike assignTechnician (which flips status to "assigned"), this
  * preserves the current status, so reassigning an "in_progress" job keeps it
- * in progress. Allowed only from REASSIGNABLE_STATUSES (assigned/in_progress):
+ * in progress. Allowed only from REASSIGNABLE_STATUSES (any in-flight status):
  * a "pending" request has no assignee to swap (use assign), and terminal
  * requests are locked. The status-guarded UPDATE also closes the lost-update
  * race between two dispatchers.
@@ -1150,6 +1150,10 @@ function buildDashboardStatsQuery(organizationId: string) {
       completedToday: count(
         sql`CASE WHEN ${serviceRequests.status} = 'completed' AND ${serviceRequests.completedAt} >= ${todayStart} AND ${serviceRequests.fieldpulseJobId} IS NULL AND ${serviceRequests.hcpJobId} IS NULL THEN 1 END`,
       ),
+      // Every assigned request, not just today's: with this the five status
+      // tiles (pending, scheduled, assigned, in progress, on hold) partition
+      // OPEN_STATUSES exactly. See page-dashboard "Open requests".
+      assigned: count(sql`CASE WHEN ${serviceRequests.status} = 'assigned' AND ${serviceRequests.fieldpulseJobId} IS NULL AND ${serviceRequests.hcpJobId} IS NULL THEN 1 END`),
       scheduled: count(sql`CASE WHEN ${serviceRequests.status} = 'scheduled' AND ${serviceRequests.fieldpulseJobId} IS NULL AND ${serviceRequests.hcpJobId} IS NULL THEN 1 END`),
       onHold: count(sql`CASE WHEN ${serviceRequests.status} = 'on_hold' AND ${serviceRequests.fieldpulseJobId} IS NULL AND ${serviceRequests.hcpJobId} IS NULL THEN 1 END`),
       emergencyOpen: count(
@@ -1167,6 +1171,18 @@ function buildDashboardStatsQuery(organizationId: string) {
       // Imported (FP or HCP) jobs in pending state — shown as "+N imported" suffix.
       importedPending: count(
         sql`CASE WHEN ${serviceRequests.status} = 'pending' AND (${serviceRequests.fieldpulseJobId} IS NOT NULL OR ${serviceRequests.hcpJobId} IS NOT NULL) THEN 1 END`,
+      ),
+      importedScheduled: count(
+        sql`CASE WHEN ${serviceRequests.status} = 'scheduled' AND (${serviceRequests.fieldpulseJobId} IS NOT NULL OR ${serviceRequests.hcpJobId} IS NOT NULL) THEN 1 END`,
+      ),
+      importedAssigned: count(
+        sql`CASE WHEN ${serviceRequests.status} = 'assigned' AND (${serviceRequests.fieldpulseJobId} IS NOT NULL OR ${serviceRequests.hcpJobId} IS NOT NULL) THEN 1 END`,
+      ),
+      importedInProgress: count(
+        sql`CASE WHEN ${serviceRequests.status} IN ('en_route', 'arrived', 'in_progress') AND (${serviceRequests.fieldpulseJobId} IS NOT NULL OR ${serviceRequests.hcpJobId} IS NOT NULL) THEN 1 END`,
+      ),
+      importedOnHold: count(
+        sql`CASE WHEN ${serviceRequests.status} = 'on_hold' AND (${serviceRequests.fieldpulseJobId} IS NOT NULL OR ${serviceRequests.hcpJobId} IS NOT NULL) THEN 1 END`,
       ),
     })
     .from(serviceRequests)
@@ -1188,6 +1204,11 @@ function toDashboardStats(result: DashboardStatsRow | undefined): DashboardStats
     emergencyOpen: result?.emergencyOpen ?? 0,
     afterHoursToday: result?.afterHoursToday ?? 0,
     importedPending: result?.importedPending ?? 0,
+    assigned: result?.assigned ?? 0,
+    importedScheduled: result?.importedScheduled ?? 0,
+    importedAssigned: result?.importedAssigned ?? 0,
+    importedInProgress: result?.importedInProgress ?? 0,
+    importedOnHold: result?.importedOnHold ?? 0,
   };
 }
 

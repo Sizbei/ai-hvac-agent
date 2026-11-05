@@ -140,3 +140,32 @@ describe('en_route / arrived', () => {
     expect(ON_SITE_STATUSES).not.toContain('en_route');
   });
 });
+
+import { REASSIGNABLE_STATUSES, requestStatusLabel } from './request-status';
+
+describe('REASSIGNABLE_STATUSES (sheet reassign matches calendar drag)', () => {
+  it('includes scheduled and assigned, so a booked request can change technician', () => {
+    expect(REASSIGNABLE_STATUSES).toContain('scheduled');
+    expect(REASSIGNABLE_STATUSES).toContain('assigned');
+  });
+  it('keeps working states (the visit-one guard refuses once there is progress)', () => {
+    for (const s of ['en_route', 'arrived', 'in_progress', 'on_hold']) {
+      expect(REASSIGNABLE_STATUSES).toContain(s);
+    }
+  });
+  it('never includes pending (no assignee to swap) or terminal states', () => {
+    expect(REASSIGNABLE_STATUSES).not.toContain('pending');
+    for (const s of TERMINAL_STATUSES) expect(REASSIGNABLE_STATUSES).not.toContain(s);
+  });
+});
+
+describe('requestStatusLabel', () => {
+  it('turns enum values into sentence case', () => {
+    expect(requestStatusLabel('in_progress')).toBe('In progress');
+    expect(requestStatusLabel('on_hold')).toBe('On hold');
+    expect(requestStatusLabel('scheduled')).toBe('Scheduled');
+  });
+  it('falls back for an empty value', () => {
+    expect(requestStatusLabel('')).toBe('Unknown');
+  });
+});

@@ -39,3 +39,29 @@ describe("assign route — visit #1 refusals", () => {
     expect(logAudit).not.toHaveBeenCalled();
   });
 });
+
+describe("assign route — status refusals read as human copy", () => {
+  it("PATCH names the status in words, never the raw enum", async () => {
+    (reassignTechnician as unknown as Mock).mockResolvedValue({
+      ok: false,
+      reason: "request_not_reassignable",
+      currentStatus: "pending",
+    });
+    const res = await call(PATCH, "PATCH");
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error.code).toBe("REQUEST_NOT_REASSIGNABLE");
+    expect(body.error.message).toBe("This request can’t be reassigned while it is pending.");
+  });
+
+  it("POST lowers an underscored status to plain words", async () => {
+    (assignTechnician as unknown as Mock).mockResolvedValue({
+      ok: false,
+      reason: "request_not_assignable",
+      currentStatus: "in_progress",
+    });
+    const body = await (await call(POST, "POST")).json();
+    expect(body.error.message).toBe("This request can’t be assigned while it is in progress.");
+    expect(body.error.message).not.toMatch(/_|'/);
+  });
+});
