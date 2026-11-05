@@ -10,6 +10,7 @@ import type { VisitRange } from '@/lib/tech/visit-range';
 import { labelAssignmentStatus } from '@/components/tech/tech-status-confirm';
 import { GuideCard } from '@/components/tech/guide-card';
 import { pickTodayFirst, type TodayFirst } from '@/lib/tech/guide-view';
+import { dayClockText } from '@/lib/tech/clock-display';
 
 /** Card-shaped skeleton matching the 3-line job card anatomy. */
 function JobCardSkeleton() {
@@ -55,15 +56,6 @@ const EMPTY_COPY: Record<VisitRange, string> = {
   upcoming: 'No upcoming visits.',
   past: 'No past visits in the last 30 days.',
 };
-
-/** 3725 seconds -> "1:02:05"; under an hour -> "2:05". */
-function formatElapsed(ms: number): string {
-  const total = Math.max(0, Math.floor(ms / 1000));
-  const h = Math.floor(total / 3600);
-  const m = String(Math.floor((total % 3600) / 60)).padStart(h > 0 ? 2 : 1, '0');
-  const sec = String(total % 60).padStart(2, '0');
-  return h > 0 ? `${h}:${m}:${sec}` : `${m}:${sec}`;
-}
 
 /** Day clock: a general clock-in with no job attached. */
 function ClockButton() {
@@ -130,12 +122,13 @@ function ClockButton() {
   }
 
   const clockedIn = typeof clockInAt === 'string';
+  const text = dayClockText({ clockInAt, nowMs: now, pending });
   return (
     <div className="flex flex-col items-end gap-1">
       <div className="flex items-center gap-3">
-        {clockedIn && (
-          <span className="font-mono text-[15px] tabular-nums text-muted-foreground" aria-live="off">
-            {formatElapsed(now - new Date(clockInAt).getTime())}
+        {text.running && (
+          <span className="text-[15px] tabular-nums text-muted-foreground" aria-live="off">
+            {text.running}
           </span>
         )}
         <Button
@@ -146,7 +139,7 @@ function ClockButton() {
           onClick={() => void toggle()}
           className="min-h-11"
         >
-          {pending ? (clockedIn ? 'Clocking out…' : 'Clocking in…') : clockedIn ? 'Clock out' : 'Clock in'}
+          {text.button}
         </Button>
       </div>
       {error && <p className="text-[13px] text-danger-strong">{error}</p>}

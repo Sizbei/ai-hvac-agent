@@ -11,6 +11,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { TechJobSummary } from '@/components/tech/tech-job-summary';
 import { SignaturePad } from '@/components/tech/signature-pad';
+import { JobTimeCard } from '@/components/tech/job-time-card';
 import { mintKey } from '@/lib/http/idempotency-codes';
 import { useIdempotencyKey } from '@/hooks/use-idempotency-key';
 import { outcomeEvent, type WriteOutcome } from '@/lib/tech/invoice-key-state';
@@ -30,15 +31,6 @@ interface PricebookItem {
   readonly name: string;
   readonly type: string;
   readonly priceCents: number;
-}
-
-interface TimeEntry {
-  readonly id: string;
-  readonly technicianId: string;
-  readonly clockInAt: string;
-  readonly clockOutAt: string | null;
-  readonly minutes: number | null;
-  readonly laborCostCents: number | null;
 }
 
 interface TimelineEntry {
@@ -63,13 +55,6 @@ function humanizeStatus(s: string): string {
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
-/** Format whole minutes as "Hh Mm" (or "Mm" under an hour). */
-function formatMinutes(mins: number): string {
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  return h > 0 ? `${h}h ${m}m` : `${m}m`;
-}
-
 /** "Nov 4, 2:05 PM" in the device's locale. */
 function formatSignedAt(iso: string): string {
   return new Date(iso).toLocaleString([], {
@@ -92,16 +77,6 @@ function signatureErrorCopy(outcome: WriteOutcome, message: string | undefined):
   return message ?? "Couldn't save the signature. Try again.";
 }
 
-function isToday(iso: string): boolean {
-  const d = new Date(iso);
-  const now = new Date();
-  return (
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate()
-  );
-}
-
 export function TechJobDetailClient({
   id,
   appointmentId,
@@ -116,13 +91,10 @@ export function TechJobDetailClient({
   // they're off the clock. Either the materials or timesheet fetch can set it.
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Timesheet (labor tracking)
-  const [entries, setEntries] = useState<TimeEntry[]>([]);
+  // Time on this job: read-only, driven by status taps.
   const [openSince, setOpenSince] = useState<string | null>(null);
-  const [isClocking, setIsClocking] = useState(false);
-  const [clockError, setClockError] = useState<string | null>(null);
-  // Ticks every second so the elapsed time updates live while on the clock.
-  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [totalMinutes, setTotalMinutes] = useState(0);
+  const [timeLoaded, setTimeLoaded] = useState(false);
 
   // Material add form
   const [catalog, setCatalog] = useState<PricebookItem[]>([]);
@@ -249,8 +221,9 @@ export function TechJobDetailClient({
       const res = await fetch(`/api/tech/jobs/${id}/timesheet`);
       const body = await res.json().catch(() => ({ success: false }));
       if (res.ok && body.success) {
-        setEntries(body.data.entries);
         setOpenSince(body.data.open ? body.data.open.clockInAt : null);
+        setTotalMinutes(typeof body.data.totalMinutes === 'number' ? body.data.totalMinutes : 0);
+        setTimeLoaded(true);
       } else {
         setLoadError("Couldn't load this job's timesheet.");
       }
@@ -262,38 +235,6 @@ export function TechJobDetailClient({
   useEffect(() => {
     void loadTimesheet();
   }, [loadTimesheet]);
-
-  // Live-tick the elapsed clock only while on the clock.
-  useEffect(() => {
-    if (!openSince) return;
-    const t = setInterval(() => setNowMs(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [openSince]);
-
-  const handleClock = useCallback(
-    async (action: 'clock_in' | 'clock_out'): Promise<void> => {
-      setIsClocking(true);
-      setClockError(null);
-      try {
-        const res = await fetch(`/api/tech/jobs/${id}/timesheet`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action }),
-        });
-        const body = await res.json().catch(() => ({ success: false }));
-        if (res.ok && body.success) {
-          void loadTimesheet();
-        } else {
-          setClockError(body.error?.message ?? 'Failed to update timesheet');
-        }
-      } catch {
-        setClockError('Could not connect to server.');
-      } finally {
-        setIsClocking(false);
-      }
-    },
-    [id, loadTimesheet],
-  );
 
   // Load the pricebook once for catalog selection. Uses the TECH-scoped endpoint
   // (the admin one 401s for a technician session, so the catalog stayed empty and
@@ -489,12 +430,6 @@ export function TechJobDetailClient({
       )
     : catalog;
 
-  // Live elapsed minutes while on the clock (whole minutes, floored).
-  const elapsedMins = openSince
-    ? Math.max(0, Math.floor((nowMs - new Date(openSince).getTime()) / 60000))
-    : 0;
-  const todaysEntries = entries.filter((e) => isToday(e.clockInAt));
-
   return (
     <div className="space-y-5">
       <Link
@@ -505,7 +440,15 @@ export function TechJobDetailClient({
       </Link>
 
       {/* All info the tech needs on-site + status controls. */}
-      <TechJobSummary id={id} appointmentId={appointmentId} onStatusChanged={() => void loadTimeline()} />
+      <TechJobSummary
+        id={id}
+        appointmentId={appointmentId}
+        onStatusChanged={() => {
+          // A status tap opens or closes the job clock: reload both.
+          void loadTimeline();
+          void loadTimesheet();
+        }}
+      />
 
       {loadError && (
         <div
@@ -516,74 +459,8 @@ export function TechJobDetailClient({
         </div>
       )}
 
-      {/* Time on this job (clock in / out) */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-[17px]">Time on this job</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {openSince ? (
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-[13px] text-muted-foreground">On the clock</p>
-                <p className="font-mono text-[26px] leading-[30px] font-medium tabular-nums">
-                  {formatMinutes(elapsedMins)}
-                </p>
-              </div>
-              <Button
-                variant="destructive"
-                className="h-11 rounded-xl px-4 text-[15px]"
-                disabled={isClocking}
-                onClick={() => void handleClock('clock_out')}
-              >
-                {isClocking ? 'Saving…' : 'Clock Out'}
-              </Button>
-            </div>
-          ) : (
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-[15px] text-muted-foreground">Not clocked in.</p>
-              <Button
-                className="h-11 rounded-xl px-4 text-[15px]"
-                disabled={isClocking}
-                onClick={() => void handleClock('clock_in')}
-              >
-                {isClocking ? 'Saving…' : 'Clock In'}
-              </Button>
-            </div>
-          )}
-          {clockError && (
-            <p className="text-[13px] text-danger-strong">{clockError}</p>
-          )}
-
-          {todaysEntries.length > 0 && (
-            <ul className="space-y-1 border-t border-border pt-3">
-              {todaysEntries.map((e) => (
-                <li
-                  key={e.id}
-                  className="flex justify-between font-mono text-[13px] tabular-nums text-muted-foreground"
-                >
-                  <span>
-                    {new Date(e.clockInAt).toLocaleTimeString([], {
-                      hour: 'numeric',
-                      minute: '2-digit',
-                    })}
-                    {' – '}
-                    {e.clockOutAt
-                      ? new Date(e.clockOutAt).toLocaleTimeString([], {
-                          hour: 'numeric',
-                          minute: '2-digit',
-                        })
-                      : 'now'}
-                  </span>
-                  <span className="tabular-nums text-foreground">
-                    {e.minutes !== null ? formatMinutes(e.minutes) : '—'}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
+      {/* Time on this job (read-only: status taps are the job clock) */}
+      <JobTimeCard openSince={openSince} totalMinutes={totalMinutes} loaded={timeLoaded} />
 
       {/* Materials used */}
       <Card>

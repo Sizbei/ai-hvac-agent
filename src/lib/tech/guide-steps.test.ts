@@ -22,7 +22,7 @@ describe("STEP_DEFS", () => {
     const how = Object.fromEntries(STEP_DEFS.map((s) => [s.id, s.how]));
     expect(how.start_job).toBe("Open your job in the list. Tap On my way when you leave. Tap I've arrived at the door, then Working.");
     expect(how.finish_job).toBe("Tap Done when your part is finished. If Close out shows instead, tap that.");
-    expect(how.clock_in).toBe("Tap Clock in above your jobs list, not the one on a job. Tap Clock out when you're done.");
+    expect(how.clock_in).toBe("Tap Clock in for the day at the top of your jobs. Tap Clock out when you're done.");
     expect(how.share_location).toBe("Turn on Share my location at the top of the screen.");
     expect(how.add_material).toBe("On the job, under Materials used, pick an item from the pricebook or type one in, then tap Add.");
     expect(how.note_or_photo).toBe("On the job, write an on-site note and tap Save note, or add a photo under Photos.");

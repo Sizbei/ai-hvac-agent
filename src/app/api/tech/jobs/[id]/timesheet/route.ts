@@ -2,9 +2,9 @@
  * Technician labor tracking — clock in / clock out per job.
  *
  * GET   list the time entries on a job (org-scoped read) + whether THIS tech has
- *       an open entry (so the UI can show Clock In vs Clock Out + elapsed time).
+ *       an open entry and their closed minutes (the job page's read-only card).
  * POST  { action: "clock_in" | "clock_out" } — assignee + tenant guarded in
- *       timesheet-queries.
+ *       timesheet-queries. No client calls it: status taps are the job clock.
  *
  * Auth mirrors the tech materials route: getTechSession (technician session) +
  * the assignee+tenant guard lives in the query layer.
@@ -57,9 +57,14 @@ export async function GET(
         ...rest
       }) => rest,
     );
+    // This tech's closed minutes on the job (the read-only card's "so far").
+    const totalMinutes = entries
+      .filter((e) => e.technicianId === session.userId && e.clockOutAt !== null)
+      .reduce((sum, e) => sum + (e.minutes ?? 0), 0);
     return successResponse({
       entries: publicEntries,
       open: openEntry ? { id: openEntry.id, clockInAt: openEntry.clockInAt } : null,
+      totalMinutes,
     });
   } catch (error) {
     logger.error({ error }, "Failed to list time entries");
