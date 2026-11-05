@@ -136,7 +136,7 @@ beforeEach(() => {
   captured.length = 0;
 });
 
-import { listInvoices, collectedThisMonthCents, voidInvoice, listInvoiceReminders } from './invoice-queries';
+import { listInvoices, voidInvoice, listInvoiceReminders } from './invoice-queries';
 
 describe('listInvoices', () => {
   it('returns invoices with decrypted customer name + lastReminderSentAt, org-scoped', async () => {
@@ -163,32 +163,8 @@ describe('listInvoices', () => {
   });
 });
 
-describe('collectedThisMonthCents', () => {
-  it('sums succeeded payments for the current month (coerces neon string)', async () => {
-    selectQueue.push([{ value: '124500' }]); // neon returns sum() as a string
-    const total = await collectedThisMonthCents('org-1', new Date('2026-07-06T12:00:00Z'));
-    expect(total).toBe(124500);
-  });
-  it('returns 0 when there are no payments', async () => {
-    selectQueue.push([{ value: null }]);
-    expect(
-      await collectedThisMonthCents('org-1', new Date('2026-07-06T12:00:00Z')),
-    ).toBe(0);
-  });
-  it('scopes to the org, succeeded status, the month window, and excludes FP payments', async () => {
-    selectQueue.push([{ value: '0' }]);
-    await collectedThisMonthCents('org-1', new Date('2026-07-06T12:00:00Z'));
-    const where = JSON.stringify(captured[0].where);
-    expect(where).toContain('succeeded');
-    expect(where).toContain('org-1');
-    // month window predicates present
-    expect(where).toContain('gte');
-    expect(where).toContain('lt');
-    // FP payment guard: isNull(payments.fieldpulsePaymentId)
-    expect(where).toContain('isNull');
-    expect(where).toContain('payments.fieldpulsePaymentId');
-  });
-});
+// collectedThisMonthCents (net of refunds, one db.batch) is covered in
+// collected-this-month.test.ts.
 
 describe('voidInvoice', () => {
   const openNative = { state: 'open', amountPaidCents: 0, fieldpulseInvoiceId: null, hcpInvoiceId: null };

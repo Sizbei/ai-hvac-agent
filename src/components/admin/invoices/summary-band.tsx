@@ -23,7 +23,7 @@ export function SummaryBand({
         icon={Wallet}
         label="Outstanding"
         value={formatCentsExact(outstanding)}
-        sublabel={`Across ${outstandingCount} open invoices`}
+        sublabel={`Across ${outstandingCount} open ${outstandingCount === 1 ? 'invoice' : 'invoices'}`}
       />
       <StatCard
         icon={AlertTriangle}
@@ -31,15 +31,15 @@ export function SummaryBand({
         value={formatCentsExact(overdueSum)}
         sublabel={
           oldestOverdueDays > 0
-            ? `${overdueCount} invoices · oldest ${Math.round(oldestOverdueDays)}d past due`
-            : `${overdueCount} invoices`
+            ? `${overdueCount} ${overdueCount === 1 ? 'invoice' : 'invoices'} · oldest ${Math.round(oldestOverdueDays)}d past due`
+            : `${overdueCount} ${overdueCount === 1 ? 'invoice' : 'invoices'}`
         }
       />
       <StatCard
         icon={TrendingUp}
         label="Collected this month"
         value={formatCentsExact(collectedThisMonthCents)}
-        sublabel="Payments received since the 1st"
+        sublabel="Received since the 1st, less refunds"
       />
     </StatStrip>
   );

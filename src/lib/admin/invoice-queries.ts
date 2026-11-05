@@ -877,9 +877,12 @@ export async function getInvoiceOrgIdentity(
 }
 
 /**
- * Total succeeded payments received this calendar month (UTC month boundary — an
- * acceptable approximation for a glance tile). neon-http returns sum() as a
- * string, hence the Number() coercion.
+ * Net cash collected this calendar month (UTC month boundary — an acceptable
+ * approximation for a glance tile): payments received this month minus
+ * refunds given this month. A payment that has since been refunded in full
+ * reads `refunded`, so it still counts as received; its refund rows subtract.
+ * Native money only (FieldPulse-mirrored payments are excluded, and so are any
+ * refunds on them). neon-http returns sum() as a string, hence the coercion.
  */
 export async function collectedThisMonthCents(
   organizationId: string,
@@ -888,21 +891,50 @@ export async function collectedThisMonthCents(
   const monthStart = new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
   );
-  const [row] = await db
-    .select({ value: sum(payments.amountCents) })
-    .from(payments)
-    .where(
-      withTenant(
-        payments,
-        organizationId,
-        eq(payments.status, "succeeded"),
-        isNull(payments.fieldpulsePaymentId),
-        gte(payments.createdAt, monthStart),
-        lt(payments.createdAt, now),
+  const [receivedRows, refundedRows] = await db.batch([
+    db
+      .select({ value: sum(payments.amountCents) })
+      .from(payments)
+      .where(
+        withTenant(
+          payments,
+          organizationId,
+          inArray(payments.status, ["succeeded", "refunded"]),
+          isNull(payments.fieldpulsePaymentId),
+          gte(payments.createdAt, monthStart),
+          lt(payments.createdAt, now),
+        ),
       ),
-    );
-  const parsed = Number(row?.value ?? 0);
-  return Number.isFinite(parsed) ? parsed : 0;
+    db
+      .select({ value: sum(refunds.amountCents) })
+      .from(refunds)
+      .innerJoin(
+        payments,
+        and(
+          eq(payments.id, refunds.paymentId),
+          eq(payments.organizationId, organizationId),
+        ),
+      )
+      .where(
+        withTenant(
+          refunds,
+          organizationId,
+          isNull(payments.fieldpulsePaymentId),
+          gte(refunds.createdAt, monthStart),
+          lt(refunds.createdAt, now),
+        ),
+      ),
+  ]);
+  return netCollectedCents(receivedRows[0]?.value, refundedRows[0]?.value);
+}
+
+/** received − refunded, each a possibly-null/string SQL sum. */
+export function netCollectedCents(received: unknown, refunded: unknown): number {
+  const toCents = (v: unknown): number => {
+    const n = Number(v ?? 0);
+    return Number.isFinite(n) ? n : 0;
+  };
+  return toCents(received) - toCents(refunded);
 }
 
 /**
