@@ -35,17 +35,33 @@ or Google id. The FieldPulse note counts only FieldPulse-synced technicians
 password-less Housecall Pro imports are not counted. `book_first_request`
 needs a booked appointment with a technician (role only, active not required);
 `tech_sign_in` is done by time entries, locations, a Google-linked technician or
-`flags.techSignedInAt`. Without `NEXT_PUBLIC_APP_URL` the step carries no
-`action`/`copyValue`; card, hero and row show the instruction only. Step copy is exact per spec §3/§4; do not reword.
+`flags.techSignedInAt`. Technicians in Staff with neither a password nor a
+Google id (`tech_passwordless`, any source) switch the open step to "Give a
+technician a way to sign in" with a count note pointing at Reset password and
+the "Set a password in Staff" primary (the FieldPulse note still wins when
+those exist) — the plain "Add a technician" made owners add duplicates.
+Without `NEXT_PUBLIC_APP_URL` the step carries no
+`action`/`copyValue`; card, hero and row show the instruction only. Step copy is exact per spec §3/§4 except the passwordless switch above, the
+phase 2 title ("Get your team in") and the dismissed note ("Hidden from the
+home page."); do not reword further.
 
 **Stamps and flags:** `organization_settings.onboarding_state` holds
 `firstSeenAt` (write-once, set by the first GET), `firstCompleted` (write-once
-per step), `dismissedAt`, `completedSeenAt` and `flags` (`embedCopied`,
+per step), `dismissedAt` (cleared only by `showOnHome`), `completedSeenAt` and `flags` (`embedCopied`,
 `techSignedInAt`). GET = the SELECT, then the stamp upsert only if there are new
 stamps or `$top` keys (`firstSeenAt` when absent, plus grandfather keys; all in
 `$topKeys`). The payload is built from the SELECT copy, never RETURNING. Old values always win (`$new || OLD`). The two
 upserts are single-statement and row-less safe; concurrent writers cannot lose
 keys. A failed stamp write is logged, not fatal.
+
+**Undo a dismissal:** PATCH `{ showOnHome: true }` (alone; mixed bodies are
+400) runs `clearDismissalSql`, removing `dismissedAt` and the legacy
+`dismissed` key — the one write that deletes a top key. /admin/setup shows a
+"Show on home page" button next to the dismissed note; it refreshes the store
+and `router.refresh()`es so the server-computed placement moves Setup back
+under Operations. Audit keys: `["showOnHome"]`. The sidebar digit no longer
+hides on `dismissedAt`: it counts required steps left until they are done
+(after `completedSeenAt` it still shows only needs-attention steps).
 
 **Grandfathering:** first GET only (no `firstSeenAt` stored yet) and only while
 no stamps exist. Required 4 of 4 sets

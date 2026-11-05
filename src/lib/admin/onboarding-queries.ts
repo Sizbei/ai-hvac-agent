@@ -9,6 +9,7 @@ import {
   type Signals,
 } from "./onboarding-state";
 import {
+  clearDismissalSql,
   flagsStatementSql,
   onboardingSelectSql,
   stampStatementSql,
@@ -31,6 +32,7 @@ function signalsFromRow(row: Row): Signals {
     logoUrl: b("logo_url"),
     technicianReady: b("technician_ready"),
     fpPasswordless: Number(row.fp_passwordless ?? 0) || 0,
+    passwordless: Number(row.tech_passwordless ?? 0) || 0,
     pendingInvite: b("pending_invite"),
     pricebook: b("pricebook"),
     anyRequest: b("any_request"),
@@ -111,6 +113,8 @@ export async function getOnboarding(
 
 export interface OnboardingPatchBody {
   dismissed?: true;
+  /** Undo `dismissed`: never sent together with it (the route rejects that). */
+  showOnHome?: true;
   completedSeen?: true;
   flags?: { embedCopied?: true };
 }
@@ -122,8 +126,12 @@ function topFor(body: OnboardingPatchBody, nowIso: string) {
   };
 }
 
-/** Old values win, as in the SQL statements. */
+/** Old values win, as in the SQL statements; `showOnHome` drops dismissedAt. */
 function applyPatch(state: StateV2, body: OnboardingPatchBody, nowIso: string): StateV2 {
+  if (body.showOnHome) {
+    const { dismissedAt: _dismissed, ...rest } = state;
+    return rest;
+  }
   return {
     ...topFor(body, nowIso),
     ...state,
@@ -142,6 +150,10 @@ export async function patchOnboarding(
   opts: { demo: boolean; now?: Date },
 ): Promise<StateV2> {
   const nowIso = (opts.now ?? new Date()).toISOString();
+  if (body.showOnHome && !opts.demo) {
+    const res = await db.execute(clearDismissalSql(organizationId));
+    return parseOnboardingState((res.rows[0] as Row | undefined)?.onboarding_state);
+  }
   if (opts.demo) {
     const res = await db.execute(
       sql`SELECT onboarding_state FROM organization_settings WHERE organization_id = ${organizationId}`,

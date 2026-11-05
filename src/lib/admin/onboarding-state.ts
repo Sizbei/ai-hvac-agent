@@ -35,6 +35,8 @@ export interface Signals {
   logoUrl: boolean;
   technicianReady: boolean;
   fpPasswordless: number;
+  /** Active technicians (any source) with neither a password nor a Google id. */
+  passwordless: number;
   pendingInvite: boolean;
   pricebook: boolean;
   anyRequest: boolean;

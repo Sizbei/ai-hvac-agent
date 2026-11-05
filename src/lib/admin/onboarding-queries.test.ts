@@ -38,6 +38,7 @@ function row(p: Record<string, unknown> = {}) {
     logo_url: false,
     technician_ready: false,
     fp_passwordless: 0,
+    tech_passwordless: 0,
     pending_invite: false,
     pricebook: false,
     any_request: false,
@@ -246,6 +247,26 @@ describe("patchOnboarding", () => {
     expect(q.params).toContain(JSON.stringify({ dismissedAt: NOW_ISO }));
     expect(q.params).toContain(JSON.stringify({ embedCopied: true }));
     expect(s).toEqual({ dismissedAt: NOW_ISO, firstCompleted: {}, flags: { embedCopied: true } });
+  });
+
+  it("showOnHome removes dismissedAt with one UPDATE and parses RETURNING", async () => {
+    queue.push({ rows: [{ onboarding_state: { firstSeenAt: NOW_ISO, flags: {} } }] });
+    const s = await patchOnboarding(ORG, { showOnHome: true }, { demo: false, now: NOW });
+    expect(executed).toHaveLength(1);
+    const q = render(executed[0]);
+    expect(q.sql.replace(/\s+/g, " ")).toBe(
+      "UPDATE organization_settings SET onboarding_state = onboarding_state - 'dismissedAt' - 'dismissed' WHERE organization_id = $1 RETURNING onboarding_state",
+    );
+    expect(q.params).toEqual([ORG]);
+    expect(s.dismissedAt).toBeUndefined();
+    expect(s.firstSeenAt).toBe(NOW_ISO);
+  });
+
+  it("demo showOnHome: drops dismissedAt in memory, no write", async () => {
+    queue.push({ rows: [{ onboarding_state: { dismissedAt: "2026-10-02T00:00:00.000Z", flags: {} } }] });
+    const s = await patchOnboarding(ORG, { showOnHome: true }, { demo: true, now: NOW });
+    expect(render(executed[0]).sql).toContain("SELECT");
+    expect(s.dismissedAt).toBeUndefined();
   });
 
   it("completedSeen only: empty flags, completedSeenAt in top", async () => {

@@ -19,6 +19,7 @@ export function onboardingSelectSql(organizationId: string): SQL {
   COALESCE((SELECT logo_url IS NOT NULL FROM organization_settings WHERE organization_id = ${o}), false) AS logo_url,
   EXISTS (SELECT 1 FROM users WHERE organization_id = ${o} AND role = 'technician' AND is_active AND (password_hash IS NOT NULL OR google_id IS NOT NULL)) AS technician_ready,
   (SELECT count(*) FROM users WHERE organization_id = ${o} AND role = 'technician' AND is_active AND password_hash IS NULL AND google_id IS NULL AND fieldpulse_user_id IS NOT NULL)::int AS fp_passwordless,
+  (SELECT count(*) FROM users WHERE organization_id = ${o} AND role = 'technician' AND is_active AND password_hash IS NULL AND google_id IS NULL)::int AS tech_passwordless,
   EXISTS (SELECT 1 FROM staff_invites WHERE organization_id = ${o} AND role = 'technician' AND revoked_at IS NULL AND accepted_at IS NULL AND expires_at > now()) AS pending_invite,
   EXISTS (SELECT 1 FROM pricebook_items WHERE organization_id = ${o} AND active) AS pricebook,
   EXISTS (SELECT 1 FROM service_requests WHERE organization_id = ${o}) AS any_request,
@@ -95,5 +96,17 @@ ON CONFLICT (organization_id) DO UPDATE SET onboarding_state = jsonb_set(
   ${top}::jsonb || ${OLD}, '{flags}',
   ${flags}::jsonb || CASE WHEN jsonb_typeof((${OLD})->'flags') = 'object' THEN (${OLD})->'flags' ELSE '{}'::jsonb END, true)
 ${guard}
+RETURNING onboarding_state`;
+}
+
+/**
+ * "Show setup guide on home page": removes `dismissedAt` (and the legacy
+ * `dismissed: true`, which the parser folds into dismissedAt) so the home card and
+ * the Operations placement come back. The only write that removes a top key;
+ * a later dismiss sets it again (absent key → new value wins).
+ */
+export function clearDismissalSql(organizationId: string): SQL {
+  return sql`UPDATE organization_settings SET onboarding_state = onboarding_state - 'dismissedAt' - 'dismissed'
+WHERE organization_id = ${organizationId}
 RETURNING onboarding_state`;
 }

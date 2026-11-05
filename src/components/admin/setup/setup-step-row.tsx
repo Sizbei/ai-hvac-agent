@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { ContextBadge } from '@/components/admin/ui/context-badge';
 import { StepGlyph } from '@/components/admin/ui/step-glyph';
 import { CopySignInLink } from '@/components/admin/setup/copy-sign-in-link';
 import { rowActionsFor, type StepRow } from '@/lib/admin/setup-view';
@@ -83,7 +82,6 @@ export function SetupStepRow({ row, justDone = false, heroId }: SetupStepRowProp
             <p className={cn('text-[14px] font-medium leading-5', step.done ? 'text-muted-foreground' : 'text-foreground')}>
               {step.title}
             </p>
-            {!step.required && <ContextBadge variant="neutral" label="Optional" />}
           </div>
           <p className="text-[13px] leading-5 text-muted-foreground">{step.why}</p>
           {step.note && (

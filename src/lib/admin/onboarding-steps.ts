@@ -77,6 +77,12 @@ const SIGN_IN_INSTRUCTION =
 const SIGN_IN_GOOGLE_CLAUSE =
   " Use the password, not Google, if this email also signs in to the office.";
 const FP_PRIMARY = { href: "/admin/staff?from=setup", hrefLabel: "Set a password in Staff" };
+/**
+ * add_technician while technicians exist but none can sign in: the generic
+ * "Add a technician" made owners add duplicates instead of setting a password.
+ */
+const PASSWORDLESS_TITLE = "Give a technician a way to sign in";
+const PASSWORDLESS_WHY = "Requests need a technician who can sign in on a phone and run them.";
 const FOURTEEN_DAYS_MS = 14 * 24 * 60 * 60 * 1000;
 
 function rule(id: StepId, s: Signals, demo: boolean): boolean {
@@ -108,12 +114,21 @@ function fieldPulseNote(count: number, googleEnabled: boolean): string {
   return `${who} from FieldPulse can't sign in yet. ${fix}`;
 }
 
+function passwordlessNote(count: number, googleEnabled: boolean): string {
+  const who = count === 1 ? "1 technician is" : `${count} technicians are`;
+  const fix = googleEnabled
+    ? "Use Reset password in Staff to set one, or have them sign in with Google."
+    : "Use Reset password in Staff to set one.";
+  return `${who} in Staff but can't sign in yet: no password. ${fix}`;
+}
+
 function noteFor(id: StepId, s: Signals, googleEnabled: boolean): string | undefined {
   if (id === "phone_hours" && s.phone !== s.businessHours) {
     return "Add both a phone number and hours.";
   }
   if (id === "add_technician") {
     if (s.fpPasswordless > 0) return fieldPulseNote(s.fpPasswordless, googleEnabled);
+    if (s.passwordless > 0) return passwordlessNote(s.passwordless, googleEnabled);
     if (s.pendingInvite) return "Waiting for an invite to be accepted.";
   }
   if (id === "book_first_request" && s.anyRequest && !s.bookedAssigned) {
@@ -129,11 +144,12 @@ function toDerivedStep(
   flags: { done: boolean; needsAttention: boolean },
 ): DerivedStep {
   const { live: _live, secondaryHref, secondaryLabel, ...base } = def;
-  const fpSwitch = def.id === "add_technician" && s.fpPasswordless > 0 && !flags.done;
+  const fpSwitch =
+    def.id === "add_technician" && (s.fpPasswordless > 0 || s.passwordless > 0) && !flags.done;
   const note = noteFor(def.id, s, opts.googleEnabled);
   return {
     ...base,
-    ...(fpSwitch ? FP_PRIMARY : {}),
+    ...(fpSwitch ? { ...FP_PRIMARY, title: PASSWORDLESS_TITLE, why: PASSWORDLESS_WHY } : {}),
     ...(secondaryHref && !fpSwitch ? { secondaryHref, secondaryLabel } : {}),
     ...flags,
     ...(note ? { note } : {}),

@@ -44,7 +44,7 @@ export interface PhaseGroup {
 
 export const PHASE_TITLES: Record<1 | 2 | 3, string> = {
   1: "Set up your company",
-  2: "Get your team and prices in",
+  2: "Get your team in",
   3: "Run your first request",
 };
 
@@ -99,7 +99,7 @@ export function showFinished(payload: OnboardingPayload): boolean {
 const SUBTITLE_ACTIVE =
   "Finish these to run your first request. Steps complete on their own · about 10 min, plus your technician's sign-in";
 const SUBTITLE_SETTLED = "Steps complete on their own.";
-const DISMISSED_NOTE = "Hidden from the home page. Steps still complete on their own.";
+const DISMISSED_NOTE = "Hidden from the home page.";
 
 export function subtitleFor(payload: OnboardingPayload): string {
   return payload.dismissedAt != null || payload.completedSeenAt != null

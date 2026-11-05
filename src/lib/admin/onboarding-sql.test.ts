@@ -30,7 +30,7 @@ describe("onboardingSelectSql", () => {
   it("selects one column per signal", () => {
     for (const col of [
       "company_name", "phone", "business_hours", "logo_url", "technician_ready",
-      "fp_passwordless", "pending_invite", "pricebook", "any_request",
+      "fp_passwordless", "tech_passwordless", "pending_invite", "pricebook", "any_request",
       "booked_assigned", "tech_signed_in_evidence", "widget_key", "allowed_origins",
       "integration_connected", "completed_request", "org_created_at", "onboarding_state",
     ]) {
@@ -46,10 +46,10 @@ describe("onboardingSelectSql", () => {
       if (!/\bFROM\b/.test(f)) continue;
       expect(f).toMatch(/(organization_id|\bid) = \$\d+/);
     }
-    // exactly 25 org predicates in the builder, each bound to the org id
-    expect(params).toHaveLength(25);
+    // exactly 26 org predicates in the builder, each bound to the org id
+    expect(params).toHaveLength(26);
     expect(params.every((p) => p === ORG)).toBe(true);
-    expect((flat.match(/\$\d+/g) ?? []).length).toBe(25);
+    expect((flat.match(/\$\d+/g) ?? []).length).toBe(26);
   });
 
   it("booked_assigned carries all five org predicates", () => {

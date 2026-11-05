@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ErrorState } from '@/components/admin/ui/error-state';
@@ -82,6 +84,50 @@ function SetupContent({ data, flipped }: { data: OnboardingPayload; flipped: Rea
   );
 }
 
+/**
+ * Undo "Hide the setup guide from the home page": brings back the home card,
+ * and (via router.refresh, the placement is computed in the server layout)
+ * the Setup item's place under Operations.
+ */
+function ShowOnHomeButton() {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  async function show(): Promise<void> {
+    setBusy(true);
+    setFailed(false);
+    try {
+      const res = await adminFetch('/api/admin/onboarding', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ showOnHome: true }),
+      });
+      if (!res.ok) throw new Error('onboarding PATCH failed');
+      await refreshOnboarding({ force: true });
+      router.refresh();
+    } catch (err) {
+      if (err instanceof AdminAuthRedirectError) return;
+      setFailed(true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <span className="inline-flex items-center gap-2">
+      <Button variant="outline" size="sm" disabled={busy} onClick={() => void show()}>
+        {busy ? 'Showing…' : 'Show on home page'}
+      </Button>
+      {failed && (
+        <span role="alert" className="text-[13px] text-destructive">
+          Couldn&apos;t show the guide. Please try again.
+        </span>
+      )}
+    </span>
+  );
+}
+
 /** `/admin/setup` (spec §8): hero, three phases, optional steps; all derived server-side. */
 export function SetupPageClient() {
   const { data, error } = useOnboarding();
@@ -135,7 +181,12 @@ export function SetupPageClient() {
     <PageShell narrow>
       <div>
         <PageHeader title={TITLE} subtitle={subtitleFor(data)} />
-        {note && <p className="mt-1 text-[13px] leading-5 text-muted-foreground">{note}</p>}
+        {note && (
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
+            <p className="text-[13px] leading-5 text-muted-foreground">{note}</p>
+            <ShowOnHomeButton />
+          </div>
+        )}
         <div className="mt-3 flex items-center gap-3">
           <ProgressBar
             value={requiredDone}

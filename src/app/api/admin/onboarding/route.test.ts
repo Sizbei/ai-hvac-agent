@@ -129,6 +129,9 @@ describe("PATCH /api/admin/onboarding", () => {
     ["extra top-level key", { dismissed: true, foo: 1 }],
     ["empty flags", { flags: {} }],
     ["embedCopied false", { flags: { embedCopied: false } }],
+    ["showOnHome false", { showOnHome: false }],
+    ["showOnHome with dismissed", { showOnHome: true, dismissed: true }],
+    ["showOnHome with a flag", { showOnHome: true, flags: { embedCopied: true } }],
   ])("400 VALIDATION_ERROR on %s", async (_n, body) => {
     getAdminSession.mockResolvedValue(SESSION);
     const res = await PATCH(patchReq(body));
@@ -183,6 +186,14 @@ describe("PATCH /api/admin/onboarding", () => {
       entityId: ORG,
       details: JSON.stringify({ keys: ["dismissed"] }),
     });
+  });
+
+  it("200 for showOnHome, audits the key name only", async () => {
+    getAdminSession.mockResolvedValue(SESSION);
+    const res = await PATCH(patchReq({ showOnHome: true }));
+    expect(res.status).toBe(200);
+    expect(patchOnboarding).toHaveBeenCalledWith(ORG, { showOnHome: true }, { demo: false });
+    expect(logAudit.mock.calls[0][0].details).toBe(JSON.stringify({ keys: ["showOnHome"] }));
   });
 
   it("audits flags.embedCopied", async () => {

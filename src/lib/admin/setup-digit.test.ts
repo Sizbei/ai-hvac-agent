@@ -52,10 +52,14 @@ describe("setupDigit", () => {
     expect(setupDigit({ data })).toEqual(HIDDEN);
   });
 
-  it("is never shown after dismissedAt, even with steps left or needing attention", () => {
-    expect(setupDigit({ data: payload({ dismissedAt: ISO }) })).toEqual(HIDDEN);
+  it("keeps counting required steps after dismissedAt (hiding the home card is not hiding the work)", () => {
+    expect(setupDigit({ data: payload({ dismissedAt: ISO }) })).toEqual({
+      visible: true,
+      label: "4",
+      srLabel: "4 setup steps left",
+    });
     expect(
-      setupDigit({ data: payload({ dismissedAt: ISO, completedSeenAt: ISO, attention: ["add_technician"] }) }),
+      setupDigit({ data: payload({ dismissedAt: ISO, done: ["phone_hours", "add_technician", "book_first_request", "tech_sign_in"] }) }),
     ).toEqual(HIDDEN);
   });
 

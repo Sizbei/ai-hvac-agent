@@ -1,8 +1,9 @@
 /**
  * Sidebar digit on the Setup nav item (spec §2): the required steps not done.
- * Pure so it unit-tests without React. Hidden until loaded, when 0, and always
- * after `dismissedAt`; after `completedSeenAt` it shows only the steps that
- * need attention.
+ * Pure so it unit-tests without React. Hidden until loaded and when 0; after
+ * `completedSeenAt` it shows only the steps that need attention. Dismissing the
+ * home card does NOT hide it: an owner who hid the card with required steps
+ * still open is exactly the one who needs the nudge.
  */
 import type { OnboardingPayload } from "./onboarding-steps";
 
@@ -15,7 +16,7 @@ export interface SetupDigit {
 const HIDDEN: SetupDigit = { visible: false, label: "", srLabel: "" };
 
 export function setupDigit({ data }: { data: OnboardingPayload | null }): SetupDigit {
-  if (!data || data.dismissedAt) return HIDDEN;
+  if (!data) return HIDDEN;
   if (data.completedSeenAt) {
     const n = data.steps.filter((s) => s.needsAttention).length;
     if (n === 0) return HIDDEN;

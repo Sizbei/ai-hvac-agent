@@ -23,6 +23,7 @@ function signals(p: Partial<Signals> = {}): Signals {
     logoUrl: false,
     technicianReady: false,
     fpPasswordless: 0,
+    passwordless: 0,
     pendingInvite: false,
     pricebook: false,
     anyRequest: false,
@@ -176,6 +177,33 @@ describe("deriveSteps — notes", () => {
     expect(n({ anyRequest: true })).toBe("Pick a time and a technician in the request.");
     expect(n({ anyRequest: true, bookedAssigned: true })).toBeUndefined();
     expect(n({})).toBeUndefined();
+  });
+});
+
+describe("deriveSteps — technicians without a password", () => {
+  it("explains them instead of saying Add a technician, and points at Staff", () => {
+    const s = step(deriveSteps(signals({ passwordless: 2 }), OPTS).steps, "add_technician");
+    expect(s.done).toBe(false);
+    expect(s.title).toBe("Give a technician a way to sign in");
+    expect(s.note).toBe("2 technicians are in Staff but can't sign in yet: no password. Use Reset password in Staff to set one.");
+    expect(s.href).toBe("/admin/staff?from=setup");
+    expect(s.hrefLabel).toBe("Set a password in Staff");
+  });
+
+  it("singular, with Google", () => {
+    const s = step(deriveSteps(signals({ passwordless: 1 }), { ...OPTS, googleEnabled: true }).steps, "add_technician");
+    expect(s.note).toBe("1 technician is in Staff but can't sign in yet: no password. Use Reset password in Staff to set one, or have them sign in with Google.");
+  });
+
+  it("keeps the normal title and link once a technician can sign in", () => {
+    const s = step(deriveSteps(signals({ passwordless: 1, technicianReady: true }), OPTS).steps, "add_technician");
+    expect(s.title).toBe("Add a technician");
+    expect(s.hrefLabel).toBe("Add technician");
+  });
+
+  it("with no technicians at all, stays Add a technician", () => {
+    const s = step(deriveSteps(signals({}), OPTS).steps, "add_technician");
+    expect(s.title).toBe("Add a technician");
   });
 });
 

@@ -45,6 +45,7 @@ export async function GET() {
 const patchSchema = z
   .strictObject({
     dismissed: z.literal(true).optional(),
+    showOnHome: z.literal(true).optional(),
     completedSeen: z.literal(true).optional(),
     flags: z
       .strictObject({ embedCopied: z.literal(true).optional() })
@@ -53,9 +54,17 @@ const patchSchema = z
   .refine(
     (v) =>
       v.dismissed === true ||
+      v.showOnHome === true ||
       v.completedSeen === true ||
       v.flags?.embedCopied === true,
     { message: "At least one field must be true" },
+  )
+  // showOnHome undoes a dismissal: alone, never mixed with other writes.
+  .refine(
+    (v) =>
+      v.showOnHome !== true ||
+      (v.dismissed === undefined && v.completedSeen === undefined && v.flags === undefined),
+    { message: "showOnHome must be sent alone" },
   );
 
 /** PATCH — persist the non-derivable setup guide signals. */
@@ -92,6 +101,7 @@ export async function PATCH(request: NextRequest) {
     if (!demo) {
       const keys = [
         ...(body.dismissed ? ["dismissed"] : []),
+        ...(body.showOnHome ? ["showOnHome"] : []),
         ...(body.completedSeen ? ["completedSeen"] : []),
         ...(body.flags?.embedCopied ? ["flags.embedCopied"] : []),
       ];

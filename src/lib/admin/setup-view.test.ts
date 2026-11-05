@@ -71,7 +71,7 @@ describe("phasesOf", () => {
     expect(phases.map((p) => p.phase)).toEqual([1, 2, 3]);
     expect(phases.map((p) => p.title)).toEqual([
       "Set up your company",
-      "Get your team and prices in",
+      "Get your team in",
       "Run your first request",
     ]);
     expect(phases.map((p) => p.rows.map((r) => r.step.id))).toEqual([
@@ -179,7 +179,8 @@ describe("subtitleFor / dismissedNote", () => {
   it("shortens the subtitle and adds the note when dismissed", () => {
     const p = payload([], { dismissedAt: NOW });
     expect(subtitleFor(p)).toBe("Steps complete on their own.");
-    expect(dismissedNote(p)).toBe("Hidden from the home page. Steps still complete on their own.");
+    // The subtitle already says steps complete on their own; the note does not repeat it.
+    expect(dismissedNote(p)).toBe("Hidden from the home page.");
   });
 
   it("shortens the subtitle without the note when finished", () => {
