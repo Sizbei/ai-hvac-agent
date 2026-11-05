@@ -27,6 +27,7 @@ import { useWidgetKeys } from '@/hooks/use-widget-keys';
 import { adminFetch } from '@/lib/admin/admin-fetch';
 import { invalidateOnboarding } from '@/lib/admin/onboarding-store';
 import type { OrgConfig, OrgConfigUpdate } from '@/lib/admin/org-config-types';
+import { buildEmbedSnippet } from '@/lib/admin/embed-snippet';
 
 interface EmbedPanelProps {
   readonly config: OrgConfig;
@@ -78,11 +79,9 @@ export function EmbedPanel({ config, onSave }: EmbedPanelProps) {
   const [savingOrigins, setSavingOrigins] = useState(false);
   const [originsSaved, setOriginsSaved] = useState(false);
 
-  const publishable = keys.find((k) => k.keyType === 'publishable' && k.isActive);
-  const snippetKey = publishable?.keyPrefix
-    ? `${publishable.keyPrefix}…`
-    : 'pk_live_…';
-  const snippet = `<script src="https://ai-hvac-agent-lovat.vercel.app/widget.js"\n        data-hvac-key="${snippetKey}" async></script>`;
+  const hasPublishable = keys.some((k) => k.keyType === 'publishable' && k.isActive);
+  // Only a just-created key is known in full (keys are stored hashed).
+  const snippet = buildEmbedSnippet(revealedType === 'publishable' ? revealed : null);
 
   async function handleCreate(type: 'publishable' | 'secret'): Promise<void> {
     setCreating(true);
@@ -153,20 +152,33 @@ export function EmbedPanel({ config, onSave }: EmbedPanelProps) {
         <CardHeader>
           <CardTitle>Add the widget to your site</CardTitle>
           <CardDescription>
-            Paste this snippet just before the closing{' '}
-            <code className="rounded bg-muted px-1">&lt;/body&gt;</code> tag.
-            Replace the key with a publishable key below.
+            <span>
+              Paste this snippet just before the closing{' '}
+              <code className="rounded bg-muted px-1">&lt;/body&gt;</code> tag.
+            </span>
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="relative">
             <pre className="overflow-x-auto rounded-lg bg-muted p-4 text-xs leading-relaxed">
-              <code>{snippet}</code>
+              <code>{snippet.text}</code>
             </pre>
-            <div className="absolute right-2 top-2">
-              <CopyButton value={snippet} />
-            </div>
+            {snippet.copyable && (
+              <div className="absolute right-2 top-2">
+                <CopyButton
+                  value={snippet.text}
+                  onCopied={() => void handleRevealedCopied()}
+                />
+              </div>
+            )}
           </div>
+          {!snippet.copyable && (
+            <p className="mt-3 text-sm text-muted-foreground">
+              {hasPublishable
+                ? 'For security, a key is shown in full only once, when it is created. Paste your saved publishable key in place of YOUR_PUBLISHABLE_KEY, or create a new publishable key below and the snippet will fill in.'
+                : 'Create a publishable key below and the snippet will fill in with it.'}
+            </p>
+          )}
         </CardContent>
       </Card>
 
@@ -175,8 +187,11 @@ export function EmbedPanel({ config, onSave }: EmbedPanelProps) {
         <CardHeader>
           <CardTitle>API keys</CardTitle>
           <CardDescription>
-            Use a <strong>publishable</strong> key in the snippet (it&apos;s safe
-            to expose). Keep <strong>secret</strong> keys server-side only.
+            <span>
+              Use a <strong>publishable</strong>{' '}
+              {"key in the snippet (it's safe to expose). Keep"}{' '}
+              <strong>secret</strong> keys on your server only.
+            </span>
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -221,7 +236,7 @@ export function EmbedPanel({ config, onSave }: EmbedPanelProps) {
               ) : (
                 <Plus className="size-4" />
               )}
-              Publishable
+              Publishable key
             </Button>
             <Button
               variant="outline"
@@ -229,7 +244,7 @@ export function EmbedPanel({ config, onSave }: EmbedPanelProps) {
               onClick={() => handleCreate('secret')}
             >
               <Plus className="size-4" />
-              Secret
+              Secret key
             </Button>
           </div>
 
@@ -252,9 +267,9 @@ export function EmbedPanel({ config, onSave }: EmbedPanelProps) {
                           k.keyType === 'secret' ? 'destructive' : 'secondary'
                         }
                       >
-                        {k.keyType}
+                        {k.keyType === 'secret' ? 'Secret' : 'Publishable'}
                       </Badge>
-                      {!k.isActive && <Badge variant="outline">revoked</Badge>}
+                      {!k.isActive && <Badge variant="outline">Revoked</Badge>}
                     </div>
                     {k.label && (
                       <p className="truncate text-xs text-muted-foreground">
