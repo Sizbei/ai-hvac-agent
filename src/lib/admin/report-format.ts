@@ -49,3 +49,8 @@ export function locationDisplayLabel(loc: {
   if (loc.address?.trim() === ERASED_PLACEHOLDER) return "Erased address";
   return firstAddressLine(loc.address) ?? "Address not on file";
 }
+
+/** A 0–1 ratio as a whole percentage, or "—" when nothing is behind it. */
+export function formatRatio(ratio: number, denominator: number): string {
+  return denominator > 0 ? `${Math.round(ratio * 100)}%` : "—";
+}

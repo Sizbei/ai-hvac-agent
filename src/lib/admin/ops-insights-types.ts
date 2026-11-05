@@ -21,7 +21,7 @@ export interface TechnicianLoad {
   readonly technicianId: string | null;
   readonly technicianName: string | null;
   readonly total: number;
-  /** Currently open (pending/assigned/in_progress) — the actionable backlog. */
+  /** Currently open (OPEN_STATUSES) — the actionable backlog. */
   readonly active: number;
   readonly completed: number;
 }
@@ -48,8 +48,10 @@ export interface CostStats {
 
 export interface OpsInsights {
   readonly totalRequests: number;
-  /** Open = not completed and not cancelled. */
+  /** Open = status in OPEN_STATUSES, every source (see open-requests.ts). */
   readonly openRequests: number;
+  /** Of openRequests, those imported from FieldPulse / Housecall Pro. */
+  readonly openImported: number;
   readonly completedRequests: number;
   readonly cancelledRequests: number;
   /** Requests created in the last 7 days. */

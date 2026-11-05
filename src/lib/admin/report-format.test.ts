@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatRate, visibleLeadSources, firstAddressLine, locationDisplayLabel } from "./report-format";
+import { formatRatio, formatRate, visibleLeadSources, firstAddressLine, locationDisplayLabel } from "./report-format";
 
 describe("formatRate", () => {
   it("renders a dash when nothing was decided", () => {
@@ -47,5 +47,13 @@ describe("locationDisplayLabel", () => {
   });
   it("never falls back to the bare word Location", () => {
     expect(locationDisplayLabel({ label: null, zone: null, address: null })).toBe("Address not on file");
+  });
+});
+
+describe("formatRatio", () => {
+  it("dashes an empty denominator and rounds otherwise", () => {
+    expect(formatRatio(0, 0)).toBe("—");
+    expect(formatRatio(0.456, 10)).toBe("46%");
+    expect(formatRatio(0, 10)).toBe("0%");
   });
 });

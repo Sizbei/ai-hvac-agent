@@ -30,6 +30,18 @@ overdueInvoices) via `db.batch()` — ONE HTTP round-trip, not `Promise.all`
 so `getDashboardStats` and `getDashboardOverview` share the exact same SQL
 without either awaiting inside the batch array).
 
+**Open requests (one definition, shared with insights and requests):** open =
+status in `OPEN_STATUSES` (pending, scheduled, assigned, en_route, arrived,
+in_progress, on_hold), every source. The five tiles Pending / Scheduled /
+Assigned / In progress (en_route + arrived + in_progress) / On hold count
+NATIVE requests and partition open exactly; each carries "+N imported" for
+FieldPulse/HCP jobs in the same bucket. The caption above the tiles states the
+total (`openRequestCaption`, `src/lib/admin/open-requests.ts`), and it equals
+"Open requests" on /admin/insights. Before 2026-11-05 the dashboard had no
+"Assigned" tile (only "Assigned today") and insights left out scheduled and
+on_hold, so the two pages disagreed (19 vs 110 on the dev default org).
+`assignedToday` stays in the API but has no tile.
+
 **Invariants:**
 - Poll is equality-guarded: if the JSON payload hasn't changed since the last
   tick, `setOverview` is skipped entirely — prevents re-rendering the whole
@@ -62,6 +74,10 @@ without either awaiting inside the batch array).
   full list.
 - `DashboardListCard` receives `meta="arrivalWindow"` or `meta="followUp"`;
   adding a new meta type requires updating the component, not just the page.
+
+- Tiles Pending, Scheduled, Assigned and On hold link to
+  `/admin/requests?status=…`; In progress and Open emergencies span several
+  statuses and are not links. On phones the strips are two columns.
 
 **Verify changes:** `npx vitest run src/lib/admin/queries.test.ts` (covers
 getDashboardStats and related helpers). Visual via the admin-pages skill recipe.

@@ -20,6 +20,7 @@ import type {
   IntentDistributionRow,
   OutcomeDistributionRow,
 } from '@/lib/admin/bot-analytics-queries';
+import { formatRatio } from '@/lib/admin/report-format';
 
 const OUTCOME_LABELS: Record<string, string> = {
   booked: 'Booked',
@@ -30,10 +31,6 @@ const OUTCOME_LABELS: Record<string, string> = {
   unclassified: 'Unclassified',
 };
 
-/** A ratio (0-1) as a whole-number percentage string. */
-function pct(ratio: number): string {
-  return `${Math.round(ratio * 100)}%`;
-}
 
 /** Humanize a router intent id ("emergency-gas-smell" -> "emergency gas smell"). */
 function humanizeIntent(intentId: string): string {
@@ -86,6 +83,13 @@ export function BotAnalyticsSection() {
   const outcomeRows = (data?.outcomeDistribution ?? []).map(
     (r: OutcomeDistributionRow) => ({ key: r.outcome, count: r.count }),
   );
+  // Turn ratios divide by turns; the abandon rate by sessions with an outcome.
+  // With nothing behind them they render "—", never "0%".
+  const turns = data?.totalTurns ?? 0;
+  const classified = outcomeRows
+    .filter((r) => r.key !== 'unclassified')
+    .reduce((sum, r) => sum + r.count, 0);
+  const sessions = outcomeRows.reduce((sum, r) => sum + r.count, 0);
 
   return (
     <section aria-labelledby="bot-analytics-heading" className="space-y-4">
@@ -94,10 +98,16 @@ export function BotAnalyticsSection() {
         title="Bot analytics"
         right={
           <span className="text-xs text-muted-foreground">
-            {data ? `${data.totalTurns} turns · last 30 days` : 'Last 30 days'}
+            {data
+              ? `${data.totalTurns} turns · ${sessions} conversations · last 30 days`
+              : 'Last 30 days'}
           </span>
         }
       />
+      <p className="text-xs text-muted-foreground">
+        Everything in this section covers the last 30 days. The AI assistant
+        totals above are all-time, so the two can differ.
+      </p>
 
       {error && (
         <Alert variant="destructive">
@@ -119,7 +129,7 @@ export function BotAnalyticsSection() {
         <StatCard
           icon={Cpu}
           label="Instant reply ratio"
-          value={data ? pct(data.deterministicRatio) : '0%'}
+          value={data ? formatRatio(data.deterministicRatio, turns) : '—'}
           intent="info"
           size="sm"
           loading={isLoading}
@@ -127,7 +137,7 @@ export function BotAnalyticsSection() {
         <StatCard
           icon={AlertTriangle}
           label="Escalation rate"
-          value={data ? pct(data.escalationRate) : '0%'}
+          value={data ? formatRatio(data.escalationRate, turns) : '—'}
           intent="warning"
           size="sm"
           loading={isLoading}
@@ -135,7 +145,7 @@ export function BotAnalyticsSection() {
         <StatCard
           icon={ClipboardCheck}
           label="Extraction completion"
-          value={data ? pct(data.extractionCompletionRate) : '0%'}
+          value={data ? formatRatio(data.extractionCompletionRate, turns) : '—'}
           intent="success"
           size="sm"
           loading={isLoading}
@@ -151,7 +161,7 @@ export function BotAnalyticsSection() {
         <StatCard
           icon={Lightbulb}
           label="Knowledge answers"
-          value={data ? pct(data.knowledgeAnswerRate) : '0%'}
+          value={data ? formatRatio(data.knowledgeAnswerRate, turns) : '—'}
           intent="primary"
           size="sm"
           loading={isLoading}
@@ -171,9 +181,9 @@ export function BotAnalyticsSection() {
         <Card className="border-t-2 border-t-signal p-4">
           <div className="mb-3 flex items-center justify-between">
             <p className="text-sm font-medium">Conversation outcomes</p>
-            {data && (
+            {data && classified > 0 && (
               <span className="text-xs text-muted-foreground">
-                {pct(data.abandonRate)} abandoned
+                {formatRatio(data.abandonRate, classified)} of classified abandoned
               </span>
             )}
           </div>

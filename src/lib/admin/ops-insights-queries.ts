@@ -8,10 +8,11 @@
  * NOTE: the neon-http driver returns SQL aggregates (count) as strings, so each
  * aggregate value is coerced with Number() before use.
  */
-import { eq, and, sql, count, gte } from "drizzle-orm";
+import { eq, and, sql, count, gte, inArray, or, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { serviceRequests, serviceHistory, users } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
+import { OPEN_STATUSES } from "./request-status";
 import type {
   OpsInsights,
   CategoryCount,
@@ -25,8 +26,6 @@ function toNumber(value: number | string | null | undefined): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-/** Statuses that count as "open" (actionable backlog). */
-const OPEN_STATUSES = ["pending", "assigned", "en_route", "arrived", "in_progress"] as const;
 
 export async function getOpsInsights(
   organizationId: string,
@@ -34,7 +33,7 @@ export async function getOpsInsights(
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
   // Grouped breakdowns and the per-tech load run independently; send them as a
-  // single db.batch to reduce 7 HTTP round-trips to 1. Each is org-scoped via withTenant.
+  // single db.batch to reduce 8 HTTP round-trips to 1. Each is org-scoped via withTenant.
   const [
     issueRows,
     urgencyRows,
@@ -43,6 +42,7 @@ export async function getOpsInsights(
     techRows,
     hourRows,
     costRow,
+    openImportedRow,
   ] = await db.batch([
     db
       .select({ key: serviceRequests.issueType, value: count() })
@@ -80,7 +80,10 @@ export async function getOpsInsights(
         technicianId: serviceRequests.assignedTo,
         technicianName: users.name,
         total: count(),
-        active: sql<number | string>`count(*) filter (where ${serviceRequests.status} in ('pending','assigned','en_route','arrived','in_progress'))`,
+        active: sql<number | string>`count(*) filter (where ${serviceRequests.status} in (${sql.join(
+          OPEN_STATUSES.map((st) => sql`${st}`),
+          sql`, `,
+        )}))`,
         completed: sql<number | string>`count(*) filter (where ${serviceRequests.status} = 'completed')`,
       })
       .from(serviceRequests)
@@ -122,6 +125,20 @@ export async function getOpsInsights(
       })
       .from(serviceHistory)
       .where(withTenant(serviceHistory, organizationId)),
+
+    // Open requests that came from FieldPulse / Housecall Pro — the part of
+    // openRequests the dashboard shows as "+N imported" (open-requests.ts).
+    db
+      .select({ value: count() })
+      .from(serviceRequests)
+      .where(
+        withTenant(
+          serviceRequests,
+          organizationId,
+          inArray(serviceRequests.status, [...OPEN_STATUSES]),
+          or(isNotNull(serviceRequests.fieldpulseJobId), isNotNull(serviceRequests.hcpJobId))!,
+        ),
+      ),
   ] as const);
 
   const byIssueType: CategoryCount[] = issueRows
@@ -189,5 +206,6 @@ export async function getOpsInsights(
     technicianLoad,
     requestsByHour,
     costStats,
+    openImported: toNumber(openImportedRow[0]?.value),
   };
 }

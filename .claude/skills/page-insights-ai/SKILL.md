@@ -51,6 +51,18 @@ in-memory state.
   (session expired → redirect handled by `adminFetch` itself); do not surface it
   as an error message.
 
+- "Open requests" uses the shared `OPEN_STATUSES` (every source) — the same
+  definition as the dashboard tiles (see page-dashboard "Open requests");
+  `openImported` is the FieldPulse/HCP share shown in its sublabel. Technician
+  load "Active" uses the same list. Never re-declare a local open list.
+- Issue-type chart: `groupIssueTypes` (`src/lib/admin/issue-type-label.ts`)
+  keeps the top 8 known issue types and folds smaller ones plus imported
+  free-text job titles into "Other", with a caption counting the imports.
+  Labels come from `ISSUE_TYPE_LABELS`; unknown codes are humanized, never raw.
+- Bot analytics is last-30-days only; its ratios render "—" when there are no
+  turns (`formatRatio`), and the abandon note shows only when some session
+  was classified.
+
 **Gotchas:**
 - `isFetchingRef` is a ref (not state) so toggling it doesn't trigger a
   re-render — intentional; the loading spinner is driven by `isLoading` state.

@@ -171,6 +171,14 @@ export interface DashboardStats {
    * 0 when no imported jobs are pending.
    */
   readonly importedPending: number;
+  /** Native requests in status "assigned" (any day). */
+  readonly assigned: number;
+  /** Imported (FP/HCP) counts per open bucket, for the "+N imported" suffixes. */
+  readonly importedScheduled: number;
+  readonly importedAssigned: number;
+  /** en_route + arrived + in_progress, like `inProgress`. */
+  readonly importedInProgress: number;
+  readonly importedOnHold: number;
 }
 
 /** A single request as it appears in a dashboard list (today's schedule,

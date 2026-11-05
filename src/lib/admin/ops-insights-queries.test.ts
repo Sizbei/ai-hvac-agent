@@ -31,9 +31,12 @@ vi.mock('@/lib/db/tenant', () => ({
 vi.mock('drizzle-orm', () => ({
   eq: (...a: unknown[]) => a,
   and: (...a: unknown[]) => a,
-  sql: (...a: unknown[]) => a,
+  sql: Object.assign((...a: unknown[]) => a, { join: (...a: unknown[]) => a }),
   count: () => 'count',
   gte: (...a: unknown[]) => a,
+  inArray: (...a: unknown[]) => a,
+  or: (...a: unknown[]) => a,
+  isNotNull: (...a: unknown[]) => a,
 }));
 
 vi.mock('@/lib/db/schema', () => ({
@@ -47,6 +50,8 @@ vi.mock('@/lib/db/schema', () => ({
   },
   users: { id: 'u.id', name: 'u.name', organizationId: 'u.org' },
   serviceHistory: { cost: 'sh.cost', organizationId: 'sh.org' },
+  requestStatusEnum: { enumValues: [] },
+  holdReasonEnum: { enumValues: [] },
 }));
 
 import { getOpsInsights } from './ops-insights-queries';
@@ -69,6 +74,7 @@ function seed(opts: {
   }[];
   hour?: { hour: number | string; value: number | string }[];
   cost?: { count: number | string; total: number | string; average: number | string };
+  openImported?: number | string;
 }): void {
   selectQueue.push(opts.issue);
   selectQueue.push(opts.urgency);
@@ -77,6 +83,7 @@ function seed(opts: {
   selectQueue.push(opts.tech);
   selectQueue.push(opts.hour ?? []);
   selectQueue.push([opts.cost ?? { count: 0, total: 0, average: 0 }]);
+  selectQueue.push([{ value: opts.openImported ?? 0 }]);
 }
 
 beforeEach(() => {
@@ -151,6 +158,29 @@ describe('getOpsInsights', () => {
     });
     const r = await getOpsInsights(ORG);
     expect(r.costStats.averageCents).toBe(0);
+  });
+
+  it('counts scheduled and on hold as open (the shared OPEN_STATUSES) and passes the imported share through', async () => {
+    seed({
+      issue: [],
+      urgency: [],
+      status: [
+        { key: 'pending', value: '69' },
+        { key: 'scheduled', value: '7' },
+        { key: 'assigned', value: '24' },
+        { key: 'in_progress', value: '17' },
+        { key: 'on_hold', value: '2' },
+        { key: 'completed', value: '125' },
+      ],
+      last7: 0,
+      tech: [],
+      openImported: '84',
+    });
+    const r = await getOpsInsights(ORG);
+    expect(r.openRequests).toBe(119);
+    expect(r.openImported).toBe(84);
+    // open + completed + cancelled now equals the total.
+    expect(r.openRequests + r.completedRequests + r.cancelledRequests).toBe(r.totalRequests);
   });
 
   it('derives totals from the status breakdown and coerces string aggregates', async () => {

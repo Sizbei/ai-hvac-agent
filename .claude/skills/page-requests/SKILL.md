@@ -29,6 +29,10 @@ tables `serviceRequests`, `users`
 session predicate `src/lib/admin/stand-in-session.ts` · availability
 API `src/app/api/admin/requests/availability/route.ts`.
 
+**Open requests:** the status filter covers every source; "open" everywhere
+means `OPEN_STATUSES` (see page-dashboard "Open requests" for how the
+dashboard and insights split and total it).
+
 **Data flow:** `useAdminRequests` fetches `/api/admin/requests` with a composite
 cache key (all filter/sort/page params), polls every 10 s (not 30 s — the
 request list is the operator's primary triage surface). SWR cache keeps the

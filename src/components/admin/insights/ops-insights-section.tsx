@@ -22,18 +22,7 @@ import { DataTableShell } from '@/components/admin/ui/data-table-shell';
 import type { OpsInsights } from '@/lib/admin/ops-insights-types';
 import { formatCents, hourLabel } from '@/lib/admin/ops-insights-format';
 import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
-
-const ISSUE_LABELS: Record<string, string> = {
-  heating_not_working: 'Heating',
-  cooling_not_working: 'Cooling / AC',
-  thermostat_issue: 'Thermostat',
-  air_quality: 'Air quality',
-  strange_noises: 'Noises / diagnostics',
-  water_leak: 'Water leak',
-  maintenance: 'Maintenance',
-  installation: 'Installation',
-  other: 'Other',
-};
+import { groupIssueTypes, humanizeCode } from '@/lib/admin/issue-type-label';
 
 const URGENCY_LABELS: Record<string, string> = {
   emergency: 'Emergency',
@@ -44,16 +33,18 @@ const URGENCY_LABELS: Record<string, string> = {
 
 const STATUS_LABELS: Record<string, string> = {
   pending: 'Pending',
+  scheduled: 'Scheduled',
   assigned: 'Assigned',
   en_route: 'En route',
   arrived: 'Arrived',
   in_progress: 'In progress',
+  on_hold: 'On hold',
   completed: 'Completed',
   cancelled: 'Cancelled',
 };
 
 function humanize(value: string, labels: Record<string, string>): string {
-  return labels[value] ?? value.replace(/_/g, ' ');
+  return Object.hasOwn(labels, value) ? labels[value]! : humanizeCode(value);
 }
 
 /** A simple labelled horizontal bar list — shares of a total. */
@@ -87,6 +78,26 @@ function BarList({
         </div>
       ))}
     </div>
+  );
+}
+
+/** Top issue types plus "Other" (imported job titles are not issue types). */
+function IssueTypeChart({
+  rows,
+}: {
+  readonly rows: readonly { readonly key: string; readonly count: number }[];
+}) {
+  const { bars, importedTitles } = groupIssueTypes(rows);
+  const labels = Object.fromEntries(bars.map((b) => [b.key, b.label]));
+  return (
+    <>
+      <BarList rows={bars} labels={labels} />
+      {importedTitles > 0 && (
+        <p className="mt-3 text-xs text-muted-foreground">
+          Other includes {importedTitles} imported request{importedTitles === 1 ? '' : 's'} with no issue type.
+        </p>
+      )}
+    </>
   );
 }
 
@@ -209,6 +220,11 @@ export function OpsInsightsSection() {
           icon={Clock}
           label="Open requests"
           value={data?.openRequests ?? 0}
+          sublabel={
+            data && data.openImported > 0
+              ? `${data.openRequests - data.openImported} booked here · ${data.openImported} imported`
+              : undefined
+          }
           intent="warning"
           size="sm"
           loading={isLoading}
@@ -245,7 +261,7 @@ export function OpsInsightsSection() {
           {isLoading ? (
             <Skeleton className="h-32 w-full" />
           ) : (
-            <BarList rows={data?.byIssueType ?? []} labels={ISSUE_LABELS} />
+            <IssueTypeChart rows={data?.byIssueType ?? []} />
           )}
         </Card>
 
