@@ -17,6 +17,13 @@ import { mintKey } from '@/lib/http/idempotency-codes';
 import { useIdempotencyKey } from '@/hooks/use-idempotency-key';
 import { outcomeEvent, type WriteOutcome } from '@/lib/tech/invoice-key-state';
 import { classifyWriteError } from '@/lib/tech/invoice-client-errors';
+import { SIGNATURE_DIDNT_SAVE } from '@/lib/tech/approval-flow';
+import {
+  JOB_NOT_FOUND,
+  JOB_NOT_FOUND_BACK,
+  PHOTO_UPLOAD_FAILED,
+  type JobLoadOutcome,
+} from '@/lib/tech/job-page-state';
 
 interface Material {
   readonly id: string;
@@ -65,11 +72,10 @@ interface SignatureBody {
   readonly name: string;
 }
 
-/** Copy for a signature write that did not land (spec §7.6). */
-function signatureErrorCopy(outcome: WriteOutcome, message: string | undefined): string {
-  if (outcome === 'retry_same_key_after_refetch') return "Couldn't save the signature. Try again.";
+/** Copy for a signature write that did not land: one message, never server text. */
+function signatureErrorCopy(outcome: WriteOutcome): string {
   if (outcome === 'wait_then_refetch') return 'Still saving your last tap. Try again in a moment.';
-  return message ?? "Couldn't save the signature. Try again.";
+  return SIGNATURE_DIDNT_SAVE;
 }
 
 export function TechJobDetailClient({
@@ -79,6 +85,8 @@ export function TechJobDetailClient({
   readonly id: string;
   readonly appointmentId?: string;
 }) {
+  // 'not_found' (404/400 from the summary) replaces the whole page with one state.
+  const [jobOutcome, setJobOutcome] = useState<JobLoadOutcome | null>(null);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   // A load failure must NOT masquerade as an empty job (no materials / not
@@ -199,11 +207,10 @@ export function TechJobDetailClient({
           setPhotoStatus('Photo uploaded.');
           await loadPhotos();
         } else {
-          const body = await res.json().catch(() => ({}));
-          setPhotoStatus(body?.error?.message ?? "Couldn't upload that photo.");
+          setPhotoStatus(PHOTO_UPLOAD_FAILED);
         }
       } catch {
-        setPhotoStatus('Network error — the photo was not uploaded.');
+        setPhotoStatus(PHOTO_UPLOAD_FAILED);
       } finally {
         setIsUploadingPhoto(false);
       }
@@ -375,7 +382,6 @@ export function TechJobDetailClient({
       let status: number | null = null;
       let code: string | null = null;
       let details: { storedStatus?: number } | undefined;
-      let message: string | undefined;
       try {
         const form = new FormData();
         form.append('file', new File([toSend.blob], 'signature.png', { type: 'image/png' }));
@@ -397,7 +403,6 @@ export function TechJobDetailClient({
         const err = await res.json().catch(() => ({}));
         code = err?.error?.code ?? null;
         details = err?.error?.details;
-        message = err?.error?.message;
       } catch {
         /* network error: status stays null */
       }
@@ -414,7 +419,7 @@ export function TechJobDetailClient({
         setSigSaved(true);
         return;
       }
-      setSigError(signatureErrorCopy(outcome, message));
+      setSigError(signatureErrorCopy(outcome));
     },
     [id, sigDispatch, signedAt, loadSignedAt],
   );
@@ -424,6 +429,24 @@ export function TechJobDetailClient({
         c.name.toLowerCase().includes(search.trim().toLowerCase()),
       )
     : catalog;
+
+  if (jobOutcome === 'not_found') {
+    return (
+      <Card>
+        <CardContent className="space-y-4 py-6">
+          <p role="alert" className="text-[17px] font-medium">
+            {JOB_NOT_FOUND}
+          </p>
+          <Link
+            href="/tech/jobs"
+            className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-border-input bg-surface-raised px-4 text-[15px] font-medium text-foreground active:bg-accent"
+          >
+            <ArrowLeft className="size-4" /> {JOB_NOT_FOUND_BACK}
+          </Link>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <div className="space-y-5">
@@ -438,6 +461,7 @@ export function TechJobDetailClient({
       <TechJobSummary
         id={id}
         appointmentId={appointmentId}
+        onLoaded={setJobOutcome}
         onStatusChanged={() => {
           // A status tap opens or closes the job clock: reload both.
           void loadTimeline();

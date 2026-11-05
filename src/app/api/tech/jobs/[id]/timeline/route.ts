@@ -13,6 +13,7 @@ import { getTechSession } from "@/lib/auth/tech-session";
 import { getJobTimelineForTech } from "@/lib/tech/field-queries";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { logger } from "@/lib/logger";
+import { isUuid } from "@/lib/validation/uuid";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +27,9 @@ export async function GET(
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
     const { id } = await params;
+    if (!isUuid(id)) {
+      return errorResponse("Invalid request ID format", "INVALID_ID", 400);
+    }
     const result = await getJobTimelineForTech(
       session.organizationId,
       session.userId,

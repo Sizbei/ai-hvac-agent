@@ -42,6 +42,13 @@ describe("GET /api/tech/jobs/[id]/timesheet", () => {
     expect(res.status).toBe(401);
   });
 
+  it("400 INVALID_ID for a non-UUID id, before any query", async () => {
+    const res = await GET(req(), ctx("not-a-uuid") as never);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe("INVALID_ID");
+    expect(isJobOwnedByTech).not.toHaveBeenCalled();
+  });
+
   it("404 when the job isn't the tech's", async () => {
     (isJobOwnedByTech as unknown as Mock).mockResolvedValue(false);
     const res = await GET(req(), ctx(VALID_ID) as never);

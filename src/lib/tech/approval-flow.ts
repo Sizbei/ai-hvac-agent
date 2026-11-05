@@ -21,6 +21,11 @@ export interface ApprovalInput {
   readonly captured?: boolean;
 }
 
+/** The one message for a signature that did not land (sheet, page banner, job page). */
+export const SIGNATURE_DIDNT_SAVE = "The signature didn't save. Try again.";
+/** The banner's text; its own "Try again" button completes the same message. */
+export const SIGNATURE_DIDNT_SAVE_BANNER = "The signature didn't save.";
+
 export const ZERO_TOTAL_COPY = "Nothing to collect. This closes the invoice at $0 and locks the lines.";
 
 /**
@@ -67,7 +72,7 @@ export function unknownBanner(kinds: readonly IntentKind[]): UnknownBanner | nul
   const first = kinds[0];
   if (first === undefined) return null;
   if (first === "signature") {
-    return { action: "open_approval", text: "Your last signature may not have saved. Open Customer approval and try again." };
+    return { action: "open_approval", text: SIGNATURE_DIDNT_SAVE_BANNER };
   }
   return { action: "retry", kind: first, text: "Your last change may not have saved." };
 }

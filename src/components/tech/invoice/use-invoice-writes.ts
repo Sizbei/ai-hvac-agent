@@ -7,6 +7,7 @@ import { classifyWriteError } from '@/lib/tech/invoice-client-errors';
 import { outcomeEvent, type KeyEvent, type KeyState } from '@/lib/tech/invoice-key-state';
 import { INTENTS_STORAGE_KEY, parseIntents } from '@/lib/tech/invoice-intent-persist';
 import { writeErrorCopy } from '@/lib/tech/invoice-page-copy';
+import { SIGNATURE_DIDNT_SAVE } from '@/lib/tech/approval-flow';
 import {
   intentFromBody,
   intentLanded,
@@ -43,7 +44,6 @@ export type WriteFn = (
 ) => Promise<WriteResult>;
 
 const PERSISTED: readonly IntentKind[] = ['create', 'add_line', 'remove_line', 'finalize', 'payment', 'pay_link'];
-const SIGNATURE_RETRY = 'Your last signature may not have saved. Try again.';
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** Whether a reload left in-flight intents to re-send (false on the server). */
@@ -119,7 +119,7 @@ export function useInvoiceWrites(opts: {
     async (kind: IntentKind): Promise<WriteResult> => {
       // The signature body (a Blob) is never stored: only the caller can re-send
       // it, by calling write() again with the SAME bodyHash (same key).
-      if (kind === 'signature') return { status: 'retry', message: SIGNATURE_RETRY };
+      if (kind === 'signature') return { status: 'retry', message: SIGNATURE_DIDNT_SAVE };
       const s = dispatchers[kind]({ type: 'sent' });
       if (s.phase !== 'sent') return { status: 'skipped', message: null };
       return run(kind, intentFromBody(kind, s.body), s, (key) =>

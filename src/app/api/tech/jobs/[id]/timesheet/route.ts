@@ -21,6 +21,7 @@ import {
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { logger } from "@/lib/logger";
+import { isUuid } from "@/lib/validation/uuid";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +39,9 @@ export async function GET(
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
     const { id } = await params;
+    if (!isUuid(id)) {
+      return errorResponse("Invalid request ID format", "INVALID_ID", 400);
+    }
     if (!(await isJobOwnedByTech(session.organizationId, session.userId, id))) {
       return errorResponse("Job not found", "NOT_FOUND", 404);
     }

@@ -16,6 +16,7 @@ import {
 } from '@/components/tech/tech-status-confirm';
 import type { Blocker, TechAction } from '@/lib/tech/status-actions';
 import { TechInvoiceCard } from '@/components/tech/invoice/tech-invoice-card';
+import { jobLoadOutcome, type JobLoadOutcome } from '@/lib/tech/job-page-state';
 
 interface TechJobSummary {
   readonly id: string;
@@ -65,10 +66,13 @@ export function TechJobSummary({
   id,
   appointmentId,
   onStatusChanged,
+  onLoaded,
 }: {
   readonly id: string;
   readonly appointmentId?: string;
   readonly onStatusChanged?: () => void;
+  /** Called after each summary load; 'not_found' lets the page drop every form. */
+  readonly onLoaded?: (outcome: JobLoadOutcome) => void;
 }) {
   const [job, setJob] = useState<TechJobSummary | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -86,7 +90,8 @@ export function TechJobSummary({
       const query = appointmentId ? `?appointmentId=${encodeURIComponent(appointmentId)}` : '';
       const res = await fetch(`/api/tech/jobs/${id}${query}`);
       const body = await res.json().catch(() => ({ success: false }));
-      if (res.ok && body.success) {
+      const outcome = jobLoadOutcome(res.status, res.ok && body.success === true);
+      if (outcome === 'ok') {
         setJob(body.data);
         setServerBlockers(null);
         setRequestBehind(false);
@@ -94,12 +99,14 @@ export function TechJobSummary({
       } else {
         setError("Couldn't load this job.");
       }
+      onLoaded?.(outcome);
     } catch {
       setError("Couldn't load this job.");
+      onLoaded?.('error');
     } finally {
       setIsLoading(false);
     }
-  }, [id, appointmentId]);
+  }, [id, appointmentId, onLoaded]);
 
   useEffect(() => {
     void load();

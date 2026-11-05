@@ -5,9 +5,9 @@ import { Button } from '@/components/ui/button';
 import { SignaturePad } from '@/components/tech/signature-pad';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { mintKey } from '@/lib/http/idempotency-codes';
-import { approvalButtonLabel, approvalStep, padVisible, ZERO_TOTAL_COPY, type SendStatus } from '@/lib/tech/approval-flow';
+import { approvalButtonLabel, approvalStep, padVisible, SIGNATURE_DIDNT_SAVE, ZERO_TOTAL_COPY, type SendStatus } from '@/lib/tech/approval-flow';
 import type { TechInvoice } from '@/lib/tech/invoice-view';
-import { noteFor, type SheetNote } from '@/lib/tech/sheet-note';
+import { noteFor, signatureNoteFor, type SheetNote } from '@/lib/tech/sheet-note';
 import { InvoiceSignature } from './invoice-record';
 import { postJson, type Envelope, type SendResult } from './post-json';
 import { NoteLine, TechSheet } from './tech-sheet';
@@ -20,7 +20,6 @@ interface Capture {
   readonly url: string;
 }
 
-const SIGNATURE_FAILED = "Couldn't save the signature. Try again.";
 const FINALIZE_FAILED = "Couldn't finalize the invoice. Try again.";
 const landed = (r: WriteResult) => r.status === 'done' || r.status === 'dropped';
 
@@ -109,7 +108,7 @@ export function ApprovalSheet({
     // `skipped` is never success: a tap is still in flight or a write is pending.
     setSigSent(r.status === 'skipped' ? 'idle' : 'failed');
     setSigUnknown(r.status === 'retry' || r.status === 'pending');
-    setMessage(noteFor(r, SIGNATURE_FAILED));
+    setMessage(signatureNoteFor(r, SIGNATURE_DIDNT_SAVE));
     return false;
   }
 

@@ -65,7 +65,7 @@ describe("unknownBanner", () => {
   it("an unknown signature opens Customer approval", () => {
     expect(unknownBanner(["signature"])).toEqual({
       action: "open_approval",
-      text: "Your last signature may not have saved. Open Customer approval and try again.",
+      text: "The signature didn't save.",
     });
   });
   it("any other unknown intent retries that kind (the first one)", () => {
