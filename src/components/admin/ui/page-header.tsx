@@ -62,7 +62,10 @@ export function PageHeader({
         )}
       </div>
       {actions && (
-        <div className="flex shrink-0 items-center gap-2 self-start">
+        // Phone widths: the actions wrap onto as many rows as they need and
+        // never grow past the header, so a primary button is never pushed off
+        // screen. From `sm` up they keep the single non-shrinking row.
+        <div className="flex max-w-full flex-wrap items-center gap-2 self-start sm:shrink-0 sm:flex-nowrap">
           {actions}
         </div>
       )}
