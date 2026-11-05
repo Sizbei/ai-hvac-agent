@@ -49,7 +49,7 @@ function JobChip({
         onSelect(job.id);
       }}
       title={`${time} ${label}`}
-      className={`flex w-full items-center gap-1 truncate rounded-[3px] px-1 py-0.5 text-left text-[11px] leading-tight transition-colors ${accent.chip}`}
+      className={`pointer-events-auto flex w-full items-center gap-1 truncate rounded-[3px] px-1 py-0.5 text-left text-[11px] leading-tight transition-colors ${accent.chip}`}
     >
       <span className={`size-1.5 shrink-0 rounded-[1px] ${accent.dot}`} />
       {time && (
@@ -82,19 +82,23 @@ function MonthCell({
   const visible = cell.jobs.slice(0, MAX_CHIPS);
   const overflow = Math.max(cell.jobs.length - MAX_CHIPS, 0);
 
+  // The cell is a div, not a button: the job chips are buttons and a button
+  // inside a button is invalid HTML (hydration error). The day-number button
+  // stretches over the whole cell (after:inset-0) so the cell stays clickable;
+  // chips sit above it (relative z-10).
   return (
-    <button
-      type="button"
-      onClick={() => onPickDay(cell.day)}
-      title="Open this day"
-      aria-label={`Open ${cell.day}${cell.jobs.length ? ` (${cell.jobs.length} requests)` : ''}`}
-      className={`flex min-h-24 flex-col gap-0.5 border-b border-r border-border p-1 text-left align-top transition-colors hover:bg-row-hover ${
+    <div
+      className={`relative flex min-h-24 flex-col gap-0.5 border-b border-r border-border p-1 text-left align-top transition-colors hover:bg-row-hover ${
         cell.inMonth ? 'bg-surface-raised' : 'bg-surface-sunken'
       }`}
     >
       <div className="flex justify-end">
-        <span
-          className={`flex h-5 w-5 items-center justify-center rounded-[3px] font-mono text-xs tabular-nums ${
+        <button
+          type="button"
+          onClick={() => onPickDay(cell.day)}
+          title="Open this day"
+          aria-label={`Open ${cell.day}${cell.jobs.length ? ` (${cell.jobs.length} requests)` : ''}`}
+          className={`flex h-5 w-5 items-center justify-center rounded-[3px] font-mono text-xs tabular-nums after:absolute after:inset-0 after:content-[''] focus-visible:outline-2 focus-visible:outline-ring ${
             isToday
               ? 'bg-primary font-semibold text-primary-foreground'
               : cell.inMonth
@@ -103,19 +107,19 @@ function MonthCell({
           }`}
         >
           {dayOfMonth(cell.day)}
-        </span>
+        </button>
       </div>
-      <div className="flex flex-col gap-0.5">
+      <div className="pointer-events-none relative z-10 flex flex-col gap-0.5">
         {visible.map((job) => (
           <JobChip key={job.id} job={job} onSelect={onSelect} />
         ))}
         {overflow > 0 && (
-          <span className="px-1 font-mono text-[11px] font-medium tabular-nums text-muted-foreground">
+          <span className="pointer-events-none px-1 font-mono text-[11px] font-medium tabular-nums text-muted-foreground">
             +{overflow} more
           </span>
         )}
       </div>
-    </button>
+    </div>
   );
 }
 

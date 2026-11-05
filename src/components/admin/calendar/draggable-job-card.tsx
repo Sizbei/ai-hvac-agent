@@ -33,6 +33,7 @@ export function DraggableJobCard({
     kind: 'job',
     requestId: job.id,
     currentStartIso: job.arrivalWindowStart,
+    label: `${job.customerName ?? 'Unknown customer'}, ${job.referenceNumber}`,
   };
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: dragJobId(job.id),

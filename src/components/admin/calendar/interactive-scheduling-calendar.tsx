@@ -10,6 +10,7 @@ import {
   useSensor,
   useSensors,
   closestCenter,
+  type Announcements,
   type DragStartEvent,
   type DragEndEvent,
 } from '@dnd-kit/core';
@@ -26,7 +27,7 @@ import {
   CALENDAR_END_HOUR,
   RESCHEDULE_WINDOW_ROWS,
   hourRowLabels,
-  placeJobInGrid,
+  placeJobInLane,
   windowBandPlacement,
   businessIsoDate,
   businessMinutesOfDay,
@@ -39,7 +40,12 @@ import {
   UNASSIGNED_SCOPE,
 } from '@/lib/admin/calendar-optimistic';
 import { isWindowWithinAvailability } from '@/lib/admin/availability-coverage';
-import type { DragJobData, CalendarDropData } from '@/lib/admin/calendar-dnd';
+import {
+  describeDragJob,
+  describeDropTarget,
+  type DragJobData,
+  type CalendarDropData,
+} from '@/lib/admin/calendar-dnd';
 import {
   useRescheduleJob,
   type RescheduleConflictDetail,
@@ -77,7 +83,14 @@ interface PositionedJob {
   readonly job: DashboardRequest;
   readonly topPx: number;
   readonly heightPx: number;
+  /** Window lies wholly before/after the drawn hours: pinned to an edge. */
+  readonly outside: 'before' | 'after' | null;
 }
+
+/** Minimum card height inside the grid. */
+const MIN_CARD_PX = 28;
+/** A pinned out-of-hours card: tall enough for its time and customer. */
+const PINNED_CARD_PX = 44;
 
 function positionJobs(
   jobs: readonly DashboardRequest[],
@@ -90,12 +103,13 @@ function positionJobs(
     const end = new Date(job.arrivalWindowEnd);
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) continue;
     if (businessIsoDate(start) !== isoDay) continue;
-    const placement = placeJobInGrid(start, end);
+    const placement = placeJobInLane(start, end, PINNED_CARD_PX / GRID_PX);
     if (!placement) continue;
     positioned.push({
       job,
       topPx: placement.top * GRID_PX,
-      heightPx: Math.max(placement.height * GRID_PX, 28),
+      heightPx: Math.max(placement.height * GRID_PX, MIN_CARD_PX),
+      outside: placement.outside,
     });
   }
   return positioned;
@@ -158,7 +172,10 @@ function DayLane({
 
   return (
     <div
-      className="relative flex-1 rounded-sm border border-border bg-canvas"
+      // shrink-0, not flex-1: in the day view's flex column a flex-1 lane was
+      // squeezed 28px short of GRID_PX (the header's height), so cards placed
+      // in px against GRID_PX ran off the bottom.
+      className="relative shrink-0 rounded-sm border border-border bg-canvas"
       style={{ height: GRID_PX }}
     >
       <HourLines />
@@ -186,14 +203,21 @@ function DayLane({
           />
         );
       })}
-      {positioned.map(({ job, topPx, heightPx }) => {
+      {positioned.map(({ job, topPx, heightPx, outside }) => {
         const isTerminal =
           job.status === 'completed' || job.status === 'cancelled';
         return (
           <div
             key={job.id}
-            className="absolute inset-x-0.5 z-10"
+            className={`absolute inset-x-0.5 z-10${outside ? ' rounded-sm outline-1 outline-dashed outline-offset-1 outline-warning-border' : ''}`}
             style={{ top: topPx, height: heightPx }}
+            title={
+              outside === 'after'
+                ? 'After the calendar’s hours'
+                : outside === 'before'
+                  ? 'Before the calendar’s hours'
+                  : undefined
+            }
           >
             {isTerminal ? (
               <div className="h-full w-full opacity-50">
@@ -232,7 +256,11 @@ function DayView({
 }) {
   return (
     <div className="flex gap-2 overflow-x-auto pb-2">
-      <TimeAxis />
+      {/* pt-7 offsets the axis past the lane header row (h-6 + mb-1 = 28px),
+          as in the week view, so each hour label sits on its line. */}
+      <div className="pt-7">
+        <TimeAxis />
+      </div>
       <div className="flex min-w-0 flex-1 gap-2">
         <div className="flex w-56 shrink-0 flex-col">
           <div className="mb-1 flex h-6 items-center gap-1.5 rounded-sm bg-surface-sunken px-2 text-[13px] font-semibold">
@@ -604,8 +632,31 @@ export function InteractiveSchedulingCalendar({
 
   const showSkeleton = isLoading && !board;
 
+  // Screen-reader announcements in words. dnd-kit's default reads the raw ids
+  // ("job:<uuid> was dropped over drop:<uuid>:2026-11-05:afternoon").
+  const techNames = new Map(
+    (board?.lanes ?? []).map((l) => [l.technicianId, l.technicianName] as const),
+  );
+  const jobName = (d: unknown) => describeDragJob(d as Partial<DragJobData> | undefined);
+  const target = (d: unknown) =>
+    describeDropTarget(d as CalendarDropData | undefined, techNames);
+  const announcements: Announcements = {
+    onDragStart: ({ active }) => `Picked up ${jobName(active.data.current)}.`,
+    onDragOver: ({ active, over }) =>
+      over
+        ? `${jobName(active.data.current)} is over ${target(over.data.current)}.`
+        : `${jobName(active.data.current)} is no longer over a drop area.`,
+    onDragEnd: ({ active, over }) =>
+      over
+        ? `${jobName(active.data.current)} was dropped on ${target(over.data.current)}.`
+        : `${jobName(active.data.current)} was dropped.`,
+    onDragCancel: ({ active }) =>
+      `Moving ${jobName(active.data.current)} was cancelled.`,
+  };
+
   return (
     <DndContext
+      accessibility={{ announcements }}
       sensors={sensors}
       collisionDetection={closestCenter}
       modifiers={[restrictToWindowEdges]}

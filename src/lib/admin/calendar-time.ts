@@ -228,6 +228,46 @@ export function placeJobInGrid(
   };
 }
 
+/** Where a job sits in a lane: inside the grid, or pinned to its top or
+ * bottom edge when its window lies wholly before or after the drawn hours. */
+export interface LanePlacement extends SlotPlacement {
+  readonly outside: "before" | "after" | null;
+}
+
+/**
+ * placeJobInGrid, but a job wholly outside the drawn hours (an 11:03 PM
+ * emergency, a 6 AM start) is pinned to the lane's top or bottom edge at
+ * `pinnedHeight` (a fraction of the grid) instead of vanishing, so every job
+ * the lane header counts is visible and draggable.
+ */
+export function placeJobInLane(
+  startInstant: Date,
+  endInstant: Date,
+  pinnedHeight: number,
+  gridStartHour: number = CALENDAR_START_HOUR,
+  gridEndHour: number = CALENDAR_END_HOUR,
+): LanePlacement | null {
+  const inGrid = placeJobInGrid(startInstant, endInstant, gridStartHour, gridEndHour);
+  if (inGrid) return { ...inGrid, outside: null };
+  if (gridEndHour <= gridStartHour) return null;
+  const height = Math.min(Math.max(pinnedHeight, 0), 1);
+  const startMin = businessMinutesOfDay(startInstant);
+  if (startMin >= gridEndHour * MINUTES_PER_HOUR) {
+    return { top: 1 - height, height, outside: "after" };
+  }
+  return { top: 0, height, outside: "before" };
+}
+
+/** "8:00 AM" -> "8 AM"; keeps minutes when they matter ("11:03 PM"). */
+export function shortBusinessTime(instant: Date): string {
+  return formatBusinessTime(instant).replace(/:00(?=\s)/u, "");
+}
+
+/** A window as a range in business time: "8 AM–12 PM", "11:03 PM–1:03 AM". */
+export function formatBusinessTimeRange(start: Date, end: Date): string {
+  return `${shortBusinessTime(start)}–${shortBusinessTime(end)}`;
+}
+
 /** Hour-row labels for the grid, e.g. ["7 AM", "8 AM", … "7 PM"]. */
 export function hourRowLabels(
   gridStartHour: number = CALENDAR_START_HOUR,

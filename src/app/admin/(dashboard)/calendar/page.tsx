@@ -18,6 +18,7 @@ import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 import { TabGroup } from '@/components/admin/ui/tab-group';
 import { UrgencyLegend } from '@/components/admin/ui/urgency-legend';
+import { businessWeekDates } from '@/lib/admin/calendar-time';
 import { useAdminPageTitle } from '@/components/admin/org-name-context';
 
 // The interactive day/week board pulls in dnd-kit (drag-and-drop). Code-split it
@@ -114,8 +115,9 @@ function formatRangeLabel(isoDate: string, view: CalendarView): string {
       timeZone: 'UTC',
     });
   }
-  // Week label: the Sunday-anchored week of this date.
-  return `Week of ${date.toLocaleDateString('en-US', {
+  // Week label: the Sunday the grid starts on, not the picked day.
+  const sunday = new Date(`${businessWeekDates(isoDate)[0]}T00:00:00.000Z`);
+  return `Week of ${sunday.toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
@@ -208,18 +210,22 @@ export default function CalendarPage() {
         subtitle="Scheduled requests by technician, in Eastern time."
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            {/* Show completed toggle */}
-            <Button
-              variant={showCompleted ? 'secondary' : 'outline'}
-              size="sm"
-              onClick={toggleShowCompleted}
-            >
-              {showCompleted ? 'Hide completed' : 'Show completed'}
-            </Button>
+            {/* Show completed toggle — not for the agenda, a full history feed
+                that always lists completed requests. */}
+            {!isAgenda && (
+              <Button
+                variant={showCompleted ? 'secondary' : 'outline'}
+                size="sm"
+                onClick={toggleShowCompleted}
+              >
+                {showCompleted ? 'Hide completed' : 'Show completed'}
+              </Button>
+            )}
 
             {/* Date stepper — not shown for the agenda feed (a flat, paged list). */}
             {!isAgenda && (
-              <>
+              // One unbreakable group so Next/Today never fall off a phone screen.
+              <div className="flex items-center gap-2">
                 <Button
                   variant="outline"
                   size="icon-sm"
@@ -228,7 +234,7 @@ export default function CalendarPage() {
                 >
                   <ChevronLeft className="size-4" />
                 </Button>
-                <div className="min-w-44 text-center text-sm font-medium">
+                <div className="min-w-0 text-center text-sm font-medium sm:min-w-44">
                   {formatRangeLabel(date, view)}
                 </div>
                 <Button
@@ -248,7 +254,7 @@ export default function CalendarPage() {
                 >
                   Today
                 </Button>
-              </>
+              </div>
             )}
           </div>
         }

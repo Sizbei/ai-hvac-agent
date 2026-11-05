@@ -2,7 +2,7 @@
 
 import { UrgencyBadge } from '@/components/admin/urgency-badge';
 import { StatusBadge } from '@/components/admin/status-badge';
-import { formatBusinessTime } from '@/lib/admin/calendar-time';
+import { formatBusinessTimeRange, shortBusinessTime } from '@/lib/admin/calendar-time';
 import { urgencyAccent } from '@/lib/admin/urgency-accent';
 import type { DashboardRequest } from '@/lib/admin/types';
 import { SyncPill } from '@/components/admin/sync-pill';
@@ -25,8 +25,14 @@ interface CalendarJobCardProps {
  */
 export function CalendarJobCard({ job, onSelect, compact }: CalendarJobCardProps) {
   const start = job.arrivalWindowStart ? new Date(job.arrivalWindowStart) : null;
-  const time = start && !Number.isNaN(start.getTime())
-    ? formatBusinessTime(start)
+  const end = job.arrivalWindowEnd ? new Date(job.arrivalWindowEnd) : null;
+  const validStart = start && !Number.isNaN(start.getTime()) ? start : null;
+  const validEnd = end && !Number.isNaN(end.getTime()) ? end : null;
+  // The whole window ("8 AM–12 PM"), not just its start.
+  const time = validStart
+    ? validEnd
+      ? formatBusinessTimeRange(validStart, validEnd)
+      : shortBusinessTime(validStart)
     : '—';
 
   const accent = urgencyAccent(job.urgency);
@@ -41,8 +47,8 @@ export function CalendarJobCard({ job, onSelect, compact }: CalendarJobCardProps
       // as the urgency badges.
       className={`flex h-full w-full flex-col overflow-hidden rounded-sm border border-border border-l-[3px] ${accent.bar} bg-surface-raised px-2 py-1 text-left text-xs leading-tight transition-colors hover:bg-row-hover`}
     >
-      <div className="flex items-center gap-1">
-        <span className="font-mono font-medium tabular-nums">{time}</span>
+      <div className="flex shrink-0 items-center gap-1">
+        <span className="truncate font-mono font-medium tabular-nums">{time}</span>
         {job.isAfterHours && (
           <span
             title="After hours"
@@ -58,7 +64,8 @@ export function CalendarJobCard({ job, onSelect, compact }: CalendarJobCardProps
           </span>
         )}
       </div>
-      <span className="truncate font-medium text-foreground">
+      {/* shrink-0: on a short card the customer outranks the badges. */}
+      <span className="shrink-0 truncate font-medium text-foreground">
         {job.customerName ?? 'Unknown'}
       </span>
       {!compact && (

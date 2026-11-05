@@ -329,3 +329,35 @@ describe("businessDayBounds", () => {
     expect(businessDayBounds("")).toBeNull();
   });
 });
+
+import { placeJobInLane, shortBusinessTime, formatBusinessTimeRange } from "./calendar-time";
+
+describe("placeJobInLane (out-of-hours jobs stay visible)", () => {
+  it("matches placeJobInGrid inside the grid", () => {
+    // 2026-11-05 13:00Z = 8 AM EST; 17:00Z = 12 PM EST.
+    const p = placeJobInLane(new Date("2026-11-05T13:00:00Z"), new Date("2026-11-05T17:00:00Z"), 0.05);
+    expect(p?.outside).toBeNull();
+    expect(p?.height).toBeGreaterThan(0.05);
+  });
+  it("pins an 11:03 PM job to the bottom edge", () => {
+    // 2026-08-19T03:03Z = Aug 18 11:03 PM EDT, ends 1:03 AM.
+    const p = placeJobInLane(new Date("2026-08-19T03:03:00Z"), new Date("2026-08-19T05:03:00Z"), 0.05);
+    expect(p).toEqual({ top: 0.95, height: 0.05, outside: "after" });
+  });
+  it("pins a 5 AM job to the top edge", () => {
+    // 09:00Z-10:00Z in August = 5–6 AM EDT.
+    const p = placeJobInLane(new Date("2026-08-18T09:00:00Z"), new Date("2026-08-18T10:00:00Z"), 0.05);
+    expect(p).toEqual({ top: 0, height: 0.05, outside: "before" });
+  });
+});
+
+describe("business time range labels", () => {
+  it("drops :00 and keeps real minutes", () => {
+    expect(shortBusinessTime(new Date("2026-11-05T13:00:00Z"))).toMatch(/^8\sAM$/u);
+    expect(shortBusinessTime(new Date("2026-08-19T03:03:00Z"))).toMatch(/^11:03\sPM$/u);
+  });
+  it("formats a window as start–end", () => {
+    const r = formatBusinessTimeRange(new Date("2026-11-05T13:00:00Z"), new Date("2026-11-05T17:00:00Z"));
+    expect(r).toMatch(/^8\sAM–12\sPM$/u);
+  });
+});
