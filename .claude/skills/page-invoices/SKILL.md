@@ -91,7 +91,20 @@ polls `/api/admin/payments/reconcile` on mount (best-effort, never throws).
   org-scoped, not invoice-scoped, so a double-click or a retry records once,
   and a token reused for another invoice/amount/method → 409 `ID_CONFLICT`
   (never a silent success). The token is re-minted after a success or an
-  `ID_CONFLICT` (`shouldRemintToken`). Shown only when
+  `ID_CONFLICT` (`shouldRemintToken`).
+  - **Uncertain outcomes reload first:** on a network error (fetch threw) or
+    an `ID_CONFLICT` the payment may already have landed, so the card calls
+    the parent's `load()` (`onReload`, `shouldReloadAfterRecord`) BEFORE the
+    message shows. Copy: `ID_CONFLICT` → "This payment may already be
+    recorded. Check the payments list before recording it again." (spec §8
+    said "That payment token was already used. Try again."; changed in the
+    final wave because "token" is not office copy and "Try again" invited a
+    double record); network → "Couldn't reach the server. The payment may have
+    been recorded. Check the list before trying again." The refund form
+    reloads on a network error the same way (`REFUND_NETWORK_COPY`).
+  - `checkNumber` must match `/^[A-Za-z0-9-]{1,32}$/` on both the admin and
+    tech payment routes (free text would carry names that erase never clears).
+  - Shown only when
   `canRecordPayment` (state `open` + chargeable): drafts are never payable by
   hand (server: 409 `INVOICE_NOT_CHARGEABLE` "Finalize the invoice first.").
   201 when created, 200 on a replay (no audit/receipt). Audit
@@ -122,15 +135,21 @@ polls `/api/admin/payments/reconcile` on mount (best-effort, never throws).
   shows the request's current signature labelled "Job signature (not yet on
   the invoice)". Other states: `erased` → "Signature removed";
   `unavailable` → "Signature couldn't be loaded." (no R2 creds on dev);
-  `none` → nothing. An image `onError` refetches up to 2 times.
+  `none` → nothing. An image `onError` refetches up to 2 times; once the cap
+  is hit the parent sets `signatureUnavailable` and the document renders the
+  "Signature couldn't be loaded." note instead of a broken image
+  (`signatureBlock(input, imageFailed)`).
 - **Reconcile:** a pending `mock` payment while cards are disabled is a
   FAILED charge. One batch marks it failed and un-claims the invoice credit
   (gated on that write's xmin). Drafts are included and stay drafts; the
   state otherwise follows `CASE WHEN paid >= total THEN 'paid' ELSE 'open'`.
+  The un-claim is native-only (`P_NATIVE`), so it never takes credit off a
+  FieldPulse or Housecall Pro invoice.
 - `createInvoiceFromSoldEstimate` on a request refuses while the request has a
   native field DRAFT (`request_has_draft`); it coexists with an open field
-  invoice. `listStuckPayments` skips `provider = 'manual'` (manual payments
-  are never pending).
+  invoice. `listStuckPayments` skips `provider IN ('manual', 'fieldpulse',
+  'hcp')`: manual payments are never pending, and mirrored payments with an
+  unknown status are not ours to reconcile.
 - Erasing a customer nulls `signature_url`/`signature_name` on their requests
   AND invoices (`signed_at` kept) and deletes the R2 objects (see
   `src/lib/admin/erasure-queries.ts`).

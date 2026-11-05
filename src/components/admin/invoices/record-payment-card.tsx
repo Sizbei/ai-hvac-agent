@@ -9,8 +9,10 @@ import { parseDollarsToCents } from '@/lib/admin/money-format';
 import { mintKey } from '@/lib/http/idempotency-codes';
 import {
   RECORD_PAYMENT_METHODS,
+  RECORD_PAYMENT_NETWORK_COPY,
   buildRecordPaymentBody,
   recordPaymentErrorCopy,
+  shouldReloadAfterRecord,
   shouldRemintToken,
   type RecordMethod,
 } from '@/lib/admin/invoice-payment-copy';
@@ -19,14 +21,19 @@ import {
  * Office "Record payment" form (cash / check / other — no card in M3b). The
  * client token is minted when the form mounts (opens) and replaced after a
  * success or an ID_CONFLICT; the server derives the payment id from it, so a
- * double click or a browser retry records once.
+ * double click or a browser retry records once. A network error or an
+ * ID_CONFLICT means the payment may already have landed, so the parent reloads
+ * the invoice before the message shows.
  */
 export function RecordPaymentCard({
   invoiceId,
   onRecorded,
+  onReload,
 }: {
   readonly invoiceId: string;
   readonly onRecorded: () => void;
+  /** Refetch the invoice (payments list) without closing the form. */
+  readonly onReload: () => void;
 }) {
   const [clientToken, setClientToken] = useState(() => mintKey());
   const [method, setMethod] = useState<RecordMethod>('cash');
@@ -64,14 +71,16 @@ export function RecordPaymentCard({
         setIsDeposit(false);
         onRecorded();
       } else {
+        if (shouldReloadAfterRecord(body.error?.code)) onReload();
         setError(recordPaymentErrorCopy(body.error?.code));
       }
     } catch {
-      setError("Couldn't reach the server. Please try again.");
+      if (shouldReloadAfterRecord(null)) onReload();
+      setError(RECORD_PAYMENT_NETWORK_COPY);
     } finally {
       setIsSaving(false);
     }
-  }, [invoiceId, clientToken, method, amount, checkNumber, isDeposit, onRecorded]);
+  }, [invoiceId, clientToken, method, amount, checkNumber, isDeposit, onRecorded, onReload]);
 
   return (
     <Card>

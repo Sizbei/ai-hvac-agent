@@ -63,6 +63,11 @@ error copy ("Couldn't save X. Please try again."), never err.message or
 ## Repo-wide invariants
 
 - Tenancy: every admin query scopes by the session's organizationId.
+- Logs carry codes and ids, never PII. `logger.error({ error })` is fine: the
+  `error` serializer in `src/lib/logger.ts` drops Drizzle's `query`/`params`
+  (a failed statement's params can hold names, check numbers and portal
+  links). Prefer `logger.error({ code: errorCode(error), invoiceId }, "…")`
+  with `errorCode` from the same module.
 - Demo account (admin@demo-hvac.com): blocked from GDPR erase
   (super_admin gate) and outbound SMS (`isDemoAccount` in
   `src/lib/auth/authz.ts`) — deliberate, do not "fix".

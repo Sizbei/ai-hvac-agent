@@ -34,6 +34,7 @@ import { mintKey } from '@/lib/http/idempotency-codes';
 import {
   canRecordPayment,
   paymentMethodSummary,
+  REFUND_NETWORK_COPY,
   refundErrorCopy,
   refundSuccessCopy,
   shouldRemintToken,
@@ -157,7 +158,9 @@ export function InvoiceDetailClient({
 
   // Signed signature URLs expire; refetch on an image error, a bounded number
   // of times so a permanently broken object can't loop.
+  // Once the cap is hit, the document shows a note instead of a broken image.
   const signatureRetries = useRef(0);
+  const [signatureUnavailable, setSignatureUnavailable] = useState(false);
 
   // Send reminder
   const [isSendingReminder, setIsSendingReminder] = useState(false);
@@ -231,7 +234,9 @@ export function InvoiceDetailClient({
           setRefundError(refundErrorCopy(body.error?.code));
         }
       } catch {
-        setRefundError('Could not connect to server.');
+        // The refund may have landed: reload the payments before the message.
+        void load();
+        setRefundError(REFUND_NETWORK_COPY);
       } finally {
         setIsRefunding(false);
       }
@@ -240,7 +245,10 @@ export function InvoiceDetailClient({
   );
 
   const handleSignatureError = useCallback((): void => {
-    if (signatureRetries.current >= 2) return;
+    if (signatureRetries.current >= 2) {
+      setSignatureUnavailable(true);
+      return;
+    }
     signatureRetries.current += 1;
     void load();
   }, [load]);
@@ -248,6 +256,10 @@ export function InvoiceDetailClient({
   const handleSignatureLoad = useCallback((): void => {
     signatureRetries.current = 0;
   }, []);
+
+  const handleReload = useCallback((): void => {
+    void load();
+  }, [load]);
 
   const handleRecorded = useCallback((): void => {
     setShowPaymentForm(false);
@@ -474,6 +486,7 @@ export function InvoiceDetailClient({
           <InvoiceDocument
             invoice={invoice}
             org={org ?? fallbackOrg}
+            signatureUnavailable={signatureUnavailable}
             onSignatureError={handleSignatureError}
             onSignatureLoad={handleSignatureLoad}
           />
@@ -541,7 +554,7 @@ export function InvoiceDetailClient({
           {/* Record payment — never for a read-only FSM-synced invoice (canTakePayment).
               Toggled by the toolbar button above; mounting mints the client token. */}
           {showRecordPayment && showPaymentForm && (
-            <RecordPaymentCard invoiceId={invoice.id} onRecorded={handleRecorded} />
+            <RecordPaymentCard invoiceId={invoice.id} onRecorded={handleRecorded} onReload={handleReload} />
           )}
 
           {/* Financing (subordinate). Keyed to the invoice's estimate; only shown

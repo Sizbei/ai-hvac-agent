@@ -24,11 +24,20 @@ export type SignatureBlock =
 
 const FINALIZED = new Set(['open', 'paid', 'refunded', 'void']);
 
-export function signatureBlock(input: {
-  state: string;
-  signature: DocumentSignature;
-  requestSignature: DocumentSignature | null;
-}): SignatureBlock | null {
+const UNAVAILABLE_NOTE = "Signature couldn't be loaded.";
+
+/**
+ * `imageFailed`: the parent hit its refetch cap on the image, so a present
+ * signature renders the "couldn't be loaded" note instead of a broken <img>.
+ */
+export function signatureBlock(
+  input: {
+    state: string;
+    signature: DocumentSignature;
+    requestSignature: DocumentSignature | null;
+  },
+  imageFailed = false,
+): SignatureBlock | null {
   let sig: DocumentSignature | null = null;
   let label = 'Customer signature';
   if (input.state === 'draft') {
@@ -40,13 +49,14 @@ export function signatureBlock(input: {
   if (!sig) return null;
   switch (sig.state) {
     case 'present':
-      return sig.url
-        ? { kind: 'image', label, url: sig.url, name: sig.name, signedAt: sig.signedAt }
-        : null;
+      if (!sig.url) return null;
+      return imageFailed
+        ? { kind: 'note', label, note: UNAVAILABLE_NOTE }
+        : { kind: 'image', label, url: sig.url, name: sig.name, signedAt: sig.signedAt };
     case 'erased':
       return { kind: 'note', label, note: 'Signature removed' };
     case 'unavailable':
-      return { kind: 'note', label, note: "Signature couldn't be loaded." };
+      return { kind: 'note', label, note: UNAVAILABLE_NOTE };
     default:
       return null;
   }

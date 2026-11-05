@@ -16,13 +16,32 @@ export const RECORD_PAYMENT_METHODS: ReadonlyArray<{ value: RecordMethod; label:
 const RECORD_ERRORS: Readonly<Record<string, string>> = {
   EXCEEDS_BALANCE: "That's more than the balance due.",
   INVOICE_NOT_CHARGEABLE: "Finalize the invoice first.",
-  ID_CONFLICT: "That payment token was already used. Try again.",
+  // Spec §8 said "That payment token was already used. Try again."; changed in
+  // the final wave because a reused token usually means the first try landed.
+  ID_CONFLICT: "This payment may already be recorded. Check the payments list before recording it again.",
   STALE: "This invoice changed. Refresh and try again.",
   INVOICE_SYNCED_READ_ONLY: "This invoice is managed in FieldPulse.",
 };
 
 export function recordPaymentErrorCopy(code: string | undefined): string {
   return (code && RECORD_ERRORS[code]) || "Couldn't record the payment. Please try again.";
+}
+
+/** A thrown fetch: the payment may have landed, so the form reloads the invoice first. */
+export const RECORD_PAYMENT_NETWORK_COPY =
+  "Couldn't reach the server. The payment may have been recorded. Check the list before trying again.";
+
+/** A thrown fetch on a refund: same uncertainty, same reload-first rule. */
+export const REFUND_NETWORK_COPY =
+  "Couldn't reach the server. The refund may have been recorded. Check the list before trying again.";
+
+/**
+ * The outcome is uncertain (the write may have landed): a network error
+ * (`code === null`) or an ID_CONFLICT. The office reloads the invoice before
+ * showing the message so the payments list is current.
+ */
+export function shouldReloadAfterRecord(code: string | null | undefined): boolean {
+  return code === null || code === "ID_CONFLICT";
 }
 
 const REFUND_ERRORS: Readonly<Record<string, string>> = {

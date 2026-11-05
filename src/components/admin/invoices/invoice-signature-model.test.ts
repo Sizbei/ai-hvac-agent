@@ -57,4 +57,26 @@ describe('signatureBlock', () => {
       note: 'Signature removed',
     });
   });
+
+  it('shows the "couldn\'t be loaded" note instead of the image once the retry cap is hit', () => {
+    expect(signatureBlock({ state: 'open', signature: present, requestSignature: null }, true)).toEqual({
+      kind: 'note',
+      label: 'Customer signature',
+      note: "Signature couldn't be loaded.",
+    });
+    expect(signatureBlock({ state: 'draft', signature: none, requestSignature: present }, true)).toEqual({
+      kind: 'note',
+      label: 'Job signature (not yet on the invoice)',
+      note: "Signature couldn't be loaded.",
+    });
+  });
+
+  it('leaves erased and missing signatures alone when the image flag is set', () => {
+    expect(signatureBlock({ state: 'paid', signature: erased, requestSignature: null }, true)).toEqual({
+      kind: 'note',
+      label: 'Customer signature',
+      note: 'Signature removed',
+    });
+    expect(signatureBlock({ state: 'open', signature: none, requestSignature: null }, true)).toBeNull();
+  });
 });

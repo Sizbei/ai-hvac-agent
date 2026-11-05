@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   RECORD_PAYMENT_METHODS,
+  RECORD_PAYMENT_NETWORK_COPY,
+  REFUND_NETWORK_COPY,
   buildRecordPaymentBody,
   canRecordPayment,
   refundErrorCopy,
@@ -9,6 +11,7 @@ import {
   paymentMethodSummary,
   recordPaymentErrorCopy,
   refundSuccessCopy,
+  shouldReloadAfterRecord,
   shouldRemintToken,
 } from "./invoice-payment-copy";
 
@@ -25,7 +28,9 @@ describe("recordPaymentErrorCopy", () => {
   it("maps the known codes to human copy", () => {
     expect(recordPaymentErrorCopy("EXCEEDS_BALANCE")).toBe("That's more than the balance due.");
     expect(recordPaymentErrorCopy("INVOICE_NOT_CHARGEABLE")).toBe("Finalize the invoice first.");
-    expect(recordPaymentErrorCopy("ID_CONFLICT")).toBe("That payment token was already used. Try again.");
+    expect(recordPaymentErrorCopy("ID_CONFLICT")).toBe(
+      "This payment may already be recorded. Check the payments list before recording it again.",
+    );
     expect(recordPaymentErrorCopy("STALE")).toBe("This invoice changed. Refresh and try again.");
     expect(recordPaymentErrorCopy("INVOICE_SYNCED_READ_ONLY")).toBe("This invoice is managed in FieldPulse.");
   });
@@ -34,6 +39,26 @@ describe("recordPaymentErrorCopy", () => {
     for (const code of [undefined, "INTERNAL_ERROR", "VALIDATION_ERROR", "SOMETHING_NEW"]) {
       expect(recordPaymentErrorCopy(code)).toBe("Couldn't record the payment. Please try again.");
     }
+  });
+});
+
+describe("uncertain record outcomes", () => {
+  it("reloads after a network error (null code) or an ID_CONFLICT only", () => {
+    expect(shouldReloadAfterRecord(null)).toBe(true);
+    expect(shouldReloadAfterRecord("ID_CONFLICT")).toBe(true);
+    expect(shouldReloadAfterRecord(undefined)).toBe(false);
+    expect(shouldReloadAfterRecord("EXCEEDS_BALANCE")).toBe(false);
+    expect(shouldReloadAfterRecord("STALE")).toBe(false);
+  });
+
+  it("network copy says the money may have landed and never says token", () => {
+    expect(RECORD_PAYMENT_NETWORK_COPY).toBe(
+      "Couldn't reach the server. The payment may have been recorded. Check the list before trying again.",
+    );
+    expect(REFUND_NETWORK_COPY).toBe(
+      "Couldn't reach the server. The refund may have been recorded. Check the list before trying again.",
+    );
+    expect(recordPaymentErrorCopy("ID_CONFLICT")).not.toMatch(/token/i);
   });
 });
 

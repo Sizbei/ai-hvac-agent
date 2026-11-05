@@ -132,10 +132,15 @@ server-side from the pricebook at add time — client-sent cost values are ignor
   signedAt >= invoice.updatedAt`; once open/paid it is the invoice's own
   snapshot (`none|present|erased|unavailable|estimate`). `pendingWrite` = an
   `in_progress` key younger than 2 min on any `/api/tech/jobs/<rid>/…` route.
-  `allowed` comes from `invoiceAllowedActions`. Live = draft or open; with no
-  live invoice the newest paid/refunded/void one is `history` (a final-wave
-  ruling may render a paid invoice in full instead — check
-  `invoice-queries.ts`).
+  `allowed` comes from `invoiceAllowedActions`. Live = draft or open. With no
+  live invoice, `invoice` is the newest PAID or REFUNDED one in full read-only
+  form (lines, payments, signature) and `allowed` includes `create` (a second
+  invoice for unbilled materials); `history` is then `null`. `history` (the
+  newest older paid/refunded/void one) is sent only alongside a live invoice.
+  The page keys the totals footer on `state` (paid → "Paid", refunded →
+  "Refunded") and detects a landed `create` by a new draft id, not by
+  `before.invoice === null`. (Final-wave ruling; spec §5.1/§6.2.1 resolved
+  toward §7.4.)
 - **Keys:** the client mints with `mintKey()` (`idempotency-codes.ts`) and
   sends `Idempotency-Key` on every money POST. One reducer state per intent
   (`nextKeyState`: `idle → armed → sent → idle | unknown`). A changed body
@@ -150,6 +155,10 @@ server-side from the pricebook at add time — client-sent cost values are ignor
   an unknown write actually landed. Stored 409s map to
   `show_message_refetch`, which keeps the spent key until the next edit.
   This is harmless and accepted.
+- **Stale unknown intents:** a refetch that shows the signature landed
+  (`signature.fresh`, or the invoice is no longer a draft) drops an `unknown`
+  signature intent, and a landed finalize drops it too, so the "may not have
+  saved" banner never outlives the write it was about.
 - **Approval sheet order:** signature FIRST (the request-level capture, its own
   key and held Blob), THEN finalize. Finalize snapshots the request signature
   onto the invoice only when `signed_at >= invoices.updated_at` (signed after
@@ -157,7 +166,12 @@ server-side from the pricebook at add time — client-sent cost values are ignor
   snapshot is never written again: a later "Sign again" changes the job
   signature only. If the signature fails nothing is finalized ("Try again"
   re-sends the same Blob + key). If finalize fails after the signature landed,
-  only finalize is retried. A $0 draft finalizes to `open`.
+  only finalize is retried. A $0 draft finalizes to `open`. In this sheet the
+  shared pad's button reads "Use this signature" (it only captures; nothing is
+  sent until "Approve and finalize").
+- **Signature freshness:** the totals statement bumps `invoices.updated_at`
+  when the subtotal OR the total changes (a tax-rate change moves the total
+  without the subtotal), never on a no-op retry. Spec §5.4 deviation.
 - **Materials once:** create seeds lines from the job's materials that are not
   yet on a non-void native invoice of the request (`invoice_line_items.
   job_material_id`, ids `materialLineId(invoice, material)`). Adding a material
@@ -168,13 +182,23 @@ server-side from the pricebook at add time — client-sent cost values are ignor
   else 409 `STALE`. Payments and pay link accept any non-void native invoice
   of the request; the writer then refuses `INVOICE_NOT_CHARGEABLE`. Both
   checks run inside the idempotency `run`, so a replay wins over STALE.
-- **Pay link:** SMS only (`invoice_sent` / `invoice_sent_sms`). A 2-minute
-  per-invoice cooldown is claimed on `invoices.pay_link_sent_at` BEFORE the
-  portal token is minted (409 `COOLDOWN`). A throw from the queue insert →
-  500 `SEND_FAILED` "The link may not have gone out. Try again in 2 minutes."
-  (stored, claim kept). The demo org → 403 `DEMO_RESTRICTED`. Receipts and
-  pay links call `processPendingJobs()` inside `after()`. A
-  committed-but-thrown insert waits for the daily cron (accepted).
+- **Pay link:** SMS only (`invoice_sent` / `invoice_sent_sms`). A 5-minute
+  per-invoice cooldown (longer than the 2-minute idempotency takeover window,
+  so a crashed send retried by takeover can't text twice; spec §6.4 said 2
+  minutes) is claimed on `invoices.pay_link_sent_at` BEFORE the portal token
+  is minted (409 `COOLDOWN`). The claim UPDATE carries the lead predicate
+  (`stillLeadSql`), so a lead reassigned after the preamble sends nothing. A
+  throw from the queue insert → 500 `SEND_FAILED` "The link may not have gone
+  out. Try again in 5 minutes." (stored, claim kept; spec said "Couldn't send
+  the link. Try again.", deviation kept because the claim is kept). The demo
+  org → 403 `DEMO_RESTRICTED`. Receipts and pay links call
+  `processPendingJobs()` inside `after()`. Accepted: a committed-but-thrown
+  insert waits for the daily cron; a lead can send at most one link per 5
+  minutes per invoice, with no daily cap.
+- **Logs:** route and writer error logs carry codes and ids only. The pino
+  `error` serializer in `src/lib/logger.ts` drops Drizzle's `query`/`params`
+  (they held the signature name, check numbers and the pay link), so prefer
+  `logger.error({ code: errorCode(error), invoiceId }, "…")`.
 - **Probes:** mint tech sessions with `MINT_ORG_ID=<throwaway org> npx tsx
   scripts/agent/mint-tech-session.mjs` and assert the token's
   `organizationId` before any fetch. Send `Origin: http://localhost:3000`.

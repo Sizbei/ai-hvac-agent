@@ -531,18 +531,23 @@ until a tech can finish and collect on a job here.
      of the hash. Lines and finalize need the newest live invoice (else
      409 `STALE`); payments and pay link accept any non-void native
      invoice.
-     (3) The pay link is SMS only, with a 2-minute cooldown claimed on
+     (3) The pay link is SMS only, with a 5-minute cooldown (spec §6.4
+     said 2; it must outlast the 2-minute takeover window so a crashed
+     send retried by takeover can't text twice) claimed on
      `invoices.pay_link_sent_at` before the token mint (never
-     `last_reminder_sent_at`).
+     `last_reminder_sent_at`); the claim UPDATE also carries the lead
+     predicate.
      (4) Manual refunds record without a provider call and put the invoice
      back to `open` (never `refunded`).
      (5) $0 drafts finalize to `open`. There is no due date (`issued_at`
      is set). An admin finalize route exists (`POST
      /api/admin/invoices/[id]/finalize`).
      (6) `STORED_CODES` includes `SEND_FAILED` ("The link may not have gone
-     out. Try again in 2 minutes.").
-     (7) The totals statement `T` keeps `updated_at` when a retry leaves
-     the subtotal unchanged, so a fresh signature survives a no-op.
+     out. Try again in 5 minutes."; spec said "Couldn't send the link. Try
+     again.").
+     (7) The totals statement `T` bumps `updated_at` only when the subtotal
+     OR the total changes (a tax-rate change moves only the total), so a
+     fresh signature survives a no-op retry.
      (8) Reconcile's un-claim of a failed or mock-pending card payment
      includes drafts and keeps them drafts.
      (9) `scripts/agent/mint-tech-session.mjs` honours `MINT_ORG_ID`.
@@ -556,6 +561,32 @@ until a tech can finish and collect on a job here.
      (12) Keys live 7 days (the cleanup cron deletes older rows). The
      client keeps in-flight intents in `sessionStorage` per job rather than
      in a 72 h queue, because there is no offline queue yet.
+     (13) Final wave: with no live invoice the tech GET returns the newest
+     paid/refunded invoice in full (read-only, `create` allowed for a
+     second invoice); `history` is sent only alongside a live invoice
+     (spec §5.1/§6.2.1 resolved toward §7.4's "the invoice reads paid").
+     (14) Office record-payment `ID_CONFLICT` copy is "This payment may
+     already be recorded. Check the payments list before recording it
+     again." (spec §8 said "That payment token was already used. Try
+     again."), and a network error or `ID_CONFLICT` reloads the invoice
+     before the message; refunds reload on a network error too.
+     (15) Reconcile's un-claim is native-only and `listStuckPayments`
+     excludes `manual`, `fieldpulse` and `hcp` providers. `checkNumber`
+     must match `/^[A-Za-z0-9-]{1,32}$/`. Error logs carry codes and ids
+     only (a pino `error` serializer drops Drizzle `query`/`params`).
+     Stale `unknown` signature intents are dropped once the view shows the
+     signature fresh or the invoice finalized; the approval pad button
+     reads "Use this signature".
+     Accepted: a takeover re-run of a crashed tech payment replays without
+     the receipt or the `payment_recorded` audit; a lead can send one pay
+     link per 5 minutes per invoice (no daily cap); erasing customer A can
+     delete a signature file B's request still links to; a queue insert
+     that committed but threw waits for the daily cron.
+     M4 backlog (card path, latent while `cardPaymentsEnabled()` is false):
+     `takePayment`'s un-claim must recompute state with the reconcile
+     CASE; a card charge on a draft must leave it a draft (or refuse); card
+     refunds must use the office token's `refundId` with by-id replay; the
+     manual and card refund paths must agree on the resulting invoice state.
      Erase now nulls and deletes the signature on both requests and
      invoices, and `purgeOrganization` passes object keys (it used to pass
      URLs).

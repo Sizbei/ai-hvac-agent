@@ -22,6 +22,8 @@ export type DocumentInvoice = Omit<InvoiceDetailView, 'signature' | 'requestSign
 interface Props {
   readonly invoice: DocumentInvoice;
   readonly org: OrgIdentity;
+  /** The parent's image refetch cap was hit: show a note, not a broken image. */
+  readonly signatureUnavailable?: boolean;
   /** Signed read URLs expire; the parent refetches the detail for a fresh one. */
   readonly onSignatureError?: () => void;
   /** A successful load resets the parent's retry budget. */
@@ -37,9 +39,15 @@ function fmt(d: Date): string {
  * display logic; renders logo lockup, meta box, parties, line-item table,
  * notes, and totals. No data fetching or event handlers.
  */
-export function InvoiceDocument({ invoice, org, onSignatureError, onSignatureLoad }: Props) {
+export function InvoiceDocument({
+  invoice,
+  org,
+  signatureUnavailable = false,
+  onSignatureError,
+  onSignatureLoad,
+}: Props) {
   const m = invoiceDocModel(invoice);
-  const sig = signatureBlock(invoice);
+  const sig = signatureBlock(invoice, signatureUnavailable);
 
   // The sheet is pinned to --surface-raised (pure white): this is paper, and it
   // must keep reading as paper against the warm canvas.
