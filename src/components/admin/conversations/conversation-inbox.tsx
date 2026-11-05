@@ -1,17 +1,19 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { AlertCircle, Search, Inbox, MessagesSquare } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback, useSyncExternalStore } from 'react';
+import { Search, Inbox, MessagesSquare, RotateCw } from 'lucide-react';
 import { useAdminConversations } from '@/hooks/use-admin-conversations';
+import { useUrlFilterSync } from '@/hooks/use-url-filter-sync';
 import { ConversationDetailContent } from '@/components/admin/conversations/conversation-detail-content';
 import { ConversationDetailSheet } from '@/components/admin/conversation-detail-sheet';
 import { ChannelChip } from '@/components/admin/conversations/channel-chip';
 import { StatusBadge } from '@/components/admin/status-badge';
 import { ContextBadge } from '@/components/admin/ui/context-badge';
 import { EmptyState } from '@/components/admin/ui/empty-state';
+import { ErrorState } from '@/components/admin/ui/error-state';
 import { TabGroup } from '@/components/admin/ui/tab-group';
 import { Pager } from '@/components/admin/ui/pager';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -23,22 +25,46 @@ import {
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { formatRelativeTime } from '@/lib/admin/relative-time';
+import { conversationTitle } from '@/lib/admin/conversation-display';
+import { isUuid } from '@/lib/validation/uuid';
 import type { ConversationSummary } from '@/lib/admin/conversation-types';
 
 const ALL_STATUSES = 'all';
 const ALL_CHANNELS = 'all';
 const SEARCH_DEBOUNCE_MS = 300;
 const PER_PAGE = 50;
+/** Tailwind `lg` — at and above it the detail renders inline, not in a sheet. */
+const DESKTOP_QUERY = '(min-width: 1024px)';
 
+function subscribeDesktop(onChange: () => void): () => void {
+  const mql = window.matchMedia(DESKTOP_QUERY);
+  mql.addEventListener('change', onChange);
+  return () => mql.removeEventListener('change', onChange);
+}
+
+/**
+ * Desktop (lg+) shows the detail inline; below lg it opens in a sheet. Only
+ * ONE of them mounts, so a click loads the detail once and the sheet (which
+ * portals to <body>, out of reach of `lg:hidden`) never opens on desktop.
+ */
+function useIsDesktop(): boolean {
+  return useSyncExternalStore(
+    subscribeDesktop,
+    () => window.matchMedia(DESKTOP_QUERY).matches,
+    () => false,
+  );
+}
+
+// Office-meaningful statuses only; "extracting"/"confirmed" are brief internal
+// pipeline states.
 const STATUS_OPTIONS: readonly { readonly label: string; readonly value: string }[] = [
   { label: 'All statuses', value: ALL_STATUSES },
   { label: 'Chatting', value: 'chatting' },
-  { label: 'Extracting', value: 'extracting' },
-  { label: 'Confirmed', value: 'confirmed' },
   { label: 'Submitted', value: 'submitted' },
   { label: 'Escalated', value: 'escalated' },
   { label: 'Abandoned', value: 'abandoned' },
 ];
+const STATUS_VALUES: readonly string[] = STATUS_OPTIONS.map((o) => o.value);
 
 const CHANNEL_TABS: readonly { readonly id: string; readonly label: string }[] = [
   { id: ALL_CHANNELS, label: 'All' },
@@ -52,11 +78,6 @@ const CHANNEL_NOUN: Record<string, string> = {
   sms: 'SMS',
   web: 'web',
 };
-
-/** Statuses that warrant a "needs action" marker on the row. */
-function needsAction(status: string): boolean {
-  return status === 'escalated';
-}
 
 function ConversationRow({
   conversation,
@@ -73,13 +94,19 @@ function ConversationRow({
   readonly onRef: (el: HTMLButtonElement | null) => void;
   readonly onSelect: () => void;
 }) {
+  const title = conversationTitle(conversation);
+  // Second line: the request number when the title is the customer's name.
+  const subtitle =
+    conversation.customerName && conversation.referenceNumber
+      ? conversation.referenceNumber
+      : null;
   return (
     <button
       ref={onRef}
       type="button"
       tabIndex={tabIndex}
       onClick={onSelect}
-      aria-label={`Open conversation ${conversation.referenceNumber ?? conversation.id.slice(0, 8)}`}
+      aria-label={`Open conversation ${title}`}
       aria-current={isSelected}
       className={cn(
         'relative flex w-full items-start gap-3 border-b border-border px-4 py-3 text-left transition-colors',
@@ -94,43 +121,77 @@ function ConversationRow({
       <ChannelChip channel={conversation.channel} size="sm" />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="truncate font-mono text-[13px] font-medium tabular-nums">
-            {conversation.referenceNumber ?? conversation.id.slice(0, 8)}
+          <span
+            className={cn(
+              'truncate text-[13px] font-medium',
+              !conversation.customerName && 'font-mono tabular-nums',
+            )}
+          >
+            {title}
           </span>
-          {needsAction(conversation.status) && (
-            <ContextBadge
-              variant="warning"
-              label="Needs action"
-              className="shrink-0"
-            />
-          )}
           <span className="ml-auto shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
-            {formatRelativeTime(conversation.lastMessageAt ?? conversation.updatedAt)}
+            {formatRelativeTime(conversation.lastMessageAt ?? conversation.createdAt)}
           </span>
         </div>
+        {subtitle && (
+          <p className="font-mono text-[11px] tabular-nums text-muted-foreground">{subtitle}</p>
+        )}
         <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
-          {conversation.preview ?? 'No messages yet'}
+          {conversation.preview ?? 'No customer messages yet'}
         </p>
         <div className="mt-1.5 flex items-center gap-2">
-          <StatusBadge status={conversation.status} />
+          {/* "Needs action" already says "escalated"; show one or the other. */}
+          {conversation.needsAction ? (
+            <ContextBadge variant="warning" label="Needs action" className="shrink-0" />
+          ) : (
+            <StatusBadge status={conversation.status} />
+          )}
         </div>
       </div>
     </button>
   );
 }
 
-export function ConversationInbox() {
+interface ConversationInboxProps {
+  /** Permanent delete is super_admin-only server-side; hide it for others. */
+  readonly canDelete: boolean;
+}
+
+export function ConversationInbox({ canDelete }: ConversationInboxProps) {
   const [statusFilter, setStatusFilter] = useState<string>(ALL_STATUSES);
   const [channelFilter, setChannelFilter] = useState<string>(ALL_CHANNELS);
+  const [needsActionOnly, setNeedsActionOnly] = useState<boolean>(false);
+  const [includeEmpty, setIncludeEmpty] = useState<boolean>(false);
   const [searchInput, setSearchInput] = useState<string>('');
   const [debouncedSearch, setDebouncedSearch] = useState<string>('');
   const [page, setPage] = useState<number>(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  // Drives the mobile (<lg) slide-over; desktop renders the pane inline.
-  const [mobileOpenId, setMobileOpenId] = useState<string | null>(null);
+  const isDesktop = useIsDesktop();
   // Keyboard navigation: focusedIndex tracks the arrow-key cursor in the list.
   const [focusedIndex, setFocusedIndex] = useState<number>(-1);
   const rowRefs = useRef<Array<HTMLButtonElement | null>>([]);
+
+  // Filters + the open conversation live in the URL (shareable, survive reload).
+  const urlState = {
+    status: statusFilter === ALL_STATUSES ? '' : statusFilter,
+    channel: channelFilter === ALL_CHANNELS ? '' : channelFilter,
+    action: needsActionOnly ? '1' : '',
+    empty: includeEmpty ? '1' : '',
+    q: searchInput,
+    c: selectedId ?? '',
+  };
+  const restoreFromUrl = useCallback((p: Record<string, string>) => {
+    if (p.status && STATUS_VALUES.includes(p.status)) setStatusFilter(p.status);
+    if (p.channel && CHANNEL_TABS.some((t) => t.id === p.channel)) setChannelFilter(p.channel);
+    if (p.action === '1') setNeedsActionOnly(true);
+    if (p.empty === '1') setIncludeEmpty(true);
+    if (p.q) {
+      setSearchInput(p.q);
+      setDebouncedSearch(p.q);
+    }
+    if (p.c && isUuid(p.c)) setSelectedId(p.c);
+  }, []);
+  useUrlFilterSync(urlState, restoreFromUrl);
 
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -143,26 +204,29 @@ export function ConversationInbox() {
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
     setPage(1);
-  }, [statusFilter, channelFilter, debouncedSearch]);
+  }, [statusFilter, channelFilter, debouncedSearch, needsActionOnly, includeEmpty]);
 
-  const { conversations, total, isLoading, error, refetch } = useAdminConversations({
-    status: statusFilter === ALL_STATUSES ? undefined : statusFilter,
-    channel: channelFilter === ALL_CHANNELS ? undefined : channelFilter,
-    search: debouncedSearch || undefined,
-    page,
-    limit: PER_PAGE,
-  });
+  const { conversations, total, needsActionCount, isLoading, error, refetch } =
+    useAdminConversations({
+      status: statusFilter === ALL_STATUSES ? undefined : statusFilter,
+      channel: channelFilter === ALL_CHANNELS ? undefined : channelFilter,
+      search: debouncedSearch || undefined,
+      needsAction: needsActionOnly,
+      includeEmpty,
+      page,
+      limit: PER_PAGE,
+    });
 
   const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
   const safePage = Math.min(page, totalPages);
 
-  const selected =
-    conversations.find((c) => c.id === selectedId) ?? null;
   const channelNoun = channelFilter === ALL_CHANNELS ? '' : CHANNEL_NOUN[channelFilter] ?? '';
   const isFiltered =
     statusFilter !== ALL_STATUSES ||
     channelFilter !== ALL_CHANNELS ||
+    needsActionOnly ||
     debouncedSearch.length > 0;
+  const isFirstLoad = isLoading && conversations.length === 0;
 
   // Reset focusedIndex when the list changes so stale arrow positions don't persist.
   useEffect(() => {
@@ -172,8 +236,16 @@ export function ConversationInbox() {
 
   const handleSelect = useCallback((id: string) => {
     setSelectedId(id);
-    setMobileOpenId(id);
   }, []);
+
+  const handleDeleted = useCallback(() => {
+    setSelectedId(null);
+    void refetch();
+  }, [refetch]);
+
+  const handleChanged = useCallback(() => {
+    void refetch();
+  }, [refetch]);
 
   // Arrow key / Enter navigation on the list pane (keyboard-first requirement).
   const handleListKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -196,15 +268,6 @@ export function ConversationInbox() {
 
   return (
     <div className="flex h-full flex-col">
-      {error && (
-        <div className="p-4">
-          <Alert variant="destructive">
-            <AlertCircle className="size-4" />
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        </div>
-      )}
-
       <div className="flex min-h-0 flex-1">
         {/* LEFT: list pane */}
         <div className="flex w-full shrink-0 flex-col border-r border-border-strong bg-surface lg:w-[380px]">
@@ -214,7 +277,8 @@ export function ConversationInbox() {
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 type="search"
-                placeholder="Search conversations..."
+                placeholder="Search name, phone, request or message…"
+                aria-label="Search conversations"
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 className="h-9 w-full pl-9"
@@ -247,6 +311,28 @@ export function ConversationInbox() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="flex items-center justify-between gap-3 pb-3">
+              <Button
+                type="button"
+                size="sm"
+                variant={needsActionOnly ? 'default' : 'outline'}
+                aria-pressed={needsActionOnly}
+                onClick={() => setNeedsActionOnly((v) => !v)}
+              >
+                Needs action
+                <span className="font-mono tabular-nums">{needsActionCount}</span>
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                aria-pressed={includeEmpty}
+                onClick={() => setIncludeEmpty((v) => !v)}
+                className="text-muted-foreground"
+              >
+                {includeEmpty ? 'Hide empty chats' : 'Show empty chats'}
+              </Button>
+            </div>
           </div>
 
           {/* Rows */}
@@ -260,7 +346,18 @@ export function ConversationInbox() {
               isLoading && conversations.length > 0 && 'opacity-50 pointer-events-none',
             )}
           >
-            {isLoading && conversations.length === 0 ? (
+            {error && conversations.length === 0 ? (
+              <ErrorState
+                title="Couldn't load conversations"
+                description="Check your connection and try again."
+                action={
+                  <Button variant="outline" size="sm" onClick={() => void refetch()}>
+                    <RotateCw className="size-3.5" />
+                    Try again
+                  </Button>
+                }
+              />
+            ) : isFirstLoad ? (
               <div className="space-y-px">
                 {Array.from({ length: 6 }, (_, i) => (
                   <div key={`skeleton-${i}`} className="flex gap-3 border-b border-border px-4 py-3">
@@ -277,14 +374,18 @@ export function ConversationInbox() {
               <EmptyState
                 icon={Inbox}
                 title={
-                  isFiltered
-                    ? `No ${channelNoun} conversations match`
-                    : 'No conversations yet'
+                  needsActionOnly && !debouncedSearch
+                    ? 'Nothing needs action'
+                    : isFiltered
+                      ? `No ${channelNoun ? `${channelNoun} ` : ''}conversations match`
+                      : 'No conversations yet'
                 }
                 description={
-                  isFiltered
-                    ? 'Try a different channel, status, or search.'
-                    : 'New conversations from chat, phone, and SMS will appear here.'
+                  needsActionOnly && !debouncedSearch
+                    ? 'Escalated conversations show up here until someone marks them handled.'
+                    : isFiltered
+                      ? 'Try a different channel, status, or search.'
+                      : 'New conversations from chat, phone, and SMS will appear here.'
                 }
               />
             ) : (
@@ -306,7 +407,7 @@ export function ConversationInbox() {
             <Pager
               page={safePage}
               totalPages={totalPages}
-              total={total}
+              total={isFirstLoad || (error && conversations.length === 0) ? undefined : total}
               perPage={PER_PAGE}
               onPageChange={setPage}
               showFirstLast
@@ -316,15 +417,14 @@ export function ConversationInbox() {
 
         {/* RIGHT: detail pane (desktop only) */}
         <div className="hidden min-w-0 flex-1 flex-col bg-background lg:flex">
-          {selected ? (
+          {isDesktop && selectedId ? (
             <ConversationDetailContent
-              key={selected.id}
-              conversationId={selected.id}
+              key={selectedId}
+              conversationId={selectedId}
+              canDelete={canDelete}
               onClose={() => setSelectedId(null)}
-              onDeleted={() => {
-                setSelectedId(null);
-                void refetch();
-              }}
+              onDeleted={handleDeleted}
+              onChanged={handleChanged}
             />
           ) : (
             <EmptyState
@@ -338,17 +438,13 @@ export function ConversationInbox() {
       </div>
 
       {/* Mobile (<lg): tapping a row opens the slide-over sheet */}
-      <div className="lg:hidden">
-        <ConversationDetailSheet
-          conversationId={mobileOpenId}
-          onClose={() => setMobileOpenId(null)}
-          onDeleted={() => {
-            setMobileOpenId(null);
-            setSelectedId(null);
-            void refetch();
-          }}
-        />
-      </div>
+      <ConversationDetailSheet
+        conversationId={isDesktop ? null : selectedId}
+        canDelete={canDelete}
+        onClose={() => setSelectedId(null)}
+        onDeleted={handleDeleted}
+        onChanged={handleChanged}
+      />
     </div>
   );
 }

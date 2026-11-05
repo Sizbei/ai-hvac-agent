@@ -132,5 +132,5 @@ export interface ModeIndicator {
  * the generic `ContextBadge` since mode isn't a status-colors entry.
  */
 export function modeIndicator(mode: string): ModeIndicator {
-  return mode === 'human' ? { label: 'Human', variant: 'warning' } : { label: 'AI', variant: 'info' };
+  return mode === 'human' ? { label: 'Office replying', variant: 'warning' } : { label: 'AI replying', variant: 'info' };
 }

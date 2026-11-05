@@ -66,7 +66,7 @@ export function RecentConversationsCard() {
           {recent.map((c) => (
             <li key={c.id}>
               <Link
-                href="/admin/conversations"
+                href={`/admin/conversations?c=${c.id}`}
                 className="flex items-start gap-3 rounded-[3px] px-2 py-2.5 transition-colors hover:bg-row-hover"
               >
                 <ChannelChip channel={c.channel} size="sm" />

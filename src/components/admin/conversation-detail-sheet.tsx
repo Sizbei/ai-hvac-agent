@@ -7,6 +7,8 @@ interface ConversationDetailSheetProps {
   readonly conversationId: string | null;
   readonly onClose: () => void;
   readonly onDeleted?: () => void;
+  readonly onChanged?: () => void;
+  readonly canDelete: boolean;
 }
 
 /**
@@ -19,6 +21,8 @@ export function ConversationDetailSheet({
   conversationId,
   onClose,
   onDeleted,
+  onChanged,
+  canDelete,
 }: ConversationDetailSheetProps) {
   const isOpen = conversationId !== null;
 
@@ -35,6 +39,8 @@ export function ConversationDetailSheet({
           conversationId={conversationId}
           onClose={onClose}
           onDeleted={onDeleted}
+          onChanged={onChanged}
+          canDelete={canDelete}
         />
       </SheetContent>
     </Sheet>

@@ -124,12 +124,12 @@ describe('replyErrorToCopy', () => {
 });
 
 describe('modeIndicator', () => {
-  it('renders human mode as a Human/warning indicator', () => {
-    expect(modeIndicator('human')).toEqual({ label: 'Human', variant: 'warning' });
+  it('renders human mode as an Office replying/warning indicator', () => {
+    expect(modeIndicator('human')).toEqual({ label: 'Office replying', variant: 'warning' });
   });
 
-  it('renders ai mode (and any other value) as an AI/info indicator', () => {
-    expect(modeIndicator('ai')).toEqual({ label: 'AI', variant: 'info' });
-    expect(modeIndicator('unknown')).toEqual({ label: 'AI', variant: 'info' });
+  it('renders ai mode (and any other value) as an AI replying/info indicator', () => {
+    expect(modeIndicator('ai')).toEqual({ label: 'AI replying', variant: 'info' });
+    expect(modeIndicator('unknown')).toEqual({ label: 'AI replying', variant: 'info' });
   });
 });
