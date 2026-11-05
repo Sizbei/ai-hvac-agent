@@ -55,6 +55,27 @@ ErrorState, SkeletonTable…). Status colors ONLY via
 `src/lib/admin/status-colors.ts`. Bricolage Grotesque display font via
 tokens; one cyan accent; oklch tokens in globals.
 
+Shared UI and shell behaviour:
+
+- `Select` (`src/components/ui/select.tsx`) passes Base UI an `items` list
+  collected from its `SelectItem` children (`collectSelectItems` in
+  `select-items.ts`), so the trigger shows the option LABEL, not the raw value.
+  Items rendered inside a custom wrapper component aren't seen; pass `items`
+  yourself there.
+- `SheetContent` side widths are plain classes (`w-3/4 sm:max-w-sm` for
+  left/right), so a caller's `w-full sm:w-[480px] sm:max-w-[480px]` wins.
+- Tab titles: client pages call `useAdminPageTitle('<Page>')`
+  (`src/components/admin/org-name-context.tsx`) → "<Page> · <org name>";
+  server pages set `metadata.title = '<Page>'` and the dashboard layout's
+  template adds the org. Never hardcode a brand.
+- Phone shell: the top bar shows the org name (`AdminHeader orgName`); the
+  drawer is a left `Sheet` (Esc, focus trap); its Search button closes the
+  drawer first. Active nav + top-bar title use `navItemMatches` / `navLabelFor`
+  in `nav-items.ts`.
+- ⌘K search (`search-queries.ts`): request results link to
+  `/admin/requests?request=<id>` (there is no `/admin/requests/[id]` page);
+  conversations are searched by captured metadata + request number.
+
 ## Copy canon (enforced by review waves)
 
 request (not job/booking — "Bookings" allowed only as the customer-profile

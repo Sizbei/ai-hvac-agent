@@ -24,15 +24,54 @@ Hooks
 `customer_sessions`, `messages`.
 
 **Data flow:** `useAdminConversations` fetches `/api/admin/conversations` with
-status + channel + search filters; server-paginated at 50/page. Selecting a row
-loads `/api/admin/conversations/[id]` for the full message thread. No polling —
-operator refreshes manually or selects another row.
+status + channel + search + `needsAction=1` + `includeEmpty=1` filters;
+server-paginated at 50/page, sorted by last message time (falls back to
+`created_at`), and returns an org-wide `needsActionCount`. The list polls every
+10s. Selecting a row loads `/api/admin/conversations/[id]`. Filters and the
+open conversation live in the URL (`status`, `channel`, `action`, `empty`, `q`,
+`c=<session id>`); the dashboard card and ⌘K results deep-link with `?c=`.
+Pure display/triage helpers: `src/lib/admin/conversation-display.ts`
+(`needsAction`, `conversationTitle`, `extractedFields`, `messageAuthors`,
+`phoneDigitsQuery`).
+
+**One detail view per breakpoint:** `useIsDesktop()` (matchMedia `lg`) mounts
+EITHER the inline pane OR the sheet — never both. The sheet portals to `<body>`,
+so a `lg:hidden` wrapper can't hide it; don't go back to opening it on every
+click.
+
+**Needs action:** `customer_sessions.handled_at` (migration 0055). Needs action
+= `status = 'escalated'` AND (`handled_at IS NULL` OR a customer message after
+it) — SQL `needsActionSql` in the queries mirrors the pure `needsAction`.
+`PATCH /api/admin/conversations/[id]` `{ handled: boolean }` (any admin, only
+escalated rows, 404 otherwise) sets/clears it and audits
+`conversation_marked_handled` / `conversation_reopened` with ids only.
+
+**Empty sessions:** a session with no `user` message AND no linked request is a
+widget open; it is hidden unless `includeEmpty=1` ("Show empty chats"). Nothing
+is deleted.
+
+**Search:** session id, captured metadata (name/phone/email/address), linked
+request number, message text, and — for a phone-shaped query — the digits of
+metadata + SMS token (`phoneDigitsQuery`).
 
 **Invariants:**
 - `page.tsx` intentionally omits PageShell (no `<h1>` wrapper, full-bleed
-  layout); the `<h1>` is SR-only inside the page div.
-- `ConversationDetailContent` has a reply composer at the bottom (above the
-  delete footer): a `Textarea` bound to `REPLY_MAX_LENGTH` (1600, mirrors the
+  layout); the `<h1>` is SR-only inside the page div. It reads the session to
+  pass `canDelete` (super_admin) — Delete is hidden for everyone else and sits
+  at the end of the scroll body, not pinned.
+- The header is titled by the intake customer name (else request number, else
+  short id) and links the request (`/admin/requests?request=<id>` + an "Open
+  request" button). Extracted data shows only the office fields in
+  `EXTRACTED_FIELDS` with human labels; bot state keys (reAskCount,
+  empathyShown…) are hidden. Phone/email rows are `tel:`/`mailto:`.
+- Staff replies are stored as role `assistant` (send route unchanged); the
+  detail returns `staffReplyTimes` (the `conversation_reply_sent` audit rows)
+  and `messageAuthors` labels the matching message "Office", not "AI
+  assistant".
+- List/detail failures render `ErrorState` with "Try again" and human copy —
+  never `body.error.message`.
+- `ConversationDetailContent` has a reply composer pinned at the bottom, ONLY
+  for `canReplyByChannel` channels (SMS) — phone/web threads get no panel: a `Textarea` bound to `REPLY_MAX_LENGTH` (1600, mirrors the
   server's zod bound) that POSTs to the message API and re-fetches the detail
   silently on success. `canReplyByChannel` only allows `sms` client-side — the
   server (`UNSUPPORTED_CHANNEL`) is still the authority, since a closed/retired
@@ -46,8 +85,8 @@ operator refreshes manually or selects another row.
 - On send, the route sets `mode='human'` on the session so the bot stops
   auto-replying (checked in `sms/incoming` handler). Never bypass this. The
   detail panel shows a `ContextBadge` from `modeIndicator(detail.mode)` next to
-  the status badge, and a "you've taken over" hint under the composer while
-  `mode === 'human'`.
+  the status badge (text threads only; "AI replying" / "Office replying"), and
+  a "you've taken over" hint under the composer while `mode === 'human'`.
 - `detail.outcome` (AI post-hoc classification) and `detail.nextSteps`
   (suggested next steps list) render in their own card above Overview when
   present — these fields existed on `ConversationDetail` before but were
@@ -64,13 +103,15 @@ operator refreshes manually or selects another row.
 - Tenancy: every query goes through `withTenant(customerSessions, organizationId)`.
 
 **Gotchas:**
-- Status values in the filter dropdown: chatting · extracting · confirmed ·
-  submitted · escalated · abandoned — match the enum in schema exactly.
-- `needsAction(status)` marks only `escalated` rows; other statuses are
-  informational.
+- Status filter offers chatting · submitted · escalated · abandoned (the
+  brief `extracting` / `confirmed` pipeline states are left out); values match
+  the schema enum.
+- A row shows "Needs action" OR its status badge, never both.
 - Deleting a conversation uses `db.batch` (not `db.transaction`) — neon-http
   has no interactive transactions.
 
 **Verify changes:** `npx vitest run src/lib/admin/conversation-queries.test.ts
+src/lib/admin/conversation-display.test.ts
+src/app/api/admin/conversations
 src/components/admin/conversations/conversation-reply-logic.test.ts`.
 Visual via the admin-pages recipe (`/admin/conversations`).
