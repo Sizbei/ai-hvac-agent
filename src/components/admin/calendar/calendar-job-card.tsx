@@ -6,19 +6,13 @@ import { formatBusinessTime } from '@/lib/admin/calendar-time';
 import { urgencyAccent } from '@/lib/admin/urgency-accent';
 import type { DashboardRequest } from '@/lib/admin/types';
 import { SyncPill } from '@/components/admin/sync-pill';
+import { issueTypeLabel } from '@/lib/admin/request-labels';
 
 interface CalendarJobCardProps {
   readonly job: DashboardRequest;
   readonly onSelect: (id: string) => void;
   /** Compact variant for the dense week grid — hides secondary metadata. */
   readonly compact?: boolean;
-}
-
-function formatIssueType(issueType: string): string {
-  return issueType
-    .split('_')
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
 }
 
 /**
@@ -70,7 +64,7 @@ export function CalendarJobCard({ job, onSelect, compact }: CalendarJobCardProps
       {!compact && (
         <>
           <span className="truncate text-[11px] leading-[14px] text-muted-foreground">
-            {formatIssueType(job.issueType)} ·{' '}
+            {issueTypeLabel(job.issueType)} ·{' '}
             <span className="font-mono">{job.referenceNumber}</span>
           </span>
           <span className="mt-0.5 flex flex-wrap items-center gap-1">

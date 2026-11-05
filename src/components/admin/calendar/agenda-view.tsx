@@ -12,6 +12,7 @@ import {
 import type { AgendaBooking } from '@/lib/admin/types';
 import { SyncPill } from '@/components/admin/sync-pill';
 import { REQUEST_STATUS_DOT, REQUEST_STATUS_DOT_DEFAULT } from '@/lib/admin/status-colors';
+import { issueTypeLabel } from '@/lib/admin/request-labels';
 
 interface AgendaViewProps {
   readonly bookings: readonly AgendaBooking[];
@@ -117,7 +118,7 @@ function AgendaRow({
       {/* body */}
       <div className="min-w-0 flex-1">
         <div className="truncate text-[13px] font-semibold">
-          {booking.issueType || 'Service request'}
+          {issueTypeLabel(booking.issueType)}
         </div>
         <div className="mt-0.5 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
           <span className="truncate font-medium text-foreground">

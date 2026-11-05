@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import type { AdminRequest } from '@/lib/admin/types';
 import { SyncPill } from '@/components/admin/sync-pill';
 import { ClipboardList } from 'lucide-react';
+import { issueTypeLabel } from '@/lib/admin/request-labels';
 
 interface RequestTableProps {
   readonly requests: readonly AdminRequest[];
@@ -21,13 +22,6 @@ interface RequestTableProps {
   readonly hasActiveFilters?: boolean;
   /** Called when the user clicks "Clear filters" in the empty state. */
   readonly onClearFilters?: () => void;
-}
-
-function formatIssueType(issueType: string): string {
-  return issueType
-    .split('_')
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
 }
 
 function formatDate(dateString: string): string {
@@ -49,7 +43,7 @@ const COLUMNS: ReadonlyArray<DataTableColumn<AdminRequest>> = [
   {
     key: 'issue',
     header: 'Issue',
-    cell: (r) => formatIssueType(r.issueType),
+    cell: (r) => issueTypeLabel(r.issueType),
   },
   {
     key: 'urgency',

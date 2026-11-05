@@ -121,9 +121,17 @@ describe('scoreTechnician', () => {
     const r = scoreTechnician(
       signals('t1', { skillJobsCompleted: 7, avgRating: 4.9, sameDayJobCount: 2 }),
     );
-    expect(r.reasons).toContain('7 prior no_cool jobs');
+    expect(r.reasons).toContain('7 prior no cooling requests');
     expect(r.reasons).toContain('4.9★');
-    expect(r.reasons).toContain('2 jobs today');
+    expect(r.reasons).toContain('2 requests today');
+    // No raw enum values reach the dispatcher.
+    for (const reason of r.reasons) expect(reason).not.toMatch(/_/);
+  });
+
+  it('singular counts read naturally', () => {
+    const r = scoreTechnician(signals('t1', { skillJobsCompleted: 1, sameDayJobCount: 1 }));
+    expect(r.reasons).toContain('1 prior no cooling request');
+    expect(r.reasons).toContain('1 request today');
   });
 
   it('down-ranks a tech whose day likely will not fit the job (-0.1 + reason)', () => {

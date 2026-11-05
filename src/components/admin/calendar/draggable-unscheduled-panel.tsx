@@ -14,6 +14,7 @@ import {
 } from '@/lib/admin/calendar-dnd';
 import { urgencyAccent } from '@/lib/admin/urgency-accent';
 import { DASHBOARD_LIST_LIMIT, type DashboardRequest } from '@/lib/admin/types';
+import { issueTypeLabel } from '@/lib/admin/request-labels';
 
 interface DraggableUnscheduledPanelProps {
   /** Jobs not yet placed: no technician and/or no arrival window. */
@@ -21,13 +22,6 @@ interface DraggableUnscheduledPanelProps {
   readonly isLoading: boolean;
   readonly onSelect: (id: string) => void;
   readonly disabled?: boolean;
-}
-
-function formatIssueType(issueType: string): string {
-  return issueType
-    .split('_')
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
 }
 
 function reason(job: DashboardRequest): string {
@@ -88,7 +82,7 @@ function UnscheduledRow({
         )}
       </div>
       <div className="truncate text-xs text-muted-foreground">
-        {formatIssueType(job.issueType)} ·{' '}
+        {issueTypeLabel(job.issueType)} ·{' '}
         <span className="font-mono">{job.referenceNumber}</span>
       </div>
       <div className="mt-1 flex items-center gap-1.5">

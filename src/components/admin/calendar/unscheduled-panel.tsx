@@ -7,19 +7,13 @@ import { UrgencyBadge } from '@/components/admin/urgency-badge';
 import { StatusBadge } from '@/components/admin/status-badge';
 import { urgencyAccent } from '@/lib/admin/urgency-accent';
 import { DASHBOARD_LIST_LIMIT, type DashboardRequest } from '@/lib/admin/types';
+import { issueTypeLabel } from '@/lib/admin/request-labels';
 
 interface UnscheduledPanelProps {
   /** Jobs not yet placed: no technician and/or no arrival window. */
   readonly jobs: readonly DashboardRequest[];
   readonly isLoading: boolean;
   readonly onSelect: (id: string) => void;
-}
-
-function formatIssueType(issueType: string): string {
-  return issueType
-    .split('_')
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
 }
 
 function reason(job: DashboardRequest): string {
@@ -90,7 +84,7 @@ export function UnscheduledPanel({ jobs, isLoading, onSelect }: UnscheduledPanel
                   )}
                 </div>
                 <div className="truncate text-xs text-muted-foreground">
-                  {formatIssueType(job.issueType)} ·{' '}
+                  {issueTypeLabel(job.issueType)} ·{' '}
                   <span className="font-mono">{job.referenceNumber}</span>
                 </div>
                 <div className="mt-1 flex items-center gap-1.5">

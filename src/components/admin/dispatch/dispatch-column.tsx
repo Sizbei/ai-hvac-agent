@@ -8,6 +8,7 @@ import { ContextBadge } from '@/components/admin/ui/context-badge';
 import { BUSINESS_TIME_ZONE } from '@/lib/admin/calendar-time';
 import { urgencyAccent } from '@/lib/admin/urgency-accent';
 import type { DashboardRequest } from '@/lib/admin/types';
+import { issueTypeLabel } from '@/lib/admin/request-labels';
 
 interface DispatchColumnProps {
   readonly title: string;
@@ -15,13 +16,6 @@ interface DispatchColumnProps {
   readonly isUnassigned?: boolean;
   readonly jobs: readonly DashboardRequest[];
   readonly onSelect: (id: string) => void;
-}
-
-function formatIssueType(issueType: string): string {
-  return issueType
-    .split('_')
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
 }
 
 /**
@@ -81,7 +75,7 @@ function JobCard({
       </div>
       <div className="mt-0.5 truncate text-sm">{job.customerName ?? 'Unknown'}</div>
       <div className="truncate text-xs text-muted-foreground">
-        {formatIssueType(job.issueType)} ·{' '}
+        {issueTypeLabel(job.issueType)} ·{' '}
         <span className="font-mono">{job.referenceNumber}</span>
       </div>
       <div className="mt-1 flex items-center gap-1.5">

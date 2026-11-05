@@ -3,6 +3,7 @@
  * money/ops decision that must be explainable, cheap, and hallucination-free.
  * All weights are constants (ML-tunable later). See the design spec.
  */
+import { humanizeCode, inSentence, jobTypeLabel } from "@/lib/admin/request-labels";
 
 export interface DispatchSignals {
   readonly job: {
@@ -101,8 +102,15 @@ export function sumAvailabilityMinutes(
 const DURATION_FIT_PENALTY = 0.1;
 
 /** A short label for the job's specialty, for human-readable reasons. */
+/** Office words for the skill a reason names: "service call", never "service_call". */
 function skillLabel(job: DispatchSignals['job']): string {
-  return job.jobType ?? job.systemType ?? 'matching';
+  if (job.jobType) return inSentence(jobTypeLabel(job.jobType));
+  if (job.systemType) return inSentence(humanizeCode(job.systemType));
+  return 'matching';
+}
+
+function plural(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
 }
 
 // Neutral travel term for a candidate with NO location signal when OTHER
@@ -176,7 +184,7 @@ export function scoreTechnician(
   if (dayLikelyFull) reasons.push("day likely full");
   reasons.push(
     skillMatched
-      ? `${tech.skillJobsCompleted} prior ${skillLabel(job)} jobs`
+      ? `${plural(tech.skillJobsCompleted, `prior ${skillLabel(job)} request`, `prior ${skillLabel(job)} requests`)}`
       : `no prior ${skillLabel(job)} experience`,
   );
   if (tech.avgRating != null) reasons.push(`${tech.avgRating.toFixed(1)}★`);
@@ -184,7 +192,7 @@ export function scoreTechnician(
   if (tech.avgJobRevenueCents > 0) {
     reasons.push(`$${Math.round(tech.avgJobRevenueCents / 100)} avg ticket`);
   }
-  reasons.push(`${tech.sameDayJobCount} jobs today`);
+  reasons.push(plural(tech.sameDayJobCount, 'request today', 'requests today'));
 
   return {
     technicianId: tech.technicianId,

@@ -68,6 +68,7 @@ import { humanizeSeconds } from '@/lib/admin/duration-format';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
 import { SyncPill } from '@/components/admin/sync-pill';
+import { issueTypeLabel } from '@/lib/admin/request-labels';
 
 // Only manual targets can ever be a transition button — narrowing the map to
 // those keys makes any drift from the state machine a compile error rather than
@@ -968,12 +969,6 @@ export function RequestDetailSheet({
     }
   }, [requestId, selectedTechId, detail, technicians, onAssigned, isReassignMode]);
 
-  const formatIssueType = (issueType: string): string =>
-    issueType
-      .split('_')
-      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-      .join(' ');
-
   const activeTechnicians = technicians.filter((t) => t.isActive);
   const isOpen = requestId !== null;
 
@@ -1044,7 +1039,7 @@ export function RequestDetailSheet({
                   <div className="flex justify-between">
                     <span className="text-sm text-muted-foreground">Type</span>
                     <span className="text-sm font-medium">
-                      {formatIssueType(detail.issueType)}
+                      {issueTypeLabel(detail.issueType)}
                     </span>
                   </div>
                   {detail.description && (
@@ -1241,12 +1236,7 @@ export function RequestDetailSheet({
                             className="flex items-start justify-between gap-2 rounded-md border border-border bg-surface-sunken p-2"
                           >
                             <div className="min-w-0">
-                              <p className="text-sm font-medium">
-                                {name}{' '}
-                                <span className="text-xs font-normal text-muted-foreground">
-                                  · score {Math.round(s.score * 100)}
-                                </span>
-                              </p>
+                              <p className="text-sm font-medium">{name}</p>
                               <p className="text-xs text-muted-foreground">
                                 {s.reasons.join(' · ')}
                               </p>
