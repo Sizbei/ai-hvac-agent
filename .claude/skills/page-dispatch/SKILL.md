@@ -57,6 +57,13 @@ detail sheet opens for an unassigned request — fail-open (empty = no card show
   `dispatchDecisions` (overriddenTechnicianId, overriddenByUserId, overriddenAt).
 
 **Gotchas:**
+- Columns render busy-first (`busyColumnsFirst`,
+  `src/lib/admin/dispatch-board-order.ts`).
+- `GET /requests/[id]/decision` answers 200 with `data: null` when no decision
+  exists (was 404 on every sheet open).
+- Suggestion reasons use `jobTypeLabel` words and singular/plural counts; the
+  sheet shows no raw score number.
+
 - Date stepper is UTC-safe for WHOLE-day shifts only (`shiftDate` uses UTC
   arithmetic) — do not introduce `getDate`/`setDate` without a TZ offset.
 - Exceptions rail only shows when `board.exceptions.length > 0` — the card is

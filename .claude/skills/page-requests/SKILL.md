@@ -139,6 +139,12 @@ visits #2+ yet (M2).
   debounce window, not on every keystroke.
 - Search is capped at 64 chars server-side (reference numbers are ≤20 chars;
   the cap is a defensive guard, not a feature).
+- Search matches reference prefixes: a bare fragment ("cf94") also matches
+  with "HVAC-" in front (`src/lib/admin/request-search.ts`,
+  `referenceSearchPatterns`). Customer names are encrypted, so name search is
+  not supported; the placeholder and no-match copy say so.
+- Below `sm` the list renders cards (`RequestCards` in `request-table.tsx`),
+  not the table.
 - `sort` accepted values: `newest` (default, omitted from URL), `oldest`,
   `urgency`. Any other value is rejected; the server re-validates with
   `VALID_SORTS`.
@@ -148,6 +154,22 @@ visits #2+ yet (M2).
   (`?afterHours=1` in the URL for brevity).
 
 **Gotchas:**
+- Detail sheet: reassign (PATCH `/assign`) is allowed from any in-flight
+  status incl. `scheduled` — `REASSIGNABLE_STATUSES` in
+  `src/lib/admin/request-status.ts` (calendar-drag parity); the visit-one guard
+  still refuses once a technician has progress. 409 copy uses
+  `requestStatusLabel`, never the raw enum.
+- Detail sheet: "Cancel request" goes through a ConfirmDialog; hold reason and
+  follow-up date show only after "Put on hold"; the date/window inputs start
+  from the stored window via `scheduleInputsFrom`
+  (`src/lib/admin/request-schedule-inputs.ts`) and Save is disabled until the
+  choice changes (`canSaveSchedule`); terminal requests show no controls.
+- New request dialog: Esc/X/backdrop/Cancel ask "Discard this request?" when
+  `isDraftDirty` (create-request.ts) is true.
+- Enum labels on read surfaces come from `src/lib/admin/request-labels.ts`
+  (`issueTypeLabel`, `jobTypeLabel`, `urgencyLabel`) — don't add local
+  formatIssueType copies.
+
 - `refetch` on `useAdminRequests` busts the SWR cache (`bust: true`) so a
   status change committed via the detail sheet always fetches fresh data, not
   the cached page.

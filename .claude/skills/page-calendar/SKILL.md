@@ -65,6 +65,16 @@ sources ignore shifts. The calendar still renders requests only; visits #2+
 offers "Schedule anyway" for a time-off conflict (server refuses it).
 
 **Gotchas:**
+- A job whose window lies wholly outside the drawn hours is pinned to the
+  lane's top/bottom edge (`placeJobInLane` in calendar-time.ts, dashed
+  outline) — never drop it silently; the lane header counts it.
+- Lanes are `shrink-0` with `height: GRID_PX`; `flex-1` squeezed them by the
+  header height. Day and week axes both sit under a `pt-7` wrapper.
+- Drag announcements come from `describeDragJob`/`describeDropTarget`
+  (calendar-dnd.ts); draggables carry a `label`. Never let dnd-kit read ids.
+- Month cells are divs; the day-number button stretches over the cell (no
+  button-in-button).
+
 - `onStatus` callback surfaces a transient `CalendarStatus` banner (warning or
   error) from `InteractiveSchedulingCalendar` after a reschedule — a rollback
   posts an error tone, a soft conflict posts warning.

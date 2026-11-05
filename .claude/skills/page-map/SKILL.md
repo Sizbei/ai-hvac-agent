@@ -46,6 +46,9 @@ at intake; missed geocodes are backfilled by the booking-recovery cron.
   scheme; omitted for localhost; route is force-dynamic.
 
 **Gotchas:**
+- `JOB_PIN_LEGEND` (in both `dispatch-map.tsx` and `apple-dispatch-map.tsx`)
+  must list every `jobColor` in `map-pins.ts`, including Low (#0891b2). The
+  MapLibre status chips sit at `bottom-10` to clear the attribution bar.
 - Apple branch is inert until APPLE_TEAM_ID / APPLE_MAPKIT_KEY_ID /
   APPLE_MAPKIT_PRIVATE_KEY exist (\n-escaped .p8; see .env.example).
 - Dev DB: active requests have seeded cached locations near Johnson City
