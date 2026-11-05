@@ -7,6 +7,7 @@
  * IP/timestamp capture.
  */
 import { randomBytes, randomUUID, createHash } from "node:crypto";
+import { v7 as uuidv7 } from "uuid";
 import { and, asc, count, desc, eq, inArray, isNull, lt, sql, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
@@ -97,7 +98,9 @@ export async function createEstimate(
     });
     for (const li of opt.lineItems) {
       lineRows.push({
-        id: randomUUID(),
+        // v7 ids are time-ordered, so reading lines back ORDER BY id keeps the
+        // order they were added in (random v4 ids shuffled them).
+        id: uuidv7(),
         optionId,
         pricebookItemId: li.pricebookItemId ?? null,
         name: li.name,
@@ -353,6 +356,21 @@ const EFFECTIVE_CREATED_AT_SQL = sql`
   )
 `;
 
+// What an estimate is worth: the SOLD option's total once one is chosen
+// (customer e-sign or office Mark sold), else the headline total (the largest
+// option — the most an open estimate could become). Without this a sold
+// Good/Better/Best counted its Best price in "Won" even when Good was bought.
+// The estimate_id match keeps a stray sold_option_id from borrowing another
+// estimate's option.
+export const ESTIMATE_VALUE_SQL = sql<number>`
+  coalesce(
+    (select ${estimateOptions.totalCents} from ${estimateOptions}
+      where ${estimateOptions.id} = ${estimates.soldOptionId}
+        and ${estimateOptions.estimateId} = ${estimates.id}),
+    ${estimates.totalCents}
+  )
+`;
+
 export interface EstimatePipelineStats {
   readonly openCents: number;
   readonly openCount: number;
@@ -377,15 +395,15 @@ export async function getEstimatePipelineStats(
 ): Promise<EstimatePipelineStats> {
   const [row] = await db
     .select({
-      openCents: sql<number>`coalesce(sum(${estimates.totalCents}) filter (where (${BUCKET_CASE_SQL}) = 'open'), 0)::bigint`,
+      openCents: sql<number>`coalesce(sum(${ESTIMATE_VALUE_SQL}) filter (where (${BUCKET_CASE_SQL}) = 'open'), 0)::bigint`,
       openCount: sql<number>`count(*) filter (where (${BUCKET_CASE_SQL}) = 'open')::int`,
-      staleCents: sql<number>`coalesce(sum(${estimates.totalCents}) filter (where (${BUCKET_CASE_SQL}) = 'open' and (${EFFECTIVE_CREATED_AT_SQL}) < now() - interval '14 days'), 0)::bigint`,
+      staleCents: sql<number>`coalesce(sum(${ESTIMATE_VALUE_SQL}) filter (where (${BUCKET_CASE_SQL}) = 'open' and (${EFFECTIVE_CREATED_AT_SQL}) < now() - interval '14 days'), 0)::bigint`,
       staleCount: sql<number>`count(*) filter (where (${BUCKET_CASE_SQL}) = 'open' and (${EFFECTIVE_CREATED_AT_SQL}) < now() - interval '14 days')::int`,
-      wonCents: sql<number>`coalesce(sum(${estimates.totalCents}) filter (where (${BUCKET_CASE_SQL}) = 'won'), 0)::bigint`,
+      wonCents: sql<number>`coalesce(sum(${ESTIMATE_VALUE_SQL}) filter (where (${BUCKET_CASE_SQL}) = 'won'), 0)::bigint`,
       wonCount: sql<number>`count(*) filter (where (${BUCKET_CASE_SQL}) = 'won')::int`,
-      lostCents: sql<number>`coalesce(sum(${estimates.totalCents}) filter (where (${BUCKET_CASE_SQL}) = 'lost'), 0)::bigint`,
+      lostCents: sql<number>`coalesce(sum(${ESTIMATE_VALUE_SQL}) filter (where (${BUCKET_CASE_SQL}) = 'lost'), 0)::bigint`,
       lostCount: sql<number>`count(*) filter (where (${BUCKET_CASE_SQL}) = 'lost')::int`,
-      draftCents: sql<number>`coalesce(sum(${estimates.totalCents}) filter (where (${BUCKET_CASE_SQL}) = 'draft'), 0)::bigint`,
+      draftCents: sql<number>`coalesce(sum(${ESTIMATE_VALUE_SQL}) filter (where (${BUCKET_CASE_SQL}) = 'draft'), 0)::bigint`,
       draftCount: sql<number>`count(*) filter (where (${BUCKET_CASE_SQL}) = 'draft')::int`,
       winRatePct: sql<number | null>`
         case when (
@@ -460,7 +478,7 @@ export async function listEstimates(
   const rowCols = {
     id: estimates.id,
     status: estimates.status,
-    totalCents: estimates.totalCents,
+    totalCents: ESTIMATE_VALUE_SQL,
     customerId: estimates.customerId,
     serviceRequestId: estimates.serviceRequestId,
     createdAt: estimates.createdAt,
