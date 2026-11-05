@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { sentenceCase, urgencyLabel } from '@/lib/chat/summary-labels';
 import { Loader2, Pencil, Check, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -23,13 +24,6 @@ interface ConfirmationDialogProps {
   /** Called with the (possibly edited) extraction data on confirm. */
   readonly onConfirm: (edited: ExtractionResult) => void;
   readonly isLoading?: boolean;
-}
-
-function formatSnakeCase(value: string): string {
-  return value
-    .split('_')
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
 }
 
 function getUrgencyVariant(
@@ -89,7 +83,7 @@ function EditableRow({ label, value, onSave, disabled, badge }: EditableRowProps
         <span className="text-xs font-medium text-muted-foreground">{label}</span>
         <span className="text-sm">
           <Badge variant={getUrgencyVariant(value)}>
-            {value.charAt(0).toUpperCase() + value.slice(1)}
+            {urgencyLabel(value)}
           </Badge>
         </span>
       </div>
@@ -198,14 +192,14 @@ export function ConfirmationDialog({
           {issueType && (
             <div className="flex flex-col gap-0.5">
               <span className="text-xs font-medium text-muted-foreground">Issue type</span>
-              <span className="text-sm">{formatSnakeCase(issueType)}</span>
+              <span className="text-sm">{sentenceCase(issueType)}</span>
             </div>
           )}
           {urgency && (
             <div className="flex flex-col gap-0.5">
               <span className="text-xs font-medium text-muted-foreground">Urgency</span>
               <Badge variant={getUrgencyVariant(urgency)} className="w-fit">
-                {urgency.charAt(0).toUpperCase() + urgency.slice(1)}
+                {urgencyLabel(urgency)}
               </Badge>
             </div>
           )}

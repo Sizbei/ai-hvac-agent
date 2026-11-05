@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { sentenceCase, urgencyLabel } from '@/lib/chat/summary-labels';
 import { motion } from 'motion/react';
 import { ClipboardCheck, Pencil, Check, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -21,13 +22,6 @@ interface ExtractionCardProps {
   readonly extraction: ExtractionResult;
   /** Called with the (possibly inline-edited) extraction data to open the dialog. */
   readonly onConfirm: (edited: ExtractionResult) => void;
-}
-
-function formatSnakeCase(value: string): string {
-  return value
-    .split('_')
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
 }
 
 function getUrgencyVariant(
@@ -177,13 +171,13 @@ export function ExtractionCard({ extraction, onConfirm }: ExtractionCardProps) {
         <CardContent className="grid gap-3">
           {issueType && (
             <FieldRow label="Issue type">
-              {formatSnakeCase(issueType)}
+              {sentenceCase(issueType)}
             </FieldRow>
           )}
           {urgency && (
             <FieldRow label="Urgency">
               <Badge variant={getUrgencyVariant(urgency)}>
-                {urgency.charAt(0).toUpperCase() + urgency.slice(1)}
+                {urgencyLabel(urgency)}
               </Badge>
             </FieldRow>
           )}
