@@ -27,6 +27,8 @@ import type { InventoryItem } from '@/hooks/use-inventory';
 export interface MaterialOption {
   readonly id: string;
   readonly name: string;
+  /** Pricebook cost — pre-fills the unit cost when the material is picked. */
+  readonly costCents?: number;
 }
 
 interface InventoryFormDialogProps {
@@ -159,7 +161,19 @@ export function InventoryFormDialog({
               <Label htmlFor="inv-material">Material</Label>
               <Select
                 value={form.pricebookItemId}
-                onValueChange={(v) => updateField('pricebookItemId', v ?? '')}
+                onValueChange={(v) => {
+                  const id = v ?? '';
+                  const cost = materials.find((m) => m.id === id)?.costCents;
+                  setForm((prev) => ({
+                    ...prev,
+                    pricebookItemId: id,
+                    // Pre-fill from the pricebook unless a cost was typed already.
+                    unitCost:
+                      !prev.unitCost.trim() && cost != null && cost > 0
+                        ? (cost / 100).toFixed(2)
+                        : prev.unitCost,
+                  }));
+                }}
               >
                 <SelectTrigger id="inv-material">
                   <SelectValue>

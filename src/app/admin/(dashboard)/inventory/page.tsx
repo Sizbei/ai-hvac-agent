@@ -89,7 +89,7 @@ export default function InventoryPage() {
     () =>
       pricebookItems
         .filter((i) => i.type === 'material' && i.active)
-        .map((i) => ({ id: i.id, name: i.name })),
+        .map((i) => ({ id: i.id, name: i.name, costCents: i.costCents })),
     [pricebookItems],
   );
 

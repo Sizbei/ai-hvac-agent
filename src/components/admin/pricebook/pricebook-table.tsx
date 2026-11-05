@@ -24,6 +24,11 @@ interface PricebookTableProps {
   readonly isLoading: boolean;
   readonly onEdit: (item: PricebookItem) => void;
   readonly onDeactivate: (item: PricebookItem) => void;
+  /** The active search text; an empty result then reads as "no match", not "empty catalog". */
+  readonly searchTerm?: string;
+  /** True when any search or filter is narrowing the list. */
+  readonly isFiltered?: boolean;
+  readonly onClearFilters?: () => void;
 }
 
 function TypeBadge({ type }: { type: string }) {
@@ -58,13 +63,27 @@ export function PricebookTable({
   isLoading,
   onEdit,
   onDeactivate,
+  searchTerm = '',
+  isFiltered = false,
+  onClearFilters,
 }: PricebookTableProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   if (!isLoading && items.length === 0) {
     return (
-      <div className="py-12 text-center text-muted-foreground">
-        No pricebook items yet.
+      <div className="space-y-3 py-12 text-center text-muted-foreground">
+        <p>
+          {isFiltered
+            ? searchTerm.trim()
+              ? `No items match “${searchTerm.trim()}”.`
+              : 'No items match these filters.'
+            : 'No pricebook items yet.'}
+        </p>
+        {isFiltered && onClearFilters && (
+          <Button type="button" variant="outline" size="sm" onClick={onClearFilters}>
+            Clear search and filters
+          </Button>
+        )}
       </div>
     );
   }
@@ -215,6 +234,18 @@ export function PricebookTable({
                             <>
                               <dt className="text-muted-foreground">Hours</dt>
                               <dd className="tabular-nums">{item.hours}</dd>
+                            </>
+                          )}
+                          {item.markupPct > 0 && (
+                            <>
+                              <dt className="text-muted-foreground">Markup</dt>
+                              <dd className="tabular-nums">{item.markupPct}%</dd>
+                            </>
+                          )}
+                          {item.warranty && (
+                            <>
+                              <dt className="text-muted-foreground">Warranty</dt>
+                              <dd className="max-w-xs">{item.warranty}</dd>
                             </>
                           )}
                           <dt className="text-muted-foreground">Labor item</dt>

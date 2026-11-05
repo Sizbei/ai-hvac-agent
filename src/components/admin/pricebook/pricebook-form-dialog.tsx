@@ -17,6 +17,7 @@ import {
   SelectItem,
 } from '@/components/ui/select';
 import { selectLabel } from '@/lib/admin/select-label';
+import { markupFromPrice, priceFromMarkup } from '@/lib/admin/pricebook-markup';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -118,6 +119,21 @@ export function PricebookFormDialog({
     setForm((prev) => ({ ...prev, [field]: value }));
   }
 
+  /**
+   * Cost or markup changed: price follows cost × (1 + markup) so the Markup
+   * field visibly does something. A price typed by hand is overwritten only
+   * when both cost and markup are filled in (that's what asking for a markup
+   * means).
+   */
+  function updateCostOrMarkup(field: 'cost' | 'markupPct', value: string): void {
+    setForm((prev) => {
+      const next = { ...prev, [field]: value };
+      if (!next.cost.trim() || !next.markupPct.trim()) return next;
+      const derived = priceFromMarkup(parseDollarsToCents(next.cost), parseInt(next.markupPct, 10));
+      return derived === null ? next : { ...next, price: (derived / 100).toFixed(2) };
+    });
+  }
+
   function validate(): string | null {
     if (!form.name.trim()) return 'Name is required';
     if (!form.price.trim() || parseDollarsToCents(form.price) < 0) {
@@ -150,7 +166,10 @@ export function PricebookFormDialog({
           ? parseDollarsToCents(form.memberPrice)
           : null,
         costCents: form.cost.trim() ? parseDollarsToCents(form.cost) : 0,
-        markupPct: form.markupPct.trim() ? parseInt(form.markupPct, 10) : 0,
+        // A blank markup is the one the price implies over cost, not 0.
+        markupPct: form.markupPct.trim()
+          ? parseInt(form.markupPct, 10)
+          : markupFromPrice(parseDollarsToCents(form.price), form.cost.trim() ? parseDollarsToCents(form.cost) : 0),
         hours: form.hours.trim() ? parseInt(form.hours, 10) : null,
         warranty: form.warranty.trim() || undefined,
       };
@@ -300,7 +319,7 @@ export function PricebookFormDialog({
                 min="0"
                 inputMode="decimal"
                 value={form.cost}
-                onChange={(e) => updateField('cost', e.target.value)}
+                onChange={(e) => updateCostOrMarkup('cost', e.target.value)}
                 placeholder="0.00"
               />
             </div>
@@ -312,12 +331,12 @@ export function PricebookFormDialog({
                 min="0"
                 step="1"
                 value={form.markupPct}
-                onChange={(e) => updateField('markupPct', e.target.value)}
+                onChange={(e) => updateCostOrMarkup('markupPct', e.target.value)}
                 placeholder="0"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="item-hours">Labor hrs</Label>
+              <Label htmlFor="item-hours">Labor hrs (whole)</Label>
               <Input
                 id="item-hours"
                 type="number"

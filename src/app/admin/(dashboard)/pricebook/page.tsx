@@ -49,6 +49,7 @@ export default function PricebookPage() {
   const [sortKey, setSortKey] = useState<PricebookSortKey>('name');
   const [includeInactive, setIncludeInactive] = useState(false);
   const [laborOnly, setLaborOnly] = useState(false);
+  const [savedNotice, setSavedNotice] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<PricebookItem | null>(null);
@@ -250,11 +251,25 @@ export default function PricebookPage() {
         </Alert>
       )}
 
+      {savedNotice && (
+        <p role="status" className="text-sm text-success">
+          {savedNotice}
+        </p>
+      )}
+
       <PricebookTable
         items={items}
         isLoading={isLoading}
         onEdit={handleEditClick}
         onDeactivate={(item) => { setDeactivateError(null); setPendingDeactivate(item); }}
+        searchTerm={debouncedSearch}
+        isFiltered={Boolean(debouncedSearch.trim()) || typeFilter !== ALL_TYPES || laborOnly}
+        onClearFilters={() => {
+          setSearch('');
+          setDebouncedSearch('');
+          setTypeFilter(ALL_TYPES);
+          setLaborOnly(false);
+        }}
       />
 
       {/* pager bar — only shown when there are results */}
@@ -282,6 +297,8 @@ export default function PricebookPage() {
         onClose={() => setFormOpen(false)}
         onSuccess={() => {
           void refetch();
+          setSavedNotice(editing ? 'Item updated.' : 'Item added to the pricebook.');
+          setTimeout(() => setSavedNotice(null), 4000);
           if (fromSetup) {
             setBannerEvent('saved');
             void refreshOnboarding({ force: true });

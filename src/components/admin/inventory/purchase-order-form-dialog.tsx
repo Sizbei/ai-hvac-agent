@@ -177,12 +177,13 @@ export function PurchaseOrderFormDialog({
             <Label>Lines</Label>
             {lines.map((line, index) => (
               <div key={index} className="flex items-end gap-2">
-                <div className="flex-1 space-y-1">
+                <div className="min-w-0 flex-1 space-y-1">
+                  <span className="text-xs text-muted-foreground">Material</span>
                   <Select
                     value={line.pricebookItemId}
                     onValueChange={(v) => onMaterialChange(index, v ?? '')}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger aria-label="Material" className="w-full min-w-0">
                       <SelectValue>
                         {(v: unknown) =>
                           selectLabel(
@@ -203,6 +204,7 @@ export function PurchaseOrderFormDialog({
                   </Select>
                 </div>
                 <div className="w-20 space-y-1">
+                  <span className="text-xs text-muted-foreground">Qty</span>
                   <Input
                     type="number"
                     min="1"
@@ -213,6 +215,7 @@ export function PurchaseOrderFormDialog({
                   />
                 </div>
                 <div className="w-28 space-y-1">
+                  <span className="text-xs text-muted-foreground">Unit cost</span>
                   <Input
                     type="number"
                     min="0"
@@ -238,7 +241,7 @@ export function PurchaseOrderFormDialog({
             ))}
             <Button type="button" variant="outline" size="sm" onClick={addLine}>
               <Plus className="mr-2 h-4 w-4" />
-              Add Line
+              Add line
             </Button>
           </div>
 
