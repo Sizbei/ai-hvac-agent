@@ -13,7 +13,9 @@ interface RouteParams {
 /**
  * GET /api/admin/requests/[id]/decision — the RECORDED dispatch decision for a
  * request (why this tech?). Admin-session gated, org from session, UUID-guarded.
- * Returns the latest decision row (real or shadow); 404 when none exists.
+ * Returns the latest decision row (real or shadow), or `data: null` when none
+ * exists. Most requests have none, so a 404 here was console noise on every
+ * sheet open.
  */
 export async function GET(_request: NextRequest, { params }: RouteParams) {
   try {
@@ -37,10 +39,7 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
       session.organizationId,
       id,
     );
-    if (!decision) {
-      return errorResponse("No dispatch decision recorded", "NOT_FOUND", 404);
-    }
-    return successResponse(decision);
+    return successResponse(decision ?? null);
   } catch (error: unknown) {
     logger.error({ error }, "Failed to load dispatch decision");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);

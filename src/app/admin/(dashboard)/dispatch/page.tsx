@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { AlertCircle, ChevronLeft, ChevronRight, RefreshCw, Users } from 'lucide-react';
 import { useDispatchBoard } from '@/hooks/use-dispatch-board';
 import { DispatchColumn } from '@/components/admin/dispatch/dispatch-column';
+import { busyColumnsFirst } from '@/lib/admin/dispatch-board-order';
 import { RequestDetailSheet } from '@/components/admin/request-detail-sheet';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -195,7 +196,7 @@ export default function DispatchPage() {
             jobs={board?.unassigned ?? []}
             onSelect={setSelectedRequestId}
           />
-          {(board?.columns ?? []).map((column) => (
+          {busyColumnsFirst(board?.columns ?? []).map((column) => (
             <DispatchColumn
               key={column.technicianId}
               title={column.technicianName}

@@ -106,6 +106,7 @@ const JOB_PIN_LEGEND: readonly {
   { label: 'Emergency', fill: '#dc2626' },
   { label: 'High priority', fill: '#ea580c' },
   { label: 'Standard request', fill: '#2563eb' },
+  { label: 'Low priority', fill: '#0891b2' },
 ];
 
 /** AR ring colors, mirroring arStyle() in ./map-pins.ts. */

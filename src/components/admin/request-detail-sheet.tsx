@@ -927,9 +927,9 @@ export function RequestDetailSheet({
         }
         const body = (await res.json()) as {
           success: boolean;
-          data: DispatchDecisionView;
+          data: DispatchDecisionView | null;
         };
-        if (!cancelled && body.success) setDecision(body.data);
+        if (!cancelled && body.success) setDecision(body.data ?? null);
       } catch {
         // Non-fatal: no decision section.
       }

@@ -55,6 +55,7 @@ const JOB_PIN_LEGEND: readonly {
   { label: 'Emergency', fill: '#dc2626' },
   { label: 'High priority', fill: '#ea580c' },
   { label: 'Standard request', fill: '#2563eb' },
+  { label: 'Low priority', fill: '#0891b2' },
 ];
 
 /** AR ring colors, mirroring arStyle() in ./map-pins.ts. */
@@ -356,8 +357,9 @@ export function DispatchMap() {
         </div>
       )}
 
-      {/* Status chips — stacked so they never overlap each other */}
-      <div className="pointer-events-none absolute bottom-4 right-4 z-10 flex flex-col items-end gap-1.5">
+      {/* Status chips — stacked so they never overlap each other; bottom-10
+          clears MapLibre's attribution bar in the same corner. */}
+      <div className="pointer-events-none absolute bottom-10 right-4 z-10 flex flex-col items-end gap-1.5">
         {notPlottedMsg && (
           <div className="rounded-[3px] border border-border bg-surface-raised/90 px-2.5 py-1 text-[11px] text-muted-foreground shadow-[var(--shadow-pop)] backdrop-blur">
             {notPlottedMsg}
