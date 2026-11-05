@@ -110,7 +110,8 @@ work logs — real booking history is in `service_requests` via
   no de-identification), so it is strictly more destructive than erase and must
   never be reachable by a plain admin.
 - **Archive** soft-hides the customer (`archivedAt` set); the list hides
-  archived by default. Re-contact auto-reactivates (per the confirm dialog copy).
+  archived by default. Re-contact auto-reactivates (per the confirm dialog copy),
+  and the profile's Unarchive button restores it by hand.
 - Tenancy: all queries are scoped by `session.organizationId`.
 - `service_history` is empty for FieldPulse-imported customers — real history
   lives in `service_requests`; the section is hidden when empty.
@@ -124,8 +125,32 @@ work logs — real booking history is in `service_requests` via
   is non-null. Equipment with `fieldpulseAssetId` is similarly tagged.
 - Page-level filter resets to page 1 on any filter/search change via a
   `useEffect` — do not remove that reset effect.
-- The list's own search (decrypt + substring filter, `src/lib/admin/crm-queries.ts`)
-  correctly returns every sibling on a shared contact. Global command search
+- The list's own search (decrypt + filter, `src/lib/admin/crm-queries.ts`)
+  correctly returns every sibling on a shared contact. Matching is
+  `customerMatchesSearch` in `src/lib/admin/customer-search.ts`: phone-shaped
+  queries compare DIGITS on both sides (`423-555-0187`, `4235550187`,
+  `(423) 555-0187`, `1-423-…` all match). The scan (ciphertext only, never
+  plaintext) is cached per instance in a `CustomerScanCache` keyed by org +
+  filters and revalidated every search by a one-row md5 fingerprint of the
+  filtered set, so a repeat search costs ~1 round trip instead of re-reading
+  ~800 KB; counts are aggregated for the returned page ids only.
+- Erased (`anonymized_at`) rows are hidden with archived ones by default and
+  sort last when "Show archived" is on.
+- Labels for issue/note/equipment types come from
+  `src/lib/admin/display-labels.ts` — never render the raw code or add a
+  per-page map. Request-history rows link to `/admin/requests?request=<id>`
+  (the requests page opens that sheet).
+- Unarchive: `POST /api/admin/customers/[id]` `{ action: "unarchive" }`
+  (`unarchiveCustomer`, audit `customer_unarchived`, ids only). The profile
+  shows an Archived banner with Unarchive; archiving stays on the profile.
+- `POST /api/admin/customers` 409 `CUSTOMER_ALREADY_EXISTS` carries
+  `details: { customerId, archived }` (`findNativeContactClash`) so the add
+  form can link to the existing (possibly archived) row.
+- Phone input is validated by `phoneInputError`
+  (`src/lib/admin/customer-validation.ts`) on create and on a CHANGED number in
+  `update_contact` (legacy short numbers on file don't block other edits).
+  Form save errors go through `saveErrorMessage` (400/409 messages pass, the
+  rest become "Couldn't save … Please try again."). Global command search
   (`src/lib/admin/search-queries.ts`) is a separate, pre-existing truncation
   (`SCAN_LIMIT_CUSTOMERS`) — it does not see the whole corpus and is a known,
   unfixed gap, not something this page's code controls.
@@ -135,7 +160,9 @@ work logs — real booking history is in `service_requests` via
   is how an operator records the second business on a shared AP contact), not
   a dedupe regression.
 
-**Verify changes:** `npx vitest run src/lib/admin/crm-queries.test.ts
+**Verify changes:** `npx vitest run src/lib/admin/customer-search.test.ts
+src/lib/admin/display-labels.test.ts src/lib/admin/customer-validation.test.ts
+src/lib/admin/customer-display.test.ts src/lib/admin/crm-queries.test.ts
 src/lib/admin/crm-equipment-queries.test.ts
 src/lib/admin/crm-list-helpers.test.ts src/lib/admin/customer-match.test.ts
 src/lib/admin/erasure-queries.test.ts`. Visual via admin-pages recipe.

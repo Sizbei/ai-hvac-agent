@@ -41,6 +41,10 @@ are aggregated in the API query. No polling — manual page navigation.
 - Tenancy: the API query scopes all rows by `session.organizationId`.
 
 **Gotchas:**
+- Each row carries `customerName` (decrypted), `customerId` and the request's
+  `referenceNumber` from org-scoped left joins in `listReviews`; the table
+  links to the customer and to `/admin/requests?request=<id>`. Feedback text
+  stays out of the list.
 - `publicClicked` is a boolean on `review_requests` — indicates whether the
   customer clicked through to the public review link (e.g. Google). It does not
   mean they left a review on the external platform.

@@ -165,3 +165,7 @@ filters restore.
 schedule panel already open (`initialScheduleOpen` on `request-create-dialog.tsx`,
 set only for the deep-link open) and shows the `book_first_request` banner. See
 page-setup.
+
+**Deep link to one request:** `/admin/requests?request=<uuid>` opens that
+request's detail sheet (read in `restoreFiltersFromUrl`, UUID-guarded, not
+persisted). Customer history rows, reviews, estimates and invoices link here.

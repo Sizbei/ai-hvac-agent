@@ -52,6 +52,8 @@ toggle is on. No SWR cache; data refreshes after every mutation via
 - Compose `PageShell`, `PageHeader` from `src/components/admin/ui/`.
 
 **Gotchas:**
+- Under 640px the table renders as one card per plan (price, billing label,
+  visits, Edit/Deactivate) — keep both layouts in sync when adding a column.
 - There is no server-side pagination here; the hook fetches all plans in one
   request. If plan counts grow large, add pagination before adding a client-side
   filter.
