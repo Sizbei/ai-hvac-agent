@@ -46,11 +46,14 @@ describe("getHousecallClient — configured", () => {
     expect(client).toBeInstanceOf(RestHousecallProClient);
   });
 
-  it("returns a client from the env fallback when no connection exists", async () => {
+  it("returns a client from the env fallback for the single-tenant org only", async () => {
     process.env.HOUSECALL_API_KEY = "env-key";
     getOrgHousecallApiKey.mockResolvedValue(null);
+    expect(
+      await getHousecallClient("org-1", explodingFetch, "https://api.housecallpro.test"),
+    ).toBeNull();
     const client = await getHousecallClient(
-      "org-1",
+      "00000000-0000-0000-0000-000000000001",
       explodingFetch,
       "https://api.housecallpro.test",
     );

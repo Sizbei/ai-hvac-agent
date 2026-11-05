@@ -12,6 +12,7 @@
  * cache non-secret account metadata) a company name. This whole module is
  * server-only and its result is safe to send to the client.
  */
+import { envKeyFallbackAllowed } from "@/lib/integrations/env-fallback";
 import "server-only";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -96,7 +97,7 @@ export async function getIntegrationsStatus(
   // FSM — Fieldpulse. Connected (per-org key) or env-fallback key present.
   // A "Connected" badge must not stay green when the daily availability-sync
   // cron is failing — that's Rintegrations-1, fed by Rintegrations-2's data.
-  const fieldpulseEnv = envPresent("FIELDPULSE_API_KEY");
+  const fieldpulseEnv = envPresent("FIELDPULSE_API_KEY") && envKeyFallbackAllowed(organizationId);
   const fieldpulseSyncFailed =
     fieldpulse.connected && fieldpulse.availabilitySyncStatus === "failed";
   const fieldpulseItem: IntegrationStatusItem = {
@@ -124,7 +125,7 @@ export async function getIntegrationsStatus(
   };
 
   // FSM — Housecall Pro.
-  const housecallEnv = envPresent("HOUSECALL_API_KEY");
+  const housecallEnv = envPresent("HOUSECALL_API_KEY") && envKeyFallbackAllowed(organizationId);
   const housecallItem: IntegrationStatusItem = {
     key: "housecall_pro",
     label: "Housecall Pro",

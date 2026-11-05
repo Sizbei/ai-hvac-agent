@@ -12,6 +12,7 @@ import { db } from "@/lib/db";
 import { fieldpulseConnections } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { decrypt } from "@/lib/crypto";
+import { envKeyFallbackAllowed } from "@/lib/integrations/env-fallback";
 
 /** Base URL for the Fieldpulse REST API (AWS API Gateway stage). */
 export const FIELDPULSE_BASE_URL = "https://ywe3crmpll.execute-api.us-east-2.amazonaws.com/stage";
@@ -54,8 +55,9 @@ export async function getFieldpulseConfig(
     apiKey = decrypt(conn[0].apiKeyEncrypted);
   }
 
-  // Env fallback for single-tenant setups (mirrors HCP pattern).
-  if (!apiKey) {
+  // Env fallback for the single-tenant org only: the env key is one business's
+  // account, so another tenant without a connection must never resolve it.
+  if (!apiKey && envKeyFallbackAllowed(organizationId)) {
     apiKey = process.env.FIELDPULSE_API_KEY?.trim() ?? null;
   }
 

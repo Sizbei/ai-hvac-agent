@@ -35,10 +35,11 @@ describe("getHousecallConfig", () => {
     expect(config?.apiKey).toBe("org-key");
   });
 
-  it("falls back to the env key when no connection exists", async () => {
+  it("falls back to the env key only for the single-tenant org", async () => {
     process.env.HOUSECALL_API_KEY = "env-key";
     getOrgHousecallApiKey.mockResolvedValue(null);
-    const config = await getHousecallConfig("org-1");
+    expect(await getHousecallConfig("org-1")).toBeNull();
+    const config = await getHousecallConfig("00000000-0000-0000-0000-000000000001");
     expect(config?.apiKey).toBe("env-key");
   });
 

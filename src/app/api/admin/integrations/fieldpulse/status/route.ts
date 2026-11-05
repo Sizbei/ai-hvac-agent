@@ -7,6 +7,7 @@
  * env-fallback key is present even before an org connects) so the panel can
  * explain state precisely. NEVER returns the API key.
  */
+import { envKeyFallbackAllowed } from "@/lib/integrations/env-fallback";
 import { getAdminSession } from "@/lib/auth/session";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
@@ -34,7 +35,8 @@ export async function GET(): Promise<Response> {
       // An env fallback key means Fieldpulse is usable even before an explicit connect.
       configured:
         status.connected ||
-        Boolean(process.env.FIELDPULSE_API_KEY?.trim()),
+        (Boolean(process.env.FIELDPULSE_API_KEY?.trim()) &&
+          envKeyFallbackAllowed(session.organizationId)),
       connected: status.connected,
       accountInfo: status.accountInfo,
     });

@@ -148,7 +148,9 @@ describe("getIntegrationsStatus — mock vs live detection", () => {
 
   it("reports FSM as 'live' on env-fallback key when not connected", async () => {
     process.env.FIELDPULSE_API_KEY = "fp_env_dummy";
-    const items = byKey(await getIntegrationsStatus("org-1"));
+    // The env key belongs to the single-tenant org only.
+    expect(byKey(await getIntegrationsStatus("org-1")).fieldpulse.status).toBe("not_configured");
+    const items = byKey(await getIntegrationsStatus("00000000-0000-0000-0000-000000000001"));
     expect(items.fieldpulse.status).toBe("live");
   });
 

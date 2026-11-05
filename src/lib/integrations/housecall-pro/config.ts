@@ -15,6 +15,7 @@
  * rather than attempting a broken request. The API key is NEVER logged.
  */
 import { getOrgHousecallApiKey } from "./connection-queries";
+import { envKeyFallbackAllowed } from "@/lib/integrations/env-fallback";
 
 const HOUSECALL_API_BASE = "https://api.housecallpro.com";
 
@@ -43,7 +44,7 @@ export async function getHousecallConfig(
   baseUrl: string = HOUSECALL_API_BASE,
 ): Promise<HousecallConfig | null> {
   const orgKey = await getOrgHousecallApiKey(organizationId);
-  const apiKey = orgKey ?? getEnvApiKey();
+  const apiKey = orgKey ?? (envKeyFallbackAllowed(organizationId) ? getEnvApiKey() : null);
   if (!apiKey) {
     return null;
   }
