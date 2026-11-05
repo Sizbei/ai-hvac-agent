@@ -14,7 +14,7 @@ import { reasonResult } from "@/lib/tech/invoice-errors";
 
 type Parsed<T> = { ok: true; data: T } | { ok: false; response: NextResponse };
 
-export const invalidInput = (): NextResponse => errorResponse("That isn't a valid request.", "INVALID_INPUT", 400);
+export const invalidInput = (): NextResponse => errorResponse("Couldn't save that. Try again.", "INVALID_INPUT", 400);
 
 /** JSON body → schema. `emptyIsObject`: an absent or blank body reads as `{}` (create). */
 export async function readWriteBody<S extends z.ZodType>(

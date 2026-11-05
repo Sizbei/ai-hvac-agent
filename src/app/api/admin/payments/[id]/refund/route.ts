@@ -76,13 +76,8 @@ export async function POST(
             422,
           );
         case "synced_read_only":
-          return errorResponse(
-            "This invoice is synced from FieldPulse — manage refunds in FieldPulse",
-            "INVOICE_SYNCED_READ_ONLY",
-            409,
-          );
         case "refund_id_conflict": {
-          const e = fieldError("refund_id_conflict");
+          const e = fieldError(result.reason);
           return errorResponse(e.message, e.code, e.status);
         }
         case "stale":

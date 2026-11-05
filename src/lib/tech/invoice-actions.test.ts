@@ -39,10 +39,22 @@ describe("invoiceAllowedActions", () => {
     expect(allowed({ state: "open", lines: 1, balanceCents: 8900, fromEstimate: true })).toEqual(["record_payment", "pay_link"]);
   });
 
-  it("open with nothing due, paid and refunded: nothing", () => {
+  it("open with nothing due: nothing", () => {
     expect(allowed({ state: "open", lines: 1, balanceCents: 0 })).toEqual([]);
-    expect(allowed({ state: "paid", lines: 1 })).toEqual([]);
-    expect(allowed({ state: "refunded", lines: 1 })).toEqual([]);
+  });
+
+  it("paid and refunded: create a new draft (paid-view ruling), nothing else", () => {
+    expect(allowed({ state: "paid", lines: 1 })).toEqual(["create"]);
+    expect(allowed({ state: "refunded", lines: 1, balanceCents: 500 })).toEqual(["create"]);
+  });
+
+  it("paid and refunded: no create with an external invoice, off site, non-native or as a helper", () => {
+    for (const state of ["paid", "refunded"] as const) {
+      expect(allowed({ state, externalInvoice: true })).toEqual([]);
+      expect(allowed({ state, onSite: false })).toEqual([]);
+      expect(allowed({ state, native: false })).toEqual([]);
+      expect(allowed({ state, isLead: false })).toEqual([]);
+    }
   });
 
   it("nothing for helpers, off site or non-native whatever the state", () => {

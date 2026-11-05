@@ -24,7 +24,8 @@ import { getOrgConfig } from "@/lib/admin/org-config-queries";
 import { generatePortalToken } from "@/lib/portal/portal-queries";
 import { claimOutboundOnce } from "./outbound-ledger";
 import { queueCommunicationJob } from "./job-queue";
-import { logger } from "@/lib/logger";
+import { errorCode, logger } from "@/lib/logger";
+import { stillLeadSql } from "@/lib/admin/invoice-field-writes";
 import { isCollectible, invoiceRef, REMINDER_COOLDOWN_MS } from "@/lib/admin/invoice-collectible";
 export { invoiceRef } from "@/lib/admin/invoice-collectible";
 
@@ -377,13 +378,14 @@ export type PayLinkResult =
   | { readonly ok: true }
   | { readonly ok: false; readonly reason:
       | "invoice_not_found" | "synced_read_only" | "invoice_not_chargeable" | "no_contact"
-      | "no_template" | "demo_restricted" | "cooldown" | "send_failed" };
+      | "no_template" | "demo_restricted" | "cooldown" | "not_lead" | "send_failed" };
 
 /**
  * Text the customer the portal link for an open invoice (tech pay link, spec
- * §6.4). SMS only; the copy says "view", never "pay". The 2-minute per-invoice
+ * §6.4). SMS only; the copy says "view", never "pay". The 5-minute per-invoice
  * cooldown is claimed with ONE JS `now` BEFORE the token mint, so a refused tap
- * never rotates the link just sent. A failure between the claim and the queue
+ * never rotates the link just sent. The claim carries the in-write lead check
+ * (a lead reassigned after the route's preamble claims nothing → not_lead). A failure between the claim and the queue
  * call releases the claim (only while it is still ours) and rethrows; a throw
  * FROM queueCommunicationJob keeps the claim and reports send_failed, because
  * the insert may have committed and a retry must never double-send.
@@ -392,6 +394,7 @@ export type PayLinkResult =
 export async function sendInvoicePayLink(
   organizationId: string,
   invoiceId: string,
+  actor: { readonly requestId: string; readonly techUserId: string },
 ): Promise<PayLinkResult> {
   const [inv] = await db
     .select({
@@ -426,8 +429,14 @@ export async function sendInvoicePayLink(
   // $now, so it can never clobber a newer claim.
   const previous = inv.payLinkSentAt ? inv.payLinkSentAt.toISOString() : null;
   const now = new Date().toISOString();
-  const { rows: claimed } = (await db.execute(sql`UPDATE invoices SET pay_link_sent_at = ${now}::timestamptz WHERE id = ${invoiceId}::uuid AND organization_id = ${organizationId}::uuid AND (pay_link_sent_at IS NULL OR pay_link_sent_at < ${now}::timestamptz - interval '2 minutes') RETURNING id`)) as unknown as { rows: unknown[] };
-  if (claimed.length === 0) return { ok: false, reason: "cooldown" };
+  // 5 minutes: longer than the 2-minute idempotency takeover window, so a retry
+  // after a crashed first send can never text a second time.
+  const lead = stillLeadSql(organizationId, actor.requestId, actor.techUserId);
+  const { rows: claimed } = (await db.execute(sql`UPDATE invoices SET pay_link_sent_at = ${now}::timestamptz WHERE id = ${invoiceId}::uuid AND organization_id = ${organizationId}::uuid AND (pay_link_sent_at IS NULL OR pay_link_sent_at < ${now}::timestamptz - interval '5 minutes') AND (${lead}) RETURNING id`)) as unknown as { rows: unknown[] };
+  if (claimed.length === 0) {
+    const { rows: still } = (await db.execute(sql`SELECT (${lead}) AS still_lead`)) as unknown as { rows: { still_lead?: boolean }[] };
+    return { ok: false, reason: still[0]?.still_lead === true ? "cooldown" : "not_lead" };
+  }
 
   let payLink: string;
   try {
@@ -463,7 +472,8 @@ export async function sendInvoicePayLink(
       recipientPhone: contact.phone,
     });
   } catch (error) {
-    logger.error({ error, organizationId, invoiceId }, "Pay link enqueue failed; cooldown kept");
+    // Codes and ids only: the failed insert's params carry the name and pay link.
+    logger.error({ code: errorCode(error), organizationId, invoiceId }, "Pay link enqueue failed; cooldown kept");
     return { ok: false, reason: "send_failed" };
   }
   return { ok: true };

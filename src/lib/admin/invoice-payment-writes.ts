@@ -11,28 +11,15 @@
  * instead of `invoice_not_chargeable`.
  */
 import { sql, type SQL } from "drizzle-orm";
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
-import { isDeadlock } from "@/lib/tech/status-writes";
-import { lockInvoiceSql, lockRequestSql, P_NATIVE, stillLeadSql, type Actor, type FieldReason } from "./invoice-field-writes";
+import {
+  lockInvoiceSql, lockRequestSql, P_NATIVE, readRows, runBatch, stillLeadSql, type Actor, type FieldReason,
+} from "./invoice-field-writes";
 
 type Row = Record<string, unknown>;
-type Stale = { ok: false; reason: "stale" };
 
-async function readRows(q: SQL): Promise<Row[]> {
-  return ((await db.execute(q)) as unknown as { rows: Row[] }).rows;
-}
-
-/** One batch; a deadlock (40P01) is a stale write, never a 500. */
-async function runBatch(items: SQL[]): Promise<Row[][] | Stale> {
-  try {
-    const out = (await db.batch(items.map((q) => db.execute(q)) as never)) as unknown as { rows: Row[] }[];
-    return out.map((r) => r.rows);
-  } catch (error) {
-    if (isDeadlock(error)) return { ok: false, reason: "stale" };
-    throw error;
-  }
-}
+/** A positive whole number of cents; anything else is refused before any read. */
+const validCents = (n: number): boolean => Number.isInteger(n) && n >= 1;
 
 const XMIN = sql.raw("xmin = pg_current_xact_id()::xid");
 const nullable = (v: unknown): unknown => v ?? null;
@@ -59,6 +46,7 @@ export async function recordManualPayment(
   const { organizationId: org } = actor;
   const { paymentId: pid } = ids;
   const amt = input.amountCents;
+  if (!validCents(amt)) return { ok: false, reason: "exceeds_balance" };
   const tech = actor.techUserId !== null;
   if (tech && actor.requestId === null) throw new Error("recordManualPayment: a technician actor needs a requestId");
 
@@ -147,6 +135,7 @@ export async function refundManualPayment(
   const pid = paymentId;
   const { refundId } = ids;
   const amt = input.amountCents;
+  if (!validCents(amt)) return { ok: false, reason: "exceeds_payment" };
 
   // 1. By-id row first.
   const [prior] = await readRows(refundByIdSql(refundId));
@@ -190,7 +179,7 @@ export async function refundManualPayment(
     sql`SELECT status FROM payments WHERE id = ${pid}::uuid AND organization_id = ${org}::uuid`,
   ];
   const rows = await runBatch(items);
-  if (!Array.isArray(rows)) return rows;
+  if (!Array.isArray(rows)) return { ok: false, reason: "stale" };
 
   const at = rid !== null ? 3 : 2;
   const [claim, inserted, , refRows, , statusRows] = rows.slice(at);

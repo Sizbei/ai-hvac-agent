@@ -18,14 +18,18 @@ import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
 import { isUuid } from "@/lib/validation/uuid";
 
+/** A check number is letters, digits and dashes only: never free text (erase never clears it). */
+const CHECK_NUMBER = /^[A-Za-z0-9-]{1,32}$/;
+
 const recordPaymentSchema = z
   .object({
     clientToken: z.string().uuid(),
     method: z.enum(["card", "cash", "check", "other"]),
     amountCents: z.number().int().min(1).max(100_000_000),
-    checkNumber: z.string().trim().min(1).max(32).optional(),
+    checkNumber: z.string().trim().min(1).max(32).regex(CHECK_NUMBER).optional(),
     isDeposit: z.boolean().optional(),
   })
+  .strict()
   .refine((b) => b.checkNumber === undefined || b.method === "check", {
     path: ["checkNumber"],
   });

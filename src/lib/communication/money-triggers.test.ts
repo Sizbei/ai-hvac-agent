@@ -227,6 +227,9 @@ describe("consent rules exist for all money-loop triggers", () => {
 
 describe("sendInvoicePayLink", () => {
   const INV = "abcdef12-3456-4789-8abc-def012345678";
+  const REQ = "22222222-2222-4222-8222-222222222222";
+  const ME = "33333333-3333-4333-8333-333333333333";
+  const ACTOR = { requestId: REQ, techUserId: ME };
   const PREV = new Date("2026-11-01T10:00:00.000Z");
   const dialect = new PgDialect();
   const render = (q: unknown) => dialect.sqlToQuery(q as SQL);
@@ -268,15 +271,22 @@ describe("sendInvoicePayLink", () => {
       return "job-1";
     });
 
-    const r = await sendInvoicePayLink(ORG, INV);
+    const r = await sendInvoicePayLink(ORG, INV, ACTOR);
     expect(r).toEqual({ ok: true });
     expect(order).toEqual(["claim", "mint", "queue"]);
 
     const claim = render(vi.mocked(db.execute).mock.calls[0][0]);
-    expect(claim.sql).toMatch(/^UPDATE invoices SET pay_link_sent_at = \$1::timestamptz WHERE id = \$2::uuid AND organization_id = \$3::uuid AND \(pay_link_sent_at IS NULL OR pay_link_sent_at < \$4::timestamptz - interval '2 minutes'\) RETURNING id$/);
-    expect(claim.params).toHaveLength(4);
+    const claimSql = claim.sql.replace(/\s+/g, " ");
+    // 5 minutes: longer than the 2-minute idempotency takeover window.
+    expect(claimSql).toMatch(/^UPDATE invoices SET pay_link_sent_at = \$1::timestamptz WHERE id = \$2::uuid AND organization_id = \$3::uuid AND \(pay_link_sent_at IS NULL OR pay_link_sent_at < \$4::timestamptz - interval '5 minutes'\) AND \(EXISTS \(SELECT 1 FROM appointment_assignments a JOIN appointments p ON p\.id = a\.appointment_id/);
+    expect(claimSql).toContain("WHERE p.service_request_id = $5::uuid AND p.organization_id = $6::uuid AND a.organization_id = $7::uuid");
+    expect(claimSql).toContain("a.technician_id = $8::uuid AND a.is_lead");
+    expect(claimSql).toMatch(/\)\) RETURNING id$/);
+    expect(claimSql).not.toContain("2 minutes");
+    expect(claim.params).toHaveLength(8);
     expect(claim.params[0]).toBe(claim.params[3]); // one JS $now
     expect(claim.params.slice(1, 3)).toEqual([INV, ORG]);
+    expect(claim.params.slice(4)).toEqual([REQ, ORG, ORG, ME]);
     expect(claim.sql).not.toContain("last_reminder_sent_at");
 
     const job = vi.mocked(queueCommunicationJob).mock.calls[0][0];
@@ -303,7 +313,7 @@ describe("sendInvoicePayLink", () => {
   it("releases the claim (WHERE pay_link_sent_at = $now, SET $previous) and rethrows on a token-mint throw", async () => {
     arrange(openInvoice);
     vi.mocked(generatePortalToken).mockRejectedValueOnce(new Error("mint down"));
-    await expect(sendInvoicePayLink(ORG, INV)).rejects.toThrow("mint down");
+    await expect(sendInvoicePayLink(ORG, INV, ACTOR)).rejects.toThrow("mint down");
     expect(queueCommunicationJob).not.toHaveBeenCalled();
     expect(db.execute).toHaveBeenCalledTimes(2);
     const claim = render(vi.mocked(db.execute).mock.calls[0][0]);
@@ -317,7 +327,7 @@ describe("sendInvoicePayLink", () => {
   it("releases on a null token too (definite failure before the queue)", async () => {
     arrange({ ...openInvoice, payLinkSentAt: null });
     vi.mocked(generatePortalToken).mockResolvedValueOnce(null);
-    await expect(sendInvoicePayLink(ORG, INV)).rejects.toThrow();
+    await expect(sendInvoicePayLink(ORG, INV, ACTOR)).rejects.toThrow();
     const release = render(vi.mocked(db.execute).mock.calls[1][0]);
     expect(release.params[0]).toBeNull();
     expect(queueCommunicationJob).not.toHaveBeenCalled();
@@ -326,30 +336,45 @@ describe("sendInvoicePayLink", () => {
   it("send_failed with the claim KEPT when queueCommunicationJob throws", async () => {
     arrange(openInvoice);
     vi.mocked(queueCommunicationJob).mockRejectedValueOnce(new Error("insert maybe committed"));
-    const r = await sendInvoicePayLink(ORG, INV);
+    const r = await sendInvoicePayLink(ORG, INV, ACTOR);
     expect(r).toEqual({ ok: false, reason: "send_failed" });
     expect(db.execute).toHaveBeenCalledTimes(1); // the claim only — no release
   });
 
-  it("cooldown when the claim matches 0 rows — no token minted, nothing queued", async () => {
+  it("cooldown when the claim matches 0 rows and the tech is still lead — no token minted, nothing queued", async () => {
     arrange(openInvoice);
-    vi.mocked(db.execute).mockResolvedValue({ rows: [] } as never);
-    expect(await sendInvoicePayLink(ORG, INV)).toEqual({ ok: false, reason: "cooldown" });
+    vi.mocked(db.execute)
+      .mockResolvedValueOnce({ rows: [] } as never)
+      .mockResolvedValueOnce({ rows: [{ still_lead: true }] } as never);
+    expect(await sendInvoicePayLink(ORG, INV, ACTOR)).toEqual({ ok: false, reason: "cooldown" });
+    const check = render(vi.mocked(db.execute).mock.calls[1][0]);
+    expect(check.sql.replace(/\s+/g, " ")).toMatch(/^SELECT \(EXISTS \(SELECT 1 FROM appointment_assignments a/);
+    expect(check.params).toEqual([REQ, ORG, ORG, ME]);
+    expect(generatePortalToken).not.toHaveBeenCalled();
+    expect(queueCommunicationJob).not.toHaveBeenCalled();
+  });
+
+  it("not_lead when the claim matches 0 rows because the lead moved (in-write gate) — nothing minted or queued", async () => {
+    arrange(openInvoice);
+    vi.mocked(db.execute)
+      .mockResolvedValueOnce({ rows: [] } as never)
+      .mockResolvedValueOnce({ rows: [{ still_lead: false }] } as never);
+    expect(await sendInvoicePayLink(ORG, INV, ACTOR)).toEqual({ ok: false, reason: "not_lead" });
     expect(generatePortalToken).not.toHaveBeenCalled();
     expect(queueCommunicationJob).not.toHaveBeenCalled();
   });
 
   it("invoice_not_found when the invoice is missing", async () => {
     arrange(null);
-    expect(await sendInvoicePayLink(ORG, INV)).toEqual({ ok: false, reason: "invoice_not_found" });
+    expect(await sendInvoicePayLink(ORG, INV, ACTOR)).toEqual({ ok: false, reason: "invoice_not_found" });
     expect(db.execute).not.toHaveBeenCalled();
   });
 
   it("synced_read_only for FieldPulse and HCP mirrors", async () => {
     arrange({ ...openInvoice, fieldpulseInvoiceId: "fp-1" });
-    expect(await sendInvoicePayLink(ORG, INV)).toEqual({ ok: false, reason: "synced_read_only" });
+    expect(await sendInvoicePayLink(ORG, INV, ACTOR)).toEqual({ ok: false, reason: "synced_read_only" });
     arrange({ ...openInvoice, hcpInvoiceId: "hcp-1" });
-    expect(await sendInvoicePayLink(ORG, INV)).toEqual({ ok: false, reason: "synced_read_only" });
+    expect(await sendInvoicePayLink(ORG, INV, ACTOR)).toEqual({ ok: false, reason: "synced_read_only" });
     expect(db.execute).not.toHaveBeenCalled();
   });
 
@@ -359,19 +384,19 @@ describe("sendInvoicePayLink", () => {
     ["zero balance", { amountPaidCents: 12345 }],
   ])("invoice_not_chargeable on %s", async (_label, patch) => {
     arrange({ ...openInvoice, ...patch });
-    expect(await sendInvoicePayLink(ORG, INV)).toEqual({ ok: false, reason: "invoice_not_chargeable" });
+    expect(await sendInvoicePayLink(ORG, INV, ACTOR)).toEqual({ ok: false, reason: "invoice_not_chargeable" });
     expect(db.execute).not.toHaveBeenCalled();
   });
 
   it("no_contact for a null customer_id", async () => {
     arrange({ ...openInvoice, customerId: null });
-    expect(await sendInvoicePayLink(ORG, INV)).toEqual({ ok: false, reason: "no_contact" });
+    expect(await sendInvoicePayLink(ORG, INV, ACTOR)).toEqual({ ok: false, reason: "no_contact" });
     expect(db.execute).not.toHaveBeenCalled();
   });
 
   it("no_contact when the customer has no phone (SMS only)", async () => {
     arrange(openInvoice, { phoneEncrypted: null, emailEncrypted: "a@b.co", nameEncrypted: "Pat" });
-    expect(await sendInvoicePayLink(ORG, INV)).toEqual({ ok: false, reason: "no_contact" });
+    expect(await sendInvoicePayLink(ORG, INV, ACTOR)).toEqual({ ok: false, reason: "no_contact" });
     expect(db.execute).not.toHaveBeenCalled();
   });
 
@@ -382,7 +407,7 @@ describe("sendInvoicePayLink", () => {
 
   it("demo_restricted for the demo org, before the contact read", async () => {
     arrange(openInvoice);
-    const r = await sendInvoicePayLink("00000000-0000-0000-0000-000000000001", INV);
+    const r = await sendInvoicePayLink("00000000-0000-0000-0000-000000000001", INV, ACTOR);
     expect(r).toEqual({ ok: false, reason: "demo_restricted" });
     expect(db.select).toHaveBeenCalledTimes(1); // the invoice read only
     expect(db.execute).not.toHaveBeenCalled();
@@ -391,7 +416,7 @@ describe("sendInvoicePayLink", () => {
   it("no_template without an active invoice_sent SMS template", async () => {
     arrange(openInvoice);
     vi.mocked(db.query.communicationTemplates.findFirst).mockResolvedValue(undefined as never);
-    expect(await sendInvoicePayLink(ORG, INV)).toEqual({ ok: false, reason: "no_template" });
+    expect(await sendInvoicePayLink(ORG, INV, ACTOR)).toEqual({ ok: false, reason: "no_template" });
     expect(db.execute).not.toHaveBeenCalled();
   });
 });

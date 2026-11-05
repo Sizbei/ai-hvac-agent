@@ -20,17 +20,20 @@ import { db } from "@/lib/db";
 import { invoices } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { eq } from "drizzle-orm";
-import { logger } from "@/lib/logger";
+import { errorCode, logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+/** A check number is letters, digits and dashes only: never free text (erase never clears it). */
+const CHECK_NUMBER = /^[A-Za-z0-9-]{1,32}$/;
 
 const bodySchema = z
   .object({
     invoiceId: z.string().uuid(),
     method: z.enum(["cash", "check"]),
     amountCents: z.number().int().min(1).max(100_000_000),
-    checkNumber: z.string().trim().min(1).max(32).optional(),
+    checkNumber: z.string().trim().min(1).max(32).regex(CHECK_NUMBER).optional(),
   })
   .strict()
   .refine((b) => b.checkNumber === undefined || b.method === "check");
@@ -96,7 +99,7 @@ export async function POST(
     }
     return toResponse(result);
   } catch (error) {
-    logger.error({ error }, "Failed to record tech payment");
+    logger.error({ code: errorCode(error) }, "Failed to record tech payment");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);
   }
 }

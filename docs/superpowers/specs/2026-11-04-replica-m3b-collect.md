@@ -407,7 +407,7 @@ invoice {{invoiceNumber}} ({{amount}}) is ready to view: {{payLink}}"), a null
 demo org (`organizationId === DEMO_ORG_ID`, from `@/lib/tenancy/organization`;
 `isDemoAccount` is an email check on an admin session and does not apply to
 technicians) → `demo_restricted`, and ORDER: (1) read `$previous = pay_link_sent_at`, then claim the per-invoice
-2-minute cooldown with a JS timestamp `$now`: `UPDATE invoices SET pay_link_sent_at = $now WHERE id=$i AND organization_id=$org AND (pay_link_sent_at IS NULL OR pay_link_sent_at < $now - interval '2 minutes') RETURNING id`
+5-minute cooldown (longer than the 2-minute idempotency takeover window, so a crashed first send is never followed by a second text) with a JS timestamp `$now` and the in-write lead check: `UPDATE invoices SET pay_link_sent_at = $now WHERE id=$i AND organization_id=$org AND (pay_link_sent_at IS NULL OR pay_link_sent_at < $now - interval '5 minutes') AND (stillLead) RETURNING id` (0 rows → `COOLDOWN` while still lead, else `NOT_LEAD`)
 (0 rows → `cooldown`, BEFORE any token mint so a refused tap never rotates the
 link just sent; the same pattern `sendInvoiceReminder` uses), (2) mint the
 portal token, (3) queue. A definite failure in (2) or before the queue insert
@@ -504,7 +504,7 @@ never matches — a verified defect).
 6. The invoice carries its own signature snapshot from finalize — only a signature newer than the invoice's last change; otherwise "No signature" (immutable evidence); the job-level signature is always re-capturable. The approval sheet signs first, then finalizes.
 7. A key with a different hash is 422, stale or not; only 2xx and deterministic 4xx are stored; everything else deletes the row so a retry re-evaluates.
 8. Office money forms send a client token; the server derives org-scoped (not invoice-scoped) ids from it; a token reused for a different invoice, amount, method, check number or deposit flag is `ID_CONFLICT`, never a silent success.
-9. The pay link is SMS only, sent regardless of the provider; cooldown 2 minutes per invoice claimed BEFORE the token mint.
+9. The pay link is SMS only, sent regardless of the provider; cooldown 5 minutes per invoice claimed BEFORE the token mint.
 10. Every tech write names its `invoiceId`; lines/finalize require the newest live invoice (else 409 `STALE`); payments/pay-link accept any non-void native invoice of the request; replay precedes both checks.
 11. Materials are billed at most once per request across non-void invoices (`job_material_id` link); a sold-estimate job bills materials through the office.
 12. Tech copy says "job"; office copy says "request".

@@ -19,11 +19,11 @@ import { logger } from "@/lib/logger";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const bodySchema = z.object({ invoiceId: z.string().uuid() });
+const bodySchema = z.object({ invoiceId: z.string().uuid() }).strict();
 
 const SEND_FAILED: RunResult = {
   status: 500,
-  envelope: { success: false, error: { message: "The link may not have gone out. Try again in 2 minutes.", code: "SEND_FAILED" } },
+  envelope: { success: false, error: { message: "The link may not have gone out. Try again in 5 minutes.", code: "SEND_FAILED" } },
 };
 
 export async function POST(
@@ -50,7 +50,7 @@ export async function POST(
       async () => {
         const target = await resolveTarget(organizationId, pre.requestId, invoiceId, "any");
         if (target !== "ok") return reasonResult(target === "stale" ? "stale" : "invoice_not_found");
-        const sent = await sendInvoicePayLink(organizationId, invoiceId);
+        const sent = await sendInvoicePayLink(organizationId, invoiceId, { requestId: pre.requestId, techUserId: userId });
         if (!sent.ok) return sent.reason === "send_failed" ? SEND_FAILED : reasonResult(sent.reason);
         return { status: 200, envelope: { success: true, data: { queued: true } } };
       },

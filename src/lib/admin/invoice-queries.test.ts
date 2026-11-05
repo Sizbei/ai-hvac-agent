@@ -965,13 +965,13 @@ describe("getInvoiceDetailById", () => {
 });
 
 describe("listStuckPayments", () => {
-  it("never lists manual payments (they are never pending)", async () => {
+  it("never lists manual or FieldPulse/HCP mirror payments", async () => {
     let whereArg: unknown;
     vi.mocked(db.select).mockReturnValue({
       from: () => ({ where: (w: unknown) => { whereArg = w; return { orderBy: () => Promise.resolve([]) }; } }),
     } as never);
     await listStuckPayments(ORG);
-    expect(render(whereArg)).toContain(`"payments"."provider" <> 'manual'`);
+    expect(render(whereArg)).toContain(`"payments"."provider" NOT IN ('manual', 'fieldpulse', 'hcp')`);
   });
 });
 
@@ -1101,6 +1101,7 @@ describe("reconcilePayment", () => {
       "UPDATE invoices SET amount_paid_cents = GREATEST(0, amount_paid_cents - $1::int), " +
         "state = (CASE WHEN state = 'draft'::invoice_state THEN state WHEN GREATEST(0, amount_paid_cents - $2::int) >= total_cents THEN 'paid' ELSE 'open' END)::invoice_state, updated_at = now() " +
         "WHERE id = $3::uuid AND organization_id = $4::uuid AND state IN ('open'::invoice_state, 'paid'::invoice_state, 'draft'::invoice_state) " +
+        "AND fieldpulse_invoice_id IS NULL AND hcp_invoice_id IS NULL " +
         "AND EXISTS (SELECT 1 FROM payments WHERE id = $5::uuid AND xmin = pg_current_xact_id()::xid)",
     );
     expect(renderQ(inv).params).toEqual([10000, 10000, "inv-1", ORG, "pay-1"]);

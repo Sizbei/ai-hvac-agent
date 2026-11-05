@@ -31,7 +31,7 @@ import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { errorResponse } from "@/lib/api-response";
 import { multipartHash, parseIdempotencyKey, toResponse, withIdempotency } from "@/lib/http/idempotency";
 import { logAudit } from "@/lib/admin/audit";
-import { logger } from "@/lib/logger";
+import { errorCode, logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -121,10 +121,17 @@ export async function POST(
       async () => {
         const storageKey = generateStorageKey(organizationId, id, file.name);
         const upload = await storageClient.uploadFile(file, storageKey, validatedMime);
-        const recorded = await recordSignature(organizationId, userId, id, {
-          signatureUrl: upload.url,
-          signatureName,
-        });
+        let recorded: Awaited<ReturnType<typeof recordSignature>>;
+        try {
+          recorded = await recordSignature(organizationId, userId, id, {
+            signatureUrl: upload.url,
+            signatureName,
+          });
+        } catch (error) {
+          // No row references the object: delete it, or erase can never find it.
+          await storageClient.deleteFile(storageKey).catch(() => {});
+          throw error;
+        }
         if (!recorded.ok) {
           // Race: job was reassigned between the ownership check and the write.
           await storageClient.deleteFile(storageKey).catch(() => {});
@@ -169,7 +176,8 @@ export async function POST(
     }
     return toResponse(result);
   } catch (error) {
-    logger.error({ error }, "Failed to capture signature");
+    // Codes only: a failed write's SQL params carry the customer's printed name.
+    logger.error({ code: errorCode(error) }, "Failed to capture signature");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);
   }
 }

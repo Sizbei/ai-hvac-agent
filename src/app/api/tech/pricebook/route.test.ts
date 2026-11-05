@@ -42,6 +42,14 @@ describe("GET /api/tech/pricebook?scope=invoice", () => {
     expect(h.listPricebookItemsForAdmin).not.toHaveBeenCalled();
   });
 
+  it("a query over 100 characters returns [] without searching; exactly 100 searches", async () => {
+    const res = await GET(req(`?scope=invoice&q=${"a".repeat(101)}`));
+    expect(await res.json()).toEqual({ success: true, data: { items: [] } });
+    expect(h.listPricebookItemsForAdmin).not.toHaveBeenCalled();
+    await GET(req(`?scope=invoice&q=${"a".repeat(100)}`));
+    expect(h.listPricebookItemsForAdmin).toHaveBeenCalledTimes(1);
+  });
+
   it("whitespace-padded short queries count trimmed", async () => {
     const res = await GET(req("?scope=invoice&q=%20c%20"));
     expect((await res.json()).data.items).toEqual([]);

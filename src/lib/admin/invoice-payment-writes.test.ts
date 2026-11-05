@@ -118,6 +118,12 @@ describe("recordManualPayment — preconditions", () => {
     expect(batch).not.toHaveBeenCalled();
   });
 
+  it.each([0, -100, 12.5, Number.NaN])("a non-positive or fractional amount (%s) → exceeds_balance before any read", async (amountCents) => {
+    expect(await recordManualPayment(TECH, INV, { paymentId: PAY }, { ...CASH, amountCents })).toEqual({ ok: false, reason: "exceeds_balance" });
+    expect(reads).toHaveLength(0);
+    expect(batch).not.toHaveBeenCalled();
+  });
+
   it("office: synced_read_only from the pre-read, no request predicate", async () => {
     readQueue.push([], [openInv({ synced: true })]);
     expect(await recordManualPayment(OFFICE, INV, { paymentId: PAY }, CASH)).toEqual({ ok: false, reason: "synced_read_only" });
@@ -252,6 +258,12 @@ describe("refundManualPayment", () => {
   ])("a row differing only in %s → refund_id_conflict", async (_f, over) => {
     readQueue.push([refRow(over)]);
     expect(await refundManualPayment(ORG, PAY, { refundId: REF }, { amountCents: 5000, reason: "Overpaid" })).toEqual({ ok: false, reason: "refund_id_conflict" });
+    expect(batch).not.toHaveBeenCalled();
+  });
+
+  it.each([0, -1, 0.5, Number.NaN])("a non-positive or fractional amount (%s) → exceeds_payment before any read", async (amountCents) => {
+    expect(await refundManualPayment(ORG, PAY, { refundId: REF }, { amountCents })).toEqual({ ok: false, reason: "exceeds_payment" });
+    expect(reads).toHaveLength(0);
     expect(batch).not.toHaveBeenCalled();
   });
 

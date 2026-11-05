@@ -19,7 +19,8 @@ export function invoiceAllowedActions(i: {
 }): InvoiceAction[] {
   if (!i.isLead || !i.onSite || !i.native) return [];
   const out: InvoiceAction[] = [];
-  if (i.state === "none") {
+  if (i.state === "none" || i.state === "paid" || i.state === "refunded") {
+    // A new draft after a settled invoice (paid-view ruling) as well as the first one.
     if (!i.externalInvoice) out.push("create");
   } else if (i.state === "draft") {
     if (!i.fromEstimate) out.push("add_line", "remove_line");

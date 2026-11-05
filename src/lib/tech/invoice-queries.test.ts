@@ -64,7 +64,8 @@ const M = {
   estimate: "FROM estimates",
   customer: "FROM customers",
   otherOpen: "id <> ",
-  history: "'paid'::invoice_state",
+  settled: "state IN ('paid'::invoice_state, 'refunded'::invoice_state) AND",
+  history: "'refunded'::invoice_state, 'void'::invoice_state)",
 };
 
 const invoiceRow = (over: Record<string, unknown> = {}) => ({
@@ -78,11 +79,13 @@ const invoiceRow = (over: Record<string, unknown> = {}) => ({
 function script(opts: {
   invoice?: Record<string, unknown> | null;
   meta?: Record<string, unknown>;
+  settled?: Record<string, unknown> | null;
   history?: Record<string, unknown> | null;
   otherOpen?: Record<string, unknown>[];
 }) {
   h.answers.clear();
   // Order matters: the first matching marker wins.
+  h.answers.set(M.settled, opts.settled ? [opts.settled] : []);
   h.answers.set(M.history, opts.history ? [opts.history] : []);
   h.answers.set(M.otherOpen, opts.otherOpen ?? []);
   h.answers.set(M.meta, [{
@@ -310,11 +313,70 @@ describe("getTechInvoiceView", () => {
     expect(q.params).toContain(INV);
   });
 
-  it("no live invoice: history = newest paid/refunded/void; create offered on site", async () => {
-    script({ invoice: null, history: { id: OTHER, state: "paid", total_cents: 5000 } });
+  it("no live invoice, a paid one: THE invoice in full (lines, payments, its own signature), history null, create offered", async () => {
+    script({
+      invoice: null,
+      settled: invoiceRow({
+        id: OTHER, state: "paid", amount_paid_cents: 10700, balance_cents: 0, issued_at: "2026-11-04T10:30:00.000Z",
+        signature_url: `${PUBLIC}/inv-sig.png`, signature_name: "Pat Doe", signed_at: "2026-11-04T10:15:00.000Z",
+      }),
+      meta: { signature_url: `${PUBLIC}/req-sig.png`, signature_name: "Someone Else", signed_at: "2026-11-04T12:00:00.000Z" },
+    });
+    const v = (await viewOf());
+    const inv = v.invoice as TechInvoice;
+    expect(inv).toMatchObject({ id: OTHER, state: "paid", balanceCents: 0, amountPaidCents: 10700, taxBps: null });
+    expect(inv.lines).toHaveLength(1);
+    expect(inv.payments).toEqual([
+      { id: "p1", method: "cash", checkNumber: null, amountCents: 500, status: "succeeded", createdAt: "2026-11-04T11:00:00.000Z" },
+    ]);
+    expect(inv.signature).toMatchObject({ state: "present", signatureName: "Pat Doe", signedAt: "2026-11-04T10:15:00.000Z", fresh: false });
+    expect(h.getSignedReadUrl).toHaveBeenCalledWith(expect.stringContaining("inv-sig.png"), expect.any(Number));
+    expect(v.materialsNotOnInvoice).toEqual([]);
+    expect(stmt(M.materials)).toBeUndefined();
+    expect(h.getDefaultTaxBps).not.toHaveBeenCalled();
+    expect(v.history).toBeNull();
+    expect(stmt(M.history)).toBeUndefined();
+    expect(v.otherOpen).toEqual([]);
+    expect(v.allowed).toEqual(["create"]);
+    const q = stmt(M.settled)!;
+    expect(q.sql).toContain("ORDER BY created_at DESC, id DESC LIMIT 1");
+    expect(q.sql).toContain("fieldpulse_invoice_id IS NULL AND hcp_invoice_id IS NULL");
+    expect(q.params).toEqual([ORG, REQ]);
+    expect(stmt(M.payments)!.params).toEqual([OTHER, ORG]);
+  });
+
+  it("no live invoice, a refunded one: shown in full, create offered", async () => {
+    script({ invoice: null, settled: invoiceRow({ id: OTHER, state: "refunded", amount_paid_cents: 0, balance_cents: 10700 }) });
+    const v = (await viewOf());
+    expect(v.invoice).toMatchObject({ id: OTHER, state: "refunded" });
+    expect(v.history).toBeNull();
+    expect(v.allowed).toEqual(["create"]);
+  });
+
+  it("a live invoice is never replaced by a settled one; the settled query is not issued", async () => {
+    script({ invoice: invoiceRow(), settled: invoiceRow({ id: OTHER, state: "paid" }) });
+    const v = (await viewOf());
+    expect(v.invoice).toMatchObject({ id: INV, state: "draft" });
+    expect(stmt(M.settled)).toBeUndefined();
+    expect(v.history).toBeNull();
+  });
+
+  it("non-lead on a paid invoice: the reduced view still applies", async () => {
+    asLead(false);
+    script({ invoice: null, settled: invoiceRow({ id: OTHER, state: "paid", amount_paid_cents: 10700, balance_cents: 0 }) });
+    const v = (await viewOf());
+    expect(v.invoice).toEqual({ id: OTHER, state: "paid", totalCents: 10700, balanceCents: 0 });
+    expect(v.allowed).toEqual([]);
+    expect(v.history).toBeNull();
+    expect(stmt(M.lines)).toBeUndefined();
+    expect(stmt(M.payments)).toBeUndefined();
+  });
+
+  it("no live and no settled invoice: history = the newest voided one; create offered on site", async () => {
+    script({ invoice: null, history: { id: OTHER, state: "void", total_cents: 5000 } });
     const v = (await viewOf());
     expect(v.invoice).toBeNull();
-    expect(v.history).toEqual({ id: OTHER, state: "paid", totalCents: 5000 });
+    expect(v.history).toEqual({ id: OTHER, state: "void", totalCents: 5000 });
     expect(stmt(M.history)!.sql).toContain("ORDER BY created_at DESC, id DESC LIMIT 1");
     expect(v.allowed).toEqual(["create"]);
     expect(v.customerHasPhone).toBe(true);

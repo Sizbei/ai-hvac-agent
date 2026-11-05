@@ -28,7 +28,7 @@ vi.mock("@/lib/admin/invoice-payment-writes", () => ({ recordManualPayment: h.re
 vi.mock("@/lib/communication/money-triggers", () => ({ triggerPaymentReceipt: h.triggerPaymentReceipt }));
 vi.mock("@/lib/communication/job-queue", () => ({ processPendingJobs: h.processPendingJobs }));
 vi.mock("@/lib/admin/audit", () => ({ logAudit: h.logAudit }));
-vi.mock("@/lib/logger", () => ({ logger: { info: vi.fn(), error: h.logError, warn: vi.fn() } }));
+vi.mock("@/lib/logger", async (orig) => ({ ...(await orig<typeof import("@/lib/logger")>()), logger: { info: vi.fn(), error: h.logError, warn: vi.fn() } }));
 
 import { POST } from "./route";
 import { NextResponse } from "next/server";
@@ -64,7 +64,7 @@ beforeEach(() => {
     h.replay.current
       ? { ...h.replay.current, replayed: true }
       : { ...(await run({ id: (n) => (n === "payment" ? PAY : `bad-${n}`) }) as object), replayed: false });
-  h.recordManualPayment.mockResolvedValue({ ok: true, paymentId: PAY, invoiceState: "partially_paid", created: true });
+  h.recordManualPayment.mockResolvedValue({ ok: true, paymentId: PAY, invoiceState: "open", created: true });
   h.dbRows.mockReturnValue([{ customerId: CUST }]);
   h.triggerPaymentReceipt.mockResolvedValue(undefined);
   h.processPendingJobs.mockResolvedValue(undefined);
@@ -96,6 +96,8 @@ describe("POST /api/tech/jobs/[id]/invoice/payments", () => {
       { ...CASH, checkNumber: "123" },
       { ...CHECK, checkNumber: "   " },
       { ...CHECK, checkNumber: "x".repeat(33) },
+      { ...CHECK, checkNumber: "Jane Doe chk 4471" },
+      { ...CHECK, checkNumber: "12/34" },
       { ...CASH, invoiceId: "nope" },
       { ...CASH, isDeposit: true },
       { method: "cash", amountCents: 100 },
@@ -103,7 +105,7 @@ describe("POST /api/tech/jobs/[id]/invoice/payments", () => {
     for (const body of bad) {
       const res = await post(body);
       expect(res.status, JSON.stringify(body)).toBe(400);
-      expect((await json(res)).error).toEqual({ code: "INVALID_INPUT", message: "That isn't a valid request." });
+      expect((await json(res)).error).toEqual({ code: "INVALID_INPUT", message: "Couldn't save that. Try again." });
     }
     expect((await post(null, "k", "")).status).toBe(400);
     expect(h.withIdempotency).not.toHaveBeenCalled();
@@ -124,7 +126,7 @@ describe("POST /api/tech/jobs/[id]/invoice/payments", () => {
       { method: "check", amountCents: 12345, checkNumber: "CHK-998", isDeposit: false, recordedBy: U },
     );
     expect(await json(res)).toEqual({
-      success: true, data: { paymentId: PAY, invoiceId: INV, invoiceState: "partially_paid", created: true },
+      success: true, data: { paymentId: PAY, invoiceId: INV, invoiceState: "open", created: true },
     });
   });
 

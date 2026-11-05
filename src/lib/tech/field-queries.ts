@@ -446,7 +446,7 @@ export async function recordSignature(
     SET signature_url = ${input.signatureUrl}, signature_name = ${input.signatureName}, signed_at = now(), updated_at = now()
     FROM (SELECT id, signature_url AS old FROM service_requests WHERE id = ${serviceRequestId}::uuid AND organization_id = ${organizationId}::uuid FOR UPDATE) o
     WHERE service_requests.id = o.id AND service_requests.organization_id = ${organizationId}::uuid
-      AND EXISTS (SELECT 1 FROM appointment_assignments a JOIN appointments p ON p.id = a.appointment_id WHERE p.service_request_id = service_requests.id AND a.organization_id = ${organizationId}::uuid AND a.technician_id = ${techUserId} AND a.is_lead AND a.status IN ${SIGNABLE_IN} AND p.cancelled_at IS NULL)
+      AND EXISTS (SELECT 1 FROM appointment_assignments a JOIN appointments p ON p.id = a.appointment_id WHERE p.service_request_id = service_requests.id AND p.organization_id = ${organizationId}::uuid AND a.organization_id = ${organizationId}::uuid AND a.technician_id = ${techUserId} AND a.is_lead AND a.status IN ${SIGNABLE_IN} AND p.cancelled_at IS NULL)
     RETURNING o.old`);
   const updated = rows[0] as { old: string | null } | undefined;
   if (!updated) {

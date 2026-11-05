@@ -412,9 +412,11 @@ describe("recordSignature", () => {
     // No JS clock: no Date param bound anywhere (signed_at comes from now()).
     expect(params.some((p) => p instanceof Date)).toBe(false);
     // org on the subquery, the outer UPDATE and the EXISTS body.
-    expect(params.filter((p) => p === ORG)).toHaveLength(3);
-    expect(params).toEqual([SIG.signatureUrl, SIG.signatureName, JOB, ORG, ORG, ORG, TECH]);
-    expect((text.match(/organization_id = \$\d+::uuid/g) ?? [])).toHaveLength(3);
+    expect(params.filter((p) => p === ORG)).toHaveLength(4);
+    expect(params).toEqual([SIG.signatureUrl, SIG.signatureName, JOB, ORG, ORG, ORG, ORG, TECH]);
+    expect(params).toHaveLength(8);
+    expect((text.match(/organization_id = \$\d+::uuid/g) ?? [])).toHaveLength(4);
+    expect(text).toContain("p.organization_id = $6::uuid AND a.organization_id = $7::uuid");
   });
 
   it("signs only from a lead row that is not cancelled on a live visit (open statuses + completed)", async () => {

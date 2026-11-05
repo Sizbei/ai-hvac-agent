@@ -491,3 +491,26 @@ describe("idempotency-codes", () => {
     });
   });
 });
+
+describe("tech derived ids vs office ids (no collision)", () => {
+  const ORG = "11111111-1111-4111-8111-111111111111";
+  const TOKEN = "22222222-2222-4222-8222-222222222222";
+  // Adversarial fixture: the tech key equals the office client token.
+  const scope = { organizationId: ORG, userId: "33333333-3333-4333-8333-333333333333", route: "/api/tech/jobs/x/invoice/payments", key: TOKEN };
+
+  it("the pre-hash inputs differ in shape: five fields vs three", () => {
+    const tech = derivedIdInput(scope, "payment");
+    const office = `${ORG}|payment|${TOKEN}`;
+    expect(tech.split("|")).toHaveLength(5);
+    expect(office.split("|")).toHaveLength(3);
+    expect(tech).not.toBe(office);
+    // The second field is a user uuid in one and the literal kind in the other.
+    expect(tech.split("|")[1]).not.toBe("payment");
+  });
+
+  it("the uuids differ for a fixed fixture, payment and refund alike", () => {
+    expect(derivedId(scope, "payment")).not.toBe(officeId("payment", ORG, TOKEN));
+    expect(derivedId(scope, "refund")).not.toBe(officeId("refund", ORG, TOKEN));
+    expect(officeId("payment", ORG, TOKEN)).toBe(officeId("payment", ORG, TOKEN));
+  });
+});

@@ -51,7 +51,7 @@ describe("DELETE /api/tech/jobs/[id]/invoice/lines/[lid]", () => {
     for (const [lid, q] of [["nope", `?invoiceId=${INV}`], [LID, ""], [LID, "?invoiceId=nope"]]) {
       const res = await del(lid, q);
       expect(res.status).toBe(400);
-      expect((await json(res)).error).toEqual({ code: "INVALID_INPUT", message: "That isn't a valid request." });
+      expect((await json(res)).error).toEqual({ code: "INVALID_INPUT", message: "Couldn't save that. Try again." });
     }
     expect(h.resolveTarget).not.toHaveBeenCalled();
   });

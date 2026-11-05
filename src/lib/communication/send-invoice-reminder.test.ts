@@ -110,6 +110,8 @@ vi.mock("@/lib/admin/org-config-queries", () => ({
 }));
 
 vi.mock("@/lib/crypto", () => ({ decrypt: (s: string) => s }));
+// money-triggers imports the pay link's lead check; the reminder never uses it.
+vi.mock("@/lib/admin/invoice-field-writes", () => ({ stillLeadSql: vi.fn() }));
 
 process.env.NEXT_PUBLIC_APP_URL = "https://app.test";
 

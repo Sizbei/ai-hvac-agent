@@ -62,6 +62,16 @@ function otherOpenSql(org: string, rid: string, adoptedId: string): SQL {
     ORDER BY created_at DESC, id DESC`;
 }
 
+/** With no live invoice: the newest settled (paid/refunded) native invoice, shown in full (paid-view ruling). */
+function settledSql(org: string, rid: string): SQL {
+  return sql`SELECT id, state, subtotal_cents, tax_cents, total_cents, amount_paid_cents,
+      GREATEST(0, total_cents - amount_paid_cents) AS balance_cents, issued_at, updated_at, created_at,
+      estimate_id, customer_id, signature_url, signature_name, signed_at
+    FROM invoices WHERE organization_id = ${org}::uuid AND service_request_id = ${rid}::uuid
+      AND state IN ('paid'::invoice_state, 'refunded'::invoice_state) AND ${P_NATIVE}
+    ORDER BY created_at DESC, id DESC LIMIT 1`;
+}
+
 function historySql(org: string, rid: string): SQL {
   return sql`SELECT id, state, total_cents
     FROM invoices WHERE organization_id = ${org}::uuid AND service_request_id = ${rid}::uuid
@@ -199,7 +209,7 @@ async function buildView(
   job: { customerId: string | null; native: boolean; status: string },
 ): Promise<TechInvoiceView> {
 
-  const [visit, [adopted], [meta]] = await Promise.all([
+  const [visit, [live], [meta]] = await Promise.all([
     findActiveVisit(org, rid),
     rows(adoptedSql(org, rid)),
     rows(metaSql(org, rid, techUserId)),
@@ -207,11 +217,15 @@ async function buildView(
   const isLead = visit?.leadTechnicianId === techUserId;
   const onSite = ON_SITE.includes(job.status);
   const m: Row = meta ?? {};
+  // No live invoice: the newest paid/refunded one is THE invoice, in full; history
+  // is only a void-only request's last voided invoice.
+  const [settled] = live ? [] : await rows(settledSql(org, rid));
+  const adopted: Row | undefined = live ?? settled;
   // The invoice's own customer once one exists (pay link refuses a null invoice customer, §6.4).
   const customerId = adopted ? str(adopted.customer_id) : job.customerId;
 
   const [otherRows, historyRows, phoneRows] = await Promise.all([
-    adopted ? rows(otherOpenSql(org, rid, String(adopted.id))) : Promise.resolve([] as Row[]),
+    live ? rows(otherOpenSql(org, rid, String(live.id))) : Promise.resolve([] as Row[]),
     adopted ? Promise.resolve([] as Row[]) : rows(historySql(org, rid)),
     customerId ? rows(customerPhoneSql(org, customerId)) : Promise.resolve([] as Row[]),
   ]);
@@ -239,7 +253,7 @@ async function buildView(
 
   const full = adopted ? await fullInvoice(org, rid, adopted, m) : null;
   const allowed = invoiceAllowedActions({
-    state: full ? (full.invoice.state as "draft" | "open") : "none",
+    state: full ? full.invoice.state : "none",
     isLead, onSite, native: job.native, externalInvoice: shared.externalInvoice,
     balanceCents: full?.invoice.balanceCents ?? 0,
     lines: full?.invoice.lines.length ?? 0,

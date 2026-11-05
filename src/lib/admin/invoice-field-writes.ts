@@ -53,15 +53,18 @@ export function stillLeadSql(org: string, rid: string, me: string): SQL {
 
 /**
  * T(gate): recompute the invoice totals from its lines. `updated_at` moves only
- * when the subtotal changed, so a replay, a refused attempt or an already-gone
- * removal never makes a fresh signature stale before finalize.
+ * when the subtotal OR the total changed (a tax-rate change moves the total
+ * alone), so a replay, a refused attempt or an already-gone removal never makes
+ * a fresh signature stale before finalize, and a signature never stays fresh
+ * over a different total. The tax is computed once in the subquery (one param).
  */
 export function totalsSql(org: string, inv: string, taxBps: number, gate: SQL): SQL {
   return sql`UPDATE invoices SET subtotal_cents = s.sub,
-      tax_cents = ROUND(s.sub * ${taxBps}::int / 10000.0)::int,
-      total_cents = s.sub + ROUND(s.sub * ${taxBps}::int / 10000.0)::int,
-      updated_at = CASE WHEN invoices.subtotal_cents <> s.sub THEN now() ELSE invoices.updated_at END
-    FROM (SELECT COALESCE(SUM(line_total_cents), 0) AS sub FROM invoice_line_items WHERE invoice_id = ${inv}::uuid AND organization_id = ${org}::uuid) s
+      tax_cents = s.tax,
+      total_cents = s.sub + s.tax,
+      updated_at = CASE WHEN invoices.subtotal_cents <> s.sub OR invoices.total_cents <> s.sub + s.tax THEN now() ELSE invoices.updated_at END
+    FROM (SELECT t.sub, ROUND(t.sub * ${taxBps}::int / 10000.0)::int AS tax
+      FROM (SELECT COALESCE(SUM(line_total_cents), 0) AS sub FROM invoice_line_items WHERE invoice_id = ${inv}::uuid AND organization_id = ${org}::uuid) t) s
     WHERE invoices.id = ${inv}::uuid AND invoices.organization_id = ${org}::uuid AND ${gate}`;
 }
 
@@ -87,12 +90,12 @@ const LINE_COLUMNS = sql.raw("(id, organization_id, invoice_id, job_material_id,
 const XMIN_GATE = sql.raw("invoices.xmin = pg_current_xact_id()::xid");
 const LINE_GATE = sql.raw("invoices.state = 'draft'::invoice_state AND invoices.amount_paid_cents = 0");
 
-async function readRows(q: SQL): Promise<Row[]> {
+export async function readRows(q: SQL): Promise<Row[]> {
   return ((await db.execute(q)) as unknown as { rows: Row[] }).rows;
 }
 
 /** One batch; a deadlock (40P01) is a stale write, never a 500. */
-async function runBatch(items: SQL[]): Promise<Row[][] | Fail> {
+export async function runBatch(items: SQL[]): Promise<Row[][] | Fail> {
   try {
     const out = (await db.batch(items.map((q) => db.execute(q)) as never)) as unknown as { rows: Row[] }[];
     return out.map((r) => r.rows);

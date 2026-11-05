@@ -151,7 +151,7 @@ describe("POST /api/tech/jobs/[id]/invoice", () => {
     for (const raw of ['{"invoiceId":"x"}', "[]", "null", "{"]) {
       const res = await create(raw);
       expect(res.status, raw).toBe(400);
-      expect((await json(res)).error).toEqual({ code: "INVALID_INPUT", message: "That isn't a valid request." });
+      expect((await json(res)).error).toEqual({ code: "INVALID_INPUT", message: "Couldn't save that. Try again." });
     }
     expect(h.withIdempotency).not.toHaveBeenCalled();
   });

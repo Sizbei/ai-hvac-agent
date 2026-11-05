@@ -90,7 +90,7 @@ describe("POST /api/tech/jobs/[id]/invoice/lines", () => {
     for (const body of bad) {
       const res = await post(body);
       expect(res.status, JSON.stringify(body)).toBe(400);
-      expect(await json(res)).toEqual({ success: false, error: { code: "INVALID_INPUT", message: "That isn't a valid request." } });
+      expect(await json(res)).toEqual({ success: false, error: { code: "INVALID_INPUT", message: "Couldn't save that. Try again." } });
     }
     expect((await post(null, "k-1", "{not json")).status).toBe(400);
     expect((await post(null, "k-1", "")).status).toBe(400);

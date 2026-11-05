@@ -50,7 +50,7 @@ vi.mock("next/server", async (orig) => ({
   after: h.after,
 }));
 vi.mock("@/lib/admin/audit", () => ({ logAudit: h.logAudit }));
-vi.mock("@/lib/logger", () => ({ logger: { info: h.logInfo, error: h.logError, warn: h.logWarn } }));
+vi.mock("@/lib/logger", async (orig) => ({ ...(await orig<typeof import("@/lib/logger")>()), logger: { info: h.logInfo, error: h.logError, warn: h.logWarn } }));
 
 import { POST } from "./route";
 import { multipartHash } from "@/lib/http/idempotency";
@@ -209,6 +209,17 @@ describe("POST /api/tech/jobs/[id]/signature", () => {
     expect(h.uploadFile).not.toHaveBeenCalled();
     expect(h.after).not.toHaveBeenCalled();
     expect(h.logAudit).not.toHaveBeenCalled();
+  });
+
+  it("deletes the uploaded object and logs only a code when recordSignature throws (no orphaned image)", async () => {
+    const dbError = Object.assign(new Error(`Failed query\nparams: ${NAME}`), { query: "UPDATE", params: [NAME], cause: { code: "40P01" } });
+    h.recordSignature.mockRejectedValueOnce(dbError);
+    const res = await POST(req(), ctx());
+    expect(res.status).toBe(500);
+    expect(h.deleteFile).toHaveBeenCalledTimes(1);
+    expect(h.deleteFile).toHaveBeenCalledWith(h.uploadFile.mock.calls[0][1]);
+    expect(h.logError).toHaveBeenCalledWith({ code: "40P01" }, "Failed to capture signature");
+    expect(JSON.stringify(h.logError.mock.calls)).not.toContain(NAME);
   });
 
   it("never logs the customer's printed name", async () => {

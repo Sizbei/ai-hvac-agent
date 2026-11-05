@@ -7,7 +7,7 @@
  *
  * `?scope=invoice&q=` is the field invoice's add-item search (spec §6.2):
  * active items of EVERY type (services included), server search, q >= 2
- * chars, limit 50, `{ id, name, type, priceCents, sku }`, rate-limited.
+ * chars (over 100 → no items), limit 50, `{ id, name, type, priceCents, sku }`, rate-limited.
  */
 import type { NextRequest } from "next/server";
 import { getTechSession } from "@/lib/auth/tech-session";
@@ -18,6 +18,8 @@ import { logger } from "@/lib/logger";
 
 const INVOICE_SEARCH_LIMIT = 50;
 const INVOICE_SEARCH_MIN_CHARS = 2;
+/** Longer queries return nothing: no item name is that long, and each is three ILIKE scans. */
+const INVOICE_SEARCH_MAX_CHARS = 100;
 
 async function invoiceSearch(organizationId: string, userId: string, q: string) {
   const rate = slidingWindow(`tech:pricebook:${userId}`, RATE_LIMITS.adminRead.maxRequests, RATE_LIMITS.adminRead.windowMs);
@@ -25,7 +27,7 @@ async function invoiceSearch(organizationId: string, userId: string, q: string) 
     return errorResponse("Too many requests. Wait a moment and try again.", "RATE_LIMITED", 429);
   }
   const search = q.trim();
-  if (search.length < INVOICE_SEARCH_MIN_CHARS) return successResponse({ items: [] });
+  if (search.length < INVOICE_SEARCH_MIN_CHARS || search.length > INVOICE_SEARCH_MAX_CHARS) return successResponse({ items: [] });
   const page = await listPricebookItemsForAdmin(organizationId, {
     search,
     includeInactive: false,

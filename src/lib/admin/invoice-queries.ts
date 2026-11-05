@@ -638,8 +638,9 @@ export async function listStuckPayments(
         organizationId,
         eq(payments.status, "pending"),
         lt(payments.createdAt, cutoff),
-        // Manual payments are never pending (spec §5.5); never "reconcile" them.
-        sql`${payments.provider} <> 'manual'`,
+        // Manual payments are never pending (spec §5.5) and FieldPulse/HCP
+        // mirror payments are not ours to settle; never "reconcile" them.
+        sql`${payments.provider} NOT IN ('manual', 'fieldpulse', 'hcp')`,
       ),
     )
     .orderBy(asc(payments.createdAt));
@@ -798,7 +799,8 @@ function failPendingPaymentSql(org: string, pid: string): SQL {
 }
 
 /**
- * Reconcile failed branch, statement 2: un-claim, only if statement 1 won.
+ * Reconcile failed branch, statement 2: un-claim, only if statement 1 won,
+ * and only on a native invoice (never decrement a FieldPulse/HCP mirror).
  * Deviation from spec §5.7 (orchestrator ruling): drafts are included and stay
  * drafts — takePayment still claims card payments on drafts, and a phantom
  * credit would freeze line edits (they require amount_paid_cents = 0).
@@ -809,6 +811,7 @@ function unclaimInvoiceSql(org: string, inv: string, pid: string, amt: number): 
       updated_at = now()
     WHERE id = ${inv}::uuid AND organization_id = ${org}::uuid
       AND state IN ('open'::invoice_state, 'paid'::invoice_state, 'draft'::invoice_state)
+      AND fieldpulse_invoice_id IS NULL AND hcp_invoice_id IS NULL
       AND EXISTS (SELECT 1 FROM payments WHERE id = ${pid}::uuid AND xmin = pg_current_xact_id()::xid)`;
 }
 

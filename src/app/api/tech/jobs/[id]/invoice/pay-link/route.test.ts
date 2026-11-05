@@ -99,7 +99,7 @@ describe("POST /api/tech/jobs/[id]/invoice/pay-link", () => {
       key: "key-1",
     });
     expect(h.resolveTarget).toHaveBeenCalledWith("o1", ID, INV, "any");
-    expect(h.sendInvoicePayLink).toHaveBeenCalledWith("o1", INV);
+    expect(h.sendInvoicePayLink).toHaveBeenCalledWith("o1", INV, { requestId: ID, techUserId: "u1" });
     expect(h.after).toHaveBeenCalledTimes(1);
     expect(h.processPendingJobs).not.toHaveBeenCalled();
     await h.after.mock.calls[0][0]();
@@ -120,7 +120,7 @@ describe("POST /api/tech/jobs/[id]/invoice/pay-link", () => {
     const res = await POST(req({ invoiceId: INV }), ctx);
     expect(lastRun).toEqual({
       status: 500,
-      envelope: { success: false, error: { message: "The link may not have gone out. Try again in 2 minutes.", code: "SEND_FAILED" } },
+      envelope: { success: false, error: { message: "The link may not have gone out. Try again in 5 minutes.", code: "SEND_FAILED" } },
     });
     expect(res.status).toBe(500);
     expect(h.after).not.toHaveBeenCalled();
@@ -133,6 +133,21 @@ describe("POST /api/tech/jobs/[id]/invoice/pay-link", () => {
     expect(res.status).toBe(409);
     expect((await res.json()).error.code).toBe("COOLDOWN");
     expect(h.after).not.toHaveBeenCalled();
+  });
+
+  it("an unknown body key → 400 INVALID_INPUT (strict body), nothing sent", async () => {
+    const res = await POST(req({ invoiceId: INV, extra: 1 }), ctx);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe("INVALID_INPUT");
+    expect(h.withIdempotency).not.toHaveBeenCalled();
+    expect(h.sendInvoicePayLink).not.toHaveBeenCalled();
+  });
+
+  it("not_lead from the sender's in-write gate → 403 NOT_LEAD", async () => {
+    h.sendInvoicePayLink.mockResolvedValue({ ok: false, reason: "not_lead" });
+    const res = await POST(req({ invoiceId: INV }), ctx);
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.code).toBe("NOT_LEAD");
   });
 
   it("stale target → 409 STALE; not_found target → 404; the sender is never called", async () => {

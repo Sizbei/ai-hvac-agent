@@ -66,7 +66,7 @@ const LOCK_REQ = /^SELECT 1 FROM service_requests WHERE id = \$1::uuid AND organ
 const LOCK_INV = /^SELECT 1 FROM invoices WHERE id = \$1::uuid AND organization_id = \$2::uuid FOR NO KEY UPDATE$/;
 const XMIN = "xmin = pg_current_xact_id()::xid";
 const SIG_CASE = "CASE WHEN r.signed_at >= invoices.updated_at";
-const T_KEEPS_UPDATED_AT = "updated_at = CASE WHEN invoices.subtotal_cents <> s.sub THEN now() ELSE invoices.updated_at END";
+const T_KEEPS_UPDATED_AT = "updated_at = CASE WHEN invoices.subtotal_cents <> s.sub OR invoices.total_cents <> s.sub + s.tax THEN now() ELSE invoices.updated_at END";
 
 beforeEach(() => {
   readQueue.length = 0;
@@ -92,10 +92,21 @@ describe("shared SQL builders", () => {
     expect(lead.sql).toContain("'completed'::request_status)");
     expect(lead.sql).toContain("p.cancelled_at IS NULL");
     const t = renderQ(totalsSql(ORG, INV, 925, sql.raw("TRUE")));
-    expect(t.params).toHaveLength(6);
-    expect(t.sql).toContain("ROUND(s.sub * $1::int / 10000.0)::int");
+    expect(t.params).toHaveLength(5);
+    expect(t.params[0]).toBe(925); // the tax rate is bound once
+    expect(t.sql).toContain("ROUND(t.sub * $1::int / 10000.0)::int AS tax");
+    expect(t.sql).toContain("tax_cents = s.tax");
+    expect(t.sql).toContain("total_cents = s.sub + s.tax");
     expect(t.sql.replace(/\s+/g, " ")).toContain(T_KEEPS_UPDATED_AT);
-    expect(t.sql).toMatch(/FROM invoice_line_items WHERE invoice_id = \$\d::uuid AND organization_id = \$\d::uuid\) s/);
+    expect(t.sql).toMatch(/FROM invoice_line_items WHERE invoice_id = \$\d::uuid AND organization_id = \$\d::uuid\) t\) s/);
+  });
+
+  it("T bumps updated_at on a subtotal change OR a total change (a tax-rate change moves only the total)", () => {
+    const t = render(totalsSql(ORG, INV, 925, sql.raw("TRUE")));
+    const caseExpr = t.slice(t.indexOf("updated_at = CASE"), t.indexOf(" END", t.indexOf("updated_at = CASE")));
+    expect(caseExpr).toContain("invoices.subtotal_cents <> s.sub");
+    expect(caseExpr).toContain("invoices.total_cents <> s.sub + s.tax");
+    expect(caseExpr).toContain(" OR ");
   });
 });
 
@@ -124,7 +135,7 @@ describe("createInvoiceFromJob", () => {
 
     const s = stmts();
     expect(s).toHaveLength(6);
-    expect(params()).toEqual([2, 10, 21, 6, 2, 4]);
+    expect(params()).toEqual([2, 10, 21, 5, 2, 4]);
     expect(s[0]).toMatch(LOCK_REQ);
     expect(s[1]).toMatch(/^INSERT INTO invoices \(id, organization_id, service_request_id, customer_id, state, subtotal_cents, tax_cents, total_cents, amount_paid_cents\)/);
     expect(s[1]).toContain("'draft'::invoice_state, 0, 0, 0, 0 WHERE (EXISTS (SELECT 1 FROM appointment_assignments a");
@@ -153,7 +164,7 @@ describe("createInvoiceFromJob", () => {
     readQueue.push(nativeReq, []);
     batch.mockResolvedValue(res([], [{ id: INV }], [], [{ id: INV, state: "draft" }], [{ still_lead: true }]));
     await createInvoiceFromJob(actor, { invoiceId: INV });
-    expect(params()).toEqual([2, 10, 6, 2, 4]);
+    expect(params()).toEqual([2, 10, 5, 2, 4]);
     expect(stmts().some((q) => q.startsWith("INSERT INTO invoice_line_items"))).toBe(false);
   });
 
@@ -206,7 +217,7 @@ describe("addInvoiceLine", () => {
     const out = await addInvoiceLine(TECH, INV, { lineId: LINE }, { pricebookItemId: ITEM, quantity: 2 });
     expect(out).toEqual({ ok: true, lineId: LINE });
     const s = stmts();
-    expect(params()).toEqual([2, 2, 16, 6, 6, 4]);
+    expect(params()).toEqual([2, 2, 16, 5, 6, 4]);
     expect(s[0]).toMatch(LOCK_REQ);
     expect(s[1]).toMatch(LOCK_INV);
     expect(s[2]).toMatch(/^INSERT INTO invoice_line_items/);
@@ -226,7 +237,7 @@ describe("addInvoiceLine", () => {
     batch.mockResolvedValue(res([], [], [{ id: lid }], [], [{ state: "draft", line_exists: true, already_billed: true }], [{ still_lead: true }]));
     expect(await addInvoiceLine(TECH, INV, { lineId: LINE }, { jobMaterialId: MAT1 })).toEqual({ ok: true, lineId: lid });
     expect(render(reads[0])).toContain("m.service_request_id = $");
-    expect(params()).toEqual([2, 2, 20, 6, 10, 4]);
+    expect(params()).toEqual([2, 2, 20, 5, 10, 4]);
     const s = stmts();
     expect(s[2]).toContain("AND NOT EXISTS (SELECT 1 FROM invoice_line_items l JOIN invoices i ON i.id = l.invoice_id WHERE l.job_material_id = $");
     expect(renderQ((batch.mock.calls[0]![0] as unknown[])[2]).params).toContain(lid);
@@ -263,7 +274,7 @@ describe("addInvoiceLine", () => {
     readQueue.push([{ service_request_id: REQ, synced: false }]);
     batch.mockResolvedValue(res([], [], [{ id: LINE }], [], [{ state: "draft", line_exists: true, already_billed: false }]));
     expect(await addInvoiceLine(OFFICE, INV, { lineId: LINE }, { pricebookItemId: ITEM, quantity: 1 })).toEqual({ ok: true, lineId: LINE });
-    expect(params()).toEqual([2, 2, 11, 6, 5]);
+    expect(params()).toEqual([2, 2, 11, 5, 5]);
     expect(renderQ((batch.mock.calls[0]![0] as unknown[])[0]).params[0]).toBe(REQ);
     const s = stmts();
     expect(s[2]).toContain("WHERE (TRUE) AND EXISTS (SELECT 1 FROM invoices i WHERE i.id = $");
@@ -281,7 +292,7 @@ describe("removeInvoiceLine", () => {
   it("removes under the draft + unpaid gate, T with amount_paid_cents = 0", async () => {
     batch.mockResolvedValue(res([], [], [{ id: LINE }], [], [{ state: "draft" }], [{ still_lead: true }]));
     expect(await removeInvoiceLine(TECH, INV, LINE)).toEqual({ ok: true, removed: true });
-    expect(params()).toEqual([2, 2, 10, 6, 3, 4]);
+    expect(params()).toEqual([2, 2, 10, 5, 3, 4]);
     const s = stmts();
     expect(s[0]).toMatch(LOCK_REQ);
     expect(s[1]).toMatch(LOCK_INV);
