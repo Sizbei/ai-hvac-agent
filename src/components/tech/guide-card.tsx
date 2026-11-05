@@ -13,8 +13,8 @@ import { GUIDE_COPY, progressLabel } from '@/lib/tech/guide-copy';
 import { cardNote, cardState, type TodayFirst } from '@/lib/tech/guide-view';
 
 const SKELETON_DELAY_MS = 300;
-/** Tallest common state (header, bar, eyebrow, title, two-line how, button, link) so the skeleton → card swap never moves the list. */
-const CARD_MIN_H = 'min-h-[332px]';
+/** The common button state (header, bar, eyebrow, title, two-line how, button, link) so the skeleton → card swap never moves the list. */
+const CARD_MIN_H = 'min-h-[276px]';
 
 export function GuideCard({ todayFirst, todaySettled, onHidden }: {
   readonly todayFirst: TodayFirst;
@@ -42,8 +42,8 @@ export function GuideCard({ todayFirst, todaySettled, onHidden }: {
   if (state === 'skeleton' || !data) {
     return (
       <Card className={CARD_MIN_H}>
-        <CardContent className="space-y-3 p-4" aria-hidden="true">
-          <div className="flex h-11 items-center justify-between"><Skeleton className="h-4 w-28" /><Skeleton className="h-4 w-10" /></div>
+        <CardContent className="space-y-3" aria-hidden="true">
+          <div className="flex h-6 items-center justify-between"><Skeleton className="h-4 w-28" /><Skeleton className="h-4 w-10" /></div>
           <Skeleton className="h-1.5 w-full rounded-full" />
           <Skeleton className="h-3 w-14" />
           <Skeleton className="h-5 w-48" />
@@ -81,8 +81,8 @@ export function GuideCard({ todayFirst, todaySettled, onHidden }: {
 
   return (
     <Card className={CARD_MIN_H}>
-      <CardContent className="space-y-3 p-4">
-        <div className="flex h-11 items-center justify-between gap-2">
+      <CardContent className="space-y-3">
+        <div className="flex items-center justify-between gap-2">
           <p className="text-[15px] font-semibold">{GUIDE_COPY.cardTitle}</p>
           <div className="flex items-center gap-1">
             <span className="font-mono text-[13px] tabular-nums text-muted-foreground">
@@ -91,7 +91,7 @@ export function GuideCard({ todayFirst, todaySettled, onHidden }: {
             <Button
               variant="ghost"
               size="icon"
-              className="size-11"
+              className="-my-2.5 -mr-2.5 size-11"
               aria-label={finished ? GUIDE_COPY.closeAria : GUIDE_COPY.hideAria}
               onClick={() => void hide()}
             >
@@ -115,7 +115,7 @@ export function GuideCard({ todayFirst, todaySettled, onHidden }: {
             )}
           </div>
         ) : null}
-        <Link href="/tech/guide" className="inline-flex min-h-11 items-center text-[13px] font-medium text-link">
+        <Link href="/tech/guide" className="-mb-3 inline-flex min-h-11 items-center text-[13px] font-medium text-link">
           {GUIDE_COPY.seeAll}
         </Link>
         {failed && <p role="alert" className="text-[13px] text-danger-strong">{GUIDE_COPY.updateFailed}</p>}
