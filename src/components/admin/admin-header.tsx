@@ -9,18 +9,18 @@ interface AdminHeaderProps {
   /** Current page label shown between the hamburger and BrandMark on mobile,
    *  so users know their location when the sidebar is closed. */
   readonly title?: string;
+  /** The org's display name — the same brand the desktop sidebar shows. */
+  readonly orgName?: string;
 }
 
-export function AdminHeader({ onMenuClick, title }: AdminHeaderProps) {
+export function AdminHeader({ onMenuClick, title, orgName }: AdminHeaderProps) {
   return (
     <header className="flex h-16 items-center gap-3 border-b bg-card/80 px-4 backdrop-blur-sm md:hidden">
-      <Button variant="ghost" size="icon" onClick={onMenuClick}>
+      <Button variant="ghost" size="icon" onClick={onMenuClick} aria-label="Open navigation">
         <Menu className="size-5" />
       </Button>
-      {title && (
-        <span className="flex-1 truncate text-sm font-medium">{title}</span>
-      )}
-      <BrandMark />
+      <span className="min-w-0 flex-1 truncate text-sm font-medium">{title}</span>
+      <BrandMark name={orgName} className="min-w-0 max-w-[55%] [&_span]:truncate" />
     </header>
   );
 }

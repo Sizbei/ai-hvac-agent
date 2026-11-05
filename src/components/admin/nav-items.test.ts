@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { ListChecks } from "lucide-react";
-import { navGroupsFor } from "./nav-items";
+import { navGroupsFor, navItemMatches, navLabelFor } from "./nav-items";
 import { filterCommands } from "@/lib/admin/nav-search";
 
 function group(placement: "operations" | "integrations", heading: string) {
@@ -57,5 +57,26 @@ describe("navGroupsFor", () => {
 
   it("returns a stable reference per placement", () => {
     expect(navGroupsFor("operations")).toBe(navGroupsFor("operations"));
+  });
+});
+
+describe("navItemMatches / navLabelFor", () => {
+  it("matches the dashboard with or without a trailing slash, and only exactly", () => {
+    const dash = { href: "/admin/", exact: true };
+    expect(navItemMatches("/admin", dash)).toBe(true);
+    expect(navItemMatches("/admin/", dash)).toBe(true);
+    expect(navItemMatches("/admin/requests", dash)).toBe(false);
+  });
+
+  it("matches sub-pages but not look-alike prefixes", () => {
+    const item = { href: "/admin/customers" };
+    expect(navItemMatches("/admin/customers/abc", item)).toBe(true);
+    expect(navItemMatches("/admin/customersx", item)).toBe(false);
+  });
+
+  it("labels the mobile top bar, including the dashboard", () => {
+    expect(navLabelFor("/admin", "operations")).toBe("Dashboard");
+    expect(navLabelFor("/admin/conversations", "integrations")).toBe("Conversations");
+    expect(navLabelFor("/nowhere", "integrations")).toBeUndefined();
   });
 });

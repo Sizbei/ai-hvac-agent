@@ -130,3 +130,30 @@ const GROUPS_BY_PLACEMENT: Record<SetupPlacement, readonly NavGroup[]> = {
 export function navGroupsFor(placement: SetupPlacement): readonly NavGroup[] {
   return GROUPS_BY_PLACEMENT[placement];
 }
+
+/** Drop trailing slashes so "/admin/" and "/admin" compare equal. */
+function normalizePath(path: string): string {
+  const trimmed = path.replace(/\/+$/, '');
+  return trimmed === '' ? '/' : trimmed;
+}
+
+/**
+ * Whether `pathname` is on `item`'s page. Exact items (Dashboard, href
+ * "/admin/") match only their own path; others also match sub-pages.
+ */
+export function navItemMatches(pathname: string, item: Pick<NavItem, 'href' | 'exact'>): boolean {
+  const path = normalizePath(pathname);
+  const href = normalizePath(item.href);
+  if (item.exact) return path === href;
+  return path === href || path.startsWith(`${href}/`);
+}
+
+/** The nav label for the current page (mobile top bar), or undefined. */
+export function navLabelFor(pathname: string, placement: SetupPlacement): string | undefined {
+  for (const group of navGroupsFor(placement)) {
+    for (const item of group.items) {
+      if (navItemMatches(pathname, item)) return item.label;
+    }
+  }
+  return undefined;
+}

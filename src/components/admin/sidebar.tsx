@@ -11,6 +11,7 @@ import {
   Search,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
 import {
   Tooltip,
   TooltipContent,
@@ -21,7 +22,7 @@ import { BrandMark } from '@/components/admin/brand-mark';
 import { EnvBadge } from '@/components/admin/env-badge';
 // NAV_GROUPS lives in a shared module so the ⌘K search can offer page-navigation
 // from the same source of truth (no drift with the sidebar).
-import { navGroupsFor, type NavItem, type SetupPlacement } from './nav-items';
+import { navGroupsFor, navItemMatches, type NavItem, type SetupPlacement } from './nav-items';
 import { useUnscheduledCount } from '@/hooks/use-unscheduled-count';
 import { unscheduledBadge, type UnscheduledBadge } from '@/lib/admin/unscheduled-badge';
 import { refreshOnboarding, useOnboarding } from '@/lib/admin/onboarding-store';
@@ -136,8 +137,7 @@ export function Sidebar({
   }, []);
 
   const isItemActive = useCallback(
-    (item: NavItem) =>
-      item.exact ? pathname === item.href : pathname.startsWith(item.href),
+    (item: NavItem) => navItemMatches(pathname, item),
     [pathname],
   );
 
@@ -213,32 +213,20 @@ export function Sidebar({
   // hairline — no radius, no shadow, no gradient.
   const surfaceClass = 'bg-sidebar text-sidebar-foreground';
 
-  // Mobile: overlay sidebar
+  // Mobile: the drawer is a modal Sheet — Esc, backdrop tap, focus trap and
+  // focus return come from the dialog primitive.
   if (isMobile) {
     return (
-      <>
-        {isMobileOpen && (
-          <div
-            className="fixed inset-0 z-40 bg-foreground/45"
-            onClick={onMobileClose}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') {
-                onMobileClose();
-              }
-            }}
-            role="button"
-            tabIndex={0}
-            aria-label="Close sidebar"
-          />
-        )}
-
-        <aside
+      <Sheet open={isMobileOpen} onOpenChange={(open) => { if (!open) onMobileClose(); }}>
+        <SheetContent
+          side="left"
+          showCloseButton={false}
           className={cn(
-            'fixed inset-y-0 left-0 z-50 w-[var(--sidebar-w,232px)] border-r border-sidebar-border transition-transform duration-200 motion-reduce:transition-none',
+            'w-[var(--sidebar-w,232px)] gap-0 border-sidebar-border p-0',
             surfaceClass,
-            isMobileOpen ? 'translate-x-0' : '-translate-x-full',
           )}
         >
+          <SheetTitle className="sr-only">Navigation</SheetTitle>
           <div className="flex h-full flex-col">
             <div className="flex h-16 items-center border-b border-sidebar-border px-4">
               <div className="flex flex-col gap-0.5">
@@ -256,13 +244,14 @@ export function Sidebar({
               </Button>
             </div>
 
-            {/* Search button (mobile) */}
+            {/* Search button (mobile) — closes the drawer so search isn't stacked on it */}
             <div className="px-3 pb-1 pt-3">
               <button
                 type="button"
-                onClick={() =>
-                  window.dispatchEvent(new CustomEvent('global-search:open'))
-                }
+                onClick={() => {
+                  onMobileClose();
+                  window.dispatchEvent(new CustomEvent('global-search:open'));
+                }}
                 className={RAIL_ROW}
               >
                 <Search className="size-4 shrink-0 [color:var(--sidebar-foreground-dim)]" />
@@ -313,8 +302,8 @@ export function Sidebar({
               </Button>
             </div>
           </div>
-        </aside>
-      </>
+        </SheetContent>
+      </Sheet>
     );
   }
 
