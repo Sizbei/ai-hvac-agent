@@ -179,7 +179,7 @@ export function BrandingPanel({ config, onSave }: BrandingPanelProps) {
         <div className="relative h-[320px] overflow-hidden rounded-lg border border-border-strong bg-surface-sunken">
           <div
             className={cn(
-              'absolute bottom-4 w-[220px] overflow-hidden rounded-2xl border border-border-strong bg-surface-raised shadow-[var(--shadow-pop)]',
+              'absolute bottom-20 w-[220px] overflow-hidden rounded-2xl border border-border-strong bg-surface-raised shadow-[var(--shadow-pop)]',
               launcherPosition === 'bottom-right' ? 'right-4' : 'left-4',
             )}
           >
@@ -210,7 +210,6 @@ export function BrandingPanel({ config, onSave }: BrandingPanelProps) {
               // shop-floor austerity laws (see SPEC "EXEMPT tonight").
               'absolute bottom-4 flex size-12 items-center justify-center rounded-full text-primary-foreground shadow-[var(--shadow-pop)]',
               launcherPosition === 'bottom-right' ? 'right-4' : 'left-4',
-              'translate-y-[120%]',
             )}
             style={{ backgroundColor: previewColor }}
           >

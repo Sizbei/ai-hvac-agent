@@ -93,7 +93,7 @@ export function ConversationLimitsPanel({
         <CardTitle>Conversation limits</CardTitle>
         <CardDescription>
           Control how long an AI chat can run before it wraps up and hands off.
-          These apply to NEW conversations. Leave a field blank to use the
+          These apply to new conversations. Leave a field blank to use the
           system default. Emergencies always escalate regardless of these
           limits.
         </CardDescription>

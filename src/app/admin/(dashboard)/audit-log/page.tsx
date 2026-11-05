@@ -1,5 +1,6 @@
 'use client';
 
+import { humanizeAuditKey } from '@/lib/admin/audit-format';
 import { useState } from 'react';
 import { AlertCircle, ScrollText, X } from 'lucide-react';
 import { useAdminAuditLog } from '@/hooks/use-admin-audit-log';
@@ -52,14 +53,7 @@ const KNOWN_ENTITIES = [
 
 // Pretty-print a snake_case action/entity ("customer_updated" → "Customer updated").
 // Sentence case: only the first word is capitalised.
-function humanize(value: string): string {
-  const words = value.split('_');
-  if (words.length === 0) return value;
-  return [
-    words[0].charAt(0).toUpperCase() + words[0].slice(1),
-    ...words.slice(1),
-  ].join(' ');
-}
+const humanize = humanizeAuditKey;
 
 // Render the JSON `details` payload (field names / ids only, never PII) as a
 // compact readable string. Falls back to the raw string if it isn't JSON.

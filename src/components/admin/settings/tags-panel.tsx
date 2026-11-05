@@ -33,10 +33,19 @@ const GENERIC_COPY = "Couldn't save the tag. Please try again.";
 const GROUPS: readonly { entity: TagEntity; title: string; description: string }[] = [
   { entity: 'customer', title: 'Customers', description: 'Labels on customer profiles, such as VIP or Commercial.' },
   { entity: 'location', title: 'Locations', description: 'Labels on service locations, such as Gate code or Dog.' },
-  { entity: 'job', title: 'Requests', description: 'Labels on requests. Tags marked "Show on board" will appear on dispatch cards once the board shows tags (coming with the dispatch milestone).' },
+  { entity: 'job', title: 'Requests', description: 'Labels on requests. Dispatch cards don\'t show tags yet; "Show on board" picks the ones they will show.' },
 ];
 
-const COLOR_ITEMS = TAG_COLOR_TOKENS.map((c) => ({ value: c, label: c.charAt(0).toUpperCase() + c.slice(1) }));
+// Plain colour names for the design tokens (owners don't know "marker").
+const COLOR_NAMES: Record<TagColor, string> = {
+  graphite: 'Gray',
+  marker: 'Teal',
+  danger: 'Red',
+  success: 'Green',
+  warning: 'Amber',
+  info: 'Blue',
+};
+const COLOR_ITEMS = TAG_COLOR_TOKENS.map((c) => ({ value: c, label: COLOR_NAMES[c] }));
 
 type SaveResult =
   | { readonly ok: true; readonly tag: TagTypeRecord }

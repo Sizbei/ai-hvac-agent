@@ -121,3 +121,37 @@ export function isStaleRun(
   if (Number.isNaN(startedMs)) return false;
   return nowMs - startedMs > STALE_RUN_THRESHOLD_MS;
 }
+
+/**
+ * Duration cell for a run. A run that finished, or is genuinely still
+ * running, shows elapsed time; a run that stopped without finishing (stale
+ * `running`, or `failed`/other with no finishedAt) shows "—" instead of a
+ * duration counting up to now ("124107m 10s").
+ */
+export function runDuration(
+  run: { readonly status: string; readonly startedAt: string; readonly finishedAt: string | null },
+  nowMs: number,
+): string {
+  if (run.finishedAt) return formatElapsed(run.startedAt, run.finishedAt);
+  if (run.status === 'running' && !isStaleRun(run, nowMs)) {
+    return formatElapsed(run.startedAt, new Date(nowMs).toISOString());
+  }
+  return '—';
+}
+
+/** "job-metrics" → "Job metrics" (sentence case, not CSS capitalize). */
+export function phaseLabel(phase: string): string {
+  const text = phase.replace(/[-_]+/g, ' ').trim();
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** "Aug 13, 2026, 12:28 AM" — the app's date style. */
+export function formatRunStarted(iso: string): string {
+  return new Date(iso).toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}

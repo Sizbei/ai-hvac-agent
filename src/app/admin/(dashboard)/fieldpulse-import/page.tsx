@@ -9,6 +9,9 @@ import {
   formatElapsed,
   runTone,
   isStaleRun,
+  runDuration,
+  phaseLabel,
+  formatRunStarted,
   PIPELINE_PHASES,
   type FpImportRunSummary,
   type FpRunCounts,
@@ -98,9 +101,13 @@ function TalliesRow({ counts }: { counts: FpRunCounts }) {
 function ElapsedTime({
   run,
   isRunning,
+  isStale,
+  asOfMs,
 }: {
   run: FpImportRunSummary;
   isRunning: boolean;
+  isStale: boolean;
+  asOfMs: number;
 }) {
   const [, setTick] = useState(0);
 
@@ -110,7 +117,11 @@ function ElapsedTime({
     return () => clearInterval(id);
   }, [isRunning]);
 
-  const elapsed = formatElapsed(run.startedAt, run.finishedAt);
+  // A live run ticks; a stopped one shows "—" instead of counting to now.
+  const elapsed =
+    isRunning && !isStale
+      ? formatElapsed(run.startedAt, run.finishedAt)
+      : runDuration(run, asOfMs);
   return (
     <p className="text-xs text-muted-foreground" aria-live="polite">
       Elapsed: {elapsed}
@@ -153,7 +164,7 @@ function RecentRunsTable({
             const stale = isStaleRun(run, asOfMs);
             return (
               <tr key={run.id} className="hover:bg-row-hover">
-                <td className="px-3 py-2 capitalize">{run.phase}</td>
+                <td className="px-3 py-2">{phaseLabel(run.phase)}</td>
                 <td className="px-3 py-2">
                   <StatusChip status={run.status} isStale={stale} />
                 </td>
@@ -168,10 +179,10 @@ function RecentRunsTable({
                   {counts.errors ?? 0}
                 </td>
                 <td className="px-3 py-2 text-muted-foreground">
-                  {new Date(run.startedAt).toLocaleString()}
+                  {formatRunStarted(run.startedAt)}
                 </td>
                 <td className="px-3 py-2 tabular-nums text-muted-foreground">
-                  {formatElapsed(run.startedAt, run.finishedAt)}
+                  {runDuration(run, asOfMs)}
                 </td>
               </tr>
             );
@@ -226,14 +237,14 @@ export default function FieldpulseImportPage() {
             <Card key={phase}>
               <CardContent className="space-y-3 pt-4">
                 <div className="flex items-center justify-between gap-2">
-                  <SectionHeading as="h2" title={phase} className="capitalize" />
+                  <SectionHeading as="h2" title={phaseLabel(phase)} />
                   <StatusChip status={run?.status} isStale={stale} />
                 </div>
                 {run ? (
                   <>
                     <ProgressBar pct={pct} isRunning={isRunning} />
                     <TalliesRow counts={counts} />
-                    <ElapsedTime run={run} isRunning={isRunning} />
+                    <ElapsedTime run={run} isRunning={isRunning} isStale={stale} asOfMs={asOfMs} />
                     {run.error && (
                       <p className="break-words text-xs text-destructive">{run.error}</p>
                     )}

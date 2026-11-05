@@ -269,3 +269,24 @@ describe('isStaleRun', () => {
     expect(isStaleRun(run, NOW)).toBe(false);
   });
 });
+
+describe('runDuration / phaseLabel / formatRunStarted', () => {
+  const now = Date.parse('2026-11-05T12:00:00.000Z');
+
+  it('shows elapsed for finished and live runs, a dash for stopped ones', async () => {
+    const { runDuration } = await import('./import-status-model');
+    expect(
+      runDuration({ status: 'completed', startedAt: '2026-11-05T11:00:00.000Z', finishedAt: '2026-11-05T11:01:30.000Z' }, now),
+    ).toBe('1m 30s');
+    expect(runDuration({ status: 'running', startedAt: '2026-11-05T11:59:50.000Z', finishedAt: null }, now)).toBe('10s');
+    expect(runDuration({ status: 'running', startedAt: '2026-08-01T00:00:00.000Z', finishedAt: null }, now)).toBe('—');
+    expect(runDuration({ status: 'failed', startedAt: '2026-08-01T00:00:00.000Z', finishedAt: null }, now)).toBe('—');
+  });
+
+  it('labels phases in sentence case and formats start times', async () => {
+    const { phaseLabel, formatRunStarted } = await import('./import-status-model');
+    expect(phaseLabel('job-metrics')).toBe('Job metrics');
+    expect(phaseLabel('customers')).toBe('Customers');
+    expect(formatRunStarted('2026-08-13T12:28:04.000Z')).toMatch(/^Aug 13, 2026/);
+  });
+});
