@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Menu, Wind } from "lucide-react";
+import { Menu, Phone, Wind } from "lucide-react";
 import {
   Sheet,
   SheetContent,
@@ -16,7 +16,17 @@ const NAV = [
   { label: "Docs", href: "/docs.html" },
 ];
 
-export function MobileNav() {
+/**
+ * Phone menu. A homeowner opening it needs the two real actions first — get
+ * service (the chat) and call — before the demo/admin/docs links.
+ */
+export function MobileNav({
+  phoneDisplay,
+  phoneTel,
+}: {
+  readonly phoneDisplay: string;
+  readonly phoneTel: string;
+}) {
   return (
     <Sheet>
       <SheetTrigger
@@ -34,6 +44,21 @@ export function MobileNav() {
             <span className="font-heading font-semibold tracking-tight">Spears Services</span>
           </SheetTitle>
         </SheetHeader>
+        <div className="flex flex-col gap-2 border-b border-border px-4 py-4">
+          <Link
+            href="/chat"
+            className="flex min-h-11 items-center justify-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors duration-[var(--dur-hover)] hover:bg-primary-deep"
+          >
+            Get service
+          </Link>
+          <a
+            href={`tel:${phoneTel}`}
+            className="flex min-h-11 items-center justify-center gap-2 rounded-md border border-border-input px-3 text-sm font-medium text-foreground transition-colors duration-[var(--dur-hover)] hover:bg-accent"
+          >
+            <Phone className="size-4" aria-hidden="true" />
+            Call {phoneDisplay}
+          </a>
+        </div>
         <nav className="flex flex-col gap-1 p-4">
           {NAV.map((item) => (
             <Link

@@ -178,7 +178,7 @@ export function PurchaseOrderFormDialog({
             {lines.map((line, index) => (
               <div key={index} className="flex items-end gap-2">
                 <div className="min-w-0 flex-1 space-y-1">
-                  <span className="text-xs text-muted-foreground">Material</span>
+                  <span className="block text-xs text-muted-foreground">Material</span>
                   <Select
                     value={line.pricebookItemId}
                     onValueChange={(v) => onMaterialChange(index, v ?? '')}
@@ -204,7 +204,7 @@ export function PurchaseOrderFormDialog({
                   </Select>
                 </div>
                 <div className="w-20 space-y-1">
-                  <span className="text-xs text-muted-foreground">Qty</span>
+                  <span className="block text-xs text-muted-foreground">Qty</span>
                   <Input
                     type="number"
                     min="1"
@@ -215,7 +215,7 @@ export function PurchaseOrderFormDialog({
                   />
                 </div>
                 <div className="w-28 space-y-1">
-                  <span className="text-xs text-muted-foreground">Unit cost</span>
+                  <span className="block text-xs text-muted-foreground">Unit cost</span>
                   <Input
                     type="number"
                     min="0"

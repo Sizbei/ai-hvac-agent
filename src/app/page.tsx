@@ -73,7 +73,7 @@ const WHY_CHOOSE = [
   { icon: CheckCircle2, title: 'Most jobs in one trip', body: 'We come prepared to diagnose and fix on the first visit.' },
   { icon: BadgeCheck, title: 'Licensed professional engineer', body: 'A licensed PE on staff and multiple service licenses.' },
   { icon: Users, title: 'Full-time technicians', body: 'No rotating subcontractors. Our own trained crew.' },
-  { icon: ShieldAlert, title: 'Pricing estimates', body: 'Clear estimates before the work, no surprises after.' },
+  { icon: ShieldAlert, title: 'Clear estimates up front', body: 'Clear estimates before the work, no surprises after.' },
 ];
 
 /** Animation delay helper, keeps staggered reveals declarative. */
@@ -144,7 +144,7 @@ export default function Home() {
               Get service now
               <ArrowRight className="size-4" data-icon="inline-end" />
             </Button>
-            <MobileNav />
+            <MobileNav phoneDisplay={SPEARS.phoneDisplay} phoneTel={SPEARS.phoneTel} />
           </div>
         </nav>
       </header>
@@ -272,7 +272,7 @@ export default function Home() {
         <section className="pb-16 md:pb-24">
           <SectionHeading
             eyebrow="Why choose Spears Services?"
-            title="Experts with 50+ years of experience"
+            title="Trusted across the Tri-Cities since 1993"
             subtitle="Since 1993, businesses across the Tri-Cities have trusted Spears to keep their refrigeration, HVAC, and appliances running."
           />
           <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
@@ -526,15 +526,17 @@ function ChatPreview() {
           </div>
         </div>
 
-        {/* input */}
-        <div className="flex items-center gap-2 border-t border-border/60 px-4 py-3">
-          <div className="flex-1 rounded-full bg-muted px-4 py-2 text-sm text-muted-foreground">
-            Type your message…
-          </div>
+        {/* input — a static preview, so it links to the real chat instead of
+            looking like a text box that ignores typing */}
+        <Link
+          href="/chat"
+          className="flex min-h-11 items-center gap-2 border-t border-border/60 px-4 py-3 text-sm font-medium text-foreground transition-colors duration-[var(--dur-hover)] hover:bg-muted/40"
+        >
+          <span className="flex-1">Start a real chat</span>
           <span className="flex size-8 items-center justify-center rounded-full bg-primary text-primary-foreground">
             <ArrowRight className="size-4" />
           </span>
-        </div>
+        </Link>
       </div>
 
       {/* floating 24/7 badge */}

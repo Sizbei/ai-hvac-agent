@@ -38,8 +38,12 @@ export function SignupForm({ signupEnabled }: SignupFormProps) {
 
   return (
     <AuthShell
-      title="Start your account"
-      subtitle="Stand up a service console in about a minute."
+      title={signupEnabled ? 'Start your account' : 'Signups are invite-only'}
+      subtitle={
+        signupEnabled
+          ? 'Stand up a service console in about a minute.'
+          : 'New accounts are set up by invitation for now.'
+      }
       footer={
         <p>
           Already have an account?{' '}
@@ -105,8 +109,9 @@ export function SignupForm({ signupEnabled }: SignupFormProps) {
           <Alert>
             <AlertCircle className="size-4" />
             <AlertDescription>
-              Signups are invite-only right now. Ask your administrator for an
-              invite, or reach out and we&apos;ll get you set up.
+              Ask your company&apos;s administrator to send you an invite from
+              Staff in their console. Already invited? Open the link in your
+              invite, or sign in below.
             </AlertDescription>
           </Alert>
         )}
