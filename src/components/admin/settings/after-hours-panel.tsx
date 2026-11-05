@@ -11,14 +11,23 @@ import {
   CardFooter,
 } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import {
-  afterHoursConfigSchema,
-  DEFAULT_AFTER_HOURS_CONFIG,
-} from '@/lib/admin/after-hours';
+import { afterHoursConfigSchema } from '@/lib/admin/after-hours';
 import type { OrgConfig, OrgConfigUpdate } from '@/lib/admin/org-config-types';
+import { settingsFieldErrorCopy } from '@/lib/admin/settings-errors';
+import {
+  HOUR_OPTIONS,
+  timezoneOptions,
+  type Option,
+} from '@/lib/admin/after-hours-options';
 
 interface AfterHoursPanelProps {
   readonly config: OrgConfig;
@@ -48,7 +57,7 @@ export function AfterHoursPanel({ config, onSave }: AfterHoursPanelProps) {
     const parsed = afterHoursConfigSchema.safeParse(candidate);
     if (!parsed.success) {
       setError(
-        parsed.error.issues[0]?.message ??
+        settingsFieldErrorCopy(['afterHoursConfig', ...(parsed.error.issues[0]?.path ?? [])]) ??
           'Some values are out of range. Please check the fields and try again.',
       );
       return;
@@ -88,33 +97,23 @@ export function AfterHoursPanel({ config, onSave }: AfterHoursPanelProps) {
           />
         </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="after-hours-start">After-hours begins (hour, 0–23)</Label>
-          <Input
-            id="after-hours-start"
-            inputMode="numeric"
-            value={startHour}
-            onChange={(e) => setStartHour(e.target.value)}
-            placeholder={`Default: ${DEFAULT_AFTER_HOURS_CONFIG.startHour}`}
-          />
-          <p className="text-xs text-muted-foreground">
-            Hour the after-hours window starts (e.g. 18 = 6pm). Range 0–23.
-          </p>
-        </div>
+        <OptionSelect
+          id="after-hours-end"
+          label="Business day begins"
+          value={endHour}
+          onChange={setEndHour}
+          options={HOUR_OPTIONS}
+          hint="When normal business hours start each weekday."
+        />
 
-        <div className="space-y-2">
-          <Label htmlFor="after-hours-end">Business day begins (hour, 0–23)</Label>
-          <Input
-            id="after-hours-end"
-            inputMode="numeric"
-            value={endHour}
-            onChange={(e) => setEndHour(e.target.value)}
-            placeholder={`Default: ${DEFAULT_AFTER_HOURS_CONFIG.endHour}`}
-          />
-          <p className="text-xs text-muted-foreground">
-            Hour normal business hours resume (e.g. 8 = 8am). Range 0–23.
-          </p>
-        </div>
+        <OptionSelect
+          id="after-hours-start"
+          label="After-hours begins"
+          value={startHour}
+          onChange={setStartHour}
+          options={HOUR_OPTIONS}
+          hint="Requests from this hour until the business day begins are flagged as after-hours."
+        />
 
         <div className="flex items-center justify-between rounded-lg px-3 py-2 hover:bg-muted/50">
           <Label htmlFor="after-hours-weekends" className="cursor-pointer">
@@ -127,19 +126,14 @@ export function AfterHoursPanel({ config, onSave }: AfterHoursPanelProps) {
           />
         </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="after-hours-timezone">Timezone</Label>
-          <Input
-            id="after-hours-timezone"
-            value={timezone}
-            onChange={(e) => setTimezone(e.target.value)}
-            placeholder={DEFAULT_AFTER_HOURS_CONFIG.timezone}
-          />
-          <p className="text-xs text-muted-foreground">
-            IANA timezone (e.g. America/New_York). All after-hours time math uses
-            this clock.
-          </p>
-        </div>
+        <OptionSelect
+          id="after-hours-timezone"
+          label="Timezone"
+          value={timezone}
+          onChange={setTimezone}
+          options={timezoneOptions(current.timezone)}
+          hint="The hours above are read on this clock."
+        />
 
         {error && <p className="text-sm text-destructive">{error}</p>}
       </CardContent>
@@ -154,5 +148,42 @@ export function AfterHoursPanel({ config, onSave }: AfterHoursPanelProps) {
         </Button>
       </CardFooter>
     </Card>
+  );
+}
+
+function OptionSelect({
+  id,
+  label,
+  value,
+  onChange,
+  options,
+  hint,
+}: {
+  readonly id: string;
+  readonly label: string;
+  readonly value: string;
+  readonly onChange: (v: string) => void;
+  readonly options: readonly Option[];
+  readonly hint: string;
+}) {
+  return (
+    <div className="space-y-2">
+      <Label htmlFor={id}>{label}</Label>
+      <Select value={value} onValueChange={(v) => v != null && onChange(v)}>
+        <SelectTrigger id={id} className="w-full sm:w-72" aria-describedby={`${id}-hint`}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((o) => (
+            <SelectItem key={o.value} value={o.value}>
+              {o.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <p id={`${id}-hint`} className="text-xs text-muted-foreground">
+        {hint}
+      </p>
+    </div>
   );
 }
