@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -8,6 +8,8 @@ import { Button } from '@/components/ui/button';
 import { SegmentedControl } from '@/components/ui/segmented-control';
 import type { VisitRange } from '@/lib/tech/visit-range';
 import { labelAssignmentStatus } from '@/components/tech/tech-status-confirm';
+import { GuideCard } from '@/components/tech/guide-card';
+import { pickTodayFirst, type TodayFirst } from '@/lib/tech/guide-view';
 
 /** Card-shaped skeleton matching the 3-line job card anatomy. */
 function JobCardSkeleton() {
@@ -152,15 +154,24 @@ function ClockButton() {
   );
 }
 
-export function TechJobsListClient() {
+export function TechJobsListClient({ guideHidden }: { readonly guideHidden: boolean }) {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [range, setRange] = useState<VisitRange>('today');
+  // Guide card inputs (spec §6): the first Today row is captured once, from the
+  // first successful Today fetch only; `todaySettled` flips on success, failure
+  // or abort so the card never waits for the whole visit. A tab switch never
+  // changes either.
+  const [todayFirst, setTodayFirst] = useState<TodayFirst>('unknown');
+  const [todaySettled, setTodaySettled] = useState(false);
+  const groupRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let cancelled = false;
+    let settled = false;
     const controller = new AbortController();
+    const isToday = range === 'today';
     void (async () => {
       try {
         const res = await fetch(`/api/tech/jobs?range=${range}`, { signal: controller.signal });
@@ -169,6 +180,9 @@ export function TechJobsListClient() {
         if (res.ok && body.success) {
           setJobs(body.data.jobs);
           setError(null);
+          if (isToday) {
+            setTodayFirst((prev) => (prev === 'unknown' ? pickTodayFirst(body.data.jobs) : prev));
+          }
         } else {
           setError('Failed to load jobs');
         }
@@ -176,11 +190,19 @@ export function TechJobsListClient() {
         if (cancelled) return;
         setError('Could not connect to server.');
       }
-      if (!cancelled) setIsLoading(false);
+      if (!cancelled) {
+        setIsLoading(false);
+        if (isToday) {
+          settled = true;
+          setTodaySettled(true);
+        }
+      }
     })();
     return () => {
       cancelled = true;
       controller.abort();
+      // An aborted Today fetch still settles the card (todayFirst stays 'unknown').
+      if (isToday && !settled) setTodaySettled(true);
     };
   }, [range]);
 
@@ -252,17 +274,26 @@ export function TechJobsListClient() {
       <div className="flex justify-end">
         <ClockButton />
       </div>
-      <SegmentedControl
-        aria-label="Visit range"
-        options={TABS}
-        value={range}
-        onChange={(next) => {
-          if (next === range) return;
-          setIsLoading(true);
-          setRange(next);
-        }}
-        className="w-full [&>button]:flex-1 [&>button]:justify-center"
-      />
+      {!guideHidden && (
+        <GuideCard
+          todayFirst={todayFirst}
+          todaySettled={todaySettled}
+          onHidden={() => groupRef.current?.querySelector<HTMLButtonElement>('[role=radio][aria-checked=true]')?.focus()}
+        />
+      )}
+      <div ref={groupRef}>
+        <SegmentedControl
+          aria-label="Visit range"
+          options={TABS}
+          value={range}
+          onChange={(next) => {
+            if (next === range) return;
+            setIsLoading(true);
+            setRange(next);
+          }}
+          className="w-full [&>button]:flex-1 [&>button]:justify-center"
+        />
+      </div>
       {content}
     </div>
   );
