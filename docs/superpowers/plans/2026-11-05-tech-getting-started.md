@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-05-tech-getting-started.md` (v4 FINAL). The spec is the authority; this plan argues from it. Plan v2 after plan review round 1 (two critics; see the SDD ledger).
 
-**Deviations from the spec, ruled here:** `progressLabel(done, total, suffix)` lives in `guide-copy.ts` (spec §6 put it in `guide-view.ts`); the payload has no `finishedAt` (spec §7 mentions one in cases (c)/(g); assert `finished === true` and the stored `firstCompleted.finish_job` instead); `GuideFinished` is built in Task 4 and reused by Task 5.
+**Deviations from the spec, ruled here:** `progressLabel(done, total, suffix)` lives in `guide-copy.ts` (spec §6 put it in `guide-view.ts`); the payload has no `finishedAt` (spec §7 mentions one in cases (c)/(g); assert `finished === true` and the stored `firstCompleted.finish_job` instead); `GuideFinished` is built in Task 4 and reused by Task 5; the spec §7 route-test cases "stamp statement executed only with new stamps" and "stamp failure still 200" live in `guide-queries.test.ts` (the route test mocks `getGuide`), which is equivalent.
 
 ## Global Constraints
 
@@ -323,10 +323,10 @@ Snapshot: `cp drizzle/meta/0053_snapshot.json drizzle/meta/0054_snapshot.json`, 
         },
 ```
 
-- [ ] **Step 11: Verify the migration recipe** — `npx drizzle-kit generate` prints "No schema changes, nothing to migrate 😴" (delete any file it created if it did not). Then `npm run db:migrate` (dev branch) applies 0054. Confirm with a one-off script (do not commit it):
+- [ ] **Step 11: Verify the migration recipe** — do this IMMEDIATELY after Step 9/10: once `schema.ts` carries the column, every drizzle `insert(users)` on dev (createOrgCore, Google sign-in provisioning, the dev server) fails until the dev branch is migrated. `npx drizzle-kit generate` prints "No schema changes, nothing to migrate 😴" (delete any file it created if it did not). Then `npm run db:migrate` (dev branch) applies 0054. Confirm with a one-off script (do not commit it):
 
 ```bash
-npx tsx -e "import {readFileSync} from 'fs'; for (const l of readFileSync('.env.local','utf8').split('\n')) { const m=l.match(/^([A-Z_0-9]+)=(.*)$/); if (m && !process.env[m[1]]) process.env[m[1]]=m[2].replace(/^\"|\"$/g,''); } const {neon}=await import('@neondatabase/serverless'); const sql=neon(process.env.DATABASE_URL); console.log(await sql\`SELECT column_name FROM information_schema.columns WHERE table_name='users' AND column_name='field_guide_state'\`)"
+npx tsx --input-type=module -e "import {readFileSync} from 'fs'; for (const l of readFileSync('.env.local','utf8').split('\n')) { const m=l.match(/^([A-Z_0-9]+)=(.*)$/); if (m && !process.env[m[1]]) process.env[m[1]]=m[2].replace(/^\"|\"$/g,''); } const {neon}=await import('@neondatabase/serverless'); const sql=neon(process.env.DATABASE_URL); console.log(await sql\`SELECT column_name FROM information_schema.columns WHERE table_name='users' AND column_name='field_guide_state'\`)"
 ```
 
 → one row.
@@ -1012,6 +1012,7 @@ let org2 = "";
 let lead = "";
 let helper = "";
 let helperRow = "";
+let leadB = "";
 let techB = "";
 
 async function run(statement: ReturnType<typeof sql>): Promise<Row[]> {
@@ -1064,6 +1065,7 @@ beforeAll(async () => {
   org2 = await make("2");
   lead = await tech(org1, false);
   helper = await tech(org1);
+  leadB = await tech(org2, false);
   techB = await tech(org2);
 }, 60_000);
 
@@ -1123,7 +1125,7 @@ describe("technician guide (dev DB)", () => {
   });
 
   it("(e) tenancy: technician B's rows in org 2 never count for the helper, and the org parameter gates", async () => {
-    const { rid, row } = await seedJob(org2, techB, techB);
+    const { rid, row } = await seedJob(org2, leadB, techB);
     await db.execute(sql`UPDATE appointment_assignments SET en_route_at = now(), started_at = now() WHERE id = ${row} AND organization_id = ${org2}`);
     await db.execute(sql`INSERT INTO job_materials (organization_id,service_request_id,description,created_by) VALUES (${org2},${rid},'Probe part',${techB})`);
     await db.execute(sql`INSERT INTO request_notes (organization_id,request_id,author_id,content) VALUES (${org2},${rid},${techB},'Probe note')`);
@@ -1704,7 +1706,7 @@ export default function TechGuidePage() {
 ```tsx
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useState } from 'react';
 import { Check } from 'lucide-react';
 import { GUIDE_COPY } from '@/lib/tech/guide-copy';
 import type { DerivedStep } from '@/lib/tech/guide-steps';
@@ -1717,7 +1719,7 @@ function StepGlyph({ glyph, flipped }: { readonly glyph: Glyph; readonly flipped
   return (
     <span className="flex size-5 shrink-0 items-center justify-center">
       {glyph === 'done' ? (
-        <Check className={`size-4 text-success-strong ${flipped ? 'animate-in fade-in duration-[180ms]' : ''}`} aria-hidden="true" />
+        <Check className={`size-4 text-success-strong ${flipped ? 'animate-in fade-in duration-[180ms] motion-reduce:animate-none' : ''}`} aria-hidden="true" />
       ) : (
         <span aria-hidden="true" className={glyph === 'next' ? 'size-2 rounded-full bg-primary' : 'size-2 rounded-full border border-border-strong'} />
       )}
@@ -1728,11 +1730,13 @@ function StepGlyph({ glyph, flipped }: { readonly glyph: Glyph; readonly flipped
 
 /** One step row: glyph, title, Lead only chip, how + note (both hidden on the hero's own step). */
 export function GuideStepRow({ step, glyph, showHow }: { readonly step: DerivedStep; readonly glyph: Glyph; readonly showHow: boolean }) {
-  const wasDone = useRef(step.done);
-  const flipped = step.done && !wasDone.current;
-  useEffect(() => {
-    wasDone.current = step.done;
-  }, [step.done]);
+  // Previous-value-in-state (never a ref read during render): the fade runs only on a flip while mounted.
+  const [prevDone, setPrevDone] = useState(step.done);
+  const [flipped, setFlipped] = useState(false);
+  if (step.done !== prevDone) {
+    setPrevDone(step.done);
+    setFlipped(step.done);
+  }
   return (
     <li className="flex min-h-11 gap-3 py-2.5">
       <div className="pt-0.5"><StepGlyph glyph={glyph} flipped={flipped} /></div>
