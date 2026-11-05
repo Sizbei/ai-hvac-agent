@@ -24,6 +24,7 @@ let org2 = "";
 let lead = "";
 let helper = "";
 let helperRow = "";
+let rid1 = "";
 let leadB = "";
 let techB = "";
 
@@ -103,7 +104,7 @@ describe("technician guide (dev DB)", () => {
   });
 
   it("(b) a started row completes start_job, stamps it, and the stamp is sticky", async () => {
-    ({ row: helperRow } = await seedJob(org1, lead, helper));
+    ({ rid: rid1, row: helperRow } = await seedJob(org1, lead, helper));
     expect((await q.getGuide(org1, helper)).steps[0].note).toBeUndefined();
     await db.execute(sql`UPDATE appointment_assignments SET en_route_at = now() WHERE id = ${helperRow} AND organization_id = ${org1}`);
     const p = await q.getGuide(org1, helper);
@@ -151,6 +152,20 @@ describe("technician guide (dev DB)", () => {
     for (const [k, v] of Object.entries(cross)) {
       if (k !== "field_guide_state") expect(v, k).toBe(false);
     }
+  });
+
+  it("(h) office uploads never count, a session photo does, and only the lead row earns the signature", async () => {
+    const appt = (await run(sql`SELECT id FROM appointments WHERE service_request_id = ${rid1} AND organization_id = ${org1} ORDER BY appointment_number LIMIT 1`))[0].id as string;
+    const freshHelper = await tech(org1);
+    await db.execute(sql`INSERT INTO appointment_assignments (organization_id,appointment_id,technician_id,is_lead,status) VALUES (${org1},${appt},${freshHelper},false,'assigned'::request_status)`);
+    await db.execute(sql`INSERT INTO attachments (organization_id,service_request_id,filename,mime_type,size,storage_key) VALUES (${org1},${rid1},'a.jpg','image/jpeg',1,'org_'||${org1}||'_admin_x.jpg')`);
+    await db.execute(sql`UPDATE service_requests SET signed_at = now() WHERE id = ${rid1} AND organization_id = ${org1}`);
+    const before = await q.getGuide(org1, freshHelper);
+    expect(before.steps.find((x) => x.id === "note_or_photo")?.done).toBe(false);
+    expect(before.steps.find((x) => x.id === "capture_signature")?.done).toBe(false);
+    expect((await q.getGuide(org1, lead)).steps.find((x) => x.id === "capture_signature")?.done).toBe(true);
+    await db.execute(sql`INSERT INTO attachments (organization_id,service_request_id,filename,mime_type,size,storage_key) VALUES (${org1},${rid1},'b.jpg','image/jpeg',1,'org_'||${org1}||'_session_'||${rid1}||'_y.jpg')`);
+    expect((await q.getGuide(org1, freshHelper)).steps.find((x) => x.id === "note_or_photo")?.done).toBe(true);
   });
 
   it("(f) two stamp statements with disjoint keys both land", async () => {

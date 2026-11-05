@@ -299,12 +299,20 @@ completes the step. See page-setup.
   further". Steps self-complete from real data.
 - **Sticky stamps:** `users.field_guide_state` = `{ hiddenAt?, firstCompleted }`.
   One guarded UPDATE on GET writes new stamps; the old value wins.
-- **Card visibility:** `cardHiddenFor` (× tapped, or 24 h after the `finish_job`
-  stamp, server clock). The jobs page reads it server-side with
+- **Card visibility:** `cardHiddenFor` (× tapped, or more than 24 h after the
+  `finish_job` stamp, server clock). The jobs page reads it server-side with
   `readGuideHidden(organizationId, userId, now?)` and the payload echoes it as
-  `cardHidden`. `cardState` (`guide-view.ts`): nothing renders until the 300 ms
-  skeleton delay, then a skeleton held at `CARD_MIN_H` (`guide-card.tsx`) so the
-  list does not jump.
+  `cardHidden`. `cardState` (`guide-view.ts`): while the payload or the Today
+  list is unsettled, nothing renders until the 300 ms delay
+  (`SKELETON_DELAY_MS`), then a skeleton at `CARD_MIN_H` (`guide-card.tsx`) so
+  the list does not jump; `guideHidden` or `cardHidden` short-circuits to hidden.
+- **Jobs-list inputs:** `todayFirst` is captured once from the first successful
+  Today fetch (`pickTodayFirst`, active row first) and never from another range;
+  `todaySettled` flips on Today success/failure or the first tab switch; the card
+  renders only once both it and the guide payload have settled. × fills the
+  mounted `role=status` region with the hint and focuses
+  `[role=radio][aria-checked=true]` via `groupRef`; PATCH failure restores the
+  card with a `role=alert` line.
 - **Refresh:** the location toggle dispatches `tech:guide:refresh`
   (`guide-refresh.ts`, from `tech-location-tracker.tsx`); the hook re-fetches.
 - **Rulings:** no demo rule (PLATFORM_ORG_ID = DEMO_ORG_ID in prod, so a demo

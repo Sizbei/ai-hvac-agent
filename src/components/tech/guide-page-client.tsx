@@ -79,10 +79,10 @@ export function GuidePageClient() {
       {header}
       <GuideProgress done={data.progress.requiredDone} total={data.progress.requiredTotal} />
       {data.finished ? (
-        <Card><CardContent className="p-4"><GuideFinished /></CardContent></Card>
+        <Card><CardContent><GuideFinished /></CardContent></Card>
       ) : up ? (
         <Card>
-          <CardContent className="space-y-2 p-4">
+          <CardContent className="space-y-2">
             <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{GUIDE_COPY.upNext}</p>
             <p className="text-[17px] font-semibold">{up.title}</p>
             <p className="text-[15px]">{up.why}</p>
@@ -93,7 +93,7 @@ export function GuidePageClient() {
         </Card>
       ) : null}
       <Card>
-        <CardHeader><CardTitle className="text-[17px]">{GUIDE_COPY.runTitle}</CardTitle></CardHeader>
+        <CardHeader><CardTitle role="heading" aria-level={2} className="text-[17px]">{GUIDE_COPY.runTitle}</CardTitle></CardHeader>
         <CardContent>
           <ul className="divide-y divide-border">
             {run.map((s) => <GuideStepRow key={s.id} step={s} glyph={glyphFor(s, data.upNext)} showHow={showHow(s.id)} />)}
@@ -102,7 +102,7 @@ export function GuidePageClient() {
       </Card>
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="text-[17px]">{GUIDE_COPY.furtherTitle}</CardTitle>
+          <CardTitle role="heading" aria-level={2} className="text-[17px]">{GUIDE_COPY.furtherTitle}</CardTitle>
           <span className="font-mono text-[13px] tabular-nums text-muted-foreground">{progressLabel(data.progress.optionalDone, data.progress.optionalTotal, '')}</span>
         </CardHeader>
         <CardContent>

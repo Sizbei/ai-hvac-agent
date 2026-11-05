@@ -12,7 +12,7 @@ export function GuideLink() {
     <Link
       href="/tech/guide"
       aria-current={current ? 'page' : undefined}
-      className="inline-flex min-h-11 items-center gap-1.5 rounded-md px-2 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground aria-[current=page]:text-foreground"
+      className="inline-flex min-h-11 items-center gap-1.5 rounded-md px-2 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground aria-[current=page]:bg-muted aria-[current=page]:text-foreground"
     >
       <BookOpen className="size-4" aria-hidden="true" />
       {GUIDE_COPY.guideLink}

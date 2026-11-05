@@ -169,7 +169,6 @@ export function TechJobsListClient({ guideHidden }: { readonly guideHidden: bool
 
   useEffect(() => {
     let cancelled = false;
-    let settled = false;
     const controller = new AbortController();
     const isToday = range === 'today';
     void (async () => {
@@ -192,17 +191,12 @@ export function TechJobsListClient({ guideHidden }: { readonly guideHidden: bool
       }
       if (!cancelled) {
         setIsLoading(false);
-        if (isToday) {
-          settled = true;
-          setTodaySettled(true);
-        }
+        if (isToday) setTodaySettled(true);
       }
     })();
     return () => {
       cancelled = true;
       controller.abort();
-      // An aborted Today fetch still settles the card (todayFirst stays 'unknown').
-      if (isToday && !settled) setTodaySettled(true);
     };
   }, [range]);
 
@@ -288,6 +282,8 @@ export function TechJobsListClient({ guideHidden }: { readonly guideHidden: bool
           value={range}
           onChange={(next) => {
             if (next === range) return;
+            // The first range is always Today, so any switch means that fetch finished or was aborted.
+            setTodaySettled(true);
             setIsLoading(true);
             setRange(next);
           }}

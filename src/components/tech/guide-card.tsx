@@ -35,12 +35,19 @@ export function GuideCard({ todayFirst, todaySettled, onHidden }: {
     ? 'hidden'
     : cardState(data, { loading: status === 'loading', failed: status === 'failed', slowElapsed: slow, guideHidden: false, todaySettled });
 
-  if (state === 'hidden') {
-    return hidden ? <p role="status" className="text-[13px] text-muted-foreground">{GUIDE_COPY.hint}</p> : null;
-  }
-  if (state === 'nothing') return null;
+  // One live region stays mounted for the card's whole life so the × hint is announced when it fills.
+  const statusRegion = (
+    <div role="status" aria-live="polite">
+      {hidden ? <p className="text-[13px] text-muted-foreground">{GUIDE_COPY.hint}</p> : null}
+    </div>
+  );
+
+  // Same fragment shape in every branch so React keeps the region mounted.
+  if (state === 'hidden' || state === 'nothing') return <>{statusRegion}</>;
   if (state === 'skeleton' || !data) {
     return (
+      <>
+      {statusRegion}
       <Card className={CARD_MIN_H}>
         <CardContent className="space-y-3" aria-hidden="true">
           <div className="flex h-6 items-center justify-between"><Skeleton className="h-4 w-28" /><Skeleton className="h-4 w-10" /></div>
@@ -53,6 +60,7 @@ export function GuideCard({ todayFirst, todaySettled, onHidden }: {
           <Skeleton className="h-4 w-24" />
         </CardContent>
       </Card>
+      </>
     );
   }
 
@@ -80,10 +88,12 @@ export function GuideCard({ todayFirst, todaySettled, onHidden }: {
   const showButton = !finished && todayFirst !== 'unknown' && todayFirst !== null;
 
   return (
+    <>
+    {statusRegion}
     <Card className={CARD_MIN_H}>
       <CardContent className="space-y-3">
         <div className="flex items-center justify-between gap-2">
-          <p className="text-[15px] font-semibold">{GUIDE_COPY.cardTitle}</p>
+          <h2 className="text-[15px] font-semibold">{GUIDE_COPY.cardTitle}</h2>
           <div className="flex items-center gap-1">
             <span className="font-mono text-[13px] tabular-nums text-muted-foreground">
               {progressLabel(data.progress.requiredDone, data.progress.requiredTotal, '')}
@@ -121,5 +131,6 @@ export function GuideCard({ todayFirst, todaySettled, onHidden }: {
         {failed && <p role="alert" className="text-[13px] text-danger-strong">{GUIDE_COPY.updateFailed}</p>}
       </CardContent>
     </Card>
+    </>
   );
 }
