@@ -15,11 +15,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
-import type {
-  OrgConfig,
-  OrgConfigUpdate,
-  BusinessInfo,
+import {
+  businessInfoSchema,
+  type OrgConfig,
+  type OrgConfigUpdate,
 } from '@/lib/admin/org-config-types';
+import { settingsFieldErrorCopy } from '@/lib/admin/settings-errors';
+import { mergeBusinessInfo } from '@/lib/admin/business-info-merge';
 
 interface BusinessInfoPanelProps {
   readonly config: OrgConfig;
@@ -31,6 +33,7 @@ export function BusinessInfoPanel({ config, onSave }: BusinessInfoPanelProps) {
   const [serviceArea, setServiceArea] = useState(bi.serviceArea ?? '');
   const [businessHours, setBusinessHours] = useState(bi.businessHours ?? '');
   const [phone, setPhone] = useState(bi.phone ?? '');
+  const [email, setEmail] = useState(bi.email ?? '');
   const [licensedInsured, setLicensedInsured] = useState(
     bi.licensedInsured ?? '',
   );
@@ -41,22 +44,33 @@ export function BusinessInfoPanel({ config, onSave }: BusinessInfoPanelProps) {
   );
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function handleSave(): Promise<void> {
+    // The PATCH replaces businessInfo wholesale, so merge onto the stored
+    // object: keys this panel doesn't edit must survive the save.
+    const businessInfo = mergeBusinessInfo(config.businessInfo, {
+      serviceArea,
+      businessHours,
+      phone,
+      email,
+      licensedInsured,
+      paymentMethods,
+      website,
+      financingAvailable: financing,
+    });
+    const parsed = businessInfoSchema.safeParse(businessInfo);
+    if (!parsed.success) {
+      setSaved(false);
+      setError(
+        settingsFieldErrorCopy(['businessInfo', ...(parsed.error.issues[0]?.path ?? [])]) ??
+          "Some details aren't valid. Check the fields and try again.",
+      );
+      return;
+    }
+    setError(null);
     setSaving(true);
     setSaved(false);
-    // Only include non-empty fields so we don't store empty strings.
-    const businessInfo: BusinessInfo = {
-      financingAvailable: financing,
-    };
-    if (serviceArea.trim()) businessInfo.serviceArea = serviceArea.trim();
-    if (businessHours.trim()) businessInfo.businessHours = businessHours.trim();
-    if (phone.trim()) businessInfo.phone = phone.trim();
-    if (licensedInsured.trim())
-      businessInfo.licensedInsured = licensedInsured.trim();
-    if (paymentMethods.trim())
-      businessInfo.paymentMethods = paymentMethods.trim();
-    if (website.trim()) businessInfo.website = website.trim();
 
     const ok = await onSave({ businessInfo });
     setSaving(false);
@@ -91,6 +105,7 @@ export function BusinessInfoPanel({ config, onSave }: BusinessInfoPanelProps) {
           onChange={setBusinessHours}
           placeholder="Mon–Fri 8am–6pm, Sat 9am–2pm"
           maxLength={300}
+          hint="What the assistant tells customers. Which requests count as after-hours is set on the After-hours tab, so keep the two in step."
         />
         <Field
           id="phone"
@@ -99,6 +114,16 @@ export function BusinessInfoPanel({ config, onSave }: BusinessInfoPanelProps) {
           onChange={setPhone}
           placeholder="(555) 123-4567"
           maxLength={40}
+          type="tel"
+        />
+        <Field
+          id="business-email"
+          label="Contact email"
+          value={email}
+          onChange={setEmail}
+          placeholder="office@yourcompany.com"
+          maxLength={254}
+          type="email"
         />
         <Field
           id="payment-methods"
@@ -146,6 +171,11 @@ export function BusinessInfoPanel({ config, onSave }: BusinessInfoPanelProps) {
             onCheckedChange={setFinancing}
           />
         </div>
+        {error && (
+          <p role="alert" className="text-sm text-destructive">
+            {error}
+          </p>
+        )}
       </CardContent>
       <CardFooter>
         <Button onClick={handleSave} disabled={saving}>
@@ -169,6 +199,7 @@ interface FieldProps {
   readonly placeholder?: string;
   readonly maxLength: number;
   readonly type?: string;
+  readonly hint?: string;
 }
 
 function Field({
@@ -179,6 +210,7 @@ function Field({
   placeholder,
   maxLength,
   type,
+  hint,
 }: FieldProps) {
   return (
     <div className="space-y-2">
@@ -190,7 +222,13 @@ function Field({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         maxLength={maxLength}
+        aria-describedby={hint ? `${id}-hint` : undefined}
       />
+      {hint && (
+        <p id={`${id}-hint`} className="text-xs text-muted-foreground">
+          {hint}
+        </p>
+      )}
     </div>
   );
 }

@@ -50,10 +50,14 @@ export async function PATCH(request: NextRequest) {
     const body: unknown = await request.json();
     const parsed = orgConfigUpdateSchema.safeParse(body);
     if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      // details.path lets the UI name the field in human copy
+      // (settings-errors.ts); path segments are schema keys, never values.
       return errorResponse(
-        "Invalid settings: " + parsed.error.issues[0]?.message,
+        "Invalid settings: " + issue?.message,
         "VALIDATION_ERROR",
         400,
+        { path: (issue?.path ?? []).filter((p) => typeof p !== "symbol") },
       );
     }
 

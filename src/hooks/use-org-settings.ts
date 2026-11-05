@@ -7,6 +7,7 @@ import type {
   CustomFaq,
   CustomFaqInput,
 } from '@/lib/admin/org-config-types';
+import { settingsSaveErrorMessage } from '@/lib/admin/settings-errors';
 
 interface UseOrgSettingsResult {
   readonly config: OrgConfig | null;
@@ -23,9 +24,11 @@ interface UseOrgSettingsResult {
   readonly refetch: () => Promise<void>;
 }
 
+// Human copy only: the server's message can be raw zod text.
 async function readError(res: Response, fallback: string): Promise<string> {
-  const body = await res.json().catch(() => null);
-  return body?.error?.message ?? fallback;
+  const body: unknown = await res.json().catch(() => null);
+  const copy = settingsSaveErrorMessage(body);
+  return copy === settingsSaveErrorMessage(null) ? fallback : copy;
 }
 
 export function useOrgSettings(): UseOrgSettingsResult {
@@ -44,7 +47,7 @@ export function useOrgSettings(): UseOrgSettingsResult {
         fetch('/api/admin/settings/faqs'),
       ]);
       if (!cfgRes.ok) {
-        setError(await readError(cfgRes, 'Failed to load settings'));
+        setError(await readError(cfgRes, "Couldn't load settings. Please try again."));
         return;
       }
       const cfgBody = (await cfgRes.json()) as {
@@ -79,7 +82,7 @@ export function useOrgSettings(): UseOrgSettingsResult {
           body: JSON.stringify(update),
         });
         if (!res.ok) {
-          setError(await readError(res, 'Failed to save settings'));
+          setError(await readError(res, "Couldn't save settings. Please try again."));
           return false;
         }
         const body = (await res.json()) as { data: { config: OrgConfig } };
@@ -103,7 +106,7 @@ export function useOrgSettings(): UseOrgSettingsResult {
           body: JSON.stringify(input),
         });
         if (!res.ok) {
-          setError(await readError(res, 'Failed to create FAQ'));
+          setError(await readError(res, "Couldn't add the question. Please try again."));
           return false;
         }
         const body = (await res.json()) as { data: { faq: CustomFaq } };
@@ -127,7 +130,7 @@ export function useOrgSettings(): UseOrgSettingsResult {
           body: JSON.stringify(input),
         });
         if (!res.ok) {
-          setError(await readError(res, 'Failed to update FAQ'));
+          setError(await readError(res, "Couldn't save the question. Please try again."));
           return false;
         }
         const body = (await res.json()) as { data: { faq: CustomFaq } };
@@ -148,7 +151,7 @@ export function useOrgSettings(): UseOrgSettingsResult {
         method: 'DELETE',
       });
       if (!res.ok) {
-        setError(await readError(res, 'Failed to delete FAQ'));
+        setError(await readError(res, "Couldn't delete the question. Please try again."));
         return false;
       }
       setFaqs((prev) => prev.filter((f) => f.id !== id));
