@@ -44,11 +44,15 @@ import { refreshOnboarding } from '@/lib/admin/onboarding-store';
 import type { BannerEvent } from '@/lib/admin/setup-card-view';
 import { setupStepForTab } from '@/lib/admin/setup-view';
 import type { OrgConfigUpdate } from '@/lib/admin/org-config-types';
+import { resolveSettingsTab, settingsTabSearch } from '@/lib/admin/settings-tabs';
 
 export default function SettingsPage() {
   useEffect(() => { document.title = 'Settings · Spears Admin'; }, []);
   const settings = useOrgSettings();
-  const initialTab = useSearchParams().get('tab') ?? 'branding';
+  const searchParams = useSearchParams();
+  // Captured once: switching tabs rewrites ?tab= but the setup banner belongs
+  // to the tab the page was opened on.
+  const [initialTab] = useState(() => resolveSettingsTab(searchParams.get('tab')));
   const fromSetup = useFromSetup();
   const [bannerEvent, setBannerEvent] = useState<BannerEvent>(null);
   const setupStep = fromSetup ? setupStepForTab(initialTab) : undefined;
@@ -86,7 +90,14 @@ export default function SettingsPage() {
           <Skeleton className="h-64 w-full" />
         </div>
       ) : (
-        <Tabs defaultValue={initialTab}>
+        <Tabs
+          defaultValue={initialTab}
+          onValueChange={(value) => {
+            // Keep the tab in the URL so refresh and back land on it.
+            const search = settingsTabSearch(window.location.search, resolveSettingsTab(String(value)));
+            window.history.replaceState(null, '', search);
+          }}
+        >
           <TabsList className="h-auto w-full flex-wrap justify-start gap-y-1 group-data-horizontal/tabs:h-auto">
             <TabsTrigger value="branding">
               <Palette className="size-4" />
@@ -134,10 +145,12 @@ export default function SettingsPage() {
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="branding" className="mt-6">
+          {/* keepMounted on the form tabs: a draft survives switching tabs
+              and back (they were lost silently before). */}
+          <TabsContent value="branding" className="mt-6" keepMounted>
             <BrandingPanel config={settings.config} onSave={(u) => saveFromSetup('branding', u)} />
           </TabsContent>
-          <TabsContent value="services" className="mt-6">
+          <TabsContent value="services" className="mt-6" keepMounted>
             <ServicesPanel config={settings.config} onSave={settings.saveConfig} />
           </TabsContent>
           <TabsContent value="job-types" className="mt-6">
@@ -146,13 +159,13 @@ export default function SettingsPage() {
           <TabsContent value="tags" className="mt-6">
             <TagsPanel />
           </TabsContent>
-          <TabsContent value="business" className="mt-6">
+          <TabsContent value="business" className="mt-6" keepMounted>
             <BusinessInfoPanel
               config={settings.config}
               onSave={(u) => saveFromSetup('business', u)}
             />
           </TabsContent>
-          <TabsContent value="faqs" className="mt-6">
+          <TabsContent value="faqs" className="mt-6" keepMounted>
             <CustomFaqsPanel
               faqs={settings.faqs}
               onCreate={settings.createFaq}
@@ -160,22 +173,22 @@ export default function SettingsPage() {
               onDelete={settings.deleteFaq}
             />
           </TabsContent>
-          <TabsContent value="embed" className="mt-6">
+          <TabsContent value="embed" className="mt-6" keepMounted>
             <EmbedPanel config={settings.config} onSave={(u) => saveFromSetup('embed', u)} />
           </TabsContent>
-          <TabsContent value="limits" className="mt-6">
+          <TabsContent value="limits" className="mt-6" keepMounted>
             <ConversationLimitsPanel
               config={settings.config}
               onSave={settings.saveConfig}
             />
           </TabsContent>
-          <TabsContent value="after-hours" className="mt-6">
+          <TabsContent value="after-hours" className="mt-6" keepMounted>
             <AfterHoursPanel
               config={settings.config}
               onSave={settings.saveConfig}
             />
           </TabsContent>
-          <TabsContent value="dispatch" className="mt-6">
+          <TabsContent value="dispatch" className="mt-6" keepMounted>
             <DispatchPanel config={settings.config} onSave={settings.saveConfig} />
           </TabsContent>
           <TabsContent value="integrations" className="mt-6 space-y-6">
