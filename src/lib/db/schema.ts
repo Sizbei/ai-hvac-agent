@@ -312,6 +312,9 @@ export const users = pgTable(
     locationConsentUpdatedAt: timestamp("location_consent_updated_at", {
       withTimezone: true,
     }),
+    // Technician getting-started guide (spec 2026-11-05): { hiddenAt?, firstCompleted: { <stepId>: iso } }.
+    // Timestamps and step ids only — never PII. NULL = never read.
+    fieldGuideState: jsonb("field_guide_state"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

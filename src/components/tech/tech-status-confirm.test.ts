@@ -15,7 +15,7 @@ describe('techStatusLabel', () => {
   it('gives field wording to the new taps and keeps humanized defaults', () => {
     expect(techStatusLabel('en_route')).toBe('On my way');
     expect(techStatusLabel('arrived')).toBe("I've arrived");
-    expect(techStatusLabel('in_progress')).toBe('In progress');
+    expect(techStatusLabel('in_progress')).toBe('Working');
     expect(techStatusLabel('completed')).toBe('Done');
   });
 });

@@ -9,6 +9,7 @@ import type { Blocker } from '@/lib/tech/status-actions';
 const TECH_STATUS_LABELS: Record<string, string> = {
   en_route: 'On my way',
   arrived: "I've arrived",
+  in_progress: 'Working',
   completed: 'Done',
   pause: 'Pause',
   on_hold: 'Hold',
