@@ -22,15 +22,25 @@ interface ApproveFormProps {
  * On success it swaps to a confirmation; the page itself is token-gated, not
  * session-gated.
  */
+// A typed signature needs at least this many letters (one stray key isn't one).
+const MIN_SIGNATURE_LENGTH = 2;
+
 export function ApproveForm({ token, options }: ApproveFormProps) {
-  const [optionId, setOptionId] = useState<string>(options[0]?.id ?? '');
+  // Pre-select only when there is a single option: with several, the customer
+  // must choose deliberately (a pre-selected cheapest option got approved by accident).
+  const [optionId, setOptionId] = useState<string>(
+    options.length === 1 ? (options[0]?.id ?? '') : '',
+  );
   const [signatureName, setSignatureName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
 
+  const signatureOk = signatureName.trim().length >= MIN_SIGNATURE_LENGTH;
+  const chosen = options.find((o) => o.id === optionId) ?? null;
+
   async function handleSubmit(): Promise<void> {
-    if (!optionId || !signatureName.trim()) return;
+    if (!optionId || !signatureOk) return;
     setIsSubmitting(true);
     setError(null);
     try {
@@ -47,7 +57,14 @@ export function ApproveForm({ token, options }: ApproveFormProps) {
       if (res.ok && body.success) {
         setDone(true);
       } else {
-        setError(body.error?.message ?? 'Could not approve this estimate.');
+        // Only these codes carry customer-ready copy; anything else gets one
+        // human sentence instead of server text.
+        const code = body.error?.code;
+        setError(
+          (code === 'EXPIRED' || code === 'ALREADY_DECIDED') && body.error?.message
+            ? `${body.error.message}. Reload the page to see the details.`
+            : "Couldn't approve this estimate. Please try again, or contact us.",
+        );
       }
     } catch {
       setError('Could not connect to the server. Please try again.');
@@ -63,7 +80,11 @@ export function ApproveForm({ token, options }: ApproveFormProps) {
           Thank you — your approval is signed.
         </p>
         <p className="mt-1 text-[15px] text-foreground">
-          We&apos;ve recorded your selection and will be in touch shortly.
+          {chosen
+            ? `You approved ${chosen.name} for ${formatCentsExact(chosen.totalCents)}. `
+            : ''}
+          We&apos;ll be in touch to schedule the work. You can reopen this link
+          any time to see what you approved.
         </p>
       </div>
     );
@@ -127,7 +148,7 @@ export function ApproveForm({ token, options }: ApproveFormProps) {
 
       <Button
         className="h-11 w-full rounded-xl text-[15px]"
-        disabled={isSubmitting || !optionId || !signatureName.trim()}
+        disabled={isSubmitting || !optionId || !signatureOk}
         onClick={handleSubmit}
       >
         {isSubmitting ? 'Submitting…' : 'Approve & sign'}

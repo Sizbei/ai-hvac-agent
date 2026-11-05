@@ -1,19 +1,39 @@
 import { getEstimateForApproval } from '@/lib/admin/estimate-queries';
 import { formatCentsExact } from '@/lib/admin/money-format';
+import { BUSINESS_BASE_LOCATION } from '@/lib/config/business-location';
+import { getEstimatePublicContext } from '@/lib/portal/estimate-public';
+import { estimateDecisionCopy } from '@/lib/portal/estimate-decision';
+import { BusinessIdentity } from '@/components/public/business-identity';
 import { ApproveForm, type ApproveOption } from './approve-form';
+
+function formatDate(d: Date): string {
+  return d.toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    timeZone: BUSINESS_BASE_LOCATION.timezone,
+  });
+}
 
 function MessageState({
   title,
   body,
+  companyName = null,
+  phone = null,
 }: {
   readonly title: string;
   readonly body: string;
+  readonly companyName?: string | null;
+  readonly phone?: string | null;
 }) {
   return (
     <main className="flex min-h-screen items-center justify-center bg-canvas p-6">
-      <div className="w-full max-w-lg rounded-lg border border-border-strong bg-surface p-8 text-center">
-        <h1 className="text-xl font-semibold text-foreground">{title}</h1>
-        <p className="mt-2 text-[15px] text-muted-foreground">{body}</p>
+      <div className="w-full max-w-lg space-y-4 rounded-lg border border-border-strong bg-surface p-8">
+        <BusinessIdentity companyName={companyName} phone={phone} />
+        <div className="text-center">
+          <h1 className="text-xl font-semibold text-foreground">{title}</h1>
+          <p className="mt-2 text-[15px] text-muted-foreground">{body}</p>
+        </div>
       </div>
     </main>
   );
@@ -25,24 +45,30 @@ export default async function EstimateApprovalPage({
   readonly params: Promise<{ token: string }>;
 }) {
   const { token } = await params;
-  const estimate = await getEstimateForApproval(token);
+  const context = await getEstimatePublicContext(token);
+  const estimate = context ? await getEstimateForApproval(token) : null;
 
-  if (!estimate) {
+  if (!context || !estimate) {
     return (
       <MessageState
-        title="Estimate not found"
-        body="This link may be incorrect or is no longer available. Please contact us if you need a new copy."
+        title="This link isn't valid"
+        body="It may be incorrect or no longer active. Please contact us and we'll send you a fresh link."
       />
     );
   }
+  const brand = { companyName: context.companyName, phone: context.phone };
 
   if (estimate.status !== 'open') {
-    return (
-      <MessageState
-        title="This estimate has already been decided"
-        body="Thank you — there's nothing more to do here. Please contact us with any questions."
-      />
-    );
+    // A receipt of what was approved (option, price, signer, date) — the
+    // customer reopening the link must be able to see what they signed.
+    const decision = estimateDecisionCopy({
+      status: estimate.status,
+      soldOptionName: context.soldOption?.name ?? null,
+      soldTotal: context.soldOption ? formatCentsExact(context.soldOption.totalCents) : null,
+      signedOn: context.signedAt ? formatDate(context.signedAt) : null,
+      signatureName: context.signatureName,
+    });
+    return <MessageState title={decision.title} body={decision.body} {...brand} />;
   }
 
   // This is an async Server Component: it renders once per request on the
@@ -54,6 +80,7 @@ export default async function EstimateApprovalPage({
       <MessageState
         title="This estimate has expired"
         body="Please contact us and we'll be happy to send you an updated quote."
+        {...brand}
       />
     );
   }
@@ -67,10 +94,21 @@ export default async function EstimateApprovalPage({
   return (
     <main className="min-h-screen bg-canvas p-4 sm:p-6">
       <div className="mx-auto max-w-2xl rounded-lg border border-border-strong bg-surface p-6 sm:p-8">
+        <div className="mb-5">
+          <BusinessIdentity {...brand} />
+        </div>
         <header className="mb-6">
           <h1 className="font-heading text-[26px] leading-[30px] font-semibold tracking-[-0.02em] text-foreground">
             Your estimate
           </h1>
+          <p className="mt-1 font-mono text-[13px] tabular-nums text-muted-foreground">
+            {[
+              `Sent ${formatDate(context.createdAt)}`,
+              estimate.expiresAt ? `valid until ${formatDate(estimate.expiresAt)}` : null,
+            ]
+              .filter(Boolean)
+              .join(' · ')}
+          </p>
           <p className="mt-1.5 text-[15px] text-muted-foreground">
             Review the options below, then choose one and sign to approve.
           </p>

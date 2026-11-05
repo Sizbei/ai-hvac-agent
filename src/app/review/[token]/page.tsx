@@ -30,8 +30,8 @@ export default async function ReviewPage({
   if (!review) {
     return (
       <MessageState
-        title="Review link not found"
-        body="This link may be incorrect or is no longer available. Please contact us if you need a new copy."
+        title="This link isn't valid"
+        body="It may be incorrect or no longer active. Please contact us if you have any questions about your visit."
       />
     );
   }

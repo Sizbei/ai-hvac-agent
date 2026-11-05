@@ -9,9 +9,12 @@ import { cardPaymentsEnabled } from "@/lib/payments/card-enabled";
 import { getOrgConfig } from "@/lib/admin/org-config-queries";
 import {
   portalPaymentNotice,
+  telHref,
   type PortalPaymentNotice,
 } from "@/lib/portal/portal-notice";
 import { logger } from "@/lib/logger";
+import type { PortalEstimateAmount } from "@/lib/portal/portal-estimate";
+import { BusinessIdentity } from "@/components/public/business-identity";
 import { PayButton } from "./pay-button";
 
 // Arrival windows are stored anchored to the BUSINESS timezone; render them in it
@@ -49,8 +52,16 @@ function formatWindow(start: Date | null, end: Date | null): string | null {
   return `${day}, ${t(start)}`;
 }
 
+/** Sentence-case a stored enum ("no_cooling" → "No cooling") for customers. */
 function humanize(value: string): string {
-  return value.replace(/_/g, " ");
+  const text = value.replace(/_/g, " ").trim();
+  return text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
+}
+
+function formatEstimateAmount(amount: PortalEstimateAmount): string {
+  return amount.kind === "single"
+    ? formatCentsExact(amount.cents)
+    : `${formatCentsExact(amount.minCents)} – ${formatCentsExact(amount.maxCents)}`;
 }
 
 function MessageState({
@@ -97,7 +108,7 @@ function InvoiceStateBadge({ state }: { readonly state: string }) {
   };
   return (
     <span
-      className={`inline-flex items-center rounded-[3px] border px-2 py-0.5 text-[11px] font-semibold tracking-[0.07em] uppercase ${
+      className={`inline-flex items-center rounded-[3px] border px-2 py-0.5 text-[12px] font-semibold ${
         colors[state] ?? NEUTRAL
       }`}
     >
@@ -106,14 +117,20 @@ function InvoiceStateBadge({ state }: { readonly state: string }) {
   );
 }
 
-/** The org's configured business phone (the same source message templates use), or null. */
-async function getOrgPhone(organizationId: string): Promise<string | null> {
+/** The org's name and configured business phone (the same source message
+ * templates use), or nulls. */
+async function getOrgBrand(
+  organizationId: string,
+): Promise<{ companyName: string | null; phone: string | null }> {
   try {
     const config = await getOrgConfig(organizationId);
-    return config.businessInfo?.phone?.trim() || null;
+    return {
+      companyName: config.companyName?.trim() || null,
+      phone: config.businessInfo?.phone?.trim() || null,
+    };
   } catch (error: unknown) {
-    logger.warn({ error }, "Portal org phone lookup failed");
-    return null;
+    logger.warn({ error }, "Portal org brand lookup failed");
+    return { companyName: null, phone: null };
   }
 }
 
@@ -183,7 +200,7 @@ function InvoicesSection({
                     <InvoiceStateBadge state={inv.state} />
                   </div>
                   <p className="mt-0.5 font-mono text-[13px] tabular-nums text-muted-foreground">
-                    {formatDate(inv.createdAt)}
+                    Issued {formatDate(inv.createdAt)}
                     {inv.amountPaidCents > 0 &&
                       ` · ${formatCentsExact(inv.amountPaidCents)} paid`}
                     {payable &&
@@ -225,16 +242,23 @@ function EstimatesSection({
             >
               <div>
                 <span className="font-mono text-[17px] font-medium tabular-nums text-foreground">
-                  {formatCentsExact(est.totalCents)}
+                  {formatEstimateAmount(est.display.amount)}
                 </span>
                 <p className="mt-0.5 text-[13px] text-muted-foreground">
-                  {est.awaitingApproval
-                    ? "Awaiting your approval"
-                    : humanize(est.status)}
+                  {est.display.statusLabel}
+                  {est.display.optionName ? ` · ${est.display.optionName}` : ""}
+                  {est.display.optionCount
+                    ? ` · ${est.display.optionCount} options`
+                    : ""}
                   {est.expiresAt && est.status === "open"
                     ? ` · expires ${formatDate(est.expiresAt)}`
                     : ""}
                 </p>
+                {est.awaitingApproval && (
+                  <p className="mt-0.5 text-[13px] text-muted-foreground">
+                    To approve, open the estimate link we sent you.
+                  </p>
+                )}
               </div>
             </li>
           ))}
@@ -264,7 +288,7 @@ function JobsSection({ jobs }: { readonly jobs: PortalData["jobs"] }) {
                   <span className="text-[15px] font-medium text-foreground">
                     {humanize(job.issueType)}
                   </span>
-                  <span className="rounded-[3px] border border-border bg-surface-raised px-2 py-0.5 text-[11px] font-semibold tracking-[0.07em] text-muted-foreground uppercase">
+                  <span className="rounded-[3px] border border-border bg-surface-raised px-2 py-0.5 text-[12px] font-semibold text-muted-foreground">
                     {humanize(job.status)}
                   </span>
                 </div>
@@ -329,18 +353,19 @@ export default async function CustomerPortalPage({
     );
   }
 
-  const [data, phone] = await Promise.all([
+  const [data, brand] = await Promise.all([
     getPortalData(identity.organizationId, identity.customerId),
-    getOrgPhone(identity.organizationId),
+    getOrgBrand(identity.organizationId),
   ]);
-  const payment = portalPaymentNotice({
-    cardEnabled: cardPaymentsEnabled(),
-    phone,
-  });
+  const phone = brand.phone;
+  const cardEnabled = cardPaymentsEnabled();
+  const payment = portalPaymentNotice({ cardEnabled, phone });
+  const tel = phone ? telHref(phone) : null;
 
   return (
     <main className="min-h-screen bg-canvas">
       <div className="mx-auto max-w-2xl space-y-5 p-4 sm:p-6">
+        <BusinessIdentity companyName={brand.companyName} phone={phone} />
         <header className="pt-2">
           <h1 className="font-heading text-[26px] leading-[30px] font-semibold tracking-[-0.02em] text-foreground">
             {data.customerName
@@ -348,8 +373,9 @@ export default async function CustomerPortalPage({
               : "Your account"}
           </h1>
           <p className="mt-1.5 text-[15px] text-muted-foreground">
-            View your estimates and invoices, pay a balance, and track upcoming
-            service.
+            {cardEnabled
+              ? "View your estimates and invoices, pay a balance, and track upcoming service."
+              : "View your estimates and invoices and track upcoming service."}
           </p>
         </header>
 
@@ -364,7 +390,20 @@ export default async function CustomerPortalPage({
         <HistorySection history={data.history} />
 
         <p className="pb-4 text-center text-[13px] text-muted-foreground">
-          Questions? Reply to your confirmation message or give us a call.
+          {tel && phone ? (
+            <>
+              Questions? Call us at{" "}
+              <a
+                href={tel}
+                className="font-medium whitespace-nowrap text-link underline underline-offset-2"
+              >
+                {phone}
+              </a>
+              .
+            </>
+          ) : (
+            "Questions? Contact us and we'll help."
+          )}
         </p>
       </div>
     </main>
