@@ -12,6 +12,10 @@ import {
 } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import {
+  fsmConnectErrorMessage,
+  fsmConnectionView,
+} from '@/lib/admin/fsm-connection-view';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -25,6 +29,8 @@ interface FieldpulseAccountInfo {
 /** Shape of GET /api/admin/integrations/fieldpulse/status. */
 interface FieldpulseStatus {
   readonly configured: boolean;
+  /** Connected, but the last availability sync failed (absent on older responses). */
+  readonly syncFailed?: boolean;
   readonly connected: boolean;
   readonly accountInfo: FieldpulseAccountInfo | null;
 }
@@ -49,13 +55,13 @@ export function FieldpulsePanel() {
       const res = await fetch('/api/admin/integrations/fieldpulse/status');
       const body = await res.json();
       if (!res.ok || !body.success) {
-        setError('Could not load Fieldpulse status.');
+        setError("Couldn't load the FieldPulse status. Please try again.");
         return;
       }
       setError(null);
       setStatus(body.data as FieldpulseStatus);
     } catch {
-      setError('Could not load Fieldpulse status.');
+      setError("Couldn't load the FieldPulse status. Please try again.");
     }
   }, []);
 
@@ -65,7 +71,7 @@ export function FieldpulsePanel() {
 
   async function handleConnect(): Promise<void> {
     if (!apiKey.trim()) {
-      setError('Enter your Fieldpulse API key.');
+      setError('Enter your FieldPulse API key.');
       return;
     }
     setConnecting(true);
@@ -81,12 +87,10 @@ export function FieldpulsePanel() {
         setApiKey(''); // clear the secret from component state on success
         await load();
       } else {
-        setError(
-          body?.error ?? 'Could not connect Fieldpulse. Check the API key.',
-        );
+        setError(fsmConnectErrorMessage('FieldPulse', body));
       }
     } catch {
-      setError('Could not connect Fieldpulse.');
+      setError("Couldn't connect FieldPulse. Please try again.");
     } finally {
       setConnecting(false);
     }
@@ -101,10 +105,10 @@ export function FieldpulsePanel() {
       if (res.ok) {
         await load();
       } else {
-        setError('Could not disconnect Fieldpulse.');
+        setError("Couldn't disconnect FieldPulse. Please try again.");
       }
     } catch {
-      setError('Could not disconnect Fieldpulse.');
+      setError("Couldn't disconnect FieldPulse. Please try again.");
     } finally {
       setDisconnecting(false);
     }
@@ -115,12 +119,12 @@ export function FieldpulsePanel() {
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Zap className="size-5" />
-          Fieldpulse
+          FieldPulse
         </CardTitle>
         <CardDescription>
-          Connect your Fieldpulse account to sync customers, jobs, and
-          technician schedules. Paste an API key from your Fieldpulse account
-          settings; it is validated, then stored encrypted.
+          Connect your FieldPulse account to sync customers, jobs, and
+          technician schedules. Paste an API key from your FieldPulse account
+          settings; it is checked, then stored encrypted.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -129,7 +133,7 @@ export function FieldpulsePanel() {
         {!status ? (
           <Skeleton className="h-10 w-full" />
         ) : status.connected ? (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Badge variant="default" className="gap-1">
               <Check className="size-3" />
               Connected
@@ -137,23 +141,42 @@ export function FieldpulsePanel() {
             <span className="text-sm text-muted-foreground">
               Linked to{' '}
               <span className="font-medium">
-                {status.accountInfo?.companyName ?? 'your Fieldpulse account'}
+                {status.accountInfo?.companyName ?? 'your FieldPulse account'}
               </span>
               .
             </span>
+            {status.syncFailed && (
+              <p className="w-full text-sm text-warning-strong">
+                The last availability sync failed. Check that the API key is
+                still valid, then reconnect.
+              </p>
+            )}
           </div>
         ) : (
           <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <Badge variant="secondary">Not connected</Badge>
-            </div>
+            {fsmConnectionView(status) === 'server_key' ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="default" className="gap-1">
+                  <Check className="size-3" />
+                  Connected
+                </Badge>
+                <span className="text-sm text-muted-foreground">
+                  Using the account key set up on the server. To use a
+                  different account, paste its API key below.
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary">Not connected</Badge>
+              </div>
+            )}
             <div className="space-y-2">
-              <Label htmlFor="fieldpulse-api-key">Fieldpulse API key</Label>
+              <Label htmlFor="fieldpulse-api-key">FieldPulse API key</Label>
               <Input
                 id="fieldpulse-api-key"
                 type="password"
                 autoComplete="off"
-                placeholder="Paste your Fieldpulse API key"
+                placeholder="Paste your FieldPulse API key"
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
                 disabled={connecting}
@@ -186,7 +209,7 @@ export function FieldpulsePanel() {
             ) : (
               <Plug className="size-4" />
             )}
-            Connect Fieldpulse
+            Connect FieldPulse
           </Button>
         )}
       </CardFooter>

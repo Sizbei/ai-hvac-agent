@@ -117,7 +117,7 @@ export function GoogleCalendarPanel() {
             <Badge variant="secondary">Not connected</Badge>
             {!status.configured && (
               <span className="text-sm text-muted-foreground">
-                Google Calendar isn&apos;t configured on the server yet.
+                Google Calendar isn&apos;t available on this account yet.
               </span>
             )}
           </div>

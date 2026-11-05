@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { AlertCircle, ArrowUpRight, Plug } from 'lucide-react';
+import { AlertCircle, ChevronRight, Plug } from 'lucide-react';
 import {
   useIntegrations,
   type IntegrationCategory,
@@ -133,7 +133,7 @@ function IntegrationCard({ item }: { readonly item: IntegrationStatusItem }) {
             render={<Link href={item.manageHref} />}
           >
             Manage
-            <ArrowUpRight className="size-4" />
+            <ChevronRight className="size-4" />
           </Button>
         </div>
       )}

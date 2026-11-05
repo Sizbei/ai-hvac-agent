@@ -14,7 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { SERVICE_TAGS } from '@/lib/admin/org-config-types';
-import { issueTypeValues } from '@/lib/ai/extraction-schema';
+import { issueTypeValues, type IssueType } from '@/lib/ai/extraction-schema';
 import type { OrgConfig, OrgConfigUpdate } from '@/lib/admin/org-config-types';
 
 interface ServicesPanelProps {
@@ -22,7 +22,8 @@ interface ServicesPanelProps {
   readonly onSave: (update: OrgConfigUpdate) => Promise<boolean>;
 }
 
-const ISSUE_LABELS: Record<string, string> = {
+// Record<IssueType, …> so a new issue type fails the build until it has a label.
+const ISSUE_LABELS: Record<IssueType, string> = {
   heating_not_working: 'Heating repair',
   cooling_not_working: 'Cooling / AC repair',
   thermostat_issue: 'Thermostat',
@@ -31,6 +32,10 @@ const ISSUE_LABELS: Record<string, string> = {
   water_leak: 'Water leaks',
   maintenance: 'Maintenance / tune-ups',
   installation: 'New installation / replacement',
+  refrigeration: 'Refrigeration',
+  ice_machine: 'Ice machines',
+  boiler: 'Boiler repair',
+  commercial_appliance: 'Commercial appliances',
   other: 'Other HVAC issues',
 };
 

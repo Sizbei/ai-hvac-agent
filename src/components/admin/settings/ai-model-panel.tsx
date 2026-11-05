@@ -92,10 +92,10 @@ export function AiModelPanel() {
         setSaved(true);
         setTimeout(() => setSaved(false), 2000);
       } else {
-        setError(json.error?.message ?? 'Could not save the model selection.');
+        setError("Couldn't save the model choice. Please try again.");
       }
     } catch {
-      setError('Could not save the model selection.');
+      setError("Couldn't save the model choice. Please try again.");
     } finally {
       setSaving(false);
     }
@@ -114,17 +114,17 @@ export function AiModelPanel() {
       const json = await res.json();
       if (res.ok && json.success) {
         if (json.data.error === 'key_not_configured') {
-          setTestError('This model has no API key configured in the environment.');
+          setTestError("This model isn't set up on the server yet.");
         } else if (json.data.error === 'model_call_failed') {
-          setTestError('The model call failed. Check the provider configuration.');
+          setTestError("The model didn't answer. Please try again later.");
         } else {
           setTestReply(json.data.reply ?? '');
         }
       } else {
-        setTestError(json.error?.message ?? 'Test failed.');
+        setTestError("Couldn't run the test. Please try again.");
       }
     } catch {
-      setTestError('Test failed.');
+      setTestError("Couldn't run the test. Please try again.");
     } finally {
       setTesting(false);
     }
@@ -137,9 +137,9 @@ export function AiModelPanel() {
       <CardHeader>
         <CardTitle>AI model</CardTitle>
         <CardDescription>
-          Choose which LLM powers this organization&apos;s assistant. Used for
-          A/B testing models. Changes take effect on the next conversation turn.
-          A model with no API key configured silently falls back to the default.
+          Choose which AI model powers this organization&apos;s assistant.
+          Changes take effect on the next message. If a model isn&apos;t set up
+          on the server yet, the assistant uses the default model instead.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -154,7 +154,7 @@ export function AiModelPanel() {
               disabled={saving}
             >
               <SelectTrigger id="ai-model-select" className="max-w-sm">
-                <SelectValue placeholder="Use environment default" />
+                <SelectValue placeholder="Default model" />
               </SelectTrigger>
               <SelectContent>
                 {state.choices.map((c) => (

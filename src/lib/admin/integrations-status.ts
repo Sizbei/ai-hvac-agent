@@ -79,6 +79,9 @@ async function getOrgAiModelId(organizationId: string): Promise<string | null> {
 
 const SETTINGS_INTEGRATIONS_HREF = "/admin/settings?tab=integrations";
 
+/** Same wording as the Settings › Integrations panels for an env-key org. */
+const SERVER_KEY_DETAIL = "Connected with the account key set up on the server";
+
 /**
  * Compose the full set of integration statuses for an org. Every status is
  * derived; nothing is read from a status table (there is none). Safe for the
@@ -112,13 +115,13 @@ export async function getIntegrationsStatus(
           ? "live"
           : "not_configured",
     detail: fieldpulseSyncFailed
-      ? `Connected — last availability sync failed: ${fieldpulse.lastSyncError ?? "unknown error"}`
+      ? "Connected, but the last availability sync failed. Check the API key in Settings."
       : fieldpulse.connected
         ? fieldpulse.accountInfo?.companyName
           ? `Connected — ${fieldpulse.accountInfo.companyName}`
           : "Connected"
         : fieldpulseEnv
-          ? "Environment key present"
+          ? SERVER_KEY_DETAIL
           : "Not connected",
     configurable: true,
     manageHref: SETTINGS_INTEGRATIONS_HREF,
@@ -140,7 +143,7 @@ export async function getIntegrationsStatus(
         ? `Connected — ${housecall.accountInfo.companyName}`
         : "Connected"
       : housecallEnv
-        ? "Environment key present"
+        ? SERVER_KEY_DETAIL
         : "Not connected",
     configurable: true,
     manageHref: SETTINGS_INTEGRATIONS_HREF,
@@ -227,7 +230,7 @@ export async function getIntegrationsStatus(
   const aiEntry = aiModelId ? getRegistryEntry(aiModelId) : undefined;
   const aiItem: IntegrationStatusItem = {
     key: "ai_model",
-    label: "AI Model",
+    label: "AI model",
     category: "ai",
     status: "live",
     detail: aiEntry

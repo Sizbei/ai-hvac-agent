@@ -38,6 +38,8 @@ export async function GET(): Promise<Response> {
         (Boolean(process.env.FIELDPULSE_API_KEY?.trim()) &&
           envKeyFallbackAllowed(session.organizationId)),
       connected: status.connected,
+      // Same rule as /admin/integrations' "Sync failed" badge so the two agree.
+      syncFailed: status.connected && status.availabilitySyncStatus === "failed",
       accountInfo: status.accountInfo,
     });
   } catch (error: unknown) {

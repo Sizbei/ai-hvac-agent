@@ -12,6 +12,10 @@ import {
 } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import {
+  fsmConnectErrorMessage,
+  fsmConnectionView,
+} from '@/lib/admin/fsm-connection-view';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -50,13 +54,13 @@ export function HousecallProPanel() {
       const res = await fetch('/api/admin/integrations/housecall/status');
       const body = await res.json();
       if (!res.ok || !body.success) {
-        setError('Could not load Housecall Pro status.');
+        setError("Couldn't load the Housecall Pro status. Please try again.");
         return;
       }
       setError(null);
       setStatus(body.data as HousecallStatus);
     } catch {
-      setError('Could not load Housecall Pro status.');
+      setError("Couldn't load the Housecall Pro status. Please try again.");
     }
   }, []);
 
@@ -85,13 +89,10 @@ export function HousecallProPanel() {
         setApiKey(''); // clear the secret from component state on success
         await load();
       } else {
-        setError(
-          body?.error ??
-            'Could not connect Housecall Pro. Check the API key.',
-        );
+        setError(fsmConnectErrorMessage('Housecall Pro', body));
       }
     } catch {
-      setError('Could not connect Housecall Pro.');
+      setError("Couldn't connect Housecall Pro. Please try again.");
     } finally {
       setConnecting(false);
     }
@@ -107,10 +108,10 @@ export function HousecallProPanel() {
       if (res.ok) {
         await load();
       } else {
-        setError('Could not disconnect Housecall Pro.');
+        setError("Couldn't disconnect Housecall Pro. Please try again.");
       }
     } catch {
-      setError('Could not disconnect Housecall Pro.');
+      setError("Couldn't disconnect Housecall Pro. Please try again.");
     } finally {
       setDisconnecting(false);
     }
@@ -124,9 +125,10 @@ export function HousecallProPanel() {
           Housecall Pro
         </CardTitle>
         <CardDescription>
-          Connect your Housecall Pro account (MAX plan) to sync customers and
-          push scheduled jobs. Paste an API key from your HCP account settings;
-          it is validated, then stored encrypted.
+          Connect your Housecall Pro account to sync customers and send
+          scheduled jobs. API access needs Housecall Pro&apos;s MAX plan. Paste
+          an API key from your Housecall Pro account settings; it is checked,
+          then stored encrypted.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -150,16 +152,29 @@ export function HousecallProPanel() {
           </div>
         ) : (
           <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <Badge variant="secondary">Not connected</Badge>
-            </div>
+            {fsmConnectionView(status) === 'server_key' ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="default" className="gap-1">
+                  <Check className="size-3" />
+                  Connected
+                </Badge>
+                <span className="text-sm text-muted-foreground">
+                  Using the account key set up on the server. To use a
+                  different account, paste its API key below.
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary">Not connected</Badge>
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="hcp-api-key">Housecall Pro API key</Label>
               <Input
                 id="hcp-api-key"
                 type="password"
                 autoComplete="off"
-                placeholder="Paste your HCP API key"
+                placeholder="Paste your Housecall Pro API key"
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
                 disabled={connecting}

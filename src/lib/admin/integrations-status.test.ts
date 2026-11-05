@@ -173,7 +173,9 @@ describe("getIntegrationsStatus — Rintegrations-1: sync-health folds into stat
     });
     const items = byKey(await getIntegrationsStatus("org-1"));
     expect(items.fieldpulse.status).not.toBe("connected");
-    expect(items.fieldpulse.detail).toContain("401 Unauthorized — key revoked");
+    // Human copy only: the raw provider error never reaches the UI.
+    expect(items.fieldpulse.detail).toMatch(/last availability sync failed/);
+    expect(items.fieldpulse.detail).not.toContain("401");
   });
 
   it("connected + availabilitySyncStatus='completed' → status stays 'connected'", async () => {
