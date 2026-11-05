@@ -18,7 +18,11 @@ guarded-flush layer `src/lib/ai/guarded-stream.ts` ·
 output guardrail `src/lib/ai/output-guardrail.ts` ·
 voice parity `src/lib/ai/voice-turn.ts` ·
 account-verify gate `src/lib/ai/account-verify.ts` ·
-history API `src/app/api/chat/history/route.ts`
+history API `src/app/api/chat/history/route.ts` ·
+end-state mapping `src/lib/chat/chat-end-state.ts` (pure) + panel
+`src/components/chat/chat-end-panel.tsx` · failure copy
+`src/lib/chat/chat-turn-feedback.ts` (pure) · widget loader
+`src/app/widget.js/route.ts` + close contract `src/lib/widget/widget-messages.ts`
 
 **Data flow:** `useChatSession` wraps `useChat` (Vercel AI SDK) via
 `TextStreamChatTransport`. On first render it POSTs `/api/session` to create or resume
@@ -61,6 +65,35 @@ shows an inline confirmation instead of navigating.
   `src/lib/ai/account-verify.contract.test.ts` fails if the two ever drift, which
   is what makes the unsafe default tolerable. Add a capability, add a gate.
 
+**Closed-chat and failure UX (customer must never hit a dead end):**
+- `chatEndActions({status, urgency, phone})` decides what a non-active chat
+  offers. Escalated → persistent panel (emergency when the polled extraction's
+  urgency is `emergency`, else hand-off) with the org phone as `tel:`; with no
+  phone, the emergency panel shows `EMERGENCY_GENERIC_GUIDANCE`. "Talk to a
+  human" becomes "Call us" (tel) or focuses the panel — never disabled while
+  escalated. The input is hidden in terminal states and the reason
+  (`inputNote`) shows above "Start a new conversation" — the chat route still
+  refuses messages for escalated sessions (`isTerminalState`), so the
+  deterministic escalation's "what's the address/phone?" ask is answered by
+  calling, not typing.
+- GET and POST `/api/session` return `companyName` + `companyPhone` (from
+  `getRouterConfig`, memoized). The header falls back to "Chat with us",
+  never another org's name; the escalation dialog shows only the org's phone.
+- Empty reply (HTTP 200, no text — e.g. the provider errored and `streamText`
+  ended empty): `isEmptyReply` → `emptyReplyFallback` bubble with Try again
+  (`regenerate()`) / Call. Blank assistant bubbles are not rendered. Fixed in
+  the UI on purpose: `guarded-stream.ts` stays untouched.
+- Failed sends: the AI SDK's `error.message` is the raw JSON envelope — always
+  map through `chatErrorCopy` (restart for NO_SESSION/terminal, retry
+  otherwise). Session start errors use `sessionStartErrorCopy(status)`.
+- Chat session creation has its own limit `RATE_LIMITS.chatSessionCreate`
+  (15/min/IP); `sessionCreate` (5/min) still guards the login routes.
+- Widget: the loader opens `/embed?widget=1&key=…`; with `widget=1` the
+  embed header shows an X and Esc (unless a dialog is open) posts
+  `WIDGET_CLOSE_MESSAGE` to the parent; the loader accepts it only from
+  `APP` origin + its own iframe. On phones the panel is `100dvh` and the
+  launcher hides while open. `tests/api/widget-loader.test.ts` pins this.
+
 **Gotchas:**
 - `/embed` is wrapped in `<Suspense>` to prevent prerender errors from `useChat`'s
   `Math.random()` calls during Next.js build — do not remove it.
@@ -73,4 +106,5 @@ shows an inline confirmation instead of navigating.
 - `npx vitest run src/lib/ai/guarded-stream.test.ts src/lib/ai/guarded-stream.route-wiring.test.ts`
 - `npx vitest run src/lib/ai/output-guardrail.test.ts src/lib/ai/guardrails.test.ts`
 - `npx vitest run src/lib/ai/state-machine.test.ts src/lib/ai/intent-router.test.ts`
+- `npx vitest run src/lib/chat tests/api/widget-loader.test.ts`
 - Gate: `npx tsc --noEmit`

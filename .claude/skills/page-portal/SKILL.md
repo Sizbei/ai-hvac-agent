@@ -23,7 +23,9 @@ Review collects post-job satisfaction feedback and always offers a public review
   `src/app/review/[token]/review-form.tsx` · queries
   `src/lib/reviews/review-queries.ts` · review route
   `src/app/api/review/[token]/route.ts`
-- Shared: analytics masking `src/lib/analytics-path.ts` (pure) + client wrapper
+- Shared: org name + tap-to-call header
+  `src/components/public/business-identity.tsx` (portal, estimate page);
+  analytics masking `src/lib/analytics-path.ts` (pure) + client wrapper
   `src/components/masked-analytics.tsx`, mounted in `src/app/layout.tsx`
 
 **Data flow:** all three pages are async server components. The token arrives as a
@@ -69,6 +71,20 @@ Review checks `status === 'responded'` to show the already-recorded state.
   excluded from the portal's invoice list — never a bill the business has
   committed to yet.
 
+- **Estimate amounts:** `estimates.total_cents` is the headline MAX option and
+  is never reset on approval — never show it raw. The portal reads option
+  totals (names + totals only) and `portalEstimateDisplay`
+  (`src/lib/portal/portal-estimate.ts`, pure): sold → the sold option's total
+  + name + "Approved"; open → single total or low–high range with the option
+  count; human status labels only.
+- **Estimate link frame:** `getEstimatePublicContext(token)`
+  (`src/lib/portal/estimate-public.ts`) resolves the org brand and, once
+  sold, the sold option + signer + date; a reopened sold link shows the
+  `estimateDecisionCopy` receipt (`src/lib/portal/estimate-decision.ts`,
+  pure; "(admin)" signer is hidden). The approve form pre-selects only a
+  single option and needs a 2+ character signature. Invalid portal /
+  estimate / review tokens share "This link isn't valid".
+
 **Gotchas:**
 - `params` is a `Promise` (this Next.js version) — always `await params` before
   destructuring in server components.
@@ -87,7 +103,7 @@ Review checks `status === 'responded'` to show the already-recorded state.
   says "view", never "pay".
 
 **Verify changes:**
-- `npx vitest run src/lib/portal/portal-queries.test.ts`
+- `npx vitest run src/lib/portal/portal-queries.test.ts src/lib/portal/portal-estimate.test.ts src/lib/portal/estimate-decision.test.ts`
 - `npx vitest run src/lib/reviews/review-queries.test.ts`
 - `npx vitest run src/lib/analytics-path.test.ts`
 - `npx vitest run src/lib/portal/portal-notice.test.ts tests/api/portal-pay-route.test.ts`

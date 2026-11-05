@@ -31,6 +31,11 @@ is a static mock — it has no connection to the live chat.
 - The service-radius and region copy ("NE Tennessee, SW Virginia, Western North
   Carolina") must match `BUSINESS_BASE_LOCATION` — do not hardcode separately.
 
+- `MobileNav` takes `phoneDisplay`/`phoneTel` (from `SPEARS`) and leads with
+  "Get service" (/chat) + Call before the demo/admin/docs links.
+- The `ChatPreview` input row is a "Start a real chat" link to /chat — it
+  must not look like a text box that ignores typing.
+
 **Gotchas:**
 - `delay()` returns a `React.CSSProperties` object used as inline style for
   stagger animation — it is NOT a setTimeout wrapper.
