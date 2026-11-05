@@ -79,6 +79,14 @@ on_hold, so the two pages disagreed (19 vs 110 on the dev default org).
   `/admin/requests?status=…`; In progress and Open emergencies span several
   statuses and are not links. On phones the strips are two columns.
 
+- List rows: issue type via `issueTypeLabel`, hold reason via `humanizeCode`
+  (sentence case, never Title-Cased enums); customer via
+  `customerDisplayName` ("Erased customer" for the `[deleted]` erasure
+  placeholder, "No name on file" for none — never "Unknown").
+- Recent conversations fetches 20, drops sessions with no messages and no
+  request (`recentConversations` in `src/lib/admin/dashboard-display.ts`) and
+  titles rows by customer name → reference → channel, never an id hash.
+
 **Verify changes:** `npx vitest run src/lib/admin/queries.test.ts` (covers
 getDashboardStats and related helpers). Visual via the admin-pages skill recipe.
 

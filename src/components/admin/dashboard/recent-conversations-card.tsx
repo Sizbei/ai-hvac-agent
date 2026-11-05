@@ -9,8 +9,11 @@ import { ChannelChip } from '@/components/admin/conversations/channel-chip';
 import { StatusBadge } from '@/components/admin/status-badge';
 import { useAdminConversations } from '@/hooks/use-admin-conversations';
 import { formatRelativeTime } from '@/lib/admin/relative-time';
+import { conversationTitle, recentConversations } from '@/lib/admin/dashboard-display';
 
 const RECENT_LIMIT = 5;
+/** Fetch extra rows so empty widget sessions can be dropped and 5 still remain. */
+const FETCH_LIMIT = 20;
 
 /**
  * Right-rail feed of the most recent conversations on the dashboard. Fetches its
@@ -19,10 +22,10 @@ const RECENT_LIMIT = 5;
  */
 export function RecentConversationsCard() {
   const { conversations, isLoading } = useAdminConversations({
-    limit: RECENT_LIMIT,
+    limit: FETCH_LIMIT,
     intervalMs: 30_000,
   });
-  const recent = conversations.slice(0, RECENT_LIMIT);
+  const recent = recentConversations(conversations, RECENT_LIMIT);
 
   return (
     <SectionCard
@@ -69,15 +72,15 @@ export function RecentConversationsCard() {
                 <ChannelChip channel={c.channel} size="sm" />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="truncate font-mono text-[13px] font-medium tabular-nums">
-                      {c.referenceNumber ?? c.id.slice(0, 8)}
+                    <span className="truncate text-[13px] font-medium">
+                      {conversationTitle(c)}
                     </span>
                     <span className="ml-auto shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
                       {formatRelativeTime(c.lastMessageAt ?? c.updatedAt)}
                     </span>
                   </div>
                   <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
-                    {c.preview ?? 'No messages yet'}
+                    {c.preview ?? 'No customer message'}
                   </p>
                   <div className="mt-1.5">
                     <StatusBadge status={c.status} />

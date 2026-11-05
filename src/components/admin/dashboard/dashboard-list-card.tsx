@@ -10,6 +10,8 @@ import { SectionCard } from '@/components/admin/ui/section-card';
 import { type IconChipIntent } from '@/components/admin/ui/icon-chip';
 import { formatArrivalWindow } from '@/lib/admin/arrival-window';
 import { DASHBOARD_LIST_LIMIT, type DashboardRequest } from '@/lib/admin/types';
+import { humanizeCode, issueTypeLabel } from '@/lib/admin/issue-type-label';
+import { customerDisplayName } from '@/lib/admin/dashboard-display';
 
 type RowMeta = 'arrivalWindow' | 'followUp';
 
@@ -29,19 +31,8 @@ interface DashboardListCardProps {
   readonly onSelect: (id: string) => void;
 }
 
-function formatIssueType(issueType: string): string {
-  return issueType
-    .split('_')
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
-}
-
 function formatHoldReason(reason: string | null): string | null {
-  if (!reason) return null;
-  return reason
-    .split('_')
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
+  return reason ? humanizeCode(reason) : null;
 }
 
 function formatFollowUp(iso: string | null): string | null {
@@ -139,7 +130,7 @@ export function DashboardListCard({
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="truncate text-sm font-medium">
-                      {request.customerName ?? 'Unknown'}
+                      {customerDisplayName(request.customerName)}
                     </span>
                     {request.isAfterHours && (
                       <ContextBadge
@@ -151,7 +142,7 @@ export function DashboardListCard({
                     )}
                   </div>
                   <div className="truncate text-xs text-muted-foreground">
-                    {formatIssueType(request.issueType)} ·{' '}
+                    {issueTypeLabel(request.issueType)} ·{' '}
                     <span className="font-mono">{request.referenceNumber}</span>
                   </div>
                   <MetaLine request={request} meta={meta} />
