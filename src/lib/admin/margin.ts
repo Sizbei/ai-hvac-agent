@@ -104,3 +104,12 @@ export function rollUpActualLaborCost(
 ): number {
   return entries.reduce((sum, e) => sum + (e.laborCostCents ?? 0), 0);
 }
+
+/** Shown under a margin when a priced line has no cost on file (manual lines are $0 cost). */
+export const UNCOSTED_MARGIN_NOTE =
+  "Some lines have no cost on file, so this margin reads higher than it is.";
+
+/** True when any line earns money but carries no cost — the margin is then incomplete. */
+export function hasUncostedLines(lines: readonly MarginLine[]): boolean {
+  return lines.some((l) => l.lineTotalCents > 0 && l.costCents === 0);
+}

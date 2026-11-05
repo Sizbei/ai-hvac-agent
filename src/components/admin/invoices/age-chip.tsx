@@ -40,6 +40,12 @@ export function daysPastDue(inv: InvoiceAgeDates, now: Date = new Date()): numbe
   return inv.dueDate != null ? daysBetween(new Date(inv.dueDate), now) : 0;
 }
 
+/** "Issued today" / "1 day" / "12 days" — never "0 days" or "1 days". */
+export function ageLabel(days: number): string {
+  if (days <= 0) return 'Issued today';
+  return days === 1 ? '1 day' : `${days} days`;
+}
+
 // Status chip per the redesign spec: 3 px radius, 20 px tall, semantic
 // light/border/strong triplet, 11 px. The label text ("Paid" / "12 days" /
 // "863d overdue") is the primary disambiguator — no redundant dot glyph, which
@@ -65,5 +71,5 @@ export function AgeChip({ issuedAt, dueDate, createdAt, state }: { issuedAt?: st
   }
   const days = invoiceAgeDays({ issuedAt, createdAt });
   const b = state === 'open' && overdueByDates({ issuedAt, dueDate, createdAt }) ? 'red' : ageBucket(days);
-  return <span className={`${CHIP} ${CLS[b]} font-mono tabular-nums`}>{days} days</span>;
+  return <span className={`${CHIP} ${CLS[b]} font-mono tabular-nums`}>{ageLabel(days)}</span>;
 }

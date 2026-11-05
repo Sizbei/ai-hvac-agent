@@ -64,7 +64,7 @@ export function InvoiceCollectionsSide({
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium leading-none">{ev.label}</p>
                   <p className="mt-0.5 text-xs text-muted-foreground">
-                    {KIND_LABEL[ev.kind]} · {ev.at.toLocaleDateString()}
+                    {KIND_LABEL[ev.kind]} · {ev.at.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                   </p>
                 </div>
               </li>

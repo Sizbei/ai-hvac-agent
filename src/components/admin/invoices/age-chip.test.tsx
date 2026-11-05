@@ -1,5 +1,5 @@
 import { it, expect } from 'vitest';
-import { ageBucket, daysBetween, daysPastDue, invoiceAgeDays, overdueByDates } from './age-chip';
+import { ageBucket, ageLabel, daysBetween, daysPastDue, invoiceAgeDays, overdueByDates } from './age-chip';
 
 it('buckets invoice age into green/amber/red at 30 and 60 days', () => {
   expect(ageBucket(10)).toBe('green');
@@ -65,4 +65,10 @@ it('daysPastDue counts whole days past the due date, 0 when not past', () => {
   expect(daysPastDue({ dueDate: '2026-06-10T00:00:00Z', createdAt: '2026-06-01T00:00:00Z' }, NOW)).toBe(30);
   expect(daysPastDue({ dueDate: '2026-08-01T00:00:00Z', createdAt: '2026-06-01T00:00:00Z' }, NOW)).toBe(0);
   expect(daysPastDue({ createdAt: '2026-06-01T00:00:00Z' }, NOW)).toBe(0);
+});
+
+it('ageLabel reads naturally for fresh invoices', () => {
+  expect(ageLabel(0)).toBe('Issued today');
+  expect(ageLabel(1)).toBe('1 day');
+  expect(ageLabel(12)).toBe('12 days');
 });

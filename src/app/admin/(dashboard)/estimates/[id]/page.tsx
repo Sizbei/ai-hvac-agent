@@ -23,7 +23,7 @@ import { ErrorState } from '@/components/admin/ui/error-state';
 import { EstimateStatusBadge } from '@/components/admin/estimates/estimate-status-badge';
 import { FinancingPanel } from '@/components/admin/financing/financing-panel';
 import { formatCentsExact } from '@/lib/admin/money-format';
-import { rollUpMargin } from '@/lib/admin/margin';
+import { rollUpMargin, hasUncostedLines, UNCOSTED_MARGIN_NOTE } from '@/lib/admin/margin';
 import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
 import { SyncPill } from '@/components/admin/sync-pill';
 
@@ -357,6 +357,9 @@ export default function EstimateDetailPage({
                     {(margin.marginPct * 100).toFixed(1)}%)
                   </span>
                 </div>
+                {hasUncostedLines(opt.lineItems) && (
+                  <p className="mt-1">{UNCOSTED_MARGIN_NOTE}</p>
+                )}
               </div>
             </CardContent>
           </Card>

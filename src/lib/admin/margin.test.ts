@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeMargin, rollUpMargin, fpDiscountCents } from "./margin";
+import { computeMargin, rollUpMargin, fpDiscountCents, hasUncostedLines } from "./margin";
 
 describe("computeMargin", () => {
   it("positive margin: revenue above cost", () => {
@@ -112,5 +112,13 @@ describe("fpDiscountCents", () => {
     expect(fpDiscountCents({})).toBe(0);
     expect(fpDiscountCents({ discount: "not-a-number" })).toBe(0);
     expect(fpDiscountCents({ discount: "-5.00" })).toBe(0);
+  });
+});
+
+describe("hasUncostedLines", () => {
+  it("flags a priced line with no cost", () => {
+    expect(hasUncostedLines([{ lineTotalCents: 9500, costCents: 0 }])).toBe(true);
+    expect(hasUncostedLines([{ lineTotalCents: 9500, costCents: 4000 }])).toBe(false);
+    expect(hasUncostedLines([{ lineTotalCents: 0, costCents: 0 }])).toBe(false);
   });
 });

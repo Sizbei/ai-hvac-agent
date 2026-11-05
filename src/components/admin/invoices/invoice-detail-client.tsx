@@ -34,7 +34,7 @@ import { FinalizeButton } from '@/components/admin/invoices/finalize-button';
 import { InvoiceCollectionsSide } from '@/components/admin/invoices/invoice-collections-side';
 import { FinancingPanel } from '@/components/admin/financing/financing-panel';
 import { formatCentsExact, parseDollarsToCents } from '@/lib/admin/money-format';
-import { rollUpMargin, computeMargin, fpDiscountCents } from '@/lib/admin/margin';
+import { rollUpMargin, computeMargin, fpDiscountCents, hasUncostedLines, UNCOSTED_MARGIN_NOTE } from '@/lib/admin/margin';
 import { deriveInvoicePresentation } from '@/lib/admin/invoice-presentation';
 import { isCollectible, invoiceRef } from '@/lib/admin/invoice-collectible';
 import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
@@ -113,8 +113,15 @@ function hydrateSignature(s: ApiSignature): DocumentSignature {
   return { ...s, signedAt: s.signedAt ? new Date(s.signedAt) : null };
 }
 
+/** "Nov 5, 2026, 9:01 PM" — the invoice document's day format plus a time. */
 function formatDateTime(d: Date): string {
-  return d.toLocaleString();
+  return d.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 }
 
 /** Convert the API JSON response (string dates) into the client view (Date objects). */
@@ -548,6 +555,9 @@ export function InvoiceDetailClient({
                 {(margin.marginPct * 100).toFixed(1)}%)
               </span>
             </div>
+            {hasUncostedLines(invoice.lineItems) && (
+              <p className="mt-1">{UNCOSTED_MARGIN_NOTE}</p>
+            )}
 
             {hasActual && actualMargin && (
               <div className="mt-2 border-t pt-2">

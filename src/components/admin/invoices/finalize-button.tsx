@@ -63,6 +63,9 @@ export function FinalizeButton({
           >
             Cancel
           </Button>
+          <span className="basis-full text-xs text-muted-foreground sm:basis-auto">
+            The draft becomes an open invoice you can collect on. Lines can&apos;t be changed after.
+          </span>
         </>
       ) : (
         <Button size="sm" variant="outline" onClick={() => setArmed(true)}>
