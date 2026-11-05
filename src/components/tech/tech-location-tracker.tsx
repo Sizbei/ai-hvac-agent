@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { MapPin } from 'lucide-react';
+import { dispatchGuideRefresh } from '@/lib/tech/guide-refresh';
 
 // Coalesce posts: the browser fires watchPosition often, but dispatch only needs
 // a fix roughly every minute. The server's per-instance rate limit is a backstop;
@@ -96,6 +97,7 @@ export function TechLocationTracker() {
       });
       if (res.ok) {
         setEnabled(next);
+        dispatchGuideRefresh();
         setStatus(next ? null : 'Location sharing turned off.');
         // Surface the OS permission prompt right away on enable.
         if (next && typeof navigator !== 'undefined' && navigator.geolocation) {

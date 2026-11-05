@@ -21,6 +21,8 @@ const INTEGRATION_SUITES = [
   "tests/integration/onboarding-state.test.ts",
   // M3b field invoices: writers + idempotency against the dev DB (throwaway org).
   "tests/integration/field-invoice.test.ts",
+  // Technician getting-started guide: derivation + stamps against the dev DB (two throwaway orgs).
+  "tests/integration/tech-guide.test.ts",
 ];
 
 // `npm run test:integration` sets this to invert the selection: run ONLY the

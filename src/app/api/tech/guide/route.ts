@@ -1,0 +1,49 @@
+/**
+ * Technician getting-started guide (spec 2026-11-05).
+ * GET   → the derived steps + progress for the session's technician (stamps new completions).
+ * PATCH { hidden: true } → hides the jobs-list card for this technician (write-once).
+ */
+import { NextRequest } from "next/server";
+import { z } from "zod";
+import { getTechSession } from "@/lib/auth/tech-session";
+import { getGuide, hideGuide } from "@/lib/tech/guide-queries";
+import { isSameOriginRequest } from "@/lib/session-csrf";
+import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
+import { successResponse, errorResponse, readJsonBody } from "@/lib/api-response";
+import { logger, errorCode } from "@/lib/logger";
+
+export const dynamic = "force-dynamic";
+
+const patchSchema = z.strictObject({ hidden: z.literal(true) });
+
+export async function GET() {
+  try {
+    const session = await getTechSession();
+    if (!session) return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
+    const rate = slidingWindow(`tech:guide-get:${session.userId}`, RATE_LIMITS.adminRead.maxRequests, RATE_LIMITS.adminRead.windowMs);
+    if (!rate.allowed) return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
+    return successResponse(await getGuide(session.organizationId, session.userId));
+  } catch (error) {
+    logger.error({ code: errorCode(error) }, "Failed to load the technician guide");
+    return errorResponse("Couldn't load the guide.", "INTERNAL_ERROR", 500);
+  }
+}
+
+export async function PATCH(request: NextRequest) {
+  try {
+    const session = await getTechSession();
+    if (!session) return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
+    if (!isSameOriginRequest(request)) return errorResponse("Forbidden", "FORBIDDEN", 403);
+    const rate = slidingWindow(`tech:guide-patch:${session.userId}`, RATE_LIMITS.adminMutation.maxRequests, RATE_LIMITS.adminMutation.windowMs);
+    if (!rate.allowed) return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
+    const body = await readJsonBody(request);
+    const parsed = body.ok ? patchSchema.safeParse(body.data) : null;
+    if (!parsed?.success) return errorResponse("Invalid request body", "VALIDATION_ERROR", 400);
+    const result = await hideGuide(session.organizationId, session.userId);
+    if (!result) return errorResponse("Technician not found", "NOT_FOUND", 404);
+    return successResponse(result);
+  } catch (error) {
+    logger.error({ code: errorCode(error) }, "Failed to update the technician guide");
+    return errorResponse("Couldn't update the guide. Please try again.", "INTERNAL_ERROR", 500);
+  }
+}
