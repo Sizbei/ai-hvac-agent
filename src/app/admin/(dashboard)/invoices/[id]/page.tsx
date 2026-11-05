@@ -1,6 +1,7 @@
 import { getAdminSession } from '@/lib/auth/session';
 import { isSuperAdmin } from '@/lib/auth/authz';
 import { InvoiceDetailClient } from '@/components/admin/invoices/invoice-detail-client';
+import { cardPaymentsEnabled } from '@/lib/payments/card-enabled';
 
 /**
  * Thin server wrapper — no PageShell here; PageShell lives in InvoiceDetailClient.
@@ -17,5 +18,11 @@ export default async function InvoiceDetailPage({
   const session = await getAdminSession();
   const canRefund = session ? isSuperAdmin(session) : false;
 
-  return <InvoiceDetailClient id={id} canRefund={canRefund} />;
+  return (
+    <InvoiceDetailClient
+      id={id}
+      canRefund={canRefund}
+      cardPaymentsEnabled={cardPaymentsEnabled()}
+    />
+  );
 }

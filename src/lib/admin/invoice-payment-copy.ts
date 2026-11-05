@@ -128,3 +128,85 @@ export function buildRecordPaymentBody(input: {
     isDeposit: input.isDeposit,
   };
 }
+
+// ── Card payments off + customer link (UX fix wave) ─────────────────────────
+
+/** Shown where a Card option or online-pay action would appear while the provider is the mock. */
+export const CARD_PAYMENTS_OFF_COPY =
+  "Card payments aren't set up yet, so customers can't pay online. Record cash and check payments here.";
+
+/**
+ * The header/row link action for an invoice, or null when there is none. The
+ * link is the customer's portal: it needs a customer (the route 404s without
+ * one) and only makes sense on an open native invoice — never a draft, a
+ * settled invoice, or a synced mirror. With cards off the portal can't take a
+ * payment, so the action is labelled for what it is.
+ */
+export function invoiceLinkAction(input: {
+  readonly state: string;
+  readonly syncedSource: string | null;
+  readonly customerId: string | null;
+  readonly cardPaymentsEnabled: boolean;
+}): { readonly label: string } | null {
+  if (input.syncedSource !== null || !input.customerId || input.state !== "open") return null;
+  return { label: input.cardPaymentsEnabled ? "Copy pay link" : "Copy portal link" };
+}
+
+/** A reminder texts the customer, so it needs one. */
+export function canSendReminder(input: {
+  readonly collectible: boolean;
+  readonly syncedSource: string | null;
+  readonly customerId: string | null;
+}): boolean {
+  return input.collectible && input.syncedSource === null && input.customerId !== null;
+}
+
+/** Said BEFORE recording: a payment on an invoice with a customer queues a text receipt (M3b). */
+export function receiptNoticeCopy(input: {
+  readonly customerId: string | null;
+  readonly customerPhone: string | null;
+}): string | null {
+  if (!input.customerId || !input.customerPhone) return null;
+  return "We'll text the customer a receipt when you record this payment.";
+}
+
+/** Client-side over-balance check, naming the balance (the server re-checks). */
+export function overBalanceCopy(amountCents: number, balanceCents: number, format: (c: number) => string): string | null {
+  return amountCents > balanceCents
+    ? `That's more than the balance due (${format(balanceCents)}).`
+    : null;
+}
+
+/** "298.95" — the Record payment amount pre-filled with the balance. */
+export function centsToInputDollars(cents: number): string {
+  return cents > 0 ? (cents / 100).toFixed(2) : "";
+}
+
+const PAYMENT_STATUS_LABELS: Readonly<Record<string, string>> = {
+  pending: "Pending",
+  succeeded: "Received",
+  failed: "Failed",
+  refunded: "Refunded",
+};
+
+/**
+ * Plain-language payment chip: "Received", "Partly refunded", "Refunded" …
+ * Never the raw enum.
+ */
+export function paymentStatusLabel(status: string, refundedCents: number): string {
+  if (status === "succeeded" && refundedCents > 0) return "Partly refunded";
+  return PAYMENT_STATUS_LABELS[status] ?? "Unknown";
+}
+
+export const REFUND_REASONS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: "duplicate", label: "Duplicate charge" },
+  { value: "customer_request", label: "Customer request" },
+  { value: "defective", label: "Defective / service issue" },
+  { value: "other", label: "Other" },
+];
+
+/** The picker label for a stored refund reason code; null when absent/unknown. */
+export function refundReasonLabel(reason: string | null): string | null {
+  if (!reason) return null;
+  return REFUND_REASONS.find((r) => r.value === reason)?.label ?? null;
+}

@@ -14,6 +14,7 @@ import { successResponse, errorResponse, readJsonBody } from "@/lib/api-response
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { isUniqueViolation } from "@/lib/db/unique-violation";
 import { logger } from "@/lib/logger";
+import { cardPaymentsEnabled } from "@/lib/payments/card-enabled";
 import { invoiceStateEnum } from "@/lib/db/schema";
 
 const VALID_STATES = new Set(invoiceStateEnum.enumValues);
@@ -103,6 +104,9 @@ export async function GET(request: NextRequest) {
       sourceCounts: listResult.sourceCounts,
       stats,
       collectedThisMonthCents: collected,
+      // Card payments are off while the provider is the mock; the list labels
+      // its customer-link action accordingly.
+      cardPaymentsEnabled: cardPaymentsEnabled(),
     });
     response.headers.set('Cache-Control', 'private, max-age=0, stale-while-revalidate=30');
     return response;

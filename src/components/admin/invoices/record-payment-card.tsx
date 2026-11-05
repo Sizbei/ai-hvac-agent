@@ -1,16 +1,19 @@
 'use client';
 
 import { CHECK_NUMBER_COPY, isValidCheckNumber } from '@/lib/payments/check-number';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { SegmentedControl } from '@/components/ui/segmented-control';
-import { parseDollarsToCents } from '@/lib/admin/money-format';
+import { formatCentsExact, parseDollarsToCents } from '@/lib/admin/money-format';
 import { mintKey } from '@/lib/http/idempotency-codes';
 import {
+  CARD_PAYMENTS_OFF_COPY,
   RECORD_PAYMENT_METHODS,
   RECORD_PAYMENT_NETWORK_COPY,
+  centsToInputDollars,
+  overBalanceCopy,
   buildRecordPaymentBody,
   recordPaymentErrorCopy,
   shouldReloadAfterRecord,
@@ -28,10 +31,18 @@ import {
  */
 export function RecordPaymentCard({
   invoiceId,
+  balanceCents,
+  receiptNotice,
+  cardPaymentsEnabled,
   onRecorded,
   onReload,
 }: {
   readonly invoiceId: string;
+  /** Pre-fills the amount ("paid in full" is the common case) and bounds it. */
+  readonly balanceCents: number;
+  /** Said before recording when a receipt text will go out (M3b, by design). */
+  readonly receiptNotice: string | null;
+  readonly cardPaymentsEnabled: boolean;
   readonly onRecorded: () => void;
   /** Refetch the invoice (payments list) without closing the form. */
   readonly onReload: () => void;
@@ -39,7 +50,16 @@ export function RecordPaymentCard({
   const [clientToken, setClientToken] = useState(() => mintKey());
   const [method, setMethod] = useState<RecordMethod>('cash');
   const [checkNumber, setCheckNumber] = useState('');
-  const [amount, setAmount] = useState('');
+  const [amount, setAmount] = useState(() => centsToInputDollars(balanceCents));
+  const cardRef = useRef<HTMLDivElement>(null);
+  const amountRef = useRef<HTMLInputElement>(null);
+
+  // The card mounts below the invoice document: bring it into view and put
+  // the cursor in the amount so the office doesn't hunt for the form.
+  useEffect(() => {
+    cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    amountRef.current?.focus({ preventScroll: true });
+  }, []);
   const [isDeposit, setIsDeposit] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,6 +68,11 @@ export function RecordPaymentCard({
     const amountCents = parseDollarsToCents(amount);
     if (amountCents < 1) {
       setError('Enter an amount greater than zero.');
+      return;
+    }
+    const over = overBalanceCopy(amountCents, balanceCents, formatCentsExact);
+    if (over) {
+      setError(over);
       return;
     }
     if (method === 'check' && checkNumber.trim().length > 0 && !isValidCheckNumber(checkNumber)) {
@@ -85,14 +110,17 @@ export function RecordPaymentCard({
     } finally {
       setIsSaving(false);
     }
-  }, [invoiceId, clientToken, method, amount, checkNumber, isDeposit, onRecorded, onReload]);
+  }, [invoiceId, balanceCents, clientToken, method, amount, checkNumber, isDeposit, onRecorded, onReload]);
 
   return (
-    <Card>
+    <Card ref={cardRef}>
       <CardHeader>
         <CardTitle className="text-base">Record payment</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
+        {!cardPaymentsEnabled && (
+          <p className="text-xs text-muted-foreground">{CARD_PAYMENTS_OFF_COPY}</p>
+        )}
         <SegmentedControl
           aria-label="Payment method"
           options={RECORD_PAYMENT_METHODS}
@@ -115,6 +143,7 @@ export function RecordPaymentCard({
               $
             </span>
             <Input
+              ref={amountRef}
               aria-label="Payment amount in dollars"
               type="number"
               min="0"
@@ -139,6 +168,10 @@ export function RecordPaymentCard({
             {isSaving ? 'Recording…' : 'Record'}
           </Button>
         </div>
+        <p className="text-xs text-muted-foreground">
+          Balance due {formatCentsExact(balanceCents)}.
+          {receiptNotice ? ` ${receiptNotice}` : ''}
+        </p>
         {error && (
           <p role="alert" className="text-xs text-destructive">
             {error}

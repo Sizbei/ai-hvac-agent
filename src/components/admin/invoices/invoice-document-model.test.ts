@@ -42,3 +42,9 @@ it('a source-system due date wins over the net-30 fallback', () => {
   expect(m.dueDate).toEqual(new Date('2026-02-10'));
   expect(m.derivedNetTerms).toBe(false);
 });
+
+it('a balance that is not yet due is not overdue (no red on a fresh invoice)', () => {
+  const now = new Date('2026-04-24');
+  expect(invoiceDocModel(base, now).isOverdue).toBe(false);
+  expect(invoiceDocModel(base, new Date('2026-06-01')).isOverdue).toBe(true);
+});

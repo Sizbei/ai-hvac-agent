@@ -16,6 +16,19 @@ import { AgeChip, daysBetween } from './age-chip';
 import { SyncPill } from '@/components/admin/sync-pill';
 import { InvoiceStateBadge } from './invoice-state-badge';
 import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
+import { canSendReminder, invoiceLinkAction } from '@/lib/admin/invoice-payment-copy';
+import { shortIssuedDate } from '@/lib/admin/invoice-dates';
+
+/**
+ * Shared header/row grid. Phone: customer (with its age under it), balance,
+ * chevron — the one number a collector needs stays on screen; the actions
+ * live in the expanded panel and on the invoice. From `sm` up: the full
+ * six-column table.
+ */
+export const INVOICE_ROW_GRID =
+  'grid-cols-[minmax(0,1fr)_auto_24px] sm:grid-cols-[minmax(200px,1fr)_90px_120px_140px_232px_32px]';
+/** Header columns hidden below `sm`. */
+export const INVOICE_ROW_DESKTOP_ONLY: ReadonlySet<string> = new Set(['created', 'age', 'actions']);
 
 /** True while the 6h re-send cooldown is still active. */
 function isCooldownActive(lastReminderSentAt: string | null): boolean {
@@ -35,12 +48,24 @@ interface InvoiceRowProps {
   readonly onRemind: (id: string) => void;
   readonly onCopyPayLink: (id: string) => void;
   readonly onVoid: (id: string) => void;
+  readonly cardPaymentsEnabled: boolean;
   readonly pending?: boolean;
   readonly isExpanded: boolean;
   readonly onToggle: (id: string) => void;
 }
 
-function InvoiceRowInner({ invoice, onRemind, onCopyPayLink, onVoid, pending = false, isExpanded, onToggle }: InvoiceRowProps) {
+function InvoiceRowInner({ invoice, onRemind, onCopyPayLink, onVoid, cardPaymentsEnabled, pending = false, isExpanded, onToggle }: InvoiceRowProps) {
+  const linkAction = invoiceLinkAction({
+    state: invoice.state,
+    syncedSource: invoice.syncedSource,
+    customerId: invoice.customerId,
+    cardPaymentsEnabled,
+  });
+  const showReminder = canSendReminder({
+    collectible: isCollectible(invoice),
+    syncedSource: invoice.syncedSource,
+    customerId: invoice.customerId,
+  });
   const balance = invoice.totalCents - invoice.amountPaidCents;
   const shownCents = invoice.state === 'paid' ? invoice.totalCents : balance;
   const isPartial = invoice.state !== 'paid' && invoice.amountPaidCents > 0;
@@ -62,7 +87,7 @@ function InvoiceRowInner({ invoice, onRemind, onCopyPayLink, onVoid, pending = f
             onToggle(invoice.id);
           }
         }}
-        className="grid grid-cols-[minmax(200px,1fr)_90px_120px_140px_232px_32px] items-center gap-4 border-t border-border px-4 py-2.5 transition-colors hover:bg-row-hover first:border-t-0 w-full text-left cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+        className={`grid ${INVOICE_ROW_GRID} items-center gap-4 border-t border-border px-4 py-2.5 transition-colors hover:bg-row-hover first:border-t-0 w-full text-left cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset`}
       >
         {/* Customer — name over its mono invoice ref. The initials tile that
             used to lead this cell carried no information the name beside it
@@ -78,17 +103,21 @@ function InvoiceRowInner({ invoice, onRemind, onCopyPayLink, onVoid, pending = f
               <SyncPill source={invoice.syncedSource} size="md" />
             )}
           </div>
+          {/* Phone: the age column is hidden, so its chip rides under the name. */}
+          <div className="mt-1 sm:hidden">
+            <AgeChip issuedAt={invoice.issuedAt} dueDate={invoice.dueDate} createdAt={invoice.createdAt} state={invoice.state} />
+          </div>
         </div>
 
         {/* Issued date (source-system date for mirrored invoices; row creation
             for native). UTC-rendered: the source dates are UTC-pinned by
             parseFpDate, so local-zone rendering would shift them a day back. */}
-        <div className="font-mono text-xs tabular-nums text-muted-foreground">
-          {new Date(invoice.issuedAt ?? invoice.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}
+        <div className="hidden font-mono text-xs tabular-nums text-muted-foreground sm:block">
+          {shortIssuedDate(invoice.issuedAt ?? invoice.createdAt)}
         </div>
 
         {/* Age chip */}
-        <div>
+        <div className="hidden sm:block">
           <AgeChip issuedAt={invoice.issuedAt} dueDate={invoice.dueDate} createdAt={invoice.createdAt} state={invoice.state} />
         </div>
 
@@ -116,11 +145,11 @@ function InvoiceRowInner({ invoice, onRemind, onCopyPayLink, onVoid, pending = f
             to two ragged lines and shoved the button ~50 px left of every
             other row's. */}
         <div
-          className="flex items-center justify-end gap-2 whitespace-nowrap"
+          className="hidden items-center justify-end gap-2 whitespace-nowrap sm:flex"
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
         >
-          {isCollectible(invoice) && invoice.syncedSource === null ? (
+          {showReminder ? (
             !invoice.lastReminderSentAt ? (
               <Button size="sm" disabled={pending} onClick={(e) => { e.stopPropagation(); onRemind(invoice.id); }}>
                 Send reminder
@@ -154,9 +183,9 @@ function InvoiceRowInner({ invoice, onRemind, onCopyPayLink, onVoid, pending = f
               <DropdownMenuItem render={<Link href={`/admin/invoices/${invoice.id}`} />}>
                 View invoice
               </DropdownMenuItem>
-              {invoice.syncedSource === null && (
+              {linkAction && (
                 <DropdownMenuItem onClick={() => onCopyPayLink(invoice.id)}>
-                  Copy pay link
+                  {linkAction.label}
                 </DropdownMenuItem>
               )}
               {invoice.syncedSource === null &&

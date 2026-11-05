@@ -24,7 +24,7 @@ import { Pager } from '@/components/admin/ui/pager';
 import { TableSkeleton, StatTileSkeleton } from '@/components/admin/skeletons';
 import { StatStrip } from '@/components/admin/ui/stat-card';
 import { SummaryBand } from '@/components/admin/invoices/summary-band';
-import { InvoiceRow } from '@/components/admin/invoices/invoice-row';
+import { InvoiceRow, INVOICE_ROW_GRID, INVOICE_ROW_DESKTOP_ONLY } from '@/components/admin/invoices/invoice-row';
 import { invoiceRef } from '@/lib/admin/invoice-collectible';
 import {
   Dialog,
@@ -209,7 +209,7 @@ export default function InvoicesPage() {
     return Number.isFinite(d) && d >= 0 ? Math.round(d * 100) : undefined;
   }, [maxDollars]);
 
-  const { invoices, total, sourceCounts, stats, collectedThisMonthCents, isLoading, error, sendReminder, voidInvoice } = useInvoices({
+  const { invoices, total, sourceCounts, stats, collectedThisMonthCents, cardPaymentsEnabled, isLoading, error, sendReminder, voidInvoice } = useInvoices({
     page,
     limit: PER_PAGE,
     search: debouncedSearch || undefined,
@@ -271,14 +271,14 @@ export default function InvoicesPage() {
       };
       if (res.ok && body.success && body.data?.payLink) {
         await navigator.clipboard.writeText(body.data.payLink);
-        showFlash('Pay link copied to clipboard', true);
+        showFlash(cardPaymentsEnabled ? 'Pay link copied to clipboard' : 'Portal link copied to clipboard', true);
       } else {
-        showFlash('Could not create a pay link', false);
+        showFlash('Couldn’t create the link. Please try again.', false);
       }
     } catch {
-      showFlash('Could not create a pay link', false);
+      showFlash('Couldn’t create the link. Please try again.', false);
     }
-  }, [showFlash]);
+  }, [showFlash, cardPaymentsEnabled]);
 
   const handleVoid = useCallback((id: string) => {
     setVoidingId(id);
@@ -499,7 +499,7 @@ export default function InvoicesPage() {
                 the 16 px gutter is the one every stacked panel on this page
                 shares: KPI label, filter control, header label and first cell
                 text all land on the same vertical line. */}
-            <div className="grid h-8 grid-cols-[minmax(200px,1fr)_90px_120px_140px_232px_32px] items-center gap-4 bg-surface-sunken px-4 shadow-[inset_0_-1px_0_var(--border-strong)]">
+            <div className={cn('grid h-8 items-center gap-4 bg-surface-sunken px-4 shadow-[inset_0_-1px_0_var(--border-strong)]', INVOICE_ROW_GRID)}>
               {(
                 [
                   { key: 'customer', label: 'Customer' },
@@ -515,6 +515,7 @@ export default function InvoicesPage() {
                   className={cn(
                     'text-[11px] font-semibold tracking-[0.04em] text-muted-foreground',
                     col.key === 'balance' || col.key === 'actions' ? 'text-right' : '',
+                    INVOICE_ROW_DESKTOP_ONLY.has(col.key) ? 'hidden sm:block' : '',
                   )}
                 >
                   {col.label}
@@ -527,6 +528,7 @@ export default function InvoicesPage() {
                 invoice={inv}
                 onRemind={handleRemind}
                 onCopyPayLink={handleCopyPayLink}
+                cardPaymentsEnabled={cardPaymentsEnabled}
                 onVoid={handleVoid}
                 pending={pendingId === inv.id}
                 isExpanded={expandedId === inv.id}

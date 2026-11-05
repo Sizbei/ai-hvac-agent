@@ -13,6 +13,14 @@ import {
   refundSuccessCopy,
   shouldReloadAfterRecord,
   shouldRemintToken,
+  CARD_PAYMENTS_OFF_COPY,
+  canSendReminder,
+  centsToInputDollars,
+  invoiceLinkAction,
+  overBalanceCopy,
+  paymentStatusLabel,
+  receiptNoticeCopy,
+  refundReasonLabel,
 } from "./invoice-payment-copy";
 
 const TOKEN = "6f1c6b3e-2a7d-4f0e-9c1d-3b8e5a2f7d41";
@@ -150,5 +158,67 @@ describe("refundErrorCopy", () => {
     for (const code of [undefined, "INTERNAL_ERROR", "NOPE"]) {
       expect(refundErrorCopy(code)).toBe("Couldn't record the refund. Please try again.");
     }
+  });
+});
+
+describe("card-off + customer link helpers", () => {
+  const base = { state: "open", syncedSource: null, customerId: "c1", cardPaymentsEnabled: false };
+
+  it("labels the link for what it is while cards are off", () => {
+    expect(invoiceLinkAction(base)).toEqual({ label: "Copy portal link" });
+    expect(invoiceLinkAction({ ...base, cardPaymentsEnabled: true })).toEqual({ label: "Copy pay link" });
+  });
+
+  it("offers no link on drafts, settled, synced or customer-less invoices", () => {
+    expect(invoiceLinkAction({ ...base, state: "draft" })).toBeNull();
+    expect(invoiceLinkAction({ ...base, state: "paid" })).toBeNull();
+    expect(invoiceLinkAction({ ...base, state: "void" })).toBeNull();
+    expect(invoiceLinkAction({ ...base, syncedSource: "fieldpulse" })).toBeNull();
+    expect(invoiceLinkAction({ ...base, customerId: null })).toBeNull();
+  });
+
+  it("states plainly that card payments are off", () => {
+    expect(CARD_PAYMENTS_OFF_COPY).toMatch(/Card payments aren't set up yet/);
+  });
+
+  it("only offers a reminder when there is a customer to text", () => {
+    expect(canSendReminder({ collectible: true, syncedSource: null, customerId: "c1" })).toBe(true);
+    expect(canSendReminder({ collectible: true, syncedSource: null, customerId: null })).toBe(false);
+    expect(canSendReminder({ collectible: true, syncedSource: "housecall", customerId: "c1" })).toBe(false);
+    expect(canSendReminder({ collectible: false, syncedSource: null, customerId: "c1" })).toBe(false);
+  });
+
+  it("warns about the receipt text only when one can go out", () => {
+    expect(receiptNoticeCopy({ customerId: "c1", customerPhone: "(423) 555-0100" })).toMatch(/text the customer a receipt/);
+    expect(receiptNoticeCopy({ customerId: "c1", customerPhone: null })).toBeNull();
+    expect(receiptNoticeCopy({ customerId: null, customerPhone: null })).toBeNull();
+  });
+});
+
+describe("record-payment amount helpers", () => {
+  const fmt = (c: number) => `$${(c / 100).toFixed(2)}`;
+  it("names the balance when the amount is over it", () => {
+    expect(overBalanceCopy(30000, 29895, fmt)).toBe("That's more than the balance due ($298.95).");
+    expect(overBalanceCopy(29895, 29895, fmt)).toBeNull();
+  });
+  it("pre-fills the balance as dollars", () => {
+    expect(centsToInputDollars(29895)).toBe("298.95");
+    expect(centsToInputDollars(0)).toBe("");
+  });
+});
+
+describe("payment row labels", () => {
+  it("never shows the raw status enum", () => {
+    expect(paymentStatusLabel("succeeded", 0)).toBe("Received");
+    expect(paymentStatusLabel("succeeded", 5000)).toBe("Partly refunded");
+    expect(paymentStatusLabel("refunded", 20000)).toBe("Refunded");
+    expect(paymentStatusLabel("pending", 0)).toBe("Pending");
+    expect(paymentStatusLabel("weird", 0)).toBe("Unknown");
+  });
+  it("maps refund reason codes to the picker labels", () => {
+    expect(refundReasonLabel("defective")).toBe("Defective / service issue");
+    expect(refundReasonLabel("customer_request")).toBe("Customer request");
+    expect(refundReasonLabel(null)).toBeNull();
+    expect(refundReasonLabel("nope")).toBeNull();
   });
 });

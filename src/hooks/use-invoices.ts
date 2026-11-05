@@ -62,6 +62,7 @@ interface InvoicesPayload {
   readonly sourceCounts: Record<string, number>;
   readonly stats: InvoiceStats;
   readonly collectedThisMonthCents: number;
+  readonly cardPaymentsEnabled: boolean;
 }
 
 interface UseInvoicesResult {
@@ -70,6 +71,7 @@ interface UseInvoicesResult {
   readonly sourceCounts: Record<string, number>;
   readonly stats: InvoiceStats | null;
   readonly collectedThisMonthCents: number;
+  readonly cardPaymentsEnabled: boolean;
   readonly isLoading: boolean;
   readonly error: string | null;
   readonly refetch: () => Promise<void>;
@@ -133,6 +135,9 @@ export function useInvoices(params: UseInvoicesParams = {}): UseInvoicesResult {
   const [collectedThisMonthCents, setCollectedThisMonthCents] = useState(
     () => invoicesCache.get(key)?.data.collectedThisMonthCents ?? 0,
   );
+  const [cardPaymentsEnabled, setCardPaymentsEnabled] = useState(
+    () => invoicesCache.get(key)?.data.cardPaymentsEnabled ?? false,
+  );
   const [isLoading, setIsLoading] = useState(() => invoicesCache.get(key) === null);
   const [error, setError] = useState<string | null>(null);
 
@@ -149,6 +154,7 @@ export function useInvoices(params: UseInvoicesParams = {}): UseInvoicesResult {
         setSourceCounts(cached.data.sourceCounts);
         setStats(cached.data.stats);
         setCollectedThisMonthCents(cached.data.collectedThisMonthCents);
+        setCardPaymentsEnabled(cached.data.cardPaymentsEnabled);
         setIsLoading(false);
       } else {
         setIsLoading(true);
@@ -168,6 +174,7 @@ export function useInvoices(params: UseInvoicesParams = {}): UseInvoicesResult {
             sourceCounts: Record<string, number>;
             stats: InvoiceStats;
             collectedThisMonthCents: number;
+            cardPaymentsEnabled?: boolean;
           };
         };
         if (body.success) {
@@ -177,12 +184,14 @@ export function useInvoices(params: UseInvoicesParams = {}): UseInvoicesResult {
             sourceCounts: body.data.sourceCounts ?? {},
             stats: body.data.stats,
             collectedThisMonthCents: body.data.collectedThisMonthCents ?? 0,
+            cardPaymentsEnabled: body.data.cardPaymentsEnabled === true,
           };
           setInvoices(fresh.invoices);
           setTotal(fresh.total);
           setSourceCounts(fresh.sourceCounts);
           setStats(fresh.stats);
           setCollectedThisMonthCents(fresh.collectedThisMonthCents);
+          setCardPaymentsEnabled(fresh.cardPaymentsEnabled);
           invoicesCache.set(key, fresh);
           setError(null);
         }
@@ -232,5 +241,5 @@ export function useInvoices(params: UseInvoicesParams = {}): UseInvoicesResult {
 
   const refetch = useCallback(() => fetchAll({ bust: true }), [fetchAll]);
 
-  return { invoices, total, sourceCounts, stats, collectedThisMonthCents, isLoading, error, refetch, sendReminder, voidInvoice };
+  return { invoices, total, sourceCounts, stats, collectedThisMonthCents, cardPaymentsEnabled, isLoading, error, refetch, sendReminder, voidInvoice };
 }

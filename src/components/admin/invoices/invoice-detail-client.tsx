@@ -6,6 +6,15 @@ import { Link2, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { selectLabel } from '@/lib/admin/select-label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
@@ -33,7 +42,13 @@ import { SyncPill } from '@/components/admin/sync-pill';
 import { mintKey } from '@/lib/http/idempotency-codes';
 import {
   canRecordPayment,
+  canSendReminder,
+  invoiceLinkAction,
   paymentMethodSummary,
+  paymentStatusLabel,
+  receiptNoticeCopy,
+  REFUND_REASONS,
+  refundReasonLabel,
   REFUND_NETWORK_COPY,
   refundErrorCopy,
   refundSuccessCopy,
@@ -98,13 +113,6 @@ function hydrateSignature(s: ApiSignature): DocumentSignature {
   return { ...s, signedAt: s.signedAt ? new Date(s.signedAt) : null };
 }
 
-const REFUND_REASONS: ReadonlyArray<{ value: string; label: string }> = [
-  { value: 'duplicate', label: 'Duplicate charge' },
-  { value: 'customer_request', label: 'Customer request' },
-  { value: 'defective', label: 'Defective / service issue' },
-  { value: 'other', label: 'Other' },
-];
-
 function formatDateTime(d: Date): string {
   return d.toLocaleString();
 }
@@ -134,9 +142,12 @@ function hydrateInvoice(raw: ApiInvoice): DocumentInvoice {
 export function InvoiceDetailClient({
   id,
   canRefund,
+  cardPaymentsEnabled,
 }: {
   readonly id: string;
   readonly canRefund: boolean;
+  /** False while the payment provider is the mock (card payments off). */
+  readonly cardPaymentsEnabled: boolean;
 }) {
   const [invoice, setInvoice] = useState<DocumentInvoice | null>(null);
   const [org, setOrg] = useState<OrgIdentity | null>(null);
@@ -381,6 +392,18 @@ export function InvoiceDetailClient({
     ? computeMargin(margin.revenueCents, actualTotalCostCents)
     : null;
 
+  const linkAction = invoiceLinkAction({
+    state: invoice.state,
+    syncedSource: invoice.syncedSource,
+    customerId: invoice.customerId,
+    cardPaymentsEnabled,
+  });
+  const showReminder = canSendReminder({
+    collectible: isCollectible(invoice),
+    syncedSource: invoice.syncedSource,
+    customerId: invoice.customerId,
+  });
+
   const fallbackOrg: OrgIdentity = { companyName: '—', address: null, phone: null };
 
   return (
@@ -396,8 +419,8 @@ export function InvoiceDetailClient({
             {invoice.syncedSource && (
               <SyncPill source={invoice.syncedSource} size="md" />
             )}
-            {/* Send reminder — only for open collectible invoices, never synced */}
-            {isCollectible(invoice) && !invoice.syncedSource && (
+            {/* Send reminder — open collectible native invoices with a customer */}
+            {showReminder && (
               <Button
                 variant="outline"
                 size="sm"
@@ -413,7 +436,7 @@ export function InvoiceDetailClient({
                 reminder button swap their label to a transient status
                 ("Sent!", "Copied!", "Generating…"); the min-width keeps the
                 whole right-aligned header row from reflowing when they do. */}
-            {!invoice.syncedSource && (
+            {linkAction && (
               <Button
                 variant="outline"
                 size="sm"
@@ -422,7 +445,7 @@ export function InvoiceDetailClient({
                 onClick={() => void handleCopyPayLink()}
               >
                 <Link2 className="mr-1.5 size-3.5" />
-                {copyLinkMsg ?? (isCopyingLink ? 'Generating…' : 'Copy pay link')}
+                {copyLinkMsg ?? (isCopyingLink ? 'Generating…' : linkAction.label)}
               </Button>
             )}
             {/* Finalize — native drafts only (a synced draft lives in its FSM) */}
@@ -554,7 +577,14 @@ export function InvoiceDetailClient({
           {/* Record payment — never for a read-only FSM-synced invoice (canTakePayment).
               Toggled by the toolbar button above; mounting mints the client token. */}
           {showRecordPayment && showPaymentForm && (
-            <RecordPaymentCard invoiceId={invoice.id} onRecorded={handleRecorded} onReload={handleReload} />
+            <RecordPaymentCard
+              invoiceId={invoice.id}
+              balanceCents={balance}
+              receiptNotice={receiptNoticeCopy(invoice)}
+              cardPaymentsEnabled={cardPaymentsEnabled}
+              onRecorded={handleRecorded}
+              onReload={handleReload}
+            />
           )}
 
           {/* Financing (subordinate). Keyed to the invoice's estimate; only shown
@@ -590,14 +620,14 @@ export function InvoiceDetailClient({
                     return (
                       <div key={p.id} className="rounded-lg border p-3">
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 text-sm">
+                          <div className="flex flex-wrap items-center gap-2 text-sm">
                             <span className="font-medium">
                               {formatCentsExact(p.amountCents)}
                             </span>
-                            <span className="inline-flex h-5 items-center rounded-[3px] border border-border bg-surface-raised px-1.5 text-[11px] font-medium">
-                              {p.status}
+                            <span className="inline-flex h-5 items-center whitespace-nowrap rounded-[3px] border border-border bg-surface-raised px-1.5 text-[11px] font-medium">
+                              {paymentStatusLabel(p.status, refunded)}
                             </span>
-                            <span className="inline-flex h-5 items-center rounded-[3px] border border-border bg-surface-sunken px-1.5 text-[11px] font-medium tabular-nums">
+                            <span className="inline-flex h-5 items-center whitespace-nowrap rounded-[3px] border border-border bg-surface-sunken px-1.5 text-[11px] font-medium tabular-nums">
                               {paymentMethodSummary(p.method, p.checkNumber)}
                             </span>
                             {p.isDeposit && (
@@ -636,12 +666,20 @@ export function InvoiceDetailClient({
                                 className="flex justify-between text-xs text-muted-foreground"
                               >
                                 <span>
-                                  Refunded {r.reason ? `(${r.reason})` : ''}{' '}
+                                  Refunded
+                                  {refundReasonLabel(r.reason) ? ` · ${refundReasonLabel(r.reason)}` : ''}
+                                  {' · '}
                                   {formatDateTime(r.createdAt)}
                                 </span>
                                 <span>-{formatCentsExact(r.amountCents)}</span>
                               </li>
                             ))}
+                            <li className="flex justify-between text-xs font-medium text-foreground">
+                              <span>Net kept</span>
+                              <span className="tabular-nums">
+                                {formatCentsExact(p.amountCents - refunded)}
+                              </span>
+                            </li>
                           </ul>
                         )}
 
@@ -650,13 +688,17 @@ export function InvoiceDetailClient({
                             fully-refunded payment can't keep an open form). */}
                         {canRefund && !invoice.syncedSource && refundable && refundFor === p.id && (
                           <div className="mt-3 space-y-2 border-t pt-3">
-                            <div className="flex flex-wrap items-center gap-2">
+                            <div className="flex flex-wrap items-end gap-2">
+                              <div className="space-y-1">
+                              <Label htmlFor={`refund-amount-${p.id}`} className="text-xs">
+                                Refund amount (up to {formatCentsExact(p.amountCents - refunded)})
+                              </Label>
                               <div className="relative">
                                 <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
                                   $
                                 </span>
                                 <Input
-                                  aria-label="Refund amount in dollars"
+                                  id={`refund-amount-${p.id}`}
                                   type="number"
                                   min="0"
                                   step="0.01"
@@ -667,18 +709,24 @@ export function InvoiceDetailClient({
                                   className="w-32 pl-6"
                                 />
                               </div>
-                              <select
-                                aria-label="Refund reason"
+                              </div>
+                              <Select
                                 value={refundReason}
-                                onChange={(e) => setRefundReason(e.target.value)}
-                                className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                onValueChange={(v) => setRefundReason(v ?? 'customer_request')}
                               >
-                                {REFUND_REASONS.map((r) => (
-                                  <option key={r.value} value={r.value}>
-                                    {r.label}
-                                  </option>
-                                ))}
-                              </select>
+                                <SelectTrigger aria-label="Refund reason" className="min-w-[200px]">
+                                  <SelectValue>
+                                    {(v: unknown) => selectLabel(REFUND_REASONS, v, 'Reason')}
+                                  </SelectValue>
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {REFUND_REASONS.map((r) => (
+                                    <SelectItem key={r.value} value={r.value}>
+                                      {r.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
                               <Button
                                 size="sm"
                                 disabled={isRefunding || !refundAmount}
