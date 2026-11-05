@@ -5,8 +5,25 @@ import { Select as SelectPrimitive } from "@base-ui/react/select"
 
 import { cn } from "@/lib/utils"
 import { ChevronDownIcon, CheckIcon, ChevronUpIcon } from "lucide-react"
+import { collectSelectItems } from "./select-items"
 
-const Select = SelectPrimitive.Root
+/**
+ * Base UI's `Select.Value` shows the raw value (`all`, `heat_pump`) unless the
+ * root knows the items. When a caller doesn't pass `items`, derive them from
+ * the `SelectItem` children so the trigger always shows the option's label.
+ */
+function Select<Value, Multiple extends boolean | undefined = false>({
+  items,
+  children,
+  ...props
+}: SelectPrimitive.Root.Props<Value, Multiple>) {
+  const resolvedItems = items ?? collectSelectItems(children, SelectItem)
+  return (
+    <SelectPrimitive.Root items={resolvedItems} {...props}>
+      {children}
+    </SelectPrimitive.Root>
+  )
+}
 
 function SelectGroup({ className, ...props }: SelectPrimitive.Group.Props) {
   return (
