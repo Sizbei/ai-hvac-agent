@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { logger } from "@/lib/logger";
+import { WIDGET_CLOSE_MESSAGE } from "@/lib/widget/widget-messages";
 
 /**
  * The embeddable widget loader. A contractor pastes:
@@ -20,6 +21,7 @@ function buildLoader(appOrigin: string): string {
   return `(function () {
   "use strict";
   var APP = ${JSON.stringify(appOrigin)};
+  var CLOSE_MSG = ${JSON.stringify(WIDGET_CLOSE_MESSAGE)};
   var current = document.currentScript;
   var KEY = current && current.getAttribute("data-hvac-key");
   if (!KEY) {
@@ -84,18 +86,24 @@ function buildLoader(appOrigin: string): string {
     style.textContent = [
       ":host{all:initial}",
       ".w-wrap{position:fixed;bottom:20px;" + side + ":20px;z-index:2147483000;font-family:system-ui,-apple-system,sans-serif}",
-      ".w-btn{width:60px;height:60px;border-radius:50%;border:none;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.2);display:flex;align-items:center;justify-content:center;transition:transform .15s cubic-bezier(.23,1,.32,1);color:#fff}",
+      // position+z-index: the fixed panel would otherwise paint OVER the launcher
+      // (a positioned box beats an unpositioned one regardless of DOM order).
+      ".w-btn{position:relative;z-index:1;width:60px;height:60px;border-radius:50%;border:none;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.2);display:flex;align-items:center;justify-content:center;transition:transform .15s cubic-bezier(.23,1,.32,1);color:#fff}",
       "@media (hover:hover) and (pointer:fine){.w-btn:hover{transform:scale(1.06)}}",
       ".w-btn:active{transform:scale(.94)}",
       ".w-btn svg{width:28px;height:28px}",
       // Panel scales in from the launcher's corner (origin-aware, like a
       // popover from its trigger), enters slower than it exits (220ms in /
       // 140ms out) with a strong ease-out so it never feels sluggish.
-      ".w-panel{position:fixed;bottom:92px;" + side + ":20px;width:380px;max-width:calc(100vw - 40px);height:600px;max-height:calc(100vh - 120px);border-radius:16px;overflow:hidden;box-shadow:0 12px 48px rgba(0,0,0,.24);background:#fff;border:1px solid rgba(0,0,0,.08);opacity:0;transform:translateY(10px) scale(.97);transform-origin:bottom " + side + ";pointer-events:none;transition:opacity .14s cubic-bezier(.23,1,.32,1),transform .14s cubic-bezier(.23,1,.32,1)}",
+      ".w-panel{position:fixed;bottom:92px;" + side + ":20px;width:380px;max-width:calc(100vw - 40px);height:600px;max-height:calc(100vh - 120px);max-height:calc(100dvh - 120px);border-radius:16px;overflow:hidden;box-shadow:0 12px 48px rgba(0,0,0,.24);background:#fff;border:1px solid rgba(0,0,0,.08);opacity:0;transform:translateY(10px) scale(.97);transform-origin:bottom " + side + ";pointer-events:none;transition:opacity .14s cubic-bezier(.23,1,.32,1),transform .14s cubic-bezier(.23,1,.32,1)}",
       ".w-panel.open{opacity:1;transform:none;pointer-events:auto;transition-duration:.22s}",
       "@media (prefers-reduced-motion:reduce){.w-btn,.w-panel{transition-property:opacity}.w-panel{transform:none}}",
       ".w-panel iframe{width:100%;height:100%;border:0;display:block}",
-      "@media (max-width:480px){.w-panel{width:100vw;max-width:100vw;height:100vh;max-height:100vh;bottom:0;" + side + ":0;border-radius:0}}"
+      // Phones: full-screen panel sized to the VISIBLE viewport (dvh, so iOS's
+      // URL bar can't hide the input). The launcher would sit on the chat's
+      // send button, so it hides while open; the embed header's X (and Esc,
+      // relayed from the iframe) close the panel instead.
+      "@media (max-width:480px){.w-panel{width:100vw;max-width:100vw;height:100vh;height:100dvh;max-height:100vh;max-height:100dvh;bottom:0;" + side + ":0;border-radius:0}.w-wrap.open .w-btn{display:none}}"
     ].join("");
     root.appendChild(style);
 
@@ -132,7 +140,7 @@ function buildLoader(appOrigin: string): string {
       iframe = document.createElement("iframe");
       iframe.title = "Chat";
       iframe.setAttribute("allow", "clipboard-write");
-      iframe.src = APP + "/embed?key=" + encodeURIComponent(KEY);
+      iframe.src = APP + "/embed?widget=1&key=" + encodeURIComponent(KEY);
       panel.appendChild(iframe);
     }
 
@@ -140,6 +148,7 @@ function buildLoader(appOrigin: string): string {
       open = next;
       if (open) ensureIframe();
       panel.classList.toggle("open", open);
+      wrap.classList.toggle("open", open);
 
       // Safe SVG update - clear and re-append
       while (btn.firstChild && btn.firstChild.nodeType === 1 /* ELEMENT */) {
@@ -153,6 +162,14 @@ function buildLoader(appOrigin: string): string {
     btn.addEventListener("click", function () { setOpen(!open); });
     document.addEventListener("keydown", function (e) {
       if (e.key === "Escape" && open) setOpen(false);
+    });
+    // Close requests from our own iframe (its header X, or Esc pressed while
+    // focus is inside it). Only trust our origin + our iframe's window.
+    window.addEventListener("message", function (e) {
+      if (!open || !iframe || e.origin !== APP) return;
+      if (e.source !== iframe.contentWindow || e.data !== CLOSE_MSG) return;
+      setOpen(false);
+      try { btn.focus(); } catch (err) {}
     });
 
     wrap.appendChild(panel);

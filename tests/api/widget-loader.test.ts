@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 import { GET } from "@/app/widget.js/route";
+import { WIDGET_CLOSE_MESSAGE } from "@/lib/widget/widget-messages";
 
 vi.mock("@/lib/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -30,7 +31,8 @@ describe("GET /widget.js (embed loader)", () => {
     const res = GET(req());
     const body = await res.text();
     expect(body).toContain('getAttribute("data-hvac-key")');
-    expect(body).toContain("/embed?key=");
+    // widget=1 tells the embed it can ask the loader to close the panel.
+    expect(body).toContain('"/embed?widget=1&key="');
     expect(body).toContain("/api/widget/config?key=");
   });
 
@@ -63,5 +65,26 @@ describe("GET /widget.js (embed loader)", () => {
     const res = GET(req());
     const body = await res.text();
     expect(body).toContain("__hvacWidgetLoaded");
+  });
+
+  it("is valid JavaScript", async () => {
+    const body = await GET(req()).text();
+    expect(() => new Function(body)).not.toThrow();
+  });
+
+  it("keeps the launcher above the open panel and hides it on phones", async () => {
+    const body = await GET(req()).text();
+    // A positioned launcher paints over the fixed panel (it didn't before).
+    expect(body).toContain(".w-btn{position:relative;z-index:1;");
+    // Phones: the panel covers the screen and the X lives in the embed header.
+    expect(body).toContain(".w-wrap.open .w-btn{display:none}");
+    expect(body).toContain("height:100dvh");
+  });
+
+  it("closes on the iframe's close message, only from our origin and iframe", async () => {
+    const body = await GET(req()).text();
+    expect(body).toContain(JSON.stringify(WIDGET_CLOSE_MESSAGE));
+    expect(body).toContain("e.origin !== APP");
+    expect(body).toContain("e.source !== iframe.contentWindow");
   });
 });
