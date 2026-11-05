@@ -31,6 +31,10 @@ import {
   TEMPLATE_TYPES,
   type Template,
 } from "@/components/admin/communications/template-editor-dialog";
+import {
+  parseTemplatesResponse,
+  templateDeleteErrorMessage,
+} from "@/lib/admin/template-response";
 
 export default function CommunicationTemplatesPage() {
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -49,8 +53,7 @@ export default function CommunicationTemplatesPage() {
       setLoading(true);
       const response = await fetch("/api/admin/communications/templates");
       if (!response.ok) throw new Error("Couldn't load templates. Please try again.");
-      const data = await response.json();
-      setTemplates(data.templates || []);
+      setTemplates(parseTemplatesResponse<Template>(await response.json()));
       setError(null);
     } catch (err) {
       console.error("Failed to fetch templates:", err);
@@ -95,10 +98,8 @@ export default function CommunicationTemplatesPage() {
         { method: "DELETE" },
       );
       if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(
-          data.error?.message || "Couldn't delete the template. Please try again.",
-        );
+        const data: unknown = await response.json().catch(() => null);
+        throw new Error(templateDeleteErrorMessage(data));
       }
       setDeletingTemplate(null);
       await fetchTemplates();

@@ -21,6 +21,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { COMMUNICATION_TRIGGER_TYPES } from "@/lib/communication/sms-templates";
+import {
+  unknownVariables,
+  variablesForTrigger,
+} from "@/lib/admin/template-variables";
 
 export interface Template {
   id: string;
@@ -45,7 +49,7 @@ export const TRIGGER_TYPES = COMMUNICATION_TRIGGER_TYPES;
 export const TEMPLATE_TYPES = [
   { value: "sms", label: "SMS" },
   { value: "email_html", label: "Email (HTML)" },
-  { value: "email_text", label: "Email (Plain Text)" },
+  { value: "email_text", label: "Email (plain text)" },
 ] as const;
 
 const TEXTAREA_CLASS =
@@ -114,6 +118,11 @@ function TemplateEditorForm({
   const [error, setError] = useState<string | null>(null);
 
   const isEmail = form.templateType.startsWith("email");
+  const availableVariables = variablesForTrigger(form.triggerType);
+  const unknown = unknownVariables(
+    `${isEmail ? form.subjectTemplate : ""} ${form.bodyTemplate}`,
+    form.triggerType,
+  );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -154,7 +163,7 @@ function TemplateEditorForm({
         </DialogTitle>
         <DialogDescription>
           Use {"{{ variable }}"} placeholders to insert customer and appointment
-          details.
+          details. The variables you can use depend on the trigger.
         </DialogDescription>
       </DialogHeader>
 
@@ -163,14 +172,18 @@ function TemplateEditorForm({
 
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
-            <Label htmlFor="template-key">Template key</Label>
+            <Label htmlFor="template-key">Template ID</Label>
             <Input
               id="template-key"
+              aria-describedby="template-key-hint"
               value={form.key}
               onChange={(e) => setForm({ ...form, key: e.target.value })}
               placeholder="e.g. appointment_scheduled_sms"
               required
             />
+            <p id="template-key-hint" className="text-xs text-muted-foreground">
+              Lowercase letters, numbers and underscores. Must be unique.
+            </p>
           </div>
           <div className="space-y-2">
             <Label htmlFor="template-priority">Priority</Label>
@@ -186,7 +199,11 @@ function TemplateEditorForm({
               }
               min={0}
               max={100}
+              aria-describedby="template-priority-hint"
             />
+            <p id="template-priority-hint" className="text-xs text-muted-foreground">
+              When two active templates share a trigger, the lower number is used.
+            </p>
           </div>
         </div>
 
@@ -275,8 +292,34 @@ function TemplateEditorForm({
             onChange={(e) => setForm({ ...form, bodyTemplate: e.target.value })}
             rows={6}
             className={`${TEXTAREA_CLASS} font-mono`}
+            aria-describedby="template-body-vars"
             required
           />
+          <div id="template-body-vars" className="space-y-1 text-xs">
+            {availableVariables.length > 0 && (
+              <p className="text-muted-foreground">
+                Available:{" "}
+                {availableVariables.map((name, i) => (
+                  <span key={name}>
+                    {i > 0 && ", "}
+                    <code className="font-mono">{`{{${name}}}`}</code>
+                  </span>
+                ))}
+              </p>
+            )}
+            {unknown.length > 0 && (
+              <p className="text-warning-strong" role="status">
+                This trigger doesn&apos;t provide{" "}
+                {unknown.map((name, i) => (
+                  <span key={name}>
+                    {i > 0 && ", "}
+                    <code className="font-mono">{`{{${name}}}`}</code>
+                  </span>
+                ))}
+                . It will show up blank in the message.
+              </p>
+            )}
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
@@ -300,7 +343,7 @@ function TemplateEditorForm({
             Cancel
           </Button>
           <Button type="submit" disabled={saving}>
-            {saving ? "Saving..." : template ? "Update" : "Create"}
+            {saving ? "Saving…" : template ? "Save" : "Create"}
           </Button>
         </DialogFooter>
       </form>
