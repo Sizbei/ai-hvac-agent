@@ -64,6 +64,7 @@ vi.mock('drizzle-orm', () => ({
   count: () => 'count',
   isNull: (c: unknown) => ({ kind: 'isNull', c }),
   isNotNull: (c: unknown) => ({ kind: 'isNotNull', c }),
+  inArray: (c: unknown, v: unknown) => ({ kind: 'inArray', c, v }),
   sql: vi.fn((strings: TemplateStringsArray) => ({ kind: 'sql', text: strings.join('?') })),
 }));
 
@@ -81,6 +82,7 @@ vi.mock('@/lib/db/schema', () => ({
     createdAt: 'customers.createdAt',
     updatedAt: 'customers.updated',
     archivedAt: 'customers.archived',
+    anonymizedAt: 'customers.anonymized',
     customerType: 'customers.customerType',
     membershipStatus: 'customers.membershipStatus',
     fieldpulseCustomerId: 'customers.fieldpulseCustomerId',
@@ -168,5 +170,68 @@ describe('getCustomers', () => {
     queuePage();
     await getCustomers(ORG);
     expect(captured.some((c) => c.hasLimit)).toBe(true);
+  });
+
+  it('hides erased rows by default and shows them with includeArchived', async () => {
+    queuePage();
+    await getCustomers(ORG);
+    expect(wheres().some((w) => w.includes('customers.anonymized'))).toBe(true);
+
+    captured.length = 0;
+    queuePage();
+    await getCustomers(ORG, { includeArchived: true });
+    expect(wheres().some((w) => w.includes('customers.anonymized'))).toBe(false);
+  });
+
+  describe('search', () => {
+    const queueSearch = (fp: string, scan: unknown[], pageRows: unknown[]) => {
+      selectQueue.push([]); // distinct property types
+      selectQueue.push([{ fp }]); // fingerprint
+      if (scan.length || fp) selectQueue.push(scan); // scan (skipped on a cache hit)
+      selectQueue.push(pageRows); // page aggregate
+    };
+    const scanRow = (id: string, phone: string) => ({
+      id,
+      nameEncrypted: `enc:Name ${id}`,
+      phoneEncrypted: `enc:${phone}`,
+      emailEncrypted: null,
+      addressEncrypted: null,
+    });
+
+    it.each(['423-555-0187', '4235550187', '(423) 555-0187'])(
+      'matches a formatted phone typed as %s',
+      async (q) => {
+        queueSearch(`fp-${q}`, [scanRow('a', '(423) 555-0187'), scanRow('b', '(423) 555-0144')], [
+          makeRow({ id: 'a', phoneEncrypted: 'enc:(423) 555-0187' }),
+        ]);
+        const res = await getCustomers(ORG, { search: q });
+        expect(res.total).toBe(1);
+        expect(res.customers.map((c) => c.id)).toEqual(['a']);
+      },
+    );
+
+    it('reuses the cached scan when the fingerprint is unchanged', async () => {
+      const opts = { search: '0144', customerType: 'commercial' };
+      queueSearch('fp-cache', [scanRow('b', '(423) 555-0144')], [makeRow({ id: 'b' })]);
+      await getCustomers(ORG, opts);
+      const firstQueries = captured.length;
+
+      captured.length = 0;
+      selectQueue.push([]); // types
+      selectQueue.push([{ fp: 'fp-cache' }]); // same fingerprint → no scan
+      selectQueue.push([makeRow({ id: 'b' })]); // page aggregate
+      const res = await getCustomers(ORG, opts);
+      expect(captured.length).toBe(firstQueries - 1);
+      expect(res.customers.map((c) => c.id)).toEqual(['b']);
+    });
+
+    it('returns an empty page without an aggregate query when nothing matches', async () => {
+      selectQueue.push([]);
+      selectQueue.push([{ fp: 'fp-none' }]);
+      selectQueue.push([scanRow('a', '(423) 555-0187')]);
+      const res = await getCustomers(ORG, { search: 'zzzzqqq' });
+      expect(res).toEqual({ customers: [], total: 0, propertyTypes: [] });
+      expect(captured.length).toBe(3);
+    });
   });
 });

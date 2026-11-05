@@ -38,6 +38,7 @@ import {
   type CustomerMatchCandidate,
 } from "@/lib/admin/customer-match";
 import { encrypt, decrypt, blindIndex } from "@/lib/crypto";
+import { customerMatchesSearch, CustomerScanCache } from "@/lib/admin/customer-search";
 import {
   sanitizeName,
   sanitizePhone,
@@ -68,6 +69,20 @@ function safeDecrypt(ciphertext: string | null): string | null {
 
 /** Default customers-list page size. */
 export const CUSTOMERS_PAGE_SIZE = 50;
+
+/** Most rows the search scan reads (newest first), as in search-queries.ts. */
+const SEARCH_SCAN_LIMIT = 5000;
+
+/** Ciphertext columns the search scan reads; decrypted per search, never cached as plaintext. */
+interface SearchScanRow {
+  readonly id: string;
+  readonly nameEncrypted: string | null;
+  readonly phoneEncrypted: string | null;
+  readonly emailEncrypted: string | null;
+  readonly addressEncrypted: string | null;
+}
+
+const searchScanCache = new CustomerScanCache<SearchScanRow>();
 
 /**
  * Paginated customers list. The heavy former version fetched ALL customers with
@@ -115,7 +130,11 @@ export async function getCustomers(
   const fieldpulseSynced = options?.fieldpulseSynced ?? false;
 
   const conditions: SQL[] = [];
-  if (!includeArchived) conditions.push(isNull(customers.archivedAt));
+  // Erased ("[deleted]") rows carry no contact details, so they are hidden with
+  // the archived ones and sorted last when "Show archived" is on.
+  if (!includeArchived) {
+    conditions.push(isNull(customers.archivedAt), isNull(customers.anonymizedAt));
+  }
   if (propertyType) conditions.push(eq(customers.propertyType, propertyType));
   if (customerType) conditions.push(eq(customers.customerType, customerType));
   if (membershipStatus) conditions.push(eq(customers.membershipStatus, membershipStatus));
@@ -190,7 +209,13 @@ export async function getCustomers(
     membershipStatus: customers.membershipStatus,
     fieldpulseCustomerId: customers.fieldpulseCustomerId,
     archivedAt: customers.archivedAt,
+    anonymizedAt: customers.anonymizedAt,
   } as const;
+
+  // Newest first; erased rows (only present with "Show archived") go last.
+  const listOrder = includeArchived
+    ? [sql`${customers.anonymizedAt} is not null`, desc(customers.createdAt), desc(customers.id)]
+    : [desc(customers.createdAt), desc(customers.id)];
 
   if (!search) {
     // Fast path. Pick the page's customer ids FIRST (indexed created_at order +
@@ -200,7 +225,7 @@ export async function getCustomers(
       .select(customerCols)
       .from(customers)
       .where(whereClause)
-      .orderBy(desc(customers.createdAt))
+      .orderBy(...listOrder)
       .limit(limit)
       .offset((page - 1) * limit)
       .as("page");
@@ -218,6 +243,7 @@ export async function getCustomers(
         membershipStatus: pageSub.membershipStatus,
         fieldpulseCustomerId: pageSub.fieldpulseCustomerId,
         archivedAt: pageSub.archivedAt,
+        anonymizedAt: pageSub.anonymizedAt,
         ...aggCols,
       })
       .from(pageSub)
@@ -235,8 +261,9 @@ export async function getCustomers(
         pageSub.membershipStatus,
         pageSub.fieldpulseCustomerId,
         pageSub.archivedAt,
+        pageSub.anonymizedAt,
       )
-      .orderBy(desc(pageSub.createdAt));
+      .orderBy(sql`${pageSub.anonymizedAt} is not null`, desc(pageSub.createdAt));
 
     const countPromise = db
       .select({ n: count() })
@@ -255,36 +282,81 @@ export async function getCustomers(
     };
   }
 
-  // Search path: encrypted columns aren't SQL-searchable, so aggregate over ALL
-  // matching customers, then decrypt + filter + paginate the matches. Runs the
-  // scan and the types lookup together.
-  // Cap to the most recent 5 000 rows (newest-first ordering already applied) —
-  // mirrors the SCAN_LIMIT_CUSTOMERS cap in search-queries.ts. Without this the
-  // query fetches ALL org customer rows on every keystroke.
-  const allPromise = db
+  // Search path: encrypted columns aren't SQL-searchable, so the matching set is
+  // decrypted and filtered here. Reading every row's ciphertext is the slow part
+  // (~800 KB at 2.6k customers), so the scan is cached per instance and only
+  // re-read when a one-row fingerprint of the same filtered set changes. The
+  // counts are then aggregated for the returned page only.
+  const scanKey = JSON.stringify([
+    organizationId,
+    includeArchived,
+    propertyType,
+    customerType,
+    membershipStatus,
+    fieldpulseSynced,
+  ]);
+  const fingerprintPromise = db
+    .select({
+      fp: sql<string>`md5(coalesce(string_agg(${customers.id}::text || coalesce(${customers.nameEncrypted}, '') || coalesce(${customers.phoneEncrypted}, '') || coalesce(${customers.emailEncrypted}, '') || coalesce(${customers.addressEncrypted}, '') || coalesce(${customers.anonymizedAt}::text, ''), ',' order by ${customers.createdAt} desc, ${customers.id} desc), ''))`,
+    })
+    .from(customers)
+    .where(whereClause);
+  const [fingerprintRows, propertyTypes] = await Promise.all([
+    fingerprintPromise,
+    typesPromise,
+  ]);
+  const fingerprint = fingerprintRows[0]?.fp ?? "";
+
+  let scan = searchScanCache.get(scanKey, fingerprint);
+  if (!scan) {
+    scan = await db
+      .select({
+        id: customers.id,
+        nameEncrypted: customers.nameEncrypted,
+        phoneEncrypted: customers.phoneEncrypted,
+        emailEncrypted: customers.emailEncrypted,
+        addressEncrypted: customers.addressEncrypted,
+      })
+      .from(customers)
+      .where(whereClause)
+      .orderBy(...listOrder)
+      .limit(SEARCH_SCAN_LIMIT);
+    searchScanCache.set(scanKey, fingerprint, scan);
+  }
+
+  const matchedIds = scan
+    .filter((row) =>
+      customerMatchesSearch(
+        {
+          name: safeDecrypt(row.nameEncrypted),
+          phone: safeDecrypt(row.phoneEncrypted),
+          email: safeDecrypt(row.emailEncrypted),
+          address: safeDecrypt(row.addressEncrypted),
+        },
+        search,
+      ),
+    )
+    .map((row) => row.id);
+  const start = (page - 1) * limit;
+  const pageIds = matchedIds.slice(start, start + limit);
+  if (pageIds.length === 0) {
+    return { customers: [], total: matchedIds.length, propertyTypes };
+  }
+
+  const pageRows = await db
     .select({ ...customerCols, ...aggCols })
     .from(customers)
     .leftJoin(customerEquipment, eq(customerEquipment.customerId, customers.id))
     .leftJoin(serviceRequests, eq(serviceRequests.customerId, customers.id))
-    .where(whereClause)
-    .groupBy(customers.id)
-    .orderBy(desc(customers.createdAt))
-    .limit(5000);
-
-  const [allRows, propertyTypes] = await Promise.all([allPromise, typesPromise]);
-  const matched = allRows
-    .map(mapRow)
-    .filter(
-      (c) =>
-        c.name?.toLowerCase().includes(search) ||
-        c.email?.toLowerCase().includes(search) ||
-        c.phone?.includes(search) ||
-        c.address?.toLowerCase().includes(search),
-    );
-  const start = (page - 1) * limit;
+    .where(withTenant(customers, organizationId, inArray(customers.id, pageIds)))
+    .groupBy(customers.id);
+  const byId = new Map(pageRows.map((row) => [row.id, row]));
   return {
-    customers: matched.slice(start, start + limit),
-    total: matched.length,
+    customers: pageIds
+      .map((id) => byId.get(id))
+      .filter((row): row is (typeof pageRows)[number] => row !== undefined)
+      .map(mapRow),
+    total: matchedIds.length,
     propertyTypes,
   };
 }
