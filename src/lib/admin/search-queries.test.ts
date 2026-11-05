@@ -36,6 +36,7 @@ import {
   searchCustomers,
   searchInvoices,
   searchJobs,
+  searchConversations,
   searchEstimates,
   searchPricebook,
   searchAllEntities,
@@ -277,7 +278,7 @@ describe("searchJobs", () => {
       {
         id: "job-uuid-1",
         referenceNumber: "SR-001",
-        issueType: "AC not cooling",
+        issueType: "cooling_not_working",
         status: "pending",
       },
     ];
@@ -286,8 +287,8 @@ describe("searchJobs", () => {
     expect(results).toHaveLength(1);
     expect(results[0].type).toBe("job");
     expect(results[0].title).toBe("SR-001");
-    expect(results[0].subtitle).toBe("AC not cooling");
-    expect(results[0].href).toBe("/admin/requests/job-uuid-1");
+    expect(results[0].subtitle).toBe("Cooling not working");
+    expect(results[0].href).toBe("/admin/requests?request=job-uuid-1");
     expect(results[0].syncedSource).toBeNull();
   });
 
@@ -302,7 +303,33 @@ describe("searchJobs", () => {
     ];
     mockSelect.mockReturnValue(makeChain(rows));
     const results = await searchJobs(ORG, "heat");
-    expect(results[0].title).toBe("Job ABCD1234");
+    expect(results[0].title).toBe("Request ABCD1234");
+  });
+});
+
+// ── searchConversations ──────────────────────────────────────────────────────
+
+describe("searchConversations", () => {
+  it("titles by the captured name and deep-links into the inbox", async () => {
+    mockSelect.mockReturnValue(
+      makeChain([
+        {
+          id: "abcd1234-0000-0000-0000-000000000000",
+          channel: "phone",
+          status: "submitted",
+          metadata: JSON.stringify({ customerName: "Robert Alvarez" }),
+        },
+        { id: "ffff0000-0000-0000-0000-000000000000", channel: "web", status: "escalated", metadata: "not json" },
+      ]),
+    );
+    const results = await searchConversations(ORG, "rob");
+    expect(results[0]).toMatchObject({
+      type: "conversation",
+      title: "Robert Alvarez",
+      subtitle: "Phone call · Submitted",
+      href: "/admin/conversations?c=abcd1234-0000-0000-0000-000000000000",
+    });
+    expect(results[1].title).toBe("Conversation ffff0000");
   });
 });
 

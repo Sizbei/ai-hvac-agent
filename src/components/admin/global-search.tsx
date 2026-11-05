@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, Loader2, Users, Receipt, ClipboardList, FileText, Tags, CornerDownLeft } from 'lucide-react';
+import { Search, Loader2, Users, Receipt, ClipboardList, FileText, Tags, CornerDownLeft, MessagesSquare } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -16,12 +16,13 @@ import { filterCommands, type CommandItem } from '@/lib/admin/nav-search';
 const TYPE_LABELS: Record<SearchResult['type'], string> = {
   customer: 'Customers',
   invoice: 'Invoices',
-  job: 'Jobs',
+  job: 'Requests',
+  conversation: 'Conversations',
   estimate: 'Estimates',
   pricebook: 'Pricebook',
 };
 
-const TYPE_ORDER: SearchResult['type'][] = ['customer', 'invoice', 'job', 'estimate', 'pricebook'];
+const TYPE_ORDER: SearchResult['type'][] = ['customer', 'job', 'conversation', 'invoice', 'estimate', 'pricebook'];
 
 function TypeIcon({ type }: { type: SearchResult['type'] }) {
   const cls = 'size-4 shrink-0 text-muted-foreground';
@@ -32,6 +33,8 @@ function TypeIcon({ type }: { type: SearchResult['type'] }) {
       return <Receipt className={cls} />;
     case 'job':
       return <ClipboardList className={cls} />;
+    case 'conversation':
+      return <MessagesSquare className={cls} />;
     case 'estimate':
       return <FileText className={cls} />;
     case 'pricebook':
@@ -192,7 +195,9 @@ export function GlobalSearch({ placement }: GlobalSearchProps) {
     >
       <DialogContent
         showCloseButton={false}
-        className="max-w-xl overflow-hidden p-0"
+        // Top-anchored with a gutter so a phone keyboard doesn't cover the
+        // results; the caller's sm:max-w-xl beats the dialog's sm:max-w-sm.
+        className="top-4 max-w-[calc(100%-2rem)] translate-y-0 overflow-hidden p-0 data-starting-style:translate-y-1 sm:top-[12vh] sm:max-w-xl"
       >
         {/* Search input row */}
         <div className="flex items-center gap-3 border-b px-4 py-3">
@@ -206,7 +211,8 @@ export function GlobalSearch({ placement }: GlobalSearchProps) {
               setActiveIndex(0);
             }}
             onKeyDown={handleKeyDown}
-            placeholder="Search pages, customers, invoices, jobs…"
+            aria-label="Search"
+            placeholder="Search pages, customers, requests…"
             className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           />
           {loading && (
@@ -215,7 +221,7 @@ export function GlobalSearch({ placement }: GlobalSearchProps) {
         </div>
 
         {/* Results */}
-        <div className="max-h-[360px] overflow-y-auto py-2">
+        <div className="max-h-[min(360px,60dvh)] overflow-y-auto py-2" aria-busy={loading}>
           {/* Pages / Quick navigation — instant client-side navigation matches */}
           {navItems.length > 0 && (
             <div>
@@ -243,6 +249,10 @@ export function GlobalSearch({ placement }: GlobalSearchProps) {
                 );
               })}
             </div>
+          )}
+
+          {loading && query.length >= 2 && results.length === 0 && (
+            <p className="px-4 py-3 text-sm text-muted-foreground">Searching records…</p>
           )}
 
           {/* Record placeholders — suppressed when nav items fill the list */}

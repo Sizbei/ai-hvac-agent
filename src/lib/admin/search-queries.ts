@@ -1,12 +1,22 @@
-import { and, desc, eq, ilike, or } from "drizzle-orm";
+import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { customers, serviceRequests, estimates, invoices, pricebookItems } from "@/lib/db/schema";
+import {
+  customers,
+  serviceRequests,
+  estimates,
+  invoices,
+  pricebookItems,
+  customerSessions,
+} from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { decrypt } from "@/lib/crypto";
 import { invoiceRef } from "@/lib/admin/invoice-collectible";
+import { issueTypeLabel, humanizeCode } from "@/lib/admin/request-labels";
+import { notStandInSession } from "@/lib/admin/stand-in-session";
+import { customerNameFromMetadata } from "@/lib/admin/conversation-display";
 
 export type SearchResult = {
-  readonly type: "customer" | "invoice" | "job" | "estimate" | "pricebook";
+  readonly type: "customer" | "invoice" | "job" | "conversation" | "estimate" | "pricebook";
   readonly id: string;
   readonly title: string;
   readonly subtitle: string;
@@ -151,9 +161,77 @@ export async function searchJobs(
   return rows.map((row) => ({
     type: "job" as const,
     id: row.id,
-    title: row.referenceNumber ?? `Job ${row.id.slice(0, 8).toUpperCase()}`,
-    subtitle: row.issueType,
-    href: `/admin/requests/${row.id}`,
+    title: row.referenceNumber ?? `Request ${row.id.slice(0, 8).toUpperCase()}`,
+    subtitle: issueTypeLabel(row.issueType),
+    // There is no /admin/requests/[id] page; the list opens the sheet.
+    href: `/admin/requests?request=${row.id}`,
+    syncedSource: null,
+  }));
+}
+
+const CHANNEL_NAMES: Record<string, string> = {
+  phone: "Phone call",
+  sms: "Text message",
+  web: "Web chat",
+};
+
+function parseSessionMetadata(raw: string | null): Record<string, unknown> | null {
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Conversations by the intake's captured name/phone/email (session metadata,
+ * not encrypted) or the linked request number. Message text is left to the
+ * inbox's own search to keep ⌘K fast.
+ */
+export async function searchConversations(
+  organizationId: string,
+  q: string,
+): Promise<SearchResult[]> {
+  const pattern = `%${q.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
+  const rows = await db
+    .select({
+      id: customerSessions.id,
+      channel: customerSessions.channel,
+      status: customerSessions.status,
+      metadata: customerSessions.metadata,
+    })
+    .from(customerSessions)
+    .where(
+      withTenant(
+        customerSessions,
+        organizationId,
+        notStandInSession(customerSessions.token),
+        sql`(
+            coalesce(${customerSessions.metadata}, '') ILIKE ${pattern}
+            OR EXISTS (
+              SELECT 1 FROM ${serviceRequests}
+              WHERE ${serviceRequests.sessionId} = ${customerSessions.id}
+                AND ${serviceRequests.organizationId} = ${customerSessions.organizationId}
+                AND ${serviceRequests.referenceNumber} ILIKE ${pattern}
+            )
+          )`,
+      ),
+    )
+    .orderBy(desc(customerSessions.createdAt))
+    .limit(RESULTS_PER_TYPE);
+
+  return rows.map((row) => ({
+    type: "conversation" as const,
+    id: row.id,
+    title:
+      customerNameFromMetadata(parseSessionMetadata(row.metadata)) ??
+      `Conversation ${row.id.slice(0, 8)}`,
+    subtitle: `${CHANNEL_NAMES[row.channel] ?? "Conversation"} · ${humanizeCode(row.status)}`,
+    href: `/admin/conversations?c=${row.id}`,
     syncedSource: null,
   }));
 }
@@ -245,19 +323,27 @@ export async function searchAllEntities(
   organizationId: string,
   q: string,
 ): Promise<SearchResult[]> {
-  const [customerResults, invoiceResults, jobResults, estimateResults, pricebookResults] =
-    await Promise.all([
-      searchCustomers(organizationId, q),
-      searchInvoices(organizationId, q),
-      searchJobs(organizationId, q),
-      searchEstimates(organizationId, q),
-      searchPricebook(organizationId, q),
-    ]);
+  const [
+    customerResults,
+    invoiceResults,
+    jobResults,
+    conversationResults,
+    estimateResults,
+    pricebookResults,
+  ] = await Promise.all([
+    searchCustomers(organizationId, q),
+    searchInvoices(organizationId, q),
+    searchJobs(organizationId, q),
+    searchConversations(organizationId, q),
+    searchEstimates(organizationId, q),
+    searchPricebook(organizationId, q),
+  ]);
 
   return [
     ...customerResults,
     ...invoiceResults,
     ...jobResults,
+    ...conversationResults,
     ...estimateResults,
     ...pricebookResults,
   ];
