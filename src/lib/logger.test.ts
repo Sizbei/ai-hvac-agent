@@ -15,27 +15,34 @@ describe("serializeError", () => {
   it("drops params, query and the SQL-bearing message, keeps type and the cause code", () => {
     const e = new DrizzleQueryError("UPDATE service_requests SET signature_name = $1", ["Jane"], { code: "40P01" });
     const out = serializeError(e);
-    expect(out).toEqual({ type: "DrizzleQueryError", code: "40P01" });
+    expect(out).toMatchObject({ type: "DrizzleQueryError", code: "40P01" });
+    expect(out).not.toHaveProperty("message");
+    expect(out).not.toHaveProperty("params");
+    expect(out).not.toHaveProperty("query");
     expect(JSON.stringify(out)).not.toContain("Jane");
   });
 
   it("the real drizzle-orm DrizzleQueryError serialises without its params", () => {
     const e = new RealDrizzleQueryError("UPDATE x SET name = $1", ["Jane"], Object.assign(new Error("deadlock"), { code: "40P01" }));
     const out = serializeError(e);
-    expect(out).toEqual({ type: "DrizzleQueryError", code: "40P01" });
+    expect(out).toMatchObject({ type: "DrizzleQueryError", code: "40P01" });
+    expect(out).not.toHaveProperty("message");
+    expect(out).not.toHaveProperty("params");
+    expect(out).not.toHaveProperty("query");
     expect(JSON.stringify(out)).not.toContain("Jane");
   });
 
   it("drops the message of any error-shaped object carrying params or query", () => {
     const out = serializeError({ query: "select $1", params: ["Jane"], cause: { code: "40P01" }, message: "params: Jane" });
-    expect(out).toEqual({ type: "Object", code: "40P01" });
+    expect(out).toMatchObject({ type: "Object", code: "40P01" });
+    expect(out).not.toHaveProperty("message");
     expect(JSON.stringify(out)).not.toContain("Jane");
   });
 
   it("keeps the message of a plain error, and its own code", () => {
-    expect(serializeError(Object.assign(new Error("portal_token_unavailable"), { code: "E1" })))
-      .toEqual({ type: "Error", code: "E1", message: "portal_token_unavailable" });
-    expect(serializeError(new TypeError("boom"))).toEqual({ type: "TypeError", message: "boom" });
+    expect(serializeError(Object.assign(new Error("portal_token_unavailable"), { code: "E1" }))).toMatchObject({ type: "Error", code: "E1", message: "portal_token_unavailable" });
+    expect(serializeError(new TypeError("boom"))).toMatchObject({ type: "TypeError", message: "boom" });
+    expect(typeof serializeError(new TypeError("boom")).stack).toBe("string");
   });
 
   it("non-objects serialise to their type only", () => {
@@ -52,7 +59,7 @@ describe("serializeError", () => {
     log.error({ err: e }, "b");
     expect(lines.join("")).not.toContain("Jane");
     expect(lines.join("")).not.toContain("SECRET");
-    expect(JSON.parse(lines[0]!).error).toEqual({ type: "DrizzleQueryError", code: "23505" });
+    expect(JSON.parse(lines[0]!).error).toMatchObject({ type: "DrizzleQueryError", code: "23505" });
     expect(JSON.parse(lines[1]!).err).toEqual({ type: "DrizzleQueryError", code: "23505" });
   });
 });

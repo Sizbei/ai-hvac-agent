@@ -26,14 +26,14 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /** A check number is letters, digits and dashes only: never free text (erase never clears it). */
-const CHECK_NUMBER = /^[A-Za-z0-9-]{1,32}$/;
+import { CHECK_NUMBER_PATTERN } from "@/lib/payments/check-number";
 
 const bodySchema = z
   .object({
     invoiceId: z.string().uuid(),
     method: z.enum(["cash", "check"]),
     amountCents: z.number().int().min(1).max(100_000_000),
-    checkNumber: z.string().trim().min(1).max(32).regex(CHECK_NUMBER).optional(),
+    checkNumber: z.string().trim().min(1).max(32).regex(CHECK_NUMBER_PATTERN).optional(),
   })
   .strict()
   .refine((b) => b.checkNumber === undefined || b.method === "check");

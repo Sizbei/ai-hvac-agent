@@ -28,7 +28,14 @@ function buildRedactPaths(): string[] {
   return paths;
 }
 
-type ErrorLike = { constructor?: { name?: string }; code?: unknown; cause?: { code?: unknown }; message?: unknown; params?: unknown; query?: unknown };
+type ErrorLike = { constructor?: { name?: string }; code?: unknown; cause?: { code?: unknown; stack?: unknown }; message?: unknown; stack?: unknown; params?: unknown; query?: unknown };
+
+/** Stack frames only — the first line of a stack repeats the message, which for a Postgres error can echo a bound value. */
+function frames(stack: unknown): string | undefined {
+  if (typeof stack !== "string") return undefined;
+  const rest = stack.split("\n").slice(1).join("\n");
+  return rest.length > 0 ? rest : undefined;
+}
 
 /** The database/system error code of an error or its cause (e.g. "40P01"), else undefined. */
 export function errorCode(e: unknown): string | undefined {
@@ -39,11 +46,12 @@ export function errorCode(e: unknown): string | undefined {
 }
 
 /**
- * Error serializer for the `error` and `err` keys: type, code and — only when
- * the error carries no SQL — the message. A DrizzleQueryError keeps `query` and
- * `params` as enumerable fields and embeds both in its message, so serialising
- * it whole would write customer PII and portal tokens into the logs (spec §4:
- * "codes and ids only, never SQL parameters").
+ * Error serializer for the `error` and `err` keys. An ordinary error keeps its
+ * type, code, message and stack. An error that carries SQL (a DrizzleQueryError
+ * keeps `query` and `params` as enumerable fields and embeds both in its
+ * message) keeps only its type, the cause's code and the cause's stack FRAMES —
+ * never `params`, `query` or a message, which would write customer PII and
+ * portal tokens into the logs (spec §4: "codes and ids only, never SQL parameters").
  */
 export function serializeError(e: unknown): Record<string, unknown> {
   if (e === null || typeof e !== "object") return { type: typeof e };
@@ -53,7 +61,13 @@ export function serializeError(e: unknown): Record<string, unknown> {
   const out: Record<string, unknown> = { type };
   const code = errorCode(e);
   if (code !== undefined) out.code = code;
-  if (!carriesSql && typeof err.message === "string") out.message = err.message;
+  if (carriesSql) {
+    const causeFrames = frames(err.cause?.stack);
+    if (causeFrames) out.stack = causeFrames;
+    return out;
+  }
+  if (typeof err.message === "string") out.message = err.message;
+  if (typeof err.stack === "string") out.stack = err.stack;
   return out;
 }
 

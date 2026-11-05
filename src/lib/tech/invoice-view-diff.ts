@@ -45,7 +45,7 @@ export function intentLanded(intent: Intent, before: TechInvoiceView, after: Tec
   switch (intent.kind) {
     case "create":
       // A NEW draft (before may be null or the paid/refunded invoice shown read-only).
-      return after.invoice?.id !== before.invoice?.id && after.invoice?.state === "draft";
+      return after.invoice !== null && after.invoice.id !== before.invoice?.id;
     case "add_line": {
       if (!a) return false;
       const had = ids(b?.lines);

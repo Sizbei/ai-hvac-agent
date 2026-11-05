@@ -563,7 +563,7 @@ until a tech can finish and collect on a job here.
      in a 72 h queue, because there is no offline queue yet.
      (13) Final wave: with no live invoice the tech GET returns the newest
      paid/refunded invoice in full (read-only, `create` allowed for a
-     second invoice); `history` is sent only alongside a live invoice
+     second invoice); `history` is non-null only when the request has no live and no paid/refunded invoice (the newest voided one)
      (spec §5.1/§6.2.1 resolved toward §7.4's "the invoice reads paid").
      (14) Office record-payment `ID_CONFLICT` copy is "This payment may
      already be recorded. Check the payments list before recording it

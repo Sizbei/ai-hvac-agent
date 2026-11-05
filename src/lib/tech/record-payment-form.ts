@@ -3,6 +3,7 @@
  * parser and max-balance check (run BEFORE posting), the "Record $x" label,
  * the request body and the remembered method. Tests run in node.
  */
+import { CHECK_NUMBER_COPY, isValidCheckNumber } from "@/lib/payments/check-number";
 import { formatCentsExact, MAX_PRICE_CENTS } from "@/lib/admin/money-format";
 
 export type TechPaymentMethod = "cash" | "check";
@@ -40,6 +41,9 @@ export function validateRecordForm(f: {
   if (cents > f.balanceCents) return { ok: false, error: "That's more than the balance due." };
   if (f.method === "check" && f.checkNumber.trim().length > CHECK_NUMBER_MAX) {
     return { ok: false, error: "Check number is too long." };
+  }
+  if (f.method === "check" && f.checkNumber.trim().length > 0 && !isValidCheckNumber(f.checkNumber)) {
+    return { ok: false, error: CHECK_NUMBER_COPY };
   }
   return { ok: true, amountCents: cents };
 }

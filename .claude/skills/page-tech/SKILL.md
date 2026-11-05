@@ -135,10 +135,11 @@ server-side from the pricebook at add time — client-sent cost values are ignor
   `allowed` comes from `invoiceAllowedActions`. Live = draft or open. With no
   live invoice, `invoice` is the newest PAID or REFUNDED one in full read-only
   form (lines, payments, signature) and `allowed` includes `create` (a second
-  invoice for unbilled materials); `history` is then `null`. `history` (the
-  newest older paid/refunded/void one) is sent only alongside a live invoice.
+  invoice for unbilled materials); `history` is then `null`. `history` is
+  non-null only when the request has no live and no paid/refunded invoice
+  (the newest voided one).
   The page keys the totals footer on `state` (paid → "Paid", refunded →
-  "Refunded") and detects a landed `create` by a new draft id, not by
+  "Refunded") and detects a landed `create` by a new invoice id, not by
   `before.invoice === null`. (Final-wave ruling; spec §5.1/§6.2.1 resolved
   toward §7.4.)
 - **Keys:** the client mints with `mintKey()` (`idempotency-codes.ts`) and

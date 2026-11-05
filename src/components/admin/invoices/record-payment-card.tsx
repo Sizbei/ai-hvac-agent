@@ -1,5 +1,6 @@
 'use client';
 
+import { CHECK_NUMBER_COPY, isValidCheckNumber } from '@/lib/payments/check-number';
 import { useCallback, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -47,6 +48,10 @@ export function RecordPaymentCard({
     const amountCents = parseDollarsToCents(amount);
     if (amountCents < 1) {
       setError('Enter an amount greater than zero.');
+      return;
+    }
+    if (method === 'check' && checkNumber.trim().length > 0 && !isValidCheckNumber(checkNumber)) {
+      setError(CHECK_NUMBER_COPY);
       return;
     }
     setIsSaving(true);
