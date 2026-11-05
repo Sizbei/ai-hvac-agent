@@ -38,6 +38,20 @@ the revenue tile shows the breakdown in its sublabel.
   (invoiced), not cash collected — do not let that copy drift back to a bare
   "revenue" that implies collected cash.
 
+- Rates with a zero denominator render `—` (`formatRate` in
+  `src/lib/admin/report-format.ts`): the close-rate tile when no estimates
+  exist, a lead-source row with 0 leads. The query still returns 0; the page
+  owns the dash.
+- Lead sources with no leads, bookings or revenue are hidden
+  (`visibleLeadSources`); all hidden → the empty state.
+- Location names come from `locationDisplayLabel`: label → zone → first line
+  of the decrypted address → "Address not on file" ("Erased address" for an
+  erased one). Never the bare word "Location". Only locations with jobs in
+  the period are decrypted.
+- Phone layout: secondary columns (Booked, Avg rating, Labor) use
+  `hidden sm:table-cell`; card explanations go in SectionCard `description`,
+  never in `action`/`meta` (that squeezed titles to nothing on phones).
+
 **Gotchas:**
 - The range `useMemo` dependency is `[days]`, not the `Date` objects. Removing the
   memo causes an infinite refetch loop.

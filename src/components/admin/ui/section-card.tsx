@@ -11,6 +11,12 @@ interface SectionCardBaseProps {
   readonly meta?: string;
   /** Optional numeric count shown as a mono figure next to the title. */
   readonly count?: number;
+  /**
+   * Optional one-line explanation of the panel, shown under the header band
+   * (wraps on phones). Use this, not `meta` or `action`, for sentence-length
+   * copy: header slots are single-line and would squeeze the title.
+   */
+  readonly description?: React.ReactNode;
   readonly children: React.ReactNode;
   readonly className?: string;
   readonly contentClassName?: string;
@@ -37,8 +43,10 @@ interface CollapsibleSectionCardProps extends SectionCardBaseProps {
 
 type SectionCardProps = StaticSectionCardProps | CollapsibleSectionCardProps;
 
+// min-h + flex-wrap: on a narrow phone the action drops to its own line rather
+// than squeezing the title to nothing.
 const HEADER_CLASSES =
-  "flex h-10 shrink-0 items-center gap-2 border-b border-border-strong bg-surface-sunken px-4";
+  "flex min-h-10 shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border-strong bg-surface-sunken px-4 py-1";
 
 /**
  * Panel — the one boxed surface of the admin: `--surface` body, 1 px
@@ -54,6 +62,7 @@ export function SectionCard({
   icon: Icon,
   meta,
   count,
+  description,
   action,
   children,
   className,
@@ -69,11 +78,13 @@ export function SectionCard({
           aria-hidden="true"
         />
       )}
-      <h2 className="min-w-0 truncate text-[15px] font-semibold leading-none text-foreground">
+      {/* The title never yields to meta: it truncates only when it alone is
+          wider than the header. Meta is the part that shrinks. */}
+      <h2 className="max-w-full shrink-0 truncate text-[15px] font-semibold leading-none text-foreground">
         {title}
       </h2>
       {meta && (
-        <span className="shrink-0 font-mono text-[13px] leading-none tabular-nums text-muted-foreground">
+        <span className="min-w-0 truncate font-mono text-[13px] leading-none tabular-nums text-muted-foreground">
           {meta}
         </span>
       )}
@@ -84,6 +95,12 @@ export function SectionCard({
       )}
     </>
   );
+
+  const descriptionLine = description ? (
+    <p className="border-b border-border px-4 py-2 text-xs leading-5 text-muted-foreground">
+      {description}
+    </p>
+  ) : null;
 
   if (collapsible) {
     return (
@@ -107,6 +124,7 @@ export function SectionCard({
             className="ml-auto size-4 shrink-0 text-foreground-faint transition-transform duration-[var(--dur-hover)] group-open/section:rotate-180"
           />
         </summary>
+        {descriptionLine}
         <div className={cn("p-4", contentClassName)}>{children}</div>
       </details>
     );
@@ -130,6 +148,7 @@ export function SectionCard({
           </div>
         )}
       </div>
+      {descriptionLine}
       <div className={cn("p-4", contentClassName)}>{children}</div>
     </Card>
   );

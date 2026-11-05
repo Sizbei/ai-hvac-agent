@@ -24,6 +24,18 @@ import {
   users,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
+import { decrypt } from "@/lib/crypto";
+import { locationDisplayLabel } from "./report-format";
+
+/** Decrypts a ciphertext column, returning null on absent/corrupt input. */
+function safeDecrypt(ciphertext: string | null | undefined): string | null {
+  if (!ciphertext) return null;
+  try {
+    return decrypt(ciphertext);
+  } catch {
+    return null;
+  }
+}
 
 export interface SalesReportPeriod {
   readonly fromDate?: Date;
@@ -553,12 +565,15 @@ export async function getLocationBreakdown(
       )
       .groupBy(locationKey),
 
-    // 4. Labels: the location's label/zone. Org-scoped (the location's own org).
+    // 4. Labels: the location's label/zone/address. Org-scoped (the location's
+    //    own org). Most rows have neither label nor zone, so the address is the
+    //    usual name; it is decrypted below only for locations that had jobs.
     db
       .select({
         id: customerLocations.id,
         label: customerLocations.label,
         zone: customerLocations.zone,
+        addressEncrypted: customerLocations.addressEncrypted,
       })
       .from(customerLocations)
       .where(withTenant(customerLocations, organizationId)),
@@ -578,7 +593,16 @@ export async function getLocationBreakdown(
   }
   const labelById = new Map<string, string>();
   for (const r of labelRows) {
-    labelById.set(r.id, r.label ?? r.zone ?? "Location");
+    if (!jobsByLoc.has(r.id)) continue;
+    labelById.set(
+      r.id,
+      locationDisplayLabel({
+        label: r.label,
+        zone: r.zone,
+        // Only decrypt when label and zone are both missing.
+        address: r.label?.trim() || r.zone?.trim() ? null : safeDecrypt(r.addressEncrypted),
+      }),
+    );
   }
 
   // One row per location bucket that had jobs in the period (the LEFT side is
@@ -589,7 +613,7 @@ export async function getLocationBreakdown(
       label:
         locationId === UNASSIGNED_LOCATION
           ? "Unassigned"
-          : (labelById.get(locationId) ?? "Location"),
+          : (labelById.get(locationId) ?? "Address not on file"),
       jobs: jobsByLoc.get(locationId) ?? 0,
       revenueCents: revenueByLoc.get(locationId) ?? 0,
       avgRating: ratingByLoc.get(locationId) ?? null,

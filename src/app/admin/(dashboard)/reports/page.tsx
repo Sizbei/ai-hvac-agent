@@ -21,6 +21,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { formatCentsExact } from '@/lib/admin/money-format';
+import { formatRate, visibleLeadSources } from '@/lib/admin/report-format';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 import { StatCard, StatStrip } from '@/components/admin/ui/stat-card';
@@ -118,7 +119,7 @@ export default function ReportsPage() {
         />
         <StatCard
           label="Estimate close rate"
-          value={report ? `${report.closeRatePct}%` : '—'}
+          value={report ? formatRate(report.closeRatePct, report.estimatesCreated) : '—'}
           sublabel={
             // estimatesCreated already accounts for every status (open, sold,
             // dismissed, expired) — using it here keeps "decided" from silently
@@ -181,6 +182,12 @@ export default function ReportsPage() {
   );
 }
 
+/**
+ * Secondary columns drop out below `sm` so the remaining columns fit a phone
+ * without a hidden sideways scroll.
+ */
+const PHONE_HIDDEN = 'hidden text-right sm:table-cell';
+
 /** A null metric renders an em dash, never a misleading 0. */
 const EMPTY = '—';
 
@@ -215,19 +222,16 @@ interface LeadSourceTableProps {
 
 function LeadSourceTable({ rows, isLoading }: LeadSourceTableProps) {
   // Sort by revenue desc; revenue lives in cents so a plain numeric sort is fine.
+  // All-zero sources are dropped (the query returns every enum value).
   const sorted = useMemo(
-    () => [...rows].sort((a, b) => b.revenueCents - a.revenueCents),
+    () => visibleLeadSources(rows).sort((a, b) => b.revenueCents - a.revenueCents),
     [rows],
   );
 
   return (
     <SectionCard
       title="Lead source ROI"
-      action={
-        <p className="text-xs text-muted-foreground">
-          Revenue and close rate by where each lead came from.
-        </p>
-      }
+      description="Revenue and close rate by where each lead came from."
     >
       {isLoading ? (
         <div className="space-y-2">
@@ -240,8 +244,8 @@ function LeadSourceTable({ rows, isLoading }: LeadSourceTableProps) {
           columns={[
             { key: 'source', header: 'Source', cell: (row) => <span className="font-medium">{leadSourceLabel(row.source)}</span> },
             { key: 'leads', header: 'Leads', cell: (row) => <span className="tabular-nums">{row.leads}</span>, className: 'text-right' },
-            { key: 'booked', header: 'Booked', cell: (row) => <span className="tabular-nums">{row.booked}</span>, className: 'text-right' },
-            { key: 'closeRate', header: 'Close rate', cell: (row) => <span className="tabular-nums">{row.closeRatePct}%</span>, className: 'text-right' },
+            { key: 'booked', header: 'Booked', cell: (row) => <span className="tabular-nums">{row.booked}</span>, className: PHONE_HIDDEN },
+            { key: 'closeRate', header: 'Close rate', cell: (row) => <span className="tabular-nums">{formatRate(row.closeRatePct, row.leads)}</span>, className: 'text-right' },
             { key: 'revenue', header: 'Revenue', cell: (row) => <span className="font-medium tabular-nums">{formatCentsExact(row.revenueCents)}</span>, className: 'text-right' },
           ]}
           rows={sorted}
@@ -269,12 +273,7 @@ function LocationTable({ rows, isLoading }: LocationTableProps) {
   return (
     <SectionCard
       title="By location"
-      action={
-        <p className="text-xs text-muted-foreground">
-          Jobs and rating rolled up by service location. Revenue is billed
-          (invoiced), not cash collected.
-        </p>
-      }
+      description="Jobs and rating rolled up by service location. Revenue is billed (invoiced), not cash collected."
     >
       {isLoading ? (
         <div className="space-y-2">
@@ -287,7 +286,7 @@ function LocationTable({ rows, isLoading }: LocationTableProps) {
           columns={[
             { key: 'location', header: 'Location', cell: (row) => <span className="font-medium">{row.label}</span> },
             { key: 'jobs', header: 'Jobs', cell: (row) => <span className="tabular-nums">{row.jobs}</span>, className: 'text-right' },
-            { key: 'avgRating', header: 'Avg rating', cell: (row) => <span className="tabular-nums">{formatRating(row.avgRating)}</span>, className: 'text-right' },
+            { key: 'avgRating', header: 'Avg rating', cell: (row) => <span className="tabular-nums">{formatRating(row.avgRating)}</span>, className: PHONE_HIDDEN },
             { key: 'revenue', header: 'Revenue', cell: (row) => <span className="font-medium tabular-nums">{formatCentsExact(row.revenueCents)}</span>, className: 'text-right' },
           ]}
           rows={sorted}
@@ -314,12 +313,7 @@ function TechnicianTable({ rows, isLoading }: TechnicianTableProps) {
   return (
     <SectionCard
       title="Technician scorecards"
-      action={
-        <p className="text-xs text-muted-foreground">
-          Jobs, labor, and rating per technician. Revenue is billed (invoiced),
-          not cash collected. A dash means the data wasn&apos;t captured for that metric.
-        </p>
-      }
+      description="Jobs, labor, and rating per technician. Revenue is billed (invoiced), not cash collected. A dash means the data wasn't captured for that metric."
     >
       {isLoading ? (
         <div className="space-y-2">
@@ -332,8 +326,8 @@ function TechnicianTable({ rows, isLoading }: TechnicianTableProps) {
           columns={[
             { key: 'name', header: 'Technician', cell: (row) => <span className="font-medium">{row.name}</span> },
             { key: 'completed', header: 'Completed', cell: (row) => <span className="tabular-nums">{row.jobsCompleted} / {row.jobsAssigned}</span>, className: 'text-right' },
-            { key: 'labor', header: 'Labor', cell: (row) => <span className="tabular-nums">{formatHours(row.laborHours)}</span>, className: 'text-right' },
-            { key: 'avgRating', header: 'Avg rating', cell: (row) => <span className="tabular-nums">{formatRating(row.avgRating)}</span>, className: 'text-right' },
+            { key: 'labor', header: 'Labor', cell: (row) => <span className="tabular-nums">{formatHours(row.laborHours)}</span>, className: PHONE_HIDDEN },
+            { key: 'avgRating', header: 'Avg rating', cell: (row) => <span className="tabular-nums">{formatRating(row.avgRating)}</span>, className: PHONE_HIDDEN },
             { key: 'revenue', header: 'Revenue', cell: (row) => <span className="font-medium tabular-nums">{formatCentsExact(row.revenueCents)}</span>, className: 'text-right' },
           ]}
           rows={sorted}

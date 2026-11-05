@@ -65,6 +65,13 @@ vi.mock('@/lib/db', () => ({
 
 // withTenant returns a tagged array so the test can see the org filter + the
 // extra conditions a query passed in.
+vi.mock('@/lib/crypto', () => ({
+  decrypt: (c: string) => {
+    if (c === 'BAD') throw new Error('bad ciphertext');
+    return c.replace(/^ENC\((.*)\)$/, '$1');
+  },
+}));
+
 vi.mock('@/lib/db/tenant', () => ({
   withTenant: (_table: unknown, orgId: string, ...c: unknown[]) => [
     { kind: 'tenant', orgId },
@@ -133,6 +140,7 @@ vi.mock('@/lib/db/schema', () => ({
     id: 'customerLocations.id',
     label: 'customerLocations.label',
     zone: 'customerLocations.zone',
+    addressEncrypted: 'customerLocations.addressEncrypted',
     organizationId: 'customerLocations.org',
   },
   technicianTimeEntries: {
@@ -672,7 +680,7 @@ function seedLocation(s: {
   jobs: LocRow[];
   revenue: LocRow[];
   rating: { locationId: string; value: number | string | null }[];
-  labels: { id: string; label: string | null; zone: string | null }[];
+  labels: { id: string; label: string | null; zone: string | null; addressEncrypted?: string | null }[];
 }): void {
   selectQueue.push(s.jobs);
   selectQueue.push(s.revenue);
@@ -681,6 +689,28 @@ function seedLocation(s: {
 }
 
 describe('getLocationBreakdown', () => {
+  it('names an unlabelled location by its address, never the word "Location"', async () => {
+    seedLocation({
+      jobs: [
+        { locationId: 'loc-1', value: 1 },
+        { locationId: 'loc-2', value: 4 },
+        { locationId: 'loc-3', value: 2 },
+      ],
+      revenue: [],
+      rating: [],
+      labels: [
+        { id: 'loc-1', label: null, zone: null, addressEncrypted: 'ENC(12 Oak St, Johnson City, TN)' },
+        { id: 'loc-2', label: null, zone: null, addressEncrypted: 'BAD' },
+        { id: 'loc-3', label: null, zone: 'East', addressEncrypted: 'ENC(9 Elm Rd)' },
+      ],
+    });
+    const rows = await getLocationBreakdown(ORG);
+    const label = (id: string) => rows.find((r) => r.locationId === id)!.label;
+    expect(label('loc-1')).toBe('12 Oak St');
+    expect(label('loc-2')).toBe('Address not on file');
+    expect(label('loc-3')).toBe('East');
+  });
+
   it('buckets NULL locationId under "unassigned" and resolves labels', async () => {
     seedLocation({
       jobs: [

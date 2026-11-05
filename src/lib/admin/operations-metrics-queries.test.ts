@@ -140,7 +140,7 @@ vi.mock('@/lib/db/schema', () => ({
   },
 }));
 
-import { getOperationsMetrics } from './operations-metrics-queries';
+import { getOperationsMetrics, assignedAtCreation } from './operations-metrics-queries';
 
 const ORG = 'org-1';
 const FROM = new Date('2026-06-01T00:00:00Z');
@@ -228,6 +228,24 @@ describe('getOperationsMetrics', () => {
     expect(m.firstResponseHumanSeconds.previous).toBe(86400);
     expect(m.firstResponseSystemSeconds).toBe(42);
     expect(m.rangeDays).toBe(30);
+  });
+
+  it('leaves out requests booked with a technician already chosen (assigned within a minute of creation)', async () => {
+    queueAll({
+      assigned: [
+        // Office picked a technician in the New request dialog: 1 s after creation.
+        { serviceRequestId: 'r-booked', actorType: 'human', firstAt: '2026-06-05T00:00:01Z', createdAt: new Date('2026-06-05T00:00:00Z') },
+        // A dispatcher answered a waiting request after 10 minutes.
+        { serviceRequestId: 'r-wait', actorType: 'human', firstAt: '2026-06-06T00:10:00Z', createdAt: new Date('2026-06-06T00:00:00Z') },
+      ],
+    });
+    const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO });
+    expect(m.firstResponseHumanSeconds.current).toBe(600);
+  });
+
+  it('assignedAtCreation uses a 60 s cut-off', () => {
+    expect(assignedAtCreation('2026-06-05T00:00:59Z', '2026-06-05T00:00:00Z')).toBe(true);
+    expect(assignedAtCreation('2026-06-05T00:01:00Z', '2026-06-05T00:00:00Z')).toBe(false);
   });
 
   it('attributes first response to the EARLIEST assignment — a later human reassignment of an auto-dispatched job does not inflate the human headline', async () => {

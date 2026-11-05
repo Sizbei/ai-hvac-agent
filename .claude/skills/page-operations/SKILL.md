@@ -42,6 +42,12 @@ fixed, not the selected range).
   to measure. Mirrors the `jobsCurrentRow` native-only filter already used
   elsewhere in this file — keep any new status-event query in sync.
 
+- "First response — dispatcher" averages human first assignments EXCEPT those
+  within `ASSIGNED_AT_CREATION_SECONDS` (60 s) of creation: those were booked
+  with a technician already chosen, not answered by a dispatcher. Without
+  this the headline read "1 s".
+- AR amount columns are `w-28 shrink-0` so six-figure synced totals line up.
+
 **Gotchas:**
 - `onSiteSeconds` is not a `MetricTrend` — it has no previous value and no delta.
   It appears as a sublabel of "Response time", not its own card.

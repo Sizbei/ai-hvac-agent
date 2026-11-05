@@ -41,6 +41,12 @@ function formatDuration(seconds: number | null): string {
   return `${(s / 86400).toFixed(1)} days`;
 }
 
+/** "Response time" sublabel: what the median measures, plus time on site when known. */
+function responseSublabel(onSiteSeconds: number | null): string {
+  const base = 'Median from booking to a technician on site';
+  return onSiteSeconds === null ? base : `${base} · ${formatDuration(onSiteSeconds)} avg on site`;
+}
+
 interface DeltaShape {
   readonly text: string;
   readonly good: boolean;
@@ -129,7 +135,7 @@ export default function OperationsPage() {
           delta={metrics ? toStatDelta(durationDelta(metrics.responseTimeSeconds), days) : undefined}
           intent="neutral"
           loading={isLoading}
-          sublabel={metrics ? `Median booking → on-site · On-site ${formatDuration(metrics.onSiteSeconds ?? null)}` : undefined}
+          sublabel={metrics ? responseSublabel(metrics.onSiteSeconds ?? null) : undefined}
         />
         <StatCard
           label="Avg time to paid"
@@ -171,7 +177,7 @@ export default function OperationsPage() {
           loading={isLoading}
           sublabel={
             metrics
-              ? `Created → a dispatcher assigns the job · auto-dispatch ${formatDuration(metrics.firstResponseSystemSeconds ?? null)}`
+              ? `Average wait for a dispatcher to assign a new request · auto-dispatch ${formatDuration(metrics.firstResponseSystemSeconds ?? null)}`
               : undefined
           }
         />
@@ -197,9 +203,7 @@ export default function OperationsPage() {
       {/* AR aging — full width card */}
       <SectionCard
         title="Accounts receivable — open balance"
-        action={
-          <p className="text-xs text-muted-foreground">Outstanding on unpaid invoices, by age</p>
-        }
+        description="Outstanding on unpaid invoices, by age."
       >
         {isLoading ? (
           <div className="space-y-3">
@@ -229,7 +233,7 @@ export default function OperationsPage() {
                     label={`${b.label}: ${formatCentsExact(b.cents)}`}
                     className="flex-1"
                   />
-                  <span className="w-20 text-right font-mono text-sm tabular-nums">
+                  <span className="w-28 shrink-0 text-right font-mono text-sm tabular-nums">
                     {formatCentsExact(b.cents)}
                   </span>
                 </div>
@@ -280,7 +284,7 @@ export default function OperationsPage() {
                         label={`${b.label}: ${formatCentsExact(b.cents)}`}
                         className="flex-1"
                       />
-                      <span className="w-20 text-right font-mono text-sm tabular-nums">
+                      <span className="w-28 shrink-0 text-right font-mono text-sm tabular-nums">
                         {formatCentsExact(b.cents)}
                       </span>
                     </div>
@@ -299,9 +303,9 @@ export default function OperationsPage() {
       </SectionCard>
 
       <p className="max-w-2xl text-xs text-muted-foreground">
-        Trend arrows compare the selected window against the immediately preceding
-        window of equal length. Metrics with no data show &ldquo;&mdash;&rdquo;, never a misleading
-        zero.
+        Where a trend shows, it compares the selected window with the window of
+        equal length just before it. Metrics with no data show &ldquo;&mdash;&rdquo;, never a
+        misleading zero.
       </p>
     </PageShell>
   );

@@ -75,6 +75,21 @@ function toNumberOrNull(value: number | string | null | undefined): number | nul
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+/**
+ * A first assignment this close to creation was made in the booking itself
+ * (the office picked a technician in the New request dialog), not by a
+ * dispatcher answering a waiting request. Counting it would put "1 s" on the
+ * dispatcher headline.
+ */
+export const ASSIGNED_AT_CREATION_SECONDS = 60;
+
+export function assignedAtCreation(
+  firstAt: string | Date,
+  createdAt: string | Date,
+): boolean {
+  return secondsBetween(toDate(firstAt), toDate(createdAt)) < ASSIGNED_AT_CREATION_SECONDS;
+}
+
 type EventRow = {
   readonly firstAt: string | Date;
   readonly createdAt: string | Date;
@@ -368,7 +383,9 @@ export async function getOperationsMetrics(
   const firstAssignments = [...firstAssignByRequest.values()];
 
   const humanBuckets = bucketDurations(
-    firstAssignments.filter((r) => r.actorType === "human"),
+    firstAssignments.filter(
+      (r) => r.actorType === "human" && !assignedAtCreation(r.firstAt, r.createdAt),
+    ),
     fromDate,
     toDate_,
     prevFrom,

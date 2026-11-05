@@ -46,6 +46,9 @@ Migrations run in the Vercel build.
 
 ## Design system (compose, don't hand-roll)
 
+SectionCard: put sentence-length explanations in `description` (a line under
+the header band), not in `action` or `meta`; the header wraps on phones and
+the title never yields to `meta`.
 Primitives in `src/components/admin/ui/` (PageShell, PageHeader, StatCard,
 SectionCard, DataTableShell, Pager, TabGroup, SegmentedControl, InfoBanner,
 ErrorState, SkeletonTable…). Status colors ONLY via
