@@ -65,11 +65,12 @@ describe("GET /api/admin/requests/[id]/decision", () => {
     expect(res.status).toBe(400);
   });
 
-  it("404 when there is no decision row", async () => {
+  it("200 with null data when there is no decision row", async () => {
     mockGetAdminSession.mockResolvedValue(session);
     mockGetDecision.mockResolvedValue(null);
     const res = await GET(req(), { params: Promise.resolve({ id: VALID }) });
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(200);
+    expect((await res.json()).data).toBeNull();
   });
 
   it("200 with the decision view", async () => {
