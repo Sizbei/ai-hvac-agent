@@ -20,6 +20,7 @@ const {
   mockGetSignedReadUrl,
   mockCreateEstimate,
   mockListEstimates,
+  mockCustomerInOrg,
   mockGetDefaultTaxBps,
   mockGetPricebookItemById,
   mockLogAudit,
@@ -41,6 +42,7 @@ const {
   mockGetSignedReadUrl: vi.fn(),
   mockCreateEstimate: vi.fn(),
   mockListEstimates: vi.fn(),
+  mockCustomerInOrg: vi.fn(),
   mockGetDefaultTaxBps: vi.fn(),
   mockGetPricebookItemById: vi.fn(),
   mockLogAudit: vi.fn(),
@@ -101,6 +103,7 @@ vi.mock("@/lib/storage/r2-client", () => ({
 vi.mock("@/lib/admin/estimate-queries", () => ({
   listEstimates: (...a: unknown[]) => mockListEstimates(...a),
   createEstimate: (...a: unknown[]) => mockCreateEstimate(...a),
+  customerInOrg: (...a: unknown[]) => mockCustomerInOrg(...a),
 }));
 vi.mock("@/lib/admin/pricebook-queries", () => ({
   getDefaultTaxBps: (...a: unknown[]) => mockGetDefaultTaxBps(...a),
@@ -155,6 +158,7 @@ beforeEach(() => {
     approvalToken: "tok-1",
   });
   mockTriggerEstimateSent.mockResolvedValue(undefined);
+  mockCustomerInOrg.mockResolvedValue(true);
   mockTriggerPaymentReceipt.mockResolvedValue(undefined);
   mockProcessPendingJobs.mockResolvedValue({ processed: 0, succeeded: 0, failed: 0 });
   mockCardPaymentsEnabled.mockReturnValue(false);
@@ -704,5 +708,40 @@ describe("POST /api/admin/estimates — server-authoritative pricing (anti-tampe
     expect(res.status).toBe(201);
     await flushAfter();
     expect(mockTriggerEstimateSent).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/admin/estimates — customer + title (list-page New estimate)", () => {
+  const OPTIONS = [{ name: "Good", lineItems: [{ name: "x", quantity: 1, unitPriceCents: 100 }] }];
+  const CUSTOMER_ID = "22222222-2222-4222-8222-222222222222";
+
+  it("refuses a customer that is not this org's, before creating anything", async () => {
+    mockGetAdminSession.mockResolvedValue(session("admin"));
+    mockCustomerInOrg.mockResolvedValue(false);
+    const res = await estimatesPOST(
+      jsonReq("/api/admin/estimates", { customerId: CUSTOMER_ID, options: OPTIONS }),
+    );
+    expect(res.status).toBe(400);
+    expect(mockCustomerInOrg).toHaveBeenCalledWith(ORG, CUSTOMER_ID);
+    expect(mockCreateEstimate).not.toHaveBeenCalled();
+  });
+
+  it("stores a trimmed title, and none for a blank one", async () => {
+    mockGetAdminSession.mockResolvedValue(session("admin"));
+    await estimatesPOST(
+      jsonReq("/api/admin/estimates", { customerId: CUSTOMER_ID, title: "  Furnace replacement ", options: OPTIONS }),
+    );
+    expect((mockCreateEstimate.mock.calls[0][1] as { title: string | null }).title).toBe("Furnace replacement");
+    await estimatesPOST(
+      jsonReq("/api/admin/estimates", { customerId: CUSTOMER_ID, title: "   ", options: OPTIONS }),
+    );
+    expect((mockCreateEstimate.mock.calls[1][1] as { title: string | null }).title).toBeNull();
+  });
+
+  it("stays backward compatible: no customer, no title still creates", async () => {
+    mockGetAdminSession.mockResolvedValue(session("admin"));
+    const res = await estimatesPOST(jsonReq("/api/admin/estimates", { options: OPTIONS }));
+    expect(res.status).toBe(201);
+    expect(mockCustomerInOrg).not.toHaveBeenCalled();
   });
 });

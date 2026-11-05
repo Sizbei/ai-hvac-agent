@@ -14,6 +14,8 @@ import {
   estimateOptions,
   estimateLineItems,
   customers,
+  auditLog,
+  users,
 } from "@/lib/db/schema";
 import { decrypt } from "@/lib/crypto";
 import { withTenant } from "@/lib/db/tenant";
@@ -50,6 +52,7 @@ export async function createEstimate(
   input: {
     readonly serviceRequestId?: string | null;
     readonly customerId?: string | null;
+    readonly title?: string | null;
     readonly taxBps: number;
     readonly options: readonly EstimateOptionInput[];
     readonly expiresInDays?: number;
@@ -115,6 +118,7 @@ export async function createEstimate(
     organizationId,
     serviceRequestId: input.serviceRequestId ?? null,
     customerId: input.customerId ?? null,
+    title: input.title ?? null,
     status: "open",
     totalCents: headlineTotal,
     approvalTokenHash: hashToken(approvalToken),
@@ -587,8 +591,12 @@ export interface EstimateDetailView {
   readonly syncedSource: "fieldpulse" | null;
   /** Human-readable status label from FieldPulse (e.g. "Sent"). Null for native estimates. */
   readonly fieldpulseStatusName: string | null;
-  /** Human-readable estimate title from FieldPulse. Null for native estimates. */
+  /** Estimate title: FieldPulse's, or the one typed in New estimate; null when none. */
   readonly title: string | null;
+  /** Decrypted customer name for the header; null when none/unreadable. */
+  readonly customerName: string | null;
+  /** Staff member who marked it sold in the office (from the audit log); null otherwise. */
+  readonly markedSoldBy: string | null;
   /** FieldPulse spillover data for the detail panel; null when not a FP estimate or empty. */
   readonly fieldpulseData: Record<string, unknown> | null;
 }
@@ -691,23 +699,61 @@ export async function getEstimateDetailById(
       fieldpulseStatusName: estimates.fieldpulseStatusName,
       title: estimates.title,
       fieldpulseData: estimates.fieldpulseData,
+      nameEncrypted: customers.nameEncrypted,
     })
     .from(estimates)
+    // Org-scope the join too (defense in depth).
+    .leftJoin(
+      customers,
+      and(
+        eq(customers.id, estimates.customerId),
+        eq(customers.organizationId, organizationId),
+      ),
+    )
     .where(withTenant(estimates, organizationId, eq(estimates.id, id)))
     .limit(1);
 
   if (!est) return null;
 
-  const { fieldpulseEstimateId, fieldpulseStatusName, fieldpulseData, ...header } = est;
+  const { fieldpulseEstimateId, fieldpulseStatusName, fieldpulseData, nameEncrypted, ...header } = est;
+  const markedSoldBy =
+    est.signatureName === ADMIN_SIGNATURE ? await findMarkedSoldBy(organizationId, est.id) : null;
   // Admin detail: include snapshotted cost so the UI can show margin.
   const options = await loadOptionsWithLineItems(organizationId, est.id, true);
   return {
     ...header,
+    customerName: safeDecryptName(nameEncrypted ?? null),
+    markedSoldBy,
     options,
     syncedSource: fieldpulseEstimateId != null ? "fieldpulse" : null,
     fieldpulseStatusName: fieldpulseStatusName ?? null,
     fieldpulseData: (fieldpulseData as Record<string, unknown> | null) ?? null,
   };
+}
+
+/** signature_name marker for an office "Mark sold" (no customer signature). */
+const ADMIN_SIGNATURE = "(admin)";
+
+/** Name of the staff member whose `estimate_marked_sold` audit row is newest. */
+async function findMarkedSoldBy(organizationId: string, estimateId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ name: users.name })
+    .from(auditLog)
+    .innerJoin(
+      users,
+      and(eq(users.id, auditLog.userId), eq(users.organizationId, organizationId)),
+    )
+    .where(
+      withTenant(
+        auditLog,
+        organizationId,
+        eq(auditLog.action, "estimate_marked_sold"),
+        eq(auditLog.entityId, estimateId),
+      ),
+    )
+    .orderBy(desc(auditLog.createdAt))
+    .limit(1);
+  return row?.name ?? null;
 }
 
 /**
@@ -751,7 +797,7 @@ export async function markEstimateSold(
       status: "sold",
       soldOptionId: optionId,
       signedAt: now,
-      signatureName: "(admin)",
+      signatureName: ADMIN_SIGNATURE,
       updatedAt: now,
     })
     .where(
@@ -809,4 +855,14 @@ export async function getEstimateForApproval(
     expiresAt: est.expiresAt,
     options,
   };
+}
+
+/** True when the customer exists in this org (cross-tenant ids read as absent). */
+export async function customerInOrg(organizationId: string, customerId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: customers.id })
+    .from(customers)
+    .where(withTenant(customers, organizationId, eq(customers.id, customerId)))
+    .limit(1);
+  return row != null;
 }

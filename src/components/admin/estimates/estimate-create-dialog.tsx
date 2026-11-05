@@ -22,7 +22,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { parseDollarsToCents, formatCentsExact } from '@/lib/admin/money-format';
-import { usePricebook, type PricebookItem } from '@/hooks/use-pricebook';
+import { usePricebook, useTaxRates, type PricebookItem } from '@/hooks/use-pricebook';
+import { defaultTaxBps, draftOptionTotals } from '@/lib/admin/estimate-draft';
+import {
+  EstimateCustomerPicker,
+  type PickedCustomer,
+} from '@/components/admin/estimates/estimate-customer-picker';
 
 const MANUAL = '__manual__';
 
@@ -47,6 +52,11 @@ interface EstimateCreateDialogProps {
   /** Pre-fill the link to a request/customer when launched from their detail. */
   readonly serviceRequestId?: string;
   readonly customerId?: string;
+  /**
+   * Launched from the estimates list (no customer in context): the office must
+   * pick an existing customer before the estimate can be created.
+   */
+  readonly pickCustomer?: boolean;
   readonly onCreated?: () => void;
 }
 
@@ -75,11 +85,19 @@ export function EstimateCreateDialog({
   open,
   onOpenChange,
   serviceRequestId,
-  customerId,
+  customerId: customerIdProp,
+  pickCustomer = false,
   onCreated,
 }: EstimateCreateDialogProps) {
   const { items, isLoading: pricebookLoading } = usePricebook({ limit: 20000 });
   const itemById = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
+  const { taxRates } = useTaxRates();
+  const taxBps = defaultTaxBps(taxRates);
+
+  const [pickedCustomer, setPickedCustomer] = useState<PickedCustomer | null>(null);
+  const [customerError, setCustomerError] = useState<string | null>(null);
+  const [title, setTitle] = useState('');
+  const customerId = customerIdProp ?? pickedCustomer?.id;
 
   // When the estimate is for a customer with an active membership, default the
   // per-line member-price toggle ON (the server still re-snapshots price
@@ -141,6 +159,9 @@ export function EstimateCreateDialog({
 
   function reset(): void {
     setOptions([emptyOption('Good', isMember)]);
+    setPickedCustomer(null);
+    setCustomerError(null);
+    setTitle('');
     setExpiresInDays('30');
     setSendToCustomer(false);
     setError(null);
@@ -269,6 +290,11 @@ export function EstimateCreateDialog({
   async function handleSubmit(): Promise<void> {
     setError(null);
 
+    if (pickCustomer && !customerId) {
+      setCustomerError('Pick the customer this estimate is for.');
+      return;
+    }
+
     // MAJOR-7: validate expiresInDays before submit (empty = no expiry is fine).
     if (expiresInDays !== '') {
       const days = parseInt(expiresInDays, 10);
@@ -316,6 +342,7 @@ export function EstimateCreateDialog({
         body: JSON.stringify({
           serviceRequestId,
           customerId,
+          title: title.trim() || undefined,
           expiresInDays: parseInt(expiresInDays, 10) || undefined,
           options: payloadOptions,
           sendToCustomer: customerId ? sendToCustomer : undefined,
@@ -378,8 +405,28 @@ export function EstimateCreateDialog({
             </div>
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="min-w-0 space-y-4">
             {error && <p className="text-sm text-destructive">{error}</p>}
+            {pickCustomer && (
+              <EstimateCustomerPicker
+                value={pickedCustomer}
+                onChange={(c) => {
+                  setPickedCustomer(c);
+                  if (c) setCustomerError(null);
+                }}
+                error={customerError}
+              />
+            )}
+            <div className="space-y-2">
+              <Label htmlFor="estimate-title">Title (optional)</Label>
+              <Input
+                id="estimate-title"
+                value={title}
+                maxLength={200}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="e.g. Furnace replacement"
+              />
+            </div>
             {isMember && (
               <div className="flex items-center gap-2 rounded-lg border border-success/30 bg-success-light px-3 py-2 text-sm text-success">
                 <BadgeCheck className="size-4 shrink-0" />
@@ -449,7 +496,7 @@ export function EstimateCreateDialog({
                             value={line.pricebookItemId ?? MANUAL}
                             onValueChange={(v) => pickItem(oi, li, v ?? MANUAL)}
                           >
-                            <SelectTrigger className="flex-1">
+                            <SelectTrigger className="min-w-0 flex-1">
                               <SelectValue>
                                 {(v: unknown) => linePickerLabel(v)}
                               </SelectValue>
@@ -476,12 +523,12 @@ export function EstimateCreateDialog({
                           )}
                         </div>
 
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-end gap-2">
                           {item ? (
                             // Catalog line: name + price are read-only (server-priced).
-                            <div className="flex flex-1 items-center justify-between rounded-md bg-muted/40 px-2.5 py-1.5 text-sm">
-                              <span className="truncate">{item.name}</span>
-                              <span className="font-medium tabular-nums">
+                            <div className="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-md bg-muted/40 px-2.5 py-1.5 text-sm">
+                              <span className="min-w-0 truncate">{item.name}</span>
+                              <span className="shrink-0 font-medium tabular-nums">
                                 {formatCentsExact(
                                   catalogUnitCents(item, line.useMemberPrice),
                                 )}
@@ -490,38 +537,42 @@ export function EstimateCreateDialog({
                           ) : (
                             // Manual line: free name + dollar price.
                             <>
-                              <Input
-                                value={line.name}
-                                onChange={(e) =>
-                                  updateLine(oi, li, { name: e.target.value })
-                                }
-                                placeholder="Line item"
-                                className="flex-1"
-                              />
-                              <Input
-                                value={line.unitPrice}
-                                onChange={(e) =>
-                                  updateLine(oi, li, { unitPrice: e.target.value })
-                                }
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                placeholder="0.00"
-                                aria-label="Unit price (dollars)"
-                                className="w-24"
-                              />
+                              <label className="min-w-0 flex-1 space-y-1">
+                                <span className="text-xs text-muted-foreground">Item</span>
+                                <Input
+                                  value={line.name}
+                                  onChange={(e) =>
+                                    updateLine(oi, li, { name: e.target.value })
+                                  }
+                                  placeholder="Line item"
+                                />
+                              </label>
+                              <label className="w-24 space-y-1">
+                                <span className="text-xs text-muted-foreground">Unit price</span>
+                                <Input
+                                  value={line.unitPrice}
+                                  onChange={(e) =>
+                                    updateLine(oi, li, { unitPrice: e.target.value })
+                                  }
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  placeholder="0.00"
+                                />
+                              </label>
                             </>
                           )}
-                          <Input
-                            value={line.quantity}
-                            onChange={(e) =>
-                              updateLine(oi, li, { quantity: e.target.value })
-                            }
-                            type="number"
-                            min="1"
-                            aria-label="Quantity"
-                            className="w-16"
-                          />
+                          <label className="w-16 space-y-1">
+                            <span className="text-xs text-muted-foreground">Qty</span>
+                            <Input
+                              value={line.quantity}
+                              onChange={(e) =>
+                                updateLine(oi, li, { quantity: e.target.value })
+                              }
+                              type="number"
+                              min="1"
+                            />
+                          </label>
                         </div>
 
                         {item && hasMember && (
@@ -549,6 +600,7 @@ export function EstimateCreateDialog({
                     Add line item
                   </Button>
                 </div>
+                <OptionTotalsRow totals={draftOptionTotals(opt.lineItems, itemById, taxBps)} />
               </div>
             ))}
 
@@ -601,5 +653,29 @@ export function EstimateCreateDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** Running subtotal / tax / total under each option (a preview; the server re-prices). */
+function OptionTotalsRow({
+  totals,
+}: {
+  readonly totals: { subtotalCents: number; taxCents: number; totalCents: number };
+}) {
+  return (
+    <dl className="flex flex-wrap justify-end gap-x-4 gap-y-1 border-t pt-2 text-xs text-muted-foreground tabular-nums">
+      <div className="flex gap-1">
+        <dt>Subtotal</dt>
+        <dd>{formatCentsExact(totals.subtotalCents)}</dd>
+      </div>
+      <div className="flex gap-1">
+        <dt>Tax</dt>
+        <dd>{formatCentsExact(totals.taxCents)}</dd>
+      </div>
+      <div className="flex gap-1 font-medium text-foreground">
+        <dt>Total</dt>
+        <dd>{formatCentsExact(totals.totalCents)}</dd>
+      </div>
+    </dl>
   );
 }

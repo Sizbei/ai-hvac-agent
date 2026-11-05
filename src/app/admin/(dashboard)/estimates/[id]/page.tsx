@@ -59,7 +59,20 @@ interface EstimateDetail {
   readonly syncedSource: 'fieldpulse' | null;
   readonly fieldpulseStatusName: string | null;
   readonly title: string | null;
+  readonly customerName: string | null;
+  readonly markedSoldBy: string | null;
   readonly fieldpulseData: Record<string, unknown> | null;
+}
+
+/** "Furnace replacement", else "Estimate for Trevor Nunn", else "Estimate". */
+function estimateHeading(title: string | null, customerName: string | null): string {
+  if (title) return title;
+  return customerName ? `Estimate for ${customerName}` : 'Estimate';
+}
+
+/** "Nov 5, 2026" — the same day format the invoice document uses. */
+function formatDay(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 export default function EstimateDetailPage({
@@ -75,6 +88,7 @@ export default function EstimateDetailPage({
   const [selectedOption, setSelectedOption] = useState<string>('');
   const [isMarking, setIsMarking] = useState(false);
   const [markError, setMarkError] = useState<string | null>(null);
+  const [markedNotice, setMarkedNotice] = useState<string | null>(null);
   const [isInvoicing, setIsInvoicing] = useState(false);
   const [invoiceError, setInvoiceError] = useState<string | null>(null);
   const [isRegenerating, setIsRegenerating] = useState(false);
@@ -121,6 +135,10 @@ export default function EstimateDetailPage({
       });
       const body = await res.json().catch(() => ({ success: false }));
       if (res.ok && body.success) {
+        const won = estimate?.options.find((o) => o.id === selectedOption);
+        setMarkedNotice(
+          won ? `Marked sold: ${won.name}. Generate the invoice when you're ready.` : 'Marked sold.',
+        );
         void load();
       } else {
         setMarkError(body.error?.message ?? 'Failed to mark sold');
@@ -130,7 +148,7 @@ export default function EstimateDetailPage({
     } finally {
       setIsMarking(false);
     }
-  }, [id, selectedOption, load]);
+  }, [id, selectedOption, load, estimate]);
 
   const handleGenerateInvoice = useCallback(async (): Promise<void> => {
     setIsInvoicing(true);
@@ -145,7 +163,8 @@ export default function EstimateDetailPage({
       // Idempotent: an existing invoice is returned (not an error), so on success
       // we always have an invoiceId to navigate to.
       if (res.ok && body.success && body.data?.invoiceId) {
-        router.push(`/admin/invoices/${body.data.invoiceId}`);
+        // ?created=1: the invoice page confirms what just happened.
+        router.push(`/admin/invoices/${body.data.invoiceId}?created=1`);
       } else {
         setInvoiceError(body.error?.message ?? 'Failed to generate invoice');
         setIsInvoicing(false);
@@ -220,13 +239,15 @@ export default function EstimateDetailPage({
   return (
     <PageShell>
       <PageHeader
-        title={estimate.title ?? 'Estimate'}
+        title={estimateHeading(estimate.title, estimate.customerName)}
         back={{ href: '/admin/estimates', label: 'Back to estimates' }}
-        subtitle={
-          estimate.dueDate
-            ? `Created ${new Date(estimate.createdAt).toLocaleDateString()} · Due ${new Date(estimate.dueDate).toLocaleDateString()}`
-            : `Created ${new Date(estimate.createdAt).toLocaleDateString()}`
-        }
+        subtitle={[
+          estimate.title && estimate.customerName ? estimate.customerName : null,
+          `Created ${formatDay(estimate.createdAt)}`,
+          estimate.dueDate ? `Due ${formatDay(estimate.dueDate)}` : null,
+        ]
+          .filter(Boolean)
+          .join(' · ')}
         actions={
           <>
             <EstimateStatusBadge status={estimate.status} />
@@ -349,11 +370,26 @@ export default function EstimateDetailPage({
             <CardTitle className="text-base">Approval</CardTitle>
           </CardHeader>
           <CardContent className="text-sm text-muted-foreground">
-            Signed by{' '}
-            <span className="font-medium text-foreground">
-              {estimate.signatureName ?? 'customer'}
-            </span>{' '}
-            on {new Date(estimate.signedAt).toLocaleString()}.
+            {estimate.signatureName === '(admin)' ? (
+              <>
+                Marked sold in the office
+                {estimate.markedSoldBy && (
+                  <>
+                    {' '}by{' '}
+                    <span className="font-medium text-foreground">{estimate.markedSoldBy}</span>
+                  </>
+                )}{' '}
+                on {formatDay(estimate.signedAt)}.
+              </>
+            ) : (
+              <>
+                Signed by{' '}
+                <span className="font-medium text-foreground">
+                  {estimate.signatureName ?? 'customer'}
+                </span>{' '}
+                on {formatDay(estimate.signedAt)}.
+              </>
+            )}
           </CardContent>
         </Card>
       )}
@@ -365,6 +401,11 @@ export default function EstimateDetailPage({
             <CardTitle className="text-base">Invoice</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
+            {markedNotice && (
+              <p role="status" className="text-sm text-foreground">
+                {markedNotice}
+              </p>
+            )}
             <p className="text-sm text-muted-foreground">
               Generate an invoice from the sold option to take payment.
             </p>

@@ -7,6 +7,7 @@ import {
   createEstimate,
   getEstimatePipelineStats,
   expireOverdueEstimates,
+  customerInOrg,
   type EstimateOptionInput,
 } from "@/lib/admin/estimate-queries";
 import {
@@ -33,6 +34,8 @@ const MAX_QUANTITY = 1_000_000;
 const createSchema = z.object({
   serviceRequestId: z.string().uuid().optional(),
   customerId: z.string().uuid().optional(),
+  // Optional human title ("Furnace replacement"); blank is treated as none.
+  title: z.string().trim().max(200).optional(),
   expiresInDays: z.number().int().min(1).max(365).optional(),
   // When true (and the estimate is linked to a customer with contact info), text
   // the customer the tokenized approval link via the consent-gated comms queue.
@@ -139,6 +142,15 @@ export async function POST(request: NextRequest) {
       return errorResponse("Invalid estimate", "VALIDATION_ERROR", 400);
     }
 
+    // The customer must be this org's: a foreign id would link the estimate
+    // (and a later invoice) to another tenant's customer.
+    if (
+      parsed.data.customerId &&
+      !(await customerInOrg(session.organizationId, parsed.data.customerId))
+    ) {
+      return errorResponse("That customer couldn't be found.", "VALIDATION_ERROR", 400);
+    }
+
     // Resolve every line AUTHORITATIVELY server-side. Catalog lines (those with a
     // pricebookItemId) take name/price/cost from the tenant-scoped pricebook item
     // — a client-sent unitPriceCents can NEVER override a catalog price. Manual
@@ -222,6 +234,7 @@ export async function POST(request: NextRequest) {
       {
         serviceRequestId: parsed.data.serviceRequestId ?? null,
         customerId: parsed.data.customerId ?? null,
+        title: parsed.data.title ? parsed.data.title : null,
         taxBps,
         options: resolvedOptions,
         expiresInDays: parsed.data.expiresInDays,

@@ -143,8 +143,11 @@ export function InvoiceDetailClient({
   id,
   canRefund,
   cardPaymentsEnabled,
+  justCreated = false,
 }: {
   readonly id: string;
+  /** Arrived from the estimate's Generate invoice: say the invoice was created. */
+  readonly justCreated?: boolean;
   readonly canRefund: boolean;
   /** False while the payment provider is the mock (card payments off). */
   readonly cardPaymentsEnabled: boolean;
@@ -461,6 +464,10 @@ export function InvoiceDetailClient({
           </>
         }
       />
+
+      {justCreated && invoice.estimateId && (
+        <InfoBanner>Invoice created from the estimate.</InfoBanner>
+      )}
 
       {/* ── Synced source banner ── */}
       {sourceLabel && (

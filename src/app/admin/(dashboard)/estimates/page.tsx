@@ -99,7 +99,7 @@ function KpiBand({ stats }: { stats: EstimatePipelineStats | null }) {
         intent="info"
         label="Open pipeline"
         value={formatCentsExact(s?.openCents ?? 0)}
-        sublabel={`${s?.openCount ?? 0} open estimates`}
+        sublabel={`${s?.openCount ?? 0} open ${(s?.openCount ?? 0) === 1 ? 'estimate' : 'estimates'}`}
       />
       <StatCard
         icon={Clock}
@@ -340,9 +340,14 @@ export default function EstimatesPage() {
                       {/* Customer (bold) + SyncPill */}
                       <td className="px-4 py-3" onClick={toggle}>
                         <div className="flex flex-col items-start gap-0.5">
-                          <span className="font-semibold">
-                            {est.customerName ?? (est.customerId ? 'Customer' : '—')}
-                          </span>
+                          {/* One click to the estimate (the row itself expands). */}
+                          <Link
+                            href={`/admin/estimates/${est.id}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="font-semibold hover:underline focus-visible:underline focus-visible:outline-none"
+                          >
+                            {est.customerName ?? (est.customerId ? 'Customer' : 'No customer')}
+                          </Link>
                           {est.syncedSource === 'fieldpulse' && (
                             <SyncPill source={est.syncedSource} size="md" />
                           )}
@@ -486,6 +491,7 @@ export default function EstimatesPage() {
       <EstimateCreateDialog
         open={createOpen}
         onOpenChange={setCreateOpen}
+        pickCustomer
         onCreated={() => {
           setPage(1);
           void refetch();

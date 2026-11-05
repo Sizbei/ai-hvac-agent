@@ -11,10 +11,14 @@ import { cardPaymentsEnabled } from '@/lib/payments/card-enabled';
  */
 export default async function InvoiceDetailPage({
   params,
+  searchParams,
 }: {
   readonly params: Promise<{ id: string }>;
+  readonly searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { id } = await params;
+  // Set by the estimate page's Generate invoice so this page can confirm it.
+  const justCreated = (await searchParams).created === '1';
   const session = await getAdminSession();
   const canRefund = session ? isSuperAdmin(session) : false;
 
@@ -23,6 +27,7 @@ export default async function InvoiceDetailPage({
       id={id}
       canRefund={canRefund}
       cardPaymentsEnabled={cardPaymentsEnabled()}
+      justCreated={justCreated}
     />
   );
 }
