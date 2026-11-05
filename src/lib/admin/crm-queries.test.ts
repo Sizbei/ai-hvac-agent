@@ -196,6 +196,7 @@ import {
   upsertCustomerByContact,
   deleteCustomer,
   archiveCustomer,
+  unarchiveCustomer,
   updateCustomerContact,
   completeFollowUp,
 } from './crm-queries';
@@ -510,6 +511,27 @@ describe('archiveCustomer', () => {
     selectQueue.push([{ id: 'c1', archivedAt: new Date() }]); // already archived
     const result = await archiveCustomer(ORG, 'c1', { userId: 'admin-1' });
     expect(result).toBe(true);
+    expect(batchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('unarchiveCustomer', () => {
+  it('returns false and does not write when the customer is not in the org', async () => {
+    selectQueue.push([]);
+    expect(await unarchiveCustomer(ORG, 'missing-id')).toBe(false);
+    expect(batchMock).not.toHaveBeenCalled();
+  });
+
+  it('clears archived_at and writes one audit row in one batch', async () => {
+    selectQueue.push([{ id: 'c1', archivedAt: new Date() }]);
+    expect(await unarchiveCustomer(ORG, 'c1', { userId: 'admin-1' })).toBe(true);
+    expect(batchMock).toHaveBeenCalledTimes(1);
+    expect(batchMock.mock.calls[0][0] as unknown[]).toHaveLength(2);
+  });
+
+  it('is a no-op when the customer is already active', async () => {
+    selectQueue.push([{ id: 'c1', archivedAt: null }]);
+    expect(await unarchiveCustomer(ORG, 'c1')).toBe(true);
     expect(batchMock).not.toHaveBeenCalled();
   });
 });

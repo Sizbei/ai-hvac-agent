@@ -10,6 +10,7 @@ import {
   completeFollowUp,
   deleteCustomer,
   archiveCustomer,
+  unarchiveCustomer,
 } from "@/lib/admin/crm-queries";
 import { isUuid } from "@/lib/validation/uuid";
 import {
@@ -18,6 +19,7 @@ import {
   isEquipmentType,
 } from "@/lib/admin/crm-equipment-queries";
 import { logAudit } from "@/lib/admin/audit";
+import { phoneInputError } from "@/lib/admin/customer-validation";
 import { successResponse, errorResponse, readJsonBody } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
@@ -337,6 +339,16 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
             typeof body.phone === "string" && body.phone.trim().length > 0
               ? body.phone.trim()
               : null;
+          // Only a CHANGED number is validated, so an unrelated edit to a
+          // customer with a legacy short number still saves.
+          const digits = (v: string | null) => (v ?? "").replace(/\D/g, "");
+          const phoneError =
+            digits(patch.phone) !== digits(owned.phone)
+              ? phoneInputError(patch.phone)
+              : null;
+          if (phoneError) {
+            return errorResponse(phoneError, "VALIDATION_ERROR", 400);
+          }
         }
         if ("email" in body) {
           patch.email =
@@ -398,6 +410,17 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           ipAddress,
         });
         if (!archived) {
+          return errorResponse("Customer not found", "NOT_FOUND", 404);
+        }
+        return successResponse({ ok: true });
+      }
+
+      case "unarchive": {
+        const restored = await unarchiveCustomer(session.organizationId, id, {
+          userId: session.userId,
+          ipAddress,
+        });
+        if (!restored) {
           return errorResponse("Customer not found", "NOT_FOUND", 404);
         }
         return successResponse({ ok: true });

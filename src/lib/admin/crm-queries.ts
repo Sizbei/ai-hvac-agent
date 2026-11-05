@@ -1229,6 +1229,83 @@ export async function archiveCustomer(
 }
 
 /**
+ * The native customer a create clashed with on email or phone (the per-org
+ * native unique indexes), so the 409 can link to it — including an archived
+ * row the default list hides. Email wins over phone, like the match order.
+ * Returns ids and the archived flag only; never contact values.
+ */
+export async function findNativeContactClash(
+  organizationId: string,
+  input: { readonly email: string | null; readonly phone: string | null },
+): Promise<{ readonly id: string; readonly archived: boolean } | null> {
+  const { emailHash, phoneHash } = computeContactHashes(input);
+  const matchers: SQL[] = [];
+  if (emailHash) matchers.push(eq(customers.emailHash, emailHash));
+  if (phoneHash) matchers.push(eq(customers.phoneHash, phoneHash));
+  if (matchers.length === 0) return null;
+  const rows = await db
+    .select({
+      id: customers.id,
+      archivedAt: customers.archivedAt,
+      emailMatched: emailHash
+        ? sql<boolean>`${customers.emailHash} = ${emailHash}`
+        : sql<boolean>`false`,
+    })
+    .from(customers)
+    .where(
+      withTenant(
+        customers,
+        organizationId,
+        isNull(customers.fieldpulseCustomerId),
+        isNull(customers.anonymizedAt),
+        or(...matchers) ?? sql`false`,
+      ),
+    )
+    .limit(2);
+  const pick = rows.find((r) => r.emailMatched) ?? rows[0];
+  return pick ? { id: pick.id, archived: pick.archivedAt !== null } : null;
+}
+
+/**
+ * Restores an archived customer (clears archived_at) so it shows in the
+ * default list again. Mirror of {@link archiveCustomer}: idempotent on an
+ * active row (returns true, no write), false only when the customer isn't in
+ * the org. An erased row stays erased; unarchiving only un-hides it.
+ */
+export async function unarchiveCustomer(
+  organizationId: string,
+  customerId: string,
+  actor?: { readonly userId?: string | null; readonly ipAddress?: string | null },
+): Promise<boolean> {
+  const [existing] = await db
+    .select({ id: customers.id, archivedAt: customers.archivedAt })
+    .from(customers)
+    .where(withTenant(customers, organizationId, eq(customers.id, customerId)));
+
+  if (!existing) return false;
+  if (existing.archivedAt === null) return true;
+
+  await db.batch([
+    db
+      .update(customers)
+      .set({ archivedAt: null, updatedAt: sql`now()` })
+      .where(
+        withTenant(customers, organizationId, eq(customers.id, customerId)),
+      ),
+    db.insert(auditLog).values({
+      organizationId,
+      userId: actor?.userId ?? null,
+      action: "customer_unarchived",
+      entity: "customers",
+      entityId: customerId,
+      ipAddress: actor?.ipAddress ?? null,
+    }),
+  ]);
+
+  return true;
+}
+
+/**
  * Updates a customer's contact/property fields within an org.
  *
  * PII columns are re-encrypted (random IV) and, when email/phone change, the

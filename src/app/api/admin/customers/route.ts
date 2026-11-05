@@ -1,6 +1,11 @@
 import { NextRequest } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
-import { getCustomers, createCustomer } from "@/lib/admin/crm-queries";
+import {
+  getCustomers,
+  createCustomer,
+  findNativeContactClash,
+} from "@/lib/admin/crm-queries";
+import { phoneInputError } from "@/lib/admin/customer-validation";
 import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse, readJsonBody } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
@@ -52,12 +57,15 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  let organizationId: string | null = null;
+  let clash: { email: string | null; phone: string | null } | null = null;
   try {
     const session = await getAdminSession();
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
 
+    organizationId = session.organizationId;
     const rateCheck = slidingWindow(
       `admin:customers-create:${session.userId}`,
       RATE_LIMITS.adminMutation.maxRequests,
@@ -81,6 +89,14 @@ export async function POST(request: NextRequest) {
       return errorResponse("Name must be 200 characters or fewer", "VALIDATION_ERROR", 400);
     }
 
+    const phone = typeof body.phone === "string" ? body.phone : undefined;
+    const email = typeof body.email === "string" ? body.email : undefined;
+    const phoneError = phoneInputError(phone);
+    if (phoneError) {
+      return errorResponse(phoneError, "VALIDATION_ERROR", 400);
+    }
+    clash = { email: email ?? null, phone: phone ?? null };
+
     const rawSqft = body.propertySqft;
     const propertySqft =
       typeof rawSqft === "number" &&
@@ -92,8 +108,8 @@ export async function POST(request: NextRequest) {
 
     const customer = await createCustomer(session.organizationId, {
       name,
-      phone: typeof body.phone === "string" ? body.phone : undefined,
-      email: typeof body.email === "string" ? body.email : undefined,
+      phone,
+      email,
       address: typeof body.address === "string" ? body.address : undefined,
       propertyType:
         typeof body.propertyType === "string" ? body.propertyType : undefined,
@@ -120,11 +136,20 @@ export async function POST(request: NextRequest) {
   } catch (error: unknown) {
     // A unique-index conflict means a customer with this email or phone already
     // exists in the org — report it as a clean 409 instead of a 500.
+    // The details carry the existing row's id + archived flag (no PII) so the
+    // form can link to it — an archived match is otherwise unfindable.
     if (isUniqueViolation(error)) {
+      const existing =
+        organizationId && clash
+          ? await findNativeContactClash(organizationId, clash).catch(() => null)
+          : null;
       return errorResponse(
-        "A customer with this email or phone already exists",
+        existing?.archived
+          ? "An archived customer already uses this email or phone"
+          : "A customer with this email or phone already exists",
         "CUSTOMER_ALREADY_EXISTS",
         409,
+        existing ? { customerId: existing.id, archived: existing.archived } : undefined,
       );
     }
     logger.error({ error }, "Failed to create customer");

@@ -1,11 +1,21 @@
 'use client';
 
 import { useState, useCallback, useRef } from 'react';
+import Link from 'next/link';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { phoneInputError, saveErrorMessage } from '@/lib/admin/customer-validation';
+
+/** The existing customer a duplicate email/phone clashed with (ids only). */
+interface ExistingCustomer {
+  readonly customerId: string;
+  readonly archived: boolean;
+}
+
+const SAVE_FAILED = "Couldn't save the customer. Please try again.";
 
 interface CustomerFormDialogProps {
   readonly open: boolean;
@@ -25,13 +35,29 @@ export function CustomerFormDialog({
   const [propertyType, setPropertyType] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [existing, setExisting] = useState<ExistingCustomer | null>(null);
   const submittingRef = useRef(false);
+
+  // Editing any field clears the previous attempt's error so it can't sit next
+  // to a field that is already fixed.
+  const edit =
+    (set: (v: string) => void) =>
+    (e: React.ChangeEvent<HTMLInputElement>): void => {
+      set(e.target.value);
+      setError(null);
+      setExisting(null);
+    };
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
       if (!name.trim()) {
-        setError('Name is required');
+        setError('Name is required.');
+        return;
+      }
+      const phoneError = phoneInputError(phone);
+      if (phoneError) {
+        setError(phoneError);
         return;
       }
       if (submittingRef.current) return;
@@ -39,6 +65,7 @@ export function CustomerFormDialog({
 
       setIsSubmitting(true);
       setError(null);
+      setExisting(null);
 
       try {
         const res = await fetch('/api/admin/customers', {
@@ -53,8 +80,8 @@ export function CustomerFormDialog({
           }),
         });
 
-        const json = await res.json();
-        if (json.success) {
+        const json = await res.json().catch(() => null);
+        if (res.ok && json?.success) {
           setName('');
           setPhone('');
           setEmail('');
@@ -62,10 +89,14 @@ export function CustomerFormDialog({
           setPropertyType('');
           onSuccess();
         } else {
-          setError(json.error?.message ?? 'Failed to create customer');
+          setError(saveErrorMessage(res.status, json, SAVE_FAILED));
+          const details = json?.error?.details as ExistingCustomer | undefined;
+          if (res.status === 409 && typeof details?.customerId === 'string') {
+            setExisting(details);
+          }
         }
       } catch {
-        setError('Network error');
+        setError(SAVE_FAILED);
       } finally {
         setIsSubmitting(false);
         submittingRef.current = false;
@@ -84,7 +115,19 @@ export function CustomerFormDialog({
         <form onSubmit={handleSubmit} className="space-y-4">
           {error && (
             <Alert variant="destructive">
-              <AlertDescription>{error}</AlertDescription>
+              <AlertDescription>
+                {error}
+                {existing && (
+                  <Link
+                    href={`/admin/customers/${existing.customerId}`}
+                    className="mt-1 block font-medium text-link underline-offset-2 hover:underline"
+                  >
+                    {existing.archived
+                      ? 'Open the archived customer'
+                      : 'Open the existing customer'}
+                  </Link>
+                )}
+              </AlertDescription>
             </Alert>
           )}
 
@@ -93,7 +136,7 @@ export function CustomerFormDialog({
             <Input
               id="name"
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={edit(setName)}
               placeholder="John Smith"
             />
           </div>
@@ -103,8 +146,9 @@ export function CustomerFormDialog({
             <Input
               id="phone"
               value={phone}
-              onChange={(e) => setPhone(e.target.value)}
+              onChange={edit(setPhone)}
               placeholder="(555) 123-4567"
+              inputMode="tel"
             />
           </div>
 
@@ -114,7 +158,7 @@ export function CustomerFormDialog({
               id="email"
               type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={edit(setEmail)}
               placeholder="john@example.com"
             />
           </div>
@@ -124,7 +168,7 @@ export function CustomerFormDialog({
             <Input
               id="address"
               value={address}
-              onChange={(e) => setAddress(e.target.value)}
+              onChange={edit(setAddress)}
               placeholder="123 Main St, City, ST 12345"
             />
           </div>
@@ -134,7 +178,7 @@ export function CustomerFormDialog({
             <Input
               id="propertyType"
               value={propertyType}
-              onChange={(e) => setPropertyType(e.target.value)}
+              onChange={edit(setPropertyType)}
               placeholder="Residential, Commercial, etc."
             />
           </div>

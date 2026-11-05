@@ -6,6 +6,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { phoneInputError, saveErrorMessage } from '@/lib/admin/customer-validation';
+
+const SAVE_FAILED = "Couldn't save the customer. Please try again.";
+const digitsOf = (v: string | null): string => (v ?? '').replace(/\D/g, '');
 
 interface CustomerEditValues {
   readonly name: string | null;
@@ -60,11 +64,27 @@ export function CustomerEditDialog({
     }
   }
 
+  // Editing a field clears the previous attempt's error.
+  const edit =
+    (set: (v: string) => void) =>
+    (e: React.ChangeEvent<HTMLInputElement>): void => {
+      set(e.target.value);
+      setError(null);
+    };
+
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
       if (!name.trim()) {
-        setError('Name is required');
+        setError('Name is required.');
+        return;
+      }
+      // Only a changed number is checked, so a legacy short number on file
+      // doesn't block an unrelated edit (the API applies the same rule).
+      const phoneError =
+        digitsOf(phone) !== digitsOf(initial.phone) ? phoneInputError(phone) : null;
+      if (phoneError) {
+        setError(phoneError);
         return;
       }
 
@@ -99,15 +119,15 @@ export function CustomerEditDialog({
         if (res.ok && json.success) {
           onSuccess();
         } else {
-          setError(json.error?.message ?? 'Failed to update customer');
+          setError(saveErrorMessage(res.status, json, SAVE_FAILED));
         }
       } catch {
-        setError('Network error');
+        setError(SAVE_FAILED);
       } finally {
         setIsSubmitting(false);
       }
     },
-    [customerId, name, phone, email, address, propertyType, propertySqft, onSuccess],
+    [customerId, name, phone, email, address, propertyType, propertySqft, onSuccess, initial.phone],
   );
 
   return (
@@ -129,7 +149,7 @@ export function CustomerEditDialog({
             <Input
               id="edit-name"
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={edit(setName)}
               placeholder="Jane Doe"
             />
           </div>
@@ -140,8 +160,9 @@ export function CustomerEditDialog({
               <Input
                 id="edit-phone"
                 value={phone}
-                onChange={(e) => setPhone(e.target.value)}
+                onChange={edit(setPhone)}
                 placeholder="(555) 010-0100"
+                inputMode="tel"
               />
             </div>
             <div className="space-y-2">
@@ -150,7 +171,7 @@ export function CustomerEditDialog({
                 id="edit-email"
                 type="email"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={edit(setEmail)}
                 placeholder="jane@example.com"
               />
             </div>
@@ -161,7 +182,7 @@ export function CustomerEditDialog({
             <Input
               id="edit-address"
               value={address}
-              onChange={(e) => setAddress(e.target.value)}
+              onChange={edit(setAddress)}
               placeholder="123 Main St, Springfield"
             />
           </div>
@@ -172,7 +193,7 @@ export function CustomerEditDialog({
               <Input
                 id="edit-property-type"
                 value={propertyType}
-                onChange={(e) => setPropertyType(e.target.value)}
+                onChange={edit(setPropertyType)}
                 placeholder="Single-family, Condo, etc."
               />
             </div>
@@ -182,7 +203,7 @@ export function CustomerEditDialog({
                 id="edit-sqft"
                 inputMode="numeric"
                 value={propertySqft}
-                onChange={(e) => setPropertySqft(e.target.value)}
+                onChange={edit(setPropertySqft)}
                 placeholder="2000"
               />
             </div>

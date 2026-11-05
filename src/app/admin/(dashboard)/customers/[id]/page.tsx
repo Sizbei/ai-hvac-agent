@@ -14,6 +14,9 @@ import {
   Trash2,
   Pencil,
   Archive,
+  ArchiveRestore,
+  Phone,
+  Mail,
   ShieldX,
   MoreHorizontal,
   User,
@@ -59,6 +62,13 @@ import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
 import { SyncPill } from '@/components/admin/sync-pill';
 import type { EquipmentRecord } from '@/lib/admin/crm-types';
 import { formatCentsExact } from '@/lib/admin/money-format';
+import {
+  equipmentTypeLabel,
+  humanizeCode,
+  issueTypeLabel,
+  noteTypeLabel,
+} from '@/lib/admin/display-labels';
+import { lastSeenLabel } from '@/lib/admin/customer-display';
 
 /** Another row in this org sharing the target's email or phone hash — id +
  * server-side decrypted name only (customer-identity SPEC §5.1 disclosure). */
@@ -70,15 +80,6 @@ interface ContactSibling {
 /** Bullet list caps here; the rest collapse into a single "+N more…" row. */
 const MAX_SIBLINGS_SHOWN = 8;
 
-const EQUIPMENT_LABELS: Record<string, string> = {
-  ac: 'Air Conditioner',
-  furnace: 'Furnace',
-  heat_pump: 'Heat Pump',
-  boiler: 'Boiler',
-  mini_split: 'Mini Split',
-  thermostat: 'Thermostat',
-  other: 'Other',
-};
 
 /**
  * Ruled definition row — 140 px label, value right-aligned, one hairline per
@@ -118,13 +119,13 @@ function formatDate(iso: string): string {
   });
 }
 
-/** Warranty status badge text from the tracked expiry: "EXPIRED" once past,
+/** Warranty status badge text from the tracked expiry: "Expired" once past,
  * otherwise "Expires in N days" (the column the reminder sweep keys off). */
 function warrantyStatusLabel(iso: string): string {
   const days = Math.ceil(
     (new Date(iso).getTime() - Date.now()) / (24 * 60 * 60 * 1000),
   );
-  if (days < 0) return 'EXPIRED';
+  if (days < 0) return 'Expired';
   if (days === 0) return 'Expires today';
   return `Expires in ${days} day${days === 1 ? '' : 's'}`;
 }
@@ -161,10 +162,14 @@ export default function CustomerDetailPage({
   const [eraseSiblings, setEraseSiblings] = useState<readonly ContactSibling[]>([]);
   const [isLoadingSiblings, setIsLoadingSiblings] = useState(false);
   const [completingId, setCompletingId] = useState<string | null>(null);
+  const [followUpError, setFollowUpError] = useState<string | null>(null);
+  const [isUnarchiving, setIsUnarchiving] = useState(false);
+  const [unarchiveError, setUnarchiveError] = useState<string | null>(null);
 
   const handleCompleteFollowUp = useCallback(
     async (followUpId: string): Promise<void> => {
       setCompletingId(followUpId);
+      setFollowUpError(null);
       try {
         const res = await fetch(`/api/admin/customers/${id}`, {
           method: 'POST',
@@ -177,9 +182,13 @@ export default function CustomerDetailPage({
         const json = await res.json().catch(() => ({ success: false }));
         if (res.ok && json.success) {
           refetch();
+        } else {
+          setFollowUpError("Couldn't complete the follow-up. Please try again.");
+          // A 404 means it was already completed elsewhere — show that state.
+          if (res.status === 404) refetch();
         }
       } catch {
-        // Surfaced by the unchanged status on refetch; no destructive failure.
+        setFollowUpError("Couldn't complete the follow-up. Please try again.");
       } finally {
         setCompletingId(null);
       }
@@ -207,10 +216,14 @@ export default function CustomerDetailPage({
         return;
       }
 
-      setDeleteError(json.error?.message ?? 'Failed to delete customer');
+      setDeleteError(
+        res.status === 403
+          ? 'Only a super admin can delete customers.'
+          : "Couldn't delete the customer. Please try again.",
+      );
       setIsDeleting(false);
     } catch {
-      setDeleteError('Network error');
+      setDeleteError("Couldn't delete the customer. Please try again.");
       setIsDeleting(false);
     }
   }, [id, router]);
@@ -231,19 +244,43 @@ export default function CustomerDetailPage({
       }));
 
       if (res.ok && json.success) {
-        // Archived customers drop out of the list — leave disabled and navigate
-        // (unmounts this page) so a second archive can't fire.
-        router.push('/admin/customers');
+        // Stay on the profile: the "Archived" banner confirms it and offers
+        // the undo.
+        setShowArchiveConfirm(false);
+        setIsArchiving(false);
+        refetch();
         return;
       }
 
-      setArchiveError(json.error?.message ?? 'Failed to archive customer');
+      setArchiveError("Couldn't archive the customer. Please try again.");
       setIsArchiving(false);
     } catch {
-      setArchiveError('Network error');
+      setArchiveError("Couldn't archive the customer. Please try again.");
       setIsArchiving(false);
     }
-  }, [id, router]);
+  }, [id, refetch]);
+
+  const handleUnarchive = useCallback(async (): Promise<void> => {
+    setIsUnarchiving(true);
+    setUnarchiveError(null);
+    try {
+      const res = await fetch(`/api/admin/customers/${id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'unarchive' }),
+      });
+      const json = await res.json().catch(() => ({ success: false }));
+      if (res.ok && json.success) {
+        refetch();
+      } else {
+        setUnarchiveError("Couldn't unarchive the customer. Please try again.");
+      }
+    } catch {
+      setUnarchiveError("Couldn't unarchive the customer. Please try again.");
+    } finally {
+      setIsUnarchiving(false);
+    }
+  }, [id, refetch]);
 
   // Opens the erase confirmation and loads the sibling disclosure (SPEC §5.1):
   // other rows in the org sharing this contact's email or phone. Informational
@@ -288,10 +325,14 @@ export default function CustomerDetailPage({
         return;
       }
 
-      setEraseError(json.error?.message ?? 'Failed to erase customer data');
+      setEraseError(
+        res.status === 403
+          ? 'Only a super admin can erase customer data.'
+          : "Couldn't erase the customer's data. Please try again.",
+      );
       setIsErasing(false);
     } catch {
-      setEraseError('Network error');
+      setEraseError("Couldn't erase the customer's data. Please try again.");
       setIsErasing(false);
     }
   }, [id, router]);
@@ -318,12 +359,10 @@ export default function CustomerDetailPage({
         setDeletingEquipment(null);
         refetch();
       } else {
-        setEquipmentDeleteError(
-          json.error?.message ?? 'Failed to delete equipment',
-        );
+        setEquipmentDeleteError("Couldn't delete the equipment. Please try again.");
       }
     } catch {
-      setEquipmentDeleteError('Network error');
+      setEquipmentDeleteError("Couldn't delete the equipment. Please try again.");
     } finally {
       setIsDeletingEquipment(false);
     }
@@ -387,7 +426,11 @@ export default function CustomerDetailPage({
       <PageHeader
         back={{ href: '/admin/customers', label: 'Customers' }}
         title={customer.name ?? 'Unknown customer'}
-        subtitle={`Customer since ${formatDate(customer.createdAt)}`}
+        subtitle={`Customer since ${formatDate(customer.createdAt)} · ${
+          customer.lastServiceDate
+            ? `Last service ${lastSeenLabel(customer.lastServiceDate)}`
+            : 'No completed service yet'
+        }`}
         actions={
           <>
             {/* Type + tax-exempt badges */}
@@ -406,6 +449,24 @@ export default function CustomerDetailPage({
                 Tax-exempt
               </Badge>
             )}
+            {customer.phone && (
+              <a
+                href={`tel:${customer.phone}`}
+                className="inline-flex h-[30px] items-center gap-1.5 rounded-[4.8px] border border-input bg-surface-raised px-2.5 text-sm font-medium transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <Phone className="size-4" />
+                Call
+              </a>
+            )}
+            {customer.email && (
+              <a
+                href={`mailto:${customer.email}`}
+                className="inline-flex h-[30px] items-center gap-1.5 rounded-[4.8px] border border-input bg-surface-raised px-2.5 text-sm font-medium transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <Mail className="size-4" />
+                Email
+              </a>
+            )}
             <Button variant="outline" onClick={() => setShowEditForm(true)}>
               <Pencil className="size-4" />
               Edit
@@ -419,15 +480,27 @@ export default function CustomerDetailPage({
                 <MoreHorizontal className="size-4" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                  onClick={() => {
-                    setArchiveError(null);
-                    setShowArchiveConfirm(true);
-                  }}
-                >
-                  <Archive className="size-4" />
-                  Archive customer
-                </DropdownMenuItem>
+                {customer.archivedAt ? (
+                  <DropdownMenuItem
+                    disabled={isUnarchiving}
+                    onClick={() => {
+                      void handleUnarchive();
+                    }}
+                  >
+                    <ArchiveRestore className="size-4" />
+                    Unarchive customer
+                  </DropdownMenuItem>
+                ) : (
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setArchiveError(null);
+                      setShowArchiveConfirm(true);
+                    }}
+                  >
+                    <Archive className="size-4" />
+                    Archive customer
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   className="text-destructive focus:text-destructive"
@@ -454,12 +527,36 @@ export default function CustomerDetailPage({
         }
       />
 
+      {customer.archivedAt && (
+        <div
+          role="status"
+          className="flex flex-wrap items-center gap-3 rounded-md border border-warning/30 bg-warning-light px-3 py-2.5 text-[13px] leading-5"
+        >
+          <Archive className="size-4 shrink-0 text-warning" aria-hidden />
+          <div className="min-w-[12rem] flex-1">
+            <p className="font-medium text-foreground">
+              Archived on {formatDate(customer.archivedAt)}
+            </p>
+            <p className={unarchiveError ? 'text-destructive' : 'text-muted-foreground'}>
+              {unarchiveError ??
+                'Hidden from the customer list. Their records are kept; unarchive to bring them back.'}
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={isUnarchiving}
+            onClick={() => {
+              void handleUnarchive();
+            }}
+          >
+            <ArchiveRestore className="size-3.5" />
+            {isUnarchiving ? 'Unarchiving…' : 'Unarchive'}
+          </Button>
+        </div>
+      )}
+
       <TagChipPicker entity="customer" entityId={customer.id} />
-
-      {/* Service locations */}
-      <LocationsSection customerId={id} />
-
-      <ContactsSection customerId={id} />
 
       {/* Contact info */}
       <SectionCard
@@ -467,15 +564,34 @@ export default function CustomerDetailPage({
         icon={customer.customerType === 'commercial' ? Building2 : User}
       >
         <dl className="flex flex-col">
-          {customer.phone && <DetailRow label="Phone" value={customer.phone} mono />}
-          {customer.email && <DetailRow label="Email" value={customer.email} />}
+          {customer.phone && (
+            <DetailRow
+              label="Phone"
+              value={
+                <a href={`tel:${customer.phone}`} className="text-link hover:underline">
+                  {customer.phone}
+                </a>
+              }
+              mono
+            />
+          )}
+          {customer.email && (
+            <DetailRow
+              label="Email"
+              value={
+                <a href={`mailto:${customer.email}`} className="text-link hover:underline">
+                  {customer.email}
+                </a>
+              }
+            />
+          )}
           {customer.address && (
             <DetailRow label="Service address" value={customer.address} />
           )}
           {customer.propertyType && (
             <DetailRow
               label="Property type"
-              value={`${customer.propertyType}${customer.propertySqft ? ` (${customer.propertySqft} sq ft)` : ''}`}
+              value={`${humanizeCode(customer.propertyType)}${customer.propertySqft ? ` (${customer.propertySqft.toLocaleString('en-US')} sq ft)` : ''}`}
             />
           )}
           {/* Billing address — only when present and different from service address */}
@@ -484,6 +600,16 @@ export default function CustomerDetailPage({
           )}
         </dl>
       </SectionCard>
+
+      {/* Bookings — real service_requests (service_history is empty for imports).
+          High on the page: "what did you do last time?" is the first question
+          on a call. */}
+      <CustomerBookingsSection customerId={id} />
+
+      {/* Service locations (hidden when none are recorded) */}
+      <LocationsSection customerId={id} />
+
+      <ContactsSection customerId={id} />
 
       {/* FieldPulse details — collapsed panel (custom fields + structured data) */}
       <FieldpulseDetails
@@ -526,7 +652,7 @@ export default function CustomerDetailPage({
               >
                 <div className="flex items-center justify-between gap-2">
                   <p className="flex items-center gap-1.5 text-sm font-medium">
-                    {EQUIPMENT_LABELS[eq.equipmentType] ?? eq.equipmentType}
+                    {equipmentTypeLabel(eq.equipmentType)}
                     {eq.fieldpulseAssetId && (
                       <SyncPill source="fieldpulse" size="md" />
                     )}
@@ -572,14 +698,23 @@ export default function CustomerDetailPage({
                     Location: {eq.locationInHome}
                   </p>
                 )}
+                {(eq.installDate || eq.warrantyExpiration) && (
+                  <p className="text-xs text-muted-foreground">
+                    {[
+                      eq.installDate ? `Installed ${formatDate(eq.installDate)}` : null,
+                      eq.warrantyExpiration
+                        ? `Warranty until ${formatDate(eq.warrantyExpiration)}`
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </p>
+                )}
               </div>
             ))}
           </div>
         )}
       </SectionCard>
-
-      {/* Bookings — real service_requests (service_history is empty for imports) */}
-      <CustomerBookingsSection customerId={id} />
 
       {/* Service history (native manual work logs; hidden when empty — imports
           have no native history; real history is in the Bookings card above) */}
@@ -598,7 +733,7 @@ export default function CustomerDetailPage({
                 </div>
                 {h.issueType && (
                   <p className="mt-1 text-xs text-muted-foreground">
-                    {h.issueType.replace(/_/g, ' ')}
+                    {issueTypeLabel(h.issueType)}
                   </p>
                 )}
                 {h.workPerformed && (
@@ -642,7 +777,7 @@ export default function CustomerDetailPage({
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5">
                     <Badge variant="outline" className="text-xs">
-                      {n.noteType}
+                      {noteTypeLabel(n.noteType)}
                     </Badge>
                     {n.fieldpulseCommentId && (
                       <SyncPill source="fieldpulse" size="md" />
@@ -672,6 +807,11 @@ export default function CustomerDetailPage({
           </Button>
         }
       >
+        {followUpError && (
+          <p role="alert" className="mb-2 text-sm text-destructive">
+            {followUpError}
+          </p>
+        )}
         {customer.followUps.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             No follow-ups scheduled.
@@ -679,13 +819,13 @@ export default function CustomerDetailPage({
         ) : (
           <div className="space-y-3">
             {customer.followUps.map((f) => (
-              <div key={f.id} className="flex items-center gap-3 rounded-lg border bg-muted/20 p-3">
+              <div key={f.id} className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/20 p-3">
                 {f.status === 'completed' ? (
                   <CheckCircle className="size-4 text-success" />
                 ) : (
                   <Clock className="size-4 text-muted-foreground" />
                 )}
-                <div className="flex-1">
+                <div className="min-w-[10rem] flex-1">
                   <p className="text-sm">{f.reason}</p>
                   <p className="text-xs text-muted-foreground">
                     Due: {formatDate(f.dueDate)}
