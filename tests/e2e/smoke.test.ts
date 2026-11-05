@@ -211,6 +211,7 @@ vi.mock('@/lib/rate-limit', () => ({
   RATE_LIMITS: {
     chat: { maxRequests: 20, windowMs: 60000 },
     sessionCreate: { maxRequests: 5, windowMs: 60000 },
+    chatSessionCreate: { maxRequests: 15, windowMs: 60000 },
     sessionAction: { maxRequests: 10, windowMs: 60000 },
     adminMutation: { maxRequests: 30, windowMs: 60000 },
     adminRead: { maxRequests: 60, windowMs: 60000 },

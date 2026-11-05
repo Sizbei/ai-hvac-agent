@@ -16,6 +16,10 @@ interface EscalationDialogProps {
   readonly onOpenChange: (open: boolean) => void;
   readonly onConfirm: () => void;
   readonly isLoading?: boolean;
+  /** The org's phone as displayed, with its `tel:` href — omitted when the
+   * org has none (never another company's number). */
+  readonly phone?: string | null;
+  readonly callHref?: string | null;
 }
 
 export function EscalationDialog({
@@ -23,24 +27,28 @@ export function EscalationDialog({
   onOpenChange,
   onConfirm,
   isLoading = false,
+  phone = null,
+  callHref = null,
 }: EscalationDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Talk to a Human</DialogTitle>
+          <DialogTitle>Talk to a human</DialogTitle>
           <DialogDescription>
-            We&apos;ll flag this conversation for a human, who will reach out to
-            confirm the details. For an emergency, call us any time, day or
-            night.
+            We&apos;ll flag this conversation for a person on our team, who
+            will reach out to confirm the details.
+            {phone ? ' For an emergency, call us any time, day or night.' : ''}
           </DialogDescription>
         </DialogHeader>
-        <div className="flex items-center gap-2 rounded-lg bg-muted p-3">
-          <Phone className="size-4 text-muted-foreground" />
-          <a href="tel:+14238549505" className="text-sm font-medium hover:underline">
-            423-854-9505
-          </a>
-        </div>
+        {phone && callHref && (
+          <div className="flex items-center gap-2 rounded-lg bg-muted p-3">
+            <Phone className="size-4 text-muted-foreground" />
+            <a href={callHref} className="text-sm font-medium hover:underline">
+              {phone}
+            </a>
+          </div>
+        )}
         <DialogFooter>
           <Button
             variant="outline"
@@ -51,7 +59,7 @@ export function EscalationDialog({
           </Button>
           <Button onClick={onConfirm} disabled={isLoading}>
             {isLoading && <Loader2 className="size-4 animate-spin" />}
-            Confirm Escalation
+            Connect me
           </Button>
         </DialogFooter>
       </DialogContent>

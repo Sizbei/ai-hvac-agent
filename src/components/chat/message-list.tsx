@@ -47,13 +47,24 @@ export function MessageList({ messages, isStreaming, showFeedback }: MessageList
         {messages.map((message, index) => {
           const isAssistant = message.role === 'assistant';
           const isLast = index === lastIndex;
+          const isBlank = message.content.trim().length === 0;
+          // A blank assistant turn (the reply failed upstream) renders nothing;
+          // the chat shows its own fallback below. Keep it while it streams in.
+          if (isAssistant && isBlank && !(isStreaming && isLast)) return null;
           return (
             <div
               key={message.id}
               ref={isAssistant && isLast ? lastAssistantRef : undefined}
             >
               <MessageBubble message={message} isLatest={isLast} />
-              {showFeedback && isAssistant && isLast && message.id !== 'welcome' && (
+              {/* No feedback ask on the scripted greeting or a turn still streaming. */}
+              {showFeedback &&
+                isAssistant &&
+                isLast &&
+                !isBlank &&
+                !isStreaming &&
+                message.id !== 'welcome' &&
+                message.id !== 'greeting' && (
                 <div className="flex justify-start">
                   <MessageFeedback messageIndex={index} />
                 </div>

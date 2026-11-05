@@ -29,12 +29,18 @@ import { getRouterConfig } from "@/lib/admin/org-config-queries";
 import { logger } from "@/lib/logger";
 import { clientIp } from "@/lib/http/client-ip";
 
+/** The org's configured business phone from its businessInfo bag, or null. */
+function orgPhone(businessInfo: Readonly<Record<string, unknown>> | null | undefined): string | null {
+  const phone = businessInfo?.phone;
+  return typeof phone === "string" && phone.trim() ? phone.trim() : null;
+}
+
 export async function POST(request: NextRequest) {
   const ip = clientIp(request);
   const rateCheck = slidingWindow(
     `session:create:${ip}`,
-    RATE_LIMITS.sessionCreate.maxRequests,
-    RATE_LIMITS.sessionCreate.windowMs,
+    RATE_LIMITS.chatSessionCreate.maxRequests,
+    RATE_LIMITS.chatSessionCreate.windowMs,
   );
 
   if (!rateCheck.allowed) {
@@ -115,9 +121,11 @@ export async function POST(request: NextRequest) {
     // Best-effort — a failure here must not fail session creation.
     let greeting: string | null = null;
     let companyName: string | null = null;
+    let companyPhone: string | null = null;
     try {
       const config = await getRouterConfig(organizationId);
       companyName = config.companyName ?? null;
+      companyPhone = orgPhone(config.businessInfo);
       greeting = buildWelcomeMessage(
         brandInfoFromConfig(config.companyName, config.businessInfo),
       );
@@ -149,6 +157,8 @@ export async function POST(request: NextRequest) {
         sessionId: session.id,
         status: session.status,
         companyName,
+        // The org's business phone (for the chat's tap-to-call links), or null.
+        companyPhone,
         // The persisted welcome copy, so the client can seed its transcript
         // without a second round-trip. Null if persistence failed (the client
         // falls back to its generic copy).
@@ -229,9 +239,20 @@ export async function GET(request: NextRequest) {
       )
       .orderBy(attachments.createdAt);
 
+    // Brand for the header + tap-to-call links, so a reload/resume keeps the
+    // org's own name (memoized 60s; a miss degrades to nulls, never a failure).
+    const brand = await getRouterConfig(session.organizationId)
+      .then((c) => ({
+        companyName: c.companyName ?? null,
+        companyPhone: orgPhone(c.businessInfo),
+      }))
+      .catch(() => ({ companyName: null, companyPhone: null }));
+
     return successResponse({
       sessionId: session.id,
       status: session.status,
+      companyName: brand.companyName,
+      companyPhone: brand.companyPhone,
       tokensUsed: session.tokensUsed,
       tokenBudget: session.tokenBudget,
       turnCount: session.turnCount,

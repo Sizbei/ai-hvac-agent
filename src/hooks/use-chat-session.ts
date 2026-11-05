@@ -12,6 +12,11 @@ import {
   isEmailComplete,
 } from '@/lib/ai/extraction-schema';
 import type { ChatMessage, ExtractionField, UploadedAttachment } from '@/lib/types/chat';
+import {
+  chatErrorCopy,
+  sessionStartErrorCopy,
+  type ChatErrorRecovery,
+} from '@/lib/chat/chat-turn-feedback';
 
 interface SessionData {
   readonly sessionId: string;
@@ -19,6 +24,8 @@ interface SessionData {
   readonly tokensUsed: number;
   readonly tokenBudget: number;
   readonly turnCount: number;
+  readonly companyName?: string | null;
+  readonly companyPhone?: string | null;
   readonly messages: readonly {
     readonly role: string;
     readonly content: string;
@@ -28,13 +35,22 @@ interface SessionData {
 
 interface UseChatSessionReturn {
   readonly companyName: string | null;
+  /** The org's business phone (tap-to-call), or null when none is configured. */
+  readonly companyPhone: string | null;
   readonly messages: readonly ChatMessage[];
   readonly status: SessionState;
   readonly isStreaming: boolean;
   readonly extraction: ExtractionResult | null;
   readonly extractionFields: readonly ExtractionField[];
+  /** Human copy only — never a raw server message or JSON envelope. */
   readonly error: string | null;
+  /** How the customer can recover from `error`: resend, or start over. */
+  readonly errorRecovery: ChatErrorRecovery | null;
+  /** True when no session could be created/resumed (nothing to send into). */
+  readonly sessionUnavailable: boolean;
   readonly isLoading: boolean;
+  /** Resend the last customer message (after an empty or failed reply). */
+  readonly retryLastMessage: () => void;
   readonly sendMessage: (text: string, attachments?: readonly UploadedAttachment[]) => void;
   readonly escalate: () => Promise<void>;
   readonly confirm: (
@@ -77,6 +93,8 @@ export function useChatSession(): UseChatSessionReturn {
   const [isLoading, setIsLoading] = useState(true);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [companyName, setCompanyName] = useState<string | null>(null);
+  const [companyPhone, setCompanyPhone] = useState<string | null>(null);
+  const [sessionUnavailable, setSessionUnavailable] = useState(false);
   const sessionCreatedRef = useRef(false);
   const previousStatusRef = useRef<string>('ready');
 
@@ -111,6 +129,8 @@ export function useChatSession(): UseChatSessionReturn {
     messages: uiMessages,
     setMessages,
     sendMessage: aiSendMessage,
+    regenerate,
+    clearError,
     status: chatStatus,
     error: chatError,
   } = useChat({ transport });
@@ -192,8 +212,8 @@ export function useChatSession(): UseChatSessionReturn {
           headers: widgetKeyHeaders(),
         });
         if (!res.ok) {
-          const body = await res.json().catch(() => ({ error: { message: 'Failed to create session' } }));
-          setSessionError(body?.error?.message ?? 'Failed to create session');
+          setSessionError(sessionStartErrorCopy(res.status));
+          setSessionUnavailable(true);
           return;
         }
         // Session cookie is set by the server response (httpOnly). Seed the
@@ -202,14 +222,20 @@ export function useChatSession(): UseChatSessionReturn {
         // IS the conversation's first turn (not a display-only bubble that
         // vanishes when they reply).
         const body = (await res.json().catch(() => null)) as {
-          data?: { greeting?: string | null; companyName?: string | null };
+          data?: {
+            greeting?: string | null;
+            companyName?: string | null;
+            companyPhone?: string | null;
+          };
         } | null;
         if (body?.data?.companyName) setCompanyName(body.data.companyName);
+        setCompanyPhone(body?.data?.companyPhone ?? null);
         setMessages([
           greetingUiMessage(body?.data?.greeting ?? FALLBACK_GREETING),
         ]);
       } catch {
-        setSessionError('Could not connect to server. Please try again.');
+        setSessionError(sessionStartErrorCopy(null));
+        setSessionUnavailable(true);
       }
     }
 
@@ -253,6 +279,10 @@ export function useChatSession(): UseChatSessionReturn {
               })),
             );
             setSessionStatus(s.status);
+            // Keep the org's own brand on a reload/resume (the header would
+            // otherwise fall back to a generic name).
+            if (s.companyName) setCompanyName(s.companyName);
+            setCompanyPhone(s.companyPhone ?? null);
             if (typeof s.metadata === 'string') {
               try {
                 const parsed = JSON.parse(s.metadata) as ExtractionResult;
@@ -269,7 +299,8 @@ export function useChatSession(): UseChatSessionReturn {
         // No resumable session — create a fresh one.
         await createSession();
       } catch {
-        setSessionError('Could not connect to server. Please try again.');
+        setSessionError(sessionStartErrorCopy(null));
+        setSessionUnavailable(true);
       } finally {
         setIsLoading(false);
       }
@@ -306,7 +337,7 @@ export function useChatSession(): UseChatSessionReturn {
         if (!res.ok) {
           failures += 1;
           if (failures >= 3) {
-            setSessionError('Could not refresh session status. Your data may be stale.');
+            setSessionError("We're having trouble staying connected. Your messages are saved; please try again in a moment.");
           }
           return;
         }
@@ -345,7 +376,7 @@ export function useChatSession(): UseChatSessionReturn {
       } catch {
         failures += 1;
         if (failures >= 3) {
-          setSessionError('Could not refresh session status. Your data may be stale.');
+          setSessionError("We're having trouble staying connected. Your messages are saved; please try again in a moment.");
         }
       }
     }
@@ -362,10 +393,16 @@ export function useChatSession(): UseChatSessionReturn {
   // Wrap sendMessage to accept plain text and optional attachments
   const sendMessage = useCallback(
     (text: string, attachments?: readonly UploadedAttachment[]): void => {
-      if (isTerminalOrSubmitted(sessionStatus) || isStreaming || isLoading) {
+      if (
+        isTerminalOrSubmitted(sessionStatus) ||
+        isStreaming ||
+        isLoading ||
+        sessionUnavailable
+      ) {
         return;
       }
       setSessionError(null);
+      if (chatError) clearError();
 
       const attachmentIds = attachments?.map((a) => a.id) ?? [];
 
@@ -381,16 +418,25 @@ export function useChatSession(): UseChatSessionReturn {
           : undefined,
       );
     },
-    [sessionStatus, isStreaming, isLoading, aiSendMessage],
+    [sessionStatus, isStreaming, isLoading, sessionUnavailable, chatError, clearError, aiSendMessage],
   );
+
+  // Resend the customer's last message after an empty or failed reply.
+  // regenerate() drops a trailing (blank) assistant bubble and resubmits the
+  // last user message through the same transport.
+  const retryLastMessage = useCallback((): void => {
+    if (isTerminalOrSubmitted(sessionStatus) || isStreaming || isLoading) return;
+    setSessionError(null);
+    if (chatError) clearError();
+    void regenerate();
+  }, [sessionStatus, isStreaming, isLoading, chatError, clearError, regenerate]);
 
   // Escalate to human
   const escalate = useCallback(async (): Promise<void> => {
     try {
       const res = await fetch('/api/session/escalate', { method: 'POST' });
       if (!res.ok) {
-        const body = await res.json().catch(() => ({ error: { message: 'Escalation failed' } }));
-        setSessionError(body?.error?.message ?? 'Escalation failed');
+        setSessionError("We couldn't reach our team just now. Please try again.");
         return;
       }
       setSessionStatus('escalated');
@@ -422,8 +468,17 @@ export function useChatSession(): UseChatSessionReturn {
       });
 
       if (!res.ok) {
-        const body = await res.json().catch(() => ({ error: { message: 'Confirmation failed' } }));
-        throw new Error(body?.error?.message ?? 'Confirmation failed');
+        const body = (await res.json().catch(() => null)) as {
+          error?: { message?: string; code?: string };
+        } | null;
+        // Only DO_NOT_SERVICE carries customer-ready copy; anything else (validation
+        // detail, internal failures) gets one human sentence instead.
+        const code = body?.error?.code;
+        const humanReady = code === 'DO_NOT_SERVICE' && body?.error?.message;
+        throw new Error(
+          humanReady ||
+            "We couldn't submit your request just now. Please try again, or call our office and we'll take it directly.",
+        );
       }
 
       const result = (await res.json()) as {
@@ -453,6 +508,8 @@ export function useChatSession(): UseChatSessionReturn {
   // escalation, where the input is otherwise locked.
   const startNewConversation = useCallback(async (): Promise<void> => {
     setSessionError(null);
+    setSessionUnavailable(false);
+    if (chatError) clearError();
     setExtraction(null);
     setMessages([]);
     setSessionStatus('chatting');
@@ -464,39 +521,53 @@ export function useChatSession(): UseChatSessionReturn {
       }
       const res = await fetch('/api/session', { method: 'POST', headers });
       if (!res.ok) {
-        const body = await res
-          .json()
-          .catch(() => ({ error: { message: 'Failed to start a new conversation' } }));
-        setSessionError(
-          body?.error?.message ?? 'Failed to start a new conversation',
-        );
+        setSessionError(sessionStartErrorCopy(res.status));
+        setSessionUnavailable(true);
         return;
       }
       // Seed the new transcript with the greeting the server persisted as the
       // fresh session's first assistant message (same as initial creation).
       const body = (await res.json().catch(() => null)) as {
-        data?: { greeting?: string | null };
+        data?: {
+          greeting?: string | null;
+          companyName?: string | null;
+          companyPhone?: string | null;
+        };
       } | null;
+      if (body?.data?.companyName) setCompanyName(body.data.companyName);
+      setCompanyPhone(body?.data?.companyPhone ?? null);
       setMessages([
         greetingUiMessage(body?.data?.greeting ?? FALLBACK_GREETING),
       ]);
     } catch {
-      setSessionError('Could not connect to server. Please try again.');
+      setSessionError(sessionStartErrorCopy(null));
+      setSessionUnavailable(true);
     }
-  }, [setMessages]);
+  }, [setMessages, chatError, clearError]);
 
-  // Merge chat error with session error
-  const error = sessionError ?? (chatError ? chatError.message : null);
+  // Merge chat error with session error. The AI SDK's error message is the raw
+  // response body (a JSON envelope) — map it to human copy, never show it.
+  const chatErrorView = chatErrorCopy(chatError ? chatError.message : null);
+  const error = sessionError ?? chatErrorView?.message ?? null;
+  const errorRecovery: ChatErrorRecovery | null = sessionError
+    ? sessionUnavailable
+      ? 'restart'
+      : null
+    : (chatErrorView?.recovery ?? null);
 
   return {
     messages,
     companyName,
+    companyPhone,
     status: sessionStatus,
     isStreaming,
     extraction,
     extractionFields,
     error,
+    errorRecovery,
+    sessionUnavailable,
     isLoading,
+    retryLastMessage,
     sendMessage,
     escalate,
     confirm,

@@ -57,7 +57,7 @@ const GROUPS: readonly QuickReplyGroup[] = [
     ],
   },
   {
-    label: 'Ice Machine',
+    label: 'Ice machine',
     icon: IceCream,
     color: 'border-border-input bg-surface-raised text-foreground hover:bg-accent',
     replies: [
@@ -79,7 +79,7 @@ const GROUPS: readonly QuickReplyGroup[] = [
     ],
   },
   {
-    label: 'Commercial Appliance',
+    label: 'Commercial appliance',
     icon: CookingPot,
     color: 'border-border-input bg-surface-raised text-foreground hover:bg-accent',
     replies: [

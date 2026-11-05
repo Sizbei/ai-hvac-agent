@@ -187,6 +187,11 @@ describe('RATE_LIMITS', () => {
     expect(RATE_LIMITS.sessionCreate.windowMs).toBe(60_000);
   });
 
+  it('should define chatSessionCreate rate limit as 15 per minute', () => {
+    expect(RATE_LIMITS.chatSessionCreate.maxRequests).toBe(15);
+    expect(RATE_LIMITS.chatSessionCreate.windowMs).toBe(60_000);
+  });
+
   it('should define sessionAction rate limit as 10 per minute', () => {
     expect(RATE_LIMITS.sessionAction.maxRequests).toBe(10);
     expect(RATE_LIMITS.sessionAction.windowMs).toBe(60_000);

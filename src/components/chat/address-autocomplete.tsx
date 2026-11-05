@@ -55,7 +55,7 @@ function distanceHint(suggestion: AddressSuggestion): string | null {
 export function AddressAutocomplete({
   onSelect,
   disabled = false,
-  placeholder = 'Start typing your service address...',
+  placeholder = 'Start typing your service address…',
 }: AddressAutocompleteProps) {
   const [query, setQuery] = useState('');
   const [suggestions, setSuggestions] = useState<readonly AddressSuggestion[]>(

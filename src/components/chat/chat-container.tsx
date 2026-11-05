@@ -21,7 +21,7 @@ export function ChatContainer({
         onSendMessage={onSendMessage}
         disabled={inputDisabled || isStreaming}
         placeholder={
-          isStreaming ? 'Waiting for response...' : 'Describe your HVAC issue...'
+          isStreaming ? 'Waiting for response…' : 'Describe your HVAC issue…'
         }
       />
     </div>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { AlertCircle, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useChatSession } from '@/hooks/use-chat-session';
@@ -22,10 +22,13 @@ import { ExtractionCard } from '@/components/chat/extraction-card';
 import { EscalationDialog } from '@/components/chat/escalation-dialog';
 import { ConfirmationDialog } from '@/components/chat/confirmation-dialog';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { cn } from '@/lib/utils';
 import { HistorySidebar } from '@/components/chat/history-sidebar';
 import { ConnectionStatus } from '@/components/streaming/streaming-states';
+import { ChatEndPanel } from '@/components/chat/chat-end-panel';
+import { chatEndActions } from '@/lib/chat/chat-end-state';
+import { emptyReplyFallback, isEmptyReply } from '@/lib/chat/chat-turn-feedback';
 
 const ISSUE_SUGGESTIONS: readonly Suggestion[] = [
   { label: 'AC not cooling', message: 'My air conditioner is running but not cooling — it just blows warm air.' },
@@ -44,21 +47,28 @@ interface ChatExperienceProps {
     referenceNumber: string;
     arrivalWindowLabel: string | null;
   }) => void;
+  /** Close the surrounding widget (set only inside the site widget iframe). */
+  readonly onClose?: () => void;
 }
 
 export function ChatExperience({
   variant = 'page',
   onSubmitted,
+  onClose,
 }: ChatExperienceProps) {
   const {
     messages,
     companyName,
+    companyPhone,
     status,
     isStreaming,
     extraction,
     extractionFields,
     error,
+    errorRecovery,
+    sessionUnavailable,
     isLoading,
+    retryLastMessage,
     sendMessage,
     escalate,
     confirm,
@@ -74,6 +84,7 @@ export function ChatExperience({
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [, setViewingPastSessionId] = useState<string | null>(null);
+  const endPanelRef = useRef<HTMLDivElement>(null);
 
   // Network status for the offline affordance (ConnectionStatus renders a banner
   // only while offline). Initialized true to avoid an SSR/client mismatch, then
@@ -97,15 +108,28 @@ export function ChatExperience({
       : 'h-dvh bg-canvas md:mx-auto md:max-w-lg md:border-x md:border-border-strong',
   );
 
+  // What the chat offers once it leaves active intake: the escalated panel
+  // (emergency or hand-off) with tap-to-call, why the input is locked, and
+  // what "Talk to a human" does instead of going dead.
+  const endActions = chatEndActions({
+    status,
+    urgency: extraction?.urgency,
+    phone: companyPhone,
+  });
   const isTerminal =
     status === 'escalated' || status === 'abandoned' || status === 'submitted';
-  const inputDisabled = isStreaming || isTerminal || isLoading;
+  const inputDisabled =
+    isStreaming || isTerminal || isLoading || sessionUnavailable;
 
   const hasUserMessages = messages.some((m) => m.role === 'user');
   // The greeting is a real persisted message (seeded by useChatSession from
   // POST /api/session), so the transcript renders as-is — no display-only
   // welcome that would vanish on the customer's first reply.
   const lastMessageIsAssistant = messages.at(-1)?.role === 'assistant';
+  // The turn ended with no assistant text (e.g. the model call failed upstream
+  // and the stream closed empty): show a human fallback, never silence.
+  const showEmptyReply =
+    hasUserMessages && !isStreaming && !isTerminal && !error && isEmptyReply(messages);
 
   // Tappable mid-intake chips (#3): derive the next triage step's quick replies
   // from the polled extraction and offer them as one-tap suggestions. The chip's
@@ -162,8 +186,11 @@ export function ChatExperience({
       setShowConfirmation(false);
       onSubmitted?.({ referenceNumber, arrivalWindowLabel });
     } catch (err) {
+      // The hook already maps server failures to customer-ready copy.
       const message =
-        err instanceof Error ? err.message : 'Confirmation failed';
+        err instanceof Error
+          ? err.message
+          : "We couldn't submit your request just now. Please try again.";
       setConfirmError(message);
     } finally {
       setIsConfirming(false);
@@ -206,6 +233,13 @@ export function ChatExperience({
         companyName={companyName}
         status={status}
         onEscalate={() => setShowEscalation(true)}
+        talkToHuman={endActions.talkToHuman}
+        callHref={endActions.callHref}
+        onShowEndPanel={() => {
+          endPanelRef.current?.scrollIntoView({ block: 'nearest' });
+          endPanelRef.current?.focus();
+        }}
+        onClose={onClose}
         onNewConversation={handleNewConversation}
         onShowHistory={() => setShowHistory(true)}
       />
@@ -215,6 +249,40 @@ export function ChatExperience({
         isStreaming={isStreaming}
         showFeedback
       />
+
+      {showEmptyReply && (
+        <div className="px-3 pb-2" role="status">
+          <div className="rounded-lg border border-border-strong bg-surface p-3">
+            <p className="text-[15px] text-foreground">
+              {emptyReplyFallback(endActions.phone)}
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Button variant="outline" className="h-11" onClick={retryLastMessage}>
+                <RotateCcw className="size-4" data-icon="inline-start" />
+                Try again
+              </Button>
+              {endActions.callHref && (
+                <Button
+                  variant="outline"
+                  className="h-11"
+                  render={<a href={endActions.callHref} />}
+                >
+                  Call {endActions.phone}
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {endActions.panel && (
+        <ChatEndPanel
+          ref={endPanelRef}
+          panel={endActions.panel}
+          phone={endActions.phone}
+          callHref={endActions.callHref}
+        />
+      )}
 
       {status === 'extracting' && extraction && (
         <div className="px-4 pb-2">
@@ -232,13 +300,31 @@ export function ChatExperience({
         <div className="px-3 pb-2">
           <Alert variant="destructive">
             <AlertCircle className="size-4" />
-            <AlertTitle>Error</AlertTitle>
-            <AlertDescription>{confirmError ?? error}</AlertDescription>
+            <AlertDescription>
+              {confirmError ?? error}
+              {!confirmError && errorRecovery && (
+                <Button
+                  variant="outline"
+                  className="mt-2 h-11"
+                  onClick={
+                    errorRecovery === 'restart'
+                      ? () => void startNewConversation()
+                      : retryLastMessage
+                  }
+                >
+                  <RotateCcw className="size-4" data-icon="inline-start" />
+                  {errorRecovery === 'restart'
+                    ? 'Start a new conversation'
+                    : 'Try again'}
+                </Button>
+              )}
+            </AlertDescription>
           </Alert>
         </div>
       )}
 
-      <ExtractionPills fields={extractionFields} />
+      {/* The intake stepper means nothing once the chat is closed. */}
+      {!isTerminal && <ExtractionPills fields={extractionFields} />}
 
       {hasUserMessages &&
         !isStreaming &&
@@ -253,7 +339,7 @@ export function ChatExperience({
           />
         )}
 
-      {!hasUserMessages && !isStreaming && !isTerminal && (
+      {!hasUserMessages && !isStreaming && !isTerminal && !sessionUnavailable && (
         <div className="border-t border-border bg-surface px-3 py-3">
           <QuickReplies onSelect={sendMessage} disabled={inputDisabled} />
         </div>
@@ -275,6 +361,11 @@ export function ChatExperience({
           input is locked — offer a clear way to start over instead of a dead box. */}
       {isTerminal && (
         <div className="border-t border-border bg-surface px-3 py-3">
+          {endActions.inputNote && (
+            <p className="mb-2 text-center text-[13px] text-muted-foreground">
+              {endActions.inputNote}
+            </p>
+          )}
           <Button
             variant="outline"
             className="h-11 w-full text-sm"
@@ -289,25 +380,29 @@ export function ChatExperience({
       {/* Offline affordance — renders a banner only while the network is down. */}
       <ConnectionStatus isOnline={isOnline} />
 
-      <ChatInput
-        onSendMessage={sendMessage}
-        disabled={inputDisabled}
-        placeholder={
-          isStreaming
-            ? 'Waiting for response...'
-            : isTerminal
-              ? 'Chat has ended'
+      {/* A closed chat shows its reason + "Start a new conversation" above
+          instead of a dead text box. */}
+      {!isTerminal && (
+        <ChatInput
+          onSendMessage={sendMessage}
+          disabled={inputDisabled}
+          placeholder={
+            isStreaming
+              ? 'Waiting for response…'
               : hasUserMessages
-                ? 'Type your reply...'
-                : 'Describe your HVAC issue...'
-        }
-      />
+                ? 'Type your reply…'
+                : 'Describe your HVAC issue…'
+          }
+        />
+      )}
 
       <EscalationDialog
         open={showEscalation}
         onOpenChange={setShowEscalation}
         onConfirm={handleEscalate}
         isLoading={isEscalating}
+        phone={endActions.phone}
+        callHref={endActions.callHref}
       />
 
       {extraction && (

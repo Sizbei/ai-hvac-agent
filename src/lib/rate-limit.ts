@@ -81,7 +81,11 @@ export function slidingWindow(
 // Rate limit configs for different endpoints
 export const RATE_LIMITS = {
   chat: { maxRequests: 20, windowMs: 60_000 }, // 20 messages per minute
-  sessionCreate: { maxRequests: 5, windowMs: 60_000 }, // 5 sessions per minute
+  sessionCreate: { maxRequests: 5, windowMs: 60_000 }, // 5 sessions per minute (also guards logins)
+  // Customer chat sessions only (POST /api/session). 15/min/IP: a household or
+  // office behind one NAT reloading a few times must not lock everyone out of
+  // starting a chat (5/min did, after ~6 page loads). Logins keep sessionCreate.
+  chatSessionCreate: { maxRequests: 15, windowMs: 60_000 },
   sessionAction: { maxRequests: 10, windowMs: 60_000 }, // 10 actions per minute
   adminMutation: { maxRequests: 30, windowMs: 60_000 }, // 30 admin writes/deletes per minute
   // Polled admin read surfaces (dashboard overview, dispatch board) refresh on

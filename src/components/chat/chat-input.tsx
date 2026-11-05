@@ -18,7 +18,7 @@ const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 export function ChatInput({
   onSendMessage,
   disabled = false,
-  placeholder = 'Describe your HVAC issue...',
+  placeholder = 'Describe your HVAC issue…',
 }: ChatInputProps) {
   const [value, setValue] = useState('');
   const [attachments, setAttachments] = useState<readonly PendingAttachment[]>([]);
