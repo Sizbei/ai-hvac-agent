@@ -321,3 +321,37 @@ describe("M0b fields", () => {
     expect(r.ok).toBe(false);
   });
 });
+
+import { isDraftDirty } from "./create-request";
+
+describe("isDraftDirty (ask before discarding a New request)", () => {
+  const empty = {
+    customerId: null,
+    newCustomer: { name: "", phone: "", email: "" },
+    address: "",
+    issueType: "",
+    jobType: "",
+    jobTypeId: "",
+    tagTypeIds: [],
+    urgency: "medium",
+    description: "",
+    accessNotes: "",
+    scheduleOpen: false,
+    isoDay: "",
+    window: "",
+    technicianId: "",
+  };
+  it("an untouched form is clean, even with urgency changed or the schedule panel open", () => {
+    expect(isDraftDirty(empty)).toBe(false);
+    expect(isDraftDirty({ ...empty, urgency: "high", scheduleOpen: true })).toBe(false);
+    expect(isDraftDirty(empty, "   ")).toBe(false);
+  });
+  it("a picked customer, typed text, chosen slot or tag makes it dirty", () => {
+    expect(isDraftDirty({ ...empty, customerId: "c1" })).toBe(true);
+    expect(isDraftDirty({ ...empty, description: "No heat" })).toBe(true);
+    expect(isDraftDirty({ ...empty, newCustomer: { name: "Ann", phone: "", email: "" } })).toBe(true);
+    expect(isDraftDirty({ ...empty, window: "morning" })).toBe(true);
+    expect(isDraftDirty({ ...empty, tagTypeIds: ["t"] })).toBe(true);
+    expect(isDraftDirty(empty, "Boone")).toBe(true);
+  });
+});

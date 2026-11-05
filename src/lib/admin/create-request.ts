@@ -433,3 +433,31 @@ export function buildCreateRequestPayload(
     ...(override ? { override: true } : {}),
   };
 }
+
+/**
+ * Whether the New request form holds anything the office typed or picked —
+ * closing it then asks before discarding (a phone booking was lost to one Esc).
+ * Urgency and the schedule panel's open/closed state alone don't count.
+ */
+export function isDraftDirty(draft: CreateRequestDraft, searchInput = ""): boolean {
+  const text = [
+    draft.newCustomer.name,
+    draft.newCustomer.phone,
+    draft.newCustomer.email,
+    draft.address,
+    draft.issueType,
+    draft.jobType,
+    draft.jobTypeId ?? "",
+    draft.description,
+    draft.accessNotes,
+    draft.isoDay,
+    draft.window,
+    draft.technicianId,
+    searchInput,
+  ];
+  return (
+    draft.customerId !== null ||
+    text.some((v) => v.trim() !== "") ||
+    (draft.tagTypeIds?.length ?? 0) > 0
+  );
+}

@@ -33,8 +33,10 @@ import {
   URGENCY_LABELS,
   buildCreateRequestPayload,
   firstOpenDay,
+  isDraftDirty,
   type CreateRequestDraft,
 } from '@/lib/admin/create-request';
+import { ConfirmDialog } from '@/components/admin/confirm-dialog';
 import type { CustomerListRecord } from '@/lib/admin/crm-types';
 import type { ContactRecord } from '@/lib/admin/contact-types';
 import type { JobTypeRecord } from '@/lib/admin/job-type-types';
@@ -295,7 +297,19 @@ export function RequestCreateDialog({
 
   function close(): void {
     if (submittingRef.current) return;
+    setDiscardOpen(false);
     onOpenChange(false);
+  }
+
+  // Esc, the X, the backdrop and Cancel ask first when something was entered.
+  const [discardOpen, setDiscardOpen] = useState(false);
+  function requestClose(): void {
+    if (submittingRef.current) return;
+    if (!notice && isDraftDirty(draft, searchInput)) {
+      setDiscardOpen(true);
+      return;
+    }
+    close();
   }
 
   function pickCustomer(c: CustomerListRecord): void {
@@ -370,7 +384,7 @@ export function RequestCreateDialog({
   const customerErrorId = 'new-request-customer-error';
 
   return (
-    <Dialog open={open} onOpenChange={(o) => (o ? onOpenChange(true) : close())}>
+    <Dialog open={open} onOpenChange={(o) => (o ? onOpenChange(true) : requestClose())}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>New request</DialogTitle>
@@ -758,7 +772,7 @@ export function RequestCreateDialog({
             <Button onClick={close}>Done</Button>
           ) : (
             <>
-              <Button type="button" variant="outline" onClick={close}>
+              <Button type="button" variant="outline" onClick={requestClose}>
                 Cancel
               </Button>
               <Button type="submit" form="new-request-form" disabled={isSubmitting || Boolean(conflict)}>
@@ -768,6 +782,15 @@ export function RequestCreateDialog({
           )}
         </DialogFooter>
       </DialogContent>
+      <ConfirmDialog
+        open={discardOpen}
+        onOpenChange={setDiscardOpen}
+        title="Discard this request?"
+        description="What you’ve entered will be lost."
+        confirmLabel="Discard"
+        cancelLabel="Keep editing"
+        onConfirm={close}
+      />
     </Dialog>
   );
 }
