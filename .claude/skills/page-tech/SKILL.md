@@ -1,9 +1,9 @@
 ---
 name: page-tech
-description: Use when working on /tech-login or /tech/jobs — the mobile-first technician portal for viewing assigned jobs and capturing on-site work.
+description: Use when working on /tech-login, /tech/jobs or /tech/guide — the mobile-first technician portal for viewing assigned jobs, capturing on-site work, and the getting-started guide.
 ---
 
-# Tech portal (/tech-login · /tech/jobs · /tech/jobs/[id])
+# Tech portal (/tech-login · /tech/jobs · /tech/jobs/[id] · /tech/guide)
 
 **Purpose:** mobile-first portal for field technicians. Login lands on the job list
 (requests assigned to the calling technician); tapping a job opens the detail view for
@@ -30,7 +30,9 @@ photo API `src/app/api/tech/jobs/[id]/photo/route.ts` ·
 signature API `src/app/api/tech/jobs/[id]/signature/route.ts` ·
 status API `src/app/api/tech/jobs/[id]/status/route.ts` ·
 timesheet API `src/app/api/tech/jobs/[id]/timesheet/route.ts` ·
-location consent API `src/app/api/tech/location/consent/route.ts`
+location consent API `src/app/api/tech/location/consent/route.ts` ·
+getting-started guide: see "Getting started guide" below (`src/app/tech/guide/page.tsx`,
+`src/components/tech/guide-*.tsx`, `src/lib/tech/guide-*.ts`, `src/app/api/tech/guide/route.ts`)
 
 **Data flow:** login issues a `role=technician` JWT cookie via
 `/api/auth/tech/login`. `/tech/*` routes are inside a session gate that verifies this
@@ -270,6 +272,8 @@ server-side from the pricebook at add time — client-sent cost values are ignor
 - `npx vitest run src/lib/tech/invoice-*.test.ts src/lib/tech/approval-flow.test.ts src/lib/tech/record-payment-form.test.ts src/lib/admin/invoice-field-writes.test.ts src/lib/admin/invoice-payment-writes.test.ts src/lib/http/idempotency.test.ts`
 - Dev DB: `VITEST_INTEGRATION=1 npx vitest run tests/integration/field-invoice.test.ts`
 - `npx vitest run src/lib/tech/ownership.test.ts src/lib/tech/status-actions.test.ts src/lib/tech/status-writes.test.ts src/lib/tech/time-entry-sql.test.ts src/lib/tech/visit-range.test.ts`
+- `npx vitest run src/lib/tech/guide-*.test.ts src/app/api/tech/guide`
+- Dev DB: `VITEST_INTEGRATION=1 npx vitest run tests/integration/tech-guide.test.ts`
 - Gate: `npx tsc --noEmit`
 
 **Setup guide hook:** `createTechSession` (`src/lib/auth/tech-session.ts`) writes
@@ -278,3 +282,36 @@ server-side from the pricebook at add time — client-sent cost values are ignor
 what completes the `tech_sign_in` step. `scripts/agent/mint-tech-session.mjs`
 signs the cookie directly and BYPASSES this hook, so a minted session never
 completes the step. See page-setup.
+
+**Getting started guide (spec 2026-11-05):** `/tech/guide` page plus a card on
+`/tech/jobs` and a header Guide link.
+- **Files:** page `src/app/tech/guide/page.tsx` · components
+  `src/components/tech/guide-{card,page-client,step-row,progress,finished,link}.tsx`
+  · hook `src/hooks/use-tech-guide.ts` · logic
+  `src/lib/tech/guide-{state,sql,steps,copy,queries,view,refresh}.ts` · route
+  `src/app/api/tech/guide/route.ts` (GET payload, PATCH hide) · integration
+  `tests/integration/tech-guide.test.ts` · migration `drizzle/0054_tech_guide.sql`
+  (`users.field_guide_state`).
+- **Steps:** nine ids in `STEP_IDS` (`guide-state.ts`): `start_job`, `finish_job`,
+  `clock_in`, `share_location`, `add_material`, `note_or_photo`,
+  `capture_signature`, `build_invoice`, `collect_payment`. Required =
+  `start_job`, `finish_job`; progress counts those two, the rest sit under "Go
+  further". Steps self-complete from real data.
+- **Sticky stamps:** `users.field_guide_state` = `{ hiddenAt?, firstCompleted }`.
+  One guarded UPDATE on GET writes new stamps; the old value wins.
+- **Card visibility:** `cardHiddenFor` (× tapped, or 24 h after the `finish_job`
+  stamp, server clock). The jobs page reads it server-side with
+  `readGuideHidden(organizationId, userId, now?)` and the payload echoes it as
+  `cardHidden`. `cardState` (`guide-view.ts`): nothing renders until the 300 ms
+  skeleton delay, then a skeleton held at `CARD_MIN_H` (`guide-card.tsx`) so the
+  list does not jump.
+- **Refresh:** the location toggle dispatches `tech:guide:refresh`
+  (`guide-refresh.ts`, from `tech-location-tracker.tsx`); the hook re-fetches.
+- **Rulings:** no demo rule (PLATFORM_ORG_ID = DEMO_ORG_ID in prod, so a demo
+  check would hide it for real orgs). The tap label for `in_progress` is
+  `Working` (`tech-status-confirm.ts`). Lenient rules: office finalize counts, a
+  Working-then-held row counts as finished, any technician's photo on your live
+  job counts.
+- **Probe:** `MINT_ORG_ID=<org> npx tsx scripts/agent/mint-tech-session.mjs`,
+  decode the token and assert `userId`/`organizationId`, then `GET
+  /api/tech/guide`, and `PATCH` with `Origin: http://localhost:3000`.

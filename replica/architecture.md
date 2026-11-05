@@ -145,6 +145,8 @@ technician JWT; `token` = a hashed single-purpose token; `cron` = bearer
 
 ### F04 Tech loop (M3a–M3d)
 
+Technician getting-started guide (`/tech/guide`, card on `/tech/jobs`): nine self-completing steps per technician in `users.field_guide_state`; spec 2026-11-05.
+
 M3 applies to NATIVE requests only (`fieldpulse_job_id IS NULL AND
 hcp_job_id IS NULL`): the nightly FieldPulse sync overwrites status and
 assignee on synced rows and the money flow already refuses synced
