@@ -160,7 +160,7 @@ describe('getAccountingExport', () => {
     // Amounts are DOLLARS, not cents.
     expect(byType.invoice.amountDollars).toBe(108.25); // 10000 + 825 = 10825 cents
     expect(byType.payment.amountDollars).toBe(108.25);
-    expect(byType.refund.amountDollars).toBe(50.0);
+    expect(byType.refund.amountDollars).toBe(-50.0); // money out is negative
     expect(byType.labor.amountDollars).toBe(75.0);
 
     // Accounts are QBO-style.
@@ -196,19 +196,18 @@ describe('getAccountingExport', () => {
       // no free-text customer fields.
       expect(line.memo).not.toContain('@');
     }
-    expect(native.find((l) => l.type === 'invoice')!.memo).toBe('Invoice inv-1');
+    // Memos use the #XXXXXXXX refs the app shows; the full id is the Reference.
+    expect(native.find((l) => l.type === 'invoice')!.memo).toBe('Invoice #INV-1');
+    expect(native.find((l) => l.type === 'invoice')!.ref).toBe('inv-1');
     expect(native.find((l) => l.type === 'payment')!.memo).toBe(
-      'Payment pay-1 (invoice inv-1, check)',
+      'Payment on invoice #INV-1 (check)',
     );
+    expect(native.find((l) => l.type === 'payment')!.ref).toBe('pay-1');
     expect(result.synced.find((l) => l.type === 'payment')!.memo).toBe(
-      'Payment pay-fp (invoice inv-fp, card)',
+      'Payment on invoice #INV-FP (card)',
     );
-    expect(native.find((l) => l.type === 'refund')!.memo).toBe(
-      'Refund ref-1 (payment pay-1)',
-    );
-    expect(native.find((l) => l.type === 'labor')!.memo).toBe(
-      'Time entry tte-1 (request req-1)',
-    );
+    expect(native.find((l) => l.type === 'refund')!.memo).toBe('Refund on payment #PAY-1');
+    expect(native.find((l) => l.type === 'labor')!.memo).toBe('Labor on request #REQ-1');
   });
 
   it('scopes every query to the tenant org and the period', async () => {
@@ -234,7 +233,7 @@ describe('getAccountingExport', () => {
     const result = await getAccountingExport(ORG, { fromDate: FROM, toDate: TO });
     const invoiceLines = result.native.filter((l) => l.type === 'invoice');
     expect(invoiceLines).toHaveLength(1);
-    expect(invoiceLines[0].memo).toBe('Invoice inv-real');
+    expect(invoiceLines[0].ref).toBe('inv-real');
   });
 
   it('partitions native and synced rows into separate sections — subtotals never blend', async () => {
@@ -257,17 +256,17 @@ describe('getAccountingExport', () => {
 
     // Native section: 1 invoice + 1 payment
     expect(result.native.filter((l) => l.type === 'invoice')).toHaveLength(1);
-    expect(result.native.find((l) => l.type === 'invoice')!.memo).toBe('Invoice inv-n1');
+    expect(result.native.find((l) => l.type === 'invoice')!.ref).toBe('inv-n1');
     expect(result.native.filter((l) => l.type === 'payment')).toHaveLength(1);
 
     // Synced section: 1 invoice + 1 payment — separate, not blended with native
     expect(result.synced.filter((l) => l.type === 'invoice')).toHaveLength(1);
-    expect(result.synced.find((l) => l.type === 'invoice')!.memo).toBe('Invoice inv-fp1');
+    expect(result.synced.find((l) => l.type === 'invoice')!.ref).toBe('inv-fp1');
     expect(result.synced.filter((l) => l.type === 'payment')).toHaveLength(1);
 
     // The FP invoice does NOT appear in native and vice versa
-    expect(result.native.some((l) => l.memo.includes('inv-fp1'))).toBe(false);
-    expect(result.synced.some((l) => l.memo.includes('inv-n1'))).toBe(false);
+    expect(result.native.some((l) => l.ref === 'inv-fp1')).toBe(false);
+    expect(result.synced.some((l) => l.ref === 'inv-n1')).toBe(false);
   });
 
   it('native query carries IS NULL discriminators; synced query carries IS NOT NULL', async () => {
@@ -352,7 +351,8 @@ describe('buildCsv', () => {
     date: '2026-01-05',
     type: 'invoice' as const,
     account: 'Sales Revenue' as const,
-    memo: 'Invoice inv-1',
+    ref: 'inv-1',
+    memo: 'Invoice #INV-1',
     amountDollars: 108.25,
   };
 
@@ -360,32 +360,47 @@ describe('buildCsv', () => {
     date: '2026-01-06',
     type: 'invoice' as const,
     account: 'Sales Revenue' as const,
-    memo: 'Invoice fp-1',
-    amountDollars: 200.00,
+    ref: 'fp-1',
+    memo: 'Invoice #FP-1',
+    amountDollars: 200.0,
     source: 'fieldpulse' as const,
   };
 
-  it('produces header + native section + synced section with separate subtotals', () => {
+  it('is one header plus one row per transaction — no comment or subtotal rows', () => {
     const csv = buildCsv({ native: [nativeLine], synced: [syncedLine] });
-    // Header first
-    expect(csv).toContain('Date,Type,Account,Memo,Amount');
-    // Native section marker
-    expect(csv).toContain('# NATIVE');
-    expect(csv).toContain('Invoice inv-1');
-    expect(csv).toContain('Native subtotal');
-    expect(csv).toContain('108.25');
-    // Synced section marker
-    expect(csv).toContain('# SYNCED FROM EXTERNAL SOURCE');
-    expect(csv).toContain('Invoice fp-1');
-    expect(csv).toContain('FieldPulse synced subtotal');
-    expect(csv).toContain('200.00');
-    // No blended grand total
+    const lines = csv.trimEnd().split('\n');
+    expect(lines[0]).toBe('Date,Type,Account,Reference,Memo,Amount,Import');
+    expect(lines).toHaveLength(3);
+    expect(lines.some((l) => l.startsWith('#'))).toBe(false);
+    expect(csv).not.toMatch(/subtotal/i);
+    // No blended grand total either.
     expect(csv).not.toContain('308.25');
   });
 
-  it('native line has 2dp dollar amounts', () => {
-    const csv = buildCsv({ native: [nativeLine], synced: [] });
-    expect(csv).toContain('2026-01-05,invoice,Sales Revenue,Invoice inv-1,108.25');
+  it('marks which rows to import: native yes, mirrored no', () => {
+    const csv = buildCsv({ native: [nativeLine], synced: [syncedLine] });
+    expect(csv).toContain('2026-01-05,invoice,Sales Revenue,inv-1,Invoice #INV-1,108.25,Yes');
+    expect(csv).toContain('2026-01-06,invoice,Sales Revenue,fp-1,Invoice #FP-1,200.00,No — already in FieldPulse');
+    const hcp = buildCsv({ native: [], synced: [{ ...syncedLine, source: 'housecall' as const }] });
+    expect(hcp).toContain('No — already in HCP');
+  });
+
+  it('writes refunds as negative amounts', async () => {
+    queue({ refunds: [{ id: 'ref-1', paymentId: 'pay-1', amountCents: 5000, createdAt: FROM }] });
+    const result = await getAccountingExport(ORG, { fromDate: FROM, toDate: TO });
+    expect(result.native[0]!.amountDollars).toBe(-50);
+    expect(buildCsv(result)).toContain(',-50.00,Yes');
+  });
+
+  it('drops $0 labor rows', async () => {
+    queue({
+      labor: [
+        { id: 'tte-0', serviceRequestId: 'req-1', laborCostCents: 0, clockOutAt: FROM },
+        { id: 'tte-1', serviceRequestId: 'req-1', laborCostCents: 1500, clockOutAt: FROM },
+      ],
+    });
+    const result = await getAccountingExport(ORG, { fromDate: FROM, toDate: TO });
+    expect(result.native.map((l) => l.ref)).toEqual(['tte-1']);
   });
 
   it('escapes fields containing commas or quotes', () => {
@@ -393,29 +408,11 @@ describe('buildCsv', () => {
       date: '2026-01-05',
       type: 'refund' as const,
       account: 'Refunds & Allowances' as const,
+      ref: 'ref-1',
       memo: 'Refund a, "b"',
-      amountDollars: 1,
+      amountDollars: -1,
     };
     const csv = buildCsv({ native: [refundLine], synced: [] });
     expect(csv).toContain('"Refund a, ""b"""');
-  });
-
-  // Raccounting-2: the synced-section subtotal label must reflect the actual
-  // source(s) present, not an unconditional "FieldPulse synced subtotal" —
-  // that misattributes which system booked the money for HCP-only orgs.
-  it('labels the synced subtotal "HCP synced subtotal" for an all-HCP-sourced section', () => {
-    const hcpLine = { ...syncedLine, memo: 'Invoice hcp-1', source: 'housecall' as const };
-    const csv = buildCsv({ native: [], synced: [hcpLine] });
-    expect(csv).toContain('HCP synced subtotal');
-    expect(csv).not.toContain('FieldPulse synced subtotal');
-  });
-
-  it('labels the synced subtotal source-neutrally when sources are mixed', () => {
-    const fpLine = { ...syncedLine, memo: 'Invoice fp-1', source: 'fieldpulse' as const };
-    const hcpLine = { ...syncedLine, memo: 'Invoice hcp-1', source: 'housecall' as const };
-    const csv = buildCsv({ native: [], synced: [fpLine, hcpLine] });
-    expect(csv).toContain('Synced subtotal');
-    expect(csv).not.toContain('FieldPulse synced subtotal');
-    expect(csv).not.toContain('HCP synced subtotal');
   });
 });

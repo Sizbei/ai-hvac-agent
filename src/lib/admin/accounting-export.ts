@@ -12,9 +12,16 @@
  * TENANCY: every query is withTenant + period-scoped. A cross-org sum is a
  * tenant breach.
  *
- * PII: memos carry NON-SENSITIVE ids only (invoice/payment/refund/time-entry
- * ids, plus the payment method enum) — never customer names, emails, addresses, or free-text. The exported
+ * PII: memos carry NON-SENSITIVE references only (the #XXXXXXXX refs the app
+ * shows, plus the payment method enum) and the Reference column the full row
+ * id — never customer names, emails, addresses, or free-text. The exported
  * FILE does contain amounts, so the route that serves it is super_admin-gated.
+ *
+ * CSV shape (QuickBooks-importable): one header row, one row per transaction,
+ * no comment or subtotal rows. Amounts are signed — money in (invoice,
+ * payment) positive, money out (refund) negative; labor is a positive cost on
+ * the Labor Cost account. An `Import` column says which rows belong in your
+ * ledger ("Yes") and which are already booked in FieldPulse/HCP ("No — …").
  */
 import { and, or, eq, gte, lte, isNotNull, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -25,6 +32,7 @@ import {
   technicianTimeEntries,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
+import { invoiceRef } from "@/lib/admin/invoice-collectible";
 
 /** QBO-style account names the journal posts against. */
 export type AccountName =
@@ -41,10 +49,12 @@ export interface JournalLine {
   readonly type: JournalLineType;
   /** QBO account the amount posts to. */
   readonly account: AccountName;
-  /** Non-sensitive memo — ids only, never customer PII. */
+  /** Full id of the source row (invoice/payment/refund/time entry). */
+  readonly ref: string;
+  /** Non-sensitive memo — app refs only, never customer PII. */
   readonly memo: string;
-  /** Amount in decimal DOLLARS (cents/100). Always positive; `type`/`account`
-   * carry the debit/credit semantics. */
+  /** Amount in decimal DOLLARS (cents/100). Signed: refunds are negative,
+   * everything else positive. */
   readonly amountDollars: number;
   /** External system this row was mirrored from. Undefined for native rows. */
   readonly source?: "fieldpulse" | "housecall";
@@ -244,7 +254,8 @@ export async function getAccountingExport(
       date: isoDate(inv.createdAt),
       type: "invoice",
       account: "Sales Revenue",
-      memo: `Invoice ${inv.id}`,
+      ref: inv.id,
+      memo: `Invoice ${invoiceRef(inv.id)}`,
       amountDollars: centsToDollars(revenueCents),
     });
   }
@@ -259,7 +270,8 @@ export async function getAccountingExport(
       date: isoDate(effectiveDate),
       type: "invoice",
       account: "Sales Revenue",
-      memo: `Invoice ${inv.id}`,
+      ref: inv.id,
+      memo: `Invoice ${invoiceRef(inv.id)}`,
       amountDollars: centsToDollars(revenueCents),
       source: inv.fieldpulseInvoiceId ? "fieldpulse" : "housecall",
     });
@@ -270,7 +282,8 @@ export async function getAccountingExport(
       date: isoDate(pay.createdAt),
       type: "payment",
       account: "Undeposited Funds",
-      memo: `Payment ${pay.id} (invoice ${pay.invoiceId}, ${pay.method})`,
+      ref: pay.id,
+      memo: paymentMemo(pay.invoiceId, pay.method),
       amountDollars: centsToDollars(pay.amountCents),
     });
   }
@@ -280,7 +293,8 @@ export async function getAccountingExport(
       date: isoDate(pay.createdAt),
       type: "payment",
       account: "Undeposited Funds",
-      memo: `Payment ${pay.id} (invoice ${pay.invoiceId}, ${pay.method})`,
+      ref: pay.id,
+      memo: paymentMemo(pay.invoiceId, pay.method),
       amountDollars: centsToDollars(pay.amountCents),
       // HCP never writes to `payments` (no HCP payment mirror) — every synced
       // payment row is FieldPulse-sourced.
@@ -293,19 +307,24 @@ export async function getAccountingExport(
       date: isoDate(ref.createdAt),
       type: "refund",
       account: "Refunds & Allowances",
-      memo: `Refund ${ref.id} (payment ${ref.paymentId})`,
-      amountDollars: centsToDollars(ref.amountCents),
+      ref: ref.id,
+      memo: `Refund on payment ${invoiceRef(ref.paymentId)}`,
+      // Money out: negative, so a column sum nets correctly.
+      amountDollars: -centsToDollars(ref.amountCents),
     });
   }
 
   for (const lab of laborRows) {
+    // A $0 labor row (no rate on file) is noise in a ledger import.
+    if (!lab.laborCostCents) continue;
     // clockOutAt is non-null here (filtered above); guard for the type only.
     const date = lab.clockOutAt ? isoDate(lab.clockOutAt) : isoDate(fromDate);
     native.push({
       date,
       type: "labor",
       account: "Labor Cost",
-      memo: `Time entry ${lab.id} (request ${lab.serviceRequestId})`,
+      ref: lab.id,
+      memo: lab.serviceRequestId ? `Labor on request ${invoiceRef(lab.serviceRequestId)}` : 'Labor',
       amountDollars: centsToDollars(lab.laborCostCents ?? 0),
     });
   }
@@ -322,79 +341,45 @@ function csvField(value: string | number): string {
   return s;
 }
 
-const CSV_HEADER = ["Date", "Type", "Account", "Memo", "Amount"] as const;
+const CSV_HEADER = ["Date", "Type", "Account", "Reference", "Memo", "Amount", "Import"] as const;
+
+/** "Payment on invoice #AFA28E5D (check)". */
+function paymentMemo(invoiceId: string | null, method: string): string {
+  return invoiceId ? `Payment on invoice ${invoiceRef(invoiceId)} (${method})` : `Payment (${method})`;
+}
 
 /**
- * The synced-section subtotal label, attributed to the actual source(s) of the
- * rows in `lines` — never a hardcoded "FieldPulse", since an HCP-only org's
- * synced rows never touched FieldPulse.
+ * The Import column: native rows go in your ledger; mirrored rows are already
+ * booked in their source system — importing them double-counts the money.
  */
-function syncedSubtotalLabel(lines: readonly JournalLine[]): string {
-  const sources = new Set(
-    lines
-      .map((l) => l.source)
-      .filter((s): s is NonNullable<JournalLine["source"]> => Boolean(s)),
-  );
-  if (sources.size === 1) {
-    const [only] = sources;
-    return only === "fieldpulse" ? "FieldPulse synced subtotal" : "HCP synced subtotal";
-  }
-  // Mixed sources or no synced rows — stay source-neutral rather than guess.
-  return "Synced subtotal";
+function importLabel(line: JournalLine): string {
+  if (!line.source) return "Yes";
+  return line.source === "fieldpulse" ? "No — already in FieldPulse" : "No — already in HCP";
 }
 
-/** Serialize one section of lines (header already written) into CSV rows. */
-function csvRows(lines: readonly JournalLine[]): string[] {
-  return lines.map((line) =>
-    [
-      csvField(line.date),
-      csvField(line.type),
-      csvField(line.account),
-      csvField(line.memo),
-      csvField(line.amountDollars.toFixed(2)),
-    ].join(","),
-  );
+function csvRow(line: JournalLine): string {
+  return [
+    csvField(line.date),
+    csvField(line.type),
+    csvField(line.account),
+    csvField(line.ref),
+    csvField(line.memo),
+    csvField(line.amountDollars.toFixed(2)),
+    csvField(importLabel(line)),
+  ].join(",");
 }
 
 /**
- * Serialize a partitioned export to CSV with two clearly separated sections:
- *
- * 1. NATIVE rows — import these into your ledger.
- * 2. SYNCED FROM FIELDPULSE rows — for reconciliation only; already booked in
- *    FieldPulse. Do NOT import alongside section 1 or money will double-count.
- *
- * Each section has its own subtotal row. A blended grand total is intentionally
- * omitted to prevent accidental double-booking.
+ * Serialize a partitioned export to a QuickBooks-importable CSV: one header,
+ * then native rows (Import = Yes), then mirrored rows (Import = No — …). No
+ * comment or subtotal rows (they break an import, and a sum across invoices,
+ * payments and labor means nothing); filter on Import before importing.
  */
 export function buildCsv(result: AccountingExportResult): string {
-  const nativeTotal = result.native.reduce((s, l) => s + l.amountDollars, 0);
-  const syncedTotal = result.synced.reduce((s, l) => s + l.amountDollars, 0);
-
   const rows: string[] = [
     CSV_HEADER.join(","),
-    // ── Section 1: native rows (safe to import) ──────────────────────────────
-    csvField("# NATIVE — import into your ledger"),
-    ...csvRows(result.native),
-    [
-      csvField(""),
-      csvField("subtotal"),
-      csvField(""),
-      csvField("Native subtotal"),
-      csvField(nativeTotal.toFixed(2)),
-    ].join(","),
-    // ── Section 2: externally-synced rows (reconciliation only) ─────────────
-    csvField(
-      "# SYNCED FROM EXTERNAL SOURCE (already booked in FieldPulse/HCP — not native revenue — do NOT import)",
-    ),
-    ...csvRows(result.synced),
-    [
-      csvField(""),
-      csvField("subtotal"),
-      csvField(""),
-      csvField(syncedSubtotalLabel(result.synced)),
-      csvField(syncedTotal.toFixed(2)),
-    ].join(","),
+    ...result.native.map(csvRow),
+    ...result.synced.map(csvRow),
   ];
-
   return rows.join("\n") + "\n";
 }

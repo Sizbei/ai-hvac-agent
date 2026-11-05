@@ -37,6 +37,7 @@ export function AccountingExportPanel() {
   const [to, setTo] = useState(() => ymd(new Date()));
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [downloaded, setDownloaded] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -60,6 +61,7 @@ export function AccountingExportPanel() {
 
   async function handleDownload(): Promise<void> {
     setError(null);
+    setDownloaded(null);
     if (!from || !to) {
       setError('Pick both a start and end date.');
       return;
@@ -99,6 +101,7 @@ export function AccountingExportPanel() {
       a.click();
       a.remove();
       URL.revokeObjectURL(objectUrl);
+      setDownloaded(a.download);
     } catch {
       setError('Could not generate the export.');
     } finally {
@@ -112,8 +115,9 @@ export function AccountingExportPanel() {
         <CardTitle>Accounting export</CardTitle>
         <CardDescription>
           Download a QuickBooks-compatible CSV journal of invoices, payments,
-          refunds, and labor cost for a date range. Amounts are in dollars.
-          Import the file into QuickBooks (or any ledger) manually.
+          refunds, and labor cost for a date range. Amounts are in dollars;
+          refunds are negative. Import only the rows marked Yes in the Import
+          column — the others are already booked in FieldPulse or HCP.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -154,6 +158,11 @@ export function AccountingExportPanel() {
           </Button>
         </div>
         {error && <p className="text-sm text-destructive">{error}</p>}
+        {downloaded && (
+          <p role="status" className="text-sm text-success">
+            Downloaded {downloaded}.
+          </p>
+        )}
       </CardContent>
     </Card>
   );
