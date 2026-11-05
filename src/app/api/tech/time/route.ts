@@ -1,7 +1,8 @@
 /**
  * Technician general clock — a day clock with no job attached.
  *
- * GET   the technician's open general entry, or 404 when not clocked in.
+ * GET   the technician's open general entry, or { id: null, clockInAt: null }
+ *       (200) when not clocked in.
  * POST  { action: "in" | "out" } — 201 on in, 409 ALREADY_OPEN if already in,
  *       200 with minutes on out, 404 when nothing is open.
  */
@@ -29,7 +30,7 @@ export async function GET() {
     }
     const open = await getOpenGeneralEntry(session.organizationId, session.userId);
     if (!open) {
-      return errorResponse("You're not clocked in.", "NOT_FOUND", 404);
+      return successResponse({ id: null, clockInAt: null });
     }
     return successResponse({ id: open.id, clockInAt: open.clockInAt });
   } catch (error) {

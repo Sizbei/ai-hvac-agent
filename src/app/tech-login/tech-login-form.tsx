@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AuthShell } from '@/components/auth/auth-shell';
+import { techLoginErrorCopy } from '@/lib/tech/login-copy';
 
 /**
  * Technician login form (mobile-first). Password posts to /api/auth/tech/login,
@@ -33,12 +34,12 @@ export function TechLoginForm({ googleEnabled }: { readonly googleEnabled: boole
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
-        setError(body?.error?.message ?? 'Login failed. Please try again.');
+        setError(techLoginErrorCopy(res.status, body?.error?.code));
         return;
       }
       router.push(body?.data?.redirectTo ?? '/tech/jobs');
     } catch {
-      setError('Could not reach the server. Please try again.');
+      setError(techLoginErrorCopy(null, null));
     } finally {
       setSubmitting(false);
     }
@@ -110,11 +111,10 @@ export function TechLoginForm({ googleEnabled }: { readonly googleEnabled: boole
               onChange={(e) => setPassword(e.target.value)}
             />
           </div>
-          {error && (
-            <p role="alert" className="text-sm text-destructive">
-              {error}
-            </p>
-          )}
+          {/* The line is always reserved so an error never shifts the form. */}
+          <p role="alert" className="-my-1 min-h-5 text-sm text-destructive">
+            {error ?? ''}
+          </p>
           <Button type="submit" className="w-full" disabled={submitting}>
             {submitting ? 'Signing in…' : 'Sign in'}
           </Button>

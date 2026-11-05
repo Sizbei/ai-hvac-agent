@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  actionButtonVariant,
+  jobIsClosed,
+  urgencyTone,
   closeOutInvoiceWarning,
   actionNeedsSheet,
   buildActionSheetCopy,
@@ -121,5 +124,43 @@ describe('closeOutInvoiceWarning', () => {
     expect(closeOutInvoiceWarning(null)).toBeNull();
     expect(closeOutInvoiceWarning({ state: 'open', balanceCents: 0 })).toBeNull();
     expect(closeOutInvoiceWarning({ state: 'paid', balanceCents: 0 })).toBeNull();
+  });
+});
+
+describe('actionButtonVariant', () => {
+  it('scheduled: On my way is the only primary', () => {
+    const actions = ['en_route', 'in_progress', 'on_hold'];
+    expect(actions.map((a) => actionButtonVariant(a, actions))).toEqual(['default', 'outline', 'outline']);
+  });
+  it('arrived: Working is primary, Pause and Hold outline', () => {
+    const actions = ['in_progress', 'pause', 'on_hold'];
+    expect(actions.map((a) => actionButtonVariant(a, actions))).toEqual(['default', 'outline', 'outline']);
+  });
+  it('working solo lead: Close out is primary (not red)', () => {
+    const actions = ['pause', 'on_hold', 'close_out'];
+    expect(actions.map((a) => actionButtonVariant(a, actions))).toEqual(['outline', 'outline', 'default']);
+  });
+  it('working helper: Done is primary', () => {
+    const actions = ['completed', 'pause'];
+    expect(actions.map((a) => actionButtonVariant(a, actions))).toEqual(['default', 'outline']);
+  });
+});
+
+describe('urgencyTone', () => {
+  it('amber only for high and emergency', () => {
+    expect(urgencyTone('low')).toBe('neutral');
+    expect(urgencyTone('medium')).toBe('neutral');
+    expect(urgencyTone('high')).toBe('warning');
+    expect(urgencyTone('emergency')).toBe('warning');
+  });
+});
+
+describe('jobIsClosed', () => {
+  it('completed and cancelled are closed', () => {
+    expect(jobIsClosed('completed')).toBe(true);
+    expect(jobIsClosed('cancelled')).toBe(true);
+    expect(jobIsClosed('on_hold')).toBe(false);
+    expect(jobIsClosed('in_progress')).toBe(false);
+    expect(jobIsClosed(null)).toBe(false);
   });
 });

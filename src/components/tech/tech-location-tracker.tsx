@@ -118,17 +118,15 @@ export function TechLocationTracker() {
 
   return (
     <div className="flex min-h-11 items-center justify-between gap-3 rounded-lg border border-border-strong bg-surface px-3 py-2">
-      <div className="flex items-center gap-2">
+      <div className="flex min-w-0 items-center gap-2">
         <MapPin
-          className={`size-4 ${enabled ? 'text-success' : 'text-foreground-faint'}`}
+          className={`size-4 shrink-0 ${enabled ? 'text-success' : 'text-foreground-faint'}`}
         />
-        <div>
+        <div className="min-w-0">
           <p className="text-[15px] font-medium">Share my location</p>
-          <p className="text-[13px] text-muted-foreground">
-            {status ??
-              (enabled
-                ? 'On while you work — helps dispatch route jobs.'
-                : 'Off')}
+          {/* One line in every state so turning it on never moves the page. */}
+          <p className="truncate text-[13px] text-muted-foreground">
+            {status ?? (enabled ? 'On while you work' : 'Off')}
           </p>
         </div>
       </div>
@@ -148,7 +146,7 @@ export function TechLocationTracker() {
       >
         {/* switch knob — a listed circular exemption */}
         <span
-          className={`absolute top-[1px] size-5 rounded-full border border-border-strong bg-surface-raised transition-transform ${
+          className={`absolute top-[1px] left-0 size-5 rounded-full border border-border-strong bg-surface-raised transition-transform ${
             enabled ? 'translate-x-5' : 'translate-x-0.5'
           }`}
         />

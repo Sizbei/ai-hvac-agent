@@ -71,8 +71,7 @@ export function GuidePageClient() {
   const up = data.steps.find((s) => s.id === data.upNext);
   const run = data.steps.filter((s) => s.group === 'run');
   const further = data.steps.filter((s) => s.group === 'further');
-  // The hero shows the up-next how line; the row repeats it only when there is no hero (finished).
-  const showHow = (id: string) => data.finished || id !== data.upNext;
+  // The hero shows only the why (its how repeated it); every row keeps its how.
 
   return (
     <div className="space-y-4">
@@ -86,8 +85,6 @@ export function GuidePageClient() {
             <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{GUIDE_COPY.upNext}</p>
             <p className="text-[17px] font-semibold">{up.title}</p>
             <p className="text-[15px]">{up.why}</p>
-            <p className="text-[13px] text-muted-foreground">{up.how}</p>
-            {up.note && <p className="text-[13px] text-muted-foreground">{up.note}</p>}
             <Button className="h-12 w-full rounded-xl text-[16px]" render={<Link href="/tech/jobs" />}>{GUIDE_COPY.goToJobs}</Button>
           </CardContent>
         </Card>
@@ -96,7 +93,7 @@ export function GuidePageClient() {
         <CardHeader><CardTitle role="heading" aria-level={2} className="text-[17px]">{GUIDE_COPY.runTitle}</CardTitle></CardHeader>
         <CardContent>
           <ul className="divide-y divide-border">
-            {run.map((s) => <GuideStepRow key={s.id} step={s} glyph={glyphFor(s, data.upNext)} showHow={showHow(s.id)} />)}
+            {run.map((s) => <GuideStepRow key={s.id} step={s} glyph={glyphFor(s, data.upNext)} showHow />)}
           </ul>
         </CardContent>
       </Card>
@@ -107,7 +104,7 @@ export function GuidePageClient() {
         </CardHeader>
         <CardContent>
           <ul className="divide-y divide-border">
-            {further.map((s) => <GuideStepRow key={s.id} step={s} glyph={glyphFor(s, data.upNext)} showHow={showHow(s.id)} />)}
+            {further.map((s) => <GuideStepRow key={s.id} step={s} glyph={glyphFor(s, data.upNext)} showHow />)}
           </ul>
         </CardContent>
       </Card>

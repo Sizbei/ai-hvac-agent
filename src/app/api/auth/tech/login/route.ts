@@ -91,7 +91,7 @@ export async function POST(request: NextRequest) {
     );
 
     if (!eligibleUser || !passwordValid) {
-      return errorResponse("Invalid credentials", "INVALID_CREDENTIALS", 401);
+      return errorResponse("That email and password don't match.", "INVALID_CREDENTIALS", 401);
     }
 
     await createTechSession({

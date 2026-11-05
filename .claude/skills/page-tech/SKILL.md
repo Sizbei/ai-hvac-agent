@@ -41,6 +41,24 @@ cookie and scopes every query to the tech's `userId`. Jobs list: client componen
 scoped). Job detail: `TechJobDetailClient` fetches the full job by id; mutations POST
 to the sub-routes listed above. Catalog material costs/prices are SNAPSHOTTED
 server-side from the pricebook at add time — client-sent cost values are ignored.
+A typed-in (manual) material may carry `unitPriceCents` (the "Price each $"
+field, `parseManualPrice` in `material-form.ts`); the route 400s it on a catalog
+line, and `validManualPrice` (`field-queries.ts`) caps the unit price and the
+line total at `MAX_PRICE_CENTS`.
+
+**Job page states (UX wave 2026-11-05):** list cards, status history and the
+arrival window use `src/lib/tech/job-display.ts` (`issueLabel`, `visitWhen`
+"Thu, Aug 13 · 10:41 PM", `visitWindow`, `overdueLabel` "Overdue · Aug 13",
+`visitBadge` → "On hold" for a held request). A 404/400 summary load
+(`jobLoadOutcome`, `job-page-state.ts`) replaces the page with one "This job
+isn't yours, or it no longer exists." state; the `materials`, `timeline`,
+`photo` and `timesheet` GETs 400 `INVALID_ID` on a non-UUID id. A completed or
+cancelled request (`jobIsClosed`) hides the material form, note box, signature
+pad and Take photo button. One primary status button per state
+(`actionButtonVariant`; Close out is never red); urgency is amber only for
+high/emergency (`urgencyTone`). Photos and signatures never show server text
+(`PHOTO_UPLOAD_FAILED`, `SIGNATURE_DIDNT_SAVE`). Sign-in errors come from
+`techLoginErrorCopy` (`login-copy.ts`).
 
 **Run the day (M3a):** ownership, actions and time live in `src/lib/tech/`.
 - **Ownership read rule** (`ownership.ts`): a technician reads a request when
@@ -83,10 +101,17 @@ server-side from the pricebook at add time — client-sent cost values are ignor
   business-timezone days; past = last 30 days of done/cancelled rows); one row
   per visit, tabs in `tech-jobs-list-client.tsx`.
 - **General clock** `GET/POST /api/tech/time` (`{ action: "in" | "out" }`, 409
-  `ALREADY_OPEN`), one open general entry per technician (partial unique
-  index, migration `0050`). Job time entries (`kind='job'`, with
+  `ALREADY_OPEN`; GET is 200 `{ id: null, clockInAt: null }` when clocked
+  out), one open general entry per technician (partial unique
+  index, migration `0050`). The list labels it "Clock in for the day" /
+  "Day clock h:mm:ss" + "Clock out" (`dayClockText`, `clock-display.ts`).
+  Job time entries (`kind='job'`, with
   `appointment_id`) open on arrived/in_progress and close on pause, hold or
-  done; `clock_in_method` records `auto` (status tap) vs `manual`. SQL in
+  done; `clock_in_method` records `auto` (status tap) vs `manual`. Status taps
+  are the ONLY job clock: the job page's "Time on this job" card
+  (`job-time-card.tsx`, `jobClockLine`) is read-only and reloads after every
+  tap; the timesheet GET adds the tech's closed `totalMinutes`. The timesheet
+  POST route stays but no client calls it. SQL in
   `time-entry-sql.ts`; admins read them in the staff Timesheets dialog.
 - GPS geostamps, backdating, en-route texts, required forms, offline: not built.
 
@@ -168,7 +193,10 @@ server-side from the pricebook at add time — client-sent cost values are ignor
   the last line change); otherwise the invoice says "No signature". The
   snapshot is never written again: a later "Sign again" changes the job
   signature only. If the signature fails nothing is finalized ("Try again"
-  re-sends the same Blob + key). If finalize fails after the signature landed,
+  re-sends the same Blob + key; the sheet and the page banner both read "The
+  signature didn't save."). "Customer not here? Finalize without signature"
+  (`noSignatureOffered`) calls finalize alone while no signature has landed;
+  the invoice then reads "No signature". If finalize fails after the signature landed,
   only finalize is retried. A $0 draft finalizes to `open`. In this sheet the
   shared pad's button reads "Use this signature" (it only captures; nothing is
   sent until "Approve and finalize").
@@ -231,7 +259,9 @@ server-side from the pricebook at add time — client-sent cost values are ignor
   customer's furnace, not a desktop density.
 - Done, Pause, Hold and Close out open the bottom sheet
   (`close-out-sheet.tsx`, copy from `buildActionSheetCopy` in
-  `tech-status-confirm.ts`) and only post on its confirm; the travel and
+  `tech-status-confirm.ts`) and only post on its confirm; Close out warns
+  (without blocking) when the invoice is a draft or has a balance
+  (`closeOutInvoiceWarning`, from the summary's `invoiceSummary`); the travel and
   Working taps post on first tap (`actionNeedsSheet`).
 - Travel taps: "On my way" (`en_route`) and "I've arrived" (`arrived`) post
   to the same `POST /api/tech/jobs/[id]/status` route; wording comes from
@@ -313,6 +343,8 @@ completes the step. See page-setup.
   mounted `role=status` region with the hint and focuses
   `[role=radio][aria-checked=true]` via `groupRef`; PATCH failure restores the
   card with a `role=alert` line.
+- **Page hero:** the guide page's Up next card shows the step's why only;
+  every step row shows its how (the hero's how repeated the why).
 - **Refresh:** the location toggle dispatches `tech:guide:refresh`
   (`guide-refresh.ts`, from `tech-location-tracker.tsx`); the hook re-fetches.
 - **Rulings:** no demo rule (PLATFORM_ORG_ID = DEMO_ORG_ID in prod, so a demo

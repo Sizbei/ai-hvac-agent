@@ -8,10 +8,12 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { issueLabel, visitWindow } from '@/lib/tech/job-display';
 import { CloseOutSheet, type SheetConfirmOptions } from '@/components/tech/close-out-sheet';
 import {
+  actionButtonVariant,
   actionNeedsSheet,
   showRequestBehind,
   relevantBlockers,
   techStatusLabel,
+  urgencyTone,
   type SheetAction,
 } from '@/components/tech/tech-status-confirm';
 import type { Blocker, TechAction } from '@/lib/tech/status-actions';
@@ -72,7 +74,7 @@ export function TechJobSummary({
   readonly appointmentId?: string;
   readonly onStatusChanged?: () => void;
   /** Called after each summary load; 'not_found' lets the page drop every form. */
-  readonly onLoaded?: (outcome: JobLoadOutcome) => void;
+  readonly onLoaded?: (outcome: JobLoadOutcome, status: string | null) => void;
 }) {
   const [job, setJob] = useState<TechJobSummary | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -99,10 +101,10 @@ export function TechJobSummary({
       } else {
         setError("Couldn't load this job.");
       }
-      onLoaded?.(outcome);
+      onLoaded?.(outcome, outcome === 'ok' ? String(body.data.status) : null);
     } catch {
       setError("Couldn't load this job.");
-      onLoaded?.('error');
+      onLoaded?.('error', null);
     } finally {
       setIsLoading(false);
     }
@@ -194,7 +196,7 @@ export function TechJobSummary({
           <CardTitle className="text-[17px]">
             {job.customerName ?? 'Customer'}
           </CardTitle>
-          <span className="shrink-0 rounded-[3px] border border-border bg-surface-raised px-2 py-0.5 text-[11px] font-semibold tracking-[0.07em] text-muted-foreground uppercase">
+          <span className="shrink-0 rounded-[3px] border border-border bg-surface-raised px-2 py-0.5 text-[13px] font-medium text-muted-foreground">
             {humanize(job.status)}
           </span>
         </div>
@@ -237,8 +239,14 @@ export function TechJobSummary({
               {humanize(job.systemType)}
             </span>
           )}
-          <span className="rounded-[3px] border border-warning-border bg-warning-light px-2 py-0.5 text-[11px] font-semibold tracking-[0.07em] text-warning-strong uppercase">
-            {humanize(job.urgency)}
+          <span
+            className={`rounded-[3px] border px-2 py-0.5 text-[13px] ${
+              urgencyTone(job.urgency) === 'warning'
+                ? 'border-warning-border bg-warning-light font-medium text-warning-strong'
+                : 'border-border bg-surface-raised text-muted-foreground'
+            }`}
+          >
+            {humanize(job.urgency)} urgency
           </span>
         </div>
 
@@ -279,7 +287,7 @@ export function TechJobSummary({
                 {actions.map((a, i) => (
                   <Button
                     key={a}
-                    variant={a === 'close_out' ? 'destructive' : actionNeedsSheet(a) ? 'outline' : 'default'}
+                    variant={actionButtonVariant(a, actions)}
                     className={`h-12 rounded-xl px-4 text-[16px] ${actions.length % 2 === 1 && i === 0 ? 'col-span-2' : ''}`}
                     disabled={advancing !== null}
                     onClick={() => handleTap(a)}

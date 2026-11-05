@@ -12,17 +12,18 @@ import { formatCentsExact } from '@/lib/admin/money-format';
 import { TechJobSummary } from '@/components/tech/tech-job-summary';
 import { SignaturePad } from '@/components/tech/signature-pad';
 import { JobTimeCard } from '@/components/tech/job-time-card';
+import { JobPhotosCard } from '@/components/tech/job-photos-card';
 import { statusLabel, visitWhen } from '@/lib/tech/job-display';
 import { mintKey } from '@/lib/http/idempotency-codes';
 import { useIdempotencyKey } from '@/hooks/use-idempotency-key';
 import { outcomeEvent, type WriteOutcome } from '@/lib/tech/invoice-key-state';
 import { classifyWriteError } from '@/lib/tech/invoice-client-errors';
 import { SIGNATURE_DIDNT_SAVE } from '@/lib/tech/approval-flow';
+import { jobIsClosed } from '@/components/tech/tech-status-confirm';
 import { parseManualPrice } from '@/lib/tech/material-form';
 import {
   JOB_NOT_FOUND,
   JOB_NOT_FOUND_BACK,
-  PHOTO_UPLOAD_FAILED,
   type JobLoadOutcome,
 } from '@/lib/tech/job-page-state';
 
@@ -47,15 +48,6 @@ interface TimelineEntry {
   readonly toStatus: string;
   readonly actorType: string;
   readonly at: string;
-}
-
-interface PhotoRow {
-  readonly id: string;
-  readonly filename: string;
-  readonly mimeType: string;
-  readonly size: number;
-  readonly createdAt: string;
-  readonly url: string | null;
 }
 
 /** "Nov 4, 2:05 PM" in the device's locale. */
@@ -88,6 +80,13 @@ export function TechJobDetailClient({
 }) {
   // 'not_found' (404/400 from the summary) replaces the whole page with one state.
   const [jobOutcome, setJobOutcome] = useState<JobLoadOutcome | null>(null);
+  // A completed or cancelled request shows saved work read-only.
+  const [jobStatus, setJobStatus] = useState<string | null>(null);
+  const onSummaryLoaded = useCallback((outcome: JobLoadOutcome, status: string | null) => {
+    setJobOutcome(outcome);
+    if (status) setJobStatus(status);
+  }, []);
+  const closed = jobIsClosed(jobStatus);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   // A load failure must NOT masquerade as an empty job (no materials / not
@@ -130,11 +129,6 @@ export function TechJobDetailClient({
   // Status timeline (read-only history of this job's transitions).
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
 
-  // Job photos (field uploads).
-  const [photos, setPhotos] = useState<PhotoRow[]>([]);
-  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
-  const [photoStatus, setPhotoStatus] = useState<string | null>(null);
-
   const loadMaterials = useCallback(async (): Promise<void> => {
     try {
       const res = await fetch(`/api/tech/jobs/${id}/materials`);
@@ -173,52 +167,6 @@ export function TechJobDetailClient({
   useEffect(() => {
     void loadTimeline();
   }, [loadTimeline]);
-
-  const loadPhotos = useCallback(async (): Promise<void> => {
-    try {
-      const res = await fetch(`/api/tech/jobs/${id}/photo`);
-      const body = await res.json().catch(() => ({ success: false }));
-      if (res.ok && body.success) {
-        setPhotos(body.data.photos);
-      }
-      // Non-critical: a failed list just leaves the gallery empty.
-    } catch {
-      /* non-critical */
-    }
-  }, [id]);
-
-  useEffect(() => {
-    void loadPhotos();
-  }, [loadPhotos]);
-
-  const handlePhotoChange = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
-      const file = e.target.files?.[0];
-      e.target.value = ''; // allow re-selecting the same file
-      if (!file) return;
-      setIsUploadingPhoto(true);
-      setPhotoStatus(null);
-      try {
-        const form = new FormData();
-        form.append('file', file);
-        const res = await fetch(`/api/tech/jobs/${id}/photo`, {
-          method: 'POST',
-          body: form,
-        });
-        if (res.ok) {
-          setPhotoStatus('Photo uploaded.');
-          await loadPhotos();
-        } else {
-          setPhotoStatus(PHOTO_UPLOAD_FAILED);
-        }
-      } catch {
-        setPhotoStatus(PHOTO_UPLOAD_FAILED);
-      } finally {
-        setIsUploadingPhoto(false);
-      }
-    },
-    [id, loadPhotos],
-  );
 
   const loadTimesheet = useCallback(async (): Promise<void> => {
     try {
@@ -473,7 +421,7 @@ export function TechJobDetailClient({
       <TechJobSummary
         id={id}
         appointmentId={appointmentId}
-        onLoaded={setJobOutcome}
+        onLoaded={onSummaryLoaded}
         onStatusChanged={() => {
           // A status tap opens or closes the job clock: reload both.
           void loadTimeline();
@@ -520,6 +468,7 @@ export function TechJobDetailClient({
                     <span className="font-mono text-[14px] tabular-nums text-foreground">
                       {formatCentsExact(m.unitPriceCents * m.quantity)}
                     </span>
+                    {!closed && (
                     <button
                       type="button"
                       aria-label="Remove material"
@@ -528,13 +477,15 @@ export function TechJobDetailClient({
                     >
                       <Trash2 className="size-4" />
                     </button>
+                    )}
                   </span>
                 </li>
               ))}
             </ul>
           )}
 
-          {/* Add material */}
+          {/* Add material (not on a completed or cancelled job) */}
+          {!closed && (
           <div className="space-y-2 border-t border-border pt-3">
             <Input
               placeholder="Search pricebook…"
@@ -602,10 +553,12 @@ export function TechJobDetailClient({
               <p className="text-[13px] text-danger-strong">{addError}</p>
             )}
           </div>
+          )}
         </CardContent>
       </Card>
 
-      {/* On-site note */}
+      {/* On-site note (saved notes go to the office; nothing to add once closed) */}
+      {!closed && (
       <Card>
         <CardHeader>
           <CardTitle className="text-[17px]">On-site note</CardTitle>
@@ -630,6 +583,7 @@ export function TechJobDetailClient({
           )}
         </CardContent>
       </Card>
+      )}
 
       {/* Customer signature */}
       <Card>
@@ -639,6 +593,10 @@ export function TechJobDetailClient({
         <CardContent className="space-y-2">
           {signedAt === undefined ? (
             <Skeleton className="h-[140px] w-full rounded-xl" />
+          ) : closed ? (
+            <p className="text-[15px] text-muted-foreground">
+              {signedAt ? `Signed ${formatSignedAt(signedAt)}` : 'No signature.'}
+            </p>
           ) : signedAt && !signAgain ? (
             <div className="flex items-center justify-between gap-3">
               <p className="text-[15px]">Signed {formatSignedAt(signedAt)}</p>
@@ -670,56 +628,7 @@ export function TechJobDetailClient({
       </Card>
 
       {/* Job photos */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-[17px]">Photos</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <label className="inline-flex">
-            <span className="sr-only">Add a photo</span>
-            <input
-              type="file"
-              accept="image/*"
-              capture="environment"
-              disabled={isUploadingPhoto}
-              onChange={(e) => void handlePhotoChange(e)}
-              aria-label="Add a job photo"
-              className="text-[15px] file:mr-3 file:h-11 file:rounded-xl file:border-0 file:bg-primary file:px-4 file:text-[15px] file:font-medium file:text-primary-foreground"
-            />
-          </label>
-          {isUploadingPhoto && (
-            <p className="text-[13px] text-muted-foreground">Uploading…</p>
-          )}
-          {photoStatus && (
-            <p className="text-[13px] text-muted-foreground">{photoStatus}</p>
-          )}
-          {photos.length === 0 ? (
-            <p className="text-[15px] text-muted-foreground">No photos yet.</p>
-          ) : (
-            <div className="grid grid-cols-3 gap-2">
-              {photos.map((p) =>
-                p.url ? (
-                  <a key={p.id} href={p.url} target="_blank" rel="noreferrer">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={p.url}
-                      alt={p.filename}
-                      className="aspect-square w-full rounded-md border border-border object-cover"
-                    />
-                  </a>
-                ) : (
-                  <div
-                    key={p.id}
-                    className="flex aspect-square w-full items-center justify-center rounded-md border border-border text-[11px] text-muted-foreground"
-                  >
-                    {p.filename}
-                  </div>
-                ),
-              )}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      <JobPhotosCard jobId={id} readOnly={closed} />
 
       {/* Status timeline (read-only history) */}
       <Card>

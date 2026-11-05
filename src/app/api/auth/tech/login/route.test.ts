@@ -77,6 +77,10 @@ describe("POST /api/auth/tech/login", () => {
     (bcrypt.compare as unknown as Mock).mockResolvedValue(false);
     const res = await POST(req({ email: "nobody@example.com", password: "pw" }));
     expect(res.status).toBe(401);
+    expect((await res.json()).error).toMatchObject({
+      code: "INVALID_CREDENTIALS",
+      message: "That email and password don't match.",
+    });
     expect(bcrypt.compare).toHaveBeenCalledOnce();
     expect(createTechSession).not.toHaveBeenCalled();
   });

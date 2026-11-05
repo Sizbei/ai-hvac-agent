@@ -72,10 +72,6 @@ function ClockButton() {
       try {
         const res = await fetch('/api/tech/time');
         if (cancelled) return;
-        if (res.status === 404) {
-          setClockInAt(null);
-          return;
-        }
         const body = await res.json().catch(() => null);
         setClockInAt(res.ok && body?.data?.clockInAt ? String(body.data.clockInAt) : null);
       } catch {

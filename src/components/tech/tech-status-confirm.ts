@@ -130,3 +130,29 @@ export function closeOutInvoiceWarning(invoice: CloseOutInvoice | null): string 
   }
   return null;
 }
+
+/** The travel and Working taps, in the order a visit moves through them. */
+const FORWARD_TAPS: readonly string[] = ['en_route', 'arrived', 'in_progress'];
+
+/**
+ * One primary button per state: the next forward tap (On my way, I've
+ * arrived, Working) when one is offered, else the finish (Close out or Done).
+ * Everything else is outline; Close out is never destructive red.
+ */
+export function actionButtonVariant(action: string, actions: readonly string[]): 'default' | 'outline' {
+  const primary =
+    actions.find((a) => FORWARD_TAPS.includes(a)) ??
+    actions.find((a) => a === 'close_out') ??
+    actions.find((a) => a === 'completed');
+  return action === primary ? 'default' : 'outline';
+}
+
+/** Urgency chip: amber only for high and emergency; low and medium stay neutral. */
+export function urgencyTone(urgency: string): 'warning' | 'neutral' {
+  return urgency === 'high' || urgency === 'emergency' ? 'warning' : 'neutral';
+}
+
+/** A completed or cancelled request: the job page shows saved work read-only. */
+export function jobIsClosed(status: string | null | undefined): boolean {
+  return status === 'completed' || status === 'cancelled';
+}

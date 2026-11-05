@@ -137,7 +137,6 @@ export function CloseOutSheet({
           <div className="flex flex-col gap-2 pt-1">
             {blocked.length === 0 && (
               <Button
-                variant={shown === 'close_out' ? 'destructive' : 'default'}
                 className="h-12 w-full rounded-xl text-[16px]"
                 disabled={pending}
                 onClick={confirm}
