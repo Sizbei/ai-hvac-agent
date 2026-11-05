@@ -58,6 +58,15 @@ written by the tech app (`/api/tech/time`, status taps), never here.
   attempt to enforce this in application code alone (the app-level check in
   `staff-queries.ts` is a fast-path only; the trigger is authoritative).
 
+**Seat limit:** one rule for both ways in. `getSeatUsage(orgId)`
+(`src/lib/admin/seats.ts`: active users vs the plan's `maxStaff`) gates
+`createInvite` AND `POST /api/admin/staff` (403 `SEAT_LIMIT_REACHED`), and
+`GET /api/admin/staff` returns `seats` so the page shows "You've used N of M
+seats." and disables Invite / Add staff when full (`seat-usage.ts`). Dialog
+errors use `staffErrorMessage` (`staff-errors.ts`, copy by code). Phones get a
+card per person instead of the table; inactive people only offer Timesheets
+and Edit.
+
 **Gotchas:**
 - `canInviteAdmins` prop on `InviteDialog` controls whether `admin` role is
   offered; only `super_admin` users see it. Technicians invited via this page

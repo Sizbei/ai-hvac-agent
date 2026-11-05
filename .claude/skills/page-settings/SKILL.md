@@ -52,6 +52,35 @@ and `.../tags-panel.tsx`; types/schemas `src/lib/admin/job-type-types.ts`,
   customer/location/job; unknown entity or tag id -> 400 `UNKNOWN_TAG`, missing
   target row -> 404.
 
+**Tabs:** ids live in `src/lib/admin/settings-tabs.ts` (`resolveSettingsTab`,
+`settingsTabSearch`). Switching tabs rewrites `?tab=` with
+`history.replaceState` (other params such as `from=setup` kept); the setup
+banner keys off the tab the page OPENED on (captured once). The config-form
+tabs (branding, services, business, faqs, embed, limits, after-hours,
+dispatch) use `keepMounted`, so an unsaved draft survives a tab switch; the
+fetch-on-mount tabs (job types, tags, integrations) don't.
+
+**Saves:** the PATCH replaces nested objects wholesale. Business info builds
+its object with `mergeBusinessInfo` (`src/lib/admin/business-info-merge.ts`)
+so keys the panel doesn't edit (and the contact email, which it now edits)
+survive. A VALIDATION_ERROR carries `details.path`; the UI shows
+`settingsSaveErrorMessage` / `settingsFieldErrorCopy`
+(`src/lib/admin/settings-errors.ts`), never zod text. After-hours uses hour
+and timezone selects (`src/lib/admin/after-hours-options.ts`).
+
+**Embed snippet:** keys are stored hashed, so `buildEmbedSnippet`
+(`src/lib/admin/embed-snippet.ts`) fills in only a key created on this page
+in this visit; otherwise it shows `YOUR_PUBLISHABLE_KEY` and hides Copy.
+Never put the `keyPrefix…` display string in a snippet.
+
+**FSM panels vs /admin/integrations:** both must agree. An org served by the
+server env key (only the single-tenant org, see
+`src/lib/integrations/env-fallback.ts`) reads `configured && !connected`;
+`fsmConnectionView` (`src/lib/admin/fsm-connection-view.ts`) turns that into
+"Connected … account key set up on the server", matching the overview's
+detail. The FieldPulse status route also returns `syncFailed` (same rule as
+the overview's "Sync failed" badge).
+
 **Data flow:** `useOrgSettings` fetches `/api/admin/settings` and
 `/api/admin/settings/faqs` in parallel on mount, then provides typed save/CRUD
 helpers. Each panel receives `config` + `onSave`; saves are per-panel (not a

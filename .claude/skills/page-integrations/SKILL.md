@@ -27,9 +27,13 @@ derive each service's status; no writes occur here.
 - FieldPulse shows `sync_failed` (red, over `connected`'s green) when
   `fieldpulse.connected && availabilitySyncStatus === "failed"` — a
   "Connected" badge must not stay green while the daily availability-sync
-  cron is actually failing. The detail string surfaces `lastSyncError`. Both
-  columns are already written by the sync job; this just stops the UI from
-  discarding them.
+  cron is actually failing. The detail string is fixed human copy — it
+  must NOT echo `lastSyncError` (raw provider text such as "HTTP 403"). The
+  Settings › Integrations FieldPulse panel shows the same failure via the
+  status route's `syncFailed`.
+- An env-key-served FSM (single-tenant org only) shows `SERVER_KEY_DETAIL`,
+  worded to match the Settings panels (`fsm-connection-view.ts`). Keep the two
+  pages telling the same story when you change either.
 - Icon + intent come from `getIntegrationMeta(key)` in
   `src/lib/admin/integration-meta.ts`. Unmapped keys fall back to
   `{ icon: Plug, intent: 'neutral' }` — the UI never breaks on unknown services.

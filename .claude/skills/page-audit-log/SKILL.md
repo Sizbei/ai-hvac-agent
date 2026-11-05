@@ -31,7 +31,9 @@ Entity filter uses the static `KNOWN_ENTITIES` enum in the page.
   collapsing on narrow viewports. Do not remove.
 - Actor is `actorName` (display name); null renders as `<span italic>System</span>`
   for automated/unauthenticated actions. Never show a raw user ID.
-- `humanize()` converts `snake_case` to sentence case (only first word capitalised).
+- `humanize()` (`humanizeAuditKey` in `src/lib/admin/audit-format.ts`)
+  converts `snake_case` and dotted keys (`invoice.reminder_sent`) to sentence
+  case (only first word capitalised).
   This matches the copy canon.
 - Tenancy: the API scopes all queries to `organizationId` from the session.
   `getAuditLog`'s actor join (`src/lib/admin/audit-queries.ts`) is ALSO scoped

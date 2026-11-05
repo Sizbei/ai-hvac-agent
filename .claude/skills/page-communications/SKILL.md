@@ -22,7 +22,15 @@ list) · trigger-type source of truth
 DELETE) · table `communication_templates`, `communication_jobs`.
 
 **Data flow:** page fetches `/api/admin/communications/templates` on mount and
-after any mutation (create, toggle active, delete). No pagination — all templates
+after any mutation (create, toggle active, delete). The route answers the
+standard envelope `{ success, data: { templates } }`; parse it ONLY via
+`parseTemplatesResponse` in `src/lib/admin/template-response.ts` (tested) —
+the page once read `json.templates` and every org showed "No templates yet".
+Delete errors go through `templateDeleteErrorMessage` (copy by code). The
+editor lists the trigger's variables and warns about names the trigger won't
+fill, via `src/lib/admin/template-variables.ts` (reads
+`templateVariableSchemas`; keep that map in step with what each trigger
+actually passes). No pagination — all templates
 for the org are returned in a single request, ordered by `triggerType` then
 `priority`. State lives in local React state; `fetchTemplates` is the shared
 re-fetch callback.
