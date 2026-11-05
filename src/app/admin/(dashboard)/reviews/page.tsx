@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { AlertCircle, Star, MessageSquareQuote, Send } from 'lucide-react';
 import { useReviews, type ReviewRow } from '@/hooks/use-reviews';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -79,7 +80,7 @@ export default function ReviewsPage() {
     <PageShell>
       <PageHeader
         title="Reviews"
-        subtitle="Post-job review requests, average rating, and response rate."
+        subtitle="Review requests sent after completed requests, average rating and response rate."
       />
 
       {error && (
@@ -121,6 +122,8 @@ export default function ReviewsPage() {
           <table className="w-full text-sm">
             <thead className="border-b text-left text-xs text-muted-foreground">
               <tr>
+                <th scope="col" className="px-4 py-3 font-medium">Customer</th>
+                <th scope="col" className="px-4 py-3 font-medium">Request</th>
                 <th scope="col" className="px-4 py-3 font-medium">Status</th>
                 <th scope="col" className="px-4 py-3 font-medium">Rating</th>
                 <th scope="col" className="px-4 py-3 font-medium">Public link clicked</th>
@@ -132,24 +135,44 @@ export default function ReviewsPage() {
               {isLoading ? (
                 Array.from({ length: 4 }).map((_, i) => (
                   <tr key={i}>
-                    <td className="px-4 py-3" colSpan={5}>
+                    <td className="px-4 py-3" colSpan={7}>
                       <Skeleton className="h-5 w-full" />
                     </td>
                   </tr>
                 ))
               ) : reviews.length === 0 ? (
                 <tr>
-                  <td colSpan={5}>
+                  <td colSpan={7}>
                     <EmptyState
                       icon={Star}
                       title="No reviews yet"
-                      description="Review requests are sent automatically when a job is completed."
+                      description="Review requests are sent automatically when a request is completed."
                     />
                   </td>
                 </tr>
               ) : (
                 reviews.map((r) => (
                   <tr key={r.id}>
+                    <td className="px-4 py-3">
+                      {r.customerId && r.customerName ? (
+                        <Link
+                          href={`/admin/customers/${r.customerId}`}
+                          className="text-link hover:underline"
+                        >
+                          {r.customerName}
+                        </Link>
+                      ) : (
+                        <span className="text-muted-foreground">Unknown customer</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <Link
+                        href={`/admin/requests?request=${r.serviceRequestId}`}
+                        className="font-mono text-xs tabular-nums text-link hover:underline"
+                      >
+                        {r.referenceNumber ?? 'Open request'}
+                      </Link>
+                    </td>
                     <td className="px-4 py-3">
                       <ReviewStatusBadge status={r.status} />
                     </td>

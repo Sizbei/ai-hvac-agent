@@ -68,7 +68,8 @@ vi.mock('drizzle-orm', () => ({
 }));
 
 vi.mock('@/lib/db/schema', () => ({
-  customers: {},
+  customers: { id: 'c.id', organizationId: 'c.org', nameEncrypted: 'c.name' },
+  serviceRequests: { id: 'sr.id', organizationId: 'sr.org', referenceNumber: 'sr.ref' },
   reviewRequests: {
     id: 'rr.id',
     organizationId: 'rr.org',
@@ -152,5 +153,27 @@ describe('listReviews', () => {
     const countWhere = JSON.stringify(captured[0]?.where ?? '');
     const rowsWhere = JSON.stringify(captured[1]?.where ?? '');
     expect(countWhere).toBe(rowsWhere);
+  });
+
+  it('maps the customer name and request reference', async () => {
+    queuePage([{
+      id: 'rr-1',
+      serviceRequestId: 'sr-1',
+      referenceNumber: 'HVAC-1',
+      customerId: 'c-1',
+      customerNameEncrypted: 'Dana Halvorsen',
+      status: 'responded',
+      rating: 2,
+      publicClicked: false,
+      sentAt: null,
+      respondedAt: null,
+      createdAt: { toISOString: () => '2024-01-01T00:00:00.000Z' },
+    }]);
+    const { reviews } = await listReviews(ORG);
+    expect(reviews[0]).toMatchObject({
+      referenceNumber: 'HVAC-1',
+      customerId: 'c-1',
+      customerName: 'Dana Halvorsen',
+    });
   });
 });

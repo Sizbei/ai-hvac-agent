@@ -15,7 +15,7 @@
 import { randomBytes, randomUUID, createHash } from "node:crypto";
 import { and, count, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { customers, reviewRequests } from "@/lib/db/schema";
+import { customers, reviewRequests, serviceRequests } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { decrypt } from "@/lib/crypto";
 import { getOrgConfig } from "@/lib/admin/org-config-queries";
@@ -240,6 +240,11 @@ export async function getReviewByToken(token: string): Promise<{
 export interface ReviewRow {
   readonly id: string;
   readonly serviceRequestId: string;
+  /** The request's reference number (e.g. HVAC-1A2B3C4D), for the link label. */
+  readonly referenceNumber: string | null;
+  readonly customerId: string | null;
+  /** Decrypted customer name, or null when unknown/erased. */
+  readonly customerName: string | null;
   readonly status: "pending" | "sent" | "responded";
   readonly rating: number | null;
   readonly publicClicked: boolean;
@@ -250,10 +255,21 @@ export interface ReviewRow {
 
 const REVIEW_PAGE_SIZE = 50;
 
+function safeName(ciphertext: string | null | undefined): string | null {
+  if (!ciphertext) return null;
+  try {
+    return decrypt(ciphertext);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * List an org's review requests, newest first, with server-side pagination.
  * Deliberately omits the PRIVATE feedback and the token hash — the admin list
  * shows rating + status only (free-text feedback is never surfaced in aggregate UI).
+ * Each row carries who it was for and which request, so a low rating can be
+ * acted on; both joins are org-scoped.
  */
 export async function listReviews(
   organizationId: string,
@@ -271,6 +287,9 @@ export async function listReviews(
       .select({
         id: reviewRequests.id,
         serviceRequestId: reviewRequests.serviceRequestId,
+        referenceNumber: serviceRequests.referenceNumber,
+        customerId: reviewRequests.customerId,
+        customerNameEncrypted: customers.nameEncrypted,
         status: reviewRequests.status,
         rating: reviewRequests.rating,
         publicClicked: reviewRequests.publicClicked,
@@ -279,6 +298,20 @@ export async function listReviews(
         createdAt: reviewRequests.createdAt,
       })
       .from(reviewRequests)
+      .leftJoin(
+        serviceRequests,
+        and(
+          eq(serviceRequests.id, reviewRequests.serviceRequestId),
+          eq(serviceRequests.organizationId, organizationId),
+        ),
+      )
+      .leftJoin(
+        customers,
+        and(
+          eq(customers.id, reviewRequests.customerId),
+          eq(customers.organizationId, organizationId),
+        ),
+      )
       .where(whereClause)
       .orderBy(desc(reviewRequests.createdAt))
       .limit(limit)
@@ -289,6 +322,9 @@ export async function listReviews(
   const reviews = rows.map((r) => ({
     id: r.id,
     serviceRequestId: r.serviceRequestId,
+    referenceNumber: r.referenceNumber ?? null,
+    customerId: r.customerId ?? null,
+    customerName: safeName(r.customerNameEncrypted),
     status: r.status,
     rating: r.rating,
     publicClicked: r.publicClicked,

@@ -6,6 +6,9 @@ import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 export interface ReviewRow {
   readonly id: string;
   readonly serviceRequestId: string;
+  readonly referenceNumber: string | null;
+  readonly customerId: string | null;
+  readonly customerName: string | null;
   readonly status: 'pending' | 'sent' | 'responded';
   readonly rating: number | null;
   readonly publicClicked: boolean;

@@ -15,6 +15,7 @@ import { formatCentsExact } from '@/lib/admin/money-format';
 import { SkeletonTable } from '@/components/admin/ui/skeleton-table';
 import { EmptyState } from '@/components/admin/ui/empty-state';
 import type { MembershipPlan } from '@/hooks/use-membership-plans';
+import { humanizeCode } from '@/lib/admin/display-labels';
 
 interface MembershipPlansTableProps {
   readonly plans: readonly MembershipPlan[];
@@ -25,6 +26,46 @@ interface MembershipPlansTableProps {
   /** id of the plan currently being reactivated, if any — disables its button. */
   readonly reactivatingId?: string | null;
   readonly onAdd: () => void;
+}
+
+function PlanActions({
+  plan,
+  onEdit,
+  onDeactivate,
+  onReactivate,
+  reactivatingId,
+}: {
+  readonly plan: MembershipPlan;
+  readonly onEdit: (plan: MembershipPlan) => void;
+  readonly onDeactivate: (plan: MembershipPlan) => void;
+  readonly onReactivate: (plan: MembershipPlan) => void;
+  readonly reactivatingId: string | null;
+}) {
+  return (
+    <div className="flex justify-end gap-2">
+      <Button variant="outline" size="sm" onClick={() => onEdit(plan)}>
+        Edit
+      </Button>
+      {plan.active ? (
+        <Button variant="outline" size="sm" onClick={() => onDeactivate(plan)}>
+          Deactivate
+        </Button>
+      ) : (
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={reactivatingId === plan.id}
+          onClick={() => onReactivate(plan)}
+        >
+          {reactivatingId === plan.id ? 'Reactivating…' : 'Reactivate'}
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function billingLabel(period: string): string {
+  return humanizeCode(period);
 }
 
 export function MembershipPlansTable({
@@ -57,7 +98,46 @@ export function MembershipPlansTable({
   }
 
   return (
-    <div className="overflow-x-auto">
+    <>
+    {/* Phone: one card per plan so price, billing and actions stay visible. */}
+    <ul className="flex flex-col divide-y divide-border sm:hidden">
+      {plans.map((plan) => (
+        <li key={plan.id} className={`flex flex-col gap-2 px-4 py-3 ${plan.active ? '' : 'opacity-60'}`}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="flex flex-wrap items-center gap-2 font-medium">
+                {plan.name}
+                {!plan.active && (
+                  <Badge variant="outline" className="bg-muted text-muted-foreground border-border text-[11px]">
+                    Inactive
+                  </Badge>
+                )}
+              </p>
+              {plan.description && (
+                <p className="text-xs text-muted-foreground">{plan.description}</p>
+              )}
+            </div>
+            <span className="shrink-0 font-mono text-sm tabular-nums">
+              {formatCentsExact(plan.priceCents)}
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {billingLabel(plan.billingPeriod)} ·{' '}
+            {plan.visitsPerYear > 0
+              ? `${plan.visitsPerYear} visit${plan.visitsPerYear === 1 ? '' : 's'} a year`
+              : 'No included visits'}
+          </p>
+          <PlanActions
+            plan={plan}
+            onEdit={onEdit}
+            onDeactivate={onDeactivate}
+            onReactivate={onReactivate}
+            reactivatingId={reactivatingId}
+          />
+        </li>
+      ))}
+    </ul>
+    <div className="hidden overflow-x-auto sm:block">
     <Table>
       <TableHeader>
         <TableRow>
@@ -90,8 +170,8 @@ export function MembershipPlansTable({
               )}
             </TableCell>
             <TableCell>
-              <Badge variant="secondary" className="capitalize">
-                {plan.billingPeriod}
+              <Badge variant="secondary">
+                {billingLabel(plan.billingPeriod)}
               </Badge>
             </TableCell>
             <TableCell className="text-right tabular-nums">
@@ -101,34 +181,19 @@ export function MembershipPlansTable({
               {formatCentsExact(plan.priceCents)}
             </TableCell>
             <TableCell>
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" size="sm" onClick={() => onEdit(plan)}>
-                  Edit
-                </Button>
-                {plan.active ? (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => onDeactivate(plan)}
-                  >
-                    Deactivate
-                  </Button>
-                ) : (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={reactivatingId === plan.id}
-                    onClick={() => onReactivate(plan)}
-                  >
-                    {reactivatingId === plan.id ? 'Reactivating…' : 'Reactivate'}
-                  </Button>
-                )}
-              </div>
+              <PlanActions
+                plan={plan}
+                onEdit={onEdit}
+                onDeactivate={onDeactivate}
+                onReactivate={onReactivate}
+                reactivatingId={reactivatingId}
+              />
             </TableCell>
           </TableRow>
         ))}
       </TableBody>
     </Table>
     </div>
+    </>
   );
 }
