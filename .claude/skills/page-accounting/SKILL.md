@@ -36,11 +36,14 @@ streams a CSV blob; the client triggers a synthetic `<a download>` click.
   `coalesce(issuedAt, createdAt)`, never raw `createdAt` — `issuedAt` is the
   real source-system invoice date, `createdAt` is only when we imported the
   row. Matches `/admin/invoices` and `/admin/operations`.
-- The synced-section subtotal label is source-accurate (`syncedSubtotalLabel`):
-  "FieldPulse synced subtotal" / "HCP synced subtotal" when every row shares
-  one source, "Synced subtotal" when mixed — never hardcode "FieldPulse" (an
-  HCP-only org's rows never touched FieldPulse). Payment rows are always
-  `source: "fieldpulse"` since HCP has no payment mirror.
+- CSV shape is QuickBooks-importable: header
+  `Date,Type,Account,Reference,Memo,Amount,Import`, one row per transaction,
+  NO `#` comment rows and NO subtotal rows. Reference = full row id; memo uses
+  the app's `#XXXXXXXX` refs (never customer names — ids-only PII stance).
+  Refunds are negative; $0 labor rows are dropped. The `Import` column is the
+  double-count guard: native "Yes", mirrored "No — already in FieldPulse" /
+  "No — already in HCP" (source-accurate; payment mirrors are always
+  FieldPulse since HCP has no payment mirror).
 
 **Gotchas:**
 - `authorized === null` (loading) and `authorized === false` (unauthorized) both

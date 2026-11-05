@@ -64,6 +64,24 @@ actionable follow-up list). Stale = open >14 days. Search debounced 300ms.
   per-field caps and still overflows `line_total_cents`. The check runs after
   catalog prices are resolved server-side, so it covers catalog lines too.
 
+- **Estimate value = sold option:** every pipeline sum and the list row total
+  use `ESTIMATE_VALUE_SQL` (sold option's total, same estimate; else the
+  headline/largest-option `total_cents`). Never sum raw `estimates.totalCents`
+  for Won — a sold Good/Better/Best would count its Best price.
+- **New estimate from the list requires a customer** (`pickCustomer` prop →
+  `estimate-customer-picker.tsx`, org-scoped `/api/admin/customers?search=`).
+  The API stays backward compatible (customerId/title optional) but returns
+  400 when `customerId` is not the session org's (`customerInOrg`). Optional
+  `title` (≤200, blank → null). The dialog shows running subtotal/tax/total per
+  option (`src/lib/admin/estimate-draft.ts`, org default tax via `useTaxRates`).
+- Detail: heading = title, else "Estimate for <customer>" (`customerName` from
+  an org-scoped join). An office Mark sold stores `signature_name = "(admin)"`;
+  the detail resolves `markedSoldBy` from the newest `estimate_marked_sold`
+  audit row → "Marked sold in the office by <staff>". Generate invoice pushes
+  `/admin/invoices/<id>?created=1` (banner on the invoice).
+- New line items get uuid **v7** ids so `ORDER BY id` is insertion order
+  (older estimates keep random v4 order — no sort column exists).
+
 **Gotchas:**
 - `winRatePct` can be null (no closed estimates yet); guard before rendering.
 - `stats` may be null on partial server failures; the KpiBand must handle
@@ -73,4 +91,5 @@ actionable follow-up list). Stale = open >14 days. Search debounced 300ms.
 
 **Verify changes:** `npx vitest run src/lib/admin/estimate-queries.test.ts
 src/lib/admin/estimate-list-pagination.test.ts
-src/lib/admin/estimate-synced-guards.test.ts` · visual via admin-pages recipe.
+src/lib/admin/estimate-synced-guards.test.ts src/lib/admin/estimate-value.test.ts
+src/lib/admin/estimate-detail.test.ts src/lib/admin/estimate-draft.test.ts` · visual via admin-pages recipe.

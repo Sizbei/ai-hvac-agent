@@ -154,6 +154,26 @@ polls `/api/admin/payments/reconcile` on mount (best-effort, never throws).
   AND invoices (`signed_at` kept) and deletes the R2 objects (see
   `src/lib/admin/erasure-queries.ts`).
 
+**Office UX (fix wave 2026-11):**
+- `cardPaymentsEnabled` reaches the detail via the server wrapper and the list
+  via `GET /api/admin/invoices` (`data.cardPaymentsEnabled`). While false,
+  Record payment shows `CARD_PAYMENTS_OFF_COPY` and the customer-link action
+  reads "Copy portal link" (`invoiceLinkAction`): no link on drafts, settled,
+  synced or customer-less invoices (the pay-link route 404s without a
+  customer). Send reminder needs a customer too (`canSendReminder`).
+- Record payment pre-fills the balance, scrolls into view, names the balance
+  when over it, and says "We'll text the customer a receipt…" BEFORE
+  recording when the invoice has a customer + phone (`receiptNoticeCopy`) —
+  the receipt + drain themselves are by design (M3b).
+- Payment chips via `paymentStatusLabel` (Received / Partly refunded /
+  Refunded), refund reasons via `refundReasonLabel`; never raw enums.
+- "Collected this month" = received (succeeded + refunded rows) − refunds
+  given this month, native only, one `db.batch` (`collected-this-month.test.ts`).
+- Phone list: `INVOICE_ROW_GRID` shows customer+age, balance, chevron below
+  `sm`; Created shows the year outside the current year (`shortIssuedDate`).
+- Document amount due is red only when past the due date
+  (`invoiceDocModel(inv, now).isOverdue`).
+
 **Gotchas:**
 - The SummaryBand is suppressed during initial load (`!isLoading`) to avoid the
   zero-data flash before stats arrive — do not remove the guard.

@@ -36,6 +36,12 @@ Search is debounced 300ms. Filters persist to URL (?q=&type=&sort=&inactive=&lab
 - Compose `PageShell`, `PageHeader`, `Pager` from `src/components/admin/ui/`;
   status colors via `src/lib/admin/status-colors.ts` only.
 
+- Form: cost + markup sets price (`priceFromMarkup`); a blank markup saves
+  the one the price implies (`markupFromPrice`) — `src/lib/admin/pricebook-markup.ts`.
+  `hours` is an INTEGER column (labelled "whole"); half hours need a migration.
+- Empty result with a search/filter active reads "No items match …" with a
+  clear action — "No pricebook items yet." only for a truly empty catalog.
+
 **Gotchas:**
 - The `types` array returned by the server drives the type-filter dropdown;
   never hardcode type values — they come from actual db rows.

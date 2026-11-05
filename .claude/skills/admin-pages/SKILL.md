@@ -76,6 +76,15 @@ Shared UI and shell behaviour:
   `/admin/requests?request=<id>` (there is no `/admin/requests/[id]` page);
   conversations are searched by captured metadata + request number.
 
+**Pickers:** base-ui `<SelectValue />` renders the RAW value (a UUID,
+`__manual__`, `name`). Always pass a formatter:
+`<SelectValue>{(v: unknown) => selectLabel(options, v, 'Placeholder')}</SelectValue>`
+(`src/lib/admin/select-label.ts`) — it never returns the raw value.
+
+**PageHeader actions** wrap on phones (`flex-wrap max-w-full`, single
+non-shrinking row from `sm` up) so a primary action is never pushed off a
+390 px screen. Don't re-add `shrink-0`/nowrap below `sm`.
+
 ## Copy canon (enforced by review waves)
 
 request (not job/booking — "Bookings" allowed only as the customer-profile

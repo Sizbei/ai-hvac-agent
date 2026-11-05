@@ -36,6 +36,9 @@ shareable links. Search is debounced 300 ms.
   narrows the result set.
 - Pager renders only when `inventoryTotal > 0`; an empty list shows no pager.
 
+- Track material pre-fills unit cost from the pricebook item's `costCents`
+  (materials carry `costCents`) unless a cost was already typed.
+
 **Gotchas:**
 - The `usePricebook({ limit: 20000 })` call is intentionally large — it powers
   the material-picker dropdown and must cover the full catalog. Leave the limit as-is.
