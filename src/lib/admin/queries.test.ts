@@ -325,6 +325,18 @@ describe('getRequests', () => {
     );
   });
 
+  it('matches a bare reference fragment with or without the HVAC- prefix', async () => {
+    const { ilike, or } = await import('drizzle-orm');
+    vi.mocked(ilike).mockClear();
+    vi.mocked(or).mockClear();
+    selectResolutions = [[{ value: 0 }], []];
+
+    await getRequests(ORG_ID, { search: 'cf94' });
+    expect(ilike).toHaveBeenCalledWith(expect.anything(), 'cf94%');
+    expect(ilike).toHaveBeenCalledWith(expect.anything(), 'HVAC-cf94%');
+    expect(or).toHaveBeenCalled();
+  });
+
   it('does not search when the term is blank after trimming', async () => {
     const { ilike } = await import('drizzle-orm');
     vi.mocked(ilike).mockClear();

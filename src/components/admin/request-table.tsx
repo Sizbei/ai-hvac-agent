@@ -9,6 +9,7 @@ import {
   type DataTableColumn,
 } from '@/components/admin/ui/data-table-shell';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import type { AdminRequest } from '@/lib/admin/types';
 import { SyncPill } from '@/components/admin/sync-pill';
 import { ClipboardList } from 'lucide-react';
@@ -38,11 +39,15 @@ const COLUMNS: ReadonlyArray<DataTableColumn<AdminRequest>> = [
   {
     key: 'customer',
     header: 'Customer',
+    // Capped so a long name or imported issue code can't push Status and
+    // Assigned off the right edge at desktop widths.
+    className: 'max-w-56 truncate',
     cell: (r) => r.customerName ?? 'Unknown',
   },
   {
     key: 'issue',
     header: 'Issue',
+    className: 'max-w-56 truncate',
     cell: (r) => issueTypeLabel(r.issueType),
   },
   {
@@ -80,6 +85,72 @@ const COLUMNS: ReadonlyArray<DataTableColumn<AdminRequest>> = [
   },
 ];
 
+/** Phone layout: one card per request, so status and technician are visible
+ * without scrolling a seven-column table sideways. */
+function RequestCards({
+  requests,
+  isLoading,
+  onRowClick,
+  emptyState,
+}: {
+  readonly requests: readonly AdminRequest[];
+  readonly isLoading: boolean;
+  readonly onRowClick: (request: AdminRequest) => void;
+  readonly emptyState: React.ReactNode;
+}) {
+  if (isLoading && requests.length === 0) {
+    return (
+      <div className="space-y-2" aria-busy="true">
+        <span role="status" aria-label="Loading" className="sr-only" />
+        {[0, 1, 2].map((i) => (
+          <Skeleton key={i} className="h-24 w-full rounded-lg" />
+        ))}
+      </div>
+    );
+  }
+  if (requests.length === 0) {
+    return (
+      <div className="rounded-lg border border-border-strong bg-surface">{emptyState}</div>
+    );
+  }
+  return (
+    <ul className="space-y-2" aria-busy={isLoading}>
+      {requests.map((r) => (
+        <li key={r.id}>
+          <button
+            type="button"
+            onClick={() => onRowClick(r)}
+            className="w-full rounded-lg border border-border-strong bg-surface-raised p-3 text-left transition-colors hover:bg-row-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium">
+                  {r.customerName ?? 'Unknown'}
+                </p>
+                <p className="truncate text-xs text-muted-foreground">
+                  {issueTypeLabel(r.issueType)} ·{' '}
+                  <span className="font-mono">{r.referenceNumber}</span>
+                </p>
+              </div>
+              <StatusBadge status={r.status} />
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+              <UrgencyBadge urgency={r.urgency} />
+              {r.isAfterHours && (
+                <ContextBadge variant="after-hours" label="After-hrs" title="Arrived after hours" />
+              )}
+              {r.syncedSource && <SyncPill source={r.syncedSource} size="md" />}
+              <span className="ml-auto truncate">
+                {r.assignedToName ?? 'No technician'} · {formatDate(r.createdAt)}
+              </span>
+            </div>
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function RequestTable({
   requests,
   isLoading,
@@ -87,31 +158,43 @@ export function RequestTable({
   hasActiveFilters = false,
   onClearFilters,
 }: RequestTableProps) {
-  return (
-    <DataTableShell<AdminRequest>
-      columns={COLUMNS}
-      rows={requests}
-      getRowKey={(r) => r.id}
-      isLoading={isLoading}
-      onRowClick={onRowClick}
-      emptyState={
-        <EmptyState
-          icon={ClipboardList}
-          title={hasActiveFilters ? 'No requests match' : 'No requests yet'}
-          description={
-            hasActiveFilters
-              ? 'Try adjusting the filters or search to see results.'
-              : 'Service requests submitted by customers will appear here.'
-          }
-          action={
-            hasActiveFilters && onClearFilters ? (
-              <Button variant="outline" size="sm" onClick={onClearFilters}>
-                Clear filters
-              </Button>
-            ) : undefined
-          }
-        />
+  const emptyState = (
+    <EmptyState
+      icon={ClipboardList}
+      title={hasActiveFilters ? 'No requests match' : 'No requests yet'}
+      description={
+        hasActiveFilters
+          ? 'Try adjusting the filters. Search matches reference numbers, like HVAC-1A2B or 1A2B.'
+          : 'Service requests submitted by customers will appear here.'
+      }
+      action={
+        hasActiveFilters && onClearFilters ? (
+          <Button variant="outline" size="sm" onClick={onClearFilters}>
+            Clear filters
+          </Button>
+        ) : undefined
       }
     />
+  );
+  return (
+    <>
+      <div className="sm:hidden">
+        <RequestCards
+          requests={requests}
+          isLoading={isLoading}
+          onRowClick={onRowClick}
+          emptyState={emptyState}
+        />
+      </div>
+      <DataTableShell<AdminRequest>
+        className="hidden sm:flex"
+        columns={COLUMNS}
+        rows={requests}
+        getRowKey={(r) => r.id}
+        isLoading={isLoading}
+        onRowClick={onRowClick}
+        emptyState={emptyState}
+      />
+    </>
   );
 }

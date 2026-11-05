@@ -144,7 +144,7 @@ export default function AdminRequestsPage() {
           <Input
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Search by reference #"
+            placeholder="Search by reference, like 1A2B"
             className="pl-9"
             aria-label="Search requests by reference number"
           />

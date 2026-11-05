@@ -38,6 +38,7 @@ import { withTenant } from "@/lib/db/tenant";
 // operations page both compute AR off this exact function. Do not
 // re-implement "overdue" here (see AGENTS.md's definitional-consistency note).
 import { overdueWhere } from "./invoice-queries";
+import { referenceSearchPatterns } from "./request-search";
 import { normalizeEmail } from "./staff-queries";
 import { decrypt } from "@/lib/crypto";
 import {
@@ -142,14 +143,15 @@ export async function getRequests(
       eq(serviceRequests.status, filters.status as RequestStatus),
     );
   }
-  const search = filters.search?.trim();
-  if (search) {
-    // Reference number is plaintext + indexed. Prefix match (ilike 'X%') so the
-    // requests_ref_idx can serve it; escape LIKE metacharacters in user input.
-    const escaped = search.replace(/[\\%_]/g, (ch) => `\\${ch}`);
-    extraConditions.push(
-      ilike(serviceRequests.referenceNumber, `${escaped}%`),
+  // Reference number is plaintext + indexed. Prefix matches (ilike 'X%') so the
+  // requests_ref_idx can serve them; a bare fragment ("cf94") also matches with
+  // the "HVAC-" prefix in front (referenceSearchPatterns).
+  const searchPatterns = referenceSearchPatterns(filters.search);
+  if (searchPatterns.length > 0) {
+    const [first, ...rest] = searchPatterns.map((p) =>
+      ilike(serviceRequests.referenceNumber, p),
     );
+    extraConditions.push(rest.length > 0 ? or(first, ...rest)! : first);
   }
 
   type UrgencyLevel = (typeof urgencyEnum.enumValues)[number];
