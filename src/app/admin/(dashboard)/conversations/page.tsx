@@ -3,7 +3,7 @@ import { ConversationInbox } from '@/components/admin/conversations/conversation
 import { getAdminSession } from '@/lib/auth/session';
 import { isSuperAdmin } from '@/lib/auth/authz';
 
-export const metadata: Metadata = { title: 'Conversations · Spears Admin' };
+export const metadata: Metadata = { title: 'Conversations' };
 
 // No PageShell — intentional full-bleed master-detail; no PageShell by design.
 export default async function AdminConversationsPage() {

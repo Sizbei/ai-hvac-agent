@@ -3,7 +3,7 @@ import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 import { AccountingExportPanel } from '@/components/admin/accounting/accounting-export-panel';
 
-export const metadata: Metadata = { title: 'Accounting · Spears Admin' };
+export const metadata: Metadata = { title: 'Accounting' };
 
 /**
  * Accounting export page. The page renders for any admin (the dashboard layout

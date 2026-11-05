@@ -1,3 +1,5 @@
+import { cache } from 'react';
+import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 import { eq } from 'drizzle-orm';
 import { getAdminSession } from '@/lib/auth/session';
@@ -8,6 +10,15 @@ import { DEMO_ORG_ID } from '@/lib/tenancy/organization';
 import type { SetupPlacement } from '@/components/admin/nav-items';
 import { isOrgActive } from '@/lib/billing/entitlements';
 import { DashboardShell } from '@/components/admin/dashboard-shell';
+import { adminPageTitle } from '@/lib/admin/admin-title';
+
+/** Tab titles read "<page> · <org name>" for server pages that set a title. */
+export async function generateMetadata(): Promise<Metadata> {
+  const session = await getAdminSession();
+  const orgName = session ? (await loadBillingState(session.organizationId)).orgName : undefined;
+  const brand = adminPageTitle('', orgName);
+  return { title: { template: `%s · ${brand}`, default: brand } };
+}
 
 export default async function DashboardLayout({
   children,
@@ -46,7 +57,8 @@ export default async function DashboardLayout({
  * subscription is past_due/suspended. Degrade-safe — a query miss leaves the
  * org treated as active (no banner) rather than blocking the dashboard.
  */
-async function loadBillingState(
+// cache(): generateMetadata and the layout share one lookup per request.
+const loadBillingState = cache(async function loadBillingState(
   organizationId: string,
 ): Promise<{ billingAttention: boolean; orgName: string | undefined }> {
   try {
@@ -62,7 +74,7 @@ async function loadBillingState(
   } catch {
     return { billingAttention: false, orgName: undefined };
   }
-}
+});
 
 /**
  * Setup nav placement (spec §2, `placementFor`): second in Operations while
