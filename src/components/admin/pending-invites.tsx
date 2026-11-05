@@ -61,7 +61,11 @@ export function PendingInvites({
   }
 
   if (!isLoading && invites.length === 0) {
-    return null;
+    return (
+      <p className="rounded-lg border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
+        No pending invites. Use Invite to send someone a sign-up link.
+      </p>
+    );
   }
 
   return (
@@ -75,7 +79,7 @@ export function PendingInvites({
       <CardContent className="space-y-2">
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         {isLoading ? (
-          <p className="text-sm text-muted-foreground">Loading...</p>
+          <p className="text-sm text-muted-foreground">Loading…</p>
         ) : (
           invites.map((invite) => (
             <div

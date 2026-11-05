@@ -1,5 +1,6 @@
 'use client';
 
+import { staffErrorMessage } from '@/lib/admin/staff-errors';
 import { useState, useEffect } from 'react';
 import type { StaffRecord } from '@/lib/admin/types';
 import {
@@ -70,10 +71,8 @@ export function StaffResetPasswordDialog({
       );
 
       if (!res.ok) {
-        const body = await res.json().catch(() => ({
-          error: { message: 'An unexpected error occurred' },
-        }));
-        setError(body?.error?.message ?? 'Failed to reset password');
+        const body: unknown = await res.json().catch(() => null);
+        setError(staffErrorMessage(body, "Couldn't reset the password. Please try again."));
         return;
       }
 
@@ -145,7 +144,7 @@ export function StaffResetPasswordDialog({
               Cancel
             </Button>
             <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? 'Resetting...' : 'Reset Password'}
+              {isSubmitting ? 'Resetting…' : 'Reset password'}
             </Button>
           </DialogFooter>
         </form>

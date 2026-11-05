@@ -1,5 +1,6 @@
 'use client';
 
+import { staffErrorMessage } from '@/lib/admin/staff-errors';
 import { useState, useEffect, useRef } from 'react';
 import type { StaffRecord, StaffRole } from '@/lib/admin/types';
 import {
@@ -201,10 +202,10 @@ export function StaffFormDialog({
       });
 
       if (!res.ok) {
-        const responseBody = await res.json().catch(() => ({
-          error: { message: 'An unexpected error occurred' },
-        }));
-        setError(responseBody?.error?.message ?? 'Failed to save staff member');
+        const responseBody: unknown = await res.json().catch(() => null);
+        setError(
+          staffErrorMessage(responseBody, "Couldn't save this staff member. Please try again."),
+        );
         return;
       }
 
@@ -288,7 +289,7 @@ export function StaffFormDialog({
               <SelectContent>
                 {/* super_admin is DB/edit-only — POST route rejects it; hide from create form */}
                 {canManageAdmins && isEditMode && (
-                  <SelectItem value="super_admin">Super Admin</SelectItem>
+                  <SelectItem value="super_admin">Super admin</SelectItem>
                 )}
                 {canManageAdmins && (
                   <SelectItem value="admin">Admin</SelectItem>
@@ -304,14 +305,14 @@ export function StaffFormDialog({
           </div>
 
           {isEditMode && (
-            <div className="flex items-center justify-between">
-              <div>
+            <div className="flex items-center justify-between gap-4">
+              <div className="space-y-1">
                 <Label htmlFor="staff-active">Active</Label>
-                {isSelf && (
-                  <p className="text-xs text-muted-foreground">
-                    You cannot deactivate your own account.
-                  </p>
-                )}
+                <p className="text-xs text-muted-foreground">
+                  {isSelf
+                    ? "You can't deactivate your own account."
+                    : "Inactive staff can't sign in and don't use a seat. Their past work stays on record."}
+                </p>
               </div>
               <Switch
                 id="staff-active"

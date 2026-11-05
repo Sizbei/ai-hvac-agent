@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { UserPlus, Mail, AlertCircle } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
+import { UserPlus, Mail, AlertCircle, Users, Check } from 'lucide-react';
 import { useAdminStaff } from '@/hooks/use-admin-staff';
 import { useAdminInvites } from '@/hooks/use-admin-invites';
 import { StaffTable } from '@/components/admin/staff-table';
@@ -21,12 +22,16 @@ import { BackToGuideBanner } from '@/components/admin/setup/back-to-guide-banner
 import { useOpenFromParam } from '@/hooks/use-open-from-param';
 import { refreshOnboarding } from '@/lib/admin/onboarding-store';
 import type { BannerEvent } from '@/lib/admin/setup-card-view';
+import { InfoBanner } from '@/components/admin/ui/info-banner';
+import { SEAT_LIMIT_COPY, seatsFull, seatUsageCopy } from '@/lib/admin/seat-usage';
 
 const STAFF_OPEN_VALUES = ['technician', 'invite'] as const;
 
 export default function StaffPage() {
   useEffect(() => { document.title = 'Staff · Spears Admin'; }, []);
-  const { staff, currentUserId, isLoading, error, refetch } = useAdminStaff();
+  const { staff, currentUserId, seats, isLoading, error, refetch } = useAdminStaff();
+  // Same rule the server applies to invites and direct creation.
+  const noFreeSeats = seats !== null && seatsFull(seats);
   // The current user appears in their own staff list; derive whether they're a
   // super_admin so the UI only offers admin-tier role options to those allowed
   // to assign them. The server is the authoritative guard regardless.
@@ -45,6 +50,9 @@ export default function StaffPage() {
   const [timeOffTarget, setTimeOffTarget] = useState<StaffRecord | null>(null);
   const [timesheetsTarget, setTimesheetsTarget] = useState<StaffRecord | null>(null);
   const [bannerEvent, setBannerEvent] = useState<BannerEvent>(null);
+  // Confirmation after a dialog closes ("Password reset for Dana.").
+  const [notice, setNotice] = useState<string | null>(null);
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { fromSetup } = useOpenFromParam('new', STAFF_OPEN_VALUES, (v) => {
     if (v === 'technician') handleAddClick();
     else setInviteOpen(true);
@@ -71,9 +79,25 @@ export default function StaffPage() {
     setResetOpen(true);
   }
 
+  function showNotice(message: string): void {
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    setNotice(message);
+    noticeTimer.current = setTimeout(() => setNotice(null), 6000);
+  }
+
   function handleSuccess(): void {
     void refetch();
     noteSetupEvent('saved');
+  }
+
+  function handleFormSuccess(): void {
+    showNotice(editing ? `Saved changes to ${editing.name}.` : 'Staff member added.');
+    handleSuccess();
+  }
+
+  function handleResetSuccess(): void {
+    if (resetTarget) showNotice(`Password reset for ${resetTarget.name}.`);
+    void refetch();
   }
 
   function handleInviteSuccess(role: 'admin' | 'technician'): void {
@@ -88,11 +112,15 @@ export default function StaffPage() {
         subtitle="Manage admins and technicians, roles, and passwords."
         actions={
           <>
-            <Button variant="outline" onClick={() => setInviteOpen(true)}>
+            <Button
+              variant="outline"
+              onClick={() => setInviteOpen(true)}
+              disabled={noFreeSeats}
+            >
               <Mail className="mr-2 h-4 w-4" />
               Invite
             </Button>
-            <Button onClick={handleAddClick}>
+            <Button onClick={handleAddClick} disabled={noFreeSeats}>
               <UserPlus className="mr-2 h-4 w-4" />
               Add staff
             </Button>
@@ -101,6 +129,33 @@ export default function StaffPage() {
       />
 
       {fromSetup && <BackToGuideBanner stepId="add_technician" event={bannerEvent} />}
+
+      {seats && (
+        <InfoBanner icon={Users}>
+          {seatUsageCopy(seats)}
+          {noFreeSeats && (
+            <>
+              {' '}
+              {SEAT_LIMIT_COPY}
+              {canManageAdmins && (
+                <>
+                  {' '}
+                  <Link href="/admin/settings/billing" className="font-medium underline underline-offset-2">
+                    See plans
+                  </Link>
+                </>
+              )}
+            </>
+          )}
+        </InfoBanner>
+      )}
+
+      {notice && (
+        <p role="status" className="flex items-center gap-2 text-sm text-success-strong">
+          <Check className="size-4" aria-hidden="true" />
+          {notice}
+        </p>
+      )}
 
       {error && (
         <Alert variant="destructive">
@@ -137,7 +192,7 @@ export default function StaffPage() {
       <StaffFormDialog
         open={formOpen}
         onClose={() => setFormOpen(false)}
-        onSuccess={handleSuccess}
+        onSuccess={handleFormSuccess}
         staff={editing}
         isSelf={editing !== null && editing.id === currentUserId}
         canManageAdmins={canManageAdmins}
@@ -146,7 +201,7 @@ export default function StaffPage() {
       <StaffResetPasswordDialog
         open={resetOpen}
         onClose={() => setResetOpen(false)}
-        onSuccess={handleSuccess}
+        onSuccess={handleResetSuccess}
         staff={resetTarget}
       />
       <TimesheetsDialog

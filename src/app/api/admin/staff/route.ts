@@ -7,6 +7,8 @@ import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
 import { clientIp } from "@/lib/http/client-ip";
+import { getSeatUsage } from "@/lib/admin/seats";
+import { seatsFull } from "@/lib/admin/seat-usage";
 
 export async function GET() {
   try {
@@ -24,10 +26,14 @@ export async function GET() {
       return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
     }
 
-    const staff = await listStaff(session.organizationId);
+    const [staff, seats] = await Promise.all([
+      listStaff(session.organizationId),
+      getSeatUsage(session.organizationId),
+    ]);
     // Echo the caller's own id so the UI can disable self-demote/self-deactivate
     // without a second round-trip. (The server enforces this regardless.)
-    return successResponse({ staff, currentUserId: session.userId });
+    // `seats` lets the page say "You've used 3 of 5 seats." before any form.
+    return successResponse({ staff, currentUserId: session.userId, seats });
   } catch (error: unknown) {
     logger.error({ error }, "Failed to list staff");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);
@@ -64,6 +70,16 @@ export async function POST(request: NextRequest) {
         "Invalid request body: name, valid email, password (min 8 chars), and a valid role required",
         "VALIDATION_ERROR",
         400,
+      );
+    }
+
+    // Same seat gate as invites (createInvite): a new active user needs a
+    // free seat on the plan.
+    if (seatsFull(await getSeatUsage(session.organizationId))) {
+      return errorResponse(
+        "Your plan's staff limit has been reached. Upgrade your plan to add more team members.",
+        "SEAT_LIMIT_REACHED",
+        403,
       );
     }
 

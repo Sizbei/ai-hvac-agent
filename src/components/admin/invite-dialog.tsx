@@ -1,5 +1,6 @@
 'use client';
 
+import { staffErrorMessage } from '@/lib/admin/staff-errors';
 import { useState, useEffect, useRef } from 'react';
 import { Copy, Check } from 'lucide-react';
 import {
@@ -75,7 +76,7 @@ export function InviteDialog({
       });
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.success) {
-        setError(body?.error?.message ?? 'Failed to create invite.');
+        setError(staffErrorMessage(body, "Couldn't create the invite. Please try again."));
         return;
       }
       setInviteUrl(body.data.url as string);

@@ -1,0 +1,83 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+const getAdminSession = vi.fn();
+vi.mock("@/lib/auth/session", () => ({
+  getAdminSession: () => getAdminSession(),
+}));
+
+const listStaff = vi.fn();
+const createStaff = vi.fn();
+vi.mock("@/lib/admin/staff-queries", () => ({
+  listStaff: (...a: unknown[]) => listStaff(...a),
+  createStaff: (...a: unknown[]) => createStaff(...a),
+}));
+
+const getSeatUsage = vi.fn();
+vi.mock("@/lib/admin/seats", () => ({
+  getSeatUsage: (...a: unknown[]) => getSeatUsage(...a),
+}));
+
+vi.mock("@/lib/admin/audit", () => ({ logAudit: vi.fn().mockResolvedValue(undefined) }));
+vi.mock("@/lib/rate-limit", () => ({
+  slidingWindow: () => ({ allowed: true }),
+  RATE_LIMITS: {
+    adminRead: { maxRequests: 60, windowMs: 60_000 },
+    adminMutation: { maxRequests: 30, windowMs: 60_000 },
+  },
+}));
+vi.mock("@/lib/logger", () => ({ logger: { error: vi.fn(), info: vi.fn() } }));
+
+import { NextRequest } from "next/server";
+import { GET, POST } from "./route";
+
+const SESSION = {
+  userId: "11111111-1111-1111-1111-111111111111",
+  organizationId: "00000000-0000-0000-0000-000000000009",
+  email: "admin@x.com",
+  name: "Admin",
+  role: "admin" as const,
+};
+
+const BODY = { name: "New Tech", email: "new@x.com", password: "longenough", role: "technician" };
+
+function postReq() {
+  return new NextRequest("https://app.example.com/api/admin/staff", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(BODY),
+  });
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  getAdminSession.mockResolvedValue(SESSION);
+});
+
+describe("POST /api/admin/staff seat gate", () => {
+  it("refuses with SEAT_LIMIT_REACHED when the plan is full, without creating", async () => {
+    getSeatUsage.mockResolvedValue({ used: 2, limit: 2 });
+    const res = await POST(postReq());
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.code).toBe("SEAT_LIMIT_REACHED");
+    expect(createStaff).not.toHaveBeenCalled();
+    expect(getSeatUsage).toHaveBeenCalledWith(SESSION.organizationId);
+  });
+
+  it("creates when a seat is free", async () => {
+    getSeatUsage.mockResolvedValue({ used: 1, limit: 2 });
+    createStaff.mockResolvedValue({ ok: true, staff: { id: "u1", role: "technician" } });
+    const res = await POST(postReq());
+    expect(res.status).toBe(201);
+    expect(createStaff).toHaveBeenCalledOnce();
+  });
+});
+
+describe("GET /api/admin/staff", () => {
+  it("returns seat usage for the session org", async () => {
+    listStaff.mockResolvedValue([]);
+    getSeatUsage.mockResolvedValue({ used: 3, limit: 2 });
+    const body = await (await GET()).json();
+    expect(body.data.seats).toEqual({ used: 3, limit: 2 });
+    expect(getSeatUsage).toHaveBeenCalledWith(SESSION.organizationId);
+  });
+});

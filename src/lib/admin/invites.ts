@@ -1,14 +1,15 @@
 import "server-only";
 
 import { randomBytes, createHash } from "node:crypto";
-import { and, eq, asc, gt, isNull, desc, count } from "drizzle-orm";
+import { and, eq, asc, gt, isNull, desc } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { staffInvites, users, organizations } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { canAssignRole } from "@/lib/auth/authz";
-import { getOrgEntitlements } from "@/lib/billing/entitlements";
 import type { AdminRole, AdminSessionPayload } from "@/lib/auth/types";
 import { normalizeEmail, createStaff, claimPasswordlessStaff } from "./staff-queries";
+import { getSeatUsage } from "./seats";
+import { seatsFull } from "./seat-usage";
 
 /**
  * Team invitations — tokenized, copyable signup links (no email dependency).
@@ -162,14 +163,7 @@ export async function createInvite(
   // representative entitlement enforcement in v1. SKIPPED for credential-setup
   // invites: the existing user already holds their seat.
   if (!credentialSetup) {
-    const { entitlements } = await getOrgEntitlements(organizationId);
-    const [seatRow] = await db
-      .select({ value: count() })
-      .from(users)
-      .where(withTenant(users, organizationId, eq(users.isActive, true)));
-    // neon-http returns count() as a string.
-    const activeStaff = Number(seatRow?.value ?? 0);
-    if (activeStaff >= entitlements.maxStaff) {
+    if (seatsFull(await getSeatUsage(organizationId))) {
       return { ok: false, reason: "seat_limit" };
     }
   }
