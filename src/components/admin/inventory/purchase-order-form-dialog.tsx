@@ -17,6 +17,7 @@ import {
   SelectContent,
   SelectItem,
 } from '@/components/ui/select';
+import { selectLabel } from '@/lib/admin/select-label';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -182,7 +183,15 @@ export function PurchaseOrderFormDialog({
                     onValueChange={(v) => onMaterialChange(index, v ?? '')}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Material" />
+                      <SelectValue>
+                        {(v: unknown) =>
+                          selectLabel(
+                            materials.map((m) => ({ value: m.id, label: m.name })),
+                            v,
+                            'Material',
+                          )
+                        }
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {materials.map((m) => (

@@ -230,6 +230,14 @@ export function EstimateCreateDialog({
     updateLine(oi, li, { pricebookItemId: selected, useMemberPrice: isMember });
   }
 
+  /** Trigger text for a line's picker — the item name, never its id. */
+  function linePickerLabel(value: unknown): string {
+    if (value === MANUAL || value == null) return 'Manual entry';
+    const picked = typeof value === 'string' ? itemById.get(value) : undefined;
+    if (picked) return `${picked.name} — ${formatCentsExact(picked.priceCents)}`;
+    return pricebookLoading ? 'Loading catalog…' : 'Pick from pricebook or enter manually';
+  }
+
   function addOption(): void {
     const names = ['Good', 'Better', 'Best'];
     const next = names[options.length] ?? `Option ${options.length + 1}`;
@@ -442,13 +450,9 @@ export function EstimateCreateDialog({
                             onValueChange={(v) => pickItem(oi, li, v ?? MANUAL)}
                           >
                             <SelectTrigger className="flex-1">
-                              <SelectValue
-                                placeholder={
-                                  pricebookLoading
-                                    ? 'Loading catalog…'
-                                    : 'Pick from pricebook or enter manually'
-                                }
-                              />
+                              <SelectValue>
+                                {(v: unknown) => linePickerLabel(v)}
+                              </SelectValue>
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value={MANUAL}>Manual entry</SelectItem>

@@ -19,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { selectLabel } from '@/lib/admin/select-label';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 import { Pager } from '@/components/admin/ui/pager';
@@ -135,7 +136,9 @@ export default function InventoryPage() {
           onValueChange={(value) => { setSortKey(value as InventorySortKey); setPage(1); }}
         >
           <SelectTrigger className="w-[160px]" aria-label="Sort order">
-            <SelectValue />
+            <SelectValue>
+              {(v: unknown) => selectLabel(INVENTORY_SORT_OPTIONS, v, 'Sort')}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             {INVENTORY_SORT_OPTIONS.map((opt) => (

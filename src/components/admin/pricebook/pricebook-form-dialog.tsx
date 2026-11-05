@@ -16,6 +16,7 @@ import {
   SelectContent,
   SelectItem,
 } from '@/components/ui/select';
+import { selectLabel } from '@/lib/admin/select-label';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -35,6 +36,12 @@ interface PricebookFormDialogProps {
 }
 
 type ItemType = 'service' | 'material' | 'equipment';
+
+const ITEM_TYPE_OPTIONS: ReadonlyArray<{ value: ItemType; label: string }> = [
+  { value: 'service', label: 'Service' },
+  { value: 'material', label: 'Material' },
+  { value: 'equipment', label: 'Equipment' },
+];
 
 interface FormState {
   readonly type: ItemType;
@@ -210,12 +217,14 @@ export function PricebookFormDialog({
                 }
               >
                 <SelectTrigger id="item-type">
-                  <SelectValue placeholder="Select a type" />
+                  <SelectValue>
+                    {(v: unknown) => selectLabel(ITEM_TYPE_OPTIONS, v, 'Select a type')}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="service">Service</SelectItem>
-                  <SelectItem value="material">Material</SelectItem>
-                  <SelectItem value="equipment">Equipment</SelectItem>
+                  {ITEM_TYPE_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>

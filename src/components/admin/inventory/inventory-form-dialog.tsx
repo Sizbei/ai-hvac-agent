@@ -16,6 +16,7 @@ import {
   SelectContent,
   SelectItem,
 } from '@/components/ui/select';
+import { selectLabel } from '@/lib/admin/select-label';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -161,7 +162,15 @@ export function InventoryFormDialog({
                 onValueChange={(v) => updateField('pricebookItemId', v ?? '')}
               >
                 <SelectTrigger id="inv-material">
-                  <SelectValue placeholder="Select a material" />
+                  <SelectValue>
+                    {(v: unknown) =>
+                      selectLabel(
+                        materials.map((m) => ({ value: m.id, label: m.name })),
+                        v,
+                        'Select a material',
+                      )
+                    }
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {materials.map((m) => (

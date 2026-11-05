@@ -15,6 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { selectLabel } from '@/lib/admin/select-label';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 import { InfoBanner } from '@/components/admin/ui/info-banner';
@@ -411,7 +412,18 @@ export default function EstimateDetailPage({
             <div className="flex flex-wrap items-center gap-2">
               <Select value={selectedOption} onValueChange={(v) => setSelectedOption(v ?? '')}>
                 <SelectTrigger aria-label="Estimate option to mark sold" className="w-auto min-w-[220px]">
-                  <SelectValue />
+                  <SelectValue>
+                    {(v: unknown) =>
+                      selectLabel(
+                        estimate.options.map((o) => ({
+                          value: o.id,
+                          label: `${o.name} — ${formatCentsExact(o.totalCents)}`,
+                        })),
+                        v,
+                        'Choose the option',
+                      )
+                    }
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {estimate.options.map((o) => (

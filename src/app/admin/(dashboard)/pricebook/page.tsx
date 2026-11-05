@@ -23,6 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { selectLabel } from '@/lib/admin/select-label';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 import { Pager } from '@/components/admin/ui/pager';
@@ -187,7 +188,15 @@ export default function PricebookPage() {
         </div>
         <Select value={typeFilter} onValueChange={(v) => setTypeFilter(v ?? ALL_TYPES)}>
           <SelectTrigger aria-label="Filter by type" className="w-[160px]">
-            <SelectValue placeholder="All types" />
+            <SelectValue>
+              {(v: unknown) =>
+                selectLabel(
+                  types.map((t) => ({ value: t, label: t.charAt(0).toUpperCase() + t.slice(1) })),
+                  v,
+                  'All types',
+                )
+              }
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={ALL_TYPES}>All types</SelectItem>
@@ -203,7 +212,9 @@ export default function PricebookPage() {
           onValueChange={(v) => { setSortKey(v as PricebookSortKey); setPage(1); }}
         >
           <SelectTrigger aria-label="Sort pricebook" className="w-[180px]">
-            <SelectValue />
+            <SelectValue>
+              {(v: unknown) => selectLabel(PRICEBOOK_SORT_OPTIONS, v, 'Sort')}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             {PRICEBOOK_SORT_OPTIONS.map((opt) => (
