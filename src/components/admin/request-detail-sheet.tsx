@@ -58,6 +58,7 @@ import {
 import { MAX_TECHNICIANS_PER_VISIT, type AppointmentRecord } from '@/lib/admin/appointment-types';
 import { WINDOW_LABELS, firstOpenDay, formatIsoDayShort } from '@/lib/admin/create-request';
 import {
+  BUSINESS_TIME_ZONE,
   arrivalWindowUtcForBusinessDate,
   businessIsoDate,
   formatBusinessTime,
@@ -69,6 +70,7 @@ import { formatCentsExact } from '@/lib/admin/money-format';
 import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
 import { SyncPill } from '@/components/admin/sync-pill';
 import { issueTypeLabel } from '@/lib/admin/request-labels';
+import { canSaveSchedule, scheduleInputsFrom } from '@/lib/admin/request-schedule-inputs';
 
 // Only manual targets can ever be a transition button — narrowing the map to
 // those keys makes any drift from the state machine a compile error rather than
@@ -82,14 +84,8 @@ const STATUS_ACTION_LABELS: Record<ManualTargetStatus, string> = {
   in_progress: 'Start work',
   on_hold: 'Put on hold',
   completed: 'Mark complete',
-  cancelled: 'Cancel',
+  cancelled: 'Cancel request',
 };
-
-// HTML <input type="date"> wants YYYY-MM-DD; convert an ISO timestamp to that.
-function toDateInputValue(iso: string | null): string {
-  if (!iso) return '';
-  return iso.slice(0, 10);
-}
 
 // Spoken-friendly labels for the arrival-window selector.
 const ARRIVAL_WINDOW_LABELS: Record<ArrivalWindow, string> = {
@@ -276,16 +272,35 @@ function InvoiceStatusBadge({ status }: { readonly status: string }) {
   );
 }
 
-function InfoRow({ label, value }: { readonly label: string; readonly value: string | null }) {
+function InfoRow({
+  label,
+  value,
+  hideEmpty = false,
+}: {
+  readonly label: string;
+  readonly value: string | null;
+  /** Skip the row entirely when there is no value (intake fields). */
+  readonly hideEmpty?: boolean;
+}) {
+  if (hideEmpty && value === null) return null;
   return (
-    <div className="flex justify-between py-1">
-      <span className="text-sm text-muted-foreground">{label}</span>
-      <span className="text-sm font-medium">
+    <div className="flex justify-between gap-4 py-1">
+      <span className="shrink-0 text-sm text-muted-foreground">{label}</span>
+      <span className="min-w-0 break-words text-right text-sm font-medium">
         {value ?? <span className="text-muted-foreground italic">Not provided</span>}
       </span>
     </div>
   );
 }
+
+// Note timestamps read in the business timezone, like the rest of the sheet.
+const NOTE_TIME_FORMAT = new Intl.DateTimeFormat('en-US', {
+  month: 'short',
+  day: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+  timeZone: BUSINESS_TIME_ZONE,
+});
 
 function TranscriptBubble({
   role,
@@ -675,7 +690,10 @@ export function RequestDetailSheet({
 
   const [scheduledInput, setScheduledInput] = useState<string>('');
   const [arrivalWindowInput, setArrivalWindowInput] =
-    useState<ArrivalWindow>('anytime');
+    useState<ArrivalWindow | null>(null);
+  // Hold details appear only after "Put on hold" is chosen.
+  const [holdOpen, setHoldOpen] = useState(false);
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
   const [holdReasonInput, setHoldReasonInput] =
     useState<HoldReason>('awaiting_parts');
   const [followUpInput, setFollowUpInput] = useState<string>('');
@@ -715,7 +733,7 @@ export function RequestDetailSheet({
           prev ? { ...prev, notes: [created, ...prev.notes] } : prev,
         );
       } else {
-        setNoteError(body.error?.message ?? 'Failed to add note');
+        setNoteError(body.error?.message ?? 'Couldn’t add the note. Please try again.');
       }
     } catch {
       setNoteError('Could not connect to server.');
@@ -734,8 +752,8 @@ export function RequestDetailSheet({
       arrivalWindow?: ArrivalWindow | null;
       holdReason?: HoldReason | null;
       followUpDate?: string | null;
-    }): Promise<void> => {
-      if (!requestId) return;
+    }): Promise<boolean> => {
+      if (!requestId) return false;
       setIsPatching(true);
       setWorkflowError(null);
       try {
@@ -748,15 +766,20 @@ export function RequestDetailSheet({
         if (res.ok && body.success) {
           const next = body.data as AdminRequestDetail;
           setDetail(next);
-          // Re-derive the date input from the server's truth so a Clear or Save
+          // Re-derive the inputs from the server's truth so a Clear or Save
           // reflects what actually persisted (no optimistic divergence on error).
-          setScheduledInput(toDateInputValue(next.scheduledDate));
+          const inputs = scheduleInputsFrom(next.scheduledDate, next.arrivalWindowStart, next.arrivalWindowEnd);
+          setScheduledInput(inputs.date);
+          setArrivalWindowInput(inputs.window);
+          setHoldOpen(false);
           onAssigned(); // refresh the underlying list (status/schedule changed)
-        } else {
-          setWorkflowError(body.error?.message ?? 'Update failed');
+          return true;
         }
+        setWorkflowError(body.error?.message ?? 'Couldn’t update the request. Please try again.');
+        return false;
       } catch {
-        setWorkflowError('Could not connect to server.');
+        setWorkflowError('Couldn’t reach the server. Please try again.');
+        return false;
       } finally {
         setIsPatching(false);
       }
@@ -802,6 +825,9 @@ export function RequestDetailSheet({
     setAssignError(null);
     setWorkflowError(null);
     setScheduledInput('');
+    setArrivalWindowInput(null);
+    setHoldOpen(false);
+    setCancelConfirmOpen(false);
     setNoteInput('');
     setNoteError(null);
 
@@ -828,7 +854,13 @@ export function RequestDetailSheet({
         if (cancelled) return;
         if (body.success) {
           setDetail(body.data);
-          setScheduledInput(toDateInputValue(body.data.scheduledDate));
+          const inputs = scheduleInputsFrom(
+            body.data.scheduledDate,
+            body.data.arrivalWindowStart,
+            body.data.arrivalWindowEnd,
+          );
+          setScheduledInput(inputs.date);
+          setArrivalWindowInput(inputs.window);
           // Pre-select current technician if already assigned
           if (body.data.assignedTo) {
             setSelectedTechId(body.data.assignedTo);
@@ -970,6 +1002,14 @@ export function RequestDetailSheet({
   }, [requestId, selectedTechId, detail, technicians, onAssigned, isReassignMode]);
 
   const activeTechnicians = technicians.filter((t) => t.isActive);
+  const isTerminalStatus =
+    detail?.status === 'completed' || detail?.status === 'cancelled';
+  const scheduleCanSave = detail
+    ? canSaveSchedule(
+        scheduleInputsFrom(detail.scheduledDate, detail.arrivalWindowStart, detail.arrivalWindowEnd),
+        { date: scheduledInput, window: arrivalWindowInput },
+      )
+    : false;
   const isOpen = requestId !== null;
 
   return (
@@ -1010,7 +1050,7 @@ export function RequestDetailSheet({
             <div className="flex-1 overflow-y-auto space-y-4 px-4">
               {/* Customer info */}
               <section>
-                <h3 className="text-sm font-semibold mb-2">Customer Information</h3>
+                <h3 className="text-sm font-semibold mb-2">Customer information</h3>
                 <div className="rounded-md border p-3 space-y-1">
                   <InfoRow label="Name" value={detail.customerName} />
                   {detail.customerPhone && <InfoRow label="Phone" value={detail.customerPhone} />}
@@ -1034,7 +1074,7 @@ export function RequestDetailSheet({
 
               {/* Issue details */}
               <section>
-                <h3 className="text-sm font-semibold mb-2">Issue Details</h3>
+                <h3 className="text-sm font-semibold mb-2">Issue details</h3>
                 <div className="rounded-md border p-3 space-y-2">
                   <div className="flex justify-between">
                     <span className="text-sm text-muted-foreground">Type</span>
@@ -1112,85 +1152,85 @@ export function RequestDetailSheet({
                   conversations don't render a wall of "Not provided" rows. */}
               {Object.values(detail.intake).some((v) => v !== null) && (
               <section>
-                <h3 className="text-sm font-semibold mb-2">Intake Details</h3>
+                <h3 className="text-sm font-semibold mb-2">Intake details</h3>
                 <div className="rounded-md border p-3 space-y-1">
-                  <InfoRow
+                  <InfoRow hideEmpty
                     label="System"
                     value={humanizeIntakeValue(
                       detail.intake.systemType,
                       SYSTEM_TYPE_LABELS,
                     )}
                   />
-                  <InfoRow
+                  <InfoRow hideEmpty
                     label="Job type"
                     value={humanizeIntakeValue(
                       detail.intake.jobType,
                       JOB_TYPE_LABELS,
                     )}
                   />
-                  <InfoRow
+                  <InfoRow hideEmpty
                     label="Equipment age"
                     value={humanizeIntakeValue(
                       detail.intake.equipmentAgeBand,
                       EQUIPMENT_AGE_LABELS,
                     )}
                   />
-                  <InfoRow label="Brand" value={detail.intake.equipmentBrand} />
-                  <InfoRow
+                  <InfoRow hideEmpty label="Brand" value={detail.intake.equipmentBrand} />
+                  <InfoRow hideEmpty
                     label="Property"
                     value={humanizeIntakeValue(
                       detail.intake.propertyType,
                       PROPERTY_TYPE_LABELS,
                     )}
                   />
-                  <InfoRow
+                  <InfoRow hideEmpty
                     label="Owner / Renter"
                     value={humanizeIntakeValue(
                       detail.intake.ownerOccupant,
                       OWNER_OCCUPANT_LABELS,
                     )}
                   />
-                  <InfoRow
+                  <InfoRow hideEmpty
                     label="Warranty"
                     value={humanizeIntakeValue(
                       detail.intake.underWarranty,
                       WARRANTY_LABELS,
                     )}
                   />
-                  <InfoRow
+                  <InfoRow hideEmpty
                     label="System status"
                     value={humanizeIntakeValue(
                       detail.intake.systemDownStatus,
                       SYSTEM_STATUS_LABELS,
                     )}
                   />
-                  <InfoRow
+                  <InfoRow hideEmpty
                     label="Duration"
                     value={detail.intake.problemDuration}
                   />
-                  <InfoRow
+                  <InfoRow hideEmpty
                     label="Vulnerable occupants"
                     value={boolLabel(detail.intake.vulnerableOccupants)}
                   />
-                  <InfoRow
+                  <InfoRow hideEmpty
                     label="Preferred window"
                     value={humanizeIntakeValue(
                       detail.intake.preferredWindow,
                       PREFERRED_WINDOW_LABELS,
                     )}
                   />
-                  <InfoRow
+                  <InfoRow hideEmpty
                     label="Contact preference"
                     value={humanizeIntakeValue(
                       detail.intake.contactPreference,
                       CONTACT_PREFERENCE_LABELS,
                     )}
                   />
-                  <InfoRow
+                  <InfoRow hideEmpty
                     label="SMS consent"
                     value={boolLabel(detail.intake.smsConsent)}
                   />
-                  <InfoRow
+                  <InfoRow hideEmpty
                     label="Lead source"
                     value={humanizeIntakeValue(
                       detail.intake.leadSource,
@@ -1289,8 +1329,8 @@ export function RequestDetailSheet({
                     >
                       {isAssigning
                         ? isReassignMode
-                          ? 'Reassigning...'
-                          : 'Assigning...'
+                          ? 'Reassigning…'
+                          : 'Assigning…'
                         : isReassignMode
                           ? 'Reassign'
                           : 'Assign'}
@@ -1366,83 +1406,111 @@ export function RequestDetailSheet({
 
               {/* Status & scheduling */}
               <section>
-                <h3 className="text-sm font-semibold mb-2">Status &amp; Scheduling</h3>
+                <h3 className="text-sm font-semibold mb-2">Status &amp; scheduling</h3>
                 <div className="rounded-md border p-3 space-y-3">
+                  {isTerminalStatus ? (
+                    <p className="text-sm text-muted-foreground">
+                      {detail.status === 'cancelled'
+                        ? 'This request is cancelled.'
+                        : 'This request is complete.'}{' '}
+                      No further changes.
+                    </p>
+                  ) : (
                   <div className="space-y-2">
                     <span className="text-xs text-muted-foreground">
                       Move this request to:
                     </span>
                     <div className="flex flex-wrap gap-2">
-                      {allowedTransitions(detail.status as RequestStatus)
-                        .length === 0 ? (
-                        <span className="text-sm text-muted-foreground italic">
-                          No further status changes available.
-                        </span>
-                      ) : (
-                        allowedTransitions(detail.status as RequestStatus).map(
-                          (next) => (
-                            <Button
-                              key={next}
-                              size="sm"
-                              variant={
-                                next === 'cancelled' ? 'outline' : 'default'
+                      {allowedTransitions(detail.status as RequestStatus).map(
+                        (next) => (
+                          <Button
+                            key={next}
+                            size="sm"
+                            variant={
+                              next === 'cancelled' || next === 'on_hold'
+                                ? 'outline'
+                                : 'default'
+                            }
+                            aria-expanded={next === 'on_hold' ? holdOpen : undefined}
+                            disabled={isPatching}
+                            onClick={() => {
+                              if (next === 'on_hold') {
+                                setHoldOpen((v) => !v);
+                              } else if (next === 'cancelled') {
+                                setWorkflowError(null);
+                                setCancelConfirmOpen(true);
+                              } else {
+                                void patchRequest({ status: next });
                               }
-                              disabled={isPatching}
-                              onClick={() =>
-                                patchRequest(
-                                  next === 'on_hold'
-                                    ? {
-                                        status: next,
-                                        holdReason: holdReasonInput,
-                                        followUpDate: followUpInput
-                                          ? new Date(
-                                              `${followUpInput}T00:00:00.000Z`,
-                                            ).toISOString()
-                                          : null,
-                                      }
-                                    : { status: next },
-                                )
-                              }
-                            >
-                              {STATUS_ACTION_LABELS[
-                                next as ManualTargetStatus
-                              ] ?? next}
-                            </Button>
-                          ),
-                        )
+                            }}
+                          >
+                            {STATUS_ACTION_LABELS[
+                              next as ManualTargetStatus
+                            ] ?? next}
+                          </Button>
+                        ),
                       )}
                     </div>
 
-                    {/* Hold details — shown when "on_hold" is reachable, so the
-                        dispatcher can attach a reason + follow-up to the pause. */}
-                    {allowedTransitions(detail.status as RequestStatus).includes(
-                      'on_hold',
-                    ) && (
-                      <div className="flex flex-wrap items-center gap-2 pt-1">
-                        <span className="text-xs text-muted-foreground">
-                          If putting on hold:
-                        </span>
-                        <select
-                          aria-label="Hold reason"
-                          value={holdReasonInput}
-                          onChange={(e) =>
-                            setHoldReasonInput(e.target.value as HoldReason)
-                          }
-                          className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        >
-                          {HOLD_REASONS.map((r) => (
-                            <option key={r} value={r}>
-                              {HOLD_REASON_LABELS[r]}
-                            </option>
-                          ))}
-                        </select>
-                        <input
-                          type="date"
-                          value={followUpInput}
-                          onChange={(e) => setFollowUpInput(e.target.value)}
-                          aria-label="Follow-up date"
-                          className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        />
+                    {/* Hold details — only after "Put on hold" is chosen. */}
+                    {holdOpen && (
+                      <div className="space-y-2 rounded-md border border-border bg-surface-sunken p-3">
+                        <div className="flex flex-wrap items-end gap-3">
+                          <label className="space-y-1">
+                            <span className="block text-xs text-muted-foreground">Reason</span>
+                            <select
+                              value={holdReasonInput}
+                              onChange={(e) =>
+                                setHoldReasonInput(e.target.value as HoldReason)
+                              }
+                              className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            >
+                              {HOLD_REASONS.map((r) => (
+                                <option key={r} value={r}>
+                                  {HOLD_REASON_LABELS[r]}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="space-y-1">
+                            <span className="block text-xs text-muted-foreground">
+                              Follow up on (optional)
+                            </span>
+                            <input
+                              type="date"
+                              value={followUpInput}
+                              onChange={(e) => setFollowUpInput(e.target.value)}
+                              className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            />
+                          </label>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            disabled={isPatching}
+                            onClick={() =>
+                              void patchRequest({
+                                status: 'on_hold',
+                                holdReason: holdReasonInput,
+                                followUpDate: followUpInput
+                                  ? new Date(
+                                      `${followUpInput}T00:00:00.000Z`,
+                                    ).toISOString()
+                                  : null,
+                              })
+                            }
+                          >
+                            {isPatching ? 'Saving…' : 'Put on hold'}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={isPatching}
+                            onClick={() => setHoldOpen(false)}
+                          >
+                            Back
+                          </Button>
+                        </div>
                       </div>
                     )}
 
@@ -1468,64 +1536,75 @@ export function RequestDetailSheet({
                       </p>
                     )}
                   </div>
+                  )}
 
                   <div className="space-y-2">
-                    <span className="text-xs text-muted-foreground">
-                      Scheduled service date &amp; arrival window:
-                    </span>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <input
-                        type="date"
-                        aria-label="Scheduled service date"
-                        value={scheduledInput}
-                        onChange={(e) => setScheduledInput(e.target.value)}
-                        className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      />
-                      <select
-                        aria-label="Arrival window"
-                        value={arrivalWindowInput}
-                        onChange={(e) =>
-                          setArrivalWindowInput(e.target.value as ArrivalWindow)
-                        }
-                        className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      >
-                        {ARRIVAL_WINDOWS.map((w) => (
-                          <option key={w} value={w}>
-                            {ARRIVAL_WINDOW_LABELS[w]}
-                          </option>
-                        ))}
-                      </select>
-                      <Button
-                        size="sm"
-                        disabled={isPatching || !scheduledInput}
-                        onClick={() =>
-                          patchRequest({
-                            // Anchor the chosen calendar day at UTC midnight.
-                            scheduledDate: new Date(
-                              `${scheduledInput}T00:00:00.000Z`,
-                            ).toISOString(),
-                            arrivalWindow: arrivalWindowInput,
-                          })
-                        }
-                      >
-                        Save
-                      </Button>
-                      {detail.scheduledDate && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={isPatching}
-                          onClick={() =>
-                            patchRequest({
-                              scheduledDate: null,
-                              arrivalWindow: null,
-                            })
-                          }
-                        >
-                          Clear
-                        </Button>
-                      )}
-                    </div>
+                    {!isTerminalStatus && (
+                      <>
+                        <span className="text-xs text-muted-foreground">
+                          Scheduled service date &amp; arrival window:
+                        </span>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <input
+                            type="date"
+                            aria-label="Scheduled service date"
+                            value={scheduledInput}
+                            onChange={(e) => setScheduledInput(e.target.value)}
+                            className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          />
+                          <select
+                            aria-label="Arrival window"
+                            value={arrivalWindowInput ?? ''}
+                            onChange={(e) =>
+                              setArrivalWindowInput(
+                                e.target.value ? (e.target.value as ArrivalWindow) : null,
+                              )
+                            }
+                            className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          >
+                            {arrivalWindowInput === null && (
+                              <option value="">Choose a window</option>
+                            )}
+                            {ARRIVAL_WINDOWS.map((w) => (
+                              <option key={w} value={w}>
+                                {ARRIVAL_WINDOW_LABELS[w]}
+                              </option>
+                            ))}
+                          </select>
+                          <Button
+                            size="sm"
+                            disabled={isPatching || !scheduleCanSave}
+                            onClick={() => {
+                              if (!arrivalWindowInput) return;
+                              void patchRequest({
+                                // The route reads the day part as a business date.
+                                scheduledDate: new Date(
+                                  `${scheduledInput}T00:00:00.000Z`,
+                                ).toISOString(),
+                                arrivalWindow: arrivalWindowInput,
+                              });
+                            }}
+                          >
+                            Save
+                          </Button>
+                          {detail.scheduledDate && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              disabled={isPatching}
+                              onClick={() =>
+                                void patchRequest({
+                                  scheduledDate: null,
+                                  arrivalWindow: null,
+                                })
+                              }
+                            >
+                              Clear
+                            </Button>
+                          )}
+                        </div>
+                      </>
+                    )}
                     {formatArrivalWindow(
                       detail.arrivalWindowStart,
                       detail.arrivalWindowEnd,
@@ -1542,16 +1621,32 @@ export function RequestDetailSheet({
                     )}
                   </div>
 
-                  {workflowError && (
+                  {workflowError && !cancelConfirmOpen && (
                     <p role="alert" className="text-xs text-destructive">{workflowError}</p>
                   )}
                 </div>
+                <ConfirmDialog
+                  open={cancelConfirmOpen}
+                  onOpenChange={(o) => { if (!o && !isPatching) setCancelConfirmOpen(false); }}
+                  title="Cancel this request?"
+                  description="The technician will see it as cancelled."
+                  confirmLabel="Cancel request"
+                  confirmingLabel="Cancelling…"
+                  cancelLabel="Keep request"
+                  isConfirming={isPatching}
+                  error={cancelConfirmOpen ? workflowError : null}
+                  onConfirm={() => {
+                    void patchRequest({ status: 'cancelled' }).then((ok) => {
+                      if (ok) setCancelConfirmOpen(false);
+                    });
+                  }}
+                />
               </section>
 
               {/* Internal notes */}
               <section>
                 <h3 className="text-sm font-semibold mb-2">
-                  Internal Notes ({detail.notes.length})
+                  Internal notes ({detail.notes.length})
                 </h3>
                 <div className="space-y-3">
                   <div className="space-y-2">
@@ -1559,7 +1654,7 @@ export function RequestDetailSheet({
                       aria-label="Internal note"
                       value={noteInput}
                       onChange={(e) => setNoteInput(e.target.value)}
-                      placeholder="Add an internal note (not visible to the customer)..."
+                      placeholder="Add an internal note (not visible to the customer)…"
                       rows={2}
                       maxLength={5000}
                       className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -1575,7 +1670,7 @@ export function RequestDetailSheet({
                         disabled={isAddingNote || !noteInput.trim()}
                         onClick={handleAddNote}
                       >
-                        {isAddingNote ? 'Adding...' : 'Add Note'}
+                        {isAddingNote ? 'Adding…' : 'Add note'}
                       </Button>
                     </div>
                   </div>
@@ -1593,12 +1688,7 @@ export function RequestDetailSheet({
                           </p>
                           <p className="mt-1 text-xs text-muted-foreground">
                             {note.authorName ?? 'System'} ·{' '}
-                            {new Date(note.createdAt).toLocaleString('en-US', {
-                              month: 'short',
-                              day: 'numeric',
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
+                            {NOTE_TIME_FORMAT.format(new Date(note.createdAt))}
                           </p>
                         </div>
                       ))}
@@ -1638,7 +1728,7 @@ export function RequestDetailSheet({
 
               {/* Transcript */}
               <section>
-                <h3 className="text-sm font-semibold mb-2">Conversation Transcript</h3>
+                <h3 className="text-sm font-semibold mb-2">Conversation transcript</h3>
                 <ScrollArea className="max-h-[300px] rounded-md border p-3">
                   {detail.transcript.length === 0 ? (
                     detail.syncedSource === 'fieldpulse' ? (

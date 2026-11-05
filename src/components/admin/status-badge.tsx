@@ -7,6 +7,8 @@ import {
   SESSION_STATUS_BADGE,
   SESSION_STATUS_DEFAULT,
 } from '@/lib/admin/status-colors';
+// Sentence case ("On hold"), matching the list's status tabs.
+import { requestStatusLabel } from '@/lib/admin/request-status';
 
 interface StatusBadgeProps {
   readonly status: string;
@@ -26,19 +28,12 @@ function resolveColorClass(status: string): string {
   );
 }
 
-function formatStatus(status: string): string {
-  return status
-    .split('_')
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
-}
-
 export function StatusBadge({ status }: StatusBadgeProps) {
   const colorClass = resolveColorClass(status);
 
   return (
     <Badge variant="outline" className={colorClass}>
-      {formatStatus(status)}
+      {requestStatusLabel(status)}
     </Badge>
   );
 }
