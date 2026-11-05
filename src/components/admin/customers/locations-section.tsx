@@ -18,7 +18,8 @@ interface LocationsSectionProps {
   readonly customerId: string;
 }
 
-/** Customer-page "Service locations" card: addresses, primary chip, make-primary menu. */
+/** Customer-page "Service locations" card: addresses, primary chip, make-primary menu.
+ * Renders nothing when the customer has no recorded locations. */
 export function LocationsSection({ customerId }: LocationsSectionProps) {
   const [locations, setLocations] = useState<readonly CustomerLocation[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -66,6 +67,10 @@ export function LocationsSection({ customerId }: LocationsSectionProps) {
     }
   }
 
+  // No recorded locations: the service address in Contact information is the
+  // only address, so an empty card would just repeat it as "none yet".
+  if (locations?.length === 0 && !error) return null;
+
   return (
     <SectionCard
       title="Service locations"
@@ -79,9 +84,6 @@ export function LocationsSection({ customerId }: LocationsSectionProps) {
       )}
       {locations === null && !error && (
         <p className="px-4 py-3 text-sm text-muted-foreground">Loading…</p>
-      )}
-      {locations?.length === 0 && (
-        <p className="px-4 py-3 text-sm text-muted-foreground">No service locations yet. Bookings use the customer&apos;s service address until a location is recorded.</p>
       )}
       {locations && locations.length > 0 && (
         <ul className="flex flex-col divide-y divide-border">

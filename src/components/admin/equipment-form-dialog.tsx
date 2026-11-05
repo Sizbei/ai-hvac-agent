@@ -8,16 +8,10 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import type { EquipmentRecord } from '@/lib/admin/crm-types';
+import { EQUIPMENT_TYPE_OPTIONS } from '@/lib/admin/display-labels';
+import { saveErrorMessage } from '@/lib/admin/customer-validation';
 
-const EQUIPMENT_TYPES = [
-  { value: 'ac', label: 'Air Conditioner' },
-  { value: 'furnace', label: 'Furnace' },
-  { value: 'heat_pump', label: 'Heat Pump' },
-  { value: 'boiler', label: 'Boiler' },
-  { value: 'mini_split', label: 'Mini Split' },
-  { value: 'thermostat', label: 'Thermostat' },
-  { value: 'other', label: 'Other' },
-] as const;
+const SAVE_FAILED = "Couldn't save the equipment. Please try again.";
 
 interface EquipmentFormDialogProps {
   readonly open: boolean;
@@ -97,13 +91,14 @@ export function EquipmentFormDialog({
 
   function update<K extends keyof FormState>(key: K, value: FormState[K]): void {
     setForm((prev) => ({ ...prev, [key]: value }));
+    setError(null);
   }
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
       if (!form.equipmentType) {
-        setError('Equipment type is required');
+        setError('Choose an equipment type.');
         return;
       }
 
@@ -148,17 +143,14 @@ export function EquipmentFormDialog({
           body: JSON.stringify(body),
         });
 
-        const json = await res.json();
-        if (json.success) {
+        const json = await res.json().catch(() => null);
+        if (res.ok && json?.success) {
           onSuccess();
         } else {
-          setError(
-            json.error?.message ??
-              `Failed to ${isEditMode ? 'update' : 'add'} equipment`,
-          );
+          setError(saveErrorMessage(res.status, json, SAVE_FAILED));
         }
       } catch {
-        setError('Network error');
+        setError(SAVE_FAILED);
       } finally {
         setIsSubmitting(false);
       }
@@ -183,6 +175,7 @@ export function EquipmentFormDialog({
           <div className="space-y-2">
             <Label>Type *</Label>
             <Select
+              items={EQUIPMENT_TYPE_OPTIONS}
               value={form.equipmentType}
               onValueChange={(v) => update('equipmentType', v ?? '')}
             >
@@ -190,7 +183,7 @@ export function EquipmentFormDialog({
                 <SelectValue placeholder="Select equipment type" />
               </SelectTrigger>
               <SelectContent>
-                {EQUIPMENT_TYPES.map((t) => (
+                {EQUIPMENT_TYPE_OPTIONS.map((t) => (
                   <SelectItem key={t.value} value={t.value}>
                     {t.label}
                   </SelectItem>
@@ -231,7 +224,7 @@ export function EquipmentFormDialog({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="location">Location in Home</Label>
+            <Label htmlFor="location">Location in home</Label>
             <Input
               id="location"
               value={form.locationInHome}

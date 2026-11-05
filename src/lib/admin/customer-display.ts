@@ -4,6 +4,8 @@
  * shared between the card grid and the drawer.
  */
 
+import { BUSINESS_BASE_LOCATION } from '@/lib/config/business-location';
+
 /** Up to two initials from a customer name, ignoring parenthetical suffixes like
  * "(TCG)" so "Belk Morristown (TCG)" → "BM", not "B(". Falls back to the first
  * two characters, and to "?" when there's nothing usable. */
@@ -53,4 +55,24 @@ export function lastSeenTone(iso: string | null, now: Date = new Date()): string
   if (days < 0 || days <= 30) return '#16a34a';
   if (days <= 90) return '#d97706';
   return '#9ca3af';
+}
+
+const BOOKING_DATE_FORMAT = new Intl.DateTimeFormat('en-US', {
+  timeZone: BUSINESS_BASE_LOCATION.timezone,
+  month: 'short',
+  day: 'numeric',
+  year: 'numeric',
+});
+
+/** Month / day / year of a booking in the business timezone (Eastern), so an
+ * evening booking doesn't show as the next day the way UTC getters did. */
+export function bookingDateParts(iso: string): {
+  readonly month: string;
+  readonly day: string;
+  readonly year: string;
+} {
+  const parts = BOOKING_DATE_FORMAT.formatToParts(new Date(iso));
+  const get = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((p) => p.type === type)?.value ?? '';
+  return { month: get('month'), day: get('day'), year: get('year') };
 }

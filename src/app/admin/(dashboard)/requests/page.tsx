@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useUrlFilterSync } from '@/hooks/use-url-filter-sync';
 import { BackToGuideBanner } from '@/components/admin/setup/back-to-guide-banner';
 import { useOpenFromParam } from '@/hooks/use-open-from-param';
+import { isUuid } from '@/lib/validation/uuid';
 import { refreshOnboarding } from '@/lib/admin/onboarding-store';
 import type { BannerEvent } from '@/lib/admin/setup-card-view';
 import { AlertCircle, Plus, Search } from 'lucide-react';
@@ -69,6 +70,9 @@ export default function AdminRequestsPage() {
     if (p.afterHours === '1') setIsAfterHoursFilter(true);
     if (p.sort && sorts.includes(p.sort)) setSortKey(p.sort as RequestSortKey);
     if (p.q) { setSearchInput(p.q); setDebouncedSearch(p.q); }
+    // Deep link from a customer's history, an estimate or an invoice: open that
+    // request's detail sheet. Not persisted, so closing it drops the param.
+    if (p.request && isUuid(p.request)) setSelectedRequestId(p.request);
   }, []);
   useUrlFilterSync(urlFilterState, restoreFiltersFromUrl);
 

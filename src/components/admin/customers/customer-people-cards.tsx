@@ -66,11 +66,12 @@ function PeopleCard({
           <span className="font-mono font-medium tabular-nums text-foreground">
             {customer.requestCount}
           </span>
-          booking{customer.requestCount === 1 ? '' : 's'}
+          request{customer.requestCount === 1 ? '' : 's'}
         </span>
         <span className="flex items-center gap-1.5">
           <Wrench className="size-3.5 text-foreground-faint" />
           <span className="font-mono tabular-nums">{customer.equipmentCount}</span>
+          equipment
         </span>
       </div>
 
@@ -81,7 +82,9 @@ function PeopleCard({
             className={`size-1.5 rounded-[1px] ${lastSeenDotClass(customer.lastServiceDate)}`}
             aria-hidden
           />
-          {lastSeenLabel(customer.lastServiceDate)}
+          {customer.lastServiceDate
+            ? `Last service ${lastSeenLabel(customer.lastServiceDate)}`
+            : 'No completed service yet'}
         </span>
         {customer.archivedAt && (
           <Badge variant="outline" className="text-[10px]">

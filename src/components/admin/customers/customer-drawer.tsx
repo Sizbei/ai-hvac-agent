@@ -73,7 +73,7 @@ export function CustomerDrawer({ customer, onClose }: CustomerDrawerProps) {
         if (active) setBookings(body.data.bookings);
       })
       .catch(() => {
-        if (active) setError('Could not load booking history.');
+        if (active) setError("Couldn't load the request history. Please try again.");
       })
       .finally(() => {
         if (active) setIsLoading(false);
@@ -109,7 +109,7 @@ export function CustomerDrawer({ customer, onClose }: CustomerDrawerProps) {
                     {customer.name ?? 'Unknown'}
                   </span>
                   <span className="block text-xs font-normal text-muted-foreground">
-                    {customer.requestCount} booking
+                    {customer.requestCount} request
                     {customer.requestCount === 1 ? '' : 's'} on record
                   </span>
                 </span>
@@ -117,7 +117,7 @@ export function CustomerDrawer({ customer, onClose }: CustomerDrawerProps) {
             </SheetHeader>
 
             {/* contact */}
-            <div className="mt-5 flex flex-col gap-2.5">
+            <div className="mt-1 flex flex-col gap-2.5 px-4">
               <ContactRow
                 icon={Phone}
                 value={customer.phone}
@@ -132,9 +132,9 @@ export function CustomerDrawer({ customer, onClose }: CustomerDrawerProps) {
             </div>
 
             {/* booking history */}
-            <div className="mt-6">
+            <div className="mt-6 px-4">
               <h3 className="mb-2 text-[13px] font-medium text-muted-foreground">
-                Booking history
+                Request history
               </h3>
               <BookingHistoryList
                 bookings={bookings}
@@ -143,7 +143,7 @@ export function CustomerDrawer({ customer, onClose }: CustomerDrawerProps) {
               />
             </div>
 
-            <div className="mt-auto pt-6">
+            <div className="mt-auto px-4 pt-6 pb-4">
               <Button
                 variant="outline"
                 className="w-full"

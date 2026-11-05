@@ -4,6 +4,7 @@ import {
   customerCity,
   lastSeenLabel,
   lastSeenTone,
+  bookingDateParts,
 } from './customer-display';
 
 describe('customerInitials', () => {
@@ -59,5 +60,23 @@ describe('lastSeenTone', () => {
     expect(lastSeenTone('2026-05-15T12:00:00Z', now)).toBe('#d97706');
     expect(lastSeenTone('2025-01-01T12:00:00Z', now)).toBe('#9ca3af');
     expect(lastSeenTone(null, now)).toBe('#9ca3af');
+  });
+});
+
+describe('bookingDateParts', () => {
+  it('uses the business timezone, not UTC', () => {
+    // 9:30 pm Eastern on Mar 3 is already Mar 4 in UTC.
+    expect(bookingDateParts('2026-03-04T02:30:00.000Z')).toEqual({
+      month: 'Mar',
+      day: '3',
+      year: '2026',
+    });
+  });
+  it('keeps a midday booking on its own day', () => {
+    expect(bookingDateParts('2026-07-15T16:00:00.000Z')).toEqual({
+      month: 'Jul',
+      day: '15',
+      year: '2026',
+    });
   });
 });

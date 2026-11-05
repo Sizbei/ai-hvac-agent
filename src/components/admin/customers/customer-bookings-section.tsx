@@ -33,7 +33,7 @@ export function CustomerBookingsSection({
         if (active) setBookings(body.data.bookings);
       })
       .catch(() => {
-        if (active) setError('Could not load bookings.');
+        if (active) setError("Couldn't load bookings. Please try again.");
       })
       .finally(() => {
         if (active) setIsLoading(false);

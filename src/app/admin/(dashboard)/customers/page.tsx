@@ -23,6 +23,8 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { CardSkeleton } from '@/components/admin/skeletons';
+import { Skeleton } from '@/components/ui/skeleton';
+import { humanizeCode } from '@/lib/admin/display-labels';
 import {
   Select,
   SelectContent,
@@ -56,7 +58,7 @@ const CustomerRow = memo(function CustomerRow({ customer }: CustomerRowProps) {
   return (
     <Link href={`/admin/customers/${customer.id}`}>
       <Card className="transition-colors hover:bg-row-hover">
-        <CardContent className="flex items-center gap-4 p-4">
+        <CardContent className="flex items-center gap-4 px-4 py-2.5">
           <div className="flex size-9 items-center justify-center rounded-[4px] bg-primary-soft text-marker-strong">
             {customer.customerType === 'commercial' ? (
               <Building2 className="size-5" aria-hidden="true" />
@@ -82,21 +84,21 @@ const CustomerRow = memo(function CustomerRow({ customer }: CustomerRowProps) {
               {customer.address ?? customer.email ?? customer.phone ?? 'No contact info'}
             </p>
           </div>
-          <div className="flex items-center gap-3 text-sm text-muted-foreground">
-            <span className="flex items-center gap-1.5">
-              <Wrench className="size-3.5 text-foreground-faint" aria-hidden="true" />
-              <span className="sr-only">Equipment:</span>
-              <span className="font-mono tabular-nums">{customer.equipmentCount}</span>
-            </span>
+          <div className="hidden items-center gap-4 text-sm text-muted-foreground sm:flex">
             <span className="flex items-center gap-1.5">
               <Calendar className="size-3.5 text-foreground-faint" aria-hidden="true" />
-              <span className="sr-only">Bookings:</span>
-              <span className="font-mono tabular-nums">{customer.requestCount}</span>
+              <span className="font-mono tabular-nums text-foreground">{customer.requestCount}</span>
+              request{customer.requestCount === 1 ? '' : 's'}
+            </span>
+            <span className="flex items-center gap-1.5">
+              <Wrench className="size-3.5 text-foreground-faint" aria-hidden="true" />
+              <span className="font-mono tabular-nums">{customer.equipmentCount}</span>
+              equipment
             </span>
             {customer.lastServiceDate && (
-              <Badge variant="outline" className="text-xs">
-                Last: {new Date(customer.lastServiceDate).toLocaleDateString()}
-              </Badge>
+              <span className="text-xs">
+                Last service {new Date(customer.lastServiceDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+              </span>
             )}
           </div>
         </CardContent>
@@ -261,11 +263,11 @@ export default function CustomersPage() {
       />
 
       <div className="flex flex-wrap items-center gap-3">
-        <div className="relative flex-1 sm:max-w-md">
+        <div className="relative w-full sm:w-auto sm:min-w-[300px] sm:max-w-md sm:flex-1">
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             aria-label="Search customers"
-            placeholder="Search by name, email, phone, or address..."
+            placeholder="Search name, phone, email or address…"
             value={search}
             onChange={handleSearchChange}
             className="pl-10"
@@ -275,14 +277,14 @@ export default function CustomersPage() {
           value={propertyTypeFilter}
           onValueChange={handlePropertyTypeChange}
         >
-          <SelectTrigger aria-label="Filter by property type" className="w-[180px]">
+          <SelectTrigger aria-label="Filter by property type" className="w-[calc(50%-6px)] sm:w-[180px]">
             <SelectValue placeholder="Filter by property" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={ALL_PROPERTY_TYPES}>All property types</SelectItem>
             {propertyTypeOptions.map((type) => (
               <SelectItem key={type} value={type}>
-                {type}
+                {humanizeCode(type)}
               </SelectItem>
             ))}
           </SelectContent>
@@ -291,7 +293,7 @@ export default function CustomersPage() {
           value={customerTypeFilter}
           onValueChange={handleCustomerTypeChange}
         >
-          <SelectTrigger aria-label="Filter by customer type" className="w-[160px]">
+          <SelectTrigger aria-label="Filter by customer type" className="w-[calc(50%-6px)] sm:w-[160px]">
             <SelectValue placeholder="Customer type" />
           </SelectTrigger>
           <SelectContent>
@@ -304,7 +306,7 @@ export default function CustomersPage() {
           value={membershipStatusFilter}
           onValueChange={handleMembershipStatusChange}
         >
-          <SelectTrigger aria-label="Filter by membership status" className="w-[180px]">
+          <SelectTrigger aria-label="Filter by membership status" className="w-[calc(50%-6px)] sm:w-[180px]">
             <SelectValue placeholder="Membership status" />
           </SelectTrigger>
           <SelectContent>
@@ -356,10 +358,14 @@ export default function CustomersPage() {
       </div>
 
       {isLoading ? (
-        <div className="grid gap-3">
-          {Array.from({ length: 6 }, (_, i) => (
-            <CardSkeleton key={i} />
-          ))}
+        <div className={view === 'cards' ? 'grid gap-4 sm:grid-cols-2 lg:grid-cols-3' : 'grid gap-3'}>
+          {Array.from({ length: 6 }, (_, i) =>
+            view === 'cards' ? (
+              <Skeleton key={i} className="h-[178px] w-full rounded-[6px]" />
+            ) : (
+              <CardSkeleton key={i} />
+            ),
+          )}
         </div>
       ) : error ? (
         <Alert variant="destructive">
@@ -385,7 +391,7 @@ export default function CustomersPage() {
             title={isFiltered ? 'No customers match' : 'No customers yet'}
             description={
               isFiltered
-                ? 'Try a different search term or property-type filter.'
+                ? 'Try a different search or clear the filters. Phone numbers match in any format.'
                 : 'Add your first customer to start tracking equipment, service history, and follow-ups.'
             }
             action={
