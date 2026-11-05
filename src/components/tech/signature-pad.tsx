@@ -14,6 +14,8 @@ export interface SignaturePadProps {
   readonly initialName?: string;
   /** Inline error from the parent (the write's outcome). */
   readonly error?: string;
+  /** The capture button's label ("Use this signature" where capturing sends nothing). */
+  readonly captureLabel?: string;
 }
 
 const CANVAS_W = 320;
@@ -36,7 +38,13 @@ function typedNameCanvas(name: string): HTMLCanvasElement {
 
 /** Customer signature: pointer-drawn canvas + printed name. Captures the PNG
  * once per intent and holds it until a redraw, Clear or name edit. */
-export function SignaturePad({ onCapture, disabled = false, initialName = '', error }: SignaturePadProps) {
+export function SignaturePad({
+  onCapture,
+  disabled = false,
+  initialName = '',
+  error,
+  captureLabel = 'Save signature',
+}: SignaturePadProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawingRef = useRef(false);
   const hasDrawnRef = useRef(false);
@@ -166,7 +174,7 @@ export function SignaturePad({ onCapture, disabled = false, initialName = '', er
           disabled={locked || !name.trim()}
           onClick={() => void handleSave()}
         >
-          {busy ? 'Saving…' : 'Save signature'}
+          {busy ? 'Saving…' : captureLabel}
         </Button>
         <Button className="h-12 rounded-xl px-4 text-[15px]" variant="ghost" disabled={locked} onClick={clearCanvas}>
           Clear

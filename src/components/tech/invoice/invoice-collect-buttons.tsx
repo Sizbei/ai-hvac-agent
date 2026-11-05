@@ -2,7 +2,7 @@
 
 import { Button } from '@/components/ui/button';
 import type { TechInvoice } from '@/lib/tech/invoice-view';
-import { approvalBlocked } from '@/lib/tech/approval-flow';
+import { approvalCanMount } from '@/lib/tech/invoice-page-locks';
 import type { IntentKind } from '@/lib/tech/invoice-view-diff';
 import { ApprovalSheet } from './approval-sheet';
 import { PayLinkSheet } from './pay-link-sheet';
@@ -33,6 +33,7 @@ export function InvoiceCollectButtons({
   invoice,
   jobId,
   unknownKinds,
+  approvalBlocked,
   sheet,
   onSheet,
   onNotice,
@@ -41,6 +42,8 @@ export function InvoiceCollectButtons({
   readonly invoice: TechInvoice;
   readonly jobId: string;
   readonly unknownKinds: readonly IntentKind[];
+  /** `pageLocks().approvalBlocked`: a pending write or a non-approval unknown intent. */
+  readonly approvalBlocked: boolean;
   readonly sheet: CollectSheet | null;
   readonly onSheet: (s: CollectSheet | null) => void;
   /** The payment-success line, shown by the page (a full payment moves the
@@ -50,7 +53,7 @@ export function InvoiceCollectButtons({
   const { view } = api;
   if (!view.isLead) return null;
   const can = (a: (typeof view.allowed)[number]) => view.allowed.includes(a);
-  const showApproval = invoice.state === 'draft' && invoice.lines.length > 0 && (can('finalize') || can('sign'));
+  const showApproval = approvalCanMount(view);
   const showRecord = invoice.state === 'open' && invoice.balanceCents > 0 && can('record_payment');
   const showPayLink = can('pay_link');
   const close = () => onSheet(null);
@@ -65,7 +68,7 @@ export function InvoiceCollectButtons({
     <div className="space-y-2">
       {showApproval && (
         <>
-          <Button className="h-12 w-full rounded-xl text-[16px]" disabled={disabled || approvalBlocked(unknownKinds)} onClick={() => openSheet('approval')}>
+          <Button className="h-12 w-full rounded-xl text-[16px]" disabled={approvalBlocked} onClick={() => openSheet('approval')}>
             Customer approval
           </Button>
           <ApprovalSheet

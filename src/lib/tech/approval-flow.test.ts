@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { approvalBlocked, approvalStep, padVisible, unknownBanner, ZERO_TOTAL_COPY, type ApprovalInput } from "./approval-flow";
+import { approvalBlocked, approvalButtonLabel, approvalStep, padVisible, unknownBanner, ZERO_TOTAL_COPY, type ApprovalInput } from "./approval-flow";
 
 const base: ApprovalInput = { signatureFresh: false, signatureSent: "idle", finalizeSent: "idle", state: "draft" };
 const step = (o: Partial<ApprovalInput>) => approvalStep({ ...base, ...o });
@@ -83,5 +83,25 @@ describe("approvalBlocked", () => {
     expect(approvalBlocked(["signature", "finalize"])).toBe(false);
     expect(approvalBlocked(["add_line"])).toBe(true);
     expect(approvalBlocked(["signature", "remove_line"])).toBe(true);
+  });
+});
+
+describe("approvalButtonLabel", () => {
+  it("Approve and finalize by default", () => {
+    expect(approvalButtonLabel("send_signature", null)).toBe("Approve and finalize");
+    expect(approvalButtonLabel("send_finalize", null)).toBe("Approve and finalize");
+  });
+
+  it("Try again after a failed signature on send_signature", () => {
+    expect(approvalButtonLabel("send_signature", "signature")).toBe("Try again");
+  });
+
+  it("Try again after a failed finalize once the signature landed", () => {
+    expect(approvalButtonLabel("send_finalize", "finalize")).toBe("Try again");
+  });
+
+  it("a stale failure from the other step does not relabel", () => {
+    expect(approvalButtonLabel("send_finalize", "signature")).toBe("Approve and finalize");
+    expect(approvalButtonLabel("send_signature", "finalize")).toBe("Approve and finalize");
   });
 });

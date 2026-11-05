@@ -44,7 +44,8 @@ export function intentLanded(intent: Intent, before: TechInvoiceView, after: Tec
   const a = fullInvoice(after);
   switch (intent.kind) {
     case "create":
-      return before.invoice === null && after.invoice !== null;
+      // A NEW draft (before may be null or the paid/refunded invoice shown read-only).
+      return after.invoice?.id !== before.invoice?.id && after.invoice?.state === "draft";
     case "add_line": {
       if (!a) return false;
       const had = ids(b?.lines);
@@ -99,11 +100,12 @@ export function sendPlan(pre: KeyState, bodyHash: string): "send" | "resend_stor
 /**
  * The result kind `write()` reports. pending = the server still holds the key
  * (IN_PROGRESS) after the 2 s wait: not an error, just "Still saving".
+ * already_saved_refetch = a replay said the write is already stored: done.
  */
 export type WriteStatus = "done" | "dropped" | "retry" | "pending" | "error" | "skipped";
 
 export function writeStatus(outcome: WriteOutcome, ev: OutcomeEventType | null): WriteStatus {
-  if (outcome === "success_refetch") return "done";
+  if (outcome === "success_refetch" || outcome === "already_saved_refetch") return "done";
   if (ev === "dropped") return "dropped";
   if (ev === "unknown") return outcome === "wait_then_refetch" ? "pending" : "retry";
   return "error";

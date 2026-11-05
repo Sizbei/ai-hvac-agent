@@ -168,9 +168,12 @@ export function useInvoiceWrites(opts: {
     })();
   }, [jobId, retry]);
 
+  /** Forget an intent a refetch made moot (back to idle; its stored copy is cleared). */
+  const drop = useCallback((kind: IntentKind) => void dispatchers[kind]({ type: 'dropped' }), [dispatchers]);
+
   const unknownKinds = [...PERSISTED, 'signature' as const].filter((k) => states[k].phase === 'unknown');
   const inFlight = (kind: IntentKind) => states[kind].phase === 'sent' || busy === kind;
-  return { write, retry, busy, recovering, unknownKinds, inFlight };
+  return { write, retry, drop, busy, recovering, unknownKinds, inFlight };
 }
 
 /** What the page hands to the Task 14 sheets. */

@@ -3,7 +3,7 @@
 import { X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { formatCentsExact } from '@/lib/admin/money-format';
-import { taxLabel } from '@/lib/tech/invoice-page-copy';
+import { taxLabel, totalsFooter } from '@/lib/tech/invoice-page-copy';
 import type { TechInvoice, TechUnbilledMaterial } from '@/lib/tech/invoice-view';
 
 const MONEY = 'font-mono tabular-nums';
@@ -100,21 +100,18 @@ function Row({ label, cents, strong = false }: { label: string; cents: number; s
   );
 }
 
-/** Subtotal, tax (with the rate while draft), total; plus paid/balance once open. */
+/** Subtotal, tax (with the rate while draft), total; then paid so far and a state-keyed footer once finalized. */
 export function InvoiceTotals({ invoice }: { readonly invoice: TechInvoice }) {
-  const settled = invoice.state !== 'draft';
+  const footer = totalsFooter(invoice.state, invoice.totalCents, invoice.balanceCents);
   return (
     <div className="space-y-1.5 border-t pt-3">
       <Row label="Subtotal" cents={invoice.subtotalCents} />
       <Row label={taxLabel(invoice.taxBps)} cents={invoice.taxCents} />
       <Row label="Total" cents={invoice.totalCents} strong />
-      {settled && invoice.amountPaidCents > 0 && <Row label="Paid so far" cents={invoice.amountPaidCents} />}
-      {settled &&
-        (invoice.balanceCents > 0 ? (
-          <Row label="Balance due" cents={invoice.balanceCents} strong />
-        ) : (
-          <p className="text-right text-[15px] font-semibold text-success-strong">Paid</p>
-        ))}
+      {footer && invoice.amountPaidCents > 0 && <Row label="Paid so far" cents={invoice.amountPaidCents} />}
+      {footer?.kind === 'balance' && <Row label={footer.label} cents={footer.cents} strong />}
+      {footer?.kind === 'paid' && <p className="text-right text-[15px] font-semibold text-success-strong">{footer.label}</p>}
+      {footer?.kind === 'note' && <p className="text-right text-[15px] font-semibold text-muted-foreground">{footer.label}</p>}
     </div>
   );
 }

@@ -3,7 +3,7 @@
  * Sentence case, "job" (technician copy), no exclamation marks.
  */
 import { formatCentsExact } from "@/lib/admin/money-format";
-import type { SignatureState } from "./invoice-view";
+import type { SignatureState, TechInvoiceState } from "./invoice-view";
 import type { WriteOutcome } from "./invoice-key-state";
 
 export function invoiceChipLabel(s: { state: string; balanceCents: number } | null): string {
@@ -92,4 +92,36 @@ export function signatureCopy(state: SignatureState): string | null {
     case "present":
       return null;
   }
+}
+
+/** The prompt above "Create invoice" once the shown invoice is paid or refunded. */
+export function newInvoicePrompt(materialCount: number): string {
+  return materialCount > 0 ? materialsPrompt(materialCount) : "Start a new invoice for this job.";
+}
+
+export type TotalsFooter =
+  | { readonly kind: "balance"; readonly label: "Balance due"; readonly cents: number }
+  | { readonly kind: "paid"; readonly label: "Paid" }
+  | { readonly kind: "note"; readonly label: "Refunded" | "Nothing to collect" };
+
+/** The line under the totals, keyed on the invoice state; null for a draft (totals only). */
+export function totalsFooter(state: TechInvoiceState, totalCents: number, balanceCents: number): TotalsFooter | null {
+  switch (state) {
+    case "draft":
+      return null;
+    case "paid":
+      return { kind: "paid", label: "Paid" };
+    case "refunded":
+      return { kind: "note", label: "Refunded" };
+    case "open":
+      return totalCents === 0
+        ? { kind: "note", label: "Nothing to collect" }
+        : { kind: "balance", label: "Balance due", cents: balanceCents };
+  }
+}
+
+/** A payment's status next to its method; null for a succeeded payment (the usual case). */
+export function paymentStatusLabel(status: string): string | null {
+  if (status === "succeeded") return null;
+  return status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, " ");
 }

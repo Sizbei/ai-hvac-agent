@@ -2,7 +2,7 @@
 
 import { useRef, useState } from 'react';
 import { formatCentsExact } from '@/lib/admin/money-format';
-import { paymentLabel, signatureCopy } from '@/lib/tech/invoice-page-copy';
+import { paymentLabel, paymentStatusLabel, signatureCopy } from '@/lib/tech/invoice-page-copy';
 import type { TechInvoicePayment, TechInvoiceSignature } from '@/lib/tech/invoice-view';
 
 function formatWhen(iso: string | null): string {
@@ -74,7 +74,7 @@ export function InvoicePayments({ payments }: { readonly payments: readonly Tech
             <div className="min-w-0">
               <p className="text-[15px]">
                 {paymentLabel(p.method, p.checkNumber)}
-                {p.status !== 'succeeded' && <span className="text-muted-foreground"> · {p.status}</span>}
+                {paymentStatusLabel(p.status) && <span className="text-muted-foreground"> · {paymentStatusLabel(p.status)}</span>}
               </p>
               {p.createdAt && <p className="text-[13px] text-muted-foreground">{formatWhen(p.createdAt)}</p>}
             </div>

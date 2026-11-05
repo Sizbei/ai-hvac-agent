@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { SegmentedControl } from '@/components/ui/segmented-control';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { INTENTS_STORAGE_KEY, parseIntents } from '@/lib/tech/invoice-intent-persist';
+import { inFlightPaymentBody } from '@/lib/tech/invoice-page-locks';
 import type { TechInvoice } from '@/lib/tech/invoice-view';
 import { noteFor, type SheetNote } from '@/lib/tech/sheet-note';
 import {
@@ -92,7 +93,8 @@ export function RecordPaymentSheet({
   // The body of the last send that has no definitive answer yet.
   const [lastBody, setLastBody] = useState<PaymentBody | null>(null);
 
-  const inFlight = busy || paymentUnknown ? lastBody ?? (paymentUnknown ? storedPaymentBody(jobId) : null) : null;
+  const stored = paymentUnknown && !lastBody ? storedPaymentBody(jobId) : null;
+  const inFlight = inFlightPaymentBody({ busy, paymentUnknown, stored }, lastBody);
   const shownMethod = inFlight?.method ?? method;
   const shownAmount = inFlight ? dollars(inFlight.amountCents) : amount ?? dollars(invoice.balanceCents);
   const shownCheck = inFlight ? inFlight.checkNumber ?? '' : checkNumber;

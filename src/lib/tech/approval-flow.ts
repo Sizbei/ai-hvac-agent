@@ -36,6 +36,19 @@ export function approvalStep(i: ApprovalInput): ApprovalStep {
   return "show_pad";
 }
 
+export type ApprovalFailure = "signature" | "finalize" | null;
+
+/**
+ * The approval button's label: "Try again" after a failed send of the step it
+ * re-runs (the signature on send_signature, finalize on send_finalize once the
+ * signature landed); otherwise "Approve and finalize".
+ */
+export function approvalButtonLabel(step: ApprovalStep, lastFailure: ApprovalFailure): string {
+  if (step === "send_signature" && lastFailure === "signature") return "Try again";
+  if (step === "send_finalize" && lastFailure === "finalize") return "Try again";
+  return "Approve and finalize";
+}
+
 /** The pad is drawn only before a capture; later steps show the captured image. */
 export function padVisible(step: ApprovalStep): boolean {
   return step === "show_pad";

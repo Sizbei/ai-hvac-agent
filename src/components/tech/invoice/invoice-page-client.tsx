@@ -8,10 +8,12 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { unknownBanner } from '@/lib/tech/approval-flow';
-import { invoiceChipLabel, materialsPrompt } from '@/lib/tech/invoice-page-copy';
+import { invoiceChipLabel, materialsPrompt, newInvoicePrompt } from '@/lib/tech/invoice-page-copy';
+import { bannerTap, pageLocks, staleUnknownKinds } from '@/lib/tech/invoice-page-locks';
 import { fullInvoice } from '@/lib/tech/invoice-view-diff';
 import type { TechInvoiceView } from '@/lib/tech/invoice-view';
 import { AddItemSheet, type PricebookHit } from './add-item-sheet';
+import { CreateInvoicePrompt } from './create-invoice-prompt';
 import { devCollectSheet, InvoiceCollectButtons, type CollectSheet } from './invoice-collect-buttons';
 import { InvoiceLines, InvoiceTotals, UnbilledMaterials } from './invoice-lines';
 import { InvoicePayments, InvoiceSignature } from './invoice-record';
@@ -68,7 +70,7 @@ export function InvoicePageClient({ id, devOpenAddItem = false }: { readonly id:
     return null;
   }, [base]);
 
-  const { write, retry, busy, recovering, unknownKinds, inFlight } = useInvoiceWrites({ jobId: id, viewRef, refetch });
+  const { write, retry, drop, busy, recovering, unknownKinds, inFlight } = useInvoiceWrites({ jobId: id, viewRef, refetch });
 
   useEffect(() => {
     void refetch();
@@ -92,12 +94,19 @@ export function InvoicePageClient({ id, devOpenAddItem = false }: { readonly id:
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, [refetch]);
 
-  // Another tap is still saving on the server: look again until it settles.
+  // Another tap is still saving on the server: look again until it settles,
+  // only while visible (the visibility listener refetches on return).
   useEffect(() => {
-    if (!view?.pendingWrite) return;
-    const t = setTimeout(() => void refetch(), PENDING_POLL_MS);
+    if (!view?.pendingWrite || document.visibilityState !== 'visible') return;
+    const t = setTimeout(() => { if (document.visibilityState === 'visible') void refetch(); }, PENDING_POLL_MS);
     return () => clearTimeout(t);
   }, [view, refetch]);
+
+  // After every refetch or poll: forget a signature/finalize the invoice shows landed (or moot).
+  useEffect(() => {
+    if (!view || busy !== null || recovering) return;
+    for (const kind of staleUnknownKinds(view, unknownKinds)) drop(kind);
+  }, [view, busy, recovering, unknownKinds, drop]);
 
   const report = useCallback((r: WriteResult): WriteResult => {
     // `pending` (the server still holds the tap) and `skipped` read as status, not as an error.
@@ -134,10 +143,7 @@ export function InvoicePageClient({ id, devOpenAddItem = false }: { readonly id:
 
   const inv = view.invoice;
   const full = fullInvoice(view);
-  const locked = view.pendingWrite || recovering || busy !== null || unknownKinds.length > 0;
-  // The add-item sheet re-sends its own unknown add ("Try again"); only OTHER unknown intents lock it.
-  const addLocked =
-    view.pendingWrite || recovering || (busy !== null && busy !== 'add_line') || unknownKinds.some((k) => k !== 'add_line');
+  const { locked, addLocked, approvalBlocked } = pageLocks({ pendingWrite: view.pendingWrite, busy, recovering, unknownKinds });
   const banner = unknownBanner(unknownKinds);
   const can = (a: TechInvoiceView['allowed'][number]) => view.allowed.includes(a);
   const api: InvoicePageApi = { view, refetch, write };
@@ -161,6 +167,18 @@ export function InvoicePageClient({ id, devOpenAddItem = false }: { readonly id:
     const path = `${base}/lines/${lineId}?invoiceId=${encodeURIComponent(full.id)}`;
     void write({ kind: 'remove_line', lineId }, () => deleteJson(path), body).then(report);
   };
+
+  const onBanner = (b: NonNullable<typeof banner>) => {
+    const tap = bannerTap(b, view);
+    if (tap.type === 'open_approval') setCollectSheet('approval');
+    else if (tap.type === 'retry') void retry(tap.kind).then(report);
+    else setMessage({ text: tap.text, error: false });
+  };
+  const createButton = (prompt: string) => (
+    <CreateInvoicePrompt prompt={prompt} canCreate={can('create')} onSite={view.onSite}
+      disabled={locked || inFlight('create')} creating={busy === 'create'} onCreate={create} />
+  );
+  const settled = full?.state === 'paid' || full?.state === 'refunded';
 
   const otherDue = view.otherOpen.reduce((s, o) => s + o.balanceCents, 0);
 
@@ -200,7 +218,7 @@ export function InvoicePageClient({ id, devOpenAddItem = false }: { readonly id:
             variant="outline"
             className="h-11 shrink-0 rounded-xl px-4"
             disabled={view.pendingWrite}
-            onClick={() => (banner.action === 'open_approval' ? setCollectSheet('approval') : void retry(banner.kind).then(report))}
+            onClick={() => onBanner(banner)}
           >
             Try again
           </Button>
@@ -238,14 +256,7 @@ export function InvoicePageClient({ id, devOpenAddItem = false }: { readonly id:
       ) : !full ? (
         <Card>
           <CardContent className="space-y-3">
-            <p className="text-[15px]">{materialCount === null ? 'Start from the materials on this job.' : materialsPrompt(materialCount)}</p>
-            {can('create') ? (
-              <Button className="h-12 w-full rounded-xl text-[16px]" disabled={locked || inFlight('create')} onClick={create}>
-                {busy === 'create' ? 'Creating…' : 'Create invoice'}
-              </Button>
-            ) : (
-              !view.onSite && <p className={NOTE}>Arrive at the job before invoicing.</p>
-            )}
+            {createButton(materialCount === null ? 'Start from the materials on this job.' : materialsPrompt(materialCount))}
           </CardContent>
         </Card>
       ) : (
@@ -268,15 +279,19 @@ export function InvoicePageClient({ id, devOpenAddItem = false }: { readonly id:
               </>
             )}
             <InvoiceCollectButtons api={api} invoice={full} jobId={id} unknownKinds={unknownKinds}
+              approvalBlocked={approvalBlocked}
               sheet={collectSheet}
               onSheet={setCollectSheet}
               onNotice={setNotice}
             />
+            {settled && can('create') && (
+              <div className="space-y-3 border-t pt-3">{createButton(newInvoicePrompt(view.materialsNotOnInvoice.length))}</div>
+            )}
           </CardContent>
         </Card>
       )}
 
-      <AddItemSheet open={addOpen && !!full} onClose={() => setAddOpen(false)} onAdd={addItem} onRetry={() => retry('add_line')} disabled={addLocked} />
+      <AddItemSheet open={addOpen && full?.state === 'draft'} onClose={() => setAddOpen(false)} onAdd={addItem} onRetry={() => retry('add_line')} disabled={addLocked} />
     </div>
   );
 }

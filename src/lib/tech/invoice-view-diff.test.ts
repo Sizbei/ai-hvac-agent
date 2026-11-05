@@ -34,6 +34,14 @@ describe("intentLanded", () => {
     expect(intentLanded(i, view(null), view(null))).toBe(false);
   });
 
+  it("create: a new draft after a paid invoice landed; the same invoice did not", () => {
+    const i: Intent = { kind: "create" };
+    expect(intentLanded(i, view(inv({ id: "p1", state: "paid" })), view(inv({ id: "d2" })))).toBe(true);
+    expect(intentLanded(i, view(inv({ id: "p1", state: "refunded" })), view(inv({ id: "d2" })))).toBe(true);
+    expect(intentLanded(i, view(inv({ id: "p1", state: "paid" })), view(inv({ id: "p1", state: "paid" })))).toBe(false);
+    expect(intentLanded(i, view(inv({ id: "d1" })), view(inv({ id: "d1" })))).toBe(false);
+  });
+
   it("add_line (pricebook): landed when a new line appears", () => {
     const i: Intent = { kind: "add_line", pricebookItemId: "p1" };
     expect(intentLanded(i, view(inv({ lines: [LINE] })), view(inv({ lines: [LINE, LINE2] })))).toBe(true);
@@ -140,7 +148,7 @@ describe("writeStatus", () => {
     expect(writeStatus("wait_then_refetch", "unknown")).toBe("pending");
     expect(writeStatus("wait_then_refetch", "dropped")).toBe("dropped");
     expect(writeStatus("show_message_refetch", "definitive_unstored")).toBe("error");
-    expect(writeStatus("already_saved_refetch", "spent")).toBe("error");
+    expect(writeStatus("already_saved_refetch", "spent")).toBe("done");
   });
 });
 

@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { SignaturePad } from '@/components/tech/signature-pad';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { mintKey } from '@/lib/http/idempotency-codes';
-import { approvalStep, padVisible, ZERO_TOTAL_COPY, type SendStatus } from '@/lib/tech/approval-flow';
+import { approvalButtonLabel, approvalStep, padVisible, ZERO_TOTAL_COPY, type SendStatus } from '@/lib/tech/approval-flow';
 import type { TechInvoice } from '@/lib/tech/invoice-view';
 import { noteFor, type SheetNote } from '@/lib/tech/sheet-note';
 import { InvoiceSignature } from './invoice-record';
@@ -91,7 +91,7 @@ export function ApprovalSheet({
     setCapture(next);
   }
 
-  // The pad's "Save signature" only captures; nothing is sent until approval.
+  // The pad's "Use this signature" only captures; nothing is sent until "Approve and finalize".
   async function onCapture(blob: Blob, name: string): Promise<void> {
     hold({ blob, name, hash: `${mintKey()}|${name}`, url: URL.createObjectURL(blob) });
     setSigSent('idle');
@@ -144,7 +144,8 @@ export function ApprovalSheet({
   };
 
   const pending = api.view.pendingWrite;
-  const label = busy ? 'Saving…' : step === 'send_signature' && sigSent === 'failed' ? 'Try again' : 'Approve and finalize';
+  const lastFailure = finSent === 'failed' ? 'finalize' : sigSent === 'failed' ? 'signature' : null;
+  const label = busy ? 'Saving…' : approvalButtonLabel(step, lastFailure);
 
   return (
     <TechSheet
@@ -161,7 +162,7 @@ export function ApprovalSheet({
           </div>
 
           {padVisible(step) ? (
-            <SignaturePad onCapture={onCapture} disabled={busy || pending} />
+            <SignaturePad onCapture={onCapture} disabled={busy || pending} captureLabel="Use this signature" />
           ) : capture ? (
             <div className="space-y-1">
               {/* eslint-disable-next-line @next/next/no-img-element -- local object URL of the held capture */}
