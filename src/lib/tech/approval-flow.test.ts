@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { approvalBlocked, approvalButtonLabel, approvalStep, padVisible, unknownBanner, ZERO_TOTAL_COPY, type ApprovalInput } from "./approval-flow";
+import { approvalBlocked, approvalButtonLabel, approvalStep, NO_SIGNATURE_ACTION, NO_SIGNATURE_PROMPT, noSignatureOffered, padVisible, unknownBanner, ZERO_TOTAL_COPY, type ApprovalInput } from "./approval-flow";
 
 const base: ApprovalInput = { signatureFresh: false, signatureSent: "idle", finalizeSent: "idle", state: "draft" };
 const step = (o: Partial<ApprovalInput>) => approvalStep({ ...base, ...o });
@@ -103,5 +103,19 @@ describe("approvalButtonLabel", () => {
   it("a stale failure from the other step does not relabel", () => {
     expect(approvalButtonLabel("send_finalize", "signature")).toBe("Approve and finalize");
     expect(approvalButtonLabel("send_signature", "finalize")).toBe("Approve and finalize");
+  });
+});
+
+describe("noSignatureOffered", () => {
+  it("offered before a signature lands", () => {
+    expect(noSignatureOffered("show_pad")).toBe(true);
+    expect(noSignatureOffered("send_signature")).toBe(true);
+  });
+  it("not once signed or finalized", () => {
+    expect(noSignatureOffered("send_finalize")).toBe(false);
+    expect(noSignatureOffered("done")).toBe(false);
+  });
+  it("copy", () => {
+    expect(`${NO_SIGNATURE_PROMPT} ${NO_SIGNATURE_ACTION}`).toBe("Customer not here? Finalize without signature");
   });
 });

@@ -5,7 +5,17 @@ import { Button } from '@/components/ui/button';
 import { SignaturePad } from '@/components/tech/signature-pad';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { mintKey } from '@/lib/http/idempotency-codes';
-import { approvalButtonLabel, approvalStep, padVisible, SIGNATURE_DIDNT_SAVE, ZERO_TOTAL_COPY, type SendStatus } from '@/lib/tech/approval-flow';
+import {
+  approvalButtonLabel,
+  approvalStep,
+  NO_SIGNATURE_ACTION,
+  NO_SIGNATURE_PROMPT,
+  noSignatureOffered,
+  padVisible,
+  SIGNATURE_DIDNT_SAVE,
+  ZERO_TOTAL_COPY,
+  type SendStatus,
+} from '@/lib/tech/approval-flow';
 import type { TechInvoice } from '@/lib/tech/invoice-view';
 import { noteFor, signatureNoteFor, type SheetNote } from '@/lib/tech/sheet-note';
 import { InvoiceSignature } from './invoice-record';
@@ -112,24 +122,29 @@ export function ApprovalSheet({
     return false;
   }
 
-  async function approve(): Promise<void> {
+  async function finalize(): Promise<void> {
+    setFinSent('sent');
+    const body = { invoiceId: invoice.id };
+    const r = await api.write({ kind: 'finalize' }, (key) => postJson(`/api/tech/jobs/${jobId}/invoice/finalize`, body, key), body);
+    if (landed(r)) {
+      setFinSent('ok');
+      hold(null);
+      onApproved();
+      return;
+    }
+    setFinSent(r.status === 'skipped' ? 'idle' : 'failed');
+    setMessage(noteFor(r, FINALIZE_FAILED));
+  }
+
+  /** withSignature=false: the customer isn't here; finalize alone (the invoice reads "No signature"). */
+  async function approve(withSignature = true): Promise<void> {
     if (busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
     setMessage(null);
     try {
-      if (step === 'send_signature' && capture && !(await signature(capture))) return;
-      setFinSent('sent');
-      const body = { invoiceId: invoice.id };
-      const r = await api.write({ kind: 'finalize' }, (key) => postJson(`/api/tech/jobs/${jobId}/invoice/finalize`, body, key), body);
-      if (landed(r)) {
-        setFinSent('ok');
-        hold(null);
-        onApproved();
-        return;
-      }
-      setFinSent(r.status === 'skipped' ? 'idle' : 'failed');
-      setMessage(noteFor(r, FINALIZE_FAILED));
+      if (withSignature && step === 'send_signature' && capture && !(await signature(capture))) return;
+      await finalize();
     } finally {
       busyRef.current = false;
       setBusy(false);
@@ -184,6 +199,19 @@ export function ApprovalSheet({
             <Button className="h-12 w-full rounded-xl text-[16px]" disabled={busy || pending} onClick={() => void approve()}>
               {label}
             </Button>
+          )}
+          {noSignatureOffered(step) && (
+            <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
+              <span className="text-[15px] text-muted-foreground">{NO_SIGNATURE_PROMPT}</span>
+              <Button
+                variant="outline"
+                className="h-11 shrink-0 rounded-xl px-4 text-[15px]"
+                disabled={busy || pending || sigUnknown}
+                onClick={() => void approve(false)}
+              >
+                {NO_SIGNATURE_ACTION}
+              </Button>
+            </div>
           )}
         </div>
     </TechSheet>

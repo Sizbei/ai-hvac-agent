@@ -18,6 +18,7 @@ import { useIdempotencyKey } from '@/hooks/use-idempotency-key';
 import { outcomeEvent, type WriteOutcome } from '@/lib/tech/invoice-key-state';
 import { classifyWriteError } from '@/lib/tech/invoice-client-errors';
 import { SIGNATURE_DIDNT_SAVE } from '@/lib/tech/approval-flow';
+import { parseManualPrice } from '@/lib/tech/material-form';
 import {
   JOB_NOT_FOUND,
   JOB_NOT_FOUND_BACK,
@@ -104,6 +105,7 @@ export function TechJobDetailClient({
   const [search, setSearch] = useState('');
   const [selectedItemId, setSelectedItemId] = useState('');
   const [manualDesc, setManualDesc] = useState('');
+  const [manualPrice, setManualPrice] = useState('');
   const [quantity, setQuantity] = useState('1');
   const [addError, setAddError] = useState<string | null>(null);
   const [isAdding, setIsAdding] = useState(false);
@@ -268,12 +270,21 @@ export function TechJobDetailClient({
       setAddError('Pick a catalog item or enter a description.');
       return;
     }
+    const price = selectedItemId ? null : parseManualPrice(manualPrice, qty);
+    if (price && !price.ok) {
+      setAddError(price.message);
+      return;
+    }
     setIsAdding(true);
     setAddError(null);
     try {
       const payload = selectedItemId
         ? { pricebookItemId: selectedItemId, quantity: qty }
-        : { description: manualDesc.trim(), quantity: qty };
+        : {
+            description: manualDesc.trim(),
+            quantity: qty,
+            ...(price?.ok && price.cents !== null ? { unitPriceCents: price.cents } : {}),
+          };
       const res = await fetch(`/api/tech/jobs/${id}/materials`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -283,18 +294,19 @@ export function TechJobDetailClient({
       if (res.ok && body.success) {
         setSelectedItemId('');
         setManualDesc('');
+        setManualPrice('');
         setQuantity('1');
         setSearch('');
         void loadMaterials();
       } else {
-        setAddError(body.error?.message ?? 'Failed to add material');
+        setAddError("Couldn't add that material. Check it and try again.");
       }
     } catch {
-      setAddError('Could not connect to server.');
+      setAddError("Couldn't reach the server. Try again.");
     } finally {
       setIsAdding(false);
     }
-  }, [id, quantity, selectedItemId, manualDesc, loadMaterials]);
+  }, [id, quantity, selectedItemId, manualDesc, manualPrice, loadMaterials]);
 
   const handleRemove = useCallback(
     async (materialId: string): Promise<void> => {
@@ -547,12 +559,25 @@ export function TechJobDetailClient({
               ))}
             </select>
             {!selectedItemId && (
-              <Input
-                placeholder="Manual description"
-                value={manualDesc}
-                onChange={(e) => setManualDesc(e.target.value)}
-                className="h-11 rounded-xl text-[15px] md:text-[15px]"
-              />
+              <>
+                <Input
+                  placeholder="Manual description"
+                  value={manualDesc}
+                  onChange={(e) => setManualDesc(e.target.value)}
+                  className="h-11 rounded-xl text-[15px] md:text-[15px]"
+                />
+                <label className="flex items-center gap-2">
+                  <span className="shrink-0 text-[15px] text-muted-foreground">Price each $</span>
+                  <Input
+                    aria-label="Price each, in dollars (optional)"
+                    placeholder="Optional"
+                    inputMode="decimal"
+                    value={manualPrice}
+                    onChange={(e) => setManualPrice(e.target.value)}
+                    className="h-11 rounded-xl font-mono text-[15px] tabular-nums md:text-[15px]"
+                  />
+                </label>
+              </>
             )}
             <div className="flex items-center gap-2">
               <Input

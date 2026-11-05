@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  closeOutInvoiceWarning,
   actionNeedsSheet,
   buildActionSheetCopy,
   describeBlocker,
@@ -106,5 +107,19 @@ describe('labelAssignmentStatus', () => {
     expect(labelAssignmentStatus('on_hold')).toBe('On hold');
     expect(labelAssignmentStatus('en_route')).toBe('En route');
     expect(labelAssignmentStatus('completed')).toBe('Completed');
+  });
+});
+
+describe('closeOutInvoiceWarning', () => {
+  it('draft invoice is not approved yet', () => {
+    expect(closeOutInvoiceWarning({ state: 'draft', balanceCents: 68657 })).toBe("The invoice isn't approved yet.");
+  });
+  it('open invoice with a balance names the amount due', () => {
+    expect(closeOutInvoiceWarning({ state: 'open', balanceCents: 68657 })).toBe('The invoice still has $686.57 due.');
+  });
+  it('nothing to warn about', () => {
+    expect(closeOutInvoiceWarning(null)).toBeNull();
+    expect(closeOutInvoiceWarning({ state: 'open', balanceCents: 0 })).toBeNull();
+    expect(closeOutInvoiceWarning({ state: 'paid', balanceCents: 0 })).toBeNull();
   });
 });

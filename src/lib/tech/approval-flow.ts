@@ -54,6 +54,17 @@ export function approvalButtonLabel(step: ApprovalStep, lastFailure: ApprovalFai
   return "Approve and finalize";
 }
 
+/**
+ * "Customer not here? Finalize without signature" is offered while no
+ * signature has landed for this approval (pad shown or a capture not yet sent).
+ */
+export function noSignatureOffered(step: ApprovalStep): boolean {
+  return step === "show_pad" || step === "send_signature";
+}
+
+export const NO_SIGNATURE_PROMPT = "Customer not here?";
+export const NO_SIGNATURE_ACTION = "Finalize without signature";
+
 /** The pad is drawn only before a capture; later steps show the captured image. */
 export function padVisible(step: ApprovalStep): boolean {
   return step === "show_pad";

@@ -3,7 +3,7 @@
  *
  * GET    list the materials recorded on a job (org-scoped read).
  * POST   add a material (catalog line snapshots cost/price server-side; manual
- *        line defaults costs to 0). Assignee + tenant guarded in field-queries.
+ *        line keeps cost 0 and takes an optional unitPriceCents, capped). Assignee + tenant guarded in field-queries.
  * DELETE remove a material by ?materialId=. Assignee + tenant guarded.
  *
  * Auth mirrors the tech status route: getTechSession (technician role) + the
@@ -22,14 +22,21 @@ import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { logger } from "@/lib/logger";
 import { isUuid } from "@/lib/validation/uuid";
+import { MAX_PRICE_CENTS } from "@/lib/admin/money-format";
 
 export const dynamic = "force-dynamic";
 
-const addSchema = z.object({
-  pricebookItemId: z.string().uuid().optional(),
-  description: z.string().trim().min(1).max(500).optional(),
-  quantity: z.number().int().min(1).max(10000),
-});
+const addSchema = z
+  .object({
+    pricebookItemId: z.string().uuid().optional(),
+    description: z.string().trim().min(1).max(500).optional(),
+    quantity: z.number().int().min(1).max(10000),
+    // Manual lines only: catalog prices are snapshotted server-side.
+    unitPriceCents: z.number().int().min(0).max(MAX_PRICE_CENTS).optional(),
+  })
+  .refine((b) => !(b.pricebookItemId && b.unitPriceCents !== undefined), {
+    message: "A catalog item's price comes from the pricebook",
+  });
 
 export async function GET(
   _request: NextRequest,
@@ -89,6 +96,7 @@ export async function POST(
       pricebookItemId: parsed.data.pricebookItemId ?? null,
       description: parsed.data.description ?? null,
       quantity: parsed.data.quantity,
+      unitPriceCents: parsed.data.unitPriceCents ?? null,
     });
     if (!result.ok) {
       if (result.reason === "not_owned") {

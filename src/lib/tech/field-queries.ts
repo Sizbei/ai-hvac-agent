@@ -37,6 +37,7 @@ import { decrypt } from "@/lib/crypto";
 import { getPricebookItemById } from "@/lib/admin/pricebook-queries";
 import { adjustStock } from "@/lib/admin/inventory-queries";
 import { rollUpActualMaterialsCost } from "@/lib/admin/margin";
+import { MAX_PRICE_CENTS } from "@/lib/admin/money-format";
 
 /** Decrypt PII, tolerating a value encrypted under a now-rotated key (returns
  * null rather than throwing, so one bad field can't 500 the whole summary). */
@@ -243,6 +244,18 @@ export interface AddJobMaterialInput {
   readonly pricebookItemId?: string | null;
   readonly description?: string | null;
   readonly quantity: number;
+  /** Manual lines only: the tech's price per unit. Ignored for catalog lines (snapshotted). */
+  readonly unitPriceCents?: number | null;
+}
+
+/** A manual price is whole cents, ≥ 0, and the line total stays within the money cap. */
+export function validManualPrice(unitPriceCents: number, quantity: number): boolean {
+  return (
+    Number.isInteger(unitPriceCents) &&
+    unitPriceCents >= 0 &&
+    unitPriceCents <= MAX_PRICE_CENTS &&
+    unitPriceCents * quantity <= MAX_PRICE_CENTS
+  );
 }
 
 /**
@@ -287,12 +300,18 @@ export async function addJobMaterial(
     unitCostCents = item.costCents;
     unitPriceCents = item.priceCents;
   } else {
-    // Manual line: must carry a description; costs default to 0.
+    // Manual line: must carry a description; cost stays 0, the price is the
+    // tech's (optional, default 0) within the money caps.
     const trimmed = input.description?.trim();
     if (!trimmed) {
       return { ok: false, reason: "invalid_input" };
     }
+    const price = input.unitPriceCents ?? 0;
+    if (!validManualPrice(price, input.quantity)) {
+      return { ok: false, reason: "invalid_input" };
+    }
     description = trimmed;
+    unitPriceCents = price;
   }
 
   const [created] = await db

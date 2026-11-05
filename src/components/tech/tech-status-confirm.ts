@@ -5,6 +5,7 @@
  */
 
 import type { Blocker } from '@/lib/tech/status-actions';
+import { formatCentsExact } from '@/lib/admin/money-format';
 
 const TECH_STATUS_LABELS: Record<string, string> = {
   en_route: 'On my way',
@@ -109,4 +110,23 @@ export function describeBlocker(b: Blocker): string {
 /** The request is waiting on an earlier visit: derived from loaded blockers, or the last response said so. */
 export function showRequestBehind(blockers: readonly Blocker[], lastResponseBehind: boolean): boolean {
   return lastResponseBehind || blockers.some((b) => b.kind === 'earlier_visit_open');
+}
+
+/** The summary's invoice fields the close-out warning reads. */
+export interface CloseOutInvoice {
+  readonly state: string;
+  readonly balanceCents: number;
+}
+
+/**
+ * A heads-up line in the Close out sheet (the lead can still close out): a
+ * draft invoice is not approved yet; an open one with a balance is still due.
+ */
+export function closeOutInvoiceWarning(invoice: CloseOutInvoice | null): string | null {
+  if (!invoice) return null;
+  if (invoice.state === 'draft') return "The invoice isn't approved yet.";
+  if (invoice.state === 'open' && invoice.balanceCents > 0) {
+    return `The invoice still has ${formatCentsExact(invoice.balanceCents)} due.`;
+  }
+  return null;
 }

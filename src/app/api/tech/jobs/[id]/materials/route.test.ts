@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 
 vi.mock("@/lib/auth/tech-session", () => ({ getTechSession: vi.fn() }));
+vi.mock("@/lib/rate-limit", () => ({
+  slidingWindow: () => ({ allowed: true }),
+  RATE_LIMITS: { adminMutation: { maxRequests: 1, windowMs: 1 } },
+}));
 vi.mock("@/lib/tech/field-queries", () => ({
   addJobMaterial: vi.fn(),
   listJobMaterials: vi.fn(),
@@ -8,9 +12,9 @@ vi.mock("@/lib/tech/field-queries", () => ({
   isJobOwnedByTech: vi.fn(),
 }));
 
-import { GET } from "./route";
+import { GET, POST } from "./route";
 import { getTechSession } from "@/lib/auth/tech-session";
-import { isJobOwnedByTech, listJobMaterials } from "@/lib/tech/field-queries";
+import { addJobMaterial, isJobOwnedByTech, listJobMaterials } from "@/lib/tech/field-queries";
 
 const ctx = (id: string) => ({ params: Promise.resolve({ id }) });
 const req = () => new Request("http://t/api") as never;
@@ -44,5 +48,46 @@ describe("GET /api/tech/jobs/[id]/materials", () => {
     expect(res.status).toBe(200);
     expect(body.data.materials[0]).not.toHaveProperty("unitCostCents");
     expect(body.data.materials[0].unitPriceCents).toBe(900);
+  });
+});
+
+const post = (body: unknown) =>
+  new Request("http://t/api", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }) as never;
+const PB = "22222222-2222-2222-2222-222222222222";
+
+describe("POST /api/tech/jobs/[id]/materials — manual price", () => {
+  it("passes a manual line's unitPriceCents through", async () => {
+    (addJobMaterial as unknown as Mock).mockResolvedValue({ ok: true, id: "m1" });
+    const res = await POST(post({ description: "Capacitor", quantity: 2, unitPriceCents: 4250 }), ctx(VALID_ID) as never);
+    expect(res.status).toBe(201);
+    expect(addJobMaterial).toHaveBeenCalledWith("o", "u", VALID_ID, {
+      pricebookItemId: null, description: "Capacitor", quantity: 2, unitPriceCents: 4250,
+    });
+  });
+
+  it("a manual line without a price sends null (stored as 0)", async () => {
+    (addJobMaterial as unknown as Mock).mockResolvedValue({ ok: true, id: "m1" });
+    await POST(post({ description: "Fittings", quantity: 1 }), ctx(VALID_ID) as never);
+    expect(addJobMaterial).toHaveBeenCalledWith("o", "u", VALID_ID, expect.objectContaining({ unitPriceCents: null }));
+  });
+
+  it("400 for a price on a catalog line", async () => {
+    const res = await POST(post({ pricebookItemId: PB, quantity: 1, unitPriceCents: 100 }), ctx(VALID_ID) as never);
+    expect(res.status).toBe(400);
+    expect(addJobMaterial).not.toHaveBeenCalled();
+  });
+
+  it("400 for a negative, fractional or over-cap price", async () => {
+    for (const unitPriceCents of [-1, 1.5, 100_000_000]) {
+      const res = await POST(post({ description: "x", quantity: 1, unitPriceCents }), ctx(VALID_ID) as never);
+      expect(res.status).toBe(400);
+    }
+    expect(addJobMaterial).not.toHaveBeenCalled();
+  });
+
+  it("400 when the query layer refuses the line total", async () => {
+    (addJobMaterial as unknown as Mock).mockResolvedValue({ ok: false, reason: "invalid_input" });
+    const res = await POST(post({ description: "x", quantity: 2, unitPriceCents: 60_000_000 }), ctx(VALID_ID) as never);
+    expect(res.status).toBe(400);
   });
 });

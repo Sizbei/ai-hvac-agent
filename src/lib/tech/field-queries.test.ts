@@ -109,6 +109,7 @@ describe("addJobMaterial — catalog line", () => {
     const r = await addJobMaterial(ORG, TECH, JOB, {
       pricebookItemId: "pb-1",
       quantity: 2,
+      unitPriceCents: 1, // a client price never overrides the catalog snapshot
     });
 
     expect(r).toEqual({ ok: true, id: "mat-1" });
@@ -213,6 +214,29 @@ describe("addJobMaterial — manual line", () => {
         quantity: 3,
       }),
     );
+  });
+
+  it("stores the tech's price on a manual line, cost stays 0", async () => {
+    owned(true);
+    const valuesSpy = vi.fn(() => ({ returning: () => Promise.resolve([{ id: "mat-3" }]) }));
+    vi.mocked(db.insert).mockReturnValue({ values: valuesSpy } as never);
+    const r = await addJobMaterial(ORG, TECH, JOB, { description: "Capacitor 45/5", quantity: 2, unitPriceCents: 4250 });
+    expect(r).toEqual({ ok: true, id: "mat-3" });
+    expect(valuesSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ unitCostCents: 0, unitPriceCents: 4250, quantity: 2 }),
+    );
+  });
+
+  it("rejects a manual price that is negative, fractional, or over the money cap", async () => {
+    owned(true);
+    for (const unitPriceCents of [-1, 10.5, 100_000_000]) {
+      const r = await addJobMaterial(ORG, TECH, JOB, { description: "x", quantity: 1, unitPriceCents });
+      expect(r).toEqual({ ok: false, reason: "invalid_input" });
+    }
+    // The line total is capped too.
+    const r = await addJobMaterial(ORG, TECH, JOB, { description: "x", quantity: 2, unitPriceCents: 60_000_000 });
+    expect(r).toEqual({ ok: false, reason: "invalid_input" });
+    expect(db.insert).not.toHaveBeenCalled();
   });
 
   it("rejects a manual line with no description", async () => {

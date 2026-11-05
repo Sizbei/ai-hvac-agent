@@ -295,6 +295,7 @@ export function TechJobSummary({
         <CloseOutSheet
           action={sheetAction}
           blockers={relevantBlockers(serverBlockers ?? job.blockers)}
+          invoice={job.invoiceSummary}
           pending={advancing !== null}
           error={sheetError}
           onConfirm={(a, options) => void advance(a, options)}
