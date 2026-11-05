@@ -1,15 +1,16 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { SignaturePad } from '@/components/tech/signature-pad';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { mintKey } from '@/lib/http/idempotency-codes';
 import { approvalStep, padVisible, ZERO_TOTAL_COPY, type SendStatus } from '@/lib/tech/approval-flow';
 import type { TechInvoice } from '@/lib/tech/invoice-view';
+import { noteFor, type SheetNote } from '@/lib/tech/sheet-note';
 import { InvoiceSignature } from './invoice-record';
 import { postJson, type Envelope, type SendResult } from './post-json';
+import { NoteLine, TechSheet } from './tech-sheet';
 import type { InvoicePageApi, WriteResult } from './use-invoice-writes';
 
 interface Capture {
@@ -22,13 +23,7 @@ interface Capture {
 const SIGNATURE_FAILED = "Couldn't save the signature. Try again.";
 const FINALIZE_FAILED = "Couldn't finalize the invoice. Try again.";
 const landed = (r: WriteResult) => r.status === 'done' || r.status === 'dropped';
-interface Note { readonly text: string; readonly error: boolean }
-/** The inline line after a write that did not land; `pending` and `skipped`
- * (the server still holds a tap) read as status, not as an error. */
-function noteFor(r: WriteResult, fallback: string): Note | null {
-  if (r.status === 'pending' || r.status === 'skipped') return r.message ? { text: r.message, error: false } : null;
-  return { text: r.message ?? fallback, error: true };
-}
+
 
 /** The job signature: multipart with the held Blob and the intent's key. */
 async function sendSignature(jobId: string, c: Capture, key: string): Promise<SendResult> {
@@ -77,7 +72,7 @@ export function ApprovalSheet({
   const [finSent, setFinSent] = useState<SendStatus>('idle');
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
-  const [message, setMessage] = useState<Note | null>(null);
+  const [message, setMessage] = useState<SheetNote | null>(null);
   const captureRef = useRef<Capture | null>(null);
 
   useEffect(() => () => { if (captureRef.current) URL.revokeObjectURL(captureRef.current.url); }, []);
@@ -152,14 +147,13 @@ export function ApprovalSheet({
   const label = busy ? 'Saving…' : step === 'send_signature' && sigSent === 'failed' ? 'Try again' : 'Approve and finalize';
 
   return (
-    <Sheet open={open} onOpenChange={(o) => { if (!o && !busy) onClose(); }}>
-      <SheetContent side="bottom" className="max-h-[92dvh] gap-3 overflow-y-auto rounded-t-2xl pb-[max(1rem,env(safe-area-inset-bottom))]">
-        <SheetHeader className="pr-12">
-          <SheetTitle className="text-[17px]">Customer approval</SheetTitle>
-          <SheetDescription className="text-[15px]">
-            {invoice.totalCents === 0 ? ZERO_TOTAL_COPY : 'The customer signs to approve the work and the total.'}
-          </SheetDescription>
-        </SheetHeader>
+    <TechSheet
+      open={open}
+      onClose={onClose}
+      busy={busy}
+      title="Customer approval"
+      description={invoice.totalCents === 0 ? ZERO_TOTAL_COPY : 'The customer signs to approve the work and the total.'}
+    >
         <div className="space-y-4 px-4">
           <div className="flex items-baseline justify-between border-b border-border pb-3">
             <span className="text-[15px] text-muted-foreground">Total</span>
@@ -185,18 +179,13 @@ export function ApprovalSheet({
             <InvoiceSignature signature={invoice.signature} onImageError={() => void api.refetch()} />
           )}
 
-          {message && (
-            <p role={message.error ? 'alert' : 'status'} className={`text-[15px] ${message.error ? 'text-danger-strong' : 'text-muted-foreground'}`}>
-              {message.text}
-            </p>
-          )}
+          <NoteLine note={message} />
           {step !== 'show_pad' && step !== 'done' && (
             <Button className="h-12 w-full rounded-xl text-[16px]" disabled={busy || pending} onClick={() => void approve()}>
               {label}
             </Button>
           )}
         </div>
-      </SheetContent>
-    </Sheet>
+    </TechSheet>
   );
 }

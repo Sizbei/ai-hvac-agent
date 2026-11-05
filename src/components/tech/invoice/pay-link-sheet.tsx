@@ -1,10 +1,11 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import type { TechInvoice } from '@/lib/tech/invoice-view';
+import { noteFor, type SheetNote } from '@/lib/tech/sheet-note';
 import { postJson } from './post-json';
+import { NoteLine, TechSheet } from './tech-sheet';
 import type { InvoicePageApi } from './use-invoice-writes';
 
 const SENT_CLOSE_MS = 1500;
@@ -29,7 +30,7 @@ export function PayLinkSheet({
 }) {
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
-  const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
+  const [message, setMessage] = useState<SheetNote | null>(null);
   const [sent, setSent] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -57,7 +58,7 @@ export function PayLinkSheet({
         timer.current = setTimeout(close, SENT_CLOSE_MS);
         return;
       }
-      if (r.message) setMessage({ text: r.message, error: r.status !== 'pending' && r.status !== 'skipped' });
+      setMessage(noteFor(r, "Couldn't send the link. Try again."));
     } finally {
       busyRef.current = false;
       setBusy(false);
@@ -65,23 +66,13 @@ export function PayLinkSheet({
   }
 
   return (
-    <Sheet open={open} onOpenChange={(o) => { if (!o && !busy) close(); }}>
-      <SheetContent side="bottom" className="gap-3 rounded-t-2xl pb-[max(1rem,env(safe-area-inset-bottom))]">
-        <SheetHeader className="pr-12">
-          <SheetTitle className="text-[17px]">Send pay link</SheetTitle>
-          <SheetDescription className="text-[15px]">Text the invoice link to the customer?</SheetDescription>
-        </SheetHeader>
+    <TechSheet open={open} onClose={close} busy={busy} title="Send pay link" description="Text the invoice link to the customer?">
         <div className="space-y-3 px-4">
-          {message && (
-            <p role={message.error ? 'alert' : 'status'} className={`text-[15px] ${message.error ? 'text-danger-strong' : sent ? 'text-success-strong' : 'text-muted-foreground'}`}>
-              {message.text}
-            </p>
-          )}
+          <NoteLine note={message} success={sent} />
           <Button className="h-12 w-full rounded-xl text-[16px]" disabled={busy || sent || api.view.pendingWrite} onClick={() => void send()}>
             {busy ? 'Sending…' : 'Send'}
           </Button>
         </div>
-      </SheetContent>
-    </Sheet>
+    </TechSheet>
   );
 }

@@ -7,6 +7,7 @@
  * "pad captured" rows: the pad's Blob is held by the sheet until it is sent.
  */
 import type { TechInvoiceState } from "./invoice-view";
+import type { IntentKind } from "./invoice-view-diff";
 
 export type ApprovalStep = "show_pad" | "send_signature" | "send_finalize" | "done";
 export type SendStatus = "idle" | "sent" | "ok" | "failed";
@@ -38,4 +39,27 @@ export function approvalStep(i: ApprovalInput): ApprovalStep {
 /** The pad is drawn only before a capture; later steps show the captured image. */
 export function padVisible(step: ApprovalStep): boolean {
   return step === "show_pad";
+}
+
+export type UnknownBanner =
+  | { readonly action: "open_approval"; readonly text: string }
+  | { readonly action: "retry"; readonly kind: IntentKind; readonly text: string };
+
+/**
+ * The page's "may not have saved" banner. A signature body (a Blob) is held
+ * only by the approval sheet, so its "Try again" opens that sheet; every other
+ * kind re-sends its stored body with the same key.
+ */
+export function unknownBanner(kinds: readonly IntentKind[]): UnknownBanner | null {
+  const first = kinds[0];
+  if (first === undefined) return null;
+  if (first === "signature") {
+    return { action: "open_approval", text: "Your last signature may not have saved. Open Customer approval and try again." };
+  }
+  return { action: "retry", kind: first, text: "Your last change may not have saved." };
+}
+
+/** Approval is offered only while no OTHER intent (a line add/remove…) is unknown. */
+export function approvalBlocked(kinds: readonly IntentKind[]): boolean {
+  return kinds.some((k) => k !== "signature" && k !== "finalize");
 }

@@ -1,13 +1,13 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { SegmentedControl } from '@/components/ui/segmented-control';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { INTENTS_STORAGE_KEY, parseIntents } from '@/lib/tech/invoice-intent-persist';
 import type { TechInvoice } from '@/lib/tech/invoice-view';
+import { noteFor, type SheetNote } from '@/lib/tech/sheet-note';
 import {
   buildPaymentBody,
   CHECK_NUMBER_MAX,
@@ -22,6 +22,7 @@ import {
   type TechPaymentMethod,
 } from '@/lib/tech/record-payment-form';
 import { postJson } from './post-json';
+import { NoteLine, TechSheet } from './tech-sheet';
 import type { InvoicePageApi } from './use-invoice-writes';
 
 const METHODS = [
@@ -86,8 +87,8 @@ export function RecordPaymentSheet({
   const [checkNumber, setCheckNumber] = useState('');
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
-  const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
+  const [note, setNote] = useState<SheetNote | null>(null);
+  const clearNote = () => setNote(null);
   // The body of the last send that has no definitive answer yet.
   const [lastBody, setLastBody] = useState<PaymentBody | null>(null);
 
@@ -100,8 +101,7 @@ export function RecordPaymentSheet({
   function reset(): void {
     setAmount(null);
     setCheckNumber('');
-    setError(null);
-    setStatus(null);
+    setNote(null);
   }
 
   async function record(): Promise<void> {
@@ -110,15 +110,14 @@ export function RecordPaymentSheet({
     if (!body) {
       const v = validateRecordForm({ amount: shownAmount, balanceCents: invoice.balanceCents, method, checkNumber });
       if (!v.ok) {
-        setError(v.error);
+        setNote({ text: v.error, error: true });
         return;
       }
       body = buildPaymentBody(invoice.id, method, v.amountCents, checkNumber);
     }
     busyRef.current = true;
     setBusy(true);
-    setError(null);
-    setStatus(null);
+    setNote(null);
     setLastBody(body);
     rememberMethod(body.method);
     const sent = body;
@@ -135,13 +134,9 @@ export function RecordPaymentSheet({
         onRecorded(paymentSuccessCopy(api.view.customerHasPhone));
         return;
       }
-      if (r.status === 'pending' || r.status === 'skipped') {
-        if (r.status === 'skipped') setLastBody(null);
-        setStatus(r.message);
-        return;
-      }
-      if (r.status !== 'retry') setLastBody(null);
-      setError(r.message ?? "Couldn't record the payment. Try again.");
+      // retry/pending: still unknown, keep the in-flight body for the same-key re-send.
+      if (r.status !== 'retry' && r.status !== 'pending') setLastBody(null);
+      setNote(noteFor(r, "Couldn't record the payment. Try again."));
     } finally {
       busyRef.current = false;
       setBusy(false);
@@ -152,20 +147,19 @@ export function RecordPaymentSheet({
   const locked = busy || api.view.pendingWrite;
 
   return (
-    <Sheet open={open} onOpenChange={(o) => { if (!o && !busy) { reset(); onClose(); } }}>
-      <SheetContent side="bottom" className="max-h-[92dvh] gap-3 overflow-y-auto rounded-t-2xl pb-[max(1rem,env(safe-area-inset-bottom))]">
-        <SheetHeader className="pr-12">
-          <SheetTitle className="text-[17px]">Record payment</SheetTitle>
-          <SheetDescription className="text-[15px]">
-            Balance due <span className="font-mono tabular-nums">{formatCentsExact(invoice.balanceCents)}</span>
-          </SheetDescription>
-        </SheetHeader>
+    <TechSheet
+      open={open}
+      onClose={() => { reset(); onClose(); }}
+      busy={busy}
+      title="Record payment"
+      description={<>Balance due <span className="font-mono tabular-nums">{formatCentsExact(invoice.balanceCents)}</span></>}
+    >
         <fieldset disabled={locked || readOnly} className="min-w-0 space-y-4 px-4">
           <SegmentedControl
             aria-label="Payment method"
             options={METHODS}
             value={shownMethod}
-            onChange={(m) => { setMethod(m); setError(null); }}
+            onChange={(m) => { setMethod(m); clearNote(); }}
             className="h-11 w-full [&>button]:flex-1 [&>button]:justify-center [&>button]:text-[15px]"
           />
           <label className="block space-y-1.5">
@@ -177,8 +171,8 @@ export function RecordPaymentSheet({
                 autoComplete="off"
                 value={shownAmount}
                 readOnly={readOnly}
-                aria-invalid={error !== null}
-                onChange={(e) => { setAmount(e.target.value); setError(null); }}
+                aria-invalid={note?.error === true}
+                onChange={(e) => { setAmount(e.target.value); clearNote(); }}
                 className="h-11 rounded-xl pl-7 font-mono text-[16px] tabular-nums"
               />
             </span>
@@ -200,13 +194,11 @@ export function RecordPaymentSheet({
         </fieldset>
         <div className="space-y-3 px-4">
           {inFlight && <p role="status" className="text-[15px] text-muted-foreground">{inFlightCopy(inFlight.amountCents)}</p>}
-          {status && <p role="status" className="text-[15px] text-muted-foreground">{status}</p>}
-          {error && <p role="alert" className="text-[15px] text-danger-strong">{error}</p>}
+          <NoteLine note={note} />
           <Button className="h-12 w-full rounded-xl text-[16px]" disabled={locked} onClick={() => void record()}>
             {busy ? 'Recording…' : recordLabel(labelCents)}
           </Button>
         </div>
-      </SheetContent>
-    </Sheet>
+    </TechSheet>
   );
 }

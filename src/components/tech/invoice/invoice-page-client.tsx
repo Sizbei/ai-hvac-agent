@@ -7,11 +7,12 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatCentsExact } from '@/lib/admin/money-format';
+import { unknownBanner } from '@/lib/tech/approval-flow';
 import { invoiceChipLabel, materialsPrompt } from '@/lib/tech/invoice-page-copy';
 import { fullInvoice } from '@/lib/tech/invoice-view-diff';
 import type { TechInvoiceView } from '@/lib/tech/invoice-view';
 import { AddItemSheet, type PricebookHit } from './add-item-sheet';
-import { InvoiceCollectButtons } from './invoice-collect-buttons';
+import { devCollectSheet, InvoiceCollectButtons, type CollectSheet } from './invoice-collect-buttons';
 import { InvoiceLines, InvoiceTotals, UnbilledMaterials } from './invoice-lines';
 import { InvoicePayments, InvoiceSignature } from './invoice-record';
 import { deleteJson, postJson } from './post-json';
@@ -41,6 +42,9 @@ export function InvoicePageClient({ id, devOpenAddItem = false }: { readonly id:
   const [materialCount, setMaterialCount] = useState<number | null>(null);
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
   const [addOpen, setAddOpen] = useState(devOpenAddItem);
+  const [collectSheet, setCollectSheet] = useState<CollectSheet | null>(devCollectSheet);
+  // The payment-success line; separate from `message` so opening a sheet never clears an error.
+  const [notice, setNotice] = useState<string | null>(null);
 
   const refetch = useCallback(async (): Promise<TechInvoiceView | null> => {
     try {
@@ -132,7 +136,9 @@ export function InvoicePageClient({ id, devOpenAddItem = false }: { readonly id:
   const full = fullInvoice(view);
   const locked = view.pendingWrite || recovering || busy !== null || unknownKinds.length > 0;
   // The add-item sheet re-sends its own unknown add ("Try again"); only OTHER unknown intents lock it.
-  const addLocked = view.pendingWrite || recovering || unknownKinds.some((k) => k !== 'add_line');
+  const addLocked =
+    view.pendingWrite || recovering || (busy !== null && busy !== 'add_line') || unknownKinds.some((k) => k !== 'add_line');
+  const banner = unknownBanner(unknownKinds);
   const can = (a: TechInvoiceView['allowed'][number]) => view.allowed.includes(a);
   const api: InvoicePageApi = { view, refetch, write };
 
@@ -187,14 +193,20 @@ export function InvoicePageClient({ id, devOpenAddItem = false }: { readonly id:
       </header>
 
       {(view.pendingWrite || recovering) && <p role="status" className={NOTE}>Still saving your last tap…</p>}
-      {unknownKinds.length > 0 && busy === null && !recovering && (
+      {banner && busy === null && !recovering && (
         <div role="alert" className="flex items-center justify-between gap-3 rounded-md border border-warning-border bg-warning-light px-3 py-2 text-[15px]">
-          <span>Your last change may not have saved.</span>
-          <Button variant="outline" className="h-11 shrink-0 rounded-xl px-4" disabled={view.pendingWrite} onClick={() => void retry(unknownKinds[0]).then(report)}>
+          <span>{banner.text}</span>
+          <Button
+            variant="outline"
+            className="h-11 shrink-0 rounded-xl px-4"
+            disabled={view.pendingWrite}
+            onClick={() => (banner.action === 'open_approval' ? setCollectSheet('approval') : void retry(banner.kind).then(report))}
+          >
             Try again
           </Button>
         </div>
       )}
+      {notice && <p role="status" className="text-[15px] text-success-strong">{notice}</p>}
       {message && (
         <p role={message.error ? 'alert' : 'status'} className={`text-[15px] ${message.error ? 'text-danger-strong' : 'text-muted-foreground'}`}>
           {message.text}
@@ -256,7 +268,9 @@ export function InvoicePageClient({ id, devOpenAddItem = false }: { readonly id:
               </>
             )}
             <InvoiceCollectButtons api={api} invoice={full} jobId={id} unknownKinds={unknownKinds}
-              onNotice={(text) => setMessage(text ? { text, error: false } : null)}
+              sheet={collectSheet}
+              onSheet={setCollectSheet}
+              onNotice={setNotice}
             />
           </CardContent>
         </Card>

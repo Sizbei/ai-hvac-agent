@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { approvalStep, padVisible, ZERO_TOTAL_COPY, type ApprovalInput } from "./approval-flow";
+import { approvalBlocked, approvalStep, padVisible, unknownBanner, ZERO_TOTAL_COPY, type ApprovalInput } from "./approval-flow";
 
 const base: ApprovalInput = { signatureFresh: false, signatureSent: "idle", finalizeSent: "idle", state: "draft" };
 const step = (o: Partial<ApprovalInput>) => approvalStep({ ...base, ...o });
@@ -55,5 +55,33 @@ describe("approvalStep", () => {
 
   it("$0 copy", () => {
     expect(ZERO_TOTAL_COPY).toBe("Nothing to collect. This closes the invoice at $0 and locks the lines.");
+  });
+});
+
+describe("unknownBanner", () => {
+  it("nothing unknown → null", () => {
+    expect(unknownBanner([])).toBeNull();
+  });
+  it("an unknown signature opens Customer approval", () => {
+    expect(unknownBanner(["signature"])).toEqual({
+      action: "open_approval",
+      text: "Your last signature may not have saved. Open Customer approval and try again.",
+    });
+  });
+  it("any other unknown intent retries that kind (the first one)", () => {
+    expect(unknownBanner(["add_line", "signature"])).toEqual({
+      action: "retry",
+      kind: "add_line",
+      text: "Your last change may not have saved.",
+    });
+  });
+});
+
+describe("approvalBlocked", () => {
+  it("only signature/finalize unknowns leave approval open", () => {
+    expect(approvalBlocked([])).toBe(false);
+    expect(approvalBlocked(["signature", "finalize"])).toBe(false);
+    expect(approvalBlocked(["add_line"])).toBe(true);
+    expect(approvalBlocked(["signature", "remove_line"])).toBe(true);
   });
 });
