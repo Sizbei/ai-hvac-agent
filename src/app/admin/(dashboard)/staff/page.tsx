@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import Link from 'next/link';
 import { UserPlus, Mail, AlertCircle, Users, Check } from 'lucide-react';
 import { useAdminStaff } from '@/hooks/use-admin-staff';
@@ -24,11 +24,12 @@ import { refreshOnboarding } from '@/lib/admin/onboarding-store';
 import type { BannerEvent } from '@/lib/admin/setup-card-view';
 import { InfoBanner } from '@/components/admin/ui/info-banner';
 import { SEAT_LIMIT_COPY, seatsFull, seatUsageCopy } from '@/lib/admin/seat-usage';
+import { useAdminPageTitle } from '@/components/admin/org-name-context';
 
 const STAFF_OPEN_VALUES = ['technician', 'invite'] as const;
 
 export default function StaffPage() {
-  useEffect(() => { document.title = 'Staff · Spears Admin'; }, []);
+  useAdminPageTitle('Staff');
   const { staff, currentUserId, seats, isLoading, error, refetch } = useAdminStaff();
   // Same rule the server applies to invites and direct creation.
   const noFreeSeats = seats !== null && seatsFull(seats);

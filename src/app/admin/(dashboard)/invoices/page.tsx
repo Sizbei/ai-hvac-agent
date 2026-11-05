@@ -35,6 +35,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { useAdminPageTitle } from '@/components/admin/org-name-context';
 
 // ── constants ─────────────────────────────────────────────────────────────────
 
@@ -150,7 +151,7 @@ function ReconcileBanner() {
 // ── main page ─────────────────────────────────────────────────────────────────
 
 export default function InvoicesPage() {
-  useEffect(() => { document.title = 'Invoices · Spears Admin'; }, []);
+  useAdminPageTitle('Invoices');
   const [filter, setFilter] = useState<Filter>('overdue');
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');

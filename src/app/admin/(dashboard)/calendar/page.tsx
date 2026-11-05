@@ -18,6 +18,7 @@ import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 import { TabGroup } from '@/components/admin/ui/tab-group';
 import { UrgencyLegend } from '@/components/admin/ui/urgency-legend';
+import { useAdminPageTitle } from '@/components/admin/org-name-context';
 
 // The interactive day/week board pulls in dnd-kit (drag-and-drop). Code-split it
 // behind next/dynamic (ssr:false) so that bundle only loads when the board is
@@ -130,7 +131,7 @@ const VIEW_TABS: ReadonlyArray<{ readonly id: CalendarView; readonly label: stri
 ];
 
 export default function CalendarPage() {
-  useEffect(() => { document.title = 'Calendar · Spears Admin'; }, []);
+  useAdminPageTitle('Calendar');
   const [date, setDate] = useState<string>(todayBusiness);
   const [view, setView] = useState<CalendarView>('day');
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);

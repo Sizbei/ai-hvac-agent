@@ -20,6 +20,7 @@ import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 import { Pager } from '@/components/admin/ui/pager';
 import type { RequestSortKey } from '@/lib/admin/types';
+import { useAdminPageTitle } from '@/components/admin/org-name-context';
 
 const PER_PAGE = 50;
 const OPEN_VALUES = ['1'] as const;
@@ -46,7 +47,7 @@ export default function AdminRequestsPage() {
     setCreateOpen(true);
   });
 
-  useEffect(() => { document.title = 'Requests · Spears Admin'; }, []);
+  useAdminPageTitle('Requests');
 
   // Persist filters to the URL (shareable links + survives refresh). Page and
   // the detail sheet selection are intentionally NOT persisted. Defaults map to

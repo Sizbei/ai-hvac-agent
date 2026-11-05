@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect } from 'react';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 import { DispatchMapProvider } from '@/components/admin/dispatch/dispatch-map-provider';
+import { useAdminPageTitle } from '@/components/admin/org-name-context';
 
 export type MapProvider = 'apple' | 'maplibre';
 
@@ -12,7 +12,7 @@ interface DispatchMapPageClientProps {
 }
 
 export function DispatchMapPageClient({ mapProvider }: DispatchMapPageClientProps) {
-  useEffect(() => { document.title = 'Map · Spears Admin'; }, []);
+  useAdminPageTitle('Map');
   return (
     <PageShell fullHeight className="p-6 sm:p-7 gap-4">
       <PageHeader

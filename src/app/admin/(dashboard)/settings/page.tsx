@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
   AlertCircle,
@@ -45,9 +45,10 @@ import type { BannerEvent } from '@/lib/admin/setup-card-view';
 import { setupStepForTab } from '@/lib/admin/setup-view';
 import type { OrgConfigUpdate } from '@/lib/admin/org-config-types';
 import { resolveSettingsTab, settingsTabSearch } from '@/lib/admin/settings-tabs';
+import { useAdminPageTitle } from '@/components/admin/org-name-context';
 
 export default function SettingsPage() {
-  useEffect(() => { document.title = 'Settings · Spears Admin'; }, []);
+  useAdminPageTitle('Settings');
   const settings = useOrgSettings();
   const searchParams = useSearchParams();
   // Captured once: switching tabs rewrites ?tab= but the setup banner belongs

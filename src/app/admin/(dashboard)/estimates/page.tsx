@@ -29,6 +29,7 @@ import {
 import { SyncPill } from '@/components/admin/sync-pill';
 import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
 import { cn } from '@/lib/utils';
+import { useAdminPageTitle } from '@/components/admin/org-name-context';
 
 // ── constants ──────────────────────────────────────────────────────────────────
 
@@ -168,7 +169,7 @@ function emptyMessage(bucket: Bucket | null): string {
 // ── page ──────────────────────────────────────────────────────────────────────
 
 export default function EstimatesPage() {
-  useEffect(() => { document.title = 'Estimates · Spears Admin'; }, []);
+  useAdminPageTitle('Estimates');
   const searchRef = useRef<HTMLInputElement>(null);
   // Default to Open — the actionable tab (the follow-up list), per the
   // approved mockup; All is one click away.

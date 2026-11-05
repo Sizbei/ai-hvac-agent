@@ -24,6 +24,7 @@ import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 import { Pager } from '@/components/admin/ui/pager';
 import type { InventoryItem } from '@/hooks/use-inventory';
+import { useAdminPageTitle } from '@/components/admin/org-name-context';
 
 const PER_PAGE = 50;
 
@@ -34,7 +35,7 @@ const INVENTORY_SORT_OPTIONS: ReadonlyArray<{ value: InventorySortKey; label: st
 ];
 
 export default function InventoryPage() {
-  useEffect(() => { document.title = 'Inventory · Spears Admin'; }, []);
+  useAdminPageTitle('Inventory');
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [belowReorderOnly, setBelowReorderOnly] = useState(false);

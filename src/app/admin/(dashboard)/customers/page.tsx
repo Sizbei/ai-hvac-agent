@@ -42,6 +42,7 @@ import { EmptyState } from '@/components/admin/ui/empty-state';
 import { Pager } from '@/components/admin/ui/pager';
 import { SyncPill } from '@/components/admin/sync-pill';
 import type { CustomerListRecord } from '@/lib/admin/crm-types';
+import { useAdminPageTitle } from '@/components/admin/org-name-context';
 
 const ALL_PROPERTY_TYPES = 'all';
 const ALL_CUSTOMER_TYPES = 'all';
@@ -110,7 +111,7 @@ const CustomerRow = memo(function CustomerRow({ customer }: CustomerRowProps) {
 // ── Page ───────────────────────────────────────────────────────────────────────
 
 export default function CustomersPage() {
-  useEffect(() => { document.title = 'Customers · Spears Admin'; }, []);
+  useAdminPageTitle('Customers');
   const [showArchived, setShowArchived] = useState(false);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');

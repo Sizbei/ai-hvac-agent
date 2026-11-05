@@ -28,6 +28,7 @@ import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 import { Pager } from '@/components/admin/ui/pager';
 import type { PricebookItem } from '@/hooks/use-pricebook';
+import { useAdminPageTitle } from '@/components/admin/org-name-context';
 
 const ALL_TYPES = 'all';
 const OPEN_VALUES = ['1'] as const;
@@ -40,7 +41,7 @@ const PRICEBOOK_SORT_OPTIONS: ReadonlyArray<{ value: PricebookSortKey; label: st
 ];
 
 export default function PricebookPage() {
-  useEffect(() => { document.title = 'Pricebook · Spears Admin'; }, []);
+  useAdminPageTitle('Pricebook');
   const searchRef = useRef<HTMLInputElement>(null);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');

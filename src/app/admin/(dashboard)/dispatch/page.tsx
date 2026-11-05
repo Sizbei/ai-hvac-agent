@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { AlertCircle, ChevronLeft, ChevronRight, RefreshCw, Users } from 'lucide-react';
 import { useDispatchBoard } from '@/hooks/use-dispatch-board';
 import { DispatchColumn } from '@/components/admin/dispatch/dispatch-column';
@@ -16,6 +16,7 @@ import { ContextBadge } from '@/components/admin/ui/context-badge';
 import { EmptyState } from '@/components/admin/ui/empty-state';
 import { UrgencyLegend } from '@/components/admin/ui/urgency-legend';
 import { businessIsoDate } from '@/lib/admin/calendar-time';
+import { useAdminPageTitle } from '@/components/admin/org-name-context';
 
 /** Current BUSINESS day as YYYY-MM-DD. Anchoring on the UTC day put the board
  * on tomorrow every evening after 8pm ET; the server buckets jobs by business
@@ -57,7 +58,7 @@ function formatDayLabel(isoDate: string): string {
 }
 
 export default function DispatchPage() {
-  useEffect(() => { document.title = 'Dispatch · Spears Admin'; }, []);
+  useAdminPageTitle('Dispatch');
   const [date, setDate] = useState<string>(todayBusiness);
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
 

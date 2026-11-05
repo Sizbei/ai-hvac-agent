@@ -20,14 +20,20 @@ import "server-only";
  *    selected into a portal payload. Customers must not see cost.
  */
 import { randomBytes, createHash } from "node:crypto";
-import { desc, eq, inArray, ne } from "drizzle-orm";
+import { asc, desc, eq, inArray, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   customers,
   invoices,
   estimates,
+  estimateOptions,
   serviceRequests,
 } from "@/lib/db/schema";
+import {
+  portalEstimateDisplay,
+  type PortalEstimateDisplay,
+  type PortalEstimateOption,
+} from "@/lib/portal/portal-estimate";
 import { withTenant } from "@/lib/db/tenant";
 import { decrypt } from "@/lib/crypto";
 import { OPEN_STATUSES } from "@/lib/admin/request-status";
@@ -171,6 +177,9 @@ export interface PortalEstimateView {
    * separately. We expose only this safe flag so the portal can show
    * "Awaiting your approval" without leaking the token or its hash. */
   readonly awaitingApproval: boolean;
+  /** What the customer sees: the SOLD option's total once approved (the
+   * stored totalCents is the headline max), else the option total / range. */
+  readonly display: PortalEstimateDisplay;
 }
 
 export interface PortalJobView {
@@ -244,6 +253,7 @@ export async function getPortalData(
       totalCents: estimates.totalCents,
       expiresAt: estimates.expiresAt,
       approvalTokenHash: estimates.approvalTokenHash,
+      soldOptionId: estimates.soldOptionId,
     })
     .from(estimates)
     .where(withTenant(estimates, organizationId, eq(estimates.customerId, customerId)))
@@ -293,6 +303,39 @@ export async function getPortalData(
     )
     .orderBy(desc(serviceRequests.completedAt), desc(serviceRequests.createdAt));
 
+  // Option totals (names + totals only; no line items, no cost) so the portal
+  // can show the approved option's price instead of the headline maximum.
+  const optionRows =
+    estimateRows.length === 0
+      ? []
+      : await db
+          .select({
+            id: estimateOptions.id,
+            estimateId: estimateOptions.estimateId,
+            name: estimateOptions.name,
+            totalCents: estimateOptions.totalCents,
+          })
+          .from(estimateOptions)
+          .where(
+            withTenant(
+              estimateOptions,
+              organizationId,
+              inArray(
+                estimateOptions.estimateId,
+                estimateRows.map((r) => r.id),
+              ),
+            ),
+          )
+          .orderBy(asc(estimateOptions.sortOrder));
+  const optionsByEstimate = new Map<string, PortalEstimateOption[]>();
+  for (const o of optionRows) {
+    const list = optionsByEstimate.get(o.estimateId) ?? [];
+    optionsByEstimate.set(o.estimateId, [
+      ...list,
+      { id: o.id, name: o.name, totalCents: o.totalCents },
+    ]);
+  }
+
   return {
     customerName,
     invoices: invoiceRows.map((r) => ({
@@ -311,6 +354,13 @@ export async function getPortalData(
       // Awaiting approval only if it's still open AND carries a public token.
       // We expose the boolean — never the hash — so no token material leaks.
       awaitingApproval: r.status === "open" && Boolean(r.approvalTokenHash),
+      display: portalEstimateDisplay({
+        status: r.status,
+        totalCents: r.totalCents,
+        soldOptionId: r.soldOptionId ?? null,
+        awaitingApproval: r.status === "open" && Boolean(r.approvalTokenHash),
+        options: optionsByEstimate.get(r.id) ?? [],
+      }),
     })),
     jobs: jobRows.map((r) => ({
       id: r.id,

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   AlertCircle,
   Clock,
@@ -24,6 +24,7 @@ import { SectionCard } from '@/components/admin/ui/section-card';
 import { SectionHeading } from '@/components/admin/ui/section-heading';
 import { ProgressBar } from '@/components/admin/ui/progress-bar';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useAdminPageTitle } from '@/components/admin/org-name-context';
 
 const PRESETS = [
   { label: 'Last 30 days', days: 30 },
@@ -80,7 +81,7 @@ function toStatDelta(delta: DeltaShape | null, rangeDays: number): { value: stri
 }
 
 export default function OperationsPage() {
-  useEffect(() => { document.title = 'Operations · Spears Admin'; }, []);
+  useAdminPageTitle('Operations');
   const [days, setDays] = useState<number>(30);
 
   const range = useMemo(() => {

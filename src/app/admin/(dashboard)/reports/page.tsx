@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   AlertCircle,
   DollarSign,
@@ -29,6 +29,7 @@ import { SectionCard } from '@/components/admin/ui/section-card';
 import { DataTableShell } from '@/components/admin/ui/data-table-shell';
 import { EmptyState } from '@/components/admin/ui/empty-state';
 import { BarChart2, MapPin, Users } from 'lucide-react';
+import { useAdminPageTitle } from '@/components/admin/org-name-context';
 
 const PRESETS = [
   { label: 'Last 30 days', days: 30 },
@@ -37,7 +38,7 @@ const PRESETS = [
 ] as const;
 
 export default function ReportsPage() {
-  useEffect(() => { document.title = 'Reports · Spears Admin'; }, []);
+  useAdminPageTitle('Reports');
   const [days, setDays] = useState<number>(30);
 
   // Recompute the range only when the preset changes (a fresh Date each render

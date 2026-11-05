@@ -194,6 +194,35 @@ describe("getPortalData", () => {
     expect(serialized).not.toContain("some-hash");
   });
 
+  it("shows a sold estimate at the SOLD option's total, not the headline maximum", async () => {
+    mockSelectSeq([
+      [{ nameEncrypted: null }], // customer name
+      [], // invoices
+      [
+        {
+          id: "est-9",
+          status: "sold",
+          totalCents: 577613, // headline = most expensive option
+          expiresAt: null,
+          approvalTokenHash: "h",
+          soldOptionId: "opt-b",
+        },
+      ],
+      [], // jobs
+      [], // history
+      [
+        { id: "opt-a", estimateId: "est-9", name: "Repair", totalCents: 31500 },
+        { id: "opt-b", estimateId: "est-9", name: "Repair + tune-up", totalCents: 46319 },
+        { id: "opt-c", estimateId: "est-9", name: "Replace", totalCents: 577613 },
+      ],
+    ]);
+    const data = await getPortalData(ORG, CUSTOMER);
+    expect(data.estimates[0].display.amount).toEqual({ kind: "single", cents: 46319 });
+    expect(data.estimates[0].display.statusLabel).toBe("Approved");
+    expect(data.estimates[0].display.optionName).toBe("Repair + tune-up");
+    expect(JSON.stringify(data)).not.toContain("costCents");
+  });
+
   it("sources service history from service_requests (status='completed'), not the empty service_history table", async () => {
     mockSelectSeq([
       [{ nameEncrypted: null }], // customer name

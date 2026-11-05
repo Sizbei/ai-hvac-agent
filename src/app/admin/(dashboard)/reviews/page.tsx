@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { AlertCircle, Star, MessageSquareQuote, Send } from 'lucide-react';
 import { useReviews, type ReviewRow } from '@/hooks/use-reviews';
@@ -13,6 +13,7 @@ import { StatCard, StatStrip } from '@/components/admin/ui/stat-card';
 import { SectionCard } from '@/components/admin/ui/section-card';
 import { EmptyState } from '@/components/admin/ui/empty-state';
 import { Pager } from '@/components/admin/ui/pager';
+import { useAdminPageTitle } from '@/components/admin/org-name-context';
 
 const PER_PAGE = 50;
 
@@ -64,7 +65,7 @@ function Stars({ rating }: { readonly rating: number | null }) {
 }
 
 export default function ReviewsPage() {
-  useEffect(() => { document.title = 'Reviews · Spears Admin'; }, []);
+  useAdminPageTitle('Reviews');
   const [page, setPage] = useState(1);
   const { reviews, total, stats, isLoading, error } = useReviews({ page });
 

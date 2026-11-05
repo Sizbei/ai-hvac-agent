@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { AlertCircle, ScrollText, X } from 'lucide-react';
 import { useAdminAuditLog } from '@/hooks/use-admin-audit-log';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -19,6 +19,7 @@ import { DataTableShell, type DataTableColumn } from '@/components/admin/ui/data
 import { Pager } from '@/components/admin/ui/pager';
 import { EmptyState } from '@/components/admin/ui/empty-state';
 import type { AuditLogEntry } from '@/lib/admin/audit-types';
+import { useAdminPageTitle } from '@/components/admin/org-name-context';
 
 const ALL_ACTIONS = 'all';
 const ALL_ENTITIES = 'all';
@@ -138,7 +139,7 @@ const AUDIT_COLUMNS: ReadonlyArray<DataTableColumn<AuditLogEntry>> = [
 ];
 
 export default function AdminAuditLogPage() {
-  useEffect(() => { document.title = 'Audit log · Spears Admin'; }, []);
+  useAdminPageTitle('Audit log');
   const [actionFilter, setActionFilter] = useState<string>(ALL_ACTIONS);
   const [entityFilter, setEntityFilter] = useState<string>(ALL_ENTITIES);
   const [page, setPage] = useState(1);

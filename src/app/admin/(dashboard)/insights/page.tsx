@@ -25,6 +25,7 @@ import { PageHeader } from '@/components/admin/ui/page-header';
 import { StatCard, StatStrip } from '@/components/admin/ui/stat-card';
 import { SectionHeading } from '@/components/admin/ui/section-heading';
 import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
+import { useAdminPageTitle } from '@/components/admin/org-name-context';
 
 interface InsightCard {
   readonly label: string;
@@ -76,7 +77,7 @@ const INSIGHT_CARDS: readonly InsightCard[] = [
 ] as const;
 
 export default function AiInsightsPage() {
-  useEffect(() => { document.title = 'Insights · Spears Admin'; }, []);
+  useAdminPageTitle('Insights');
   const [data, setData] = useState<AiInsights | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

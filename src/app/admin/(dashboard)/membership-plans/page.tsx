@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Plus, AlertCircle } from 'lucide-react';
 import { useMembershipPlans, type MembershipPlan } from '@/hooks/use-membership-plans';
 import { MembershipPlansTable } from '@/components/admin/memberships/membership-plans-table';
@@ -10,9 +10,10 @@ import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
+import { useAdminPageTitle } from '@/components/admin/org-name-context';
 
 export default function MembershipPlansPage() {
-  useEffect(() => { document.title = 'Membership plans · Spears Admin'; }, []);
+  useAdminPageTitle('Membership plans');
   const [showInactive, setShowInactive] = useState(false);
   const { plans, isLoading, error, refetch } = useMembershipPlans(showInactive);
   const [formOpen, setFormOpen] = useState(false);
