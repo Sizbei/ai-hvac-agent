@@ -52,9 +52,22 @@ arrival window use `src/lib/tech/job-display.ts` (`issueLabel`, `visitWhen`
 `visitBadge` → "On hold" for a held request). A 404/400 summary load
 (`jobLoadOutcome`, `job-page-state.ts`) replaces the page with one "This job
 isn't yours, or it no longer exists." state; the `materials`, `timeline`,
-`photo` and `timesheet` GETs 400 `INVALID_ID` on a non-UUID id. A completed or
-cancelled request (`jobIsClosed`) hides the material form, note box, signature
-pad and Take photo button. One primary status button per state
+`photo` and `timesheet` GETs 400 `INVALID_ID` on a non-UUID id. No form renders
+until the summary has loaded. A completed or cancelled request (`jobIsClosed`)
+hides only the material form and signature pad: notes and photos stay allowed
+(late uploads are legitimate). The materials POST refuses a closed request with
+409 `JOB_CLOSED` "This job is closed. Ask the office to add parts."
+(`addJobMaterial` → `job_closed`).
+- **Unbilled parts:** the materials GET adds `onInvoice` per material
+  (`billedMaterialIds`, `invoice-queries.ts`: on a non-void native invoice of
+  the request; never cost fields). Rows with `onInvoice: false` carry a "Not on
+  an invoice" chip. When the summary's `invoiceSummary.state` is open/paid/
+  refunded, the material form warns before saving (`lateMaterialWarning`,
+  "This part won't be on the open invoice. The office can bill it
+  separately."); the part still saves. Close out adds
+  `unbilledPartsWarning` ("2 parts aren't on an invoice yet.") even with no
+  invoice. The primary status button sits first, full width
+  (`actionSpansRow`). One primary status button per state
 (`actionButtonVariant`; Close out is never red); urgency is amber only for
 high/emergency (`urgencyTone`). Photos and signatures never show server text
 (`PHOTO_UPLOAD_FAILED`, `SIGNATURE_DIDNT_SAVE`). Sign-in errors come from
@@ -109,8 +122,11 @@ high/emergency (`urgencyTone`). Photos and signatures never show server text
   `appointment_id`) open on arrived/in_progress and close on pause, hold or
   done; `clock_in_method` records `auto` (status tap) vs `manual`. Status taps
   are the ONLY job clock: the job page's "Time on this job" card
-  (`job-time-card.tsx`, `jobClockLine`) is read-only and reloads after every
-  tap; the timesheet GET adds the tech's closed `totalMinutes`. The timesheet
+  (`job-time-card.tsx`, `jobClockLine`) is read-only and reloads as soon as a
+  tap's POST succeeds (in parallel with the summary reload); the timesheet GET
+  adds the tech's closed `totalMinutes` and `closedEntries`. Lines: "On the
+  clock since 8:03 PM · 12m (42m on this job)" (earlier time added), "0m so
+  far" after a sub-minute pause, "Total 20m" on a closed job. The timesheet
   POST route stays but no client calls it. SQL in
   `time-entry-sql.ts`; admins read them in the staff Timesheets dialog.
 - GPS geostamps, backdating, en-route texts, required forms, offline: not built.
@@ -195,8 +211,10 @@ high/emergency (`urgencyTone`). Photos and signatures never show server text
   signature only. If the signature fails nothing is finalized ("Try again"
   re-sends the same Blob + key; the sheet and the page banner both read "The
   signature didn't save."). "Customer not here? Finalize without signature"
-  (`noSignatureOffered`) calls finalize alone while no signature has landed;
-  the invoice then reads "No signature". If finalize fails after the signature landed,
+  (`noSignatureOffered`) first asks `NO_SIGNATURE_CONFIRM` ("Finalize without
+  the customer's signature? The invoice will say 'No signature' and can't be
+  edited."), then calls finalize alone while no signature has landed, labelled
+  `FINALIZING`; the invoice then reads "No signature". If finalize fails after the signature landed,
   only finalize is retried. A $0 draft finalizes to `open`. In this sheet the
   shared pad's button reads "Use this signature" (it only captures; nothing is
   sent until "Approve and finalize").
