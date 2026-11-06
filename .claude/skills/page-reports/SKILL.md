@@ -47,7 +47,10 @@ the revenue tile shows the breakdown in its sublabel.
 - Location names come from `locationDisplayLabel`: label → zone → first line
   of the decrypted address → "Address not on file" ("Erased address" for an
   erased one). Never the bare word "Location". Only locations with jobs in
-  the period are decrypted.
+  the period are decrypted. Requests without a location are "No location"
+  ("Unassigned" means no technician elsewhere).
+- Scorecard Completed reads "0 of 2" (done of assigned; the card description
+  says so).
 - Phone layout: secondary columns (Booked, Avg rating, Labor) use
   `hidden sm:table-cell`; card explanations go in SectionCard `description`,
   never in `action`/`meta` (that squeezed titles to nothing on phones).

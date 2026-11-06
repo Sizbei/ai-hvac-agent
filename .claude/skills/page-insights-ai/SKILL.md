@@ -59,6 +59,17 @@ in-memory state.
   keeps the top 8 known issue types and folds smaller ones plus imported
   free-text job titles into "Other", with a caption counting the imports.
   Labels come from `ISSUE_TYPE_LABELS`; unknown codes are humanized, never raw.
+- Requests by time of day: hours are bucketed `AT TIME ZONE` the org's
+  business zone (`getOrgTimeZone`, `src/lib/admin/org-time-zone.ts` — the
+  after-hours settings zone, Eastern by default; `OpsInsights.timeZone`), over
+  NATIVE requests only (an imported job's created_at is the import run). The
+  query groups by `sql\`1\`` because the zone is a bound parameter. Each hour
+  column is `h-full` — without it the columns collapsed and every bar was 0 px.
+  Caption names the zone via `timeZoneLabel`.
+- Imported free-text titles get NO issue-type bar (they made an "Other 209"
+  that dwarfed the real bars); the caption counts them. Urgency rows are
+  ordered by `sortByUrgency` (emergency → low).
+- Error copy is fixed human text with Try again, never the server message.
 - Bot analytics is last-30-days only; its ratios render "—" when there are no
   turns (`formatRatio`), and the abandon note shows only when some session
   was classified.

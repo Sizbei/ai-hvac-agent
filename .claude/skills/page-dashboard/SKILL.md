@@ -23,9 +23,9 @@ components `src/components/admin/dashboard/dashboard-greeting.tsx`
 **Data flow:** `useDashboardOverview` polls `/api/admin/overview` every 30 s.
 A module-level SWR cache (`createSwrCache`) returns the prior payload
 instantly on re-mount so returning to the dashboard paints data before the
-poll resolves — no skeleton flash. `getDashboardOverview` runs five queries
+poll resolves — no skeleton flash. `getDashboardOverview` runs six queries
 (stats + todaySchedule + needsAttention + awaitingFollowUp +
-overdueInvoices) via `db.batch()` — ONE HTTP round-trip, not `Promise.all`
+overdueInvoices + conversations needs-action count) via `db.batch()` — ONE HTTP round-trip, not `Promise.all`
 (neon-http invariant; the stats query is built with `buildDashboardStatsQuery`
 so `getDashboardStats` and `getDashboardOverview` share the exact same SQL
 without either awaiting inside the batch array).
@@ -41,6 +41,27 @@ total (`openRequestCaption`, `src/lib/admin/open-requests.ts`), and it equals
 "Assigned" tile (only "Assigned today") and insights left out scheduled and
 on_hold, so the two pages disagreed (19 vs 110 on the dev default org).
 `assignedToday` stays in the API but has no tile.
+
+**Failed loads (2026-11-06):** a failed overview fetch with nothing loaded is
+an ERROR in every section — `dashboardSectionState`
+(`src/lib/admin/dashboard-display.ts`) returns `error`, and
+`DashboardListCard` (prop `state`, `onRetry`) shows "Couldn't load this list"
++ Try again, never "All clear". Tiles show "—". A later failed poll keeps the
+last data; the banner says so and offers Try again. The hook's error copy is a
+fixed human string, never the server message. Recent conversations has its
+own error state.
+
+**Conversations that need action:** the overview batches
+`buildNeedsActionCountQuery` from `src/lib/admin/conversation-queries.ts`
+(the inbox's own "Needs action" query — import it, never copy the SQL) into
+`conversationsNeedingAction`. It drives the "Conversations need action" tile
+(links to `NEEDS_ACTION_INBOX_HREF` = `/admin/conversations?action=1`, in
+`conversation-display.ts`), a row at the top of Needs attention (the card is
+not "All clear" while it's non-zero; its count includes it), and a
+"+N escalated conversations" note under Open emergencies.
+
+**Header date:** `businessDateLabel(now, BUSINESS_TIME_ZONE)` — the business
+day, matching Today's schedule; the greeting word stays on the viewer's clock.
 
 **Invariants:**
 - Poll is equality-guarded: if the JSON payload hasn't changed since the last

@@ -29,8 +29,8 @@ fixed, not the selected range).
   for counts (`countDelta`). Swapping the polarity inverts the color signal.
 - AR aging bars cover NATIVE invoices only; synced (FieldPulse/HCP) AR is shown
   in a separate sub-section that renders only when `syncedArTotalCents > 0`.
-- `timeToPaidSeconds` sublabel explicitly states "your invoices only · synced
-  FieldPulse/HCP excluded" — preserve this disclaimer.
+- `timeToPaidSublabel` states "your invoices only, not FieldPulse/HCP" —
+  preserve this disclaimer.
 - Dispatch health `commitRate` is a fraction (0–1); multiply by 100 for display.
 - Metrics with no data: `null` renders `—` via `formatDuration(null)` returning
   `'—'`. Never let a `null` reach `Math.round` or arithmetic.
@@ -47,6 +47,21 @@ fixed, not the selected range).
   with a technician already chosen, not answered by a dispatcher. Without
   this the headline read "1 s".
 - AR amount columns are `w-28 shrink-0` so six-figure synced totals line up.
+- Time to paid (2026-11-06) is the MEDIAN from issue (`coalesce(issuedAt,
+  createdAt)`) to the last succeeded payment, for invoices paid in the window
+  MORE than `PAID_AT_VISIT_SECONDS` (1 h) after issue. Faster ones were
+  collected at the visit and are counted in `samples.paidAtVisit`, not in the
+  median — mixing them in made the default org read "7 s".
+- The dispatcher headline is a median too; the auto-dispatch sublabel averages
+  `system` first assignments on `autoAssigned` requests only (office bookings
+  also log `system` at creation and read "1 s").
+- Every card states its definition and its sample (`samples.*`: "1 request",
+  "3 paid at the visit, not counted"). Copy lives in
+  `src/lib/admin/operations-format.ts` (tested); `formatDuration` moved there.
+  Dispatch health speaks owner words (decisions, suggested only, changed by a
+  dispatcher) — no "commit rate", "preview", "overrides".
+- A long response time on the dev orgs comes from seeded requests that testers
+  moved on site months later (n shown on the card), not from the formula.
 
 **Gotchas:**
 - `onSiteSeconds` is not a `MetricTrend` — it has no previous value and no delta.
