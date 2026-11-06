@@ -40,6 +40,7 @@ import {
   UNASSIGNED_SCOPE,
 } from '@/lib/admin/calendar-optimistic';
 import { isWindowWithinAvailability } from '@/lib/admin/availability-coverage';
+import { overlapColumns } from '@/lib/admin/calendar-overlap';
 import {
   describeDragJob,
   describeDropTarget,
@@ -85,6 +86,9 @@ interface PositionedJob {
   readonly heightPx: number;
   /** Window lies wholly before/after the drawn hours: pinned to an edge. */
   readonly outside: 'before' | 'after' | null;
+  /** Side-by-side slot when cards overlap (a double-booking). */
+  readonly column: number;
+  readonly columns: number;
 }
 
 /** Minimum card height inside the grid. */
@@ -96,7 +100,7 @@ function positionJobs(
   jobs: readonly DashboardRequest[],
   isoDay: string,
 ): readonly PositionedJob[] {
-  const positioned: PositionedJob[] = [];
+  const positioned: Omit<PositionedJob, 'column' | 'columns'>[] = [];
   for (const job of jobs) {
     if (!job.arrivalWindowStart || !job.arrivalWindowEnd) continue;
     const start = new Date(job.arrivalWindowStart);
@@ -112,7 +116,11 @@ function positionJobs(
       outside: placement.outside,
     });
   }
-  return positioned;
+  // Overlapping cards sit side by side instead of exactly on top of each other.
+  const slots = overlapColumns(
+    positioned.map((p) => ({ top: p.topPx, bottom: p.topPx + p.heightPx })),
+  );
+  return positioned.map((p, i) => ({ ...p, ...slots[i]! }));
 }
 
 function HourLines() {
@@ -203,14 +211,20 @@ function DayLane({
           />
         );
       })}
-      {positioned.map(({ job, topPx, heightPx, outside }) => {
+      {positioned.map(({ job, topPx, heightPx, outside, column, columns }) => {
         const isTerminal =
           job.status === 'completed' || job.status === 'cancelled';
         return (
           <div
             key={job.id}
-            className={`absolute inset-x-0.5 z-10${outside ? ' rounded-sm outline-1 outline-dashed outline-offset-1 outline-warning-border' : ''}`}
-            style={{ top: topPx, height: heightPx }}
+            className={`absolute z-10${outside ? ' rounded-sm outline-1 outline-dashed outline-offset-1 outline-warning-border' : ''}`}
+            // 2px gutters at the lane edges and between side-by-side cards.
+            style={{
+              top: topPx,
+              height: heightPx,
+              left: `calc(${(column / columns) * 100}% + 2px)`,
+              width: `calc(${100 / columns}% - 4px)`,
+            }}
             title={
               outside === 'after'
                 ? 'After the calendar’s hours'
