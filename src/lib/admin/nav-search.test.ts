@@ -107,4 +107,12 @@ describe('filterCommands', () => {
     const cal = result.find((i) => i.label === 'Calendar');
     expect(cal?.group).toBe('Operations');
   });
+  it('subsequence matches must start at a word: "gas" is not "Integrations"', () => {
+    const items = [
+      { label: 'Integrations', href: '/admin/integrations', group: 'Integrations' },
+      { label: 'Dispatch', href: '/admin/dispatch', group: 'Operations' },
+    ];
+    expect(filterCommands('gas', items)).toEqual([]);
+    expect(filterCommands('dsp', items).map((i) => i.label)).toEqual(['Dispatch']);
+  });
 });

@@ -39,6 +39,7 @@ import {
   searchConversations,
   searchEstimates,
   searchPricebook,
+  searchStaff,
   searchAllEntities,
   type SearchResult,
 } from "./search-queries";
@@ -48,7 +49,10 @@ function makeChain(rows: unknown[]) {
   const chain: Record<string, unknown> = {};
   const fn = () => chain;
   chain.from = fn;
+  chain.leftJoin = fn;
   chain.where = fn;
+  // Queries without .limit() await the chain itself.
+  chain.then = (resolve: (v: unknown) => void) => resolve(rows);
   chain.orderBy = fn;
   chain.limit = () => Promise.resolve(rows);
   return chain;
@@ -214,7 +218,7 @@ describe("searchInvoices", () => {
     ];
     mockSelect.mockReturnValue(makeChain(rows));
     const results = await searchInvoices(ORG, "aabbccdd");
-    expect(results[0].subtitle).toBe("draft · $0.00");
+    expect(results[0].subtitle).toBe("Draft · $0.00");
   });
 
   it("sets syncedSource=fieldpulse when fieldpulseInvoiceId is set", async () => {
@@ -305,13 +309,27 @@ describe("searchJobs", () => {
     const results = await searchJobs(ORG, "heat");
     expect(results[0].title).toBe("Request ABCD1234");
   });
+
+  it("titles by the customer's name, falling back to the customer row, never an erased name", async () => {
+    mockSelect.mockReturnValue(
+      makeChain([
+        { id: "r1", referenceNumber: "HVAC-1", issueType: "no_heat", requestNameEncrypted: "Ada", customerNameEncrypted: null },
+        { id: "r2", referenceNumber: "HVAC-2", issueType: "no_heat", requestNameEncrypted: null, customerNameEncrypted: "Watauga" },
+        { id: "r3", referenceNumber: "HVAC-3", issueType: "no_heat", requestNameEncrypted: null, customerNameEncrypted: null },
+      ]),
+    );
+    const results = await searchJobs(ORG, "hvac");
+    expect(results.map((r) => r.title)).toEqual(["dec:Ada", "dec:Watauga", "HVAC-3"]);
+    expect(results[0].subtitle).toBe("HVAC-1 · No heat");
+    expect(results[2].subtitle).toBe("No heat");
+  });
 });
 
 // ── searchConversations ──────────────────────────────────────────────────────
 
 describe("searchConversations", () => {
   it("titles by the captured name and deep-links into the inbox", async () => {
-    mockSelect.mockReturnValue(
+    mockSelect.mockReturnValueOnce(
       makeChain([
         {
           id: "abcd1234-0000-0000-0000-000000000000",
@@ -319,17 +337,69 @@ describe("searchConversations", () => {
           status: "submitted",
           metadata: JSON.stringify({ customerName: "Robert Alvarez" }),
         },
-        { id: "ffff0000-0000-0000-0000-000000000000", channel: "web", status: "escalated", metadata: "not json" },
+        { id: "ffff0000-0000-0000-0000-000000000000", channel: "web", status: "escalated", metadata: "not json", handledAt: new Date("2026-11-06T16:00:00Z") },
       ]),
     );
+    mockSelect.mockReturnValueOnce(makeChain([])); // customer messages
+    mockSelect.mockReturnValueOnce(makeChain([])); // linked requests
     const results = await searchConversations(ORG, "rob");
     expect(results[0]).toMatchObject({
       type: "conversation",
       title: "Robert Alvarez",
-      subtitle: "Phone call · Submitted",
+      subtitle: "Phone call · Submitted · abcd1234",
       href: "/admin/conversations?c=abcd1234-0000-0000-0000-000000000000",
     });
-    expect(results[1].title).toBe("Conversation ffff0000");
+    // No name: titled by channel (no hex id); the short id is in the subtitle.
+    expect(results[1].title).toBe("Web chat");
+    expect(results[1].subtitle).toBe("Escalated · ffff0000");
+  });
+
+  it("titles an anonymous chat by its first message and says Needs action like the inbox", async () => {
+    mockSelect.mockReturnValueOnce(
+      makeChain([
+        {
+          id: "7d111fea-0000-0000-0000-000000000000",
+          channel: "web",
+          status: "escalated",
+          metadata: null,
+          handledAt: null,
+        },
+      ]),
+    );
+    // Second read: the customer's messages (first one titles the chat).
+    mockSelect.mockReturnValueOnce(
+      makeChain([
+        { sessionId: "7d111fea-0000-0000-0000-000000000000", content: "I smell gas in the basement right now", createdAt: new Date("2026-11-06T15:00:00Z") },
+      ]),
+    );
+    mockSelect.mockReturnValueOnce(makeChain([]));
+    const [result] = await searchConversations(ORG, "7d111fea");
+    expect(result.title).toBe("Web chat · \u201cI smell gas in the\u2026\u201d");
+    expect(result.subtitle).toBe("Needs action · 7d111fea");
+  });
+
+  it("returns [] without a second query when nothing matches", async () => {
+    mockSelect.mockReturnValue(makeChain([]));
+    expect(await searchConversations(ORG, "zz")).toEqual([]);
+    expect(mockSelect).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ── searchStaff ──────────────────────────────────────────────────────────────
+
+describe("searchStaff", () => {
+  it("finds staff by name, labels the role, and opens the Staff page", async () => {
+    mockSelect.mockReturnValue(
+      makeChain([
+        { id: "u1", name: "Camila Reyes", role: "technician", isActive: true },
+        { id: "u2", name: "Cam Ortiz", role: "admin", isActive: false },
+      ]),
+    );
+    const results = await searchStaff(ORG, "cam");
+    expect(results).toEqual([
+      { type: "staff", id: "u1", title: "Camila Reyes", subtitle: "Technician", href: "/admin/staff", syncedSource: null },
+      { type: "staff", id: "u2", title: "Cam Ortiz", subtitle: "Admin · Inactive", href: "/admin/staff", syncedSource: null },
+    ]);
   });
 });
 
@@ -475,7 +545,7 @@ describe("searchPricebook", () => {
       type: "pricebook",
       id: "pb-1",
       title: "24 SEER Condenser",
-      subtitle: "equipment · $4200.00 · CND-24",
+      subtitle: "Equipment · $4,200.00 · CND-24",
       href: "/admin/pricebook?q=24%20SEER%20Condenser",
       syncedSource: null,
     });
@@ -488,7 +558,7 @@ describe("searchPricebook", () => {
       ]),
     );
     const results = await searchPricebook(ORG, "diag");
-    expect(results[0].subtitle).toBe("service · $89.00");
+    expect(results[0].subtitle).toBe("Service · $89.00");
     expect(results[0].syncedSource).toBe("fieldpulse");
   });
 

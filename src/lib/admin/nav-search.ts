@@ -24,7 +24,8 @@ function isSubsequence(needle: string, haystack: string): boolean {
  *  1 — prefix match (label starts with query)
  *  2 — word-boundary match (any word in label starts with query)
  *  3 — substring match (query appears anywhere in label)
- *  4 — subsequence match
+ *  4 — subsequence match that starts a word ("dsp" → Dispatch; "gas" does
+ *      not match "Integrations", whose g/a/s are mid-word)
  * -1 — no match
  */
 function rank(query: string, label: string): number {
@@ -40,7 +41,7 @@ function rank(query: string, label: string): number {
 
   if (l.includes(q)) return 3;
 
-  if (isSubsequence(q, l)) return 4;
+  if (words.some((w) => w.startsWith(q[0])) && isSubsequence(q, l)) return 4;
 
   return -1;
 }
