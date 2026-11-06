@@ -1,6 +1,6 @@
 # Replica M3c: Sell on site
 
-Status: v3 (2026-11-06) after adversarial review rounds 1–2 (5 critics; log in
+Status: v4 FINAL (2026-11-06) after adversarial review rounds 1–3 (6 critics; log in
 `docs/superpowers/specs/2026-11-05-replica-m3c-review-log.md`). Owner: Raymond Chen.
 Milestone source: `replica/architecture.md` build order "M3c Sell on site" and the M3c rows of the
 F04 tech-loop route table. Builds on M3b Collect (field invoice draft, idempotency keys).
@@ -45,7 +45,7 @@ fields; the location-info tab (M3d); fixing name capture order in chat (unrelate
 | Customer view (`#customer` on the estimate page) | the customer, holding the lead's phone | §7.2 |
 | Job page `Equipment` card (after Materials) | technicians with a non-cancelled assignment on a non-cancelled visit of the request | §7.5 |
 | Office estimate detail (`/admin/estimates/[id]`) | admin | field-sold: "Signed on site with <technician name> · <time>"; office-sold: "Marked sold by <admin name>" when `sold_via='office'`; portal and old rows as today |
-| Office estimates list | admin | a new `Sold, not invoiced` filter: native estimates with `status='sold'` and not billed(eid) (§5.3) |
+| Office estimates list | admin | a new `Sold, not invoiced` filter: native estimates with `status='sold'`, no invoice of any state with `estimate_id = $eid`, and not job-billed (the job half of billed(eid)) — consistent with Generate, which treats a voided office invoice as handled |
 | Office customer page equipment list | admin | retired units listed last, muted, `Replaced <date>`, with a link to the replacement when it still exists; the equipment count counts live units only |
 
 ## 3. Data model
@@ -100,7 +100,7 @@ pricebook."). Option subtotal = Σ line totals; tax = round(subtotal × default 
 `service_requests.customer_id = $cust` (the customer read before the batch), with `service_request_id`,
 `customer_id`, `status='open'`, `expires_at = now() + 30 days`, `title='Field estimate'`, `total_cents =
 max(option totals)`, `approval_token_hash = NULL`; options and lines gated on the estimate's xmin; tail
-`SELECT`s of `still_lead`, status and customer. Zero rows → `NOT_LEAD` / `NOT_ON_SITE` ("Arrive at the
+`SELECT`s of `still_lead`, status and customer. Zero rows → first, an estimate row with this id already exists → 200 `{ created:false }` (re-run); else `NOT_LEAD` / `NOT_ON_SITE` ("Arrive at the
 job first.") / `JOB_CLOSED` ("This job is closed.") / `NO_CUSTOMER` ("Ask the office to add the
 customer before quoting.") / `STALE`. Returns `{ estimateId, created }` (201 created / 200 re-run).
 
@@ -132,12 +132,16 @@ Exactly once PER ESTIMATE.
    already on an invoice." with `details.invoiceId`. No invoice is touched or created in these cases.
 2. **Draft**: call M3b `createInvoiceFromJob` with id `derivedId(scope,"invoice")` — it adopts the
    request's live native invoice or creates a draft seeded with the job's unbilled materials (the
-   normal M3b rule, so parts logged before the sale are billed). Map its result: a `draft` → continue;
-   `open` / `paid` / `refunded`, `invoice_voided`, `stale` → re-check billed(eid) first (→
-   `ALREADY_BILLED`), else 409 `INVOICE_LOCKED` "The job's invoice is already finalized. The office
-   will bill this estimate."; `external_invoice` → 409 `MANAGED_EXTERNALLY`; `not_lead` → 403 `NOT_LEAD`.
-   Accepted: if step 3 then fails, the created draft stays with the job's materials (it is the job's
-   invoice anyway).
+   normal M3b rule, so parts logged before the sale are billed). When the job's earlier invoice is
+   paid and no live invoice exists, this creates a new draft and the sale goes on that second invoice
+   (accepted: it is new work). Map its result, re-checking billed(eid) first in every non-draft case
+   (→ `ALREADY_BILLED`): `draft` with `amount_paid_cents = 0` → continue; `draft` with a payment or
+   `open` → 409 `INVOICE_LOCKED` "The job's invoice is already finalized. The office will bill this
+   estimate." (stored: terminal for this invoice); `paid` / `refunded` (the derived-id invoice is
+   history), `invoice_voided`, `stale` (this includes a deadlock) → 409 `STALE` "This job changed. Try
+   again." (not stored); `external_invoice` / `managed_externally` → 409 `MANAGED_EXTERNALLY`;
+   `not_lead` → 403 `NOT_LEAD`. Accepted: if step 3 then fails, the created draft stays with the job's
+   materials (it is the job's invoice anyway).
 3. **One batch**: `L_req` → `L_inv` → INSERT the sold option's lines (`uuidv7` ids in line order, name,
    quantity, unit price, cost, line total, `estimate_line_item_id`) `SELECT … WHERE` the invoice is a
    native draft of this request with `amount_paid_cents = 0` AND stillLead AND request status allowed
@@ -146,16 +150,24 @@ Exactly once PER ESTIMATE.
    with its invoice id.
 4. **Result**: inserted > 0 → 200 `{ invoiceId, added }`; else billed → `ALREADY_BILLED` (this also
    answers a takeover re-run of the caller's own success; the client renders `ALREADY_BILLED` as the
-   billed state after a refetch, never as an error); not lead → `NOT_LEAD`; not a draft →
-   `INVOICE_LOCKED`; else `STALE`. Lines carry the estimate's snapshot prices; the invoice's tax is
+   billed state after a refetch, never as an error); not lead → `NOT_LEAD`; the invoice is still a
+   draft but has a payment, or is open → `INVOICE_LOCKED`; void or anything else → `STALE`. A numeric
+   overflow (Postgres 22003) anywhere in the batch is caught → 400 `INVALID_INPUT` "That total is too
+   large." Lines carry the estimate's snapshot prices; the invoice's tax is
    recomputed by `totalsSql` at the current default rate over all its lines.
 - Linked lines are protected: M3b `removeInvoiceLine` refuses a line with `estimate_line_item_id` set
   (409 `FROM_ESTIMATE` "This item came from the approved estimate. Ask the office to change it."), so
-  billed(eid) never covers a partial sale.
+  billed(eid) never covers a partial sale. The tech invoice view marks such lines (`fromEstimate:
+  true`) and hides their Remove control; the client copy map includes `FROM_ESTIMATE`.
+- The tech invoice view's `pendingWrite` check is narrowed to the invoice and signature routes
+  (`/api/tech/jobs/<rid>/invoice%` and `/api/tech/jobs/<rid>/signature`), so estimate and equipment
+  keys never mark the invoice page as busy.
 Two concurrent bills serialize on `L_req`; the second sees billed(eid) and adds nothing.
 
 ### 5.4 Office generate guard
-`createInvoiceFromSoldEstimate` keeps its estimate-id early return; its batch INSERT's `WHERE` gains
+`createInvoiceFromSoldEstimate` keeps its estimate-id early return (which also returns a voided office
+invoice: the unique index on `estimate_id` means a voided office invoice ends office billing of that
+estimate — the office handled it); its batch INSERT's `WHERE` gains
 `AND NOT` (the job half of billed(eid)) under the existing `L_req`; on 0 rows it re-reads: a billing
 invoice exists → `{ ok:true, invoiceId }`; else the existing `request_has_draft` answer. Both insert
 paths copy lines ordered by the estimate line's id, with `uuidv7()` ids, and write
@@ -195,15 +207,17 @@ leaves estimates (and a field-typed name) in place, as it does for portal-signed
 
 ## 6. Routes (all `force-dynamic`)
 
-`techWritePreamble` gains an options argument `{ bucket, statuses, beforeCopy, closedCopy }` (invoice
-routes keep today's values: bucket `invoice`, statuses arrived/in_progress/on_hold/completed, "Arrive at
-the job before invoicing."). Estimate create/sell/decline: bucket `estimate`, statuses
+`techWritePreamble` gains an options argument `{ bucket, statuses, beforeCopy, closedCopy }`: a status
+of `completed` or `cancelled` not in `statuses` gets `closedCopy` (409 `JOB_CLOSED`); any other status
+not in `statuses` (`pending`, `assigned`, `scheduled`, `en_route`) gets `beforeCopy` (409
+`NOT_ON_SITE`). The invoice routes keep today's values (bucket `invoice`, statuses
+arrived/in_progress/on_hold/completed, both copies "Arrive at the job before invoicing."). Estimate create/sell/decline: bucket `estimate`, statuses
 arrived/in_progress/on_hold, "Arrive at the job first." / "This job is closed." Bill: the invoicing
 statuses.
 
 | route | gate | body | success |
 | --- | --- | --- | --- |
-| `GET /api/tech/jobs/[id]/estimates` | session, readable job, native (409 `MANAGED_EXTERNALLY`), read rate limit | — | `{ companyName (org settings; null when unset), customerDisplayName (the request's decrypted customer name; null when none), isLead, canCreate, createBlockedReason, taxBps, hasOtherSold, estimates: [{ id, label, status (derived), createdAt, expiresAt, signedAt, soldOptionId, soldVia, hasApprovalLink, billing: 'office' \| 'job' \| 'none', billingInvoiceId, options: [{ id, name, sortOrder, subtotalCents, taxCents, totalCents, lines: [{ id, pricebookItemId, name, quantity, unitPriceCents, lineTotalCents }] }] }] }` — never cost fields, never `signature_name`. `billing` = `office` when the office half of billed(eid) holds, else `job` when the job half holds, else `none` |
+| `GET /api/tech/jobs/[id]/estimates` | session, readable job, native (409 `MANAGED_EXTERNALLY`), read rate limit | — | `{ companyName (org settings; null when unset), customerDisplayName (the request's decrypted customer name; null when none), isLead, canCreate, createBlockedReason, taxBps, hasOtherSold, jobInvoice: { id, state, hasPayment } or null (the request's newest live native invoice), estimates: [{ id, label, status (derived), createdAt, expiresAt, signedAt, soldOptionId, soldVia, soldByMe, hasApprovalLink, billing: 'office' \| 'job' \| 'none', billingInvoiceId, options: [{ id, name, sortOrder, subtotalCents, taxCents, totalCents, lines: [{ id, pricebookItemId, name, quantity, unitPriceCents, lineTotalCents }] }] }] }` — never cost fields, never `signature_name`. `billing` = `office` when the office half of billed(eid) holds, else `job` when the job half holds, else `none` |
 | `POST /api/tech/jobs/[id]/estimates` | write preamble + key | §5.1 | 201/200 `{ estimateId }` |
 | `POST …/estimates/[eid]/sell` | write preamble + key | `{ optionId, signatureName }` | 200 `{ estimateId, status:'sold' }` |
 | `POST …/estimates/[eid]/bill` | write preamble (invoicing statuses) + key | `{}` | 200 `{ invoiceId, added }` |
@@ -218,8 +232,11 @@ Audit (ids/enums only, only when a write created or changed something, never on 
 ## 7. Client
 
 Tech conventions (base primitives, `h-11` targets, sentence case, human errors, shared label helpers).
-Keys use the M3b `useIdempotencyKey` reducer and `classifyWriteError`. The estimate page and the job
-page refetch the estimates GET on mount, after every write, when the customer view closes, and on
+Keys use the M3b `useIdempotencyKey` reducer and `classifyWriteError`, with intent ids
+`estimate:create`, `estimate:sell:<eid>`, `estimate:bill:<eid>`, `estimate:decline:<eid>`,
+`equipment:add`, `equipment:replace:<unitId>` in their own storage key (`tech:estimate:<rid>:intents`,
+not the M3b invoice key); a reload during `Approving…` resends the persisted sell intent before the page
+unlocks (M3b rule). The estimate page and the job page refetch the estimates GET on mount, after every write, when the customer view closes, and on
 `visibilitychange` → visible.
 
 ### 7.1 Builder
@@ -243,7 +260,11 @@ Opened by `Show to customer` (open estimates, request `arrived`/`in_progress`/`o
 history entry with `#customer` and renders an opaque full-screen layer (`fixed inset-0 z-50`) over the
 technician header, Guide, Sign out and location card. **Back** (gesture, system back, browser back)
 pops to the estimate page with the layer closed — never further. A **reload** with `#customer` in the
-URL reopens the layer. `Not now` (top corner) shows the hand-back screen.
+URL reopens the layer only while the estimate is still open and the request allows selling; otherwise
+the hash is stripped with `history.replaceState`. It uses `history.pushState` / `popstate` directly
+(Next 16 copies its own router state into pushed entries, so Back restores the same page); a layer
+opened by a reload has no earlier entry, so closing it strips the hash with `replaceState` instead of
+going back. `Not now` (top corner) shows the hand-back screen.
 - Header: the company name (omitted when null) and `Estimate for <customerDisplayName>` (or `Your
   estimate` when null).
 - `Choose an option`: a `role="radiogroup"` of option cards (native radios inside labels; nothing
@@ -258,8 +279,9 @@ URL reopens the layer. `Not now` (top corner) shows the hand-back screen.
 - `Approve` opens a confirm "Approve Better for $4,812.00?" with `Approve` / `Go back`; while sending,
   `Approving…` and locked.
 - Result: success → "Approved. Thank you." then `Hand back to technician`. An unknown result (network,
-  5xx) → "Checking…", refetch; sold by this tech → success screen; else the customer-safe line
-  "Something went wrong. Please hand the phone back to your technician." with `Hand back`. The
+  5xx) → "Checking…", refetch; `soldByMe` with the chosen option → success screen; else the
+  customer-safe line "Something went wrong. Please hand the phone back to your technician." with `Hand
+  back to technician`. The
   technician sees the real reason on the estimate page.
 - Hand-back screen: "Please hand the phone back to your technician." and `I'm the technician`, which
   closes the layer (history back).
@@ -268,11 +290,12 @@ URL reopens the layer. `Not now` (top corner) shows the hand-back screen.
 Open: options with totals, `Show to customer`, `Customer declined` (confirm "Mark this estimate as
 declined?"), and the approval-link note when `hasApprovalLink`. Sold: "Approved · <time> · <option>",
 then billing:
-- `billing: none` and the job's invoice is a draft or does not exist: `Add to the job's invoice` and
+- `billing: none` and `jobInvoice` is null or a draft without a payment: `Add to the job's invoice` and
   `Leave for the office` (returns to the job page; the estimate shows in the office's `Sold, not
   invoiced` filter).
-- `none` and the job's invoice is finalized: "The job's invoice is finalized. The office will bill
-  this estimate." (no Add).
+- `none` and `jobInvoice` is open or a draft with a payment: "The job's invoice is already finalized.
+  The office will bill this estimate." (no Add). When `jobInvoice` is null and an earlier invoice is
+  paid, Add creates a new invoice for the sale (the sold view says "This goes on a new invoice.").
 - `job`: `On the job's invoice` + `Open invoice`. `office`: `Billed by the office`.
 - After an add: "Added. Get the customer's signature on the invoice before finalizing." and, when the
   draft also holds job materials, "Check the invoice for parts that are also on the estimate."
@@ -317,7 +340,13 @@ location replaces a located unit; FieldPulse unit → MANAGED_EXTERNALLY; (j) te
 estimate/equipment id → 404; (k) expired → ESTIMATE_EXPIRED; decline → dismissed, replay → success, then
 sell → ALREADY_DECIDED; (l) materials logged before the sale, no draft, then bill → the draft holds the
 materials and the estimate lines; (m) removing an estimate-linked line → FROM_ESTIMATE; (n) a zero-line
-sold estimate → NO_LINES.
+sold estimate → NO_LINES; (o) a draft with a recorded payment → INVOICE_LOCKED, nothing added; (p) the
+job's earlier invoice paid, no live invoice → bill creates a new draft with the sale; (q)
+`createInvoiceFromJob` stale/void results map to STALE (not stored) — unit-tested with a mocked writer;
+(r) office invoice voided → the office filter no longer lists the estimate, Generate returns the void
+invoice, the tech GET shows `billing='none'` and a field bill works; (s) an estimate-linked line has
+`fromEstimate` in the tech invoice view; (t) an in-flight estimate key does not set the invoice view's
+`pendingWrite`.
 
 Browser walk (throwaway org via `createOrgCore`; technician, customer, request, assignment, pricebook
 items and a tax rate inserted by SQL — never through the API on the FieldPulse-connected default org;

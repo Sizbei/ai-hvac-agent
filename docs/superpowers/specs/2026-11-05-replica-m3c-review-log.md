@@ -44,3 +44,9 @@ Applied:
 Rejected:
 - Restrict Show to customer / decline to field-created estimates (ux m12): rejected; a note shows when an approval link exists.
 - Helper "Ask <lead name>" (ux m11): rejected as scope; helpers see sold rows read-only.
+
+## Spec round 3 (v3 → v4 FINAL), 2026-11-06 — 1 combined critic
+
+Applied (4 majors, no blockers): createInvoiceFromJob stale/void/history results map to STALE (not stored), only open or a draft with a payment map to stored INVOICE_LOCKED; a draft with a payment is locked (no STALE loop); the GET carries `jobInvoice { id, state, hasPayment }` and §7.3 branches on it, and billing after a paid earlier invoice deliberately creates a new invoice; the "Sold, not invoiced" filter and Generate agree that a voided office invoice ends office billing. Minors: soldByMe, fromEstimate lines + FROM_ESTIMATE copy, create re-run first in the zero-row map, void → STALE in step 4, managed_externally mapped, pendingWrite narrowed to invoice/signature routes, 22003 caught → 400, preamble copy per status, named intent ids in their own storage key, copy unified, tests (o)–(t), the `#customer` approach stated (pushState/popstate work with Next 16; reload reopens only while sellable; replaceState when there is no earlier entry).
+
+Verdict: converged at the round cap — round 3 found no blocker; its majors were mapping/consistency gaps now closed. v4 is FINAL; the plan and the code get their own reviews.
