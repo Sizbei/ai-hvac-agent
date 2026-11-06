@@ -30,9 +30,19 @@ server-paginated at 50/page, sorted by last message time (falls back to
 10s. Selecting a row loads `/api/admin/conversations/[id]`. Filters and the
 open conversation live in the URL (`status`, `channel`, `action`, `empty`, `q`,
 `c=<session id>`); the dashboard card and ⌘K results deep-link with `?c=`.
+Below `lg`, opening a conversation PUSHES a history entry
+(`inbox-history.ts`), so phone Back closes the sheet; closing with X/Esc calls
+`history.back()` to consume it, and `popstate` re-reads `c` from the URL.
+Desktop keeps `replaceState` via `useUrlFilterSync`.
 Pure display/triage helpers: `src/lib/admin/conversation-display.ts`
 (`needsAction`, `conversationTitle`, `extractedFields`, `messageAuthors`,
-`phoneDigitsQuery`).
+`phoneDigitsQuery` — strips a leading 1 from 11 digits).
+
+**Titles:** `conversationTitle` = captured name → linked request's customer
+(`requestCustomerName`, decrypted request copy else customer row, never
+`[deleted]`) → "Web chat · “first words…” · 2:14 PM" (rows omit the time; the
+time column says it). The header shows the short id (`shortConversationId`),
+which ⌘K and the inbox search match.
 
 **One detail view per breakpoint:** `useIsDesktop()` (matchMedia `lg`) mounts
 EITHER the inline pane OR the sheet — never both. The sheet portals to `<body>`,
@@ -42,6 +52,15 @@ click.
 **Needs action:** `customer_sessions.handled_at` (migration 0055). Needs action
 = `status = 'escalated'` AND (`handled_at IS NULL` OR a customer message after
 it) — SQL `needsActionSql` in the queries mirrors the pure `needsAction`.
+The inbox's Needs action is one org-wide queue: turning it on clears the status
+and channel filters (status select disabled); picking a channel tab turns it
+off. The Conversations nav badge reads
+`GET /api/admin/conversations/needs-action-count` (`buildNeedsActionCountQuery`,
+the same query the dashboard batches; `use-needs-action-count.ts`, 30s poll,
+refreshed by `notifyConversationsChanged()` after Mark handled / delete).
+Never put `needsActionSql` (or any messages subquery) in a SELECT list:
+drizzle leaves single-table select columns unqualified, so `session_id = id`
+compares `messages.id`. Row flags are derived with the pure `needsAction`.
 `PATCH /api/admin/conversations/[id]` `{ handled: boolean }` (any admin, only
 escalated rows, 404 otherwise) sets/clears it and audits
 `conversation_marked_handled` / `conversation_reopened` with ids only.
@@ -74,7 +93,8 @@ never digit-matched). Erased customers' sessions have no metadata and an
   and `messageAuthors` labels the matching message "Office", not "AI
   assistant".
 - List/detail failures render `ErrorState` with "Try again" and human copy —
-  never `body.error.message`.
+  never `body.error.message`. A failed list hides the Needs action count and
+  the pager (unknown, not 0).
 - `ConversationDetailContent` has a reply composer pinned at the bottom, ONLY
   for `canReplyByChannel` channels (SMS) — phone/web threads get no panel: a `Textarea` bound to `REPLY_MAX_LENGTH` (1600, mirrors the
   server's zod bound) that POSTs to the message API and re-fetches the detail

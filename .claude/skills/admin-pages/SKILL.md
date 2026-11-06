@@ -71,11 +71,17 @@ Shared UI and shell behaviour:
 - Phone shell: the top bar shows the org name (`AdminHeader orgName`); the
   drawer is a left `Sheet` (Esc, focus trap); its Search button closes the
   drawer first. Active nav + top-bar title use `navItemMatches` / `navLabelFor`
-  in `nav-items.ts`.
+  in `nav-items.ts`. The active link has `aria-current="page"` and scrolls
+  into view on mount. Groups: Operations · Customers · Workspace · Money ·
+  Insights (Operations, Reports, AI insights) · Integrations. Nav badges:
+  `unscheduled` (Calendar), `setup`, `needsAction` (Conversations).
 - ⌘K search (`search-queries.ts`): request results link to
-  `/admin/requests?request=<id>` (there is no `/admin/requests/[id]` page);
-  conversations are searched by the captured contact keys
-  (`sessionContactMatches`, not the raw metadata text) + request number.
+  `/admin/requests?request=<id>` (there is no `/admin/requests/[id]` page),
+  titled by the customer's name; conversations are searched by the captured
+  contact keys (`sessionContactMatches`, not the raw metadata text), request
+  number, the FIRST customer message and the short id, titled like the inbox;
+  staff match by name (plaintext) → `/admin/staff`. Page matches by
+  subsequence must start at a word (`nav-search.ts`).
 
 **Pickers:** base-ui `<SelectValue />` renders the RAW value (a UUID,
 `__manual__`, `name`). Always pass a formatter:
