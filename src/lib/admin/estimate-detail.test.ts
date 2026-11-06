@@ -49,4 +49,11 @@ describe("getEstimateDetailById — people", () => {
     expect(d?.markedSoldBy).toBeNull();
     expect(db.select).toHaveBeenCalledTimes(2); // header + options only
   });
+
+  it("carries the generated invoice id so the page shows View invoice", async () => {
+    mockSelectSeq([[{ ...HEADER, signatureName: "Trevor Nunn", invoiceId: "inv-9" }], []]);
+    expect((await getEstimateDetailById("org-1", "est-1"))?.invoiceId).toBe("inv-9");
+    mockSelectSeq([[{ ...HEADER, signatureName: "Trevor Nunn" }], []]);
+    expect((await getEstimateDetailById("org-1", "est-1"))?.invoiceId).toBeNull();
+  });
 });

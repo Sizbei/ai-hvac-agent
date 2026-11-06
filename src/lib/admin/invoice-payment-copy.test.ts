@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  canOfferFinancing,
   RECORD_PAYMENT_METHODS,
   RECORD_PAYMENT_NETWORK_COPY,
   REFUND_NETWORK_COPY,
@@ -220,5 +221,13 @@ describe("payment row labels", () => {
     expect(refundReasonLabel("customer_request")).toBe("Customer request");
     expect(refundReasonLabel(null)).toBeNull();
     expect(refundReasonLabel("nope")).toBeNull();
+  });
+});
+
+describe("canOfferFinancing", () => {
+  it("is offered only with a customer to send the link to and an amount", () => {
+    expect(canOfferFinancing({ customerId: "c1", amountCents: 1000 })).toBe(true);
+    expect(canOfferFinancing({ customerId: null, amountCents: 1000 })).toBe(false);
+    expect(canOfferFinancing({ customerId: "c1", amountCents: 0 })).toBe(false);
   });
 });

@@ -179,6 +179,12 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Idempotent: the estimate already had its invoice. Return it as-is (200,
+    // created: false) so the UI never claims it was just created.
+    if (!result.created) {
+      return successResponse({ invoiceId: result.invoiceId, created: false }, 200);
+    }
+
     // ids only — no customer PII.
     await logAudit({
       organizationId: session.organizationId,
@@ -194,7 +200,7 @@ export async function POST(request: NextRequest) {
       );
     });
 
-    return successResponse({ invoiceId: result.invoiceId }, 201);
+    return successResponse({ invoiceId: result.invoiceId, created: true }, 201);
   } catch (error: unknown) {
     // The per-estimate unique index can race two concurrent creates — surface
     // as a clean 409 rather than a 500.

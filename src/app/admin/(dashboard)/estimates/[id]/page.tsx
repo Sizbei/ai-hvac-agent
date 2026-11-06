@@ -20,6 +20,10 @@ import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 import { InfoBanner } from '@/components/admin/ui/info-banner';
 import { ErrorState } from '@/components/admin/ui/error-state';
+import { LoadErrorState } from '@/components/admin/ui/load-error-state';
+import { ConfirmDialog } from '@/components/admin/confirm-dialog';
+import { detailLoadFailure, type DetailLoadFailure } from '@/lib/admin/detail-load';
+import { canOfferFinancing } from '@/lib/admin/invoice-payment-copy';
 import { EstimateStatusBadge } from '@/components/admin/estimates/estimate-status-badge';
 import { FinancingPanel } from '@/components/admin/financing/financing-panel';
 import { formatCentsExact } from '@/lib/admin/money-format';
@@ -62,6 +66,8 @@ interface EstimateDetail {
   readonly customerName: string | null;
   readonly markedSoldBy: string | null;
   readonly fieldpulseData: Record<string, unknown> | null;
+  /** The invoice generated from this estimate, if any. */
+  readonly invoiceId: string | null;
 }
 
 /** "Furnace replacement", else "Estimate for Trevor Nunn", else "Estimate". */
@@ -84,7 +90,8 @@ export default function EstimateDetailPage({
   const router = useRouter();
   const [estimate, setEstimate] = useState<EstimateDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loadFailure, setLoadFailure] = useState<DetailLoadFailure | null>(null);
+  const [confirmSoldOpen, setConfirmSoldOpen] = useState(false);
   const [selectedOption, setSelectedOption] = useState<string>('');
   const [isMarking, setIsMarking] = useState(false);
   const [markError, setMarkError] = useState<string | null>(null);
@@ -100,7 +107,7 @@ export default function EstimateDetailPage({
     try {
       const res = await fetch(`/api/admin/estimates/${id}`);
       if (!res.ok) {
-        setError(res.status === 404 ? 'Estimate not found' : 'Failed to load');
+        setLoadFailure(detailLoadFailure(res.status));
         return;
       }
       const body = (await res.json()) as {
@@ -110,14 +117,19 @@ export default function EstimateDetailPage({
       if (body.success) {
         setEstimate(body.data.estimate);
         setSelectedOption(body.data.estimate.options[0]?.id ?? '');
-        setError(null);
+        setLoadFailure(null);
       }
     } catch {
-      setError('Could not connect to server.');
+      setLoadFailure(detailLoadFailure(null));
     } finally {
       setIsLoading(false);
     }
   }, [id]);
+
+  const retryLoad = useCallback(async (): Promise<void> => {
+    setIsLoading(true);
+    await load();
+  }, [load]);
 
   useEffect(() => {
     void load();
@@ -125,6 +137,7 @@ export default function EstimateDetailPage({
 
   const handleMarkSold = useCallback(async (): Promise<void> => {
     if (!selectedOption) return;
+    setConfirmSoldOpen(false);
     setIsMarking(true);
     setMarkError(null);
     try {
@@ -163,8 +176,10 @@ export default function EstimateDetailPage({
       // Idempotent: an existing invoice is returned (not an error), so on success
       // we always have an invoiceId to navigate to.
       if (res.ok && body.success && body.data?.invoiceId) {
-        // ?created=1: the invoice page confirms what just happened.
-        router.push(`/admin/invoices/${body.data.invoiceId}?created=1`);
+        // ?created=1 only for a NEW invoice: the invoice page then confirms
+        // it. An existing one (created: false) opens without the banner.
+        const createdParam = body.data.created === false ? '' : '?created=1';
+        router.push(`/admin/invoices/${body.data.invoiceId}${createdParam}`);
       } else {
         setInvoiceError(body.error?.message ?? 'Failed to generate invoice');
         setIsInvoicing(false);
@@ -216,19 +231,25 @@ export default function EstimateDetailPage({
     );
   }
 
-  if (error || !estimate) {
+  // Only a page with nothing loaded is replaced; a failed reload after Mark
+  // sold keeps the estimate on screen.
+  if (!estimate) {
     return (
       <PageShell>
         <PageHeader title="Estimate" back={{ href: '/admin/estimates', label: 'Back to estimates' }} />
-        <ErrorState
-          title={error ?? 'Estimate not found'}
-          description="This estimate may have been removed, or the link is out of date."
-          action={
-            <Link href="/admin/estimates">
-              <Button variant="outline">Back to estimates</Button>
-            </Link>
-          }
-        />
+        {loadFailure === 'not_found' ? (
+          <ErrorState
+            title="Estimate not found"
+            description="This estimate may have been removed, or the link is out of date."
+            action={
+              <Link href="/admin/estimates">
+                <Button variant="outline">Back to estimates</Button>
+              </Link>
+            }
+          />
+        ) : (
+          <LoadErrorState title="Couldn't load this estimate." onRetry={retryLoad} />
+        )}
       </PageShell>
     );
   }
@@ -409,17 +430,35 @@ export default function EstimateDetailPage({
                 {markedNotice}
               </p>
             )}
-            <p className="text-sm text-muted-foreground">
-              Generate an invoice from the sold option to take payment.
-            </p>
-            <Button
-              size="sm"
-              disabled={isInvoicing}
-              onClick={handleGenerateInvoice}
-            >
-              <Receipt className="mr-2 size-4" />
-              {isInvoicing ? 'Generating…' : 'Generate invoice'}
-            </Button>
+            {estimate.invoiceId ? (
+              <>
+                <p className="text-sm text-muted-foreground">
+                  The invoice for the sold option is ready.
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  render={<Link href={`/admin/invoices/${estimate.invoiceId}`} />}
+                >
+                  <Receipt className="mr-2 size-4" />
+                  View invoice
+                </Button>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-muted-foreground">
+                  Generate an invoice from the sold option to take payment.
+                </p>
+                <Button
+                  size="sm"
+                  disabled={isInvoicing}
+                  onClick={handleGenerateInvoice}
+                >
+                  <Receipt className="mr-2 size-4" />
+                  {isInvoicing ? 'Generating…' : 'Generate invoice'}
+                </Button>
+              </>
+            )}
             {invoiceError && (
               <p className="text-xs text-destructive">{invoiceError}</p>
             )}
@@ -435,7 +474,7 @@ export default function EstimateDetailPage({
             (o) => o.id === estimate.soldOptionId,
           );
           const amountCents = soldOption?.totalCents ?? estimate.totalCents;
-          return amountCents > 0 ? (
+          return canOfferFinancing({ customerId: estimate.customerId, amountCents }) ? (
             <FinancingPanel
               estimateId={estimate.id}
               requestedAmountCents={amountCents}
@@ -480,7 +519,7 @@ export default function EstimateDetailPage({
               <Button
                 size="sm"
                 disabled={isMarking || !selectedOption}
-                onClick={handleMarkSold}
+                onClick={() => setConfirmSoldOpen(true)}
               >
                 {isMarking ? 'Saving…' : 'Mark sold'}
               </Button>
@@ -489,6 +528,24 @@ export default function EstimateDetailPage({
           </CardContent>
         </Card>
       )}
+      {isOpen && !isSynced && (() => {
+        const chosen = estimate.options.find((o) => o.id === selectedOption);
+        return (
+          <ConfirmDialog
+            open={confirmSoldOpen}
+            onOpenChange={setConfirmSoldOpen}
+            title={chosen ? `Mark ${chosen.name} sold?` : 'Mark this estimate sold?'}
+            description={
+              chosen
+                ? `${chosen.name} — ${formatCentsExact(chosen.totalCents)} is recorded as the option the customer accepted. This can't be undone here.`
+                : "This can't be undone here."
+            }
+            confirmLabel="Mark sold"
+            cancelLabel="Not yet"
+            onConfirm={() => void handleMarkSold()}
+          />
+        );
+      })()}
 
       {/* Approval link — only while open and not synced. The plaintext token is
           never persisted, so this is the only way to recover a link once the

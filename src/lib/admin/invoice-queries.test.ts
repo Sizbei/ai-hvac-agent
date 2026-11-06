@@ -399,7 +399,7 @@ describe("createInvoiceFromSoldEstimate", () => {
       [{ id: "inv-existing" }], // an invoice already exists for this estimate
     ]);
     const r = await createInvoiceFromSoldEstimate(ORG, "est-1");
-    expect(r).toEqual({ ok: true, invoiceId: "inv-existing" });
+    expect(r).toEqual({ ok: true, invoiceId: "inv-existing", created: false });
     // No insert/batch — we returned the existing invoice instead of duplicating.
     expect(db.batch).not.toHaveBeenCalled();
   });
@@ -451,7 +451,7 @@ describe("createInvoiceFromSoldEstimate", () => {
     it("returns the existing estimate invoice FIRST, before any lock", async () => {
       mockCreateSeq([[EST], [{ id: "inv-existing" }]]);
       const r = await createInvoiceFromSoldEstimate(ORG, "est-1");
-      expect(r).toEqual({ ok: true, invoiceId: "inv-existing" });
+      expect(r).toEqual({ ok: true, invoiceId: "inv-existing", created: false });
       expect(db.execute).not.toHaveBeenCalled();
       expect(db.batch).not.toHaveBeenCalled();
     });
@@ -487,7 +487,7 @@ describe("createInvoiceFromSoldEstimate", () => {
       mockCreateSeq([[EST], [], [OPT], [], [{ id: "inv-raced" }]]);
       vi.mocked(db.batch).mockResolvedValueOnce([{ rows: [] }, { rows: [] }] as never);
       const r = await createInvoiceFromSoldEstimate(ORG, "est-1");
-      expect(r).toEqual({ ok: true, invoiceId: "inv-raced" });
+      expect(r).toEqual({ ok: true, invoiceId: "inv-raced", created: false });
       expect(batchStmts()).toHaveLength(2); // no lines → no lines INSERT
     });
   });

@@ -19,6 +19,9 @@ export interface EstimateListItem {
   readonly title: string | null;
   readonly fieldpulseData: Record<string, unknown> | null;
   readonly customerName: string | null;
+  readonly soldOptionId: string | null;
+  /** Options on the estimate (Good/Better/Best); 0 for some FieldPulse imports. */
+  readonly optionCount: number;
 }
 
 export interface EstimatePipelineStats {

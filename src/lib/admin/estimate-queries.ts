@@ -17,6 +17,7 @@ import {
   customers,
   auditLog,
   users,
+  invoices,
 } from "@/lib/db/schema";
 import { decrypt } from "@/lib/crypto";
 import { withTenant } from "@/lib/db/tenant";
@@ -327,6 +328,9 @@ export interface EstimateListRow {
   readonly customerName: string | null;
   /** ISO string of the effective created-at (FieldPulse created_at if present, else native). */
   readonly effectiveCreatedAt: string;
+  readonly soldOptionId: string | null;
+  /** Options on the estimate; total is "up to" while undecided with more than one. */
+  readonly optionCount: number;
 }
 
 const ESTIMATE_PAGE_SIZE = 50;
@@ -490,6 +494,10 @@ export async function listEstimates(
     fieldpulseData: estimates.fieldpulseData,
     nameEncrypted: customers.nameEncrypted,
     effectiveCreatedAt: EFFECTIVE_CREATED_AT_SQL,
+    soldOptionId: estimates.soldOptionId,
+    // Good/Better/Best: an undecided estimate's total is its highest option,
+    // so the list says "up to" when there is more than one.
+    optionCount: sql<number>`(select count(*)::int from ${estimateOptions} where ${estimateOptions.estimateId} = ${estimates.id})`,
   };
 
   if (search) {
@@ -617,6 +625,8 @@ export interface EstimateDetailView {
   readonly markedSoldBy: string | null;
   /** FieldPulse spillover data for the detail panel; null when not a FP estimate or empty. */
   readonly fieldpulseData: Record<string, unknown> | null;
+  /** The invoice generated from this estimate (one per estimate), or null. */
+  readonly invoiceId: string | null;
 }
 
 /**
@@ -718,6 +728,7 @@ export async function getEstimateDetailById(
       title: estimates.title,
       fieldpulseData: estimates.fieldpulseData,
       nameEncrypted: customers.nameEncrypted,
+      invoiceId: invoices.id,
     })
     .from(estimates)
     // Org-scope the join too (defense in depth).
@@ -728,12 +739,21 @@ export async function getEstimateDetailById(
         eq(customers.organizationId, organizationId),
       ),
     )
+    // At most one invoice per estimate (invoices_estimate_unique), so the
+    // detail can show "View invoice" instead of a second Generate.
+    .leftJoin(
+      invoices,
+      and(
+        eq(invoices.estimateId, estimates.id),
+        eq(invoices.organizationId, organizationId),
+      ),
+    )
     .where(withTenant(estimates, organizationId, eq(estimates.id, id)))
     .limit(1);
 
   if (!est) return null;
 
-  const { fieldpulseEstimateId, fieldpulseStatusName, fieldpulseData, nameEncrypted, ...header } = est;
+  const { fieldpulseEstimateId, fieldpulseStatusName, fieldpulseData, nameEncrypted, invoiceId, ...header } = est;
   const markedSoldBy =
     est.signatureName === ADMIN_SIGNATURE ? await findMarkedSoldBy(organizationId, est.id) : null;
   // Admin detail: include snapshotted cost so the UI can show margin.
@@ -746,6 +766,7 @@ export async function getEstimateDetailById(
     syncedSource: fieldpulseEstimateId != null ? "fieldpulse" : null,
     fieldpulseStatusName: fieldpulseStatusName ?? null,
     fieldpulseData: (fieldpulseData as Record<string, unknown> | null) ?? null,
+    invoiceId: invoiceId ?? null,
   };
 }
 

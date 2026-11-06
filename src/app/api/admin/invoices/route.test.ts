@@ -29,7 +29,9 @@ vi.mock('@/lib/rate-limit', () => ({
 vi.mock('@/lib/logger', () => ({ logger: { error: vi.fn(), info: vi.fn() } }));
 
 import { NextRequest } from 'next/server';
-import { GET } from './route';
+import { GET, POST } from './route';
+import { createInvoiceFromSoldEstimate } from '@/lib/admin/invoice-queries';
+import { logAudit } from '@/lib/admin/audit';
 
 beforeEach(() => {
   getAdminSession.mockReset();
@@ -47,5 +49,38 @@ describe('GET /api/admin/invoices caching', () => {
     const res = await GET(new NextRequest('https://app.example.com/api/admin/invoices'));
     expect(res.status).toBe(200);
     expect(res.headers.get('Cache-Control')).toBe('no-store');
+  });
+});
+
+describe('POST /api/admin/invoices (generate from an estimate)', () => {
+  const EST = '7f1a9a4e-0f43-4b8e-9d0a-2c3a5b6c7d8e';
+  function post() {
+    return new NextRequest('https://app.example.com/api/admin/invoices', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: 'https://app.example.com' },
+      body: JSON.stringify({ estimateId: EST }),
+    });
+  }
+  beforeEach(() => {
+    getAdminSession.mockResolvedValue({
+      userId: 'u1', organizationId: 'org-1', email: 'a@x.com', name: 'A', role: 'admin',
+    });
+    vi.mocked(logAudit).mockReset().mockResolvedValue(undefined);
+  });
+
+  it('says created: true (201) only for a new invoice', async () => {
+    vi.mocked(createInvoiceFromSoldEstimate).mockResolvedValue({ ok: true, invoiceId: 'inv-1', created: true });
+    const res = await POST(post());
+    expect(res.status).toBe(201);
+    expect((await res.json()).data).toEqual({ invoiceId: 'inv-1', created: true });
+    expect(logAudit).toHaveBeenCalledOnce();
+  });
+
+  it('returns the existing invoice as created: false (200), with no audit row', async () => {
+    vi.mocked(createInvoiceFromSoldEstimate).mockResolvedValue({ ok: true, invoiceId: 'inv-1', created: false });
+    const res = await POST(post());
+    expect(res.status).toBe(200);
+    expect((await res.json()).data).toEqual({ invoiceId: 'inv-1', created: false });
+    expect(logAudit).not.toHaveBeenCalled();
   });
 });

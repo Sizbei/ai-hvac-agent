@@ -210,3 +210,15 @@ export function refundReasonLabel(reason: string | null): string | null {
   if (!reason) return null;
   return REFUND_REASONS.find((r) => r.value === reason)?.label ?? null;
 }
+
+/**
+ * "Offer financing" sends the customer a lender prequalification link, so it
+ * needs a customer to send it to and something left to finance. Shared by the
+ * invoice and estimate detail pages.
+ */
+export function canOfferFinancing(input: {
+  readonly customerId: string | null;
+  readonly amountCents: number;
+}): boolean {
+  return input.customerId !== null && input.amountCents > 0;
+}

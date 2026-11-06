@@ -50,7 +50,12 @@ export function overdueWhere(tbl: typeof invoices): SQL<unknown> {
 }
 
 export type CreateInvoiceResult =
-  | { readonly ok: true; readonly invoiceId: string }
+  | {
+      readonly ok: true;
+      readonly invoiceId: string;
+      /** False when the estimate already had its invoice (idempotent return). */
+      readonly created: boolean;
+    }
   | {
       readonly ok: false;
       readonly reason: "estimate_not_sold" | "no_sold_option" | "synced_read_only" | "request_has_draft";
@@ -95,7 +100,7 @@ export async function createInvoiceFromSoldEstimate(
     .where(withTenant(invoices, organizationId, eq(invoices.estimateId, estimateId)))
     .limit(1);
   if (existingInvoice) {
-    return { ok: true, invoiceId: existingInvoice.id };
+    return { ok: true, invoiceId: existingInvoice.id, created: false };
   }
 
   const [opt] = await db
@@ -159,7 +164,7 @@ export async function createInvoiceFromSoldEstimate(
     await db.batch([invoiceInsert]);
   }
 
-  return { ok: true, invoiceId };
+  return { ok: true, invoiceId, created: true };
 }
 
 type EstimateLine = { name: string; quantity: number; unitPriceCents: number; costCents: number; lineTotalCents: number };
@@ -204,7 +209,7 @@ async function createRequestEstimateInvoice(
       WHERE EXISTS (SELECT 1 FROM invoices WHERE id = ${inv}::uuid AND organization_id = ${org}::uuid AND xmin = pg_current_xact_id()::xid)`);
   }
   const out = (await db.batch(items.map((q) => db.execute(q)) as never)) as unknown as { rows: unknown[] }[];
-  if (out[1]!.rows.length > 0) return { ok: true, invoiceId: inv };
+  if (out[1]!.rows.length > 0) return { ok: true, invoiceId: inv, created: true };
   // No row: a concurrent create of THIS estimate won the per-estimate unique
   // index (return it, like the early return), or the request has a draft.
   const [raced] = await db
@@ -212,7 +217,9 @@ async function createRequestEstimateInvoice(
     .from(invoices)
     .where(withTenant(invoices, org, eq(invoices.estimateId, est.id)))
     .limit(1);
-  return raced ? { ok: true, invoiceId: raced.id } : { ok: false, reason: "request_has_draft" };
+  return raced
+    ? { ok: true, invoiceId: raced.id, created: false }
+    : { ok: false, reason: "request_has_draft" };
 }
 
 export type TakePaymentResult =

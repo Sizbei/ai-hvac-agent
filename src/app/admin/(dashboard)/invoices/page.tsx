@@ -19,6 +19,7 @@ import { cn } from '@/lib/utils';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 import { EmptyState } from '@/components/admin/ui/empty-state';
+import { LoadErrorState } from '@/components/admin/ui/load-error-state';
 import { SegmentedControl } from '@/components/ui/segmented-control';
 import { Pager } from '@/components/admin/ui/pager';
 import { TableSkeleton, StatTileSkeleton } from '@/components/admin/skeletons';
@@ -210,7 +211,7 @@ export default function InvoicesPage() {
     return Number.isFinite(d) && d >= 0 ? Math.round(d * 100) : undefined;
   }, [maxDollars]);
 
-  const { invoices, total, sourceCounts, stats, collectedThisMonthCents, cardPaymentsEnabled, isLoading, error, sendReminder, voidInvoice } = useInvoices({
+  const { invoices, total, sourceCounts, stats, collectedThisMonthCents, cardPaymentsEnabled, isLoading, error, refetch, sendReminder, voidInvoice } = useInvoices({
     page,
     limit: PER_PAGE,
     search: debouncedSearch || undefined,
@@ -331,18 +332,17 @@ export default function InvoicesPage() {
 
       <ReconcileBanner />
 
-      {/* Suppress the zero-data band on uncached first load — the skeleton
-          stat tiles below own that state (review fix). */}
-      {!isLoading && (
-        <SummaryBand stats={stats} collectedThisMonthCents={collectedThisMonthCents} />
-      )}
-
-      {/* error feedback (in-flow) */}
-      {error && (
-        <Alert variant="destructive">
-          <AlertCircle className="size-4" />
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
+      {/* The KPI band sits above the filters in every state: skeleton tiles
+          while loading (same silhouette, so nothing jumps), nothing when the
+          load failed — $0.00 tiles would read as real (round-2 fix). */}
+      {isLoading ? (
+        <StatStrip>
+          <StatTileSkeleton />
+          <StatTileSkeleton />
+          <StatTileSkeleton />
+        </StatStrip>
+      ) : (
+        !error && <SummaryBand stats={stats} collectedThisMonthCents={collectedThisMonthCents} />
       )}
 
       {/* Filter band — one fused strip (spec: filter rows are fused strips).
@@ -376,7 +376,7 @@ export default function InvoicesPage() {
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-foreground-faint" />
               <Input
                 type="search"
-                placeholder="Search customer or invoice ID…"
+                placeholder="Customer or invoice #…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Escape') { setSearch(''); setDebouncedSearch(''); } }}
@@ -461,17 +461,11 @@ export default function InvoicesPage() {
 
       {/* list */}
       {isLoading ? (
-        <>
-          {/* Three tiles in the same fused strip the loaded SummaryBand uses —
-              loading and loaded share one silhouette, so nothing re-draws its
-              own borders when the stats land. */}
-          <StatStrip>
-            <StatTileSkeleton />
-            <StatTileSkeleton />
-            <StatTileSkeleton />
-          </StatStrip>
-          <TableSkeleton rows={8} cols={6} />
-        </>
+        <TableSkeleton rows={8} cols={6} />
+      ) : error ? (
+        <Card className="p-5">
+          <LoadErrorState title="Couldn't load invoices." onRetry={refetch} />
+        </Card>
       ) : displayRows.length === 0 ? (
         <Card className="p-5">
           <EmptyState

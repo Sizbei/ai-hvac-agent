@@ -2,7 +2,7 @@
 
 import { Fragment, useCallback, useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
-import { ChevronDown, ChevronRight, Plus, AlertCircle, AlertTriangle, FileText, FolderOpen, Clock, Trophy, Gauge, Search } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, AlertTriangle, FileText, FolderOpen, Clock, Trophy, Gauge, Search } from 'lucide-react';
 import { useEstimates, type EstimatePipelineStats } from '@/hooks/use-estimates';
 import { useUrlFilterSync } from '@/hooks/use-url-filter-sync';
 import { EstimateCreateDialog } from '@/components/admin/estimates/estimate-create-dialog';
@@ -10,7 +10,6 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
 import { TableSkeleton } from '@/components/admin/skeletons';
 import { formatCentsExact } from '@/lib/admin/money-format';
@@ -18,6 +17,8 @@ import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 import { StatCard, StatStrip } from '@/components/admin/ui/stat-card';
 import { EmptyState } from '@/components/admin/ui/empty-state';
+import { LoadErrorState } from '@/components/admin/ui/load-error-state';
+import { estimateAgeDays, estimateTotalLabel } from '@/lib/admin/estimate-list-display';
 import { SegmentedControl } from '@/components/ui/segmented-control';
 import { Pager } from '@/components/admin/ui/pager';
 import {
@@ -73,10 +74,6 @@ function formatDate(iso: string): string {
   });
 }
 
-function ageDays(effectiveCreatedAt: string): number {
-  return Math.floor((Date.now() - new Date(effectiveCreatedAt).getTime()) / 86_400_000);
-}
-
 /** Mirrors the server's BUCKET_CASE_SQL open semantics: open = NOT won/lost/
  * draft (the ELSE arm), so custom FP status names land in open here too — an
  * allowlist would drop the ⚠/follow-up affordances for rows the Open tab and
@@ -100,7 +97,7 @@ function KpiBand({ stats }: { stats: EstimatePipelineStats | null }) {
         intent="info"
         label="Open pipeline"
         value={formatCentsExact(s?.openCents ?? 0)}
-        sublabel={`${s?.openCount ?? 0} open ${(s?.openCount ?? 0) === 1 ? 'estimate' : 'estimates'}`}
+        sublabel={`${s?.openCount ?? 0} open ${(s?.openCount ?? 0) === 1 ? 'estimate' : 'estimates'} · highest option`}
       />
       <StatCard
         icon={Clock}
@@ -228,6 +225,9 @@ export default function EstimatesPage() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
+  // Ages are counted from when the page opened (render stays pure).
+  const [nowMs] = useState(() => Date.now());
+
   const { estimates, total, stats, isLoading, error, refetch } = useEstimates({
     page,
     bucket: activeBucket ?? undefined,
@@ -263,15 +263,9 @@ export default function EstimatesPage() {
             {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-24 rounded-xl" />)}
           </div>
         )
-        : <KpiBand stats={stats} />
+        // A failed load shows no $0.00 pipeline — the error card below owns it.
+        : !error && <KpiBand stats={stats} />
       }
-
-      {error && (
-        <Alert variant="destructive">
-          <AlertCircle className="size-4" />
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
 
       {/* Search + status tabs toolbar */}
       <div className="relative sm:max-w-sm">
@@ -287,8 +281,9 @@ export default function EstimatesPage() {
       </div>
 
       {/* Status tabs */}
-      <div className="overflow-x-auto">
+      <div className="max-w-full overflow-x-auto">
         <SegmentedControl<string>
+          className="w-max"
           aria-label="Filter estimates by status"
           options={TABS.map((tab) => ({
             value: tab.value ?? 'all',
@@ -305,6 +300,10 @@ export default function EstimatesPage() {
       {/* List */}
       {isLoading ? (
         <TableSkeleton rows={8} cols={6} />
+      ) : error ? (
+        <Card className="p-5">
+          <LoadErrorState title="Couldn't load estimates." onRetry={refetch} />
+        </Card>
       ) : estimates.length === 0 ? (
         <Card className="p-5">
           <EmptyState
@@ -319,17 +318,17 @@ export default function EstimatesPage() {
             <thead className="border-b bg-muted/50 text-left text-[11px] font-medium text-muted-foreground">
               <tr>
                 <th scope="col" className="px-4 py-2 font-medium">Customer</th>
-                <th scope="col" className="px-4 py-2 font-medium max-w-48">Title</th>
+                <th scope="col" className="hidden px-4 py-2 font-medium max-w-48 sm:table-cell">Title</th>
                 <th scope="col" className="px-4 py-2 font-medium text-right">Total</th>
                 <th scope="col" className="px-4 py-2 font-medium">Status</th>
-                <th scope="col" className="px-4 py-2 font-medium">Waiting</th>
+                <th scope="col" className="hidden px-4 py-2 font-medium sm:table-cell">Waiting</th>
                 <th scope="col" className="px-4 py-2 w-8" />
               </tr>
             </thead>
             <tbody>
               {estimates.map((est) => {
                 const isExpanded = expandedId === est.id;
-                const age = ageDays(est.effectiveCreatedAt);
+                const age = estimateAgeDays(est.effectiveCreatedAt, nowMs);
                 // Flag stale on Open tab or All tab (when this specific row is open).
                 const stale = age > 14 && isOpenEstimate(est.fieldpulseStatusName, est.status);
                 const toggle = () => setExpandedId((prev) => (prev === est.id ? null : est.id));
@@ -355,22 +354,22 @@ export default function EstimatesPage() {
                         </div>
                       </td>
                       {/* Estimate title (muted, truncate) */}
-                      <td className="px-4 py-3 max-w-48" onClick={toggle}>
+                      <td className="hidden px-4 py-3 max-w-48 sm:table-cell" onClick={toggle}>
                         {est.title
                           ? <span className="block truncate text-muted-foreground">{est.title}</span>
                           : <span className="text-muted-foreground/50 italic text-xs">no title</span>
                         }
                       </td>
                       {/* Total (right, formatCentsExact) */}
-                      <td className="px-4 py-3 text-right font-medium tabular-nums" onClick={toggle}>
-                        {formatCentsExact(est.totalCents)}
+                      <td className="px-4 py-3 text-right font-medium tabular-nums whitespace-nowrap" onClick={toggle}>
+                        {estimateTotalLabel(est)}
                       </td>
                       {/* Status pill */}
                       <td className="px-4 py-3" onClick={toggle}>
                         <StatusPill fps={est.fieldpulseStatusName} native={est.status} />
                       </td>
                       {/* Waiting: Nd, amber+⚠ when open >14d */}
-                      <td className="px-4 py-3" onClick={toggle}>
+                      <td className="hidden px-4 py-3 sm:table-cell" onClick={toggle}>
                         <span className={cn(
                           'inline-flex items-center gap-0.5 text-xs tabular-nums',
                           stale ? 'text-warning font-medium' : 'text-muted-foreground',
@@ -414,7 +413,7 @@ export default function EstimatesPage() {
                                 <StatusPill fps={est.fieldpulseStatusName} native={est.status} />
                               </dd>
                               <dt className="text-muted-foreground">Total</dt>
-                              <dd className="font-medium tabular-nums">{formatCentsExact(est.totalCents)}</dd>
+                              <dd className="font-medium tabular-nums">{estimateTotalLabel(est)}</dd>
                               <dt className="text-muted-foreground">Created</dt>
                               <dd className="tabular-nums">{formatDate(est.effectiveCreatedAt)}</dd>
                               {est.expiresAt && (

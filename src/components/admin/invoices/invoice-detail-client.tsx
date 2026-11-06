@@ -21,6 +21,8 @@ import { PageHeader } from '@/components/admin/ui/page-header';
 import { SectionCard } from '@/components/admin/ui/section-card';
 import { InfoBanner } from '@/components/admin/ui/info-banner';
 import { ErrorState } from '@/components/admin/ui/error-state';
+import { LoadErrorState } from '@/components/admin/ui/load-error-state';
+import { detailLoadFailure, type DetailLoadFailure } from '@/lib/admin/detail-load';
 import { InvoiceStateBadge } from '@/components/admin/invoices/invoice-state-badge';
 import { AgeChip } from '@/components/admin/invoices/age-chip';
 import {
@@ -42,6 +44,7 @@ import { SyncPill } from '@/components/admin/sync-pill';
 import { mintKey } from '@/lib/http/idempotency-codes';
 import {
   canRecordPayment,
+  canOfferFinancing,
   canSendReminder,
   centsToInputDollars,
   invoiceLinkAction,
@@ -164,7 +167,7 @@ export function InvoiceDetailClient({
   const [org, setOrg] = useState<OrgIdentity | null>(null);
   const [reminders, setReminders] = useState<InvoiceReminderView[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loadFailure, setLoadFailure] = useState<DetailLoadFailure | null>(null);
 
   // Record-payment form (the card mints its own client token when it opens)
   const [showPaymentForm, setShowPaymentForm] = useState(false);
@@ -196,7 +199,7 @@ export function InvoiceDetailClient({
     try {
       const res = await fetch(`/api/admin/invoices/${id}`);
       if (!res.ok) {
-        setError(res.status === 404 ? 'Invoice not found' : 'Failed to load');
+        setLoadFailure(detailLoadFailure(res.status));
         return;
       }
       const body = (await res.json()) as {
@@ -213,18 +216,33 @@ export function InvoiceDetailClient({
             status: r.status,
           })),
         );
-        setError(null);
+        setLoadFailure(null);
       }
     } catch {
-      setError('Could not connect to server.');
+      setLoadFailure(detailLoadFailure(null));
     } finally {
       setIsLoading(false);
     }
   }, [id]);
 
+  const retryLoad = useCallback(async (): Promise<void> => {
+    setIsLoading(true);
+    await load();
+  }, [load]);
+
   useEffect(() => {
     void load();
   }, [load]);
+
+  // The "created" banner is for this visit only: drop ?created=1 from the
+  // address so a reload or a shared link doesn't claim it again.
+  useEffect(() => {
+    if (!justCreated) return;
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has('created')) return;
+    url.searchParams.delete('created');
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  }, [justCreated]);
 
   // ── MONEY HANDLERS (refund; recording lives in RecordPaymentCard) ─────────
 
@@ -367,19 +385,25 @@ export function InvoiceDetailClient({
     );
   }
 
-  if (error || !invoice) {
+  // Only a page with nothing loaded yet is replaced: a failed reload after a
+  // payment keeps the invoice on screen.
+  if (!invoice) {
     return (
       <PageShell>
         <PageHeader title="Invoice" back={{ href: '/admin/invoices', label: 'Back to invoices' }} />
-        <ErrorState
-          title={error ?? 'Invoice not found'}
-          description="This invoice may have been removed, or the link is out of date."
-          action={
-            <Link href="/admin/invoices">
-              <Button variant="outline">Back to invoices</Button>
-            </Link>
-          }
-        />
+        {loadFailure === 'not_found' ? (
+          <ErrorState
+            title="Invoice not found"
+            description="This invoice may have been removed, or the link is out of date."
+            action={
+              <Link href="/admin/invoices">
+                <Button variant="outline">Back to invoices</Button>
+              </Link>
+            }
+          />
+        ) : (
+          <LoadErrorState title="Couldn't load this invoice." onRetry={retryLoad} />
+        )}
       </PageShell>
     );
   }
@@ -617,8 +641,10 @@ export function InvoiceDetailClient({
           )}
 
           {/* Financing (subordinate). Keyed to the invoice's estimate; only shown
-              when the invoice links to one and a balance remains to finance. */}
-          {invoice.estimateId && balance > 0 && (
+              when the invoice links to one, has a customer to send the link
+              to, and a balance remains to finance. */}
+          {invoice.estimateId &&
+            canOfferFinancing({ customerId: invoice.customerId, amountCents: balance }) && (
             <FinancingPanel
               invoiceId={invoice.id}
               requestedAmountCents={balance}
