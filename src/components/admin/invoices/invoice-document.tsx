@@ -134,16 +134,16 @@ export function InvoiceDocument({
           <table className="w-full border-collapse text-sm">
             <thead>
               <tr className="border-b-2 border-foreground/80">
-                <th className="px-3.5 py-2.5 text-left text-[11px] font-medium text-muted-foreground">
+                <th className="px-2 sm:px-3.5 py-2.5 text-left text-[11px] font-medium text-muted-foreground">
                   Service / product description
                 </th>
-                <th className="px-3.5 py-2.5 text-right text-[11px] font-medium text-muted-foreground tabular-nums">
+                <th className="px-2 sm:px-3.5 py-2.5 text-right text-[11px] font-medium text-muted-foreground tabular-nums">
                   Qty / hrs
                 </th>
-                <th className="px-3.5 py-2.5 text-right text-[11px] font-medium text-muted-foreground tabular-nums">
+                <th className="hidden px-2 sm:table-cell sm:px-3.5 py-2.5 text-right text-[11px] font-medium text-muted-foreground tabular-nums">
                   Unit price / rate
                 </th>
-                <th className="px-3.5 py-2.5 text-right text-[11px] font-medium text-muted-foreground tabular-nums">
+                <th className="px-2 sm:px-3.5 py-2.5 text-right text-[11px] font-medium text-muted-foreground tabular-nums">
                   Amount
                 </th>
               </tr>
@@ -151,7 +151,7 @@ export function InvoiceDocument({
             <tbody>
               {invoice.lineItems.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-3.5 py-4 text-xs text-muted-foreground">
+                  <td colSpan={4} className="px-2 sm:px-3.5 py-4 text-xs text-muted-foreground">
                     No line items.
                   </td>
                 </tr>
@@ -161,16 +161,16 @@ export function InvoiceDocument({
                     key={li.id}
                     className={cn(i % 2 === 1 && 'bg-muted/30')}
                   >
-                    <td className="px-3.5 py-3 align-top font-medium text-foreground">
+                    <td className="px-2 sm:px-3.5 py-3 align-top font-medium text-foreground">
                       {li.name}
                     </td>
-                    <td className="px-3.5 py-3 text-right tabular-nums text-muted-foreground">
+                    <td className="px-2 sm:px-3.5 py-3 text-right tabular-nums text-muted-foreground">
                       {li.quantity}
                     </td>
-                    <td className="px-3.5 py-3 text-right tabular-nums text-muted-foreground">
+                    <td className="hidden px-2 sm:table-cell sm:px-3.5 py-3 text-right tabular-nums text-muted-foreground">
                       {formatCentsExact(li.unitPriceCents)}
                     </td>
-                    <td className="px-3.5 py-3 text-right tabular-nums font-medium text-foreground">
+                    <td className="px-2 sm:px-3.5 py-3 text-right tabular-nums font-medium text-foreground">
                       {formatCentsExact(li.lineTotalCents)}
                     </td>
                   </tr>

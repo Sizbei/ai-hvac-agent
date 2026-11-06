@@ -262,11 +262,21 @@ export function EstimateCreateDialog({
     updateLine(oi, li, { pricebookItemId: selected, useMemberPrice: isMember });
   }
 
-  /** Trigger text for a line's picker — the item name, never its id. */
-  function linePickerLabel(value: unknown): string {
+  /**
+   * Trigger text for a line's picker — the item name, never its id. A long
+   * name truncates; the price never does (it was cut off at phone width).
+   */
+  function linePickerLabel(value: unknown): React.ReactNode {
     if (value === MANUAL || value == null) return 'Manual entry';
     const picked = typeof value === 'string' ? itemById.get(value) : undefined;
-    if (picked) return `${picked.name} — ${formatCentsExact(picked.priceCents)}`;
+    if (picked) {
+      return (
+        <span className="flex min-w-0 items-baseline gap-1">
+          <span className="min-w-0 truncate">{picked.name}</span>
+          <span className="shrink-0 tabular-nums">— {formatCentsExact(picked.priceCents)}</span>
+        </span>
+      );
+    }
     return pricebookLoading ? 'Loading catalog…' : 'Pick from pricebook or enter manually';
   }
 

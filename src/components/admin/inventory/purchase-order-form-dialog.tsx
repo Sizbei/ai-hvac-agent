@@ -195,8 +195,9 @@ export function PurchaseOrderFormDialog({
           <div className="space-y-3">
             <Label>Lines</Label>
             {lines.map((line, index) => (
-              <div key={index} className="flex items-end gap-2">
-                <div className="min-w-0 flex-1 space-y-1">
+              <div key={index} className="flex flex-wrap items-end gap-2 sm:flex-nowrap">
+                {/* Phone: the material gets its own full-width row. */}
+                <div className="w-full min-w-0 space-y-1 sm:w-auto sm:flex-1">
                   <span className="block text-xs text-muted-foreground">Material</span>
                   <Select
                     value={line.pricebookItemId}
