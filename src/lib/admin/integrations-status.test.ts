@@ -102,12 +102,13 @@ describe("getIntegrationsStatus — mock vs live detection", () => {
     expect(items.payments.status).toBe("live");
   });
 
-  it("flags the 'live key present but adapter mock' nuance for payments", async () => {
+  it("flags the 'key set up but still test mode' nuance for payments", async () => {
     paymentName.mockReturnValue("mock");
     process.env.STRIPE_SECRET_KEY = "sk_live_dummy";
     const items = byKey(await getIntegrationsStatus("org-1"));
     expect(items.payments.status).toBe("mock");
-    expect(items.payments.detail.toLowerCase()).toContain("adapter is mock");
+    expect(items.payments.detail).toContain("still run in test mode");
+    expect(items.payments.detail.toLowerCase()).not.toMatch(/mock|adapter/);
   });
 
   it("reports financing as 'mock' on the mock seam", async () => {
@@ -123,7 +124,7 @@ describe("getIntegrationsStatus — mock vs live detection", () => {
     process.env.RESEND_API_KEY = "re_dummy";
     items = byKey(await getIntegrationsStatus("org-1"));
     expect(items.email.status).toBe("live");
-    expect(items.email.detail.toLowerCase()).toContain("configured");
+    expect(items.email.detail).toMatch(/^Set up/);
   });
 
   it("marks Twilio 'live' only when BOTH sid and auth token are present", async () => {

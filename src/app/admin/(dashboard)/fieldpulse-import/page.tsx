@@ -23,6 +23,8 @@ import { SkeletonTable } from '@/components/admin/ui/skeleton-table';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
+import Link from 'next/link';
+import { InfoBanner } from '@/components/admin/ui/info-banner';
 
 function StatusChip({ status, isStale }: { status?: string; isStale?: boolean }) {
   if (isStale) {
@@ -224,6 +226,16 @@ export default function FieldpulseImportPage() {
       />
 
       {error && <p className="text-sm text-destructive">{error}</p>}
+
+      {!error && runs.length === 0 && (
+        <InfoBanner>
+          Nothing has been imported from FieldPulse yet. Connect your FieldPulse account in{' '}
+          <Link href="/admin/settings?tab=integrations" className="font-medium underline underline-offset-2">
+            Settings › Integrations
+          </Link>{' '}
+          and its customers, requests and invoices are imported here, phase by phase.
+        </InfoBanner>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {PIPELINE_PHASES.map((phase) => {

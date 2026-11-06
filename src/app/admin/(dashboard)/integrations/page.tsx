@@ -49,7 +49,7 @@ const STATUS_BADGE: Record<IntegrationStatus, { label: string; className: string
     className: 'bg-danger-light text-danger-strong border-danger-border',
   },
   mock: {
-    label: 'Mock',
+    label: 'Test mode',
     className: 'bg-warning-light text-warning-strong border-warning-border',
   },
   not_configured: {

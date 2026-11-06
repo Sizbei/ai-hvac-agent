@@ -73,16 +73,20 @@ export function ConversationLimitsPanel({
     const parsedBudget = parseLimit(budget, TOKEN_BUDGET_MIN, TOKEN_BUDGET_MAX);
     const parsedTurns = parseLimit(turns, MAX_TURNS_MIN, MAX_TURNS_MAX);
 
+    // Report every bad field at once, not just the first.
+    const problems: string[] = [];
     if (parsedBudget === undefined) {
-      setError(
-        `Token budget must be a whole number between ${TOKEN_BUDGET_MIN.toLocaleString()} and ${TOKEN_BUDGET_MAX.toLocaleString()} (or blank to use the default).`,
+      problems.push(
+        `AI usage limit must be a whole number between ${TOKEN_BUDGET_MIN.toLocaleString()} and ${TOKEN_BUDGET_MAX.toLocaleString()}, or blank for the default.`,
       );
-      return;
     }
     if (parsedTurns === undefined) {
-      setError(
-        `Max turns must be a whole number between ${MAX_TURNS_MIN} and ${MAX_TURNS_MAX} (or blank to use the default).`,
+      problems.push(
+        `Max conversation turns must be a whole number between ${MAX_TURNS_MIN} and ${MAX_TURNS_MAX}, or blank for the default.`,
       );
+    }
+    if (parsedBudget === undefined || parsedTurns === undefined) {
+      setError(problems.join(' '));
       return;
     }
 
@@ -113,7 +117,7 @@ export function ConversationLimitsPanel({
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="space-y-2">
-          <Label htmlFor="chat-token-budget">AI token budget per conversation</Label>
+          <Label htmlFor="chat-token-budget">AI usage limit per conversation</Label>
           <Input
             id="chat-token-budget"
             inputMode="numeric"
@@ -122,7 +126,7 @@ export function ConversationLimitsPanel({
             placeholder={`Default: ${DEFAULT_TOKEN_BUDGET.toLocaleString()}`}
           />
           <p className="text-xs text-muted-foreground">
-            Caps the AI tokens a single chat can spend (cost control). Range{' '}
+            Caps how much AI processing one chat can use, which keeps costs predictable. Range{' '}
             {TOKEN_BUDGET_MIN.toLocaleString()}–{TOKEN_BUDGET_MAX.toLocaleString()}.
           </p>
         </div>

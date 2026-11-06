@@ -176,8 +176,8 @@ export async function getIntegrationsStatus(
     detail:
       paymentName === "mock"
         ? stripeKeyPresent
-          ? "Live key present, but adapter is mock — no real charges"
-          : "Mock provider — no real charges"
+          ? "A Stripe key is set up, but payments still run in test mode — no real charges yet"
+          : "Test mode — no real charges are made"
         : "Live provider active",
     configurable: false,
   };
@@ -193,8 +193,8 @@ export async function getIntegrationsStatus(
     detail:
       financingName === "mock"
         ? wisetackKeyPresent
-          ? "Live key present, but adapter is mock — no real applications"
-          : "Mock provider — no real applications"
+          ? "A Wisetack key is set up, but financing still runs in test mode — no real applications yet"
+          : "Test mode — no real applications are sent"
         : "Live provider active",
     configurable: false,
   };
@@ -206,8 +206,8 @@ export async function getIntegrationsStatus(
     category: "comms",
     status: envPresent("RESEND_API_KEY") ? "live" : "not_configured",
     detail: envPresent("RESEND_API_KEY")
-      ? "API key configured"
-      : "No API key configured",
+      ? "Set up — sends email to customers and staff"
+      : "Not set up",
     configurable: false,
   };
 
@@ -220,8 +220,8 @@ export async function getIntegrationsStatus(
     category: "comms",
     status: twilioConfigured ? "live" : "not_configured",
     detail: twilioConfigured
-      ? "Credentials configured"
-      : "Credentials not configured",
+      ? "Set up — sends texts and handles calls"
+      : "Not set up",
     configurable: false,
   };
 

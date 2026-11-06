@@ -160,7 +160,7 @@ export function EmbedPanel({ config, onSave }: EmbedPanelProps) {
         </CardHeader>
         <CardContent>
           <div className="relative">
-            <pre className="overflow-x-auto rounded-lg bg-muted p-4 text-xs leading-relaxed">
+            <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-lg bg-muted p-4 text-xs leading-relaxed">
               <code>{snippet.text}</code>
             </pre>
             {snippet.copyable && (

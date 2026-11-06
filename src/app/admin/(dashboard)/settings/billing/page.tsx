@@ -1,4 +1,7 @@
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { ArrowLeft } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { getAdminSession } from '@/lib/auth/session';
 import { isSuperAdmin, isPlatformAdmin } from '@/lib/auth/authz';
 import { PageShell } from '@/components/admin/ui/page-shell';
@@ -21,7 +24,13 @@ export default async function BillingSettingsPage() {
     <PageShell narrow>
       <PageHeader
         title="Billing"
-        subtitle="Manage your platform subscription, see your plan's entitlements, and upgrade or change billing details."
+        subtitle="See your plan and what it includes, upgrade, or change billing details."
+        actions={
+          <Button variant="outline" render={<Link href="/admin/settings" />}>
+            <ArrowLeft className="size-4" aria-hidden="true" />
+            Back to settings
+          </Button>
+        }
       />
       <BillingPanel />
     </PageShell>

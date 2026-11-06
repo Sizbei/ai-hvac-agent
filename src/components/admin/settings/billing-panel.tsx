@@ -16,6 +16,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { ALL_PLANS } from '@/lib/billing/plans';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { cn } from '@/lib/utils';
+import { billingFeatureLabel, billingPlanLine, billingStatusLabel } from '@/lib/admin/billing-copy';
+import { LoadErrorState } from '@/components/admin/ui/load-error-state';
 
 interface BillingState {
   readonly plan: { id: string; label: string; priceCents: number; interval: string };
@@ -51,13 +53,13 @@ export function BillingPanel() {
       const res = await fetch('/api/platform/billing');
       const json = await res.json();
       if (!res.ok || !json.success) {
-        setError(json?.error?.message ?? 'Failed to load billing.');
+        setError("Couldn't load billing.");
         return;
       }
       setState(json.data as BillingState);
       setError(null);
     } catch {
-      setError('Failed to load billing.');
+      setError("Couldn't load billing.");
     } finally {
       setLoading(false);
     }
@@ -79,14 +81,14 @@ export function BillingPanel() {
         });
         const json = await res.json();
         if (!res.ok || !json.success) {
-          setError(json?.error?.message ?? 'Something went wrong.');
+          setError("Couldn't open billing. Please try again.");
           return;
         }
         if (typeof json.data?.url === 'string') {
           window.location.href = json.data.url;
         }
       } catch {
-        setError('Something went wrong.');
+        setError("Couldn't open billing. Please try again.");
       } finally {
         setBusyAction(null);
       }
@@ -105,10 +107,11 @@ export function BillingPanel() {
 
   if (!state) {
     return (
-      <Alert variant="destructive">
-        <AlertCircle className="size-4" />
-        <AlertDescription>{error ?? 'Billing unavailable.'}</AlertDescription>
-      </Alert>
+      <LoadErrorState
+        title="Couldn't load billing."
+        onRetry={load}
+        className="rounded-lg border border-dashed"
+      />
     );
   }
 
@@ -126,21 +129,17 @@ export function BillingPanel() {
           <div className="flex items-center justify-between gap-3">
             <div>
               <CardTitle>Current plan</CardTitle>
-              <CardDescription>
-                {state.plan.label} · {formatPrice(state.plan.priceCents)}
-                {state.plan.priceCents > 0 ? `/${state.plan.interval}` : ''}
-              </CardDescription>
+              <CardDescription>{billingPlanLine(state.plan, formatPrice)}</CardDescription>
             </div>
             <Badge
               variant="outline"
               className={cn(
-                'capitalize',
                 state.active
                   ? 'bg-success-light text-success border-success/30'
                   : 'bg-danger-light text-danger border-danger/30',
               )}
             >
-              {state.status}
+              {billingStatusLabel(state.status)}
             </Badge>
           </div>
         </CardHeader>
@@ -160,7 +159,7 @@ export function BillingPanel() {
             {state.entitlements.features.map((feature) => (
               <li key={feature} className="flex items-center gap-2">
                 <Check className="size-4 shrink-0 text-success" aria-hidden="true" />
-                {feature}
+                {billingFeatureLabel(feature)}
               </li>
             ))}
           </ul>

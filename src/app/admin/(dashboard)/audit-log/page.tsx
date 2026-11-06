@@ -1,6 +1,6 @@
 'use client';
 
-import { humanizeAuditKey } from '@/lib/admin/audit-format';
+import { formatAuditDetails, humanizeAuditKey } from '@/lib/admin/audit-format';
 import { useState } from 'react';
 import { ScrollText, X } from 'lucide-react';
 import { useAdminAuditLog } from '@/hooks/use-admin-audit-log';
@@ -55,31 +55,12 @@ const KNOWN_ENTITIES = [
 // Sentence case: only the first word is capitalised.
 const humanize = humanizeAuditKey;
 
-// Render the JSON `details` payload (field names / ids only, never PII) as a
-// compact readable string. Falls back to the raw string if it isn't JSON.
-function formatDetails(details: string | null): string | null {
-  if (!details) return null;
-  try {
-    const parsed = JSON.parse(details) as Record<string, unknown>;
-    const parts = Object.entries(parsed).map(([k, v]) => {
-      const val = Array.isArray(v) ? v.join(', ') : String(v);
-      return `${humanize(k)}: ${val || '—'}`;
-    });
-    return parts.join(' · ');
-  } catch {
-    // Every write site stores valid JSON of field NAMES only. If a row somehow
-    // holds free text, don't echo it verbatim — it could contain a value a
-    // future bad write leaked. Show a neutral placeholder instead.
-    return '(details unavailable)';
-  }
-}
-
 function formatTimestamp(iso: string): string {
   return new Date(iso).toLocaleString('en-US', {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
-    hour: '2-digit',
+    hour: 'numeric',
     minute: '2-digit',
   });
 }
@@ -99,7 +80,7 @@ const AUDIT_COLUMNS: ReadonlyArray<DataTableColumn<AuditLogEntry>> = [
     key: 'action',
     header: 'Action',
     cell: (e) => {
-      const details = formatDetails(e.details);
+      const details = formatAuditDetails(e.details);
       return (
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">

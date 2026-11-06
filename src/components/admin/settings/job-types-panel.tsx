@@ -159,6 +159,8 @@ function JobTypeRow({ jobType, onSaved, onError }: RowProps) {
         onChange={(e) => setDuration(e.target.value)}
         onBlur={commitDuration}
       />
+      {/* Phones lose the column header row, so the bare numbers get words. */}
+      <span aria-hidden className="text-xs text-muted-foreground sm:hidden">min</span>
       <Select
         items={PRIORITY_ITEMS}
         value={jobType.defaultPriority}
@@ -173,22 +175,29 @@ function JobTypeRow({ jobType, onSaved, onError }: RowProps) {
           ))}
         </SelectContent>
       </Select>
-      <Input
-        aria-label="Position"
-        type="number"
-        min={0}
-        max={999}
-        className="w-16"
-        value={position}
-        onChange={(e) => setPosition(e.target.value)}
-        onBlur={commitPosition}
-      />
-      <Switch
-        aria-label="Active"
-        checked={jobType.active}
-        disabled={saving}
-        onCheckedChange={(checked) => void save({ active: checked })}
-      />
+      {/* Label + control stay together when the row wraps on a phone. */}
+      <span className="inline-flex items-center gap-2">
+        <span aria-hidden className="text-xs text-muted-foreground sm:hidden">Order</span>
+        <Input
+          aria-label="Position"
+          type="number"
+          min={0}
+          max={999}
+          className="w-16"
+          value={position}
+          onChange={(e) => setPosition(e.target.value)}
+          onBlur={commitPosition}
+        />
+      </span>
+      <span className="inline-flex items-center gap-2">
+        <span aria-hidden className="text-xs text-muted-foreground sm:hidden">Active</span>
+        <Switch
+          aria-label="Active"
+          checked={jobType.active}
+          disabled={saving}
+          onCheckedChange={(checked) => void save({ active: checked })}
+        />
+      </span>
       <span className="size-4">
         {saving && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
       </span>

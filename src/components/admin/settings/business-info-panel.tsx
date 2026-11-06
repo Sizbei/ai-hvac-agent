@@ -23,6 +23,7 @@ import {
 import { settingsFieldErrorCopy } from '@/lib/admin/settings-errors';
 import { mergeBusinessInfo } from '@/lib/admin/business-info-merge';
 import { hasUnsavedChanges } from '@/lib/admin/unsaved-changes';
+import { phoneInputError } from '@/lib/admin/customer-validation';
 import { useReportDirty } from '@/hooks/use-unsaved-changes-guard';
 
 interface BusinessInfoPanelProps {
@@ -75,6 +76,13 @@ export function BusinessInfoPanel({ config, onSave, onDirtyChange }: BusinessInf
   useReportDirty(dirty, onDirtyChange);
 
   async function handleSave(): Promise<void> {
+    // Same phone rule as the customer forms: "call me maybe" isn't a number.
+    const phoneError = phoneInputError(phone);
+    if (phoneError) {
+      setSaved(false);
+      setError(phoneError);
+      return;
+    }
     // The PATCH replaces businessInfo wholesale, so merge onto the stored
     // object: keys this panel doesn't edit must survive the save.
     const businessInfo = mergeBusinessInfo(config.businessInfo, {

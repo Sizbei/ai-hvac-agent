@@ -42,7 +42,7 @@ export function BillingLinkPanel() {
       <CardHeader>
         <CardTitle>Billing</CardTitle>
         <CardDescription>
-          Manage your platform subscription, plan, and entitlements.
+          See your plan, what it includes, and change it.
         </CardDescription>
       </CardHeader>
       <CardContent>
