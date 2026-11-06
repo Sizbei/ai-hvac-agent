@@ -69,3 +69,22 @@ it('without a due date, age counts from issuedAt (mirrored) over createdAt (impo
   };
   expect(collectionsStats(mirrored, now).daysOverdue).toBe(45);
 });
+
+it('payment and refund rows carry the amount and method', () => {
+  const evs = buildActivity({
+    createdAt: d('2026-06-01'),
+    lastReminderSentAt: null,
+    payments: [
+      {
+        id: 'p1', amountCents: 20000, status: 'succeeded', isDeposit: false, createdAt: d('2026-06-02'),
+        method: 'check', checkNumber: '1042', provider: 'manual',
+        refunds: [{ id: 'r1', amountCents: 5000, reason: null, createdAt: d('2026-06-03') }],
+      },
+    ],
+  });
+  expect(evs.map((e) => e.label)).toEqual([
+    'Refund issued · $50.00',
+    'Payment recorded · $200.00 · Check',
+    'Invoice created',
+  ]);
+});

@@ -1,5 +1,7 @@
 import type { InvoiceDetailView, InvoiceReminderView } from '@/lib/admin/invoice-queries';
 import { daysBetween, invoiceAgeDays, overdueByDates } from './age-chip';
+import { formatCentsExact } from '@/lib/admin/money-format';
+import { paymentMethodLabel } from '@/lib/admin/invoice-payment-copy';
 
 export type ActivityEvent = {
   kind: 'created' | 'payment' | 'refund' | 'reminder';
@@ -50,9 +52,18 @@ export function buildActivity(
   events.push({ kind: 'created', at: inv.createdAt, label: 'Invoice created' });
 
   for (const payment of inv.payments) {
-    events.push({ kind: 'payment', at: payment.createdAt, label: 'Payment recorded' });
+    // Amount and method, so the trail reads without opening Payments.
+    events.push({
+      kind: 'payment',
+      at: payment.createdAt,
+      label: `Payment recorded · ${formatCentsExact(payment.amountCents)} · ${paymentMethodLabel(payment.method)}`,
+    });
     for (const refund of payment.refunds ?? []) {
-      events.push({ kind: 'refund', at: refund.createdAt, label: 'Refund issued' });
+      events.push({
+        kind: 'refund',
+        at: refund.createdAt,
+        label: `Refund issued · ${formatCentsExact(refund.amountCents)}`,
+      });
     }
   }
 
