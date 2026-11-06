@@ -45,12 +45,12 @@ function SkeletonRows() {
       {Array.from({ length: 5 }, (_, i) => (
         <TableRow key={i}>
           <TableCell><Skeleton className="h-4 w-40" /></TableCell>
-          <TableCell><Skeleton className="h-5 w-20" /></TableCell>
-          <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+          <TableCell className="hidden sm:table-cell"><Skeleton className="h-5 w-20" /></TableCell>
+          <TableCell className="hidden sm:table-cell"><Skeleton className="h-4 w-24" /></TableCell>
           <TableCell><Skeleton className="h-4 w-20" /></TableCell>
-          <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+          <TableCell className="hidden sm:table-cell"><Skeleton className="h-4 w-20" /></TableCell>
           <TableCell><Skeleton className="h-4 w-12" /></TableCell>
-          <TableCell><Skeleton className="h-7 w-32" /></TableCell>
+          <TableCell className="hidden sm:table-cell"><Skeleton className="h-7 w-32" /></TableCell>
           <TableCell />
         </TableRow>
       ))}
@@ -93,12 +93,13 @@ export function PricebookTable({
       <TableHeader>
         <TableRow>
           <TableHead>Name</TableHead>
-          <TableHead>Type</TableHead>
-          <TableHead>SKU</TableHead>
+          {/* Phone: name, price, margin and the expander; the rest is in the panel. */}
+          <TableHead className="hidden sm:table-cell">Type</TableHead>
+          <TableHead className="hidden sm:table-cell">SKU</TableHead>
           <TableHead className="text-right">Price</TableHead>
-          <TableHead className="text-right">Member</TableHead>
+          <TableHead className="hidden sm:table-cell text-right">Member</TableHead>
           <TableHead className="text-right">Margin</TableHead>
-          <TableHead className="text-right">Actions</TableHead>
+          <TableHead className="hidden sm:table-cell text-right">Actions</TableHead>
           <TableHead className="w-8" />
         </TableRow>
       </TableHeader>
@@ -121,7 +122,7 @@ export function PricebookTable({
                   className={`cursor-pointer ${item.active ? '' : 'opacity-60'} ${isExpanded ? 'border-b-0' : ''}`}
                   onClick={() => setExpandedId((prev) => (prev === item.id ? null : item.id))}
                 >
-                  <TableCell className="font-medium">
+                  <TableCell className="min-w-28 whitespace-normal font-medium">
                     <div className="flex items-center gap-1.5">
                       {item.name}
                       {!item.active && (
@@ -134,12 +135,12 @@ export function PricebookTable({
                       )}
                     </div>
                     {item.description && (
-                      <div className="text-xs text-muted-foreground truncate max-w-xs">
+                      <div className="max-w-28 truncate text-xs text-muted-foreground sm:max-w-xs">
                         {item.description}
                       </div>
                     )}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden sm:table-cell">
                     <div className="flex flex-wrap gap-1">
                       <TypeBadge type={item.type} />
                       {item.isLaborItem && (
@@ -149,13 +150,13 @@ export function PricebookTable({
                       )}
                     </div>
                   </TableCell>
-                  <TableCell className="text-muted-foreground">
+                  <TableCell className="hidden sm:table-cell text-muted-foreground">
                     {item.sku ?? ''}
                   </TableCell>
                   <TableCell className="text-right tabular-nums">
                     {formatCentsExact(item.priceCents)}
                   </TableCell>
-                  <TableCell className="text-right tabular-nums text-muted-foreground">
+                  <TableCell className="hidden sm:table-cell text-right tabular-nums text-muted-foreground">
                     {item.memberPriceCents != null
                       ? formatCentsExact(item.memberPriceCents)
                       : '—'}
@@ -165,7 +166,7 @@ export function PricebookTable({
                       ? `${(marginData.marginPct * 100).toFixed(1)}%`
                       : '—'}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden sm:table-cell">
                     <div
                       className="flex justify-end gap-2"
                       onClick={(e) => e.stopPropagation()}
@@ -206,7 +207,7 @@ export function PricebookTable({
                 </TableRow>
                 {isExpanded && (
                   <TableRow key={`${item.id}-expand`}>
-                    <TableCell colSpan={8} className="bg-muted/30 px-6 py-4 animate-in fade-in-0 slide-in-from-top-1 duration-100 motion-reduce:animate-none">
+                    <TableCell colSpan={8} className="bg-muted/30 px-4 py-4 sm:px-6 animate-in fade-in-0 slide-in-from-top-1 duration-100 motion-reduce:animate-none">
                       <div className="flex flex-wrap gap-6">
                         {/* Key facts */}
                         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
@@ -260,8 +261,9 @@ export function PricebookTable({
                         )}
                       </div>
 
-                      {/* Primary action */}
-                      <div className="mt-4">
+                      {/* Primary action (+ Deactivate on phones, where the
+                          Actions column is hidden) */}
+                      <div className="mt-4 flex flex-wrap gap-2">
                         <Button
                           variant="outline"
                           size="sm"
@@ -269,6 +271,16 @@ export function PricebookTable({
                         >
                           Edit item
                         </Button>
+                        {item.active && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="sm:hidden"
+                            onClick={(e) => { e.stopPropagation(); onDeactivate(item); }}
+                          >
+                            Deactivate
+                          </Button>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>

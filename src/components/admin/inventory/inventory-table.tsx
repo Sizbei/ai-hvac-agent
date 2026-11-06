@@ -45,9 +45,9 @@ export function InventoryTable({ items, isLoading, onEdit }: InventoryTableProps
         <TableRow>
           <TableHead>Material</TableHead>
           <TableHead className="text-right">On hand</TableHead>
-          <TableHead className="text-right">Reorder at</TableHead>
+          <TableHead className="hidden sm:table-cell text-right">Reorder at</TableHead>
           <TableHead className="text-right">Unit cost</TableHead>
-          <TableHead>Location</TableHead>
+          <TableHead className="hidden sm:table-cell">Location</TableHead>
           <TableHead className="text-right">Actions</TableHead>
         </TableRow>
       </TableHeader>
@@ -58,7 +58,7 @@ export function InventoryTable({ items, isLoading, onEdit }: InventoryTableProps
               key={item.id}
               className={cn(item.belowReorder && 'bg-warning-light/40')}
             >
-              <TableCell className="font-medium">
+              <TableCell className="min-w-32 whitespace-normal font-medium">
                 {item.itemName}
                 {item.belowReorder && (
                   <Badge
@@ -71,13 +71,13 @@ export function InventoryTable({ items, isLoading, onEdit }: InventoryTableProps
               <TableCell className="text-right tabular-nums">
                 {item.quantityOnHand}
               </TableCell>
-              <TableCell className="text-right tabular-nums text-muted-foreground">
+              <TableCell className="hidden sm:table-cell text-right tabular-nums text-muted-foreground">
                 {item.reorderPoint ?? '—'}
               </TableCell>
               <TableCell className="text-right tabular-nums">
                 {formatCentsExact(item.unitCostCents)}
               </TableCell>
-              <TableCell className="text-muted-foreground">
+              <TableCell className="hidden sm:table-cell text-muted-foreground">
                 {item.location ?? '—'}
               </TableCell>
               <TableCell>
