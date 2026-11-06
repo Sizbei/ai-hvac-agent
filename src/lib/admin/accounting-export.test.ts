@@ -71,6 +71,9 @@ vi.mock('@/lib/db/schema', () => ({
     hcpInvoiceId: 'invoices.hcpInvoiceId',
   },
   payments: {
+    id: 'payments.id',
+    invoiceId: 'payments.invoiceId',
+    organizationId: 'payments.organizationId',
     status: 'payments.status',
     createdAt: 'payments.createdAt',
     fieldpulsePaymentId: 'payments.fieldpulsePaymentId',
@@ -155,10 +158,14 @@ describe('getAccountingExport', () => {
     const native = result.native;
 
     const byType = Object.fromEntries(native.map((l) => [l.type, l]));
-    expect(native).toHaveLength(4);
+    expect(native).toHaveLength(5);
 
-    // Amounts are DOLLARS, not cents.
-    expect(byType.invoice.amountDollars).toBe(108.25); // 10000 + 825 = 10825 cents
+    // Amounts are DOLLARS, not cents. Revenue is the subtotal; tax is its own
+    // row on Sales Tax Payable (owed to the state, not earned).
+    expect(byType.invoice.amountDollars).toBe(100);
+    expect(byType.tax.amountDollars).toBe(8.25);
+    expect(byType.tax.account).toBe('Sales Tax Payable');
+    expect(byType.tax.ref).toBe('inv-1');
     expect(byType.payment.amountDollars).toBe(108.25);
     expect(byType.refund.amountDollars).toBe(-50.0); // money out is negative
     expect(byType.labor.amountDollars).toBe(75.0);
@@ -184,7 +191,7 @@ describe('getAccountingExport', () => {
       nativeInvoices: [{ id: 'inv-1', subtotalCents: 100, taxCents: 0, createdAt: FROM }],
       nativePayments: [{ id: 'pay-1', invoiceId: 'inv-1', amountCents: 100, method: 'check', createdAt: FROM }],
       syncedPayments: [{ id: 'pay-fp', invoiceId: 'inv-fp', amountCents: 100, method: 'card', createdAt: FROM }],
-      refunds: [{ id: 'ref-1', paymentId: 'pay-1', amountCents: 50, createdAt: FROM }],
+      refunds: [{ id: 'ref-1', paymentId: 'pay-1', invoiceId: 'inv-1', amountCents: 50, createdAt: FROM }],
       labor: [{ id: 'tte-1', serviceRequestId: 'req-1', laborCostCents: 200, clockOutAt: FROM }],
     });
 
@@ -206,7 +213,8 @@ describe('getAccountingExport', () => {
     expect(result.synced.find((l) => l.type === 'payment')!.memo).toBe(
       'Payment on invoice #INV-FP (card)',
     );
-    expect(native.find((l) => l.type === 'refund')!.memo).toBe('Refund on payment #PAY-1');
+    // Refunds name the invoice the office knows, not the payment.
+    expect(native.find((l) => l.type === 'refund')!.memo).toBe('Refund on invoice #INV-1');
     expect(native.find((l) => l.type === 'labor')!.memo).toBe('Labor on request #REQ-1');
   });
 
@@ -414,5 +422,74 @@ describe('buildCsv', () => {
     };
     const csv = buildCsv({ native: [refundLine], synced: [] });
     expect(csv).toContain('"Refund a, ""b"""');
+  });
+});
+
+describe('sales tax, business-day dates and order (round-2 books fixes)', () => {
+  it('books tax to Sales Tax Payable on its own row — revenue is the subtotal only', async () => {
+    queue({
+      nativeInvoices: [
+        { id: 'afa28e5d-0000', subtotalCents: 41000, taxCents: 3895, createdAt: new Date('2026-11-05T15:00:00Z') },
+        { id: 'notax-0000', subtotalCents: 5000, taxCents: 0, createdAt: new Date('2026-11-05T15:00:00Z') },
+      ],
+    });
+    const { native } = await getAccountingExport(ORG, { fromDate: FROM, toDate: TO });
+    const revenue = native.filter((l) => l.account === 'Sales Revenue');
+    const tax = native.filter((l) => l.account === 'Sales Tax Payable');
+    expect(revenue.map((l) => l.amountDollars)).toEqual([410, 50]);
+    expect(tax).toHaveLength(1);
+    expect(tax[0]).toMatchObject({ type: 'tax', amountDollars: 38.95, memo: 'Sales tax on invoice #AFA28E5D' });
+    const csv = buildCsv({ native, synced: [] });
+    expect(csv).toContain('2026-11-05,tax,Sales Tax Payable,afa28e5d-0000,Sales tax on invoice #AFA28E5D,38.95,Yes');
+  });
+
+  it('splits tax on mirrored invoices too, keeping their Import = No', async () => {
+    queue({
+      syncedInvoices: [
+        { id: 'fp-1', subtotalCents: 10000, taxCents: 700, createdAt: FROM, issuedAt: null, fieldpulseInvoiceId: 'x', hcpInvoiceId: null },
+      ],
+    });
+    const { synced } = await getAccountingExport(ORG, { fromDate: FROM, toDate: TO });
+    expect(synced.map((l) => [l.account, l.amountDollars, l.source])).toEqual([
+      ['Sales Revenue', 100, 'fieldpulse'],
+      ['Sales Tax Payable', 7, 'fieldpulse'],
+    ]);
+  });
+
+  it('dates rows in the business time zone: an 8 pm Eastern payment on Nov 5 is Nov 5', async () => {
+    queue({
+      nativePayments: [
+        { id: 'pay-eve', invoiceId: 'inv-1', amountCents: 100, method: 'cash', createdAt: new Date('2026-11-06T01:00:00Z') },
+      ],
+    });
+    const { native } = await getAccountingExport(ORG, {
+      fromDate: FROM,
+      toDate: TO,
+      timeZone: 'America/New_York',
+    });
+    expect(native[0]!.date).toBe('2026-11-05');
+  });
+
+  it('sorts rows by date, keeping an invoice before its tax', async () => {
+    queue({
+      nativeInvoices: [
+        { id: 'inv-late', subtotalCents: 100, taxCents: 10, createdAt: new Date('2026-11-06T15:00:00Z') },
+      ],
+      nativePayments: [
+        { id: 'pay-early', invoiceId: 'inv-x', amountCents: 100, method: 'cash', createdAt: new Date('2026-11-05T15:00:00Z') },
+      ],
+      refunds: [
+        { id: 'ref-mid', paymentId: 'pay-early', invoiceId: null, amountCents: 50, createdAt: new Date('2026-11-05T20:00:00Z') },
+      ],
+    });
+    const { native } = await getAccountingExport(ORG, { fromDate: FROM, toDate: TO });
+    expect(native.map((l) => `${l.date} ${l.type}`)).toEqual([
+      '2026-11-05 payment',
+      '2026-11-05 refund',
+      '2026-11-06 invoice',
+      '2026-11-06 tax',
+    ]);
+    // A refund whose payment has no invoice falls back to the payment ref.
+    expect(native[1]!.memo).toBe('Refund on payment #PAY-EARL');
   });
 });

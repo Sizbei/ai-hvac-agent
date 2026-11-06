@@ -1,7 +1,7 @@
 /**
  * Super-admin accounting export (parity Stage 10 — QuickBooks / accounting).
  *
- *   GET /api/admin/accounting/export?from=ISO&to=ISO[&format=csv]
+ *   GET /api/admin/accounting/export?from=YYYY-MM-DD&to=YYYY-MM-DD[&format=csv]
  *     -> a downloadable journal file (text/csv attachment) of invoice/payment/
  *        refund/labor lines for the period, in a QBO-compatible shape.
  *
@@ -9,6 +9,11 @@
  * financial data (amounts, ids), so this is super_admin-gated like a signed
  * download (getAdminSession -> 401, isSuperAdmin -> 403) and read-rate-limited.
  * The export action is audited with the PERIOD + ROW COUNT only — never PII.
+ *
+ * from/to are BUSINESS days (the org's time zone, after-hours settings): the
+ * period runs from that zone's midnight on `from` through the end of `to`, and
+ * each row is dated in that zone. A full ISO timestamp is accepted for older
+ * clients; only its date part is used.
  *
  * Money is integer cents in-DB; the journal converts cents->dollars at the
  * export boundary (in accounting-export.ts), never mutating stored cents.
@@ -22,12 +27,15 @@ import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
 import { getAccountingExport } from "@/lib/admin/accounting-export";
 import { getAccountingProvider } from "@/lib/accounting/accounting-provider";
+import { getOrgTimeZone } from "@/lib/admin/org-time-zone";
+import { isRealIsoDate } from "@/lib/admin/calendar-time";
+import { zonedDayRange } from "@/lib/admin/zoned-date";
 
-/** Parse an ISO date param; returns null when absent/invalid. */
-function parseDateParam(value: string | null): Date | null {
+/** The YYYY-MM-DD day of a date param (plain date or ISO); null when invalid. */
+function parseDayParam(value: string | null): string | null {
   if (!value) return null;
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? null : d;
+  const day = value.slice(0, 10);
+  return isRealIsoDate(day) ? day : null;
 }
 
 export async function GET(request: NextRequest): Promise<Response> {
@@ -50,18 +58,18 @@ export async function GET(request: NextRequest): Promise<Response> {
     }
 
     const params = request.nextUrl.searchParams;
-    const fromDate = parseDateParam(params.get("from"));
-    const toDate = parseDateParam(params.get("to"));
-    if (!fromDate || !toDate) {
+    const fromDay = parseDayParam(params.get("from"));
+    const toDay = parseDayParam(params.get("to"));
+    if (!fromDay || !toDay) {
       return errorResponse(
-        "Both 'from' and 'to' are required ISO dates.",
+        "Pick both a start and end date.",
         "VALIDATION_ERROR",
         400,
       );
     }
-    if (fromDate > toDate) {
+    if (fromDay > toDay) {
       return errorResponse(
-        "'from' must be on or before 'to'.",
+        "The start date must be on or before the end date.",
         "VALIDATION_ERROR",
         400,
       );
@@ -77,15 +85,18 @@ export async function GET(request: NextRequest): Promise<Response> {
       );
     }
 
+    const timeZone = await getOrgTimeZone(session.organizationId);
+    const { fromDate, toDate } = zonedDayRange(fromDay, toDay, timeZone);
     const journal = await getAccountingExport(session.organizationId, {
       fromDate,
       toDate,
+      timeZone,
     });
 
     const provider = getAccountingProvider();
     const body = provider.format(journal);
 
-    const filename = `accounting-export-${params.get("from")?.slice(0, 10)}_to_${params.get("to")?.slice(0, 10)}.${provider.fileExtension}`;
+    const filename = `accounting-export-${fromDay}_to_${toDay}.${provider.fileExtension}`;
 
     // Audit with PERIOD + COUNT only — no customer names, no amounts.
     await logAudit({

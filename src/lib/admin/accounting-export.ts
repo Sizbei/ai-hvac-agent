@@ -20,8 +20,14 @@
  * CSV shape (QuickBooks-importable): one header row, one row per transaction,
  * no comment or subtotal rows. Amounts are signed — money in (invoice,
  * payment) positive, money out (refund) negative; labor is a positive cost on
- * the Labor Cost account. An `Import` column says which rows belong in your
- * ledger ("Yes") and which are already booked in FieldPulse/HCP ("No — …").
+ * the Labor Cost account. An invoice posts its subtotal to Sales Revenue and
+ * its tax, on a separate row, to Sales Tax Payable (tax is owed to the state,
+ * not earned). An `Import` column says which rows belong in your ledger
+ * ("Yes") and which are already booked in FieldPulse/HCP ("No — …").
+ *
+ * DATES are the org's business-time-zone calendar day (a payment at 8 pm
+ * Eastern on Nov 5 is Nov 5, not UTC's Nov 6), and rows are sorted by date
+ * within each section.
  */
 import { and, or, eq, gte, lte, isNotNull, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -33,15 +39,18 @@ import {
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { invoiceRef } from "@/lib/admin/invoice-collectible";
+import { BUSINESS_TIME_ZONE } from "@/lib/admin/calendar-time";
+import { dateInZone } from "@/lib/admin/zoned-date";
 
 /** QBO-style account names the journal posts against. */
 export type AccountName =
   | "Sales Revenue"
+  | "Sales Tax Payable"
   | "Undeposited Funds"
   | "Refunds & Allowances"
   | "Labor Cost";
 
-export type JournalLineType = "invoice" | "payment" | "refund" | "labor";
+export type JournalLineType = "invoice" | "tax" | "payment" | "refund" | "labor";
 
 export interface JournalLine {
   /** ISO date (YYYY-MM-DD) the line is dated on. */
@@ -63,6 +72,8 @@ export interface JournalLine {
 export interface AccountingExportPeriod {
   readonly fromDate: Date;
   readonly toDate: Date;
+  /** IANA zone the line dates are written in (the org's business zone). */
+  readonly timeZone?: string;
 }
 
 /**
@@ -84,9 +95,41 @@ function centsToDollars(cents: number): number {
   return Math.round(cents) / 100;
 }
 
-/** YYYY-MM-DD in UTC (stable, locale-independent — accounting wants a date). */
-function isoDate(d: Date): string {
-  return d.toISOString().slice(0, 10);
+/**
+ * An invoice's journal rows: subtotal → Sales Revenue, tax → Sales Tax
+ * Payable (its own row so tax collected is never booked as income). Zero
+ * amounts are left out.
+ */
+function invoiceLines(
+  inv: { readonly id: string; readonly subtotalCents: number; readonly taxCents: number },
+  date: string,
+  source?: JournalLine["source"],
+): JournalLine[] {
+  const lines: JournalLine[] = [];
+  const sourced = source ? { source } : {};
+  if (inv.subtotalCents !== 0) {
+    lines.push({
+      date,
+      type: "invoice",
+      account: "Sales Revenue",
+      ref: inv.id,
+      memo: `Invoice ${invoiceRef(inv.id)}`,
+      amountDollars: centsToDollars(inv.subtotalCents),
+      ...sourced,
+    });
+  }
+  if (inv.taxCents !== 0) {
+    lines.push({
+      date,
+      type: "tax",
+      account: "Sales Tax Payable",
+      ref: inv.id,
+      memo: `Sales tax on invoice ${invoiceRef(inv.id)}`,
+      amountDollars: centsToDollars(inv.taxCents),
+      ...sourced,
+    });
+  }
+  return lines;
 }
 
 /**
@@ -107,6 +150,8 @@ export async function getAccountingExport(
   period: AccountingExportPeriod,
 ): Promise<AccountingExportResult> {
   const { fromDate, toDate } = period;
+  const timeZone = period.timeZone ?? BUSINESS_TIME_ZONE;
+  const isoDate = (d: Date): string => dateInZone(d, timeZone);
 
   const [
     nativeInvoiceRows,
@@ -204,15 +249,24 @@ export async function getAccountingExport(
       ),
 
     // Refunds issued in the period -> contra (Refunds & Allowances).
-    // Refunds are always native; no FP mirror for this table.
+    // Refunds are always native; no FP mirror for this table. The payment's
+    // invoice id names the refund by the invoice number the office knows.
     db
       .select({
         id: refunds.id,
         paymentId: refunds.paymentId,
+        invoiceId: payments.invoiceId,
         amountCents: refunds.amountCents,
         createdAt: refunds.createdAt,
       })
       .from(refunds)
+      .leftJoin(
+        payments,
+        and(
+          eq(payments.id, refunds.paymentId),
+          eq(payments.organizationId, refunds.organizationId),
+        ),
+      )
       .where(
         withTenant(
           refunds,
@@ -248,33 +302,20 @@ export async function getAccountingExport(
   const synced: JournalLine[] = [];
 
   for (const inv of nativeInvoiceRows) {
-    const revenueCents = inv.subtotalCents + inv.taxCents;
-    if (revenueCents === 0) continue;
-    native.push({
-      date: isoDate(inv.createdAt),
-      type: "invoice",
-      account: "Sales Revenue",
-      ref: inv.id,
-      memo: `Invoice ${invoiceRef(inv.id)}`,
-      amountDollars: centsToDollars(revenueCents),
-    });
+    native.push(...invoiceLines(inv, isoDate(inv.createdAt)));
   }
 
   for (const inv of syncedInvoiceRows) {
-    const revenueCents = inv.subtotalCents + inv.taxCents;
-    if (revenueCents === 0) continue;
     // issuedAt is the real source-system invoice date; createdAt is only
     // when WE imported the row (see the query comment above).
     const effectiveDate = inv.issuedAt ?? inv.createdAt;
-    synced.push({
-      date: isoDate(effectiveDate),
-      type: "invoice",
-      account: "Sales Revenue",
-      ref: inv.id,
-      memo: `Invoice ${invoiceRef(inv.id)}`,
-      amountDollars: centsToDollars(revenueCents),
-      source: inv.fieldpulseInvoiceId ? "fieldpulse" : "housecall",
-    });
+    synced.push(
+      ...invoiceLines(
+        inv,
+        isoDate(effectiveDate),
+        inv.fieldpulseInvoiceId ? "fieldpulse" : "housecall",
+      ),
+    );
   }
 
   for (const pay of nativePaymentRows) {
@@ -308,7 +349,9 @@ export async function getAccountingExport(
       type: "refund",
       account: "Refunds & Allowances",
       ref: ref.id,
-      memo: `Refund on payment ${invoiceRef(ref.paymentId)}`,
+      memo: ref.invoiceId
+        ? `Refund on invoice ${invoiceRef(ref.invoiceId)}`
+        : `Refund on payment ${invoiceRef(ref.paymentId)}`,
       // Money out: negative, so a column sum nets correctly.
       amountDollars: -centsToDollars(ref.amountCents),
     });
@@ -329,7 +372,12 @@ export async function getAccountingExport(
     });
   }
 
-  return { native, synced };
+  return { native: sortByDate(native), synced: sortByDate(synced) };
+}
+
+/** Oldest first; same-day rows keep their order (invoice before its tax). */
+function sortByDate(lines: readonly JournalLine[]): JournalLine[] {
+  return [...lines].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }
 
 /** RFC-4180 field escaping: quote when the value has a comma, quote, or newline. */

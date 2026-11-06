@@ -33,6 +33,10 @@ vi.mock('@/lib/rate-limit', () => ({
   RATE_LIMITS: { adminRead: { maxRequests: 60, windowMs: 60_000 } },
 }));
 
+vi.mock('@/lib/admin/org-time-zone', () => ({
+  getOrgTimeZone: () => Promise.resolve('America/New_York'),
+}));
+
 vi.mock('@/lib/logger', () => ({
   logger: { error: vi.fn(), info: vi.fn() },
 }));
@@ -116,6 +120,35 @@ describe('GET /api/admin/accounting/export', () => {
   it('400 for an unsupported format', async () => {
     getAdminSession.mockResolvedValue(SUPER);
     const res = await GET(req('?from=2026-01-01&to=2026-01-31&format=iif'));
+    expect(res.status).toBe(400);
+  });
+
+  it('covers whole business days in the org time zone and dates rows there', async () => {
+    getAdminSession.mockResolvedValue(SUPER);
+    getAccountingExport.mockResolvedValue({ native: [], synced: [] });
+
+    // Older clients send full-day UTC ISO bounds; only the date part is used.
+    const res = await GET(
+      req('?from=2026-11-01T00:00:00.000Z&to=2026-11-05T23:59:59.999Z'),
+    );
+    expect(res.status).toBe(200);
+    const period = getAccountingExport.mock.calls[0][1] as {
+      fromDate: Date;
+      toDate: Date;
+      timeZone: string;
+    };
+    expect(period.timeZone).toBe('America/New_York');
+    // Midnight Eastern on Nov 1 (EDT) through the end of Nov 5 (EST).
+    expect(period.fromDate.toISOString()).toBe('2026-11-01T04:00:00.000Z');
+    expect(period.toDate.toISOString()).toBe('2026-11-06T04:59:59.999Z');
+    expect(res.headers.get('content-disposition')).toContain(
+      'accounting-export-2026-11-01_to_2026-11-05.csv',
+    );
+  });
+
+  it('400 for an impossible date', async () => {
+    getAdminSession.mockResolvedValue(SUPER);
+    const res = await GET(req('?from=2026-02-31&to=2026-03-01'));
     expect(res.status).toBe(400);
   });
 });

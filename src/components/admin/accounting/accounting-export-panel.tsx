@@ -13,9 +13,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
-/** Local YYYY-MM-DD for an <input type="date"> default. */
+/** The viewer's local YYYY-MM-DD for an <input type="date"> default. */
 function ymd(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
 }
 
 /**
@@ -72,19 +74,18 @@ export function AccountingExportPanel() {
     }
     setDownloading(true);
     try {
-      // Send the dates as full-day ISO bounds (inclusive end-of-day).
-      const fromISO = new Date(`${from}T00:00:00.000Z`).toISOString();
-      const toISO = new Date(`${to}T23:59:59.999Z`).toISOString();
+      // Plain business days: the server covers them in the org's time zone.
       const url = `/api/admin/accounting/export?from=${encodeURIComponent(
-        fromISO,
-      )}&to=${encodeURIComponent(toISO)}&format=csv`;
+        from,
+      )}&to=${encodeURIComponent(to)}&format=csv`;
 
       const res = await fetch(url);
       if (!res.ok) {
         let message = 'Could not generate the export.';
         try {
           const json = await res.json();
-          message = json.error?.message ?? message;
+          // Server copy only for a bad request (e.g. dates); never a 5xx text.
+          if (res.status === 400) message = json.error?.message ?? message;
         } catch {
           // non-JSON error body — keep the default message.
         }
@@ -116,8 +117,10 @@ export function AccountingExportPanel() {
         <CardDescription>
           Download a QuickBooks-compatible CSV journal of invoices, payments,
           refunds, and labor cost for a date range. Amounts are in dollars;
-          refunds are negative. Import only the rows marked Yes in the Import
-          column — the others are already booked in FieldPulse or HCP.
+          refunds are negative; sales tax posts to Sales Tax Payable, not
+          revenue. Dates are your business days in your time zone. Import only
+          the rows marked Yes in the Import column — the others are already
+          booked in FieldPulse or HCP.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
