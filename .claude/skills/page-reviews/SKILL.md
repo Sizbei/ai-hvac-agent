@@ -45,6 +45,9 @@ are aggregated in the API query. No polling — manual page navigation.
   `referenceNumber` from org-scoped left joins in `listReviews`; the table
   links to the customer and to `/admin/requests?request=<id>`. Feedback text
   stays out of the list.
+- Under 640px the list renders one card per review (customer, request code,
+  status, stars when rated, sent/responded/link line) instead of the table —
+  keep both layouts in sync when adding a column.
 - `publicClicked` is a boolean on `review_requests` — indicates whether the
   customer clicked through to the public review link (e.g. Google). It does not
   mean they left a review on the external platform.

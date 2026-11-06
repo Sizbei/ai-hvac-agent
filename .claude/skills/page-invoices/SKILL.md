@@ -36,7 +36,8 @@ finalize button `src/components/admin/invoices/finalize-button.tsx` · document
 overdue, source, sort, search, unreminded, minCents, maxCents params. Stats
 (outstandingCents, overdueCount, oldestOverdueDays, collectedThisMonthCents)
 come from the server — SummaryBand never reduces over the client list. 60s SWR
-cache. PER_PAGE=50. Default filter=overdue, sort=age-oldest. The ReconcileBanner
+cache (client-side only: the list route sends `Cache-Control: no-store`, so
+the browser never replays a pre-payment body). PER_PAGE=50. Default filter=overdue, sort=age-oldest. The ReconcileBanner
 polls `/api/admin/payments/reconcile` on mount (best-effort, never throws).
 
 **Invariants (violate = bug):**

@@ -51,7 +51,14 @@ location row.
 (SWR-style fetch with debounced 300ms search). Filters (property type, customer
 type, membership status, FieldPulse-synced, archived) are synced to URL via
 `src/hooks/use-url-filter-sync.ts` for shareable links. View mode (cards/list)
-is persisted to `localStorage` under key `customers:view`. Detail page fetches
+is persisted to `localStorage` under key `customers:view`. The hook keeps only the
+newest request's result (`isStaleResponse` from `tag-picker-logic.ts`), and
+the page passes `enabled: false` until its URL filters are read, so a `?q=`
+link never shows the unfiltered list first. `GET /api/admin/customers` sends
+`Cache-Control: no-store` (route test): a browser-cached body once showed
+pre-edit/pre-archive search results for 30 s. Load failures show fixed human
+copy (`CUSTOMERS_LOAD_FAILED` / `CUSTOMERS_OFFLINE`), never the server
+message; the header hides the count while loading or failed. Detail page fetches
 `/api/admin/customers/[id]` on mount; `service_history` rows are from manual
 work logs — real booking history is in `service_requests` via
 `CustomerBookingsSection`.
@@ -166,6 +173,8 @@ work logs — real booking history is in `service_requests` via
 - Phone input is validated by `phoneInputError`
   (`src/lib/admin/customer-validation.ts`) on create and on a CHANGED number in
   `update_contact` (legacy short numbers on file don't block other edits).
+  Esc/X/backdrop/Cancel on a dirty Add customer form opens "Discard this
+  customer?" (`isCustomerFormDirty`, same rule as New request).
   Form save errors go through `saveErrorMessage` (400/409 messages pass, the
   rest become "Couldn't save … Please try again."). Global command search
   (`src/lib/admin/search-queries.ts`) is a separate, pre-existing truncation
