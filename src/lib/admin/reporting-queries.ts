@@ -477,7 +477,7 @@ export async function getLeadSourceBreakdown(
 export interface LocationBreakdownRow {
   /** customerLocations.id, or the synthetic UNASSIGNED_LOCATION key. */
   readonly locationId: string;
-  /** Location label/zone, or "Unassigned" for the NULL-location bucket. */
+  /** Location label/zone, or "No location" for the NULL-location bucket. */
   readonly label: string;
   /** Service requests in this location bucket, created in the period. */
   readonly jobs: number;
@@ -612,7 +612,7 @@ export async function getLocationBreakdown(
       locationId,
       label:
         locationId === UNASSIGNED_LOCATION
-          ? "Unassigned"
+          ? "No location"
           : (labelById.get(locationId) ?? "Address not on file"),
       jobs: jobsByLoc.get(locationId) ?? 0,
       revenueCents: revenueByLoc.get(locationId) ?? 0,

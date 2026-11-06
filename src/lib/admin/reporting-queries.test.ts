@@ -725,7 +725,7 @@ describe('getLocationBreakdown', () => {
 
     const unassigned = rows.find((r) => r.locationId === 'unassigned');
     expect(unassigned).toBeDefined();
-    expect(unassigned!.label).toBe('Unassigned');
+    expect(unassigned!.label).toBe('No location');
     expect(unassigned!.jobs).toBe(2);
     expect(unassigned!.revenueCents).toBe(0);
     expect(unassigned!.avgRating).toBeNull();

@@ -314,7 +314,7 @@ function TechnicianTable({ rows, isLoading }: TechnicianTableProps) {
   return (
     <SectionCard
       title="Technician scorecards"
-      description="Jobs, labor, and rating per technician. Revenue is billed (invoiced), not cash collected. A dash means the data wasn't captured for that metric."
+      description="Jobs, labor, and rating per technician. Revenue is billed (invoiced), not cash collected. Completed reads “done of assigned”. A dash means the data wasn't captured for that metric."
     >
       {isLoading ? (
         <div className="space-y-2">
@@ -326,7 +326,7 @@ function TechnicianTable({ rows, isLoading }: TechnicianTableProps) {
         <DataTableShell
           columns={[
             { key: 'name', header: 'Technician', cell: (row) => <span className="font-medium">{row.name}</span> },
-            { key: 'completed', header: 'Completed', cell: (row) => <span className="tabular-nums">{row.jobsCompleted} / {row.jobsAssigned}</span>, className: 'text-right' },
+            { key: 'completed', header: 'Completed', cell: (row) => <span className="tabular-nums">{row.jobsCompleted} of {row.jobsAssigned}</span>, className: 'text-right' },
             { key: 'labor', header: 'Labor', cell: (row) => <span className="tabular-nums">{formatHours(row.laborHours)}</span>, className: PHONE_HIDDEN },
             { key: 'avgRating', header: 'Avg rating', cell: (row) => <span className="tabular-nums">{formatRating(row.avgRating)}</span>, className: PHONE_HIDDEN },
             { key: 'revenue', header: 'Revenue', cell: (row) => <span className="font-medium tabular-nums">{formatCentsExact(row.revenueCents)}</span>, className: 'text-right' },
