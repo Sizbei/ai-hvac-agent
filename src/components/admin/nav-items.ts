@@ -33,8 +33,9 @@ export interface NavItem {
    * href is a prefix of every other admin route). */
   readonly exact?: boolean;
   /** Which notification badge the item shows: 'unscheduled' = unscheduled-jobs
-   * count; 'setup' = setup steps left. */
-  readonly badge?: 'unscheduled' | 'setup';
+   * count; 'setup' = setup steps left; 'needsAction' = conversations that need
+   * action (the inbox's "Needs action" filter). */
+  readonly badge?: 'unscheduled' | 'setup' | 'needsAction';
 }
 
 export interface NavGroup {
@@ -57,8 +58,7 @@ const BASE_NAV_GROUPS: readonly NavGroup[] = [
   {
     heading: 'Customers',
     items: [
-      { label: 'Conversations', href: '/admin/conversations', icon: MessagesSquare },
-      { label: 'AI Insights', href: '/admin/insights', icon: BarChart3 },
+      { label: 'Conversations', href: '/admin/conversations', icon: MessagesSquare, badge: 'needsAction' },
       { label: 'Customers', href: '/admin/customers', icon: Building2 },
       { label: 'Reviews', href: '/admin/reviews', icon: Star },
       { label: 'Communications', href: '/admin/communications/templates', icon: MessageSquare },
@@ -79,16 +79,23 @@ const BASE_NAV_GROUPS: readonly NavGroup[] = [
       { label: 'Estimates', href: '/admin/estimates', icon: FileText },
       { label: 'Invoices', href: '/admin/invoices', icon: Receipt },
       { label: 'Accounting', href: '/admin/accounting', icon: Calculator },
+    ],
+  },
+  {
+    // Read-only numbers about the business and the assistant (not money).
+    heading: 'Insights',
+    items: [
       { label: 'Operations', href: '/admin/operations', icon: Gauge },
       { label: 'Reports', href: '/admin/reports', icon: TrendingUp },
+      { label: 'AI insights', href: '/admin/insights', icon: BarChart3 },
     ],
   },
   {
     heading: 'Integrations',
     items: [
-      { label: 'Chatbot settings', href: '/admin/settings', icon: Settings },
+      { label: 'Settings', href: '/admin/settings', icon: Settings },
       { label: 'Integrations', href: '/admin/integrations', icon: Plug },
-      { label: 'FP import', href: '/admin/fieldpulse-import', icon: Download },
+      { label: 'FieldPulse import', href: '/admin/fieldpulse-import', icon: Download },
       { label: 'Audit log', href: '/admin/audit-log', icon: ScrollText },
     ],
   },

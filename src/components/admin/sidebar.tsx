@@ -25,6 +25,8 @@ import { EnvBadge } from '@/components/admin/env-badge';
 import { navGroupsFor, navItemMatches, type NavItem, type SetupPlacement } from './nav-items';
 import { useUnscheduledCount } from '@/hooks/use-unscheduled-count';
 import { unscheduledBadge, type UnscheduledBadge } from '@/lib/admin/unscheduled-badge';
+import { needsActionBadge } from '@/lib/admin/needs-action-badge';
+import { useNeedsActionCount } from '@/hooks/use-needs-action-count';
 import { refreshOnboarding, useOnboarding } from '@/lib/admin/onboarding-store';
 import { setupDigit } from '@/lib/admin/setup-digit';
 import { envName, parseEnvLinks } from '@/lib/admin/environment';
@@ -83,14 +85,16 @@ export function Sidebar({
   const [isCollapsed, setIsCollapsed] = useState(false);
   const { count: unscheduledCount } = useUnscheduledCount();
   const { data: onboarding } = useOnboarding();
+  const needsActionCount = useNeedsActionCount();
   const navGroups = navGroupsFor(setupPlacement);
   // One entry per NavItem.badge kind; every kind shares the visible/label/srLabel shape.
   const badges: Record<NonNullable<NavItem['badge']>, UnscheduledBadge> = useMemo(
     () => ({
       unscheduled: unscheduledBadge(unscheduledCount),
       setup: setupDigit({ data: onboarding }),
+      needsAction: needsActionBadge(needsActionCount),
     }),
-    [unscheduledCount, onboarding],
+    [unscheduledCount, onboarding, needsActionCount],
   );
   const envLinks =
     role === 'super_admin'
@@ -141,6 +145,13 @@ export function Sidebar({
     [pathname],
   );
 
+  // The rail scrolls; bring the active item into view when it mounts (a page
+  // load, a route change, or the phone drawer opening) — e.g. Reports on a
+  // short laptop screen.
+  const scrollActiveIntoView = useCallback((el: HTMLAnchorElement | null) => {
+    el?.scrollIntoView({ block: 'nearest' });
+  }, []);
+
   const renderNavLink = useCallback(
     (item: NavItem, collapsed: boolean) => {
       const isActive = isItemActive(item);
@@ -151,6 +162,8 @@ export function Sidebar({
       return (
         <Link
           href={item.href}
+          ref={isActive ? scrollActiveIntoView : undefined}
+          aria-current={isActive ? 'page' : undefined}
           className={cn(
             'group/nav relative',
             RAIL_ROW,
@@ -206,7 +219,7 @@ export function Sidebar({
         </Link>
       );
     },
-    [badges, isItemActive],
+    [badges, isItemActive, scrollActiveIntoView],
   );
 
   // Shared rail surface: a light sunken column separated from the canvas by a

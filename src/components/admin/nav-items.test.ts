@@ -51,6 +51,7 @@ describe("navGroupsFor", () => {
       "Customers",
       "Workspace",
       "Money",
+      "Insights",
       "Integrations",
     ]);
   });
@@ -78,5 +79,14 @@ describe("navItemMatches / navLabelFor", () => {
     expect(navLabelFor("/admin", "operations")).toBe("Dashboard");
     expect(navLabelFor("/admin/conversations", "integrations")).toBe("Conversations");
     expect(navLabelFor("/nowhere", "integrations")).toBeUndefined();
+  });
+
+  it("uses plain sentence-case labels and keeps reports out of Money", () => {
+    const labels = navGroupsFor("operations").flatMap((g) => g.items.map((i) => i.label));
+    expect(labels).toEqual(expect.arrayContaining(["AI insights", "Settings", "FieldPulse import"]));
+    expect(labels).not.toEqual(expect.arrayContaining(["AI Insights"]));
+    const money = navGroupsFor("operations").find((g) => g.heading === "Money")!;
+    expect(money.items.map((i) => i.href)).not.toContain("/admin/reports");
+    expect(navLabelFor("/admin/operations", "operations")).toBe("Operations");
   });
 });
