@@ -1,6 +1,7 @@
 /**
- * Shared gates for the tech invoice WRITE routes (spec §6.1) and the target
- * check every write runs inside its idempotency `run` (spec §6.2). Each gate
+ * Shared gates for the tech WRITE routes — invoice (M3b §6.1), estimate and
+ * bill (M3c §6), equipment (M3c §5.6) — and the invoice target check every
+ * invoice write runs inside its idempotency `run` (M3b §6.2). Each gate
  * short-circuits before the next one is evaluated.
  */
 import type { NextRequest, NextResponse } from "next/server";
@@ -12,8 +13,9 @@ import { isSameOriginRequest } from "@/lib/session-csrf";
 import { isUuid } from "@/lib/validation/uuid";
 import { RATE_LIMITS, slidingWindow } from "@/lib/rate-limit";
 import { errorResponse } from "@/lib/api-response";
-import { findActiveVisit, findReadableJob } from "@/lib/tech/ownership";
+import { findActiveVisit, findReadableJob, findTechAssignments } from "@/lib/tech/ownership";
 import { P_LIVE, P_NATIVE } from "@/lib/admin/invoice-field-writes";
+import { BILL_STATUSES, SELL_STATUSES, statusGate } from "@/lib/tech/field-sale-statuses";
 
 export type ReadableJob = NonNullable<Awaited<ReturnType<typeof findReadableJob>>>;
 
@@ -21,31 +23,82 @@ export type PreambleResult =
   | { ok: true; session: TechSessionPayload; job: ReadableJob; requestId: string }
   | { ok: false; response: NextResponse };
 
-const ON_SITE: readonly string[] = ["arrived", "in_progress", "on_hold", "completed"];
+export interface PreambleOptions {
+  /** Rate-limit bucket: `tech:<bucket>:write:<user>`. */
+  readonly bucket: string;
+  /** Request statuses the write accepts. */
+  readonly statuses: readonly string[];
+  /** 409 NOT_ON_SITE copy (pending / assigned / scheduled / en_route). */
+  readonly beforeCopy: string;
+  /** 409 JOB_CLOSED copy (completed / cancelled not in `statuses`). */
+  readonly closedCopy: string;
+}
 
-const fail = (message: string, code: string, status: number): PreambleResult =>
-  ({ ok: false, response: errorResponse(message, code, status) });
+export const INVOICE_PREAMBLE: PreambleOptions = {
+  bucket: "invoice", statuses: BILL_STATUSES,
+  beforeCopy: "Arrive at the job before invoicing.", closedCopy: "Arrive at the job before invoicing.",
+};
+export const ESTIMATE_PREAMBLE: PreambleOptions = {
+  bucket: "estimate", statuses: SELL_STATUSES, beforeCopy: "Arrive at the job first.", closedCopy: "This job is closed.",
+};
+export const BILL_PREAMBLE: PreambleOptions = { ...ESTIMATE_PREAMBLE, statuses: BILL_STATUSES };
+export const EQUIPMENT_PREAMBLE: PreambleOptions = { ...ESTIMATE_PREAMBLE, bucket: "equipment", statuses: BILL_STATUSES };
 
-export async function techWritePreamble(request: NextRequest, id: string): Promise<PreambleResult> {
+export function statusRefusal(
+  status: string, opts: PreambleOptions,
+): { code: "NOT_ON_SITE" | "JOB_CLOSED"; message: string } | null {
+  const gate = statusGate(status, opts.statuses);
+  if (gate === "ok") return null;
+  return gate === "job_closed" ? { code: "JOB_CLOSED", message: opts.closedCopy } : { code: "NOT_ON_SITE", message: opts.beforeCopy };
+}
+
+const fail = (message: string, code: string, status: number) =>
+  ({ ok: false as const, response: errorResponse(message, code, status) });
+
+/** session → same-origin → uuid → rate limit. */
+async function frontGates(
+  request: NextRequest, id: string, bucket: string,
+): Promise<{ ok: true; session: TechSessionPayload } | { ok: false; response: NextResponse }> {
   const session = await getTechSession();
   if (!session) return fail("Unauthorized", "UNAUTHORIZED", 401);
   if (!isSameOriginRequest(request)) return fail("Forbidden", "FORBIDDEN", 403);
   if (!isUuid(id)) return fail("Invalid request ID format", "INVALID_ID", 400);
-  const rate = slidingWindow(
-    `tech:invoice:write:${session.userId}`,
-    RATE_LIMITS.adminMutation.maxRequests,
-    RATE_LIMITS.adminMutation.windowMs,
-  );
+  const rate = slidingWindow(`tech:${bucket}:write:${session.userId}`, RATE_LIMITS.adminMutation.maxRequests, RATE_LIMITS.adminMutation.windowMs);
   if (!rate.allowed) return fail("Too many requests. Wait a moment and try again.", "RATE_LIMITED", 429);
+  return { ok: true, session };
+}
 
+/** Lead-only writes: front gates → readable job 404 → native 409 → active lead 403 → status 409. */
+export async function techWritePreamble(
+  request: NextRequest, id: string, opts: PreambleOptions = INVOICE_PREAMBLE,
+): Promise<PreambleResult> {
+  const front = await frontGates(request, id, opts.bucket);
+  if (!front.ok) return front;
+  const { session } = front;
   const job = await findReadableJob(session.organizationId, session.userId, id);
   if (!job) return fail("This job isn't yours.", "NOT_FOUND", 404);
   if (!job.native) return fail("This job is managed in FieldPulse.", "MANAGED_EXTERNALLY", 409);
   const visit = await findActiveVisit(session.organizationId, id);
-  if (!visit || visit.leadTechnicianId !== session.userId) {
-    return fail("Only the lead technician can do that.", "NOT_LEAD", 403);
+  if (!visit || visit.leadTechnicianId !== session.userId) return fail("Only the lead technician can do that.", "NOT_LEAD", 403);
+  const refusal = statusRefusal(job.status, opts);
+  if (refusal) return fail(refusal.message, refusal.code, 409);
+  return { ok: true, session, job, requestId: id };
+}
+
+/** Equipment writes (any technician working the job): front gates → readable job → native → a non-cancelled assignment → status. */
+export async function techEquipmentPreamble(request: NextRequest, id: string): Promise<PreambleResult> {
+  const front = await frontGates(request, id, EQUIPMENT_PREAMBLE.bucket);
+  if (!front.ok) return front;
+  const { session } = front;
+  const job = await findReadableJob(session.organizationId, session.userId, id);
+  if (!job) return fail("This job isn't yours.", "NOT_FOUND", 404);
+  if (!job.native) return fail("This job is managed in FieldPulse.", "MANAGED_EXTERNALLY", 409);
+  const mine = await findTechAssignments(session.organizationId, session.userId, id);
+  if (!mine.some((r) => r.status !== "cancelled")) {
+    return fail("Only a technician working this job can do that.", "NOT_ASSIGNED", 403);
   }
-  if (!ON_SITE.includes(job.status)) return fail("Arrive at the job before invoicing.", "NOT_ON_SITE", 409);
+  const refusal = statusRefusal(job.status, EQUIPMENT_PREAMBLE);
+  if (refusal) return fail(refusal.message, refusal.code, 409);
   return { ok: true, session, job, requestId: id };
 }
 

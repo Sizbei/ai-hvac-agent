@@ -8,6 +8,7 @@ const h = vi.hoisted(() => ({
   slidingWindow: vi.fn(),
   findReadableJob: vi.fn(),
   findActiveVisit: vi.fn(),
+  findTechAssignments: vi.fn(),
   execute: vi.fn(),
 }));
 
@@ -22,10 +23,11 @@ vi.mock("@/lib/tech/ownership", async (orig) => ({
   ...(await orig<typeof import("@/lib/tech/ownership")>()),
   findReadableJob: h.findReadableJob,
   findActiveVisit: h.findActiveVisit,
+  findTechAssignments: h.findTechAssignments,
 }));
 vi.mock("@/lib/admin/pricebook-queries", () => ({ getDefaultTaxBps: vi.fn(), getPricebookItemById: vi.fn() }));
 
-import { resolveTarget, techWritePreamble } from "./invoice-route-guards";
+import { BILL_PREAMBLE, ESTIMATE_PREAMBLE, resolveTarget, statusRefusal, techEquipmentPreamble, techWritePreamble } from "./invoice-route-guards";
 import { RATE_LIMITS } from "@/lib/rate-limit";
 
 const ORG = "11111111-1111-4111-8111-111111111111";
@@ -109,7 +111,7 @@ describe("techWritePreamble", () => {
     await expectFail(403, "NOT_LEAD", "Only the lead technician can do that.");
   });
 
-  it.each(["scheduled", "assigned", "en_route", "cancelled", "submitted"])("409 NOT_ON_SITE while %s", async (status) => {
+  it.each(["scheduled", "assigned", "en_route", "submitted"])("409 NOT_ON_SITE while %s", async (status) => {
     h.findReadableJob.mockResolvedValue({ ...JOB, status });
     await expectFail(409, "NOT_ON_SITE", "Arrive at the job before invoicing.");
   });
@@ -118,6 +120,58 @@ describe("techWritePreamble", () => {
     h.findReadableJob.mockResolvedValue({ ...JOB, status });
     const r = await techWritePreamble(req, REQ);
     expect(r).toEqual({ ok: true, session: SESSION, job: { ...JOB, status }, requestId: REQ });
+  });
+
+  it("409 JOB_CLOSED for a cancelled request (invoice copy unchanged)", async () => {
+    h.findReadableJob.mockResolvedValue({ ...JOB, status: "cancelled" });
+    await expectFail(409, "JOB_CLOSED", "Arrive at the job before invoicing.");
+  });
+
+  it("estimate options: own bucket, sell statuses, split copy", async () => {
+    h.findReadableJob.mockResolvedValue({ ...JOB, status: "completed" });
+    const r = await techWritePreamble(req, REQ, ESTIMATE_PREAMBLE);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(await r.response.json()).toEqual({ success: false, error: { code: "JOB_CLOSED", message: "This job is closed." } });
+    expect(h.slidingWindow).toHaveBeenCalledWith(`tech:estimate:write:${ME}`, RATE_LIMITS.adminMutation.maxRequests, RATE_LIMITS.adminMutation.windowMs);
+    h.findReadableJob.mockResolvedValue({ ...JOB, status: "en_route" });
+    const r2 = await techWritePreamble(req, REQ, ESTIMATE_PREAMBLE);
+    if (!r2.ok) expect(await r2.response.json()).toEqual({ success: false, error: { code: "NOT_ON_SITE", message: "Arrive at the job first." } });
+    h.findReadableJob.mockResolvedValue({ ...JOB, status: "completed" });
+    expect((await techWritePreamble(req, REQ, BILL_PREAMBLE)).ok).toBe(true);
+  });
+
+  it("statusRefusal", () => {
+    expect(statusRefusal("arrived", ESTIMATE_PREAMBLE)).toBeNull();
+    expect(statusRefusal("pending", ESTIMATE_PREAMBLE)).toEqual({ code: "NOT_ON_SITE", message: "Arrive at the job first." });
+    expect(statusRefusal("cancelled", BILL_PREAMBLE)).toEqual({ code: "JOB_CLOSED", message: "This job is closed." });
+  });
+});
+
+describe("techEquipmentPreamble (spec §5.6)", () => {
+  const row = (status: string) => ({ status, isLead: false, assignmentId: "x", appointmentId: "a", appointmentNumber: 1, cancelledAt: null, enRouteAt: null, arrivedAt: null, startedAt: null, completedAt: null, technicianId: ME });
+  beforeEach(() => h.findTechAssignments.mockResolvedValue([row("arrived")]));
+
+  it("a helper on the job passes; the lead check is not applied", async () => {
+    h.findActiveVisit.mockResolvedValue({ appointmentId: "a", leadTechnicianId: OTHER });
+    expect((await techEquipmentPreamble(req, REQ)).ok).toBe(true);
+    expect(h.slidingWindow).toHaveBeenCalledWith(`tech:equipment:write:${ME}`, RATE_LIMITS.adminMutation.maxRequests, RATE_LIMITS.adminMutation.windowMs);
+  });
+  it("403 NOT_ASSIGNED with only cancelled rows", async () => {
+    h.findTechAssignments.mockResolvedValue([row("cancelled")]);
+    const r = await techEquipmentPreamble(req, REQ);
+    if (!r.ok) expect(await r.response.json()).toEqual({ success: false, error: { code: "NOT_ASSIGNED", message: "Only a technician working this job can do that." } });
+    expect(r.ok).toBe(false);
+  });
+  it("a completed request still takes equipment; a cancelled one does not", async () => {
+    h.findReadableJob.mockResolvedValue({ ...JOB, status: "completed" });
+    expect((await techEquipmentPreamble(req, REQ)).ok).toBe(true);
+    h.findReadableJob.mockResolvedValue({ ...JOB, status: "cancelled" });
+    expect((await techEquipmentPreamble(req, REQ)).ok).toBe(false);
+  });
+  it("409 MANAGED_EXTERNALLY on a FieldPulse job", async () => {
+    h.findReadableJob.mockResolvedValue({ ...JOB, native: false });
+    const r = await techEquipmentPreamble(req, REQ);
+    if (!r.ok) expect(r.response.status).toBe(409);
   });
 });
 
