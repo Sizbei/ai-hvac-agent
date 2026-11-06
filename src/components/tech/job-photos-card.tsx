@@ -17,8 +17,8 @@ interface PhotoRow {
 
 /**
  * Job photos: a Take photo button that opens the camera (a hidden file input),
- * then the gallery. `readOnly` (a completed or cancelled job) shows the
- * gallery only.
+ * then the gallery. `readOnly` (the job page hasn't loaded the summary yet)
+ * shows the gallery only; late photos on a closed job are allowed.
  */
 export function JobPhotosCard({ jobId, readOnly }: { readonly jobId: string; readonly readOnly: boolean }) {
   const [photos, setPhotos] = useState<PhotoRow[]>([]);

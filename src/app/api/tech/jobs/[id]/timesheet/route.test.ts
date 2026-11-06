@@ -66,6 +66,7 @@ describe("GET /api/tech/jobs/[id]/timesheet", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data.totalMinutes).toBe(42);
+    expect(body.data.closedEntries).toBe(2);
     expect(body.data.open).toEqual({ id: "d", clockInAt: "2026-11-05T15:00:00.000Z" });
     expect(JSON.stringify(body.data)).not.toMatch(/laborRate|laborCost/);
   });

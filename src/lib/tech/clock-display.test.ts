@@ -5,6 +5,7 @@ import {
   formatElapsed,
   formatMinutes,
   jobClockLine,
+  JOB_CLOCK_NONE,
   JOB_CLOCK_NOT_STARTED,
 } from "./clock-display";
 
@@ -30,10 +31,27 @@ describe("formatClockTime", () => {
 });
 
 describe("jobClockLine", () => {
-  it("open entry: since + elapsed", () => {
+  it("open entry, no earlier time: since + elapsed", () => {
     expect(
-      jobClockLine({ openSince: T0, totalMinutes: 30, nowMs: ms(T0) + 14 * 60_000 + 59_000, timeZone: "America/New_York" }),
+      jobClockLine({ openSince: T0, totalMinutes: 0, nowMs: ms(T0) + 14 * 60_000 + 59_000, timeZone: "America/New_York" }),
     ).toBe("On the clock since 9:12 AM · 14m");
+  });
+  it("open entry after a pause: adds the whole job's time", () => {
+    expect(
+      jobClockLine({ openSince: T0, totalMinutes: 30, closedEntries: 1, nowMs: ms(T0) + 12 * 60_000, timeZone: "America/New_York" }),
+    ).toBe("On the clock since 9:12 AM · 12m (42m on this job)");
+  });
+  it("open entry after a 0-minute pause still counts as earlier time", () => {
+    expect(
+      jobClockLine({ openSince: T0, totalMinutes: 0, closedEntries: 1, nowMs: ms(T0) + 3 * 60_000, timeZone: "America/New_York" }),
+    ).toBe("On the clock since 9:12 AM · 3m (3m on this job)");
+  });
+  it("paused within the first minute: 0m so far, not 'Starts when…'", () => {
+    expect(jobClockLine({ openSince: null, totalMinutes: 0, closedEntries: 1, nowMs: 0 })).toBe("0m so far");
+  });
+  it("closed job: Total", () => {
+    expect(jobClockLine({ openSince: null, totalMinutes: 20, closedEntries: 2, jobClosed: true, nowMs: 0 })).toBe("Total 20m");
+    expect(jobClockLine({ openSince: null, totalMinutes: 0, jobClosed: true, nowMs: 0 })).toBe(JOB_CLOCK_NONE);
   });
   it("closed time only: the total so far", () => {
     expect(jobClockLine({ openSince: null, totalMinutes: 65, nowMs: 0 })).toBe("1h 5m so far");

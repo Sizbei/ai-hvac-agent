@@ -4,7 +4,10 @@ import {
   jobIsClosed,
   urgencyTone,
   closeOutInvoiceWarning,
+  lateMaterialWarning,
+  unbilledPartsWarning,
   actionNeedsSheet,
+  actionSpansRow,
   buildActionSheetCopy,
   describeBlocker,
   holdReasonLabel,
@@ -162,5 +165,37 @@ describe('jobIsClosed', () => {
     expect(jobIsClosed('on_hold')).toBe(false);
     expect(jobIsClosed('in_progress')).toBe(false);
     expect(jobIsClosed(null)).toBe(false);
+  });
+});
+
+describe('unbilledPartsWarning', () => {
+  it('nothing when every part is billed', () => expect(unbilledPartsWarning(0)).toBeNull());
+  it('singular and plural', () => {
+    expect(unbilledPartsWarning(1)).toBe("1 part isn't on an invoice yet.");
+    expect(unbilledPartsWarning(2)).toBe("2 parts aren't on an invoice yet.");
+  });
+});
+
+describe('lateMaterialWarning', () => {
+  it('warns once the invoice has left draft', () => {
+    expect(lateMaterialWarning('open')).toBe("This part won't be on the open invoice. The office can bill it separately.");
+    expect(lateMaterialWarning('paid')).toBe("This part won't be on the paid invoice. The office can bill it separately.");
+  });
+  it('no warning for a draft or no invoice', () => {
+    expect(lateMaterialWarning('draft')).toBeNull();
+    expect(lateMaterialWarning(null)).toBeNull();
+  });
+});
+
+describe('actionSpansRow', () => {
+  it('primary first spans; Pause + Hold pair below it', () => {
+    expect([0, 1, 2].map((i) => actionSpansRow(i, 3, true))).toEqual([true, false, false]);
+  });
+  it('a lone secondary under the primary spans too', () => {
+    expect([0, 1].map((i) => actionSpansRow(i, 2, true))).toEqual([true, true]);
+  });
+  it('no primary: pairs, odd last spans', () => {
+    expect([0, 1, 2].map((i) => actionSpansRow(i, 3, false))).toEqual([false, false, true]);
+    expect([0, 1].map((i) => actionSpansRow(i, 2, false))).toEqual([false, false]);
   });
 });

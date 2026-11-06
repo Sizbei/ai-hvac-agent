@@ -131,6 +131,28 @@ export function closeOutInvoiceWarning(invoice: CloseOutInvoice | null): string 
   return null;
 }
 
+/**
+ * Close out heads-up for parts on no non-void invoice (shown even when the
+ * job has no invoice at all; the lead can still close out).
+ */
+export function unbilledPartsWarning(count: number): string | null {
+  if (count <= 0) return null;
+  return count === 1 ? "1 part isn't on an invoice yet." : `${count} parts aren't on an invoice yet.`;
+}
+
+/**
+ * Shown on the material form BEFORE saving when the request's invoice has
+ * left draft: a new part can't join it, so the office bills it separately.
+ * A draft (or no invoice) takes the part via the invoice page: no warning.
+ */
+export function lateMaterialWarning(invoiceState: string | null | undefined): string | null {
+  if (invoiceState === 'open') return "This part won't be on the open invoice. The office can bill it separately.";
+  if (invoiceState === 'paid' || invoiceState === 'refunded') {
+    return `This part won't be on the ${invoiceState} invoice. The office can bill it separately.`;
+  }
+  return null;
+}
+
 /** The travel and Working taps, in the order a visit moves through them. */
 const FORWARD_TAPS: readonly string[] = ['en_route', 'arrived', 'in_progress'];
 
@@ -145,6 +167,17 @@ export function actionButtonVariant(action: string, actions: readonly string[]):
     actions.find((a) => a === 'close_out') ??
     actions.find((a) => a === 'completed');
   return action === primary ? 'default' : 'outline';
+}
+
+/**
+ * Status button grid (two columns): the primary button (first) spans the row;
+ * the rest pair up, and a lone last one spans its row too.
+ */
+export function actionSpansRow(index: number, count: number, firstIsPrimary: boolean): boolean {
+  if (firstIsPrimary && index === 0) return true;
+  const start = firstIsPrimary ? 1 : 0;
+  const rest = count - start;
+  return rest % 2 === 1 && index === count - 1;
 }
 
 /** Urgency chip: amber only for high and emergency; low and medium stay neutral. */

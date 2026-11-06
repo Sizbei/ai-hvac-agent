@@ -10,6 +10,7 @@ import { CloseOutSheet, type SheetConfirmOptions } from '@/components/tech/close
 import {
   actionButtonVariant,
   actionNeedsSheet,
+  actionSpansRow,
   showRequestBehind,
   relevantBlockers,
   techStatusLabel,
@@ -64,17 +65,26 @@ function directionsUrl(address: string): string {
  * On a status change it refetches itself and calls onStatusChanged so the parent
  * can refresh the timeline.
  */
+/** What the job page needs from each summary load (null unless the load succeeded). */
+export interface SummaryLoaded {
+  readonly status: string;
+  readonly invoiceState: string | null;
+}
+
 export function TechJobSummary({
   id,
   appointmentId,
+  unbilledParts = 0,
   onStatusChanged,
   onLoaded,
 }: {
   readonly id: string;
   readonly appointmentId?: string;
+  /** Parts on no non-void invoice, for the Close out heads-up. */
+  readonly unbilledParts?: number;
   readonly onStatusChanged?: () => void;
   /** Called after each summary load; 'not_found' lets the page drop every form. */
-  readonly onLoaded?: (outcome: JobLoadOutcome, status: string | null) => void;
+  readonly onLoaded?: (outcome: JobLoadOutcome, job: SummaryLoaded | null) => void;
 }) {
   const [job, setJob] = useState<TechJobSummary | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -101,7 +111,12 @@ export function TechJobSummary({
       } else {
         setError("Couldn't load this job.");
       }
-      onLoaded?.(outcome, outcome === 'ok' ? String(body.data.status) : null);
+      onLoaded?.(
+        outcome,
+        outcome === 'ok'
+          ? { status: String(body.data.status), invoiceState: body.data.invoiceSummary?.state ?? null }
+          : null,
+      );
     } catch {
       setError("Couldn't load this job.");
       onLoaded?.('error', null);
@@ -132,10 +147,11 @@ export function TechJobSummary({
           const data: ActionResult = body?.data ?? {};
           setServerBlockers(null);
           setSheetAction(null);
+          // The tap is saved: refresh the time card and history now, alongside the summary.
+          onStatusChanged?.();
           await load();
           // After load(), which resets the flag: keep the response's flag until the next reload.
           setRequestBehind(data.requestBehind === true);
-          onStatusChanged?.();
         } else {
           const message = body?.error?.message ?? "Couldn't update this request. Please try again.";
           // The job moved under us: refresh so the buttons match what the server allows now.
@@ -185,7 +201,12 @@ export function TechJobSummary({
     );
   }
 
-  const actions = ACTION_ORDER.filter((a) => job.allowedActions.includes(a));
+  // The primary status button first and full width; the rest below it.
+  const offered = ACTION_ORDER.filter((a) => job.allowedActions.includes(a));
+  const actions = [
+    ...offered.filter((a) => actionButtonVariant(a, offered) === 'default'),
+    ...offered.filter((a) => actionButtonVariant(a, offered) !== 'default'),
+  ];
   const windowLabel = visitWindow(job.arrivalWindowStart, job.arrivalWindowEnd, new Date());
 
   return (
@@ -288,7 +309,7 @@ export function TechJobSummary({
                   <Button
                     key={a}
                     variant={actionButtonVariant(a, actions)}
-                    className={`h-12 rounded-xl px-4 text-[16px] ${actions.length % 2 === 1 && i === 0 ? 'col-span-2' : ''}`}
+                    className={`h-12 rounded-xl px-4 text-[16px] ${actionSpansRow(i, actions.length, actionButtonVariant(actions[0], actions) === 'default') ? 'col-span-2' : ''}`}
                     disabled={advancing !== null}
                     onClick={() => handleTap(a)}
                   >
@@ -304,6 +325,7 @@ export function TechJobSummary({
           action={sheetAction}
           blockers={relevantBlockers(serverBlockers ?? job.blockers)}
           invoice={job.invoiceSummary}
+          unbilledParts={unbilledParts}
           pending={advancing !== null}
           error={sheetError}
           onConfirm={(a, options) => void advance(a, options)}

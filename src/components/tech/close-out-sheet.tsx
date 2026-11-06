@@ -11,6 +11,7 @@ import {
   describeBlocker,
   holdReasonLabel,
   relevantBlockers,
+  unbilledPartsWarning,
   type CloseOutInvoice,
   type SheetAction,
 } from '@/components/tech/tech-status-confirm';
@@ -39,6 +40,7 @@ export function CloseOutSheet({
   action,
   blockers,
   invoice = null,
+  unbilledParts = 0,
   pending,
   error,
   onConfirm,
@@ -48,6 +50,8 @@ export function CloseOutSheet({
   readonly blockers: readonly Blocker[];
   /** The job's invoice, for the Close out heads-up (draft / balance due). */
   readonly invoice?: CloseOutInvoice | null;
+  /** Parts on no non-void invoice ("2 parts aren't on an invoice yet."). */
+  readonly unbilledParts?: number;
   readonly pending: boolean;
   readonly error: string | null;
   readonly onConfirm: (action: SheetAction, options: SheetConfirmOptions) => void;
@@ -71,7 +75,10 @@ export function CloseOutSheet({
   if (action && action !== shown) setShown(action);
   const copy = buildActionSheetCopy(shown);
   const blocked = shown === 'close_out' ? relevantBlockers(blockers) : [];
-  const invoiceWarning = shown === 'close_out' && blocked.length === 0 ? closeOutInvoiceWarning(invoice) : null;
+  const closeOutReady = shown === 'close_out' && blocked.length === 0;
+  const warnings = closeOutReady
+    ? [closeOutInvoiceWarning(invoice), unbilledPartsWarning(unbilledParts)].filter((w): w is string => w !== null)
+    : [];
 
   function confirm(): void {
     if (!action) return;
@@ -109,11 +116,11 @@ export function CloseOutSheet({
             </ul>
           )}
 
-          {invoiceWarning && (
-            <p className="rounded-md border border-warning-border bg-warning-light px-3 py-2.5 text-[15px] text-foreground">
-              {invoiceWarning}
+          {warnings.map((w) => (
+            <p key={w} className="rounded-md border border-warning-border bg-warning-light px-3 py-2.5 text-[15px] text-foreground">
+              {w}
             </p>
-          )}
+          ))}
 
           {shown === 'on_hold' && (
             <div className="space-y-3">

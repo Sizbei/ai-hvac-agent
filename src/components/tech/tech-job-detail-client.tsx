@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatCentsExact } from '@/lib/admin/money-format';
-import { TechJobSummary } from '@/components/tech/tech-job-summary';
+import { TechJobSummary, type SummaryLoaded } from '@/components/tech/tech-job-summary';
 import { SignaturePad } from '@/components/tech/signature-pad';
 import { JobTimeCard } from '@/components/tech/job-time-card';
 import { JobPhotosCard } from '@/components/tech/job-photos-card';
@@ -19,7 +19,7 @@ import { useIdempotencyKey } from '@/hooks/use-idempotency-key';
 import { outcomeEvent, type WriteOutcome } from '@/lib/tech/invoice-key-state';
 import { classifyWriteError } from '@/lib/tech/invoice-client-errors';
 import { SIGNATURE_DIDNT_SAVE } from '@/lib/tech/approval-flow';
-import { jobIsClosed } from '@/components/tech/tech-status-confirm';
+import { jobIsClosed, lateMaterialWarning } from '@/components/tech/tech-status-confirm';
 import { parseManualPrice } from '@/lib/tech/material-form';
 import {
   JOB_NOT_FOUND,
@@ -34,7 +34,11 @@ interface Material {
   readonly quantity: number;
   readonly unitCostCents: number;
   readonly unitPriceCents: number;
+  /** On a non-void native invoice of the request. */
+  readonly onInvoice: boolean;
 }
+
+const JOB_CLOSED_COPY = 'This job is closed. Ask the office to add parts.';
 
 interface PricebookItem {
   readonly id: string;
@@ -80,13 +84,20 @@ export function TechJobDetailClient({
 }) {
   // 'not_found' (404/400 from the summary) replaces the whole page with one state.
   const [jobOutcome, setJobOutcome] = useState<JobLoadOutcome | null>(null);
-  // A completed or cancelled request shows saved work read-only.
+  // A completed or cancelled request takes no new parts or signature; notes
+  // and photos stay allowed. Until the summary says which, no form renders.
   const [jobStatus, setJobStatus] = useState<string | null>(null);
-  const onSummaryLoaded = useCallback((outcome: JobLoadOutcome, status: string | null) => {
+  const [invoiceState, setInvoiceState] = useState<string | null>(null);
+  const onSummaryLoaded = useCallback((outcome: JobLoadOutcome, job: SummaryLoaded | null) => {
     setJobOutcome(outcome);
-    if (status) setJobStatus(status);
+    if (job) {
+      setJobStatus(job.status);
+      setInvoiceState(job.invoiceState);
+    }
   }, []);
+  const known = jobStatus !== null;
   const closed = jobIsClosed(jobStatus);
+  const editable = known && !closed;
   const [materials, setMaterials] = useState<Material[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   // A load failure must NOT masquerade as an empty job (no materials / not
@@ -97,6 +108,7 @@ export function TechJobDetailClient({
   // Time on this job: read-only, driven by status taps.
   const [openSince, setOpenSince] = useState<string | null>(null);
   const [totalMinutes, setTotalMinutes] = useState(0);
+  const [closedEntries, setClosedEntries] = useState(0);
   const [timeLoaded, setTimeLoaded] = useState(false);
 
   // Material add form
@@ -175,6 +187,7 @@ export function TechJobDetailClient({
       if (res.ok && body.success) {
         setOpenSince(body.data.open ? body.data.open.clockInAt : null);
         setTotalMinutes(typeof body.data.totalMinutes === 'number' ? body.data.totalMinutes : 0);
+        setClosedEntries(typeof body.data.closedEntries === 'number' ? body.data.closedEntries : 0);
         setTimeLoaded(true);
       } else {
         setLoadError("Couldn't load this job's timesheet.");
@@ -246,6 +259,8 @@ export function TechJobDetailClient({
         setQuantity('1');
         setSearch('');
         void loadMaterials();
+      } else if (body?.error?.code === 'JOB_CLOSED') {
+        setAddError(JOB_CLOSED_COPY);
       } else {
         setAddError("Couldn't add that material. Check it and try again.");
       }
@@ -384,6 +399,9 @@ export function TechJobDetailClient({
     [id, sigDispatch, signedAt, loadSignedAt],
   );
 
+  const unbilledParts = isLoading ? 0 : materials.filter((m) => !m.onInvoice).length;
+  const lateWarning = lateMaterialWarning(invoiceState);
+
   const filteredCatalog = search.trim()
     ? catalog.filter((c) =>
         c.name.toLowerCase().includes(search.trim().toLowerCase()),
@@ -421,6 +439,7 @@ export function TechJobDetailClient({
       <TechJobSummary
         id={id}
         appointmentId={appointmentId}
+        unbilledParts={unbilledParts}
         onLoaded={onSummaryLoaded}
         onStatusChanged={() => {
           // A status tap opens or closes the job clock: reload both.
@@ -439,7 +458,13 @@ export function TechJobDetailClient({
       )}
 
       {/* Time on this job (read-only: status taps are the job clock) */}
-      <JobTimeCard openSince={openSince} totalMinutes={totalMinutes} loaded={timeLoaded} />
+      <JobTimeCard
+        openSince={openSince}
+        totalMinutes={totalMinutes}
+        closedEntries={closedEntries}
+        jobClosed={closed}
+        loaded={timeLoaded}
+      />
 
       {/* Materials used */}
       <Card>
@@ -460,15 +485,20 @@ export function TechJobDetailClient({
                   key={m.id}
                   className="flex min-h-11 items-center justify-between gap-2 text-[15px]"
                 >
-                  <span>
+                  <span className="min-w-0">
                     {m.description ?? 'Material'}
                     {m.quantity > 1 ? ` × ${m.quantity}` : ''}
+                    {!m.onInvoice && (
+                      <span className="ml-2 inline-block rounded-[3px] border border-warning-border bg-warning-light px-1.5 py-0.5 text-[13px] font-medium whitespace-nowrap text-warning-strong">
+                        Not on an invoice
+                      </span>
+                    )}
                   </span>
                   <span className="flex items-center gap-2">
                     <span className="font-mono text-[14px] tabular-nums text-foreground">
                       {formatCentsExact(m.unitPriceCents * m.quantity)}
                     </span>
-                    {!closed && (
+                    {editable && (
                     <button
                       type="button"
                       aria-label="Remove material"
@@ -484,8 +514,8 @@ export function TechJobDetailClient({
             </ul>
           )}
 
-          {/* Add material (not on a completed or cancelled job) */}
-          {!closed && (
+          {/* Add material: only once the summary says the job is open. */}
+          {editable && (
           <div className="space-y-2 border-t border-border pt-3">
             <Input
               placeholder="Search pricebook…"
@@ -530,6 +560,11 @@ export function TechJobDetailClient({
                 </label>
               </>
             )}
+            {lateWarning && (
+              <p className="rounded-md border border-warning-border bg-warning-light px-3 py-2 text-[15px] text-foreground">
+                {lateWarning}
+              </p>
+            )}
             <div className="flex items-center gap-2">
               <Input
                 aria-label="Quantity"
@@ -557,8 +592,8 @@ export function TechJobDetailClient({
         </CardContent>
       </Card>
 
-      {/* On-site note (saved notes go to the office; nothing to add once closed) */}
-      {!closed && (
+      {/* On-site note (saved notes go to the office; a late note on a closed job is fine) */}
+      {known && (
       <Card>
         <CardHeader>
           <CardTitle className="text-[17px]">On-site note</CardTitle>
@@ -591,7 +626,7 @@ export function TechJobDetailClient({
           <CardTitle className="text-[17px]">Customer signature</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
-          {signedAt === undefined ? (
+          {signedAt === undefined || !known ? (
             <Skeleton className="h-[140px] w-full rounded-xl" />
           ) : closed ? (
             <p className="text-[15px] text-muted-foreground">
@@ -628,7 +663,7 @@ export function TechJobDetailClient({
       </Card>
 
       {/* Job photos */}
-      <JobPhotosCard jobId={id} readOnly={closed} />
+      <JobPhotosCard jobId={id} readOnly={!known} />
 
       {/* Status timeline (read-only history) */}
       <Card>

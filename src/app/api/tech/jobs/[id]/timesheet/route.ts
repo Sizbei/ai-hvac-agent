@@ -61,14 +61,17 @@ export async function GET(
         ...rest
       }) => rest,
     );
-    // This tech's closed minutes on the job (the read-only card's "so far").
-    const totalMinutes = entries
-      .filter((e) => e.technicianId === session.userId && e.clockOutAt !== null)
-      .reduce((sum, e) => sum + (e.minutes ?? 0), 0);
+    // This tech's closed minutes on the job (the read-only card's "so far"),
+    // and how many closed entries (a 0-minute pause is still earlier time).
+    const closed = entries.filter(
+      (e) => e.technicianId === session.userId && e.clockOutAt !== null,
+    );
+    const totalMinutes = closed.reduce((sum, e) => sum + (e.minutes ?? 0), 0);
     return successResponse({
       entries: publicEntries,
       open: openEntry ? { id: openEntry.id, clockInAt: openEntry.clockInAt } : null,
       totalMinutes,
+      closedEntries: closed.length,
     });
   } catch (error) {
     logger.error({ error }, "Failed to list time entries");

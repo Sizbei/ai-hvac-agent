@@ -13,10 +13,16 @@ import { jobClockLine } from '@/lib/tech/clock-display';
 export function JobTimeCard({
   openSince,
   totalMinutes,
+  closedEntries,
+  jobClosed,
   loaded,
 }: {
   readonly openSince: string | null;
   readonly totalMinutes: number;
+  /** Closed entries behind totalMinutes (a 0-minute pause still counts). */
+  readonly closedEntries: number;
+  /** A completed or cancelled job reads "Total 20m". */
+  readonly jobClosed: boolean;
   readonly loaded: boolean;
 }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -41,7 +47,7 @@ export function JobTimeCard({
       <CardContent>
         {loaded ? (
           <p className={`text-[15px] ${openSince ? 'text-foreground' : 'text-muted-foreground'}`}>
-            {jobClockLine({ openSince, totalMinutes, nowMs })}
+            {jobClockLine({ openSince, totalMinutes, closedEntries, jobClosed, nowMs })}
           </p>
         ) : (
           <Skeleton className="h-5 w-56" />

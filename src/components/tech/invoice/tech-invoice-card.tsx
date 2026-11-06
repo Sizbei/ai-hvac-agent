@@ -30,7 +30,7 @@ export function TechInvoiceCard({
         <div className="flex items-center justify-between gap-2">
           <CardTitle className="text-[17px]">Invoice</CardTitle>
           {native && (
-            <span className="shrink-0 rounded-[3px] border border-border bg-surface-raised px-2 py-0.5 text-[11px] font-semibold tracking-[0.07em] text-muted-foreground uppercase">
+            <span className="shrink-0 rounded-[3px] border border-border bg-surface-raised px-2 py-0.5 text-[13px] font-medium text-muted-foreground">
               {invoiceChipLabel(invoiceSummary)}
             </span>
           )}

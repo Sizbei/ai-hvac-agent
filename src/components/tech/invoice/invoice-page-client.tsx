@@ -190,7 +190,7 @@ export function InvoicePageClient({ id, devOpenAddItem = false }: { readonly id:
           <h1 className="min-w-0 text-[20px] leading-7 font-semibold break-words">
             {header.customerName ?? `Job ${id.slice(0, 8)}`}
           </h1>
-          <span className="shrink-0 rounded-[3px] border border-border bg-surface-raised px-2 py-0.5 text-[11px] font-semibold tracking-[0.07em] text-muted-foreground uppercase">
+          <span className="shrink-0 rounded-[3px] border border-border bg-surface-raised px-2 py-0.5 text-[13px] font-medium text-muted-foreground">
             {invoiceChipLabel(inv)}
           </span>
         </div>

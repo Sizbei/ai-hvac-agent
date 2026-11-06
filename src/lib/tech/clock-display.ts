@@ -32,24 +32,36 @@ export function formatClockTime(iso: string, timeZone?: string): string {
 
 export const JOB_CLOCK_NOT_STARTED = "Starts when you tap I've arrived.";
 
+export const JOB_CLOCK_NONE = "No time logged on this job.";
+
 /**
- * The one line on the read-only job time card.
- * - an open entry: "On the clock since 9:12 AM · 14m"
+ * The one line on the read-only job time card. `totalMinutes` is the
+ * technician's closed time on this job and `closedEntries` how many closed
+ * entries it came from (a pause inside the first minute logs 0m but is still
+ * earlier time, so the card must not read "Starts when…").
+ * - an open entry: "On the clock since 9:12 AM · 14m", plus "(44m on this job)"
+ *   when there is earlier time
+ * - a closed job: "Total 1h 5m"
  * - closed time only: "1h 5m so far"
  * - nothing yet: "Starts when you tap I've arrived."
  */
 export function jobClockLine(input: {
   readonly openSince: string | null;
   readonly totalMinutes: number;
+  readonly closedEntries?: number;
+  readonly jobClosed?: boolean;
   readonly nowMs: number;
   readonly timeZone?: string;
 }): string {
   const { openSince, totalMinutes, nowMs, timeZone } = input;
+  const earlier = totalMinutes > 0 || (input.closedEntries ?? 0) > 0;
   if (openSince) {
-    const elapsed = Math.floor((nowMs - new Date(openSince).getTime()) / 60000);
-    return `On the clock since ${formatClockTime(openSince, timeZone)} · ${formatMinutes(elapsed)}`;
+    const elapsed = Math.max(0, Math.floor((nowMs - new Date(openSince).getTime()) / 60000));
+    const line = `On the clock since ${formatClockTime(openSince, timeZone)} · ${formatMinutes(elapsed)}`;
+    return earlier ? `${line} (${formatMinutes(totalMinutes + elapsed)} on this job)` : line;
   }
-  if (totalMinutes > 0) return `${formatMinutes(totalMinutes)} so far`;
+  if (input.jobClosed) return earlier ? `Total ${formatMinutes(totalMinutes)}` : JOB_CLOCK_NONE;
+  if (earlier) return `${formatMinutes(totalMinutes)} so far`;
   return JOB_CLOCK_NOT_STARTED;
 }
 
