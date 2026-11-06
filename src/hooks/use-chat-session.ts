@@ -17,6 +17,10 @@ import {
   sessionStartErrorCopy,
   type ChatErrorRecovery,
 } from '@/lib/chat/chat-turn-feedback';
+import {
+  shouldResumeSession,
+  parseResumedExtraction,
+} from '@/lib/chat/session-resume';
 
 interface SessionData {
   readonly sessionId: string;
@@ -197,11 +201,6 @@ export function useChatSession(): UseChatSessionReturn {
     if (sessionCreatedRef.current) return;
     sessionCreatedRef.current = true;
 
-    // 'confirmed' is intentionally excluded: the confirm endpoint transitions
-    // straight to 'submitted', so a 'confirmed' row only exists after a crash and
-    // has no resumable UI (the ExtractionCard only renders for 'extracting').
-    const RESUMABLE: readonly SessionState[] = ['chatting', 'extracting'];
-
     async function createSession(): Promise<void> {
       try {
         // When rendered inside the embed iframe the URL carries the org's
@@ -264,12 +263,9 @@ export function useChatSession(): UseChatSessionReturn {
             data: SessionData & { metadata?: string };
           };
           const s = body?.data;
-          if (
-            body.success &&
-            s &&
-            RESUMABLE.includes(s.status) &&
-            s.messages.length > 0
-          ) {
+          // Escalated sessions resume too (read-only), so an emergency keeps
+          // its panel and call button after a reload. See session-resume.ts.
+          if (body.success && s && shouldResumeSession(s.status, s.messages.length)) {
             // Rehydrate the chat transcript so a refresh doesn't lose progress.
             setMessages(
               s.messages.map((m, i) => ({
@@ -283,16 +279,8 @@ export function useChatSession(): UseChatSessionReturn {
             // otherwise fall back to a generic name).
             if (s.companyName) setCompanyName(s.companyName);
             setCompanyPhone(s.companyPhone ?? null);
-            if (typeof s.metadata === 'string') {
-              try {
-                const parsed = JSON.parse(s.metadata) as ExtractionResult;
-                if (parsed && typeof parsed === 'object' && 'issueType' in parsed) {
-                  setExtraction(parsed);
-                }
-              } catch {
-                // Not valid extraction JSON yet — ignore.
-              }
-            }
+            const resumed = parseResumedExtraction(s.metadata);
+            if (resumed) setExtraction(resumed);
             return;
           }
         }

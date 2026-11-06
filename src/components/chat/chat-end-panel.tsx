@@ -50,12 +50,13 @@ export const ChatEndPanel = forwardRef<HTMLDivElement, ChatEndPanelProps>(
             >
               {panel.title}
             </p>
-            <p className="mt-0.5 text-[13px] text-foreground">{panel.body}</p>
+            {/* The 911 / gas company line comes before our own number. */}
             {panel.guidance && (
-              <p className="mt-1 text-[13px] font-medium text-foreground">
+              <p className="mt-0.5 text-[13px] font-medium text-foreground">
                 {panel.guidance}
               </p>
             )}
+            <p className="mt-1 text-[13px] text-foreground">{panel.body}</p>
           </div>
         </div>
         {callHref && phone && (

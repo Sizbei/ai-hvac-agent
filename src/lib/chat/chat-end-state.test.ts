@@ -20,7 +20,13 @@ describe("chatEndActions", () => {
     });
     expect(a.panel?.kind).toBe("emergency");
     expect(a.panel?.body).toContain("(423) 555-0100");
-    expect(a.panel?.guidance).toBeNull();
+    // Both lines: the 911 / gas company line AND our call button (N-P1-5).
+    expect(a.panel?.guidance).toBe(EMERGENCY_GENERIC_GUIDANCE);
+    expect(EMERGENCY_GENERIC_GUIDANCE).toBe(
+      "If you smell gas, leave now and call 911 or your gas company from outside.",
+    );
+    // The panel no longer repeats the "This chat is closed" input note.
+    expect(a.panel?.body).not.toMatch(/chat is closed/);
     expect(a.callHref).toBe("tel:4235550100");
     expect(a.talkToHuman).toBe("call");
     expect(a.inputDisabled).toBe(true);

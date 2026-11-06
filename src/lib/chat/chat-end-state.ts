@@ -12,9 +12,13 @@
 import type { SessionState } from "@/lib/ai/state-machine";
 import { telHref } from "@/lib/portal/portal-notice";
 
-/** Shown in the emergency panel when the org has no phone on file. */
+/**
+ * Always shown first in the emergency panel, phone on file or not: the safety
+ * call comes before ours (round-2 UX N-P1-5). A UI constant, not frozen
+ * prompt text.
+ */
 export const EMERGENCY_GENERIC_GUIDANCE =
-  "Call 911 or your gas company's emergency line from outside.";
+  "If you smell gas, leave now and call 911 or your gas company from outside.";
 
 export type ChatEndPanelKind = "emergency" | "handoff";
 
@@ -22,7 +26,7 @@ export interface ChatEndPanel {
   readonly kind: ChatEndPanelKind;
   readonly title: string;
   readonly body: string;
-  /** Generic safety line, set only for an emergency with no org phone. */
+  /** The 911 / gas company safety line, set for every emergency panel. */
   readonly guidance: string | null;
 }
 
@@ -69,16 +73,16 @@ export function chatEndActions({
           kind: "emergency",
           title: "We've flagged this as an emergency",
           body: callPhone
-            ? `This chat is closed so a person can take over. Get somewhere safe, then call us at ${callPhone} with your address and a callback number.`
-            : "This chat is closed so a person can take over.",
-          guidance: callPhone ? null : EMERGENCY_GENERIC_GUIDANCE,
+            ? `Once you're safe, call us at ${callPhone} with your address and a callback number.`
+            : "Our team has been alerted and will follow up.",
+          guidance: EMERGENCY_GENERIC_GUIDANCE,
         }
       : {
           kind: "handoff",
           title: "A person from our team will follow up",
           body: callPhone
-            ? `This chat is closed while they take over. Need us sooner? Call ${callPhone}.`
-            : "This chat is closed while they take over.",
+            ? `Need us sooner? Call ${callPhone}.`
+            : "They'll reach out as soon as they can.",
           guidance: null,
         };
     return {
