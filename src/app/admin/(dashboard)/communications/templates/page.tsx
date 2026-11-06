@@ -24,6 +24,8 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { PageShell } from "@/components/admin/ui/page-shell";
 import { PageHeader } from "@/components/admin/ui/page-header";
 import { EmptyState } from "@/components/admin/ui/empty-state";
+import { LoadErrorState } from "@/components/admin/ui/load-error-state";
+import { listViewState } from "@/lib/admin/list-view-state";
 import { ConfirmDialog } from "@/components/admin/confirm-dialog";
 import {
   TemplateEditorDialog,
@@ -39,7 +41,10 @@ import {
 export default function CommunicationTemplatesPage() {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
+  // Load failure (GET) vs a failed toggle: only the first replaces the list.
+  const [loadFailed, setLoadFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<Template | null>(null);
   const [deletingTemplate, setDeletingTemplate] = useState<Template | null>(
@@ -48,16 +53,16 @@ export default function CommunicationTemplatesPage() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  // Refetches keep the cards on screen (no skeleton swap after a toggle).
   const fetchTemplates = useCallback(async () => {
     try {
-      setLoading(true);
       const response = await fetch("/api/admin/communications/templates");
-      if (!response.ok) throw new Error("Couldn't load templates. Please try again.");
+      if (!response.ok) throw new Error(`templates GET ${response.status}`);
       setTemplates(parseTemplatesResponse<Template>(await response.json()));
-      setError(null);
+      setLoadFailed(false);
     } catch (err) {
       console.error("Failed to fetch templates:", err);
-      setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+      setLoadFailed(true);
     } finally {
       setLoading(false);
     }
@@ -69,6 +74,8 @@ export default function CommunicationTemplatesPage() {
 
   const handleToggleActive = useCallback(
     async (template: Template) => {
+      setTogglingId(template.id);
+      setError(null);
       try {
         const response = await fetch(
           `/api/admin/communications/templates/${template.id}`,
@@ -78,11 +85,13 @@ export default function CommunicationTemplatesPage() {
             body: JSON.stringify({ isActive: !template.isActive }),
           },
         );
-        if (!response.ok) throw new Error("Couldn't save the template. Please try again.");
+        if (!response.ok) throw new Error(`template PATCH ${response.status}`);
         await fetchTemplates();
       } catch (err) {
         console.error("Failed to update template:", err);
-        setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+        setError("Couldn't save the template. Please try again.");
+      } finally {
+        setTogglingId(null);
       }
     },
     [fetchTemplates],
@@ -121,27 +130,37 @@ export default function CommunicationTemplatesPage() {
     setEditorOpen(true);
   };
 
+  const view = listViewState({
+    loading,
+    failed: loadFailed,
+    count: templates.length,
+  });
+  const refreshFailed = loadFailed && view === "ready";
+
   return (
     <PageShell>
       <PageHeader
         title="Communication templates"
         subtitle="Manage SMS and email templates for automated communications."
         actions={
-          <Button onClick={openCreate}>
+          <Button onClick={openCreate} disabled={view === "error"}>
             <Plus className="mr-1.5 size-4" />
             Create template
           </Button>
         }
       />
 
-      {error && (
+      {(error || refreshFailed) && (
         <Alert variant="destructive">
           <AlertCircle className="size-4" />
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>
+            {error ??
+              "Couldn't refresh templates. What you see may be out of date."}
+          </AlertDescription>
         </Alert>
       )}
 
-      {loading ? (
+      {view === "loading" ? (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 6 }, (_, i) => (
             <Skeleton
@@ -150,7 +169,14 @@ export default function CommunicationTemplatesPage() {
             />
           ))}
         </div>
-      ) : templates.length === 0 ? (
+      ) : view === "error" ? (
+        <Card className="p-5">
+          <LoadErrorState
+            title="Couldn't load templates."
+            onRetry={fetchTemplates}
+          />
+        </Card>
+      ) : view === "empty" ? (
         <Card className="p-5">
           <EmptyState
             icon={MailPlus}
@@ -172,6 +198,7 @@ export default function CommunicationTemplatesPage() {
               template={template}
               onEdit={() => openEdit(template)}
               onToggleActive={() => handleToggleActive(template)}
+              toggling={togglingId === template.id}
               onDelete={() => {
                 setDeleteError(null);
                 setDeletingTemplate(template);
@@ -216,10 +243,12 @@ function TemplateCard({
   onEdit,
   onToggleActive,
   onDelete,
+  toggling,
 }: {
   readonly template: Template;
   readonly onEdit: () => void;
   readonly onToggleActive: () => void;
+  readonly toggling: boolean;
   readonly onDelete: () => void;
 }) {
   const triggerType = TRIGGER_TYPES.find(
@@ -280,8 +309,17 @@ function TemplateCard({
             <Pencil className="mr-1 size-3.5" />
             Edit
           </Button>
-          <Button size="sm" variant="ghost" onClick={onToggleActive}>
-            {template.isActive ? "Deactivate" : "Activate"}
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onToggleActive}
+            disabled={toggling}
+          >
+            {toggling
+              ? "Saving…"
+              : template.isActive
+                ? "Deactivate"
+                : "Activate"}
           </Button>
           <Button
             size="icon-sm"

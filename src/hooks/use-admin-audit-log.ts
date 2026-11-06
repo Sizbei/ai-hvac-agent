@@ -53,10 +53,11 @@ export function useAdminAuditLog(
       const res = await adminFetch(`/api/admin/audit-log?${params.toString()}`);
 
       if (!res.ok) {
-        const body = await res.json().catch(() => ({
-          error: { message: 'Failed to fetch audit log' },
-        }));
-        setError(body?.error?.message ?? 'Failed to fetch audit log');
+        // Human copy only — never the server's message. Rows from an earlier
+        // filter are cleared so they can't pass for this filter's results.
+        setEntries([]);
+        setTotal(0);
+        setError("Couldn't load the audit log.");
         return;
       }
 
@@ -79,7 +80,9 @@ export function useAdminAuditLog(
       }
     } catch (err) {
       if (err instanceof AdminAuthRedirectError) return;
-      setError('Could not connect to server. Please try again.');
+      setEntries([]);
+      setTotal(0);
+      setError("Couldn't load the audit log.");
     } finally {
       isFetchingRef.current = false;
       setIsLoading(false);

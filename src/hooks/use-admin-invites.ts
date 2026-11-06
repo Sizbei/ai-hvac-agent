@@ -33,10 +33,7 @@ export function useAdminInvites(): UseAdminInvitesResult {
     try {
       const res = await fetch('/api/admin/invites');
       if (!res.ok) {
-        const body = await res.json().catch(() => ({
-          error: { message: 'Failed to fetch invites' },
-        }));
-        setError(body?.error?.message ?? 'Failed to fetch invites');
+        setError("Couldn't load pending invites.");
         return;
       }
       const body = (await res.json()) as {
@@ -48,7 +45,7 @@ export function useAdminInvites(): UseAdminInvitesResult {
         setError(null);
       }
     } catch {
-      setError('Could not connect to server. Please try again.');
+      setError("Couldn't load pending invites.");
     } finally {
       isFetchingRef.current = false;
     }

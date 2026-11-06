@@ -2,9 +2,8 @@
 
 import { humanizeAuditKey } from '@/lib/admin/audit-format';
 import { useState } from 'react';
-import { AlertCircle, ScrollText, X } from 'lucide-react';
+import { ScrollText, X } from 'lucide-react';
 import { useAdminAuditLog } from '@/hooks/use-admin-audit-log';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -18,6 +17,7 @@ import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 import { DataTableShell, type DataTableColumn } from '@/components/admin/ui/data-table-shell';
 import { Pager } from '@/components/admin/ui/pager';
+import { LoadErrorState } from '@/components/admin/ui/load-error-state';
 import { EmptyState } from '@/components/admin/ui/empty-state';
 import type { AuditLogEntry } from '@/lib/admin/audit-types';
 import { useAdminPageTitle } from '@/components/admin/org-name-context';
@@ -140,7 +140,7 @@ export default function AdminAuditLogPage() {
 
   const hasFilters = actionFilter !== ALL_ACTIONS || entityFilter !== ALL_ENTITIES;
 
-  const { entries, total, actions, isLoading, error } = useAdminAuditLog({
+  const { entries, total, actions, isLoading, error, refetch } = useAdminAuditLog({
     action: actionFilter === ALL_ACTIONS ? undefined : actionFilter,
     entity: entityFilter === ALL_ENTITIES ? undefined : entityFilter,
     page,
@@ -160,95 +160,97 @@ export default function AdminAuditLogPage() {
       <PageHeader
         title="Audit log"
         subtitle="A record of every admin action and safety-critical event for your organization. Details show which fields changed — never the values themselves."
-        actions={<span className="text-sm text-muted-foreground">{total} entries</span>}
+        actions={error ? undefined : <span className="text-sm text-muted-foreground">{total} entries</span>}
       />
 
-      {error && (
-        <Alert variant="destructive">
-          <AlertCircle className="size-4" />
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
-
-      <DataTableShell
-        columns={AUDIT_COLUMNS}
-        rows={entries}
-        getRowKey={(e) => e.id}
-        isLoading={isLoading}
-        minTableWidth="40rem"
-        toolbar={
-          <div className="flex flex-wrap items-center gap-3">
-            <Select
-              value={actionFilter}
-              onValueChange={(value) => {
-                setActionFilter(value ?? ALL_ACTIONS);
-                setPage(1);
-              }}
-            >
-              <SelectTrigger className="w-[220px]">
-                <SelectValue placeholder="Filter by action" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL_ACTIONS}>All actions</SelectItem>
-                {actions.map((a) => (
-                  <SelectItem key={a} value={a}>
-                    {humanize(a)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Select
-              value={entityFilter}
-              onValueChange={(value) => {
-                setEntityFilter(value ?? ALL_ENTITIES);
-                setPage(1);
-              }}
-            >
-              <SelectTrigger className="w-[220px]">
-                <SelectValue placeholder="Filter by entity" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL_ENTITIES}>All entities</SelectItem>
-                {KNOWN_ENTITIES.map((e) => (
-                  <SelectItem key={e} value={e}>
-                    {humanize(e)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            {hasFilters && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={clearFilters}
-                className="text-muted-foreground"
+      {error ? (
+        // A failed load is never "no activity": human copy + Try again only.
+        <LoadErrorState
+          title="Couldn't load the audit log."
+          onRetry={refetch}
+          className="rounded-lg border border-dashed"
+        />
+      ) : (
+        <DataTableShell
+          columns={AUDIT_COLUMNS}
+          rows={entries}
+          getRowKey={(e) => e.id}
+          isLoading={isLoading}
+          minTableWidth="40rem"
+          toolbar={
+            <div className="flex flex-wrap items-center gap-3">
+              <Select
+                value={actionFilter}
+                onValueChange={(value) => {
+                  setActionFilter(value ?? ALL_ACTIONS);
+                  setPage(1);
+                }}
               >
-                <X className="mr-1 size-3" aria-hidden="true" />
-                Clear filters
-              </Button>
-            )}
-          </div>
-        }
-        emptyState={
-          <EmptyState
-            icon={ScrollText}
-            title="No audit entries"
-            description={hasFilters ? 'No entries match these filters.' : 'No audit activity recorded yet.'}
-          />
-        }
-        footer={
-          <Pager
-            page={page}
-            totalPages={totalPages}
-            total={total}
-            perPage={PAGE_LIMIT}
-            onPageChange={setPage}
-            showFirstLast
-          />
-        }
-      />
+                <SelectTrigger className="w-[220px]">
+                  <SelectValue placeholder="Filter by action" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ALL_ACTIONS}>All actions</SelectItem>
+                  {actions.map((a) => (
+                    <SelectItem key={a} value={a}>
+                      {humanize(a)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Select
+                value={entityFilter}
+                onValueChange={(value) => {
+                  setEntityFilter(value ?? ALL_ENTITIES);
+                  setPage(1);
+                }}
+              >
+                <SelectTrigger className="w-[220px]">
+                  <SelectValue placeholder="Filter by entity" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ALL_ENTITIES}>All entities</SelectItem>
+                  {KNOWN_ENTITIES.map((e) => (
+                    <SelectItem key={e} value={e}>
+                      {humanize(e)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              {hasFilters && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={clearFilters}
+                  className="text-muted-foreground"
+                >
+                  <X className="mr-1 size-3" aria-hidden="true" />
+                  Clear filters
+                </Button>
+              )}
+            </div>
+          }
+          emptyState={
+            <EmptyState
+              icon={ScrollText}
+              title="No audit entries"
+              description={hasFilters ? 'No entries match these filters.' : 'No audit activity recorded yet.'}
+            />
+          }
+          footer={
+            <Pager
+              page={page}
+              totalPages={totalPages}
+              total={total}
+              perPage={PAGE_LIMIT}
+              onPageChange={setPage}
+              showFirstLast
+            />
+          }
+        />
+      )}
     </PageShell>
   );
 }

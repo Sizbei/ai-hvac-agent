@@ -12,10 +12,16 @@ import {
 } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import type { InviteListItem } from '@/hooks/use-admin-invites';
+import { LoadErrorState } from '@/components/admin/ui/load-error-state';
+import { listViewState } from '@/lib/admin/list-view-state';
+import { staffErrorMessage } from '@/lib/admin/staff-errors';
 
 interface PendingInvitesProps {
   readonly invites: readonly InviteListItem[];
   readonly isLoading: boolean;
+  /** The list fetch failed: show the error with Try again, never "No pending invites". */
+  readonly loadFailed: boolean;
+  readonly onRetry: () => Promise<void>;
   /** Called after a successful revoke so the parent refetches. */
   readonly onRevoked: () => void;
 }
@@ -34,6 +40,8 @@ function formatExpiry(iso: string): string {
 export function PendingInvites({
   invites,
   isLoading,
+  loadFailed,
+  onRetry,
   onRevoked,
 }: PendingInvitesProps) {
   // Track which invite id is mid-revoke to disable its button.
@@ -49,18 +57,30 @@ export function PendingInvites({
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        setError(body?.error?.message ?? 'Failed to revoke invite.');
+        setError(staffErrorMessage(body, "Couldn't revoke the invite. Please try again."));
         return;
       }
       onRevoked();
     } catch {
-      setError('Could not connect to server. Please try again.');
+      setError("Couldn't revoke the invite. Please try again.");
     } finally {
       setRevokingId(null);
     }
   }
 
-  if (!isLoading && invites.length === 0) {
+  const view = listViewState({ loading: isLoading, failed: loadFailed, count: invites.length });
+
+  if (view === 'error') {
+    return (
+      <LoadErrorState
+        title="Couldn't load pending invites."
+        onRetry={onRetry}
+        className="rounded-lg border border-dashed"
+      />
+    );
+  }
+
+  if (view === 'empty') {
     return (
       <p className="rounded-lg border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
         No pending invites. Use Invite to send someone a sign-up link.

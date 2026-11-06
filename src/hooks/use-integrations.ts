@@ -51,7 +51,7 @@ export function useIntegrations(): UseIntegrationsResult {
     try {
       const res = await fetch('/api/admin/integrations');
       if (!res.ok) {
-        setError('Failed to load integrations');
+        setError("Couldn't load integrations.");
         return;
       }
       const body = (await res.json()) as {
@@ -63,7 +63,7 @@ export function useIntegrations(): UseIntegrationsResult {
       }
       setError(null);
     } catch {
-      setError('Could not connect to server. Please try again.');
+      setError("Couldn't load integrations.");
     } finally {
       isFetchingRef.current = false;
     }

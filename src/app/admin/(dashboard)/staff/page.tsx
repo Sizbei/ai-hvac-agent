@@ -25,6 +25,8 @@ import type { BannerEvent } from '@/lib/admin/setup-card-view';
 import { InfoBanner } from '@/components/admin/ui/info-banner';
 import { SEAT_LIMIT_COPY, seatsFull, seatUsageCopy } from '@/lib/admin/seat-usage';
 import { useAdminPageTitle } from '@/components/admin/org-name-context';
+import { LoadErrorState } from '@/components/admin/ui/load-error-state';
+import { listViewState } from '@/lib/admin/list-view-state';
 
 const STAFF_OPEN_VALUES = ['technician', 'invite'] as const;
 
@@ -41,8 +43,10 @@ export default function StaffPage() {
   const {
     invites,
     isLoading: invitesLoading,
+    error: invitesError,
     refetch: refetchInvites,
   } = useAdminInvites();
+  const staffView = listViewState({ loading: isLoading, failed: error !== null, count: staff.length });
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<StaffRecord | null>(null);
   const [resetTarget, setResetTarget] = useState<StaffRecord | null>(null);
@@ -158,28 +162,38 @@ export default function StaffPage() {
         </p>
       )}
 
-      {error && (
+      {error && staffView === 'ready' && (
         <Alert variant="destructive">
           <AlertCircle className="size-4" />
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>Couldn&apos;t refresh your team. What you see may be out of date.</AlertDescription>
         </Alert>
       )}
 
-      <StaffTable
-        staff={staff}
-        currentUserId={currentUserId}
-        isLoading={isLoading}
-        onEdit={handleEditClick}
-        onResetPassword={handleResetClick}
-        onTimeOff={setTimeOffTarget}
-        onTimesheets={setTimesheetsTarget}
-      />
+      {staffView === 'error' ? (
+        <LoadErrorState
+          title="Couldn't load your team."
+          onRetry={refetch}
+          className="rounded-lg border border-dashed"
+        />
+      ) : (
+        <StaffTable
+          staff={staff}
+          currentUserId={currentUserId}
+          isLoading={isLoading}
+          onEdit={handleEditClick}
+          onResetPassword={handleResetClick}
+          onTimeOff={setTimeOffTarget}
+          onTimesheets={setTimesheetsTarget}
+        />
+      )}
 
       <SectionDivider label="Pending invites" />
 
       <PendingInvites
         invites={invites}
         isLoading={invitesLoading}
+        loadFailed={invitesError !== null}
+        onRetry={refetchInvites}
         onRevoked={() => void refetchInvites()}
       />
 

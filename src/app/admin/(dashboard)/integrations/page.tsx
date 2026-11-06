@@ -1,6 +1,8 @@
 'use client';
 
 import Link from 'next/link';
+import { LoadErrorState } from '@/components/admin/ui/load-error-state';
+import { listViewState } from '@/lib/admin/list-view-state';
 import { AlertCircle, ChevronRight, Plug } from 'lucide-react';
 import {
   useIntegrations,
@@ -57,7 +59,8 @@ const STATUS_BADGE: Record<IntegrationStatus, { label: string; className: string
 };
 
 export default function IntegrationsPage() {
-  const { integrations, isLoading, error } = useIntegrations();
+  const { integrations, isLoading, error, refetch } = useIntegrations();
+  const view = listViewState({ loading: isLoading, failed: error !== null, count: integrations.length });
 
   return (
     <PageShell>
@@ -66,16 +69,22 @@ export default function IntegrationsPage() {
         subtitle="Connection status for every external service. Manage actions open the relevant setup flow."
       />
 
-      {error && (
+      {error && view === 'ready' && (
         <Alert variant="destructive">
           <AlertCircle className="size-4" />
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>Couldn&apos;t refresh integrations. What you see may be out of date.</AlertDescription>
         </Alert>
       )}
 
-      {isLoading ? (
+      {view === 'loading' ? (
         <SkeletonTable rows={4} cols={3} />
-      ) : integrations.length === 0 ? (
+      ) : view === 'error' ? (
+        <LoadErrorState
+          title="Couldn't load integrations."
+          onRetry={refetch}
+          className="rounded-lg border border-dashed"
+        />
+      ) : view === 'empty' ? (
         <EmptyState
           icon={Plug}
           title="No integrations found"

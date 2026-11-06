@@ -52,7 +52,7 @@ export function useAdminStaff(): UseAdminStaffResult {
         setError(null);
       }
     } catch {
-      setError('Could not connect to server. Please try again.');
+      setError("Couldn't load your team. Please try again.");
     } finally {
       isFetchingRef.current = false;
     }
